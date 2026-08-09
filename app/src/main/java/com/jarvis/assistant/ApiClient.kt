@@ -14,7 +14,8 @@ import java.util.concurrent.TimeUnit
 /**
  * Client IA générique : route la conversation vers le bon fournisseur
  * (Claude, Gemini, OpenAI-compatible pour ChatGPT/Mistral/Groq/Ollama,
- * ou modèle local embarqué sur l'appareil).
+ * ou modèle local embarqué sur l'appareil). Gère aussi les photos jointes
+ * pour les fournisseurs qui supportent la vision (Claude, ChatGPT, Gemini).
  */
 object ApiClient {
 
@@ -30,10 +31,7 @@ object ApiClient {
 
     private val JSON = "application/json; charset=utf-8".toMediaType()
 
-    /**
-     * history : liste de paires (role, contenu) où role = "user" ou "assistant"
-     */
-    suspend fun sendChat(context: Context, history: List<Pair<String, String>>): String =
+    suspend fun sendChat(context: Context, history: List<HistoryEntry>): String =
         withContext(Dispatchers.IO) {
             val provider = Prefs.getProvider(context)
 
@@ -51,7 +49,7 @@ object ApiClient {
 
     // ---------- Modèle local sur l'appareil ----------
 
-    private suspend fun sendLocal(context: Context, history: List<Pair<String, String>>): String {
+    private suspend fun sendLocal(context: Context, history: List<HistoryEntry>): String {
         val modelPath = Prefs.getLocalModelPath(context)
         if (modelPath.isBlank()) {
             return "Aucun modèle local configuré. Ouvre ⚙ Paramètres et choisis un fichier .task."
@@ -60,11 +58,13 @@ object ApiClient {
         return LocalLlmManager.generate(context, modelPath, prompt)
     }
 
-    private fun buildPromptFromHistory(history: List<Pair<String, String>>): String {
+    private fun buildPromptFromHistory(history: List<HistoryEntry>): String {
         val recent = history.takeLast(8)
         val sb = StringBuilder(SYSTEM_PROMPT).append("\n\n")
-        for ((role, content) in recent) {
-            sb.append(if (role == "user") "Utilisateur: " else "JARVIS: ").append(content).append("\n")
+        for (entry in recent) {
+            val label = if (entry.role == "user") "Utilisateur" else "JARVIS"
+            val suffix = if (entry.imageBase64 != null) " [photo jointe non prise en charge en local]" else ""
+            sb.append(label).append(": ").append(entry.text).append(suffix).append("\n")
         }
         sb.append("JARVIS: ")
         return sb.toString()
@@ -72,15 +72,30 @@ object ApiClient {
 
     // ---------- OpenAI-compatible : ChatGPT, Mistral, Groq, Ollama, Custom ----------
 
-    private fun sendOpenAiCompatible(context: Context, history: List<Pair<String, String>>): String {
+    private fun sendOpenAiCompatible(context: Context, history: List<HistoryEntry>): String {
         val baseUrl = Prefs.getBaseUrl(context)
         val model = Prefs.getModel(context)
         val apiKey = Prefs.getApiKey(context)
 
         val messagesArray = JSONArray()
         messagesArray.put(JSONObject().put("role", "system").put("content", SYSTEM_PROMPT))
-        for ((role, content) in history) {
-            messagesArray.put(JSONObject().put("role", role).put("content", content))
+        for (entry in history) {
+            if (entry.imageBase64 != null) {
+                val contentArray = JSONArray()
+                contentArray.put(JSONObject().put("type", "text").put("text", entry.text))
+                contentArray.put(
+                    JSONObject().put("type", "image_url").put(
+                        "image_url",
+                        JSONObject().put(
+                            "url",
+                            "data:${entry.imageMime ?: "image/jpeg"};base64,${entry.imageBase64}"
+                        )
+                    )
+                )
+                messagesArray.put(JSONObject().put("role", entry.role).put("content", contentArray))
+            } else {
+                messagesArray.put(JSONObject().put("role", entry.role).put("content", entry.text))
+            }
         }
 
         val body = JSONObject()
@@ -114,7 +129,7 @@ object ApiClient {
 
     // ---------- Claude (Anthropic) ----------
 
-    private fun sendClaude(context: Context, history: List<Pair<String, String>>): String {
+    private fun sendClaude(context: Context, history: List<HistoryEntry>): String {
         val baseUrl = Prefs.getBaseUrl(context)
         val model = Prefs.getModel(context)
         val apiKey = Prefs.getApiKey(context)
@@ -122,8 +137,23 @@ object ApiClient {
         if (apiKey.isBlank()) return "Clé API Claude manquante. Ajoute-la dans ⚙ Paramètres."
 
         val messagesArray = JSONArray()
-        for ((role, content) in history) {
-            messagesArray.put(JSONObject().put("role", role).put("content", content))
+        for (entry in history) {
+            if (entry.imageBase64 != null) {
+                val contentArray = JSONArray()
+                contentArray.put(
+                    JSONObject().put("type", "image").put(
+                        "source",
+                        JSONObject()
+                            .put("type", "base64")
+                            .put("media_type", entry.imageMime ?: "image/jpeg")
+                            .put("data", entry.imageBase64)
+                    )
+                )
+                contentArray.put(JSONObject().put("type", "text").put("text", entry.text))
+                messagesArray.put(JSONObject().put("role", entry.role).put("content", contentArray))
+            } else {
+                messagesArray.put(JSONObject().put("role", entry.role).put("content", entry.text))
+            }
         }
 
         val body = JSONObject()
@@ -156,7 +186,7 @@ object ApiClient {
 
     // ---------- Google Gemini ----------
 
-    private fun sendGemini(context: Context, history: List<Pair<String, String>>): String {
+    private fun sendGemini(context: Context, history: List<HistoryEntry>): String {
         val baseUrl = Prefs.getBaseUrl(context)
         val apiKey = Prefs.getApiKey(context)
 
@@ -166,9 +196,20 @@ object ApiClient {
         val url = "$baseUrl${separator}key=$apiKey"
 
         val contentsArray = JSONArray()
-        for ((role, content) in history) {
-            val geminiRole = if (role == "assistant") "model" else "user"
-            val partsArray = JSONArray().put(JSONObject().put("text", content))
+        for (entry in history) {
+            val geminiRole = if (entry.role == "assistant") "model" else "user"
+            val partsArray = JSONArray()
+            partsArray.put(JSONObject().put("text", entry.text))
+            if (entry.imageBase64 != null) {
+                partsArray.put(
+                    JSONObject().put(
+                        "inline_data",
+                        JSONObject()
+                            .put("mime_type", entry.imageMime ?: "image/jpeg")
+                            .put("data", entry.imageBase64)
+                    )
+                )
+            }
             contentsArray.put(JSONObject().put("role", geminiRole).put("parts", partsArray))
         }
 

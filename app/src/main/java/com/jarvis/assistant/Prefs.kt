@@ -11,6 +11,7 @@ object Prefs {
     private const val KEY_LOCAL_MODEL_PATH = "local_model_path"
     private const val KEY_ACCENT_COLOR = "accent_color"
     private const val KEY_HF_TOKEN = "hf_token"
+    private const val KEY_ORB_STYLE = "orb_style"
 
     const val DEFAULT_ACCENT_COLOR = -16724737 // #FF00E5FF (cyan)
 
@@ -41,6 +42,13 @@ object Prefs {
 
     fun saveHfToken(context: Context, token: String) {
         prefs(context).edit().putString(KEY_HF_TOKEN, token).apply()
+    }
+
+    fun getOrbStyle(context: Context): String =
+        prefs(context).getString(KEY_ORB_STYLE, "PULSE") ?: "PULSE"
+
+    fun saveOrbStyle(context: Context, style: String) {
+        prefs(context).edit().putString(KEY_ORB_STYLE, style).apply()
     }
 
     fun save(context: Context, provider: Provider, baseUrl: String, model: String, apiKey: String) {

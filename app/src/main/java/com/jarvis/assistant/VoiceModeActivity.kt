@@ -48,6 +48,11 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val micToggle = findViewById<TextView>(R.id.micToggleButton)
 
         orbView.accentColor = Prefs.getAccentColor(this)
+        orbView.visualStyle = if (Prefs.getOrbStyle(this) == "NETWORK_SPHERE") {
+            OrbView.VisualStyle.NETWORK_SPHERE
+        } else {
+            OrbView.VisualStyle.PULSE
+        }
         tts = TextToSpeech(this, this)
 
         closeButton.setOnClickListener { finish() }

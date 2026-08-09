@@ -32,7 +32,7 @@
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:layout_marginTop="8dp"
-            android:layout_marginBottom="20dp">
+            android:layout_marginBottom="12dp">
 
             <TextView android:id="@+id/colorCyan" style="@style/ColorSwatch" android:background="#00E5FF" />
             <TextView android:id="@+id/colorRed" style="@style/ColorSwatch" android:background="#FF3B30" />
@@ -40,6 +40,45 @@
             <TextView android:id="@+id/colorPurple" style="@style/ColorSwatch" android:background="#B388FF" />
             <TextView android:id="@+id/colorGold" style="@style/ColorSwatch" android:background="#FFC400" />
             <TextView android:id="@+id/colorGreen" style="@style/ColorSwatch" android:background="#00E676" />
+
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Style de l'orbe vocale"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="20dp">
+
+            <TextView
+                android:id="@+id/styleOrbPulse"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:layout_marginEnd="8dp"
+                android:text="Orbe pulsante"
+                android:textSize="12sp"
+                android:gravity="center"
+                android:background="@drawable/bg_input"
+                android:textColor="@color/text_primary" />
+
+            <TextView
+                android:id="@+id/styleOrbNetwork"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:text="Sphère réseau"
+                android:textSize="12sp"
+                android:gravity="center"
+                android:background="@drawable/bg_input"
+                android:textColor="@color/text_primary" />
 
         </LinearLayout>
 
@@ -137,9 +176,38 @@
             android:visibility="gone">
 
             <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="⚠️ Remarque : Ollama ne fonctionne que sur PC/Mac (choisis « IA locale sur PC » dans la liste au-dessus pour ça). Ici, Gemma tourne directement sur ton téléphone, sans PC."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="3dp"
+                android:layout_marginBottom="16dp" />
+
+            <TextView
+                android:id="@+id/downloadNoKeyButton"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:text="TÉLÉCHARGER SANS COMPTE (miroir communautaire)"
+                android:textColor="@color/background_dark"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="@drawable/bg_mic_button"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Non officiel, peut disparaître ou changer sans préavis. Pour un modèle garanti par Google, utilise l'option ci-dessous (jeton gratuit requis, licence Gemma oblige)."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="3dp"
+                android:layout_marginBottom="16dp" />
+
+            <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Jeton Hugging Face (gratuit)"
+                android:text="Jeton Hugging Face (optionnel, requis pour le modèle officiel)"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
 
@@ -151,7 +219,7 @@
                 android:paddingStart="16dp"
                 android:paddingEnd="16dp"
                 android:textColor="@color/text_primary"
-                android:hint="hf_..."
+                android:hint="hf_... (laisser vide si tu utilises le miroir sans compte)"
                 android:textColorHint="@color/text_secondary"
                 android:inputType="textPassword"
                 android:layout_marginTop="4dp"
@@ -170,11 +238,11 @@
                 android:id="@+id/downloadRecommendedButton"
                 android:layout_width="match_parent"
                 android:layout_height="52dp"
-                android:text="TÉLÉCHARGER GEMMA 3 1B (≈550 Mo)"
-                android:textColor="@color/background_dark"
+                android:text="TÉLÉCHARGER GEMMA 3 1B OFFICIEL (≈550 Mo)"
+                android:textColor="@color/cyan_accent"
                 android:textStyle="bold"
                 android:gravity="center"
-                android:background="@drawable/bg_mic_button"
+                android:background="@drawable/bg_input"
                 android:layout_marginBottom="12dp" />
 
             <TextView

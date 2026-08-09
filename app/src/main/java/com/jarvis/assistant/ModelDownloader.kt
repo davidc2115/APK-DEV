@@ -23,10 +23,18 @@ object ModelDownloader {
         data class Error(val message: String) : Progress()
     }
 
-    // Modèle léger et rapide, vérifié fonctionnel avec l'API MediaPipe LLM Inference.
+    // Modèle officiel Google, vérifié fonctionnel — nécessite un jeton HF gratuit
+    // car Gemma est sous licence Google (obligatoire, pas une limite de l'app).
     const val RECOMMENDED_MODEL_URL =
         "https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-int4.task?download=true"
-    const val RECOMMENDED_MODEL_LABEL = "Gemma 3 1B — léger et rapide (≈550 Mo)"
+    const val RECOMMENDED_MODEL_LABEL = "Gemma 3 1B officiel — léger et rapide (≈550 Mo)"
+
+    // Miroir communautaire non officiel, sans jeton requis. Peut être retiré ou
+    // changer à tout moment car il n'est pas maintenu par Google — à utiliser
+    // en connaissance de cause si tu ne veux vraiment pas créer de compte HF.
+    const val NO_KEY_MODEL_URL =
+        "https://huggingface.co/Instamath-works/Gemma3-1B-IT-task/resolve/main/gemma3-1B-it-int4.task?download=true"
+    const val NO_KEY_MODEL_LABEL = "Gemma 3 1B (miroir communautaire, sans compte)"
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)

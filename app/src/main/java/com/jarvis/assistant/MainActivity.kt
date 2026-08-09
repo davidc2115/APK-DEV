@@ -3,9 +3,15 @@ package com.jarvis.assistant
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
+import android.util.Base64
+import android.view.View
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -16,6 +22,8 @@ import androidx.recyclerview.widget.RecyclerView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 import java.util.Locale
 
 class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
@@ -24,10 +32,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var adapter: ChatAdapter
     private lateinit var messageInput: EditText
     private lateinit var statusText: TextView
+    private lateinit var pendingImageBar: View
+    private lateinit var pendingImageThumbnail: ImageView
 
     private var tts: TextToSpeech? = null
     private var ttsReady = false
-    private var welcomeShown = false
+
+    private var pendingImageBase64: String? = null
+    private var pendingImageMime: String? = null
 
     private val micPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -37,6 +49,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
+    private val pickImageLauncher = registerForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) attachImage(uri)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -44,9 +62,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         recyclerView = findViewById(R.id.recyclerView)
         messageInput = findViewById(R.id.messageInput)
         statusText = findViewById(R.id.statusText)
+        pendingImageBar = findViewById(R.id.pendingImageBar)
+        pendingImageThumbnail = findViewById(R.id.pendingImageThumbnail)
         val micButton = findViewById<TextView>(R.id.micButton)
         val sendButton = findViewById<TextView>(R.id.sendButton)
         val settingsButton = findViewById<TextView>(R.id.settingsButton)
+        val photoButton = findViewById<TextView>(R.id.photoButton)
+        val removePendingImageButton = findViewById<TextView>(R.id.removePendingImageButton)
 
         adapter = ChatAdapter(ConversationStore.messages)
         recyclerView.layoutManager = LinearLayoutManager(this)
@@ -55,7 +77,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         tts = TextToSpeech(this, this)
 
         if (ConversationStore.messages.isEmpty()) {
-            welcomeShown = true
             addMessage(
                 "Bonjour. Je suis JARVIS, prêt à vous assister. Configurez votre IA dans les paramètres (⚙) si ce n'est pas déjà fait.",
                 isUser = false,
@@ -65,13 +86,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         sendButton.setOnClickListener {
             val text = messageInput.text.toString().trim()
-            if (text.isNotEmpty()) {
-                sendMessage(text)
+            if (text.isNotEmpty() || pendingImageBase64 != null) {
+                sendMessage(text.ifBlank { "Décris cette image." })
                 messageInput.text.clear()
             }
         }
 
         micButton.setOnClickListener { checkPermissionAndOpenVoiceMode() }
+
+        photoButton.setOnClickListener { pickImageLauncher.launch("image/*") }
+
+        removePendingImageButton.setOnClickListener { clearPendingImage() }
 
         settingsButton.setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
@@ -98,8 +123,59 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         startActivity(Intent(this, VoiceModeActivity::class.java))
     }
 
+    private fun attachImage(uri: Uri) {
+        CoroutineScope(Dispatchers.IO).launch {
+            val result = encodeImage(uri)
+            withContext(Dispatchers.Main) {
+                if (result != null) {
+                    pendingImageBase64 = result.first
+                    pendingImageMime = result.second
+                    val bytes = Base64.decode(result.first, Base64.NO_WRAP)
+                    val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    pendingImageThumbnail.setImageBitmap(bmp)
+                    pendingImageBar.visibility = View.VISIBLE
+                } else {
+                    Toast.makeText(this@MainActivity, "Impossible de lire cette image", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private fun encodeImage(uri: Uri): Pair<String, String>? {
+        return try {
+            val input = contentResolver.openInputStream(uri) ?: return null
+            val original = BitmapFactory.decodeStream(input)
+            input.close()
+            if (original == null) return null
+
+            val maxDim = 1024
+            val scale = minOf(1f, maxDim.toFloat() / maxOf(original.width, original.height))
+            val resized = if (scale < 1f) {
+                Bitmap.createScaledBitmap(
+                    original,
+                    (original.width * scale).toInt().coerceAtLeast(1),
+                    (original.height * scale).toInt().coerceAtLeast(1),
+                    true
+                )
+            } else original
+
+            val out = ByteArrayOutputStream()
+            resized.compress(Bitmap.CompressFormat.JPEG, 80, out)
+            Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP) to "image/jpeg"
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun clearPendingImage() {
+        pendingImageBase64 = null
+        pendingImageMime = null
+        pendingImageBar.visibility = View.GONE
+    }
+
     private fun sendMessage(text: String) {
-        addMessage(text, isUser = true, speak = false)
+        addMessage(text, isUser = true, speak = false, imageBase64 = pendingImageBase64, imageMime = pendingImageMime)
+        clearPendingImage()
         statusText.text = "● JARVIS réfléchit…"
 
         CoroutineScope(Dispatchers.Main).launch {
@@ -109,9 +185,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun addMessage(text: String, isUser: Boolean, speak: Boolean) {
+    private fun addMessage(
+        text: String,
+        isUser: Boolean,
+        speak: Boolean,
+        imageBase64: String? = null,
+        imageMime: String? = null
+    ) {
         if (isUser) {
-            ConversationStore.addUser(text)
+            ConversationStore.addUser(text, imageBase64, imageMime)
         } else {
             ConversationStore.addAssistant(text)
         }

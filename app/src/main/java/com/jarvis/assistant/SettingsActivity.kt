@@ -29,9 +29,12 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var localSection: View
     private lateinit var localModelPathText: TextView
     private lateinit var downloadProgressText: TextView
+    private lateinit var styleOrbPulse: TextView
+    private lateinit var styleOrbNetwork: TextView
 
     private var selectedProvider: Provider = Provider.GROQ
     private var selectedAccentColor: Int = Prefs.DEFAULT_ACCENT_COLOR
+    private var selectedOrbStyle: String = "PULSE"
     private var isDownloading = false
 
     private val colorSwatchIds = listOf(
@@ -60,8 +63,11 @@ class SettingsActivity : AppCompatActivity() {
         localSection = findViewById(R.id.localSection)
         localModelPathText = findViewById(R.id.localModelPathText)
         downloadProgressText = findViewById(R.id.downloadProgressText)
+        styleOrbPulse = findViewById(R.id.styleOrbPulse)
+        styleOrbNetwork = findViewById(R.id.styleOrbNetwork)
         val pickModelButton = findViewById<TextView>(R.id.pickModelButton)
         val downloadRecommendedButton = findViewById<TextView>(R.id.downloadRecommendedButton)
+        val downloadNoKeyButton = findViewById<TextView>(R.id.downloadNoKeyButton)
         val downloadCustomButton = findViewById<TextView>(R.id.downloadCustomButton)
         val saveButton = findViewById<TextView>(R.id.saveButton)
 
@@ -69,6 +75,7 @@ class SettingsActivity : AppCompatActivity() {
 
         setupProviderSpinner()
         setupColorSwatches()
+        setupOrbStyleSelector()
 
         hfTokenInput.setText(Prefs.getHfToken(this))
         baseUrlInput.setText(Prefs.getBaseUrl(this))
@@ -79,7 +86,11 @@ class SettingsActivity : AppCompatActivity() {
         pickModelButton.setOnClickListener { pickModelLauncher.launch(arrayOf("*/*")) }
 
         downloadRecommendedButton.setOnClickListener {
-            startDownload(ModelDownloader.RECOMMENDED_MODEL_URL)
+            startDownload(ModelDownloader.RECOMMENDED_MODEL_URL, useToken = true)
+        }
+
+        downloadNoKeyButton.setOnClickListener {
+            startDownload(ModelDownloader.NO_KEY_MODEL_URL, useToken = false)
         }
 
         downloadCustomButton.setOnClickListener {
@@ -87,7 +98,7 @@ class SettingsActivity : AppCompatActivity() {
             if (url.isBlank()) {
                 Toast.makeText(this, "Colle d'abord une URL de modèle", Toast.LENGTH_SHORT).show()
             } else {
-                startDownload(url)
+                startDownload(url, useToken = true)
             }
         }
 
@@ -101,6 +112,7 @@ class SettingsActivity : AppCompatActivity() {
             )
             Prefs.saveHfToken(this, hfTokenInput.text.toString().trim())
             Prefs.saveAccentColor(this, selectedAccentColor)
+            Prefs.saveOrbStyle(this, selectedOrbStyle)
             Toast.makeText(this, "Paramètres enregistrés", Toast.LENGTH_SHORT).show()
             finish()
         }
@@ -160,6 +172,26 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
+    private fun setupOrbStyleSelector() {
+        selectedOrbStyle = Prefs.getOrbStyle(this)
+        highlightOrbStyle()
+
+        styleOrbPulse.setOnClickListener {
+            selectedOrbStyle = "PULSE"
+            highlightOrbStyle()
+        }
+        styleOrbNetwork.setOnClickListener {
+            selectedOrbStyle = "NETWORK_SPHERE"
+            highlightOrbStyle()
+        }
+    }
+
+    private fun highlightOrbStyle() {
+        val pulseSelected = selectedOrbStyle == "PULSE"
+        styleOrbPulse.alpha = if (pulseSelected) 1f else 0.5f
+        styleOrbNetwork.alpha = if (pulseSelected) 0.5f else 1f
+    }
+
     private fun updateSectionsVisibility(provider: Provider) {
         cloudSection.visibility = if (provider.isLocal) View.GONE else View.VISIBLE
         localSection.visibility = if (provider.isLocal) View.VISIBLE else View.GONE
@@ -174,12 +206,12 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
-    private fun startDownload(url: String) {
+    private fun startDownload(url: String, useToken: Boolean) {
         if (isDownloading) {
             Toast.makeText(this, "Un téléchargement est déjà en cours…", Toast.LENGTH_SHORT).show()
             return
         }
-        val hfToken = hfTokenInput.text.toString().trim()
+        val hfToken = if (useToken) hfTokenInput.text.toString().trim() else ""
         isDownloading = true
         downloadProgressText.text = "Démarrage du téléchargement…"
 

@@ -10,7 +10,10 @@ import android.graphics.Shader
 import android.util.AttributeSet
 import android.view.View
 import android.view.animation.LinearInterpolator
+import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 class OrbView @JvmOverloads constructor(
     context: Context,
@@ -18,6 +21,7 @@ class OrbView @JvmOverloads constructor(
 ) : View(context, attrs) {
 
     enum class OrbState { IDLE, LISTENING, THINKING, SPEAKING }
+    enum class VisualStyle { PULSE, NETWORK_SPHERE }
 
     var accentColor: Int = Prefs.DEFAULT_ACCENT_COLOR
         set(value) {
@@ -31,9 +35,36 @@ class OrbView @JvmOverloads constructor(
             updateAnimatorSpeed()
         }
 
+    var visualStyle: VisualStyle = VisualStyle.PULSE
+        set(value) {
+            field = value
+            invalidate()
+        }
+
     private val corePaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    private val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
+        strokeWidth = 1.1f
+    }
+
+    private data class Point3D(val x: Float, val y: Float, val z: Float)
+
+    private val spherePoints: List<Point3D> by lazy { generateSpherePoints(90) }
+
+    private fun generateSpherePoints(count: Int): List<Point3D> {
+        val points = mutableListOf<Point3D>()
+        val golden = Math.PI * (3.0 - sqrt(5.0))
+        for (i in 0 until count) {
+            val y = 1f - (i / (count - 1f)) * 2f
+            val radiusAtY = sqrt((1 - y * y).toDouble()).toFloat()
+            val theta = golden * i
+            val x = (cos(theta) * radiusAtY).toFloat()
+            val z = (sin(theta) * radiusAtY).toFloat()
+            points.add(Point3D(x, y, z))
+        }
+        return points
     }
 
     private var pulsePhase = 0f
@@ -62,6 +93,13 @@ class OrbView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        when (visualStyle) {
+            VisualStyle.PULSE -> drawPulseOrb(canvas)
+            VisualStyle.NETWORK_SPHERE -> drawNetworkSphere(canvas)
+        }
+    }
+
+    private fun drawPulseOrb(canvas: Canvas) {
         val cx = width / 2f
         val cy = height / 2f
         val baseRadius = minOf(width, height) / 2f * 0.5f
@@ -94,6 +132,61 @@ class OrbView @JvmOverloads constructor(
             Color.blue(accentColor)
         )
         canvas.drawCircle(cx, cy, coreRadius * 0.45f, corePaint)
+    }
+
+    private fun drawNetworkSphere(canvas: Canvas) {
+        val cx = width / 2f
+        val cy = height / 2f
+        val scale = minOf(width, height) / 2f * 0.85f
+
+        // vitesse de rotation liée à l'état (écoute/réflexion/parole = plus rapide)
+        val speedFactor = when (state) {
+            OrbState.IDLE -> 0.4f
+            OrbState.LISTENING -> 1f
+            OrbState.THINKING -> 1.8f
+            OrbState.SPEAKING -> 1.3f
+        }
+        val angle = pulsePhase * 2f * Math.PI.toFloat() * speedFactor
+        val cosA = cos(angle)
+        val sinA = sin(angle)
+        val wobble = 0.25f * sin(angle * 0.5f)
+        val cosW = cos(wobble)
+        val sinW = sin(wobble)
+
+        val screenPoints = spherePoints.map { p ->
+            // rotation autour de l'axe Y
+            val rx = p.x * cosA - p.z * sinA
+            val rz = p.x * sinA + p.z * cosA
+            // léger balancement autour de l'axe X
+            val ry = p.y * cosW - rz * sinW
+            val rz2 = p.y * sinW + rz * cosW
+            Triple(cx + rx * scale, cy + ry * scale, rz2)
+        }
+
+        val threshold = scale * 0.42f
+        for (i in screenPoints.indices) {
+            val (x1, y1, z1) = screenPoints[i]
+            for (j in i + 1 until screenPoints.size) {
+                val (x2, y2, z2) = screenPoints[j]
+                val dist = hypot((x1 - x2).toDouble(), (y1 - y2).toDouble()).toFloat()
+                if (dist < threshold) {
+                    val avgZ = (z1 + z2) / 2f
+                    val alpha = (((avgZ + 1f) / 2f) * 70).toInt().coerceIn(6, 70)
+                    linePaint.color = accentColor
+                    linePaint.alpha = alpha
+                    canvas.drawLine(x1, y1, x2, y2, linePaint)
+                }
+            }
+        }
+
+        for ((x, y, z) in screenPoints) {
+            val depth = (z + 1f) / 2f
+            val alpha = (depth * 210 + 45).toInt().coerceIn(45, 255)
+            dotPaint.color = accentColor
+            dotPaint.alpha = alpha
+            val r = 2f + depth * 2.6f
+            canvas.drawCircle(x, y, r, dotPaint)
+        }
     }
 
     private fun adjustAlpha(color: Int, factor: Float): Int {
