@@ -44,7 +44,7 @@ object MarkdownUtils {
     }
 
     fun stripForSpeech(raw: String): String {
-        var text = boldOnlyRegex.replace(raw) { it.groupValues[1].ifEmpty { g -> g.groupValues[2] } }
+        var text = boldOnlyRegex.replace(raw) { m -> m.groupValues[1].ifEmpty { m.groupValues[2] } }
         text = codeOnlyRegex.replace(text) { it.groupValues[1] }
         text = headerRegex.replace(text) { it.groupValues[1] }
         text = bulletRegex.replace(text, "")
