@@ -19,6 +19,30 @@
             android:textStyle="bold"
             android:layout_marginBottom="20dp" />
 
+        <!-- Couleur du mode vocal -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Couleur du mode vocal"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="20dp">
+
+            <TextView android:id="@+id/colorCyan" style="@style/ColorSwatch" android:background="#00E5FF" />
+            <TextView android:id="@+id/colorRed" style="@style/ColorSwatch" android:background="#FF3B30" />
+            <TextView android:id="@+id/colorBlue" style="@style/ColorSwatch" android:background="#2979FF" />
+            <TextView android:id="@+id/colorPurple" style="@style/ColorSwatch" android:background="#B388FF" />
+            <TextView android:id="@+id/colorGold" style="@style/ColorSwatch" android:background="#FFC400" />
+            <TextView android:id="@+id/colorGreen" style="@style/ColorSwatch" android:background="#00E676" />
+
+        </LinearLayout>
+
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -35,7 +59,7 @@
             android:layout_marginTop="4dp"
             android:layout_marginBottom="20dp" />
 
-        <!-- Section API distante (Claude, ChatGPT, Gemini, Mistral, Groq, Ollama, Custom) -->
+        <!-- Section API distante -->
         <LinearLayout
             android:id="@+id/cloudSection"
             android:layout_width="match_parent"
@@ -115,9 +139,86 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Fichier modèle (.task)"
+                android:text="Jeton Hugging Face (gratuit)"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/hfTokenInput"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_input"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:textColor="@color/text_primary"
+                android:hint="hf_..."
+                android:textColorHint="@color/text_secondary"
+                android:inputType="textPassword"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="💡 Crée un compte gratuit sur huggingface.co → Settings → Access Tokens → New token (lecture seule). Puis accepte la licence Gemma sur la page du modèle litert-community/Gemma3-1B-IT."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="3dp"
+                android:layout_marginBottom="16dp" />
+
+            <TextView
+                android:id="@+id/downloadRecommendedButton"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:text="TÉLÉCHARGER GEMMA 3 1B (≈550 Mo)"
+                android:textColor="@color/background_dark"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="@drawable/bg_mic_button"
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Ou coller l'URL d'un autre modèle .task (plus puissant)"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:layout_marginTop="8dp" />
+
+            <EditText
+                android:id="@+id/customModelUrlInput"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_input"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:textColor="@color/text_primary"
+                android:hint="https://huggingface.co/.../modele.task"
+                android:textColorHint="@color/text_secondary"
+                android:inputType="textUri"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:id="@+id/downloadCustomButton"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:text="TÉLÉCHARGER CETTE URL"
+                android:textColor="@color/cyan_accent"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="@drawable/bg_input"
+                android:layout_marginBottom="16dp" />
+
+            <TextView
+                android:id="@+id/downloadProgressText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text=""
+                android:textColor="@color/cyan_accent"
+                android:textSize="13sp"
+                android:gravity="center"
+                android:layout_marginBottom="8dp" />
 
             <TextView
                 android:id="@+id/localModelPathText"
@@ -128,27 +229,17 @@
                 android:text="Aucun modèle importé"
                 android:textColor="@color/text_primary"
                 android:textSize="12sp"
-                android:layout_marginTop="4dp"
                 android:layout_marginBottom="12dp" />
 
             <TextView
                 android:id="@+id/pickModelButton"
                 android:layout_width="match_parent"
-                android:layout_height="52dp"
-                android:text="CHOISIR UN FICHIER .task"
-                android:textColor="@color/background_dark"
-                android:textStyle="bold"
-                android:gravity="center"
-                android:background="@drawable/bg_mic_button"
-                android:layout_marginBottom="12dp" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="💡 Ce mode fonctionne entièrement hors-ligne, sans PC ni serveur. Télécharge d'abord un modèle compatible MediaPipe LLM Inference (ex: Gemma 2B/3 1B au format .task) depuis Kaggle ou Google AI Edge, puis sélectionne-le ici. Le fichier fait souvent 500 Mo à 1,5 Go : prévois de l'espace libre et un peu de patience au premier chargement."
+                android:layout_height="48dp"
+                android:text="OU IMPORTER UN FICHIER .task MANUELLEMENT"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp"
-                android:lineSpacingExtra="4dp"
+                android:gravity="center"
+                android:background="@drawable/bg_input"
                 android:layout_marginBottom="8dp" />
 
         </LinearLayout>

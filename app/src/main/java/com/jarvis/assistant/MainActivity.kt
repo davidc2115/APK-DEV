@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
-import android.speech.RecognizerIntent
 import android.speech.tts.TextToSpeech
 import android.widget.EditText
 import android.widget.TextView
@@ -26,32 +25,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var messageInput: EditText
     private lateinit var statusText: TextView
 
-    private val messages = mutableListOf<Message>()
-    private val conversationHistory = mutableListOf<Pair<String, String>>()
-
     private var tts: TextToSpeech? = null
     private var ttsReady = false
-
-    private val recognizerLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == RESULT_OK) {
-            val data = result.data
-            val results = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-            val spokenText = results?.firstOrNull()
-            if (!spokenText.isNullOrBlank()) {
-                messageInput.setText(spokenText)
-                sendMessage(spokenText)
-            }
-        }
-    }
+    private var welcomeShown = false
 
     private val micPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) {
-            launchVoiceRecognition()
-        } else {
+        if (granted) openVoiceMode() else {
             Toast.makeText(this, "Permission micro refusée", Toast.LENGTH_SHORT).show()
         }
     }
@@ -67,13 +48,20 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val sendButton = findViewById<TextView>(R.id.sendButton)
         val settingsButton = findViewById<TextView>(R.id.settingsButton)
 
-        adapter = ChatAdapter(messages)
+        adapter = ChatAdapter(ConversationStore.messages)
         recyclerView.layoutManager = LinearLayoutManager(this)
         recyclerView.adapter = adapter
 
         tts = TextToSpeech(this, this)
 
-        addMessage("Bonjour. Je suis JARVIS, prêt à vous assister. Configurez d'abord votre API dans les paramètres (⚙) si ce n'est pas déjà fait.", isUser = false, speak = false)
+        if (ConversationStore.messages.isEmpty()) {
+            welcomeShown = true
+            addMessage(
+                "Bonjour. Je suis JARVIS, prêt à vous assister. Configurez votre IA dans les paramètres (⚙) si ce n'est pas déjà fait.",
+                isUser = false,
+                speak = false
+            )
+        }
 
         sendButton.setOnClickListener {
             val text = messageInput.text.toString().trim()
@@ -83,58 +71,54 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         }
 
-        micButton.setOnClickListener {
-            checkPermissionAndListen()
-        }
+        micButton.setOnClickListener { checkPermissionAndOpenVoiceMode() }
 
         settingsButton.setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
     }
 
-    private fun checkPermissionAndListen() {
+    override fun onResume() {
+        super.onResume()
+        adapter.notifyDataSetChanged()
+        if (ConversationStore.messages.isNotEmpty()) {
+            recyclerView.scrollToPosition(ConversationStore.messages.size - 1)
+        }
+    }
+
+    private fun checkPermissionAndOpenVoiceMode() {
         val granted = ContextCompat.checkSelfPermission(
             this, Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
 
-        if (granted) {
-            launchVoiceRecognition()
-        } else {
-            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-        }
+        if (granted) openVoiceMode() else micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
     }
 
-    private fun launchVoiceRecognition() {
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.FRENCH)
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "Je vous écoute…")
-        }
-        try {
-            recognizerLauncher.launch(intent)
-        } catch (e: Exception) {
-            Toast.makeText(this, "Reconnaissance vocale indisponible sur cet appareil", Toast.LENGTH_LONG).show()
-        }
+    private fun openVoiceMode() {
+        startActivity(Intent(this, VoiceModeActivity::class.java))
     }
 
     private fun sendMessage(text: String) {
         addMessage(text, isUser = true, speak = false)
-        conversationHistory.add("user" to text)
         statusText.text = "● JARVIS réfléchit…"
 
         CoroutineScope(Dispatchers.Main).launch {
-            val reply = ApiClient.sendChat(this@MainActivity, conversationHistory)
-            conversationHistory.add("assistant" to reply)
+            val reply = ApiClient.sendChat(this@MainActivity, ConversationStore.history)
             addMessage(reply, isUser = false, speak = true)
             statusText.text = "● en veille"
         }
     }
 
     private fun addMessage(text: String, isUser: Boolean, speak: Boolean) {
-        adapter.addMessage(Message(text, isUser))
-        recyclerView.scrollToPosition(messages.size - 1)
+        if (isUser) {
+            ConversationStore.addUser(text)
+        } else {
+            ConversationStore.addAssistant(text)
+        }
+        adapter.notifyItemInserted(ConversationStore.messages.size - 1)
+        recyclerView.scrollToPosition(ConversationStore.messages.size - 1)
         if (speak && ttsReady) {
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
+            tts?.speak(MarkdownUtils.stripForSpeech(text), TextToSpeech.QUEUE_FLUSH, null, null)
         }
     }
 
@@ -142,7 +126,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         if (status == TextToSpeech.SUCCESS) {
             val result = tts?.setLanguage(Locale.FRENCH)
             ttsReady = result != TextToSpeech.LANG_MISSING_DATA &&
-                    result != TextToSpeech.LANG_NOT_SUPPORTED
+                result != TextToSpeech.LANG_NOT_SUPPORTED
         }
     }
 

@@ -29,6 +29,13 @@
             android:label="Paramètres"
             android:theme="@style/Theme.Jarvis" />
 
+        <activity
+            android:name=".VoiceModeActivity"
+            android:exported="false"
+            android:label="Mode vocal"
+            android:theme="@style/Theme.Jarvis"
+            android:screenOrientation="portrait" />
+
     </application>
 
 </manifest>

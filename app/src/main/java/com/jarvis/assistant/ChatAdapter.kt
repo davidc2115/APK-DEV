@@ -26,7 +26,7 @@ class ChatAdapter(private val messages: MutableList<Message>) :
 
     override fun onBindViewHolder(holder: MessageViewHolder, position: Int) {
         val message = messages[position]
-        holder.messageText.text = message.text
+        holder.messageText.text = MarkdownUtils.toSpannable(message.text)
 
         if (message.isUser) {
             holder.senderLabel.text = "VOUS"
