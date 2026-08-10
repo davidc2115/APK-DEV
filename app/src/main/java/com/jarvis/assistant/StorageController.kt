@@ -10,23 +10,31 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/**
+ * Contrôleur complet du système de fichiers Android (Stockage total).
+ * Supporte : Lecture, Écriture, Renommage, Déplacement, Copie, Suppression, Création de dossiers.
+ */
 object StorageController {
 
     fun listFiles(context: Context, path: String = "/sdcard"): String {
-        val dir = File(path)
+        val targetPath = if (path.equals("downloads", ignoreCase = true)) {
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).absolutePath
+        } else path
+
+        val dir = File(targetPath)
         if (!dir.exists() || !dir.isDirectory) {
-            return "❌ Le dossier « $path » n'existe pas ou n'est pas un répertoire valide."
+            return "❌ Le dossier « $targetPath » n'existe pas ou n'est pas un répertoire valide."
         }
 
         val files = dir.listFiles()
-            ?: return "❌ Impossible de lire le contenu du dossier « $path » (accès refusé ou permission manquante)."
+            ?: return "❌ Accès au dossier « $targetPath » refusé. Accordez la permission 'Accès total au stockage'."
 
-        if (files.isEmpty()) return "📁 Le dossier « $path » est vide."
+        if (files.isEmpty()) return "📁 Le dossier « $targetPath » est vide."
 
         val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.FRENCH)
-        val sb = StringBuilder("📁 **Contenu de « $path » (${minOf(20, files.size)} premier(s))** :\n\n")
+        val sb = StringBuilder("📁 **Contenu de « $targetPath » (${minOf(25, files.size)} élément(s))** :\n\n")
 
-        files.take(20).forEachIndexed { i, file ->
+        files.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() })).take(25).forEachIndexed { i, file ->
             val icon = if (file.isDirectory) "📁" else "📄"
             val size = if (file.isFile) formatSize(file.length()) else ""
             val date = sdf.format(Date(file.lastModified()))
@@ -83,12 +91,107 @@ object StorageController {
             val content = file.readText(Charsets.UTF_8)
             val preview = content.take(5000)
             if (content.length > 5000) {
-                "📄 **Contenu de $path** (tronqué à 5000 caractères) :\n\n$preview\n\n[... suite tronquée]"
+                "📄 **Contenu de ${file.name}** (tronqué) :\n\n$preview\n\n[... suite tronquée]"
             } else {
-                "📄 **Contenu de $path** :\n\n$content"
+                "📄 **Contenu de ${file.name}** :\n\n$content"
             }
         } catch (e: Exception) {
             "❌ Échec de la lecture du fichier : ${e.message}"
+        }
+    }
+
+    fun writeTextFile(context: Context, path: String, content: String): String {
+        val file = File(path)
+        return try {
+            file.parentFile?.mkdirs()
+            file.writeText(content, Charsets.UTF_8)
+            "✍️ Fichier **${file.name}** créé/modifié avec succès (`$path`)."
+        } catch (e: Exception) {
+            "❌ Échec de l'écriture dans le fichier : ${e.message}"
+        }
+    }
+
+    fun renameFile(context: Context, oldPath: String, newNameOrPath: String): String {
+        val oldFile = File(oldPath)
+        if (!oldFile.exists()) return "❌ Fichier ou dossier introuvable : « $oldPath »."
+
+        val newFile = if (newNameOrPath.contains("/")) {
+            File(newNameOrPath)
+        } else {
+            File(oldFile.parentFile, newNameOrPath)
+        }
+
+        return try {
+            if (oldFile.renameTo(newFile)) {
+                "✏️ **${oldFile.name}** renommé avec succès en **${newFile.name}** !"
+            } else {
+                "❌ Échec du renommage de « ${oldFile.name} »."
+            }
+        } catch (e: Exception) {
+            "❌ Erreur lors du renommage : ${e.message}"
+        }
+    }
+
+    fun copyFile(context: Context, sourcePath: String, destPath: String): String {
+        val src = File(sourcePath)
+        if (!src.exists()) return "❌ Fichier source introuvable : « $sourcePath »."
+
+        val dest = File(destPath)
+        return try {
+            dest.parentFile?.mkdirs()
+            src.copyTo(dest, overwrite = true)
+            "📋 Fichier **${src.name}** copié vers **${dest.name}** avec succès."
+        } catch (e: Exception) {
+            "❌ Erreur lors de la copie : ${e.message}"
+        }
+    }
+
+    fun moveFile(context: Context, sourcePath: String, destPath: String): String {
+        val src = File(sourcePath)
+        if (!src.exists()) return "❌ Fichier source introuvable : « $sourcePath »."
+
+        val dest = File(destPath)
+        return try {
+            dest.parentFile?.mkdirs()
+            if (src.renameTo(dest)) {
+                "📦 Fichier **${src.name}** déplacé vers **${dest.path}** avec succès."
+            } else {
+                src.copyTo(dest, overwrite = true)
+                src.delete()
+                "📦 Fichier **${src.name}** déplacé avec succès."
+            }
+        } catch (e: Exception) {
+            "❌ Erreur lors du déplacement : ${e.message}"
+        }
+    }
+
+    fun createFolder(context: Context, path: String): String {
+        val dir = File(path)
+        return try {
+            if (dir.exists()) return "📁 Le dossier « $path » existe déjà."
+            if (dir.mkdirs()) {
+                "📁 Dossier **${dir.name}** créé avec succès (`$path`)."
+            } else {
+                "❌ Échec de la création du dossier « $path »."
+            }
+        } catch (e: Exception) {
+            "❌ Erreur de création du dossier : ${e.message}"
+        }
+    }
+
+    fun deleteFile(context: Context, path: String): String {
+        val file = File(path)
+        if (!file.exists()) return "❌ Le fichier ou dossier « $path » n'existe pas."
+
+        return try {
+            val deleted = if (file.isDirectory) file.deleteRecursively() else file.delete()
+            if (deleted) {
+                "🗑️ **${file.name}** supprimé avec succès."
+            } else {
+                "❌ Impossible de supprimer « $path »."
+            }
+        } catch (e: Exception) {
+            "❌ Erreur lors de la suppression : ${e.message}"
         }
     }
 
@@ -113,60 +216,6 @@ object StorageController {
     fun listDownloads(context: Context): String {
         val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         return listFiles(context, downloadsDir.absolutePath)
-    }
-
-    fun listImages(context: Context, count: Int = 10): String {
-        val projection = arrayOf(
-            MediaStore.Images.Media.DISPLAY_NAME,
-            MediaStore.Images.Media.DATE_TAKEN,
-            MediaStore.Images.Media.SIZE
-        )
-
-        return try {
-            val cursor = context.contentResolver.query(
-                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                projection,
-                null,
-                null,
-                "${MediaStore.Images.Media.DATE_TAKEN} DESC"
-            )
-
-            cursor?.use { c ->
-                if (c.count == 0) return "🖼️ Aucune photo trouvée."
-
-                val sb = StringBuilder("🖼️ **Photos récentes (${minOf(count, c.count)})** :\n\n")
-                val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.FRENCH)
-                var idx = 0
-
-                while (c.moveToNext() && idx < count) {
-                    val name = c.getString(0) ?: "Image"
-                    val date = c.getLong(1)
-                    val size = formatSize(c.getLong(2))
-                    val dateStr = if (date > 0) sdf.format(Date(date)) else "Date inconnue"
-
-                    sb.append("${idx + 1}. 🖼️ **$name** ($size) — $dateStr\n")
-                    idx++
-                }
-                sb.toString()
-            } ?: "❌ Échec de la lecture des images."
-        } catch (e: Exception) {
-            "❌ Erreur lors de la lecture des images : ${e.message}"
-        }
-    }
-
-    fun deleteFile(context: Context, path: String): String {
-        val file = File(path)
-        if (!file.exists()) return "❌ Le fichier « $path » n'existe pas."
-
-        return try {
-            if (file.delete()) {
-                "🗑️ Fichier **${file.name}** supprimé avec succès."
-            } else {
-                "❌ Impossible de supprimer le fichier « $path »."
-            }
-        } catch (e: Exception) {
-            "❌ Erreur lors de la suppression : ${e.message}"
-        }
     }
 
     private fun formatSize(bytes: Long): String {

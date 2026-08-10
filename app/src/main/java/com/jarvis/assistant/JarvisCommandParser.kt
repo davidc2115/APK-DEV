@@ -99,6 +99,45 @@ object JarvisCommandParser {
                 val query = json.optString("query", "")
                 StorageController.searchFiles(context, query)
             }
+            "read_file" -> {
+                val path = json.optString("path", "")
+                if (path.isBlank()) "❌ Chemin de fichier manquant."
+                else StorageController.readTextFile(context, path)
+            }
+            "write_file" -> {
+                val path = json.optString("path", "")
+                val content = json.optString("content", "")
+                if (path.isBlank()) "❌ Chemin de fichier manquant."
+                else StorageController.writeTextFile(context, path, content)
+            }
+            "rename_file" -> {
+                val oldPath = json.optString("oldPath", "").ifBlank { json.optString("path", "") }
+                val newName = json.optString("newName", "").ifBlank { json.optString("newPath", "") }
+                if (oldPath.isBlank() || newName.isBlank()) "❌ Ancien ou nouveau nom manquant."
+                else StorageController.renameFile(context, oldPath, newName)
+            }
+            "copy_file" -> {
+                val src = json.optString("source", "").ifBlank { json.optString("src", "") }
+                val dest = json.optString("dest", "").ifBlank { json.optString("destination", "") }
+                if (src.isBlank() || dest.isBlank()) "❌ Source ou destination manquante."
+                else StorageController.copyFile(context, src, dest)
+            }
+            "move_file" -> {
+                val src = json.optString("source", "").ifBlank { json.optString("src", "") }
+                val dest = json.optString("dest", "").ifBlank { json.optString("destination", "") }
+                if (src.isBlank() || dest.isBlank()) "❌ Source ou destination manquante."
+                else StorageController.moveFile(context, src, dest)
+            }
+            "delete_file" -> {
+                val path = json.optString("path", "")
+                if (path.isBlank()) "❌ Chemin de fichier manquant."
+                else StorageController.deleteFile(context, path)
+            }
+            "create_folder" -> {
+                val path = json.optString("path", "")
+                if (path.isBlank()) "❌ Chemin de dossier manquant."
+                else StorageController.createFolder(context, path)
+            }
             "storage_info" -> StorageController.getStorageInfo(context)
 
             "get_notifications" -> JarvisNotificationListenerService.getRecent(json.optInt("count", 5))
