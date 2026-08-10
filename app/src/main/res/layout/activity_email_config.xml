@@ -23,32 +23,28 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:layout_marginBottom="20dp"
-            android:text="JARVIS se connecte directement aux comptes Google synchronisés sur votre smartphone."
+            android:text="JARVIS lit et envoie vos e-mails directement. Google exige un mot de passe d'application 16 caractères."
             android:textColor="@color/text_secondary"
             android:textSize="13sp" />
 
-        <!-- Liste des comptes Google détectés -->
+        <!-- Bouton Générateur de mot de passe Google -->
         <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="📱 Comptes Google détectés sur cet appareil :"
-            android:textColor="@color/cyan_accent"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:layout_marginBottom="10dp" />
-
-        <LinearLayout
-            android:id="@+id/discoveredAccountsContainer"
+            android:id="@+id/btnOpenGooglePassGuide"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:layout_marginBottom="24dp" />
+            android:layout_height="48dp"
+            android:background="@drawable/bg_input"
+            android:gravity="center"
+            android:text="🔑 Obtenir un Mot de Passe d'App Google (16 caractères)"
+            android:textColor="@color/cyan_accent"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="16dp" />
 
-        <!-- Saisie manuelle d'adresse Google -->
+        <!-- Saisie d'adresse Email -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Ajouter une autre adresse Google / Email :"
+            android:text="Votre adresse Email Google / Gmail :"
             android:textColor="@color/text_secondary"
             android:textSize="12sp" />
 
@@ -57,9 +53,32 @@
             android:layout_width="match_parent"
             android:layout_height="48dp"
             android:layout_marginTop="4dp"
+            android:layout_marginBottom="12dp"
             android:background="@drawable/bg_input"
-            android:hint="exemple@gmail.com"
+            android:hint="mon.adresse@gmail.com"
             android:inputType="textEmailAddress"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_secondary" />
+
+        <!-- Saisie du mot de passe d'application Google (16 caractères) -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Mot de passe d'application Google (16 lettres, ex: abcd efgh ijkl mnop) :"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+
+        <EditText
+            android:id="@+id/passwordInput"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="16dp"
+            android:background="@drawable/bg_input"
+            android:hint="16 lettres fournies par Google"
+            android:inputType="textPassword"
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
             android:textColor="@color/text_primary"
@@ -69,19 +88,27 @@
             android:id="@+id/btnConnectGoogle"
             android:layout_width="match_parent"
             android:layout_height="52dp"
-            android:layout_marginTop="12dp"
             android:background="@drawable/bg_mic_button"
             android:gravity="center"
-            android:text="🌐 SE CONNECTER AVEC CE COMPTE GOOGLE"
+            android:text="🌐 CONNECTER CE COMPTE GOOGLE"
             android:textColor="@color/background_dark"
             android:textSize="13sp"
             android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/testResultText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:gravity="center"
+            android:textColor="@color/cyan_accent"
+            android:textSize="13sp" />
 
         <!-- Comptes actifs -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="32dp"
+            android:layout_marginTop="28dp"
             android:text="📋 Comptes Google Connectés"
             android:textColor="@color/cyan_accent"
             android:textSize="16sp"

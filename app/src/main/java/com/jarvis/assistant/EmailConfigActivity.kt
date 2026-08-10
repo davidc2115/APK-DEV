@@ -1,20 +1,27 @@
 package com.jarvis.assistant
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /**
- * Écran de connexion directe par Compte Google Android (Sans IMAP).
+ * Écran de connexion directe par Compte Google avec Mot de passe d'Application (16 caractères).
  */
 class EmailConfigActivity : AppCompatActivity() {
 
     private lateinit var emailInput: EditText
+    private lateinit var passwordInput: EditText
     private lateinit var btnConnectGoogle: TextView
-    private lateinit var discoveredAccountsContainer: LinearLayout
+    private lateinit var btnOpenGooglePassGuide: TextView
+    private lateinit var testResultText: TextView
     private lateinit var accountsContainer: LinearLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -22,74 +29,59 @@ class EmailConfigActivity : AppCompatActivity() {
         setContentView(R.layout.activity_email_config)
 
         emailInput = findViewById(R.id.emailInput)
+        passwordInput = findViewById(R.id.passwordInput)
         btnConnectGoogle = findViewById(R.id.btnConnectGoogle)
-        discoveredAccountsContainer = findViewById(R.id.discoveredAccountsContainer)
+        btnOpenGooglePassGuide = findViewById(R.id.btnOpenGooglePassGuide)
+        testResultText = findViewById(R.id.testResultText)
         accountsContainer = findViewById(R.id.accountsContainer)
 
-        refreshDiscoveredAccounts()
+        // Préremplir si un compte est déjà détecté
+        val discovered = AccountDiscoveryManager.getDeviceAccounts(this)
+        if (discovered.isNotEmpty() && emailInput.text.isBlank()) {
+            emailInput.setText(discovered.first().email)
+        }
+
         refreshAccountsList()
+
+        btnOpenGooglePassGuide.setOnClickListener {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://myaccount.google.com/apppasswords"))
+            startActivity(intent)
+        }
 
         btnConnectGoogle.setOnClickListener {
             val email = emailInput.text.toString().trim()
-            if (email.isBlank()) {
-                Toast.makeText(this, "Veuillez entrer une adresse email Google.", Toast.LENGTH_SHORT).show()
-            } else {
-                connectGoogleAccount(email, "Compte Google")
+            val pass = passwordInput.text.toString().trim().replace(" ", "")
+
+            if (email.isBlank() || pass.isBlank()) {
+                Toast.makeText(this, "Entrez votre email Google et le mot de passe d'application 16 lettres.", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
             }
-        }
-    }
 
-    private fun refreshDiscoveredAccounts() {
-        discoveredAccountsContainer.removeAllViews()
-        val discovered = AccountDiscoveryManager.getDeviceAccounts(this)
+            val account = Prefs.EmailAccount(
+                label = "Gmail Google",
+                email = email,
+                password = pass,
+                imapHost = "imap.gmail.com",
+                imapPort = 993,
+                imapSsl = true,
+                smtpHost = "smtp.gmail.com",
+                smtpPort = 587,
+                smtpStartTls = true,
+                isDefault = Prefs.getEmailAccounts(this).isEmpty()
+            )
 
-        if (discovered.isEmpty()) {
-            val emptyText = TextView(this).apply {
-                text = "Aucun compte Google trouvé sur cet appareil."
-                setTextColor(getColor(R.color.text_secondary))
-                textSize = 12f
-            }
-            discoveredAccountsContainer.addView(emptyText)
-            return
-        }
+            testResultText.text = "🔄 Connexion au serveur Google IMAP en cours…"
 
-        for (acc in discovered) {
-            val btn = TextView(this).apply {
-                text = "🌐 Connecter ${acc.email} (${acc.providerPreset})"
-                setTextColor(getColor(R.color.cyan_accent))
-                textSize = 13f
-                setTypeface(null, android.graphics.Typeface.BOLD)
-                setPadding(16, 14, 16, 14)
-                background = getDrawable(R.drawable.bg_input)
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).also { it.bottomMargin = 8 }
-
-                setOnClickListener {
-                    connectGoogleAccount(acc.email, acc.providerPreset)
+            CoroutineScope(Dispatchers.Main).launch {
+                val testRes = EmailController.testConnection(account)
+                testResultText.text = testRes
+                if (testRes.contains("succès", ignoreCase = true) || testRes.contains("✅", ignoreCase = true)) {
+                    Prefs.addEmailAccount(this@EmailConfigActivity, account)
+                    refreshAccountsList()
+                    Toast.makeText(this@EmailConfigActivity, "✅ Compte Google connecté !", Toast.LENGTH_SHORT).show()
                 }
             }
-            discoveredAccountsContainer.addView(btn)
         }
-    }
-
-    private fun connectGoogleAccount(email: String, label: String) {
-        val googleAcc = Prefs.EmailAccount(
-            label = label,
-            email = email,
-            password = "GOOGLE_ACCOUNT_AUTH",
-            imapHost = "imap.gmail.com",
-            imapPort = 993,
-            imapSsl = true,
-            smtpHost = "smtp.gmail.com",
-            smtpPort = 587,
-            smtpStartTls = true,
-            isDefault = Prefs.getEmailAccounts(this).isEmpty()
-        )
-        Prefs.addEmailAccount(this, googleAcc)
-        refreshAccountsList()
-        Toast.makeText(this, "✅ Compte Google $email connecté à JARVIS !", Toast.LENGTH_LONG).show()
     }
 
     private fun refreshAccountsList() {
@@ -120,7 +112,7 @@ class EmailConfigActivity : AppCompatActivity() {
             val textInfo = TextView(this).apply {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
                 val defTag = if (acc.isDefault) " ⭐ [Par défaut]" else ""
-                text = "📧 ${acc.label}$defTag\n${acc.email}\nAuthentification: Compte Google Système"
+                text = "📧 ${acc.label}$defTag\n${acc.email}\nAuthentification: Google App Password"
                 setTextColor(getColor(R.color.text_primary))
                 textSize = 13f
             }

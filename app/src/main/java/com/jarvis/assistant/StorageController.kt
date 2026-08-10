@@ -12,27 +12,45 @@ import java.util.Locale
 
 /**
  * Contrôleur complet du système de fichiers Android (Stockage total).
- * Supporte : Lecture, Écriture, Renommage, Déplacement, Copie, Suppression, Création de dossiers.
+ * Supporte : Résolution intelligente de chemins (Download, Documents, DCIM, SDCard),
+ * Lecture, Écriture, Renommage, Déplacement, Copie, Suppression, Création de dossiers.
  */
 object StorageController {
 
-    fun listFiles(context: Context, path: String = "/sdcard"): String {
-        val targetPath = if (path.equals("downloads", ignoreCase = true)) {
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).absolutePath
-        } else path
+    private fun resolvePath(inputPath: String): File {
+        val clean = inputPath.trim()
+        if (clean.isBlank()) return Environment.getExternalStorageDirectory()
 
-        val dir = File(targetPath)
+        val lower = clean.lowercase()
+        return when {
+            lower == "downloads" || lower == "download" || lower == "téléchargements" || lower == "telechargements" ->
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            lower == "documents" || lower == "document" ->
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+            lower == "dcim" || lower == "photos" || lower == "pictures" || lower == "images" ->
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM)
+            lower == "music" || lower == "musique" ->
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
+            lower == "sdcard" || lower == "internal" || lower == "stockage" ->
+                Environment.getExternalStorageDirectory()
+            clean.startsWith("/") -> File(clean)
+            else -> File(Environment.getExternalStorageDirectory(), clean)
+        }
+    }
+
+    fun listFiles(context: Context, path: String = "/sdcard"): String {
+        val dir = resolvePath(path)
         if (!dir.exists() || !dir.isDirectory) {
-            return "❌ Le dossier « $targetPath » n'existe pas ou n'est pas un répertoire valide."
+            return "❌ Le dossier « ${dir.absolutePath} » n'existe pas ou n'est pas un répertoire valide."
         }
 
         val files = dir.listFiles()
-            ?: return "❌ Accès au dossier « $targetPath » refusé. Accordez la permission 'Accès total au stockage'."
+            ?: return "❌ Accès au dossier « ${dir.absolutePath} » refusé. Accordez la permission 'Accès total au stockage'."
 
-        if (files.isEmpty()) return "📁 Le dossier « $targetPath » est vide."
+        if (files.isEmpty()) return "📁 Le dossier « ${dir.absolutePath} » est vide."
 
         val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.FRENCH)
-        val sb = StringBuilder("📁 **Contenu de « $targetPath » (${minOf(25, files.size)} élément(s))** :\n\n")
+        val sb = StringBuilder("📁 **Contenu de « ${dir.absolutePath} » (${minOf(25, files.size)} élément(s))** :\n\n")
 
         files.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() })).take(25).forEachIndexed { i, file ->
             val icon = if (file.isDirectory) "📁" else "📄"
@@ -82,9 +100,9 @@ object StorageController {
     }
 
     fun readTextFile(context: Context, path: String): String {
-        val file = File(path)
+        val file = resolvePath(path)
         if (!file.exists() || !file.isFile) {
-            return "❌ Fichier introuvable : « $path »."
+            return "❌ Fichier introuvable : « ${file.absolutePath} »."
         }
 
         return try {
@@ -101,22 +119,22 @@ object StorageController {
     }
 
     fun writeTextFile(context: Context, path: String, content: String): String {
-        val file = File(path)
+        val file = resolvePath(path)
         return try {
             file.parentFile?.mkdirs()
             file.writeText(content, Charsets.UTF_8)
-            "✍️ Fichier **${file.name}** créé/modifié avec succès (`$path`)."
+            "✍️ Fichier **${file.name}** créé/modifié avec succès (`${file.absolutePath}`)."
         } catch (e: Exception) {
             "❌ Échec de l'écriture dans le fichier : ${e.message}"
         }
     }
 
     fun renameFile(context: Context, oldPath: String, newNameOrPath: String): String {
-        val oldFile = File(oldPath)
-        if (!oldFile.exists()) return "❌ Fichier ou dossier introuvable : « $oldPath »."
+        val oldFile = resolvePath(oldPath)
+        if (!oldFile.exists()) return "❌ Fichier ou dossier introuvable : « ${oldFile.absolutePath} »."
 
         val newFile = if (newNameOrPath.contains("/")) {
-            File(newNameOrPath)
+            resolvePath(newNameOrPath)
         } else {
             File(oldFile.parentFile, newNameOrPath)
         }
@@ -133,10 +151,10 @@ object StorageController {
     }
 
     fun copyFile(context: Context, sourcePath: String, destPath: String): String {
-        val src = File(sourcePath)
-        if (!src.exists()) return "❌ Fichier source introuvable : « $sourcePath »."
+        val src = resolvePath(sourcePath)
+        if (!src.exists()) return "❌ Fichier source introuvable : « ${src.absolutePath} »."
 
-        val dest = File(destPath)
+        val dest = resolvePath(destPath)
         return try {
             dest.parentFile?.mkdirs()
             src.copyTo(dest, overwrite = true)
@@ -147,10 +165,10 @@ object StorageController {
     }
 
     fun moveFile(context: Context, sourcePath: String, destPath: String): String {
-        val src = File(sourcePath)
-        if (!src.exists()) return "❌ Fichier source introuvable : « $sourcePath »."
+        val src = resolvePath(sourcePath)
+        if (!src.exists()) return "❌ Fichier source introuvable : « ${src.absolutePath} »."
 
-        val dest = File(destPath)
+        val dest = resolvePath(destPath)
         return try {
             dest.parentFile?.mkdirs()
             if (src.renameTo(dest)) {
@@ -166,13 +184,13 @@ object StorageController {
     }
 
     fun createFolder(context: Context, path: String): String {
-        val dir = File(path)
+        val dir = resolvePath(path)
         return try {
-            if (dir.exists()) return "📁 Le dossier « $path » existe déjà."
+            if (dir.exists()) return "📁 Le dossier « ${dir.absolutePath} » existe déjà."
             if (dir.mkdirs()) {
-                "📁 Dossier **${dir.name}** créé avec succès (`$path`)."
+                "📁 Dossier **${dir.name}** créé avec succès (`${dir.absolutePath}`)."
             } else {
-                "❌ Échec de la création du dossier « $path »."
+                "❌ Échec de la création du dossier « ${dir.absolutePath} »."
             }
         } catch (e: Exception) {
             "❌ Erreur de création du dossier : ${e.message}"
@@ -180,15 +198,15 @@ object StorageController {
     }
 
     fun deleteFile(context: Context, path: String): String {
-        val file = File(path)
-        if (!file.exists()) return "❌ Le fichier ou dossier « $path » n'existe pas."
+        val file = resolvePath(path)
+        if (!file.exists()) return "❌ Le fichier ou dossier « ${file.absolutePath} » n'existe pas."
 
         return try {
             val deleted = if (file.isDirectory) file.deleteRecursively() else file.delete()
             if (deleted) {
                 "🗑️ **${file.name}** supprimé avec succès."
             } else {
-                "❌ Impossible de supprimer « $path »."
+                "❌ Impossible de supprimer « ${file.absolutePath} »."
             }
         } catch (e: Exception) {
             "❌ Erreur lors de la suppression : ${e.message}"

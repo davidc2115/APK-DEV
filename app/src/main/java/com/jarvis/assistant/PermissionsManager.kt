@@ -107,7 +107,7 @@ object PermissionsManager {
 
     fun hasCameraPermission(context: Context) = hasPermission(context, Manifest.permission.CAMERA)
     fun hasCallPermission(context: Context)   = hasPermission(context, Manifest.permission.CALL_PHONE)
-    fun hasSmsPermission(context: Context)    = hasPermission(context, Manifest.permission.SEND_SMS)
+    fun hasSmsPermission(context: Context)    = hasPermission(context, Manifest.permission.READ_SMS) || hasPermission(context, Manifest.permission.SEND_SMS)
     fun hasContactsPermission(context: Context) = hasPermission(context, Manifest.permission.READ_CONTACTS)
     fun hasCalendarPermission(context: Context) = hasPermission(context, Manifest.permission.READ_CALENDAR)
     fun hasLocationPermission(context: Context) = hasPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
