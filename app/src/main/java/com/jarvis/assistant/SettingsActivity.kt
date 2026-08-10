@@ -27,6 +27,7 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var customModelUrlInput: EditText
     private lateinit var cloudSection: View
     private lateinit var localSection: View
+    private lateinit var autoInfoText: View
     private lateinit var localModelPathText: TextView
     private lateinit var downloadProgressText: TextView
     private lateinit var styleOrbPulse: TextView
@@ -61,6 +62,7 @@ class SettingsActivity : AppCompatActivity() {
         customModelUrlInput = findViewById(R.id.customModelUrlInput)
         cloudSection = findViewById(R.id.cloudSection)
         localSection = findViewById(R.id.localSection)
+        autoInfoText = findViewById(R.id.autoInfoText)
         localModelPathText = findViewById(R.id.localModelPathText)
         downloadProgressText = findViewById(R.id.downloadProgressText)
         styleOrbPulse = findViewById(R.id.styleOrbPulse)
@@ -80,7 +82,10 @@ class SettingsActivity : AppCompatActivity() {
         hfTokenInput.setText(Prefs.getHfToken(this))
         baseUrlInput.setText(Prefs.getBaseUrl(this))
         modelInput.setText(Prefs.getModel(this))
-        apiKeyInput.setText(Prefs.getApiKey(this))
+        val initialProvider = Prefs.getProvider(this)
+        apiKeyInput.setText(
+            Prefs.getApiKeyFor(this, initialProvider).ifBlank { Prefs.getApiKey(this) }
+        )
         updateLocalModelLabel()
 
         pickModelButton.setOnClickListener { pickModelLauncher.launch(arrayOf("*/*")) }
@@ -114,7 +119,6 @@ class SettingsActivity : AppCompatActivity() {
             Prefs.saveAccentColor(this, selectedAccentColor)
             Prefs.saveOrbStyle(this, selectedOrbStyle)
             Toast.makeText(this, "Paramètres enregistrés", Toast.LENGTH_SHORT).show()
-            finish()
         }
     }
 
@@ -134,9 +138,10 @@ class SettingsActivity : AppCompatActivity() {
                 val provider = Provider.entries[position]
                 selectedProvider = provider
                 updateSectionsVisibility(provider)
-                if (!provider.isLocal) {
+                if (!provider.isLocal && !provider.isAuto) {
                     baseUrlInput.setText(provider.defaultBaseUrl)
                     modelInput.setText(provider.defaultModel)
+                    apiKeyInput.setText(Prefs.getApiKeyFor(this@SettingsActivity, provider))
                 }
             }
 
@@ -193,7 +198,8 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun updateSectionsVisibility(provider: Provider) {
-        cloudSection.visibility = if (provider.isLocal) View.GONE else View.VISIBLE
+        autoInfoText.visibility = if (provider.isAuto) View.VISIBLE else View.GONE
+        cloudSection.visibility = if (provider.isLocal || provider.isAuto) View.GONE else View.VISIBLE
         localSection.visibility = if (provider.isLocal) View.VISIBLE else View.GONE
     }
 

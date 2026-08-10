@@ -96,6 +96,17 @@
             android:background="@drawable/bg_input"
             android:popupBackground="@color/surface_dark"
             android:layout_marginTop="4dp"
+            android:layout_marginBottom="12dp" />
+
+        <TextView
+            android:id="@+id/autoInfoText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="🤖 Le mode Automatique essaie Claude, ChatGPT, Gemini, Groq puis Mistral dans cet ordre, en utilisant la première clé API configurée qui répond correctement. Pour l'activer : sélectionne chaque fournisseur un par un dans cette liste, ajoute sa clé API, appuie sur ENREGISTRER (les paramètres restent ouverts), puis reviens ici et choisis « Automatique »."
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp"
+            android:lineSpacingExtra="4dp"
+            android:visibility="gone"
             android:layout_marginBottom="20dp" />
 
         <!-- Section API distante -->

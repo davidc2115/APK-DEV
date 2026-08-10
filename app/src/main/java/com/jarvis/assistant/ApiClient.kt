@@ -14,8 +14,8 @@ import java.util.concurrent.TimeUnit
 /**
  * Client IA générique : route la conversation vers le bon fournisseur
  * (Claude, Gemini, OpenAI-compatible pour ChatGPT/Mistral/Groq/Ollama,
- * ou modèle local embarqué sur l'appareil). Gère aussi les photos jointes
- * pour les fournisseurs qui supportent la vision (Claude, ChatGPT, Gemini).
+ * ou modèle local embarqué). En mode Automatique, essaie chaque fournisseur
+ * configuré (avec une clé enregistrée) jusqu'à obtenir une réponse valide.
  */
 object ApiClient {
 
@@ -37,15 +37,56 @@ object ApiClient {
 
             try {
                 when {
+                    provider.isAuto -> sendAuto(context, history)
                     provider.isLocal -> sendLocal(context, history)
-                    provider == Provider.CLAUDE -> sendClaude(context, history)
-                    provider == Provider.GEMINI -> sendGemini(context, history)
-                    else -> sendOpenAiCompatible(context, history)
+                    provider == Provider.CLAUDE ->
+                        sendClaude(Prefs.getBaseUrl(context), Prefs.getModel(context), Prefs.getApiKey(context), history)
+                    provider == Provider.GEMINI ->
+                        sendGemini(Prefs.getBaseUrl(context), Prefs.getApiKey(context), history)
+                    else ->
+                        sendOpenAiCompatible(Prefs.getBaseUrl(context), Prefs.getModel(context), Prefs.getApiKey(context), history)
                 }
             } catch (e: Exception) {
                 "Connexion impossible. Vérifiez les paramètres dans ⚙. Détail : ${e.message}"
             }
         }
+
+    // ---------- Mode Automatique : essaie chaque fournisseur configuré ----------
+
+    private fun sendAuto(context: Context, history: List<HistoryEntry>): String {
+        val candidates = Provider.AUTO_FALLBACK_ORDER.filter {
+            Prefs.getApiKeyFor(context, it).isNotBlank()
+        }
+
+        if (candidates.isEmpty()) {
+            return "Aucune IA configurée pour le mode Automatique. Ouvre ⚙ Paramètres, choisis un fournisseur " +
+                "(Claude, ChatGPT, Gemini, Groq ou Mistral), ajoute sa clé API et enregistre. Répète pour " +
+                "chaque IA que tu veux inclure dans le mode Automatique."
+        }
+
+        var lastError = ""
+        for (provider in candidates) {
+            val key = Prefs.getApiKeyFor(context, provider)
+            val result = try {
+                when (provider) {
+                    Provider.CLAUDE -> sendClaude(provider.defaultBaseUrl, provider.defaultModel, key, history)
+                    Provider.GEMINI -> sendGemini(provider.defaultBaseUrl, key, history)
+                    else -> sendOpenAiCompatible(provider.defaultBaseUrl, provider.defaultModel, key, history)
+                }
+            } catch (e: Exception) {
+                "Erreur : ${e.message}"
+            }
+
+            if (!result.startsWith("Erreur") && !result.startsWith("Connexion impossible") &&
+                !result.startsWith("Format de réponse inattendu")
+            ) {
+                return result
+            }
+            lastError = "[${provider.displayName}] $result"
+        }
+
+        return "Toutes les IA configurées ont échoué. Dernière erreur : $lastError"
+    }
 
     // ---------- Modèle local sur l'appareil ----------
 
@@ -72,11 +113,7 @@ object ApiClient {
 
     // ---------- OpenAI-compatible : ChatGPT, Mistral, Groq, Ollama, Custom ----------
 
-    private fun sendOpenAiCompatible(context: Context, history: List<HistoryEntry>): String {
-        val baseUrl = Prefs.getBaseUrl(context)
-        val model = Prefs.getModel(context)
-        val apiKey = Prefs.getApiKey(context)
-
+    private fun sendOpenAiCompatible(baseUrl: String, model: String, apiKey: String, history: List<HistoryEntry>): String {
         val messagesArray = JSONArray()
         messagesArray.put(JSONObject().put("role", "system").put("content", SYSTEM_PROMPT))
         for (entry in history) {
@@ -129,11 +166,7 @@ object ApiClient {
 
     // ---------- Claude (Anthropic) ----------
 
-    private fun sendClaude(context: Context, history: List<HistoryEntry>): String {
-        val baseUrl = Prefs.getBaseUrl(context)
-        val model = Prefs.getModel(context)
-        val apiKey = Prefs.getApiKey(context)
-
+    private fun sendClaude(baseUrl: String, model: String, apiKey: String, history: List<HistoryEntry>): String {
         if (apiKey.isBlank()) return "Clé API Claude manquante. Ajoute-la dans ⚙ Paramètres."
 
         val messagesArray = JSONArray()
@@ -186,10 +219,7 @@ object ApiClient {
 
     // ---------- Google Gemini ----------
 
-    private fun sendGemini(context: Context, history: List<HistoryEntry>): String {
-        val baseUrl = Prefs.getBaseUrl(context)
-        val apiKey = Prefs.getApiKey(context)
-
+    private fun sendGemini(baseUrl: String, apiKey: String, history: List<HistoryEntry>): String {
         if (apiKey.isBlank()) return "Clé API Gemini manquante. Ajoute-la dans ⚙ Paramètres."
 
         val separator = if (baseUrl.contains("?")) "&" else "?"

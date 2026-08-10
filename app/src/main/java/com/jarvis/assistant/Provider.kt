@@ -3,17 +3,25 @@ package com.jarvis.assistant
 /**
  * Liste des fournisseurs IA disponibles.
  * isLocal = true signifie : aucun réseau, modèle exécuté directement sur le téléphone.
+ * isAuto = true signifie : essaie plusieurs fournisseurs configurés jusqu'à ce que l'un réponde.
  */
 enum class Provider(
     val displayName: String,
     val defaultBaseUrl: String,
     val defaultModel: String,
-    val isLocal: Boolean = false
+    val isLocal: Boolean = false,
+    val isAuto: Boolean = false
 ) {
+    AUTO_BEST(
+        "🤖 Automatique (essaie tes IA configurées)",
+        "",
+        "",
+        isAuto = true
+    ),
     CLAUDE(
         "Claude (Anthropic)",
         "https://api.anthropic.com/v1/messages",
-        "claude-3-5-sonnet-20241022"
+        "claude-sonnet-5"
     ),
     OPENAI(
         "ChatGPT (OpenAI)",
@@ -22,8 +30,8 @@ enum class Provider(
     ),
     GEMINI(
         "Google Gemini",
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent",
-        "gemini-1.5-flash"
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
+        "gemini-3.5-flash-lite"
     ),
     MISTRAL(
         "Mistral AI",
@@ -52,7 +60,10 @@ enum class Provider(
         ""
     );
 
+    /** Fournisseurs cloud éligibles au mode Automatique, par ordre de préférence. */
     companion object {
+        val AUTO_FALLBACK_ORDER = listOf(CLAUDE, OPENAI, GEMINI, GROQ, MISTRAL)
+
         fun fromName(name: String): Provider =
             entries.find { it.name == name } ?: GROQ
     }

@@ -58,10 +58,22 @@ object Prefs {
             .putString(KEY_MODEL, model.ifBlank { provider.defaultModel })
             .putString(KEY_API_KEY, apiKey)
             .apply()
+        // La clé est aussi mémorisée par fournisseur, pour le mode Automatique.
+        if (!provider.isLocal && !provider.isAuto && apiKey.isNotBlank()) {
+            saveApiKeyFor(context, provider, apiKey)
+        }
     }
 
     fun saveLocalModelPath(context: Context, path: String) {
         prefs(context).edit().putString(KEY_LOCAL_MODEL_PATH, path).apply()
+    }
+
+    /** Clé API mémorisée individuellement pour chaque fournisseur (mode Automatique). */
+    fun getApiKeyFor(context: Context, provider: Provider): String =
+        prefs(context).getString("api_key_${provider.name}", "") ?: ""
+
+    fun saveApiKeyFor(context: Context, provider: Provider, key: String) {
+        prefs(context).edit().putString("api_key_${provider.name}", key).apply()
     }
 
     private fun prefs(context: Context) =
