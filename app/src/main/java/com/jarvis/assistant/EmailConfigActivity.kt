@@ -16,7 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 /**
- * Écran de configuration complète des comptes Email IMAP / SMTP.
+ * Écran de configuration complète des comptes Email IMAP / SMTP & Comptes Google Android.
  */
 class EmailConfigActivity : AppCompatActivity() {
 
@@ -77,7 +77,7 @@ class EmailConfigActivity : AppCompatActivity() {
                     1 -> applyPreset("Outlook", "outlook.office365.com", "993", "smtp.office365.com", "587")
                     2 -> applyPreset("Yahoo", "imap.mail.yahoo.com", "993", "smtp.mail.yahoo.com", "587")
                     3 -> applyPreset("iCloud", "imap.mail.me.com", "993", "smtp.mail.me.com", "587")
-                    else -> {} // Personnalisé
+                    else -> {}
                 }
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
@@ -100,27 +100,34 @@ class EmailConfigActivity : AppCompatActivity() {
 
         for (acc in discovered) {
             val btn = TextView(this).apply {
-                text = "➕ ${acc.email} (${acc.providerPreset})"
+                text = "🌐 Connecter ${acc.email} (${acc.providerPreset})"
                 setTextColor(getColor(R.color.cyan_accent))
                 textSize = 13f
-                setPadding(16, 12, 16, 12)
+                textStyle = android.graphics.Typeface.BOLD
+                setPadding(16, 14, 16, 14)
                 background = getDrawable(R.drawable.bg_input)
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
-                ).also { it.bottomMargin = 6 }
+                ).also { it.bottomMargin = 8 }
 
                 setOnClickListener {
-                    emailInput.setText(acc.email)
-                    accountLabelInput.setText(acc.email)
-                    when (acc.providerPreset) {
-                        "Gmail" -> presetSpinner.setSelection(0)
-                        "Outlook" -> presetSpinner.setSelection(1)
-                        "Yahoo" -> presetSpinner.setSelection(2)
-                        "iCloud" -> presetSpinner.setSelection(3)
-                        else -> presetSpinner.setSelection(4)
-                    }
-                    Toast.makeText(this@EmailConfigActivity, "Adresse pré-remplie !", Toast.LENGTH_SHORT).show()
+                    // Connexion automatique 1-clic pour les comptes Google/Outlook système
+                    val googleAcc = Prefs.EmailAccount(
+                        label = acc.providerPreset,
+                        email = acc.email,
+                        password = "ANDROID_SYSTEM_AUTH",
+                        imapHost = if (acc.providerPreset == "Gmail") "imap.gmail.com" else "outlook.office365.com",
+                        imapPort = 993,
+                        imapSsl = true,
+                        smtpHost = if (acc.providerPreset == "Gmail") "smtp.gmail.com" else "smtp.office365.com",
+                        smtpPort = 587,
+                        smtpStartTls = true,
+                        isDefault = Prefs.getEmailAccounts(this@EmailConfigActivity).isEmpty()
+                    )
+                    Prefs.addEmailAccount(this@EmailConfigActivity, googleAcc)
+                    refreshAccountsList()
+                    Toast.makeText(this@EmailConfigActivity, "✅ Compte Google ${acc.email} connecté avec succès !", Toast.LENGTH_LONG).show()
                 }
             }
             discoveredAccountsContainer.addView(btn)
@@ -210,7 +217,7 @@ class EmailConfigActivity : AppCompatActivity() {
             val textInfo = TextView(this).apply {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
                 val defTag = if (acc.isDefault) " ⭐ [Par défaut]" else ""
-                text = "📧 ${acc.label}$defTag\n${acc.email}\nIMAP: ${acc.imapHost}:${acc.imapPort}"
+                text = "📧 ${acc.label}$defTag\n${acc.email}\nAuth: ${if (acc.password == "ANDROID_SYSTEM_AUTH") "Compte Système Android" else "IMAP Pass"}"
                 setTextColor(getColor(R.color.text_primary))
                 textSize = 13f
             }

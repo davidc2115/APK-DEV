@@ -18,13 +18,15 @@ class PhoneControlActivity : AppCompatActivity() {
     private lateinit var permissionsReportText: TextView
     private lateinit var actionOutputText: TextView
 
-    // Launchers dédiés par groupe de permissions pour éviter le blocage Android 11+
     private val requestSmsLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { map ->
         val granted = map.values.all { it }
-        if (granted) Toast.makeText(this, "✅ Permission SMS accordée !", Toast.LENGTH_SHORT).show()
-        else Toast.makeText(this, "❌ Permission SMS refusée. Activez-la dans les paramètres.", Toast.LENGTH_LONG).show()
+        if (granted) {
+            Toast.makeText(this, "✅ Permission SMS accordée !", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, "⚠️ Permission SMS bloquée par Android. Utilisez le bouton '⚙️ OUVRIR PARAMÈTRES ANDROID' pour l'activer manuellement.", Toast.LENGTH_LONG).show()
+        }
         updateReport()
     }
 
@@ -33,16 +35,7 @@ class PhoneControlActivity : AppCompatActivity() {
     ) { map ->
         val granted = map.values.all { it }
         if (granted) Toast.makeText(this, "✅ Permission Contacts accordée !", Toast.LENGTH_SHORT).show()
-        else Toast.makeText(this, "❌ Permission Contacts refusée.", Toast.LENGTH_LONG).show()
-        updateReport()
-    }
-
-    private val requestPhoneLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { map ->
-        val granted = map.values.all { it }
-        if (granted) Toast.makeText(this, "✅ Permission Appels accordée !", Toast.LENGTH_SHORT).show()
-        else Toast.makeText(this, "❌ Permission Appels refusée.", Toast.LENGTH_LONG).show()
+        else Toast.makeText(this, "⚠️ Permission Contacts bloquée par Android.", Toast.LENGTH_LONG).show()
         updateReport()
     }
 
@@ -79,7 +72,9 @@ class PhoneControlActivity : AppCompatActivity() {
                 arrayOf(
                     Manifest.permission.SEND_SMS,
                     Manifest.permission.READ_SMS,
-                    Manifest.permission.RECEIVE_SMS
+                    Manifest.permission.RECEIVE_SMS,
+                    Manifest.permission.RECEIVE_MMS,
+                    Manifest.permission.READ_PHONE_STATE
                 )
             )
         }
@@ -94,6 +89,7 @@ class PhoneControlActivity : AppCompatActivity() {
         }
 
         btnAppDetailsSettings.setOnClickListener {
+            Toast.makeText(this, "1. Touchez 'Autorisations' -> SMS -> Toujours autoriser\n2. (Si grisé) Touchez les 3 points (⋮) en haut -> Autoriser les paramètres restreints", Toast.LENGTH_LONG).show()
             val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                 data = Uri.parse("package:$packageName")
             }
