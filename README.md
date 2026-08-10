@@ -1,92 +1,124 @@
-# JARVIS — Assistant Android (voix + texte)
+# JARVIS v2 — Assistant Android IA (voix + texte)
 
-Application Android façon JARVIS : chat texte et vocal, connectée à une IA
-(compatible avec une API locale type **Ollama** ou une API cloud compatible
-OpenAI).
+> Application Android façon JARVIS (Iron Man) : chat texte et vocal,
+> connectée à **10+ fournisseurs IA cloud** et capable d'exécuter des
+> **modèles locaux hors-ligne** (GGUF, ONNX, MediaPipe .task).
 
-## 🚀 Générer l'APK via GitHub Actions (sans installer Android Studio)
+---
 
-1. Crée un nouveau dépôt sur GitHub (ex: `jarvis-assistant`).
-2. Mets tous les fichiers de ce projet dans le dépôt et pousse-les :
-   ```bash
-   git init
-   git add .
-   git commit -m "Premier commit - JARVIS"
-   git branch -M main
-   git remote add origin https://github.com/TON-COMPTE/jarvis-assistant.git
-   git push -u origin main
-   ```
-3. Va dans l'onglet **Actions** de ton dépôt GitHub : le workflow
-   `Build JARVIS APK` se lance automatiquement.
-4. Une fois le workflow terminé (icône verte ✅), clique dessus puis
-   descends jusqu'à **Artifacts** → télécharge `jarvis-debug-apk`.
-5. Décompresse le zip téléchargé : tu obtiens `app-debug.apk`.
-6. Transfère cet APK sur ton téléphone Android et installe-le (autorise
-   "sources inconnues" si demandé).
+## 🆕 Nouveautés v2
 
-Tu peux aussi relancer le build manuellement depuis Actions →
-`Build JARVIS APK` → **Run workflow**.
+| Fonctionnalité | Détail |
+|---|---|
+| **Multi-clés API** | Chaque provider a sa propre clé (fini le partage d'une seule clé) |
+| **10 providers cloud** | Groq, OpenAI, Claude, Gemini, Mistral, DeepSeek, Perplexity, Together, OpenRouter, SerpAPI |
+| **Mode Automatique** | Essaie tous les providers configurés dans l'ordre jusqu'à obtenir une réponse |
+| **GGUF local** | Modèles llama.cpp sur le téléphone : Phi-3, LLaMA 3.2, Gemma 2, Mistral… |
+| **ONNX local** | Modèles ONNX Runtime GenAI (Phi-3 Mini, etc.) |
+| **Catalogue modèles** | 6 modèles pré-listés téléchargeables directement depuis l'app |
+| **UI 3 onglets** | ☁ Config / 🔑 Clés API / 🧠 Local |
 
-## 🧠 Connecter une IA locale (recommandé : Ollama)
+---
 
-1. Sur ton PC, installe [Ollama](https://ollama.com).
-2. Lance un modèle, par exemple :
-   ```bash
-   ollama run llama3.1
-   ```
-   Ollama expose alors une API compatible OpenAI sur le port `11434`.
-3. Trouve l'adresse IP locale de ton PC (ex: `192.168.1.50`) via
-   `ipconfig` (Windows) ou `ifconfig` / `ip a` (Mac/Linux).
-4. Assure-toi que ton PC et ton téléphone sont **sur le même réseau Wi-Fi**.
-5. Dans l'app JARVIS, ouvre les paramètres (⚙) et renseigne :
-   - **URL de base** : `http://192.168.1.50:11434/v1/chat/completions`
-   - **Modèle** : `llama3.1` (ou le nom du modèle lancé)
-   - **Clé API** : laisse vide (pas nécessaire en local)
+## 🚀 Générer l'APK via GitHub Actions
 
-> Si tu testes sur un émulateur Android Studio (et non un vrai téléphone),
-> utilise `http://10.0.2.2:11434/v1/chat/completions` — c'est l'alias par
-> défaut déjà préconfiguré dans l'app.
+1. Fork ce dépôt → onglet **Actions** → workflow `Build JARVIS APK` se lance automatiquement
+2. ✅ Une fois terminé → **Artifacts** → télécharge `jarvis-debug-apk`
+3. Décompresse → installe `app-debug.apk` sur ton Android (autorise "sources inconnues")
 
-## ☁️ Ou connecter une IA dans le cloud
+Ou relancer manuellement : Actions → `Build JARVIS APK` → **Run workflow**.
 
-Renseigne simplement dans les paramètres :
-- **URL de base** de l'API compatible OpenAI (ex: un fournisseur comme
-  OpenRouter, Together AI, etc.)
-- **Modèle** correspondant
-- **Clé API** fournie par le service
+---
+
+## ☁️ Fournisseurs cloud supportés
+
+| Provider | Modèle par défaut | Clé API |
+|---|---|---|
+| **Groq** (gratuit, ultra-rapide) | `llama-3.3-70b-versatile` | [groq.com/keys](https://console.groq.com/keys) |
+| **OpenAI / ChatGPT** | `gpt-4o-mini` | [platform.openai.com](https://platform.openai.com/api-keys) |
+| **Claude (Anthropic)** | `claude-sonnet-4-5` | [console.anthropic.com](https://console.anthropic.com/) |
+| **Google Gemini** | `gemini-2.0-flash-lite` | [aistudio.google.com](https://aistudio.google.com/apikey) |
+| **Mistral AI** | `mistral-large-latest` | [console.mistral.ai](https://console.mistral.ai/) |
+| **DeepSeek** | `deepseek-chat` | [platform.deepseek.com](https://platform.deepseek.com/) |
+| **Perplexity AI** | `sonar` | [perplexity.ai/settings/api](https://www.perplexity.ai/settings/api) |
+| **Together AI** | `Mixtral-8x7B-Instruct-v0.1` | [api.together.ai](https://api.together.ai/) |
+| **OpenRouter** | `openai/gpt-4o-mini` | [openrouter.ai/keys](https://openrouter.ai/keys) |
+| **SerpAPI** | (recherche web) | [serpapi.com/manage-api-key](https://serpapi.com/manage-api-key) |
+
+### Configuration multi-clés
+
+Dans l'app → ⚙ → onglet **🔑 Clés API** : remplis les clés des services
+que tu possèdes. Le **Mode Automatique** utilisera automatiquement ceux
+qui ont une clé configurée, dans l'ordre de priorité ci-dessus.
+
+---
+
+## 🧠 Modèles locaux (hors-ligne, sans internet)
+
+### Option A : GGUF via llama.cpp (recommandé)
+
+| Modèle | Taille | RAM minimale |
+|---|---|---|
+| Phi-3 Mini 4K Q4_K_M | ~2.2 Go | 4 Go |
+| Llama 3.2 3B Q4_K_M | ~2.0 Go | 4 Go |
+| Gemma 2 2B Q4_K_M | ~1.6 Go | 3 Go |
+| Mistral 7B Q4_K_M | ~4.1 Go | 6 Go |
+
+1. Dans l'app → ⚙ → onglet **🧠 Local**
+2. Sélectionne le format **GGUF (.gguf — llama.cpp)**
+3. Clique sur ⬇ ou colle l'URL HuggingFace d'un modèle .gguf
+4. Sélectionne le provider **"Modèle GGUF sur téléphone"**
+
+### Option B : MediaPipe .task (Gemma)
+
+Modèle Gemma 3 1B officiel (~550 Mo). Téléchargeable directement
+depuis l'app (jeton HuggingFace gratuit requis pour la version officielle).
+
+### Option C : Ollama sur PC (réseau local)
+
+```bash
+ollama run llama3.1
+```
+Dans l'app : URL = `http://<IP_DE_TON_PC>:11434/v1/chat/completions`  
+PC et téléphone doivent être sur le même Wi-Fi.
+
+---
 
 ## 📁 Structure du projet
 
 ```
-JarvisAssistant/
-├── .github/workflows/build.yml   → build automatique de l'APK
+APK-DEV/
+├── .github/workflows/build.yml     → CI/CD build APK
 ├── app/
-│   ├── build.gradle
+│   ├── build.gradle                → dépendances (MediaPipe, llama-android, ONNX)
 │   └── src/main/
 │       ├── AndroidManifest.xml
-│       ├── java/com/jarvis/assistant/
-│       │   ├── MainActivity.kt      → écran chat + micro
-│       │   ├── SettingsActivity.kt  → configuration API
-│       │   ├── ApiClient.kt         → appels réseau vers l'IA
-│       │   ├── ChatAdapter.kt       → affichage des bulles
-│       │   ├── Message.kt
-│       │   └── Prefs.kt
-│       └── res/                     → thème sombre/cyan façon JARVIS
-├── build.gradle
-└── settings.gradle
+│       └── java/com/jarvis/assistant/
+│           ├── Provider.kt         → 14 providers (cloud + local)
+│           ├── Prefs.kt            → stockage multi-clés par provider
+│           ├── ApiClient.kt        → routing IA (cloud + SerpAPI + local)
+│           ├── LocalLlmManager.kt  → backend TASK/GGUF/ONNX
+│           ├── ModelDownloader.kt  → catalogue + téléchargement multi-format
+│           ├── SettingsActivity.kt → UI 3 onglets
+│           ├── MainActivity.kt     → chat + micro
+│           ├── VoiceModeActivity.kt
+│           ├── ChatAdapter.kt
+│           └── OrbView.kt
+├── settings.gradle                 → + JitPack (llama-android)
+└── README.md
 ```
 
-## ✨ Fonctionnalités
+---
+
+## ✨ Toutes les fonctionnalités
 
 - 💬 Chat texte avec historique de conversation
-- 🎤 Reconnaissance vocale (parlez à JARVIS)
-- 🔊 Synthèse vocale (JARVIS vous répond à voix haute)
-- ⚙️ API entièrement configurable (locale ou cloud)
-- 🎨 Interface sombre façon JARVIS (Iron Man)
-
-## 🔧 Personnalisation
-
-- Couleurs : `app/src/main/res/values/colors.xml`
-- Icône : `app/src/main/res/drawable/ic_launcher.xml`
-- Ton/personnalité de JARVIS : modifie le message "system" dans
-  `ApiClient.kt`
+- 🎤 Reconnaissance vocale (parle à JARVIS)
+- 🔊 Synthèse vocale (JARVIS répond à voix haute)
+- ☁️ 10 providers IA cloud avec clés individuelles
+- 🤖 Mode Automatique (failover multi-provider)
+- 🔍 Recherche web temps réel (SerpAPI)
+- 🧠 Modèles locaux hors-ligne : GGUF / ONNX / .task
+- 📥 Téléchargement de modèles directement depuis l'app
+- 🎨 Interface sombre façon Iron Man (thème JARVIS)
+- 🎨 Couleur de l'orbe personnalisable (6 couleurs)
