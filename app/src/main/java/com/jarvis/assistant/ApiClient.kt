@@ -13,9 +13,12 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Client IA générique : route la conversation vers le bon fournisseur
- * (Claude, Gemini, OpenAI-compatible pour ChatGPT/Mistral/Groq/Ollama,
- * ou modèle local embarqué). En mode Automatique, essaie chaque fournisseur
- * configuré (avec une clé enregistrée) jusqu'à obtenir une réponse valide.
+ * (Claude, Gemini, OpenAI-compatible pour ChatGPT/Mistral/Groq/Ollama/DeepSeek/
+ * Perplexity/Together/OpenRouter, SerpAPI pour la recherche web,
+ * ou modèle local embarqué TASK/GGUF/ONNX).
+ *
+ * En mode Automatique, essaie chaque fournisseur configuré (avec une clé
+ * enregistrée) jusqu'à obtenir une réponse valide.
  */
 object ApiClient {
 
@@ -40,18 +43,38 @@ object ApiClient {
                     provider.isAuto -> sendAuto(context, history)
                     provider.isLocal -> sendLocal(context, history)
                     provider == Provider.CLAUDE ->
-                        sendClaude(Prefs.getBaseUrl(context), Prefs.getModel(context), Prefs.getApiKey(context), history)
+                        sendClaude(
+                            Prefs.getBaseUrl(context),
+                            Prefs.getModel(context),
+                            Prefs.getApiKeyFor(context, Provider.CLAUDE).ifBlank { Prefs.getApiKey(context) },
+                            history
+                        )
                     provider == Provider.GEMINI ->
-                        sendGemini(Prefs.getBaseUrl(context), Prefs.getApiKey(context), history)
+                        sendGemini(
+                            Prefs.getBaseUrl(context),
+                            Prefs.getApiKeyFor(context, Provider.GEMINI).ifBlank { Prefs.getApiKey(context) },
+                            history
+                        )
+                    provider == Provider.SERPAPI ->
+                        sendSerpApi(
+                            Prefs.getApiKeyFor(context, Provider.SERPAPI),
+                            history
+                        )
                     else ->
-                        sendOpenAiCompatible(Prefs.getBaseUrl(context), Prefs.getModel(context), Prefs.getApiKey(context), history)
+                        sendOpenAiCompatible(
+                            Prefs.getBaseUrl(context),
+                            Prefs.getModel(context),
+                            Prefs.getApiKeyFor(context, provider).ifBlank { Prefs.getApiKey(context) },
+                            history,
+                            provider
+                        )
                 }
             } catch (e: Exception) {
                 "Connexion impossible. Vérifiez les paramètres dans ⚙. Détail : ${e.message}"
             }
         }
 
-    // ---------- Mode Automatique : essaie chaque fournisseur configuré ----------
+    // ─── Mode Automatique : essaie chaque fournisseur configuré ───────────────
 
     private fun sendAuto(context: Context, history: List<HistoryEntry>): String {
         val candidates = Provider.AUTO_FALLBACK_ORDER.filter {
@@ -59,9 +82,9 @@ object ApiClient {
         }
 
         if (candidates.isEmpty()) {
-            return "Aucune IA configurée pour le mode Automatique. Ouvre ⚙ Paramètres, choisis un fournisseur " +
-                "(Claude, ChatGPT, Gemini, Groq ou Mistral), ajoute sa clé API et enregistre. Répète pour " +
-                "chaque IA que tu veux inclure dans le mode Automatique."
+            return "Aucune IA configurée pour le mode Automatique. " +
+                "Ouvre ⚙ Paramètres → onglet « Clés API » et ajoute au moins une clé " +
+                "(Groq, Claude, ChatGPT, Gemini, Mistral, DeepSeek, Perplexity, Together ou OpenRouter)."
         }
 
         var lastError = ""
@@ -69,16 +92,24 @@ object ApiClient {
             val key = Prefs.getApiKeyFor(context, provider)
             val result = try {
                 when (provider) {
-                    Provider.CLAUDE -> sendClaude(provider.defaultBaseUrl, provider.defaultModel, key, history)
-                    Provider.GEMINI -> sendGemini(provider.defaultBaseUrl, key, history)
-                    else -> sendOpenAiCompatible(provider.defaultBaseUrl, provider.defaultModel, key, history)
+                    Provider.CLAUDE -> sendClaude(
+                        provider.defaultBaseUrl, provider.defaultModel, key, history
+                    )
+                    Provider.GEMINI -> sendGemini(
+                        provider.defaultBaseUrl, key, history
+                    )
+                    else -> sendOpenAiCompatible(
+                        provider.defaultBaseUrl, provider.defaultModel, key, history, provider
+                    )
                 }
             } catch (e: Exception) {
                 "Erreur : ${e.message}"
             }
 
-            if (!result.startsWith("Erreur") && !result.startsWith("Connexion impossible") &&
-                !result.startsWith("Format de réponse inattendu")
+            if (!result.startsWith("Erreur") &&
+                !result.startsWith("Connexion impossible") &&
+                !result.startsWith("Format de réponse inattendu") &&
+                !result.startsWith("Clé API")
             ) {
                 return result
             }
@@ -88,12 +119,13 @@ object ApiClient {
         return "Toutes les IA configurées ont échoué. Dernière erreur : $lastError"
     }
 
-    // ---------- Modèle local sur l'appareil ----------
+    // ─── Modèle local sur l'appareil (TASK / GGUF / ONNX) ────────────────────
 
     private suspend fun sendLocal(context: Context, history: List<HistoryEntry>): String {
         val modelPath = Prefs.getLocalModelPath(context)
         if (modelPath.isBlank()) {
-            return "Aucun modèle local configuré. Ouvre ⚙ Paramètres et choisis un fichier .task."
+            return "Aucun modèle local configuré. Ouvre ⚙ Paramètres → onglet « Local » " +
+                "et choisis ou télécharge un modèle."
         }
         val prompt = buildPromptFromHistory(history)
         return LocalLlmManager.generate(context, modelPath, prompt)
@@ -111,9 +143,15 @@ object ApiClient {
         return sb.toString()
     }
 
-    // ---------- OpenAI-compatible : ChatGPT, Mistral, Groq, Ollama, Custom ----------
+    // ─── OpenAI-compatible : ChatGPT, Groq, Mistral, Ollama, DeepSeek, etc. ──
 
-    private fun sendOpenAiCompatible(baseUrl: String, model: String, apiKey: String, history: List<HistoryEntry>): String {
+    private fun sendOpenAiCompatible(
+        baseUrl: String,
+        model: String,
+        apiKey: String,
+        history: List<HistoryEntry>,
+        provider: Provider = Provider.CUSTOM
+    ): String {
         val messagesArray = JSONArray()
         messagesArray.put(JSONObject().put("role", "system").put("content", SYSTEM_PROMPT))
         for (entry in history) {
@@ -135,20 +173,25 @@ object ApiClient {
             }
         }
 
-        val body = JSONObject()
+        val bodyObj = JSONObject()
             .put("model", model)
             .put("messages", messagesArray)
             .put("temperature", 0.7)
-            .toString()
-            .toRequestBody(JSON)
 
         val requestBuilder = Request.Builder()
             .url(baseUrl)
-            .post(body)
+            .post(bodyObj.toString().toRequestBody(JSON))
             .addHeader("Content-Type", "application/json")
 
         if (apiKey.isNotBlank()) {
             requestBuilder.addHeader("Authorization", "Bearer $apiKey")
+        }
+
+        // OpenRouter requiert des headers supplémentaires
+        if (provider == Provider.OPENROUTER) {
+            requestBuilder
+                .addHeader("HTTP-Referer", "https://github.com/davidc2115/APK-DEV")
+                .addHeader("X-Title", "JARVIS Android")
         }
 
         client.newCall(requestBuilder.build()).execute().use { response ->
@@ -164,10 +207,15 @@ object ApiClient {
         }
     }
 
-    // ---------- Claude (Anthropic) ----------
+    // ─── Claude (Anthropic) ───────────────────────────────────────────────────
 
-    private fun sendClaude(baseUrl: String, model: String, apiKey: String, history: List<HistoryEntry>): String {
-        if (apiKey.isBlank()) return "Clé API Claude manquante. Ajoute-la dans ⚙ Paramètres."
+    private fun sendClaude(
+        baseUrl: String,
+        model: String,
+        apiKey: String,
+        history: List<HistoryEntry>
+    ): String {
+        if (apiKey.isBlank()) return "Clé API Claude manquante. Ajoute-la dans ⚙ Paramètres → Clés API."
 
         val messagesArray = JSONArray()
         for (entry in history) {
@@ -217,10 +265,14 @@ object ApiClient {
         }
     }
 
-    // ---------- Google Gemini ----------
+    // ─── Google Gemini ────────────────────────────────────────────────────────
 
-    private fun sendGemini(baseUrl: String, apiKey: String, history: List<HistoryEntry>): String {
-        if (apiKey.isBlank()) return "Clé API Gemini manquante. Ajoute-la dans ⚙ Paramètres."
+    private fun sendGemini(
+        baseUrl: String,
+        apiKey: String,
+        history: List<HistoryEntry>
+    ): String {
+        if (apiKey.isBlank()) return "Clé API Gemini manquante. Ajoute-la dans ⚙ Paramètres → Clés API."
 
         val separator = if (baseUrl.contains("?")) "&" else "?"
         val url = "$baseUrl${separator}key=$apiKey"
@@ -271,6 +323,56 @@ object ApiClient {
                 }
             }
             return "Format de réponse inattendu : $bodyStr"
+        }
+    }
+
+    // ─── SerpAPI (Recherche Web) ──────────────────────────────────────────────
+
+    private fun sendSerpApi(apiKey: String, history: List<HistoryEntry>): String {
+        if (apiKey.isBlank()) return "Clé API SerpAPI manquante. Ajoute-la dans ⚙ Paramètres → Clés API."
+
+        // On extrait la dernière question de l'utilisateur comme query de recherche
+        val query = history.lastOrNull { it.role == "user" }?.text
+            ?: return "Aucune question à rechercher."
+
+        val url = "https://serpapi.com/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}" +
+            "&api_key=$apiKey&engine=google&hl=fr&gl=fr&num=5"
+
+        val request = Request.Builder()
+            .url(url)
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val bodyStr = response.body?.string() ?: ""
+            if (!response.isSuccessful) return "Erreur SerpAPI (${response.code}) : $bodyStr"
+
+            val json = JSONObject(bodyStr)
+
+            // Réponse directe (answer box)
+            val answerBox = json.optJSONObject("answer_box")
+            if (answerBox != null) {
+                val answer = answerBox.optString("answer", "")
+                    .ifBlank { answerBox.optString("snippet", "") }
+                if (answer.isNotBlank()) return "🔍 Réponse directe : $answer"
+            }
+
+            // Top résultats organiques
+            val organic = json.optJSONArray("organic_results")
+            if (organic != null && organic.length() > 0) {
+                val sb = StringBuilder("🔍 Résultats web pour « $query » :\n\n")
+                val count = minOf(3, organic.length())
+                for (i in 0 until count) {
+                    val item = organic.getJSONObject(i)
+                    val title = item.optString("title", "Sans titre")
+                    val snippet = item.optString("snippet", "")
+                    val link = item.optString("link", "")
+                    sb.append("${i + 1}. **$title**\n$snippet\n🔗 $link\n\n")
+                }
+                return sb.toString().trimEnd()
+            }
+
+            return "Aucun résultat trouvé pour « $query »."
         }
     }
 }

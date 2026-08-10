@@ -10,16 +10,21 @@
         android:orientation="vertical"
         android:padding="20dp">
 
+        <!-- ══════════════════════════════════════════════════════════════════ -->
+        <!-- Titre                                                              -->
+        <!-- ══════════════════════════════════════════════════════════════════ -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="@string/settings_title"
+            android:text="⚙ Paramètres JARVIS"
             android:textColor="@color/cyan_accent"
             android:textSize="20sp"
             android:textStyle="bold"
-            android:layout_marginBottom="20dp" />
+            android:layout_marginBottom="16dp" />
 
-        <!-- Couleur du mode vocal -->
+        <!-- ══════════════════════════════════════════════════════════════════ -->
+        <!-- Couleur & Style de l'orbe                                         -->
+        <!-- ══════════════════════════════════════════════════════════════════ -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -34,12 +39,12 @@
             android:layout_marginTop="8dp"
             android:layout_marginBottom="12dp">
 
-            <TextView android:id="@+id/colorCyan" style="@style/ColorSwatch" android:background="#00E5FF" />
-            <TextView android:id="@+id/colorRed" style="@style/ColorSwatch" android:background="#FF3B30" />
-            <TextView android:id="@+id/colorBlue" style="@style/ColorSwatch" android:background="#2979FF" />
+            <TextView android:id="@+id/colorCyan"   style="@style/ColorSwatch" android:background="#00E5FF" />
+            <TextView android:id="@+id/colorRed"    style="@style/ColorSwatch" android:background="#FF3B30" />
+            <TextView android:id="@+id/colorBlue"   style="@style/ColorSwatch" android:background="#2979FF" />
             <TextView android:id="@+id/colorPurple" style="@style/ColorSwatch" android:background="#B388FF" />
-            <TextView android:id="@+id/colorGold" style="@style/ColorSwatch" android:background="#FFC400" />
-            <TextView android:id="@+id/colorGreen" style="@style/ColorSwatch" android:background="#00E676" />
+            <TextView android:id="@+id/colorGold"   style="@style/ColorSwatch" android:background="#FFC400" />
+            <TextView android:id="@+id/colorGreen"  style="@style/ColorSwatch" android:background="#00E676" />
 
         </LinearLayout>
 
@@ -82,10 +87,13 @@
 
         </LinearLayout>
 
+        <!-- ══════════════════════════════════════════════════════════════════ -->
+        <!-- Sélecteur de provider actif                                        -->
+        <!-- ══════════════════════════════════════════════════════════════════ -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Fournisseur IA"
+            android:text="Fournisseur IA actif"
             android:textColor="@color/text_secondary"
             android:textSize="12sp" />
 
@@ -96,25 +104,81 @@
             android:background="@drawable/bg_input"
             android:popupBackground="@color/surface_dark"
             android:layout_marginTop="4dp"
-            android:layout_marginBottom="12dp" />
+            android:layout_marginBottom="16dp" />
 
-        <TextView
-            android:id="@+id/autoInfoText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="🤖 Le mode Automatique essaie Claude, ChatGPT, Gemini, Groq puis Mistral dans cet ordre, en utilisant la première clé API configurée qui répond correctement. Pour l'activer : sélectionne chaque fournisseur un par un dans cette liste, ajoute sa clé API, appuie sur ENREGISTRER (les paramètres restent ouverts), puis reviens ici et choisis « Automatique »."
-            android:textColor="@color/text_secondary"
-            android:textSize="12sp"
-            android:lineSpacingExtra="4dp"
-            android:visibility="gone"
-            android:layout_marginBottom="20dp" />
-
-        <!-- Section API distante -->
+        <!-- ══════════════════════════════════════════════════════════════════ -->
+        <!-- Onglets                                                            -->
+        <!-- ══════════════════════════════════════════════════════════════════ -->
         <LinearLayout
-            android:id="@+id/cloudSection"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical">
+            android:orientation="horizontal"
+            android:layout_marginBottom="12dp">
+
+            <TextView
+                android:id="@+id/tabCloud"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:layout_marginEnd="4dp"
+                android:text="☁ Config"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="@drawable/bg_input"
+                android:textColor="@color/cyan_accent" />
+
+            <TextView
+                android:id="@+id/tabApiKeys"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:layout_marginStart="4dp"
+                android:layout_marginEnd="4dp"
+                android:text="🔑 Clés API"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="@drawable/bg_input"
+                android:textColor="@color/cyan_accent"
+                android:alpha="0.45" />
+
+            <TextView
+                android:id="@+id/tabLocal"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:layout_marginStart="4dp"
+                android:text="🧠 Local"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="@drawable/bg_input"
+                android:textColor="@color/cyan_accent"
+                android:alpha="0.45" />
+
+        </LinearLayout>
+
+        <!-- ══════════════════════════════════════════════════════════════════ -->
+        <!-- Onglet CLOUD — configuration du provider actif                    -->
+        <!-- ══════════════════════════════════════════════════════════════════ -->
+        <LinearLayout
+            android:id="@+id/panelCloud"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="visible">
+
+            <TextView
+                android:id="@+id/autoInfoText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="🤖 Mode Automatique : JARVIS essaie Groq → Claude → ChatGPT → Gemini → Mistral → DeepSeek → Perplexity dans cet ordre, en utilisant la première clé valide. Configure les clés dans l'onglet 🔑 Clés API, puis enregistre."
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:lineSpacingExtra="4dp"
+                android:visibility="gone"
+                android:layout_marginBottom="12dp" />
 
             <TextView
                 android:layout_width="wrap_content"
@@ -158,7 +222,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Clé API (laisser vide pour une IA locale sur PC)"
+                android:text="Clé API du fournisseur actif"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
 
@@ -176,11 +240,34 @@
                 android:layout_marginTop="4dp"
                 android:layout_marginBottom="8dp" />
 
+            <TextView
+                android:id="@+id/saveButton"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:text="ENREGISTRER"
+                android:textColor="@color/background_dark"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="@drawable/bg_mic_button"
+                android:layout_marginTop="12dp"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="💡 Ollama sur PC : installe ollama.com, lance 'ollama run llama3.1', renseigne l'IP locale de ton PC. Téléphone et PC doivent être sur le même Wi-Fi."
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:lineSpacingExtra="4dp" />
+
         </LinearLayout>
 
-        <!-- Section modèle local (hors-ligne) -->
+        <!-- ══════════════════════════════════════════════════════════════════ -->
+        <!-- Onglet CLÉS API — une clé par provider                            -->
+        <!-- ══════════════════════════════════════════════════════════════════ -->
         <LinearLayout
-            android:id="@+id/localSection"
+            android:id="@+id/panelApiKeys"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
@@ -189,17 +276,96 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="⚠️ Remarque : Ollama ne fonctionne que sur PC/Mac (choisis « IA locale sur PC » dans la liste au-dessus pour ça). Ici, Gemma tourne directement sur ton téléphone, sans PC."
+                android:text="Remplis les clés des services que tu veux utiliser. Le mode Automatique utilisera tous ceux qui ont une clé configurée. Laisse vide les services que tu n'as pas."
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:lineSpacingExtra="3dp"
+                android:layout_marginBottom="12dp" />
+
+            <!-- Les champs EditText sont créés dynamiquement dans buildApiKeyFields() -->
+            <LinearLayout
+                android:id="@+id/apiKeysContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+
+            <TextView
+                android:id="@+id/saveApiKeysButton"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:text="ENREGISTRER TOUTES LES CLÉS"
+                android:textColor="@color/background_dark"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="@drawable/bg_mic_button"
+                android:layout_marginTop="20dp"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="🔒 Les clés sont stockées localement sur ton appareil dans les SharedPreferences chiffrées. Elles ne quittent jamais le téléphone, sauf lors des appels API vers les services concernés."
                 android:textColor="@color/text_secondary"
                 android:textSize="11sp"
                 android:lineSpacingExtra="3dp"
+                android:layout_marginTop="8dp" />
+
+        </LinearLayout>
+
+        <!-- ══════════════════════════════════════════════════════════════════ -->
+        <!-- Onglet LOCAL — modèle embarqué sur le téléphone                   -->
+        <!-- ══════════════════════════════════════════════════════════════════ -->
+        <LinearLayout
+            android:id="@+id/panelLocal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <!-- Format du modèle -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Format du modèle local"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <Spinner
+                android:id="@+id/modelFormatSpinner"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_input"
+                android:popupBackground="@color/surface_dark"
+                android:layout_marginTop="4dp"
                 android:layout_marginBottom="16dp" />
+
+            <!-- Modèle actuel -->
+            <TextView
+                android:id="@+id/localModelPathText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_input"
+                android:padding="12dp"
+                android:text="Aucun modèle importé"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp"
+                android:layout_marginBottom="12dp" />
+
+            <!-- ── Section .task (MediaPipe) ─────────────────────────────── -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="── Modèles .task (MediaPipe Gemma) ──"
+                android:textColor="@color/cyan_accent"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
 
             <TextView
                 android:id="@+id/downloadNoKeyButton"
                 android:layout_width="match_parent"
                 android:layout_height="52dp"
-                android:text="TÉLÉCHARGER SANS COMPTE (miroir communautaire)"
+                android:text="⬇ GEMMA 3 1B (miroir, sans compte)"
                 android:textColor="@color/background_dark"
                 android:textStyle="bold"
                 android:gravity="center"
@@ -207,18 +373,40 @@
                 android:layout_marginBottom="8dp" />
 
             <TextView
+                android:id="@+id/downloadRecommendedButton"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Non officiel, peut disparaître ou changer sans préavis. Pour un modèle garanti par Google, utilise l'option ci-dessous (jeton gratuit requis, licence Gemma oblige)."
-                android:textColor="@color/text_secondary"
-                android:textSize="11sp"
-                android:lineSpacingExtra="3dp"
+                android:layout_height="52dp"
+                android:text="⬇ GEMMA 3 1B officiel Google (≈550 Mo, jeton HF requis)"
+                android:textColor="@color/cyan_accent"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="@drawable/bg_input"
                 android:layout_marginBottom="16dp" />
 
+            <!-- ── Section GGUF (llama.cpp) ──────────────────────────────── -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="── Modèles GGUF (llama.cpp — sans réseau) ──"
+                android:textColor="@color/cyan_accent"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="6dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="• Phi-3 Mini Q4_K_M — ≈2.2 Go (Microsoft)\n• Llama 3.2 3B Q4_K_M — ≈2.0 Go (Meta)\n• Gemma 2 2B Q4_K_M — ≈1.6 Go (Google)\n• Mistral 7B Q4_K_M — ≈4.1 Go (nécessite 6+ Go RAM)"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:lineSpacingExtra="3dp"
+                android:layout_marginBottom="10dp" />
+
+            <!-- Jeton HF -->
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Jeton Hugging Face (optionnel, requis pour le modèle officiel)"
+                android:text="Jeton Hugging Face (optionnel — requis pour les modèles officiels)"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
 
@@ -230,39 +418,19 @@
                 android:paddingStart="16dp"
                 android:paddingEnd="16dp"
                 android:textColor="@color/text_primary"
-                android:hint="hf_... (laisser vide si tu utilises le miroir sans compte)"
+                android:hint="hf_..."
                 android:textColorHint="@color/text_secondary"
                 android:inputType="textPassword"
                 android:layout_marginTop="4dp"
-                android:layout_marginBottom="8dp" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="💡 Crée un compte gratuit sur huggingface.co → Settings → Access Tokens → New token (lecture seule). Puis accepte la licence Gemma sur la page du modèle litert-community/Gemma3-1B-IT."
-                android:textColor="@color/text_secondary"
-                android:textSize="11sp"
-                android:lineSpacingExtra="3dp"
-                android:layout_marginBottom="16dp" />
-
-            <TextView
-                android:id="@+id/downloadRecommendedButton"
-                android:layout_width="match_parent"
-                android:layout_height="52dp"
-                android:text="TÉLÉCHARGER GEMMA 3 1B OFFICIEL (≈550 Mo)"
-                android:textColor="@color/cyan_accent"
-                android:textStyle="bold"
-                android:gravity="center"
-                android:background="@drawable/bg_input"
                 android:layout_marginBottom="12dp" />
 
+            <!-- URL personnalisée -->
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Ou coller l'URL d'un autre modèle .task (plus puissant)"
+                android:text="URL d'un modèle personnalisé"
                 android:textColor="@color/text_secondary"
-                android:textSize="12sp"
-                android:layout_marginTop="8dp" />
+                android:textSize="12sp" />
 
             <EditText
                 android:id="@+id/customModelUrlInput"
@@ -272,7 +440,7 @@
                 android:paddingStart="16dp"
                 android:paddingEnd="16dp"
                 android:textColor="@color/text_primary"
-                android:hint="https://huggingface.co/.../modele.task"
+                android:hint="https://huggingface.co/.../model.gguf"
                 android:textColorHint="@color/text_secondary"
                 android:inputType="textUri"
                 android:layout_marginTop="4dp"
@@ -282,12 +450,12 @@
                 android:id="@+id/downloadCustomButton"
                 android:layout_width="match_parent"
                 android:layout_height="52dp"
-                android:text="TÉLÉCHARGER CETTE URL"
+                android:text="⬇ TÉLÉCHARGER CETTE URL"
                 android:textColor="@color/cyan_accent"
                 android:textStyle="bold"
                 android:gravity="center"
                 android:background="@drawable/bg_input"
-                android:layout_marginBottom="16dp" />
+                android:layout_marginBottom="8dp" />
 
             <TextView
                 android:id="@+id/downloadProgressText"
@@ -300,48 +468,25 @@
                 android:layout_marginBottom="8dp" />
 
             <TextView
-                android:id="@+id/localModelPathText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:background="@drawable/bg_input"
-                android:padding="12dp"
-                android:text="Aucun modèle importé"
-                android:textColor="@color/text_primary"
-                android:textSize="12sp"
-                android:layout_marginBottom="12dp" />
-
-            <TextView
                 android:id="@+id/pickModelButton"
                 android:layout_width="match_parent"
                 android:layout_height="48dp"
-                android:text="OU IMPORTER UN FICHIER .task MANUELLEMENT"
+                android:text="📁 IMPORTER UN FICHIER LOCAL (.task / .gguf / .onnx)"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp"
                 android:gravity="center"
                 android:background="@drawable/bg_input"
-                android:layout_marginBottom="8dp" />
+                android:layout_marginBottom="16dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="💡 Recommandation : Phi-3 Mini ou Llama 3.2 3B en Q4_K_M pour le meilleur équilibre vitesse/qualité sur Android. Les modèles > 4B paramètres nécessitent un téléphone haut de gamme avec 6+ Go de RAM."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="3dp" />
 
         </LinearLayout>
-
-        <TextView
-            android:id="@+id/saveButton"
-            android:layout_width="match_parent"
-            android:layout_height="52dp"
-            android:text="ENREGISTRER"
-            android:textColor="@color/background_dark"
-            android:textStyle="bold"
-            android:gravity="center"
-            android:background="@drawable/bg_mic_button"
-            android:layout_marginTop="12dp" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:text="💡 Pour une IA locale sur PC : installe Ollama (ollama.com), lance 'ollama run llama3.1', puis renseigne l'adresse IP locale de ton PC. Téléphone et PC doivent être sur le même Wi-Fi."
-            android:textColor="@color/text_secondary"
-            android:textSize="12sp"
-            android:lineSpacingExtra="4dp" />
 
     </LinearLayout>
 
