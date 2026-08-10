@@ -3,7 +3,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/background_dark"
-    android:padding="16dp">
+    android:padding="20dp">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -13,7 +13,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="📧 Configuration des Comptes Email"
+            android:text="🌐 Connexion Comptes Google & Email"
             android:textColor="@color/cyan_accent"
             android:textSize="20sp"
             android:textStyle="bold" />
@@ -22,73 +22,33 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:layout_marginBottom="16dp"
-            android:text="Connectez vos comptes IMAP/SMTP pour permettre à JARVIS de lire et envoyer vos mails."
+            android:layout_marginBottom="20dp"
+            android:text="JARVIS se connecte directement aux comptes Google synchronisés sur votre smartphone."
             android:textColor="@color/text_secondary"
-            android:textSize="12sp" />
+            android:textSize="13sp" />
 
-        <!-- Section des comptes automatiquement détectés sur le téléphone -->
+        <!-- Liste des comptes Google détectés -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="📱 Comptes détectés sur cet appareil (Cliquez pour pré-remplir) :"
+            android:text="📱 Comptes Google détectés sur cet appareil :"
             android:textColor="@color/cyan_accent"
-            android:textSize="13sp"
+            android:textSize="14sp"
             android:textStyle="bold"
-            android:layout_marginBottom="8dp" />
+            android:layout_marginBottom="10dp" />
 
         <LinearLayout
             android:id="@+id/discoveredAccountsContainer"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:layout_marginBottom="16dp" />
+            android:layout_marginBottom="24dp" />
 
-        <!-- Service Prédéfini -->
+        <!-- Saisie manuelle d'adresse Google -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Service Email / Preset"
-            android:textColor="@color/text_secondary"
-            android:textSize="12sp" />
-
-        <Spinner
-            android:id="@+id/presetSpinner"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:layout_marginTop="4dp"
-            android:background="@drawable/bg_input"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp" />
-
-        <!-- Libellé du compte -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="Nom du compte (ex: Gmail Perso)"
-            android:textColor="@color/text_secondary"
-            android:textSize="12sp" />
-
-        <EditText
-            android:id="@+id/accountLabelInput"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:layout_marginTop="4dp"
-            android:background="@drawable/bg_input"
-            android:hint="Gmail Pro / Perso..."
-            android:inputType="text"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
-            android:textColor="@color/text_primary"
-            android:textColorHint="@color/text_secondary" />
-
-        <!-- Email -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="Adresse Email"
+            android:text="Ajouter une autre adresse Google / Email :"
             android:textColor="@color/text_secondary"
             android:textSize="12sp" />
 
@@ -105,215 +65,24 @@
             android:textColor="@color/text_primary"
             android:textColorHint="@color/text_secondary" />
 
-        <!-- Mot de passe d'application -->
         <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            android:id="@+id/btnConnectGoogle"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
             android:layout_marginTop="12dp"
-            android:text="Mot de passe d'application (App Password)"
-            android:textColor="@color/text_secondary"
-            android:textSize="12sp" />
+            android:background="@drawable/bg_mic_button"
+            android:gravity="center"
+            android:text="🌐 SE CONNECTER AVEC CE COMPTE GOOGLE"
+            android:textColor="@color/background_dark"
+            android:textSize="13sp"
+            android:textStyle="bold" />
 
-        <EditText
-            android:id="@+id/passwordInput"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:layout_marginTop="4dp"
-            android:background="@drawable/bg_input"
-            android:hint="Mot de passe d'application (16 caractères)..."
-            android:inputType="textPassword"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
-            android:textColor="@color/text_primary"
-            android:textColorHint="@color/text_secondary" />
-
+        <!-- Comptes actifs -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="💡 Pour Gmail/Yahoo : Générez un 'App Password' sur myaccount.google.com/apppasswords."
-            android:textColor="@color/text_secondary"
-            android:textSize="11sp" />
-
-        <!-- Hôte & Port IMAP -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:orientation="horizontal">
-
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="2"
-                android:orientation="vertical">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Serveur IMAP (Lecture)"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="12sp" />
-
-                <EditText
-                    android:id="@+id/imapHostInput"
-                    android:layout_width="match_parent"
-                    android:layout_height="48dp"
-                    android:layout_marginTop="4dp"
-                    android:background="@drawable/bg_input"
-                    android:hint="imap.gmail.com"
-                    android:inputType="text"
-                    android:paddingStart="12dp"
-                    android:textColor="@color/text_primary"
-                    android:textColorHint="@color/text_secondary" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:layout_weight="1"
-                android:orientation="vertical">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Port"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="12sp" />
-
-                <EditText
-                    android:id="@+id/imapPortInput"
-                    android:layout_width="match_parent"
-                    android:layout_height="48dp"
-                    android:layout_marginTop="4dp"
-                    android:background="@drawable/bg_input"
-                    android:hint="993"
-                    android:inputType="number"
-                    android:paddingStart="12dp"
-                    android:textColor="@color/text_primary"
-                    android:textColorHint="@color/text_secondary" />
-            </LinearLayout>
-        </LinearLayout>
-
-        <!-- Hôte & Port SMTP -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:orientation="horizontal">
-
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="2"
-                android:orientation="vertical">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Serveur SMTP (Envoi)"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="12sp" />
-
-                <EditText
-                    android:id="@+id/smtpHostInput"
-                    android:layout_width="match_parent"
-                    android:layout_height="48dp"
-                    android:layout_marginTop="4dp"
-                    android:background="@drawable/bg_input"
-                    android:hint="smtp.gmail.com"
-                    android:inputType="text"
-                    android:paddingStart="12dp"
-                    android:textColor="@color/text_primary"
-                    android:textColorHint="@color/text_secondary" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:layout_weight="1"
-                android:orientation="vertical">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Port"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="12sp" />
-
-                <EditText
-                    android:id="@+id/smtpPortInput"
-                    android:layout_width="match_parent"
-                    android:layout_height="48dp"
-                    android:layout_marginTop="4dp"
-                    android:background="@drawable/bg_input"
-                    android:hint="587"
-                    android:inputType="number"
-                    android:paddingStart="12dp"
-                    android:textColor="@color/text_primary"
-                    android:textColorHint="@color/text_secondary" />
-            </LinearLayout>
-        </LinearLayout>
-
-        <CheckBox
-            android:id="@+id/useSslCheck"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:checked="true"
-            android:text="Utiliser SSL / TLS sécurisé"
-            android:textColor="@color/text_primary" />
-
-        <!-- Boutons Test & Sauvegarde -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:orientation="horizontal">
-
-            <TextView
-                android:id="@+id/btnTestConnection"
-                android:layout_width="0dp"
-                android:layout_height="48dp"
-                android:layout_weight="1"
-                android:layout_marginEnd="6dp"
-                android:background="@drawable/bg_bubble_ai"
-                android:gravity="center"
-                android:text="🧪 Tester la connexion"
-                android:textColor="@color/cyan_accent"
-                android:textSize="13sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/btnSaveAccount"
-                android:layout_width="0dp"
-                android:layout_height="48dp"
-                android:layout_weight="1"
-                android:layout_marginStart="6dp"
-                android:background="@drawable/bg_mic_button"
-                android:gravity="center"
-                android:text="💾 Enregistrer"
-                android:textColor="@color/background_dark"
-                android:textSize="13sp"
-                android:textStyle="bold" />
-        </LinearLayout>
-
-        <TextView
-            android:id="@+id/testResultText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:textColor="@color/text_primary"
-            android:textSize="12sp" />
-
-        <!-- Liste des comptes enregistrés -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:text="📋 Vos Comptes Configurés"
+            android:layout_marginTop="32dp"
+            android:text="📋 Comptes Google Connectés"
             android:textColor="@color/cyan_accent"
             android:textSize="16sp"
             android:textStyle="bold" />
@@ -322,7 +91,7 @@
             android:id="@+id/accountsContainer"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="10dp"
             android:orientation="vertical" />
 
     </LinearLayout>

@@ -5,6 +5,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
 import android.database.Cursor
+import android.net.Uri
 import android.provider.Telephony
 import android.telephony.SmsManager
 import androidx.core.content.ContextCompat
@@ -16,7 +17,7 @@ object SmsController {
 
     fun sendSms(context: Context, contactNameOrNumber: String, body: String): String {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) {
-            return "❌ Permission d'envoi de SMS non accordée."
+            return "❌ Permission d'envoi de SMS non accordée. Utilisez le bouton '💬 Demander SMS' ou '⚙️ AUTORISATIONS MANUELLES'."
         }
 
         var number = contactNameOrNumber.replace(" ", "").replace("-", "")
@@ -46,7 +47,7 @@ object SmsController {
 
     fun readInboxSms(context: Context, count: Int = 10): String {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
-            return "❌ Permission de lecture des SMS non accordée."
+            return "❌ Permission de lecture des SMS non accordée. Cliquez sur '💬 Demander SMS' ou '⚙️ AUTORISATIONS MANUELLES'."
         }
 
         val projection = arrayOf(
@@ -56,7 +57,8 @@ object SmsController {
             Telephony.Sms.READ
         )
 
-        return try {
+        // 1. Essai sur Telephony.Sms.Inbox
+        try {
             val cursor: Cursor? = context.contentResolver.query(
                 Telephony.Sms.Inbox.CONTENT_URI,
                 projection,
@@ -65,27 +67,24 @@ object SmsController {
                 "${Telephony.Sms.DATE} DESC"
             )
 
+            if (cursor != null && cursor.count > 0) {
+                return formatSmsCursor(cursor, count)
+            }
+        } catch (_: Exception) {}
+
+        // 2. Fallback universel sur Telephony.Sms.CONTENT_URI (Compatible MIUI, OneUI, ColorOS, EMUI)
+        return try {
+            val cursor: Cursor? = context.contentResolver.query(
+                Telephony.Sms.CONTENT_URI,
+                projection,
+                "${Telephony.Sms.TYPE} = 1",
+                null,
+                "${Telephony.Sms.DATE} DESC"
+            )
+
             cursor?.use { c ->
-                if (c.count == 0) return "💬 Aucun SMS reçu."
-
-                val sb = StringBuilder("💬 **Boîte de réception SMS (${minOf(count, c.count)})** :\n\n")
-                val sdf = SimpleDateFormat("dd/MM HH:mm", Locale.FRENCH)
-                var idx = 0
-
-                while (c.moveToNext() && idx < count) {
-                    val address = c.getString(0) ?: "Inconnu"
-                    val body = c.getString(1) ?: ""
-                    val date = c.getLong(2)
-                    val isRead = c.getInt(3) == 1
-
-                    val readStatus = if (isRead) "" else " 🔴 (Non lu)"
-                    val dateStr = sdf.format(Date(date))
-
-                    sb.append("${idx + 1}. **$address**$readStatus — $dateStr\n")
-                    sb.append("   « $body »\n\n")
-                    idx++
-                }
-                sb.toString().trimEnd()
+                if (c.count == 0) return "💬 Aucun SMS reçu dans le téléphone."
+                formatSmsCursor(c, count)
             } ?: "❌ Impossible d'accéder aux SMS."
         } catch (e: Exception) {
             "❌ Erreur lors de la lecture des SMS : ${e.message}"
@@ -105,9 +104,9 @@ object SmsController {
 
         return try {
             val cursor: Cursor? = context.contentResolver.query(
-                Telephony.Sms.Inbox.CONTENT_URI,
+                Telephony.Sms.CONTENT_URI,
                 projection,
-                "${Telephony.Sms.READ} = 0",
+                "${Telephony.Sms.READ} = 0 AND ${Telephony.Sms.TYPE} = 1",
                 null,
                 "${Telephony.Sms.DATE} DESC"
             )
@@ -134,6 +133,27 @@ object SmsController {
         } catch (e: Exception) {
             "❌ Erreur lors de la lecture des SMS non lus : ${e.message}"
         }
+    }
+
+    private fun formatSmsCursor(cursor: Cursor, count: Int): String {
+        val sb = StringBuilder("💬 **Boîte de réception SMS (${minOf(count, cursor.count)})** :\n\n")
+        val sdf = SimpleDateFormat("dd/MM HH:mm", Locale.FRENCH)
+        var idx = 0
+
+        while (cursor.moveToNext() && idx < count) {
+            val address = cursor.getString(0) ?: "Inconnu"
+            val body = cursor.getString(1) ?: ""
+            val date = cursor.getLong(2)
+            val isRead = cursor.getInt(3) == 1
+
+            val readStatus = if (isRead) "" else " 🔴 (Non lu)"
+            val dateStr = sdf.format(Date(date))
+
+            sb.append("${idx + 1}. **$address**$readStatus — $dateStr\n")
+            sb.append("   « $body »\n\n")
+            idx++
+        }
+        return sb.toString().trimEnd()
     }
 
     fun markAllRead(context: Context): Boolean {

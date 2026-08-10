@@ -123,6 +123,16 @@
             android:label="Configuration Email IMAP/SMTP"
             android:theme="@style/Theme.Jarvis" />
 
+        <!-- ── Receiver SMS (Validation des permissions SMS sur Android 10+) ── -->
+        <receiver
+            android:name=".SmsReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
+
         <!-- ── Service de lecture des notifications ───────────────────────────── -->
         <service
             android:name=".JarvisNotificationListenerService"
