@@ -39,7 +39,7 @@ object ContactsController {
             context.contentResolver.query(filterUri, projection, null, null, null)?.use { cursor ->
                 if (cursor.moveToFirst()) {
                     val number = cursor.getString(0)
-                    if (!number.isNull@findPhoneNumber.isBlank()) {
+                    if (!number.isNullOrBlank()) {
                         return number
                     }
                 }
