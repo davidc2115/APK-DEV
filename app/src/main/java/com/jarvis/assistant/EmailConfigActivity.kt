@@ -103,7 +103,7 @@ class EmailConfigActivity : AppCompatActivity() {
                 text = "🌐 Connecter ${acc.email} (${acc.providerPreset})"
                 setTextColor(getColor(R.color.cyan_accent))
                 textSize = 13f
-                textStyle = android.graphics.Typeface.BOLD
+                setTypeface(null, android.graphics.Typeface.BOLD)
                 setPadding(16, 14, 16, 14)
                 background = getDrawable(R.drawable.bg_input)
                 layoutParams = LinearLayout.LayoutParams(
