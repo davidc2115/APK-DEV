@@ -205,11 +205,13 @@ object PermissionsManager {
             append("1. Cliquez sur '⚙ INFOS APPLICATION' ci-dessous.\n")
             append("2. En haut à droite, touchez les 3 points (⋮).\n")
             append("3. Choisissez 'Autoriser les paramètres restreints'.\n")
-            append("4. Revenez et activez 'Accès aux notifications'.")
+            append("4. Revenez et activez 'Accès aux notifications'.\n\n")
         }
         if (!hasManageStoragePermission()) {
-            append("\n⚠️ Pour l'accès complet aux fichiers, touchez '📁 ACCÈS COMPLET AU STOCKAGE'.")
+            append("⚠️ Pour l'accès complet aux fichiers, touchez '📁 ACCÈS COMPLET AU STOCKAGE'.\n\n")
         }
+
+        append(AccountDiscoveryManager.getSummaryReport(context))
     }
 
     // ─────────────────────────────────────────────────────────────────────────

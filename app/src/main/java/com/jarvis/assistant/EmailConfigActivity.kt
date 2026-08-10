@@ -33,6 +33,7 @@ class EmailConfigActivity : AppCompatActivity() {
     private lateinit var btnTestConnection: TextView
     private lateinit var btnSaveAccount: TextView
     private lateinit var testResultText: TextView
+    private lateinit var discoveredAccountsContainer: LinearLayout
     private lateinit var accountsContainer: LinearLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -52,9 +53,11 @@ class EmailConfigActivity : AppCompatActivity() {
         btnTestConnection = findViewById(R.id.btnTestConnection)
         btnSaveAccount = findViewById(R.id.btnSaveAccount)
         testResultText = findViewById(R.id.testResultText)
+        discoveredAccountsContainer = findViewById(R.id.discoveredAccountsContainer)
         accountsContainer = findViewById(R.id.accountsContainer)
 
         setupPresets()
+        refreshDiscoveredAccounts()
         refreshAccountsList()
 
         btnTestConnection.setOnClickListener { testEmailConnection() }
@@ -78,6 +81,49 @@ class EmailConfigActivity : AppCompatActivity() {
                 }
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+    }
+
+    private fun refreshDiscoveredAccounts() {
+        discoveredAccountsContainer.removeAllViews()
+        val discovered = AccountDiscoveryManager.getDeviceAccounts(this)
+
+        if (discovered.isEmpty()) {
+            val emptyText = TextView(this).apply {
+                text = "Aucun compte email trouvé dans Android."
+                setTextColor(getColor(R.color.text_secondary))
+                textSize = 12f
+            }
+            discoveredAccountsContainer.addView(emptyText)
+            return
+        }
+
+        for (acc in discovered) {
+            val btn = TextView(this).apply {
+                text = "➕ ${acc.email} (${acc.providerPreset})"
+                setTextColor(getColor(R.color.cyan_accent))
+                textSize = 13f
+                setPadding(16, 12, 16, 12)
+                background = getDrawable(R.drawable.bg_input)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).also { it.bottomMargin = 6 }
+
+                setOnClickListener {
+                    emailInput.setText(acc.email)
+                    accountLabelInput.setText(acc.email)
+                    when (acc.providerPreset) {
+                        "Gmail" -> presetSpinner.setSelection(0)
+                        "Outlook" -> presetSpinner.setSelection(1)
+                        "Yahoo" -> presetSpinner.setSelection(2)
+                        "iCloud" -> presetSpinner.setSelection(3)
+                        else -> presetSpinner.setSelection(4)
+                    }
+                    Toast.makeText(this@EmailConfigActivity, "Adresse pré-remplie !", Toast.LENGTH_SHORT).show()
+                }
+            }
+            discoveredAccountsContainer.addView(btn)
         }
     }
 

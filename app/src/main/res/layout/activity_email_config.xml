@@ -27,6 +27,23 @@
             android:textColor="@color/text_secondary"
             android:textSize="12sp" />
 
+        <!-- Section des comptes automatiquement détectés sur le téléphone -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="📱 Comptes détectés sur cet appareil (Cliquez pour pré-remplir) :"
+            android:textColor="@color/cyan_accent"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <LinearLayout
+            android:id="@+id/discoveredAccountsContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginBottom="16dp" />
+
         <!-- Service Prédéfini -->
         <TextView
             android:layout_width="wrap_content"
@@ -114,7 +131,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:text="💡 Pour Gmail/Yahoo : Générez un 'App Password' dans la sécurité de votre compte Google/Yahoo."
+            android:text="💡 Pour Gmail/Yahoo : Générez un 'App Password' sur myaccount.google.com/apppasswords."
             android:textColor="@color/text_secondary"
             android:textSize="11sp" />
 
