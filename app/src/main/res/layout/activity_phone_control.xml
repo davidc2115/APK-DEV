@@ -30,11 +30,43 @@
             android:lineSpacingExtra="3dp"
             android:layout_marginBottom="20dp" />
 
+        <!-- Boutons de demande de permissions individuelles -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="12dp">
+
+            <TextView
+                android:id="@+id/btnRequestSms"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="1"
+                android:layout_marginEnd="6dp"
+                android:text="💬 Demander SMS"
+                android:textColor="@color/cyan_accent"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="@drawable/bg_input" />
+
+            <TextView
+                android:id="@+id/btnRequestContacts"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:text="👤 Demander Contacts"
+                android:textColor="@color/cyan_accent"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="@drawable/bg_input" />
+        </LinearLayout>
+
         <TextView
             android:id="@+id/btnGrantPermissions"
             android:layout_width="match_parent"
             android:layout_height="48dp"
-            android:text="🔐 DEMANDER TOUTES LES PERMISSIONS (SMS, Appels...)"
+            android:text="🔐 DEMANDER TOUTES LES PERMISSIONS"
             android:textColor="@color/background_dark"
             android:textStyle="bold"
             android:gravity="center"
@@ -45,7 +77,7 @@
             android:id="@+id/btnAppDetailsSettings"
             android:layout_width="match_parent"
             android:layout_height="48dp"
-            android:text="⚙️ INFOS APPLICATION (Activer Paramètres Restreints Android 13+)"
+            android:text="⚙️ AUTORISATIONS MANUELLES (Si refusé ou Paramètres restreints)"
             android:textColor="@color/cyan_accent"
             android:textStyle="bold"
             android:gravity="center"

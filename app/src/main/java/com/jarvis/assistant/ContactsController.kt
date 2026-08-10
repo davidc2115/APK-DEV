@@ -5,68 +5,110 @@ import android.content.ContentProviderOperation
 import android.content.Context
 import android.content.pm.PackageManager
 import android.database.Cursor
+import android.net.Uri
 import android.provider.ContactsContract
 import androidx.core.content.ContextCompat
 
 object ContactsController {
 
+    /**
+     * Recherche le premier numéro de téléphone pour le nom donné.
+     * Utilise le CONTENT_FILTER_URI natif d'Android pour une recherche
+     * insensible à la casse et tolérante aux fautes / prénoms / noms.
+     */
     fun findPhoneNumber(context: Context, name: String): String? {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
             return null
         }
+
+        val cleanQuery = name.trim()
+        if (cleanQuery.isBlank()) return null
 
         val projection = arrayOf(
             ContactsContract.CommonDataKinds.Phone.NUMBER,
             ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME
         )
 
-        val cursor: Cursor? = context.contentResolver.query(
-            ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-            projection,
-            "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ?",
-            arrayOf("%$name%"),
-            null
+        // 1. Recherche officielle native Android (CONTENT_FILTER_URI)
+        val filterUri = Uri.withAppendedPath(
+            ContactsContract.CommonDataKinds.Phone.CONTENT_FILTER_URI,
+            Uri.encode(cleanQuery)
         )
 
-        cursor?.use { c ->
-            if (c.moveToFirst()) {
-                return c.getString(0)
+        try {
+            context.contentResolver.query(filterUri, projection, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val number = cursor.getString(0)
+                    if (!number.isNull@findPhoneNumber.isBlank()) {
+                        return number
+                    }
+                }
             }
-        }
+        } catch (_: Exception) {}
+
+        // 2. Fallback : recherche large sur CONTENT_URI
+        try {
+            context.contentResolver.query(
+                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                projection,
+                "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ?",
+                arrayOf("%$cleanQuery%"),
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    return cursor.getString(0)
+                }
+            }
+        } catch (_: Exception) {}
+
         return null
     }
 
+    /**
+     * Recherche les contacts correspondant à une requête et les retourne sous forme de texte.
+     */
     fun searchContacts(context: Context, query: String): String {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
-            return "❌ Permission d'accès aux contacts non accordée."
+            return "❌ Permission d'accès aux contacts non accordée. Cliquez sur le bouton 'Demander Contacts' dans le dashboard."
         }
 
+        val cleanQuery = query.trim()
         val projection = arrayOf(
             ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
             ContactsContract.CommonDataKinds.Phone.NUMBER
         )
 
-        val cursor: Cursor? = context.contentResolver.query(
-            ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-            projection,
-            "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ?",
-            arrayOf("%$query%"),
-            "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} ASC"
+        val filterUri = Uri.withAppendedPath(
+            ContactsContract.CommonDataKinds.Phone.CONTENT_FILTER_URI,
+            Uri.encode(cleanQuery)
         )
 
-        return cursor?.use { c ->
-            if (c.count == 0) return "👤 Aucun contact trouvé pour « $query »."
+        return try {
+            val cursor: Cursor? = context.contentResolver.query(filterUri, projection, null, null, "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} ASC")
 
-            val sb = StringBuilder("👤 **Résultats de la recherche pour « $query »** :\n\n")
-            var count = 0
-            while (c.moveToNext() && count < 10) {
-                val displayName = c.getString(0) ?: "Inconnu"
-                val phone = c.getString(1) ?: "Pas de numéro"
-                sb.append("${count + 1}. **$displayName** : $phone\n")
-                count++
-            }
-            sb.toString()
-        } ?: "❌ Impossible d'effectuer la recherche dans les contacts."
+            cursor?.use { c ->
+                if (c.count == 0) return "👤 Aucun contact trouvé pour « $query »."
+
+                val sb = StringBuilder("👤 **Résultats de la recherche pour « $query »** :\n\n")
+                var count = 0
+                val seenNumbers = mutableSetOf<String>()
+
+                while (c.moveToNext() && count < 10) {
+                    val displayName = c.getString(0) ?: "Inconnu"
+                    val rawPhone = c.getString(1) ?: "Pas de numéro"
+                    val cleanPhone = rawPhone.replace(" ", "")
+
+                    if (!seenNumbers.contains(cleanPhone)) {
+                        seenNumbers.add(cleanPhone)
+                        sb.append("${count + 1}. **$displayName** : $rawPhone\n")
+                        count++
+                    }
+                }
+                sb.toString()
+            } ?: "❌ Impossible d'effectuer la recherche dans les contacts."
+        } catch (e: Exception) {
+            "❌ Erreur lors de la recherche des contacts : ${e.message}"
+        }
     }
 
     fun addContact(context: Context, name: String, phone: String, email: String = ""): String {
@@ -129,26 +171,37 @@ object ContactsController {
             ContactsContract.CommonDataKinds.Phone.NUMBER
         )
 
-        val cursor: Cursor? = context.contentResolver.query(
-            ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-            projection,
-            null,
-            null,
-            "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} ASC"
-        )
+        return try {
+            val cursor: Cursor? = context.contentResolver.query(
+                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                projection,
+                null,
+                null,
+                "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} ASC"
+            )
 
-        return cursor?.use { c ->
-            if (c.count == 0) return "👤 Aucun contact enregistré."
+            cursor?.use { c ->
+                if (c.count == 0) return "👤 Aucun contact enregistré dans le téléphone."
 
-            val sb = StringBuilder("👤 **Liste des contacts (${minOf(count, c.count)})** :\n\n")
-            var idx = 0
-            while (c.moveToNext() && idx < count) {
-                val displayName = c.getString(0) ?: "Inconnu"
-                val phone = c.getString(1) ?: ""
-                sb.append("${idx + 1}. **$displayName** — $phone\n")
-                idx++
-            }
-            sb.toString()
-        } ?: "❌ Échec de la lecture de la liste des contacts."
+                val sb = StringBuilder("👤 **Liste des contacts (${minOf(count, c.count)})** :\n\n")
+                var idx = 0
+                val seenNumbers = mutableSetOf<String>()
+
+                while (c.moveToNext() && idx < count) {
+                    val displayName = c.getString(0) ?: "Inconnu"
+                    val phone = c.getString(1) ?: ""
+                    val cleanPhone = phone.replace(" ", "")
+
+                    if (!seenNumbers.contains(cleanPhone)) {
+                        seenNumbers.add(cleanPhone)
+                        sb.append("${idx + 1}. **$displayName** — $phone\n")
+                        idx++
+                    }
+                }
+                sb.toString()
+            } ?: "❌ Échec de la lecture de la liste des contacts."
+        } catch (e: Exception) {
+            "❌ Erreur lors de la lecture des contacts : ${e.message}"
+        }
     }
 }

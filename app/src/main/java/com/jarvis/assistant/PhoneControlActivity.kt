@@ -1,10 +1,13 @@
 package com.jarvis.assistant
 
+import android.Manifest
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.TextView
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -15,6 +18,34 @@ class PhoneControlActivity : AppCompatActivity() {
     private lateinit var permissionsReportText: TextView
     private lateinit var actionOutputText: TextView
 
+    // Launchers dédiés par groupe de permissions pour éviter le blocage Android 11+
+    private val requestSmsLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { map ->
+        val granted = map.values.all { it }
+        if (granted) Toast.makeText(this, "✅ Permission SMS accordée !", Toast.LENGTH_SHORT).show()
+        else Toast.makeText(this, "❌ Permission SMS refusée. Activez-la dans les paramètres.", Toast.LENGTH_LONG).show()
+        updateReport()
+    }
+
+    private val requestContactsLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { map ->
+        val granted = map.values.all { it }
+        if (granted) Toast.makeText(this, "✅ Permission Contacts accordée !", Toast.LENGTH_SHORT).show()
+        else Toast.makeText(this, "❌ Permission Contacts refusée.", Toast.LENGTH_LONG).show()
+        updateReport()
+    }
+
+    private val requestPhoneLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { map ->
+        val granted = map.values.all { it }
+        if (granted) Toast.makeText(this, "✅ Permission Appels accordée !", Toast.LENGTH_SHORT).show()
+        else Toast.makeText(this, "❌ Permission Appels refusée.", Toast.LENGTH_LONG).show()
+        updateReport()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_phone_control)
@@ -23,6 +54,8 @@ class PhoneControlActivity : AppCompatActivity() {
         actionOutputText = findViewById(R.id.actionOutputText)
 
         val btnGrantPermissions = findViewById<TextView>(R.id.btnGrantPermissions)
+        val btnRequestSms = findViewById<TextView>(R.id.btnRequestSms)
+        val btnRequestContacts = findViewById<TextView>(R.id.btnRequestContacts)
         val btnNotifAccess = findViewById<TextView>(R.id.btnNotifAccess)
         val btnAppDetailsSettings = findViewById<TextView>(R.id.btnAppDetailsSettings)
         val btnStorageAccess = findViewById<TextView>(R.id.btnStorageAccess)
@@ -39,6 +72,25 @@ class PhoneControlActivity : AppCompatActivity() {
 
         btnGrantPermissions.setOnClickListener {
             PermissionsManager.requestMissingPermissions(this, PermissionsManager.REQUEST_ALL)
+        }
+
+        btnRequestSms.setOnClickListener {
+            requestSmsLauncher.launch(
+                arrayOf(
+                    Manifest.permission.SEND_SMS,
+                    Manifest.permission.READ_SMS,
+                    Manifest.permission.RECEIVE_SMS
+                )
+            )
+        }
+
+        btnRequestContacts.setOnClickListener {
+            requestContactsLauncher.launch(
+                arrayOf(
+                    Manifest.permission.READ_CONTACTS,
+                    Manifest.permission.WRITE_CONTACTS
+                )
+            )
         }
 
         btnAppDetailsSettings.setOnClickListener {
