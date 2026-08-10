@@ -84,6 +84,14 @@ object Prefs {
     fun getApiKeyFor(context: Context, provider: Provider): String =
         getApiKeysFor(context, provider).firstOrNull() ?: ""
 
+    /** Sauvegarde un Map<Provider, String> en découpant les clés multiples par virgule ou retour à la ligne. */
+    fun saveApiKeys(context: Context, keys: Map<Provider, String>) {
+        for ((provider, keyStr) in keys) {
+            val keysList = keyStr.split(",", "\n", ";").map { it.trim() }.filter { it.isNotBlank() }
+            saveApiKeysFor(context, provider, keysList)
+        }
+    }
+
     /** Sauvegarde un Map<Provider, List<String>> en batch (écran Clés API). */
     fun saveAllApiKeys(context: Context, keysMap: Map<Provider, List<String>>) {
         val editor = prefs(context).edit()
