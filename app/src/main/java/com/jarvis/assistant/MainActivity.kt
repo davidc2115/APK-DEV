@@ -67,6 +67,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val micButton = findViewById<TextView>(R.id.micButton)
         val sendButton = findViewById<TextView>(R.id.sendButton)
         val settingsButton = findViewById<TextView>(R.id.settingsButton)
+        val controlButton = findViewById<TextView>(R.id.controlButton)
         val photoButton = findViewById<TextView>(R.id.photoButton)
         val removePendingImageButton = findViewById<TextView>(R.id.removePendingImageButton)
 
@@ -78,11 +79,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         if (ConversationStore.messages.isEmpty()) {
             addMessage(
-                "Bonjour. Je suis JARVIS, prêt à vous assister. Configurez votre IA dans les paramètres (⚙) si ce n'est pas déjà fait.",
+                "Bonjour Monsieur. Je suis JARVIS, votre assistant personnel avec contrôle complet du smartphone. " +
+                    "Je peux passer des appels, envoyer des SMS, lire vos emails, gérer vos médias, votre agenda et vos fichiers. " +
+                    "Que souhaitez-vous faire ?",
                 isUser = false,
                 speak = false
             )
         }
+
+        // Demande des permissions runtime principales au démarrage
+        PermissionsManager.requestMissingPermissions(this, PermissionsManager.REQUEST_ALL)
 
         sendButton.setOnClickListener {
             val text = messageInput.text.toString().trim()
@@ -100,6 +106,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         settingsButton.setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
+        }
+
+        controlButton.setOnClickListener {
+            startActivity(Intent(this, PhoneControlActivity::class.java))
         }
     }
 
