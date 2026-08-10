@@ -189,7 +189,7 @@ object PermissionsManager {
 
         fun status(granted: Boolean) = if (granted) "✅" else "❌"
 
-        append("📞 Téléphone : ${status(hasCallPermission(context))}\n")
+        append("📞 Téléphone / Appels : ${status(hasCallPermission(context))}\n")
         append("💬 SMS : ${status(hasSmsPermission(context))}\n")
         append("👤 Contacts : ${status(hasContactsPermission(context))}\n")
         append("📅 Agenda : ${status(hasCalendarPermission(context))}\n")
@@ -201,10 +201,14 @@ object PermissionsManager {
         append("📁 Stockage total : ${status(hasManageStoragePermission())}\n")
 
         if (!isNotificationListenerEnabled(context)) {
-            append("\n⚠️ Pour lire les notifications, va dans ⚙ Android → Accès aux notifications → Active JARVIS.")
+            append("\n💡 **Si l'accès aux notifications est grisé (Android 13+)** :\n")
+            append("1. Cliquez sur '⚙ INFOS APPLICATION' ci-dessous.\n")
+            append("2. En haut à droite, touchez les 3 points (⋮).\n")
+            append("3. Choisissez 'Autoriser les paramètres restreints'.\n")
+            append("4. Revenez et activez 'Accès aux notifications'.")
         }
         if (!hasManageStoragePermission()) {
-            append("\n⚠️ Pour accès complet aux fichiers, va dans ⚙ Android → Gérer les fichiers → Active JARVIS.")
+            append("\n⚠️ Pour l'accès complet aux fichiers, touchez '📁 ACCÈS COMPLET AU STOCKAGE'.")
         }
     }
 

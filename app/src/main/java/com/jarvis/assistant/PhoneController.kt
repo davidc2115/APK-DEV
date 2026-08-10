@@ -22,6 +22,9 @@ object PhoneController {
 
         var number = contactNameOrNumber.replace(" ", "").replace("-", "")
         if (!number.all { it.isDigit() || it == '+' }) {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+                return "❌ Permission d'accès aux contacts (READ_CONTACTS) non accordée. Elle est nécessaire pour trouver le numéro de « $contactNameOrNumber »."
+            }
             val resolved = ContactsController.findPhoneNumber(context, contactNameOrNumber)
             if (resolved != null) {
                 number = resolved

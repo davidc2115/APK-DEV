@@ -1,12 +1,14 @@
 package com.jarvis.assistant
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class PhoneControlActivity : AppCompatActivity() {
 
@@ -22,7 +24,9 @@ class PhoneControlActivity : AppCompatActivity() {
 
         val btnGrantPermissions = findViewById<TextView>(R.id.btnGrantPermissions)
         val btnNotifAccess = findViewById<TextView>(R.id.btnNotifAccess)
+        val btnAppDetailsSettings = findViewById<TextView>(R.id.btnAppDetailsSettings)
         val btnStorageAccess = findViewById<TextView>(R.id.btnStorageAccess)
+        val btnEmailConfig = findViewById<TextView>(R.id.btnEmailConfig)
 
         val btnRecentCalls = findViewById<TextView>(R.id.btnRecentCalls)
         val btnReadSms = findViewById<TextView>(R.id.btnReadSms)
@@ -37,12 +41,23 @@ class PhoneControlActivity : AppCompatActivity() {
             PermissionsManager.requestMissingPermissions(this, PermissionsManager.REQUEST_ALL)
         }
 
+        btnAppDetailsSettings.setOnClickListener {
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.parse("package:$packageName")
+            }
+            startActivity(intent)
+        }
+
         btnNotifAccess.setOnClickListener {
             PermissionsManager.openNotificationListenerSettings(this)
         }
 
         btnStorageAccess.setOnClickListener {
             PermissionsManager.requestManageStoragePermission(this)
+        }
+
+        btnEmailConfig.setOnClickListener {
+            startActivity(Intent(this, EmailConfigActivity::class.java))
         }
 
         btnRecentCalls.setOnClickListener {

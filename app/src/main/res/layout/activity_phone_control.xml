@@ -34,29 +34,51 @@
             android:id="@+id/btnGrantPermissions"
             android:layout_width="match_parent"
             android:layout_height="48dp"
-            android:text="🔐 DEMANDER TOUTES LES PERMISSIONS"
+            android:text="🔐 DEMANDER TOUTES LES PERMISSIONS (SMS, Appels...)"
             android:textColor="@color/background_dark"
             android:textStyle="bold"
             android:gravity="center"
             android:background="@drawable/bg_mic_button"
-            android:layout_marginBottom="16dp" />
+            android:layout_marginBottom="12dp" />
+
+        <TextView
+            android:id="@+id/btnAppDetailsSettings"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="⚙️ INFOS APPLICATION (Activer Paramètres Restreints Android 13+)"
+            android:textColor="@color/cyan_accent"
+            android:textStyle="bold"
+            android:gravity="center"
+            android:background="@drawable/bg_input"
+            android:layout_marginBottom="12dp" />
 
         <TextView
             android:id="@+id/btnNotifAccess"
             android:layout_width="match_parent"
             android:layout_height="48dp"
-            android:text="🔔 OUVRIR ACCÈS AUX NOTIFICATIONS"
+            android:text="🔔 ACCÈS AUX NOTIFICATIONS"
             android:textColor="@color/cyan_accent"
             android:textStyle="bold"
             android:gravity="center"
             android:background="@drawable/bg_input"
-            android:layout_marginBottom="16dp" />
+            android:layout_marginBottom="12dp" />
 
         <TextView
             android:id="@+id/btnStorageAccess"
             android:layout_width="match_parent"
             android:layout_height="48dp"
             android:text="📁 ACCÈS COMPLET AU STOCKAGE"
+            android:textColor="@color/cyan_accent"
+            android:textStyle="bold"
+            android:gravity="center"
+            android:background="@drawable/bg_input"
+            android:layout_marginBottom="12dp" />
+
+        <TextView
+            android:id="@+id/btnEmailConfig"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="📧 CONFIGURATION EMAIL IMAP / SMTP"
             android:textColor="@color/cyan_accent"
             android:textStyle="bold"
             android:gravity="center"
