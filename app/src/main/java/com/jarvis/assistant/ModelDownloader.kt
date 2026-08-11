@@ -79,8 +79,8 @@ object ModelDownloader {
     // Rétrocompatibilité
     val RECOMMENDED_MODEL_URL   = MODEL_CATALOG[0].url
     val RECOMMENDED_MODEL_LABEL = MODEL_CATALOG[0].label
-    val NO_KEY_MODEL_URL        = MODEL_CATALOG[2].url   // miroir Gemma sans token
-    val NO_KEY_MODEL_LABEL      = MODEL_CATALOG[2].label
+    val NO_KEY_MODEL_URL        = MODEL_CATALOG[1].url   // miroir Gemma sans token
+    val NO_KEY_MODEL_LABEL      = MODEL_CATALOG[1].label
 
     // ─────────────────────────────────────────────────────────────────────────
     // Téléchargement automatique (avec ou sans jeton HF)
