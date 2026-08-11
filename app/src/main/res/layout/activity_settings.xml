@@ -318,6 +318,93 @@
                 android:background="@drawable/bg_input"
                 android:layout_marginBottom="8dp" />
 
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/text_secondary"
+                android:alpha="0.2"
+                android:layout_marginTop="20dp"
+                android:layout_marginBottom="16dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🎙️ Écoute permanente"
+                android:textColor="@color/cyan_accent"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="JARVIS écoute en arrière-plan et se déclenche dès que tu dis le mot-clé. ⚠️ Consomme plus de batterie qu'une utilisation normale, et nécessite internet. Sur certains téléphones (Xiaomi/MIUI notamment), il faut aussi autoriser le « démarrage automatique » de JARVIS dans les paramètres batterie du système, sinon Android coupera l'écoute au bout de quelques minutes."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="3dp"
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Mot-clé d'activation"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/wakeWordInput"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_input"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:textColor="@color/text_primary"
+                android:hint="jarvis"
+                android:textColorHint="@color/text_secondary"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Clé d'accès Picovoice (optionnelle, mais fortement recommandée)"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/picovoiceKeyInput"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_input"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:textColor="@color/text_primary"
+                android:hint="clé AccessKey Picovoice"
+                android:textColorHint="@color/text_secondary"
+                android:inputType="textPassword"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="💡 Sans cette clé, l'écoute utilise la reconnaissance vocale standard (fonctionne, mais plus gourmande en batterie). Avec elle, JARVIS utilise un moteur dédié 100% hors-ligne et économe (Porcupine). Gratuit : crée un compte sur console.picovoice.ai → AccessKey, et colle-la ici. Ne fonctionne en mode économe que si le mot-clé est « jarvis » (ou l'un des autres mots intégrés : computer, alexa, picovoice...)."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="3dp"
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:id="@+id/toggleWakeWordButton"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:text="ACTIVER L'ÉCOUTE PERMANENTE"
+                android:textColor="@color/background_dark"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="@drawable/bg_mic_button"
+                android:layout_marginBottom="8dp" />
+
         </LinearLayout>
 
         <!-- Onglet LOCAL (Modèles IA téléchargés sur le téléphone) -->

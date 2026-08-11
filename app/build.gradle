@@ -100,4 +100,7 @@ dependencies {
     implementation 'androidx.media3:media3-exoplayer:1.4.1'
     implementation 'androidx.media3:media3-ui:1.4.1'
     implementation 'androidx.media3:media3-session:1.4.1'
+
+    // ── Détection de mot-clé dédiée (écoute permanente basse consommation) ────
+    implementation 'ai.picovoice:porcupine-android:4.0.0'
 }

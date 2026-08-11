@@ -1,6 +1,8 @@
 package com.jarvis.assistant
 
+import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.widget.AdapterView
@@ -207,8 +209,14 @@ class SettingsActivity : AppCompatActivity() {
         val modelCardsContainer  = findViewById<LinearLayout>(R.id.modelCardsContainer)
         val githubTokenInput     = findViewById<EditText>(R.id.githubTokenInput)
         val saveGithubTokenButton = findViewById<TextView>(R.id.saveGithubTokenButton)
+        val wakeWordInput        = findViewById<EditText>(R.id.wakeWordInput)
+        val toggleWakeWordButton = findViewById<TextView>(R.id.toggleWakeWordButton)
+        val picovoiceKeyInput    = findViewById<EditText>(R.id.picovoiceKeyInput)
 
         githubTokenInput.setText(Prefs.getGithubToken(this))
+        wakeWordInput.setText(Prefs.getWakeWord(this))
+        picovoiceKeyInput.setText(Prefs.getPicovoiceKey(this))
+        updateWakeWordButtonLabel(toggleWakeWordButton)
 
         // ── Cartes dynamiques de modèles ──────────────────────────────────────
         modelCardsContainer.removeAllViews()
@@ -259,6 +267,37 @@ class SettingsActivity : AppCompatActivity() {
             Prefs.saveGithubToken(this, githubTokenInput.text.toString().trim())
             Toast.makeText(this, "✅ Jeton GitHub enregistré", Toast.LENGTH_SHORT).show()
         }
+
+        toggleWakeWordButton.setOnClickListener {
+            Prefs.saveWakeWord(this, wakeWordInput.text.toString().trim())
+            Prefs.savePicovoiceKey(this, picovoiceKeyInput.text.toString().trim())
+            val nowEnabled = !Prefs.isWakeWordEnabled(this)
+            Prefs.saveWakeWordEnabled(this, nowEnabled)
+
+            val serviceIntent = Intent(this, WakeWordService::class.java)
+            if (nowEnabled) {
+                val hasMicPermission = androidx.core.content.ContextCompat.checkSelfPermission(
+                    this, android.Manifest.permission.RECORD_AUDIO
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+                if (!hasMicPermission) {
+                    Prefs.saveWakeWordEnabled(this, false)
+                    Toast.makeText(this, "❌ Permission micro requise pour l'écoute permanente", Toast.LENGTH_LONG).show()
+                } else {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent)
+                    else startService(serviceIntent)
+                    Toast.makeText(this, "✅ Écoute permanente activée", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                stopService(serviceIntent)
+                Toast.makeText(this, "Écoute permanente désactivée", Toast.LENGTH_SHORT).show()
+            }
+            updateWakeWordButtonLabel(toggleWakeWordButton)
+        }
+    }
+
+    private fun updateWakeWordButtonLabel(button: TextView) {
+        button.text = if (Prefs.isWakeWordEnabled(this)) "DÉSACTIVER L'ÉCOUTE PERMANENTE" else "ACTIVER L'ÉCOUTE PERMANENTE"
     }
 
     /** Crée une carte visuelle pour un modèle du catalogue. */

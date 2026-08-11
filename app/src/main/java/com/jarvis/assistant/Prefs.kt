@@ -337,6 +337,31 @@ object Prefs {
     fun getGithubToken(context: Context): String =
         prefs(context).getString("github_token", "") ?: ""
 
+    // ─── Écoute permanente (mot-clé d'activation) ───────────────────────────────
+
+    fun getWakeWord(context: Context): String =
+        prefs(context).getString("wake_word", "jarvis") ?: "jarvis"
+
+    fun saveWakeWord(context: Context, word: String) {
+        prefs(context).edit().putString("wake_word", word.ifBlank { "jarvis" }).apply()
+    }
+
+    fun isWakeWordEnabled(context: Context): Boolean =
+        prefs(context).getBoolean("wake_word_enabled", false)
+
+    fun saveWakeWordEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean("wake_word_enabled", enabled).apply()
+    }
+
+    /** Clé d'accès gratuite Picovoice (console.picovoice.ai) pour le moteur de détection dédié. */
+    fun getPicovoiceKey(context: Context): String =
+        prefs(context).getString("picovoice_key", "") ?: ""
+
+    fun savePicovoiceKey(context: Context, key: String) {
+        prefs(context).edit().putString("picovoice_key", key.trim()).apply()
+    }
+
+
     fun saveGithubToken(context: Context, token: String) {
         prefs(context).edit().putString("github_token", token).apply()
     }

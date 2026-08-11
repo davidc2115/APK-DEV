@@ -24,6 +24,10 @@ import java.util.Locale
  */
 class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
+    companion object {
+        const val EXTRA_TRIGGERED_BY_WAKEWORD = "triggered_by_wakeword"
+    }
+
     private lateinit var orbView: OrbView
     private lateinit var statusText: TextView
     private lateinit var transcriptText: TextView
@@ -52,7 +56,11 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val micToggle = findViewById<TextView>(R.id.micToggleButton)
 
         orbView.accentColor = Prefs.getAccentColor(this)
-        orbView.visualStyle = if (Prefs.getOrbStyle(this) == "NETWORK_SPHERE") {
+        // Déclenché par le mot-clé d'activation ("Jarvis") : toujours l'animation
+        // "sphère réseau" façon Obsidian, même si l'utilisateur a choisi le style
+        // pulsation par défaut ailleurs — c'est le rendu demandé pour ce cas précis.
+        val triggeredByWakeword = intent.getBooleanExtra(EXTRA_TRIGGERED_BY_WAKEWORD, false)
+        orbView.visualStyle = if (triggeredByWakeword || Prefs.getOrbStyle(this) == "NETWORK_SPHERE") {
             OrbView.VisualStyle.NETWORK_SPHERE
         } else {
             OrbView.VisualStyle.PULSE
