@@ -85,26 +85,39 @@ object LocalLlmManager {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Backend GGUF — non disponible : aucune librairie llama.cpp Android fiable
-    // n'est accessible depuis les dépôts Maven publics en CI (testé avec
-    // com.llamatik:library et llama.android/JitPack, échec 401 dans les deux cas).
+    // Backend GGUF — llama.cpp compilé nativement depuis les sources officielles
+    // (voir app/src/main/cpp/). Fonctionne avec tout modèle .gguf standard :
+    // Qwen, Llama, Mistral, Phi... aucune licence propriétaire, aucun jeton.
     // ─────────────────────────────────────────────────────────────────────────
 
+    private var loadedGgufPath: String? = null
+
     private fun generateGguf(context: Context, modelPath: String, prompt: String): String {
-        return """
-⚠️ Format .gguf non supporté pour le moment.
+        if (!NativeLlama.isAvailable()) {
+            return """
+❌ Le moteur IA local (llama.cpp) n'a pas pu être chargé sur cet appareil.
 
-Aucune librairie llama.cpp pour Android n'est actuellement accessible
-de façon fiable depuis les dépôts publics (Maven Central / JitPack).
+Détail technique : ${NativeLlama.getLoadError() ?: "bibliothèque native introuvable"}
 
-📥 Pour une IA locale fonctionnelle dès maintenant, utilise un modèle
-**.task** (MediaPipe) à la place — ils fonctionnent parfaitement :
-
-🔗 Gemma 3 1B officiel : Paramètres → Modèles Locaux → catalogue
-🔗 Gemma 3 1B miroir libre (sans compte) : idem
-
-Dans Paramètres → Modèles Locaux, choisis l'un de ces deux modèles Gemma.
+Cela peut arriver si l'APK installé ne correspond pas à l'architecture de
+ton téléphone. Réinstalle la dernière version depuis GitHub Actions.
 """.trimIndent()
+        }
+
+        return try {
+            if (loadedGgufPath != modelPath) {
+                val ok = NativeLlama.loadModel(modelPath)
+                if (!ok) {
+                    return "❌ Échec du chargement du modèle .gguf. Vérifie qu'il s'agit bien " +
+                        "d'un fichier GGUF valide et que le téléphone a assez de mémoire libre."
+                }
+                loadedGgufPath = modelPath
+            }
+            val result = NativeLlama.generate(prompt, 512)
+            if (result.startsWith("[ERREUR]")) result.removePrefix("[ERREUR]").trim() else result
+        } catch (e: Exception) {
+            "❌ Erreur du moteur local : ${e.message}"
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -153,6 +166,10 @@ Dans Paramètres → Modèles Locaux, choisis l'un de ces deux modèles Gemma.
         llmInference?.close()
         llmInference = null
         loadedTaskPath = null
+        if (loadedGgufPath != null) {
+            NativeLlama.unload()
+            loadedGgufPath = null
+        }
     }
 
     private fun buildErrorMessage(format: LocalModelFormat, e: Exception): String {

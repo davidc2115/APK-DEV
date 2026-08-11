@@ -9,3 +9,6 @@ app/build
 .externalNativeBuildFolder
 .cxx
 local.properties
+app/src/main/cpp/llama.cpp/
+*.cxx
+.cxx/

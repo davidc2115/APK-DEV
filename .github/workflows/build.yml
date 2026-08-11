@@ -18,6 +18,15 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Install NDK and CMake
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "ndk;27.0.12077973" "cmake;3.22.1"
+
+      - name: Clone llama.cpp sources (pour l'IA locale GGUF)
+        run: |
+          git clone --depth 1 --branch b4753 https://github.com/ggerganov/llama.cpp.git app/src/main/cpp/llama.cpp
+
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
@@ -30,4 +39,3 @@ jobs:
         with:
           name: jarvis-debug-apk
           path: app/build/outputs/apk/debug/*.apk
-
