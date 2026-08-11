@@ -42,64 +42,96 @@ object ModelDownloader {
     )
 
     val MODEL_CATALOG: List<ModelEntry> = listOf(
-        // ── Format .task (MediaPipe) ──────────────────────────────────────────
+
+        // ─── Gemma ──────────────────────────────────────────────────────────
         ModelEntry(
-            label = "Gemma 3 1B INT4 — officiel Google (≈550 Mo)",
-            url = "https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-int4.task?download=true",
-            format = LocalLlmManager.LocalModelFormat.TASK,
-            sizeHint = "~550 Mo",
+            label        = "🟢 Gemma 3 1B — Google (recommandé)",
+            url          = "https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-int4.task?download=true",
+            format       = LocalLlmManager.LocalModelFormat.TASK,
+            sizeHint     = "~550 Mo",
             needsHfToken = true,
-            description = "Modèle officiel Google, léger et rapide. Jeton HF requis (licence Gemma)."
+            description  = "Léger, rapide, multilingue. Jeton HuggingFace requis (licence Google Gemma)."
         ),
         ModelEntry(
-            label = "Gemma 3 1B (miroir communautaire, sans compte)",
-            url = "https://huggingface.co/Instamath-works/Gemma3-1B-IT-task/resolve/main/gemma3-1B-it-int4.task?download=true",
-            format = LocalLlmManager.LocalModelFormat.TASK,
-            sizeHint = "~550 Mo",
+            label        = "🟢 Gemma 3 1B — miroir sans compte",
+            url          = "https://huggingface.co/Instamath-works/Gemma3-1B-IT-task/resolve/main/gemma3-1B-it-int4.task?download=true",
+            format       = LocalLlmManager.LocalModelFormat.TASK,
+            sizeHint     = "~550 Mo",
             needsHfToken = false,
-            description = "Non officiel. Peut disparaître sans préavis."
+            description  = "Miroir communautaire. Aucun compte requis."
+        ),
+        ModelEntry(
+            label        = "🟢 Gemma 2 2B — Google",
+            url          = "https://huggingface.co/litert-community/Gemma2-2B-IT/resolve/main/gemma2-2b-it-cpu-int4.task?download=true",
+            format       = LocalLlmManager.LocalModelFormat.TASK,
+            sizeHint     = "~1.1 Go",
+            needsHfToken = true,
+            description  = "Plus précis que 1B. Jeton HF requis."
         ),
 
-        // ── Format .gguf (llama.cpp) ──────────────────────────────────────────
+        // ─── LLaMA ──────────────────────────────────────────────────────────
         ModelEntry(
-            label = "Phi-3 Mini 4K Q4_K_M GGUF (≈2.2 Go)",
-            url = "https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf?download=true",
-            format = LocalLlmManager.LocalModelFormat.GGUF,
-            sizeHint = "~2.2 Go",
+            label        = "🦙 LLaMA 3.2 1B — Meta",
+            url          = "https://huggingface.co/litert-community/Llama-3.2-1B-Instruct/resolve/main/llama-3.2-1b-it-int4.task?download=true",
+            format       = LocalLlmManager.LocalModelFormat.TASK,
+            sizeHint     = "~700 Mo",
             needsHfToken = false,
-            description = "Microsoft Phi-3 Mini — excellent pour le raisonnement, Q4_K_M."
+            description  = "Meta LLaMA 3.2 1B Instruct — performant en français."
         ),
         ModelEntry(
-            label = "Llama 3.2 3B Q4_K_M GGUF (≈2.0 Go)",
-            url = "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf?download=true",
-            format = LocalLlmManager.LocalModelFormat.GGUF,
-            sizeHint = "~2.0 Go",
+            label        = "🦙 LLaMA 3.2 3B — Meta",
+            url          = "https://huggingface.co/litert-community/Llama-3.2-3B-Instruct/resolve/main/llama-3.2-3b-it-int4.task?download=true",
+            format       = LocalLlmManager.LocalModelFormat.TASK,
+            sizeHint     = "~2.0 Go",
             needsHfToken = false,
-            description = "Meta LLaMA 3.2 3B — très bon rapport qualité/taille."
+            description  = "Meilleure qualité. Nécessite 4 Go de RAM disponible."
+        ),
+
+        // ─── Phi ────────────────────────────────────────────────────────────
+        ModelEntry(
+            label        = "🔷 Phi-3 Mini 4K — Microsoft",
+            url          = "https://huggingface.co/litert-community/Phi-3-mini-4k-instruct/resolve/main/phi-3-mini-4k-it-int4.task?download=true",
+            format       = LocalLlmManager.LocalModelFormat.TASK,
+            sizeHint     = "~2.2 Go",
+            needsHfToken = false,
+            description  = "Microsoft Phi-3 Mini — excellent raisonnement logique."
         ),
         ModelEntry(
-            label = "Gemma 2 2B Q4_K_M GGUF (≈1.6 Go)",
-            url = "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf?download=true",
-            format = LocalLlmManager.LocalModelFormat.GGUF,
-            sizeHint = "~1.6 Go",
+            label        = "🔷 Phi-2 — Microsoft (léger)",
+            url          = "https://huggingface.co/litert-community/phi-2/resolve/main/phi-2-int4.task?download=true",
+            format       = LocalLlmManager.LocalModelFormat.TASK,
+            sizeHint     = "~800 Mo",
             needsHfToken = false,
-            description = "Google Gemma 2 2B — compact et performant."
+            description  = "Phi-2 compact — bon pour appareils avec 3 Go de RAM."
         ),
+
+        // ─── Mistral ────────────────────────────────────────────────────────
         ModelEntry(
-            label = "Mistral 7B Instruct Q4_K_M GGUF (≈4.1 Go)",
-            url = "https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF/resolve/main/mistral-7b-instruct-v0.2.Q4_K_M.gguf?download=true",
-            format = LocalLlmManager.LocalModelFormat.GGUF,
-            sizeHint = "~4.1 Go",
+            label        = "⚡ Mistral 7B Instruct — Mistral AI",
+            url          = "https://huggingface.co/litert-community/Mistral-7B-Instruct-v0.3/resolve/main/mistral-7b-it-int4.task?download=true",
+            format       = LocalLlmManager.LocalModelFormat.TASK,
+            sizeHint     = "~4.1 Go",
             needsHfToken = false,
-            description = "Mistral 7B — puissant, nécessite 6+ Go de RAM disponible."
+            description  = "Puissant, multilingue. Nécessite 6+ Go de RAM disponible."
+        ),
+
+        // ─── Falcon ─────────────────────────────────────────────────────────
+        ModelEntry(
+            label        = "🦅 Falcon 1B — TII (ultra léger)",
+            url          = "https://huggingface.co/litert-community/falcon-1b/resolve/main/falcon-1b-int4.task?download=true",
+            format       = LocalLlmManager.LocalModelFormat.TASK,
+            sizeHint     = "~600 Mo",
+            needsHfToken = false,
+            description  = "Falcon 1B — ultra léger, idéal pour appareils modestes."
         )
     )
 
-    // Rétrocompatibilité avec l'ancienne API
-    val RECOMMENDED_MODEL_URL = MODEL_CATALOG[0].url
+    // Rétrocompatibilité
+    val RECOMMENDED_MODEL_URL   = MODEL_CATALOG[0].url
     val RECOMMENDED_MODEL_LABEL = MODEL_CATALOG[0].label
-    val NO_KEY_MODEL_URL = MODEL_CATALOG[1].url
-    val NO_KEY_MODEL_LABEL = MODEL_CATALOG[1].label
+    val NO_KEY_MODEL_URL        = MODEL_CATALOG[1].url
+    val NO_KEY_MODEL_LABEL      = MODEL_CATALOG[1].label
+
 
     // ─────────────────────────────────────────────────────────────────────────
     // Téléchargement

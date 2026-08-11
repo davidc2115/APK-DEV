@@ -298,83 +298,25 @@
                 android:textStyle="bold"
                 android:layout_marginBottom="16dp" />
 
-            <!-- Sélection de Modèles par Marque -->
+            <!-- Titre section modèles -->
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="🦙 Modèles Meta LLaMA 3.2"
+                android:text="📦 Modèles disponibles — cliquez pour télécharger directement sur le téléphone"
                 android:textColor="@color/cyan_accent"
                 android:textSize="13sp"
                 android:textStyle="bold"
-                android:layout_marginBottom="6dp" />
+                android:layout_marginBottom="10dp" />
 
-            <TextView
-                android:id="@+id/btnDownloadLlama"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:text="⬇ Télécharger Llama 3.2 3B (2.0 Go)"
-                android:textColor="@color/text_primary"
-                android:gravity="center"
-                android:background="@drawable/bg_input"
-                android:layout_marginBottom="16dp" />
-
-            <TextView
+            <!-- Cartes dynamiques générées par SettingsActivity.buildModelCard() -->
+            <LinearLayout
+                android:id="@+id/modelCardsContainer"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="💎 Modèles Google Gemma"
-                android:textColor="@color/cyan_accent"
-                android:textSize="13sp"
-                android:textStyle="bold"
-                android:layout_marginBottom="6dp" />
+                android:orientation="vertical"
+                android:layout_marginBottom="8dp" />
 
-            <TextView
-                android:id="@+id/downloadNoKeyButton"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:text="⬇ Télécharger Gemma 3 1B (550 Mo)"
-                android:textColor="@color/text_primary"
-                android:gravity="center"
-                android:background="@drawable/bg_input"
-                android:layout_marginBottom="16dp" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="🔬 Modèles Microsoft Phi-3"
-                android:textColor="@color/cyan_accent"
-                android:textSize="13sp"
-                android:textStyle="bold"
-                android:layout_marginBottom="6dp" />
-
-            <TextView
-                android:id="@+id/btnDownloadPhi"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:text="⬇ Télécharger Phi-3 Mini (2.2 Go)"
-                android:textColor="@color/text_primary"
-                android:gravity="center"
-                android:background="@drawable/bg_input"
-                android:layout_marginBottom="16dp" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="⚡ Modèles Mistral AI"
-                android:textColor="@color/cyan_accent"
-                android:textSize="13sp"
-                android:textStyle="bold"
-                android:layout_marginBottom="6dp" />
-
-            <TextView
-                android:id="@+id/btnDownloadMistral"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:text="⬇ Télécharger Mistral 7B (4.1 Go)"
-                android:textColor="@color/text_primary"
-                android:gravity="center"
-                android:background="@drawable/bg_input"
-                android:layout_marginBottom="16dp" />
-
+            <!-- Barre de progression téléchargement -->
             <TextView
                 android:id="@+id/downloadProgressText"
                 android:layout_width="match_parent"

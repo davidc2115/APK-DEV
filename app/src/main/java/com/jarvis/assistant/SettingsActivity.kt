@@ -39,10 +39,6 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var localModelPathText: TextView
     private lateinit var downloadProgressText: TextView
 
-    private lateinit var btnDownloadLlama: TextView
-    private lateinit var btnDownloadPhi: TextView
-    private lateinit var btnDownloadMistral: TextView
-    private lateinit var downloadNoKeyButton: TextView
 
     private lateinit var styleOrbPulse: TextView
     private lateinit var styleOrbNetwork: TextView
@@ -88,10 +84,6 @@ class SettingsActivity : AppCompatActivity() {
         localModelPathText    = findViewById(R.id.localModelPathText)
         downloadProgressText  = findViewById(R.id.downloadProgressText)
 
-        btnDownloadLlama      = findViewById(R.id.btnDownloadLlama)
-        btnDownloadPhi        = findViewById(R.id.btnDownloadPhi)
-        btnDownloadMistral    = findViewById(R.id.btnDownloadMistral)
-        downloadNoKeyButton   = findViewById(R.id.downloadNoKeyButton)
 
         styleOrbPulse         = findViewById(R.id.styleOrbPulse)
         styleOrbNetwork       = findViewById(R.id.styleOrbNetwork)
@@ -212,43 +204,33 @@ class SettingsActivity : AppCompatActivity() {
         val downloadCustomButton = findViewById<TextView>(R.id.downloadCustomButton)
         val saveButton           = findViewById<TextView>(R.id.saveButton)
         val saveApiKeysButton    = findViewById<TextView>(R.id.saveApiKeysButton)
+        val modelCardsContainer  = findViewById<LinearLayout>(R.id.modelCardsContainer)
 
+        // ── Cartes dynamiques de modèles ──────────────────────────────────────
+        modelCardsContainer.removeAllViews()
+        ModelDownloader.MODEL_CATALOG.forEachIndexed { index, entry ->
+            buildModelCard(modelCardsContainer, entry, index)
+        }
+
+        // ── Import fichier local ───────────────────────────────────────────────
         pickModelButton.setOnClickListener { pickModelLauncher.launch(arrayOf("*/*")) }
 
-        // Modèle Gemma 1B (.task / MediaPipe)
-        downloadNoKeyButton.setOnClickListener {
-            val entry = ModelDownloader.MODEL_CATALOG[1]
-            startDownload(entry.url, entry.format, useToken = false)
-        }
-
-        // Modèle Llama 3.2 (GGUF)
-        btnDownloadLlama.setOnClickListener {
-            val entry = ModelDownloader.MODEL_CATALOG[3] // Llama 3.2
-            startDownload(entry.url, entry.format, useToken = false)
-        }
-
-        // Modèle Phi-3 (GGUF)
-        btnDownloadPhi.setOnClickListener {
-            val entry = ModelDownloader.MODEL_CATALOG[2] // Phi-3
-            startDownload(entry.url, entry.format, useToken = false)
-        }
-
-        // Modèle Mistral (GGUF)
-        btnDownloadMistral.setOnClickListener {
-            val entry = ModelDownloader.MODEL_CATALOG[5] // Mistral
-            startDownload(entry.url, entry.format, useToken = false)
-        }
-
+        // ── URL personnalisée ──────────────────────────────────────────────────
         downloadCustomButton.setOnClickListener {
             val url = customModelUrlInput.text.toString().trim()
             if (url.isBlank()) {
                 Toast.makeText(this, "Entrez une URL de modèle", Toast.LENGTH_SHORT).show()
             } else {
-                val format = if (url.endsWith(".task", ignoreCase = true)) LocalLlmManager.LocalModelFormat.TASK else LocalLlmManager.LocalModelFormat.GGUF
+                val format = when {
+                    url.endsWith(".task", ignoreCase = true) -> LocalLlmManager.LocalModelFormat.TASK
+                    url.endsWith(".onnx", ignoreCase = true) -> LocalLlmManager.LocalModelFormat.ONNX
+                    else -> LocalLlmManager.LocalModelFormat.TASK
+                }
                 startDownload(url, format, useToken = true)
             }
         }
 
+        // ── Sauvegarde paramètres cloud ───────────────────────────────────────
         saveButton.setOnClickListener {
             Prefs.save(
                 this,
@@ -260,7 +242,6 @@ class SettingsActivity : AppCompatActivity() {
             Prefs.saveHfToken(this, hfTokenInput.text.toString().trim())
             Prefs.saveAccentColor(this, selectedAccentColor)
             Prefs.saveOrbStyle(this, selectedOrbStyle)
-
             Toast.makeText(this, "✅ Paramètres enregistrés", Toast.LENGTH_SHORT).show()
         }
 
@@ -270,6 +251,83 @@ class SettingsActivity : AppCompatActivity() {
             Toast.makeText(this, "✅ Toutes les clés API enregistrées", Toast.LENGTH_SHORT).show()
         }
     }
+
+    /** Crée une carte visuelle pour un modèle du catalogue. */
+    private fun buildModelCard(container: LinearLayout, entry: ModelDownloader.ModelEntry, index: Int) {
+        val dp = resources.displayMetrics.density
+
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding((16 * dp).toInt(), (16 * dp).toInt(), (16 * dp).toInt(), (16 * dp).toInt())
+            background = getDrawable(R.drawable.bg_bubble_ai)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).also { it.bottomMargin = (12 * dp).toInt() }
+        }
+
+        // Nom du modèle + taille
+        val titleRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+        val titleText = TextView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            text  = entry.label
+            setTextColor(getColor(R.color.text_primary))
+            textSize = 13f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+        }
+        val sizeText = TextView(this).apply {
+            text  = entry.sizeHint
+            setTextColor(getColor(R.color.cyan_accent))
+            textSize = 11f
+        }
+        titleRow.addView(titleText)
+        titleRow.addView(sizeText)
+        card.addView(titleRow)
+
+        // Description
+        val descText = TextView(this).apply {
+            text = entry.description
+            setTextColor(getColor(R.color.text_secondary))
+            textSize = 11f
+            setPadding(0, (4 * dp).toInt(), 0, (10 * dp).toInt())
+        }
+        card.addView(descText)
+
+        // Badge "Jeton HF requis"
+        if (entry.needsHfToken) {
+            val badge = TextView(this).apply {
+                text = "🔑 Jeton HuggingFace requis — entrez-le dans le champ ci-dessus"
+                setTextColor(getColor(R.color.text_secondary))
+                textSize = 10f
+                setPadding(0, 0, 0, (8 * dp).toInt())
+            }
+            card.addView(badge)
+        }
+
+        // Bouton télécharger
+        val btnDownload = TextView(this).apply {
+            text = "⬇ TÉLÉCHARGER SUR LE TÉLÉPHONE"
+            setTextColor(getColor(R.color.background_dark))
+            textSize = 12f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            gravity = android.view.Gravity.CENTER
+            background = getDrawable(R.drawable.bg_mic_button)
+            setPadding((12 * dp).toInt(), (10 * dp).toInt(), (12 * dp).toInt(), (10 * dp).toInt())
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            setOnClickListener {
+                startDownload(entry.url, entry.format, useToken = entry.needsHfToken)
+            }
+        }
+        card.addView(btnDownload)
+
+        container.addView(card)
+    }
+
 
     private fun setupColorSwatches() {
         selectedAccentColor = Prefs.getAccentColor(this)
