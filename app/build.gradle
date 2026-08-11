@@ -54,6 +54,9 @@ dependencies {
     // ── IA embarquée : MediaPipe LLM Inference (.task) ────────────────────────
     implementation 'com.google.mediapipe:tasks-genai:0.10.14'
 
+    // ── IA embarquée : llama.cpp (.gguf) ──────────────────────────────────────
+    implementation 'com.github.shubham0204:llama.android:0.0.8'
+
     // ── IA embarquée : ONNX Runtime GenAI (.onnx) ────────────────────────────
     implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.19.2'
 
