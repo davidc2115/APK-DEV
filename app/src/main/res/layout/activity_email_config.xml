@@ -23,28 +23,28 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:layout_marginBottom="20dp"
-            android:text="JARVIS lit et envoie vos e-mails directement. Google exige un mot de passe d'application 16 caractères."
+            android:text="Connectez votre compte Google pour lire et envoyer vos e-mails directement."
             android:textColor="@color/text_secondary"
             android:textSize="13sp" />
 
-        <!-- Bouton Générateur de mot de passe Google -->
+        <!-- OPTION 1 : Connexion Web Google 1-Clic -->
         <TextView
-            android:id="@+id/btnOpenGooglePassGuide"
+            android:id="@+id/btnOpenWebGoogleLogin"
             android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:background="@drawable/bg_input"
+            android:layout_height="52dp"
+            android:background="@drawable/bg_mic_button"
             android:gravity="center"
-            android:text="🔑 Obtenir un Mot de Passe d'App Google (16 caractères)"
-            android:textColor="@color/cyan_accent"
-            android:textSize="12sp"
+            android:text="🌐 OUVRIR LA PAGE DE CONNEXION GOOGLE"
+            android:textColor="@color/background_dark"
+            android:textSize="13sp"
             android:textStyle="bold"
             android:layout_marginBottom="16dp" />
 
-        <!-- Saisie d'adresse Email -->
+        <!-- OPTION 2 : Connexion directe avec Adresse & Mot de Passe -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Votre adresse Email Google / Gmail :"
+            android:text="Adresse Email Google / Gmail :"
             android:textColor="@color/text_secondary"
             android:textSize="12sp" />
 
@@ -55,18 +55,17 @@
             android:layout_marginTop="4dp"
             android:layout_marginBottom="12dp"
             android:background="@drawable/bg_input"
-            android:hint="mon.adresse@gmail.com"
+            android:hint="exemple@gmail.com"
             android:inputType="textEmailAddress"
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
             android:textColor="@color/text_primary"
             android:textColorHint="@color/text_secondary" />
 
-        <!-- Saisie du mot de passe d'application Google (16 caractères) -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Mot de passe d'application Google (16 lettres, ex: abcd efgh ijkl mnop) :"
+            android:text="Mot de passe Google (habituel ou mot de passe d'application 16 lettres) :"
             android:textColor="@color/text_secondary"
             android:textSize="12sp" />
 
@@ -77,7 +76,7 @@
             android:layout_marginTop="4dp"
             android:layout_marginBottom="16dp"
             android:background="@drawable/bg_input"
-            android:hint="16 lettres fournies par Google"
+            android:hint="Votre mot de passe..."
             android:inputType="textPassword"
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
@@ -87,11 +86,11 @@
         <TextView
             android:id="@+id/btnConnectGoogle"
             android:layout_width="match_parent"
-            android:layout_height="52dp"
-            android:background="@drawable/bg_mic_button"
+            android:layout_height="48dp"
+            android:background="@drawable/bg_input"
             android:gravity="center"
-            android:text="🌐 CONNECTER CE COMPTE GOOGLE"
-            android:textColor="@color/background_dark"
+            android:text="✅ CONNECTER ET TESTER LE COMPTE GOOGLE"
+            android:textColor="@color/cyan_accent"
             android:textSize="13sp"
             android:textStyle="bold" />
 
@@ -103,6 +102,17 @@
             android:gravity="center"
             android:textColor="@color/cyan_accent"
             android:textSize="13sp" />
+
+        <!-- Guide App Password -->
+        <TextView
+            android:id="@+id/btnOpenGooglePassGuide"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:gravity="center"
+            android:text="🔑 Obtenir un Mot de Passe d'App Google 16 lettres (si double-étape activée)"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp"
+            android:layout_marginTop="16dp" />
 
         <!-- Comptes actifs -->
         <TextView

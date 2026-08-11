@@ -13,12 +13,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 /**
- * Écran de connexion directe par Compte Google avec Mot de passe d'Application (16 caractères).
+ * Écran de connexion par Compte Google (Page Web Sign-In, Mot de passe Google ou App-Password).
  */
 class EmailConfigActivity : AppCompatActivity() {
 
     private lateinit var emailInput: EditText
     private lateinit var passwordInput: EditText
+    private lateinit var btnOpenWebGoogleLogin: TextView
     private lateinit var btnConnectGoogle: TextView
     private lateinit var btnOpenGooglePassGuide: TextView
     private lateinit var testResultText: TextView
@@ -30,6 +31,7 @@ class EmailConfigActivity : AppCompatActivity() {
 
         emailInput = findViewById(R.id.emailInput)
         passwordInput = findViewById(R.id.passwordInput)
+        btnOpenWebGoogleLogin = findViewById(R.id.btnOpenWebGoogleLogin)
         btnConnectGoogle = findViewById(R.id.btnConnectGoogle)
         btnOpenGooglePassGuide = findViewById(R.id.btnOpenGooglePassGuide)
         testResultText = findViewById(R.id.testResultText)
@@ -43,17 +45,31 @@ class EmailConfigActivity : AppCompatActivity() {
 
         refreshAccountsList()
 
+        // Bouton 1: Ouvrir la page de connexion Google Web Sign-In
+        btnOpenWebGoogleLogin.setOnClickListener {
+            val email = emailInput.text.toString().trim()
+            val url = if (email.contains("@")) {
+                "https://accounts.google.com/ServiceLogin?Email=$email"
+            } else {
+                "https://accounts.google.com/"
+            }
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            startActivity(intent)
+        }
+
+        // Bouton 2: Générateur de mot de passe d'application 16 caractères
         btnOpenGooglePassGuide.setOnClickListener {
             val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://myaccount.google.com/apppasswords"))
             startActivity(intent)
         }
 
+        // Bouton 3: Connexion et test direct avec mot de passe
         btnConnectGoogle.setOnClickListener {
             val email = emailInput.text.toString().trim()
             val pass = passwordInput.text.toString().trim().replace(" ", "")
 
             if (email.isBlank() || pass.isBlank()) {
-                Toast.makeText(this, "Entrez votre email Google et le mot de passe d'application 16 lettres.", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Veuillez entrer votre email Google et votre mot de passe.", Toast.LENGTH_LONG).show()
                 return@setOnClickListener
             }
 
@@ -79,6 +95,10 @@ class EmailConfigActivity : AppCompatActivity() {
                     Prefs.addEmailAccount(this@EmailConfigActivity, account)
                     refreshAccountsList()
                     Toast.makeText(this@EmailConfigActivity, "✅ Compte Google connecté !", Toast.LENGTH_SHORT).show()
+                } else {
+                    // Enregistrer quand même pour que l'utilisateur puisse tester avec l'un ou l'autre mot de passe
+                    Prefs.addEmailAccount(this@EmailConfigActivity, account)
+                    refreshAccountsList()
                 }
             }
         }
@@ -112,7 +132,7 @@ class EmailConfigActivity : AppCompatActivity() {
             val textInfo = TextView(this).apply {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
                 val defTag = if (acc.isDefault) " ⭐ [Par défaut]" else ""
-                text = "📧 ${acc.label}$defTag\n${acc.email}\nAuthentification: Google App Password"
+                text = "📧 ${acc.label}$defTag\n${acc.email}\nAuthentification: Compte Google"
                 setTextColor(getColor(R.color.text_primary))
                 textSize = 13f
             }

@@ -121,6 +121,16 @@ class SettingsActivity : AppCompatActivity() {
         tabCloud.alpha   = if (tab == "cloud")   1f else 0.45f
         tabApiKeys.alpha = if (tab == "apikeys") 1f else 0.45f
         tabLocal.alpha   = if (tab == "local")   1f else 0.45f
+
+        // Si l'utilisateur clique sur l'onglet Local, passer automatiquement le Provider sur LOCAL_GGUF / ON_DEVICE
+        if (tab == "local" && !selectedProvider.isLocal) {
+            val localFormat = Prefs.getLocalModelFormat(this)
+            val newProvider = if (localFormat == "TASK") Provider.ON_DEVICE else Provider.LOCAL_GGUF
+            selectedProvider = newProvider
+            providerSpinner.setSelection(Provider.entries.indexOf(newProvider))
+            Prefs.save(this, newProvider, "", "", "")
+            Toast.makeText(this, "🧠 Mode IA Local activé !", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun setupProviderSpinner() {
@@ -205,25 +215,25 @@ class SettingsActivity : AppCompatActivity() {
 
         pickModelButton.setOnClickListener { pickModelLauncher.launch(arrayOf("*/*")) }
 
-        // Modèle Gemma 1B
+        // Modèle Gemma 1B (.task / MediaPipe)
         downloadNoKeyButton.setOnClickListener {
             val entry = ModelDownloader.MODEL_CATALOG[1]
             startDownload(entry.url, entry.format, useToken = false)
         }
 
-        // Modèle Llama 3.2
+        // Modèle Llama 3.2 (GGUF)
         btnDownloadLlama.setOnClickListener {
             val entry = ModelDownloader.MODEL_CATALOG[3] // Llama 3.2
             startDownload(entry.url, entry.format, useToken = false)
         }
 
-        // Modèle Phi-3
+        // Modèle Phi-3 (GGUF)
         btnDownloadPhi.setOnClickListener {
             val entry = ModelDownloader.MODEL_CATALOG[2] // Phi-3
             startDownload(entry.url, entry.format, useToken = false)
         }
 
-        // Modèle Mistral
+        // Modèle Mistral (GGUF)
         btnDownloadMistral.setOnClickListener {
             val entry = ModelDownloader.MODEL_CATALOG[5] // Mistral
             startDownload(entry.url, entry.format, useToken = false)
@@ -314,8 +324,15 @@ class SettingsActivity : AppCompatActivity() {
                         is ModelDownloader.Progress.Done -> {
                             isDownloading = false
                             downloadProgressText.text = "✅ Modèle téléchargé et actif sur le téléphone !"
+
+                            // Activer automatiquement le mode local
+                            val targetProvider = if (format == LocalLlmManager.LocalModelFormat.TASK) Provider.ON_DEVICE else Provider.LOCAL_GGUF
+                            selectedProvider = targetProvider
+                            providerSpinner.setSelection(Provider.entries.indexOf(targetProvider))
+                            Prefs.save(this@SettingsActivity, targetProvider, "", "", "")
+
                             updateLocalModelLabel()
-                            Toast.makeText(this@SettingsActivity, "Modèle enregistré sur l'appareil ✅", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this@SettingsActivity, "Modèle enregistré et activé ✅", Toast.LENGTH_SHORT).show()
                         }
                         is ModelDownloader.Progress.Error -> {
                             isDownloading = false
@@ -346,8 +363,13 @@ class SettingsActivity : AppCompatActivity() {
                 LocalLlmManager.unload()
 
                 runOnUiThread {
+                    // Activer automatiquement le mode local
+                    selectedProvider = Provider.LOCAL_GGUF
+                    providerSpinner.setSelection(Provider.entries.indexOf(Provider.LOCAL_GGUF))
+                    Prefs.save(this@SettingsActivity, Provider.LOCAL_GGUF, "", "", "")
+
                     updateLocalModelLabel()
-                    Toast.makeText(this@SettingsActivity, "Modèle importé ✅", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@SettingsActivity, "Modèle importé et activé ✅", Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {
                 runOnUiThread {
@@ -362,7 +384,7 @@ class SettingsActivity : AppCompatActivity() {
         localModelPathText.text = if (path.isBlank()) {
             "Modèle actif : Aucun"
         } else {
-            "Modèle actif sur l'appareil : ${File(path).name}"
+            "Modèle actif sur l'appareil : ${File(path).name} (${selectedProvider.displayName})"
         }
     }
 }
