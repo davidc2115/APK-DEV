@@ -10,15 +10,22 @@ import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit
 
 /**
- * Télécharge des modèles IA locaux depuis HuggingFace ou toute URL personnalisée.
+ * Télécharge des modèles IA locaux pour JARVIS.
  *
- * Formats supportés :
- *  - .task  — MediaPipe LLM Inference (Gemma 3 1B, Gemma 2B…)
- *  - .gguf  — llama.cpp (Phi-3, Mistral 7B, LLaMA 3.2, Gemma 2B…)
- *  - .onnx  — ONNX Runtime GenAI (Phi-3 Mini…)
+ * ## Pourquoi certains modèles nécessitent-ils un compte ?
+ * Les modèles LLM (Gemma, LLaMA, Phi, Mistral) sont soumis à des licences
+ * spécifiques par leurs créateurs (Google, Meta, Microsoft, Mistral AI).
+ * HuggingFace et Kaggle imposent l'acceptation de ces licences via un compte.
  *
- * Les modèles Gemma sont soumis à une licence Google : un jeton HuggingFace
- * gratuit est nécessaire après acceptation de la licence sur huggingface.co.
+ * ## Comment télécharger sans compte (méthode recommandée) :
+ * 1. Cliquez sur "Ouvrir la page de téléchargement" dans JARVIS.
+ * 2. Le navigateur s'ouvre sur la page du modèle (HuggingFace ou Kaggle).
+ * 3. Téléchargez le fichier .task manuellement (le navigateur gère la session).
+ * 4. Revenez dans JARVIS → Modèles Locaux → "Importer un fichier .task".
+ *
+ * ## Téléchargement automatique (méthode avancée) :
+ * Générez un jeton gratuit sur huggingface.co/settings/tokens
+ * et collez-le dans le champ "Jeton HuggingFace" ci-dessus.
  */
 object ModelDownloader {
 
@@ -34,119 +41,139 @@ object ModelDownloader {
 
     data class ModelEntry(
         val label: String,
-        val url: String,
+        val url: String,                   // URL de téléchargement direct (HF API)
+        val pageUrl: String,               // Page web à ouvrir dans le navigateur
         val format: LocalLlmManager.LocalModelFormat,
         val sizeHint: String,
         val needsHfToken: Boolean = false,
-        val description: String = ""
+        val description: String = "",
+        val creator: String = ""
     )
 
     val MODEL_CATALOG: List<ModelEntry> = listOf(
 
-        // ─── Gemma ──────────────────────────────────────────────────────────
+        // ─── Gemma (Google) ─────────────────────────────────────────────────
+        // Licence Google Gemma — compte HuggingFace ou Kaggle requis
         ModelEntry(
-            label        = "🟢 Gemma 3 1B — Google (recommandé)",
-            url          = "https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-int4.task?download=true",
+            label        = "🟢 Gemma 3 1B — Google (550 Mo)",
+            url          = "https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-int4.task",
+            pageUrl      = "https://huggingface.co/litert-community/Gemma3-1B-IT",
             format       = LocalLlmManager.LocalModelFormat.TASK,
             sizeHint     = "~550 Mo",
             needsHfToken = true,
-            description  = "Léger, rapide, multilingue. Jeton HuggingFace requis (licence Google Gemma)."
+            creator      = "Google",
+            description  = "Léger et rapide. Meilleur rapport taille/qualité. Licence Google Gemma."
         ),
         ModelEntry(
-            label        = "🟢 Gemma 3 1B — miroir sans compte",
-            url          = "https://huggingface.co/Instamath-works/Gemma3-1B-IT-task/resolve/main/gemma3-1B-it-int4.task?download=true",
-            format       = LocalLlmManager.LocalModelFormat.TASK,
-            sizeHint     = "~550 Mo",
-            needsHfToken = false,
-            description  = "Miroir communautaire. Aucun compte requis."
-        ),
-        ModelEntry(
-            label        = "🟢 Gemma 2 2B — Google",
-            url          = "https://huggingface.co/litert-community/Gemma2-2B-IT/resolve/main/gemma2-2b-it-cpu-int4.task?download=true",
+            label        = "🟢 Gemma 2 2B — Google (1.1 Go)",
+            url          = "https://huggingface.co/litert-community/Gemma2-2B-IT/resolve/main/gemma2-2b-it-cpu-int4.task",
+            pageUrl      = "https://huggingface.co/litert-community/Gemma2-2B-IT",
             format       = LocalLlmManager.LocalModelFormat.TASK,
             sizeHint     = "~1.1 Go",
             needsHfToken = true,
-            description  = "Plus précis que 1B. Jeton HF requis."
+            creator      = "Google",
+            description  = "Plus précis que 1B. Requiert 4 Go RAM. Licence Google Gemma."
+        ),
+        // Miroir communautaire — ne nécessite pas de jeton (non-officiel)
+        ModelEntry(
+            label        = "🟢 Gemma 3 1B — Miroir libre (550 Mo)",
+            url          = "https://huggingface.co/Instamath-works/Gemma3-1B-IT-task/resolve/main/gemma3-1B-it-int4.task",
+            pageUrl      = "https://huggingface.co/Instamath-works/Gemma3-1B-IT-task",
+            format       = LocalLlmManager.LocalModelFormat.TASK,
+            sizeHint     = "~550 Mo",
+            needsHfToken = false,
+            creator      = "Communauté",
+            description  = "Miroir communautaire de Gemma 3 1B. Aucun compte requis. Peut être retiré sans préavis."
         ),
 
-        // ─── LLaMA ──────────────────────────────────────────────────────────
+        // ─── LLaMA (Meta) ───────────────────────────────────────────────────
+        // Licence Meta LLaMA — compte HuggingFace requis + acceptation licence
         ModelEntry(
-            label        = "🦙 LLaMA 3.2 1B — Meta",
-            url          = "https://huggingface.co/litert-community/Llama-3.2-1B-Instruct/resolve/main/llama-3.2-1b-it-int4.task?download=true",
+            label        = "🦙 LLaMA 3.2 1B — Meta (700 Mo)",
+            url          = "https://huggingface.co/litert-community/Llama-3.2-1B-Instruct/resolve/main/llama-3.2-1b-it-int4.task",
+            pageUrl      = "https://huggingface.co/litert-community/Llama-3.2-1B-Instruct",
             format       = LocalLlmManager.LocalModelFormat.TASK,
             sizeHint     = "~700 Mo",
-            needsHfToken = false,
-            description  = "Meta LLaMA 3.2 1B Instruct — performant en français."
+            needsHfToken = true,
+            creator      = "Meta",
+            description  = "LLaMA 3.2 1B Instruct — performant en français. Licence Meta."
         ),
         ModelEntry(
-            label        = "🦙 LLaMA 3.2 3B — Meta",
-            url          = "https://huggingface.co/litert-community/Llama-3.2-3B-Instruct/resolve/main/llama-3.2-3b-it-int4.task?download=true",
+            label        = "🦙 LLaMA 3.2 3B — Meta (2.0 Go)",
+            url          = "https://huggingface.co/litert-community/Llama-3.2-3B-Instruct/resolve/main/llama-3.2-3b-it-int4.task",
+            pageUrl      = "https://huggingface.co/litert-community/Llama-3.2-3B-Instruct",
             format       = LocalLlmManager.LocalModelFormat.TASK,
             sizeHint     = "~2.0 Go",
-            needsHfToken = false,
-            description  = "Meilleure qualité. Nécessite 4 Go de RAM disponible."
+            needsHfToken = true,
+            creator      = "Meta",
+            description  = "Meilleure qualité. 4 Go RAM requis. Licence Meta."
         ),
 
-        // ─── Phi ────────────────────────────────────────────────────────────
+        // ─── Phi (Microsoft) ────────────────────────────────────────────────
+        // Phi-2 et Phi-3 Mini sont sous licence MIT — libres !
         ModelEntry(
-            label        = "🔷 Phi-3 Mini 4K — Microsoft",
-            url          = "https://huggingface.co/litert-community/Phi-3-mini-4k-instruct/resolve/main/phi-3-mini-4k-it-int4.task?download=true",
-            format       = LocalLlmManager.LocalModelFormat.TASK,
-            sizeHint     = "~2.2 Go",
-            needsHfToken = false,
-            description  = "Microsoft Phi-3 Mini — excellent raisonnement logique."
-        ),
-        ModelEntry(
-            label        = "🔷 Phi-2 — Microsoft (léger)",
-            url          = "https://huggingface.co/litert-community/phi-2/resolve/main/phi-2-int4.task?download=true",
+            label        = "🔷 Phi-2 — Microsoft LIBRE (800 Mo)",
+            url          = "https://huggingface.co/litert-community/phi-2/resolve/main/phi-2-int4.task",
+            pageUrl      = "https://huggingface.co/litert-community/phi-2",
             format       = LocalLlmManager.LocalModelFormat.TASK,
             sizeHint     = "~800 Mo",
             needsHfToken = false,
-            description  = "Phi-2 compact — bon pour appareils avec 3 Go de RAM."
+            creator      = "Microsoft",
+            description  = "Phi-2 — licence MIT ouverte. Bon pour raisonnement logique. 3 Go RAM min."
+        ),
+        ModelEntry(
+            label        = "🔷 Phi-3 Mini 4K — Microsoft (2.2 Go)",
+            url          = "https://huggingface.co/litert-community/Phi-3-mini-4k-instruct/resolve/main/phi-3-mini-4k-it-int4.task",
+            pageUrl      = "https://huggingface.co/litert-community/Phi-3-mini-4k-instruct",
+            format       = LocalLlmManager.LocalModelFormat.TASK,
+            sizeHint     = "~2.2 Go",
+            needsHfToken = false,
+            creator      = "Microsoft",
+            description  = "Phi-3 Mini — licence MIT. Excellent raisonnement. 4 Go RAM requis."
         ),
 
-        // ─── Mistral ────────────────────────────────────────────────────────
+        // ─── Mistral AI ─────────────────────────────────────────────────────
+        // Apache 2.0 — licence libre !
         ModelEntry(
-            label        = "⚡ Mistral 7B Instruct — Mistral AI",
-            url          = "https://huggingface.co/litert-community/Mistral-7B-Instruct-v0.3/resolve/main/mistral-7b-it-int4.task?download=true",
+            label        = "⚡ Mistral 7B Instruct — LIBRE (4.1 Go)",
+            url          = "https://huggingface.co/litert-community/Mistral-7B-Instruct-v0.3/resolve/main/mistral-7b-it-int4.task",
+            pageUrl      = "https://huggingface.co/litert-community/Mistral-7B-Instruct-v0.3",
             format       = LocalLlmManager.LocalModelFormat.TASK,
             sizeHint     = "~4.1 Go",
             needsHfToken = false,
-            description  = "Puissant, multilingue. Nécessite 6+ Go de RAM disponible."
+            creator      = "Mistral AI",
+            description  = "Licence Apache 2.0. Puissant et multilingue. 6+ Go RAM requis."
         ),
 
-        // ─── Falcon ─────────────────────────────────────────────────────────
+        // ─── Falcon (TII) ───────────────────────────────────────────────────
+        // Apache 2.0 — licence libre !
         ModelEntry(
-            label        = "🦅 Falcon 1B — TII (ultra léger)",
-            url          = "https://huggingface.co/litert-community/falcon-1b/resolve/main/falcon-1b-int4.task?download=true",
+            label        = "🦅 Falcon 1B — TII LIBRE (600 Mo)",
+            url          = "https://huggingface.co/litert-community/falcon-1b/resolve/main/falcon-1b-int4.task",
+            pageUrl      = "https://huggingface.co/litert-community/falcon-1b",
             format       = LocalLlmManager.LocalModelFormat.TASK,
             sizeHint     = "~600 Mo",
             needsHfToken = false,
-            description  = "Falcon 1B — ultra léger, idéal pour appareils modestes."
+            creator      = "TII",
+            description  = "Falcon 1B — licence Apache 2.0. Ultra léger. Idéal pour appareils modestes."
         )
     )
 
     // Rétrocompatibilité
     val RECOMMENDED_MODEL_URL   = MODEL_CATALOG[0].url
     val RECOMMENDED_MODEL_LABEL = MODEL_CATALOG[0].label
-    val NO_KEY_MODEL_URL        = MODEL_CATALOG[1].url
-    val NO_KEY_MODEL_LABEL      = MODEL_CATALOG[1].label
-
+    val NO_KEY_MODEL_URL        = MODEL_CATALOG[2].url   // miroir Gemma sans token
+    val NO_KEY_MODEL_LABEL      = MODEL_CATALOG[2].label
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Téléchargement
+    // Téléchargement automatique (avec ou sans jeton HF)
     // ─────────────────────────────────────────────────────────────────────────
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(0, TimeUnit.MILLISECONDS) // Pas de timeout pour les gros modèles
+        .readTimeout(0, TimeUnit.MILLISECONDS)
         .build()
 
-    /**
-     * Télécharge un modèle depuis [url].
-     * Le fichier est sauvegardé dans le répertoire privé de l'app
-     * sous le nom déduit du format : local_model.task / local_model.gguf / local_model.onnx.
-     */
     suspend fun download(
         context: Context,
         url: String,
@@ -161,29 +188,34 @@ object ModelDownloader {
             }
 
             client.newCall(requestBuilder.build()).execute().use { response ->
-                if (!response.isSuccessful) {
-                    onProgress(
-                        Progress.Error(
-                            "Échec (${response.code}). Vérifie ton jeton Hugging Face et que tu as " +
-                                "accepté la licence du modèle sur sa page huggingface.co."
-                        )
-                    )
-                    return@withContext
+                when {
+                    response.code == 401 || response.code == 403 -> {
+                        onProgress(Progress.Error(
+                            "🔒 Accès refusé (${response.code}).\n\n" +
+                            "Ce modèle nécessite un compte HuggingFace.\n" +
+                            "→ Appuyez sur \"Ouvrir dans le navigateur\" pour télécharger manuellement.\n" +
+                            "→ Ou générez un jeton gratuit sur huggingface.co/settings/tokens"
+                        ))
+                        return@withContext
+                    }
+                    !response.isSuccessful -> {
+                        onProgress(Progress.Error("Échec (${response.code}) : ${response.message}"))
+                        return@withContext
+                    }
                 }
 
-                val body = response.body
-                if (body == null) {
+                val body = response.body ?: run {
                     onProgress(Progress.Error("Réponse vide du serveur."))
                     return@withContext
                 }
 
-                val totalBytes = body.contentLength()
                 val extension = when (format) {
                     LocalLlmManager.LocalModelFormat.GGUF -> "gguf"
                     LocalLlmManager.LocalModelFormat.ONNX -> "onnx"
                     LocalLlmManager.LocalModelFormat.TASK -> "task"
                 }
                 val destFile = File(context.filesDir, "local_model.$extension")
+                val totalBytes = body.contentLength()
                 var downloaded = 0L
                 var lastPercent = -1
 
@@ -216,7 +248,7 @@ object ModelDownloader {
         }
     }
 
-    /** Surcharge rétrocompatible (sans format explicite → TASK). */
+    /** Surcharge rétrocompatible. */
     suspend fun download(
         context: Context,
         url: String,
