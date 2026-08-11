@@ -17,11 +17,12 @@ object JarvisCommandParser {
     private val INFORMATIONAL_ACTIONS = setOf(
         "list_files", "search_files", "read_file", "storage_info",
         "today_events", "upcoming_events", "search_event",
-        "read_sms", "read_unread_sms", "recent_calls",
-        "read_emails", "read_unread_emails",
+        "read_sms", "read_unread_sms", "search_sms", "recent_calls",
+        "read_emails", "read_unread_emails", "search_email", "read_email_content",
         "get_notifications", "bluetooth_info", "wifi_info",
         "web_search", "get_location", "search_contact",
-        "github_list_repos", "github_read_file"
+        "github_list_repos", "github_read_file",
+        "search_contact_profile", "list_contacts_by_category"
     )
 
     /**
@@ -67,6 +68,11 @@ object JarvisCommandParser {
                 else SmsController.sendSms(context, to, body)
             }
             "read_sms" -> SmsController.readInboxSms(context, json.optInt("count", 5))
+            "search_sms" -> {
+                val query = json.optString("query", "")
+                if (query.isBlank()) "❌ Aucun mot-clé de recherche fourni."
+                else SmsController.searchSms(context, query, json.optInt("count", 10))
+            }
             "read_unread_sms" -> SmsController.readUnreadSms(context)
 
             "search_contact" -> {
@@ -108,6 +114,12 @@ object JarvisCommandParser {
 
             "read_emails" -> EmailController.readInbox(context, json.optInt("count", 5))
             "read_unread_emails" -> EmailController.readUnread(context)
+            "search_email" -> {
+                val query = json.optString("query", "")
+                if (query.isBlank()) "❌ Aucun mot-clé de recherche fourni."
+                else EmailController.searchEmails(context, query)
+            }
+            "read_email_content" -> EmailController.readEmailContent(context, json.optInt("index", 1))
             "send_email" -> {
                 val to = json.optString("to", "")
                 val subject = json.optString("subject", "")
@@ -274,6 +286,37 @@ object JarvisCommandParser {
                         json.optString("body", "")
                     )
                 }
+            }
+
+            "save_contact_profile" -> {
+                val name = json.optString("name", "")
+                if (name.isBlank()) "❌ Nom du contact manquant."
+                else PeopleController.saveContact(
+                    context, name,
+                    json.optString("category", "autre"),
+                    json.optString("phone", "").ifBlank { null },
+                    json.optString("email", "").ifBlank { null },
+                    json.optString("address", "").ifBlank { null },
+                    if (json.has("latitude")) json.optDouble("latitude") else null,
+                    if (json.has("longitude")) json.optDouble("longitude") else null,
+                    json.optString("notes", "").ifBlank { null }
+                )
+            }
+            "search_contact_profile" -> {
+                val query = json.optString("query", "")
+                if (query.isBlank()) "❌ Aucun terme de recherche fourni."
+                else PeopleController.searchContacts(context, query)
+            }
+            "list_contacts_by_category" -> PeopleController.listByCategory(context, json.optString("category", ""))
+            "delete_contact_profile" -> {
+                val name = json.optString("name", "")
+                if (name.isBlank()) "❌ Nom du contact manquant."
+                else PeopleController.deleteContact(context, name)
+            }
+            "navigate_to_contact" -> {
+                val name = json.optString("name", "")
+                if (name.isBlank()) "❌ Nom du contact manquant."
+                else PeopleController.navigateToContact(context, name)
             }
 
             else -> "❌ Commande système inconnue : « $action »."

@@ -26,11 +26,14 @@ object ApiClient {
             "• Call : {\"action\":\"call\", \"target\":\"Maman ou 0612345678\"}\n" +
             "• SMS : {\"action\":\"send_sms\", \"to\":\"Pierre\", \"message\":\"Coucou\"}\n" +
             "• Lire SMS : {\"action\":\"read_sms\", \"count\":5} (utilise count:1 si l'utilisateur demande seulement « le dernier »)\n" +
+            "• Chercher un SMS : {\"action\":\"search_sms\", \"query\":\"Pierre\"} (cherche dans le contenu ET l'expéditeur — utilise ça pour toute demande du type « trouve le SMS de X », « cherche le message qui parle de Y »)\n" +
             "• Contacts : {\"action\":\"search_contact\", \"name\":\"Jean\"}\n" +
             "• Musique : {\"action\":\"play_music\", \"query\":\"Jazz\"}, {\"action\":\"pause_music\"}, {\"action\":\"stop_music\"}, {\"action\":\"set_volume\", \"level\":8}\n" +
             "• Agenda : {\"action\":\"today_events\"}, {\"action\":\"upcoming_events\", \"days\":7}, {\"action\":\"create_event\", \"title\":\"Rendez-vous docteur\", \"startTime\":1700000000000}, {\"action\":\"search_event\", \"query\":\"docteur\"}, {\"action\":\"update_event\", \"eventId\":42, \"newTitle\":\"nouveau titre\", \"newStartTime\":1700000000000}, {\"action\":\"delete_event\", \"eventId\":42}\n" +
             "  (IMPORTANT : pour modifier/supprimer un événement, cherche-le d'abord avec search_event ou today_events/upcoming_events pour obtenir son ID, visible entre parenthèses après chaque événement listé)\n" +
-            "• Emails : {\"action\":\"read_emails\"}, {\"action\":\"send_email\", \"to\":\"contact@mail.com\", \"subject\":\"Projet\", \"body\":\"Bonjour\"}\n" +
+            "• Emails : {\"action\":\"read_emails\"}, {\"action\":\"send_email\", \"to\":\"contact@mail.com\", \"subject\":\"Projet\", \"body\":\"Bonjour\"}, " +
+            "{\"action\":\"search_email\", \"query\":\"facture\"} (cherche dans le sujet, le corps ET l'expéditeur), " +
+            "{\"action\":\"read_email_content\", \"index\":1} (lit le contenu complet du n-ième email de la boîte de réception)\n" +
             "• Fichiers : {\"action\":\"list_files\", \"path\":\"/sdcard/Downloads\"}, {\"action\":\"search_files\", \"query\":\"rapport\"}, {\"action\":\"read_file\", \"path\":\"/sdcard/notes.txt\"}, {\"action\":\"write_file\", \"path\":\"/sdcard/notes.txt\", \"content\":\"texte à écrire\"}, {\"action\":\"rename_file\", \"oldPath\":\"/sdcard/a.txt\", \"newName\":\"b.txt\"}, {\"action\":\"copy_file\", \"source\":\"/sdcard/a.txt\", \"dest\":\"/sdcard/Documents/a.txt\"}, {\"action\":\"move_file\", \"source\":\"/sdcard/a.txt\", \"dest\":\"/sdcard/Documents/a.txt\"}, {\"action\":\"delete_file\", \"path\":\"/sdcard/a.txt\"}, {\"action\":\"create_folder\", \"path\":\"/sdcard/NouveauDossier\"}, {\"action\":\"storage_info\"}\n" +
             "• GPS / Itinéraire : {\"action\":\"get_location\"}, {\"action\":\"open_maps\", \"query\":\"Tour Eiffel\"}\n" +
             "  (open_maps sert UNIQUEMENT à afficher un itinéraire routier. Ne JAMAIS l'utiliser pour des horaires, avis, infos pratiques sur un lieu.)\n" +
@@ -45,6 +48,14 @@ object ApiClient {
             "  (github_create_file sert AUSSI à modifier un fichier existant, pas besoin d'action séparée. " +
             "Pour créer un projet complet avec plusieurs fichiers, inclus PLUSIEURS blocs [JARVIS_CMD:...] à la suite dans ta réponse, un par fichier. " +
             "Le champ « content » doit être un JSON valide : échappe bien les retours à la ligne (\\n) et les guillemets (\\\") à l'intérieur du code.)\n" +
+            "• Base de contacts JARVIS : {\"action\":\"save_contact_profile\", \"name\":\"Pierre Dupont\", \"category\":\"travail\", \"phone\":\"0612345678\", \"email\":\"...\", \"address\":\"12 rue X, Paris\", \"notes\":\"Chef de projet chez Y\"}, " +
+            "{\"action\":\"search_contact_profile\", \"query\":\"Pierre\"}, {\"action\":\"list_contacts_by_category\", \"category\":\"travail\"} (catégories : travail, personnel, famille, autre — " +
+            "\"tous\" pour tout lister), {\"action\":\"delete_contact_profile\", \"name\":\"Pierre Dupont\"}, " +
+            "{\"action\":\"navigate_to_contact\", \"name\":\"Pierre Dupont\"} (ouvre l'itinéraire vers l'adresse ou les coordonnées GPS enregistrées de ce contact — utilise ça pour « emmène-moi chez X », « guide-moi vers le client Y »)\n" +
+            "  (Ces fiches sont enregistrées directement comme notes dans le vault Obsidian de l'utilisateur, dossier Contacts/ — visibles et éditables aussi depuis l'app Obsidian elle-même, pas une base cachée. " +
+            "Cette couche est DISTINCTE du carnet d'adresses du téléphone : c'est une couche enrichie que TU peux alimenter toi-même. " +
+            "Quand tu lis un SMS, un email ou un événement d'agenda qui révèle des infos utiles sur une personne (numéro, adresse, employeur, contexte pro/perso), " +
+            "propose spontanément d'enregistrer ou de mettre à jour sa fiche avec save_contact_profile, sans attendre que l'utilisateur te le demande explicitement à chaque fois.)\n" +
             "• Bluetooth : {\"action\":\"bluetooth_info\"}, {\"action\":\"enable_bluetooth\"}, {\"action\":\"disable_bluetooth\"}\n" +
             "• Wi-Fi : {\"action\":\"wifi_info\"}, {\"action\":\"enable_wifi\"}, {\"action\":\"disable_wifi\"}\n\n" +
             "Exemple de réponse : \"Très bien Monsieur, j'appelle Maman tout de suite. [JARVIS_CMD:{\"action\":\"call\",\"target\":\"Maman\"}]\""
