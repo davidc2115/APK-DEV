@@ -160,6 +160,37 @@ object JarvisCommandParser {
             "enable_wifi" -> WifiController.enableWifi(context)
             "disable_wifi" -> WifiController.disableWifi(context)
 
+            "web_search" -> {
+                val query = json.optString("query", "")
+                WebSearchController.search(context, query)
+            }
+
+            "delete_event" -> {
+                val eventId = json.optLong("eventId", -1)
+                if (eventId == -1L) "❌ Identifiant d'événement manquant."
+                else CalendarController.deleteEvent(context, eventId)
+            }
+            "update_event" -> {
+                val eventId = json.optLong("eventId", -1)
+                if (eventId == -1L) {
+                    "❌ Identifiant d'événement manquant."
+                } else {
+                    CalendarController.updateEvent(
+                        context,
+                        eventId,
+                        newTitle = json.optString("newTitle", "").ifBlank { null },
+                        newStartTimeMillis = if (json.has("newStartTime")) json.optLong("newStartTime") else null,
+                        newEndTimeMillis = if (json.has("newEndTime")) json.optLong("newEndTime") else null,
+                        newDescription = json.optString("newDescription", "").ifBlank { null },
+                        newLocation = json.optString("newLocation", "").ifBlank { null }
+                    )
+                }
+            }
+            "search_event" -> {
+                val query = json.optString("query", "")
+                CalendarController.searchEvents(context, query)
+            }
+
             else -> "❌ Commande système inconnue : « $action »."
         }
     }

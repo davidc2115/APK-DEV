@@ -75,12 +75,13 @@ object CalendarController {
                 var idx = 0
 
                 while (c.moveToNext()) {
+                    val eventId = c.getLong(0)
                     val eventTitle = c.getString(1) ?: "Sans titre"
                     val dtStart = c.getLong(2)
                     val location = c.getString(3) ?: ""
                     val timeStr = sdf.format(Date(dtStart))
 
-                    sb.append("${idx + 1}. **$eventTitle** — $timeStr\n")
+                    sb.append("${idx + 1}. **$eventTitle** — $timeStr (ID: $eventId)\n")
                     if (location.isNotBlank()) sb.append("   📍 $location\n")
                     sb.append("\n")
                     idx++
@@ -147,12 +148,54 @@ object CalendarController {
         }
     }
 
+    /**
+     * Modifie un événement existant : renommer, changer les horaires,
+     * le lieu ou la description. Seuls les champs fournis (non nuls)
+     * sont modifiés, les autres restent inchangés.
+     */
+    fun updateEvent(
+        context: Context,
+        eventId: Long,
+        newTitle: String? = null,
+        newStartTimeMillis: Long? = null,
+        newEndTimeMillis: Long? = null,
+        newDescription: String? = null,
+        newLocation: String? = null
+    ): String {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
+            return "❌ Permission de modification de l'agenda non accordée."
+        }
+
+        return try {
+            val values = ContentValues().apply {
+                newTitle?.let { put(CalendarContract.Events.TITLE, it) }
+                newStartTimeMillis?.let { put(CalendarContract.Events.DTSTART, it) }
+                newEndTimeMillis?.let { put(CalendarContract.Events.DTEND, it) }
+                newDescription?.let { put(CalendarContract.Events.DESCRIPTION, it) }
+                newLocation?.let { put(CalendarContract.Events.EVENT_LOCATION, it) }
+            }
+
+            if (values.size() == 0) return "❌ Aucune modification à appliquer."
+
+            val rows = context.contentResolver.update(
+                CalendarContract.Events.CONTENT_URI,
+                values,
+                "${CalendarContract.Events._ID} = ?",
+                arrayOf(eventId.toString())
+            )
+            if (rows > 0) "✏️ Événement mis à jour avec succès." else "❌ Événement introuvable."
+        } catch (e: Exception) {
+            "❌ Erreur lors de la modification : ${e.message}"
+        }
+    }
+
     fun searchEvents(context: Context, query: String): String {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
             return "❌ Permission de lecture de l'agenda non accordée."
         }
 
         val projection = arrayOf(
+            CalendarContract.Events._ID,
             CalendarContract.Events.TITLE,
             CalendarContract.Events.DTSTART,
             CalendarContract.Events.EVENT_LOCATION
@@ -175,11 +218,12 @@ object CalendarController {
                 var idx = 0
 
                 while (c.moveToNext() && idx < 10) {
-                    val title = c.getString(0) ?: "Sans titre"
-                    val date = c.getLong(1)
-                    val location = c.getString(2) ?: ""
+                    val eventId = c.getLong(0)
+                    val title = c.getString(1) ?: "Sans titre"
+                    val date = c.getLong(2)
+                    val location = c.getString(3) ?: ""
 
-                    sb.append("${idx + 1}. **$title** — ${sdf.format(Date(date))}\n")
+                    sb.append("${idx + 1}. **$title** — ${sdf.format(Date(date))} (ID: $eventId)\n")
                     if (location.isNotBlank()) sb.append("   📍 $location\n")
                     sb.append("\n")
                     idx++

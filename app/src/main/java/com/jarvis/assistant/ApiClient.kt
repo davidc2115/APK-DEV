@@ -24,10 +24,14 @@ object ApiClient {
             "• Lire SMS : {\"action\":\"read_sms\", \"count\":5}\n" +
             "• Contacts : {\"action\":\"search_contact\", \"name\":\"Jean\"}\n" +
             "• Musique : {\"action\":\"play_music\", \"query\":\"Jazz\"}, {\"action\":\"pause_music\"}, {\"action\":\"stop_music\"}, {\"action\":\"set_volume\", \"level\":8}\n" +
-            "• Agenda : {\"action\":\"today_events\"}, {\"action\":\"create_event\", \"title\":\"Rendez-vous doctor\", \"startTime\":1700000000000}\n" +
+            "• Agenda : {\"action\":\"today_events\"}, {\"action\":\"upcoming_events\", \"days\":7}, {\"action\":\"create_event\", \"title\":\"Rendez-vous docteur\", \"startTime\":1700000000000}, {\"action\":\"search_event\", \"query\":\"docteur\"}, {\"action\":\"update_event\", \"eventId\":42, \"newTitle\":\"nouveau titre\", \"newStartTime\":1700000000000}, {\"action\":\"delete_event\", \"eventId\":42}\n" +
+            "  (IMPORTANT : pour modifier/supprimer un événement, cherche-le d'abord avec search_event ou today_events/upcoming_events pour obtenir son ID, visible entre parenthèses après chaque événement listé)\n" +
             "• Emails : {\"action\":\"read_emails\"}, {\"action\":\"send_email\", \"to\":\"contact@mail.com\", \"subject\":\"Projet\", \"body\":\"Bonjour\"}\n" +
-            "• Fichiers : {\"action\":\"list_files\", \"path\":\"/sdcard/Downloads\"}, {\"action\":\"storage_info\"}\n" +
-            "• GPS / Maps : {\"action\":\"get_location\"}, {\"action\":\"open_maps\", \"query\":\"Tour Eiffel\"}\n" +
+            "• Fichiers : {\"action\":\"list_files\", \"path\":\"/sdcard/Downloads\"}, {\"action\":\"search_files\", \"query\":\"rapport\"}, {\"action\":\"read_file\", \"path\":\"/sdcard/notes.txt\"}, {\"action\":\"write_file\", \"path\":\"/sdcard/notes.txt\", \"content\":\"texte à écrire\"}, {\"action\":\"rename_file\", \"oldPath\":\"/sdcard/a.txt\", \"newName\":\"b.txt\"}, {\"action\":\"copy_file\", \"source\":\"/sdcard/a.txt\", \"dest\":\"/sdcard/Documents/a.txt\"}, {\"action\":\"move_file\", \"source\":\"/sdcard/a.txt\", \"dest\":\"/sdcard/Documents/a.txt\"}, {\"action\":\"delete_file\", \"path\":\"/sdcard/a.txt\"}, {\"action\":\"create_folder\", \"path\":\"/sdcard/NouveauDossier\"}, {\"action\":\"storage_info\"}\n" +
+            "• GPS / Itinéraire : {\"action\":\"get_location\"}, {\"action\":\"open_maps\", \"query\":\"Tour Eiffel\"}\n" +
+            "  (open_maps sert UNIQUEMENT à afficher un itinéraire routier. Ne JAMAIS l'utiliser pour des horaires, avis, infos pratiques sur un lieu.)\n" +
+            "• Recherche web : {\"action\":\"web_search\", \"query\":\"horaires ouverture pharmacie Rue de Paris\"}\n" +
+            "  (à utiliser pour TOUTE question factuelle sur un lieu ou un sujet : horaires, avis, adresse, infos pratiques, actualité, etc. — jamais open_maps pour ça)\n" +
             "• Notifications : {\"action\":\"get_notifications\"}\n" +
             "• Bluetooth : {\"action\":\"bluetooth_info\"}, {\"action\":\"enable_bluetooth\"}, {\"action\":\"disable_bluetooth\"}\n" +
             "• Wi-Fi : {\"action\":\"wifi_info\"}, {\"action\":\"enable_wifi\"}, {\"action\":\"disable_wifi\"}\n\n" +
@@ -74,7 +78,7 @@ object ApiClient {
             }
         }
 
-    // ─── Mode Automatique avec multi-clés ──────────────────────────────────────
+    // ─── Mode Automatique avec multi-clés + sélection intelligente ────────────
 
     private fun sendAuto(context: Context, history: List<HistoryEntry>): String {
         val candidates = Provider.AUTO_FALLBACK_ORDER.filter {
@@ -86,8 +90,13 @@ object ApiClient {
                 "Ouvre ⚙ Paramètres → onglet « Clés API » et ajoute au moins une clé."
         }
 
+        // Ordonne les candidats selon la nature de la demande de l'utilisateur,
+        // avant de retomber sur l'ordre de repli standard si rien ne correspond.
+        val lastUserEntry = history.lastOrNull { it.role == "user" }
+        val orderedCandidates = rankProvidersForRequest(candidates, lastUserEntry)
+
         var lastError = ""
-        for (provider in candidates) {
+        for (provider in orderedCandidates) {
             val result = try {
                 when (provider) {
                     Provider.CLAUDE -> sendClaudeWithRotation(context, history)
@@ -109,6 +118,50 @@ object ApiClient {
         }
 
         return "Toutes les IA configurées ont échoué. Dernière erreur : $lastError"
+    }
+
+    /**
+     * Classement heuristique (mots-clés) des fournisseurs disponibles selon
+     * la nature de la demande. Ce n'est pas une IA de routage à proprement
+     * parler — juste des règles simples pour prioriser un fournisseur mieux
+     * adapté avant de retomber sur l'ordre de repli standard.
+     */
+    private fun rankProvidersForRequest(candidates: List<Provider>, lastUserEntry: HistoryEntry?): List<Provider> {
+        if (lastUserEntry == null) return candidates
+
+        // Une photo jointe exige un fournisseur capable de vision.
+        if (lastUserEntry.imageBase64 != null) {
+            val visionCapable = listOf(Provider.CLAUDE, Provider.OPENAI, Provider.GEMINI)
+            val preferred = candidates.filter { it in visionCapable }
+            if (preferred.isNotEmpty()) {
+                return preferred + candidates.filterNot { it in preferred }
+            }
+        }
+
+        val text = lastUserEntry.text.lowercase()
+
+        val codeKeywords = listOf(
+            "code", "fonction", "bug", "python", "kotlin", "java", "script",
+            "programme", "compile", "erreur de", "debug", "sql", "regex", "api"
+        )
+        val creativeKeywords = listOf(
+            "histoire", "poème", "poeme", "écris", "ecris", "raconte", "imagine", "rédige", "redige"
+        )
+        val quickKeywords = listOf(
+            "rapide", "vite", "en bref", "résume", "resume", "en une phrase"
+        )
+
+        val preferredOrder: List<Provider> = when {
+            codeKeywords.any { text.contains(it) } -> listOf(Provider.CLAUDE, Provider.OPENAI, Provider.DEEPSEEK)
+            creativeKeywords.any { text.contains(it) } -> listOf(Provider.CLAUDE, Provider.OPENAI)
+            quickKeywords.any { text.contains(it) } -> listOf(Provider.GROQ, Provider.GEMINI)
+            else -> emptyList()
+        }
+
+        if (preferredOrder.isEmpty()) return candidates
+
+        val preferred = preferredOrder.filter { it in candidates }
+        return preferred + candidates.filterNot { it in preferred }
     }
 
     // ─── Modèle local sur l'appareil ──────────────────────────────────────────
