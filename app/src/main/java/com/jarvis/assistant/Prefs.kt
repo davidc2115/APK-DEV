@@ -187,7 +187,10 @@ object Prefs {
         val smtpPort: Int = 587,
         val smtpSsl: Boolean = false,
         val smtpStartTls: Boolean = true,
-        val isDefault: Boolean = false
+        val isDefault: Boolean = false,
+        // OAuth2 Google (AccountManager)
+        val oauthToken: String = "",
+        val isOAuth: Boolean = false
     ) {
         fun toJson(): JSONObject = JSONObject().apply {
             put("id", id); put("label", label); put("email", email)
@@ -195,6 +198,7 @@ object Prefs {
             put("imapHost", imapHost); put("imapPort", imapPort); put("imapSsl", imapSsl)
             put("smtpHost", smtpHost); put("smtpPort", smtpPort); put("smtpSsl", smtpSsl)
             put("smtpStartTls", smtpStartTls); put("isDefault", isDefault)
+            put("oauthToken", oauthToken); put("isOAuth", isOAuth)
         }
 
         companion object {
@@ -210,7 +214,9 @@ object Prefs {
                 smtpPort    = j.optInt("smtpPort", 587),
                 smtpSsl     = j.optBoolean("smtpSsl", false),
                 smtpStartTls= j.optBoolean("smtpStartTls", true),
-                isDefault   = j.optBoolean("isDefault", false)
+                isDefault   = j.optBoolean("isDefault", false),
+                oauthToken  = j.optString("oauthToken", ""),
+                isOAuth     = j.optBoolean("isOAuth", false)
             )
 
             /** Configs pré-remplies pour les grands services. */

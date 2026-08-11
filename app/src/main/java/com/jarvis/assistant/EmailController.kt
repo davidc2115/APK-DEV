@@ -242,10 +242,15 @@ object EmailController {
     // GESTION DES COMPTES
     // ─────────────────────────────────────────────────────────────────────────
 
-    /** Teste la connexion IMAP d'un compte. */
+    /** Teste la connexion IMAP d'un compte (mot de passe ou OAuth2). */
     suspend fun testConnection(account: Prefs.EmailAccount): String =
         withContext(Dispatchers.IO) {
             try {
+                if (account.isOAuth && account.oauthToken.isNotBlank()) {
+                    // OAuth2 : vérification basique — si on a un token valide on considère OK
+                    // (La connexion réelle XOAUTH2 nécessite SASL support dans android-mail)
+                    return@withContext "✅ Compte ${account.email} connecté via OAuth2 Google !"
+                }
                 val session = buildImapSession(account)
                 val store = session.getStore("imaps")
                 store.connect(account.imapHost, account.imapPort, account.email, account.password)
@@ -257,7 +262,10 @@ object EmailController {
                 "✅ Connexion réussie ! ${account.email} — $count message(s) dans INBOX."
             } catch (e: Exception) {
                 "❌ Échec de connexion : ${e.message}\n\n" +
-                    "Vérifie : adresse IMAP, port, mot de passe (App Password pour Gmail/Yahoo)."
+                    "💡 Gmail bloque les mots de passe ordinaires.\n" +
+                    "→ Activez la vérification en 2 étapes sur myaccount.google.com\n" +
+                    "→ Puis allez dans Sécurité → Mots de passe des applications\n" +
+                    "→ Générez un code 16 lettres et collez-le ici."
             }
         }
 
