@@ -18,6 +18,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.util.Locale
 
+/**
+ * Mode Vocal Interactif avec "Barge-In" (Interruption de l'IA quand l'utilisateur parle)
+ * et écoute automatique continue à la fin de la parole.
+ */
 class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private lateinit var orbView: OrbView
@@ -33,7 +37,7 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) startListening() else {
-            statusText.text = "Permission micro requise pour le mode vocal"
+            statusText.text = "Permission micro requise pour le mode vocal."
         }
     }
 
@@ -55,9 +59,14 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
         tts = TextToSpeech(this, this)
 
-        closeButton.setOnClickListener { finish() }
+        closeButton.setOnClickListener {
+            stopSpeechAndTts()
+            finish()
+        }
+
         micToggle.setOnClickListener {
-            if (!isBusy) checkPermissionAndListen()
+            stopSpeechAndTts()
+            checkPermissionAndListen()
         }
 
         checkPermissionAndListen()
@@ -70,22 +79,50 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         if (granted) startListening() else micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
     }
 
+    private fun stopSpeechAndTts() {
+        try {
+            if (tts?.isSpeaking == true) {
+                tts?.stop()
+            }
+        } catch (_: Exception) {}
+    }
+
     private fun startListening() {
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            statusText.text = "Reconnaissance vocale indisponible sur cet appareil"
+            statusText.text = "Reconnaissance vocale indisponible sur cet appareil."
             return
         }
+
+        // Barge-In : Si l'IA parle encore, la stopper immédiatement
+        stopSpeechAndTts()
+
         isBusy = true
         orbView.state = OrbView.OrbState.LISTENING
         statusText.text = "Je vous écoute…"
         transcriptText.text = ""
 
-        speechRecognizer?.destroy()
+        try {
+            speechRecognizer?.destroy()
+        } catch (_: Exception) {}
+
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
             setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) {}
-                override fun onBeginningOfSpeech() {}
-                override fun onRmsChanged(rmsdB: Float) {}
+
+                override fun onBeginningOfSpeech() {
+                    // Barge-In instantané : dès que l'utilisateur commence à parler, couper l'IA
+                    stopSpeechAndTts()
+                    orbView.state = OrbView.OrbState.LISTENING
+                    statusText.text = "Je vous écoute…"
+                }
+
+                override fun onRmsChanged(rmsdB: Float) {
+                    // Si le volume micro dépasse un seuil pendant la parole TTS, interrompre l'IA
+                    if (rmsdB > 6f && tts?.isSpeaking == true) {
+                        stopSpeechAndTts()
+                    }
+                }
+
                 override fun onBufferReceived(buffer: ByteArray?) {}
 
                 override fun onEndOfSpeech() {
@@ -96,7 +133,7 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 override fun onError(error: Int) {
                     isBusy = false
                     orbView.state = OrbView.OrbState.IDLE
-                    statusText.text = "Touchez le micro pour réessayer"
+                    statusText.text = "Touchez l'orbe ou le micro pour parler."
                 }
 
                 override fun onResults(results: Bundle?) {
@@ -108,7 +145,7 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     } else {
                         isBusy = false
                         orbView.state = OrbView.OrbState.IDLE
-                        statusText.text = "Je n'ai rien entendu. Touchez le micro."
+                        statusText.text = "Je n'ai rien entendu. Touchez le micro pour réessayer."
                     }
                 }
 
@@ -136,13 +173,14 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun speak(text: String) {
+        stopSpeechAndTts()
         orbView.state = OrbView.OrbState.SPEAKING
         statusText.text = "JARVIS répond…"
 
         if (!ttsReady) {
             isBusy = false
             orbView.state = OrbView.OrbState.IDLE
-            statusText.text = "Touchez le micro pour parler"
+            statusText.text = "Touchez le micro pour parler."
             return
         }
 
@@ -152,8 +190,8 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             override fun onDone(utteranceId: String?) {
                 runOnUiThread {
                     isBusy = false
-                    orbView.state = OrbView.OrbState.IDLE
-                    statusText.text = "Touchez le micro pour parler"
+                    // Écoute automatique continue à la fin de la réponse JARVIS
+                    checkPermissionAndListen()
                 }
             }
 
@@ -165,6 +203,7 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             }
         })
+
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "jarvis_utterance")
     }
 
@@ -176,9 +215,11 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     override fun onDestroy() {
-        speechRecognizer?.destroy()
-        tts?.stop()
-        tts?.shutdown()
+        stopSpeechAndTts()
+        try {
+            speechRecognizer?.destroy()
+            tts?.shutdown()
+        } catch (_: Exception) {}
         super.onDestroy()
     }
 }

@@ -1,0 +1,238 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/background_dark"
+    android:padding="20dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <!-- Titre -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="🧠 Second Brain — Obsidian"
+            android:textColor="@color/cyan_accent"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:id="@+id/obsidianVaultPathText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_input"
+            android:padding="12dp"
+            android:text="Vault : /sdcard/Documents/JARVIS-Vault"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp"
+            android:layout_marginBottom="4dp" />
+
+        <!-- Boutons rapides -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="16dp">
+
+            <TextView
+                android:id="@+id/btnInitVault"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_input"
+                android:gravity="center"
+                android:text="⚙ Init Vault"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:layout_marginEnd="6dp" />
+
+            <TextView
+                android:id="@+id/btnChangeVaultPath"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_input"
+                android:gravity="center"
+                android:text="📁 Changer Dossier"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:layout_marginEnd="6dp" />
+
+            <TextView
+                android:id="@+id/btnOpenObsidian"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_mic_button"
+                android:gravity="center"
+                android:text="🟣 Obsidian"
+                android:textColor="@color/background_dark"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- ══════════════════════════════════════════════════════════════════ -->
+        <!-- SECTION : Créer une note                                          -->
+        <!-- ══════════════════════════════════════════════════════════════════ -->
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="📝 Créer une note"
+            android:textColor="@color/cyan_accent"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <EditText
+            android:id="@+id/obsidianNoteInput"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:background="@drawable/bg_input"
+            android:hint="Titre de la note..."
+            android:inputType="text"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_secondary"
+            android:layout_marginBottom="8dp" />
+
+        <EditText
+            android:id="@+id/obsidianContentInput"
+            android:layout_width="match_parent"
+            android:layout_height="120dp"
+            android:background="@drawable/bg_input"
+            android:hint="Contenu de la note..."
+            android:inputType="textMultiLine"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:paddingTop="12dp"
+            android:gravity="top"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_secondary"
+            android:layout_marginBottom="8dp" />
+
+        <EditText
+            android:id="@+id/obsidianFolderInput"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:background="@drawable/bg_input"
+            android:hint="Dossier (ex: Notes Rapides, Tâches, Réflexions...)"
+            android:inputType="text"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_secondary"
+            android:layout_marginBottom="8dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="20dp">
+
+            <TextView
+                android:id="@+id/btnCreateNote"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_mic_button"
+                android:gravity="center"
+                android:text="📝 CRÉER LA NOTE"
+                android:textColor="@color/background_dark"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:layout_marginEnd="8dp" />
+
+            <TextView
+                android:id="@+id/btnDailyNote"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_input"
+                android:gravity="center"
+                android:text="📅 Note du Jour"
+                android:textColor="@color/cyan_accent"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- ══════════════════════════════════════════════════════════════════ -->
+        <!-- SECTION : Rechercher                                              -->
+        <!-- ══════════════════════════════════════════════════════════════════ -->
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="🔍 Chercher dans vos notes"
+            android:textColor="@color/cyan_accent"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="20dp">
+
+            <EditText
+                android:id="@+id/obsidianSearchInput"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_input"
+                android:hint="Rechercher dans les notes..."
+                android:inputType="text"
+                android:paddingStart="14dp"
+                android:paddingEnd="14dp"
+                android:textColor="@color/text_primary"
+                android:textColorHint="@color/text_secondary"
+                android:layout_marginEnd="8dp" />
+
+            <TextView
+                android:id="@+id/btnSearchNotes"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_mic_button"
+                android:gravity="center"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:text="🔍"
+                android:textColor="@color/background_dark"
+                android:textSize="18sp" />
+        </LinearLayout>
+
+        <!-- Liste des notes -->
+        <TextView
+            android:id="@+id/btnListNotes"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:background="@drawable/bg_input"
+            android:gravity="center"
+            android:text="📋 Voir toutes mes notes"
+            android:textColor="@color/text_secondary"
+            android:textSize="13sp"
+            android:layout_marginBottom="20dp" />
+
+        <!-- ══════════════════════════════════════════════════════════════════ -->
+        <!-- ZONE RÉSULTAT                                                     -->
+        <!-- ══════════════════════════════════════════════════════════════════ -->
+
+        <TextView
+            android:id="@+id/obsidianResultText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_bubble_ai"
+            android:minHeight="80dp"
+            android:padding="14dp"
+            android:text="💡 Créez votre première note ou initialisez le vault."
+            android:textColor="@color/text_primary"
+            android:textSize="13sp" />
+
+    </LinearLayout>
+</ScrollView>
