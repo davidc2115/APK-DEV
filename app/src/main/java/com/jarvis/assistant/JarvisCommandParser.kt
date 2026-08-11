@@ -6,9 +6,21 @@ import org.json.JSONObject
 object JarvisCommandParser {
 
     sealed class CommandResult {
-        data class Executed(val outputMessage: String) : CommandResult()
+        data class Executed(val outputMessage: String, val action: String, val isInformational: Boolean) : CommandResult()
         object None : CommandResult()
     }
+
+    // Actions qui RENVOIENT une information à présenter (l'IA doit reformuler
+    // naturellement le résultat). Les autres actions sont des confirmations
+    // d'exécution (ex: "SMS envoyé") qui n'ont pas besoin d'être reformulées.
+    private val INFORMATIONAL_ACTIONS = setOf(
+        "list_files", "search_files", "read_file", "storage_info",
+        "today_events", "upcoming_events", "search_event",
+        "read_sms", "read_unread_sms", "recent_calls",
+        "read_emails", "read_unread_emails",
+        "get_notifications", "bluetooth_info", "wifi_info",
+        "web_search", "get_location", "search_contact"
+    )
 
     suspend fun parseAndExecute(context: Context, llmResponse: String): CommandResult {
         val regex = Regex("\\[JARVIS_CMD:(.*?)\\]", RegexOption.DOT_MATCHES_ALL)
@@ -19,9 +31,9 @@ object JarvisCommandParser {
             val json = JSONObject(jsonStr)
             val action = json.optString("action", "").lowercase()
             val resultText = executeAction(context, action, json)
-            CommandResult.Executed(resultText)
+            CommandResult.Executed(resultText, action, action in INFORMATIONAL_ACTIONS)
         } catch (e: Exception) {
-            CommandResult.Executed("❌ Erreur d'exécution de la commande système : ${e.message}")
+            CommandResult.Executed("❌ Erreur d'exécution de la commande système : ${e.message}", "", false)
         }
     }
 

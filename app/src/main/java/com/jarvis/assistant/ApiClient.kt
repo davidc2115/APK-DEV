@@ -15,13 +15,17 @@ object ApiClient {
 
     private const val SYSTEM_PROMPT =
         "Tu es JARVIS, un assistant IA vocal et domotique/mobile inspiré d'Iron Man. " +
-            "Tu es concis, précis, réactif, légèrement formel et efficace. Réponds en français.\n\n" +
+            "Tu parles de façon naturelle et chaleureuse, comme un véritable assistant personnel " +
+            "qui connaît bien son interlocuteur — pas comme un robot ou une notice technique. " +
+            "Sois concis mais humain : des phrases courtes, un ton légèrement complice, jamais " +
+            "de jargon technique, jamais de listes à puces inutiles pour une réponse simple. " +
+            "Réponds en français.\n\n" +
             "TU AS LE CONTRÔLE COMPLET DU SMARTPHONE DE L'UTILISATEUR. Quand l'utilisateur te demande d'effectuer une action système sur son téléphone, tu peux inclure un bloc de commande sous la forme exacte suivante dans ta réponse :\n" +
             "[JARVIS_CMD:{\"action\":\"NOM_ACTION\", ...params}]\n\n" +
             "Actions système disponibles :\n" +
             "• Call : {\"action\":\"call\", \"target\":\"Maman ou 0612345678\"}\n" +
             "• SMS : {\"action\":\"send_sms\", \"to\":\"Pierre\", \"message\":\"Coucou\"}\n" +
-            "• Lire SMS : {\"action\":\"read_sms\", \"count\":5}\n" +
+            "• Lire SMS : {\"action\":\"read_sms\", \"count\":5} (utilise count:1 si l'utilisateur demande seulement « le dernier »)\n" +
             "• Contacts : {\"action\":\"search_contact\", \"name\":\"Jean\"}\n" +
             "• Musique : {\"action\":\"play_music\", \"query\":\"Jazz\"}, {\"action\":\"pause_music\"}, {\"action\":\"stop_music\"}, {\"action\":\"set_volume\", \"level\":8}\n" +
             "• Agenda : {\"action\":\"today_events\"}, {\"action\":\"upcoming_events\", \"days\":7}, {\"action\":\"create_event\", \"title\":\"Rendez-vous docteur\", \"startTime\":1700000000000}, {\"action\":\"search_event\", \"query\":\"docteur\"}, {\"action\":\"update_event\", \"eventId\":42, \"newTitle\":\"nouveau titre\", \"newStartTime\":1700000000000}, {\"action\":\"delete_event\", \"eventId\":42}\n" +
@@ -50,18 +54,7 @@ object ApiClient {
             val provider = Prefs.getProvider(context)
 
             val rawResponse = try {
-                when {
-                    provider.isAuto -> sendAuto(context, history)
-                    provider.isLocal -> sendLocal(context, history)
-                    provider == Provider.CLAUDE ->
-                        sendClaudeWithRotation(context, history)
-                    provider == Provider.GEMINI ->
-                        sendGeminiWithRotation(context, history)
-                    provider == Provider.SERPAPI ->
-                        sendSerpApiWithRotation(context, history)
-                    else ->
-                        sendOpenAiWithRotation(context, history, provider)
-                }
+                dispatchToProvider(context, provider, history)
             } catch (e: Exception) {
                 "Connexion impossible. Vérifiez les paramètres dans ⚙. Détail : ${e.message}"
             }
@@ -70,13 +63,45 @@ object ApiClient {
             val commandResult = JarvisCommandParser.parseAndExecute(context, rawResponse)
             val cleanText = JarvisCommandParser.cleanResponse(rawResponse)
 
-            if (commandResult is JarvisCommandParser.CommandResult.Executed) {
-                if (cleanText.isBlank()) commandResult.outputMessage
-                else "$cleanText\n\n${commandResult.outputMessage}"
-            } else {
-                rawResponse
+            when {
+                commandResult is JarvisCommandParser.CommandResult.Executed && commandResult.isInformational -> {
+                    // Deuxième passage : demande à l'IA de reformuler le résultat brut
+                    // naturellement, au lieu de l'afficher tel quel (listes, JSON, etc.)
+                    val lastUserMsg = history.lastOrNull { it.role == "user" }?.text ?: ""
+                    val summaryPrompt =
+                        "L'utilisateur a demandé : \"$lastUserMsg\"\n\n" +
+                            "Voici le résultat brut obtenu (ne le montre jamais tel quel, ni son formatage) :\n" +
+                            "${commandResult.outputMessage}\n\n" +
+                            "Réponds directement et naturellement à l'utilisateur avec cette information, " +
+                            "comme si tu venais de la consulter toi-même. Sois concis : si l'utilisateur a " +
+                            "demandé UNE seule chose (« le dernier SMS », « le dernier email »...), ne donne " +
+                            "que celle-là avec l'expéditeur et le contenu, sans lister le reste. Ne mentionne " +
+                            "jamais de commande système, d'action JSON ni de terme technique."
+                    try {
+                        val summary = dispatchToProvider(context, provider, listOf(HistoryEntry("user", summaryPrompt)))
+                        JarvisCommandParser.cleanResponse(summary).trim()
+                    } catch (e: Exception) {
+                        commandResult.outputMessage // repli sur le résultat brut si la reformulation échoue
+                    }
+                }
+                commandResult is JarvisCommandParser.CommandResult.Executed -> {
+                    if (cleanText.isBlank()) commandResult.outputMessage
+                    else "$cleanText\n\n${commandResult.outputMessage}"
+                }
+                else -> rawResponse
             }
         }
+
+    private suspend fun dispatchToProvider(context: Context, provider: Provider, history: List<HistoryEntry>): String {
+        return when {
+            provider.isAuto -> sendAuto(context, history)
+            provider.isLocal -> sendLocal(context, history)
+            provider == Provider.CLAUDE -> sendClaudeWithRotation(context, history)
+            provider == Provider.GEMINI -> sendGeminiWithRotation(context, history)
+            provider == Provider.SERPAPI -> sendSerpApiWithRotation(context, history)
+            else -> sendOpenAiWithRotation(context, history, provider)
+        }
+    }
 
     // ─── Mode Automatique avec multi-clés + sélection intelligente ────────────
 
