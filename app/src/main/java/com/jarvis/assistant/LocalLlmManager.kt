@@ -85,27 +85,26 @@ object LocalLlmManager {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Backend GGUF — llama.cpp (Qwen2.5 et autres modèles open-source)
+    // Backend GGUF — non disponible : aucune librairie llama.cpp Android fiable
+    // n'est accessible depuis les dépôts Maven publics en CI (testé avec
+    // com.llamatik:library et llama.android/JitPack, échec 401 dans les deux cas).
     // ─────────────────────────────────────────────────────────────────────────
 
-    private var loadedGgufPath: String? = null
-
     private fun generateGguf(context: Context, modelPath: String, prompt: String): String {
-        return try {
-            if (loadedGgufPath != modelPath) {
-                com.llamatik.LlamaBridge.initGenerateModel(modelPath)
-                loadedGgufPath = modelPath
-            }
-            com.llamatik.LlamaBridge.generate(prompt)
-        } catch (e: Exception) {
-            """
-❌ Erreur de chargement du modèle .gguf : ${e.message}
+        return """
+⚠️ Format .gguf non supporté pour le moment.
 
-Vérifiez que le fichier est un modèle de langage quantifié compatible
-llama.cpp (ex : Qwen2.5-*.gguf) et que le téléphone dispose d'assez
-de mémoire libre.
+Aucune librairie llama.cpp pour Android n'est actuellement accessible
+de façon fiable depuis les dépôts publics (Maven Central / JitPack).
+
+📥 Pour une IA locale fonctionnelle dès maintenant, utilise un modèle
+**.task** (MediaPipe) à la place — ils fonctionnent parfaitement :
+
+🔗 Gemma 3 1B officiel : Paramètres → Modèles Locaux → catalogue
+🔗 Gemma 3 1B miroir libre (sans compte) : idem
+
+Dans Paramètres → Modèles Locaux, choisis l'un de ces deux modèles Gemma.
 """.trimIndent()
-        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -154,7 +153,6 @@ de mémoire libre.
         llmInference?.close()
         llmInference = null
         loadedTaskPath = null
-        loadedGgufPath = null
     }
 
     private fun buildErrorMessage(format: LocalModelFormat, e: Exception): String {

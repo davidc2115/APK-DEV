@@ -52,39 +52,6 @@ object ModelDownloader {
 
     val MODEL_CATALOG: List<ModelEntry> = listOf(
 
-        // ─── Qwen 2.5 (Alibaba) — GGUF via llama.cpp, licence Apache 2.0 ──────
-        // Vérifiés manuellement : fichiers réels, aucune licence à accepter.
-        ModelEntry(
-            label        = "🟣 Qwen2.5 0.5B — LIBRE, sans compte (400 Mo)",
-            url          = "https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf?download=true",
-            pageUrl      = "https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF",
-            format       = LocalLlmManager.LocalModelFormat.GGUF,
-            sizeHint     = "~400 Mo",
-            needsHfToken = false,
-            creator      = "Alibaba (Qwen)",
-            description  = "Très léger et rapide, aucun compte requis. Licence Apache 2.0 ouverte."
-        ),
-        ModelEntry(
-            label        = "🟣 Qwen2.5 1.5B — LIBRE, sans compte (1 Go)",
-            url          = "https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf?download=true",
-            pageUrl      = "https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF",
-            format       = LocalLlmManager.LocalModelFormat.GGUF,
-            sizeHint     = "~1 Go",
-            needsHfToken = false,
-            creator      = "Alibaba (Qwen)",
-            description  = "Bon compromis vitesse/qualité, aucun compte requis. Licence Apache 2.0."
-        ),
-        ModelEntry(
-            label        = "🟣 Qwen2.5 7B — LIBRE, sans compte (4.7 Go)",
-            url          = "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf?download=true",
-            pageUrl      = "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF",
-            format       = LocalLlmManager.LocalModelFormat.GGUF,
-            sizeHint     = "~4.7 Go",
-            needsHfToken = false,
-            creator      = "Alibaba (Qwen)",
-            description  = "Meilleure qualité, aucun compte requis. Téléphone récent recommandé (6+ Go RAM)."
-        ),
-
         // ─── Gemma (Google) — .task MediaPipe, licence Google (gating réel) ───
         ModelEntry(
             label        = "🟢 Gemma 3 1B — Google, officiel (550 Mo)",
