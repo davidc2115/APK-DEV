@@ -50,14 +50,13 @@ object BluetoothController {
     /**
      * Depuis Android 13, une appli ne peut plus activer/désactiver le Bluetooth
      * silencieusement (restriction de confidentialité de Google). On ouvre donc
-     * le panneau rapide système : un seul tap suffit côté utilisateur.
+     * l'écran de paramètres Bluetooth : un tap sur l'interrupteur suffit côté
+     * utilisateur. (Note : contrairement au Wi-Fi, il n'existe pas de panneau
+     * rapide système public pour le Bluetooth — Settings.Panel.ACTION_BLUETOOTH
+     * n'existe pas dans l'API Android.)
      */
     private fun openBluetoothPanel(context: Context) {
-        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            Intent(android.provider.Settings.Panel.ACTION_BLUETOOTH)
-        } else {
-            Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS)
-        }
+        val intent = Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS)
         intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
         context.startActivity(intent)
     }
