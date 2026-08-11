@@ -37,6 +37,14 @@ object ApiClient {
             "• Recherche web : {\"action\":\"web_search\", \"query\":\"horaires ouverture pharmacie Rue de Paris\"}\n" +
             "  (à utiliser pour TOUTE question factuelle sur un lieu ou un sujet : horaires, avis, adresse, infos pratiques, actualité, etc. — jamais open_maps pour ça)\n" +
             "• Notifications : {\"action\":\"get_notifications\"}\n" +
+            "• Codage GitHub : {\"action\":\"github_list_repos\"}, {\"action\":\"github_create_repo\", \"name\":\"mon-projet\", \"description\":\"...\", \"private\":false}, " +
+            "{\"action\":\"github_create_file\", \"owner\":\"pseudo\", \"repo\":\"mon-projet\", \"path\":\"index.html\", \"content\":\"<html>...</html>\", \"message\":\"Ajout page d'accueil\", \"branch\":\"main\"}, " +
+            "{\"action\":\"github_read_file\", \"owner\":\"pseudo\", \"repo\":\"mon-projet\", \"path\":\"index.html\", \"branch\":\"main\"}, " +
+            "{\"action\":\"github_create_branch\", \"owner\":\"pseudo\", \"repo\":\"mon-projet\", \"newBranch\":\"feature-x\", \"fromBranch\":\"main\"}, " +
+            "{\"action\":\"github_create_pr\", \"owner\":\"pseudo\", \"repo\":\"mon-projet\", \"title\":\"Ajout feature X\", \"head\":\"feature-x\", \"base\":\"main\", \"body\":\"Description\"}\n" +
+            "  (github_create_file sert AUSSI à modifier un fichier existant, pas besoin d'action séparée. " +
+            "Pour créer un projet complet avec plusieurs fichiers, inclus PLUSIEURS blocs [JARVIS_CMD:...] à la suite dans ta réponse, un par fichier. " +
+            "Le champ « content » doit être un JSON valide : échappe bien les retours à la ligne (\\n) et les guillemets (\\\") à l'intérieur du code.)\n" +
             "• Bluetooth : {\"action\":\"bluetooth_info\"}, {\"action\":\"enable_bluetooth\"}, {\"action\":\"disable_bluetooth\"}\n" +
             "• Wi-Fi : {\"action\":\"wifi_info\"}, {\"action\":\"enable_wifi\"}, {\"action\":\"disable_wifi\"}\n\n" +
             "Exemple de réponse : \"Très bien Monsieur, j'appelle Maman tout de suite. [JARVIS_CMD:{\"action\":\"call\",\"target\":\"Maman\"}]\""
@@ -62,35 +70,57 @@ object ApiClient {
             // Exécution automatique des commandes système si présentes dans la réponse
             val commandResult = JarvisCommandParser.parseAndExecute(context, rawResponse)
             val cleanText = JarvisCommandParser.cleanResponse(rawResponse)
+            val lastUserMsg = history.lastOrNull { it.role == "user" }?.text ?: ""
 
-            when {
-                commandResult is JarvisCommandParser.CommandResult.Executed && commandResult.isInformational -> {
-                    // Deuxième passage : demande à l'IA de reformuler le résultat brut
-                    // naturellement, au lieu de l'afficher tel quel (listes, JSON, etc.)
-                    val lastUserMsg = history.lastOrNull { it.role == "user" }?.text ?: ""
-                    val summaryPrompt =
-                        "L'utilisateur a demandé : \"$lastUserMsg\"\n\n" +
-                            "Voici le résultat brut obtenu (ne le montre jamais tel quel, ni son formatage) :\n" +
-                            "${commandResult.outputMessage}\n\n" +
-                            "Réponds directement et naturellement à l'utilisateur avec cette information, " +
-                            "comme si tu venais de la consulter toi-même. Sois concis : si l'utilisateur a " +
-                            "demandé UNE seule chose (« le dernier SMS », « le dernier email »...), ne donne " +
-                            "que celle-là avec l'expéditeur et le contenu, sans lister le reste. Ne mentionne " +
-                            "jamais de commande système, d'action JSON ni de terme technique."
-                    try {
-                        val summary = dispatchToProvider(context, provider, listOf(HistoryEntry("user", summaryPrompt)))
-                        JarvisCommandParser.cleanResponse(summary).trim()
-                    } catch (e: Exception) {
-                        commandResult.outputMessage // repli sur le résultat brut si la reformulation échoue
+            when (commandResult) {
+                is JarvisCommandParser.CommandResult.Executed -> {
+                    if (commandResult.isInformational) {
+                        summarizeNaturally(context, provider, lastUserMsg, commandResult.outputMessage)
+                    } else if (cleanText.isBlank()) {
+                        commandResult.outputMessage
+                    } else {
+                        "$cleanText\n\n${commandResult.outputMessage}"
                     }
                 }
-                commandResult is JarvisCommandParser.CommandResult.Executed -> {
-                    if (cleanText.isBlank()) commandResult.outputMessage
-                    else "$cleanText\n\n${commandResult.outputMessage}"
+                is JarvisCommandParser.CommandResult.ExecutedMultiple -> {
+                    // Cas d'un projet à plusieurs fichiers / plusieurs actions d'un coup.
+                    val combined = commandResult.results.joinToString("\n\n") { it.outputMessage }
+                    val anyInformational = commandResult.results.any { it.isInformational }
+                    if (anyInformational) {
+                        summarizeNaturally(context, provider, lastUserMsg, combined)
+                    } else if (cleanText.isBlank()) {
+                        combined
+                    } else {
+                        "$cleanText\n\n$combined"
+                    }
                 }
-                else -> rawResponse
+                JarvisCommandParser.CommandResult.None -> rawResponse
             }
         }
+
+    /** Demande à l'IA de reformuler naturellement un résultat brut de commande. */
+    private suspend fun summarizeNaturally(
+        context: Context,
+        provider: Provider,
+        userQuestion: String,
+        rawOutput: String
+    ): String {
+        val summaryPrompt =
+            "L'utilisateur a demandé : \"$userQuestion\"\n\n" +
+                "Voici le résultat brut obtenu (ne le montre jamais tel quel, ni son formatage) :\n" +
+                "$rawOutput\n\n" +
+                "Réponds directement et naturellement à l'utilisateur avec cette information, " +
+                "comme si tu venais de la consulter ou de la faire toi-même. Sois concis : si l'utilisateur a " +
+                "demandé UNE seule chose (« le dernier SMS », « le dernier email »...), ne donne " +
+                "que celle-là avec l'expéditeur et le contenu, sans lister le reste. Ne mentionne " +
+                "jamais de commande système, d'action JSON ni de terme technique."
+        return try {
+            val summary = dispatchToProvider(context, provider, listOf(HistoryEntry("user", summaryPrompt)))
+            JarvisCommandParser.cleanResponse(summary).trim()
+        } catch (e: Exception) {
+            rawOutput // repli sur le résultat brut si la reformulation échoue
+        }
+    }
 
     private suspend fun dispatchToProvider(context: Context, provider: Provider, history: List<HistoryEntry>): String {
         return when {

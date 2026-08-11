@@ -334,6 +334,13 @@ object Prefs {
         prefs(context).edit().putString(KEY_HF_TOKEN, token).apply()
     }
 
+    fun getGithubToken(context: Context): String =
+        prefs(context).getString("github_token", "") ?: ""
+
+    fun saveGithubToken(context: Context, token: String) {
+        prefs(context).edit().putString("github_token", token).apply()
+    }
+
     fun getOrbStyle(context: Context): String =
         prefs(context).getString(KEY_ORB_STYLE, "PULSE") ?: "PULSE"
 

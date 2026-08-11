@@ -7,6 +7,7 @@ object JarvisCommandParser {
 
     sealed class CommandResult {
         data class Executed(val outputMessage: String, val action: String, val isInformational: Boolean) : CommandResult()
+        data class ExecutedMultiple(val results: List<Executed>) : CommandResult()
         object None : CommandResult()
     }
 
@@ -19,22 +20,34 @@ object JarvisCommandParser {
         "read_sms", "read_unread_sms", "recent_calls",
         "read_emails", "read_unread_emails",
         "get_notifications", "bluetooth_info", "wifi_info",
-        "web_search", "get_location", "search_contact"
+        "web_search", "get_location", "search_contact",
+        "github_list_repos", "github_read_file"
     )
 
+    /**
+     * Exécute une ou plusieurs commandes trouvées dans la réponse de l'IA.
+     * Plusieurs blocs [JARVIS_CMD:...] peuvent apparaître dans une seule
+     * réponse — utile par exemple pour créer un projet GitHub complet
+     * (plusieurs fichiers) en une seule fois.
+     */
     suspend fun parseAndExecute(context: Context, llmResponse: String): CommandResult {
         val regex = Regex("\\[JARVIS_CMD:(.*?)\\]", RegexOption.DOT_MATCHES_ALL)
-        val match = regex.find(llmResponse) ?: return CommandResult.None
+        val matches = regex.findAll(llmResponse).toList()
+        if (matches.isEmpty()) return CommandResult.None
 
-        val jsonStr = match.groupValues[1].trim()
-        return try {
-            val json = JSONObject(jsonStr)
-            val action = json.optString("action", "").lowercase()
-            val resultText = executeAction(context, action, json)
-            CommandResult.Executed(resultText, action, action in INFORMATIONAL_ACTIONS)
-        } catch (e: Exception) {
-            CommandResult.Executed("❌ Erreur d'exécution de la commande système : ${e.message}", "", false)
+        val results = matches.map { match ->
+            val jsonStr = match.groupValues[1].trim()
+            try {
+                val json = JSONObject(jsonStr)
+                val action = json.optString("action", "").lowercase()
+                val resultText = executeAction(context, action, json)
+                CommandResult.Executed(resultText, action, action in INFORMATIONAL_ACTIONS)
+            } catch (e: Exception) {
+                CommandResult.Executed("❌ Erreur d'exécution de la commande système : ${e.message}", "", false)
+            }
         }
+
+        return if (results.size == 1) results[0] else CommandResult.ExecutedMultiple(results)
     }
 
     private suspend fun executeAction(context: Context, action: String, json: JSONObject): String {
@@ -201,6 +214,66 @@ object JarvisCommandParser {
             "search_event" -> {
                 val query = json.optString("query", "")
                 CalendarController.searchEvents(context, query)
+            }
+
+            "github_list_repos" -> GitHubController.listRepos(context)
+
+            "github_create_repo" -> {
+                val name = json.optString("name", "")
+                if (name.isBlank()) "❌ Nom de dépôt manquant."
+                else GitHubController.createRepo(
+                    context, name,
+                    json.optString("description", ""),
+                    json.optBoolean("private", false)
+                )
+            }
+
+            "github_create_file", "github_update_file" -> {
+                val owner = json.optString("owner", "")
+                val repo = json.optString("repo", "")
+                val path = json.optString("path", "")
+                val content = json.optString("content", "")
+                if (owner.isBlank() || repo.isBlank() || path.isBlank()) {
+                    "❌ Paramètres manquants (owner, repo et path sont requis)."
+                } else {
+                    GitHubController.createOrUpdateFile(
+                        context, owner, repo, path, content,
+                        json.optString("message", "Mise à jour via JARVIS"),
+                        json.optString("branch", "main")
+                    )
+                }
+            }
+
+            "github_read_file" -> {
+                val owner = json.optString("owner", "")
+                val repo = json.optString("repo", "")
+                val path = json.optString("path", "")
+                if (owner.isBlank() || repo.isBlank() || path.isBlank()) "❌ Paramètres manquants."
+                else GitHubController.readFile(context, owner, repo, path, json.optString("branch", "main"))
+            }
+
+            "github_create_branch" -> {
+                val owner = json.optString("owner", "")
+                val repo = json.optString("repo", "")
+                val newBranch = json.optString("newBranch", "")
+                if (owner.isBlank() || repo.isBlank() || newBranch.isBlank()) "❌ Paramètres manquants."
+                else GitHubController.createBranch(context, owner, repo, newBranch, json.optString("fromBranch", "main"))
+            }
+
+            "github_create_pr" -> {
+                val owner = json.optString("owner", "")
+                val repo = json.optString("repo", "")
+                val title = json.optString("title", "")
+                val head = json.optString("head", "")
+                if (owner.isBlank() || repo.isBlank() || title.isBlank() || head.isBlank()) {
+                    "❌ Paramètres manquants (owner, repo, title et head sont requis)."
+                } else {
+                    GitHubController.createPullRequest(
+                        context, owner, repo, title, head,
+                        json.optString("base", "main"),
+                        json.optString("body", "")
+                    )
+                }
             }
 
             else -> "❌ Commande système inconnue : « $action »."

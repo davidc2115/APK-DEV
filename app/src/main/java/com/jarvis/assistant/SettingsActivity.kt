@@ -205,6 +205,10 @@ class SettingsActivity : AppCompatActivity() {
         val saveButton           = findViewById<TextView>(R.id.saveButton)
         val saveApiKeysButton    = findViewById<TextView>(R.id.saveApiKeysButton)
         val modelCardsContainer  = findViewById<LinearLayout>(R.id.modelCardsContainer)
+        val githubTokenInput     = findViewById<EditText>(R.id.githubTokenInput)
+        val saveGithubTokenButton = findViewById<TextView>(R.id.saveGithubTokenButton)
+
+        githubTokenInput.setText(Prefs.getGithubToken(this))
 
         // ── Cartes dynamiques de modèles ──────────────────────────────────────
         modelCardsContainer.removeAllViews()
@@ -249,6 +253,11 @@ class SettingsActivity : AppCompatActivity() {
             val keys = apiKeyFields.mapValues { (_, field) -> field.text.toString().trim() }
             Prefs.saveApiKeys(this, keys)
             Toast.makeText(this, "✅ Toutes les clés API enregistrées", Toast.LENGTH_SHORT).show()
+        }
+
+        saveGithubTokenButton.setOnClickListener {
+            Prefs.saveGithubToken(this, githubTokenInput.text.toString().trim())
+            Toast.makeText(this, "✅ Jeton GitHub enregistré", Toast.LENGTH_SHORT).show()
         }
     }
 

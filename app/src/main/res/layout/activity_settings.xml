@@ -268,6 +268,56 @@
                 android:layout_marginTop="20dp"
                 android:layout_marginBottom="8dp" />
 
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/text_secondary"
+                android:alpha="0.2"
+                android:layout_marginTop="20dp"
+                android:layout_marginBottom="16dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="💻 Codage — GitHub"
+                android:textColor="@color/cyan_accent"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Permet à JARVIS de créer/modifier des fichiers, committer et ouvrir des pull requests sur tes dépôts. Crée un jeton fin (Fine-grained token) sur github.com → Settings → Developer settings, en limitant l'accès aux dépôts voulus uniquement."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="3dp"
+                android:layout_marginBottom="12dp" />
+
+            <EditText
+                android:id="@+id/githubTokenInput"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_input"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:textColor="@color/text_primary"
+                android:hint="github_pat_..."
+                android:textColorHint="@color/text_secondary"
+                android:inputType="textPassword"
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:id="@+id/saveGithubTokenButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:text="ENREGISTRER LE JETON GITHUB"
+                android:textColor="@color/cyan_accent"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="@drawable/bg_input"
+                android:layout_marginBottom="8dp" />
+
         </LinearLayout>
 
         <!-- Onglet LOCAL (Modèles IA téléchargés sur le téléphone) -->
