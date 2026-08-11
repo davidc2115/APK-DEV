@@ -29,6 +29,7 @@ object Prefs {
     private const val KEY_ORB_STYLE         = "orb_style"
     private const val KEY_EMAIL_ACCOUNTS    = "email_accounts"     // JSON array
     private const val KEY_ROTATION_STRATEGY = "rotation_strategy"  // "ROUNDROBIN"|"FALLBACK"|"RANDOM"
+    private const val KEY_OBSIDIAN_VAULT_PATH = "obsidian_vault_path"
 
     const val DEFAULT_ACCENT_COLOR = -16724737 // #FF00E5FF (cyan)
 
@@ -354,6 +355,14 @@ object Prefs {
             addApiKeyFor(context, provider, apiKey)
         }
     }
+
+    // ─── Obsidian Second Brain ────────────────────────────────────────────────
+
+    fun getObsidianVaultPath(context: Context): String =
+        prefs(context).getString(KEY_OBSIDIAN_VAULT_PATH, "") ?: ""
+
+    fun saveObsidianVaultPath(context: Context, path: String) =
+        prefs(context).edit().putString(KEY_OBSIDIAN_VAULT_PATH, path).apply()
 
     // ─── Interne ──────────────────────────────────────────────────────────────
 

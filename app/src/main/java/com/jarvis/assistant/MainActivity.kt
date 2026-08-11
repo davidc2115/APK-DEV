@@ -111,6 +111,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         controlButton.setOnClickListener {
             startActivity(Intent(this, PhoneControlActivity::class.java))
         }
+
+        // Bouton Second Brain Obsidian (si présent dans le layout)
+        findViewById<android.view.View?>(R.id.obsidianButton)?.setOnClickListener {
+            startActivity(Intent(this, ObsidianActivity::class.java))
+        }
     }
 
     override fun onResume() {
@@ -187,6 +192,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         addMessage(text, isUser = true, speak = false, imageBase64 = pendingImageBase64, imageMime = pendingImageMime)
         clearPendingImage()
         statusText.text = "● JARVIS réfléchit…"
+
+        // — Interception Obsidian Second Brain —
+        val obsidianReply = ObsidianController.handleVoiceCommand(this, text)
+        if (obsidianReply != null) {
+            addMessage(obsidianReply, isUser = false, speak = true)
+            statusText.text = "● en veille"
+            return
+        }
 
         CoroutineScope(Dispatchers.Main).launch {
             val reply = ApiClient.sendChat(this@MainActivity, ConversationStore.history)
