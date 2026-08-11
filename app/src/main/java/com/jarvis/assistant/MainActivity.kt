@@ -59,6 +59,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        showCrashReportIfAny()
+
         recyclerView = findViewById(R.id.recyclerView)
         messageInput = findViewById(R.id.messageInput)
         statusText = findViewById(R.id.statusText)
@@ -239,5 +241,34 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         tts?.stop()
         tts?.shutdown()
         super.onDestroy()
+    }
+
+    /**
+     * Si l'app a planté au lancement précédent, affiche le rapport dans une
+     * fenêtre copiable — plus besoin d'ADB pour diagnostiquer un crash.
+     */
+    private fun showCrashReportIfAny() {
+        val crashFile = java.io.File(filesDir, "crash_log.txt")
+        if (!crashFile.exists()) return
+
+        val report = try {
+            crashFile.readText()
+        } catch (e: Exception) {
+            crashFile.delete()
+            return
+        }
+
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("⚠️ JARVIS a planté au dernier lancement")
+            .setMessage(report)
+            .setPositiveButton("Copier") { _, _ ->
+                val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Crash JARVIS", report))
+                Toast.makeText(this, "Rapport copié dans le presse-papier", Toast.LENGTH_SHORT).show()
+                crashFile.delete()
+            }
+            .setNegativeButton("Fermer") { _, _ -> crashFile.delete() }
+            .setCancelable(false)
+            .show()
     }
 }
