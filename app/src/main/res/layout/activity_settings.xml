@@ -1,8 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:orientation="vertical"
     android:background="@color/background_dark">
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -17,7 +23,64 @@
             android:textColor="@color/cyan_accent"
             android:textSize="20sp"
             android:textStyle="bold"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Configure ton assistant"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp"
             android:layout_marginBottom="16dp" />
+
+        <!-- Sous-navigation : Dashboard / Obsidian / Paramètres -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="20dp">
+
+            <TextView
+                android:id="@+id/subNavDashboard"
+                android:layout_width="0dp"
+                android:layout_height="46dp"
+                android:layout_weight="1"
+                android:layout_marginEnd="4dp"
+                android:text="📊 Dashboard"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="@drawable/bg_input"
+                android:textColor="@color/text_primary" />
+
+            <TextView
+                android:id="@+id/subNavObsidian"
+                android:layout_width="0dp"
+                android:layout_height="46dp"
+                android:layout_weight="1"
+                android:layout_marginStart="4dp"
+                android:layout_marginEnd="4dp"
+                android:text="🧠 Obsidian"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="@drawable/bg_input"
+                android:textColor="@color/text_primary" />
+
+            <TextView
+                android:id="@+id/subNavParams"
+                android:layout_width="0dp"
+                android:layout_height="46dp"
+                android:layout_weight="1"
+                android:layout_marginStart="4dp"
+                android:text="⚙ Paramètres"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="@drawable/bg_nav_active"
+                android:textColor="@color/cyan_accent" />
+
+        </LinearLayout>
 
         <!-- Style Orbe -->
         <TextView
@@ -155,7 +218,7 @@
                 android:layout_height="44dp"
                 android:layout_weight="1"
                 android:layout_marginStart="4dp"
-                android:text="💻 Système"
+                android:text="🎙️ Écoute"
                 android:textSize="12sp"
                 android:textStyle="bold"
                 android:gravity="center"
@@ -182,6 +245,13 @@
                 android:textSize="12sp"
                 android:visibility="gone"
                 android:layout_marginBottom="12dp" />
+
+            <LinearLayout
+                android:id="@+id/advancedConfigSection"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
 
             <TextView
                 android:layout_width="wrap_content"
@@ -255,6 +325,8 @@
                 android:layout_marginTop="12dp"
                 android:layout_marginBottom="8dp" />
 
+            </LinearLayout>
+
         </LinearLayout>
 
         <!-- Onglet CLÉS API -->
@@ -293,56 +365,6 @@
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:visibility="gone">
-
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:background="@color/text_secondary"
-                android:alpha="0.2"
-                android:layout_marginTop="20dp"
-                android:layout_marginBottom="16dp" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="💻 Codage — GitHub"
-                android:textColor="@color/cyan_accent"
-                android:textSize="15sp"
-                android:textStyle="bold"
-                android:layout_marginBottom="8dp" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Permet à JARVIS de créer/modifier des fichiers, committer et ouvrir des pull requests sur tes dépôts. Crée un jeton fin (Fine-grained token) sur github.com → Settings → Developer settings, en limitant l'accès aux dépôts voulus uniquement."
-                android:textColor="@color/text_secondary"
-                android:textSize="11sp"
-                android:lineSpacingExtra="3dp"
-                android:layout_marginBottom="12dp" />
-
-            <EditText
-                android:id="@+id/githubTokenInput"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:background="@drawable/bg_input"
-                android:paddingStart="16dp"
-                android:paddingEnd="16dp"
-                android:textColor="@color/text_primary"
-                android:hint="github_pat_..."
-                android:textColorHint="@color/text_secondary"
-                android:inputType="textPassword"
-                android:layout_marginBottom="12dp" />
-
-            <TextView
-                android:id="@+id/saveGithubTokenButton"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:text="ENREGISTRER LE JETON GITHUB"
-                android:textColor="@color/cyan_accent"
-                android:textStyle="bold"
-                android:gravity="center"
-                android:background="@drawable/bg_input"
-                android:layout_marginBottom="8dp" />
 
             <View
                 android:layout_width="match_parent"
@@ -542,4 +564,8 @@
 
     </LinearLayout>
 
-</ScrollView>
+    </ScrollView>
+
+    <include layout="@layout/bottom_nav_bar" />
+
+</LinearLayout>

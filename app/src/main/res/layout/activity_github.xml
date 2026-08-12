@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/background_dark">
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="20dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="💻 GitHub"
+                android:textColor="@color/cyan_accent"
+                android:textSize="22sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="4dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Créer et modifier tes projets directement depuis JARVIS"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:layout_marginBottom="20dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Jeton d'accès personnel"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/githubTokenInput"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_input"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:textColor="@color/text_primary"
+                android:hint="github_pat_..."
+                android:textColorHint="@color/text_secondary"
+                android:inputType="textPassword"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="💡 Crée un jeton fin (Fine-grained token) sur github.com → Settings → Developer settings, limité aux dépôts voulus."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="3dp"
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:id="@+id/saveGithubTokenButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:text="ENREGISTRER LE JETON"
+                android:textColor="@color/cyan_accent"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="@drawable/bg_input"
+                android:layout_marginBottom="24dp" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/text_secondary"
+                android:alpha="0.2"
+                android:layout_marginBottom="20dp" />
+
+            <TextView
+                android:id="@+id/listReposButton"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:text="📦 VOIR MES DÉPÔTS"
+                android:textColor="@color/background_dark"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="@drawable/bg_mic_button"
+                android:layout_marginBottom="16dp" />
+
+            <TextView
+                android:id="@+id/reposResultText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_input"
+                android:padding="14dp"
+                android:text=""
+                android:textColor="@color/text_primary"
+                android:textSize="13sp"
+                android:lineSpacingExtra="3dp"
+                android:visibility="gone"
+                android:layout_marginBottom="24dp" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/text_secondary"
+                android:alpha="0.2"
+                android:layout_marginBottom="20dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Créer un nouveau dépôt"
+                android:textColor="@color/cyan_accent"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="12dp" />
+
+            <EditText
+                android:id="@+id/newRepoNameInput"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_input"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:textColor="@color/text_primary"
+                android:hint="nom-du-projet"
+                android:textColorHint="@color/text_secondary"
+                android:layout_marginBottom="12dp" />
+
+            <EditText
+                android:id="@+id/newRepoDescInput"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_input"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:textColor="@color/text_primary"
+                android:hint="Description (optionnel)"
+                android:textColorHint="@color/text_secondary"
+                android:layout_marginBottom="16dp" />
+
+            <TextView
+                android:id="@+id/createRepoButton"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:text="＋ CRÉER LE DÉPÔT (PUBLIC)"
+                android:textColor="@color/background_dark"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="@drawable/bg_mic_button"
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="💡 Pour la suite (ajouter des fichiers, committer, ouvrir des pull requests…), demande directement à JARVIS dans le chat : « crée un fichier index.html dans mon-projet », « ouvre une pull request »…"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="3dp" />
+
+        </LinearLayout>
+
+    </ScrollView>
+
+    <include layout="@layout/bottom_nav_bar" />
+
+</LinearLayout>

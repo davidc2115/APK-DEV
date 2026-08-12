@@ -66,6 +66,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         setContentView(R.layout.activity_main)
 
         showCrashReportIfAny()
+        BottomNav.setup(this, NavDestination.CHAT)
 
         recyclerView = findViewById(R.id.recyclerView)
         messageInput = findViewById(R.id.messageInput)

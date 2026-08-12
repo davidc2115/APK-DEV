@@ -120,6 +120,12 @@
             android:theme="@style/Theme.Jarvis" />
 
         <activity
+            android:name=".GitHubActivity"
+            android:exported="false"
+            android:label="GitHub"
+            android:theme="@style/Theme.Jarvis" />
+
+        <activity
             android:name=".EmailConfigActivity"
             android:exported="false"
             android:label="Configuration Email IMAP/SMTP"

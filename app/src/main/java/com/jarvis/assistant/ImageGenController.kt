@@ -18,10 +18,14 @@ import java.util.concurrent.TimeUnit
  * Génération d'images IA — essaie plusieurs fournisseurs en cascade pour
  * maximiser la fiabilité (si l'un échoue, essaie automatiquement le suivant) :
  *
- * 1. Pollinations AI — GRATUIT, AUCUNE CLÉ REQUISE, toujours essayé en premier.
- * 2. OpenAI DALL-E 3 — si une clé OpenAI est configurée (meilleure qualité).
- * 3. Stable Diffusion (via Hugging Face Inference API) — si un jeton
+ * 1. OpenAI DALL-E 3 — si une clé OpenAI est configurée (meilleure qualité, la plus fiable).
+ * 2. Stable Diffusion (via Hugging Face Inference API) — si un jeton
  *    Hugging Face est configuré (celui déjà utilisé pour les modèles locaux).
+ * 3. Pollinations AI — GRATUIT, AUCUNE CLÉ REQUISE, en dernier recours.
+ *    ⚠️ Pollinations traverse actuellement une période de qualité dégradée
+ *    (flou, basse résolution) — problème confirmé côté Pollinations eux-mêmes
+ *    (issue GitHub #5372, pas un bug de notre intégration). D'où la priorité
+ *    donnée aux fournisseurs payants dès qu'une clé est disponible.
  *
  * L'image est sauvegardée dans Pictures/JARVIS-Generated et affichée
  * directement dans le chat.
@@ -46,18 +50,18 @@ object ImageGenController {
             return Result("❌ Aucune description d'image fournie.", null, null)
         }
 
-        // 1. Pollinations AI — gratuit, sans clé, essayé en premier pour la fiabilité.
-        tryPollinations(context, prompt)?.let { return it }
-
-        // 2. OpenAI DALL-E 3, si une clé est configurée.
+        // 1. OpenAI DALL-E 3, si une clé est configurée — qualité la plus fiable.
         tryOpenAI(context, prompt)?.let { return it }
 
-        // 3. Stable Diffusion via Hugging Face, si un jeton est configuré.
+        // 2. Stable Diffusion via Hugging Face, si un jeton est configuré.
         tryHuggingFace(context, prompt)?.let { return it }
+
+        // 3. Pollinations AI — gratuit, sans clé, dernier recours.
+        tryPollinations(context, prompt)?.let { return it }
 
         return Result(
             "❌ Échec de la génération d'image sur tous les moteurs disponibles " +
-                "(Pollinations, OpenAI, Hugging Face). Vérifie ta connexion internet.",
+                "(OpenAI, Hugging Face, Pollinations). Vérifie ta connexion internet.",
             null, null
         )
     }

@@ -36,6 +36,7 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var modelInput: EditText
     private lateinit var apiKeyInput: EditText
     private lateinit var autoInfoText: View
+    private lateinit var advancedConfigSection: View
     private lateinit var apiKeysContainer: LinearLayout
 
     private lateinit var hfTokenInput: EditText
@@ -69,10 +70,20 @@ class SettingsActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
 
+        BottomNav.setup(this, NavDestination.SETTINGS)
+
+        findViewById<TextView>(R.id.subNavDashboard).setOnClickListener {
+            startActivity(Intent(this, PhoneControlActivity::class.java))
+        }
+        findViewById<TextView>(R.id.subNavObsidian).setOnClickListener {
+            startActivity(Intent(this, ObsidianActivity::class.java))
+        }
+        // subNavParams : déjà sur cet écran, pas de navigation nécessaire.
+
         providerSpinner       = findViewById(R.id.providerSpinner)
         tabCloud              = findViewById(R.id.tabCloud)
         tabApiKeys            = findViewById(R.id.tabApiKeys)
-        tabLocal              = findViewById(R.id.tabLocal)
+        tabLocal               = findViewById(R.id.tabLocal)
         tabSystem             = findViewById(R.id.tabSystem)
         panelCloud            = findViewById(R.id.panelCloud)
         panelApiKeys          = findViewById(R.id.panelApiKeys)
@@ -83,6 +94,7 @@ class SettingsActivity : AppCompatActivity() {
         modelInput            = findViewById(R.id.modelInput)
         apiKeyInput           = findViewById(R.id.apiKeyInput)
         autoInfoText          = findViewById(R.id.autoInfoText)
+        advancedConfigSection = findViewById(R.id.advancedConfigSection)
         apiKeysContainer      = findViewById(R.id.apiKeysContainer)
 
         hfTokenInput          = findViewById(R.id.hfTokenInput)
@@ -162,6 +174,10 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun updateCloudSection(provider: Provider) {
         autoInfoText.visibility  = if (provider.isAuto) View.VISIBLE else View.GONE
+        // Seuls Ollama et Custom nécessitent de préciser une URL/modèle manuellement.
+        // Pour tous les autres, l'onglet Config se limite au choix de l'IA.
+        val needsAdvanced = provider == Provider.OLLAMA || provider == Provider.CUSTOM
+        advancedConfigSection.visibility = if (needsAdvanced) View.VISIBLE else View.GONE
         val showCloud = !provider.isLocal && !provider.isAuto
         baseUrlInput.isEnabled = showCloud
         modelInput.isEnabled   = showCloud
@@ -214,13 +230,10 @@ class SettingsActivity : AppCompatActivity() {
         val saveButton           = findViewById<TextView>(R.id.saveButton)
         val saveApiKeysButton    = findViewById<TextView>(R.id.saveApiKeysButton)
         val modelCardsContainer  = findViewById<LinearLayout>(R.id.modelCardsContainer)
-        val githubTokenInput     = findViewById<EditText>(R.id.githubTokenInput)
-        val saveGithubTokenButton = findViewById<TextView>(R.id.saveGithubTokenButton)
         val wakeWordInput        = findViewById<EditText>(R.id.wakeWordInput)
         val toggleWakeWordButton = findViewById<TextView>(R.id.toggleWakeWordButton)
         val picovoiceKeyInput    = findViewById<EditText>(R.id.picovoiceKeyInput)
 
-        githubTokenInput.setText(Prefs.getGithubToken(this))
         wakeWordInput.setText(Prefs.getWakeWord(this))
         picovoiceKeyInput.setText(Prefs.getPicovoiceKey(this))
         updateWakeWordButtonLabel(toggleWakeWordButton)
@@ -268,11 +281,6 @@ class SettingsActivity : AppCompatActivity() {
             val keys = apiKeyFields.mapValues { (_, field) -> field.text.toString().trim() }
             Prefs.saveApiKeys(this, keys)
             Toast.makeText(this, "✅ Toutes les clés API enregistrées", Toast.LENGTH_SHORT).show()
-        }
-
-        saveGithubTokenButton.setOnClickListener {
-            Prefs.saveGithubToken(this, githubTokenInput.text.toString().trim())
-            Toast.makeText(this, "✅ Jeton GitHub enregistré", Toast.LENGTH_SHORT).show()
         }
 
         toggleWakeWordButton.setOnClickListener {
