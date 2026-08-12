@@ -37,6 +37,9 @@ object LocalLlmManager {
                     LocalModelFormat.TASK -> generateTask(context, modelPath, prompt)
                     LocalModelFormat.GGUF -> generateGguf(context, modelPath, prompt)
                     LocalModelFormat.ONNX -> generateOnnx(context, modelPath, prompt)
+                    LocalModelFormat.STABLE_DIFFUSION ->
+                        "❌ Erreur interne : un modèle Stable Diffusion ne peut pas générer de texte. " +
+                            "Utilise generate_image pour la génération d'image."
                 }
             } catch (e: Exception) {
                 buildErrorMessage(format, e)
@@ -177,6 +180,7 @@ ton téléphone. Réinstalle la dernière version depuis GitHub Actions.
             LocalModelFormat.TASK -> ".task (MediaPipe)"
             LocalModelFormat.GGUF -> ".gguf"
             LocalModelFormat.ONNX -> ".onnx (ONNX Runtime)"
+            LocalModelFormat.STABLE_DIFFUSION -> ".gguf/.safetensors (Stable Diffusion)"
         }
         return "❌ Erreur modèle local ($name) : ${e.message}\n\nVérifiez que le fichier est valide et que le téléphone dispose d'assez de RAM (min 3 Go)."
     }
