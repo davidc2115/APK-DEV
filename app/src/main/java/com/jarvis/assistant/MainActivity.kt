@@ -9,14 +9,17 @@ import android.net.Uri
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.util.Base64
+import android.view.Gravity
 import android.view.View
 import android.widget.EditText
 import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.drawerlayout.widget.DrawerLayout
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import kotlinx.coroutines.CoroutineScope
@@ -24,6 +27,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
+import java.text.SimpleDateFormat
 import java.util.Locale
 
 class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
@@ -34,6 +38,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var statusText: TextView
     private lateinit var pendingImageBar: View
     private lateinit var pendingImageThumbnail: ImageView
+    private lateinit var drawerLayout: DrawerLayout
+    private lateinit var conversationListContainer: LinearLayout
 
     private var tts: TextToSpeech? = null
     private var ttsReady = false
@@ -66,6 +72,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         statusText = findViewById(R.id.statusText)
         pendingImageBar = findViewById(R.id.pendingImageBar)
         pendingImageThumbnail = findViewById(R.id.pendingImageThumbnail)
+        drawerLayout = findViewById(R.id.drawerLayout)
+        conversationListContainer = findViewById(R.id.conversationListContainer)
+        val menuButton = findViewById<TextView>(R.id.menuButton)
+        val newConversationButton = findViewById<TextView>(R.id.newConversationButton)
         val micButton = findViewById<TextView>(R.id.micButton)
         val sendButton = findViewById<TextView>(R.id.sendButton)
         val settingsButton = findViewById<TextView>(R.id.settingsButton)
@@ -117,6 +127,92 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // Bouton Second Brain Obsidian (si présent dans le layout)
         findViewById<android.view.View?>(R.id.obsidianButton)?.setOnClickListener {
             startActivity(Intent(this, ObsidianActivity::class.java))
+        }
+
+        menuButton.setOnClickListener {
+            refreshConversationList()
+            drawerLayout.openDrawer(Gravity.START)
+        }
+
+        newConversationButton.setOnClickListener {
+            ConversationStore.startNew(this)
+            adapter.notifyDataSetChanged()
+            drawerLayout.closeDrawer(Gravity.START)
+            addMessage("Nouvelle conversation démarrée. Que puis-je faire pour vous ?", isUser = false, speak = false)
+        }
+    }
+
+    /** Reconstruit la liste des conversations passées dans le tiroir latéral. */
+    private fun refreshConversationList() {
+        conversationListContainer.removeAllViews()
+        val conversations = ConversationHistoryManager.listAll(this)
+        val sdf = SimpleDateFormat("dd/MM HH:mm", Locale.FRENCH)
+
+        if (conversations.isEmpty()) {
+            val empty = TextView(this).apply {
+                text = "Aucune conversation enregistrée."
+                setTextColor(getColor(R.color.text_secondary))
+                textSize = 12f
+            }
+            conversationListContainer.addView(empty)
+            return
+        }
+
+        for (conv in conversations) {
+            val isActive = conv.id == ConversationStore.currentConversationId
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(12, 12, 12, 12)
+                setBackgroundResource(if (isActive) R.drawable.bg_bubble_ai else android.R.color.transparent)
+                val params = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+                params.bottomMargin = 8
+                layoutParams = params
+            }
+
+            val titleView = TextView(this).apply {
+                text = conv.title
+                setTextColor(getColor(R.color.text_primary))
+                textSize = 13f
+                maxLines = 2
+            }
+            val dateView = TextView(this).apply {
+                text = sdf.format(java.util.Date(conv.updatedAt))
+                setTextColor(getColor(R.color.text_secondary))
+                textSize = 10f
+            }
+
+            row.addView(titleView)
+            row.addView(dateView)
+
+            row.setOnClickListener {
+                ConversationStore.loadConversation(this, conv.id)
+                adapter.notifyDataSetChanged()
+                if (ConversationStore.messages.isNotEmpty()) {
+                    recyclerView.scrollToPosition(ConversationStore.messages.size - 1)
+                }
+                drawerLayout.closeDrawer(Gravity.START)
+            }
+
+            row.setOnLongClickListener {
+                androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle("Supprimer cette conversation ?")
+                    .setMessage(conv.title)
+                    .setPositiveButton("Supprimer") { _, _ ->
+                        ConversationHistoryManager.delete(this, conv.id)
+                        if (conv.id == ConversationStore.currentConversationId) {
+                            ConversationStore.startNew(this)
+                            adapter.notifyDataSetChanged()
+                        }
+                        refreshConversationList()
+                    }
+                    .setNegativeButton("Annuler", null)
+                    .show()
+                true
+            }
+
+            conversationListContainer.addView(row)
         }
     }
 
@@ -227,6 +323,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
         adapter.notifyItemInserted(ConversationStore.messages.size - 1)
         recyclerView.scrollToPosition(ConversationStore.messages.size - 1)
+        ConversationStore.persist(this)
         if (speak && ttsReady) {
             tts?.speak(MarkdownUtils.stripForSpeech(text), TextToSpeech.QUEUE_FLUSH, null, null)
         }

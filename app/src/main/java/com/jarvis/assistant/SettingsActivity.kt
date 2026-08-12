@@ -26,9 +26,11 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var tabCloud: TextView
     private lateinit var tabApiKeys: TextView
     private lateinit var tabLocal: TextView
+    private lateinit var tabSystem: TextView
     private lateinit var panelCloud: View
     private lateinit var panelApiKeys: View
     private lateinit var panelLocal: View
+    private lateinit var panelSystem: View
 
     private lateinit var baseUrlInput: EditText
     private lateinit var modelInput: EditText
@@ -71,9 +73,11 @@ class SettingsActivity : AppCompatActivity() {
         tabCloud              = findViewById(R.id.tabCloud)
         tabApiKeys            = findViewById(R.id.tabApiKeys)
         tabLocal              = findViewById(R.id.tabLocal)
+        tabSystem             = findViewById(R.id.tabSystem)
         panelCloud            = findViewById(R.id.panelCloud)
         panelApiKeys          = findViewById(R.id.panelApiKeys)
         panelLocal            = findViewById(R.id.panelLocal)
+        panelSystem           = findViewById(R.id.panelSystem)
 
         baseUrlInput          = findViewById(R.id.baseUrlInput)
         modelInput            = findViewById(R.id.modelInput)
@@ -105,16 +109,19 @@ class SettingsActivity : AppCompatActivity() {
         tabCloud.setOnClickListener  { showTab("cloud") }
         tabApiKeys.setOnClickListener { showTab("apikeys") }
         tabLocal.setOnClickListener  { showTab("local") }
+        tabSystem.setOnClickListener { showTab("system") }
     }
 
     private fun showTab(tab: String) {
         panelCloud.visibility   = if (tab == "cloud")   View.VISIBLE else View.GONE
         panelApiKeys.visibility = if (tab == "apikeys") View.VISIBLE else View.GONE
         panelLocal.visibility   = if (tab == "local")   View.VISIBLE else View.GONE
+        panelSystem.visibility  = if (tab == "system")  View.VISIBLE else View.GONE
 
         tabCloud.alpha   = if (tab == "cloud")   1f else 0.45f
         tabApiKeys.alpha = if (tab == "apikeys") 1f else 0.45f
         tabLocal.alpha   = if (tab == "local")   1f else 0.45f
+        tabSystem.alpha  = if (tab == "system")  1f else 0.45f
 
         // Si l'utilisateur clique sur l'onglet Local, passer automatiquement le Provider sur LOCAL_GGUF / ON_DEVICE
         if (tab == "local" && !selectedProvider.isLocal) {

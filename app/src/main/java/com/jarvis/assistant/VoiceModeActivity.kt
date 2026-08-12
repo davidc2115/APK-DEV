@@ -172,9 +172,11 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun handleUserSpeech(text: String) {
         ConversationStore.addUser(text)
+        ConversationStore.persist(this)
         CoroutineScope(Dispatchers.Main).launch {
             val result = ApiClient.sendChat(this@VoiceModeActivity, ConversationStore.history)
             ConversationStore.addAssistant(result.text, result.imageBase64, result.imageMime)
+            ConversationStore.persist(this@VoiceModeActivity)
             transcriptText.text = result.text
             speak(MarkdownUtils.stripForSpeech(result.text))
         }

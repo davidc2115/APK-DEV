@@ -113,7 +113,7 @@
                 android:layout_weight="1"
                 android:layout_marginEnd="4dp"
                 android:text="☁ Config"
-                android:textSize="13sp"
+                android:textSize="12sp"
                 android:textStyle="bold"
                 android:gravity="center"
                 android:background="@drawable/bg_input"
@@ -126,8 +126,8 @@
                 android:layout_weight="1"
                 android:layout_marginStart="4dp"
                 android:layout_marginEnd="4dp"
-                android:text="🔑 Clés API"
-                android:textSize="13sp"
+                android:text="🔑 Clés"
+                android:textSize="12sp"
                 android:textStyle="bold"
                 android:gravity="center"
                 android:background="@drawable/bg_input"
@@ -140,8 +140,23 @@
                 android:layout_height="44dp"
                 android:layout_weight="1"
                 android:layout_marginStart="4dp"
-                android:text="🧠 Modèles Locaux"
-                android:textSize="13sp"
+                android:layout_marginEnd="4dp"
+                android:text="🧠 Local"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="@drawable/bg_input"
+                android:textColor="@color/cyan_accent"
+                android:alpha="0.45" />
+
+            <TextView
+                android:id="@+id/tabSystem"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:layout_marginStart="4dp"
+                android:text="💻 Système"
+                android:textSize="12sp"
                 android:textStyle="bold"
                 android:gravity="center"
                 android:background="@drawable/bg_input"
@@ -267,6 +282,17 @@
                 android:background="@drawable/bg_mic_button"
                 android:layout_marginTop="20dp"
                 android:layout_marginBottom="8dp" />
+
+
+        </LinearLayout>
+
+        <!-- Onglet SYSTÈME (Codage GitHub + Écoute permanente) -->
+        <LinearLayout
+            android:id="@+id/panelSystem"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
 
             <View
                 android:layout_width="match_parent"
@@ -404,8 +430,8 @@
                 android:gravity="center"
                 android:background="@drawable/bg_mic_button"
                 android:layout_marginBottom="8dp" />
-
         </LinearLayout>
+
 
         <!-- Onglet LOCAL (Modèles IA téléchargés sur le téléphone) -->
         <LinearLayout
