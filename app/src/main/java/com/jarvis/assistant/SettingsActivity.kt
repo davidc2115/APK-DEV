@@ -66,6 +66,12 @@ class SettingsActivity : AppCompatActivity() {
         if (uri != null) importModelFile(uri)
     }
 
+    private val pickSdModelLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) importSdModelFile(uri)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
@@ -248,6 +254,10 @@ class SettingsActivity : AppCompatActivity() {
 
         // ── Import fichier local ───────────────────────────────────────────────
         pickModelButton.setOnClickListener { pickModelLauncher.launch(arrayOf("*/*")) }
+        findViewById<TextView>(R.id.pickSdModelButton).setOnClickListener {
+            pickSdModelLauncher.launch(arrayOf("*/*"))
+        }
+        updateSdModelLabel()
 
         // ── URL personnalisée ──────────────────────────────────────────────────
         downloadCustomButton.setOnClickListener {
@@ -500,6 +510,38 @@ class SettingsActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    private fun importSdModelFile(uri: Uri) {
+        Toast.makeText(this, "Import du modèle Stable Diffusion en cours… (peut prendre une minute, fichier volumineux)", Toast.LENGTH_LONG).show()
+
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val destFile = File(filesDir, "local_sd_model.bin")
+                contentResolver.openInputStream(uri)?.use { input ->
+                    FileOutputStream(destFile).use { output ->
+                        input.copyTo(output, bufferSize = 1024 * 1024)
+                    }
+                }
+                Prefs.saveLocalSdModelPath(this@SettingsActivity, destFile.absolutePath)
+                NativeStableDiffusion.unload()
+
+                runOnUiThread {
+                    updateSdModelLabel()
+                    Toast.makeText(this@SettingsActivity, "Modèle Stable Diffusion importé ✅", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this@SettingsActivity, "Échec de l'import : ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun updateSdModelLabel() {
+        val path = Prefs.getLocalSdModelPath(this)
+        val label = findViewById<TextView>(R.id.sdModelPathText)
+        label.text = if (path.isBlank()) "Aucun modèle importé" else "Modèle actif : ${File(path).name}"
     }
 
     private fun updateLocalModelLabel() {

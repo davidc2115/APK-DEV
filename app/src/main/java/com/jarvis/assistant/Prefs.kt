@@ -311,6 +311,15 @@ object Prefs {
         prefs(context).edit().putString(KEY_LOCAL_MODEL_PATH, path).apply()
     }
 
+    // ─── Modèle Stable Diffusion local (génération d'image embarquée) ──────────
+
+    fun getLocalSdModelPath(context: Context): String =
+        prefs(context).getString("local_sd_model_path", "") ?: ""
+
+    fun saveLocalSdModelPath(context: Context, path: String) {
+        prefs(context).edit().putString("local_sd_model_path", path).apply()
+    }
+
     fun getLocalModelFormat(context: Context): String =
         prefs(context).getString(KEY_LOCAL_MODEL_FORMAT, "TASK") ?: "TASK"
 

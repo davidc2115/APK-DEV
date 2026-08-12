@@ -561,6 +561,53 @@
                 android:background="@drawable/bg_input"
                 android:layout_marginBottom="16dp" />
 
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/text_secondary"
+                android:alpha="0.2"
+                android:layout_marginBottom="16dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🎨 Génération d'image embarquée (Stable Diffusion)"
+                android:textColor="@color/cyan_accent"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Génère de vraies images directement sur le téléphone, sans réseau. ⚠️ Sans GPU dédié, compte plusieurs minutes par image sur CPU mobile — c'est la réalité du calcul de diffusion, pas un défaut. Importe un modèle Stable Diffusion (.safetensors, .ckpt ou .gguf, souvent 2 à 4 Go) téléchargé depuis Hugging Face ou Civitai."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="3dp"
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:id="@+id/sdModelPathText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_input"
+                android:padding="12dp"
+                android:text="Aucun modèle importé"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp"
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:id="@+id/pickSdModelButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:text="📁 IMPORTER UN MODÈLE STABLE DIFFUSION"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:gravity="center"
+                android:background="@drawable/bg_input"
+                android:layout_marginBottom="16dp" />
+
         </LinearLayout>
 
     </LinearLayout>

@@ -30,6 +30,12 @@ jobs:
         run: |
           git clone --depth 1 --branch b4753 https://github.com/ggerganov/llama.cpp.git app/src/main/cpp/llama.cpp
 
+      - name: Clone stable-diffusion.cpp sources (pour la génération d'image embarquée)
+        run: |
+          git clone --depth 1 https://github.com/leejet/stable-diffusion.cpp.git sdcpp/src/main/cpp/stable-diffusion.cpp
+          cd sdcpp/src/main/cpp/stable-diffusion.cpp
+          git submodule update --init ggml
+
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 

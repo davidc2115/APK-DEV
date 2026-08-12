@@ -1,6 +1,7 @@
 package com.jarvis.assistant
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.os.Environment
 import android.util.Base64
 import okhttp3.MediaType.Companion.toMediaType
@@ -8,6 +9,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -22,17 +24,17 @@ import java.util.concurrent.TimeUnit
  * 2. OpenAI DALL-E 3 — si une clé OpenAI est configurée.
  * 3. Stable Diffusion (via Hugging Face Inference API) — si un jeton
  *    Hugging Face est configuré (celui déjà utilisé pour les modèles locaux).
- * 4. Pollinations AI — GRATUIT, AUCUNE CLÉ REQUISE, en dernier recours.
- *    ⚠️ Pollinations traverse actuellement une période de qualité dégradée
- *    (flou, basse résolution) — problème confirmé côté Pollinations eux-mêmes
- *    (issue GitHub #5372, pas un bug de notre intégration). D'où la priorité
- *    donnée aux fournisseurs payants dès qu'une clé est disponible.
+ * 4. Stable Diffusion EMBARQUÉ sur le téléphone (stable-diffusion.cpp compilé
+ *    nativement, aucun réseau) — si un modèle a été importé dans les
+ *    paramètres. ⚠️ Sans GPU dédié, compte plusieurs MINUTES par image sur
+ *    CPU de téléphone — c'est la réalité du calcul de diffusion sur mobile,
+ *    pas un défaut de l'intégration.
+ *
+ * Pollinations AI a été retiré : leur service traverse une période de
+ * qualité dégradée reconnue par Pollinations eux-mêmes (issue GitHub #5372).
  *
  * ⚠️ Microsoft Copilot n'a PAS d'API publique de génération d'image
- * accessible aux applications tierces (Bing Image Creator, qui l'alimente,
- * n'expose aucune API développeur). Impossible à intégrer honnêtement —
- * seul Azure OpenAI existe côté Microsoft, mais c'est un service à part,
- * avec ses propres clés, distinct de "Copilot".
+ * accessible aux applications tierces — impossible à intégrer honnêtement.
  *
  * L'image est sauvegardée dans Pictures/JARVIS-Generated et affichée
  * directement dans le chat.
@@ -66,40 +68,82 @@ object ImageGenController {
         // 3. Stable Diffusion via Hugging Face, si un jeton est configuré.
         tryHuggingFace(context, prompt)?.let { return it }
 
-        // 4. Pollinations AI — gratuit, sans clé, dernier recours.
-        tryPollinations(context, prompt)?.let { return it }
+        // 4. Stable Diffusion embarqué sur le téléphone, si un modèle est importé.
+        tryOnDeviceStableDiffusion(context, prompt)?.let { return it }
 
         return Result(
             "❌ Échec de la génération d'image sur tous les moteurs disponibles " +
-                "(Gemini, OpenAI, Hugging Face, Pollinations). Vérifie ta connexion internet.",
+                "(Gemini, OpenAI, Hugging Face, Stable Diffusion embarqué). " +
+                "Configure au moins une clé API dans ⚙ → Clés API, ou importe un modèle " +
+                "Stable Diffusion local dans ⚙ → Modèles Locaux.",
             null, null
         )
     }
 
-    // ─── 1. Pollinations AI (gratuit, sans clé) ────────────────────────────────
+    // ─── 4. Stable Diffusion EMBARQUÉ (stable-diffusion.cpp natif) ─────────────
 
-    private fun tryPollinations(context: Context, prompt: String): Result? {
+    private fun tryOnDeviceStableDiffusion(context: Context, prompt: String): Result? {
+        val modelPath = Prefs.getLocalSdModelPath(context)
+        if (modelPath.isBlank()) return null
+
+        if (!NativeStableDiffusion.isAvailable()) {
+            return Result(
+                "❌ Le moteur Stable Diffusion embarqué n'a pas pu être chargé sur cet appareil.\n" +
+                    "Détail : ${NativeStableDiffusion.getLoadError() ?: "bibliothèque native introuvable"}",
+                null, null
+            )
+        }
+
         return try {
-            val encodedPrompt = java.net.URLEncoder.encode(prompt, "UTF-8").replace("+", "%20")
-            val url = "https://image.pollinations.ai/prompt/$encodedPrompt?width=1024&height=1024&nologo=true&model=flux&enhance=true"
-            val request = Request.Builder().url(url).get().build()
-
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return null
-                val bytes = response.body?.bytes() ?: return null
-                if (bytes.isEmpty()) return null
-
-                val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-                val savedPath = saveToGallery(context, bytes, prompt)
-                Result(
-                    "🎨 Image générée pour « $prompt » (Pollinations AI).\n📁 Enregistrée dans : $savedPath",
-                    base64,
-                    "image/jpeg"
+            val loaded = NativeStableDiffusion.loadModel(modelPath)
+            if (!loaded) {
+                return Result(
+                    "❌ Échec du chargement du modèle Stable Diffusion local. " +
+                        "Vérifie qu'il s'agit bien d'un modèle compatible (.safetensors, .ckpt ou .gguf).",
+                    null, null
                 )
             }
+
+            // Résolution modeste et peu d'étapes pour rester dans un temps raisonnable sur CPU mobile.
+            val width = 512
+            val height = 512
+            val steps = 20
+
+            val rgbBytes = NativeStableDiffusion.generate(prompt, width, height, steps)
+                ?: return Result("❌ Échec de la génération d'image embarquée (mémoire insuffisante ou erreur interne).", null, null)
+
+            val channels = NativeStableDiffusion.getChannelCount()
+            val bitmap = rgbBytesToBitmap(rgbBytes, width, height, channels)
+
+            val out = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+            val pngBytes = out.toByteArray()
+
+            val savedPath = saveToGallery(context, pngBytes, prompt)
+            val base64 = Base64.encodeToString(pngBytes, Base64.NO_WRAP)
+
+            Result(
+                "🎨 Image générée pour « $prompt » (Stable Diffusion embarqué, 100% hors-ligne).\n📁 Enregistrée dans : $savedPath",
+                base64,
+                "image/png"
+            )
         } catch (e: Exception) {
-            null // on passe au fournisseur suivant
+            Result("❌ Erreur du moteur Stable Diffusion embarqué : ${e.message}", null, null)
         }
+    }
+
+    private fun rgbBytesToBitmap(rgbBytes: ByteArray, width: Int, height: Int, channels: Int): Bitmap {
+        val pixels = IntArray(width * height)
+        for (i in 0 until width * height) {
+            val offset = i * channels
+            val r = rgbBytes[offset].toInt() and 0xFF
+            val g = rgbBytes[offset + 1].toInt() and 0xFF
+            val b = rgbBytes[offset + 2].toInt() and 0xFF
+            pixels[i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+        }
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
+        return bitmap
     }
 
     // ─── 1. Google Gemini (Nano Banana) ────────────────────────────────────────
@@ -272,7 +316,7 @@ object ImageGenController {
             ).also { it.mkdirs() }
 
             val safePrompt = prompt.take(40).replace(Regex("[/\\\\:*?\"<>|]"), "-").trim()
-            val fileName = "${fileDateFormat.format(Date())}_$safePrompt.jpg"
+            val fileName = "${fileDateFormat.format(Date())}_$safePrompt.png"
             val file = File(dir, fileName)
             file.writeBytes(bytes)
             file.absolutePath
