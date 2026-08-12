@@ -67,6 +67,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         showCrashReportIfAny()
         BottomNav.setup(this, NavDestination.CHAT)
+        EdgeToEdgeHelper.applyTopInset(findViewById(R.id.headerRow))
+        EdgeToEdgeHelper.applyBottomInset(findViewById(R.id.bottomNavRoot))
 
         recyclerView = findViewById(R.id.recyclerView)
         messageInput = findViewById(R.id.messageInput)
@@ -295,7 +297,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // — Interception Obsidian Second Brain —
         val obsidianReply = ObsidianController.handleVoiceCommand(this, text)
         if (obsidianReply != null) {
-            addMessage(obsidianReply, isUser = false, speak = true)
+            addMessage(obsidianReply, isUser = false, speak = false)
             statusText.text = "● en veille"
             return
         }
@@ -303,7 +305,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         CoroutineScope(Dispatchers.Main).launch {
             val result = ApiClient.sendChat(this@MainActivity, ConversationStore.history)
             addMessage(
-                result.text, isUser = false, speak = true,
+                result.text, isUser = false, speak = false,
                 imageBase64 = result.imageBase64, imageMime = result.imageMime
             )
             statusText.text = "● en veille"

@@ -19,6 +19,12 @@ object ApiClient {
             "qui connaît bien son interlocuteur — pas comme un robot ou une notice technique. " +
             "Sois concis mais humain : des phrases courtes, un ton légèrement complice, jamais " +
             "de jargon technique, jamais de listes à puces inutiles pour une réponse simple. " +
+            "N'UTILISE JAMAIS de mise en forme markdown dans tes réponses : pas d'astérisques (**gras**), " +
+            "pas de tirets de liste en début de ligne, pas de dièses (# titres), pas de soulignés. " +
+            "Écris en prose naturelle, comme si tu parlais à voix haute. Si tu dois énumérer plusieurs " +
+            "choses, intègre-les dans une phrase fluide (« il y a d'abord X, ensuite Y, et enfin Z ») " +
+            "plutôt qu'une liste à puces. Ces règles s'appliquent à TOUTES tes réponses, quelle que soit " +
+            "la demande, y compris les réponses générées après une commande système. " +
             "Réponds en français.\n\n" +
             "TU AS LE CONTRÔLE COMPLET DU SMARTPHONE DE L'UTILISATEUR. Quand l'utilisateur te demande d'effectuer une action système sur son téléphone, tu peux inclure un bloc de commande sous la forme exacte suivante dans ta réponse :\n" +
             "[JARVIS_CMD:{\"action\":\"NOM_ACTION\", ...params}]\n\n" +
@@ -65,12 +71,10 @@ object ApiClient {
             "La génération de vidéo et de musique n'est PAS disponible — si on te le demande, explique-le honnêtement plutôt que d'inventer un résultat. " +
             "IMPORTANT — le prompt doit toujours préciser explicitement le STYLE demandé, en anglais, sinon le résultat sera incohérent : " +
             "pour un coloriage/coloring page → ajoute \"black and white line art, coloring book page, no color, no shading, thick clean outlines, white background\" ; " +
-            "pour un dessin/cartoon → \"cartoon style, vector illustration\" ; " +
-            "pour une photo réaliste → \"photorealistic, high detail, professional photography\" ; " +
-            "pour une peinture → \"digital painting, artstation\". " +
-            "Traduis et enrichis toujours la demande de l'utilisateur en un prompt anglais complet et descriptif (sujet, style, ambiance, composition), jamais une simple traduction littérale. " +
-            "L'image passe par Gemini, puis ChatGPT/OpenAI, puis Hugging Face, puis Pollinations en dernier recours selon les clés configurées. " +
-            "Microsoft Copilot n'a pas d'API publique de génération d'image accessible aux applications tierces : si l'utilisateur le demande spécifiquement, explique-le honnêtement.)\n" +
+            "pour un dessin/cartoon → \\\"cartoon style, vector illustration\\\" ; " +
+            "pour une photo réaliste → \\\"photorealistic, high detail, professional photography\\\" ; " +
+            "pour une peinture → \\\"digital painting, artstation\\\". " +
+            "Traduis et enrichis toujours la demande de l'utilisateur en un prompt anglais complet et descriptif (sujet, style, ambiance, composition), jamais une simple traduction littérale.)\n" +
             "• Bluetooth : {\"action\":\"bluetooth_info\"}, {\"action\":\"enable_bluetooth\"}, {\"action\":\"disable_bluetooth\"}\n" +
             "• Wi-Fi : {\"action\":\"wifi_info\"}, {\"action\":\"enable_wifi\"}, {\"action\":\"disable_wifi\"}\n\n" +
             "Exemple de réponse : \"Très bien Monsieur, j'appelle Maman tout de suite. [JARVIS_CMD:{\"action\":\"call\",\"target\":\"Maman\"}]\""
@@ -144,7 +148,9 @@ object ApiClient {
                 "comme si tu venais de la consulter ou de la faire toi-même. Sois concis : si l'utilisateur a " +
                 "demandé UNE seule chose (« le dernier SMS », « le dernier email »...), ne donne " +
                 "que celle-là avec l'expéditeur et le contenu, sans lister le reste. Ne mentionne " +
-                "jamais de commande système, d'action JSON ni de terme technique."
+                "jamais de commande système, d'action JSON ni de terme technique. N'utilise aucune mise " +
+                "en forme markdown (pas d'astérisques, pas de tirets de liste, pas de dièses) : écris en " +
+                "prose naturelle comme à l'oral."
         return try {
             val summary = dispatchToProvider(context, provider, listOf(HistoryEntry("user", summaryPrompt)))
             JarvisCommandParser.cleanResponse(summary).trim()

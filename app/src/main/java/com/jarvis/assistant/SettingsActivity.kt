@@ -71,6 +71,8 @@ class SettingsActivity : AppCompatActivity() {
         setContentView(R.layout.activity_settings)
 
         BottomNav.setup(this, NavDestination.SETTINGS)
+        EdgeToEdgeHelper.applyTopInset(findViewById(R.id.rootLayout))
+        EdgeToEdgeHelper.applyBottomInset(findViewById(R.id.bottomNavRoot))
 
         findViewById<TextView>(R.id.subNavDashboard).setOnClickListener {
             startActivity(Intent(this, PhoneControlActivity::class.java))

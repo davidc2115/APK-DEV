@@ -17,6 +17,8 @@ class GitHubActivity : AppCompatActivity() {
         setContentView(R.layout.activity_github)
 
         BottomNav.setup(this, NavDestination.GITHUB)
+        EdgeToEdgeHelper.applyTopInset(findViewById(R.id.rootLayout))
+        EdgeToEdgeHelper.applyBottomInset(findViewById(R.id.bottomNavRoot))
 
         val githubTokenInput = findViewById<EditText>(R.id.githubTokenInput)
         val saveGithubTokenButton = findViewById<TextView>(R.id.saveGithubTokenButton)
