@@ -67,7 +67,7 @@ object ImageGenController {
     private fun tryPollinations(context: Context, prompt: String): Result? {
         return try {
             val encodedPrompt = java.net.URLEncoder.encode(prompt, "UTF-8").replace("+", "%20")
-            val url = "https://image.pollinations.ai/prompt/$encodedPrompt?width=1024&height=1024&nologo=true"
+            val url = "https://image.pollinations.ai/prompt/$encodedPrompt?width=1024&height=1024&nologo=true&model=flux&enhance=true"
             val request = Request.Builder().url(url).get().build()
 
             client.newCall(request).execute().use { response ->

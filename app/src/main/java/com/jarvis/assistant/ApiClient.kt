@@ -62,7 +62,13 @@ object ApiClient {
             "propose spontanément d'enregistrer ou de mettre à jour sa fiche avec save_contact_profile, sans attendre que l'utilisateur te le demande explicitement à chaque fois.)\n" +
             "• Génération d'image : {\"action\":\"generate_image\", \"prompt\":\"description détaillée de l'image souhaitée, en anglais de préférence pour de meilleurs résultats\"}\n" +
             "  (L'image générée s'affiche automatiquement dans le chat et est sauvegardée dans Pictures/JARVIS-Generated sur le téléphone. " +
-            "La génération de vidéo et de musique n'est PAS disponible — si on te le demande, explique-le honnêtement plutôt que d'inventer un résultat.)\n" +
+            "La génération de vidéo et de musique n'est PAS disponible — si on te le demande, explique-le honnêtement plutôt que d'inventer un résultat. " +
+            "IMPORTANT — le prompt doit toujours préciser explicitement le STYLE demandé, en anglais, sinon le résultat sera incohérent : " +
+            "pour un coloriage/coloring page → ajoute \"black and white line art, coloring book page, no color, no shading, thick clean outlines, white background\" ; " +
+            "pour un dessin/cartoon → \\\"cartoon style, vector illustration\\\" ; " +
+            "pour une photo réaliste → \\\"photorealistic, high detail, professional photography\\\" ; " +
+            "pour une peinture → \\\"digital painting, artstation\\\". " +
+            "Traduis et enrichis toujours la demande de l'utilisateur en un prompt anglais complet et descriptif (sujet, style, ambiance, composition), jamais une simple traduction littérale.)\n" +
             "• Bluetooth : {\"action\":\"bluetooth_info\"}, {\"action\":\"enable_bluetooth\"}, {\"action\":\"disable_bluetooth\"}\n" +
             "• Wi-Fi : {\"action\":\"wifi_info\"}, {\"action\":\"enable_wifi\"}, {\"action\":\"disable_wifi\"}\n\n" +
             "Exemple de réponse : \"Très bien Monsieur, j'appelle Maman tout de suite. [JARVIS_CMD:{\"action\":\"call\",\"target\":\"Maman\"}]\""
