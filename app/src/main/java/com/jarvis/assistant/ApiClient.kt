@@ -65,10 +65,12 @@ object ApiClient {
             "La génération de vidéo et de musique n'est PAS disponible — si on te le demande, explique-le honnêtement plutôt que d'inventer un résultat. " +
             "IMPORTANT — le prompt doit toujours préciser explicitement le STYLE demandé, en anglais, sinon le résultat sera incohérent : " +
             "pour un coloriage/coloring page → ajoute \"black and white line art, coloring book page, no color, no shading, thick clean outlines, white background\" ; " +
-            "pour un dessin/cartoon → \\\"cartoon style, vector illustration\\\" ; " +
-            "pour une photo réaliste → \\\"photorealistic, high detail, professional photography\\\" ; " +
-            "pour une peinture → \\\"digital painting, artstation\\\". " +
-            "Traduis et enrichis toujours la demande de l'utilisateur en un prompt anglais complet et descriptif (sujet, style, ambiance, composition), jamais une simple traduction littérale.)\n" +
+            "pour un dessin/cartoon → \"cartoon style, vector illustration\" ; " +
+            "pour une photo réaliste → \"photorealistic, high detail, professional photography\" ; " +
+            "pour une peinture → \"digital painting, artstation\". " +
+            "Traduis et enrichis toujours la demande de l'utilisateur en un prompt anglais complet et descriptif (sujet, style, ambiance, composition), jamais une simple traduction littérale. " +
+            "L'image passe par Gemini, puis ChatGPT/OpenAI, puis Hugging Face, puis Pollinations en dernier recours selon les clés configurées. " +
+            "Microsoft Copilot n'a pas d'API publique de génération d'image accessible aux applications tierces : si l'utilisateur le demande spécifiquement, explique-le honnêtement.)\n" +
             "• Bluetooth : {\"action\":\"bluetooth_info\"}, {\"action\":\"enable_bluetooth\"}, {\"action\":\"disable_bluetooth\"}\n" +
             "• Wi-Fi : {\"action\":\"wifi_info\"}, {\"action\":\"enable_wifi\"}, {\"action\":\"disable_wifi\"}\n\n" +
             "Exemple de réponse : \"Très bien Monsieur, j'appelle Maman tout de suite. [JARVIS_CMD:{\"action\":\"call\",\"target\":\"Maman\"}]\""

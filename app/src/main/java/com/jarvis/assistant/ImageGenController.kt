@@ -18,14 +18,21 @@ import java.util.concurrent.TimeUnit
  * Génération d'images IA — essaie plusieurs fournisseurs en cascade pour
  * maximiser la fiabilité (si l'un échoue, essaie automatiquement le suivant) :
  *
- * 1. OpenAI DALL-E 3 — si une clé OpenAI est configurée (meilleure qualité, la plus fiable).
- * 2. Stable Diffusion (via Hugging Face Inference API) — si un jeton
+ * 1. Google Gemini (Nano Banana) — si une clé Gemini est configurée.
+ * 2. OpenAI DALL-E 3 — si une clé OpenAI est configurée.
+ * 3. Stable Diffusion (via Hugging Face Inference API) — si un jeton
  *    Hugging Face est configuré (celui déjà utilisé pour les modèles locaux).
- * 3. Pollinations AI — GRATUIT, AUCUNE CLÉ REQUISE, en dernier recours.
+ * 4. Pollinations AI — GRATUIT, AUCUNE CLÉ REQUISE, en dernier recours.
  *    ⚠️ Pollinations traverse actuellement une période de qualité dégradée
  *    (flou, basse résolution) — problème confirmé côté Pollinations eux-mêmes
  *    (issue GitHub #5372, pas un bug de notre intégration). D'où la priorité
  *    donnée aux fournisseurs payants dès qu'une clé est disponible.
+ *
+ * ⚠️ Microsoft Copilot n'a PAS d'API publique de génération d'image
+ * accessible aux applications tierces (Bing Image Creator, qui l'alimente,
+ * n'expose aucune API développeur). Impossible à intégrer honnêtement —
+ * seul Azure OpenAI existe côté Microsoft, mais c'est un service à part,
+ * avec ses propres clés, distinct de "Copilot".
  *
  * L'image est sauvegardée dans Pictures/JARVIS-Generated et affichée
  * directement dans le chat.
@@ -50,18 +57,21 @@ object ImageGenController {
             return Result("❌ Aucune description d'image fournie.", null, null)
         }
 
-        // 1. OpenAI DALL-E 3, si une clé est configurée — qualité la plus fiable.
+        // 1. Google Gemini, si une clé est configurée.
+        tryGemini(context, prompt)?.let { return it }
+
+        // 2. OpenAI DALL-E 3, si une clé est configurée.
         tryOpenAI(context, prompt)?.let { return it }
 
-        // 2. Stable Diffusion via Hugging Face, si un jeton est configuré.
+        // 3. Stable Diffusion via Hugging Face, si un jeton est configuré.
         tryHuggingFace(context, prompt)?.let { return it }
 
-        // 3. Pollinations AI — gratuit, sans clé, dernier recours.
+        // 4. Pollinations AI — gratuit, sans clé, dernier recours.
         tryPollinations(context, prompt)?.let { return it }
 
         return Result(
             "❌ Échec de la génération d'image sur tous les moteurs disponibles " +
-                "(OpenAI, Hugging Face, Pollinations). Vérifie ta connexion internet.",
+                "(Gemini, OpenAI, Hugging Face, Pollinations). Vérifie ta connexion internet.",
             null, null
         )
     }
@@ -90,6 +100,80 @@ object ImageGenController {
         } catch (e: Exception) {
             null // on passe au fournisseur suivant
         }
+    }
+
+    // ─── 1. Google Gemini (Nano Banana) ────────────────────────────────────────
+
+    private fun tryGemini(context: Context, prompt: String): Result? {
+        val keys = Prefs.getApiKeysFor(context, Provider.GEMINI)
+        if (keys.isEmpty()) return null
+
+        for (apiKey in keys) {
+            try {
+                val body = JSONObject()
+                    .put(
+                        "contents",
+                        org.json.JSONArray().put(
+                            JSONObject().put(
+                                "parts",
+                                org.json.JSONArray().put(JSONObject().put("text", prompt))
+                            )
+                        )
+                    )
+                    .put(
+                        "generationConfig",
+                        JSONObject().put(
+                            "responseModalities",
+                            org.json.JSONArray().put("TEXT").put("IMAGE")
+                        )
+                    )
+                    .toString()
+                    .toRequestBody(JSON)
+
+                val url = "https://generativelanguage.googleapis.com/v1beta/models/" +
+                    "gemini-3.1-flash-image:generateContent?key=$apiKey"
+
+                val request = Request.Builder()
+                    .url(url)
+                    .addHeader("Content-Type", "application/json")
+                    .post(body)
+                    .build()
+
+                client.newCall(request).execute().use { response ->
+                    val bodyStr = response.body?.string() ?: ""
+                    if (!response.isSuccessful) {
+                        if (response.code == 429 || response.code == 401) {
+                            Prefs.markKeyFailed(context, Provider.GEMINI, apiKey)
+                        }
+                        return@use // essaie la clé suivante s'il y en a une
+                    }
+
+                    val json = JSONObject(bodyStr)
+                    val candidates = json.optJSONArray("candidates") ?: return@use
+                    if (candidates.length() == 0) return@use
+                    val parts = candidates.getJSONObject(0).optJSONObject("content")?.optJSONArray("parts")
+                        ?: return@use
+
+                    for (i in 0 until parts.length()) {
+                        val inlineData = parts.getJSONObject(i).optJSONObject("inline_data")
+                        val b64 = inlineData?.optString("data")
+                        if (!b64.isNullOrBlank()) {
+                            val mime = inlineData.optString("mime_type", "image/png")
+                            val bytes = Base64.decode(b64, Base64.DEFAULT)
+                            val savedPath = saveToGallery(context, bytes, prompt)
+                            return Result(
+                                "🎨 Image générée pour « $prompt » (Google Gemini).\n📁 Enregistrée dans : $savedPath",
+                                b64,
+                                mime
+                            )
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                // essaie la clé suivante
+            }
+        }
+        return null
     }
 
     // ─── 2. OpenAI DALL-E 3 ─────────────────────────────────────────────────────
