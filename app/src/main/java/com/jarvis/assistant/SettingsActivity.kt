@@ -258,6 +258,8 @@ class SettingsActivity : AppCompatActivity() {
             pickSdModelLauncher.launch(arrayOf("*/*"))
         }
         updateSdModelLabel()
+        findViewById<TextView>(R.id.deleteLocalModelButton).setOnClickListener { deleteLocalTextModel() }
+        findViewById<TextView>(R.id.deleteSdModelButton).setOnClickListener { deleteLocalSdModel() }
 
         // ── URL personnalisée ──────────────────────────────────────────────────
         downloadCustomButton.setOnClickListener {
@@ -458,14 +460,19 @@ class SettingsActivity : AppCompatActivity() {
                             isDownloading = false
                             downloadProgressText.text = "✅ Modèle téléchargé et actif sur le téléphone !"
 
-                            // Activer automatiquement le mode local
-                            val targetProvider = if (format == LocalLlmManager.LocalModelFormat.TASK) Provider.ON_DEVICE else Provider.LOCAL_GGUF
-                            selectedProvider = targetProvider
-                            providerSpinner.setSelection(Provider.entries.indexOf(targetProvider))
-                            Prefs.save(this@SettingsActivity, targetProvider, "", "", "")
+                            if (format == LocalLlmManager.LocalModelFormat.STABLE_DIFFUSION) {
+                                updateSdModelLabel()
+                                Toast.makeText(this@SettingsActivity, "Modèle Stable Diffusion enregistré ✅", Toast.LENGTH_SHORT).show()
+                            } else {
+                                // Activer automatiquement le mode local
+                                val targetProvider = if (format == LocalLlmManager.LocalModelFormat.TASK) Provider.ON_DEVICE else Provider.LOCAL_GGUF
+                                selectedProvider = targetProvider
+                                providerSpinner.setSelection(Provider.entries.indexOf(targetProvider))
+                                Prefs.save(this@SettingsActivity, targetProvider, "", "", "")
 
-                            updateLocalModelLabel()
-                            Toast.makeText(this@SettingsActivity, "Modèle enregistré et activé ✅", Toast.LENGTH_SHORT).show()
+                                updateLocalModelLabel()
+                                Toast.makeText(this@SettingsActivity, "Modèle enregistré et activé ✅", Toast.LENGTH_SHORT).show()
+                            }
                         }
                         is ModelDownloader.Progress.Error -> {
                             isDownloading = false
@@ -541,7 +548,13 @@ class SettingsActivity : AppCompatActivity() {
     private fun updateSdModelLabel() {
         val path = Prefs.getLocalSdModelPath(this)
         val label = findViewById<TextView>(R.id.sdModelPathText)
-        label.text = if (path.isBlank()) "Aucun modèle importé" else "Modèle actif : ${File(path).name}"
+        if (path.isBlank()) {
+            label.text = "Aucun modèle importé"
+        } else {
+            val file = File(path)
+            val sizeMb = if (file.exists()) file.length() / (1024 * 1024) else 0
+            label.text = "Modèle actif : ${file.name} (~${sizeMb} Mo)"
+        }
     }
 
     private fun updateLocalModelLabel() {
@@ -549,7 +562,49 @@ class SettingsActivity : AppCompatActivity() {
         localModelPathText.text = if (path.isBlank()) {
             "Modèle actif : Aucun"
         } else {
-            "Modèle actif sur l'appareil : ${File(path).name} (${selectedProvider.displayName})"
+            val file = File(path)
+            val sizeMb = if (file.exists()) file.length() / (1024 * 1024) else 0
+            "Modèle actif sur l'appareil : ${file.name} (${selectedProvider.displayName}, ~${sizeMb} Mo)"
         }
+    }
+
+    private fun deleteLocalTextModel() {
+        val path = Prefs.getLocalModelPath(this)
+        if (path.isBlank()) {
+            Toast.makeText(this, "Aucun modèle de texte local à supprimer.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Supprimer ce modèle ?")
+            .setMessage("${File(path).name} sera effacé du téléphone. Tu pourras le retélécharger plus tard si besoin.")
+            .setPositiveButton("Supprimer") { _, _ ->
+                LocalLlmManager.unload()
+                File(path).delete()
+                Prefs.saveLocalModelPath(this, "")
+                updateLocalModelLabel()
+                Toast.makeText(this, "🗑️ Modèle supprimé.", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Annuler", null)
+            .show()
+    }
+
+    private fun deleteLocalSdModel() {
+        val path = Prefs.getLocalSdModelPath(this)
+        if (path.isBlank()) {
+            Toast.makeText(this, "Aucun modèle Stable Diffusion local à supprimer.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Supprimer ce modèle ?")
+            .setMessage("${File(path).name} sera effacé du téléphone. Tu pourras le retélécharger plus tard si besoin.")
+            .setPositiveButton("Supprimer") { _, _ ->
+                NativeStableDiffusion.unload()
+                File(path).delete()
+                Prefs.saveLocalSdModelPath(this, "")
+                updateSdModelLabel()
+                Toast.makeText(this, "🗑️ Modèle supprimé.", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Annuler", null)
+            .show()
     }
 }

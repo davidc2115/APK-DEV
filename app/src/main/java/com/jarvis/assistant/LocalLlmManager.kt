@@ -23,7 +23,7 @@ object LocalLlmManager {
 
     private const val TAG = "LocalLlmManager"
 
-    enum class LocalModelFormat { TASK, GGUF, ONNX }
+    enum class LocalModelFormat { TASK, GGUF, ONNX, STABLE_DIFFUSION }
 
     private var llmInference: LlmInference? = null
     private var loadedTaskPath: String? = null

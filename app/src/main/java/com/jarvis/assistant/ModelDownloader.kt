@@ -52,6 +52,29 @@ object ModelDownloader {
 
     val MODEL_CATALOG: List<ModelEntry> = listOf(
 
+        // ─── Stable Diffusion (génération d'image embarquée) — GGUF, licence libre ──
+        // Vérifiés manuellement : fichiers réels et publics, aucune licence à accepter.
+        ModelEntry(
+            label        = "🎨 Stable Diffusion 1.5 — léger (2.7 Go)",
+            url          = "https://huggingface.co/kostakoff/stable-diffusion-v1-5-GGUF/resolve/main/v1-5-pruned_Q4_0.gguf?download=true",
+            pageUrl      = "https://huggingface.co/kostakoff/stable-diffusion-v1-5-GGUF",
+            format       = LocalLlmManager.LocalModelFormat.STABLE_DIFFUSION,
+            sizeHint     = "~2.7 Go",
+            needsHfToken = false,
+            creator      = "Runway ML (quantifié par kostakoff)",
+            description  = "Version compressée, plus rapide sur CPU mobile. Qualité correcte."
+        ),
+        ModelEntry(
+            label        = "🎨 Stable Diffusion 1.5 — qualité (4.5 Go)",
+            url          = "https://huggingface.co/kostakoff/stable-diffusion-v1-5-GGUF/resolve/main/v1-5-pruned_Q8_0.gguf?download=true",
+            pageUrl      = "https://huggingface.co/kostakoff/stable-diffusion-v1-5-GGUF",
+            format       = LocalLlmManager.LocalModelFormat.STABLE_DIFFUSION,
+            sizeHint     = "~4.5 Go",
+            needsHfToken = false,
+            creator      = "Runway ML (quantifié par kostakoff)",
+            description  = "Meilleure qualité d'image, plus lent à générer. Téléphone récent recommandé."
+        ),
+
         // ─── Qwen 2.5 (Alibaba) — GGUF via llama.cpp natif, licence Apache 2.0 ──
         // Vérifiés manuellement : fichiers réels, aucune licence à accepter,
         // fonctionnent avec le moteur llama.cpp compilé nativement dans l'app.
@@ -163,8 +186,14 @@ object ModelDownloader {
                     LocalLlmManager.LocalModelFormat.GGUF -> "gguf"
                     LocalLlmManager.LocalModelFormat.ONNX -> "onnx"
                     LocalLlmManager.LocalModelFormat.TASK -> "task"
+                    LocalLlmManager.LocalModelFormat.STABLE_DIFFUSION -> "bin"
                 }
-                val destFile = File(context.filesDir, "local_model.$extension")
+                val destFileName = if (format == LocalLlmManager.LocalModelFormat.STABLE_DIFFUSION) {
+                    "local_sd_model.$extension"
+                } else {
+                    "local_model.$extension"
+                }
+                val destFile = File(context.filesDir, destFileName)
                 val totalBytes = body.contentLength()
                 var downloaded = 0L
                 var lastPercent = -1
@@ -188,9 +217,14 @@ object ModelDownloader {
                     }
                 }
 
-                Prefs.saveLocalModelPath(context, destFile.absolutePath)
-                Prefs.saveLocalModelFormat(context, format.name)
-                LocalLlmManager.unload()
+                if (format == LocalLlmManager.LocalModelFormat.STABLE_DIFFUSION) {
+                    Prefs.saveLocalSdModelPath(context, destFile.absolutePath)
+                    NativeStableDiffusion.unload()
+                } else {
+                    Prefs.saveLocalModelPath(context, destFile.absolutePath)
+                    Prefs.saveLocalModelFormat(context, format.name)
+                    LocalLlmManager.unload()
+                }
                 onProgress(Progress.Done(destFile))
             }
         } catch (e: Exception) {
