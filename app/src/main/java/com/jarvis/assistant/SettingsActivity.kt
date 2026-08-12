@@ -165,6 +165,21 @@ class SettingsActivity : AppCompatActivity() {
                     modelInput.setText(provider.defaultModel)
                     apiKeyInput.setText(Prefs.getApiKeyFor(this@SettingsActivity, provider))
                 }
+
+                // Sauvegarde immédiate du choix, quelle que soit la page où l'utilisateur
+                // navigue ensuite — évite de perdre la sélection en changeant d'onglet
+                // sans être passé par le bouton ENREGISTRER de l'onglet Config.
+                // Exception : Ollama/Custom nécessitent une URL saisie manuellement,
+                // donc on attend le clic explicite sur ENREGISTRER pour ceux-là.
+                if (provider != Provider.OLLAMA && provider != Provider.CUSTOM) {
+                    Prefs.save(
+                        this@SettingsActivity,
+                        provider,
+                        baseUrlInput.text.toString().trim(),
+                        modelInput.text.toString().trim(),
+                        apiKeyInput.text.toString().trim()
+                    )
+                }
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
