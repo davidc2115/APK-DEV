@@ -204,8 +204,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         CoroutineScope(Dispatchers.Main).launch {
-            val reply = ApiClient.sendChat(this@MainActivity, ConversationStore.history)
-            addMessage(reply, isUser = false, speak = true)
+            val result = ApiClient.sendChat(this@MainActivity, ConversationStore.history)
+            addMessage(
+                result.text, isUser = false, speak = true,
+                imageBase64 = result.imageBase64, imageMime = result.imageMime
+            )
             statusText.text = "● en veille"
         }
     }

@@ -56,6 +56,9 @@ object ApiClient {
             "Cette couche est DISTINCTE du carnet d'adresses du téléphone : c'est une couche enrichie que TU peux alimenter toi-même. " +
             "Quand tu lis un SMS, un email ou un événement d'agenda qui révèle des infos utiles sur une personne (numéro, adresse, employeur, contexte pro/perso), " +
             "propose spontanément d'enregistrer ou de mettre à jour sa fiche avec save_contact_profile, sans attendre que l'utilisateur te le demande explicitement à chaque fois.)\n" +
+            "• Génération d'image : {\"action\":\"generate_image\", \"prompt\":\"description détaillée de l'image souhaitée, en anglais de préférence pour de meilleurs résultats\"}\n" +
+            "  (L'image générée s'affiche automatiquement dans le chat et est sauvegardée dans Pictures/JARVIS-Generated sur le téléphone. " +
+            "La génération de vidéo et de musique n'est PAS disponible — si on te le demande, explique-le honnêtement plutôt que d'inventer un résultat.)\n" +
             "• Bluetooth : {\"action\":\"bluetooth_info\"}, {\"action\":\"enable_bluetooth\"}, {\"action\":\"disable_bluetooth\"}\n" +
             "• Wi-Fi : {\"action\":\"wifi_info\"}, {\"action\":\"enable_wifi\"}, {\"action\":\"disable_wifi\"}\n\n" +
             "Exemple de réponse : \"Très bien Monsieur, j'appelle Maman tout de suite. [JARVIS_CMD:{\"action\":\"call\",\"target\":\"Maman\"}]\""
@@ -68,7 +71,9 @@ object ApiClient {
 
     private val JSON = "application/json; charset=utf-8".toMediaType()
 
-    suspend fun sendChat(context: Context, history: List<HistoryEntry>): String =
+    data class ChatResult(val text: String, val imageBase64: String? = null, val imageMime: String? = null)
+
+    suspend fun sendChat(context: Context, history: List<HistoryEntry>): ChatResult =
         withContext(Dispatchers.IO) {
             val provider = Prefs.getProvider(context)
 
@@ -85,27 +90,30 @@ object ApiClient {
 
             when (commandResult) {
                 is JarvisCommandParser.CommandResult.Executed -> {
-                    if (commandResult.isInformational) {
+                    val text = if (commandResult.isInformational) {
                         summarizeNaturally(context, provider, lastUserMsg, commandResult.outputMessage)
                     } else if (cleanText.isBlank()) {
                         commandResult.outputMessage
                     } else {
                         "$cleanText\n\n${commandResult.outputMessage}"
                     }
+                    ChatResult(text, commandResult.imageBase64, commandResult.imageMime)
                 }
                 is JarvisCommandParser.CommandResult.ExecutedMultiple -> {
                     // Cas d'un projet à plusieurs fichiers / plusieurs actions d'un coup.
                     val combined = commandResult.results.joinToString("\n\n") { it.outputMessage }
                     val anyInformational = commandResult.results.any { it.isInformational }
-                    if (anyInformational) {
+                    val text = if (anyInformational) {
                         summarizeNaturally(context, provider, lastUserMsg, combined)
                     } else if (cleanText.isBlank()) {
                         combined
                     } else {
                         "$cleanText\n\n$combined"
                     }
+                    val imageResult = commandResult.results.firstOrNull { it.imageBase64 != null }
+                    ChatResult(text, imageResult?.imageBase64, imageResult?.imageMime)
                 }
-                JarvisCommandParser.CommandResult.None -> rawResponse
+                JarvisCommandParser.CommandResult.None -> ChatResult(rawResponse)
             }
         }
 

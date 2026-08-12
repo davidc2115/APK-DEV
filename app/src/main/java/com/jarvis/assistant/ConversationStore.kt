@@ -24,8 +24,8 @@ object ConversationStore {
         history.add(HistoryEntry("user", text, imageBase64, imageMime))
     }
 
-    fun addAssistant(text: String) {
-        messages.add(Message(text, false))
+    fun addAssistant(text: String, imageBase64: String? = null, imageMime: String? = null) {
+        messages.add(Message(text, false, imageBase64, imageMime))
         history.add(HistoryEntry("assistant", text))
     }
 }

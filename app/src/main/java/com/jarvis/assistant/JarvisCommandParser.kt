@@ -6,10 +6,23 @@ import org.json.JSONObject
 object JarvisCommandParser {
 
     sealed class CommandResult {
-        data class Executed(val outputMessage: String, val action: String, val isInformational: Boolean) : CommandResult()
+        data class Executed(
+            val outputMessage: String,
+            val action: String,
+            val isInformational: Boolean,
+            val imageBase64: String? = null,
+            val imageMime: String? = null
+        ) : CommandResult()
         data class ExecutedMultiple(val results: List<Executed>) : CommandResult()
         object None : CommandResult()
     }
+
+    // Canal temporaire pour faire remonter une image générée jusqu'au chat
+    // (executeAction renvoie un simple texte ; l'image est déposée ici par
+    // l'action generate_image puis consommée immédiatement après par
+    // parseAndExecute, avant que la commande suivante ne s'exécute).
+    private var pendingImageBase64: String? = null
+    private var pendingImageMime: String? = null
 
     // Actions qui RENVOIENT une information à présenter (l'IA doit reformuler
     // naturellement le résultat). Les autres actions sont des confirmations
@@ -42,7 +55,11 @@ object JarvisCommandParser {
                 val json = JSONObject(jsonStr)
                 val action = json.optString("action", "").lowercase()
                 val resultText = executeAction(context, action, json)
-                CommandResult.Executed(resultText, action, action in INFORMATIONAL_ACTIONS)
+                val img = pendingImageBase64
+                val mime = pendingImageMime
+                pendingImageBase64 = null
+                pendingImageMime = null
+                CommandResult.Executed(resultText, action, action in INFORMATIONAL_ACTIONS, img, mime)
             } catch (e: Exception) {
                 CommandResult.Executed("❌ Erreur d'exécution de la commande système : ${e.message}", "", false)
             }
@@ -77,7 +94,7 @@ object JarvisCommandParser {
 
             "search_contact" -> {
                 val name = json.optString("name", "").ifBlank { json.optString("query", "") }
-                if (name.isBlank()) ContactsController.getContactList(context)
+                if (name.isBlank()) ContactsController.getContactList(context, json.optInt("count", 100))
                 else ContactsController.searchContacts(context, name)
             }
             "add_contact" -> {
@@ -317,6 +334,14 @@ object JarvisCommandParser {
                 val name = json.optString("name", "")
                 if (name.isBlank()) "❌ Nom du contact manquant."
                 else PeopleController.navigateToContact(context, name)
+            }
+
+            "generate_image" -> {
+                val prompt = json.optString("prompt", "")
+                val result = ImageGenController.generateImage(context, prompt)
+                pendingImageBase64 = result.base64
+                pendingImageMime = result.mime
+                result.message
             }
 
             else -> "❌ Commande système inconnue : « $action »."
