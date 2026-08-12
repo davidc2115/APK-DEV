@@ -142,16 +142,6 @@ class SettingsActivity : AppCompatActivity() {
         tabApiKeys.alpha = if (tab == "apikeys") 1f else 0.45f
         tabLocal.alpha   = if (tab == "local")   1f else 0.45f
         tabSystem.alpha  = if (tab == "system")  1f else 0.45f
-
-        // Si l'utilisateur clique sur l'onglet Local, passer automatiquement le Provider sur LOCAL_GGUF / ON_DEVICE
-        if (tab == "local" && !selectedProvider.isLocal) {
-            val localFormat = Prefs.getLocalModelFormat(this)
-            val newProvider = if (localFormat == "TASK") Provider.ON_DEVICE else Provider.LOCAL_GGUF
-            selectedProvider = newProvider
-            providerSpinner.setSelection(Provider.entries.indexOf(newProvider))
-            Prefs.save(this, newProvider, "", "", "")
-            Toast.makeText(this, "🧠 Mode IA Local activé !", Toast.LENGTH_SHORT).show()
-        }
     }
 
     private fun setupProviderSpinner() {
