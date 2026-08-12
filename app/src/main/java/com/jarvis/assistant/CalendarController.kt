@@ -42,17 +42,45 @@ object CalendarController {
         return getEventsTimeRange(context, start, end, "📅 **Événements des $days prochains jours**")
     }
 
+    /** Construit une table ID de calendrier -> "Nom (compte)" pour annoter les événements. */
+    private fun buildCalendarNameMap(context: Context): Map<Long, String> {
+        val map = mutableMapOf<Long, String>()
+        try {
+            context.contentResolver.query(
+                CalendarContract.Calendars.CONTENT_URI,
+                arrayOf(
+                    CalendarContract.Calendars._ID,
+                    CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
+                    CalendarContract.Calendars.ACCOUNT_NAME
+                ),
+                null, null, null
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    val id = c.getLong(0)
+                    val name = c.getString(1) ?: "?"
+                    val account = c.getString(2) ?: ""
+                    val nickname = Prefs.getCalendarNickname(context, id)
+                    map[id] = nickname.ifBlank { "$name ($account)" }
+                }
+            }
+        } catch (_: Exception) { /* table vide en cas d'erreur, pas bloquant */ }
+        return map
+    }
+
     private fun getEventsTimeRange(context: Context, startMillis: Long, endMillis: Long, title: String): String {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
             return "❌ Permission de lecture de l'agenda non accordée."
         }
+
+        val calendarNames = buildCalendarNameMap(context)
 
         val projection = arrayOf(
             CalendarContract.Events._ID,
             CalendarContract.Events.TITLE,
             CalendarContract.Events.DTSTART,
             CalendarContract.Events.EVENT_LOCATION,
-            CalendarContract.Events.DESCRIPTION
+            CalendarContract.Events.DESCRIPTION,
+            CalendarContract.Events.CALENDAR_ID
         )
 
         val selection = "${CalendarContract.Events.DTSTART} >= ? AND ${CalendarContract.Events.DTSTART} <= ? AND ${CalendarContract.Events.DELETED} = 0"
@@ -79,9 +107,12 @@ object CalendarController {
                     val eventTitle = c.getString(1) ?: "Sans titre"
                     val dtStart = c.getLong(2)
                     val location = c.getString(3) ?: ""
+                    val calendarId = c.getLong(5)
+                    val calendarName = calendarNames[calendarId] ?: "Calendrier inconnu"
                     val timeStr = sdf.format(Date(dtStart))
 
                     sb.append("${idx + 1}. **$eventTitle** — $timeStr (ID: $eventId)\n")
+                    sb.append("   🗓️ Calendrier : $calendarName\n")
                     if (location.isNotBlank()) sb.append("   📍 $location\n")
                     sb.append("\n")
                     idx++
@@ -99,13 +130,14 @@ object CalendarController {
         startTimeMillis: Long,
         endTimeMillis: Long,
         description: String = "",
-        location: String = ""
+        location: String = "",
+        calendarRef: String? = null
     ): String {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
             return "❌ Permission de modification de l'agenda non accordée."
         }
 
-        val calendarId = getDefaultCalendarId(context)
+        val calendarId = resolveCalendarId(context, calendarRef)
             ?: return "❌ Aucun calendrier disponible pour ajouter l'événement."
 
         return try {
@@ -242,7 +274,9 @@ object CalendarController {
 
         val projection = arrayOf(
             CalendarContract.Calendars._ID,
-            CalendarContract.Calendars.CALENDAR_DISPLAY_NAME
+            CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
+            CalendarContract.Calendars.ACCOUNT_NAME,
+            CalendarContract.Calendars.OWNER_ACCOUNT
         )
 
         return try {
@@ -251,7 +285,7 @@ object CalendarController {
                 projection,
                 null,
                 null,
-                null
+                "${CalendarContract.Calendars.ACCOUNT_NAME} ASC"
             )
 
             cursor?.use { c ->
@@ -261,13 +295,51 @@ object CalendarController {
                 while (c.moveToNext()) {
                     val id = c.getLong(0)
                     val name = c.getString(1) ?: "Inconnu"
-                    sb.append("• **$name** (ID: $id)\n")
+                    val account = c.getString(2) ?: "?"
+                    val nickname = Prefs.getCalendarNickname(context, id)
+                    val nicknameStr = if (nickname.isNotBlank()) " — surnom : « $nickname »" else ""
+                    sb.append("• **$name** (compte : $account, ID: $id)$nicknameStr\n")
                 }
+                sb.append(
+                    "\n💡 Pour distinguer deux calendriers similaires, donne-leur un surnom avec " +
+                        "l'action name_calendar (ex : « appelle le calendrier ID 3 'Perso' »)."
+                )
                 sb.toString()
             } ?: "❌ Erreur lors de la récupération des calendriers."
         } catch (e: Exception) {
             "❌ Erreur : ${e.message}"
         }
+    }
+
+    /** Attribue un surnom mémorisable à un calendrier (ex: "Perso", "Boulot"), pour le distinguer facilement. */
+    fun nameCalendar(context: Context, calendarId: Long, nickname: String): String {
+        Prefs.saveCalendarNickname(context, calendarId, nickname)
+        return "✅ Le calendrier ID $calendarId s'appellera désormais « $nickname »."
+    }
+
+    /** Résout un identifiant de calendrier à partir d'un surnom, d'un nom affiché, ou d'un ID numérique direct. */
+    private fun resolveCalendarId(context: Context, calendarRef: String?): Long? {
+        if (calendarRef.isNullOrBlank()) return getDefaultCalendarId(context)
+        calendarRef.toLongOrNull()?.let { return it }
+
+        val nicknameMatch = Prefs.findCalendarIdByNickname(context, calendarRef)
+        if (nicknameMatch != null) return nicknameMatch
+
+        val projection = arrayOf(
+            CalendarContract.Calendars._ID,
+            CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
+            CalendarContract.Calendars.ACCOUNT_NAME
+        )
+        context.contentResolver.query(CalendarContract.Calendars.CONTENT_URI, projection, null, null, null)?.use { c ->
+            while (c.moveToNext()) {
+                val name = c.getString(1) ?: ""
+                val account = c.getString(2) ?: ""
+                if (name.contains(calendarRef, ignoreCase = true) || account.contains(calendarRef, ignoreCase = true)) {
+                    return c.getLong(0)
+                }
+            }
+        }
+        return getDefaultCalendarId(context)
     }
 
     private fun getDefaultCalendarId(context: Context): Long? {

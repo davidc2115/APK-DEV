@@ -29,7 +29,11 @@ object ApiClient {
             "• Chercher un SMS : {\"action\":\"search_sms\", \"query\":\"Pierre\"} (cherche dans le contenu ET l'expéditeur — utilise ça pour toute demande du type « trouve le SMS de X », « cherche le message qui parle de Y »)\n" +
             "• Contacts : {\"action\":\"search_contact\", \"name\":\"Jean\"}\n" +
             "• Musique : {\"action\":\"play_music\", \"query\":\"Jazz\"}, {\"action\":\"pause_music\"}, {\"action\":\"stop_music\"}, {\"action\":\"set_volume\", \"level\":8}\n" +
-            "• Agenda : {\"action\":\"today_events\"}, {\"action\":\"upcoming_events\", \"days\":7}, {\"action\":\"create_event\", \"title\":\"Rendez-vous docteur\", \"startTime\":1700000000000}, {\"action\":\"search_event\", \"query\":\"docteur\"}, {\"action\":\"update_event\", \"eventId\":42, \"newTitle\":\"nouveau titre\", \"newStartTime\":1700000000000}, {\"action\":\"delete_event\", \"eventId\":42}\n" +
+            "• Agenda : {\"action\":\"today_events\"}, {\"action\":\"upcoming_events\", \"days\":7}, " +
+            "{\"action\":\"create_event\", \"title\":\"Rendez-vous docteur\", \"startTime\":1700000000000, \"calendar\":\"Perso\"} (le champ « calendar » est optionnel : surnom déjà donné, nom affiché, nom de compte, ou ID numérique — si omis, utilise le calendrier par défaut), " +
+            "{\"action\":\"search_event\", \"query\":\"docteur\"}, {\"action\":\"update_event\", \"eventId\":42, \"newTitle\":\"nouveau titre\", \"newStartTime\":1700000000000}, {\"action\":\"delete_event\", \"eventId\":42}, " +
+            "{\"action\":\"list_calendars\"} (montre TOUS les calendriers avec leur compte associé — utilise ça dès que l'utilisateur confond deux agendas ou parle de plusieurs plannings), " +
+            "{\"action\":\"name_calendar\", \"calendarId\":3, \"nickname\":\"Perso\"} (mémorise un surnom pour un calendrier — chaque événement affiché indique désormais de quel calendrier il vient, ils ne sont plus fusionnés)\n" +
             "  (IMPORTANT : pour modifier/supprimer un événement, cherche-le d'abord avec search_event ou today_events/upcoming_events pour obtenir son ID, visible entre parenthèses après chaque événement listé)\n" +
             "• Emails : {\"action\":\"read_emails\"}, {\"action\":\"send_email\", \"to\":\"contact@mail.com\", \"subject\":\"Projet\", \"body\":\"Bonjour\"}, " +
             "{\"action\":\"search_email\", \"query\":\"facture\"} (cherche dans le sujet, le corps ET l'expéditeur), " +

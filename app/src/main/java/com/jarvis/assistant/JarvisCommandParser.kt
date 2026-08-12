@@ -29,7 +29,7 @@ object JarvisCommandParser {
     // d'exécution (ex: "SMS envoyé") qui n'ont pas besoin d'être reformulées.
     private val INFORMATIONAL_ACTIONS = setOf(
         "list_files", "search_files", "read_file", "storage_info",
-        "today_events", "upcoming_events", "search_event",
+        "today_events", "upcoming_events", "search_event", "list_calendars",
         "read_sms", "read_unread_sms", "search_sms", "recent_calls",
         "read_emails", "read_unread_emails", "search_email", "read_email_content",
         "get_notifications", "bluetooth_info", "wifi_info",
@@ -126,7 +126,15 @@ object JarvisCommandParser {
                 val end = json.optLong("endTime", start + 3600000)
                 val desc = json.optString("description", "")
                 val loc = json.optString("location", "")
-                CalendarController.createEvent(context, title, start, end, desc, loc)
+                val calendarRef = json.optString("calendar", "").ifBlank { null }
+                CalendarController.createEvent(context, title, start, end, desc, loc, calendarRef)
+            }
+            "list_calendars" -> CalendarController.getCalendarList(context)
+            "name_calendar" -> {
+                val id = json.optLong("calendarId", -1)
+                val nickname = json.optString("nickname", "")
+                if (id == -1L || nickname.isBlank()) "❌ Identifiant de calendrier ou surnom manquant."
+                else CalendarController.nameCalendar(context, id, nickname)
             }
 
             "read_emails" -> EmailController.readInbox(context, json.optInt("count", 5))

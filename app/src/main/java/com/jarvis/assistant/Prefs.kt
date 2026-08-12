@@ -361,6 +361,28 @@ object Prefs {
         prefs(context).edit().putString("picovoice_key", key.trim()).apply()
     }
 
+    // ─── Surnoms de calendriers (pour distinguer plusieurs agendas similaires) ──
+
+    fun getCalendarNickname(context: Context, calendarId: Long): String =
+        prefs(context).getString("calendar_nickname_$calendarId", "") ?: ""
+
+    fun saveCalendarNickname(context: Context, calendarId: Long, nickname: String) {
+        prefs(context).edit().putString("calendar_nickname_$calendarId", nickname).apply()
+    }
+
+    /** Retrouve l'ID d'un calendrier à partir d'un surnom déjà enregistré. */
+    fun findCalendarIdByNickname(context: Context, nickname: String): Long? {
+        val all = prefs(context).all
+        for ((key, value) in all) {
+            if (key.startsWith("calendar_nickname_") && value is String &&
+                value.equals(nickname, ignoreCase = true)
+            ) {
+                return key.removePrefix("calendar_nickname_").toLongOrNull()
+            }
+        }
+        return null
+    }
+
 
     fun saveGithubToken(context: Context, token: String) {
         prefs(context).edit().putString("github_token", token).apply()
