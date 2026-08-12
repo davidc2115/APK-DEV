@@ -91,6 +91,46 @@ object SmsController {
         }
     }
 
+    /** Recherche des SMS par mot-clé (dans le contenu ou le nom/numéro de l'expéditeur). */
+    fun searchSms(context: Context, query: String, count: Int = 10): String {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
+            return "❌ Permission de lecture des SMS non accordée. Cliquez sur '💬 Demander SMS' ou '⚙️ AUTORISATIONS MANUELLES'."
+        }
+
+        val projection = arrayOf(
+            Telephony.Sms.ADDRESS,
+            Telephony.Sms.BODY,
+            Telephony.Sms.DATE,
+            Telephony.Sms.READ
+        )
+        val selection = "(${Telephony.Sms.BODY} LIKE ? OR ${Telephony.Sms.ADDRESS} LIKE ?)"
+        val likeQuery = "%$query%"
+        val selectionArgs = arrayOf(likeQuery, likeQuery)
+
+        fun runQuery(uri: Uri, extraSelection: String?): Cursor? {
+            val fullSelection = if (extraSelection != null) "$extraSelection AND $selection" else selection
+            return try {
+                context.contentResolver.query(uri, projection, fullSelection, selectionArgs, "${Telephony.Sms.DATE} DESC")
+            } catch (e: Exception) {
+                null
+            }
+        }
+
+        var cursor = runQuery(Telephony.Sms.Inbox.CONTENT_URI, null)
+        if (cursor == null || cursor.count == 0) {
+            cursor?.close()
+            cursor = runQuery(Telephony.Sms.CONTENT_URI, "${Telephony.Sms.TYPE} = 1")
+        }
+
+        return cursor?.use { c ->
+            if (c.count == 0) "🔍 Aucun SMS trouvé pour « $query »."
+            else formatSmsCursor(c, count).replaceFirst(
+                Regex("^💬 \\*\\*.*?\\*\\*"),
+                "🔍 **Résultats pour « $query »**"
+            )
+        } ?: "❌ Impossible de rechercher dans les SMS."
+    }
+
     fun readUnreadSms(context: Context): String {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
             return "❌ Permission de lecture des SMS non accordée."
