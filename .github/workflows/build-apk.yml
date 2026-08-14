@@ -29,10 +29,16 @@ jobs:
           set +e
           ./gradlew assembleDebug --no-daemon --stacktrace > build.log 2>&1
           code=$?
-          echo "----- tail of build.log -----"
-          tail -c 20000 build.log
           if [ $code -ne 0 ]; then
-            ERR=$(tail -c 4000 build.log | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')
+            {
+              echo "=== kotlinc errors (e:) ==="
+              grep -n "^e: " build.log | head -80
+              echo "=== what went wrong ==="
+              awk '/FAILURE: Build failed/,0' build.log | head -120
+            } > summary.log
+            echo "----- summary.log -----"
+            cat summary.log
+            ERR=$(cat summary.log | head -c 3800 | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')
             echo "::error::$ERR"
           fi
           exit $code
