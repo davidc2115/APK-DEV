@@ -52,6 +52,12 @@ dependencies {
     ksp(libs.hilt.compiler)
     implementation(libs.hilt.navigation.compose)
 
+    // Requis pour @HiltWorker / @AssistedInject dans ObsidianSyncWorker (CoroutineWorker) :
+    // sans ce compilateur androidx.hilt dédié, KSP ne peut pas générer les classes Hilt_*
+    // pour les Workers et échoue avec "error.NonExistentClass".
+    implementation(libs.hilt.work)
+    ksp(libs.androidx.hilt.compiler)
+
     implementation(libs.retrofit.core)
     implementation(libs.retrofit.moshi)
     implementation(libs.okhttp)
