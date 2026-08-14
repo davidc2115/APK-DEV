@@ -25,7 +25,24 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        run: |
+          set +e
+          ./gradlew assembleDebug --no-daemon --stacktrace > build.log 2>&1
+          code=$?
+          echo "----- tail of build.log -----"
+          tail -c 20000 build.log
+          if [ $code -ne 0 ]; then
+            ERR=$(tail -c 4000 build.log | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')
+            echo "::error::$ERR"
+          fi
+          exit $code
+
+      - name: Upload build log
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gradle-build-log
+          path: build.log
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
