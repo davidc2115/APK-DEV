@@ -1,19 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Jarvis" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <item name="colorPrimary">@color/cyan_accent</item>
-        <item name="colorPrimaryDark">@color/background_dark</item>
-        <item name="colorAccent">@color/cyan_accent</item>
-        <item name="android:windowBackground">@color/background_dark</item>
-        <item name="android:statusBarColor">@color/background_dark</item>
-        <item name="android:navigationBarColor">@color/background_dark</item>
-        <item name="android:textColorPrimary">@color/text_primary</item>
-    </style>
-
-    <style name="ColorSwatch">
-        <item name="android:layout_width">0dp</item>
-        <item name="android:layout_height">40dp</item>
-        <item name="android:layout_weight">1</item>
-        <item name="android:layout_marginEnd">8dp</item>
-    </style>
+    <style name="Theme.JarvisAI" parent="android:Theme.Material.Light.NoActionBar" />
 </resources>

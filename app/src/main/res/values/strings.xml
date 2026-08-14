@@ -1,6 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">JARVIS</string>
-    <string name="hint_message">Parlez ou écrivez à JARVIS…</string>
-    <string name="settings_title">Paramètres de connexion IA</string>
+    <string name="app_name">Jarvis</string>
 </resources>

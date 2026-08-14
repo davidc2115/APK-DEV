@@ -4,11 +4,11 @@
 /.idea
 .DS_Store
 /build
-app/build
 /captures
 .externalNativeBuildFolder
 .cxx
 local.properties
-app/src/main/cpp/llama.cpp/
-*.cxx
-.cxx/
+*.apk
+*.aab
+/app/build
+/app/release
