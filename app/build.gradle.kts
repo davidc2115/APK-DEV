@@ -40,8 +40,11 @@ android {
 dependencies {
     implementation(libs.core.ktx)
     implementation(libs.lifecycle.runtime.ktx)
+    implementation(libs.lifecycle.viewmodel.ktx)
+    implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.activity.compose)
     implementation(platform(libs.compose.bom))
+    implementation(libs.compose.foundation)
     implementation(libs.compose.ui)
     implementation(libs.compose.ui.graphics)
     implementation(libs.compose.ui.tooling.preview)
@@ -72,6 +75,7 @@ dependencies {
     implementation(libs.security.crypto)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.work.runtime.ktx)
+    implementation(libs.documentfile) // DocumentFile (SAF) pour ObsidianVaultManager
 
     // TODO Phase 2+ : whisper.cpp (JNI/.aar maison), llama.cpp/MLC (module natif), openWakeWord (tflite runtime),
     // Apache POI / PdfBox-Android (documents), JGit (module codage).
