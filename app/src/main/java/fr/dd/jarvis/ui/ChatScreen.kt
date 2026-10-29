@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,6 +50,8 @@ fun ChatScreen(vm: ChatViewModel, store: Store) {
     val listState = rememberLazyListState()
     var input by remember { mutableStateOf("") }
     val count = vm.messages.size + if (vm.busy) 1 else 0
+    var showHistory by remember { mutableStateOf(false) }
+    var confirmReset by remember { mutableStateOf(false) }
 
     LaunchedEffect(count) {
         if (count > 0) listState.animateScrollToItem(count - 1)
@@ -111,7 +115,8 @@ fun ChatScreen(vm: ChatViewModel, store: Store) {
         ) {
             HudChip("🔊 Réponse vocale", store.speakReplies.value) { store.speakReplies.set(!store.speakReplies.value) }
             HudChip("🎧 Conversation", store.conversationMode.value) { store.conversationMode.set(!store.conversationMode.value) }
-            HudChip("Effacer") { vm.clear() }
+            HudChip("➕ Nouvelle") { vm.nouvelle() }
+            HudChip("🕘 Historique") { showHistory = true }
         }
 
         if (vm.partial.isNotBlank() || (vm.status.isNotBlank() && !vm.busy)) {
@@ -138,6 +143,50 @@ fun ChatScreen(vm: ChatViewModel, store: Store) {
                 input = ""
             }
         }
+    }
+
+    if (showHistory) {
+        var items by remember { mutableStateOf(vm.historique()) }
+        val fmt = remember { java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.FRENCH) }
+        AlertDialog(
+            onDismissRequest = { showHistory = false },
+            containerColor = Color(0xFF0B1424), titleContentColor = accent, textContentColor = HudText,
+            title = { Text("Historique des conversations") },
+            text = {
+                androidx.compose.foundation.layout.Column(
+                    Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (items.isEmpty()) Text("Aucune conversation archivée. « ➕ Nouvelle » range la conversation en cours ici.", color = HudDim, fontSize = 13.sp)
+                    items.forEach { c ->
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "${fmt.format(java.util.Date(c.ts))} · ${c.title} (${c.count})", color = HudText, fontSize = 13.sp,
+                                modifier = Modifier.weight(1f).clickable { vm.ouvrir(c.id); showHistory = false }
+                            )
+                            Text("✕", color = Color(0xFFFF4D6D), fontSize = 16.sp, modifier = Modifier.padding(start = 8.dp).clickable { vm.supprimer(c.id); items = vm.historique() })
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton({ showHistory = false; confirmReset = true }) { Text("Tout remettre à zéro", color = Color(0xFFFF4D6D)) } },
+            dismissButton = {
+                Row {
+                    TextButton({ vm.toutEffacer(); items = vm.historique() }) { Text("Vider l'historique", color = accent) }
+                    TextButton({ showHistory = false }) { Text("Fermer", color = HudDim) }
+                }
+            }
+        )
+    }
+    if (confirmReset) {
+        AlertDialog(
+            onDismissRequest = { confirmReset = false },
+            containerColor = Color(0xFF0B1424), titleContentColor = accent, textContentColor = HudText,
+            title = { Text("Remise à zéro complète ?") },
+            text = { Text("Efface la conversation, tout l'historique, les consignes mémorisées (note « Mémoire JARVIS ») et les images générées sur le téléphone. Les clés, la société, les devis et factures sont conservés.", fontSize = 13.sp) },
+            confirmButton = { TextButton({ vm.remiseAZero(); confirmReset = false }) { Text("Tout effacer", color = Color(0xFFFF4D6D)) } },
+            dismissButton = { TextButton({ confirmReset = false }) { Text("Annuler", color = HudDim) } }
+        )
     }
 
     vm.pendingConfirm?.let { question ->

@@ -119,6 +119,23 @@ fun SettingsScreen(app: JarvisApp) {
             )
         }
 
+        // ------------------------------------------------------------ Images (Cloudflare)
+        item {
+            KeyPanel(
+                title = "Images — comptes Cloudflare Workers AI (rotation)",
+                hint = "Un compte par ligne au format idCompte:jeton (Cloudflare › Workers AI › « Utiliser l'API REST » : ID de compte + jeton API avec la permission Workers AI). Gratuit dans la limite du quota quotidien de chaque compte : plus de comptes = plus d'images.",
+                keys = store.cfAccounts,
+                onAdd = { store.addCfAccounts(it) },
+                onRemove = { store.removeCfAccount(it) },
+                onTest = {
+                    try { val (f, _) = fr.dd.jarvis.ai.ImageGen.generate(app, "a small blue circle on white background"); listOf("✅ Image générée (${f.length() / 1024} Ko)") }
+                    catch (e: Exception) { listOf("❌ ${e.message}") }
+                },
+                modelLabel = "Modèle d'image", model = store.cfModel.value, onModel = { store.cfModel.set(it) },
+                onListModels = { fr.dd.jarvis.ai.ImageGen.MODELES }
+            )
+        }
+
         // ------------------------------------------------------------ Mails
         item {
             var result by remember { mutableStateOf("") }

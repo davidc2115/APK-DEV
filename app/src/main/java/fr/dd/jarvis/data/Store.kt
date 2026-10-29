@@ -81,6 +81,15 @@ class Store(context: Context) {
     val groqKeys: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readList("groqKeys")) }
     val geminiKeys: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readList("geminiKeys")) }
 
+    // ---- Génération d'images (Cloudflare Workers AI) : lignes « idCompte:jeton », rotation automatique
+    val cfModel = SPref("cfModel", "@cf/black-forest-labs/flux-1-schnell")
+    val cfAccounts: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readList("cfAccounts")) }
+    fun addCfAccounts(raw: String) {
+        val parts = raw.split(Regex("[\\s,;]+")).map { it.trim() }.filter { it.contains(':') && it.length >= 20 && it !in cfAccounts }.distinct()
+        cfAccounts.addAll(parts); writeList("cfAccounts", cfAccounts)
+    }
+    fun removeCfAccount(i: Int) { if (i in cfAccounts.indices) cfAccounts.removeAt(i); writeList("cfAccounts", cfAccounts) }
+
     fun addGroqKeys(raw: String) = addKeys(groqKeys, "groqKeys", raw)
     fun addGeminiKeys(raw: String) = addKeys(geminiKeys, "geminiKeys", raw)
     fun removeGroqKey(i: Int) {

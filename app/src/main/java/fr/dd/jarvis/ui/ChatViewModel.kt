@@ -112,15 +112,78 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun clear() {
+    data class ConvInfo(val id: String, val title: String, val count: Int, val ts: Long)
+
+    private val convDir get() = File(getApplication<Application>().filesDir, "convs").apply { mkdirs() }
+
+    private fun serialize(list: List<ChatMsg>): String {
+        val arr = JSONArray()
+        list.forEach { arr.put(JSONObject().put("u", it.fromUser).put("t", it.text).put("ts", it.ts)) }
+        return arr.toString()
+    }
+
+    /** Range la conversation en cours dans l'historique (si elle contient un message de l'utilisateur). */
+    private fun archiveCurrent() {
+        val list = messages.toList()
+        val first = list.firstOrNull { it.fromUser } ?: return
+        runCatching { File(convDir, "${list.first().ts}.json").writeText(serialize(list)) }
+        first.text.length
+    }
+
+    /** Nouvelle conversation : l'actuelle est conservée dans l'historique. */
+    fun nouvelle() {
+        if (busy) return
+        voice.stopSpeaking()
+        archiveCurrent(); messages.clear(); persist()
+    }
+
+    fun historique(): List<ConvInfo> = (convDir.listFiles() ?: emptyArray()).mapNotNull { f ->
+        runCatching {
+            val arr = JSONArray(f.readText())
+            var titre = "Conversation"
+            for (i in 0 until arr.length()) arr.getJSONObject(i).let { if (it.getBoolean("u")) { titre = it.getString("t").take(60); return@let } }
+            val firstUser = (0 until arr.length()).map { arr.getJSONObject(it) }.firstOrNull { it.getBoolean("u") }?.getString("t")?.take(60) ?: titre
+            ConvInfo(f.nameWithoutExtension, firstUser, arr.length(), f.nameWithoutExtension.toLongOrNull() ?: f.lastModified())
+        }.getOrNull()
+    }.sortedByDescending { it.ts }
+
+    fun ouvrir(id: String) {
+        if (busy) return
+        val f = File(convDir, "$id.json")
+        if (!f.exists()) return
+        val text = f.readText()
+        archiveCurrent()
+        f.delete()
         messages.clear()
+        runCatching {
+            val arr = JSONArray(text)
+            for (i in 0 until arr.length()) arr.getJSONObject(i).let { messages.add(ChatMsg(it.getBoolean("u"), it.getString("t"), it.optLong("ts"))) }
+        }
         persist()
     }
+
+    fun supprimer(id: String) { File(convDir, "$id.json").delete() }
+
+    /** Efface la conversation en cours et tout l'historique. */
+    fun toutEffacer() {
+        messages.clear(); persist()
+        convDir.listFiles()?.forEach { it.delete() }
+    }
+
+    /** Remise à zéro complète : conversations, mémoire des consignes, images générées, point du matin en attente. */
+    fun remiseAZero() {
+        toutEffacer()
+        runCatching { app.memo.clear() }
+        File(getApplication<Application>().filesDir, "images").listFiles()?.forEach { it.delete() }
+        store.lastBriefing.set("")
+    }
+
+    fun clear() = nouvelle()
 
     private fun persist() {
         try {
             val arr = JSONArray()
-            messages.takeLast(60).forEach {
+            messages.takeLast(200).forEach {
                 arr.put(JSONObject().put("u", it.fromUser).put("t", it.text).put("ts", it.ts))
             }
             file.writeText(arr.toString())

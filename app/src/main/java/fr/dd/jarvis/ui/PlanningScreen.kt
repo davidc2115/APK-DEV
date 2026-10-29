@@ -56,6 +56,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -114,6 +116,7 @@ fun PlanningScreen(app: JarvisApp) {
     var editCal by remember { mutableStateOf<CalInfo?>(null) }
     var selected by remember { mutableStateOf<EventInfo?>(null) }
     var creating by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<EventInfo?>(null) }
 
     LaunchedEffect(day, range, refresh, store.hiddenCals.size) {
         withContext(Dispatchers.IO) {
@@ -268,6 +271,7 @@ fun PlanningScreen(app: JarvisApp) {
                         )
                     }
                     if (e.description.isNotBlank()) Text(e.description.take(600), color = HudDim, fontSize = 12.sp)
+                    HudButton("✎ Modifier le rendez-vous") { editing = e; selected = null }
                     Text("Couleur du rendez-vous", color = HudDim, fontSize = 12.sp)
                     ColorPalette(store.eventColor[e.id] ?: e.eventColor) {
                         repo.setEventColor(e.id, it)
@@ -287,6 +291,46 @@ fun PlanningScreen(app: JarvisApp) {
                     refresh++
                 }) { Text("Supprimer", color = Color(0xFFFF4D6D)) }
             }
+        )
+    }
+
+    // ---- Modifier un rendez-vous
+    editing?.let { e ->
+        val z = ZoneId.systemDefault()
+        var title by remember(e.id) { mutableStateOf(e.title) }
+        var location by remember(e.id) { mutableStateOf(e.location) }
+        var desc by remember(e.id) { mutableStateOf(e.description) }
+        var date by remember(e.id) { mutableStateOf(Instant.ofEpochMilli(e.begin).atZone(if (e.allDay) java.time.ZoneOffset.UTC else z).toLocalDate()) }
+        var start by remember(e.id) { mutableStateOf(Instant.ofEpochMilli(e.begin).atZone(z).toLocalTime().withSecond(0).withNano(0)) }
+        var end by remember(e.id) { mutableStateOf(Instant.ofEpochMilli(e.end).atZone(z).toLocalTime().withSecond(0).withNano(0)) }
+        AlertDialog(
+            onDismissRequest = { editing = null },
+            containerColor = Color(0xFF0B1424), titleContentColor = LocalAccent.current, textContentColor = HudText,
+            title = { Text("Modifier le rendez-vous") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HudTextField(title, { title = it }, label = "Titre")
+                    HudTextField(location, { location = it }, label = "Lieu")
+                    HudTextField(desc, { desc = it }, label = "Notes", singleLine = false, maxLines = 5)
+                    if (!e.allDay) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        HudChip("📅 " + date.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))) { pickDate(ctx, date) { date = it } }
+                        HudChip("De " + start.format(hourFmt)) { pickTime(ctx, start) { t -> start = t; if (!end.isAfter(t)) end = t.plusHours(1) } }
+                        HudChip("à " + end.format(hourFmt)) { pickTime(ctx, end) { end = it } }
+                    } else Text("Événement sur la journée : date et horaires non modifiables ici.", color = HudDim, fontSize = 12.sp)
+                }
+            },
+            confirmButton = {
+                TextButton({
+                    val ok = repo.update(
+                        e.id, title.trim().ifBlank { e.title },
+                        if (e.allDay) null else date.atTime(start), if (e.allDay) null else date.atTime(if (end.isAfter(start)) end else start.plusHours(1)),
+                        location.trim(), desc
+                    )
+                    if (!ok) { /* rien de modifié */ }
+                    editing = null; refresh++
+                }) { Text("Enregistrer", color = LocalAccent.current) }
+            },
+            dismissButton = { TextButton({ editing = null }) { Text("Annuler", color = HudDim) } }
         )
     }
 

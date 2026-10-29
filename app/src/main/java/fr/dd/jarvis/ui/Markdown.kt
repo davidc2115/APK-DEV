@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -114,6 +116,10 @@ private fun MdLines(lines: List<String>, color: Color, accent: Color) {
                 while (i < lines.size && lines[i].trimStart().startsWith("|")) { rows += lines[i].trimEnd(); i++ }
                 Table(rows, color, accent, ctx)
             }
+            line.startsWith("![") && line.contains("jarvis-img:") -> {
+                val name = Regex("""jarvis-img:([^)\s]+)""").find(line)?.groupValues?.get(1).orEmpty()
+                ChatImage(name)
+            }
             line.isBlank() -> Spacer(Modifier.height(4.dp))
             line.trim() == "---" || line.trim() == "***" -> {
                 Spacer(Modifier.height(4.dp))
@@ -170,4 +176,28 @@ private fun Table(rows: List<String>, color: Color, accent: Color, ctx: Context)
             HudDivider()
         }
     }
+}
+
+@Composable
+private fun ChatImage(name: String) {
+    val ctx = LocalContext.current
+    val file = java.io.File(java.io.File(ctx.filesDir, "images"), name.substringAfterLast('/'))
+    val bmp = androidx.compose.runtime.remember(name) {
+        runCatching {
+            val o = android.graphics.BitmapFactory.Options().apply { inSampleSize = 2 }
+            android.graphics.BitmapFactory.decodeFile(file.absolutePath, o)?.asImageBitmap()
+        }.getOrNull()
+    }
+    if (bmp == null) { androidx.compose.material3.Text("🖼️ (image introuvable)", color = HudDim, fontSize = 12.sp); return }
+    androidx.compose.foundation.Image(
+        bmp, contentDescription = "Image générée",
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(10.dp)).clickable {
+            runCatching {
+                val uri = androidx.core.content.FileProvider.getUriForFile(ctx, ctx.packageName + ".files", file)
+                ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("image/png").putExtra(Intent.EXTRA_STREAM, uri)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Partager l'image").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+        },
+        contentScale = androidx.compose.ui.layout.ContentScale.FillWidth
+    )
 }

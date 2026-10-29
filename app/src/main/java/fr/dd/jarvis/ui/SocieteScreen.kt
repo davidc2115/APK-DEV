@@ -126,6 +126,7 @@ private fun ClientsTab(app: JarvisApp) {
     val d = svc.data
     var selected by remember { mutableStateOf<Client?>(null) }
     var creating by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<Client?>(null) }
     var query by remember { mutableStateOf("") }
     var info by remember { mutableStateOf("") }
     val kmlScope = rememberCoroutineScope()
@@ -164,33 +165,61 @@ private fun ClientsTab(app: JarvisApp) {
         Dialogue(c.nom, { selected = null }, actions = {
             Action("Obsidian") { info = "📁 " + svc.exporterClient(c).second; selected = null }
             Action("PDF") { svc.partagerPdf("Fiche ${c.nom}", md) }
+            Action("✎ Modifier") { editing = c; selected = null }
         }) { MarkdownText(md) }
     }
-    if (creating) ClientForm(onClose = { creating = false }) { c ->
+    if (creating) ClientForm(null, onClose = { creating = false }) { c ->
         svc.repo.update { it.copy(clients = it.clients + c) }
         creating = false
     }
+    editing?.let { e0 ->
+        ClientForm(e0, onClose = { editing = null }) { c ->
+            svc.repo.update { d0 -> d0.copy(clients = d0.clients.map { if (it.id == c.id) c else it }) }
+            info = "✅ Fiche de ${c.nom} mise à jour"
+            editing = null
+        }
+    }
 }
 
+private data class SiteDraft(
+    val id: String, val nom: String, val adresse: String, val kwc: String, val mes: String,
+    val onduleur: String, val panneaux: String, val notes: String
+)
+
 @Composable
-private fun ClientForm(onClose: () -> Unit, onSave: (Client) -> Unit) {
-    var nom by remember { mutableStateOf("") }
-    var tel by remember { mutableStateOf("") }
-    var email by remember { mutableStateOf("") }
-    var adresse by remember { mutableStateOf("") }
-    var depuis by remember { mutableStateOf(LocalDate.now().year.toString()) }
-    var pro by remember { mutableStateOf(false) }
-    var siteNom by remember { mutableStateOf("") }
-    var siteAdr by remember { mutableStateOf("") }
-    var kwc by remember { mutableStateOf("") }
-    Dialogue("Nouveau client", onClose, actions = {
-        Action("Créer") {
+private fun ClientForm(initial: Client?, onClose: () -> Unit, onSave: (Client) -> Unit) {
+    var nom by remember { mutableStateOf(initial?.nom ?: "") }
+    var contact by remember { mutableStateOf(initial?.contact ?: "") }
+    var tel by remember { mutableStateOf(initial?.tel ?: "") }
+    var email by remember { mutableStateOf(initial?.email ?: "") }
+    var adresse by remember { mutableStateOf(initial?.adresse ?: "") }
+    var depuis by remember { mutableStateOf(initial?.depuis?.ifBlank { null } ?: LocalDate.now().year.toString()) }
+    var notes by remember { mutableStateOf(initial?.notes ?: "") }
+    var pro by remember { mutableStateOf(initial?.type == "professionnel") }
+    val sites = remember {
+        androidx.compose.runtime.mutableStateListOf<SiteDraft>().also { l ->
+            initial?.sites?.forEach { l += SiteDraft(it.id, it.nom, it.adresse, if (it.kwc > 0) nombre(it.kwc) else "", it.miseEnService, it.onduleur, if (it.nbPanneaux > 0) it.nbPanneaux.toString() else "", it.notes) }
+        }
+    }
+    Dialogue(if (initial == null) "Nouveau client" else "Modifier ${initial.nom}", onClose, actions = {
+        Action(if (initial == null) "Créer" else "Enregistrer") {
             if (nom.isNotBlank()) {
-                val sites = if (kwc.isNotBlank() || siteNom.isNotBlank() || siteAdr.isNotBlank())
-                    listOf(Site(java.util.UUID.randomUUID().toString().take(8), siteNom.ifBlank { "Installation 1" }, siteAdr.ifBlank { adresse }, kwc.replace(',', '.').toDoubleOrNull() ?: 0.0))
-                else emptyList()
-                onSave(Client(java.util.UUID.randomUUID().toString().take(8), nom.trim(), if (pro) "professionnel" else "particulier",
-                    tel = tel, email = email, adresse = adresse, sites = sites, depuis = if (depuis.matches(Regex("\\d{4}"))) "$depuis-01-01" else depuis))
+                val newSites = sites.map { d ->
+                    val old = initial?.sites?.firstOrNull { it.id == d.id }
+                    val adr = d.adresse.ifBlank { adresse }
+                    val same = old != null && old.adresse == d.adresse
+                    Site(
+                        d.id, d.nom.ifBlank { "Installation" }, d.adresse, d.kwc.replace(',', '.').toDoubleOrNull() ?: 0.0,
+                        d.mes, d.onduleur, d.panneaux.toIntOrNull() ?: 0, d.notes,
+                        if (same) old?.lat else null, if (same) old?.lon else null,
+                        if (same) old?.distanceKm else null, if (same) old?.dureeMin else null, if (same) old?.distanceCle ?: "" else ""
+                    ).also { adr.length }
+                }
+                onSave(Client(
+                    initial?.id ?: java.util.UUID.randomUUID().toString().take(8), nom.trim(), if (pro) "professionnel" else "particulier",
+                    contact = contact, tel = tel, email = email, adresse = adresse, sites = newSites,
+                    depuis = if (depuis.matches(Regex("\\d{4}"))) "$depuis-01-01" else depuis, notes = notes
+                ))
             }
         }
     }) {
@@ -199,14 +228,28 @@ private fun ClientForm(onClose: () -> Unit, onSave: (Client) -> Unit) {
             HudChip("Professionnel", pro) { pro = true }
         }
         HudTextField(nom, { nom = it }, Modifier.fillMaxWidth(), label = "Nom")
+        HudTextField(contact, { contact = it }, Modifier.fillMaxWidth(), label = "Contact (interlocuteur)")
         HudTextField(tel, { tel = it }, Modifier.fillMaxWidth(), label = "Téléphone")
         HudTextField(email, { email = it }, Modifier.fillMaxWidth(), label = "Email")
         HudTextField(adresse, { adresse = it }, Modifier.fillMaxWidth(), label = "Adresse")
-        HudTextField(depuis, { depuis = it }, Modifier.fillMaxWidth(), label = "Client depuis (année)")
-        Text("Première installation (optionnel)", color = HudDim, fontSize = 12.sp)
-        HudTextField(siteNom, { siteNom = it }, Modifier.fillMaxWidth(), label = "Nom de l'installation")
-        HudTextField(siteAdr, { siteAdr = it }, Modifier.fillMaxWidth(), label = "Adresse (si différente)")
-        HudTextField(kwc, { kwc = it }, Modifier.fillMaxWidth(), label = "Puissance (kWc)")
+        HudTextField(depuis, { depuis = it }, Modifier.fillMaxWidth(), label = "Client depuis (année ou aaaa-mm-jj)")
+        HudTextField(notes, { notes = it }, Modifier.fillMaxWidth(), label = "Notes", singleLine = false)
+        Text("Installations", color = LocalAccent.current, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        sites.forEachIndexed { i, d ->
+            HudPanel(Modifier.fillMaxWidth()) {
+                HudTextField(d.nom, { sites[i] = d.copy(nom = it) }, Modifier.fillMaxWidth(), label = "Nom de l'installation")
+                HudTextField(d.adresse, { sites[i] = d.copy(adresse = it) }, Modifier.fillMaxWidth(), label = "Adresse (vide = celle du client)")
+                HudTextField(d.kwc, { sites[i] = d.copy(kwc = it) }, Modifier.fillMaxWidth(), label = "Puissance (kWc)")
+                HudTextField(d.mes, { sites[i] = d.copy(mes = it) }, Modifier.fillMaxWidth(), label = "Mise en service (aaaa-mm-jj)")
+                HudTextField(d.onduleur, { sites[i] = d.copy(onduleur = it) }, Modifier.fillMaxWidth(), label = "Onduleur")
+                HudTextField(d.panneaux, { sites[i] = d.copy(panneaux = it) }, Modifier.fillMaxWidth(), label = "Nombre de panneaux")
+                HudTextField(d.notes, { sites[i] = d.copy(notes = it) }, Modifier.fillMaxWidth(), label = "Notes", singleLine = false)
+                TextButton({ sites.removeAt(i) }) { Text("Supprimer cette installation", color = Color(0xFFFF4D6D), fontSize = 12.sp) }
+            }
+        }
+        HudButton("Ajouter une installation", icon = Icons.Filled.Add) {
+            sites += SiteDraft(java.util.UUID.randomUUID().toString().take(8), "Installation ${sites.size + 1}", "", "", "", "", "", "")
+        }
     }
 }
 
@@ -217,6 +260,7 @@ private fun DocsTab(app: JarvisApp, type: String) {
     val svc = app.societe
     val d = svc.data
     var selected by remember { mutableStateOf<String?>(null) }
+    var editingDoc by remember { mutableStateOf<String?>(null) }
     var info by remember { mutableStateOf("") }
     val list = d.docs.filter { it.type == type }.sortedByDescending { it.numero }
 
@@ -251,9 +295,79 @@ private fun DocsTab(app: JarvisApp, type: String) {
                         val r = svc.marquerPayee(x.numero, "")
                         info = "✅ Payée" + (r?.second?.let { " · réserve ${euro(it.montant)}" } ?: ""); selected = null
                     }
+                if (x.statut in setOf("brouillon", "envoye", "accepte", "a_payer")) Action("✎ Modifier") { editingDoc = x.numero; selected = null }
                 if (x.statut != "annulee" && x.statut != "refuse" && x.statut != "facture") Action("Annuler") { svc.annuler(x.numero); selected = null }
             }) { MarkdownText(md) }
         }
+    }
+
+    editingDoc?.let { num ->
+        val x = d.doc(num)
+        if (x == null) editingDoc = null else DocEditor(x, onClose = { editingDoc = null }) { nouveau ->
+            svc.repo.update { d0 -> d0.copy(docs = d0.docs.map { if (it.numero == nouveau.numero) nouveau else it }) }
+            info = "✅ ${nouveau.numero} modifié · " + svc.exporter(nouveau)
+            editingDoc = null
+        }
+    }
+}
+
+private data class LigneDraft(val des: String, val qte: String, val unite: String, val pu: String, val remise: String, val tva: String, val genre: String)
+
+@Composable
+private fun DocEditor(doc: Doc, onClose: () -> Unit, onSave: (Doc) -> Unit) {
+    var date by remember { mutableStateOf(doc.date) }
+    var echeance by remember { mutableStateOf(doc.echeance) }
+    var notes by remember { mutableStateOf(doc.notes) }
+    var remiseInfo by remember { mutableStateOf(doc.remiseInfo) }
+    var statut by remember { mutableStateOf(doc.statut) }
+    var err by remember { mutableStateOf("") }
+    val lignes = remember {
+        androidx.compose.runtime.mutableStateListOf<LigneDraft>().also { l ->
+            doc.lignes.forEach { l += LigneDraft(it.designation, nombre(it.qte), it.unite, nombre(it.puHt), nombre(it.remisePct), nombre(it.tva), it.genre) }
+        }
+    }
+    fun n(t: String) = t.replace(',', '.').trim().toDoubleOrNull()
+    Dialogue("Modifier ${doc.numero}", onClose, actions = {
+        Action("Enregistrer") {
+            try {
+                LocalDate.parse(date.trim()); if (echeance.isNotBlank()) LocalDate.parse(echeance.trim())
+                if (lignes.isEmpty()) { err = "Au moins une ligne." } else {
+                    val ls = lignes.map { l ->
+                        Ligne(l.des.trim().ifBlank { "Prestation" }, n(l.qte) ?: 1.0, l.unite.trim(), n(l.pu) ?: 0.0, (n(l.remise) ?: 0.0).coerceIn(0.0, 100.0), n(l.tva) ?: 20.0, l.genre)
+                    }
+                    onSave(doc.copy(date = date.trim(), echeance = echeance.trim(), notes = notes, remiseInfo = remiseInfo, lignes = ls, statut = statut))
+                }
+            } catch (e: Exception) { err = "Dates au format aaaa-mm-jj." }
+        }
+    }) {
+        if (doc.type == "facture") Text("⚠️ Facture émise : une modification doit rester exceptionnelle (préférer une annulation puis une nouvelle facture).", color = Color(0xFFFFB020), fontSize = 12.sp)
+        HudTextField(date, { date = it }, Modifier.fillMaxWidth(), label = "Date (aaaa-mm-jj)")
+        HudTextField(echeance, { echeance = it }, Modifier.fillMaxWidth(), label = if (doc.type == "devis") "Valable jusqu'au" else "Échéance")
+        if (doc.type == "devis") {
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf("brouillon", "envoye", "accepte").forEach { st -> HudChip(Rendu.statutLabel("devis", st), statut == st) { statut = st } }
+            }
+        }
+        HudTextField(remiseInfo, { remiseInfo = it }, Modifier.fillMaxWidth(), label = "Remise (mention affichée)")
+        HudTextField(notes, { notes = it }, Modifier.fillMaxWidth(), label = "Notes", singleLine = false)
+        Text("Lignes", color = LocalAccent.current, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        lignes.forEachIndexed { i, l ->
+            HudPanel(Modifier.fillMaxWidth()) {
+                HudTextField(l.des, { lignes[i] = l.copy(des = it) }, Modifier.fillMaxWidth(), label = "Désignation")
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    HudTextField(l.qte, { lignes[i] = l.copy(qte = it) }, Modifier.weight(1f), label = "Qté")
+                    HudTextField(l.unite, { lignes[i] = l.copy(unite = it) }, Modifier.weight(1f), label = "Unité")
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    HudTextField(l.pu, { lignes[i] = l.copy(pu = it) }, Modifier.weight(1f), label = "PU HT €")
+                    HudTextField(l.remise, { lignes[i] = l.copy(remise = it) }, Modifier.weight(1f), label = "Remise %")
+                    HudTextField(l.tva, { lignes[i] = l.copy(tva = it) }, Modifier.weight(1f), label = "TVA %")
+                }
+                TextButton({ lignes.removeAt(i) }) { Text("Supprimer la ligne", color = Color(0xFFFF4D6D), fontSize = 12.sp) }
+            }
+        }
+        HudButton("Ajouter une ligne", icon = Icons.Filled.Add) { lignes += LigneDraft("", "1", "", "", "0", "20", "prestation") }
+        if (err.isNotBlank()) Text(err, color = Color(0xFFFF4D6D), fontSize = 12.sp)
     }
 }
 
@@ -266,6 +380,7 @@ private fun PaieTab(app: JarvisApp) {
     var bulletin by remember { mutableStateOf<String?>(null) }
     var bilan by remember { mutableStateOf<String?>(null) }
     var adding by remember { mutableStateOf(false) }
+    var editEmp by remember { mutableStateOf<Employe?>(null) }
     var mois by remember { mutableStateOf(LocalDate.now().toString().take(7)) }
 
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -289,32 +404,40 @@ private fun PaieTab(app: JarvisApp) {
             }) {
                 Text("${e.nom} (${e.statut})", color = HudText, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Text("${e.poste.ifBlank { "—" }} · brut ${euro(e.brutMensuel)}/mois · touche pour le bulletin de $mois", color = HudDim, fontSize = 12.sp)
+                TextButton({ editEmp = e }) { Text("✎ Modifier", color = LocalAccent.current, fontSize = 12.sp) }
             }
         }
     }
     bulletin?.let { md -> Dialogue("Bulletin", { bulletin = null }, actions = { Action("PDF") { svc.partagerPdf("Bulletin $mois", md) } }) { MarkdownText(md) } }
     bilan?.let { md -> Dialogue("Réserve", { bilan = null }) { MarkdownText(md) } }
-    if (adding) {
-        var nom by remember { mutableStateOf("") }
-        var poste by remember { mutableStateOf("") }
-        var brut by remember { mutableStateOf("") }
-        var pas by remember { mutableStateOf("0") }
-        var dir by remember { mutableStateOf(d.employes.none { it.statut == "dirigeant" }) }
-        Dialogue("Nouvel employé", { adding = false }, actions = {
-            Action("Créer") {
-                if (nom.isNotBlank()) {
-                    svc.repo.update { it.copy(employes = it.employes + Employe(svc.newId(), nom.trim(), poste, if (dir) "dirigeant" else "salarie",
-                        brut.replace(',', '.').toDoubleOrNull() ?: 0.0, pas.replace(',', '.').toDoubleOrNull() ?: 0.0, LocalDate.now().toString())) }
-                    adding = false
-                }
-            }
-        }) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { HudChip("Dirigeant", dir) { dir = true }; HudChip("Salarié", !dir) { dir = false } }
-            HudTextField(nom, { nom = it }, Modifier.fillMaxWidth(), label = "Nom")
-            HudTextField(poste, { poste = it }, Modifier.fillMaxWidth(), label = "Poste")
-            HudTextField(brut, { brut = it }, Modifier.fillMaxWidth(), label = "Brut mensuel (€)")
-            HudTextField(pas, { pas = it }, Modifier.fillMaxWidth(), label = "Prélèvement à la source (%)")
+    if (adding) EmployeForm(null, d.employes.none { it.statut == "dirigeant" }, { adding = false }) { e ->
+        svc.repo.update { it.copy(employes = it.employes + e) }; adding = false
+    }
+    editEmp?.let { e0 ->
+        EmployeForm(e0, e0.statut == "dirigeant", { editEmp = null }) { e ->
+            svc.repo.update { x -> x.copy(employes = x.employes.map { if (it.id == e.id) e else it }) }; editEmp = null
         }
+    }
+}
+
+@Composable
+private fun EmployeForm(initial: Employe?, dirDefaut: Boolean, onClose: () -> Unit, onSave: (Employe) -> Unit) {
+    var nom by remember { mutableStateOf(initial?.nom ?: "") }
+    var poste by remember { mutableStateOf(initial?.poste ?: "") }
+    var brut by remember { mutableStateOf(initial?.let { nombre(it.brutMensuel) } ?: "") }
+    var pas by remember { mutableStateOf(initial?.let { nombre(it.tauxPas) } ?: "0") }
+    var dir by remember { mutableStateOf(dirDefaut) }
+    Dialogue(if (initial == null) "Nouvel employé" else "Modifier ${initial.nom}", onClose, actions = {
+        Action(if (initial == null) "Créer" else "Enregistrer") {
+            if (nom.isNotBlank()) onSave(Employe(initial?.id ?: java.util.UUID.randomUUID().toString().take(8), nom.trim(), poste, if (dir) "dirigeant" else "salarie",
+                brut.replace(',', '.').toDoubleOrNull() ?: 0.0, pas.replace(',', '.').toDoubleOrNull() ?: 0.0, initial?.dateEntree ?: LocalDate.now().toString()))
+        }
+    }) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { HudChip("Dirigeant", dir) { dir = true }; HudChip("Salarié", !dir) { dir = false } }
+        HudTextField(nom, { nom = it }, Modifier.fillMaxWidth(), label = "Nom")
+        HudTextField(poste, { poste = it }, Modifier.fillMaxWidth(), label = "Poste")
+        HudTextField(brut, { brut = it }, Modifier.fillMaxWidth(), label = "Brut mensuel (€)")
+        HudTextField(pas, { pas = it }, Modifier.fillMaxWidth(), label = "Prélèvement à la source (%)")
     }
 }
 
@@ -356,6 +479,7 @@ private fun ReglagesTab(app: JarvisApp) {
     var tauxS by remember { mutableStateOf(nombre(d.paie.tauxSalarial)) }
     var tauxP by remember { mutableStateOf(nombre(d.paie.tauxPatronal)) }
     var tarifEdit by remember { mutableStateOf(false) }
+    var tarifInit by remember { mutableStateOf<Tarif?>(null) }
 
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
@@ -445,11 +569,12 @@ private fun ReglagesTab(app: JarvisApp) {
                             Text(t.designation, color = HudText, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                             Text("${t.mode.name.lowercase()} — ${Pricing.libelleTranches(t)}", color = HudDim, fontSize = 12.sp)
                         }
+                        TextButton({ tarifInit = t; tarifEdit = true }) { Text("✎", color = LocalAccent.current, fontSize = 14.sp) }
                         TextButton({ svc.repo.update { x -> x.copy(tarifs = x.tarifs.filterNot { it.designation == t.designation }) } }) { Text("Suppr.", color = Color(0xFFFF4D6D), fontSize = 12.sp) }
                     }
                 }
                 Spacer(Modifier.height(6.dp))
-                HudButton("Ajouter un tarif", icon = Icons.Filled.Add) { tarifEdit = true }
+                HudButton("Ajouter un tarif", icon = Icons.Filled.Add) { tarifInit = null; tarifEdit = true }
             }
         }
         item {
@@ -470,14 +595,15 @@ private fun ReglagesTab(app: JarvisApp) {
     }
 
     if (tarifEdit) {
-        var des by remember { mutableStateOf("") }
-        var mode by remember { mutableStateOf(Mode.FORFAIT) }
-        var tr by remember { mutableStateOf("") }
-        Dialogue("Nouveau tarif", { tarifEdit = false }, actions = {
+        val ini = tarifInit
+        var des by remember { mutableStateOf(ini?.designation ?: "") }
+        var mode by remember { mutableStateOf(ini?.mode ?: Mode.FORFAIT) }
+        var tr by remember { mutableStateOf(ini?.tranches?.sortedBy { it.jusquaKwc }?.joinToString("; ") { (if (it.jusquaKwc >= KWC_MAX) "+" else nombre(it.jusquaKwc)) + ":" + nombre(it.prix) } ?: "") }
+        Dialogue(if (ini == null) "Nouveau tarif" else "Modifier le tarif", { tarifEdit = false }, actions = {
             Action("Enregistrer") {
                 val t = Pricing.parserTranches(tr).ifEmpty { num(tr)?.let { listOf(Tranche(KWC_MAX, it)) } ?: emptyList() }
                 if (des.isNotBlank() && t.isNotEmpty()) {
-                    svc.repo.update { it.copy(tarifs = it.tarifs.filterNot { x -> x.designation == des.trim() } + Tarif(des.trim(), mode, t)) }
+                    svc.repo.update { it.copy(tarifs = it.tarifs.filterNot { x -> x.designation == des.trim() || x.designation == ini?.designation } + Tarif(des.trim(), mode, t, ini?.tva)) }
                     tarifEdit = false
                 }
             }

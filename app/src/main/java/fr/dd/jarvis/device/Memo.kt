@@ -64,6 +64,9 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     }
 
     @Synchronized
+    fun clear() { ensure(); items.clear(); persist() }
+
+    @Synchronized
     fun all(): Map<String, String> { ensure(); return LinkedHashMap(items) }
 
     /** Consignes des sujets demandés (+ « general »), prêtes à ajouter à un prompt. Vide s'il n'y en a pas. */
