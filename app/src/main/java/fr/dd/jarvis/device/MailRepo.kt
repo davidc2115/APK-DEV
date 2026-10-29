@@ -21,7 +21,8 @@ data class MailItem(
     val date: Date?,
     val snippet: String,
     val unread: Boolean,
-    val account: String = ""
+    val account: String = "",
+    val id: String = ""
 )
 
 /** Lecture des mails en IMAP (Gmail : activer l'IMAP et utiliser un « mot de passe d'application »). */

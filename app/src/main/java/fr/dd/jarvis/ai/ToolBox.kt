@@ -66,6 +66,21 @@ class ToolBox(
                 "count" to prop("Nombre de mails à analyser (5 à 40). Par défaut 20."),
                 "unread_only" to prop("« true » pour ne lire que les non lus.")
             )))
+        put(tool("trier_mails", "Analyse les derniers mails, les classe par catégorie (Urgent, Clients, Factures, Chantiers, Administratif, Notifications, Newsletters, Perso) et peut les ranger dans Gmail (libellés JARVIS/…).",
+            mapOf(
+                "count" to prop("Nombre de mails (5 à 60). Par défaut 30."),
+                "unread_only" to prop("« true » pour ne trier que les non lus."),
+                "ranger" to prop("« true » pour appliquer les libellés dans Gmail."),
+                "archiver" to prop("« true » pour aussi retirer de la boîte de réception les newsletters et notifications (avec ranger).")
+            )))
+        put(tool("itineraire", "Itinéraire et temps de route. Sans destination : tournée des rendez-vous (avec lieu) de l'agenda d'un jour, enchaînés depuis la position ou le siège, avec heures de départ. Avec destination : trajet simple.",
+            mapOf(
+                "destination" to prop("Adresse de destination (trajet simple). Vide pour la tournée de l'agenda."),
+                "depuis" to prop("Départ : « position » (défaut), « siege » ou une adresse."),
+                "date" to prop("Jour de la tournée yyyy-MM-dd. Par défaut aujourd'hui."),
+                "restants" to prop("« true » (défaut) pour ne garder que les rendez-vous restants aujourd'hui, « false » pour toute la journée."),
+                "calendar" to prop("Nom d'un agenda précis (optionnel).")
+            )))
         put(tool("morning_briefing", "Point du jour : planning du jour et mails importants."))
         put(tool("search_contacts", "Cherche des contacts du téléphone (nom, numéro, email, société).",
             mapOf("query" to prop("Texte recherché.")), listOf("query")))
@@ -125,6 +140,20 @@ class ToolBox(
         "delete_event" -> deleteEvent(a)
         "summarize_mails" -> summarizeMails(a)
         "morning_briefing" -> ToolResult(briefing(), direct = true)
+        "trier_mails" -> trierMails(a)
+        "itineraire" -> {
+            val dest = a.optString("destination").trim()
+            val depuis = a.optString("depuis")
+            val txt = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                if (dest.isNotBlank()) fr.dd.jarvis.societe.Trajet.simple(app, dest, depuis)
+                else fr.dd.jarvis.societe.Trajet.tournee(
+                    app,
+                    a.optString("date").takeIf { it.isNotBlank() }?.let { runCatching { LocalDate.parse(it.take(10)) }.getOrNull() } ?: LocalDate.now(),
+                    !a.optString("restants").equals("false", true), depuis, a.optString("calendar")
+                )
+            }
+            ToolResult(txt, direct = true)
+        }
         "search_contacts" -> searchContacts(a)
         "create_contact" -> createContact(a)
         "update_contact" -> updateContact(a)
@@ -283,6 +312,34 @@ class ToolBox(
         val id = a.optString("event_id").trim().removePrefix("#").toLongOrNull() ?: return ToolResult("Identifiant invalide.")
         if (!confirm("Supprimer l'événement #$id de l'agenda ?", false)) return ToolResult("Suppression refusée par l'utilisateur.")
         return ToolResult(if (app.calendar.delete(id)) "Événement #$id supprimé." else "Événement introuvable.")
+    }
+
+    private suspend fun trierMails(a: JSONObject): ToolResult {
+        if (!store.mailConfigured()) return ToolResult("Les mails ne sont pas configurés (Réglages › Mails).")
+        val count = (a.optString("count").toIntOrNull() ?: 30).coerceIn(5, 60)
+        val mails = try {
+            app.mail.fetchRecent(count, a.optString("unread_only").equals("true", true))
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
+            return ToolResult("❌ Impossible de lire les mails : ${e.message}", direct = true)
+        }
+        if (mails.isEmpty()) return ToolResult("📭 Aucun mail à trier.", direct = true)
+        val classes = try {
+            fr.dd.jarvis.ai.MailTri.classer(app, mails)
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
+            return ToolResult("❌ Tri impossible : ${e.message}\n\n" + app.mail.localList(mails), direct = true)
+        }
+        var note = ""
+        if (a.optString("ranger").equals("true", true)) {
+            if (store.gmailAccounts.isEmpty()) note = "ℹ️ Rangement dans la boîte : disponible avec un compte Google connecté (pas en IMAP)."
+            else {
+                val archiver = a.optString("archiver").equals("true", true)
+                if (!confirm("Ranger ${classes.size} mails dans Gmail avec les libellés JARVIS/…" + (if (archiver) " et archiver newsletters/notifications ?" else " ?"), false)) note = "Rangement refusé."
+                else note = try {
+                    "✅ ${fr.dd.jarvis.ai.MailTri.ranger(app, classes, archiver)} mail(s) rangés dans Gmail (libellés JARVIS/…)."
+                } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { "❌ Rangement impossible : ${e.message}" }
+            }
+        }
+        return ToolResult(fr.dd.jarvis.ai.MailTri.presenter(classes, note), direct = true)
     }
 
     private suspend fun summarizeMails(a: JSONObject): ToolResult {

@@ -13,15 +13,17 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.util.Date
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-/** Compte Google connecté dans l'application (lecture seule de la boîte de réception via l'API Gmail). */
+/** Compte Google connecté dans l'application (lecture et classement par libellés via l'API Gmail). */
 object GmailApi {
-    const val SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+    const val SCOPE = "https://www.googleapis.com/auth/gmail.modify"
     private const val BASE = "https://gmail.googleapis.com/gmail/v1/users/me"
 
     private fun request(email: String?) = AuthorizationRequest.builder().setRequestedScopes(listOf(Scope(SCOPE))).apply {
@@ -93,11 +95,51 @@ object GmailApi {
                             date = m.optString("internalDate").toLongOrNull()?.let { Date(it) },
                             snippet = m.optString("snippet").replace("&#39;", "'").replace("&quot;", "\"").replace("&amp;", "&"),
                             unread = m.optJSONArray("labelIds")?.toString()?.contains("UNREAD") == true,
-                            account = account
+                            account = account,
+                            id = id
                         )
                     }
                 }.awaitAll()
             }
         }
+    }
+
+    private fun post(token: String, url: String, json: JSONObject): JSONObject {
+        val req = Request.Builder().url(url).header("Authorization", "Bearer $token")
+            .post(json.toString().toRequestBody("application/json".toMediaType())).build()
+        return Http.client.newCall(req).execute().use { r ->
+            val body = r.body?.string().orEmpty()
+            if (!r.isSuccessful) throw ApiException(r.code, "Gmail ${r.code} : ${body.take(200)}")
+            if (body.isBlank()) JSONObject() else JSONObject(body)
+        }
+    }
+
+    /**
+     * Range les mails : un libellé « JARVIS/<catégorie> » par mail (créé au besoin) ; [archiver] retire aussi le mail de la boîte de réception.
+     * [classement] : compte → liste (id du mail, catégorie). Retourne le nombre de mails rangés.
+     */
+    suspend fun appliquerLibelles(ctx: Context, classement: Map<String, List<Pair<String, String>>>, archiver: Set<String>): Int {
+        var n = 0
+        for ((account, items) in classement) {
+            val auth = authorize(ctx, account)
+            if (auth.hasResolution()) throw IllegalStateException("autorisation à renouveler pour $account (Réglages › Mails › Ajouter un compte Google : le classement demande la permission « modifier »).")
+            val token = auth.accessToken ?: continue
+            withContext(Dispatchers.IO) {
+                val existing = mutableMapOf<String, String>()
+                val ls = get(token, "$BASE/labels").optJSONArray("labels")
+                for (i in 0 until (ls?.length() ?: 0)) ls!!.getJSONObject(i).let { existing[it.getString("name")] = it.getString("id") }
+                for (cat in items.map { it.second }.distinct()) {
+                    val name = "JARVIS/$cat"
+                    if (name !in existing) existing[name] = post(token, "$BASE/labels", JSONObject().put("name", name)).getString("id")
+                }
+                for ((id, cat) in items) {
+                    val body = JSONObject().put("addLabelIds", org.json.JSONArray().put(existing["JARVIS/$cat"]))
+                    if (cat in archiver) body.put("removeLabelIds", org.json.JSONArray().put("INBOX"))
+                    post(token, "$BASE/messages/$id/modify", body)
+                    n++
+                }
+            }
+        }
+        return n
     }
 }
