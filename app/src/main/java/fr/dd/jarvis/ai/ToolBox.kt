@@ -92,6 +92,22 @@ class ToolBox(
                 "restants" to prop("« true » (défaut) pour ne garder que les rendez-vous restants aujourd'hui, « false » pour toute la journée."),
                 "calendar" to prop("Nom d'un agenda précis (optionnel).")
             )))
+        put(tool("marquer_mails_traites", "Marque des mails comme traités (lus + libellé JARVIS/Traité, archivés si demandé). Compte Google requis.",
+            mapOf(
+                "recherche" to prop("Texte à retrouver dans l'expéditeur ou l'objet. Vide ou « tous » = tous les mails récents non lus."),
+                "count" to prop("Nombre de mails récents à considérer (5 à 60). Par défaut 30."),
+                "archiver" to prop("« true » pour aussi les retirer de la boîte de réception.")
+            )))
+        put(tool("lire_sms", "Lit les SMS récents (reçus et envoyés).",
+            mapOf(
+                "count" to prop("Nombre de SMS (1 à 30). Par défaut 10."),
+                "contact" to prop("Nom ou numéro pour filtrer (optionnel)."),
+                "non_lus" to prop("« true » pour les non lus seulement.")
+            )))
+        put(tool("envoyer_sms", "Envoie un SMS à un contact ou un numéro.",
+            mapOf("destinataire" to prop("Nom du contact ou numéro."), "texte" to prop("Contenu du SMS.")), listOf("destinataire", "texte")))
+        put(tool("appeler_contact", "Appelle un contact (ou un numéro) directement.",
+            mapOf("contact" to prop("Nom du contact ou numéro.")), listOf("contact")))
         put(tool("morning_briefing", "Point du jour : planning du jour et mails importants."))
         put(tool("search_contacts", "Cherche des contacts du téléphone (nom, numéro, email, société).",
             mapOf("query" to prop("Texte recherché.")), listOf("query")))
@@ -154,6 +170,27 @@ class ToolBox(
         "summarize_mails" -> summarizeMails(a)
         "morning_briefing" -> ToolResult(briefing(), direct = true)
         "trier_mails" -> trierMails(a)
+        "marquer_mails_traites" -> marquerTraites(a)
+        "lire_sms" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            fr.dd.jarvis.device.Telephony.lire(app, (a.optString("count").toIntOrNull() ?: 10).coerceIn(1, 30), a.optString("contact"), a.optString("non_lus").equals("true", true))
+        }, direct = true)
+        "envoyer_sms" -> {
+            val r = fr.dd.jarvis.device.Telephony.resolve(app, a.optString("destinataire"))
+            val txt = a.optString("texte")
+            if (r == null) ToolResult("Destinataire introuvable (ou sans numéro) : ${a.optString("destinataire")}.")
+            else if (txt.isBlank()) ToolResult("Texte du SMS vide.")
+            else if (!confirm("Envoyer ce SMS à ${r.first} (${r.second}) ?\n\n« $txt »", true)) ToolResult("Envoi refusé par l'utilisateur.")
+            else ToolResult(fr.dd.jarvis.device.Telephony.envoyer(app, r.second, txt))
+        }
+        "appeler_contact" -> {
+            val r = fr.dd.jarvis.device.Telephony.resolve(app, a.optString("contact"))
+            if (r == null) ToolResult("Contact introuvable (ou sans numéro) : ${a.optString("contact")}.")
+            else if (!confirm("Appeler ${r.first} (${r.second}) ?", true)) ToolResult("Appel refusé par l'utilisateur.")
+            else ToolResult(
+                if (fr.dd.jarvis.device.Telephony.callGranted(app)) fr.dd.jarvis.device.Telephony.appeler(app, r.second)
+                else app.phone.perform("call", r.second)
+            )
+        }
         "itineraire" -> {
             val dest = a.optString("destination").trim()
             val depuis = a.optString("depuis")
@@ -357,6 +394,24 @@ class ToolBox(
         val id = a.optString("event_id").trim().removePrefix("#").toLongOrNull() ?: return ToolResult("Identifiant invalide.")
         if (!confirm("Supprimer l'événement #$id de l'agenda ?", false)) return ToolResult("Suppression refusée par l'utilisateur.")
         return ToolResult(if (app.calendar.delete(id)) "Événement #$id supprimé." else "Événement introuvable.")
+    }
+
+    private suspend fun marquerTraites(a: JSONObject): ToolResult {
+        if (store.gmailAccounts.isEmpty()) return ToolResult("Marquer comme traité demande un compte Google connecté (Réglages › Mails).")
+        val count = (a.optString("count").toIntOrNull() ?: 30).coerceIn(5, 60)
+        val q = a.optString("recherche").trim().lowercase().let { if (it == "tous" || it == "tout") "" else it }
+        val mails = try { app.mail.fetchRecent(count, q.isBlank()) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
+            return ToolResult("❌ Impossible de lire les mails : ${e.message}")
+        }
+        val cibles = mails.filter { it.id.isNotBlank() && (q.isBlank() || it.from.lowercase().contains(q) || it.subject.lowercase().contains(q)) }
+        if (cibles.isEmpty()) return ToolResult("Aucun mail correspondant.")
+        val archiver = a.optString("archiver").equals("true", true)
+        if (!confirm("Marquer ${cibles.size} mail(s) comme traités" + (if (archiver) " et les archiver" else "") + " ?\n\n" + cibles.take(8).joinToString("\n") { "• ${it.from} — ${it.subject}" }, false))
+            return ToolResult("Refusé par l'utilisateur.")
+        return try {
+            val n = fr.dd.jarvis.device.GmailApi.marquerTraites(app, cibles.groupBy({ it.account }, { it.id }), archiver)
+            ToolResult("✅ $n mail(s) marqués comme traités (lus + libellé JARVIS/Traité${if (archiver) ", archivés" else ""}).")
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { ToolResult("❌ ${e.message}") }
     }
 
     private suspend fun trierMails(a: JSONObject): ToolResult {

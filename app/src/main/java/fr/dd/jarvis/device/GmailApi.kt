@@ -165,4 +165,26 @@ object GmailApi {
             }
         }
     } catch (e: Exception) { e.message ?: e.javaClass.simpleName }
+
+    /** Marque des mails comme traités : lus + libellé « JARVIS/Traité », et retirés de la boîte de réception si [archiver]. */
+    suspend fun marquerTraites(ctx: Context, parCompte: Map<String, List<String>>, archiver: Boolean): Int {
+        var n = 0
+        for ((account, ids) in parCompte) {
+            val auth = authorize(ctx, account)
+            if (auth.hasResolution()) throw IllegalStateException("autorisation à renouveler pour $account (Réglages › Mails › retire puis ajoute le compte).")
+            val token = auth.accessToken ?: continue
+            withContext(Dispatchers.IO) {
+                var labelId: String? = null
+                val ls = get(token, "$BASE/labels").optJSONArray("labels")
+                for (i in 0 until (ls?.length() ?: 0)) ls!!.getJSONObject(i).let { if (it.getString("name") == "JARVIS/Traité") labelId = it.getString("id") }
+                if (labelId == null) labelId = post(token, "$BASE/labels", JSONObject().put("name", "JARVIS/Traité")).getString("id")
+                for (id in ids) {
+                    val rem = org.json.JSONArray().put("UNREAD").also { if (archiver) it.put("INBOX") }
+                    post(token, "$BASE/messages/$id/modify", JSONObject().put("addLabelIds", org.json.JSONArray().put(labelId)).put("removeLabelIds", rem))
+                    n++
+                }
+            }
+        }
+        return n
+    }
 }
