@@ -122,19 +122,7 @@ fun SettingsScreen(app: JarvisApp) {
 
         // ------------------------------------------------------------ Images (Cloudflare)
         item {
-            KeyPanel(
-                title = "Images — comptes Cloudflare Workers AI (rotation)",
-                hint = "Un compte par ligne au format idCompte:jeton (Cloudflare › Workers AI › « Utiliser l'API REST » : ID de compte + jeton API avec la permission Workers AI). Gratuit dans la limite du quota quotidien de chaque compte : plus de comptes = plus d'images.",
-                keys = store.cfAccounts,
-                onAdd = { store.addCfAccounts(it) },
-                onRemove = { store.removeCfAccount(it) },
-                onTest = {
-                    try { val (f, _) = fr.dd.jarvis.ai.ImageGen.generate(app, "a small blue circle on white background"); listOf("✅ Image générée (${f.length() / 1024} Ko)") }
-                    catch (e: Exception) { listOf("❌ ${e.message}") }
-                },
-                modelLabel = "Modèle d'image", model = store.cfModel.value, onModel = { store.cfModel.set(it) },
-                onListModels = { fr.dd.jarvis.ai.ImageGen.MODELES }
-            )
+            CfPanel(store, app)
         }
 
         // ------------------------------------------------------------ Mails
@@ -569,5 +557,52 @@ private fun KeyPanel(
             Text("Touche un modèle pour le choisir :", color = HudDim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
             models.forEach { m -> Box(Modifier.padding(top = 4.dp)) { HudChip(m, selected = m == model) { onModel(m) } } }
         }
+    }
+}
+
+
+@Composable
+private fun CfPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.JarvisApp) {
+    val scope = rememberCoroutineScope()
+    var id by remember { mutableStateOf("") }
+    var key by remember { mutableStateOf("") }
+    var msg by remember { mutableStateOf("") }
+    var testing by remember { mutableStateOf(false) }
+    HudPanel(Modifier.fillMaxWidth(), title = "Images — comptes Cloudflare Workers AI (rotation)") {
+        Text(
+            "Pour chaque compte : l'ID de compte (32 caractères, dans l'URL dash.cloudflare.com ou Workers AI › « Utiliser l'API REST ») et un jeton API avec la permission « Workers AI ». Plusieurs comptes = plus d'images gratuites par jour.",
+            color = HudDim, fontSize = 12.sp
+        )
+        Spacer(Modifier.height(8.dp))
+        store.cfAccounts.forEachIndexed { i, a ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("🔑 ${a.substringBefore(':').take(6)}… / ${fr.dd.jarvis.ai.Llm.mask(a.substringAfter(':'))}", color = HudText, fontFamily = FontFamily.Monospace, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                Icon(Icons.Filled.Delete, null, tint = Color(0xFFFF4D6D), modifier = Modifier.size(22.dp).clickable { store.removeCfAccount(i) })
+            }
+        }
+        if (store.cfAccounts.isEmpty()) Text("Aucun compte pour l'instant.", color = HudDim, fontSize = 12.sp)
+        Spacer(Modifier.height(8.dp))
+        HudTextField(id, { id = it }, Modifier.fillMaxWidth(), label = "ID de compte")
+        Spacer(Modifier.height(6.dp))
+        HudTextField(key, { key = it }, Modifier.fillMaxWidth(), label = "Clé API (jeton)")
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HudButton("Ajouter", filled = true, enabled = id.isNotBlank() || key.isNotBlank()) {
+                val err = store.addCfAccount(id, key)
+                if (err == null) { id = ""; key = ""; msg = "✅ Compte enregistré." } else msg = "❌ $err"
+            }
+            HudButton(if (testing) "Test…" else "Tester", enabled = store.cfAccounts.isNotEmpty() && !testing) {
+                scope.launch {
+                    testing = true
+                    msg = try { val (f, _) = fr.dd.jarvis.ai.ImageGen.generate(app, "a small blue circle on white background"); "✅ Image générée (${f.length() / 1024} Ko)" }
+                    catch (e: Exception) { "❌ ${e.message}" }
+                    testing = false
+                }
+            }
+        }
+        if (msg.isNotBlank()) Text(msg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+        Spacer(Modifier.height(10.dp))
+        HudTextField(store.cfModel.value, { store.cfModel.set(it) }, Modifier.fillMaxWidth(), label = "Modèle d'image")
+        fr.dd.jarvis.ai.ImageGen.MODELES.forEach { m -> Box(Modifier.padding(top = 4.dp)) { HudChip(m, selected = m == store.cfModel.value) { store.cfModel.set(m) } } }
     }
 }

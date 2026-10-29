@@ -84,9 +84,21 @@ class Store(context: Context) {
     // ---- Génération d'images (Cloudflare Workers AI) : lignes « idCompte:jeton », rotation automatique
     val cfModel = SPref("cfModel", "@cf/black-forest-labs/flux-1-schnell")
     val cfAccounts: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readList("cfAccounts")) }
-    fun addCfAccounts(raw: String) {
-        val parts = raw.split(Regex("[\\s,;]+")).map { it.trim() }.filter { it.contains(':') && it.length >= 20 && it !in cfAccounts }.distinct()
-        cfAccounts.addAll(parts); writeList("cfAccounts", cfAccounts)
+    /** Ajoute un compte (ID + clé API). Retourne un message d'erreur, ou null si c'est bon. */
+    fun addCfAccount(idRaw: String, keyRaw: String): String? {
+        var id = idRaw.trim(); var key = keyRaw.trim()
+        if (id.contains(':') && key.isEmpty()) { key = id.substringAfter(':').trim(); id = id.substringBefore(':').trim() }
+        else if (key.contains(':') && id.isEmpty()) { id = key.substringBefore(':').trim(); key = key.substringAfter(':').trim() }
+        id = id.replace(Regex("^.*/accounts/"), "").substringBefore('/').trim()
+        if (id.isEmpty()) return "ID de compte manquant."
+        if (key.isEmpty()) return "Clé API manquante."
+        if (!Regex("[0-9a-fA-F]{32}").matches(id)) return "L'ID de compte doit faire 32 caractères hexadécimaux (visible dans l'URL dash.cloudflare.com/<ID>/…)."
+        if (key.length < 20 || key.any { it.isWhitespace() }) return "Clé API invalide (jeton Workers AI, sans espace)."
+        val entry = "$id:$key"
+        if (entry in cfAccounts) return "Ce compte est déjà enregistré."
+        cfAccounts.add(entry); writeList("cfAccounts", cfAccounts)
+        prefs.edit().commit()
+        return null
     }
     fun removeCfAccount(i: Int) { if (i in cfAccounts.indices) cfAccounts.removeAt(i); writeList("cfAccounts", cfAccounts) }
 
