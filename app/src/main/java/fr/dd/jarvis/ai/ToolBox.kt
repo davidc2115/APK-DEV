@@ -78,7 +78,7 @@ class ToolBox(
                 "count" to prop("Nombre de mails à analyser (5 à 40). Par défaut 20."),
                 "unread_only" to prop("« true » pour ne lire que les non lus.")
             )))
-        put(tool("trier_mails", "Analyse les derniers mails, les classe par catégorie (Urgent, Clients, Factures, Chantiers, Administratif, Notifications, Newsletters, Perso) et peut les ranger dans Gmail (libellés JARVIS/…).",
+        put(tool("trier_mails", "Analyse les derniers mails, les classe par catégorie (Urgent, Clients, Factures, Chantiers, Administratif, Notifications, Newsletters, Perso) et peut les ranger dans Gmail (libellés Urgent, Clients…).",
             mapOf(
                 "compte" to prop("Compte mail précis (adresse ou partie), même s'il est désactivé. Vide = comptes actifs seulement."),
                 "count" to prop("Nombre de mails (5 à 60). Par défaut 30."),
@@ -94,7 +94,7 @@ class ToolBox(
                 "restants" to prop("« true » (défaut) pour ne garder que les rendez-vous restants aujourd'hui, « false » pour toute la journée."),
                 "calendar" to prop("Nom d'un agenda précis (optionnel).")
             )))
-        put(tool("marquer_mails_traites", "Marque des mails comme traités (lus + libellé JARVIS/Traité, archivés si demandé). Compte Google requis.",
+        put(tool("marquer_mails_traites", "Marque des mails comme traités (lus + libellé Traité, archivés si demandé). Compte Google requis.",
             mapOf(
                 "compte" to prop("Compte mail précis (adresse ou partie), même s'il est désactivé. Vide = comptes actifs seulement."),
                 "recherche" to prop("Texte à retrouver dans l'expéditeur ou l'objet. Vide ou « tous » = tous les mails récents non lus."),
@@ -488,7 +488,7 @@ class ToolBox(
             return ToolResult("Refusé par l'utilisateur.")
         return try {
             val n = fr.dd.jarvis.device.GmailApi.marquerTraites(app, cibles.groupBy({ it.account }, { it.id }), archiver)
-            ToolResult("✅ $n mail(s) marqués comme traités (lus + libellé JARVIS/Traité${if (archiver) ", archivés" else ""}).")
+            ToolResult("✅ $n mail(s) marqués comme traités (lus + libellé Traité${if (archiver) ", archivés" else ""}).")
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { ToolResult("❌ ${e.message}") }
     }
 
@@ -511,9 +511,9 @@ class ToolBox(
             if (store.gmailAccounts.isEmpty()) note = "ℹ️ Rangement dans la boîte : disponible avec un compte Google connecté (pas en IMAP)."
             else {
                 val archiver = a.optString("archiver").equals("true", true)
-                if (!confirm("Ranger ${classes.size} mails dans Gmail avec les libellés JARVIS/…" + (if (archiver) " et archiver newsletters/notifications ?" else " ?"), false)) note = "Rangement refusé."
+                if (!confirm("Ranger ${classes.size} mails dans Gmail avec les libellés Urgent, Clients…" + (if (archiver) " et archiver newsletters/notifications ?" else " ?"), false)) note = "Rangement refusé."
                 else note = try {
-                    "✅ ${fr.dd.jarvis.ai.MailTri.ranger(app, classes, archiver)} mail(s) rangés dans Gmail (libellés JARVIS/…)."
+                    "✅ ${fr.dd.jarvis.ai.MailTri.ranger(app, classes, archiver)} mail(s) rangés dans Gmail (libellés Urgent, Clients…)."
                 } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { "❌ Rangement impossible : ${e.message}" }
             }
         }

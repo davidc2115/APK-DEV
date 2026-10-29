@@ -97,7 +97,7 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
             journal.append(urgents.joinToString("") { "  - 🔴 ${it.mail.from} — ${it.mail.subject}\n" })
         }
         if (store.agentRanger.value && store.gmailAccounts.isNotEmpty()) {
-            runCatching { MailTri.ranger(app, classes, false) }.onSuccess { journal.append("  - 🏷️ $it mail(s) rangés (libellés JARVIS/…)\n") }
+            runCatching { MailTri.ranger(app, classes, false) }.onSuccess { journal.append("  - 🏷️ $it mail(s) rangés (libellés Urgent, Clients…)\n") }
         }
         writeSet("agent_seen_mails.txt", seen + nouveaux.map { key(it) })
     }

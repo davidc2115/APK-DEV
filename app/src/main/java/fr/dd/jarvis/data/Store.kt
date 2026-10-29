@@ -164,6 +164,9 @@ class Store(context: Context) {
         writeList("disabledMail", disabledMail)
     }
 
+    /** Préfixe des libellés Gmail créés par JARVIS (vide = « Urgent », « Clients »… sans « JARVIS/ » devant). */
+    val mailLabelPrefix = SPref("mailLabelPrefix", "")
+
     fun mailConfigured() = gmailAccounts.isNotEmpty() || mailHost.value.isNotBlank() && mailUser.value.isNotBlank() && mailPass.value.isNotBlank()
 
     // ---- Obsidian (dossier choisi via le sélecteur Android)

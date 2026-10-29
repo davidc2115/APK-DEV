@@ -126,16 +126,17 @@ object GmailApi {
             val auth = authorize(ctx, account)
             if (auth.hasResolution()) throw IllegalStateException("autorisation à renouveler pour $account (Réglages › Mails › Ajouter un compte Google : le classement demande la permission « modifier »).")
             val token = auth.accessToken ?: continue
+            val prefix = (ctx.applicationContext as fr.dd.jarvis.JarvisApp).store.mailLabelPrefix.value
             withContext(Dispatchers.IO) {
                 val existing = mutableMapOf<String, String>()
                 val ls = get(token, "$BASE/labels").optJSONArray("labels")
                 for (i in 0 until (ls?.length() ?: 0)) ls!!.getJSONObject(i).let { existing[it.getString("name")] = it.getString("id") }
                 for (cat in items.map { it.second }.distinct()) {
-                    val name = "JARVIS/$cat"
+                    val name = prefix + cat
                     if (name !in existing) existing[name] = post(token, "$BASE/labels", JSONObject().put("name", name)).getString("id")
                 }
                 for ((id, cat) in items) {
-                    val body = JSONObject().put("addLabelIds", org.json.JSONArray().put(existing["JARVIS/$cat"]))
+                    val body = JSONObject().put("addLabelIds", org.json.JSONArray().put(existing[prefix + cat]))
                     if (cat in archiver) body.put("removeLabelIds", org.json.JSONArray().put("INBOX"))
                     post(token, "$BASE/messages/$id/modify", body)
                     n++
@@ -166,18 +167,19 @@ object GmailApi {
         }
     } catch (e: Exception) { e.message ?: e.javaClass.simpleName }
 
-    /** Marque des mails comme traités : lus + libellé « JARVIS/Traité », et retirés de la boîte de réception si [archiver]. */
+    /** Marque des mails comme traités : lus + libellé « Traité », et retirés de la boîte de réception si [archiver]. */
     suspend fun marquerTraites(ctx: Context, parCompte: Map<String, List<String>>, archiver: Boolean): Int {
         var n = 0
         for ((account, ids) in parCompte) {
             val auth = authorize(ctx, account)
             if (auth.hasResolution()) throw IllegalStateException("autorisation à renouveler pour $account (Réglages › Mails › retire puis ajoute le compte).")
             val token = auth.accessToken ?: continue
+            val traite = (ctx.applicationContext as fr.dd.jarvis.JarvisApp).store.mailLabelPrefix.value + "Traité"
             withContext(Dispatchers.IO) {
                 var labelId: String? = null
                 val ls = get(token, "$BASE/labels").optJSONArray("labels")
-                for (i in 0 until (ls?.length() ?: 0)) ls!!.getJSONObject(i).let { if (it.getString("name") == "JARVIS/Traité") labelId = it.getString("id") }
-                if (labelId == null) labelId = post(token, "$BASE/labels", JSONObject().put("name", "JARVIS/Traité")).getString("id")
+                for (i in 0 until (ls?.length() ?: 0)) ls!!.getJSONObject(i).let { if (it.getString("name") == traite) labelId = it.getString("id") }
+                if (labelId == null) labelId = post(token, "$BASE/labels", JSONObject().put("name", traite)).getString("id")
                 for (id in ids) {
                     val rem = org.json.JSONArray().put("UNREAD").also { if (archiver) it.put("INBOX") }
                     post(token, "$BASE/messages/$id/modify", JSONObject().put("addLabelIds", org.json.JSONArray().put(labelId)).put("removeLabelIds", rem))
