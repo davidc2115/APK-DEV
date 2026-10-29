@@ -17,7 +17,7 @@ class GroqClient(private val ring: KeyRing, private val model: () -> String) {
         val msgs = JSONArray()
             .put(JSONObject().put("role", "system").put("content", system))
             .put(JSONObject().put("role", "user").put("content", user))
-        return chat(msgs, null).optString("content", "").trim()
+        return ring.run { key -> withContext(Dispatchers.IO) { call(key, msgs, null, 1024, Http.fast) } }.optString("content", "").trim()
     }
 
     /** Test d'une clé précise (bouton « Tester »). */
@@ -39,7 +39,7 @@ class GroqClient(private val ring: KeyRing, private val model: () -> String) {
         }
     }
 
-    private fun call(key: String, messages: JSONArray, tools: JSONArray?, maxTokens: Int): JSONObject {
+    private fun call(key: String, messages: JSONArray, tools: JSONArray?, maxTokens: Int, client: okhttp3.OkHttpClient = Http.client): JSONObject {
         val body = JSONObject()
             .put("model", model())
             .put("messages", messages)
@@ -54,7 +54,7 @@ class GroqClient(private val ring: KeyRing, private val model: () -> String) {
             .header("Authorization", "Bearer $key")
             .post(body.toString().toRequestBody(Http.JSON))
             .build()
-        return Http.client.newCall(req).execute().use { resp ->
+        return client.newCall(req).execute().use { resp ->
             val text = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) throw ApiException(resp.code, "Groq ${resp.code} : ${text.take(300)}")
             JSONObject(text).getJSONArray("choices").getJSONObject(0).getJSONObject("message")
@@ -86,13 +86,21 @@ class GeminiClient(private val ring: KeyRing, private val model: () -> String) {
         }
     }
 
-    private fun call(key: String, system: String, user: String, maxTokens: Int): String {
+    private fun call(key: String, system: String, user: String, maxTokens: Int, thinkingOff: Boolean = true): String {
+        val gen = JSONObject().put("temperature", 0.3).put("maxOutputTokens", if (maxTokens > 100) 8192 else maxTokens)
+        if (thinkingOff) {
+            val m = model()
+            when {
+                m.contains("2.5") -> gen.put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
+                m.contains("gemini-3") -> gen.put("thinkingConfig", JSONObject().put("thinkingLevel", "minimal"))
+            }
+        }
         val body = JSONObject()
             .put("contents", JSONArray().put(
                 JSONObject().put("role", "user")
                     .put("parts", JSONArray().put(JSONObject().put("text", user)))
             ))
-            .put("generationConfig", JSONObject().put("temperature", 0.3).put("maxOutputTokens", if (maxTokens > 100) 8192 else maxTokens))
+            .put("generationConfig", gen)
         if (system.isNotBlank()) {
             body.put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
         }
@@ -101,18 +109,16 @@ class GeminiClient(private val ring: KeyRing, private val model: () -> String) {
             .header("x-goog-api-key", key)
             .post(body.toString().toRequestBody(Http.JSON))
             .build()
-        return Http.client.newCall(req).execute().use { resp ->
-            val text = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) throw ApiException(resp.code, "Gemini ${resp.code} : ${text.take(300)}")
-            val cands = JSONObject(text).optJSONArray("candidates")
-            val parts = cands?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
-            val sb = StringBuilder()
-            if (parts != null) {
-                for (i in 0 until parts.length()) {
-                    sb.append(parts.getJSONObject(i).optString("text", ""))
-                }
-            }
-            sb.toString().trim()
+        val (code, text) = Http.fast.newCall(req).execute().use { it.code to it.body?.string().orEmpty() }
+        // Certains modèles refusent le réglage de réflexion : on réessaie sans.
+        if (code == 400 && thinkingOff && text.contains("think", ignoreCase = true)) return call(key, system, user, maxTokens, false)
+        if (code !in 200..299) throw ApiException(code, "Gemini $code : ${text.take(300)}")
+        val cands = JSONObject(text).optJSONArray("candidates")
+        val parts = cands?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
+        val sb = StringBuilder()
+        if (parts != null) {
+            for (i in 0 until parts.length()) sb.append(parts.getJSONObject(i).optString("text", ""))
         }
+        return sb.toString().trim()
     }
 }

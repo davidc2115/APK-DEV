@@ -87,6 +87,7 @@ dependencies {
     // ADB intégré (Débogage sans fil) : droits « adb » sans installer Shizuku
     implementation("com.github.MuntashirAkon:libadb-android:3.0.0")
     implementation("org.bouncycastle:bcprov-jdk15to18:1.78")
+    implementation("org.conscrypt:conscrypt-android:2.5.3")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 
     // Contrôle du téléphone (shell via Shizuku)

@@ -13,6 +13,8 @@ object Http {
         .writeTimeout(30, TimeUnit.SECONDS)
         .callTimeout(45, TimeUnit.SECONDS)
         .build()
+    /** Client pour les agents : on préfère échouer vite (20 s) et basculer sur l'autre fournisseur. */
+    val fast: OkHttpClient = client.newBuilder().callTimeout(20, TimeUnit.SECONDS).build()
     val JSON = "application/json; charset=utf-8".toMediaType()
 }
 

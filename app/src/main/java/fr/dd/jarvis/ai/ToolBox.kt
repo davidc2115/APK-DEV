@@ -175,6 +175,11 @@ class ToolBox(
             return ToolResult("# 📅 $title\n\nAucun événement sur cette période. 🎉", direct = true)
         }
         val q = a.optString("question")
+        // Présentation standard : mise en forme locale instantanée. L'agent IA n'intervient que pour une question
+        // précise ou si l'utilisateur a personnalisé la présentation du planning.
+        if (q.isBlank() && app.societe.data.modeles["planning"] == null) {
+            return ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { localPlanning(from, days, a.optString("calendar")) }, direct = true)
+        }
         val user = "Aujourd'hui : ${Prompts.now()}\nPériode : du $from sur $days jour(s)\n" +
             (if (q.isNotBlank()) "Question : $q\n" else "") + "Événements :\n$data"
         // L'agent peut être lent ou en erreur (quota, modèle) : au-delà de 40 s ou en cas d'échec, mise en forme locale.
@@ -266,7 +271,7 @@ class ToolBox(
 
     private suspend fun summarizeMails(a: JSONObject): ToolResult {
         if (!store.mailConfigured()) return ToolResult("Les mails ne sont pas configurés : renseigner le serveur IMAP dans Réglages › Mails.")
-        val count = (a.optString("count").toIntOrNull() ?: 20).coerceIn(5, 40)
+        val count = (a.optString("count").toIntOrNull() ?: 15).coerceIn(5, 40)
         val unread = a.optString("unread_only").equals("true", ignoreCase = true)
         val mails = try {
             app.mail.fetchRecent(count, unread)

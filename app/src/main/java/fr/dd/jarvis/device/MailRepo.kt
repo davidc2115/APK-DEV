@@ -83,7 +83,7 @@ class MailRepo(private val ctx: Context, private val store: Store) {
             from = from,
             subject = m.subject ?: "(sans objet)",
             date = m.receivedDate ?: m.sentDate,
-            snippet = body.replace(Regex("\\s+"), " ").trim().take(400),
+            snippet = body.replace(Regex("\\s+"), " ").trim().take(260),
             unread = !m.isSet(Flags.Flag.SEEN)
         )
     }

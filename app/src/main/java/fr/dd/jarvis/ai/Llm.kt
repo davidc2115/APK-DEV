@@ -99,7 +99,7 @@ class Llm(private val store: Store) {
 
     suspend fun testGroqKeys(): List<String> = store.groqKeys.toList().map { k ->
         mask(k) + " : " + try {
-            groq.ping(k); "✅ OK"
+            val t0 = System.currentTimeMillis(); groq.ping(k); "✅ OK (${System.currentTimeMillis() - t0} ms)"
         } catch (e: Exception) {
             "❌ " + (e.message ?: "erreur").take(90)
         }
@@ -107,7 +107,7 @@ class Llm(private val store: Store) {
 
     suspend fun testGeminiKeys(): List<String> = store.geminiKeys.toList().map { k ->
         mask(k) + " : " + try {
-            gemini.ping(k); "✅ OK"
+            val t0 = System.currentTimeMillis(); gemini.ping(k); "✅ OK (${System.currentTimeMillis() - t0} ms)"
         } catch (e: Exception) {
             "❌ " + (e.message ?: "erreur").take(90)
         }

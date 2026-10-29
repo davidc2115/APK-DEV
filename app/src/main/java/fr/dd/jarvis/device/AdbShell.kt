@@ -103,16 +103,36 @@ object AdbShell {
     suspend fun pair(ctx: Context, code: String): String = withContext(Dispatchers.IO) {
         try {
             val app = ctx.applicationContext
+            val parts = code.trim().split(Regex("\\s+"))
+            val manualPort = if (parts.size == 2) parts[0].toIntOrNull() else null
+            val pin = parts.last()
             val found = CompletableDeferred<Pair<InetAddress?, Int>>()
-            val mdns = AdbMdns(app, AdbMdns.SERVICE_TYPE_TLS_PAIRING) { host, port -> if (port > 0) found.complete(host to port) }
-            mdns.start()
-            val r = try { withTimeoutOrNull(20_000) { found.await() } } finally { mdns.stop() }
-                ?: return@withContext "❌ Fenêtre d'appairage introuvable : garde l'écran « Associer avec un code » ouvert, en Wi-Fi."
             val m = mgr(app)
-            val host = r.first?.hostAddress ?: "127.0.0.1"
-            m.pair(host, r.second, code.trim())
-            val c = connect(app)
-            "✅ Appairage réussi. $c"
+            val host: String
+            val port: Int
+            if (manualPort != null) {
+                host = "127.0.0.1"; port = manualPort
+            } else {
+                val mdns = AdbMdns(app, AdbMdns.SERVICE_TYPE_TLS_PAIRING) { h, p -> if (p > 0) found.complete(h to p) }
+                mdns.start()
+                val r = try { withTimeoutOrNull(15_000) { found.await() } } finally { mdns.stop() }
+                    ?: return@withContext "❌ Fenêtre d'appairage introuvable. Garde l'écran « Associer avec un code » ouvert (Wi-Fi), ou saisis « port code » (ex. 37891 123456) dans la notification."
+                host = r.first?.hostAddress ?: "127.0.0.1"; port = r.second
+            }
+            // Appairage borné à 20 s (sinon la notification tournerait indéfiniment)
+            val pool = java.util.concurrent.Executors.newSingleThreadExecutor()
+            val fut = pool.submit(java.util.concurrent.Callable { m.pair(host, port, pin) })
+            try {
+                fut.get(20, java.util.concurrent.TimeUnit.SECONDS)
+            } catch (e: java.util.concurrent.TimeoutException) {
+                fut.cancel(true)
+                return@withContext "❌ Appairage sans réponse (20 s). Vérifie le code et que l'écran d'appairage est toujours affiché."
+            } catch (e: java.util.concurrent.ExecutionException) {
+                throw e.cause ?: e
+            } finally {
+                pool.shutdownNow()
+            }
+            "✅ Appairage réussi. " + connect(app)
         } catch (e: Throwable) {
             "❌ Appairage échoué : " + (e.message ?: e.javaClass.simpleName)
         }
@@ -153,11 +173,18 @@ object AdbShell {
 
 class AdbPairReceiver : android.content.BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        val code = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(AdbShell.KEY_CODE)?.toString()?.filter { it.isDigit() }.orEmpty()
-        if (code.length != 6) { AdbShell.postPairingNotification(context, "Code invalide : 6 chiffres attendus."); return }
+        val raw = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(AdbShell.KEY_CODE)?.toString().orEmpty()
+        val nums = Regex("\\d+").findAll(raw).map { it.value }.toList()
+        val code = when {
+            nums.size >= 2 && nums.last().length == 6 -> nums[nums.size - 2] + " " + nums.last()
+            nums.isNotEmpty() && nums.last().length == 6 -> nums.last()
+            else -> ""
+        }
+        if (code.isBlank()) { AdbShell.postPairingNotification(context, "Code invalide : 6 chiffres attendus (ou « port code »)."); return }
+        AdbShell.postResult(context, "⏳ Appairage en cours…")
         val pending = goAsync()
         kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
-            val r = AdbShell.pair(context, code)
+            val r = try { AdbShell.pair(context, code) } catch (e: Throwable) { "❌ " + (e.message ?: e.javaClass.simpleName) }
             AdbShell.postResult(context, r)
             pending.finish()
         }
