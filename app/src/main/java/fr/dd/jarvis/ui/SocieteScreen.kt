@@ -18,6 +18,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -126,6 +128,7 @@ private fun ClientsTab(app: JarvisApp) {
     var creating by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var info by remember { mutableStateOf("") }
+    val kmlScope = rememberCoroutineScope()
     val list = d.clients.filter { query.isBlank() || normaliser(it.nom).contains(normaliser(query)) }.sortedBy { normaliser(it.nom) }
 
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -133,6 +136,15 @@ private fun ClientsTab(app: JarvisApp) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 HudTextField(query, { query = it }, Modifier.weight(1f), placeholder = "Rechercher un client…")
                 HudRoundButton(Icons.Filled.Add) { creating = true }
+            }
+        }
+        item {
+            HudButton("🗺️ Exporter les points GPS (KML Google Earth)") {
+                kmlScope.launch {
+                    info = "⏳ Géolocalisation des adresses…"
+                    info = runCatching { svc.exporterKml().lines().drop(2).joinToString("\n").trim() }.getOrElse { "❌ ${it.message}" }
+                    svc.partagerKml()
+                }
             }
         }
         if (info.isNotBlank()) item { Text(info, color = LocalAccent.current, fontSize = 12.sp) }

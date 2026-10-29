@@ -41,7 +41,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val tools = ToolBox(app) { question, force ->
         if (!force && !store.confirmSensitive.value) true else askConfirm(question)
     }
-    private val brain = Brain(app.llm, tools) { store.userName.value }
+    private val brain = Brain(app.llm, tools, app) { store.userName.value }
 
     init {
         load()

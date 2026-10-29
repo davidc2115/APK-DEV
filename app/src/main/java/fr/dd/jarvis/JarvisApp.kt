@@ -34,6 +34,8 @@ class JarvisApp : Application() {
         private set
     lateinit var phone: PhoneControl
         private set
+    lateinit var memo: fr.dd.jarvis.device.Memo
+        private set
     lateinit var societe: SocieteService
         private set
 
@@ -47,6 +49,8 @@ class JarvisApp : Application() {
         contacts = ContactsRepo(this)
         obsidian = ObsidianWriter(this, store)
         phone = PhoneControl(this)
+        memo = fr.dd.jarvis.device.Memo(this, obsidian)
+        Thread { runCatching { memo.load() } }.start()
         societe = SocieteService(this, SocieteRepo(this), obsidian)
         societe.data.modeles["planning"]?.let { fr.dd.jarvis.ai.Prompts.planningFormat = it }
         createChannel()

@@ -102,6 +102,19 @@ object AdbShell {
         }
     }
 
+    /** Coupe la connexion ADB (l'appairage reste valable). */
+    fun disconnect() {
+        try { manager?.disconnect() } catch (_: Throwable) {}
+    }
+
+    /** Désactive le débogage sans fil et le débogage USB (nécessite une connexion ADB active), puis coupe la connexion. */
+    suspend fun disableDebugging(ctx: Context): String {
+        val r = exec(ctx, "settings put global adb_wifi_enabled 0; settings put global adb_enabled 0")
+        disconnect()
+        return if (r.startsWith("Erreur") || r.startsWith("ADB non connecté")) r
+        else "✅ Débogage désactivé. Pour reprendre le contrôle : réactive « Débogage sans fil » dans les options pour développeurs puis touche « Connecter »."
+    }
+
     /** Appairage avec le code à 6 chiffres affiché par Android ; le port d'appairage est trouvé automatiquement. */
     suspend fun pair(ctx: Context, code: String): String = withContext(Dispatchers.IO) {
         try {

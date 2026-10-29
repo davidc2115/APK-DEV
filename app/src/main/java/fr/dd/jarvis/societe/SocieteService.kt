@@ -204,4 +204,83 @@ class SocieteService(
         }
         ctx.startActivity(Intent.createChooser(i, "Partager").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
+
+    // ------------------------------------------------------------------ factures impayées
+
+    fun impayees(): String {
+        val d = data
+        val today = LocalDate.now()
+        val l = d.docs.filter { it.type == "facture" && it.statut == "a_payer" }.sortedBy { it.echeance }
+        if (l.isEmpty()) return ""
+        val total = l.sumOf { d.totaux(it).ttc }
+        return l.joinToString("\n") { f ->
+            val retard = runCatching { LocalDate.parse(f.echeance).isBefore(today) }.getOrDefault(false)
+            "- ${f.numero} · ${d.client(f.clientId)?.nom.orEmpty()} · ${euro(d.totaux(f).ttc)} TTC · échéance ${dateFr(f.echeance)}" +
+                if (retard) " ⚠️ EN RETARD" else ""
+        } + "\n**Total à encaisser : ${euro(total)} TTC**"
+    }
+
+    // ------------------------------------------------------------------ export KML (Google Earth / My Maps)
+
+    private fun esc(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    /** Géocode (une fois) les installations sans coordonnées puis écrit Clients.kml dans Obsidian. */
+    suspend fun exporterKml(): String = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val manquants = mutableListOf<String>()
+        val pts = mutableListOf<Triple<String, String, Geo.Point>>() // nom, description, point
+        for (c in data.clients) {
+            val cibles = if (c.sites.isEmpty()) listOf(null) else c.sites
+            for (s in cibles) {
+                val adr = s?.adresse?.ifBlank { null } ?: c.adresse
+                val label = if (s != null && s.nom.isNotBlank()) "${c.nom} — ${s.nom}" else c.nom
+                var p = if (s?.lat != null && s.lon != null) Geo.Point(s.lat, s.lon) else null
+                if (p == null && adr.isNotBlank()) {
+                    p = Geo.geocode(adr)
+                    kotlinx.coroutines.delay(1100) // politesse envers Nominatim (1 requête/s)
+                    if (p != null && s != null) {
+                        repo.update { d -> d.copy(clients = d.clients.map { x ->
+                            if (x.id != c.id) x else x.copy(sites = x.sites.map { y -> if (y.id == s.id) y.copy(lat = p.lat, lon = p.lon) else y })
+                        }) }
+                    }
+                }
+                if (p == null) { manquants += label; continue }
+                val desc = buildString {
+                    append(adr)
+                    if (c.tel.isNotBlank()) append("\nTél : ${c.tel}")
+                    if (s != null && s.kwc > 0) append("\n${nombre(s.kwc)} kWc")
+                    if (s != null && s.notes.isNotBlank()) append("\n${s.notes}")
+                }
+                pts += Triple(label, desc, p)
+            }
+        }
+        val hq = data.societe
+        val kml = buildString {
+            append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<kml xmlns=\"http://www.opengis.net/kml/2.2\"><Document>\n")
+            append("<name>${esc(hq.nom.ifBlank { "Clients" })} — clients</name>\n")
+            if (hq.lat != null && hq.lon != null)
+                append("<Placemark><name>Siège ${esc(hq.nom)}</name><description>${esc(hq.adresse)}</description><Point><coordinates>${hq.lon},${hq.lat},0</coordinates></Point></Placemark>\n")
+            pts.forEach { (n, dsc, p) ->
+                append("<Placemark><name>${esc(n)}</name><description>${esc(dsc)}</description><Point><coordinates>${p.lon},${p.lat},0</coordinates></Point></Placemark>\n")
+            }
+            append("</Document></kml>\n")
+        }
+        val loc = obsidian.saveBytes("Société/Cartes", "Clients.kml", kml.toByteArray(), "application/vnd.google-earth.kml+xml")
+        // copie partageable
+        val dir = File(ctx.cacheDir, "share").apply { mkdirs() }
+        File(dir, "Clients.kml").writeBytes(kml.toByteArray())
+        "# 🗺️ Export KML\n\n${pts.size} point(s) GPS enregistrés : $loc\n" +
+            (if (manquants.isNotEmpty()) "\n⚠️ Adresse introuvable ou absente : ${manquants.joinToString(", ")}\n" else "") +
+            "\nImport : Google Earth › Projets › Ouvrir › Importer un fichier KML, ou Google My Maps › Importer."
+    }
+
+    fun partagerKml() {
+        val f = File(File(ctx.cacheDir, "share"), "Clients.kml")
+        if (!f.exists()) return
+        val uri = FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f)
+        val i = Intent(Intent.ACTION_SEND).apply {
+            type = "application/vnd.google-earth.kml+xml"
+            putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        ctx.startActivity(Intent.createChooser(i, "Ouvrir avec Google Earth…").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
 }

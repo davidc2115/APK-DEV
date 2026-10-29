@@ -88,6 +88,16 @@ class ToolBox(
             ), listOf("name")))
         put(tool("create_contact_card", "Génère la fiche contact complète (Markdown Obsidian) d'un contact et l'enregistre.",
             mapOf("name" to prop("Nom du contact.")), listOf("name")))
+        put(tool("memoire_ajouter", "Enregistre une consigne durable de l'utilisateur dans la note Obsidian « Mémoire JARVIS » (remplace la consigne du même sujet).",
+            mapOf(
+                "sujet" to prop("contacts (fiches contact) | briefing (point du matin) | planning | mails | societe | general"),
+                "texte" to prop("La consigne complète, formulée clairement (structure, rubriques, calendrier à utiliser, exemples).")
+            ), listOf("sujet", "texte")))
+        put(tool("memoire_lire", "Affiche les consignes enregistrées dans la mémoire JARVIS."))
+        put(tool("memoire_oublier", "Supprime la consigne d'un sujet.", mapOf("sujet" to prop("Sujet à oublier.")), listOf("sujet")))
+        put(tool("factures_impayees", "Liste les factures émises non encore payées (avec retards)."))
+        put(tool("export_kml", "Génère un fichier KML (Google Earth / Google My Maps) avec les points GPS des clients et installations, enregistré dans Obsidian et partageable."))
+        put(tool("ma_position", "Donne la position GPS actuelle du téléphone (adresse approximative)."))
         put(tool("phone_action", "Agit sur le téléphone. Actions : torch_on, torch_off, open_app, open_url, volume, wifi_on, wifi_off, bluetooth_on, bluetooth_off, data_on, data_off, brightness, call, back, home, recents, notifications, quick_settings, lock, screenshot, read_screen, click_text, type_text, scroll_down, scroll_up, tap.",
             mapOf(
                 "action" to prop("Nom de l'action."),
@@ -119,6 +129,12 @@ class ToolBox(
         "create_contact" -> createContact(a)
         "update_contact" -> updateContact(a)
         "create_contact_card" -> createCard(a)
+        "memoire_ajouter" -> ToolResult("✅ Consigne « ${a.optString("sujet")} » enregistrée (" + app.memo.set(a.optString("sujet"), a.optString("texte")) + ").")
+        "memoire_lire" -> ToolResult(app.memo.all().entries.joinToString("\n\n") { "**${it.key}** : ${it.value}" }.ifBlank { "Aucune consigne enregistrée." }, direct = true)
+        "memoire_oublier" -> ToolResult(if (app.memo.remove(a.optString("sujet"))) "Consigne oubliée." else "Aucune consigne pour ce sujet.")
+        "factures_impayees" -> ToolResult(app.societe.impayees().ifBlank { "✅ Aucune facture impayée." }, direct = true)
+        "export_kml" -> ToolResult(app.societe.exporterKml(), direct = true)
+        "ma_position" -> ToolResult(fr.dd.jarvis.device.Locator.describe(app))
         "phone_action" -> phoneAction(a)
         "run_shell" -> runShell(a)
         in SocieteTools.NAMES -> societe.execute(name, a)
@@ -185,7 +201,7 @@ class ToolBox(
         // L'agent peut être lent ou en erreur (quota, modèle) : au-delà de 40 s ou en cas d'échec, mise en forme locale.
         var raison = ""
         val text = try {
-            llm.agent(Prompts.planning(), user)
+            llm.agent(Prompts.planning() + app.memo.pour("planning"), user)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -282,7 +298,7 @@ class ToolBox(
         }
         if (mails.isEmpty()) return ToolResult("📭 Aucun mail ${if (unread) "non lu" else "récent"}.", direct = true)
         val text = try {
-            llm.agent(Prompts.MAIL, "Aujourd'hui : ${Prompts.now()}\n\n" + app.mail.toPrompt(mails))
+            llm.agent(Prompts.MAIL + app.memo.pour("mails"), "Aujourd'hui : ${Prompts.now()}\n\n" + app.mail.toPrompt(mails))
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -293,10 +309,15 @@ class ToolBox(
 
     /** Point du jour : agenda + mails, rédigé par l'agent Briefing. */
     suspend fun briefing(): String {
+        val consignes = app.memo.pour("briefing").lowercase()
+        val sansMails = Regex("(sans|pas de|aucun|ni) (les )?(mail|e-mail|courriel)").containsMatchIn(consignes)
         val planning = if (app.calendar.hasPermission()) {
-            planningData(LocalDate.now(), 1, null).ifBlank { "Aucun événement aujourd'hui." }
+            // « seulement le planning xx » : un agenda nommé dans la consigne est utilisé comme filtre
+            val cible = app.calendar.calendars().map { app.calendar.displayName(it) }.firstOrNull { consignes.contains(it.lowercase()) }
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { planningData(LocalDate.now(), 1, cible) }
+                .ifBlank { "Aucun événement aujourd'hui." }
         } else "Permission agenda non accordée."
-        val mails = if (store.mailConfigured()) {
+        val mails = if (sansMails) "(non demandés)" else if (store.mailConfigured()) {
             try {
                 val m = app.mail.fetchRecent(15, true)
                 if (m.isEmpty()) "Aucun mail non lu." else app.mail.toPrompt(m)
@@ -304,9 +325,10 @@ class ToolBox(
                 "Mails indisponibles : ${e.message}"
             }
         } else "Mails non configurés."
+        val impayes = app.societe.impayees()
         val user = "Utilisateur : ${store.userName.value.ifBlank { "l'utilisateur" }}\nMaintenant : ${Prompts.now()}\n\n" +
-            "=== AGENDA DU JOUR ===\n$planning\n\n=== MAILS NON LUS ===\n$mails"
-        return llm.agent(Prompts.briefing(), user)
+            "=== AGENDA DU JOUR ===\n$planning\n\n=== MAILS NON LUS ===\n$mails\n\n=== FACTURES IMPAYÉES ===\n${impayes.ifBlank { "Aucune." }}"
+        return llm.agent(Prompts.briefing() + app.memo.pour("briefing"), user)
     }
 
     private suspend fun searchContacts(a: JSONObject): ToolResult {
@@ -348,7 +370,7 @@ class ToolBox(
 
     /** Génère la fiche via l'agent Contacts puis l'écrit dans le dossier Obsidian. */
     suspend fun buildCard(c: fr.dd.jarvis.device.ContactInfo): String {
-        val md = llm.agent(Prompts.CONTACT_CARD, "Date du jour : ${LocalDate.now()}\n\n${c.toPrompt()}")
+        val md = llm.agent(Prompts.CONTACT_CARD + app.memo.pour("contacts", "fiche", "fiches"), "Date du jour : ${LocalDate.now()}\n\n${c.toPrompt()}")
         val where = app.obsidian.save(c.name, md)
         return "✅ Fiche « ${c.name} » enregistrée : $where\n\n---\n\n$md"
     }

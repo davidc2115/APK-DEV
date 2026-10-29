@@ -12,6 +12,7 @@ data class ChatMsg(val fromUser: Boolean, val text: String, val ts: Long = Syste
 class Brain(
     private val llm: Llm,
     private val tools: ToolBox,
+    private val app: fr.dd.jarvis.JarvisApp,
     private val userName: () -> String
 ) {
     suspend fun reply(history: List<ChatMsg>, onStatus: (String) -> Unit): String {
@@ -20,7 +21,7 @@ class Brain(
         val schema = tools.schemaFor(recent)
         val messages = JSONArray()
         messages.put(JSONObject().put("role", "system").put("content",
-            Prompts.brain(userName()) + (if (societeOn) "\n\n" + fr.dd.jarvis.societe.SocieteTools.PROMPT else "")))
+            Prompts.brain(userName()) + app.memo.toutes() + (if (societeOn) "\n\n" + fr.dd.jarvis.societe.SocieteTools.PROMPT else "")))
         history.takeLast(16).forEach { m ->
             messages.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(3000)))
         }

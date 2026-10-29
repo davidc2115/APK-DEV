@@ -51,4 +51,26 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         saveBytes(folder, safe(baseName, "Fiche") + ".md", markdown.toByteArray(), "text/markdown")
 
     fun save(fileBaseName: String, markdown: String): String = saveIn("Contacts", fileBaseName, markdown)
+
+    /** Relit une note du coffre Obsidian (ou du dossier de l'application) ; null si introuvable. */
+    fun read(folder: String, fileName: String): String? {
+        val name = safe(fileName, "Fichier")
+        val uriStr = store.obsidianUri.value
+        try {
+            if (uriStr.isNotBlank()) {
+                val tree = DocumentFile.fromTreeUri(ctx, Uri.parse(uriStr))
+                if (tree != null && tree.canRead()) {
+                    var cur: DocumentFile? = tree
+                    for (part in folder.split('/').filter { it.isNotBlank() }) cur = cur?.findFile(part)?.takeIf { it.isDirectory }
+                    val f = cur?.findFile(name)
+                    if (f != null) return ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
+                    return null
+                }
+            }
+            val f = File(File(ctx.getExternalFilesDir(null), folder), name)
+            return if (f.exists()) f.readText() else null
+        } catch (_: Exception) {
+            return null
+        }
+    }
 }

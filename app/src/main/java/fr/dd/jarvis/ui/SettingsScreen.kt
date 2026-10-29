@@ -242,6 +242,17 @@ fun SettingsScreen(app: JarvisApp) {
                     }
                     HudButton("Actualiser") { tick++ }
                 }
+                var shMsg by remember { mutableStateOf("") }
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HudButton("Installer Shizuku", enabled = !shInstalled) {
+                        scope.launch { shMsg = "⏳ Téléchargement…"; shMsg = fr.dd.jarvis.device.ShizukuInstaller.install(ctx) }
+                    }
+                    HudButton("Démarrer Shizuku via ADB", enabled = shInstalled && !shRunning) {
+                        scope.launch { shMsg = "⏳"; shMsg = fr.dd.jarvis.device.ShizukuInstaller.startViaAdb(ctx); tick++ }
+                    }
+                }
+                if (shMsg.isNotBlank()) Text(shMsg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
                 Text(
                     "Shizuku donne à JARVIS les droits « adb » (Wi-Fi, Bluetooth, luminosité, appels, commandes shell). Installe l'app Shizuku, démarre-la via le débogage sans fil, puis autorise JARVIS ici.",
                     color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp, bottom = 10.dp)
@@ -276,9 +287,31 @@ fun SettingsScreen(app: JarvisApp) {
                         scope.launch { adbMsg = "⏳"; adbMsg = fr.dd.jarvis.device.AdbShell.exec(ctx, "id") }
                     }
                 }
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HudButton("Déconnecter") { fr.dd.jarvis.device.AdbShell.disconnect(); adbMsg = "ADB déconnecté."; tick++ }
+                    HudButton("Désactiver le débogage") {
+                        scope.launch { adbMsg = "⏳"; adbMsg = fr.dd.jarvis.device.AdbShell.disableDebugging(ctx); tick++ }
+                    }
+                    HudButton("Options dév.") {
+                        ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }
+                }
                 if (adbMsg.isNotBlank()) Text(adbMsg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
                 Spacer(Modifier.height(10.dp))
 
+                HudDivider()
+                Spacer(Modifier.height(8.dp))
+                var locOk by remember { mutableStateOf(fr.dd.jarvis.device.Locator.granted(ctx)) }
+                val locPerm = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) {
+                    locOk = fr.dd.jarvis.device.Locator.granted(ctx)
+                }
+                StatusRow("Localisation (« où suis-je », distances depuis ma position)", locOk)
+                Spacer(Modifier.height(4.dp))
+                HudButton("Autoriser la localisation", enabled = !locOk) {
+                    locPerm.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))
+                }
+                Spacer(Modifier.height(10.dp))
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     HudChip(if (store.confirmSensitive.value) "✅ Confirmer les actions sensibles" else "Confirmation désactivée", store.confirmSensitive.value) {
                         store.confirmSensitive.set(!store.confirmSensitive.value)
