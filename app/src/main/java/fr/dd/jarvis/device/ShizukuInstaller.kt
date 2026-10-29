@@ -17,6 +17,39 @@ import java.util.concurrent.TimeUnit
 object ShizukuInstaller {
     private val http = OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).build()
 
+    private fun download(ctx: Context): File {
+        val rel = http.newCall(Request.Builder().url("https://api.github.com/repos/RikkaApps/Shizuku/releases/latest")
+            .header("User-Agent", "JarvisHUD").build()).execute().use { it.body?.string() ?: "" }
+        val assets = JSONObject(rel).getJSONArray("assets")
+        var url = ""
+        for (i in 0 until assets.length()) {
+            val a = assets.getJSONObject(i)
+            if (a.getString("name").endsWith(".apk")) { url = a.getString("browser_download_url"); break }
+        }
+        require(url.isNotBlank()) { "APK Shizuku introuvable sur GitHub." }
+        val f = File(File(ctx.cacheDir, "share").apply { mkdirs() }, "shizuku.apk")
+        http.newCall(Request.Builder().url(url).header("User-Agent", "JarvisHUD").build()).execute().use { r ->
+            require(r.isSuccessful) { "Téléchargement refusé (${r.code})." }
+            r.body!!.byteStream().use { i -> f.outputStream().use { o -> i.copyTo(o) } }
+        }
+        return f
+    }
+
+    /** Tout-en-un via l'ADB intégré : téléchargement, installation silencieuse, lancement puis démarrage de Shizuku. */
+    suspend fun installAuto(ctx: Context): String = withContext(Dispatchers.IO) {
+        try {
+            if (!AdbShell.hasKey(ctx)) return@withContext "Appaire d'abord l'ADB intégré (ci-dessous) : l'installation sera alors automatique, sans écran de confirmation."
+            val f = download(ctx)
+            val r = AdbShell.installApk(ctx, f)
+            if (!r.contains("Success", true)) return@withContext "❌ Installation : $r"
+            AdbShell.exec(ctx, "monkey -p moe.shizuku.privileged.api -c android.intent.category.LAUNCHER 1")
+            kotlinx.coroutines.delay(4000)
+            "✅ Shizuku installé.\n" + startViaAdb(ctx)
+        } catch (e: Throwable) {
+            "❌ " + (e.message ?: e.javaClass.simpleName)
+        }
+    }
+
     suspend fun install(ctx: Context): String = withContext(Dispatchers.IO) {
         try {
             if (!ctx.packageManager.canRequestPackageInstalls()) {

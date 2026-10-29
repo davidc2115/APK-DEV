@@ -102,6 +102,20 @@ object AdbShell {
         }
     }
 
+    /** Installation silencieuse d'un APK via ADB (flux « exec: », sans fichier intermédiaire). */
+    suspend fun installApk(ctx: Context, apk: File): String = withContext(Dispatchers.IO) {
+        try {
+            val m = mgr(ctx)
+            if (!m.isConnected && !m.connectTls(ctx.applicationContext, 6000)) return@withContext "ADB non connecté."
+            m.openStream("exec:cmd package install -S ${apk.length()}").use { st ->
+                st.openOutputStream().use { o -> apk.inputStream().use { it.copyTo(o) }; o.flush() }
+                st.openInputStream().bufferedReader().readText().trim()
+            }
+        } catch (e: Throwable) {
+            "Erreur ADB : ${e.message ?: e.javaClass.simpleName}"
+        }
+    }
+
     /** Coupe la connexion ADB (l'appairage reste valable). */
     fun disconnect() {
         try { manager?.disconnect() } catch (_: Throwable) {}

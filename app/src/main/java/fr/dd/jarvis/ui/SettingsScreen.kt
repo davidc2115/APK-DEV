@@ -245,7 +245,10 @@ fun SettingsScreen(app: JarvisApp) {
                 var shMsg by remember { mutableStateOf("") }
                 Spacer(Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    HudButton("Installer Shizuku", enabled = !shInstalled) {
+                    HudButton("Installer Shizuku (auto via ADB)", enabled = !shInstalled, filled = true) {
+                        scope.launch { shMsg = "⏳ Téléchargement et installation…"; shMsg = fr.dd.jarvis.device.ShizukuInstaller.installAuto(ctx); tick++ }
+                    }
+                    HudButton("Installer manuellement", enabled = !shInstalled) {
                         scope.launch { shMsg = "⏳ Téléchargement…"; shMsg = fr.dd.jarvis.device.ShizukuInstaller.install(ctx) }
                     }
                     HudButton("Démarrer Shizuku via ADB", enabled = shInstalled && !shRunning) {
