@@ -27,8 +27,8 @@ object PdfExporter {
             sb.appendCodePoint(cp)
         }
         return sb.toString()
-            .replace(Regex("\\[\\[([^\\]]+)]]"), "$1")
-            .replace(Regex("\\[([^\\]]+)]\\([^)]*\\)"), "$1")
+            .replace(Regex("\\[\\[([^\\]]+)\\]\\]"), "$1")
+            .replace(Regex("\\[([^\\]]+)\\]\\([^)]*\\)"), "$1")
             .replace("`", "")
             .replace(Regex("\\s{2,}$"), "")
             .trim()

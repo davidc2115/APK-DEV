@@ -13,9 +13,9 @@ class Ctx(
  */
 object Templates {
 
-    private val section = Regex("""\{\{#(\w+)}}(.*?)\{\{/\1}}""", RegexOption.DOT_MATCHES_ALL)
-    private val variable = Regex("""\{\{(\w+)}}""")
-    private val anyTag = Regex("""\{\{[#/]?(\w+)}}""")
+    private val section = Regex("""\{\{#(\w+)\}\}(.*?)\{\{/\1\}\}""", RegexOption.DOT_MATCHES_ALL)
+    private val variable = Regex("""\{\{(\w+)\}\}""")
+    private val anyTag = Regex("""\{\{[#/]?(\w+)\}\}""")
 
     fun render(template: String, vars: Map<String, String>, lists: Map<String, List<Map<String, String>>> = emptyMap()): String {
         val withSections = section.replace(template) { m ->
@@ -45,7 +45,7 @@ object Templates {
     /** Les sections { {#x} } doivent être fermées dans le même ordre. */
     fun equilibre(template: String): Boolean {
         val pile = ArrayDeque<String>()
-        Regex("""\{\{([#/])(\w+)}}""").findAll(template).forEach { m ->
+        Regex("""\{\{([#/])(\w+)\}\}""").findAll(template).forEach { m ->
             if (m.groupValues[1] == "#") pile.addLast(m.groupValues[2])
             else if (pile.lastOrNull() == m.groupValues[2]) pile.removeLast() else return false
         }
