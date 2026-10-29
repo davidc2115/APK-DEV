@@ -25,6 +25,23 @@ class VoiceManager(private val ctx: Context) {
     var onFinal: (String) -> Unit = {}
     var onFail: (String) -> Unit = {}
     var onListening: (Boolean) -> Unit = {}
+    /** Coupe les bips de la reconnaissance (écoute en arrière-plan). */
+    var muteBeeps = false
+    private var muted = false
+    private val beepStreams = intArrayOf(android.media.AudioManager.STREAM_NOTIFICATION, android.media.AudioManager.STREAM_SYSTEM, android.media.AudioManager.STREAM_MUSIC)
+
+    private fun setMuted(on: Boolean) {
+        if (!muteBeeps || muted == on) return
+        val am = ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        for (st in beepStreams) {
+            try {
+                if (st == android.media.AudioManager.STREAM_MUSIC && am.isMusicActive && on) continue // ne pas couper une musique en cours
+                am.adjustStreamVolume(st, if (on) android.media.AudioManager.ADJUST_MUTE else android.media.AudioManager.ADJUST_UNMUTE, 0)
+            } catch (_: Throwable) {}
+        }
+        muted = on
+    }
+    private val unmuteLater = Runnable { setMuted(false) }
 
     init {
         tts = TextToSpeech(ctx) { status ->
@@ -45,6 +62,8 @@ class VoiceManager(private val ctx: Context) {
                 return@post
             }
             stopSpeaking()
+            main.removeCallbacks(unmuteLater)
+            setMuted(true)
             recognizer?.destroy()
             val local = essai >= 2 && android.os.Build.VERSION.SDK_INT >= 33 && SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx)
             val r = if (local) SpeechRecognizer.createOnDeviceSpeechRecognizer(ctx) else SpeechRecognizer.createSpeechRecognizer(ctx)
@@ -58,6 +77,7 @@ class VoiceManager(private val ctx: Context) {
                 override fun onEvent(eventType: Int, params: Bundle?) {}
 
                 override fun onError(error: Int) {
+                    main.postDelayed(unmuteLater, 900)
                     // 11 = service de reconnaissance déconnecté, 5 = erreur client, 10 = trop de requêtes, 8 = occupé : on recrée et on relance
                     if (error in setOf(11, 5, 10, 8, SpeechRecognizer.ERROR_SERVER) && essai < 3) {
                         main.postDelayed({ startListening(essai + 1) }, 500L * (essai + 1))
@@ -75,6 +95,7 @@ class VoiceManager(private val ctx: Context) {
                 }
 
                 override fun onResults(results: Bundle?) {
+                    main.postDelayed(unmuteLater, 900)
                     onListening(false)
                     val t = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
                     if (t.isNotBlank()) onFinal(t) else onFail("")
@@ -90,6 +111,10 @@ class VoiceManager(private val ctx: Context) {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, "fr-FR")
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                // Laisse le temps de réfléchir / faire des pauses avant de considérer la phrase terminée
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2800L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2200L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1500L)
             }
             r.startListening(i)
             onListening(true)
@@ -104,6 +129,7 @@ class VoiceManager(private val ctx: Context) {
     }
 
     fun speak(text: String, onDone: () -> Unit = {}) {
+        main.removeCallbacks(unmuteLater); setMuted(false)
         val clean = cleanForSpeech(text)
         if (!ttsReady || clean.isBlank()) {
             main.post(onDone)
@@ -128,6 +154,7 @@ class VoiceManager(private val ctx: Context) {
     }
 
     fun release() {
+        main.post { main.removeCallbacks(unmuteLater); setMuted(false) }
         main.post {
             recognizer?.destroy()
             recognizer = null

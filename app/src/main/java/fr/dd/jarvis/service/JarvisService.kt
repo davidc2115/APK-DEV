@@ -43,7 +43,9 @@ class JarvisService : Service() {
     private var voice: VoiceManager? = null
     private var wake: PowerManager.WakeLock? = null
     private var busy = false
-    private var followUp = false
+    private var awake = false              // conversation en cours : plus besoin de dire « Jarvis »
+    private var deadline = 0L              // fin de la conversation si personne ne parle
+    private var vosk: fr.dd.jarvis.voice.VoskWake? = null
     private var confirm: CompletableDeferred<Boolean>? = null
     private var failures = 0
     private val history = mutableListOf<ChatMsg>()
@@ -76,17 +78,45 @@ class JarvisService : Service() {
         val tools = ToolBox(app) { q, _ -> voiceConfirm(q) }
         brain = Brain(app.llm, tools, app) { app.store.userName.value }
         voice = VoiceManager(this).also { v ->
+            v.muteBeeps = app.store.muteBeeps.value
             v.onFinal = { t -> failures = 0; handle(t) }
             v.onFail = { _ ->
                 failures++
-                if (!busy || confirm != null) main.postDelayed({ listen() }, if (failures > 4) 5000L else 1200L)
+                when {
+                    confirm != null -> main.postDelayed({ listen() }, 400)
+                    busy -> {}
+                    awake -> if (System.currentTimeMillis() > deadline) goIdle() else main.postDelayed({ listen() }, 300)
+                    vosk == null -> main.postDelayed({ listen() }, if (failures > 4) 5000L else 1200L) // repli sans Vosk : écoute en boucle
+                }
             }
         }
-        main.postDelayed({ listen() }, 1500)
+        vosk = if (fr.dd.jarvis.voice.VoskModel.ready(this)) fr.dd.jarvis.voice.VoskWake(this) { main.post { onWakeWord() } } else null
+        main.postDelayed({ goIdle() }, 1200)
         return START_STICKY
     }
 
     private fun listen() { if (running) voice?.startListening() }
+
+    private fun convMs() = app.store.convSeconds.value * 1000L
+
+    /** Retour à l'attente du mot « Jarvis » (Vosk hors-ligne s'il est installé, sinon écoute en boucle). */
+    private fun goIdle() {
+        awake = false
+        voice?.stopListening()
+        val v = vosk
+        if (v != null) {
+            if (!v.start()) { vosk?.release(); vosk = null; listen() }
+        } else listen()
+    }
+
+    private fun onWakeWord() {
+        if (!running || awake || busy) return
+        vosk?.stop()
+        awake = true; deadline = System.currentTimeMillis() + convMs()
+        voice?.speak("Oui ?") { deadline = System.currentTimeMillis() + convMs(); listen() }
+    }
+
+    private val stopRegex = Regex("^(merci|c'est tout|c est tout|stop|arrete|arrête|termine|terminé|fin|a plus tard|à plus tard|au revoir|laisse tomber|ca suffit|ça suffit)\\b.*")
 
     private fun handle(text: String) {
         confirm?.let { d ->
@@ -95,14 +125,12 @@ class JarvisService : Service() {
         }
         if (busy) return
         val t = norm(text)
-        val cmd: String
-        if (followUp) { cmd = text.trim(); followUp = false }
-        else {
-            val m = wakeRegex.find(t)
-            if (m == null) { listen(); return }
-            cmd = t.substring(m.range.last + 1).trim().ifBlank { "" }
-            if (cmd.isBlank()) { followUp = true; voice?.speak("Oui ?") { listen() }; return }
-        }
+        val m = wakeRegex.find(t)
+        if (!awake && m == null) { listen(); return }   // repli sans Vosk : on ignore tout ce qui ne commence pas par Jarvis
+        val cmd = (if (m != null) t.substring(m.range.last + 1) else text).trim()
+        awake = true; deadline = System.currentTimeMillis() + convMs()
+        if (cmd.isBlank()) { voice?.speak("Oui ?") { listen() }; return }
+        if (stopRegex.matches(norm(cmd))) { voice?.speak("D'accord.") { goIdle() }; return }
         process(cmd)
     }
 
@@ -114,7 +142,8 @@ class JarvisService : Service() {
             history += ChatMsg(false, reply)
             notifier(cmd, reply)
             withContext(Dispatchers.Main) {
-                voice?.speak(reply.take(700)) { busy = false; listen() } ?: run { busy = false }
+                // La conversation continue : on réécoute après la réponse, pendant « convSeconds » secondes sans avoir à redire Jarvis.
+                voice?.speak(reply.take(700)) { busy = false; deadline = System.currentTimeMillis() + convMs(); listen() } ?: run { busy = false }
             }
         }
     }
@@ -139,6 +168,7 @@ class JarvisService : Service() {
     override fun onDestroy() {
         running = false
         scope.cancel()
+        vosk?.release(); vosk = null
         voice?.release(); voice = null
         runCatching { wake?.release() }
         super.onDestroy()

@@ -431,6 +431,29 @@ fun SettingsScreen(app: JarvisApp) {
                         store.wakeOn.set(true); fr.dd.jarvis.service.JarvisService.start(ctx)
                     } else micLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
                 }
+                Spacer(Modifier.height(8.dp))
+                var voskReady by remember { mutableStateOf(fr.dd.jarvis.voice.VoskModel.ready(ctx)) }
+                var voskMsg by remember { mutableStateOf("") }
+                StatusRow("Détecteur « Jarvis » hors-ligne (sans bip, sans réseau)", voskReady)
+                if (!voskReady) HudButton("Télécharger le détecteur (≈ 40 Mo)") {
+                    scope.launch {
+                        voskMsg = "⏳ Téléchargement…"
+                        voskMsg = fr.dd.jarvis.voice.VoskModel.download(ctx) { p -> voskMsg = "⏳ Téléchargement… $p %" }
+                        voskReady = fr.dd.jarvis.voice.VoskModel.ready(ctx)
+                        if (voskReady && store.wakeOn.value) { fr.dd.jarvis.service.JarvisService.stop(ctx); fr.dd.jarvis.service.JarvisService.start(ctx) }
+                    }
+                }
+                if (voskMsg.isNotBlank()) Text(voskMsg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                Text("Sans le détecteur, l'écoute passe par la reconnaissance Google en boucle (réseau, batterie, bips possibles).", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(vertical = 4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Conversation ouverte", color = HudDim, fontSize = 12.sp)
+                    listOf(15, 25, 45, 90).forEach { sec ->
+                        HudChip("$sec s", store.convSeconds.value == sec) { store.convSeconds.set(sec) }
+                    }
+                }
+                Text("Après « Jarvis », tu peux enchaîner les demandes sans répéter le mot, tant que tu parles dans ce délai. Dis « merci » ou « c'est tout » pour terminer.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                Spacer(Modifier.height(6.dp))
+                HudChip(if (store.muteBeeps.value) "🔇 Bips coupés pendant l'écoute" else "Bips actifs", store.muteBeeps.value) { store.muteBeeps.set(!store.muteBeeps.value) }
                 Spacer(Modifier.height(10.dp))
                 HudDivider()
                 Spacer(Modifier.height(8.dp))

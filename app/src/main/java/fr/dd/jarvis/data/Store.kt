@@ -126,6 +126,8 @@ class Store(context: Context) {
 
     // ---- Arrière-plan : écoute « Jarvis » et agents autonomes
     val wakeOn = BPref("wakeOn", false)
+    val convSeconds = IPref("convSeconds", 25)
+    val muteBeeps = BPref("muteBeeps", true)
     val agentsOn = BPref("agentsOn", false)
     val agentMails = BPref("agentMails", true)
     val agentFactures = BPref("agentFactures", true)

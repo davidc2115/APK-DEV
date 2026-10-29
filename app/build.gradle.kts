@@ -88,6 +88,8 @@ dependencies {
     implementation("com.github.MuntashirAkon:libadb-android:3.0.0")
     implementation("org.bouncycastle:bcprov-jdk15to18:1.78")
     implementation("org.conscrypt:conscrypt-android:2.5.3")
+    implementation("com.alphacephei:vosk-android:0.3.47")
+    implementation("net.java.dev.jna:jna:5.13.0@aar")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 
     // Contrôle du téléphone (shell via Shizuku)

@@ -131,6 +131,7 @@ object AdbShell {
             listOf("SYSTEM_ALERT_WINDOW", "REQUEST_INSTALL_PACKAGES", "RUN_IN_BACKGROUND", "RUN_ANY_IN_BACKGROUND", "WAKE_LOCK").forEach { add("appops set $pkg $it allow") }
             add("dumpsys deviceidle whitelist +$pkg")
             add("cmd notification allow_listener $listener")
+            add("cmd notification allow_dnd $pkg")
             add("cur=\$(settings get secure enabled_accessibility_services); case \"\$cur\" in *$a11y*) ;; null|'') settings put secure enabled_accessibility_services $a11y;; *) settings put secure enabled_accessibility_services \"\$cur:$a11y\";; esac; settings put secure accessibility_enabled 1")
         }
         val out = exec(ctx, cmds.joinToString("; "))
