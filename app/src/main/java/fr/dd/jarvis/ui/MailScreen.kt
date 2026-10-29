@@ -163,8 +163,10 @@ fun GoogleConnect(app: JarvisApp, onDone: () -> Unit = {}) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         app.store.gmailAccounts.toList().forEach { acc ->
             Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                Text("✅ $acc", color = HudText, fontSize = 13.sp, modifier = Modifier.weight(1f))
-                HudButton("Retirer") { app.store.removeGmailAccount(acc) }
+                val actif = app.store.mailActive(acc)
+                Text((if (actif) "✅ " else "⚪ ") + acc + (if (actif) "" else " (désactivé)"), color = if (actif) HudText else HudDim, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                HudButton(if (actif) "Désactiver" else "Activer") { app.store.setMailActive(acc, !actif) }
+                HudButton("Retirer") { app.store.removeGmailAccount(acc); app.store.setMailActive(acc, true) }
             }
         }
         HudButton(if (app.store.gmailAccounts.isEmpty()) "Connecter mon compte Google" else "Ajouter un autre compte Google", filled = true) {

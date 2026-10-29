@@ -74,11 +74,13 @@ class ToolBox(
         put(tool("delete_event", "Supprime un rendez-vous.", mapOf("event_id" to prop("Identifiant numérique de l'événement.")), listOf("event_id")))
         put(tool("summarize_mails", "Trie et résume les derniers mails de la boîte de réception.",
             mapOf(
+                "compte" to prop("Compte mail précis (adresse ou partie), même s'il est désactivé. Vide = comptes actifs seulement."),
                 "count" to prop("Nombre de mails à analyser (5 à 40). Par défaut 20."),
                 "unread_only" to prop("« true » pour ne lire que les non lus.")
             )))
         put(tool("trier_mails", "Analyse les derniers mails, les classe par catégorie (Urgent, Clients, Factures, Chantiers, Administratif, Notifications, Newsletters, Perso) et peut les ranger dans Gmail (libellés JARVIS/…).",
             mapOf(
+                "compte" to prop("Compte mail précis (adresse ou partie), même s'il est désactivé. Vide = comptes actifs seulement."),
                 "count" to prop("Nombre de mails (5 à 60). Par défaut 30."),
                 "unread_only" to prop("« true » pour ne trier que les non lus."),
                 "ranger" to prop("« true » pour appliquer les libellés dans Gmail."),
@@ -94,6 +96,7 @@ class ToolBox(
             )))
         put(tool("marquer_mails_traites", "Marque des mails comme traités (lus + libellé JARVIS/Traité, archivés si demandé). Compte Google requis.",
             mapOf(
+                "compte" to prop("Compte mail précis (adresse ou partie), même s'il est désactivé. Vide = comptes actifs seulement."),
                 "recherche" to prop("Texte à retrouver dans l'expéditeur ou l'objet. Vide ou « tous » = tous les mails récents non lus."),
                 "count" to prop("Nombre de mails récents à considérer (5 à 60). Par défaut 30."),
                 "archiver" to prop("« true » pour aussi les retirer de la boîte de réception.")
@@ -108,6 +111,8 @@ class ToolBox(
             mapOf("destinataire" to prop("Nom du contact ou numéro."), "texte" to prop("Contenu du SMS.")), listOf("destinataire", "texte")))
         put(tool("appeler_contact", "Appelle un contact (ou un numéro) directement.",
             mapOf("contact" to prop("Nom du contact ou numéro.")), listOf("contact")))
+        put(tool("mail_compte", "Liste, active ou désactive un compte mail (désactivé = conservé mais ignoré par JARVIS, ses agents et le point du matin).",
+            mapOf("action" to prop("lister | activer | desactiver"), "compte" to prop("Adresse ou partie de l'adresse (ou « imap »). Inutile pour lister.")), listOf("action")))
         put(tool("morning_briefing", "Point du jour : planning du jour et mails importants."))
         put(tool("search_contacts", "Cherche des contacts du téléphone (nom, numéro, email, société).",
             mapOf("query" to prop("Texte recherché.")), listOf("query")))
@@ -191,6 +196,7 @@ class ToolBox(
         "summarize_mails" -> summarizeMails(a)
         "morning_briefing" -> ToolResult(briefing(), direct = true)
         "trier_mails" -> trierMails(a)
+        "mail_compte" -> mailCompte(a)
         "marquer_mails_traites" -> marquerTraites(a)
         "lire_sms" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             fr.dd.jarvis.device.Telephony.lire(app, (a.optString("count").toIntOrNull() ?: 10).coerceIn(1, 30), a.optString("contact"), a.optString("non_lus").equals("true", true))
@@ -453,11 +459,26 @@ class ToolBox(
         return ToolResult(if (app.calendar.delete(id)) "Événement #$id supprimé." else "Événement introuvable.")
     }
 
+    private fun mailCompte(a: JSONObject): ToolResult {
+        val all = store.gmailAccounts.toList() + (if (store.gmailAccounts.isEmpty() && store.mailConfigured()) listOf("imap") else emptyList())
+        val action = a.optString("action").lowercase()
+        if (action.startsWith("list") || a.optString("compte").isBlank()) {
+            return ToolResult(if (all.isEmpty()) "Aucun compte mail configuré." else all.joinToString("\n") { (if (store.mailActive(it)) "🟢 " else "⚪ désactivé : ") + it })
+        }
+        val q = a.optString("compte").trim().lowercase()
+        val cible = all.filter { it.lowercase().contains(q) }
+        if (cible.isEmpty()) return ToolResult("Aucun compte ne correspond à « ${a.optString("compte")} ». Comptes : ${all.joinToString(", ")}")
+        if (cible.size > 1) return ToolResult("Plusieurs comptes correspondent : ${cible.joinToString(", ")}. Précise l'adresse.")
+        val on = action.startsWith("activ") && !action.startsWith("desactiv") && !action.startsWith("désactiv")
+        store.setMailActive(cible[0], on)
+        return ToolResult(if (on) "🟢 ${cible[0]} activé : JARVIS le prend de nouveau en compte." else "⚪ ${cible[0]} désactivé (conservé) : ignoré par JARVIS, les agents et le point du matin, sauf si tu le demandes explicitement.")
+    }
+
     private suspend fun marquerTraites(a: JSONObject): ToolResult {
         if (store.gmailAccounts.isEmpty()) return ToolResult("Marquer comme traité demande un compte Google connecté (Réglages › Mails).")
         val count = (a.optString("count").toIntOrNull() ?: 30).coerceIn(5, 60)
         val q = a.optString("recherche").trim().lowercase().let { if (it == "tous" || it == "tout") "" else it }
-        val mails = try { app.mail.fetchRecent(count, q.isBlank()) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
+        val mails = try { app.mail.fetchRecent(count, q.isBlank(), a.optString("compte")) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
             return ToolResult("❌ Impossible de lire les mails : ${e.message}")
         }
         val cibles = mails.filter { it.id.isNotBlank() && (q.isBlank() || it.from.lowercase().contains(q) || it.subject.lowercase().contains(q)) }
@@ -475,7 +496,7 @@ class ToolBox(
         if (!store.mailConfigured()) return ToolResult("Les mails ne sont pas configurés (Réglages › Mails).")
         val count = (a.optString("count").toIntOrNull() ?: 30).coerceIn(5, 60)
         val mails = try {
-            app.mail.fetchRecent(count, a.optString("unread_only").equals("true", true))
+            app.mail.fetchRecent(count, a.optString("unread_only").equals("true", true), a.optString("compte"))
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
             return ToolResult("❌ Impossible de lire les mails : ${e.message}", direct = true)
         }
@@ -504,7 +525,7 @@ class ToolBox(
         val count = (a.optString("count").toIntOrNull() ?: 15).coerceIn(5, 40)
         val unread = a.optString("unread_only").equals("true", ignoreCase = true)
         val mails = try {
-            app.mail.fetchRecent(count, unread)
+            app.mail.fetchRecent(count, unread, a.optString("compte"))
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {

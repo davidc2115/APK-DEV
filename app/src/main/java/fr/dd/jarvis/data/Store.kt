@@ -155,6 +155,15 @@ class Store(context: Context) {
         writeList("gmailAccounts", gmailAccounts)
     }
 
+    /** Comptes mis de côté : conservés, mais ignorés par JARVIS sauf demande explicite (« IMAP » désigne le compte IMAP). */
+    val disabledMail: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readList("disabledMail")) }
+    fun mailActive(account: String) = disabledMail.none { it.equals(account, true) }
+    fun setMailActive(account: String, active: Boolean) {
+        disabledMail.removeAll { it.equals(account, true) }
+        if (!active) disabledMail.add(account)
+        writeList("disabledMail", disabledMail)
+    }
+
     fun mailConfigured() = gmailAccounts.isNotEmpty() || mailHost.value.isNotBlank() && mailUser.value.isNotBlank() && mailPass.value.isNotBlank()
 
     // ---- Obsidian (dossier choisi via le sélecteur Android)
