@@ -26,6 +26,19 @@ class GroqClient(private val ring: KeyRing, private val model: () -> String) {
         call(key, msgs, null, 1)
     }
 
+    /** Modèles de chat disponibles pour cette clé. */
+    suspend fun listModels(key: String): List<String> = withContext(Dispatchers.IO) {
+        val req = Request.Builder().url("https://api.groq.com/openai/v1/models").header("Authorization", "Bearer $key").build()
+        Http.client.newCall(req).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ApiException(resp.code, "Groq ${resp.code} : ${text.take(200)}")
+            val arr = JSONObject(text).getJSONArray("data")
+            (0 until arr.length()).map { arr.getJSONObject(it).getString("id") }
+                .filter { id -> listOf("whisper", "orpheus", "guard", "safeguard", "tts", "embed").none { id.contains(it, true) } }
+                .sorted()
+        }
+    }
+
     private fun call(key: String, messages: JSONArray, tools: JSONArray?, maxTokens: Int): JSONObject {
         val body = JSONObject()
             .put("model", model())
@@ -56,6 +69,22 @@ class GeminiClient(private val ring: KeyRing, private val model: () -> String) {
         ring.run { key -> withContext(Dispatchers.IO) { call(key, system, user, 4096) } }
 
     suspend fun ping(key: String) = withContext(Dispatchers.IO) { call(key, "", "ping", 8) }
+
+    /** Modèles « generateContent » disponibles pour cette clé. */
+    suspend fun listModels(key: String): List<String> = withContext(Dispatchers.IO) {
+        val req = Request.Builder().url("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200")
+            .header("x-goog-api-key", key).build()
+        Http.client.newCall(req).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ApiException(resp.code, "Gemini ${resp.code} : ${text.take(200)}")
+            val arr = JSONObject(text).getJSONArray("models")
+            (0 until arr.length()).map { arr.getJSONObject(it) }
+                .filter { m -> m.optJSONArray("supportedGenerationMethods")?.toString()?.contains("generateContent") == true }
+                .map { it.getString("name").removePrefix("models/") }
+                .filter { id -> listOf("image", "tts", "live", "audio", "embed", "robotics", "omni", "veo", "imagen").none { id.contains(it, true) } }
+                .sorted()
+        }
+    }
 
     private fun call(key: String, system: String, user: String, maxTokens: Int): String {
         val body = JSONObject()

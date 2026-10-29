@@ -20,22 +20,13 @@ Pour les actions sensibles, l'application demande elle-même la confirmation à 
 Si un outil renvoie une erreur de permission, explique quoi activer dans les Réglages.
 """.trimIndent()
 
-    private const val PLANNING_FORMAT = """
-Mise en forme Markdown obligatoire :
-- Un titre par jour : `# 📅 lundi 3 novembre 2026`.
-- Un bloc par événement, séparé du suivant par une ligne `---`.
-- Les horaires dans le titre du bloc, avec un emoji : `## 🕗 08:00 – 12:00 · Titre de l'événement` (événement sur la journée : `## 🕗 Journée entière · Titre`).
-- Les détails sous le titre, un par ligne, avec un emoji :
-  `📍 [adresse](https://www.google.com/maps/search/?api=1&query=ADRESSE_ENCODEE)` (adresse cliquable vers Google Maps, espaces remplacés par +),
-  `📞 [06 12 34 56 78](tel:+33612345678)` (numéro cliquable, trouvé dans le lieu ou les notes),
-  `⚠️ ...` pour les consignes, accès, matériel ou points d'attention.
-- Quand un événement couvre plusieurs sites, un sous-bloc par site (`### 🏭 Nom du site` pour un site industriel, `### ☀️ ...` pour un site solaire/photovoltaïque, `### 🔌 ...` pour un site électrique), avec ses propres détails.
-- N'invente aucune information absente des données. Si un détail manque, ne l'écris pas.
-"""
+    /** Mise en forme du planning, modifiable par l'utilisateur (« Jarvis, présente mon planning autrement »). */
+    @Volatile
+    var planningFormat: String = fr.dd.jarvis.societe.core.Templates.PLANNING_FORMAT_DEFAUT
 
-    val PLANNING = """
+    fun planning(): String = """
 Tu es l'agent Planning de JARVIS. À partir de la liste d'événements fournie, présente le planning demandé.
-$PLANNING_FORMAT
+$planningFormat
 Termine, s'il y en a, par une ligne `⚠️ Chevauchement : ...` pour les événements qui se recouvrent.
 Si l'utilisateur a posé une question précise, réponds-y d'abord en une phrase.
 """.trimIndent()
@@ -50,12 +41,12 @@ Trie-les et résume-les en Markdown, en français, dans cet ordre :
 Omets une rubrique vide. N'invente rien. Termine par une phrase de synthèse.
 """.trimIndent()
 
-    val BRIEFING = """
+    fun briefing(): String = """
 Tu es l'agent Briefing de JARVIS. Tu prépares le point du jour de l'utilisateur à partir de son agenda et de ses mails.
 Structure :
 1. Une salutation courte avec la date du jour.
 2. Le planning du jour.
-$PLANNING_FORMAT
+$planningFormat
 3. `## 📧 Mails importants` : au maximum 5 lignes (expéditeur — résumé — action), les plus urgents d'abord.
 4. `## ⚠️ À retenir` : conflits d'agenda, deadlines, rappels utiles (omets la rubrique si rien).
 Si une source n'est pas disponible (permission ou mails non configurés), dis-le en une ligne. N'invente rien.

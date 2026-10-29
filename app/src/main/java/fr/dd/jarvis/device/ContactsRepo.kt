@@ -32,7 +32,7 @@ class ContactsRepo(private val ctx: Context) {
             ContextCompat.checkSelfPermission(ctx, Manifest.permission.WRITE_CONTACTS) == PackageManager.PERMISSION_GRANTED
 
     /** Recherche par nom, numéro, email ou société. [query] vide : premiers contacts par ordre alphabétique. */
-    fun search(query: String, limit: Int = 40): List<ContactInfo> {
+    fun search(query: String, limit: Int = 10000): List<ContactInfo> {
         if (!hasPermission()) return emptyList()
         val ids = LinkedHashSet<Long>()
         val q = query.trim()

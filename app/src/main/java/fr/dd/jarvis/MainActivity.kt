@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -62,6 +63,7 @@ import fr.dd.jarvis.ui.LocalAccent
 import fr.dd.jarvis.ui.MailScreen
 import fr.dd.jarvis.ui.PlanningScreen
 import fr.dd.jarvis.ui.SettingsScreen
+import fr.dd.jarvis.ui.SocieteScreen
 import fr.dd.jarvis.ui.accentById
 import java.io.File
 
@@ -91,6 +93,7 @@ private val tabs = listOf(
     Tab("Agenda", Icons.Filled.CalendarMonth),
     Tab("Mails", Icons.Filled.Email),
     Tab("Contacts", Icons.Filled.Contacts),
+    Tab("Société", Icons.Filled.Business),
     Tab("Réglages", Icons.Filled.Settings)
 )
 
@@ -131,6 +134,7 @@ private fun Root(app: JarvisApp, vm: ChatViewModel) {
                 1 -> PlanningScreen(app)
                 2 -> MailScreen(app)
                 3 -> ContactsScreen(app)
+                4 -> SocieteScreen(app)
                 else -> SettingsScreen(app)
             }
         }

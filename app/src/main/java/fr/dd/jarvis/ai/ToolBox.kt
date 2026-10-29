@@ -3,6 +3,7 @@ package fr.dd.jarvis.ai
 import fr.dd.jarvis.JarvisApp
 import fr.dd.jarvis.device.PhoneControl
 import fr.dd.jarvis.device.ShizukuShell
+import fr.dd.jarvis.societe.SocieteTools
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.LocalDate
@@ -18,6 +19,7 @@ class ToolBox(
     private val app: JarvisApp,
     private val confirm: suspend (String, Boolean) -> Boolean
 ) {
+    private val societe = SocieteTools(app, confirm)
     private val store get() = app.store
     private val llm get() = app.llm
 
@@ -95,6 +97,15 @@ class ToolBox(
             mapOf("command" to prop("Commande shell.")), listOf("command")))
     }
 
+    /** Les outils Société ne sont proposés au modèle que si la conversation les concerne (économie de contexte). */
+    fun schemaFor(recentUserText: String): JSONArray {
+        if (!SocieteTools.concerned(recentUserText)) return schema
+        return JSONArray().also { out ->
+            for (i in 0 until schema.length()) out.put(schema.get(i))
+            societe.schema.forEach { out.put(it) }
+        }
+    }
+
     // ------------------------------------------------------------------ exécution
 
     suspend fun execute(name: String, a: JSONObject): ToolResult = when (name) {
@@ -110,6 +121,7 @@ class ToolBox(
         "create_contact_card" -> createCard(a)
         "phone_action" -> phoneAction(a)
         "run_shell" -> runShell(a)
+        in SocieteTools.NAMES -> societe.execute(name, a)
         else -> ToolResult("Outil inconnu : $name")
     }
 
@@ -165,7 +177,7 @@ class ToolBox(
         val q = a.optString("question")
         val user = "Aujourd'hui : ${Prompts.now()}\nPériode : du $from sur $days jour(s)\n" +
             (if (q.isNotBlank()) "Question : $q\n" else "") + "Événements :\n$data"
-        return ToolResult(llm.agent(Prompts.PLANNING, user), direct = true)
+        return ToolResult(llm.agent(Prompts.planning(), user), direct = true)
     }
 
     private suspend fun createEvent(a: JSONObject): ToolResult {
@@ -223,7 +235,7 @@ class ToolBox(
         } else "Mails non configurés."
         val user = "Utilisateur : ${store.userName.value.ifBlank { "l'utilisateur" }}\nMaintenant : ${Prompts.now()}\n\n" +
             "=== AGENDA DU JOUR ===\n$planning\n\n=== MAILS NON LUS ===\n$mails"
-        return llm.agent(Prompts.BRIEFING, user)
+        return llm.agent(Prompts.briefing(), user)
     }
 
     private suspend fun searchContacts(a: JSONObject): ToolResult {

@@ -15,18 +15,22 @@ class Brain(
     private val userName: () -> String
 ) {
     suspend fun reply(history: List<ChatMsg>, onStatus: (String) -> Unit): String {
+        val recent = history.takeLast(4).filter { it.fromUser }.joinToString(" ") { it.text }
+        val societeOn = fr.dd.jarvis.societe.SocieteTools.concerned(recent)
+        val schema = tools.schemaFor(recent)
         val messages = JSONArray()
-        messages.put(JSONObject().put("role", "system").put("content", Prompts.brain(userName())))
+        messages.put(JSONObject().put("role", "system").put("content",
+            Prompts.brain(userName()) + (if (societeOn) "\n\n" + fr.dd.jarvis.societe.SocieteTools.PROMPT else "")))
         history.takeLast(16).forEach { m ->
             messages.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(3000)))
         }
 
         repeat(6) {
             val msg = try {
-                llm.groq.chat(messages, tools.schema)
+                llm.groqChat(messages, schema)
             } catch (e: ApiException) {
                 // Llama génère parfois un appel d'outil mal formé : on réessaie sans outils plutôt que d'échouer.
-                if (e.code == 400 && (e.message ?: "").contains("tool_use_failed")) llm.groq.chat(messages, null) else throw e
+                if (e.code == 400 && (e.message ?: "").contains("tool_use_failed")) llm.groqChat(messages, null) else throw e
             }
             val calls = msg.optJSONArray("tool_calls")
             if (calls == null || calls.length() == 0) {

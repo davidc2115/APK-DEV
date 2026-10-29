@@ -100,7 +100,8 @@ fun SettingsScreen(app: JarvisApp) {
                 onAdd = { store.addGroqKeys(it) },
                 onRemove = { store.removeGroqKey(it) },
                 onTest = { app.llm.testGroqKeys() },
-                modelLabel = "Modèle Groq", model = store.groqModel.value, onModel = { store.groqModel.set(it) }
+                modelLabel = "Modèle Groq", model = store.groqModel.value, onModel = { store.groqModel.set(it) },
+                onListModels = { app.llm.listGroqModels() }
             )
         }
 
@@ -113,7 +114,8 @@ fun SettingsScreen(app: JarvisApp) {
                 onAdd = { store.addGeminiKeys(it) },
                 onRemove = { store.removeGeminiKey(it) },
                 onTest = { app.llm.testGeminiKeys() },
-                modelLabel = "Modèle Gemini", model = store.geminiModel.value, onModel = { store.geminiModel.set(it) }
+                modelLabel = "Modèle Gemini", model = store.geminiModel.value, onModel = { store.geminiModel.set(it) },
+                onListModels = { app.llm.listGeminiModels() }
             )
         }
 
@@ -283,7 +285,8 @@ private fun KeyPanel(
     onTest: suspend () -> List<String>,
     modelLabel: String,
     model: String,
-    onModel: (String) -> Unit
+    onModel: (String) -> Unit,
+    onListModels: suspend () -> List<String>
 ) {
     val scope = rememberCoroutineScope()
     var input by remember { mutableStateOf("") }
@@ -319,5 +322,21 @@ private fun KeyPanel(
         results.forEach { Text(it, color = HudText, fontSize = 12.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(top = 4.dp)) }
         Spacer(Modifier.height(10.dp))
         HudTextField(model, onModel, Modifier.fillMaxWidth(), label = modelLabel)
+        Spacer(Modifier.height(8.dp))
+        var models by remember { mutableStateOf<List<String>>(emptyList()) }
+        var loading by remember { mutableStateOf(false) }
+        var err by remember { mutableStateOf("") }
+        HudButton(if (loading) "Recherche…" else "Lister les modèles disponibles", enabled = keys.isNotEmpty() && !loading) {
+            scope.launch {
+                loading = true; err = ""
+                try { models = onListModels() } catch (e: Exception) { err = (e.message ?: "erreur").take(160) }
+                loading = false
+            }
+        }
+        if (err.isNotBlank()) Text(err, color = Color(0xFFFF4D6D), fontSize = 12.sp)
+        if (models.isNotEmpty()) {
+            Text("Touche un modèle pour le choisir :", color = HudDim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+            models.forEach { m -> Box(Modifier.padding(top = 4.dp)) { HudChip(m, selected = m == model) { onModel(m) } } }
+        }
     }
 }

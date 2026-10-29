@@ -77,7 +77,7 @@ class Store(context: Context) {
 
     // ---- Cerveau (Groq) et agents (Gemini)
     val groqModel = SPref("groqModel", "llama-3.3-70b-versatile")
-    val geminiModel = SPref("geminiModel", "gemini-2.5-flash")
+    val geminiModel = SPref("geminiModel", "gemini-3.8-flash")
     val groqKeys: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readList("groqKeys")) }
     val geminiKeys: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readList("geminiKeys")) }
 

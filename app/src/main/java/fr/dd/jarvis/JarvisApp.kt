@@ -11,6 +11,8 @@ import fr.dd.jarvis.device.ContactsRepo
 import fr.dd.jarvis.device.MailRepo
 import fr.dd.jarvis.device.ObsidianWriter
 import fr.dd.jarvis.device.PhoneControl
+import fr.dd.jarvis.societe.SocieteRepo
+import fr.dd.jarvis.societe.SocieteService
 import fr.dd.jarvis.work.Scheduler
 import java.io.File
 import java.io.PrintWriter
@@ -32,6 +34,8 @@ class JarvisApp : Application() {
         private set
     lateinit var phone: PhoneControl
         private set
+    lateinit var societe: SocieteService
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -43,6 +47,8 @@ class JarvisApp : Application() {
         contacts = ContactsRepo(this)
         obsidian = ObsidianWriter(this, store)
         phone = PhoneControl(this)
+        societe = SocieteService(this, SocieteRepo(this), obsidian)
+        societe.data.modeles["planning"]?.let { fr.dd.jarvis.ai.Prompts.planningFormat = it }
         createChannel()
         if (store.briefingOn.value) Scheduler.schedule(this, store)
     }

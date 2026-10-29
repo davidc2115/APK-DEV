@@ -3,7 +3,11 @@ package fr.dd.jarvis.ui
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -56,10 +60,23 @@ private fun inline(text: String, accent: Color): AnnotatedString = buildAnnotate
 fun MarkdownText(text: String, modifier: Modifier = Modifier, color: Color = HudText) {
     val accent = LocalAccent.current
     val ctx = LocalContext.current
+    var body = text.trimStart()
+    if (body.startsWith("---\n")) {
+        val fin = body.indexOf("\n---", 3)
+        if (fin > 0) body = body.substring(fin + 4)
+    }
+    val lines = body.lines()
     Column(modifier) {
-        for (raw in text.lines()) {
-            val line = raw.trimEnd()
+        var i = 0
+        while (i < lines.size) {
+            val line = lines[i].trimEnd()
+            i++
             when {
+                line.trimStart().startsWith("|") -> {
+                    val rows = mutableListOf(line)
+                    while (i < lines.size && lines[i].trimStart().startsWith("|")) { rows += lines[i].trimEnd(); i++ }
+                    Table(rows, color, accent, ctx)
+                }
                 line.isBlank() -> Spacer(Modifier.height(4.dp))
                 line.trim() == "---" || line.trim() == "***" -> {
                     Spacer(Modifier.height(4.dp))
@@ -90,4 +107,31 @@ private fun Line(
             text.getStringAnnotations("URL", off, off).firstOrNull()?.let { openLink(ctx, it.item) }
         }
     )
+}
+
+@Composable
+private fun Table(rows: List<String>, color: Color, accent: Color, ctx: Context) {
+    val cells = rows.map { r -> r.trim().trim('|').split('|').map { it.trim() } }
+    val right = cells.getOrNull(1)?.map { it.endsWith(":") && !it.startsWith(":") } ?: emptyList()
+    val data = cells.filterIndexed { idx, c -> !(idx == 1 && c.all { it.matches(Regex(":?-{2,}:?")) }) }
+    val cols = data.maxOfOrNull { it.size } ?: return
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        data.forEachIndexed { ri, row ->
+            Row(Modifier.fillMaxWidth().background(if (ri == 0) accent.copy(alpha = 0.14f) else Color.Transparent).padding(vertical = 3.dp, horizontal = 2.dp)) {
+                for (c in 0 until cols) {
+                    val t = row.getOrElse(c) { "" }
+                    val first = c == 0
+                    Box(Modifier.weight(if (first && cols > 2) 2.2f else 1f).padding(horizontal = 3.dp)) {
+                        androidx.compose.material3.Text(
+                            inline(t, accent), color = color, fontSize = 12.sp,
+                            fontWeight = if (ri == 0) FontWeight.Bold else FontWeight.Normal,
+                            textAlign = if (right.getOrElse(c) { false } && ri > 0) androidx.compose.ui.text.style.TextAlign.End else androidx.compose.ui.text.style.TextAlign.Start,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            }
+            HudDivider()
+        }
+    }
 }

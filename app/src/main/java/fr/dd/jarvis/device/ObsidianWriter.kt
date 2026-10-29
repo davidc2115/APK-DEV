@@ -7,34 +7,48 @@ import fr.dd.jarvis.data.Store
 import java.io.File
 
 /**
- * Écrit les fiches Markdown dans le dossier Obsidian choisi (sélecteur Android),
- * sinon dans le dossier propre à l'application (Android/data/fr.dd.jarvis/files/Contacts).
+ * Écrit les fichiers dans le dossier Obsidian choisi (sélecteur Android, sous-dossiers créés au besoin),
+ * sinon dans le dossier propre à l'application (Android/data/fr.dd.jarvis/files/<dossier>).
  */
 class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
-    fun save(fileBaseName: String, markdown: String): String {
-        val safe = fileBaseName.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim().ifBlank { "Contact" }
-        val fileName = "$safe.md"
+    private fun safe(name: String, def: String) =
+        name.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim().ifBlank { def }
+
+    private fun subDir(root: DocumentFile, path: String): DocumentFile {
+        var cur = root
+        for (part in path.split('/').filter { it.isNotBlank() }) {
+            cur = cur.findFile(part)?.takeIf { it.isDirectory } ?: cur.createDirectory(part) ?: return cur
+        }
+        return cur
+    }
+
+    /** [folder] peut contenir des sous-dossiers : « Société/Devis ». Retourne l'emplacement lisible. */
+    fun saveBytes(folder: String, fileName: String, bytes: ByteArray, mime: String): String {
+        val name = safe(fileName, "Fichier")
         val uriStr = store.obsidianUri.value
         if (uriStr.isNotBlank()) {
             try {
                 val tree = DocumentFile.fromTreeUri(ctx, Uri.parse(uriStr))
                 if (tree != null && tree.canWrite()) {
-                    val folder = tree.findFile("Contacts")?.takeIf { it.isDirectory }
-                        ?: tree.createDirectory("Contacts") ?: tree
-                    val existing = folder.findFile(fileName)
-                    val target = existing ?: folder.createFile("text/markdown", fileName)
+                    val dir = subDir(tree, folder)
+                    val target = dir.findFile(name) ?: dir.createFile(mime, name)
                     if (target != null) {
-                        ctx.contentResolver.openOutputStream(target.uri, "wt")?.use { it.write(markdown.toByteArray()) }
-                        return "dossier Obsidian › Contacts › $fileName"
+                        ctx.contentResolver.openOutputStream(target.uri, "wt")?.use { it.write(bytes) }
+                        return "coffre Obsidian › ${folder.replace("/", " › ")} › $name"
                     }
                 }
             } catch (_: Exception) {
-                // on retombe sur le dossier de l'application
+                // repli sur le dossier de l'application
             }
         }
-        val dir = File(ctx.getExternalFilesDir(null), "Contacts").apply { mkdirs() }
-        File(dir, fileName).writeText(markdown)
-        return "${dir.absolutePath}/$fileName (choisis ton dossier Obsidian dans les Réglages pour y écrire directement)"
+        val dir = File(ctx.getExternalFilesDir(null), folder).apply { mkdirs() }
+        File(dir, name).writeBytes(bytes)
+        return "${dir.absolutePath}/$name (choisis ton dossier Obsidian dans les Réglages pour y écrire directement)"
     }
+
+    fun saveIn(folder: String, baseName: String, markdown: String): String =
+        saveBytes(folder, safe(baseName, "Fiche") + ".md", markdown.toByteArray(), "text/markdown")
+
+    fun save(fileBaseName: String, markdown: String): String = saveIn("Contacts", fileBaseName, markdown)
 }

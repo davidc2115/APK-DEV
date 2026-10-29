@@ -41,3 +41,17 @@ app/src/main/java/fr/dd/jarvis/
   work/     point du matin (WorkManager)
   ui/       thème HUD, composants, écrans
 ```
+
+
+## Module Société (maintenance photovoltaïque)
+
+Onglet **Société** : Résumé, Clients, Devis, Factures, Paie, Réglages.
+
+- Tout se pilote aussi au chat : tarifs par puissance (« jusqu'à 3 kWc 150 €, jusqu'à 9 kWc 220 €, au-delà 350 € »), remises fidélité / volume, frais de déplacement (siège → client, distance routière OpenStreetMap/OSRM), clients et installations, devis, factures, paie, réserve.
+- Données : JSON privé dans l'application (`filesDir/societe/data.json`, sauvegarde `.bak`).
+- Documents : Markdown + PDF écrits dans le coffre Obsidian (`Société/Devis|Factures|Clients|Paie`).
+- Présentations modifiables en langage naturel (« change la présentation de mes factures », annulable) : fiche client, devis, facture, paie, planning.
+- Réserve bénéfices : % du HT de chaque facture encaissée, bilan annuel dirigeant / salariés.
+- Les factures ne sont jamais supprimées, seulement annulées.
+
+Limites : bulletins de paie = **estimation simplifiée** (taux globaux) ; la réserve est une **provision interne** (un dividende se vote en AG) ; mentions légales à faire valider par un expert-comptable.
