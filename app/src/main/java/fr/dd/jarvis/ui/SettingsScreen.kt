@@ -30,6 +30,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -358,6 +359,108 @@ fun SettingsScreen(app: JarvisApp) {
                     "Les commandes shell demandent toujours une confirmation, quel que soit ce réglage.",
                     color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp)
                 )
+            }
+        }
+
+        // ------------------------------------------------------------ Autorisations (centre)
+        item {
+            var t2 by remember { mutableIntStateOf(0) }
+            val pm = ctx.getSystemService(android.os.PowerManager::class.java)
+            val notifOn = remember(t2) { androidx.core.app.NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName) }
+            val batt = remember(t2) { pm.isIgnoringBatteryOptimizations(ctx.packageName) }
+            val overlay = remember(t2) { Settings.canDrawOverlays(ctx) }
+            val install = remember(t2) { ctx.packageManager.canRequestPackageInstalls() }
+            fun g(p: String) = ctx.checkSelfPermission(p) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            val micOk = remember(t2) { g(android.Manifest.permission.RECORD_AUDIO) }
+            val calOk = remember(t2) { g(android.Manifest.permission.READ_CALENDAR) && g(android.Manifest.permission.WRITE_CALENDAR) }
+            val ctcOk = remember(t2) { g(android.Manifest.permission.READ_CONTACTS) && g(android.Manifest.permission.WRITE_CONTACTS) }
+            val smsOk2 = remember(t2) { fr.dd.jarvis.device.Telephony.smsGranted(ctx) && fr.dd.jarvis.device.Telephony.callGranted(ctx) }
+            val locOk2 = remember(t2) { fr.dd.jarvis.device.Locator.granted(ctx) }
+            val ntfOk = remember(t2) { android.os.Build.VERSION.SDK_INT < 33 || g(android.Manifest.permission.POST_NOTIFICATIONS) }
+            var msg by remember { mutableStateOf("") }
+            val all = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) { t2++ }
+            HudPanel(Modifier.fillMaxWidth(), title = "Autorisations — tout en un") {
+                StatusRow("Notifications", ntfOk); StatusRow("Micro", micOk); StatusRow("Agenda", calOk); StatusRow("Contacts", ctcOk)
+                StatusRow("SMS et appels", smsOk2); StatusRow("Localisation", locOk2)
+                StatusRow("Accès aux notifications (lire / résumer)", notifOn)
+                StatusRow("Batterie sans restriction (arrière-plan)", batt)
+                StatusRow("Affichage par-dessus les autres applis (lancer des applis)", overlay)
+                StatusRow("Installer des applis", install)
+                StatusRow("Accessibilité", app.phone.accessibilityEnabled())
+                Spacer(Modifier.height(8.dp))
+                HudButton("Autoriser toutes les permissions Android", filled = true) {
+                    all.launch(buildList {
+                        add(android.Manifest.permission.RECORD_AUDIO); add(android.Manifest.permission.READ_CALENDAR); add(android.Manifest.permission.WRITE_CALENDAR)
+                        add(android.Manifest.permission.READ_CONTACTS); add(android.Manifest.permission.WRITE_CONTACTS); add(android.Manifest.permission.READ_SMS)
+                        add(android.Manifest.permission.SEND_SMS); add(android.Manifest.permission.CALL_PHONE); add(android.Manifest.permission.ACCESS_FINE_LOCATION)
+                        add(android.Manifest.permission.ACCESS_COARSE_LOCATION)
+                        if (android.os.Build.VERSION.SDK_INT >= 33) add(android.Manifest.permission.POST_NOTIFICATIONS)
+                    }.toTypedArray())
+                }
+                Spacer(Modifier.height(6.dp))
+                HudButton("⚡ Tout autoriser via ADB (le plus complet)") {
+                    scope.launch { msg = "⏳"; msg = fr.dd.jarvis.device.AdbShell.grantAll(ctx); t2++ }
+                }
+                Text("Avec l'ADB intégré connecté : permissions, accès aux notifications, accessibilité, batterie et arrière-plan sont accordés sans passer par les écrans Android.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(vertical = 4.dp))
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HudButton("Accès notifications", enabled = !notifOn) { ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    HudButton("Batterie", enabled = !batt) {
+                        ctx.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }
+                    HudButton("Superposition", enabled = !overlay) {
+                        ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }
+                    HudButton("Actualiser") { t2++ }
+                }
+                if (msg.isNotBlank()) Text(msg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+            }
+        }
+
+        // ------------------------------------------------------------ Arrière-plan et agents autonomes
+        item {
+            val micLauncher = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { ok ->
+                if (ok) { store.wakeOn.set(true); fr.dd.jarvis.service.JarvisService.start(ctx) }
+            }
+            var runMsg by remember { mutableStateOf("") }
+            HudPanel(Modifier.fillMaxWidth(), title = "Arrière-plan — écoute et agents autonomes") {
+                Text("Écoute « Jarvis » : dis « Jarvis, lance un itinéraire vers chez Dupont » même écran éteint. Utilise le micro en continu (notification permanente, consommation batterie).", color = HudDim, fontSize = 12.sp)
+                Spacer(Modifier.height(6.dp))
+                HudChip(if (store.wakeOn.value) "✅ Écoute « Jarvis » active" else "Écoute « Jarvis » désactivée", store.wakeOn.value) {
+                    if (store.wakeOn.value) { store.wakeOn.set(false); fr.dd.jarvis.service.JarvisService.stop(ctx) }
+                    else if (ctx.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        store.wakeOn.set(true); fr.dd.jarvis.service.JarvisService.start(ctx)
+                    } else micLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                }
+                Spacer(Modifier.height(10.dp))
+                HudDivider()
+                Spacer(Modifier.height(8.dp))
+                Text("Agents autonomes (travaillent seuls, alertes + journal Obsidian « JARVIS/Journal »)", color = LocalAccent.current, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 13.sp)
+                Spacer(Modifier.height(6.dp))
+                HudChip(if (store.agentsOn.value) "✅ Agents actifs" else "Agents désactivés", store.agentsOn.value) {
+                    store.agentsOn.set(!store.agentsOn.value); fr.dd.jarvis.work.AgentsScheduler.apply(ctx, store)
+                }
+                Spacer(Modifier.height(6.dp))
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    HudChip("📧 Mails", store.agentMails.value) { store.agentMails.set(!store.agentMails.value) }
+                    HudChip("💶 Factures/devis", store.agentFactures.value) { store.agentFactures.set(!store.agentFactures.value) }
+                    HudChip("🚗 Départs RDV", store.agentPlanning.value) { store.agentPlanning.set(!store.agentPlanning.value) }
+                    HudChip("🔔 Notifications", store.agentNotifs.value) { store.agentNotifs.set(!store.agentNotifs.value) }
+                }
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    HudChip("🏷️ Ranger les mails dans Gmail", store.agentRanger.value) { store.agentRanger.set(!store.agentRanger.value) }
+                }
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Toutes les", color = HudDim, fontSize = 12.sp)
+                    listOf(15, 30, 60).forEach { m ->
+                        HudChip("$m min", store.agentMinutes.value == m) { store.agentMinutes.set(m); if (store.agentsOn.value) fr.dd.jarvis.work.AgentsScheduler.apply(ctx, store) }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                HudButton("Lancer les agents maintenant") { fr.dd.jarvis.work.AgentsScheduler.runNow(ctx); runMsg = "Agents lancés : alertes et journal dans quelques instants." }
+                if (runMsg.isNotBlank()) Text(runMsg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                Text("Android impose au moins 15 min entre deux passages et peut les retarder en économie d'énergie : autorise « Batterie sans restriction ».", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
             }
         }
 

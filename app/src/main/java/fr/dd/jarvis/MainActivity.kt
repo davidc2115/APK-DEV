@@ -78,6 +78,9 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
         )
         val app = application as JarvisApp
+        if (app.store.wakeOn.value && !fr.dd.jarvis.service.JarvisService.running &&
+            checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) fr.dd.jarvis.service.JarvisService.start(this)
         setContent {
             HudTheme(accentById(app.store.accent.value).color, app.store.tileAlpha.value) {
                 HudBackground { Root(app, vm) }

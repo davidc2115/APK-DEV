@@ -116,6 +116,29 @@ object AdbShell {
         }
     }
 
+    /** Accorde à JARVIS un maximum d'autorisations en une fois (nécessite l'ADB connecté). */
+    suspend fun grantAll(ctx: Context): String {
+        val pkg = ctx.packageName
+        val perms = listOf(
+            "POST_NOTIFICATIONS", "RECORD_AUDIO", "READ_CALENDAR", "WRITE_CALENDAR", "READ_CONTACTS", "WRITE_CONTACTS",
+            "READ_SMS", "SEND_SMS", "CALL_PHONE", "ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "WRITE_SECURE_SETTINGS"
+        )
+        val listener = "$pkg/fr.dd.jarvis.service.JarvisNotificationListener"
+        val a11y = "$pkg/fr.dd.jarvis.service.JarvisAccessibilityService"
+        val cmds = buildList {
+            add("appops set $pkg ACCESS_RESTRICTED_SETTINGS allow")
+            perms.forEach { add("pm grant $pkg android.permission.$it") }
+            listOf("SYSTEM_ALERT_WINDOW", "REQUEST_INSTALL_PACKAGES", "RUN_IN_BACKGROUND", "RUN_ANY_IN_BACKGROUND", "WAKE_LOCK").forEach { add("appops set $pkg $it allow") }
+            add("dumpsys deviceidle whitelist +$pkg")
+            add("cmd notification allow_listener $listener")
+            add("cur=\$(settings get secure enabled_accessibility_services); case \"\$cur\" in *$a11y*) ;; null|'') settings put secure enabled_accessibility_services $a11y;; *) settings put secure enabled_accessibility_services \"\$cur:$a11y\";; esac; settings put secure accessibility_enabled 1")
+        }
+        val out = exec(ctx, cmds.joinToString("; "))
+        val errs = out.lines().filter { it.contains("Exception", true) || it.contains("Unknown permission", true) || it.contains("not a changeable", true) || it.startsWith("Erreur") || it.startsWith("ADB non") }
+        return if (errs.isEmpty()) "✅ Autorisations accordées via ADB (permissions, arrière-plan, accès aux notifications, accessibilité)."
+        else "⚠️ Accordé avec ${errs.size} refus :\n" + errs.take(6).joinToString("\n") { it.take(140) }
+    }
+
     /** Coupe la connexion ADB (l'appairage reste valable). */
     fun disconnect() {
         try { manager?.disconnect() } catch (_: Throwable) {}

@@ -144,6 +144,8 @@ class ToolBox(
         put(tool("obsidian_ecrire", "Crée, remplace ou complète une note Obsidian.", mapOf(
             "chemin" to prop("Chemin relatif de la note (ex. JARVIS/Idées.md)."), "contenu" to prop("Contenu Markdown."),
             "ajouter" to prop("« true » pour ajouter à la fin de la note existante au lieu de la remplacer.")), listOf("chemin", "contenu")))
+        put(tool("lire_notifications", "Lit les notifications récentes du téléphone (WhatsApp, SMS, mails, banque…). Nécessite l'accès aux notifications.",
+            mapOf("count" to prop("Nombre maximum (1 à 40). Par défaut 15."), "appli" to prop("Filtrer par application (optionnel)."), "minutes" to prop("Seulement celles des N dernières minutes (optionnel)."))))
         put(tool("memoire_ajouter", "Enregistre une consigne durable de l'utilisateur dans la note Obsidian « Mémoire JARVIS » (remplace la consigne du même sujet).",
             mapOf(
                 "sujet" to prop("contacts (fiches contact) | briefing (point du matin) | planning | mails | societe | general"),
@@ -250,6 +252,18 @@ class ToolBox(
             val existe = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.obsidian.readNote(chemin) != null }
             if (existe && !append && !confirm("Remplacer le contenu de la note « $chemin » ?", false)) ToolResult("Refusé par l'utilisateur.")
             else ToolResult("✅ Note enregistrée : " + kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.obsidian.writeNote(chemin, a.optString("contenu"), append) })
+        }
+        "lire_notifications" -> {
+            val svc = fr.dd.jarvis.service.JarvisNotificationListener
+            if (!svc.active) ToolResult("Accès aux notifications non activé : Réglages › Autorisations › « Accès aux notifications ».")
+            else {
+                val n = (a.optString("count").toIntOrNull() ?: 15).coerceIn(1, 40)
+                val app0 = a.optString("appli").trim().lowercase()
+                val since = a.optString("minutes").toLongOrNull()?.let { System.currentTimeMillis() - it * 60_000 } ?: 0L
+                val fmt = java.text.SimpleDateFormat("dd/MM HH:mm", Locale.FRENCH)
+                val l = svc.snapshot().filter { it.time >= since && (app0.isBlank() || it.app.lowercase().contains(app0) || it.pkg.lowercase().contains(app0)) }.take(n)
+                ToolResult(if (l.isEmpty()) "Aucune notification." else "# 🔔 Notifications\n\n" + l.joinToString("\n") { "- **${it.app}** _(${fmt.format(java.util.Date(it.time))})_ ${it.titre} — ${it.texte.take(200)}" }, direct = true)
+            }
         }
         "memoire_ajouter" -> ToolResult("✅ Consigne « ${a.optString("sujet")} » enregistrée (" + app.memo.set(a.optString("sujet"), a.optString("texte")) + ").")
         "memoire_lire" -> ToolResult(app.memo.all().entries.joinToString("\n\n") { "**${it.key}** : ${it.value}" }.ifBlank { "Aucune consigne enregistrée." }, direct = true)

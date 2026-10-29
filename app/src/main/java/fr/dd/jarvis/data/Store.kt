@@ -124,6 +124,18 @@ class Store(context: Context) {
     val confirmSensitive = BPref("confirmSensitive", true)
     val analyseGemini = BPref("analyseGemini", true)
 
+    // ---- Arrière-plan : écoute « Jarvis » et agents autonomes
+    val wakeOn = BPref("wakeOn", false)
+    val agentsOn = BPref("agentsOn", false)
+    val agentMails = BPref("agentMails", true)
+    val agentFactures = BPref("agentFactures", true)
+    val agentPlanning = BPref("agentPlanning", true)
+    val agentNotifs = BPref("agentNotifs", true)
+    val agentRanger = BPref("agentRanger", false)
+    val agentMinutes = IPref("agentMinutes", 15)
+    val agentLastFact = SPref("agentLastFact", "")
+    val agentLastNotif = SPref("agentLastNotif", "0")
+
     // ---- Mails (IMAP)
     val mailHost = SPref("mailHost", "imap.gmail.com")
     val mailPort = SPref("mailPort", "993")

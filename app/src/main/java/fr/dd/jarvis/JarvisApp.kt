@@ -55,6 +55,7 @@ class JarvisApp : Application() {
         societe.data.modeles["planning"]?.let { fr.dd.jarvis.ai.Prompts.planningFormat = it }
         createChannel()
         if (store.briefingOn.value) Scheduler.schedule(this, store)
+        fr.dd.jarvis.work.AgentsScheduler.apply(this, store)
     }
 
     private fun createChannel() {
@@ -63,6 +64,8 @@ class JarvisApp : Application() {
             nm.createNotificationChannel(
                 NotificationChannel(CHANNEL_BRIEFING, "Point du matin", NotificationManager.IMPORTANCE_DEFAULT)
             )
+            nm.createNotificationChannel(NotificationChannel(CHANNEL_AGENTS, "Agents JARVIS (alertes)", NotificationManager.IMPORTANCE_HIGH))
+            nm.createNotificationChannel(NotificationChannel(CHANNEL_WAKE, "Écoute « Jarvis »", NotificationManager.IMPORTANCE_LOW))
         }
     }
 
@@ -82,6 +85,8 @@ class JarvisApp : Application() {
 
     companion object {
         const val CHANNEL_BRIEFING = "briefing"
+        const val CHANNEL_AGENTS = "agents"
+        const val CHANNEL_WAKE = "wake"
         const val CRASH_FILE = "last_crash.txt"
     }
 }
