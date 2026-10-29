@@ -1,27 +1,37 @@
 plugins {
-    alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
-    alias(libs.plugins.kotlin.compose)
-    alias(libs.plugins.hilt)
-    alias(libs.plugins.ksp)
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
 }
 
 android {
-    namespace = "com.jarvis.ai"
+    namespace = "fr.dd.jarvis"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.jarvis.ai"
-        minSdk = 26 // Wake word / STT locaux + APIs modernes ; 26 = bonne couverture d'appareils réels
+        applicationId = "fr.dd.jarvis"
+        minSdk = 26
         targetSdk = 34
         versionCode = 1
-        versionName = "0.1.0-scaffold"
+        versionName = "1.0.0"
+    }
+
+    // Keystore fixe, commité dans le dépôt : permet d'installer les mises à jour par-dessus l'APK précédent.
+    signingConfigs {
+        create("fixed") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("fixed")
+        }
         release {
             isMinifyEnabled = false
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.getByName("fixed")
         }
     }
 
@@ -34,50 +44,49 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
+    }
+    composeOptions {
+        kotlinCompilerExtensionVersion = "1.5.14"
+    }
+    packaging {
+        resources {
+            excludes += setOf(
+                "/META-INF/{AL2.0,LGPL2.1}",
+                "META-INF/LICENSE*",
+                "META-INF/NOTICE*",
+                "META-INF/DEPENDENCIES"
+            )
+            pickFirsts += setOf("META-INF/mailcap", "META-INF/mimetypes.default")
+        }
     }
 }
 
 dependencies {
-    implementation(libs.core.ktx)
-    implementation(libs.lifecycle.runtime.ktx)
-    implementation(libs.lifecycle.viewmodel.ktx)
-    implementation(libs.lifecycle.viewmodel.compose)
-    implementation(libs.activity.compose)
-    implementation(platform(libs.compose.bom))
-    implementation(libs.compose.foundation)
-    implementation(libs.compose.ui)
-    implementation(libs.compose.ui.graphics)
-    implementation(libs.compose.ui.tooling.preview)
-    implementation(libs.compose.material3)
-    implementation(libs.navigation.compose)
+    val composeBom = platform("androidx.compose:compose-bom:2024.06.00")
+    implementation(composeBom)
 
-    implementation(libs.hilt.android)
-    ksp(libs.hilt.compiler)
-    implementation(libs.hilt.navigation.compose)
+    implementation("androidx.core:core-ktx:1.13.1")
+    implementation("androidx.activity:activity-compose:1.9.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.3")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.3")
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-graphics")
+    implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
 
-    // Requis pour @HiltWorker / @AssistedInject dans ObsidianSyncWorker (CoroutineWorker) :
-    // sans ce compilateur androidx.hilt dédié, KSP ne peut pas générer les classes Hilt_*
-    // pour les Workers et échoue avec "error.NonExistentClass".
-    implementation(libs.hilt.work)
-    ksp(libs.androidx.hilt.compiler)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    implementation("androidx.documentfile:documentfile:1.0.1")
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
 
-    implementation(libs.retrofit.core)
-    implementation(libs.retrofit.moshi)
-    implementation(libs.okhttp)
-    implementation(libs.okhttp.logging)
-    implementation(libs.moshi.kotlin)
+    // Contrôle du téléphone (shell via Shizuku)
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
 
-    implementation(libs.room.runtime)
-    implementation(libs.room.ktx)
-    ksp(libs.room.compiler)
-
-    implementation(libs.datastore.preferences)
-    implementation(libs.security.crypto)
-    implementation(libs.kotlinx.coroutines.android)
-    implementation(libs.work.runtime.ktx)
-    implementation(libs.documentfile) // DocumentFile (SAF) pour ObsidianVaultManager
-
-    // TODO Phase 2+ : whisper.cpp (JNI/.aar maison), llama.cpp/MLC (module natif), openWakeWord (tflite runtime),
-    // Apache POI / PdfBox-Android (documents), JGit (module codage).
-    // Non ajoutés au scaffold pour garder un premier build léger et rapide à synchroniser.
+    // Mails (IMAP)
+    implementation("com.sun.mail:android-mail:1.6.7")
+    implementation("com.sun.mail:android-activation:1.6.7")
 }

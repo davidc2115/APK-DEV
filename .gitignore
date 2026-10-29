@@ -1,14 +1,8 @@
-*.iml
-.gradle
-/local.properties
-/.idea
-.DS_Store
-/build
-/captures
-.externalNativeBuildFolder
-.cxx
+.gradle/
+build/
 local.properties
-*.apk
-*.aab
-/app/build
-/app/release
+.idea/
+*.iml
+captures/
+.DS_Store
+# le keystore fixe est volontairement versionné (app/debug.keystore)

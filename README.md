@@ -1,39 +1,43 @@
-# JARVIS Mobile
+# JARVIS — assistant personnel Android (interface HUD)
 
-Assistant personnel Android complet : chat texte/vocal avec orb animée, IA locale + serveur local (Ollama) + cloud (Claude, GPT, Gemini, Groq, Perplexity/SerpAPI), persistance Obsidian (fiches contact, notes, projets à la demande), génération de documents (docx/xlsx/pdf/zip) et d'images, domotique Home Assistant embarquée, contrôle Freebox local/distant, contrôle total du téléphone (agenda, SMS, notifications, lampe, Bluetooth, Wi-Fi, apps, volume), recherche web résumée dans le chat, module de codage embarqué avec publication GitHub, et détection de mot-clé "Jarvis" gratuite (openWakeWord + Vosk).
+Application Android (Kotlin + Jetpack Compose) refaite de zéro.
 
-Inspiré des projets communautaires type Iron Man Jarvis / TechExClaire, repensé pour tourner entièrement sur smartphone.
+## Ce que fait l'application
 
-## Statut
+- **Chat texte + vocal** : micro, réponse vocale, mode conversation (JARVIS réécoute après avoir répondu).
+- **Interface HUD** : tuiles transparentes à coins coupés, fond quadrillé, orbe animé. Couleur au choix (cyan, bleu, vert, rouge, violet, orange, rose) et transparence réglable dans *Réglages*.
+- **Cerveau = Groq** : plusieurs clés, rotation automatique (une clé par requête, pause automatique d'une clé saturée).
+- **Agents = Gemini** : plusieurs clés, rotation automatique ; repli sur Groq s'il n'y a pas de clé Gemini.
+  - *Planning* : plusieurs agendas, renommables, couleur par agenda et par rendez-vous, création / suppression de RDV.
+  - *Mails* (IMAP) : tri, résumé, point du matin.
+  - *Contacts* : liste, création, modification, **fiche Markdown pour Obsidian** générée par l'IA.
+- **Point du matin** : notification quotidienne (agenda du jour + mails importants), heure réglable.
+- **Contrôle du téléphone** : lampe, apps, volume, Wi-Fi, Bluetooth, luminosité, appels, lecture de l'écran, appuis, saisie, défilement (Accessibilité + Shizuku/adb).
+  Les actions sensibles et toute commande shell demandent une confirmation dans l'app.
 
-Squelette de projet Phase 0 : structure Gradle/Compose/Hilt complète, UI de base (orb + chat + réglages), interfaces et implémentations de départ pour chaque module. Voir `docs/ARCHITECTURE.md` (section 5) pour le détail précis de ce qui fonctionne déjà vs. ce qui reste à implémenter, et `docs/ROADMAP.md` pour l'ordre de développement recommandé.
+## Premier lancement
 
-## Documentation
+1. *Réglages* → coller les clés Groq et Gemini → **Tester**.
+2. *Réglages › Mails* : serveur IMAP (Gmail : `imap.gmail.com`, mot de passe d'application).
+3. *Réglages › Obsidian* : choisir le coffre (les fiches vont dans `Contacts/`).
+4. *Réglages › Contrôle du téléphone* : activer l'accessibilité ; installer et démarrer Shizuku, puis l'autoriser.
+5. Xiaomi / HyperOS : autoriser le démarrage automatique et désactiver l'économie de batterie pour JARVIS.
 
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — architecture technique complète, tous les modules.
-- [`docs/ROADMAP.md`](docs/ROADMAP.md) — plan de développement par phases.
-- [`docs/SETUP.md`](docs/SETUP.md) — build, configuration, push GitHub.
+## Build
+
+GitHub Actions (`.github/workflows/build.yml`) compile l'APK à chaque push ; il se télécharge dans l'onglet *Actions › Artifacts*.
+Le keystore `app/debug.keystore` est versionné pour permettre les mises à jour par-dessus l'APK précédent.
+En cas de plantage, l'app affiche la trace au lancement suivant (bouton Copier).
 
 ## Structure
 
 ```
-JarvisAI/
-  app/src/main/java/com/jarvis/ai/
-    ui/          orb, chat, réglages, navigation
-    core/ai/     routeur multi-IA (cloud + local + serveur)
-    core/voice/  wake word, Whisper, TTS
-    core/obsidian/   vault, templates de notes/fiches
-    core/documents/  docx, xlsx, pdf, zip
-    core/homeassistant/  client Home Assistant
-    core/freebox/        client Freebox OS
-    core/phonecontrol/   agenda, SMS, notifications, capteurs, apps
-    core/coding/         agent de codage + publication GitHub
-    core/imagegen/       génération d'images
-    core/websearch/      recherche web résumée
-    core/websitegen/     génération de site statique
-    data/        Room + DataStore (réglages chiffrés)
+app/src/main/java/fr/dd/jarvis/
+  ai/       Groq, Gemini, rotation des clés, cerveau (Brain), outils (ToolBox), prompts des agents
+  data/     réglages (clés chiffrées)
+  device/   agenda, mails IMAP, contacts, Obsidian, Shizuku, contrôle du téléphone
+  service/  service d'accessibilité
+  voice/    reconnaissance et synthèse vocales
+  work/     point du matin (WorkManager)
+  ui/       thème HUD, composants, écrans
 ```
-
-## Tout est paramétrable
-
-Aucune clé, aucun chemin, aucun endpoint n'est en dur : tout se configure dans l'écran Réglages de l'app (clés IA, vault Obsidian, Home Assistant, Freebox, GitHub).
