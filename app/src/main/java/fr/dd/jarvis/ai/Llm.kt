@@ -21,14 +21,38 @@ class Llm(private val store: Store) {
             " · Gemini $m clé(s)" + (if (geminiRing.pausedCount() > 0) " (${geminiRing.pausedCount()} en pause)" else "")
     }
 
-    suspend fun agent(system: String, user: String): String =
+    /** Dernière erreur des agents (affichée quand un repli sans IA est utilisé). */
+    @Volatile
+    var lastError: String = ""
+
+    /** Agent : Gemini d'abord (clés en rotation), puis Groq en secours. Échoue avec un message lisible. */
+    suspend fun agent(system: String, user: String): String {
+        val errors = mutableListOf<String>()
         if (geminiRing.count() > 0) {
             try {
-                gemini.generate(system, user)
-            } catch (e: ApiException) {
-                if (e.code == 404 && autoFixGemini()) gemini.generate(system, user) else throw e
+                return try {
+                    gemini.generate(system, user)
+                } catch (e: ApiException) {
+                    if (e.code == 404 && autoFixGemini()) gemini.generate(system, user) else throw e
+                }.ifBlank { throw IllegalStateException("réponse vide") }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                errors += "Gemini : " + (e.message ?: e.javaClass.simpleName).take(160)
             }
-        } else plainGroq(system, user)
+        }
+        if (groqRing.count() > 0) {
+            try {
+                return plainGroq(system, user).ifBlank { throw IllegalStateException("réponse vide") }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                errors += "Groq : " + (e.message ?: e.javaClass.simpleName).take(160)
+            }
+        }
+        lastError = errors.joinToString(" | ").ifBlank { "aucune clé configurée" }
+        throw IllegalStateException(lastError)
+    }
 
     private suspend fun plainGroq(system: String, user: String): String = try {
         groq.plain(system, user)

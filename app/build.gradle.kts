@@ -83,6 +83,10 @@ dependencies {
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("androidx.work:work-runtime-ktx:2.9.0")
     implementation("com.google.android.gms:play-services-auth:21.2.0")
+
+    // ADB intégré (Débogage sans fil) : droits « adb » sans installer Shizuku
+    implementation("com.github.MuntashirAkon:libadb-android:3.0.0")
+    implementation("org.bouncycastle:bcprov-jdk15to18:1.78")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 
     // Contrôle du téléphone (shell via Shizuku)

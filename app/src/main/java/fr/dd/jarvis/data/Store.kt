@@ -119,9 +119,19 @@ class Store(context: Context) {
     val mailPort = SPref("mailPort", "993")
     val mailUser = SPref("mailUser", "")
     val mailPass = SPref("mailPass", "")
-    val gmailAccount = SPref("gmailAccount", "")
+    val gmailAccounts: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readList("gmailAccounts")) }
 
-    fun mailConfigured() = gmailAccount.value.isNotBlank() || mailHost.value.isNotBlank() && mailUser.value.isNotBlank() && mailPass.value.isNotBlank()
+    fun addGmailAccount(email: String) {
+        if (email.isNotBlank() && gmailAccounts.none { it.equals(email, true) }) gmailAccounts.add(email)
+        writeList("gmailAccounts", gmailAccounts)
+    }
+
+    fun removeGmailAccount(email: String) {
+        gmailAccounts.removeAll { it == email }
+        writeList("gmailAccounts", gmailAccounts)
+    }
+
+    fun mailConfigured() = gmailAccounts.isNotEmpty() || mailHost.value.isNotBlank() && mailUser.value.isNotBlank() && mailPass.value.isNotBlank()
 
     // ---- Obsidian (dossier choisi via le sélecteur Android)
     val obsidianUri = SPref("obsidianUri", "")

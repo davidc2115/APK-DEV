@@ -24,11 +24,13 @@ object GmailApi {
     const val SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
     private const val BASE = "https://gmail.googleapis.com/gmail/v1/users/me"
 
-    private fun request() = AuthorizationRequest.builder().setRequestedScopes(listOf(Scope(SCOPE))).build()
+    private fun request(email: String?) = AuthorizationRequest.builder().setRequestedScopes(listOf(Scope(SCOPE))).apply {
+        if (!email.isNullOrBlank()) setAccount(android.accounts.Account(email, "com.google"))
+    }.build()
 
     /** Si le résultat a une résolution (écran de consentement), l'interface doit la lancer. */
-    suspend fun authorize(ctx: Context): AuthorizationResult = suspendCancellableCoroutine { c ->
-        Identity.getAuthorizationClient(ctx).authorize(request())
+    suspend fun authorize(ctx: Context, email: String? = null): AuthorizationResult = suspendCancellableCoroutine { c ->
+        Identity.getAuthorizationClient(ctx).authorize(request(email))
             .addOnSuccessListener { c.resume(it) }
             .addOnFailureListener { c.resumeWithException(it) }
     }
@@ -48,10 +50,26 @@ object GmailApi {
     /** Adresse du compte connecté (vérifie aussi que le jeton fonctionne). */
     suspend fun profile(token: String): String = withContext(Dispatchers.IO) { get(token, "$BASE/profile").optString("emailAddress") }
 
-    suspend fun fetchRecent(ctx: Context, count: Int, unreadOnly: Boolean): List<MailItem> {
-        val auth = authorize(ctx)
-        if (auth.hasResolution()) throw IllegalStateException("Autorisation Google à renouveler : onglet Mails › Connecter mon compte Google.")
-        val token = auth.accessToken ?: throw IllegalStateException("Jeton Google indisponible.")
+    suspend fun fetchRecent(ctx: Context, accounts: List<String>, count: Int, unreadOnly: Boolean): List<MailItem> {
+        val all = mutableListOf<MailItem>()
+        val errors = mutableListOf<String>()
+        for (acc in accounts) {
+            try {
+                all += fetchOne(ctx, acc, count, unreadOnly)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                errors += "$acc : ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+        if (all.isEmpty() && errors.isNotEmpty()) throw IllegalStateException(errors.joinToString("\n"))
+        return all.sortedByDescending { it.date }.take(count)
+    }
+
+    private suspend fun fetchOne(ctx: Context, account: String, count: Int, unreadOnly: Boolean): List<MailItem> {
+        val auth = authorize(ctx, account)
+        if (auth.hasResolution()) throw IllegalStateException("autorisation à renouveler (Réglages › Mails › Ajouter un compte Google).")
+        val token = auth.accessToken ?: throw IllegalStateException("jeton Google indisponible.")
         return withContext(Dispatchers.IO) {
             val q = if (unreadOnly) "&q=is:unread" else ""
             val list = get(token, "$BASE/messages?maxResults=$count&labelIds=INBOX$q").optJSONArray("messages")
@@ -74,11 +92,12 @@ object GmailApi {
                             subject = h("Subject").ifBlank { "(sans objet)" },
                             date = m.optString("internalDate").toLongOrNull()?.let { Date(it) },
                             snippet = m.optString("snippet").replace("&#39;", "'").replace("&quot;", "\"").replace("&amp;", "&"),
-                            unread = m.optJSONArray("labelIds")?.toString()?.contains("UNREAD") == true
+                            unread = m.optJSONArray("labelIds")?.toString()?.contains("UNREAD") == true,
+                            account = account
                         )
                     }
                 }.awaitAll()
-            }.sortedByDescending { it.date }
+            }
         }
     }
 }

@@ -20,14 +20,15 @@ data class MailItem(
     val subject: String,
     val date: Date?,
     val snippet: String,
-    val unread: Boolean
+    val unread: Boolean,
+    val account: String = ""
 )
 
 /** Lecture des mails en IMAP (Gmail : activer l'IMAP et utiliser un « mot de passe d'application »). */
 class MailRepo(private val ctx: Context, private val store: Store) {
 
     suspend fun fetchRecent(count: Int, unreadOnly: Boolean): List<MailItem> =
-        if (store.gmailAccount.value.isNotBlank()) GmailApi.fetchRecent(ctx, count, unreadOnly) else fetchImap(count, unreadOnly)
+        if (store.gmailAccounts.isNotEmpty()) GmailApi.fetchRecent(ctx, store.gmailAccounts.toList(), count, unreadOnly) else fetchImap(count, unreadOnly)
 
     private suspend fun fetchImap(count: Int, unreadOnly: Boolean): List<MailItem> = withContext(Dispatchers.IO) {
         val host = store.mailHost.value.trim()
@@ -117,6 +118,20 @@ class MailRepo(private val ctx: Context, private val store: Store) {
         html.replace(Regex("(?is)<(script|style).*?</\\1>"), " ")
             .replace(Regex("<[^>]+>"), " ")
             .replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+
+    /** Liste lisible sans IA (non lus d'abord). */
+    fun localList(items: List<MailItem>): String {
+        val fmt = java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.FRENCH)
+        fun l(m: MailItem) = "- ${if (m.unread) "🔵 " else ""}**${m.from}** — ${m.subject}" + (m.date?.let { " _(${fmt.format(it)})_" } ?: "") +
+            (m.account.takeIf { it.isNotBlank() }?.let { " · $it" } ?: "")
+        val non = items.filter { it.unread }
+        val lus = items.filter { !it.unread }
+        return buildString {
+            append("# 📧 Boîte de réception\n\n")
+            if (non.isNotEmpty()) append("## 🔵 Non lus (${non.size})\n").append(non.joinToString("\n") { l(it) }).append("\n\n")
+            if (lus.isNotEmpty()) append("## Lus (${lus.size})\n").append(lus.joinToString("\n") { l(it) })
+        }.trim()
+    }
 
     /** Texte compact destiné aux agents. */
     fun toPrompt(items: List<MailItem>): String = items.joinToString("\n\n") { m ->

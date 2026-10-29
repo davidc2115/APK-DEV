@@ -247,6 +247,38 @@ fun SettingsScreen(app: JarvisApp) {
                     color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp, bottom = 10.dp)
                 )
 
+                HudDivider()
+                Spacer(Modifier.height(8.dp))
+                var adbMsg by remember { mutableStateOf("") }
+                val adbOn = remember(tick, adbMsg) { fr.dd.jarvis.device.AdbShell.connected() }
+                val notifPerm = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) {
+                    fr.dd.jarvis.device.AdbShell.postPairingNotification(ctx)
+                }
+                Text("ADB intégré (remplace Shizuku)", color = LocalAccent.current, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 13.sp)
+                StatusRow("ADB connecté", adbOn)
+                Text(
+                    "1) Active Options pour développeurs › Débogage sans fil (Wi-Fi requis).\n" +
+                        "2) Touche « Appairer » ci-dessous : une notification JARVIS apparaît.\n" +
+                        "3) Dans Débogage sans fil, touche « Associer l'appareil avec un code d'appairage ».\n" +
+                        "4) Tire la notification JARVIS, saisis le code à 6 chiffres. Fini : à faire une seule fois.",
+                    color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(vertical = 6.dp)
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HudButton("Appairer", filled = true) {
+                        if (android.os.Build.VERSION.SDK_INT >= 33) notifPerm.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                        else fr.dd.jarvis.device.AdbShell.postPairingNotification(ctx)
+                        ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }
+                    HudButton("Connecter") {
+                        scope.launch { adbMsg = "⏳"; adbMsg = fr.dd.jarvis.device.AdbShell.connect(ctx) }
+                    }
+                    HudButton("Tester") {
+                        scope.launch { adbMsg = "⏳"; adbMsg = fr.dd.jarvis.device.AdbShell.exec(ctx, "id") }
+                    }
+                }
+                if (adbMsg.isNotBlank()) Text(adbMsg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+                Spacer(Modifier.height(10.dp))
+
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     HudChip(if (store.confirmSensitive.value) "✅ Confirmer les actions sensibles" else "Confirmation désactivée", store.confirmSensitive.value) {
                         store.confirmSensitive.set(!store.confirmSensitive.value)

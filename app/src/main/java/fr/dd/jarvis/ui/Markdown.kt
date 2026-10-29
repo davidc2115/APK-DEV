@@ -3,6 +3,11 @@ package fr.dd.jarvis.ui
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -55,41 +60,72 @@ private fun inline(text: String, accent: Color): AnnotatedString = buildAnnotate
     append(text.substring(last))
 }
 
-/** Rendu Markdown minimal : titres, séparateurs, listes, gras et liens cliquables (http, tel:, geo:). */
+/** Rendu Markdown minimal : titres, tableaux, listes, gras, liens cliquables ; plannings (🕗) en cartes par événement. */
 @Composable
 fun MarkdownText(text: String, modifier: Modifier = Modifier, color: Color = HudText) {
     val accent = LocalAccent.current
-    val ctx = LocalContext.current
     var body = text.trimStart()
     if (body.startsWith("---\n")) {
         val fin = body.indexOf("\n---", 3)
         if (fin > 0) body = body.substring(fin + 4)
     }
     val lines = body.lines()
-    Column(modifier) {
-        var i = 0
-        while (i < lines.size) {
-            val line = lines[i].trimEnd()
-            i++
-            when {
-                line.trimStart().startsWith("|") -> {
-                    val rows = mutableListOf(line)
-                    while (i < lines.size && lines[i].trimStart().startsWith("|")) { rows += lines[i].trimEnd(); i++ }
-                    Table(rows, color, accent, ctx)
+    if (!body.contains("🕗")) {
+        Column(modifier) { MdLines(lines, color, accent) }
+        return
+    }
+    // Mode planning : un bloc visuel par événement (## …), titres de jour en grand, séparateurs --- supprimés.
+    val blocs = mutableListOf<Pair<Boolean, MutableList<String>>>() // (carte ?, lignes)
+    for (l in lines) {
+        val t = l.trim()
+        when {
+            t == "---" || t == "***" -> continue
+            l.startsWith("## ") -> blocs += true to mutableListOf(l)
+            l.startsWith("# ") -> blocs += false to mutableListOf(l)
+            else -> if (blocs.isEmpty()) blocs += false to mutableListOf(l) else blocs.last().second += l
+        }
+    }
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        for ((carte, ls) in blocs) {
+            val contenu = ls.dropLastWhile { it.isBlank() }
+            if (contenu.isEmpty()) continue
+            if (carte) {
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(accent.copy(alpha = 0.09f)).height(androidx.compose.foundation.layout.IntrinsicSize.Min)
+                ) {
+                    Box(Modifier.width(4.dp).fillMaxHeight().background(accent.copy(alpha = 0.85f)))
+                    Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) { MdLines(contenu, color, accent) }
                 }
-                line.isBlank() -> Spacer(Modifier.height(4.dp))
-                line.trim() == "---" || line.trim() == "***" -> {
-                    Spacer(Modifier.height(4.dp))
-                    HudDivider()
-                    Spacer(Modifier.height(4.dp))
-                }
-                line.startsWith("### ") -> Line(inline(line.removePrefix("### "), accent), color, 14.sp, FontWeight.SemiBold, accent, ctx)
-                line.startsWith("## ") -> Line(inline(line.removePrefix("## "), accent), color, 16.sp, FontWeight.Bold, accent, ctx)
-                line.startsWith("# ") -> Line(inline(line.removePrefix("# "), accent), accent, 18.sp, FontWeight.Bold, accent, ctx)
-                line.trimStart().startsWith("- ") || line.trimStart().startsWith("* ") ->
-                    Line(inline("• " + line.trimStart().drop(2), accent), color, 14.sp, FontWeight.Normal, accent, ctx)
-                else -> Line(inline(line, accent), color, 14.sp, FontWeight.Normal, accent, ctx)
+            } else Column { MdLines(contenu, color, accent) }
+        }
+    }
+}
+
+@Composable
+private fun MdLines(lines: List<String>, color: Color, accent: Color) {
+    val ctx = LocalContext.current
+    var i = 0
+    while (i < lines.size) {
+        val line = lines[i].trimEnd()
+        i++
+        when {
+            line.trimStart().startsWith("|") -> {
+                val rows = mutableListOf(line)
+                while (i < lines.size && lines[i].trimStart().startsWith("|")) { rows += lines[i].trimEnd(); i++ }
+                Table(rows, color, accent, ctx)
             }
+            line.isBlank() -> Spacer(Modifier.height(4.dp))
+            line.trim() == "---" || line.trim() == "***" -> {
+                Spacer(Modifier.height(4.dp))
+                HudDivider()
+                Spacer(Modifier.height(4.dp))
+            }
+            line.startsWith("### ") -> Line(inline(line.removePrefix("### "), accent), color, 14.sp, FontWeight.SemiBold, accent, ctx)
+            line.startsWith("## ") -> Line(inline(line.removePrefix("## "), accent), color, 15.sp, FontWeight.Bold, accent, ctx)
+            line.startsWith("# ") -> Line(inline(line.removePrefix("# "), accent), accent, 18.sp, FontWeight.Bold, accent, ctx)
+            line.trimStart().startsWith("- ") || line.trimStart().startsWith("* ") ->
+                Line(inline("• " + line.trimStart().drop(2), accent), color, 14.sp, FontWeight.Normal, accent, ctx)
+            else -> Line(inline(line, accent), color, 14.sp, FontWeight.Normal, accent, ctx)
         }
     }
 }

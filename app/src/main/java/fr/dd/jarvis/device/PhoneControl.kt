@@ -74,16 +74,16 @@ class PhoneControl(private val ctx: Context) {
             "open_app" -> openApp(value)
             "open_url" -> openUrl(value)
             "volume" -> volume(value.filter { it.isDigit() }.toIntOrNull() ?: 50)
-            "wifi_on" -> ShizukuShell.exec("svc wifi enable").let { "Wi-Fi activé. $it" }
-            "wifi_off" -> ShizukuShell.exec("svc wifi disable").let { "Wi-Fi désactivé. $it" }
-            "bluetooth_on" -> ShizukuShell.exec("svc bluetooth enable").let { "Bluetooth activé. $it" }
-            "bluetooth_off" -> ShizukuShell.exec("svc bluetooth disable").let { "Bluetooth désactivé. $it" }
+            "wifi_on" -> PhoneShell.exec(ctx, "svc wifi enable").let { "Wi-Fi activé. $it" }
+            "wifi_off" -> PhoneShell.exec(ctx, "svc wifi disable").let { "Wi-Fi désactivé. $it" }
+            "bluetooth_on" -> PhoneShell.exec(ctx, "svc bluetooth enable").let { "Bluetooth activé. $it" }
+            "bluetooth_off" -> PhoneShell.exec(ctx, "svc bluetooth disable").let { "Bluetooth désactivé. $it" }
             "brightness" -> {
                 val p = (value.filter { it.isDigit() }.toIntOrNull() ?: 50).coerceIn(0, 100)
-                ShizukuShell.exec("settings put system screen_brightness_mode 0; settings put system screen_brightness ${p * 255 / 100}")
+                PhoneShell.exec(ctx, "settings put system screen_brightness_mode 0; settings put system screen_brightness ${p * 255 / 100}")
                 "Luminosité réglée à $p %."
             }
-            "call" -> ShizukuShell.exec("am start -a android.intent.action.CALL -d tel:${Uri.encode(value)}").let { "Appel de $value lancé. $it" }
+            "call" -> PhoneShell.exec(ctx, "am start -a android.intent.action.CALL -d tel:${Uri.encode(value)}").let { "Appel de $value lancé. $it" }
             "back" -> a11y(AccessibilityService.GLOBAL_ACTION_BACK, "Retour.")
             "home" -> a11y(AccessibilityService.GLOBAL_ACTION_HOME, "Accueil.")
             "recents" -> a11y(AccessibilityService.GLOBAL_ACTION_RECENTS, "Applications récentes.")

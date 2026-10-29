@@ -11,6 +11,7 @@ object Http {
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(90, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
+        .callTimeout(45, TimeUnit.SECONDS)
         .build()
     val JSON = "application/json; charset=utf-8".toMediaType()
 }

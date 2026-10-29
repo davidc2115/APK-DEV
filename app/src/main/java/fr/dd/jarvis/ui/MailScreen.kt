@@ -118,46 +118,59 @@ fun MailScreen(app: JarvisApp) {
     }
 }
 
-/** Connexion du compte Google (écran de consentement Google, lecture seule des mails). */
+/** Comptes Google connectés (plusieurs possibles) : sélecteur de comptes du téléphone puis consentement lecture seule. */
 @Composable
 fun GoogleConnect(app: JarvisApp, onDone: () -> Unit = {}) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var msg by remember { mutableStateOf("") }
-    suspend fun finish(token: String?) {
+    var pending by remember { mutableStateOf("") }
+
+    suspend fun finish(token: String?, fallbackEmail: String) {
         if (token == null) { msg = "❌ Autorisation refusée."; return }
         try {
-            val email = GmailApi.profile(token)
-            app.store.gmailAccount.set(email.ifBlank { "compte Google" })
-            msg = "✅ Connecté : $email"
+            val email = GmailApi.profile(token).ifBlank { fallbackEmail }
+            app.store.addGmailAccount(email)
+            msg = "✅ Compte ajouté : $email"
             onDone()
         } catch (e: Exception) { msg = "❌ ${e.message}" }
     }
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { res ->
+    suspend fun authorize(email: String, launch: (IntentSenderRequest) -> Unit) {
+        msg = "⏳ Autorisation…"
+        try {
+            val r = GmailApi.authorize(ctx, email)
+            if (r.hasResolution()) launch(IntentSenderRequest.Builder(r.pendingIntent!!.intentSender).build())
+            else finish(r.accessToken, email)
+        } catch (e: Exception) {
+            msg = "❌ " + (e.message ?: "erreur") + "\n(Si « 10 » ou « DEVELOPER_ERROR » : la configuration Google Cloud n'est pas faite, voir la notice.)"
+        }
+    }
+    val consent = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { res ->
         scope.launch {
             if (res.resultCode == Activity.RESULT_OK) {
-                try { finish(GmailApi.resultFromIntent(ctx, res.data).accessToken) } catch (e: Exception) { msg = "❌ ${e.message}" }
+                try { finish(GmailApi.resultFromIntent(ctx, res.data).accessToken, pending) } catch (e: Exception) { msg = "❌ ${e.message}" }
             } else msg = "Connexion annulée."
         }
     }
-    val account = app.store.gmailAccount.value
+    val chooser = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        val name = res.data?.getStringExtra(android.accounts.AccountManager.KEY_ACCOUNT_NAME)
+        if (res.resultCode == Activity.RESULT_OK && !name.isNullOrBlank()) {
+            pending = name
+            scope.launch { authorize(name) { consent.launch(it) } }
+        } else msg = "Aucun compte choisi."
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (account.isNotBlank()) {
-            Text("✅ Compte Google connecté : $account", color = HudText, fontSize = 13.sp)
-            HudButton("Déconnecter") { app.store.gmailAccount.set(""); msg = "Compte déconnecté." }
-        } else {
-            HudButton("Connecter mon compte Google", filled = true) {
-                scope.launch {
-                    msg = "⏳ Connexion…"
-                    try {
-                        val r = GmailApi.authorize(ctx)
-                        if (r.hasResolution()) launcher.launch(IntentSenderRequest.Builder(r.pendingIntent!!.intentSender).build())
-                        else finish(r.accessToken)
-                    } catch (e: Exception) {
-                        msg = "❌ " + (e.message ?: "erreur") + "\n(Si « 10 » ou « DEVELOPER_ERROR » : la configuration Google Cloud n'est pas faite, voir la notice.)"
-                    }
-                }
+        app.store.gmailAccounts.toList().forEach { acc ->
+            Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text("✅ $acc", color = HudText, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                HudButton("Retirer") { app.store.removeGmailAccount(acc) }
             }
+        }
+        HudButton(if (app.store.gmailAccounts.isEmpty()) "Connecter mon compte Google" else "Ajouter un autre compte Google", filled = true) {
+            @Suppress("DEPRECATION")
+            val i = android.accounts.AccountManager.newChooseAccountIntent(null, null, arrayOf("com.google"), null, null, null, null)
+            chooser.launch(i)
         }
         if (msg.isNotBlank()) Text(msg, color = HudText, fontSize = 12.sp)
     }

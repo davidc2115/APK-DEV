@@ -157,7 +157,7 @@ class ToolBox(
             val calName = cals[e.calId]?.let { cal.displayName(it) } ?: "Agenda"
             "• #${e.id} | $when_ | agenda : $calName | ${e.title}" +
                 (if (e.location.isNotBlank()) " | lieu : ${e.location}" else "") +
-                (if (e.description.isNotBlank()) " | notes : ${e.description.replace('\n', ' ').take(400)}" else "")
+                (if (e.description.isNotBlank()) " | notes : ${fr.dd.jarvis.device.HtmlText.text(e.description).take(400)}" else "")
         }
     }
 
@@ -178,15 +178,17 @@ class ToolBox(
         val user = "Aujourd'hui : ${Prompts.now()}\nPériode : du $from sur $days jour(s)\n" +
             (if (q.isNotBlank()) "Question : $q\n" else "") + "Événements :\n$data"
         // L'agent peut être lent ou en erreur (quota, modèle) : au-delà de 40 s ou en cas d'échec, mise en forme locale.
+        var raison = ""
         val text = try {
-            kotlinx.coroutines.withTimeout(40_000) { llm.agent(Prompts.planning(), user) }.ifBlank { null }
+            llm.agent(Prompts.planning(), user)
         } catch (e: kotlinx.coroutines.CancellationException) {
-            if (e is kotlinx.coroutines.TimeoutCancellationException) null else throw e
+            throw e
         } catch (e: Exception) {
+            raison = e.message ?: ""
             null
         }
         val out = text ?: (kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { localPlanning(from, days, a.optString("calendar")) } +
-            "\n\n_⚠️ Mise en forme locale (l'agent IA n'a pas répondu)._")
+            "\n\n_ℹ️ Mise en forme locale — agent IA indisponible : ${raison.take(200)}_")
         return ToolResult(out, direct = true)
     }
 
@@ -207,19 +209,26 @@ class ToolBox(
             if (s.toLocalDate() != last) {
                 last = s.toLocalDate()
                 if (sb.isNotEmpty()) sb.append("\n")
-                sb.append("# 📅 ").append(s.format(dayTitle)).append("\n\n")
+                sb.append("# 📅 ").append(s.format(dayTitle).replaceFirstChar { it.uppercase() }).append("\n\n")
             } else sb.append("---\n\n")
             val horaire = if (e.allDay) "Journée entière" else "${s.format(timeFmt)} – ${en.format(timeFmt)}"
+            val notes = fr.dd.jarvis.device.HtmlText.lines(e.description)
+            val urls = notes.flatMap { fr.dd.jarvis.device.HtmlText.url.findAll(it).map { m -> m.value }.toList() }.distinct()
+            val texte = notes.map { fr.dd.jarvis.device.HtmlText.url.replace(it, "").trim() }.filter { it.isNotBlank() && it != "·" }
             sb.append("## 🕗 $horaire · ${e.title}\n")
             if (e.location.isNotBlank()) {
                 val q = java.net.URLEncoder.encode(e.location, "UTF-8")
                 sb.append("📍 [${e.location}](https://www.google.com/maps/search/?api=1&query=$q)\n")
             }
-            phone.findAll(e.location + " " + e.description).map { it.value }.distinct().forEach { n ->
+            urls.forEach { u ->
+                val maps = u.contains("maps.app.goo.gl") || u.contains("google.com/maps") || u.contains("goo.gl/maps")
+                sb.append(if (maps) "🧭 [Itinéraire]($u)\n" else "🔗 [${u.removePrefix("https://").removePrefix("http://").take(40)}]($u)\n")
+            }
+            phone.findAll(e.title + " " + e.location + " " + texte.joinToString(" ")).map { it.value }.distinct().forEach { n ->
                 val digits = n.replace(Regex("[^0-9+]"), "").let { if (it.startsWith("0")) "+33" + it.drop(1) else it }
                 sb.append("📞 [$n](tel:$digits)\n")
             }
-            if (e.description.isNotBlank()) sb.append("⚠️ ${e.description.replace('\n', ' ').take(300)}\n")
+            if (texte.isNotEmpty()) sb.append("⚠️ ${texte.joinToString(" · ").take(300)}\n")
             sb.append("\n")
         }
         return sb.toString().trim()
@@ -259,9 +268,21 @@ class ToolBox(
         if (!store.mailConfigured()) return ToolResult("Les mails ne sont pas configurés : renseigner le serveur IMAP dans Réglages › Mails.")
         val count = (a.optString("count").toIntOrNull() ?: 20).coerceIn(5, 40)
         val unread = a.optString("unread_only").equals("true", ignoreCase = true)
-        val mails = app.mail.fetchRecent(count, unread)
+        val mails = try {
+            app.mail.fetchRecent(count, unread)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return ToolResult("❌ Impossible de lire les mails : ${e.message ?: e.javaClass.simpleName}\nVérifie Réglages › Mails (compte Google connecté ou IMAP).", direct = true)
+        }
         if (mails.isEmpty()) return ToolResult("📭 Aucun mail ${if (unread) "non lu" else "récent"}.", direct = true)
-        val text = llm.agent(Prompts.MAIL, "Aujourd'hui : ${Prompts.now()}\n\n" + app.mail.toPrompt(mails))
+        val text = try {
+            llm.agent(Prompts.MAIL, "Aujourd'hui : ${Prompts.now()}\n\n" + app.mail.toPrompt(mails))
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            app.mail.localList(mails) + "\n\n_ℹ️ Liste brute — agent IA indisponible : ${(e.message ?: "").take(200)}_"
+        }
         return ToolResult(text, direct = true)
     }
 
@@ -339,8 +360,8 @@ class ToolBox(
     private suspend fun runShell(a: JSONObject): ToolResult {
         val cmd = a.optString("command").trim()
         if (cmd.isBlank()) return ToolResult("Commande vide.")
-        if (!ShizukuShell.ready()) return ToolResult("Shizuku n'est pas prêt (démarré + autorisé). Voir Réglages › Téléphone.")
+        if (!fr.dd.jarvis.device.PhoneShell.ready(app)) return ToolResult("Aucun accès adb : activer l'ADB intégré (ou Shizuku) dans Réglages › Contrôle du téléphone.")
         if (!confirm("Exécuter cette commande shell ?\n\n$cmd", true)) return ToolResult("Commande refusée par l'utilisateur.")
-        return ToolResult(ShizukuShell.exec(cmd))
+        return ToolResult(fr.dd.jarvis.device.PhoneShell.exec(app, cmd))
     }
 }
