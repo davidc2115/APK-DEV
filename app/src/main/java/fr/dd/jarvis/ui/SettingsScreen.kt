@@ -349,6 +349,11 @@ fun SettingsScreen(app: JarvisApp) {
                         store.confirmSensitive.set(!store.confirmSensitive.value)
                     }
                 }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 6.dp)) {
+                    HudChip(if (store.analyseGemini.value) "✅ Gemini analyse chaque demande" else "Analyse Gemini désactivée", store.analyseGemini.value) {
+                        store.analyseGemini.set(!store.analyseGemini.value)
+                    }
+                }
                 Text(
                     "Les commandes shell demandent toujours une confirmation, quel que soit ce réglage.",
                     color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp)

@@ -134,6 +134,16 @@ class ToolBox(
             mapOf("lieu" to prop("Ville ou adresse (optionnel : par défaut la position actuelle du téléphone)."), "jours" to prop("Nombre de jours de prévision (1 à 7). Par défaut 3."))))
         put(tool("generer_image", "Génère une image à partir d'une description (Cloudflare). L'image est affichée dans le chat et enregistrée dans Obsidian.",
             mapOf("prompt" to prop("Description détaillée de l'image, rédigée en anglais (sujet, style, lumière, cadrage).")), listOf("prompt")))
+        put(tool("jouer_musique", "Lance la lecture d'un titre, artiste ou playlist dans une application de musique du téléphone (fonctionne aussi en arrière-plan).",
+            mapOf("requete" to prop("Titre, artiste ou style à écouter."), "appli" to prop("Application : spotify, youtube music, deezer, youtube, vlc… (optionnel : la première installée)."))))
+        put(tool("controle_media", "Contrôle la lecture en cours : play, pause, next, previous, stop.", mapOf("action" to prop("play | pause | next | previous | stop")), listOf("action")))
+        put(tool("naviguer", "Lance la navigation GPS (Google Maps) vers une adresse.", mapOf("destination" to prop("Adresse ou lieu."), "mode" to prop("voiture (défaut), marche ou velo")), listOf("destination")))
+        put(tool("obsidian_chercher", "Cherche du texte dans les notes du coffre Obsidian (noms et contenu).", mapOf("requete" to prop("Texte recherché.")), listOf("requete")))
+        put(tool("obsidian_lire", "Lit une note Obsidian par son chemin relatif (ex. Contacts/Dupont.md).", mapOf("chemin" to prop("Chemin de la note.")), listOf("chemin")))
+        put(tool("obsidian_lister", "Liste les notes du coffre Obsidian, éventuellement d'un dossier.", mapOf("dossier" to prop("Dossier (optionnel)."))))
+        put(tool("obsidian_ecrire", "Crée, remplace ou complète une note Obsidian.", mapOf(
+            "chemin" to prop("Chemin relatif de la note (ex. JARVIS/Idées.md)."), "contenu" to prop("Contenu Markdown."),
+            "ajouter" to prop("« true » pour ajouter à la fin de la note existante au lieu de la remplacer.")), listOf("chemin", "contenu")))
         put(tool("memoire_ajouter", "Enregistre une consigne durable de l'utilisateur dans la note Obsidian « Mémoire JARVIS » (remplace la consigne du même sujet).",
             mapOf(
                 "sujet" to prop("contacts (fiches contact) | briefing (point du matin) | planning | mails | societe | general"),
@@ -160,6 +170,11 @@ class ToolBox(
             for (i in 0 until schema.length()) out.put(schema.get(i))
             societe.schema.forEach { out.put(it) }
         }
+    }
+
+    fun schemaAll(): JSONArray = JSONArray().also { out ->
+        for (i in 0 until schema.length()) out.put(schema.get(i))
+        societe.schema.forEach { out.put(it) }
     }
 
     // ------------------------------------------------------------------ exécution
@@ -218,6 +233,23 @@ class ToolBox(
             ToolResult("![image](jarvis-img:${f.name})\n\n_${a.optString("prompt").take(160)}_" + (if (loc.isNotBlank()) "\n📁 $loc" else ""), direct = true)
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
             ToolResult("❌ Image impossible : ${e.message}")
+        }
+        "jouer_musique" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.playMusic(a.optString("requete"), a.optString("appli")) })
+        "controle_media" -> ToolResult(app.phone.mediaKey(a.optString("action")))
+        "naviguer" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.navigate(a.optString("destination"), a.optString("mode")) })
+        "obsidian_chercher" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val r = app.obsidian.searchNotes(a.optString("requete"))
+            if (r.isEmpty()) "Aucune note ne contient « ${a.optString("requete")} »." else r.joinToString("\n") { "- ${it.first}" + (if (it.second.isNotBlank()) " : …${it.second}…" else "") }
+        })
+        "obsidian_lire" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.obsidian.readNote(a.optString("chemin"))?.take(6000) ?: "Note introuvable : ${a.optString("chemin")}" })
+        "obsidian_lister" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val l = app.obsidian.listNotes(a.optString("dossier")); if (l.isEmpty()) "Aucune note." else l.take(120).joinToString("\n") + (if (l.size > 120) "\n… (${l.size} notes)" else "")
+        })
+        "obsidian_ecrire" -> {
+            val chemin = a.optString("chemin"); val append = a.optString("ajouter").equals("true", true)
+            val existe = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.obsidian.readNote(chemin) != null }
+            if (existe && !append && !confirm("Remplacer le contenu de la note « $chemin » ?", false)) ToolResult("Refusé par l'utilisateur.")
+            else ToolResult("✅ Note enregistrée : " + kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.obsidian.writeNote(chemin, a.optString("contenu"), append) })
         }
         "memoire_ajouter" -> ToolResult("✅ Consigne « ${a.optString("sujet")} » enregistrée (" + app.memo.set(a.optString("sujet"), a.optString("texte")) + ").")
         "memoire_lire" -> ToolResult(app.memo.all().entries.joinToString("\n\n") { "**${it.key}** : ${it.value}" }.ifBlank { "Aucune consigne enregistrée." }, direct = true)

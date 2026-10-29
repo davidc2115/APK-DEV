@@ -122,6 +122,7 @@ class Store(context: Context) {
 
     // ---- Sécurité
     val confirmSensitive = BPref("confirmSensitive", true)
+    val analyseGemini = BPref("analyseGemini", true)
 
     // ---- Mails (IMAP)
     val mailHost = SPref("mailHost", "imap.gmail.com")

@@ -32,19 +32,91 @@ class PhoneControl(private val ctx: Context) {
         return if (on) "Lampe allumée." else "Lampe éteinte."
     }
 
-    fun openApp(name: String): String {
+    private fun adbOk() = PhoneShell.ready(ctx) || AdbShell.hasKey(ctx)
+    private fun q(s: String) = "'" + s.replace("'", "'\\''") + "'"
+
+    fun findPackage(name: String): Pair<String, String>? {
         val pm = ctx.packageManager
-        val main = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        val apps = pm.queryIntentActivities(main, 0)
+        val apps = pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
         val q = name.trim().lowercase()
-        val match = apps.firstOrNull { it.loadLabel(pm).toString().lowercase() == q }
+        val m = apps.firstOrNull { it.loadLabel(pm).toString().lowercase() == q }
             ?: apps.firstOrNull { it.loadLabel(pm).toString().lowercase().contains(q) }
             ?: apps.firstOrNull { it.activityInfo.packageName.lowercase() == q }
-            ?: return "Application « $name » introuvable."
-        val launch = pm.getLaunchIntentForPackage(match.activityInfo.packageName) ?: return "Impossible de lancer ${match.loadLabel(pm)}."
+            ?: return null
+        return m.activityInfo.packageName to m.loadLabel(pm).toString()
+    }
+
+    private fun installed(pkg: String) = try { ctx.packageManager.getPackageInfo(pkg, 0); true } catch (e: Exception) { false }
+
+    /** Lance une activité même depuis l'arrière-plan : via ADB (am start) si disponible, sinon par intent classique. */
+    fun start(action: String?, data: String? = null, pkg: String? = null, extras: Map<String, String> = emptyMap()): String {
+        if (adbOk()) {
+            val cmd = buildString {
+                append("am start -f 0x10000000")
+                if (action != null) append(" -a ").append(action)
+                if (data != null) append(" -d ").append(q(data))
+                if (pkg != null) append(" -p ").append(pkg)
+                extras.forEach { (k, v) -> append(" --es ").append(k).append(' ').append(q(v)) }
+            }
+            val r = PhoneShell.exec(ctx, cmd)
+            if (!r.contains("Error", true) && !r.contains("Exception", true) && !r.startsWith("ADB non") && !r.startsWith("Erreur ADB")) return ""
+        }
+        return try {
+            val i = Intent(action ?: Intent.ACTION_VIEW).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (data != null) i.data = Uri.parse(data)
+            if (pkg != null) i.setPackage(pkg)
+            extras.forEach { (k, v) -> i.putExtra(k, v) }
+            ctx.startActivity(i); ""
+        } catch (e: Exception) { "Lancement impossible : ${e.message}. (Pour lancer des applis quand JARVIS est en arrière-plan : appairer l'ADB intégré ou autoriser l'affichage par-dessus les autres applis.)" }
+    }
+
+    fun openApp(name: String): String {
+        val (pkg, label) = findPackage(name) ?: return "Application « $name » introuvable."
+        if (adbOk()) {
+            val r = PhoneShell.exec(ctx, "monkey -p $pkg -c android.intent.category.LAUNCHER 1")
+            if (r.contains("Events injected", true) || r.contains("(commande exécutée)")) return "Ouverture de $label."
+        }
+        val launch = ctx.packageManager.getLaunchIntentForPackage(pkg) ?: return "Impossible de lancer $label."
         launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        ctx.startActivity(launch)
-        return "Ouverture de ${match.loadLabel(pm)}."
+        return try { ctx.startActivity(launch); "Ouverture de $label." } catch (e: Exception) { "Impossible de lancer $label : ${e.message}" }
+    }
+
+    /** Recherche et lecture d'un titre / artiste dans l'application de musique choisie (Spotify, YouTube Music, Deezer…). */
+    fun playMusic(requete: String, appli: String): String {
+        if (requete.isBlank()) return "Que veux-tu écouter ?"
+        val known = mapOf(
+            "spotify" to "com.spotify.music", "youtube music" to "com.google.android.apps.youtube.music", "ytmusic" to "com.google.android.apps.youtube.music",
+            "deezer" to "deezer.android.app", "amazon music" to "com.amazon.mp3", "apple music" to "com.apple.android.music", "vlc" to "org.videolan.vlc"
+        )
+        val a = appli.trim().lowercase()
+        var pkg: String? = if (a.isBlank()) null else known.entries.firstOrNull { a.contains(it.key) }?.value?.takeIf { installed(it) } ?: findPackage(a)?.first
+        if (a.isBlank()) pkg = known.values.firstOrNull { installed(it) }
+        if (a.contains("youtube") && !a.contains("music")) {
+            val r = start(Intent.ACTION_VIEW, "https://www.youtube.com/results?search_query=" + Uri.encode(requete), "com.google.android.youtube")
+            return r.ifBlank { "Recherche « $requete » ouverte dans YouTube." }
+        }
+        val r = start("android.media.action.MEDIA_PLAY_FROM_SEARCH", null, pkg,
+            mapOf("query" to requete, "android.intent.extra.focus" to "vnd.android.cursor.item/*"))
+        return r.ifBlank { "🎵 Lecture de « $requete »" + (pkg?.let { " dans " + (findPackage(it)?.second ?: it) } ?: "") + " lancée." }
+    }
+
+    fun mediaKey(action: String): String {
+        val code = when (action.lowercase().replace("-", "_")) {
+            "play" -> android.view.KeyEvent.KEYCODE_MEDIA_PLAY; "pause" -> android.view.KeyEvent.KEYCODE_MEDIA_PAUSE
+            "next", "suivant" -> android.view.KeyEvent.KEYCODE_MEDIA_NEXT; "previous", "precedent", "précédent" -> android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS
+            "stop" -> android.view.KeyEvent.KEYCODE_MEDIA_STOP; else -> android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
+        }
+        val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        am.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, code))
+        am.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, code))
+        return "⏯️ Commande média « $action » envoyée."
+    }
+
+    /** Lance la navigation Google Maps vers une destination (d = voiture, w = marche, b = vélo, l = deux-roues). */
+    fun navigate(dest: String, mode: String): String {
+        val m = when (mode.trim().lowercase()) { "marche", "a pied", "à pied", "walking", "w" -> "w"; "velo", "vélo", "bicycling", "b" -> "b"; else -> "d" }
+        val r = start(Intent.ACTION_VIEW, "google.navigation:q=" + Uri.encode(dest) + "&mode=$m", "com.google.android.apps.maps")
+        return r.ifBlank { "🧭 Navigation vers $dest lancée." }
     }
 
     fun openUrl(url: String): String {
@@ -125,6 +197,9 @@ class PhoneControl(private val ctx: Context) {
                 val r = sh("am start -a android.intent.action.CALL -d tel:${Uri.encode(value)}")
                 if (isError(r) || r.contains("Error", true) || r.contains("Exception", true)) "Échec de l'appel : $r" else "Appel de $value lancé."
             }
+            "music" -> playMusic(value.substringBefore('|'), value.substringAfter('|', ""))
+            "media" -> mediaKey(value)
+            "navigate" -> navigate(value, "")
             "back" -> a11y(AccessibilityService.GLOBAL_ACTION_BACK, "Retour.")
             "home" -> a11y(AccessibilityService.GLOBAL_ACTION_HOME, "Accueil.")
             "recents" -> a11y(AccessibilityService.GLOBAL_ACTION_RECENTS, "Applications récentes.")

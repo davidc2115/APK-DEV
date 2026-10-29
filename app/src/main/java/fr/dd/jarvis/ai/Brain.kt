@@ -18,10 +18,21 @@ class Brain(
     suspend fun reply(history: List<ChatMsg>, onStatus: (String) -> Unit): String {
         val recent = history.takeLast(4).filter { it.fromUser }.joinToString(" ") { it.text }
         val societeOn = fr.dd.jarvis.societe.SocieteTools.concerned(recent)
-        val schema = tools.schemaFor(recent)
+        onStatus("🧠 Analyse de la demande…")
+        val all = tools.schemaAll()
+        val plan = try { Analyseur.analyser(app, history, all) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { null }
+        val schema: JSONArray
+        var societeNeeded = societeOn
+        if (plan != null && plan.outils.isNotEmpty()) {
+            val keep = (plan.outils + listOf("memoire_ajouter")).toSet()
+            schema = JSONArray()
+            for (i in 0 until all.length()) if (all.getJSONObject(i).getJSONObject("function").getString("name") in keep) schema.put(all.get(i))
+            if (plan.outils.any { it in fr.dd.jarvis.societe.SocieteTools.NAMES }) societeNeeded = true
+        } else schema = tools.schemaFor(recent)
         val messages = JSONArray()
         messages.put(JSONObject().put("role", "system").put("content",
-            Prompts.brain(userName()) + app.memo.toutes() + (if (societeOn) "\n\n" + fr.dd.jarvis.societe.SocieteTools.PROMPT else "")))
+            Prompts.brain(userName()) + app.memo.toutes() + (if (societeNeeded) "\n\n" + fr.dd.jarvis.societe.SocieteTools.PROMPT else "") +
+                (if (plan != null && plan.note.isNotBlank()) "\n\nAnalyse préalable de la demande (Gemini) — suis ce plan, avec les outils fournis : ${plan.note}" else "")))
         history.takeLast(16).forEach { m ->
             messages.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(3000)))
         }

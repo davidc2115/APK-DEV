@@ -35,7 +35,10 @@ class VoiceManager(private val ctx: Context) {
         }
     }
 
-    fun startListening() {
+    fun startListening() = startListening(0)
+
+    /** [essai] : relances automatiques sur les erreurs transitoires (service vocal déconnecté…), puis repli sur la reconnaissance locale. */
+    private fun startListening(essai: Int) {
         main.post {
             if (!SpeechRecognizer.isRecognitionAvailable(ctx)) {
                 onFail("Reconnaissance vocale indisponible sur cet appareil (installer / activer Google).")
@@ -43,7 +46,8 @@ class VoiceManager(private val ctx: Context) {
             }
             stopSpeaking()
             recognizer?.destroy()
-            val r = SpeechRecognizer.createSpeechRecognizer(ctx)
+            val local = essai >= 2 && android.os.Build.VERSION.SDK_INT >= 33 && SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx)
+            val r = if (local) SpeechRecognizer.createOnDeviceSpeechRecognizer(ctx) else SpeechRecognizer.createSpeechRecognizer(ctx)
             recognizer = r
             r.setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) {}
@@ -54,12 +58,18 @@ class VoiceManager(private val ctx: Context) {
                 override fun onEvent(eventType: Int, params: Bundle?) {}
 
                 override fun onError(error: Int) {
+                    // 11 = service de reconnaissance déconnecté, 5 = erreur client, 10 = trop de requêtes, 8 = occupé : on recrée et on relance
+                    if (error in setOf(11, 5, 10, 8, SpeechRecognizer.ERROR_SERVER) && essai < 3) {
+                        main.postDelayed({ startListening(essai + 1) }, 500L * (essai + 1))
+                        return
+                    }
                     onListening(false)
                     when (error) {
                         SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> onFail("")
                         SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> onFail("Permission micro refusée.")
                         SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> onFail("Reconnaissance vocale : réseau indisponible.")
                         SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> onFail("Reconnaissance vocale occupée, réessaie.")
+                        11 -> onFail("Le service de reconnaissance vocale Google est indisponible : vérifie le réseau, ou Réglages Android › Applis › Google › « Reconnaissance vocale » (activer / mettre à jour).")
                         else -> onFail("Erreur de reconnaissance vocale ($error).")
                     }
                 }
