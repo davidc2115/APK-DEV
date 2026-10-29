@@ -24,7 +24,7 @@ class ClaudeProvider @Inject constructor(
 
     override suspend fun chat(history: List<AIMessage>): AIResponse {
         val apiKey = settings.getApiKey("claude")
-        val model = settings.getModelOverride("claude").ifBlank { "claude-sonnet-5" }
+        val model = settings.getModelOverride("claude").ifBlank { "claude-sonnet-5-5" }
 
         val messages = JSONArray().apply {
             history.filter { it.role != "system" }.forEach {

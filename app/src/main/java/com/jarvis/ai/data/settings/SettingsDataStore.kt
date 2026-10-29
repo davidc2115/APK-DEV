@@ -46,7 +46,7 @@ class SettingsDataStore @Inject constructor(
         prefs.edit().putString("preferred_${task.name}", providerName).apply()
 
     private fun defaultProviderFor(task: TaskKind): String = when (task) {
-        TaskKind.CHAT -> "claude"
+        TaskKind.CHAT -> "gemini" // offre gratuite ; choisir "claude" dans les réglages si clé API
         TaskKind.CODE -> "claude"
         TaskKind.WEB_SEARCH -> "perplexity"
         TaskKind.IMAGE -> "openai"

@@ -2,6 +2,7 @@ package com.jarvis.ai.ui.chat
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.jarvis.ai.core.agents.AgentOrchestrator
 import com.jarvis.ai.core.ai.AIMessage
 import com.jarvis.ai.core.ai.AIRouter
 import com.jarvis.ai.core.ai.TaskKind
@@ -25,6 +26,7 @@ data class ChatUiState(
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     private val aiRouter: AIRouter,
+    private val orchestrator: AgentOrchestrator,
     private val conversationDao: ConversationDao
 ) : ViewModel() {
 
@@ -52,7 +54,7 @@ class ChatViewModel @Inject constructor(
             conversationDao.insert(MessageEntity(role = "user", content = text, providerName = null))
             try {
                 val history = _uiState.value.messages.map { AIMessage(it.role, it.content) } + AIMessage("user", text)
-                val response = aiRouter.route(TaskKind.CHAT, history)
+                val response = orchestrator.run(history, text)
                 conversationDao.insert(
                     MessageEntity(role = "assistant", content = response.text, providerName = response.providerName)
                 )

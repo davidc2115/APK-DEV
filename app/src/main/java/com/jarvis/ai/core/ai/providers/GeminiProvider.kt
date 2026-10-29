@@ -25,12 +25,15 @@ class GeminiProvider @Inject constructor(
         val apiKey = settings.getApiKey("gemini")
         val model = settings.getModelOverride("gemini").ifBlank { "gemini-2.0-flash" }
         val contents = JSONArray().apply {
-            history.forEach {
+            history.filter { it.role != "system" }.forEach {
                 put(JSONObject().put("role", if (it.role == "assistant") "model" else "user")
                     .put("parts", JSONArray().put(JSONObject().put("text", it.content))))
             }
         }
         val body = JSONObject().put("contents", contents)
+        history.firstOrNull { it.role == "system" }?.let {
+            body.put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", it.content))))
+        }
         val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
         val request = Request.Builder()
             .url(url)

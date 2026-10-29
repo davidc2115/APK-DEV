@@ -71,7 +71,7 @@ private fun MessageBubble(message: MessageEntity) {
     val isUser = message.role == "user"
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start) {
         Card(modifier = Modifier.padding(4.dp)) {
-            Text(text = message.content, modifier = Modifier.padding(12.dp))
+            RichText(text = message.content, modifier = Modifier.padding(12.dp))
         }
     }
 }

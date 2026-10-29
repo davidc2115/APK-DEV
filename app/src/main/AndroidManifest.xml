@@ -14,8 +14,7 @@
     <!-- Contrôle téléphone (chacune demandée à l'usage, voir PermissionsManager) -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.WRITE_CALENDAR" />
-    <uses-permission android:name="android.permission.SEND_SMS" />
-    <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" /> <!-- minuteur / réveil -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.CAMERA" /> <!-- lampe torche -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
@@ -45,14 +44,6 @@
             android:foregroundServiceType="microphone"
             android:exported="false" />
 
-        <service
-            android:name=".core.phonecontrol.JarvisNotificationListener"
-            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.service.notification.NotificationListenerService" />
-            </intent-filter>
-        </service>
 
     </application>
 </manifest>
