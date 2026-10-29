@@ -60,6 +60,17 @@ class ToolBox(
                 "end" to prop("Nouvelle fin (optionnel)."),
                 "location" to prop("Nouveau lieu (optionnel).")
             ), listOf("event_id")))
+        put(tool("set_event_color", "Change la couleur d'un rendez-vous (synchronisée avec Google Agenda). Identifiant #id visible dans le planning ; sinon cherche par titre.",
+            mapOf(
+                "event_id" to prop("Identifiant numérique (optionnel si title fourni)."),
+                "title" to prop("Début du titre du rendez-vous à colorer (optionnel), prochain rendez-vous correspondant."),
+                "color" to prop("Couleur : rouge, orange, jaune, vert, vert foncé, turquoise, bleu, lavande, violet, rose, gris, ou #RRGGBB. « defaut » pour reprendre la couleur de l'agenda.")
+            ), listOf("color")))
+        put(tool("set_calendar_color", "Change la couleur d'un agenda entier (synchronisée avec Google Agenda).",
+            mapOf(
+                "calendar" to prop("Nom de l'agenda."),
+                "color" to prop("Couleur : rouge, orange, jaune, vert, turquoise, bleu, violet, rose, gris ou #RRGGBB. « defaut » pour la couleur d'origine.")
+            ), listOf("calendar", "color")))
         put(tool("delete_event", "Supprime un rendez-vous.", mapOf("event_id" to prop("Identifiant numérique de l'événement.")), listOf("event_id")))
         put(tool("summarize_mails", "Trie et résume les derniers mails de la boîte de réception.",
             mapOf(
@@ -138,6 +149,8 @@ class ToolBox(
         "create_event" -> createEvent(a)
         "update_event" -> updateEvent(a)
         "delete_event" -> deleteEvent(a)
+        "set_event_color" -> setEventColor(a)
+        "set_calendar_color" -> setCalendarColor(a)
         "summarize_mails" -> summarizeMails(a)
         "morning_briefing" -> ToolResult(briefing(), direct = true)
         "trier_mails" -> trierMails(a)
@@ -306,6 +319,38 @@ class ToolBox(
             null
         )
         return ToolResult(if (ok) "Événement #$id modifié." else "Rien à modifier ou événement introuvable.")
+    }
+
+    private fun couleurDemandee(txt: String): Pair<Boolean, Int?> {
+        val t = txt.trim().lowercase()
+        if (t in setOf("defaut", "défaut", "default", "origine", "agenda")) return true to null
+        val c = fr.dd.jarvis.device.CalendarRepo.parseColor(t)
+        return (c != null) to c
+    }
+
+    private suspend fun setEventColor(a: JSONObject): ToolResult {
+        if (!app.calendar.hasPermission()) return ToolResult("Permission agenda manquante.")
+        val (ok, col) = couleurDemandee(a.optString("color"))
+        if (!ok) return ToolResult("Couleur non reconnue : « ${a.optString("color")} ». Essaie rouge, orange, jaune, vert, turquoise, bleu, violet, rose, gris ou #RRGGBB.")
+        var id = a.optString("event_id").trim().removePrefix("#").toLongOrNull()
+        if (id == null) {
+            val q = a.optString("title").trim().lowercase()
+            if (q.isBlank()) return ToolResult("Indique l'identifiant ou le titre du rendez-vous.")
+            val now = System.currentTimeMillis()
+            val evs = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.calendar.events(LocalDate.now().minusDays(1), 60) }
+                .filter { it.title.lowercase().contains(q) }
+            val e = evs.filter { it.end >= now }.minByOrNull { it.begin } ?: evs.maxByOrNull { it.begin } ?: return ToolResult("Aucun rendez-vous « $q » trouvé.")
+            id = e.id
+        }
+        return ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.calendar.setEventColor(id, col) } + " (#$id)")
+    }
+
+    private suspend fun setCalendarColor(a: JSONObject): ToolResult {
+        if (!app.calendar.hasPermission()) return ToolResult("Permission agenda manquante.")
+        val (ok, col) = couleurDemandee(a.optString("color"))
+        if (!ok) return ToolResult("Couleur non reconnue : « ${a.optString("color")} ».")
+        val cal = app.calendar.findCalendar(a.optString("calendar"), false) ?: return ToolResult("Agenda introuvable.")
+        return ToolResult("${app.calendar.displayName(cal)} : " + app.calendar.setCalendarColor(cal, col))
     }
 
     private suspend fun deleteEvent(a: JSONObject): ToolResult {

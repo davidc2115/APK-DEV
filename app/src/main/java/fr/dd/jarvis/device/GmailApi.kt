@@ -26,7 +26,9 @@ object GmailApi {
     const val SCOPE = "https://www.googleapis.com/auth/gmail.modify"
     private const val BASE = "https://gmail.googleapis.com/gmail/v1/users/me"
 
-    private fun request(email: String?) = AuthorizationRequest.builder().setRequestedScopes(listOf(Scope(SCOPE))).apply {
+    const val CAL_SCOPE = "https://www.googleapis.com/auth/calendar"
+
+    private fun request(email: String?) = AuthorizationRequest.builder().setRequestedScopes(listOf(Scope(SCOPE), Scope(CAL_SCOPE))).apply {
         if (!email.isNullOrBlank()) setAccount(android.accounts.Account(email, "com.google"))
     }.build()
 
@@ -142,4 +144,25 @@ object GmailApi {
         }
         return n
     }
+
+    /** Change la couleur d'un agenda côté Google (liste d'agendas) : visible ensuite sur tous les appareils. Retourne null si OK, sinon l'erreur. */
+    suspend fun setCalendarColor(ctx: Context, account: String, googleCalId: String, rgb: Int): String? = try {
+        val auth = authorize(ctx, account)
+        if (auth.hasResolution()) "Autorisation Google Agenda à donner : Réglages › Mails › retire puis ajoute le compte Google."
+        else if (auth.accessToken == null) "Jeton Google indisponible."
+        else {
+            val token = auth.accessToken
+            withContext(Dispatchers.IO) {
+                val hex = "#%06x".format(rgb and 0xFFFFFF)
+                val body = JSONObject().put("backgroundColor", hex).put("foregroundColor", "#000000").toString()
+                val url = "https://www.googleapis.com/calendar/v3/users/me/calendarList/${java.net.URLEncoder.encode(googleCalId, "UTF-8")}?colorRgbFormat=true"
+                val req = Request.Builder().url(url).header("Authorization", "Bearer $token")
+                    .patch(body.toRequestBody("application/json".toMediaType())).build()
+                Http.client.newCall(req).execute().use { r ->
+                    if (r.isSuccessful) null else "Google Agenda ${r.code} : " + (r.body?.string().orEmpty().take(160)) +
+                        (if (r.code == 403) " (active « Google Calendar API » dans ton projet Google Cloud)" else "")
+                }
+            }
+        }
+    } catch (e: Exception) { e.message ?: e.javaClass.simpleName }
 }

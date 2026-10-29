@@ -178,4 +178,84 @@ class CalendarRepo(private val ctx: Context, private val store: Store) {
         }
         return all.firstOrNull()
     }
+
+    // ------------------------------------------------------------------ couleurs (écrites dans le fournisseur → synchronisées avec Google)
+
+    private fun meta(calId: Long): Triple<String, String, String>? {
+        ctx.contentResolver.query(
+            ContentUris.withAppendedId(CalendarContract.Calendars.CONTENT_URI, calId),
+            arrayOf(CalendarContract.Calendars.ACCOUNT_NAME, CalendarContract.Calendars.ACCOUNT_TYPE, CalendarContract.Calendars._SYNC_ID), null, null, null
+        )?.use { c -> if (c.moveToFirst()) return Triple(c.getString(0) ?: "", c.getString(1) ?: "", c.getString(2) ?: "") }
+        return null
+    }
+
+    private fun dist(a: Int, b: Int): Int {
+        val dr = ((a shr 16) and 255) - ((b shr 16) and 255); val dg = ((a shr 8) and 255) - ((b shr 8) and 255); val db = (a and 255) - (b and 255)
+        return dr * dr + dg * dg + db * db
+    }
+
+    /** Couleur d'événement : clé de la palette Google la plus proche (synchronisée), sinon couleur libre. null = couleur de l'agenda. */
+    fun setEventColor(eventId: Long, color: Int?): String {
+        if (!hasPermission()) return "Permission agenda manquante."
+        val calId = ctx.contentResolver.query(ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventId),
+            arrayOf(CalendarContract.Events.CALENDAR_ID), null, null, null)?.use { if (it.moveToFirst()) it.getLong(0) else null }
+            ?: return "Événement introuvable."
+        val (acc, type, _) = meta(calId) ?: return "Agenda introuvable."
+        val v = ContentValues()
+        var libelle = ""
+        if (color == null) { v.putNull(CalendarContract.Events.EVENT_COLOR_KEY); v.putNull(CalendarContract.Events.EVENT_COLOR) }
+        else {
+            var key: String? = null; var best = Int.MAX_VALUE; var bestCol = color
+            ctx.contentResolver.query(CalendarContract.Colors.CONTENT_URI,
+                arrayOf(CalendarContract.Colors.COLOR_KEY, CalendarContract.Colors.COLOR),
+                "${CalendarContract.Colors.ACCOUNT_NAME}=? AND ${CalendarContract.Colors.ACCOUNT_TYPE}=? AND ${CalendarContract.Colors.COLOR_TYPE}=?",
+                arrayOf(acc, type, CalendarContract.Colors.TYPE_EVENT.toString()), null)?.use { c ->
+                while (c.moveToNext()) { val d = dist(c.getInt(1), color); if (d < best) { best = d; key = c.getString(0); bestCol = c.getInt(1) } }
+            }
+            if (key != null) { v.put(CalendarContract.Events.EVENT_COLOR_KEY, key); libelle = " (couleur Google la plus proche)" }
+            else v.put(CalendarContract.Events.EVENT_COLOR, color)
+            if (key != null) store.setEventColor(eventId, null)
+        }
+        val ok = try { ctx.contentResolver.update(ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventId), v, null, null) > 0 } catch (e: Exception) { false }
+        if (!ok && color != null) { store.setEventColor(eventId, color); return "Couleur enregistrée dans JARVIS seulement (Google Agenda a refusé)." }
+        if (color == null) store.setEventColor(eventId, null)
+        return (if (color == null) "Couleur de l'agenda rétablie." else "Couleur du rendez-vous changée$libelle") + " — synchronisée avec Google Agenda."
+    }
+
+    /** Couleur d'un agenda : Google Calendar API (visible partout) + fournisseur local. */
+    suspend fun setCalendarColor(cal: CalInfo, color: Int?): String {
+        store.setCalColor(cal.id, null)
+        if (color == null) return "Couleur d'origine rétablie (locale)."
+        val (acc, type, syncId) = meta(cal.id) ?: return "Agenda introuvable."
+        val local = try {
+            val uri = CalendarContract.Calendars.CONTENT_URI.buildUpon().appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
+                .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, acc).appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, type).build()
+            ctx.contentResolver.update(uri, ContentValues().apply { put(CalendarContract.Calendars.CALENDAR_COLOR, color) },
+                "${CalendarContract.Calendars._ID}=?", arrayOf(cal.id.toString())) > 0
+        } catch (e: Exception) { false }
+        if (type != "com.google" || syncId.isBlank()) {
+            if (!local) store.setCalColor(cal.id, color)
+            return "Couleur de l'agenda changée (agenda non-Google : local)."
+        }
+        val err = fr.dd.jarvis.device.GmailApi.setCalendarColor(ctx, acc, syncId, color)
+        if (err == null) return "Couleur de l'agenda changée sur Google Agenda."
+        if (!local) store.setCalColor(cal.id, color)
+        return "Couleur changée sur le téléphone seulement : $err"
+    }
+
+    companion object {
+        /** « rouge », « bleu ciel », « #ff8800 »… → couleur ARGB, ou null. */
+        fun parseColor(s: String): Int? {
+            val t = s.trim().lowercase()
+            if (t.isBlank()) return null
+            if (t.startsWith("#") || t.matches(Regex("[0-9a-f]{6}"))) return runCatching { (0xFF000000L or t.removePrefix("#").toLong(16)).toInt() }.getOrNull()
+            val m = mapOf(
+                "rouge" to 0xD50000, "tomate" to 0xD50000, "rose" to 0xE67C73, "flamant" to 0xE67C73, "orange" to 0xF4511E, "mandarine" to 0xF4511E,
+                "jaune" to 0xF6BF26, "banane" to 0xF6BF26, "vert" to 0x33B679, "sauge" to 0x33B679, "vert fonce" to 0x0B8043, "vert foncé" to 0x0B8043, "basilic" to 0x0B8043,
+                "turquoise" to 0x039BE5, "paon" to 0x039BE5, "bleu ciel" to 0x039BE5, "bleu" to 0x3F51B5, "myrtille" to 0x3F51B5,
+                "violet" to 0x8E24AA, "raisin" to 0x8E24AA, "lavande" to 0x7986CB, "gris" to 0x616161, "graphite" to 0x616161, "noir" to 0x212121, "blanc" to 0xFFFFFF
+            )
+            return m[t]?.let { 0xFF000000.toInt() or it }
+        }
+    }
 }

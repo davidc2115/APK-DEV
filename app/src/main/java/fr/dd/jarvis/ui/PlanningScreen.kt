@@ -52,6 +52,8 @@ import androidx.compose.ui.unit.sp
 import fr.dd.jarvis.JarvisApp
 import fr.dd.jarvis.device.CalInfo
 import fr.dd.jarvis.device.EventInfo
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.Instant
@@ -230,8 +232,11 @@ fun PlanningScreen(app: JarvisApp) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     HudTextField(alias, { alias = it }, label = "Nom affiché (laisser vide = nom d'origine)")
                     Text("Couleur", color = HudDim, fontSize = 12.sp)
-                    ColorPalette(store.calColor[cal.id]) { store.setCalColor(cal.id, it) }
-                    TextButton({ store.setCalColor(cal.id, null) }) { Text("Couleur d'origine", color = LocalAccent.current) }
+                    var calMsg by remember(cal.id) { mutableStateOf("") }
+                    val calScope = rememberCoroutineScope()
+                    ColorPalette(cal.color) { c -> if (c != null) calScope.launch { calMsg = "⏳"; calMsg = withContext(Dispatchers.IO) { repo.setCalendarColor(cal, c) }; cals = repo.calendars(); refresh++ } }
+                    TextButton({ calScope.launch { calMsg = repo.setCalendarColor(cal, null); refresh++ } }) { Text("Couleur d'origine", color = LocalAccent.current) }
+                    if (calMsg.isNotBlank()) Text(calMsg, color = HudDim, fontSize = 11.sp)
                 }
             },
             confirmButton = {
@@ -264,12 +269,12 @@ fun PlanningScreen(app: JarvisApp) {
                     }
                     if (e.description.isNotBlank()) Text(e.description.take(600), color = HudDim, fontSize = 12.sp)
                     Text("Couleur du rendez-vous", color = HudDim, fontSize = 12.sp)
-                    ColorPalette(store.eventColor[e.id]) {
-                        store.setEventColor(e.id, it)
+                    ColorPalette(store.eventColor[e.id] ?: e.eventColor) {
+                        repo.setEventColor(e.id, it)
                         refresh++
                     }
                     TextButton({
-                        store.setEventColor(e.id, null)
+                        repo.setEventColor(e.id, null)
                         refresh++
                     }) { Text("Couleur de l'agenda", color = LocalAccent.current) }
                 }
