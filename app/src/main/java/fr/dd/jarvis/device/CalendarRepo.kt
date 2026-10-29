@@ -95,13 +95,18 @@ class CalendarRepo(private val ctx: Context, private val store: Store) {
             CalendarContract.Instances.EVENT_COLOR
         )
         val out = mutableListOf<EventInfo>()
+        val memoWords = if (onlyVisible) runCatching { (ctx.applicationContext as fr.dd.jarvis.JarvisApp).memo.agendaExclus() }.getOrDefault(emptyList()) else emptyList()
+        val excludedByMemo = if (memoWords.isEmpty()) emptySet() else calendars().filter { c ->
+            val n = (displayName(c) + " " + c.name).lowercase()
+            memoWords.any { it in n }
+        }.map { it.id }.toSet()
         ctx.contentResolver.query(builder.build(), proj, null, null, CalendarContract.Instances.BEGIN + " ASC")?.use { c ->
             while (c.moveToNext()) {
                 val allDay = c.getInt(5) == 1
                 val b = c.getLong(3)
                 val e = c.getLong(4)
                 val calId = c.getLong(1)
-                if (onlyVisible && calId in store.hiddenCals) continue
+                if (onlyVisible && (calId in store.hiddenCals || calId in excludedByMemo)) continue
                 val inRange = if (allDay) {
                     // Les événements « journée entière » sont stockés en UTC : on compare les dates.
                     val d = Instant.ofEpochMilli(b).atZone(ZoneOffset.UTC).toLocalDate()

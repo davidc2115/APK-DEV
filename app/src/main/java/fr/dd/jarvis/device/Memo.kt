@@ -87,4 +87,28 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         return "\n\nMémoire de l'utilisateur (consignes durables, à appliquer) :\n" +
             items.entries.joinToString("\n") { "- [${it.key}] ${it.value.take(600)}" }.take(3500)
     }
+
+    private val exclRegex = Regex(
+        "(?:\\bsans\\b|\\bsauf\\b|\\bpas de\\b|\\bne pas (?:afficher|inclure|montrer|prendre|mettre|compter)|\\bne plus (?:afficher|inclure|montrer|prendre)|\\bexclure|\\bexclus|\\bignorer?|\\bmasquer|\\bcacher|\\benlever|\\bretirer)" +
+            "\\s+(?:le |la |l'|l’|les |un |du |des )?(?:planning |agenda |calendrier |rdv |rendez-vous )?(?:de |d'|d’|du |des )?([\\p{L}0-9'’. -]{2,40}?)(?=[,.;:!?\\n()]| et | ou | mais | quand | sauf |$)",
+        RegexOption.IGNORE_CASE
+    )
+
+    /** Mots (noms d'agendas) que les consignes demandent d'exclure : « sans le planning de Thomas » → [thomas]. */
+    @Synchronized
+    fun agendaExclus(): List<String> {
+        ensure()
+        val out = linkedSetOf<String>()
+        items.forEach { (k, v) ->
+            if (k in setOf("contacts", "mails", "societe")) return@forEach
+            v.lines().forEach { line ->
+                exclRegex.findAll(line).forEach { m ->
+                    m.groupValues[1].lowercase().split(' ', '-', '\'', '’').map { it.trim('.') }
+                        .filter { it.length >= 3 && it !in setOf("les", "des", "mon", "ton", "son", "tout", "plus", "ses", "mes") }
+                        .forEach { out.add(it) }
+                }
+            }
+        }
+        return out.toList()
+    }
 }

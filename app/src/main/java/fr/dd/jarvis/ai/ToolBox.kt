@@ -306,7 +306,7 @@ class ToolBox(
         val cals = cal.calendars().associateBy { it.id }
         val zone = ZoneId.systemDefault()
         val filterId = calendarFilter?.takeIf { it.isNotBlank() }?.let { cal.findCalendar(it, false)?.id }
-        val events = cal.events(from, days).filter { filterId == null || it.calId == filterId }
+        val events = cal.events(from, days, onlyVisible = filterId == null).filter { filterId == null || it.calId == filterId }
         if (events.isEmpty()) return ""
         return events.joinToString("\n") { e ->
             val s = java.time.Instant.ofEpochMilli(e.begin).atZone(if (e.allDay) java.time.ZoneOffset.UTC else zone)
@@ -360,7 +360,7 @@ class ToolBox(
         val cal = app.calendar
         val zone = ZoneId.systemDefault()
         val filterId = calendarFilter?.takeIf { it.isNotBlank() }?.let { cal.findCalendar(it, false)?.id }
-        val events = cal.events(from, days).filter { filterId == null || it.calId == filterId }
+        val events = cal.events(from, days, onlyVisible = filterId == null).filter { filterId == null || it.calId == filterId }
         val dayTitle = DateTimeFormatter.ofPattern("EEEE d MMMM yyyy", Locale.FRENCH)
         val phone = Regex("(?:\\+33|0)\\s?[1-9](?:[\\s.-]?\\d{2}){4}")
         val sb = StringBuilder()
