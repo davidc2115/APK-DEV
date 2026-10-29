@@ -122,7 +122,10 @@ fun SettingsScreen(app: JarvisApp) {
         // ------------------------------------------------------------ Mails
         item {
             var result by remember { mutableStateOf("") }
-            HudPanel(Modifier.fillMaxWidth(), title = "Mails (IMAP)") {
+            HudPanel(Modifier.fillMaxWidth(), title = "Mails") {
+                GoogleConnect(app)
+                Spacer(Modifier.height(10.dp))
+                Text("Ou IMAP :", color = HudDim, fontSize = 12.sp)
                 Text("Gmail : active l'IMAP, puis crée un « mot de passe d'application » (Compte Google › Sécurité).", color = HudDim, fontSize = 12.sp)
                 Spacer(Modifier.height(8.dp))
                 HudTextField(store.mailHost.value, { store.mailHost.set(it) }, Modifier.fillMaxWidth(), label = "Serveur IMAP")

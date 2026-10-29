@@ -94,8 +94,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val reply = try {
                 brain.reply(messages.toList()) { s -> status = s }
-            } catch (e: Exception) {
-                "⚠️ ${e.message ?: "Erreur inconnue"}"
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                "⚠️ ${e.message ?: e.javaClass.simpleName}"
             }
             messages.add(ChatMsg(false, reply))
             busy = false

@@ -119,7 +119,9 @@ class Store(context: Context) {
     val mailPort = SPref("mailPort", "993")
     val mailUser = SPref("mailUser", "")
     val mailPass = SPref("mailPass", "")
-    fun mailConfigured() = mailHost.value.isNotBlank() && mailUser.value.isNotBlank() && mailPass.value.isNotBlank()
+    val gmailAccount = SPref("gmailAccount", "")
+
+    fun mailConfigured() = gmailAccount.value.isNotBlank() || mailHost.value.isNotBlank() && mailUser.value.isNotBlank() && mailPass.value.isNotBlank()
 
     // ---- Obsidian (dossier choisi via le sélecteur Android)
     val obsidianUri = SPref("obsidianUri", "")

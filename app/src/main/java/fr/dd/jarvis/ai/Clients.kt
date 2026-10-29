@@ -92,7 +92,7 @@ class GeminiClient(private val ring: KeyRing, private val model: () -> String) {
                 JSONObject().put("role", "user")
                     .put("parts", JSONArray().put(JSONObject().put("text", user)))
             ))
-            .put("generationConfig", JSONObject().put("temperature", 0.3).put("maxOutputTokens", maxTokens))
+            .put("generationConfig", JSONObject().put("temperature", 0.3).put("maxOutputTokens", if (maxTokens > 100) 8192 else maxTokens))
         if (system.isNotBlank()) {
             body.put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
         }

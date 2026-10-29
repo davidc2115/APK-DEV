@@ -12,7 +12,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
+import android.app.Activity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.Text
+import androidx.compose.ui.platform.LocalContext
+import fr.dd.jarvis.device.GmailApi
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -61,10 +67,9 @@ fun MailScreen(app: JarvisApp) {
 
     if (!store.mailConfigured()) {
         HudPanel(Modifier.padding(12.dp).fillMaxWidth(), title = "Mails") {
-            Text(
-                "Renseigne ton serveur IMAP dans Réglages › Mails.\nGmail : active l'IMAP et crée un « mot de passe d'application » (Compte Google › Sécurité).",
-                color = HudText, fontSize = 14.sp
-            )
+            Text("Connecte ton compte Google (lecture seule de ta boîte de réception), ou renseigne un serveur IMAP dans Réglages › Mails.", color = HudText, fontSize = 14.sp)
+            Spacer(Modifier.height(8.dp))
+            GoogleConnect(app)
         }
         return
     }
@@ -110,5 +115,50 @@ fun MailScreen(app: JarvisApp) {
                 Text(m.snippet.take(160), color = HudDim, fontSize = 12.sp)
             }
         }
+    }
+}
+
+/** Connexion du compte Google (écran de consentement Google, lecture seule des mails). */
+@Composable
+fun GoogleConnect(app: JarvisApp, onDone: () -> Unit = {}) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var msg by remember { mutableStateOf("") }
+    suspend fun finish(token: String?) {
+        if (token == null) { msg = "❌ Autorisation refusée."; return }
+        try {
+            val email = GmailApi.profile(token)
+            app.store.gmailAccount.set(email.ifBlank { "compte Google" })
+            msg = "✅ Connecté : $email"
+            onDone()
+        } catch (e: Exception) { msg = "❌ ${e.message}" }
+    }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { res ->
+        scope.launch {
+            if (res.resultCode == Activity.RESULT_OK) {
+                try { finish(GmailApi.resultFromIntent(ctx, res.data).accessToken) } catch (e: Exception) { msg = "❌ ${e.message}" }
+            } else msg = "Connexion annulée."
+        }
+    }
+    val account = app.store.gmailAccount.value
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (account.isNotBlank()) {
+            Text("✅ Compte Google connecté : $account", color = HudText, fontSize = 13.sp)
+            HudButton("Déconnecter") { app.store.gmailAccount.set(""); msg = "Compte déconnecté." }
+        } else {
+            HudButton("Connecter mon compte Google", filled = true) {
+                scope.launch {
+                    msg = "⏳ Connexion…"
+                    try {
+                        val r = GmailApi.authorize(ctx)
+                        if (r.hasResolution()) launcher.launch(IntentSenderRequest.Builder(r.pendingIntent!!.intentSender).build())
+                        else finish(r.accessToken)
+                    } catch (e: Exception) {
+                        msg = "❌ " + (e.message ?: "erreur") + "\n(Si « 10 » ou « DEVELOPER_ERROR » : la configuration Google Cloud n'est pas faite, voir la notice.)"
+                    }
+                }
+            }
+        }
+        if (msg.isNotBlank()) Text(msg, color = HudText, fontSize = 12.sp)
     }
 }

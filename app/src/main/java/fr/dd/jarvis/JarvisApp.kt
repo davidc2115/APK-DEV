@@ -43,7 +43,7 @@ class JarvisApp : Application() {
         store = Store(this)
         llm = Llm(store)
         calendar = CalendarRepo(this, store)
-        mail = MailRepo(store)
+        mail = MailRepo(this, store)
         contacts = ContactsRepo(this)
         obsidian = ObsidianWriter(this, store)
         phone = PhoneControl(this)

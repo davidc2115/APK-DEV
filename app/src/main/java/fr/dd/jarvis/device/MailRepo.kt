@@ -1,5 +1,6 @@
 package fr.dd.jarvis.device
 
+import android.content.Context
 import fr.dd.jarvis.data.Store
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -23,9 +24,12 @@ data class MailItem(
 )
 
 /** Lecture des mails en IMAP (Gmail : activer l'IMAP et utiliser un « mot de passe d'application »). */
-class MailRepo(private val store: Store) {
+class MailRepo(private val ctx: Context, private val store: Store) {
 
-    suspend fun fetchRecent(count: Int, unreadOnly: Boolean): List<MailItem> = withContext(Dispatchers.IO) {
+    suspend fun fetchRecent(count: Int, unreadOnly: Boolean): List<MailItem> =
+        if (store.gmailAccount.value.isNotBlank()) GmailApi.fetchRecent(ctx, count, unreadOnly) else fetchImap(count, unreadOnly)
+
+    private suspend fun fetchImap(count: Int, unreadOnly: Boolean): List<MailItem> = withContext(Dispatchers.IO) {
         val host = store.mailHost.value.trim()
         val port = store.mailPort.value.trim().toIntOrNull() ?: 993
         val props = Properties().apply {

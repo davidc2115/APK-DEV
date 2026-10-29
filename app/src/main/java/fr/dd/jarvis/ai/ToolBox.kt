@@ -169,7 +169,7 @@ class ToolBox(
             LocalDate.now()
         }
         val days = (a.optString("days").toIntOrNull() ?: 1).coerceIn(1, 14)
-        val data = planningData(from, days, a.optString("calendar"))
+        val data = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { planningData(from, days, a.optString("calendar")) }
         if (data.isBlank()) {
             val title = from.format(DateTimeFormatter.ofPattern("EEEE d MMMM yyyy", Locale.FRENCH))
             return ToolResult("# 📅 $title\n\nAucun événement sur cette période. 🎉", direct = true)
@@ -177,7 +177,52 @@ class ToolBox(
         val q = a.optString("question")
         val user = "Aujourd'hui : ${Prompts.now()}\nPériode : du $from sur $days jour(s)\n" +
             (if (q.isNotBlank()) "Question : $q\n" else "") + "Événements :\n$data"
-        return ToolResult(llm.agent(Prompts.planning(), user), direct = true)
+        // L'agent peut être lent ou en erreur (quota, modèle) : au-delà de 40 s ou en cas d'échec, mise en forme locale.
+        val text = try {
+            kotlinx.coroutines.withTimeout(40_000) { llm.agent(Prompts.planning(), user) }.ifBlank { null }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            if (e is kotlinx.coroutines.TimeoutCancellationException) null else throw e
+        } catch (e: Exception) {
+            null
+        }
+        val out = text ?: (kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { localPlanning(from, days, a.optString("calendar")) } +
+            "\n\n_⚠️ Mise en forme locale (l'agent IA n'a pas répondu)._")
+        return ToolResult(out, direct = true)
+    }
+
+    /** Planning mis en forme sans IA (même présentation : 📅 jour, blocs séparés, 🕗 horaires, 📍 Maps, 📞 tel:). */
+    fun localPlanning(from: LocalDate, days: Int, calendarFilter: String?): String {
+        val cal = app.calendar
+        val zone = ZoneId.systemDefault()
+        val filterId = calendarFilter?.takeIf { it.isNotBlank() }?.let { cal.findCalendar(it, false)?.id }
+        val events = cal.events(from, days).filter { filterId == null || it.calId == filterId }
+        val dayTitle = DateTimeFormatter.ofPattern("EEEE d MMMM yyyy", Locale.FRENCH)
+        val phone = Regex("(?:\\+33|0)\\s?[1-9](?:[\\s.-]?\\d{2}){4}")
+        val sb = StringBuilder()
+        var last: LocalDate? = null
+        events.forEach { e ->
+            val z = if (e.allDay) java.time.ZoneOffset.UTC else zone
+            val s = java.time.Instant.ofEpochMilli(e.begin).atZone(z)
+            val en = java.time.Instant.ofEpochMilli(e.end).atZone(z)
+            if (s.toLocalDate() != last) {
+                last = s.toLocalDate()
+                if (sb.isNotEmpty()) sb.append("\n")
+                sb.append("# 📅 ").append(s.format(dayTitle)).append("\n\n")
+            } else sb.append("---\n\n")
+            val horaire = if (e.allDay) "Journée entière" else "${s.format(timeFmt)} – ${en.format(timeFmt)}"
+            sb.append("## 🕗 $horaire · ${e.title}\n")
+            if (e.location.isNotBlank()) {
+                val q = java.net.URLEncoder.encode(e.location, "UTF-8")
+                sb.append("📍 [${e.location}](https://www.google.com/maps/search/?api=1&query=$q)\n")
+            }
+            phone.findAll(e.location + " " + e.description).map { it.value }.distinct().forEach { n ->
+                val digits = n.replace(Regex("[^0-9+]"), "").let { if (it.startsWith("0")) "+33" + it.drop(1) else it }
+                sb.append("📞 [$n](tel:$digits)\n")
+            }
+            if (e.description.isNotBlank()) sb.append("⚠️ ${e.description.replace('\n', ' ').take(300)}\n")
+            sb.append("\n")
+        }
+        return sb.toString().trim()
     }
 
     private suspend fun createEvent(a: JSONObject): ToolResult {
