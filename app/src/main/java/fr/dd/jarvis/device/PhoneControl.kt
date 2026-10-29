@@ -67,6 +67,42 @@ class PhoneControl(private val ctx: Context) {
         return if (s.global(action)) okText else "Action impossible."
     }
 
+
+    private fun isError(r: String) = r.startsWith("Erreur ADB") || r.startsWith("ADB non connecté") || r.startsWith("Aucun accès")
+
+    /** Exécute une commande shell (ADB intégré ou Shizuku) hors du thread appelant. */
+    private fun sh(cmd: String): String {
+        if (!PhoneShell.ready(ctx) && !AdbShell.hasKey(ctx)) return "Aucun accès adb : appairer l'ADB intégré dans Réglages › Contrôle du téléphone."
+        var out = ""
+        val t = Thread { out = PhoneShell.exec(ctx, cmd) }
+        t.start(); t.join(25_000)
+        return out
+    }
+
+    private fun stateOn(key: String): Boolean? {
+        val r = when (key) {
+            "mobile_data" -> sh("settings get global mobile_data")
+            else -> sh("settings get global $key")
+        }.trim()
+        return when (r) { "1" -> true; "0" -> false; else -> null }
+    }
+
+    /** Essaie chaque commande, puis vérifie l'état réel avant de répondre. */
+    private fun toggle(label: String, on: Boolean, key: String, cmds: List<String>): String {
+        val errors = mutableListOf<String>()
+        for (c in cmds) {
+            val r = sh(c)
+            if (isError(r)) return "Échec $label : $r"
+            Thread.sleep(1200)
+            val st = stateOn(key)
+            if (st == null || st == on) {
+                return if (st == on) "$label ${if (on) "activé" else "désactivé"}." else "$label : commande envoyée (état non vérifiable)."
+            }
+            errors += "$c → $r"
+        }
+        return "$label n'a pas changé d'état malgré ${cmds.size} commande(s) : ${errors.joinToString(" | ")}"
+    }
+
     fun perform(action: String, value: String): String = try {
         when (action) {
             "torch_on" -> torch(true)
@@ -74,16 +110,21 @@ class PhoneControl(private val ctx: Context) {
             "open_app" -> openApp(value)
             "open_url" -> openUrl(value)
             "volume" -> volume(value.filter { it.isDigit() }.toIntOrNull() ?: 50)
-            "wifi_on" -> PhoneShell.exec(ctx, "svc wifi enable").let { "Wi-Fi activé. $it" }
-            "wifi_off" -> PhoneShell.exec(ctx, "svc wifi disable").let { "Wi-Fi désactivé. $it" }
-            "bluetooth_on" -> PhoneShell.exec(ctx, "svc bluetooth enable").let { "Bluetooth activé. $it" }
-            "bluetooth_off" -> PhoneShell.exec(ctx, "svc bluetooth disable").let { "Bluetooth désactivé. $it" }
+            "wifi_on" -> toggle("Wi-Fi", true, "wifi_on", listOf("cmd wifi set-wifi-enabled enabled", "svc wifi enable"))
+            "wifi_off" -> toggle("Wi-Fi", false, "wifi_on", listOf("cmd wifi set-wifi-enabled disabled", "svc wifi disable"))
+            "bluetooth_on" -> toggle("Bluetooth", true, "bluetooth_on", listOf("cmd bluetooth_manager enable", "svc bluetooth enable"))
+            "bluetooth_off" -> toggle("Bluetooth", false, "bluetooth_on", listOf("cmd bluetooth_manager disable", "svc bluetooth disable"))
+            "data_on" -> toggle("Données mobiles", true, "mobile_data", listOf("svc data enable"))
+            "data_off" -> toggle("Données mobiles", false, "mobile_data", listOf("svc data disable"))
             "brightness" -> {
                 val p = (value.filter { it.isDigit() }.toIntOrNull() ?: 50).coerceIn(0, 100)
-                PhoneShell.exec(ctx, "settings put system screen_brightness_mode 0; settings put system screen_brightness ${p * 255 / 100}")
-                "Luminosité réglée à $p %."
+                val r = sh("settings put system screen_brightness_mode 0; settings put system screen_brightness ${p * 255 / 100}")
+                if (isError(r)) "Échec luminosité : $r" else "Luminosité réglée à $p %."
             }
-            "call" -> PhoneShell.exec(ctx, "am start -a android.intent.action.CALL -d tel:${Uri.encode(value)}").let { "Appel de $value lancé. $it" }
+            "call" -> {
+                val r = sh("am start -a android.intent.action.CALL -d tel:${Uri.encode(value)}")
+                if (isError(r) || r.contains("Error", true) || r.contains("Exception", true)) "Échec de l'appel : $r" else "Appel de $value lancé."
+            }
             "back" -> a11y(AccessibilityService.GLOBAL_ACTION_BACK, "Retour.")
             "home" -> a11y(AccessibilityService.GLOBAL_ACTION_HOME, "Accueil.")
             "recents" -> a11y(AccessibilityService.GLOBAL_ACTION_RECENTS, "Applications récentes.")
@@ -109,6 +150,6 @@ class PhoneControl(private val ctx: Context) {
 
     companion object {
         /** Actions qui demandent une confirmation explicite avant exécution. */
-        val SENSITIVE = setOf("call", "click_text", "type_text", "tap", "wifi_off", "bluetooth_off", "lock")
+        val SENSITIVE = setOf("call", "click_text", "type_text", "tap", "wifi_off", "bluetooth_off", "data_off", "lock")
     }
 }

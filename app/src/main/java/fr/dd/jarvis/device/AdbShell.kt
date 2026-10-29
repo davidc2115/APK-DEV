@@ -86,6 +86,9 @@ object AdbShell {
     @Synchronized
     private fun mgr(ctx: Context): Manager = manager ?: Manager(ctx.applicationContext).also { manager = it }
 
+    /** Une clé ADB existe : appairage fait au moins une fois (la connexion se rétablit seule). */
+    fun hasKey(ctx: Context): Boolean = File(ctx.filesDir, "adb_key.pk8").exists()
+
     fun connected(): Boolean = try { manager?.isConnected == true } catch (e: Throwable) { false }
 
     /** Connexion (découverte automatique du port via mDNS). Nécessite d'être appairé et en Wi-Fi. */

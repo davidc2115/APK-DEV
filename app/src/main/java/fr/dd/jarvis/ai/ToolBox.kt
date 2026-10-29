@@ -88,12 +88,12 @@ class ToolBox(
             ), listOf("name")))
         put(tool("create_contact_card", "Génère la fiche contact complète (Markdown Obsidian) d'un contact et l'enregistre.",
             mapOf("name" to prop("Nom du contact.")), listOf("name")))
-        put(tool("phone_action", "Agit sur le téléphone. Actions : torch_on, torch_off, open_app, open_url, volume, wifi_on, wifi_off, bluetooth_on, bluetooth_off, brightness, call, back, home, recents, notifications, quick_settings, lock, screenshot, read_screen, click_text, type_text, scroll_down, scroll_up, tap.",
+        put(tool("phone_action", "Agit sur le téléphone. Actions : torch_on, torch_off, open_app, open_url, volume, wifi_on, wifi_off, bluetooth_on, bluetooth_off, data_on, data_off, brightness, call, back, home, recents, notifications, quick_settings, lock, screenshot, read_screen, click_text, type_text, scroll_down, scroll_up, tap.",
             mapOf(
                 "action" to prop("Nom de l'action."),
                 "value" to prop("Paramètre : nom d'app, URL, pourcentage, numéro, texte à cliquer ou à saisir, ou « x,y » pour tap.")
             ), listOf("action")))
-        put(tool("run_shell", "Exécute une commande shell sur le téléphone via Shizuku (réservé aux besoins que phone_action ne couvre pas).",
+        put(tool("run_shell", "Exécute une commande shell sur le téléphone via adb/Shizuku (réservé aux besoins que phone_action ne couvre pas).",
             mapOf("command" to prop("Commande shell.")), listOf("command")))
     }
 
@@ -359,7 +359,7 @@ class ToolBox(
         if (action in PhoneControl.SENSITIVE && !confirm("Exécuter l'action « $action »" + (if (value.isNotBlank()) " ($value)" else "") + " sur le téléphone ?", false)) {
             return ToolResult("Action refusée par l'utilisateur.")
         }
-        return ToolResult(app.phone.perform(action, value))
+        return ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.perform(action, value) })
     }
 
     private suspend fun runShell(a: JSONObject): ToolResult {
