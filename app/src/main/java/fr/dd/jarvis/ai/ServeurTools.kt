@@ -10,9 +10,9 @@ import org.json.JSONObject
 class ServeurTools(private val app: JarvisApp, private val confirm: suspend (String, Boolean) -> Boolean) {
 
     companion object {
-        val KEYWORDS = Regex("home ?assistant|domotique|\\bha\\b|ssh|serveur|server|yaml|docker|lumi[èe]re|volet|thermostat|automatisation|automation|sc[èe]ne\\b|configuration\\.yaml|debian|raspberry|esphome|zigbee|mqtt|capteur|\\bprise\\b|interrupteur", RegexOption.IGNORE_CASE)
+        val KEYWORDS = Regex("home ?assistant|domotique|\\bha\\b|ssh|serveur|server|yaml|docker|lumi[èe]re|volet|thermostat|automatisation|automation|sc[èe]ne\\b|configuration\\.yaml|debian|raspberry|esphome|zigbee|mqtt|capteur|\\bprise\\b|interrupteur|r[ée]seau|wifi|wi-fi|imprim|scann|\\bip\\b|adresse ip|github|\\bgit\\b|canon|epson|brother|\\bhp\\b|appareils?\\b|script|\\bcode\\b|ping|port", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
-        val NAMES = setOf("ha_entites", "ha_etat", "ha_service", "ha_config", "ssh_commande", "ssh_fichier", "serveur_diagnostic")
+        val NAMES = setOf("ha_entites", "ha_etat", "ha_service", "ha_config", "ssh_commande", "ssh_fichier", "serveur_diagnostic", "reseau_infos", "reseau_scanner", "appareil_sonder", "appareil_page", "imprimantes_trouver", "imprimer", "ssh_script", "github")
     }
 
     private fun prop(d: String) = JSONObject().put("type", "string").put("description", d)
@@ -33,9 +33,26 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
             mapOf("action" to prop("lister | lire | ecrire | sauvegardes | restaurer | valider | recharger | redemarrer | journal"), "fichier" to prop("Chemin relatif au dossier de config, ex. automations.yaml (ou dossier pour lister)."),
                 "contenu" to prop("ecrire : contenu complet du fichier. restaurer : nom de la sauvegarde (.jarvis-bak-…)."), "quoi" to prop("recharger : all | automation | script | scene | core (défaut all).")), listOf("action")),
         tool("ssh_commande", "Serveur SSH : exécute une commande shell sur le serveur (Debian) et retourne la sortie. Contrôle complet : docker, systemctl, apt, logs, réseau… Les commandes destructrices demandent une confirmation.",
-            mapOf("commande" to prop("Commande shell."), "delai" to prop("Délai maximal en secondes (défaut 60).")), listOf("commande")),
+            mapOf("commande" to prop("Commande shell."), "delai" to prop("Délai maximal en secondes (défaut 60)."),
+                "hote" to prop("Autre machine à joindre en SSH (IP/nom) au lieu du serveur des Réglages (optionnel)."), "utilisateur" to prop("Utilisateur de cette autre machine."),
+                "mot_de_passe" to prop("Mot de passe de cette autre machine."), "port" to prop("Port SSH (défaut 22).")), listOf("commande")),
         tool("ssh_fichier", "Serveur SSH : lit, écrit (sauvegarde auto) ou liste des fichiers du serveur.",
             mapOf("action" to prop("lire | ecrire | lister"), "chemin" to prop("Chemin absolu sur le serveur."), "contenu" to prop("ecrire : contenu complet.")), listOf("action", "chemin")),
+        tool("ssh_script", "Serveur SSH : envoie et exécute un script complet (bash ou python3, plusieurs lignes) sur le serveur Debian ; sert à installer, configurer, récupérer des données (git clone, curl…), automatiser.",
+            mapOf("code" to prop("Code du script (plusieurs lignes)."), "langage" to prop("bash (défaut) ou python3."), "delai" to prop("Délai maximal en secondes (défaut 120).")), listOf("code")),
+        tool("github", "GitHub (public, ou privé si un jeton est enregistré) : lit un fichier, liste un dossier, derniers commits, dernière version (release), infos ou recherche de dépôts.",
+            mapOf("action" to prop("fichier | liste | commits | release | depot | recherche"), "depot" to prop("owner/repo (ex. home-assistant/core), ou mots de la recherche."), "chemin" to prop("Chemin du fichier ou dossier."), "ref" to prop("Branche, tag ou commit (optionnel).")), listOf("action", "depot")),
+        tool("reseau_infos", "Réseau : adresse IP privée du téléphone, passerelle (box), adresse IP publique ; avec le serveur SSH configuré, ses adresses IP privée(s) et publique.",
+            mapOf("serveur" to prop("« oui » pour inclure aussi les adresses du serveur Debian."))),
+        tool("reseau_scanner", "Réseau : analyse complète du réseau Wi-Fi local (appareils connectés, adresses IP, noms, ports ouverts, type : imprimante, caméra, TV, serveur, NAS, Home Assistant…) et imprimantes détectées. Réseau local uniquement.", emptyMap()),
+        tool("appareil_sonder", "Réseau : examine un appareil du réseau local (ports ouverts, type, titre de sa page web).", mapOf("ip" to prop("Adresse IP privée.")), listOf("ip")),
+        tool("appareil_page", "Réseau : lit la page web d'un appareil local (administration d'une imprimante, d'une box, d'une caméra…) pour consulter niveaux d'encre, état, configuration.",
+            mapOf("ip" to prop("Adresse IP privée."), "port" to prop("Port (défaut 80)."), "chemin" to prop("Chemin de la page (défaut /).")), listOf("ip")),
+        tool("imprimantes_trouver", "Impression : trouve les imprimantes réseau (Canon, Epson, HP, Brother, Samsung, Xerox…) et indique modèle, état, formats acceptés.",
+            mapOf("via" to prop("local (depuis le téléphone, défaut) ou serveur (depuis le réseau du serveur Debian)."), "ip" to prop("Adresse d'une imprimante précise (optionnel)."))),
+        tool("imprimer", "Impression : imprime un fichier créé par JARVIS (PDF, image, texte) ou un texte sur une imprimante réseau (protocole IPP, sans pilote). À distance : via=serveur envoie le travail depuis le serveur Debian vers l'imprimante de son réseau.",
+            mapOf("ip" to prop("Adresse de l'imprimante (IP privée ou publique/nom d'hôte si accessible)."), "fichier" to prop("Nom d'un fichier créé par JARVIS (optionnel)."), "texte" to prop("Texte (Markdown) à imprimer (optionnel)."),
+                "titre" to prop("Titre du travail."), "copies" to prop("Nombre de copies (défaut 1)."), "via" to prop("local (défaut) ou serveur.")), listOf("ip")),
         tool("serveur_diagnostic", "Diagnostic rapide du serveur : charge, mémoire, disque, conteneurs Docker et derniers logs de Home Assistant.", emptyMap())
     )
 
@@ -62,11 +79,13 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 ToolResult(Serveur.haService(app, d, s, e, data))
             }
             "ssh_commande" -> {
-                ssh()
+                val autre = a.optString("hote").trim().takeIf { it.isNotBlank() }
+                if (autre == null) ssh()
+                val cible = autre?.let { Serveur.Cible(it, a.optString("port").toIntOrNull() ?: 22, a.optString("utilisateur").ifBlank { app.store.sshUser.value }, a.optString("mot_de_passe")) }
                 val cmd = a.optString("commande").trim()
                 if (cmd.isBlank()) return ToolResult("Commande vide.")
-                if (Serveur.dangereuse(cmd) && !confirm("Exécuter sur le serveur ${app.store.sshHost.value} :\n\n$cmd", true)) return ToolResult("Refusé par l'utilisateur.")
-                ToolResult("```\n" + sortie(Serveur.exec(app, cmd, (a.optString("delai").toIntOrNull() ?: 60).coerceIn(5, 600))) + "\n```")
+                if ((Serveur.dangereuse(cmd) || cible != null) && !confirm("Exécuter sur ${cible?.hote ?: app.store.sshHost.value} :\n\n$cmd", true)) return ToolResult("Refusé par l'utilisateur.")
+                ToolResult("```\n" + sortie(Serveur.exec(app, cmd, (a.optString("delai").toIntOrNull() ?: 60).coerceIn(5, 600), cible)) + "\n```")
             }
             "ssh_fichier" -> {
                 ssh()
@@ -89,7 +108,107 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 ToolResult("# 🖥️ Serveur\n```\n" + sortie(r, 6000) + "\n```")
             }
             "ha_config" -> haConfig(a)
+            "ssh_script" -> {
+                ssh()
+                val code = a.optString("code")
+                if (code.isBlank()) return ToolResult("Script vide.")
+                val py = a.optString("langage").lowercase().startsWith("py")
+                if (!confirm("Exécuter ce script ${if (py) "Python" else "bash"} sur le serveur ${app.store.sshHost.value} ?\n\n" + code.take(900), true)) return ToolResult("Refusé par l'utilisateur.")
+                val f = "/tmp/jarvis_script_${System.currentTimeMillis()}" + if (py) ".py" else ".sh"
+                Serveur.envoyerOctets(app, f, (if (py) code else "set -e\n$code").toByteArray())
+                val r = Serveur.exec(app, "${if (py) "python3" else "bash"} $f; c=\$?; rm -f $f; exit \$c", (a.optString("delai").toIntOrNull() ?: 120).coerceIn(10, 900))
+                ToolResult("```\n" + sortie(r) + "\n```")
+            }
+            "github" -> ToolResult(github(a))
+            "reseau_infos" -> {
+                val i = Reseau.infos(app)
+                val sb = StringBuilder("# 🌐 Réseau\n")
+                if (i == null) sb.append("- 📵 Pas de connexion réseau.\n") else sb.append("- 📱 Téléphone : **${i.ip}**/${i.prefix}${if (i.wifi) " (Wi-Fi)" else " (données mobiles — le réseau local n'est pas visible)"}\n" + (if (i.passerelle.isNotBlank()) "- 📡 Passerelle (box) : **${i.passerelle}**\n" else ""))
+                Reseau.ippPublique().takeIf { it.isNotBlank() }?.let { sb.append("- 🌍 IP publique (téléphone) : **$it**\n") }
+                if (a.optString("serveur").lowercase() in setOf("oui", "true", "1") && Serveur.sshConfigure(app)) {
+                    val r = Serveur.exec(app, "echo \"privées: \$(hostname -I)\"; echo \"publique: \$(curl -s -m 8 https://api.ipify.org)\"; ip route | head -1", 25)
+                    sb.append("- 🖥️ Serveur ${app.store.sshHost.value} :\n```\n${r.second.trim()}\n```\n")
+                }
+                ToolResult(sb.toString(), direct = true)
+            }
+            "reseau_scanner" -> {
+                val i = Reseau.infos(app) ?: return ToolResult("Pas de réseau.")
+                if (!i.wifi) return ToolResult("Le téléphone n'est pas connecté au Wi-Fi : je ne peux pas analyser le réseau local.")
+                val liste = Reseau.scanner(app)
+                val imps = Reseau.decouvrir(app, listOf("_ipp._tcp", "_printer._tcp"), 3500)
+                val sb = StringBuilder("# 📡 Réseau ${i.ip}/${i.prefix} — ${liste.size} appareil(s)\n\n| IP | Nom | Type | Ports | Page web |\n|---|---|---|---|---|\n")
+                liste.forEach { d -> sb.append("| ${d.ip}${if (d.ip == i.ip) " (moi)" else if (d.ip == i.passerelle) " (box)" else ""} | ${d.nom.take(28)} | ${d.type} | ${d.ports.joinToString(",")} | ${d.titre.take(30)} |\n") }
+                if (imps.isNotEmpty()) sb.append("\n**🖨️ Imprimantes (mDNS)** : " + imps.distinctBy { it.host }.joinToString(" · ") { "${it.nom} (${it.host})" } + "\n")
+                ToolResult(sb.toString(), direct = true)
+            }
+            "appareil_sonder" -> {
+                val ip = a.optString("ip").trim()
+                if (!Reseau.prive(ip)) return ToolResult("Réseau local uniquement : $ip n'est pas une adresse privée.")
+                val d = Reseau.appareil(ip) ?: return ToolResult("Aucune réponse de $ip.")
+                ToolResult("# ${d.type} — ${d.ip}\n- Nom : ${d.nom.ifBlank { "—" }}\n- Ports ouverts : ${d.ports.joinToString(", ").ifBlank { "aucun des ports courants" }}\n- Page web : ${d.titre.ifBlank { "—" }}", direct = true)
+            }
+            "appareil_page" -> ToolResult("```\n" + Reseau.lirePage(a.optString("ip").trim(), a.optString("port").toIntOrNull() ?: 80, a.optString("chemin")) + "\n```")
+            "imprimantes_trouver" -> {
+                val via = a.optString("via").lowercase().let { if (it.startsWith("serv")) "serveur" else "local" }
+                val ip = a.optString("ip").trim()
+                if (via == "serveur") ssh()
+                val ips = if (ip.isNotBlank()) listOf(ip) else if (via == "local") {
+                    val m = Reseau.decouvrir(app, listOf("_ipp._tcp", "_printer._tcp"), 4000).map { it.host }
+                    (m + (if (Reseau.infos(app)?.wifi == true) Reseau.scanner(app).filter { 631 in it.ports || 9100 in it.ports }.map { it.ip } else emptyList())).distinct()
+                } else emptyList()
+                if (ips.isEmpty()) return ToolResult(if (via == "serveur") "Précise l'adresse IP de l'imprimante du réseau du serveur (ip=…)." else "Aucune imprimante détectée sur ce réseau (vérifie que tu es sur le même Wi-Fi qu'elle).")
+                val rep = ips.mapNotNull { Impression.interroger(app, it, via) }
+                ToolResult(if (rep.isEmpty()) "Des appareils d'impression ont été vus (${ips.joinToString()}) mais aucun ne répond en IPP." else "# 🖨️ Imprimantes\n\n" + rep.joinToString("\n") { p ->
+                    "- **${p.nom}** (${p.modele.ifBlank { "modèle inconnu" }}) · ${p.ip} · ${p.etat}" + (if (p.raisons.isNotEmpty()) " ⚠️ ${p.raisons.joinToString()}" else "") + " · formats : ${p.formats.filter { it.startsWith("application/pdf") || it.startsWith("image/") || it.startsWith("text/") }.take(5).joinToString()}" }, direct = true)
+            }
+            "imprimer" -> {
+                val via = a.optString("via").lowercase().let { if (it.startsWith("serv")) "serveur" else "local" }
+                if (via == "serveur") ssh()
+                val ip = a.optString("ip").trim().removePrefix("http://").removePrefix("ipp://").substringBefore("/").substringBefore(":")
+                if (a.optString("fichier").isBlank() && a.optString("texte").isBlank()) return ToolResult("Rien à imprimer : indique un fichier ou un texte.")
+                if (!confirm("Imprimer sur $ip${if (via == "serveur") " (via le serveur)" else ""} : " + (a.optString("fichier").ifBlank { a.optString("texte").take(80) }) + " ?", true)) return ToolResult("Refusé par l'utilisateur.")
+                ToolResult(Impression.imprimer(app, ip, a.optString("fichier"), a.optString("texte"), a.optString("titre"), a.optString("copies").toIntOrNull() ?: 1, via))
+            }
             else -> ToolResult("Outil serveur inconnu.")
+        }
+    }
+
+    private val gh = okhttp3.OkHttpClient.Builder().connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS).readTimeout(30, java.util.concurrent.TimeUnit.SECONDS).build()
+
+    private fun ghGet(url: String): String {
+        val b = okhttp3.Request.Builder().url(url).header("Accept", "application/vnd.github+json").header("User-Agent", "JARVIS")
+        app.store.ghToken.value.trim().takeIf { it.isNotBlank() }?.let { b.header("Authorization", "Bearer $it") }
+        gh.newCall(b.build()).execute().use { r ->
+            val t = r.body?.string().orEmpty()
+            if (r.code == 404) throw IllegalStateException("Introuvable sur GitHub (dépôt privé ? ajoute un jeton dans Réglages › Serveur).")
+            if (r.code == 403 && t.contains("rate limit", true)) throw IllegalStateException("Limite GitHub atteinte (ajoute un jeton GitHub dans Réglages › Serveur).")
+            if (!r.isSuccessful) throw IllegalStateException("GitHub ${r.code}")
+            return t
+        }
+    }
+
+    private fun github(a: JSONObject): String {
+        val d = a.optString("depot").trim().removePrefix("https://github.com/").trim('/')
+        val ref = a.optString("ref").trim(); val ch = a.optString("chemin").trim().trim('/')
+        return when (a.optString("action").lowercase()) {
+            "fichier" -> {
+                val j = JSONObject(ghGet("https://api.github.com/repos/$d/contents/$ch" + if (ref.isNotBlank()) "?ref=$ref" else ""))
+                val txt = String(android.util.Base64.decode(j.optString("content").replace("\n", ""), android.util.Base64.DEFAULT), Charsets.UTF_8)
+                "```\n" + txt.take(9000) + (if (txt.length > 9000) "\n… (tronqué)" else "") + "\n```"
+            }
+            "liste" -> {
+                val arr = JSONArray(ghGet("https://api.github.com/repos/$d/contents/$ch" + if (ref.isNotBlank()) "?ref=$ref" else ""))
+                (0 until arr.length()).joinToString("\n") { arr.getJSONObject(it).let { o -> (if (o.optString("type") == "dir") "📁 " else "📄 ") + o.optString("name") + (if (o.optString("type") != "dir") " (${o.optLong("size") / 1024} Ko)" else "") } }.ifBlank { "Dossier vide." }
+            }
+            "commits" -> {
+                val arr = JSONArray(ghGet("https://api.github.com/repos/$d/commits?per_page=8" + if (ref.isNotBlank()) "&sha=$ref" else ""))
+                (0 until arr.length()).joinToString("\n") { arr.getJSONObject(it).let { o -> "- `${o.optString("sha").take(7)}` ${o.getJSONObject("commit").optString("message").lineSequence().first().take(90)} — ${o.getJSONObject("commit").getJSONObject("author").optString("date").take(10)}" } }
+            }
+            "release" -> JSONObject(ghGet("https://api.github.com/repos/$d/releases/latest")).let { "**${it.optString("tag_name")}** · ${it.optString("name")} · ${it.optString("published_at").take(10)}\n${it.optString("body").take(1500)}" }
+            "depot" -> JSONObject(ghGet("https://api.github.com/repos/$d")).let { "**${it.optString("full_name")}** — ${it.optString("description")}\n⭐ ${it.optInt("stargazers_count")} · branche ${it.optString("default_branch")} · langage ${it.optString("language")} · maj ${it.optString("pushed_at").take(10)}" }
+            else -> JSONObject(ghGet("https://api.github.com/search/repositories?per_page=6&q=" + java.net.URLEncoder.encode(d, "UTF-8"))).getJSONArray("items").let { arr ->
+                (0 until arr.length()).joinToString("\n") { arr.getJSONObject(it).let { o -> "- **${o.optString("full_name")}** ⭐${o.optInt("stargazers_count")} — ${o.optString("description").take(90)}" } }.ifBlank { "Aucun résultat." }
+            }
         }
     }
 

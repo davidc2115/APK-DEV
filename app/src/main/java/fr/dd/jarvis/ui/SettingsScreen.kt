@@ -715,6 +715,8 @@ private fun ServeurPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvi
         HudTextField(store.sshKey.value, { store.sshKey.set(it) }, Modifier.fillMaxWidth(), label = "Clé privée (optionnelle, texte PEM/OpenSSH)", singleLine = false, maxLines = 4)
         Spacer(Modifier.height(6.dp))
         HudTextField(store.haDir.value, { store.haDir.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Dossier de config HA sur le serveur (vide = détection auto)")
+        Spacer(Modifier.height(6.dp))
+        HudTextField(store.ghToken.value, { store.ghToken.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Jeton GitHub (optionnel : dépôts privés, plus de requêtes)", password = true)
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             HudButton(if (busy) "Test…" else "Tester HA", enabled = !busy && fr.dd.jarvis.ai.Serveur.haConfigure(app)) {

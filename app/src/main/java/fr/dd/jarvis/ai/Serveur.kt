@@ -24,7 +24,14 @@ object Serveur {
     fun sshConfigure(app: JarvisApp) = app.store.sshHost.value.isNotBlank() && app.store.sshUser.value.isNotBlank() &&
         (app.store.sshPass.value.isNotBlank() || app.store.sshKey.value.isNotBlank())
 
-    private fun ouvrir(app: JarvisApp): Session {
+    /** Autre machine à joindre en SSH avec des identifiants donnés par l'utilisateur (sinon le serveur des Réglages). */
+    data class Cible(val hote: String, val port: Int, val user: String, val pass: String)
+
+    private fun ouvrir(app: JarvisApp, cible: Cible? = null): Session {
+        if (cible != null) {
+            val s = JSch().getSession(cible.user, cible.hote, cible.port)
+            s.setPassword(cible.pass); s.setConfig("StrictHostKeyChecking", "no"); s.connect(15000); return s
+        }
         val st = app.store
         val jsch = JSch()
         if (st.sshKey.value.isNotBlank()) jsch.addIdentity("jarvis", st.sshKey.value.trim().replace("\r", "").plus("\n").toByteArray(), null, st.sshPass.value.takeIf { it.isNotBlank() }?.toByteArray())
@@ -41,19 +48,19 @@ object Serveur {
         return s
     }
 
-    private fun <T> session(app: JarvisApp, f: (Session) -> T): T {
-        val s = ouvrir(app)
+    private fun <T> session(app: JarvisApp, cible: Cible? = null, f: (Session) -> T): T {
+        val s = ouvrir(app, cible)
         try { return f(s) } finally { runCatching { s.disconnect() } }
     }
 
     /** Exécute une commande ; « sudo » utilise le mot de passe enregistré. Retourne (code de sortie, sortie). */
-    fun exec(app: JarvisApp, commande: String, timeoutS: Int = 60): Pair<Int, String> = session(app) { s ->
+    fun exec(app: JarvisApp, commande: String, timeoutS: Int = 60, cible: Cible? = null): Pair<Int, String> = session(app, cible) { s ->
         val sudo = commande.contains("sudo ")
         val cmd = if (sudo) commande.replace(Regex("\\bsudo\\s+(?!-S)"), "sudo -S -p '' ") else commande
         val ch = s.openChannel("exec") as ChannelExec
         ch.setCommand("export LANG=C.UTF-8; $cmd")
         val out = ByteArrayOutputStream()
-        ch.setInputStream(if (sudo && app.store.sshPass.value.isNotBlank()) ByteArrayInputStream((app.store.sshPass.value + "\n").toByteArray()) else null)
+        ch.setInputStream(if (sudo && (cible?.pass ?: app.store.sshPass.value).isNotBlank()) ByteArrayInputStream(((cible?.pass ?: app.store.sshPass.value) + "\n").toByteArray()) else null)
         ch.setErrStream(out)
         val inp = ch.inputStream
         ch.connect(10000)
@@ -104,6 +111,11 @@ object Serveur {
             if (r.first != 0) throw IllegalStateException("Écriture refusée : ${r.second.take(200)}")
         }
         return bak
+    }
+
+    fun envoyerOctets(app: JarvisApp, chemin: String, octets: ByteArray) = session(app) { s ->
+        val c = s.openChannel("sftp") as ChannelSftp; c.connect(10000)
+        try { c.put(ByteArrayInputStream(octets), chemin, ChannelSftp.OVERWRITE) } finally { c.disconnect() }
     }
 
     fun lister(app: JarvisApp, dossier: String): String = exec(app, "ls -lAh --time-style=long-iso ${q(dossier)} | head -150").second

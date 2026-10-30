@@ -91,6 +91,7 @@ class Store(context: Context) {
     val sshPass = SPref("sshPass", "")
     val sshKey = SPref("sshKey", "")
     val sshFp = SPref("sshFp", "")
+    val ghToken = SPref("ghToken", "")
 
     // ---- Génération d'images (Cloudflare Workers AI) : lignes « idCompte:jeton », rotation automatique
     val cfModel = SPref("cfModel", "@cf/black-forest-labs/flux-1-schnell")

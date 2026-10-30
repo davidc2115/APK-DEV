@@ -131,7 +131,7 @@ object Fichiers {
     }
 
     // ------------------------------------------------------------------ PDF
-    private fun pdf(md: String, titre: String): ByteArray {
+    fun pdf(md: String, titre: String): ByteArray {
         val doc = PdfDocument()
         val W = 595; val H = 842; val M = 42
         var page = doc.startPage(PdfDocument.PageInfo.Builder(W, H, 1).create())
