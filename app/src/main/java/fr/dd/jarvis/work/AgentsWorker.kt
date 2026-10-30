@@ -33,6 +33,19 @@ object AgentsScheduler {
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
         wm.enqueueUniquePeriodicWork(NAME, ExistingPeriodicWorkPolicy.UPDATE, req)
     }
+    private var dernier = HashMap<String, Long>()
+
+    /** Passage immédiat d'un agent (« mails » ou « notifs ») à l'arrivée d'une notification, au plus une fois par minute et par agent. */
+    @Synchronized fun declencher(ctx: Context, quoi: String) {
+        val now = System.currentTimeMillis()
+        if (now - (dernier[quoi] ?: 0L) < 60_000L) return
+        dernier[quoi] = now
+        val req = OneTimeWorkRequestBuilder<AgentsWorker>().setInputData(workDataOf("only" to quoi))
+            .setInitialDelay(if (quoi == "mails") 20 else 3, TimeUnit.SECONDS)   // laisse Gmail synchroniser avant de lire la boîte
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
+        WorkManager.getInstance(ctx).enqueueUniqueWork("agents_live_$quoi", ExistingWorkPolicy.KEEP, req)
+    }
+
     fun runNow(ctx: Context) {
         WorkManager.getInstance(ctx).enqueue(OneTimeWorkRequestBuilder<AgentsWorker>().setInputData(workDataOf("force" to true)).build())
     }
@@ -62,11 +75,12 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
 
     override suspend fun doWork(): Result {
         if (!store.agentsOn.value) return Result.success()
+        val only = inputData.getString("only")
         val steps = listOf<Pair<String, suspend () -> Unit>>(
-            "Mails" to { if (store.agentMails.value) mails() },
-            "Factures" to { if (store.agentFactures.value) factures() },
-            "Planning" to { if (store.agentPlanning.value) planning() },
-            "Notifications" to { if (store.agentNotifs.value) notifs() }
+            "Mails" to { if (store.agentMails.value && (only == null || only == "mails")) mails() },
+            "Factures" to { if (store.agentFactures.value && only == null) factures() },
+            "Planning" to { if (store.agentPlanning.value && only == null) planning() },
+            "Notifications" to { if (store.agentNotifs.value && (only == null || only == "notifs")) notifs() }
         )
         for ((nom, f) in steps) {
             try { f() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) { journal.append("- ⚠️ $nom : ${e.message?.take(120)}\n") }
@@ -148,7 +162,7 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
 
     // ---------------------------------------------------------------- notifications du téléphone
     private suspend fun notifs() {
-        if (!JarvisNotificationListener.active) return
+        JarvisNotificationListener.recharger(ctx)
         val last = store.agentLastNotif.value.toLongOrNull() ?: 0L
         val now = System.currentTimeMillis()
         store.agentLastNotif.set(now.toString())
