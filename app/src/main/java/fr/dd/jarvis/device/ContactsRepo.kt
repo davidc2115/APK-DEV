@@ -163,4 +163,78 @@ class ContactsRepo(private val ctx: Context) {
             ctx.contentResolver.insert(ContactsContract.Data.CONTENT_URI, ins)
         }
     }
+
+    // ---------------------------------------------------------------- nettoyage en masse des numéros
+
+    private fun cleanNum(n: String): String = n.replace(Regex("[^0-9+]"), "").let { if (it.startsWith("00")) "+" + it.drop(2) else it }
+
+    /** Numéro français ramené à 10 chiffres « 0612345678 », ou null si ce n'est pas un numéro français. */
+    private fun nationalFr(n: String): String? {
+        val c = cleanNum(n)
+        val d = when {
+            c.startsWith("+330") -> "0" + c.drop(4)
+            c.startsWith("+33") -> "0" + c.drop(3)
+            else -> c
+        }
+        return d.takeIf { it.length == 10 && it.startsWith("0") && it.all(Char::isDigit) }
+    }
+
+    private fun formater(n: String, format: String): String {
+        val nat = nationalFr(n) ?: return n.trim()
+        return if (format.startsWith("inter")) "+33 " + nat[1] + " " + nat.drop(2).chunked(2).joinToString(" ")
+        else nat.chunked(2).joinToString(" ")
+    }
+
+    private fun cle(n: String): String = nationalFr(n) ?: cleanNum(n)
+
+    /**
+     * Met tous les numéros au même format (« 06 12 34 56 78 » ou international) et supprime les doublons d'un même contact.
+     * [apercu] : ne modifie rien, annonce seulement ce qui serait fait.
+     */
+    fun normaliserNumeros(format: String, doublons: Boolean, apercu: Boolean): String {
+        if (!hasPermission()) return "Permission contacts manquante (lecture + écriture)."
+        data class Ligne(val id: Long, val contact: Long, val numero: String, val type: Int)
+        val lignes = mutableListOf<Ligne>()
+        ctx.contentResolver.query(
+            ContactsContract.Data.CONTENT_URI,
+            arrayOf(ContactsContract.Data._ID, ContactsContract.Data.CONTACT_ID, ContactsContract.CommonDataKinds.Phone.NUMBER, ContactsContract.CommonDataKinds.Phone.TYPE),
+            "${ContactsContract.Data.MIMETYPE}=?", arrayOf(ContactsContract.CommonDataKinds.Phone.CONTENT_ITEM_TYPE), null
+        )?.use { c ->
+            while (c.moveToNext()) lignes.add(Ligne(c.getLong(0), c.getLong(1), c.getString(2).orEmpty(), c.getInt(3)))
+        }
+        if (lignes.isEmpty()) return "Aucun numéro trouvé dans les contacts."
+        val ops = ArrayList<ContentProviderOperation>()
+        var reformates = 0; var supprimes = 0; var contacts = HashSet<Long>()
+        val exemples = mutableListOf<String>()
+        for ((cid, l) in lignes.groupBy { it.contact }) {
+            val vus = HashSet<String>()
+            // Mobiles d'abord : en cas de doublon, on garde la ligne la plus utile.
+            for (r in l.sortedBy { if (it.type == ContactsContract.CommonDataKinds.Phone.TYPE_MOBILE) 0 else 1 }) {
+                val k = cle(r.numero)
+                if (k.isBlank()) continue
+                if (doublons && !vus.add(k)) {
+                    supprimes++; contacts.add(cid)
+                    if (exemples.size < 8) exemples.add("🗑️ ${r.numero} (doublon)")
+                    ops.add(ContentProviderOperation.newDelete(ContactsContract.Data.CONTENT_URI).withSelection("${ContactsContract.Data._ID}=?", arrayOf(r.id.toString())).build())
+                    continue
+                }
+                val nouveau = formater(r.numero, format)
+                if (nouveau != r.numero) {
+                    reformates++; contacts.add(cid)
+                    if (exemples.size < 8) exemples.add("✏️ ${r.numero} → $nouveau")
+                    ops.add(ContentProviderOperation.newUpdate(ContactsContract.Data.CONTENT_URI).withSelection("${ContactsContract.Data._ID}=?", arrayOf(r.id.toString()))
+                        .withValue(ContactsContract.CommonDataKinds.Phone.NUMBER, nouveau).build())
+                }
+            }
+        }
+        val bilan = "$reformates numéro(s) reformaté(s), $supprimes doublon(s) à supprimer, sur ${contacts.size} contact(s) (${lignes.size} numéros analysés)."
+        val ex = if (exemples.isEmpty()) "" else "\n" + exemples.joinToString("\n")
+        if (apercu) return "👀 Aperçu : $bilan$ex"
+        if (ops.isEmpty()) return "✅ Rien à modifier : tous les numéros sont déjà propres."
+        var faits = 0
+        for (lot in ops.chunked(150)) {
+            try { ctx.contentResolver.applyBatch(ContactsContract.AUTHORITY, ArrayList(lot)); faits += lot.size } catch (e: Exception) { return "⚠️ Interrompu après $faits modification(s) : ${e.message}" }
+        }
+        return "✅ Terminé : $bilan$ex"
+    }
 }

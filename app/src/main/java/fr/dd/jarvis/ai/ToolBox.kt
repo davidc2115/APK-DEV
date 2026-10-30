@@ -138,6 +138,10 @@ class ToolBox(
                 "company" to prop("Nouvelle société (optionnel)."),
                 "note" to prop("Nouvelles notes (optionnel).")
             ), listOf("name")))
+        put(tool("contacts_normaliser_numeros", "Nettoie EN UNE FOIS les numéros de TOUS les contacts du téléphone : même format (« 06 12 34 56 78 » ou international) et suppression des numéros en double d'un même contact. À utiliser pour toute demande en masse sur les numéros (ne boucle pas contact par contact).",
+            mapOf("format" to prop("« xx xx xx xx xx » (défaut : 06 12 34 56 78) ou « international » (+33 6 12 34 56 78)."),
+                "supprimer_doublons" to prop("« false » pour garder les doublons ; par défaut true."),
+                "apercu" to prop("« true » pour seulement montrer ce qui changerait, sans rien modifier."))))
         put(tool("create_contact_card", "Génère la fiche contact complète (Markdown Obsidian) d'un contact et l'enregistre.",
             mapOf("name" to prop("Nom du contact.")), listOf("name")))
         put(tool("meteo", "Météo précise (maintenant, prochaines heures, prévisions) à la position du téléphone, ou pour un lieu donné.",
@@ -257,6 +261,13 @@ class ToolBox(
         }
         "search_contacts" -> searchContacts(a)
         "create_contact" -> createContact(a)
+        "contacts_normaliser_numeros" -> {
+            val apercu = a.optString("apercu").trim().lowercase() in setOf("true", "oui", "1")
+            val doublons = a.optString("supprimer_doublons").trim().lowercase() !in setOf("false", "non", "0")
+            val fmt = a.optString("format").ifBlank { "xx xx xx xx xx" }.lowercase()
+            if (!apercu && !confirm("Reformater les numéros de TOUS les contacts (${if (fmt.startsWith("inter")) "format international" else "xx xx xx xx xx"})" + (if (doublons) " et supprimer les doublons" else "") + " ? Pense à faire une sauvegarde (export .vcf) avant.", false)) ToolResult("Refusé par l'utilisateur.")
+            else ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.contacts.normaliserNumeros(fmt, doublons, apercu) })
+        }
         "update_contact" -> updateContact(a)
         "create_contact_card" -> createCard(a)
         "meteo" -> ToolResult(fr.dd.jarvis.ai.Meteo.get(app, a.optString("lieu"), a.optString("jours").toIntOrNull() ?: 3), direct = true)
