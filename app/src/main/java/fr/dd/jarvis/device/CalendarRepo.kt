@@ -221,7 +221,14 @@ class CalendarRepo(private val ctx: Context, private val store: Store) {
             else v.put(CalendarContract.Events.EVENT_COLOR, color)
             if (key != null) store.setEventColor(eventId, null)
         }
-        val ok = try { ctx.contentResolver.update(ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventId), v, null, null) > 0 } catch (e: Exception) { false }
+        var ok = try { ctx.contentResolver.update(ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventId), v, null, null) > 0 } catch (e: Exception) { false }
+        if (ok && color != null) {
+            // Vérification : la couleur a-t-elle vraiment été enregistrée sur l'événement ?
+            val lu = ctx.contentResolver.query(ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventId),
+                arrayOf(CalendarContract.Events.EVENT_COLOR, CalendarContract.Events.EVENT_COLOR_KEY), null, null, null)?.use { c ->
+                if (c.moveToFirst()) (if (c.isNull(0)) null else c.getInt(0)) to c.getString(1) else null }
+            if (lu == null || (lu.first == null && lu.second.isNullOrBlank())) ok = false
+        }
         if (!ok && color != null) { store.setEventColor(eventId, color); return "Couleur enregistrée dans JARVIS seulement (Google Agenda a refusé)." }
         if (color == null) store.setEventColor(eventId, null)
         return (if (color == null) "Couleur de l'agenda rétablie." else "Couleur du rendez-vous changée$libelle") + " — synchronisée avec Google Agenda."

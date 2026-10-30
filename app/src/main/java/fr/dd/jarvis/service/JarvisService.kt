@@ -104,6 +104,7 @@ class JarvisService : Service() {
                 .setContentIntent(open).setAutoCancel(true).build())
             stopSelf(); return START_NOT_STICKY
         }
+        runCatching { CarBridge.post(this, "Je suis prêt. Réponds pour me parler.") }   // conversation visible dans Android Auto
         main.postDelayed({ goIdle() }, 1200)
         return START_STICKY
     }

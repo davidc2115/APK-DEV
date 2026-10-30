@@ -62,8 +62,12 @@ class ToolBox(
             ), listOf("event_id")))
         put(tool("set_event_color", "Change la couleur d'un rendez-vous (synchronisée avec Google Agenda). Identifiant #id visible dans le planning ; sinon cherche par titre.",
             mapOf(
-                "event_id" to prop("Identifiant numérique (optionnel si title fourni)."),
-                "title" to prop("Début du titre du rendez-vous à colorer (optionnel), prochain rendez-vous correspondant."),
+                "event_id" to prop("Identifiant(s) numérique(s), séparés par des virgules (optionnel)."),
+                "title" to prop("Mot ou début du titre : TOUS les rendez-vous correspondants des 30 prochains jours (ou de la date donnée) sont colorés."),
+                "date" to prop("Jour (AAAA-MM-JJ) dont tous les rendez-vous sont à colorer (optionnel)."),
+                "days" to prop("Nombre de jours à partir de date (optionnel)."),
+                "calendar" to prop("Limiter à un agenda (optionnel)."),
+                "tous" to prop("« true » pour colorer tous les rendez-vous de la période."),
                 "color" to prop("Couleur : rouge, orange, jaune, vert, vert foncé, turquoise, bleu, lavande, violet, rose, gris, ou #RRGGBB. « defaut » pour reprendre la couleur de l'agenda.")
             ), listOf("color")))
         put(tool("set_calendar_color", "Change la couleur d'un agenda entier (synchronisée avec Google Agenda).",
@@ -486,17 +490,27 @@ class ToolBox(
         if (!app.calendar.hasPermission()) return ToolResult("Permission agenda manquante.")
         val (ok, col) = couleurDemandee(a.optString("color"))
         if (!ok) return ToolResult("Couleur non reconnue : « ${a.optString("color")} ». Essaie rouge, orange, jaune, vert, turquoise, bleu, violet, rose, gris ou #RRGGBB.")
-        var id = a.optString("event_id").trim().removePrefix("#").toLongOrNull()
-        if (id == null) {
+        val ids = linkedSetOf<Long>()
+        a.optString("event_id").split(Regex("[^0-9]+")).mapNotNull { it.toLongOrNull() }.forEach { ids.add(it) }
+        if (ids.isEmpty()) {
             val q = a.optString("title").trim().lowercase()
-            if (q.isBlank()) return ToolResult("Indique l'identifiant ou le titre du rendez-vous.")
-            val now = System.currentTimeMillis()
-            val evs = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.calendar.events(LocalDate.now().minusDays(1), 60) }
-                .filter { it.title.lowercase().contains(q) }
-            val e = evs.filter { it.end >= now }.minByOrNull { it.begin } ?: evs.maxByOrNull { it.begin } ?: return ToolResult("Aucun rendez-vous « $q » trouvé.")
-            id = e.id
+            val dateTxt = a.optString("date").trim()
+            val tous = a.optString("tous").trim().lowercase() in setOf("true", "oui", "1", "vrai")
+            val cal = a.optString("calendar").trim().takeIf { it.isNotBlank() }?.let { app.calendar.findCalendar(it, false)?.id }
+            if (q.isBlank() && dateTxt.isBlank() && !tous) return ToolResult("Indique les rendez-vous : identifiant, titre, date, ou « tous ».")
+            val from = runCatching { LocalDate.parse(dateTxt.take(10)) }.getOrNull() ?: LocalDate.now()
+            val days = (a.optString("days").toIntOrNull() ?: if (dateTxt.isNotBlank()) 1 else if (q.isNotBlank()) 30 else 1).coerceIn(1, 120)
+            val evs = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.calendar.events(from, days) }
+                .filter { (q.isBlank() || it.title.lowercase().contains(q)) && (cal == null || it.calId == cal) }
+            if (evs.isEmpty()) return ToolResult("Aucun rendez-vous trouvé" + (if (q.isNotBlank()) " pour « $q »" else "") + " du $from sur $days jour(s).")
+            evs.forEach { ids.add(it.id) }
         }
-        return ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.calendar.setEventColor(id, col) } + " (#$id)")
+        if (ids.size > 60) return ToolResult("Trop de rendez-vous (${ids.size}) : précise une date ou un titre.")
+        val res = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { ids.map { it to app.calendar.setEventColor(it, col) } }
+        val bons = res.count { !it.second.contains("seulement") && !it.second.contains("introuvable") && !it.second.contains("manquante") }
+        val locaux = res.count { it.second.contains("JARVIS seulement") }
+        return ToolResult("🎨 Couleur changée sur $bons rendez-vous sur ${res.size}" + (if (locaux > 0) " ; $locaux enregistrés dans JARVIS seulement (Google Agenda a refusé : agenda en lecture seule ou sans droit de modification)" else "") +
+            (if (res.size <= 3) " — " + res.joinToString(" ; ") { "#${it.first} ${it.second}" } else ""))
     }
 
     private suspend fun setCalendarColor(a: JSONObject): ToolResult {

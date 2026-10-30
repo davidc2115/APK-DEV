@@ -69,6 +69,8 @@
         </service>
 
         <receiver android:name=".device.AdbPairReceiver" android:exported="false" />
+        <receiver android:name=".service.CarReplyReceiver" android:exported="false" />
+        <meta-data android:name="com.google.android.gms.car.application" android:resource="@xml/automotive_app_desc" />
 
         <service
             android:name=".service.JarvisNotificationListener"

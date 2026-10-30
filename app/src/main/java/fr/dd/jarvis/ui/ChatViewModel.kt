@@ -60,6 +60,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
         voice.onFail = { msg ->
             partial = ""
+            voiceSession = false   // silence ou erreur : la conversation vocale s'arrête
             if (msg.isNotBlank()) status = msg
         }
     }
@@ -77,9 +78,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         confirmDeferred?.complete(ok)
     }
 
+    /** Micro touché : passe automatiquement en conversation (réponse parlée puis réécoute) jusqu'à ce qu'on le retouche ou qu'on dise « merci / c'est tout ». */
+    private var voiceSession = false
+    private val stopWords = Regex("^(merci|c'est tout|c est tout|stop|arrete|arrête|termine|terminé|fin|a plus tard|à plus tard|au revoir|laisse tomber|ça suffit|ca suffit)\\b.*", RegexOption.IGNORE_CASE)
+
     fun toggleListening() {
-        if (listening) voice.stopListening() else {
+        if (listening) { voiceSession = false; voice.stopListening() } else {
             status = ""
+            voiceSession = true
             voice.startListening()
         }
     }
@@ -88,6 +94,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val t = text.trim()
         if (t.isEmpty() || busy) return
         voice.stopSpeaking()
+        if (fromVoice && stopWords.matches(t)) {
+            voiceSession = false
+            messages.add(ChatMsg(true, t)); messages.add(ChatMsg(false, "D'accord."))
+            persist()
+            if (store.speakReplies.value) voice.speak("D'accord.") {}
+            return
+        }
         messages.add(ChatMsg(true, t))
         busy = true
         status = "Réflexion…"
@@ -103,8 +116,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             busy = false
             status = ""
             persist()
-            val conv = store.conversationMode.value
-            if (store.speakReplies.value && (fromVoice || conv)) {
+            val conv = store.conversationMode.value || (fromVoice && voiceSession)
+            if ((store.speakReplies.value || (fromVoice && voiceSession)) && (fromVoice || conv)) {
                 voice.speak(reply) { if (conv) voice.startListening() }
             } else if (conv && fromVoice) {
                 voice.startListening()
