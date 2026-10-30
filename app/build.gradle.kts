@@ -99,6 +99,7 @@ dependencies {
     implementation("dev.rikka.shizuku:provider:13.1.5")
 
     // Mails (IMAP)
+    implementation("com.github.mwiede:jsch:0.2.20")
     implementation("com.sun.mail:android-mail:1.6.7")
     implementation("com.sun.mail:android-activation:1.6.7")
 }

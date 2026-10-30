@@ -81,6 +81,17 @@ class Store(context: Context) {
     val groqKeys: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readList("groqKeys")) }
     val geminiKeys: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readList("geminiKeys")) }
 
+    // ---- Serveur personnel : SSH + Home Assistant
+    val haUrl = SPref("haUrl", "")
+    val haToken = SPref("haToken", "")
+    val haDir = SPref("haDir", "")
+    val sshHost = SPref("sshHost", "")
+    val sshPort = SPref("sshPort", "22")
+    val sshUser = SPref("sshUser", "")
+    val sshPass = SPref("sshPass", "")
+    val sshKey = SPref("sshKey", "")
+    val sshFp = SPref("sshFp", "")
+
     // ---- Génération d'images (Cloudflare Workers AI) : lignes « idCompte:jeton », rotation automatique
     val cfModel = SPref("cfModel", "@cf/black-forest-labs/flux-1-schnell")
     val cfAccounts: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readList("cfAccounts")) }

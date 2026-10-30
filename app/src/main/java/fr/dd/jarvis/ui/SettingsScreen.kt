@@ -183,6 +183,11 @@ fun SettingsScreen(app: JarvisApp) {
             CfPanel(store, app)
         }
 
+        // ------------------------------------------------------------ Serveur (SSH + Home Assistant)
+        item {
+            ServeurPanel(store, app)
+        }
+
         // ------------------------------------------------------------ Mails
         item {
             var result by remember { mutableStateOf("") }
@@ -677,5 +682,64 @@ private fun CfPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.JarvisApp)
         Spacer(Modifier.height(10.dp))
         HudTextField(store.cfModel.value, { store.cfModel.set(it) }, Modifier.fillMaxWidth(), label = "Modèle d'image")
         fr.dd.jarvis.ai.ImageGen.MODELES.forEach { m -> Box(Modifier.padding(top = 4.dp)) { HudChip(m, selected = m == store.cfModel.value) { store.cfModel.set(m) } } }
+    }
+}
+
+
+@Composable
+private fun ServeurPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.JarvisApp) {
+    val scope = rememberCoroutineScope()
+    var msg by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    HudPanel(Modifier.fillMaxWidth(), title = "Serveur — SSH et Home Assistant") {
+        Text(
+            "Permet à JARVIS de piloter ton serveur (commandes, fichiers, Docker) et Home Assistant (appareils, fichiers YAML de configuration). Les commandes destructrices demandent toujours ta confirmation ; chaque fichier modifié est sauvegardé avant écriture.",
+            color = HudDim, fontSize = 12.sp
+        )
+        Spacer(Modifier.height(8.dp))
+        Text("Home Assistant", color = HudText, fontSize = 13.sp)
+        HudTextField(store.haUrl.value, { store.haUrl.set(it) }, Modifier.fillMaxWidth(), label = "Adresse (ex. http://192.168.1.20:8123)")
+        Spacer(Modifier.height(6.dp))
+        HudTextField(store.haToken.value, { store.haToken.set(it) }, Modifier.fillMaxWidth(), label = "Jeton d'accès longue durée (profil HA)", password = true)
+        Spacer(Modifier.height(10.dp))
+        Text("Serveur SSH", color = HudText, fontSize = 13.sp)
+        HudTextField(store.sshHost.value, { store.sshHost.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Adresse du serveur (IP ou nom)")
+        Spacer(Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HudTextField(store.sshUser.value, { store.sshUser.set(it.trim()) }, Modifier.weight(1f), label = "Utilisateur")
+            HudTextField(store.sshPort.value, { store.sshPort.set(it.filter { c -> c.isDigit() }) }, Modifier.width(90.dp), label = "Port")
+        }
+        Spacer(Modifier.height(6.dp))
+        HudTextField(store.sshPass.value, { store.sshPass.set(it) }, Modifier.fillMaxWidth(), label = "Mot de passe (sert aussi pour sudo / phrase de passe de la clé)", password = true)
+        Spacer(Modifier.height(6.dp))
+        HudTextField(store.sshKey.value, { store.sshKey.set(it) }, Modifier.fillMaxWidth(), label = "Clé privée (optionnelle, texte PEM/OpenSSH)", singleLine = false, maxLines = 4)
+        Spacer(Modifier.height(6.dp))
+        HudTextField(store.haDir.value, { store.haDir.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Dossier de config HA sur le serveur (vide = détection auto)")
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HudButton(if (busy) "Test…" else "Tester HA", enabled = !busy && fr.dd.jarvis.ai.Serveur.haConfigure(app)) {
+                scope.launch {
+                    busy = true
+                    msg = try {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { org.json.JSONObject(fr.dd.jarvis.ai.Serveur.ha(app, "GET", "/api/")).optString("message") }.let { "✅ Home Assistant : $it" }
+                    } catch (e: Exception) { "❌ ${e.message}" }
+                    busy = false
+                }
+            }
+            HudButton(if (busy) "Test…" else "Tester SSH", enabled = !busy && fr.dd.jarvis.ai.Serveur.sshConfigure(app)) {
+                scope.launch {
+                    busy = true
+                    msg = try {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.ai.Serveur.exec(app, "hostname; uname -sr; id -un", 20).second.trim() }.let { "✅ SSH OK :\n$it" }
+                    } catch (e: Exception) { "❌ ${e.message}" }
+                    busy = false
+                }
+            }
+        }
+        if (store.sshFp.value.isNotBlank()) Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("🔒 Empreinte mémorisée", color = HudDim, fontSize = 11.sp, modifier = Modifier.weight(1f))
+            Text("Effacer", color = HudText, fontSize = 12.sp, modifier = Modifier.clickable { store.sshFp.set("") })
+        }
+        if (msg.isNotBlank()) Text(msg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
     }
 }

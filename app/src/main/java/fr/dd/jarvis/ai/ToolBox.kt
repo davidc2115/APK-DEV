@@ -20,6 +20,7 @@ class ToolBox(
     private val confirm: suspend (String, Boolean) -> Boolean
 ) {
     private val societe = SocieteTools(app, confirm)
+    private val serveur = ServeurTools(app, confirm)
     private val store get() = app.store
     private val llm get() = app.llm
 
@@ -213,16 +214,19 @@ class ToolBox(
 
     /** Les outils Société ne sont proposés au modèle que si la conversation les concerne (économie de contexte). */
     fun schemaFor(recentUserText: String): JSONArray {
-        if (!SocieteTools.concerned(recentUserText)) return schema
+        val soc = SocieteTools.concerned(recentUserText); val srv = ServeurTools.concerned(recentUserText)
+        if (!soc && !srv) return schema
         return JSONArray().also { out ->
             for (i in 0 until schema.length()) out.put(schema.get(i))
-            societe.schema.forEach { out.put(it) }
+            if (soc) societe.schema.forEach { out.put(it) }
+            if (srv) serveur.schema.forEach { out.put(it) }
         }
     }
 
     fun schemaAll(): JSONArray = JSONArray().also { out ->
         for (i in 0 until schema.length()) out.put(schema.get(i))
         societe.schema.forEach { out.put(it) }
+        serveur.schema.forEach { out.put(it) }
     }
 
     // ------------------------------------------------------------------ exécution
@@ -400,6 +404,7 @@ class ToolBox(
         "phone_action" -> phoneAction(a)
         "run_shell" -> runShell(a)
         in SocieteTools.NAMES -> societe.execute(name, a)
+        in ServeurTools.NAMES -> serveur.execute(name, a)
         else -> ToolResult("Outil inconnu : $name")
     }
 
