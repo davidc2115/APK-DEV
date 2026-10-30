@@ -43,14 +43,24 @@ object GmailApi {
     fun resultFromIntent(ctx: Context, data: android.content.Intent?): AuthorizationResult =
         Identity.getAuthorizationClient(ctx).getAuthorizationResultFromIntent(data)
 
-    private fun get(token: String, url: String): JSONObject {
-        val req = Request.Builder().url(url).header("Authorization", "Bearer $token").build()
-        return Http.client.newCall(req).execute().use { r ->
-            val body = r.body?.string().orEmpty()
-            if (!r.isSuccessful) throw ApiException(r.code, "Gmail ${r.code} : ${body.take(200)}")
-            JSONObject(body)
+    /** Exécute une requête Gmail ; en cas de quota dépassé (403/429) ou d'erreur serveur, attend puis réessaie (2, 4, 8, 16, 30 s). */
+    private fun appeler(build: () -> Request): String {
+        var essai = 0
+        while (true) {
+            val r = Http.client.newCall(build()).execute()
+            val body = r.use { it.body?.string().orEmpty() }
+            if (r.isSuccessful) return body
+            val limite = r.code == 429 || r.code >= 500 || (r.code == 403 && (body.contains("uota", true) || body.contains("ateLimit", true) || body.contains("rate limit", true)))
+            if (limite && essai < 5) {
+                Thread.sleep(minOf(30_000L, 2_000L shl essai)); essai++; continue
+            }
+            val msg = if (limite) "Quota Gmail atteint (trop de mails lus d'un coup) : réessaie dans une minute, ou demande moins de mails." else "Gmail ${r.code} : ${body.take(200)}"
+            throw ApiException(r.code, msg)
         }
     }
+
+    private fun get(token: String, url: String): JSONObject =
+        JSONObject(appeler { Request.Builder().url(url).header("Authorization", "Bearer $token").build() })
 
     /** Adresse du compte connecté (vérifie aussi que le jeton fonctionne). */
     suspend fun profile(token: String): String = withContext(Dispatchers.IO) { get(token, "$BASE/profile").optString("emailAddress") }
@@ -105,7 +115,7 @@ object GmailApi {
                 for (i in 0 until (list?.length() ?: 0)) ids.add(list!!.getJSONObject(i).getString("id"))
                 page = r.optString("nextPageToken").takeIf { it.isNotBlank() } ?: break
             }
-            val gate = kotlinx.coroutines.sync.Semaphore(12)
+            val gate = kotlinx.coroutines.sync.Semaphore(if (full) 3 else 6)
             coroutineScope {
                 ids.map { id ->
                     async {
@@ -139,13 +149,8 @@ object GmailApi {
     }
 
     private fun post(token: String, url: String, json: JSONObject): JSONObject {
-        val req = Request.Builder().url(url).header("Authorization", "Bearer $token")
-            .post(json.toString().toRequestBody("application/json".toMediaType())).build()
-        return Http.client.newCall(req).execute().use { r ->
-            val body = r.body?.string().orEmpty()
-            if (!r.isSuccessful) throw ApiException(r.code, "Gmail ${r.code} : ${body.take(200)}")
-            if (body.isBlank()) JSONObject() else JSONObject(body)
-        }
+        val body = appeler { Request.Builder().url(url).header("Authorization", "Bearer $token").post(json.toString().toRequestBody("application/json".toMediaType())).build() }
+        return if (body.isBlank()) JSONObject() else JSONObject(body)
     }
 
     /**
