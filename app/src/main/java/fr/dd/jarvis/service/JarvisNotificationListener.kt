@@ -31,6 +31,10 @@ class JarvisNotificationListener : NotificationListenerService() {
             if (titre.isBlank() && texte.isBlank()) return
             val label = try { packageManager.getApplicationLabel(packageManager.getApplicationInfo(sbn.packageName, 0)).toString() } catch (_: Exception) { sbn.packageName }
             add(Item(sbn.packageName, label, titre, texte, sbn.postTime))
+            // Annonce vocale (SMS, mails, autres notifications choisies) avec sonnerie réglable
+            runCatching {
+                fr.dd.jarvis.device.Annonces.traiter(applicationContext, applicationContext as fr.dd.jarvis.JarvisApp, sbn.key + sbn.postTime, sbn.packageName, label, n.category, titre, texte)
+            }
         } catch (_: Throwable) {
         }
     }

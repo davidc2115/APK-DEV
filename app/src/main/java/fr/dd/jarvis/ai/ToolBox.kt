@@ -147,6 +147,8 @@ class ToolBox(
         put(tool("agenda_afficher", "Affiche ou masque durablement un agenda entier (« ne plus afficher le planning de Thomas », « réaffiche-le »). Un agenda masqué disparaît du planning, de l'itinéraire, du point du jour et de l'écran Agenda tant qu'on ne le réaffiche pas.",
             mapOf("agenda" to prop("Nom (ou partie du nom) de l'agenda."), "afficher" to prop("true pour réafficher, false pour masquer.")), listOf("agenda", "afficher")))
         put(tool("agendas_liste", "Liste les agendas du téléphone et indique lesquels sont masqués."))
+        put(tool("tache_arriere_plan", "Lance en arrière-plan une demande LONGUE ou en masse (trier beaucoup de mails, renommer ou modifier plusieurs contacts, ranger…) : elle continue même si l'app est fermée et le résultat arrive par notification. À utiliser quand l'utilisateur dit « en arrière-plan », « pendant que je fais autre chose », ou pour un gros volume.",
+            mapOf("demande" to prop("La demande complète et autonome, comme l'utilisateur la formulerait (ex. « trie 300 mails du compte x, range-les dans Gmail et archive les pubs »).")), listOf("demande")))
         put(tool("alarme_creer", "Règle une alarme (sonnerie répétée jusqu'à l'arrêt) SANS ouvrir aucune application ; visible dans la barre d'état.",
             mapOf("heure" to prop("Heure au format HH:MM (24 h)."), "libelle" to prop("Nom de l'alarme (optionnel)."),
                 "jours" to prop("Répétition (optionnel) : « lun mar ven », « semaine », « tous les jours ». Vide = une seule fois.")), listOf("heure")))
@@ -273,6 +275,14 @@ class ToolBox(
             else {
                 hits.forEach { c -> if ((c.id in app.store.hiddenCals) == show) app.store.toggleCalendar(c.id) }
                 ToolResult((if (show) "👁️ Réaffiché : " else "🚫 Masqué partout (planning, itinéraire, point du jour) : ") + hits.joinToString(", ") { app.calendar.displayName(it) } + (if (show) "" else ". Pour le revoir : « réaffiche cet agenda »."))
+            }
+        }
+        "tache_arriere_plan" -> {
+            if (fr.dd.jarvis.work.TacheWorker.enCours) ToolResult("Je suis déjà dans une tâche d'arrière-plan : fais cette demande directement.")
+            else {
+                val d = a.optString("demande").trim()
+                if (d.isBlank()) ToolResult("Demande vide.")
+                else { fr.dd.jarvis.work.TacheWorker.lancer(app, d); ToolResult("🛠️ Tâche lancée en arrière-plan : « ${d.take(120)} ». Tu recevras une notification à la fin (même si l'app est fermée).") }
             }
         }
         "alarme_creer" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.device.Horloge.creerAlarme(app, a.optString("heure"), a.optString("libelle"), a.optString("jours")) })

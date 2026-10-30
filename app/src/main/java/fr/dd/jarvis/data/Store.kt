@@ -162,6 +162,22 @@ class Store(context: Context) {
     val agentLastFact = SPref("agentLastFact", "")
     val agentLastNotif = SPref("agentLastNotif", "0")
 
+    // ---- Annonces vocales (SMS, mails, notifications) : mode par catégorie (off | annonce | lecture) et sonnerie (URI, « default » ou vide = aucune)
+    val annOn = BPref("annOn", false)
+    val annPrive = BPref("annPrive", false)
+    val annApps = SPref("annApps", "")
+    private val annModes = androidx.compose.runtime.mutableStateMapOf<String, String>().also { m ->
+        listOf("sms", "mail", "autres").forEach { m[it] = prefs.getString("annMode_$it", if (it == "autres") "annonce" else "lecture") ?: "lecture" }
+    }
+    private val annSons = androidx.compose.runtime.mutableStateMapOf<String, String>().also { m ->
+        listOf("sms", "mail", "autres").forEach { m[it] = prefs.getString("annSon_$it", "default") ?: "default" }
+    }
+    fun annMode(c: String) = annModes[c] ?: "lecture"
+    fun setAnnMode(c: String, v: String) { annModes[c] = v; prefs.edit().putString("annMode_$c", v).apply() }
+    fun annSon(c: String) = annSons[c] ?: "default"
+    fun setAnnSon(c: String, v: String) { annSons[c] = v; prefs.edit().putString("annSon_$c", v).apply() }
+    val agentArchiver = BPref("agentArchiver", false)
+
     // ---- Mails (IMAP)
     val mailHost = SPref("mailHost", "imap.gmail.com")
     val mailPort = SPref("mailPort", "993")

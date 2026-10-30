@@ -83,7 +83,7 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
     // ---------------------------------------------------------------- mails
     private suspend fun mails() {
         if (!store.mailConfigured()) return
-        val unread = app.mail.fetchRecent(20, true)
+        val unread = app.mail.fetchRecent(40, true, null, full = true)
         val seen = readSet("agent_seen_mails.txt")
         fun key(m: fr.dd.jarvis.device.MailItem) = if (m.id.isNotBlank()) m.account + m.id else (m.from + m.subject).hashCode().toString()
         val nouveaux = unread.filter { key(it) !in seen }
@@ -97,7 +97,7 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
             journal.append(urgents.joinToString("") { "  - 🔴 ${it.mail.from} — ${it.mail.subject}\n" })
         }
         if (store.agentRanger.value && store.gmailAccounts.isNotEmpty()) {
-            runCatching { MailTri.ranger(app, classes, false) }.onSuccess { journal.append("  - 🏷️ $it mail(s) rangés (libellés Urgent, Clients…)\n") }
+            runCatching { MailTri.ranger(app, classes, store.agentArchiver.value) }.onSuccess { journal.append("  - 🏷️ $it mail(s) rangés (libellés Urgent, Clients…)\n") }
         }
         writeSet("agent_seen_mails.txt", seen + nouveaux.map { key(it) })
     }

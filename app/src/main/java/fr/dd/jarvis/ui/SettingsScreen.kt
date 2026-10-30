@@ -120,6 +120,50 @@ fun SettingsScreen(app: JarvisApp) {
             )
         }
 
+        // ------------------------------------------------------------ Annonces vocales
+        item {
+            var cible by remember { mutableStateOf("") }
+            val picker = rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { r ->
+                val uri = r.data?.getParcelableExtra<android.net.Uri>(android.media.RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
+                if (cible.isNotBlank() && r.resultCode == android.app.Activity.RESULT_OK) store.setAnnSon(cible, uri?.toString() ?: "")
+            }
+            HudPanel(Modifier.fillMaxWidth(), title = "Annonces vocales (SMS, mails, notifications)") {
+                Text("JARVIS annonce à voix haute l'arrivée d'un SMS, d'un mail ou d'une notification, même en arrière-plan, après la sonnerie de ton choix. Demande l'accès aux notifications (Réglages › Permissions).", color = HudDim, fontSize = 12.sp)
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    HudChip(if (store.annOn.value) "✅ Annonces actives" else "Annonces désactivées", store.annOn.value) { store.annOn.set(!store.annOn.value) }
+                    HudChip("🎧 Écouteurs/voiture seulement", store.annPrive.value) { store.annPrive.set(!store.annPrive.value) }
+                }
+                fr.dd.jarvis.device.Annonces.CATEGORIES.forEach { (cat, label) ->
+                    Spacer(Modifier.height(8.dp))
+                    Text(label, color = HudText, fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                    Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("off" to "Silence", "annonce" to "Annonce l'expéditeur", "lecture" to "Lit le message").forEach { (m, t) ->
+                            HudChip(t, store.annMode(cat) == m) { store.setAnnMode(cat, m) }
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    val son = store.annSon(cat)
+                    val nomSon = when { son.isBlank() -> "aucune"; son == "default" -> "par défaut"; else -> runCatching { android.media.RingtoneManager.getRingtone(ctx, android.net.Uri.parse(son)).getTitle(ctx) }.getOrDefault("choisie") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Sonnerie : $nomSon", color = HudDim, fontSize = 12.sp)
+                        HudChip("Choisir") {
+                            cible = cat
+                            picker.launch(Intent(android.media.RingtoneManager.ACTION_RINGTONE_PICKER)
+                                .putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_TYPE, android.media.RingtoneManager.TYPE_NOTIFICATION or android.media.RingtoneManager.TYPE_ALARM or android.media.RingtoneManager.TYPE_RINGTONE)
+                                .putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, true)
+                                .putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, if (son.isBlank() || son == "default") null else android.net.Uri.parse(son)))
+                        }
+                        HudChip("Tester") { fr.dd.jarvis.device.Annonces.annoncer(ctx, store.annSon(cat), "Ceci est un test d'annonce JARVIS.") }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                HudTextField(store.annApps.value, { store.annApps.set(it) }, Modifier.fillMaxWidth(), label = "Applis annoncées (autres notifications) : WhatsApp, Messenger…")
+                Spacer(Modifier.height(4.dp))
+                Text("Seules les applications listées ici sont annoncées dans « Autres notifications ». JARVIS se tait pendant un appel.", color = HudDim, fontSize = 11.sp)
+            }
+        }
+
         // ------------------------------------------------------------ Applications par défaut
         item {
             HudPanel(Modifier.fillMaxWidth(), title = "Applications par défaut") {
@@ -488,6 +532,7 @@ fun SettingsScreen(app: JarvisApp) {
                 Spacer(Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     HudChip("🏷️ Ranger les mails dans Gmail", store.agentRanger.value) { store.agentRanger.set(!store.agentRanger.value) }
+                    HudChip("📥 Archiver pubs/notifs", store.agentArchiver.value) { store.agentArchiver.set(!store.agentArchiver.value) }
                 }
                 Spacer(Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {

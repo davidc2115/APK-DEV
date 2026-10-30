@@ -128,28 +128,35 @@ class VoiceManager(private val ctx: Context) {
         }
     }
 
+    /** Couper la parole : si l'utilisateur parle pendant que JARVIS parle, JARVIS se tait (et la suite — réécoute — démarre). */
+    var bargeIn = true
+    private var barge: BargeIn? = null
+
     fun speak(text: String, onDone: () -> Unit = {}) {
         main.removeCallbacks(unmuteLater); setMuted(false)
+        barge?.stop(); barge = null
         val clean = cleanForSpeech(text)
         if (!ttsReady || clean.isBlank()) {
             main.post(onDone)
             return
         }
+        val fini = java.util.concurrent.atomic.AtomicBoolean(false)
+        fun terminer() { if (fini.compareAndSet(false, true)) { barge?.stop(); barge = null; main.post(onDone) } }
         tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {}
-            override fun onDone(utteranceId: String?) {
-                main.post(onDone)
-            }
+            override fun onDone(utteranceId: String?) { terminer() }
 
             @Deprecated("Deprecated in Java")
-            override fun onError(utteranceId: String?) {
-                main.post(onDone)
-            }
+            override fun onError(utteranceId: String?) { terminer() }
         })
         tts?.speak(clean.take(3500), TextToSpeech.QUEUE_FLUSH, null, UUID.randomUUID().toString())
+        if (bargeIn && androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            barge = BargeIn { main.post { if (!fini.get()) { tts?.stop(); terminer() } } }.also { it.start() }
+        }
     }
 
     fun stopSpeaking() {
+        barge?.stop(); barge = null
         tts?.stop()
     }
 

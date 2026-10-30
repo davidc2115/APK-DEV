@@ -86,6 +86,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (listening) { voiceSession = false; voice.stopListening() } else {
             status = ""
             voiceSession = true
+            voice.stopSpeaking()
             voice.startListening()
         }
     }
