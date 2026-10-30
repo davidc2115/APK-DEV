@@ -112,6 +112,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private var convId = ""
+
     data class ConvInfo(val id: String, val title: String, val count: Int, val ts: Long)
 
     private val convDir get() = File(getApplication<Application>().filesDir, "convs").apply { mkdirs() }
@@ -125,9 +127,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     /** Range la conversation en cours dans l'historique (si elle contient un message de l'utilisateur). */
     private fun archiveCurrent() {
         val list = messages.toList()
-        val first = list.firstOrNull { it.fromUser } ?: return
-        runCatching { File(convDir, "${list.first().ts}.json").writeText(serialize(list)) }
-        first.text.length
+        if (list.none { it.fromUser }) return
+        if (convId.isBlank()) convId = (list.first().ts.takeIf { it > 0 } ?: System.currentTimeMillis()).toString()
+        runCatching { File(convDir, "$convId.json").writeText(serialize(list)) }
     }
 
     /** Nouvelle conversation : l'actuelle est conservée dans l'historique. */
@@ -135,6 +137,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (busy) return
         voice.stopSpeaking()
         archiveCurrent(); messages.clear(); persist()
+        convId = ""
     }
 
     fun historique(): List<ConvInfo> = (convDir.listFiles() ?: emptyArray()).mapNotNull { f ->
@@ -153,20 +156,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (!f.exists()) return
         val text = f.readText()
         archiveCurrent()
-        f.delete()
         messages.clear()
         runCatching {
             val arr = JSONArray(text)
             for (i in 0 until arr.length()) arr.getJSONObject(i).let { messages.add(ChatMsg(it.getBoolean("u"), it.getString("t"), it.optLong("ts"))) }
         }
+        convId = id
         persist()
     }
 
-    fun supprimer(id: String) { File(convDir, "$id.json").delete() }
+    fun supprimer(id: String) { File(convDir, "$id.json").delete(); if (id == convId) { messages.clear(); convId = ""; persist() } }
 
     /** Efface la conversation en cours et tout l'historique. */
     fun toutEffacer() {
-        messages.clear(); persist()
+        messages.clear(); convId = ""; persist()
         convDir.listFiles()?.forEach { it.delete() }
     }
 
@@ -189,6 +192,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             file.writeText(arr.toString())
         } catch (_: Exception) {
         }
+        archiveCurrent()
     }
 
     private fun load() {

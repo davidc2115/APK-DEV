@@ -139,6 +139,9 @@ class ToolBox(
             mapOf("lieu" to prop("Ville ou adresse (optionnel : par défaut la position actuelle du téléphone)."), "jours" to prop("Nombre de jours de prévision (1 à 7). Par défaut 3."))))
         put(tool("generer_image", "Génère une image à partir d'une description (Cloudflare). L'image est affichée dans le chat et enregistrée dans Obsidian.",
             mapOf("prompt" to prop("Description détaillée de l'image, rédigée en anglais (sujet, style, lumière, cadrage).")), listOf("prompt")))
+        put(tool("agenda_afficher", "Affiche ou masque durablement un agenda entier (« ne plus afficher le planning de Thomas », « réaffiche-le »). Un agenda masqué disparaît du planning, de l'itinéraire, du point du jour et de l'écran Agenda tant qu'on ne le réaffiche pas.",
+            mapOf("agenda" to prop("Nom (ou partie du nom) de l'agenda."), "afficher" to prop("true pour réafficher, false pour masquer.")), listOf("agenda", "afficher")))
+        put(tool("agendas_liste", "Liste les agendas du téléphone et indique lesquels sont masqués."))
         put(tool("alarme_creer", "Règle une alarme dans l'application Horloge native du téléphone, sans l'ouvrir.",
             mapOf("heure" to prop("Heure au format HH:MM (24 h)."), "libelle" to prop("Nom de l'alarme (optionnel)."),
                 "jours" to prop("Répétition (optionnel) : « lun mar ven », « semaine », « tous les jours ». Vide = une seule fois.")), listOf("heure")))
@@ -249,6 +252,17 @@ class ToolBox(
             ToolResult("![image](jarvis-img:${f.name})\n\n_${a.optString("prompt").take(160)}_" + (if (loc.isNotBlank()) "\n📁 $loc" else ""), direct = true)
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
             ToolResult("❌ Image impossible : ${e.message}")
+        }
+        "agendas_liste" -> ToolResult(app.calendar.calendars().joinToString("\n") { (if (it.id in app.store.hiddenCals) "🚫 masqué : " else "✅ affiché : ") + app.calendar.displayName(it) }.ifBlank { "Aucun agenda." }, direct = true)
+        "agenda_afficher" -> {
+            val q = a.optString("agenda").trim().lowercase()
+            val show = a.optString("afficher").trim().lowercase() in setOf("true", "oui", "1", "vrai")
+            val hits = app.calendar.calendars().filter { q.isNotBlank() && (app.calendar.displayName(it).lowercase().contains(q) || it.name.lowercase().contains(q)) }
+            if (hits.isEmpty()) ToolResult("Aucun agenda ne correspond à « $q ». Agendas : " + app.calendar.calendars().joinToString(", ") { app.calendar.displayName(it) })
+            else {
+                hits.forEach { c -> if ((c.id in app.store.hiddenCals) == show) app.store.toggleCalendar(c.id) }
+                ToolResult((if (show) "👁️ Réaffiché : " else "🚫 Masqué partout (planning, itinéraire, point du jour) : ") + hits.joinToString(", ") { app.calendar.displayName(it) } + (if (show) "" else ". Pour le revoir : « réaffiche cet agenda »."))
+            }
         }
         "alarme_creer" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.creerAlarme(a.optString("heure"), a.optString("libelle"), a.optString("jours")) })
         "alarme_supprimer" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.supprimerAlarme(a.optString("heure"), a.optString("libelle")) })
