@@ -34,6 +34,8 @@ object Registre {
 
     fun derniereIpPublique(app: JarvisApp): String = lire(app).optJSONArray("ip_publiques")?.let { if (it.length() > 0) it.getJSONObject(it.length() - 1).optString("ip") else "" }.orEmpty()
 
+    fun nombreAppareils(app: JarvisApp): Int = lire(app).optJSONObject("appareils")?.length() ?: 0
+
     @Synchronized fun appareils(app: JarvisApp, scan: List<Reseau.Appareil>, reseau: String): Int {
         val o = lire(app)
         val m = o.optJSONObject("appareils") ?: JSONObject()
@@ -45,7 +47,7 @@ object Registre {
             e.put("ip", d.ip).put("type", d.type).put("ports", JSONArray(d.ports)).put("vu", now).put("reseau", reseau)
             if (d.nom.isNotBlank()) e.put("hote", d.nom)
             if (d.titre.isNotBlank()) e.put("titre", d.titre)
-            if (d.info.isNotBlank()) e.put("info", d.info)
+            if (d.info.isNotBlank()) { if (d.info.startsWith("MAC ")) e.put("mac", d.info.removePrefix("MAC ")) else e.put("info", d.info) }
             m.put(cle, e)
         }
         o.put("appareils", m); ecrire(app, o)
@@ -76,7 +78,7 @@ object Registre {
         if (m == null || m.length() == 0) return sb.append("Aucun appareil enregistré : lance une analyse du réseau.").toString()
         sb.append("| IP | Nom | Type | Ports | Vu le |\n|---|---|---|---|---|\n")
         m.keys().asSequence().map { m.getJSONObject(it) }.sortedBy { x -> x.optString("ip").split(".").map { it.toIntOrNull() ?: 0 }.fold(0L) { a, b -> a * 256 + b } }.forEach { e ->
-            val nom = e.optString("alias").ifBlank { e.optString("info").ifBlank { e.optString("hote").ifBlank { e.optString("titre") } } }
+            val nom = e.optString("alias").ifBlank { e.optString("info").ifBlank { e.optString("hote").ifBlank { e.optString("titre").ifBlank { e.optString("mac") } } } }
             sb.append("| ${e.optString("ip")} | ${nom.take(30)} | ${e.optString("type")} | ${e.optJSONArray("ports")?.let { a -> (0 until a.length()).joinToString(",") { a.getInt(it).toString() } }.orEmpty()} | ${fmt.format(java.util.Date(e.optLong("vu")))} |\n")
         }
         return sb.toString()

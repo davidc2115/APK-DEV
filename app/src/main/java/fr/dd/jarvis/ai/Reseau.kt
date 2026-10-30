@@ -6,6 +6,7 @@ import android.net.NetworkCapabilities
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -50,9 +51,15 @@ object Reseau {
         a is Inet4Address && (a.isSiteLocalAddress || a.isLinkLocalAddress)
     }.getOrDefault(false)
 
+    @Volatile private var wifiNet: android.net.Network? = null
+    @Volatile var diag: String = ""
+
     fun infos(ctx: Context): Infos? {
         val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val n = cm.activeNetwork ?: return null
+        // Le réseau Wi-Fi lui-même (et non le réseau « actif », qui peut être un VPN ou les données mobiles).
+        val wifi = cm.allNetworks.firstOrNull { n -> cm.getNetworkCapabilities(n)?.let { it.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) && !it.hasTransport(NetworkCapabilities.TRANSPORT_VPN) } == true }
+        val n = wifi ?: cm.activeNetwork ?: return null
+        wifiNet = wifi
         val lp = cm.getLinkProperties(n) ?: return null
         val caps = cm.getNetworkCapabilities(n)
         val la = lp.linkAddresses.firstOrNull { it.address is Inet4Address } ?: return null
@@ -65,7 +72,7 @@ object Reseau {
     }.getOrDefault("")
 
     private fun ouvert(ip: String, port: Int, ms: Int = 350): Int {   // 1 = ouvert, 0 = fermé mais l'hôte répond, -1 = pas de réponse
-        return try { Socket().use { it.connect(InetSocketAddress(ip, port), ms) }; 1 }
+        return try { Socket().use { sk -> runCatching { wifiNet?.bindSocket(sk) }; sk.connect(InetSocketAddress(ip, port), ms) }; 1 }
         catch (e: ConnectException) { if ((e.message ?: "").contains("refused", true)) 0 else -1 }
         catch (e: Exception) { -1 }
     }
@@ -105,43 +112,63 @@ object Reseau {
         dns.submit<String> { InetAddress.getByName(ip).canonicalHostName }.get(900, TimeUnit.MILLISECONDS).takeIf { it != ip }.orEmpty()
     }.getOrDefault("")
 
-    /** Balayage du sous-réseau Wi-Fi (limité à /22). */
-    suspend fun scanner(ctx: Context, onStatus: (String) -> Unit = {}): List<Appareil> = withContext(Dispatchers.IO) {
+    private val pool = Executors.newFixedThreadPool(160).asCoroutineDispatcher()
+    private val ESSENTIELS = listOf(631, 9100, 80, 443, 515, 22, 445, 8080)
+    private val RAPIDES = listOf(80, 443, 22, 445, 62078, 8009, 5353, 8080)
+
+    /** Nom NetBIOS (PC Windows, NAS, imprimantes) par requête UDP 137 : répond même quand TCP est filtré. */
+    private fun netbios(ip: String): String? = runCatching {
+        val q = byteArrayOf(0x82.toByte(), 0x28, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0x20) + "CKAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".toByteArray() + byteArrayOf(0, 0, 0x21, 0, 1)
+        java.net.DatagramSocket().use { s ->
+            runCatching { wifiNet?.bindSocket(s) }
+            s.soTimeout = 350
+            s.send(java.net.DatagramPacket(q, q.size, InetAddress.getByName(ip), 137))
+            val buf = ByteArray(600); val p = java.net.DatagramPacket(buf, buf.size); s.receive(p)
+            if (p.length > 72) String(buf, 57, 15).trim().takeIf { it.isNotBlank() } else "?"
+        }
+    }.getOrNull()
+
+    /** Balayage du sous-réseau Wi-Fi (limité à /22) : ICMP, TCP, NetBIOS, puis UPnP et mDNS. */
+    suspend fun scanner(ctx: Context, onStatus: (String) -> Unit = {}): List<Appareil> = withContext(pool) {
         val i = infos(ctx) ?: return@withContext emptyList()
-        if (!prive(i.ip)) return@withContext emptyList()
+        if (!prive(i.ip)) { diag = "Adresse ${i.ip} non locale."; return@withContext emptyList() }
         val pref = i.prefix.coerceIn(22, 30)
         val base = InetAddress.getByName(i.ip).address
         val ipInt = ((base[0].toInt() and 255) shl 24) or ((base[1].toInt() and 255) shl 16) or ((base[2].toInt() and 255) shl 8) or (base[3].toInt() and 255)
         val mask = (-1 shl (32 - pref))
         val net = ipInt and mask
         val hosts = (1 until (1 shl (32 - pref)) - 1).map { net + it }.map { "${it ushr 24 and 255}.${it ushr 16 and 255}.${it ushr 8 and 255}.${it and 255}" }
-        val sem = Semaphore(110)
-        val trouves = coroutineScope {
-            hosts.map { h -> async { sem.acquire(); try { sonder(h) } finally { sem.release() } } }.awaitAll()
-        }.filterNotNull()
+        val icmpOk = java.util.concurrent.atomic.AtomicInteger(); val tcpOk = java.util.concurrent.atomic.AtomicInteger()
+        val trouves = coroutineScope { hosts.map { h -> async { sonder(h, icmpOk, tcpOk) } }.awaitAll() }.filterNotNull()
         val upnp = runCatching { ssdp(ctx) }.getOrDefault(emptyMap())
-        val mdns = runCatching { decouvrir(ctx, listOf("_http._tcp", "_googlecast._tcp", "_airplay._tcp", "_smb._tcp", "_ssh._tcp", "_hap._tcp", "_workstation._tcp", "_ipp._tcp"), 3500) }.getOrDefault(emptyList()).groupBy({ it.host }, { it.nom })
-        // Appareils vus par UPnP/mDNS mais muets sur nos ports (téléphones, TV, objets connectés) : on les ajoute.
+        val mdns = runCatching { decouvrir(ctx, listOf("_http._tcp", "_googlecast._tcp", "_airplay._tcp", "_smb._tcp", "_ssh._tcp", "_hap._tcp", "_workstation._tcp", "_ipp._tcp", "_companion-link._tcp", "_spotify-connect._tcp"), 3500) }.getOrDefault(emptyList()).groupBy({ it.host }, { it.nom })
         val parIp = trouves.associateBy { it.ip }.toMutableMap()
-        for (ip in (upnp.keys + mdns.keys)) if (ip !in parIp && prive(ip)) parIp[ip] = Appareil(ip, nomHote(ip), emptyList(), "", "❔ appareil")
+        for (ip in (upnp.keys + mdns.keys)) if (!parIp.containsKey(ip) && prive(ip)) parIp[ip] = Appareil(ip, nomHote(ip), emptyList(), "", "❔ appareil")
+        diag = "Sous-réseau ${hosts.first().substringBeforeLast('.')}.0/$pref (${hosts.size} adresses testées, liées au Wi-Fi ${if (wifiNet != null) "✔" else "✘ (réseau actif par défaut)"}) · réponses ICMP : ${icmpOk.get()} · TCP : ${tcpOk.get()} · UPnP : ${upnp.size} · mDNS : ${mdns.size}"
         parIp.values.map { d ->
             val info = (upnp[d.ip].orEmpty().ifBlank { mdns[d.ip]?.distinct()?.joinToString(", ").orEmpty() }).take(70)
             d.copy(info = info)
         }.sortedBy { a -> a.ip.split(".").map { it.toInt() }.fold(0L) { acc, x -> acc * 256 + x } }
     }
 
-    private val ESSENTIELS = listOf(631, 9100, 80, 443, 515, 22, 445, 8080)
+    fun typeDeApp(p: List<Int>, titre: String) = typeDe(p, titre)
 
-    private fun sonder(ip: String): Appareil? {
-        val ouverts = mutableListOf<Int>(); var vivant = false
-        // Ports essentiels d'abord, avec un délai large (une imprimante en veille met parfois un moment à répondre).
-        for (p in ESSENTIELS) { val r = ouvert(ip, p, 500); if (r == 1) { ouverts += p; vivant = true } else if (r == 0) vivant = true }
-        if (!vivant) vivant = runCatching { InetAddress.getByName(ip).isReachable(400) }.getOrDefault(false)
+    private fun sonder(ip: String, icmpOk: java.util.concurrent.atomic.AtomicInteger? = null, tcpOk: java.util.concurrent.atomic.AtomicInteger? = null): Appareil? {
+        val ouverts = mutableListOf<Int>()
+        var vivant = runCatching { InetAddress.getByName(ip).isReachable(700) }.getOrDefault(false)
+        if (vivant) icmpOk?.incrementAndGet()
+        // Ports essentiels (une imprimante en veille met parfois un moment à répondre) ; « fermé mais l'hôte répond » prouve aussi sa présence.
+        for (p in ESSENTIELS) { val r = ouvert(ip, p, if (vivant) 500 else 300); if (r == 1) { ouverts += p; vivant = true } else if (r == 0) vivant = true }
+        if (!vivant) for (p in RAPIDES) if (p !in ESSENTIELS) { val r = ouvert(ip, p, 250); if (r >= 0) { vivant = true; if (r == 1) ouverts += p } }
+        var nb: String? = null
+        if (!vivant) { nb = netbios(ip); if (nb != null) vivant = true }
         if (!vivant) return null
-        for (p in PORTS) if (p !in ESSENTIELS && ouvert(ip, p, 250) == 1) ouverts += p
+        tcpOk?.incrementAndGet()
+        for (p in PORTS) if (p !in ESSENTIELS && p !in RAPIDES && ouvert(ip, p, 250) == 1) ouverts += p
         val web = ouverts.firstOrNull { it in listOf(80, 8080, 443, 8123, 5000, 8000) }
         val titre = web?.let { titreWeb(ip, it) }.orEmpty()
-        return Appareil(ip, nomHote(ip), ouverts, titre, typeDe(ouverts, titre))
+        val nom = nomHote(ip).ifBlank { (nb ?: netbios(ip))?.takeIf { it != "?" }.orEmpty() }
+        return Appareil(ip, nom, ouverts, titre, typeDe(ouverts, titre))
     }
 
     /** Sonde un seul appareil (adresse privée uniquement) : ports ouverts, titre de la page web. */
@@ -175,6 +202,7 @@ object Reseau {
         val locs = HashMap<String, String>()
         try {
             java.net.DatagramSocket().use { sock ->
+                runCatching { wifiNet?.bindSocket(sock) }
                 sock.soTimeout = 400
                 val msg = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: ssdp:all\r\n\r\n".toByteArray()
                 repeat(2) { runCatching { sock.send(java.net.DatagramPacket(msg, msg.size, InetAddress.getByName("239.255.255.250"), 1900)) } }

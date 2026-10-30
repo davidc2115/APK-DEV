@@ -25,7 +25,7 @@ object Serveur {
         (app.store.sshPass.value.isNotBlank() || app.store.sshKey.value.isNotBlank())
 
     /** Autre machine à joindre en SSH avec des identifiants donnés par l'utilisateur (sinon le serveur des Réglages). */
-    data class Cible(val hote: String, val port: Int, val user: String, val pass: String)
+    data class Cible(val hote: String, val port: Int, val user: String, val pass: String, val jump: Boolean = false)
 
     private fun ouvrir(app: JarvisApp, cible: Cible? = null): Session {
         if (cible != null) {
@@ -63,6 +63,16 @@ object Serveur {
     }
 
     private fun <T> session(app: JarvisApp, cible: Cible? = null, f: (Session) -> T): T {
+        if (cible != null && cible.jump) {
+            // Rebond par le serveur : tunnel SSH vers une machine de SON réseau local (accessible de n'importe où si le serveur l'est).
+            val main = ouvrir(app)
+            try {
+                val lp = main.setPortForwardingL(0, cible.hote, cible.port)
+                val s2 = JSch().getSession(cible.user, "127.0.0.1", lp)
+                s2.setPassword(cible.pass); s2.setConfig("StrictHostKeyChecking", "no"); s2.connect(15000)
+                try { return f(s2) } finally { runCatching { s2.disconnect() } }
+            } finally { runCatching { main.disconnect() } }
+        }
         val s = ouvrir(app, cible)
         try { return f(s) } finally { runCatching { s.disconnect() } }
     }
@@ -133,6 +143,24 @@ object Serveur {
     }
 
     fun lister(app: JarvisApp, dossier: String): String = exec(app, "ls -lAh --time-style=long-iso ${q(dossier)} | head -150").second
+
+    /** Analyse du réseau local DU SERVEUR (ping + table de voisinage = adresses MAC + ports courants) ; fonctionne même si le téléphone est ailleurs. */
+    fun scanReseau(app: JarvisApp): List<Reseau.Appareil> {
+        val r = exec(app, "net=\$(ip -4 -o addr show scope global | awk '{print \$4}' | head -1); b=\$(echo \$net | cut -d/ -f1 | cut -d. -f1-3); " +
+            "for i in \$(seq 1 254); do (ping -c1 -W1 \$b.\$i >/dev/null 2>&1) & done; wait; sleep 1; " +
+            "ip neigh show | grep -v FAILED | awk '{print \"N\",\$1,\$5}' | grep -E '^N [0-9]+\\.'; " +
+            "for ip in \$(ip neigh show | grep -v FAILED | awk '{print \$1}' | grep -E '^[0-9]+\\.'); do (for p in 22 80 443 445 631 9100 8123 8080 554 1883; do timeout 0.6 bash -c \"echo >/dev/tcp/\$ip/\$p\" 2>/dev/null && echo \"P \$ip \$p\"; done) & done; wait", 150).second
+        val mac = HashMap<String, String>(); val ports = HashMap<String, MutableList<Int>>()
+        r.lines().forEach { l ->
+            val t = l.trim().split(" ")
+            if (t.size >= 3 && t[0] == "N") mac[t[1]] = t[2]
+            if (t.size >= 3 && t[0] == "P") ports.getOrPut(t[1]) { mutableListOf() }.add(t[2].toIntOrNull() ?: 0)
+        }
+        return mac.keys.sortedBy { ip -> ip.split(".").map { it.toIntOrNull() ?: 0 }.fold(0L) { a, b -> a * 256 + b } }.map { ip ->
+            val p = ports[ip].orEmpty().sorted()
+            Reseau.Appareil(ip, "", p, "", Reseau.typeDeApp(p, ""), "MAC ${mac[ip]}")
+        }
+    }
 
     fun q(s: String) = "'" + s.replace("'", "'\\''") + "'"
 

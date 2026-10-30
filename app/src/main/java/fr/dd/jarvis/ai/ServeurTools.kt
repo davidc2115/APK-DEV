@@ -35,7 +35,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
         tool("ssh_commande", "Serveur SSH : exécute une commande shell sur le serveur (Debian) et retourne la sortie. Contrôle complet : docker, systemctl, apt, logs, réseau… Les commandes destructrices demandent une confirmation.",
             mapOf("commande" to prop("Commande shell."), "delai" to prop("Délai maximal en secondes (défaut 60)."),
                 "hote" to prop("Autre machine à joindre en SSH (IP/nom) au lieu du serveur des Réglages (optionnel)."), "utilisateur" to prop("Utilisateur de cette autre machine."),
-                "mot_de_passe" to prop("Mot de passe de cette autre machine."), "port" to prop("Port SSH (défaut 22).")), listOf("commande")),
+                "mot_de_passe" to prop("Mot de passe de cette autre machine."), "port" to prop("Port SSH (défaut 22)."), "via_serveur" to prop("« oui » : joindre cette machine DU RÉSEAU LOCAL à travers le serveur Debian (connexion à distance).")), listOf("commande")),
         tool("ssh_fichier", "Serveur SSH : lit, écrit (sauvegarde auto) ou liste des fichiers du serveur.",
             mapOf("action" to prop("lire | ecrire | lister"), "chemin" to prop("Chemin absolu sur le serveur."), "contenu" to prop("ecrire : contenu complet.")), listOf("action", "chemin")),
         tool("ssh_script", "Serveur SSH : envoie et exécute un script complet (bash ou python3, plusieurs lignes) sur le serveur Debian ; sert à installer, configurer, récupérer des données (git clone, curl…), automatiser.",
@@ -44,10 +44,10 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
             mapOf("action" to prop("fichier | liste | commits | release | depot | recherche"), "depot" to prop("owner/repo (ex. home-assistant/core), ou mots de la recherche."), "chemin" to prop("Chemin du fichier ou dossier."), "ref" to prop("Branche, tag ou commit (optionnel).")), listOf("action", "depot")),
         tool("reseau_infos", "Réseau : adresse IP privée du téléphone, passerelle (box), adresse IP publique ; avec le serveur SSH configuré, ses adresses IP privée(s) et publique.",
             mapOf("serveur" to prop("« oui » pour inclure aussi les adresses du serveur Debian."))),
-        tool("reseau_scanner", "Réseau : analyse complète du réseau Wi-Fi local (appareils connectés, adresses IP, noms, ports ouverts, type : imprimante, caméra, TV, serveur, NAS, Home Assistant…) et imprimantes détectées. Réseau local uniquement.", emptyMap()),
+        tool("reseau_scanner", "Réseau : analyse complète du réseau Wi-Fi local (appareils connectés, adresses IP, noms, ports ouverts, type : imprimante, caméra, TV, serveur, NAS, Home Assistant…), enregistre tous les appareils et l'IP publique pour la connexion à distance. Réseau local uniquement. via=serveur analyse le réseau du serveur Debian (avec adresses MAC), utile à distance.", mapOf("via" to prop("local (défaut, Wi-Fi du téléphone) ou serveur (réseau du serveur Debian)."))),
         tool("appareil_sonder", "Réseau : examine un appareil du réseau local (ports ouverts, type, titre de sa page web).", mapOf("ip" to prop("Adresse IP privée.")), listOf("ip")),
         tool("appareil_page", "Réseau : lit la page web d'un appareil local (administration d'une imprimante, d'une box, d'une caméra…) pour consulter niveaux d'encre, état, configuration.",
-            mapOf("ip" to prop("Adresse IP privée."), "port" to prop("Port (défaut 80)."), "chemin" to prop("Chemin de la page (défaut /).")), listOf("ip")),
+            mapOf("ip" to prop("Adresse IP privée."), "port" to prop("Port (défaut 80)."), "chemin" to prop("Chemin de la page (défaut /)."), "via" to prop("local (défaut) ou serveur (à distance, depuis le réseau du serveur).")), listOf("ip")),
         tool("imprimantes_trouver", "Impression : trouve les imprimantes réseau (Canon, Epson, HP, Brother, Samsung, Xerox…) et indique modèle, état, formats acceptés.",
             mapOf("via" to prop("local (depuis le téléphone, défaut) ou serveur (depuis le réseau du serveur Debian)."), "ip" to prop("Adresse d'une imprimante précise (optionnel)."))),
         tool("imprimer", "Impression : imprime un fichier créé par JARVIS (PDF, image, texte) ou un texte sur une imprimante réseau (protocole IPP, sans pilote). À distance : via=serveur envoie le travail depuis le serveur Debian vers l'imprimante de son réseau.",
@@ -86,7 +86,8 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
             "ssh_commande" -> {
                 val autre = a.optString("hote").trim().takeIf { it.isNotBlank() }
                 if (autre == null) ssh()
-                val cible = autre?.let { Serveur.Cible(it, a.optString("port").toIntOrNull() ?: 22, a.optString("utilisateur").ifBlank { app.store.sshUser.value }, a.optString("mot_de_passe")) }
+                val cible = autre?.let { Serveur.Cible(it, a.optString("port").toIntOrNull() ?: 22, a.optString("utilisateur").ifBlank { app.store.sshUser.value }, a.optString("mot_de_passe"), a.optString("via_serveur").lowercase() in setOf("oui", "true", "1")) }
+                if (cible?.jump == true) ssh()
                 val cmd = a.optString("commande").trim()
                 if (cmd.isBlank()) return ToolResult("Commande vide.")
                 if ((Serveur.dangereuse(cmd) || cible != null) && !confirm("Exécuter sur ${cible?.hote ?: app.store.sshHost.value} :\n\n$cmd", true)) return ToolResult("Refusé par l'utilisateur.")
@@ -161,6 +162,12 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 ToolResult(sb.toString(), direct = true)
             }
             "reseau_scanner" -> {
+                if (a.optString("via").lowercase().startsWith("serv")) {
+                    ssh()
+                    val l = Serveur.scanReseau(app)
+                    val neufs = Registre.appareils(app, l, "Réseau du serveur")
+                    return ToolResult("# 📡 Réseau du serveur — ${l.size} appareil(s)\n\n| IP | MAC | Type | Ports |\n|---|---|---|---|\n" + l.joinToString("\n") { "| ${it.ip} | ${it.info.removePrefix("MAC ")} | ${it.type} | ${it.ports.joinToString(",")} |" } + "\n\n💾 $neufs nouvel(s) appareil(s) enregistré(s).", direct = true)
+                }
                 val i = Reseau.infos(app) ?: return ToolResult("Pas de réseau.")
                 if (!i.wifi) return ToolResult("Le téléphone n'est pas connecté au Wi-Fi : je ne peux pas analyser le réseau local.")
                 val liste = Reseau.scanner(app)
@@ -174,6 +181,8 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 liste.forEach { d -> sb.append("| ${d.ip}${if (d.ip == i.ip) " (moi)" else if (d.ip == i.passerelle) " (box)" else ""} | ${nom(d)} | ${d.type} | ${d.ports.joinToString(",")} | ${d.titre.take(30)} |\n") }
                 if (imps.isNotEmpty()) sb.append("\n**🖨️ Imprimantes (mDNS)** : " + imps.distinctBy { it.host }.joinToString(" · ") { "${it.nom} (${it.host})" } + "\n")
                 sb.append("\n💾 $neufs nouvel(s) appareil(s) enregistré(s)." + (if (pub.isNotBlank()) " 🌍 IP publique : **$pub**." else "") + (if (chg.isNotBlank()) "\n$chg" else ""))
+                sb.append("\n\n🔎 ${Reseau.diag}")
+                if (liste.size <= 2) sb.append("\n⚠️ Très peu d'appareils vus : la box isole peut-être les appareils Wi-Fi (« isolation AP/clients »), ou un VPN est actif. Essaie « scanne le réseau via le serveur » pour une analyse complète depuis le réseau du serveur.")
                 ToolResult(sb.toString(), direct = true)
             }
             "appareil_sonder" -> {
@@ -182,7 +191,15 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 val d = Reseau.appareil(ip) ?: return ToolResult("Aucune réponse de $ip.")
                 ToolResult("# ${d.type} — ${d.ip}\n- Nom : ${d.nom.ifBlank { "—" }}\n- Ports ouverts : ${d.ports.joinToString(", ").ifBlank { "aucun des ports courants" }}\n- Page web : ${d.titre.ifBlank { "—" }}", direct = true)
             }
-            "appareil_page" -> ToolResult("```\n" + Reseau.lirePage(a.optString("ip").trim(), a.optString("port").toIntOrNull() ?: 80, a.optString("chemin")) + "\n```")
+            "appareil_page" -> {
+                val ip = a.optString("ip").trim(); val port = a.optString("port").toIntOrNull() ?: 80
+                if (a.optString("via").lowercase().startsWith("serv")) {
+                    ssh()
+                    if (!Reseau.prive(ip)) return ToolResult("Réseau local uniquement : $ip n'est pas une adresse privée.")
+                    val url = (if (port == 443 || port == 8443) "https" else "http") + "://$ip:$port/" + a.optString("chemin").trimStart('/')
+                    ToolResult("```\n" + sortie(Serveur.exec(app, "curl -sk -m 15 ${Serveur.q(url)} | sed -e 's/<[^>]*>/ /g' | tr -s ' \\n\\t' ' ' | head -c 3500", 30)) + "\n```")
+                } else ToolResult("```\n" + Reseau.lirePage(ip, port, a.optString("chemin")) + "\n```")
+            }
             "imprimantes_trouver" -> {
                 val via = a.optString("via").lowercase().let { if (it.startsWith("serv")) "serveur" else "local" }
                 val ip = a.optString("ip").trim()

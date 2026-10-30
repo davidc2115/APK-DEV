@@ -449,7 +449,7 @@ fun SettingsScreen(app: JarvisApp) {
                         add(android.Manifest.permission.READ_CONTACTS); add(android.Manifest.permission.WRITE_CONTACTS); add(android.Manifest.permission.READ_SMS)
                         add(android.Manifest.permission.SEND_SMS); add(android.Manifest.permission.CALL_PHONE); add(android.Manifest.permission.ACCESS_FINE_LOCATION)
                         add(android.Manifest.permission.ACCESS_COARSE_LOCATION)
-                        if (android.os.Build.VERSION.SDK_INT >= 33) add(android.Manifest.permission.POST_NOTIFICATIONS)
+                        if (android.os.Build.VERSION.SDK_INT >= 33) { add(android.Manifest.permission.POST_NOTIFICATIONS); add(android.Manifest.permission.NEARBY_WIFI_DEVICES) }
                     }.toTypedArray())
                 }
                 Spacer(Modifier.height(6.dp))
@@ -719,6 +719,10 @@ private fun ServeurPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvi
         HudTextField(store.sshKey.value, { store.sshKey.set(it) }, Modifier.fillMaxWidth(), label = "Clé privée (optionnelle, texte PEM/OpenSSH)", singleLine = false, maxLines = 4)
         Spacer(Modifier.height(6.dp))
         HudTextField(store.haDir.value, { store.haDir.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Dossier de config HA sur le serveur (vide = détection auto)")
+        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { store.scanAuto.set(!store.scanAuto.value); fr.dd.jarvis.work.ReseauScheduler.apply(app, store) }) {
+            Text((if (store.scanAuto.value) "✅ " else "⬜ ") + "Analyse automatique du réseau (à chaque connexion Wi-Fi et toutes les heures) : enregistre appareils et IP publique", color = HudText, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
+        }
         Spacer(Modifier.height(6.dp))
         HudTextField(store.sshHostDistant.value, { store.sshHostDistant.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Adresse distante du serveur (IP publique ou nom DDNS, optionnel)")
         Spacer(Modifier.height(6.dp))

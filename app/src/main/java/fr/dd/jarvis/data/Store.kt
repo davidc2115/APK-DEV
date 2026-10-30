@@ -92,6 +92,7 @@ class Store(context: Context) {
     val sshKey = SPref("sshKey", "")
     val sshFp = SPref("sshFp", "")
     val ghToken = SPref("ghToken", "")
+    val scanAuto = BPref("scanAuto", true)
     val sshHostDistant = SPref("sshHostDistant", "")
     val sshPortDistant = SPref("sshPortDistant", "")
     // ---- Box internet (disque dur USB)

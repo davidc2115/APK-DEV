@@ -86,6 +86,15 @@ class JarvisApp : Application() {
         createChannel()
         if (store.briefingOn.value) Scheduler.schedule(this, store)
         fr.dd.jarvis.work.AgentsScheduler.apply(this, store)
+        fr.dd.jarvis.work.ReseauScheduler.apply(this, store)
+        // Connexion à un Wi-Fi : analyse automatique du réseau (appareils + IP publique).
+        runCatching {
+            val cm = getSystemService(android.net.ConnectivityManager::class.java)
+            cm.registerNetworkCallback(android.net.NetworkRequest.Builder().addTransportType(android.net.NetworkCapabilities.TRANSPORT_WIFI).build(),
+                object : android.net.ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: android.net.Network) { if (store.scanAuto.value) fr.dd.jarvis.work.ReseauScheduler.declencher(this@JarvisApp) }
+                })
+        }
     }
 
     private fun createChannel() {
