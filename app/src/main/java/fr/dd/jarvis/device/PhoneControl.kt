@@ -179,7 +179,38 @@ class PhoneControl(private val ctx: Context) {
         }
         val r = start("android.media.action.MEDIA_PLAY_FROM_SEARCH", null, pkg,
             mapOf("query" to requete, "android.intent.extra.focus" to "vnd.android.cursor.item/*"))
-        return r.ifBlank { "🎵 Lecture de « $requete »" + (pkg?.let { " dans " + (findPackage(it)?.second ?: it) } ?: "") + " lancée." }
+        if (r.isNotBlank()) return r
+        val nom = pkg?.let { findPackage(it)?.second ?: it } ?: "l'application de musique"
+        // Ouvrir l'appli ne suffit pas : on pilote sa session média (comme un assistant) pour lancer vraiment la lecture.
+        val etat = lancerLecture(pkg, requete)
+        return when (etat) {
+            "lecture" -> "🎵 « $requete » est en cours de lecture dans $nom."
+            "session" -> "🎵 $nom est ouverte et j'ai demandé la lecture de « $requete », mais je n'ai pas pu confirmer qu'elle a démarré. Si rien ne joue, lance un titre une fois à la main dans $nom (première utilisation)."
+            else -> "⚠️ $nom s'est ouverte mais je n'ai pas pu la piloter (accès aux notifications de JARVIS requis : Réglages Android › Accès aux notifications › JARVIS). Appuie sur lecture dans $nom."
+        }
+    }
+
+    /** Cherche la session média de [pkg] et lui demande de lire [requete] ; retourne « lecture » (confirmé), « session » (demandé) ou « aucune ». */
+    private fun lancerLecture(pkg: String?, requete: String): String {
+        val msm = ctx.getSystemService(Context.MEDIA_SESSION_SERVICE) as android.media.session.MediaSessionManager
+        val cn = android.content.ComponentName(ctx, fr.dd.jarvis.service.JarvisNotificationListener::class.java)
+        fun ctrl(): android.media.session.MediaController? = try {
+            msm.getActiveSessions(cn).firstOrNull { pkg == null || it.packageName == pkg }
+        } catch (e: SecurityException) { null } catch (e: Exception) { null }
+        fun joue(c: android.media.session.MediaController) = c.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+        var c: android.media.session.MediaController? = null
+        var t = 0
+        while (t < 10 && c == null) { Thread.sleep(1000); c = ctrl(); t++ }   // l'appli met quelques secondes à démarrer
+        if (c == null) return "aucune"
+        if (joue(c) && t > 3) return "lecture"
+        Thread.sleep(800)
+        c.transportControls.playFromSearch(requete, android.os.Bundle())
+        for (i in 0 until 5) { Thread.sleep(1000); if (joue(c)) return "lecture" }
+        c.transportControls.play()
+        for (i in 0 until 3) { Thread.sleep(1000); if (joue(c)) return "lecture" }
+        mediaKey("play")
+        for (i in 0 until 3) { Thread.sleep(1000); if (joue(c)) return "lecture" }
+        return "session"
     }
 
     fun mediaKey(action: String): String {
