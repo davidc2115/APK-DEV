@@ -52,6 +52,15 @@ object Horloge {
     }
     private fun save(c: Context, l: List<JSONObject>) { prefs(c).edit().putString("items", JSONArray(l).toString()).commit() }
 
+    /** Demande l'affichage en pastille dans la barre d'état (Android 16 : notifications « en direct » avec compteur). Ignoré par les versions plus anciennes. */
+    private fun enDirect(b: NotificationCompat.Builder, court: String = ""): NotificationCompat.Builder {
+        b.addExtras(android.os.Bundle().apply {
+            putBoolean("android.requestPromotedOngoing", true)
+            if (court.isNotBlank()) putString("android.shortCriticalText", court)
+        })
+        return b
+    }
+
     private fun pi(c: Context, id: Int, action: String, flags: Int = PendingIntent.FLAG_IMMUTABLE, extra: (Intent) -> Unit = {}): PendingIntent =
         PendingIntent.getBroadcast(c, id, Intent(c, HorlogeReceiver::class.java).setAction(action).putExtra("id", id).also(extra), PendingIntent.FLAG_UPDATE_CURRENT or flags)
 
@@ -97,7 +106,8 @@ object Horloge {
         val o = JSONObject().put("id", id).put("kind", "timer").put("at", at).put("label", libelle).put("days", JSONArray())
         val l = load(c); l.add(o); save(c, l); planifier(c, o)
         // Compte à rebours visible dans la barre de notifications.
-        val n = NotificationCompat.Builder(c, CH_RUN).setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+        val n = enDirect(NotificationCompat.Builder(c, CH_RUN)).setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS).setContentText("Temps restant")
             .setContentTitle("⏳ Minuteur" + (if (libelle.isNotBlank()) " — $libelle" else "")).setWhen(at).setUsesChronometer(true).setChronometerCountDown(true)
             .setOngoing(true).setOnlyAlertOnce(true).setTimeoutAfter(secondes * 1000L + 2000)
             .addAction(0, "Annuler", pi(c, id, ACT_STOP)).build()
@@ -145,7 +155,7 @@ object Horloge {
                 else {
                     val now = System.currentTimeMillis()
                     prefs(c).edit().putLong("chrono", now).commit()
-                    val n = NotificationCompat.Builder(c, CH_RUN).setSmallIcon(android.R.drawable.ic_lock_idle_alarm).setContentTitle("⏱️ Chronomètre")
+                    val n = enDirect(NotificationCompat.Builder(c, CH_RUN)).setSmallIcon(android.R.drawable.ic_lock_idle_alarm).setContentTitle("⏱️ Chronomètre").setContentText("Temps écoulé").setCategory(NotificationCompat.CATEGORY_STOPWATCH)
                         .setWhen(now).setUsesChronometer(true).setOngoing(true).setOnlyAlertOnce(true)
                         .addAction(0, "Arrêter", pi(c, CHRONO_ID, ACT_STOP)).build()
                     runCatching { nm(c).notify(CHRONO_ID, n) }
