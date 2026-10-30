@@ -139,6 +139,14 @@ class ToolBox(
             mapOf("lieu" to prop("Ville ou adresse (optionnel : par défaut la position actuelle du téléphone)."), "jours" to prop("Nombre de jours de prévision (1 à 7). Par défaut 3."))))
         put(tool("generer_image", "Génère une image à partir d'une description (Cloudflare). L'image est affichée dans le chat et enregistrée dans Obsidian.",
             mapOf("prompt" to prop("Description détaillée de l'image, rédigée en anglais (sujet, style, lumière, cadrage).")), listOf("prompt")))
+        put(tool("alarme_creer", "Règle une alarme dans l'application Horloge native du téléphone, sans l'ouvrir.",
+            mapOf("heure" to prop("Heure au format HH:MM (24 h)."), "libelle" to prop("Nom de l'alarme (optionnel)."),
+                "jours" to prop("Répétition (optionnel) : « lun mar ven », « semaine », « tous les jours ». Vide = une seule fois.")), listOf("heure")))
+        put(tool("alarme_supprimer", "Supprime une alarme de l'Horloge (par heure HH:MM ou par libellé).",
+            mapOf("heure" to prop("Heure de l'alarme (optionnel)."), "libelle" to prop("Libellé de l'alarme (optionnel)."))))
+        put(tool("minuteur_creer", "Lance un minuteur dans l'application Horloge native, sans l'ouvrir.",
+            mapOf("secondes" to prop("Durée totale en secondes (ex. 10 min = 600)."), "libelle" to prop("Nom du minuteur (optionnel).")), listOf("secondes")))
+        put(tool("chronometre", "Ouvre le chronomètre de l'Horloge (démarrage automatique impossible sous Android)."))
         put(tool("jouer_musique", "Lance la lecture d'un titre, artiste ou playlist dans une application de musique du téléphone (fonctionne aussi en arrière-plan).",
             mapOf("requete" to prop("Titre, artiste ou style à écouter."), "appli" to prop("Application : spotify, youtube music, deezer, youtube, vlc… (optionnel : la première installée)."))))
         put(tool("controle_media", "Contrôle la lecture en cours : play, pause, next, previous, stop.", mapOf("action" to prop("play | pause | next | previous | stop")), listOf("action")))
@@ -242,6 +250,10 @@ class ToolBox(
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
             ToolResult("❌ Image impossible : ${e.message}")
         }
+        "alarme_creer" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.creerAlarme(a.optString("heure"), a.optString("libelle"), a.optString("jours")) })
+        "alarme_supprimer" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.supprimerAlarme(a.optString("heure"), a.optString("libelle")) })
+        "minuteur_creer" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.creerMinuteur(a.optString("secondes").toDoubleOrNull()?.toInt() ?: 0, a.optString("libelle")) })
+        "chronometre" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.chronometre() })
         "jouer_musique" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.playMusic(a.optString("requete"), a.optString("appli")) })
         "controle_media" -> ToolResult(app.phone.mediaKey(a.optString("action")))
         "naviguer" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.navigate(a.optString("destination"), a.optString("mode")) })

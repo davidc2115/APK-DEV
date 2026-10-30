@@ -70,6 +70,88 @@ class PhoneControl(private val ctx: Context) {
         } catch (e: Exception) { "Lancement impossible : ${e.message}. (Pour lancer des applis quand JARVIS est en arrière-plan : appairer l'ADB intégré ou autoriser l'affichage par-dessus les autres applis.)" }
     }
 
+    // ---------------------------------------------------------------- Horloge native (alarme, minuteur, chronomètre)
+
+    /** Lance un intent de l'horloge sans afficher son interface (EXTRA_SKIP_UI) ; en arrière-plan via ADB si possible. */
+    private fun horloge(action: String, ints: Map<String, Int> = emptyMap(), strs: Map<String, String> = emptyMap(),
+                        bools: Map<String, Boolean> = emptyMap(), ints2: Map<String, ArrayList<Int>> = emptyMap()): Boolean {
+        if (adbOk()) {
+            val cmd = buildString {
+                append("am start -f 0x10000000 -a ").append(action)
+                ints.forEach { (k, v) -> append(" --ei ").append(k).append(' ').append(v) }
+                strs.forEach { (k, v) -> append(" --es ").append(k).append(' ').append(q(v)) }
+                bools.forEach { (k, v) -> append(" --ez ").append(k).append(' ').append(v) }
+                ints2.forEach { (k, v) -> append(" --eial ").append(k).append(' ').append(v.joinToString(",")) }
+            }
+            val r = PhoneShell.exec(ctx, cmd)
+            if (!r.contains("Error", true) && !r.contains("Exception", true) && !r.startsWith("ADB non") && !r.startsWith("Erreur ADB")) return true
+        }
+        return try {
+            val i = Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            ints.forEach { (k, v) -> i.putExtra(k, v) }
+            strs.forEach { (k, v) -> i.putExtra(k, v) }
+            bools.forEach { (k, v) -> i.putExtra(k, v) }
+            ints2.forEach { (k, v) -> i.putIntegerArrayListExtra(k, v) }
+            ctx.startActivity(i); true
+        } catch (e: Exception) { false }
+    }
+
+    /** Crée une alarme dans l'horloge du téléphone. [jours] : lun, mar, mer, jeu, ven, sam, dim (vide = une seule fois). */
+    fun creerAlarme(heure: String, libelle: String, jours: String): String {
+        val m = Regex("(\\d{1,2})\\s*(?:[:hH]\\s*(\\d{1,2})?)?").find(heure.trim()) ?: return "Heure d'alarme non comprise : « $heure »."
+        val h = m.groupValues[1].toInt(); val mn = m.groupValues[2].toIntOrNull() ?: 0
+        if (h !in 0..23 || mn !in 0..59) return "Heure invalide : $heure."
+        val map = mapOf("dim" to 1, "lun" to 2, "mar" to 3, "mer" to 4, "jeu" to 5, "ven" to 6, "sam" to 7)
+        val days = arrayListOf<Int>()
+        val low = jours.lowercase()
+        if (low.contains("tous") || low.contains("quotidien")) days.addAll(1..7)
+        else if (low.contains("semaine") || low.contains("ouvr")) days.addAll(2..6)
+        else map.forEach { (k, v) -> if (low.contains(k)) days.add(v) }
+        val ok = horloge(
+            android.provider.AlarmClock.ACTION_SET_ALARM,
+            ints = mapOf(android.provider.AlarmClock.EXTRA_HOUR to h, android.provider.AlarmClock.EXTRA_MINUTES to mn),
+            strs = if (libelle.isNotBlank()) mapOf(android.provider.AlarmClock.EXTRA_MESSAGE to libelle) else emptyMap(),
+            bools = mapOf(android.provider.AlarmClock.EXTRA_SKIP_UI to true),
+            ints2 = if (days.isNotEmpty()) mapOf(android.provider.AlarmClock.EXTRA_DAYS to days) else emptyMap()
+        )
+        val quand = "%02d:%02d".format(h, mn) + if (days.isNotEmpty()) " (" + jours.trim() + ")" else ""
+        return if (ok) "⏰ Alarme réglée à $quand" + (if (libelle.isNotBlank()) " — $libelle" else "") + "." else "Impossible de régler l'alarme (application Horloge indisponible)."
+    }
+
+    /** Lance un minuteur dans l'horloge du téléphone. */
+    fun creerMinuteur(secondes: Int, libelle: String): String {
+        if (secondes <= 0) return "Durée du minuteur invalide."
+        val ok = horloge(
+            android.provider.AlarmClock.ACTION_SET_TIMER,
+            ints = mapOf(android.provider.AlarmClock.EXTRA_LENGTH to secondes),
+            strs = if (libelle.isNotBlank()) mapOf(android.provider.AlarmClock.EXTRA_MESSAGE to libelle) else emptyMap(),
+            bools = mapOf(android.provider.AlarmClock.EXTRA_SKIP_UI to true)
+        )
+        val h = secondes / 3600; val mi = secondes % 3600 / 60; val se = secondes % 60
+        val txt = listOfNotNull(if (h > 0) "$h h" else null, if (mi > 0) "$mi min" else null, if (se > 0) "$se s" else null).joinToString(" ")
+        return if (ok) "⏳ Minuteur de $txt lancé." + (if (libelle.isNotBlank()) " ($libelle)" else "") else "Impossible de lancer le minuteur."
+    }
+
+    /** Supprime une alarme (recherche par heure ou libellé). */
+    fun supprimerAlarme(heure: String, libelle: String): String {
+        val m = Regex("(\\d{1,2})\\s*[:hH]\\s*(\\d{0,2})").find(heure)
+        val ok = if (m != null) horloge(
+            android.provider.AlarmClock.ACTION_DISMISS_ALARM,
+            ints = mapOf(android.provider.AlarmClock.EXTRA_HOUR to m.groupValues[1].toInt(), android.provider.AlarmClock.EXTRA_MINUTES to (m.groupValues[2].toIntOrNull() ?: 0)),
+            strs = mapOf(android.provider.AlarmClock.EXTRA_ALARM_SEARCH_MODE to android.provider.AlarmClock.ALARM_SEARCH_MODE_TIME)
+        ) else horloge(
+            android.provider.AlarmClock.ACTION_DISMISS_ALARM,
+            strs = mapOf(android.provider.AlarmClock.EXTRA_ALARM_SEARCH_MODE to android.provider.AlarmClock.ALARM_SEARCH_MODE_LABEL, android.provider.AlarmClock.EXTRA_MESSAGE to libelle)
+        )
+        return if (ok) "Demande de suppression de l'alarme envoyée à l'horloge." else "Impossible de supprimer l'alarme."
+    }
+
+    /** Chronomètre : Android n'offre pas d'API publique, on ouvre l'onglet chronomètre de l'horloge. */
+    fun chronometre(): String {
+        val ok = horloge("android.intent.action.SHOW_ALARMS", ints = mapOf("deskclock.select.tab" to 2)) 
+        return if (ok) "⏱️ Chronomètre ouvert (le démarrage automatique n'est pas possible : Android ne l'expose pas)." else "Impossible d'ouvrir le chronomètre."
+    }
+
     fun openApp(name: String): String {
         val (pkg, label) = findPackage(name) ?: return "Application « $name » introuvable."
         if (adbOk()) {
