@@ -37,7 +37,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.foundation.background
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import fr.dd.jarvis.ai.ChatMsg
@@ -81,6 +83,20 @@ fun ChatScreen(vm: ChatViewModel, store: Store) {
                     )
                 }
             }
+            var menu by remember { mutableStateOf(false) }
+            Box(Modifier.align(Alignment.TopEnd).padding(4.dp).zIndex(1f)) {
+                Text("⋮", color = HudDim, fontSize = 22.sp, modifier = Modifier.clickable { menu = true }.padding(horizontal = 14.dp, vertical = 4.dp))
+                androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, modifier = Modifier.background(Color(0xFF0B1424))) {
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text((if (store.speakReplies.value) "✓ " else "") + "🔊 Réponse vocale", color = HudText) },
+                        onClick = { store.speakReplies.set(!store.speakReplies.value); menu = false })
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text((if (store.conversationMode.value) "✓ " else "") + "🎧 Conversation", color = HudText) },
+                        onClick = { store.conversationMode.set(!store.conversationMode.value); menu = false })
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("➕ Nouvelle conversation", color = HudText) }, onClick = { vm.nouvelle(); menu = false })
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("🕘 Historique", color = HudText) }, onClick = { showHistory = true; menu = false })
+                }
+            }
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
@@ -96,27 +112,6 @@ fun ChatScreen(vm: ChatViewModel, store: Store) {
                     }
                 }
             }
-        }
-
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            item { HudChip("🌅 Point du matin") { vm.send("Fais-moi mon point du matin") } }
-            item { HudChip("📅 Planning du jour") { vm.send("Montre-moi mon planning d'aujourd'hui") } }
-            item { HudChip("📅 Demain") { vm.send("Montre-moi mon planning de demain") } }
-            item { HudChip("📧 Résumé mails") { vm.send("Résume mes derniers mails") } }
-            item { HudChip("🔦 Lampe") { vm.send("Allume la lampe torche") } }
-        }
-
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            HudChip("🔊 Réponse vocale", store.speakReplies.value) { store.speakReplies.set(!store.speakReplies.value) }
-            HudChip("🎧 Conversation", store.conversationMode.value) { store.conversationMode.set(!store.conversationMode.value) }
-            HudChip("➕ Nouvelle") { vm.nouvelle() }
-            HudChip("🕘 Historique") { showHistory = true }
         }
 
         if (vm.partial.isNotBlank() || (vm.status.isNotBlank() && !vm.busy)) {

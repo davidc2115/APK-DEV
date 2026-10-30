@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
@@ -112,8 +113,10 @@ private fun Root(app: JarvisApp, vm: ChatViewModel) {
         mutableStateOf(if (f.exists()) f.readText() else null)
     }
 
+    // Clavier ouvert : l'en-tête et la barre d'onglets se masquent pour laisser toute la place à la conversation.
+    val imeOpen = androidx.compose.foundation.layout.WindowInsets.Companion.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
     Column(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
-        Row(
+        if (!(imeOpen && tab == 0)) Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -143,7 +146,7 @@ private fun Root(app: JarvisApp, vm: ChatViewModel) {
         }
 
         // Barre de navigation HUD
-        Row(
+        if (!imeOpen) Row(
             Modifier.fillMaxWidth().background(accent.copy(alpha = 0.08f)).border(1.dp, accent.copy(alpha = 0.35f)).padding(vertical = 6.dp),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
