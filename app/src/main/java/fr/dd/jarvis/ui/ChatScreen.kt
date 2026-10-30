@@ -15,6 +15,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -94,7 +98,7 @@ fun ChatScreen(vm: ChatViewModel, store: Store) {
                         text = { Text((if (store.conversationMode.value) "✓ " else "") + "🎧 Conversation", color = HudText) },
                         onClick = { store.conversationMode.set(!store.conversationMode.value); menu = false })
                     androidx.compose.material3.DropdownMenuItem(text = { Text("➕ Nouvelle conversation", color = HudText) }, onClick = { vm.nouvelle(); menu = false })
-                    androidx.compose.material3.DropdownMenuItem(text = { Text("🕘 Historique", color = HudText) }, onClick = { showHistory = true; menu = false })
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("🗂️ Conversations", color = HudText) }, onClick = { showHistory = true; menu = false })
                 }
             }
             LazyColumn(
@@ -141,37 +145,51 @@ fun ChatScreen(vm: ChatViewModel, store: Store) {
     }
 
     if (showHistory) {
-        var items by remember { mutableStateOf(vm.historique()) }
-        val fmt = remember { java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.FRENCH) }
-        AlertDialog(
+        val appCtx = androidx.compose.ui.platform.LocalContext.current.applicationContext as fr.dd.jarvis.JarvisApp
+        var requete by remember { mutableStateOf("") }
+        var rafraichir by remember { mutableStateOf(0) }
+        val fmt = remember { java.text.SimpleDateFormat("EEE dd/MM HH:mm", java.util.Locale.FRENCH) }
+        val liste = remember(requete, rafraichir) { fr.dd.jarvis.ai.Conversations.chercher(appCtx, requete) }
+        androidx.compose.ui.window.Dialog(
             onDismissRequest = { showHistory = false },
-            containerColor = Color(0xFF0B1424), titleContentColor = accent, textContentColor = HudText,
-            title = { Text("Historique des conversations") },
-            text = {
-                androidx.compose.foundation.layout.Column(
-                    Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    if (items.isEmpty()) Text("Aucune conversation archivée. « ➕ Nouvelle » range la conversation en cours ici.", color = HudDim, fontSize = 13.sp)
-                    items.forEach { c ->
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                "${fmt.format(java.util.Date(c.ts))} · ${c.title} (${c.count})", color = HudText, fontSize = 13.sp,
-                                modifier = Modifier.weight(1f).clickable { vm.ouvrir(c.id); showHistory = false }
-                            )
-                            Text("✕", color = Color(0xFFFF4D6D), fontSize = 16.sp, modifier = Modifier.padding(start = 8.dp).clickable { vm.supprimer(c.id); items = vm.historique() })
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+        ) {
+            androidx.compose.foundation.layout.Column(
+                Modifier.fillMaxSize().background(Color(0xFF070D1A)).windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.Companion.systemBars).imePadding().padding(14.dp)
+            ) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("CONVERSATIONS", color = accent, fontFamily = FontFamily.Monospace, fontSize = 18.sp, modifier = Modifier.weight(1f))
+                    Text("✕", color = HudDim, fontSize = 22.sp, modifier = Modifier.clickable { showHistory = false }.padding(8.dp))
+                }
+                Text("🧠 La mémoire (consignes, préférences) est commune à toutes les conversations.", color = HudDim, fontSize = 12.sp, modifier = Modifier.padding(vertical = 4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    HudTextField(requete, { requete = it }, Modifier.weight(1f), placeholder = "Rechercher (mot, sujet, emojis…)", singleLine = true)
+                    HudButton("➕ Nouvelle", filled = true) { vm.nouvelle(); showHistory = false }
+                }
+                androidx.compose.foundation.layout.Spacer(Modifier.height(8.dp))
+                androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (liste.isEmpty()) item { Text(if (requete.isBlank()) "Aucune conversation archivée. Chaque échange est rangé ici automatiquement." else "Aucun résultat.", color = HudDim, fontSize = 13.sp) }
+                    items(liste.size) { i ->
+                        val c = liste[i]
+                        val enCours = c.id == appCtx.convId
+                        HudPanel(Modifier.fillMaxWidth().clickable { vm.ouvrir(c.id); showHistory = false }, title = if (enCours) "EN COURS" else null) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                androidx.compose.foundation.layout.Column(Modifier.weight(1f)) {
+                                    Text(c.titre, color = HudText, fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, maxLines = 2)
+                                    Text("${fmt.format(java.util.Date(c.ts))} · ${c.count} messages" + (if (c.emojis > 5) " · ${c.emojis} emojis" else ""), color = accent, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                    if (c.apercu.isNotBlank()) Text(c.apercu, color = HudDim, fontSize = 12.sp, maxLines = 2)
+                                }
+                                Text("✕", color = Color(0xFFFF4D6D), fontSize = 18.sp, modifier = Modifier.padding(start = 8.dp).clickable { vm.supprimer(c.id); rafraichir++ }.padding(6.dp))
+                            }
                         }
                     }
                 }
-            },
-            confirmButton = { TextButton({ showHistory = false; confirmReset = true }) { Text("Tout remettre à zéro", color = Color(0xFFFF4D6D)) } },
-            dismissButton = {
-                Row {
-                    TextButton({ vm.toutEffacer(); items = vm.historique() }) { Text("Vider l'historique", color = accent) }
-                    TextButton({ showHistory = false }) { Text("Fermer", color = HudDim) }
+                Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    TextButton({ vm.toutEffacer(); rafraichir++ }) { Text("Vider l'historique", color = accent, fontSize = 12.sp) }
+                    TextButton({ showHistory = false; confirmReset = true }) { Text("Tout remettre à zéro", color = Color(0xFFFF4D6D), fontSize = 12.sp) }
                 }
             }
-        )
+        }
     }
     if (confirmReset) {
         AlertDialog(

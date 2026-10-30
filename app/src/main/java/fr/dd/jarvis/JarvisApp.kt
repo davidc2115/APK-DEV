@@ -22,6 +22,7 @@ class JarvisApp : Application() {
     // ---- Conversation partagée entre l'écran Chat et le mode vocal « Jarvis » (service)
     val chat = androidx.compose.runtime.mutableStateListOf<fr.dd.jarvis.ai.ChatMsg>()
     @Volatile var chatLoaded = false
+    @Volatile var convId = ""
 
     @Synchronized fun chatCharger() {
         if (chatLoaded) return

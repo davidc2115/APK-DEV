@@ -62,9 +62,53 @@ class Llm(private val store: Store) {
 
     /** Appel du cerveau ; si le modèle n'existe plus (404), choisit automatiquement un modèle disponible. */
     suspend fun groqChat(messages: org.json.JSONArray, tools: org.json.JSONArray?): org.json.JSONObject = try {
-        groq.chat(messages, tools)
+        groq.chat(messages, tools, 1800)
     } catch (e: ApiException) {
-        if (e.code == 404 && autoFixGroq()) groq.chat(messages, tools) else throw e
+        when {
+            e.code == 404 && autoFixGroq() -> groq.chat(messages, tools, 1800)
+            // 413 : requête trop grosse pour la limite de jetons/minute du modèle → on compacte (historique, résultats d'outils, schéma) et on réessaie.
+            e.code == 413 || (e.code == 429 && (e.message ?: "").contains("tokens per minute", true) && (e.message ?: "").contains("Requested")) -> {
+                try { groq.chat(compacter(messages, 1), compacterSchema(tools, 1), 1000) }
+                catch (e2: ApiException) { if (e2.code == 413) groq.chat(compacter(messages, 2), compacterSchema(tools, 2), 700) else throw e2 }
+            }
+            else -> throw e
+        }
+    }
+
+    private fun compacter(messages: org.json.JSONArray, niveau: Int): org.json.JSONArray {
+        val sys = if (niveau == 1) 5000 else 2800
+        val txt = if (niveau == 1) 700 else 350
+        val outil = if (niveau == 1) 1800 else 800
+        val src = (0 until messages.length()).map { messages.getJSONObject(it) }
+        val dernierUser = src.indexOfLast { it.optString("role") == "user" }
+        // Messages simples (sans appel d'outil) trop anciens : on ne garde que les plus récents.
+        val anciens = src.withIndex().filter { (i, m) -> i < dernierUser && m.optString("role") in setOf("user", "assistant") && !m.has("tool_calls") }.map { it.index }
+        val aGarder = anciens.takeLast(if (niveau == 1) 6 else 2).toSet()
+        val out = org.json.JSONArray()
+        src.forEachIndexed { i, m ->
+            val role = m.optString("role")
+            if (i < dernierUser && role in setOf("user", "assistant") && !m.has("tool_calls") && i !in aGarder) return@forEachIndexed
+            val c = org.json.JSONObject(m.toString())
+            val limite = when (role) { "system" -> sys; "tool" -> outil; else -> txt }
+            if (c.opt("content") is String) c.put("content", c.getString("content").let { if (it.length > limite) it.take(limite) + "…" else it })
+            out.put(c)
+        }
+        return out
+    }
+
+    private fun compacterSchema(tools: org.json.JSONArray?, niveau: Int): org.json.JSONArray? {
+        if (tools == null) return null
+        val out = org.json.JSONArray()
+        for (i in 0 until tools.length()) {
+            val t = org.json.JSONObject(tools.getJSONObject(i).toString())
+            val f = t.getJSONObject("function")
+            f.put("description", f.optString("description").take(if (niveau == 1) 160 else 90))
+            f.optJSONObject("parameters")?.optJSONObject("properties")?.let { p ->
+                p.keys().forEach { k -> p.optJSONObject(k)?.let { o -> if (niveau == 2) o.remove("description") else o.put("description", o.optString("description").take(70)) } }
+            }
+            out.put(t)
+        }
+        return out
     }
 
     suspend fun listGroqModels(): List<String> = firstKey(store.groqKeys.toList()) { groq.listModels(it) }

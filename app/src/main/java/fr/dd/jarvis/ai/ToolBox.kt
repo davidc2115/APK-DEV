@@ -161,6 +161,8 @@ class ToolBox(
                 "series" to JSONObject().put("type", "array").put("description", "Liste de séries {nom, valeurs:[nombres]}.").put("items", JSONObject().put("type", "object")
                     .put("properties", JSONObject().put("nom", JSONObject().put("type", "string")).put("valeurs", JSONObject().put("type", "array").put("items", JSONObject().put("type", "number"))))),
                 "unite" to prop("Unité (optionnelle), ex. €, kWh.")), listOf("type", "etiquettes", "series")))
+        put(tool("conversations", "Gère les conversations de l'appli : liste/recherche les anciennes conversations (par mots-clés, ou « emojis » pour celles avec beaucoup d'emojis), les REPREND (« remonte la conversation… », « reprends celle sur… ») ou démarre une nouvelle conversation. La mémoire (consignes) est commune à toutes les conversations.",
+            mapOf("action" to prop("liste | reprendre | nouvelle"), "recherche" to prop("Mots-clés décrivant la conversation (optionnel)."), "id" to prop("Identifiant exact d'une conversation (optionnel, vu dans la liste).")), listOf("action")))
         put(tool("agendas_liste", "Liste les agendas du téléphone et indique lesquels sont masqués."))
         put(tool("tache_arriere_plan", "Lance en arrière-plan une demande LONGUE ou en masse (trier beaucoup de mails, renommer ou modifier plusieurs contacts, ranger…) : elle continue même si l'app est fermée et le résultat arrive par notification. À utiliser quand l'utilisateur dit « en arrière-plan », « pendant que je fais autre chose », ou pour un gros volume.",
             mapOf("demande" to prop("La demande complète et autonome, comme l'utilisateur la formulerait (ex. « trie 300 mails du compte x, range-les dans Gmail et archive les pubs »).")), listOf("demande")))
@@ -301,6 +303,30 @@ class ToolBox(
         }
         "creer_fichier" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { fr.dd.jarvis.ai.Fichiers.creer(app, a) }.getOrElse { "❌ Création impossible : ${it.message}" } }, direct = true)
         "graphique" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { fr.dd.jarvis.ai.Graphique.creer(app, a) }.getOrElse { "❌ Graphique impossible : ${it.message}" } }, direct = true)
+        "conversations" -> {
+            val fmt = java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.FRENCH)
+            val act = a.optString("action").lowercase()
+            val q = a.optString("recherche").trim(); val id = a.optString("id").trim()
+            fun ligne(c: Conversations.Info) = "- id=${c.id} · ${fmt.format(java.util.Date(c.ts))} · « ${c.titre} » (${c.count} msg" + (if (c.emojis > 5) ", ${c.emojis} emojis" else "") + ")" + (if (c.apercu.isNotBlank()) " — ${c.apercu.take(80)}" else "")
+            when {
+                act.startsWith("nouv") -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { Conversations.archiverCourante(app); app.chat.clear(); app.convId = ""; app.chatSauver(); ToolResult("➕ Nouvelle conversation démarrée (la précédente est dans l'historique).", direct = true) }
+                act.startsWith("rep") || act.startsWith("ouv") -> {
+                    val cible = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        if (id.isNotBlank()) Conversations.liste(app).firstOrNull { it.id == id } else Conversations.chercher(app, q).filter { it.id != app.convId }.firstOrNull()
+                    }
+                    val cands = if (cible == null) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Conversations.liste(app).filter { it.id != app.convId }.take(8) } else emptyList()
+                    if (cible == null) ToolResult("Aucune conversation ne correspond clairement. Dernières conversations :\n" + cands.joinToString("\n") { ligne(it) } + "\nChoisis la plus probable (rappelle avec son id) ou demande à l'utilisateur laquelle.")
+                    else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        if (Conversations.ouvrir(app, cible.id)) ToolResult("↩️ Conversation reprise : « ${cible.titre} » (${cible.count} messages, ${fmt.format(java.util.Date(cible.ts))}). Tu peux continuer là où on s'était arrêtés.", direct = true)
+                        else ToolResult("Conversation introuvable.")
+                    }
+                }
+                else -> {
+                    val l = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Conversations.chercher(app, q).take(12) }
+                    ToolResult(if (l.isEmpty()) "Aucune conversation trouvée." else "# 🗂️ Conversations\n\n" + l.joinToString("\n") { ligne(it) })
+                }
+            }
+        }
         "tache_arriere_plan" -> {
             if (fr.dd.jarvis.work.TacheWorker.enCours) ToolResult("Je suis déjà dans une tâche d'arrière-plan : fais cette demande directement.")
             else {

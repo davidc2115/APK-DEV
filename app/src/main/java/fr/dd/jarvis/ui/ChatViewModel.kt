@@ -126,7 +126,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private var convId = ""
+    private var convId: String
+        get() = app.convId
+        set(v) { app.convId = v }
 
     data class ConvInfo(val id: String, val title: String, val count: Int, val ts: Long)
 

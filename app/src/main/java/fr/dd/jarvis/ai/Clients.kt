@@ -10,8 +10,8 @@ import org.json.JSONObject
 /** Groq (API compatible OpenAI) : le « cerveau » principal, avec appel d'outils. */
 class GroqClient(private val ring: KeyRing, private val model: () -> String) {
 
-    suspend fun chat(messages: JSONArray, tools: JSONArray?): JSONObject =
-        ring.run { key -> withContext(Dispatchers.IO) { call(key, messages, tools, 1024) } }
+    suspend fun chat(messages: JSONArray, tools: JSONArray?, out: Int = 2048): JSONObject =
+        ring.run { key -> withContext(Dispatchers.IO) { call(key, messages, tools, 1024, Http.client, out) } }
 
     suspend fun plain(system: String, user: String): String {
         val msgs = JSONArray()
@@ -39,12 +39,12 @@ class GroqClient(private val ring: KeyRing, private val model: () -> String) {
         }
     }
 
-    private fun call(key: String, messages: JSONArray, tools: JSONArray?, maxTokens: Int, client: okhttp3.OkHttpClient = Http.client): JSONObject {
+    private fun call(key: String, messages: JSONArray, tools: JSONArray?, maxTokens: Int, client: okhttp3.OkHttpClient = Http.client, out: Int = 2048): JSONObject {
         val body = JSONObject()
             .put("model", model())
             .put("messages", messages)
             .put("temperature", 0.4)
-            .put("max_tokens", if (maxTokens == 1) 1 else 2048)
+            .put("max_tokens", if (maxTokens == 1) 1 else out)
         if (tools != null && tools.length() > 0) {
             body.put("tools", tools)
             body.put("tool_choice", "auto")
