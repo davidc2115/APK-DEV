@@ -45,7 +45,7 @@ class JarvisService : Service() {
     private var busy = false
     private var awake = false              // conversation en cours : plus besoin de dire « Jarvis »
     private var deadline = 0L              // fin de la conversation si personne ne parle
-    private var vosk: fr.dd.jarvis.voice.VoskWake? = null
+    private var vosk: fr.dd.jarvis.voice.WakeDetector? = null
     private var confirm: CompletableDeferred<Boolean>? = null
     private var failures = 0
     private val history = mutableListOf<ChatMsg>()
@@ -90,7 +90,20 @@ class JarvisService : Service() {
                 }
             }
         }
-        vosk = if (fr.dd.jarvis.voice.VoskModel.ready(this)) fr.dd.jarvis.voice.VoskWake(this) { main.post { onWakeWord() } } else null
+        vosk = when {
+            app.store.picoKey.value.isNotBlank() -> fr.dd.jarvis.voice.PorcupineWake(this, app.store.picoKey.value) { main.post { onWakeWord() } }
+            fr.dd.jarvis.voice.VoskModel.ready(this) -> fr.dd.jarvis.voice.VoskWake(this) { main.post { onWakeWord() } }
+            else -> null
+        }
+        if (vosk == null) {
+            // Pas de détecteur : on n'écoute PAS en boucle (bips + déclenchements intempestifs). On prévient et on s'arrête.
+            app.store.wakeOn.set(false)
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.notify(NOTIF + 1, NotificationCompat.Builder(this, JarvisApp.CHANNEL_WAKE).setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                .setContentTitle("Écoute « Jarvis » non démarrée").setContentText("Ajoute une clé Picovoice (ou installe le détecteur hors-ligne) dans Réglages › Écoute.")
+                .setContentIntent(open).setAutoCancel(true).build())
+            stopSelf(); return START_NOT_STICKY
+        }
         main.postDelayed({ goIdle() }, 1200)
         return START_STICKY
     }
@@ -105,7 +118,14 @@ class JarvisService : Service() {
         voice?.stopListening()
         val v = vosk
         if (v != null) {
-            if (!v.start()) { vosk?.release(); vosk = null; listen() }
+            if (!v.start()) {
+                val err = (v as? fr.dd.jarvis.voice.PorcupineWake)?.error.orEmpty()
+                vosk?.release(); vosk = null
+                app.store.wakeOn.set(false)
+                getSystemService(NotificationManager::class.java).notify(NOTIF + 1, NotificationCompat.Builder(this, JarvisApp.CHANNEL_WAKE).setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                    .setContentTitle("Détecteur « Jarvis » en échec").setContentText(err.ifBlank { "Impossible de démarrer l'écoute." }.take(120)).setAutoCancel(true).build())
+                stopSelf()
+            }
         } else listen()
     }
 

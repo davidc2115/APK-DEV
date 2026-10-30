@@ -81,7 +81,7 @@ class ToolBox(
         put(tool("trier_mails", "Analyse les derniers mails, les classe par catégorie (Urgent, Clients, Factures, Chantiers, Administratif, Notifications, Newsletters, Perso) et peut les ranger dans Gmail (libellés Urgent, Clients…).",
             mapOf(
                 "compte" to prop("Compte mail précis (adresse ou partie), même s'il est désactivé. Vide = comptes actifs seulement."),
-                "count" to prop("Nombre de mails (5 à 60). Par défaut 30."),
+                "count" to prop("Nombre de mails à trier (5 à 500). Par défaut 100 ; mets 300-500 pour « toute la boîte »."),
                 "unread_only" to prop("« true » pour ne trier que les non lus."),
                 "ranger" to prop("« true » pour appliquer les libellés dans Gmail."),
                 "archiver" to prop("« true » pour aussi retirer de la boîte de réception les newsletters et notifications (avec ranger).")
@@ -547,7 +547,7 @@ class ToolBox(
 
     private suspend fun trierMails(a: JSONObject): ToolResult {
         if (!store.mailConfigured()) return ToolResult("Les mails ne sont pas configurés (Réglages › Mails).")
-        val count = (a.optString("count").toIntOrNull() ?: 30).coerceIn(5, 60)
+        val count = (a.optString("count").toIntOrNull() ?: 100).coerceIn(5, 500)
         val mails = try {
             app.mail.fetchRecent(count, a.optString("unread_only").equals("true", true), a.optString("compte"))
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {

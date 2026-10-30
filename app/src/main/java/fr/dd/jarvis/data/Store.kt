@@ -137,6 +137,9 @@ class Store(context: Context) {
         writeList("appPrefs", appPrefs.map { "${it.key}=${it.value}" })
     }
 
+    // Clé d'accès Picovoice (gratuite, console.picovoice.ai) : détecteur « Jarvis » de type OK Google
+    val picoKey = SPref("picoKey", "")
+
     // ---- Voix
     val speakReplies = BPref("speakReplies", true)
     val conversationMode = BPref("conversationMode", false)

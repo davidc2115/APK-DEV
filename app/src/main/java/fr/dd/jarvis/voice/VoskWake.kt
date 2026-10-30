@@ -55,24 +55,69 @@ object VoskModel {
     }
 }
 
-class VoskWake(private val ctx: Context, private val onWake: () -> Unit) {
+/** Détecteur de mot d'éveil : démarre l'écoute du seul mot « Jarvis ». */
+interface WakeDetector {
+    fun start(): Boolean
+    fun stop()
+    fun release()
+}
+
+/** Vrai détecteur de mot d'éveil (Picovoice Porcupine, mot « Jarvis » intégré) : hors-ligne, très peu de faux déclenchements. */
+class PorcupineWake(private val ctx: Context, private val accessKey: String, private val onWake: () -> Unit) : WakeDetector {
+    private var mgr: ai.picovoice.porcupine.PorcupineManager? = null
+    var error: String = ""
+
+    override fun start(): Boolean {
+        return try {
+            if (mgr == null) {
+                mgr = ai.picovoice.porcupine.PorcupineManager.Builder()
+                    .setAccessKey(accessKey.trim())
+                    .setKeyword(ai.picovoice.porcupine.Porcupine.BuiltInKeyword.JARVIS)
+                    .setSensitivity(0.65f)
+                    .build(ctx, ai.picovoice.porcupine.PorcupineManagerCallback { onWake() })
+            }
+            mgr?.start(); true
+        } catch (e: Throwable) {
+            error = e.message ?: e.javaClass.simpleName
+            try { mgr?.delete() } catch (_: Throwable) {}
+            mgr = null; false
+        }
+    }
+
+    override fun stop() { try { mgr?.stop() } catch (_: Throwable) {} }
+    override fun release() { try { mgr?.stop(); mgr?.delete() } catch (_: Throwable) {}; mgr = null }
+}
+
+class VoskWake(private val ctx: Context, private val onWake: () -> Unit) : WakeDetector {
     private var model: Model? = null
     private var service: SpeechService? = null
     @Volatile private var fired = false
 
-    fun start(): Boolean {
+    override fun start(): Boolean {
         if (!VoskModel.ready(ctx)) return false
         return try {
             LibVosk.setLogLevel(LogLevel.WARNINGS)
             if (model == null) model = Model(VoskModel.dir(ctx).absolutePath)
             val rec = Recognizer(model, 16000f, "[\"jarvis\", \"[unk]\"]")
+            rec.setWords(true)
             fired = false
             service = SpeechService(rec, 16000f).also { s ->
                 s.startListening(object : RecognitionListener {
+                    // Seuls les résultats définitifs comptent (plus de déclenchement sur les résultats partiels / bruits),
+                    // et le mot « jarvis » doit être reconnu avec une bonne confiance.
                     private fun check(j: String?) {
-                        if (!fired && j != null && j.contains("jarvis")) { fired = true; onWake() }
+                        if (fired || j == null) return
+                        try {
+                            val arr = org.json.JSONObject(j).optJSONArray("result") ?: return
+                            for (i in 0 until arr.length()) {
+                                val w = arr.getJSONObject(i)
+                                if (w.optString("word") == "jarvis" && w.optDouble("conf", 0.0) >= 0.9 && w.optDouble("end", 0.0) - w.optDouble("start", 0.0) >= 0.25) {
+                                    fired = true; onWake(); return
+                                }
+                            }
+                        } catch (_: Throwable) {}
                     }
-                    override fun onPartialResult(hypothesis: String?) = check(hypothesis)
+                    override fun onPartialResult(hypothesis: String?) {}
                     override fun onResult(hypothesis: String?) = check(hypothesis)
                     override fun onFinalResult(hypothesis: String?) = check(hypothesis)
                     override fun onError(exception: Exception?) {}
@@ -83,10 +128,10 @@ class VoskWake(private val ctx: Context, private val onWake: () -> Unit) {
         } catch (e: Throwable) { false }
     }
 
-    fun stop() {
+    override fun stop() {
         try { service?.stop(); service?.shutdown() } catch (_: Throwable) {}
         service = null
     }
 
-    fun release() { stop(); try { model?.close() } catch (_: Throwable) {}; model = null }
+    override fun release() { stop(); try { model?.close() } catch (_: Throwable) {}; model = null }
 }

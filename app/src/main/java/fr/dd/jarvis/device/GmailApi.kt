@@ -9,6 +9,7 @@ import fr.dd.jarvis.ai.ApiException
 import fr.dd.jarvis.ai.Http
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -76,11 +77,20 @@ object GmailApi {
         val token = auth.accessToken ?: throw IllegalStateException("jeton Google indisponible.")
         return withContext(Dispatchers.IO) {
             val q = if (unreadOnly) "&q=is:unread" else ""
-            val list = get(token, "$BASE/messages?maxResults=$count&labelIds=INBOX$q").optJSONArray("messages")
-            val ids = (0 until (list?.length() ?: 0)).map { list!!.getJSONObject(it).getString("id") }
+            // Pagination : l'API Gmail renvoie au plus 100 mails par page.
+            val ids = mutableListOf<String>()
+            var page: String? = null
+            while (ids.size < count) {
+                val r = get(token, "$BASE/messages?maxResults=${minOf(100, count - ids.size)}&labelIds=INBOX$q" + (page?.let { "&pageToken=$it" } ?: ""))
+                val list = r.optJSONArray("messages")
+                for (i in 0 until (list?.length() ?: 0)) ids.add(list!!.getJSONObject(i).getString("id"))
+                page = r.optString("nextPageToken").takeIf { it.isNotBlank() } ?: break
+            }
+            val gate = kotlinx.coroutines.sync.Semaphore(12)
             coroutineScope {
                 ids.map { id ->
                     async {
+                      gate.withPermit {
                         val m = get(token, "$BASE/messages/$id?format=metadata&metadataHeaders=From&metadataHeaders=Subject")
                         val headers = m.optJSONObject("payload")?.optJSONArray("headers")
                         fun h(n: String): String {
@@ -98,8 +108,10 @@ object GmailApi {
                             snippet = m.optString("snippet").replace("&#39;", "'").replace("&quot;", "\"").replace("&amp;", "&"),
                             unread = m.optJSONArray("labelIds")?.toString()?.contains("UNREAD") == true,
                             account = account,
-                            id = id
+                            id = id,
+                            fromAddr = Regex("<([^>]+)>").find(h("From"))?.groupValues?.get(1)?.lowercase() ?: h("From").trim().lowercase()
                         )
+                      }
                     }
                 }.awaitAll()
             }
@@ -132,12 +144,16 @@ object GmailApi {
                 val ls = get(token, "$BASE/labels").optJSONArray("labels")
                 for (i in 0 until (ls?.length() ?: 0)) ls!!.getJSONObject(i).let { existing[it.getString("name")] = it.getString("id") }
                 for (cat in items.map { it.second }.distinct()) {
-                    val name = prefix + cat
-                    if (name !in existing) existing[name] = post(token, "$BASE/labels", JSONObject().put("name", name)).getString("id")
+                    // « Clients/Dupont » : on crée aussi le libellé parent « Clients » pour une arborescence propre.
+                    val parts = cat.split("/")
+                    for (k in 1..parts.size) {
+                        val name = prefix + parts.take(k).joinToString("/")
+                        if (name !in existing) existing[name] = post(token, "$BASE/labels", JSONObject().put("name", name)).getString("id")
+                    }
                 }
                 for ((id, cat) in items) {
                     val body = JSONObject().put("addLabelIds", org.json.JSONArray().put(existing[prefix + cat]))
-                    if (cat in archiver) body.put("removeLabelIds", org.json.JSONArray().put("INBOX"))
+                    if (cat.substringBefore('/') in archiver) body.put("removeLabelIds", org.json.JSONArray().put("INBOX"))
                     post(token, "$BASE/messages/$id/modify", body)
                     n++
                 }

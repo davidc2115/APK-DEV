@@ -434,9 +434,19 @@ fun SettingsScreen(app: JarvisApp) {
                     } else micLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
                 }
                 Spacer(Modifier.height(8.dp))
+                var picoInput by remember { mutableStateOf(store.picoKey.value) }
+                Text("Détecteur « Jarvis » comme « OK Google » (recommandé) : crée gratuitement une clé d'accès sur console.picovoice.ai (compte gratuit › AccessKey) et colle-la ici. Le mot « Jarvis » est reconnu hors-ligne, sans bip, et rien d'autre ne déclenche l'écoute.", color = HudDim, fontSize = 12.sp)
+                Spacer(Modifier.height(4.dp))
+                HudTextField(picoInput, { picoInput = it }, Modifier.fillMaxWidth(), label = "Clé d'accès Picovoice")
+                Spacer(Modifier.height(4.dp))
+                HudButton(if (store.picoKey.value == picoInput.trim() && picoInput.isNotBlank()) "Clé enregistrée ✓" else "Enregistrer la clé", filled = true, enabled = picoInput.trim() != store.picoKey.value) {
+                    store.picoKey.set(picoInput.trim())
+                    if (store.wakeOn.value) { fr.dd.jarvis.service.JarvisService.stop(ctx); fr.dd.jarvis.service.JarvisService.start(ctx) }
+                }
+                Spacer(Modifier.height(8.dp))
                 var voskReady by remember { mutableStateOf(fr.dd.jarvis.voice.VoskModel.ready(ctx)) }
                 var voskMsg by remember { mutableStateOf("") }
-                StatusRow("Détecteur « Jarvis » hors-ligne (sans bip, sans réseau)", voskReady)
+                StatusRow("Détecteur hors-ligne de secours (Vosk)", voskReady)
                 if (!voskReady) HudButton("Télécharger le détecteur (≈ 40 Mo)") {
                     scope.launch {
                         voskMsg = "⏳ Téléchargement…"
@@ -446,7 +456,7 @@ fun SettingsScreen(app: JarvisApp) {
                     }
                 }
                 if (voskMsg.isNotBlank()) Text(voskMsg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
-                Text("Sans le détecteur, l'écoute passe par la reconnaissance Google en boucle (réseau, batterie, bips possibles).", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(vertical = 4.dp))
+                Text("Sans clé Picovoice ni détecteur hors-ligne, l'écoute « Jarvis » ne démarre pas (plus d'écoute en boucle avec bips).", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(vertical = 4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Conversation ouverte", color = HudDim, fontSize = 12.sp)
                     listOf(15, 25, 45, 90).forEach { sec ->
