@@ -26,7 +26,10 @@ object ImageGen {
             .header("Authorization", "Bearer $token").post(body.toString().toRequestBody("application/json".toMediaType())).build()
         http.newCall(req).execute().use { r ->
             val ct = r.header("Content-Type").orEmpty()
-            if (!r.isSuccessful) throw ApiException(r.code, "Cloudflare ${r.code} : " + (r.body?.string().orEmpty().take(200)))
+            if (!r.isSuccessful) {
+                val brut = r.body?.string().orEmpty().take(200)
+                throw ApiException(r.code, if (r.code == 401 || r.code == 403) diagnostic(id, token, r.code, brut) else "Cloudflare ${r.code} : $brut")
+            }
             val bytes = r.body!!.bytes()
             if (ct.startsWith("image/")) return bytes
             val j = JSONObject(String(bytes))
@@ -34,6 +37,23 @@ object ImageGen {
             if (b64.isBlank()) throw ApiException(500, "Réponse sans image : " + String(bytes).take(160))
             return Base64.decode(b64, Base64.DEFAULT)
         }
+    }
+
+    /** Explique pourquoi Cloudflare refuse : mauvais type de clé, jeton sans droit Workers AI ou mauvais compte. */
+    private fun diagnostic(id: String, token: String, code: Int, brut: String): String {
+        val entete = "Cloudflare $code (authentification refusée). "
+        return try {
+            val v = Request.Builder().url("https://api.cloudflare.com/client/v4/user/tokens/verify").header("Authorization", "Bearer $token").build()
+            http.newCall(v).execute().use { r ->
+                val ok = runCatching { JSONObject(r.body?.string().orEmpty()).optBoolean("success") }.getOrDefault(false)
+                when {
+                    !ok && Regex("[0-9a-f]{37}").matches(token.lowercase()) ->
+                        entete + "Cette clé est une « Global API Key » (37 caractères), pas un jeton. Crée un jeton : dash.cloudflare.com › Mon profil › Jetons API › Créer un jeton › modèle « Workers AI », puis colle-le ici."
+                    !ok -> entete + "Ce n'est pas un jeton API valide (copié en entier ? sans espace ?). Crée-en un : Mon profil › Jetons API › Créer un jeton › modèle « Workers AI »."
+                    else -> entete + "Le jeton est valide mais n'a pas accès à ce compte ou à Workers AI : vérifie l'ID de compte (${id.take(6)}…) et que le jeton a la permission « Workers AI » (Lecture/Édition) sur ce compte. Si tu viens de créer le compte, ouvre une fois dash.cloudflare.com › AI › Workers AI pour l'activer."
+                }
+            }
+        } catch (e: Exception) { "Cloudflare $code : $brut" }
     }
 
     /** Génère une image, la garde dans l'appli et dans Obsidian. Retourne (fichier, emplacement Obsidian). */
