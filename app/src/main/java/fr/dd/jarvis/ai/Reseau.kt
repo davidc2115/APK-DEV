@@ -31,6 +31,8 @@ object Reseau {
     private val http = OkHttpClient.Builder().connectTimeout(1500, TimeUnit.MILLISECONDS).readTimeout(2500, TimeUnit.MILLISECONDS).followRedirects(true)
         .hostnameVerifier { _, _ -> true }.sslSocketFactory(trustAll().first, trustAll().second).build()
     private val dns = Executors.newCachedThreadPool()
+    val clientLax: OkHttpClient get() = http
+    fun ouvertTcp(ip: String, port: Int, ms: Int = 1500) = ouvert(ip, port, ms) == 1
 
     private fun trustAll(): Pair<javax.net.ssl.SSLSocketFactory, javax.net.ssl.X509TrustManager> {
         val tm = object : javax.net.ssl.X509TrustManager {
@@ -113,18 +115,22 @@ object Reseau {
         val mask = (-1 shl (32 - pref))
         val net = ipInt and mask
         val hosts = (1 until (1 shl (32 - pref)) - 1).map { net + it }.map { "${it ushr 24 and 255}.${it ushr 16 and 255}.${it ushr 8 and 255}.${it and 255}" }
-        val sem = Semaphore(160)
+        val sem = Semaphore(110)
         val trouves = coroutineScope {
             hosts.map { h -> async { sem.acquire(); try { sonder(h) } finally { sem.release() } } }.awaitAll()
         }.filterNotNull()
         trouves.sortedBy { a -> a.ip.split(".").map { it.toInt() }.fold(0L) { acc, x -> acc * 256 + x } }
     }
 
+    private val ESSENTIELS = listOf(631, 9100, 80, 443, 515, 22, 445, 8080)
+
     private fun sonder(ip: String): Appareil? {
         val ouverts = mutableListOf<Int>(); var vivant = false
-        for (p in PORTS) { val r = ouvert(ip, p, 250); if (r == 1) { ouverts += p; vivant = true } else if (r == 0) vivant = true }
-        if (!vivant) vivant = runCatching { InetAddress.getByName(ip).isReachable(250) }.getOrDefault(false)
+        // Ports essentiels d'abord, avec un délai large (une imprimante en veille met parfois un moment à répondre).
+        for (p in ESSENTIELS) { val r = ouvert(ip, p, 500); if (r == 1) { ouverts += p; vivant = true } else if (r == 0) vivant = true }
+        if (!vivant) vivant = runCatching { InetAddress.getByName(ip).isReachable(400) }.getOrDefault(false)
         if (!vivant) return null
+        for (p in PORTS) if (p !in ESSENTIELS && ouvert(ip, p, 250) == 1) ouverts += p
         val web = ouverts.firstOrNull { it in listOf(80, 8080, 443, 8123, 5000, 8000) }
         val titre = web?.let { titreWeb(ip, it) }.orEmpty()
         return Appareil(ip, nomHote(ip), ouverts, titre, typeDe(ouverts, titre))

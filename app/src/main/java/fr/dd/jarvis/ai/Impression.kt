@@ -21,7 +21,7 @@ object Impression {
     private val http = OkHttpClient.Builder().connectTimeout(4, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).writeTimeout(60, TimeUnit.SECONDS).build()
     private val CHEMINS = listOf("/ipp/print", "/ipp", "/ipp/printer", "/printers/ipp", "/")
 
-    data class Imprimante(val ip: String, val chemin: String, val attrs: Map<String, List<String>>) {
+    data class Imprimante(val ip: String, val chemin: String, val attrs: Map<String, List<String>>, val schema: String = "http", val port: Int = 631) {
         val nom get() = attrs["printer-name"]?.firstOrNull() ?: attrs["printer-info"]?.firstOrNull() ?: ip
         val modele get() = attrs["printer-make-and-model"]?.firstOrNull().orEmpty()
         val formats get() = attrs["document-format-supported"].orEmpty()
@@ -35,12 +35,12 @@ object Impression {
     private fun ByteArrayOutputStream.attr(tag: Int, name: String, value: String) { write(tag); s(name.length); write(name.toByteArray()); val b = value.toByteArray(); s(b.size); write(b) }
     private fun ByteArrayOutputStream.int(name: String, v: Int) { write(0x21); s(name.length); write(name.toByteArray()); s(4); write(v ushr 24 and 255); write(v ushr 16 and 255); write(v ushr 8 and 255); write(v and 255) }
 
-    private fun requete(op: Int, ip: String, chemin: String, extra: ByteArrayOutputStream.() -> Unit, doc: ByteArray? = null): ByteArray {
+    private fun requete(op: Int, ip: String, chemin: String, extra: ByteArrayOutputStream.() -> Unit, doc: ByteArray? = null, schema: String = "http", port: Int = 631): ByteArray {
         val o = ByteArrayOutputStream()
         o.write(1); o.write(1); o.s(op); o.write(0); o.write(0); o.write(0); o.write(1)
         o.write(0x01)
         o.attr(0x47, "attributes-charset", "utf-8"); o.attr(0x48, "attributes-natural-language", "fr")
-        o.attr(0x45, "printer-uri", "ipp://$ip:631$chemin")
+        o.attr(0x45, "printer-uri", (if (schema == "https") "ipps" else "ipp") + "://$ip:$port$chemin")
         o.extra()
         o.write(0x03)
         if (doc != null) o.write(doc)
@@ -77,15 +77,26 @@ object Impression {
 
     // ---------------------------------------------------------------- transport : direct (téléphone) ou via le serveur Debian
 
-    private fun envoyer(app: JarvisApp, via: String, ip: String, chemin: String, corps: ByteArray): ByteArray? {
+    @Volatile var trace = StringBuilder()
+
+    private fun envoyer(app: JarvisApp, via: String, ip: String, chemin: String, corps: ByteArray, schema: String = "http", port: Int = 631): ByteArray? {
+        val url = "$schema://$ip:$port$chemin"
         if (via != "serveur") {
-            val r = Request.Builder().url("http://$ip:631$chemin").post(corps.toRequestBody("application/ipp".toMediaType())).build()
-            return runCatching { http.newCall(r).execute().use { it.body?.bytes() } }.getOrNull()
+            val r = Request.Builder().url(url).post(corps.toRequestBody("application/ipp".toMediaType())).build()
+            return try {
+                (if (schema == "https") Reseau.clientLax else http).newCall(r).execute().use { resp ->
+                    val b = resp.body?.bytes()
+                    trace.append("  $url → HTTP ${resp.code}${if (resp.code != 200) "" else " (${b?.size ?: 0} octets)"}\n")
+                    if (resp.isSuccessful) b else null
+                }
+            } catch (e: Exception) { trace.append("  $url → ${e.javaClass.simpleName}: ${e.message?.take(80)}\n"); null }
         }
         val tmp = "/tmp/jarvis_ipp_${System.nanoTime()}"
         Serveur.envoyerOctets(app, "$tmp.req", corps)
-        val r = Serveur.exec(app, "curl -s -m 70 -H 'Content-Type: application/ipp' --data-binary @$tmp.req -o $tmp.resp 'http://$ip:631$chemin'; base64 -w0 $tmp.resp 2>/dev/null; rm -f $tmp.req $tmp.resp", 90)
-        return runCatching { android.util.Base64.decode(r.second.trim().lines().last(), android.util.Base64.DEFAULT) }.getOrNull()
+        val r = Serveur.exec(app, "curl -sk -m 70 -H 'Content-Type: application/ipp' --data-binary @$tmp.req -o $tmp.resp -w 'HTTP%{http_code}' '$url'; echo; base64 -w0 $tmp.resp 2>/dev/null; rm -f $tmp.req $tmp.resp", 90)
+        val lignes = r.second.trim().lines()
+        trace.append("  (serveur) $url → ${lignes.firstOrNull().orEmpty().take(60)}\n")
+        return runCatching { android.util.Base64.decode(lignes.last(), android.util.Base64.DEFAULT) }.getOrNull()?.takeIf { it.size >= 8 }
     }
 
     private val ATTRS: ByteArrayOutputStream.() -> Unit = {
@@ -93,11 +104,18 @@ object Impression {
         l.forEachIndexed { i, n -> write(0x44); s(if (i == 0) "requested-attributes".length else 0); if (i == 0) write("requested-attributes".toByteArray()); s(n.length); write(n.toByteArray()) }
     }
 
+    /** Interroge l'imprimante en essayant les points d'accès IPP usuels (http 631, https 631, https 443) et plusieurs chemins. */
     fun interroger(app: JarvisApp, ip: String, via: String = "local", chemin: String? = null): Imprimante? {
-        for (c in listOfNotNull(chemin) + CHEMINS) {
-            val rep = envoyer(app, via, ip, c, requete(0x000B, ip, c, ATTRS)) ?: continue
+        val points = mutableListOf<Pair<String, Int>>()
+        for ((sch, port) in listOf("http" to 631, "https" to 631, "https" to 443, "http" to 80)) {
+            if (via == "local" && !Reseau.ouvertTcp(ip, port)) { trace.append("  port $port fermé ou muet sur $ip\n"); continue }
+            points += sch to port
+        }
+        for ((sch, port) in points) for (c in listOfNotNull(chemin) + CHEMINS) {
+            val rep = envoyer(app, via, ip, c, requete(0x000B, ip, c, ATTRS, null, sch, port), sch, port) ?: continue
             val (st, at) = parse(rep)
-            if (st in 0..2 && at.isNotEmpty()) return Imprimante(ip, c, at)
+            if (st in 0..2 && at.isNotEmpty()) return Imprimante(ip, c, at, sch, port)
+            trace.append("  $sch://$ip:$port$c → code IPP 0x${st.toString(16)}\n")
         }
         return null
     }
@@ -136,15 +154,16 @@ object Impression {
     }
 
     fun imprimer(app: JarvisApp, ip: String, fichier: String, texte: String, titre: String, copies: Int, via: String): String {
-        val p = interroger(app, ip, via) ?: return "❌ Aucune imprimante IPP n'a répondu sur $ip (port 631)" + (if (via == "serveur") " depuis le serveur." else ". Vérifie l'adresse, que tu es sur le même Wi-Fi, ou utilise via=serveur.")
+        trace = StringBuilder()
+        val p = interroger(app, ip, via) ?: return "❌ Aucune imprimante IPP n'a répondu sur $ip" + (if (via == "serveur") " depuis le serveur." else ". Vérifie l'adresse et que tu es sur le même Wi-Fi, ou utilise via=serveur.") + "\nDétail :\n" + trace.toString().take(900)
         if (p.attrs["printer-is-accepting-jobs"]?.firstOrNull() == "false") return "⚠️ ${p.nom} n'accepte pas de travaux pour l'instant (${p.raisons.joinToString().ifBlank { p.etat }})."
         val (doc, mime) = document(app, fichier, texte, titre, p.formats)
-        val job = requete(0x0002, ip, p.chemin, {
+        val job = requete(0x0002, p.ip, p.chemin, {
             attr(0x42, "requesting-user-name", "jarvis"); attr(0x42, "job-name", titre.ifBlank { "JARVIS" }.take(60))
             attr(0x49, "document-format", mime)
             if (copies > 1) int("copies", copies.coerceIn(1, 99))
-        }, doc)
-        val rep = envoyer(app, via, ip, p.chemin, job) ?: return "❌ Pas de réponse de l'imprimante pendant l'envoi."
+        }, doc, p.schema, p.port)
+        val rep = envoyer(app, via, ip, p.chemin, job, p.schema, p.port) ?: return "❌ Pas de réponse de l'imprimante pendant l'envoi."
         val (st, at) = parse(rep)
         val num = at["job-id"]?.firstOrNull()
         return if (st in 0..2) "🖨️ Envoyé à ${p.nom} (${p.modele.ifBlank { ip }})" + (if (via == "serveur") " via le serveur" else "") + (num?.let { " — travail n°$it" } ?: "") + ". ${doc.size / 1024} Ko en $mime."

@@ -152,14 +152,26 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 val via = a.optString("via").lowercase().let { if (it.startsWith("serv")) "serveur" else "local" }
                 val ip = a.optString("ip").trim()
                 if (via == "serveur") ssh()
-                val ips = if (ip.isNotBlank()) listOf(ip) else if (via == "local") {
-                    val m = Reseau.decouvrir(app, listOf("_ipp._tcp", "_printer._tcp"), 4000).map { it.host }
-                    (m + (if (Reseau.infos(app)?.wifi == true) Reseau.scanner(app).filter { 631 in it.ports || 9100 in it.ports }.map { it.ip } else emptyList())).distinct()
-                } else emptyList()
-                if (ips.isEmpty()) return ToolResult(if (via == "serveur") "Précise l'adresse IP de l'imprimante du réseau du serveur (ip=…)." else "Aucune imprimante détectée sur ce réseau (vérifie que tu es sur le même Wi-Fi qu'elle).")
-                val rep = ips.mapNotNull { Impression.interroger(app, it, via) }
-                ToolResult(if (rep.isEmpty()) "Des appareils d'impression ont été vus (${ips.joinToString()}) mais aucun ne répond en IPP." else "# 🖨️ Imprimantes\n\n" + rep.joinToString("\n") { p ->
+                Impression.trace = StringBuilder()
+                val chemins = HashMap<String, String>()
+                val ips = LinkedHashSet<String>()
+                var scan: List<Reseau.Appareil> = emptyList()
+                if (ip.isNotBlank()) ips += ip else if (via == "local") {
+                    val i = Reseau.infos(app)
+                    if (i == null || !i.wifi) return ToolResult("Le téléphone n'est pas connecté au Wi-Fi : impossible de chercher une imprimante sur le réseau local. Connecte-toi au Wi-Fi de l'imprimante, ou donne-moi son adresse IP et utilise « via serveur » si elle est sur le réseau du serveur.")
+                    Reseau.decouvrir(app, listOf("_ipp._tcp", "_ipps._tcp", "_printer._tcp", "_pdl-datastream._tcp"), 4500).forEach { ips += it.host; if (it.chemin.isNotBlank()) chemins[it.host] = "/" + it.chemin.trimStart('/') }
+                    scan = Reseau.scanner(app)
+                    scan.filter { 631 in it.ports || 9100 in it.ports || 515 in it.ports || it.type.startsWith("🖨") }.forEach { ips += it.ip }
+                } else return ToolResult("Précise l'adresse IP de l'imprimante du réseau du serveur (ip=…).")
+                val rep = ips.mapNotNull { Impression.interroger(app, it, via, chemins[it]) }
+                if (rep.isNotEmpty()) return ToolResult("# 🖨️ Imprimantes\n\n" + rep.joinToString("\n") { p ->
                     "- **${p.nom}** (${p.modele.ifBlank { "modèle inconnu" }}) · ${p.ip} · ${p.etat}" + (if (p.raisons.isNotEmpty()) " ⚠️ ${p.raisons.joinToString()}" else "") + " · formats : ${p.formats.filter { it.startsWith("application/pdf") || it.startsWith("image/") || it.startsWith("text/") }.take(5).joinToString()}" }, direct = true)
+                val sb = StringBuilder("# 🖨️ Aucune imprimante n'a répondu\n\n")
+                if (ips.isNotEmpty()) sb.append("Appareils d'impression vus : ${ips.joinToString()} — mais sans réponse IPP.\n")
+                if (scan.isNotEmpty()) sb.append("\n**Appareils du réseau (${scan.size})** :\n" + scan.take(40).joinToString("\n") { "- ${it.ip} · ${it.type} · ports ${it.ports.joinToString(",")}${if (it.titre.isNotBlank()) " · « ${it.titre.take(40)} »" else ""}" } + "\n")
+                sb.append("\n**Détail des essais** :\n```\n${Impression.trace.toString().take(1200).ifBlank { "(aucune tentative)" }}\n```\n")
+                sb.append("\nPistes : imprimante allumée et sur CE Wi-Fi (pas le réseau invité, pas Wi-Fi Direct) ; « isolation des appareils / AP isolation » désactivée sur la box ; IPP activé dans l'interface de l'imprimante (page web, rubrique Réseau/AirPrint/IPP). Tu peux aussi me donner son adresse IP (affichée sur son écran ou dans la page de la box).")
+                ToolResult(sb.toString(), direct = true)
             }
             "imprimer" -> {
                 val via = a.optString("via").lowercase().let { if (it.startsWith("serv")) "serveur" else "local" }
