@@ -10,9 +10,9 @@ import org.json.JSONObject
 class ServeurTools(private val app: JarvisApp, private val confirm: suspend (String, Boolean) -> Boolean) {
 
     companion object {
-        val KEYWORDS = Regex("home ?assistant|domotique|\\bha\\b|ssh|serveur|server|yaml|docker|lumi[èe]re|volet|thermostat|automatisation|automation|sc[èe]ne\\b|configuration\\.yaml|debian|raspberry|esphome|zigbee|mqtt|capteur|\\bprise\\b|interrupteur|r[ée]seau|wifi|wi-fi|imprim|scann|\\bip\\b|adresse ip|github|\\bgit\\b|canon|epson|brother|\\bhp\\b|appareils?\\b|script|\\bcode\\b|ping|port", RegexOption.IGNORE_CASE)
+        val KEYWORDS = Regex("home ?assistant|domotique|\\bha\\b|ssh|serveur|server|yaml|docker|lumi[èe]re|volet|thermostat|automatisation|automation|sc[èe]ne\\b|configuration\\.yaml|debian|raspberry|esphome|zigbee|mqtt|capteur|\\bprise\\b|interrupteur|box|livebox|freebox|bbox|disque|nas|\\bftp\\b|\\bsmb\\b|r[ée]seau|wifi|wi-fi|imprim|scann|\\bip\\b|adresse ip|github|\\bgit\\b|canon|epson|brother|\\bhp\\b|appareils?\\b|script|\\bcode\\b|ping|port", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
-        val NAMES = setOf("ha_entites", "ha_etat", "ha_service", "ha_config", "ssh_commande", "ssh_fichier", "serveur_diagnostic", "reseau_infos", "reseau_scanner", "appareil_sonder", "appareil_page", "imprimantes_trouver", "imprimer", "ssh_script", "github")
+        val NAMES = setOf("ha_entites", "ha_etat", "ha_service", "ha_config", "ssh_commande", "ssh_fichier", "serveur_diagnostic", "reseau_infos", "reseau_scanner", "appareil_sonder", "appareil_page", "imprimantes_trouver", "imprimer", "ssh_script", "github", "appareils_liste", "appareil_nommer", "ip_publique", "box_disque")
     }
 
     private fun prop(d: String) = JSONObject().put("type", "string").put("description", d)
@@ -53,6 +53,11 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
         tool("imprimer", "Impression : imprime un fichier créé par JARVIS (PDF, image, texte) ou un texte sur une imprimante réseau (protocole IPP, sans pilote). À distance : via=serveur envoie le travail depuis le serveur Debian vers l'imprimante de son réseau.",
             mapOf("ip" to prop("Adresse de l'imprimante (IP privée ou publique/nom d'hôte si accessible)."), "fichier" to prop("Nom d'un fichier créé par JARVIS (optionnel)."), "texte" to prop("Texte (Markdown) à imprimer (optionnel)."),
                 "titre" to prop("Titre du travail."), "copies" to prop("Nombre de copies (défaut 1)."), "via" to prop("local (défaut) ou serveur.")), listOf("ip")),
+        tool("appareils_liste", "Réseau : liste les appareils enregistrés lors des analyses (IP, nom, type, ports, dernière vue) et les IP publiques vues.", emptyMap()),
+        tool("appareil_nommer", "Réseau : donne un nom personnalisé à un appareil enregistré (ex. « Imprimante bureau », « NAS »).", mapOf("ip" to prop("Adresse IP de l'appareil."), "nom" to prop("Nom à lui donner.")), listOf("ip", "nom")),
+        tool("ip_publique", "Réseau : détecte l'adresse IP publique actuelle (téléphone et, si SSH configuré, serveur) et l'enregistre pour une connexion à distance ; signale si elle a changé.", emptyMap()),
+        tool("box_disque", "Box internet : accède au disque dur USB branché sur la box (SMB ou FTP, selon Réglages › Box) : liste les partages et dossiers, lit un fichier texte, le télécharge dans l'appli, y envoie un fichier créé par JARVIS, crée un dossier, supprime.",
+            mapOf("action" to prop("partages | lister | lire | telecharger | envoyer | supprimer | dossier"), "chemin" to prop("Chemin sur la box : partage/dossier/fichier (ex. « Disque dur/Photos/2026 »)."), "fichier" to prop("envoyer : nom du fichier créé par JARVIS à copier sur la box.")), listOf("action")),
         tool("serveur_diagnostic", "Diagnostic rapide du serveur : charge, mémoire, disque, conteneurs Docker et derniers logs de Home Assistant.", emptyMap())
     )
 
@@ -120,6 +125,30 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 ToolResult("```\n" + sortie(r) + "\n```")
             }
             "github" -> ToolResult(github(a))
+            "appareils_liste" -> ToolResult(Registre.liste(app), direct = true)
+            "appareil_nommer" -> ToolResult(if (Registre.nommer(app, a.optString("ip").trim(), a.optString("nom").trim())) "✅ ${a.optString("ip")} s'appelle maintenant « ${a.optString("nom")} »." else "Appareil inconnu : lance d'abord une analyse du réseau.")
+            "ip_publique" -> {
+                val sb = StringBuilder("# 🌍 Adresses IP\n")
+                val tel = Reseau.ippPublique()
+                val i = Reseau.infos(app)
+                if (tel.isBlank()) sb.append("- Téléphone : IP publique introuvable (pas d'accès Internet ?).\n") else {
+                    sb.append("- 📱 Téléphone/box : **$tel**" + (if (i != null && i.wifi) " (réseau Wi-Fi, privée ${i.ip})" else " (données mobiles)") + "\n")
+                    if (i != null && i.wifi) Registre.ipPublique(app, tel, "Wi-Fi ${i.ip.substringBeforeLast('.')}.x").takeIf { it.isNotBlank() }?.let { sb.append("- $it\n") }
+                }
+                if (Serveur.sshConfigure(app)) runCatching {
+                    val r = Serveur.exec(app, "echo \"privée(s): \$(hostname -I)\"; echo \"publique: \$(curl -s -m 8 https://api.ipify.org)\"", 25).second.trim()
+                    sb.append("- 🖥️ Serveur :\n```\n$r\n```\n")
+                    Regex("publique:\\s*([0-9.]+)").find(r)?.groupValues?.get(1)?.let { ip -> if (ip != tel) Registre.ipPublique(app, ip, "Serveur") }
+                }
+                val der = Registre.derniereIpPublique(app)
+                if (der.isNotBlank()) sb.append("\n✅ Enregistrée : $der. Pour te connecter de l'extérieur : redirige un port de ta box vers l'appareil (ex. 22 vers le serveur) et renseigne cette adresse (ou mieux un nom DDNS) dans Réglages › Serveur › Adresse distante. Si ta box est en CGNAT (IP publique partagée), la redirection est impossible : passe par un VPN (WireGuard/Tailscale).")
+                ToolResult(sb.toString(), direct = true)
+            }
+            "box_disque" -> {
+                val act = a.optString("action").lowercase()
+                if (act in setOf("supprimer", "envoyer") && !confirm("Box : $act « ${a.optString("chemin").ifBlank { a.optString("fichier") }} » ?", true)) return ToolResult("Refusé par l'utilisateur.")
+                ToolResult(Box.action(app, act, a.optString("chemin"), a.optString("fichier")), direct = act == "telecharger")
+            }
             "reseau_infos" -> {
                 val i = Reseau.infos(app)
                 val sb = StringBuilder("# 🌐 Réseau\n")
@@ -136,9 +165,15 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 if (!i.wifi) return ToolResult("Le téléphone n'est pas connecté au Wi-Fi : je ne peux pas analyser le réseau local.")
                 val liste = Reseau.scanner(app)
                 val imps = Reseau.decouvrir(app, listOf("_ipp._tcp", "_printer._tcp"), 3500)
+                val alias = Registre.alias(app)
+                val neufs = Registre.appareils(app, liste, "Wi-Fi ${i.ip.substringBeforeLast('.')}.x")
+                val pub = Reseau.ippPublique()
+                val chg = if (pub.isNotBlank()) Registre.ipPublique(app, pub, "Wi-Fi ${i.ip.substringBeforeLast('.')}.x") else ""
                 val sb = StringBuilder("# 📡 Réseau ${i.ip}/${i.prefix} — ${liste.size} appareil(s)\n\n| IP | Nom | Type | Ports | Page web |\n|---|---|---|---|---|\n")
-                liste.forEach { d -> sb.append("| ${d.ip}${if (d.ip == i.ip) " (moi)" else if (d.ip == i.passerelle) " (box)" else ""} | ${d.nom.take(28)} | ${d.type} | ${d.ports.joinToString(",")} | ${d.titre.take(30)} |\n") }
+                val nom = { d: Reseau.Appareil -> (alias[d.ip] ?: d.info.ifBlank { d.nom }).take(34) }
+                liste.forEach { d -> sb.append("| ${d.ip}${if (d.ip == i.ip) " (moi)" else if (d.ip == i.passerelle) " (box)" else ""} | ${nom(d)} | ${d.type} | ${d.ports.joinToString(",")} | ${d.titre.take(30)} |\n") }
                 if (imps.isNotEmpty()) sb.append("\n**🖨️ Imprimantes (mDNS)** : " + imps.distinctBy { it.host }.joinToString(" · ") { "${it.nom} (${it.host})" } + "\n")
+                sb.append("\n💾 $neufs nouvel(s) appareil(s) enregistré(s)." + (if (pub.isNotBlank()) " 🌍 IP publique : **$pub**." else "") + (if (chg.isNotBlank()) "\n$chg" else ""))
                 ToolResult(sb.toString(), direct = true)
             }
             "appareil_sonder" -> {

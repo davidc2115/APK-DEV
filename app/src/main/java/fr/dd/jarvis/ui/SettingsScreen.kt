@@ -188,6 +188,10 @@ fun SettingsScreen(app: JarvisApp) {
             ServeurPanel(store, app)
         }
 
+        item {
+            BoxPanel(store, app)
+        }
+
         // ------------------------------------------------------------ Mails
         item {
             var result by remember { mutableStateOf("") }
@@ -716,6 +720,10 @@ private fun ServeurPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvi
         Spacer(Modifier.height(6.dp))
         HudTextField(store.haDir.value, { store.haDir.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Dossier de config HA sur le serveur (vide = détection auto)")
         Spacer(Modifier.height(6.dp))
+        HudTextField(store.sshHostDistant.value, { store.sshHostDistant.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Adresse distante du serveur (IP publique ou nom DDNS, optionnel)")
+        Spacer(Modifier.height(6.dp))
+        HudTextField(store.sshPortDistant.value, { store.sshPortDistant.set(it.filter { c -> c.isDigit() }) }, Modifier.fillMaxWidth(), label = "Port distant (redirigé par la box, défaut = port SSH)")
+        Spacer(Modifier.height(6.dp))
         HudTextField(store.ghToken.value, { store.ghToken.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Jeton GitHub (optionnel : dépôts privés, plus de requêtes)", password = true)
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -741,6 +749,41 @@ private fun ServeurPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvi
         if (store.sshFp.value.isNotBlank()) Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("🔒 Empreinte mémorisée", color = HudDim, fontSize = 11.sp, modifier = Modifier.weight(1f))
             Text("Effacer", color = HudText, fontSize = 12.sp, modifier = Modifier.clickable { store.sshFp.set("") })
+        }
+        if (msg.isNotBlank()) Text(msg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+    }
+}
+
+
+@Composable
+private fun BoxPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.JarvisApp) {
+    val scope = rememberCoroutineScope()
+    var msg by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    HudPanel(Modifier.fillMaxWidth(), title = "Box internet — disque dur USB") {
+        Text(
+            "Permet à JARVIS de parcourir, lire, récupérer et déposer des fichiers sur le disque dur branché sur ta box (partage Windows/SMB ou FTP). Active le partage de fichiers dans l'interface de ta box ; identifiants = ceux du partage (vides = invité).",
+            color = HudDim, fontSize = 12.sp
+        )
+        Spacer(Modifier.height(8.dp))
+        HudTextField(store.boxHost.value, { store.boxHost.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Adresse de la box (vide = détectée sur le Wi-Fi)")
+        Spacer(Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HudChip("SMB (Windows)", selected = store.boxProto.value != "ftp") { store.boxProto.set("smb") }
+            HudChip("FTP", selected = store.boxProto.value == "ftp") { store.boxProto.set("ftp") }
+        }
+        Spacer(Modifier.height(6.dp))
+        HudTextField(store.boxUser.value, { store.boxUser.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Utilisateur du partage (vide = invité)")
+        Spacer(Modifier.height(6.dp))
+        HudTextField(store.boxPass.value, { store.boxPass.set(it) }, Modifier.fillMaxWidth(), label = "Mot de passe", password = true)
+        Spacer(Modifier.height(8.dp))
+        HudButton(if (busy) "Test…" else "Tester (lister les partages)", enabled = !busy) {
+            scope.launch {
+                busy = true
+                msg = try { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.ai.Box.action(app, "partages", "", "") }.take(600) }
+                catch (e: Exception) { "❌ ${e.message ?: e.javaClass.simpleName}" }
+                busy = false
+            }
         }
         if (msg.isNotBlank()) Text(msg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
     }

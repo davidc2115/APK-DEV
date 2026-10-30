@@ -100,6 +100,9 @@ dependencies {
 
     // Mails (IMAP)
     implementation("com.github.mwiede:jsch:0.2.20")
+    implementation("eu.agno3.jcifs:jcifs-ng:2.1.10") { exclude(group = "org.bouncycastle") }
+    implementation("commons-net:commons-net:3.11.1")
+    implementation("org.slf4j:slf4j-nop:1.7.36")
     implementation("com.sun.mail:android-mail:1.6.7")
     implementation("com.sun.mail:android-activation:1.6.7")
 }

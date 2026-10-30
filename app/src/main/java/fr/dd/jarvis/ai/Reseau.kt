@@ -25,7 +25,7 @@ import java.util.concurrent.TimeUnit
 /** Analyse du réseau local (Wi-Fi) : adresses, appareils, ports, services mDNS. Limité aux adresses privées (ton réseau), jamais Internet. */
 object Reseau {
     data class Infos(val ip: String, val prefix: Int, val passerelle: String, val wifi: Boolean)
-    data class Appareil(val ip: String, val nom: String, val ports: List<Int>, val titre: String, val type: String)
+    data class Appareil(val ip: String, val nom: String, val ports: List<Int>, val titre: String, val type: String, val info: String = "")
     data class Service(val nom: String, val host: String, val port: Int, val chemin: String, val type: String)
 
     private val http = OkHttpClient.Builder().connectTimeout(1500, TimeUnit.MILLISECONDS).readTimeout(2500, TimeUnit.MILLISECONDS).followRedirects(true)
@@ -119,7 +119,15 @@ object Reseau {
         val trouves = coroutineScope {
             hosts.map { h -> async { sem.acquire(); try { sonder(h) } finally { sem.release() } } }.awaitAll()
         }.filterNotNull()
-        trouves.sortedBy { a -> a.ip.split(".").map { it.toInt() }.fold(0L) { acc, x -> acc * 256 + x } }
+        val upnp = runCatching { ssdp(ctx) }.getOrDefault(emptyMap())
+        val mdns = runCatching { decouvrir(ctx, listOf("_http._tcp", "_googlecast._tcp", "_airplay._tcp", "_smb._tcp", "_ssh._tcp", "_hap._tcp", "_workstation._tcp", "_ipp._tcp"), 3500) }.getOrDefault(emptyList()).groupBy({ it.host }, { it.nom })
+        // Appareils vus par UPnP/mDNS mais muets sur nos ports (téléphones, TV, objets connectés) : on les ajoute.
+        val parIp = trouves.associateBy { it.ip }.toMutableMap()
+        for (ip in (upnp.keys + mdns.keys)) if (ip !in parIp && prive(ip)) parIp[ip] = Appareil(ip, nomHote(ip), emptyList(), "", "❔ appareil")
+        parIp.values.map { d ->
+            val info = (upnp[d.ip].orEmpty().ifBlank { mdns[d.ip]?.distinct()?.joinToString(", ").orEmpty() }).take(70)
+            d.copy(info = info)
+        }.sortedBy { a -> a.ip.split(".").map { it.toInt() }.fold(0L) { acc, x -> acc * 256 + x } }
     }
 
     private val ESSENTIELS = listOf(631, 9100, 80, 443, 515, 22, 445, 8080)
@@ -157,6 +165,44 @@ object Reseau {
             val txt = t.replace(Regex("(?is)<(script|style)[^>]*>.*?</\\1>"), " ").replace(Regex("<[^>]+>"), " ").replace(Regex("&nbsp;"), " ").replace(Regex("\\s+"), " ").trim()
             return "HTTP ${r.code}\n" + txt.take(3500)
         }
+    }
+
+    /** Découverte UPnP/SSDP : adresse → « fabricant modèle (nom) » pour box, TV, NAS, imprimantes, enceintes… */
+    suspend fun ssdp(ctx: Context, ms: Int = 2500): Map<String, String> = withContext(Dispatchers.IO) {
+        val res = java.util.concurrent.ConcurrentHashMap<String, String>()
+        val wm = ctx.applicationContext.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
+        val lock = runCatching { wm.createMulticastLock("jarvis_ssdp").also { it.acquire() } }.getOrNull()
+        val locs = HashMap<String, String>()
+        try {
+            java.net.DatagramSocket().use { sock ->
+                sock.soTimeout = 400
+                val msg = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: ssdp:all\r\n\r\n".toByteArray()
+                repeat(2) { runCatching { sock.send(java.net.DatagramPacket(msg, msg.size, InetAddress.getByName("239.255.255.250"), 1900)) } }
+                val fin = System.currentTimeMillis() + ms
+                val buf = ByteArray(2048)
+                while (System.currentTimeMillis() < fin) {
+                    try {
+                        val p = java.net.DatagramPacket(buf, buf.size); sock.receive(p)
+                        val ip = p.address.hostAddress ?: continue
+                        val t = String(p.data, 0, p.length)
+                        val loc = Regex("(?im)^location:\\s*(\\S+)").find(t)?.groupValues?.get(1)
+                        val srv = Regex("(?im)^server:\\s*(.+)$").find(t)?.groupValues?.get(1)?.trim().orEmpty()
+                        if (loc != null && !locs.containsKey(ip)) locs[ip] = loc
+                        if (!res.containsKey(ip)) res[ip] = srv.take(50)
+                    } catch (_: java.net.SocketTimeoutException) { }
+                }
+            }
+        } finally { runCatching { lock?.release() } }
+        // Description UPnP : nom convivial, fabricant, modèle
+        for ((ip, loc) in locs) runCatching {
+            http.newCall(Request.Builder().url(loc).build()).execute().use { r ->
+                val x = r.body?.string().orEmpty().take(30000)
+                fun tag(n: String) = Regex("<$n>(.*?)</$n>", RegexOption.DOT_MATCHES_ALL).find(x)?.groupValues?.get(1)?.trim().orEmpty()
+                val d = listOf(tag("manufacturer"), tag("modelName"), tag("friendlyName").let { if (it.isNotBlank()) "($it)" else "" }).filter { it.isNotBlank() }.joinToString(" ")
+                if (d.isNotBlank()) res[ip] = d.take(70)
+            }
+        }
+        res
     }
 
     /** Services mDNS (_ipp._tcp, _printer._tcp…) vus sur le réseau pendant [ms] millisecondes. */

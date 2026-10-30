@@ -39,7 +39,21 @@ object Serveur {
         if (st.sshKey.value.isBlank()) s.setPassword(st.sshPass.value)
         s.setConfig("StrictHostKeyChecking", "no")
         s.setConfig("PreferredAuthentications", if (st.sshKey.value.isNotBlank()) "publickey,password,keyboard-interactive" else "password,keyboard-interactive,publickey")
-        s.connect(15000)
+        try { s.connect(if (st.sshHostDistant.value.isNotBlank()) 6000 else 15000) }
+        catch (e: Exception) {
+            // Hors du réseau local : repli sur l'adresse distante (IP publique ou nom DDNS, port redirigé sur la box).
+            if (st.sshHostDistant.value.isBlank()) throw e
+            runCatching { s.disconnect() }
+            val s2 = jsch.getSession(st.sshUser.value.trim(), st.sshHostDistant.value.trim(), st.sshPortDistant.value.toIntOrNull() ?: (st.sshPort.value.toIntOrNull() ?: 22))
+            if (st.sshKey.value.isBlank()) s2.setPassword(st.sshPass.value)
+            s2.setConfig("StrictHostKeyChecking", "no")
+            s2.setConfig("PreferredAuthentications", if (st.sshKey.value.isNotBlank()) "publickey,password,keyboard-interactive" else "password,keyboard-interactive,publickey")
+            s2.connect(15000)
+            return s2.also { sess ->
+                val fp2 = sess.hostKey.getFingerPrint(jsch)
+                if (st.sshFp.value.isNotBlank() && st.sshFp.value != fp2) { sess.disconnect(); throw IllegalStateException("L'empreinte du serveur distant ne correspond pas : connexion refusée.") }
+            }
+        }
         // Empreinte du serveur mémorisée à la première connexion ; refus si elle change (protège d'un faux serveur).
         val fp = s.hostKey.getFingerPrint(jsch)
         val connu = st.sshFp.value

@@ -92,6 +92,14 @@ class Store(context: Context) {
     val sshKey = SPref("sshKey", "")
     val sshFp = SPref("sshFp", "")
     val ghToken = SPref("ghToken", "")
+    val sshHostDistant = SPref("sshHostDistant", "")
+    val sshPortDistant = SPref("sshPortDistant", "")
+    // ---- Box internet (disque dur USB)
+    val boxHost = SPref("boxHost", "")
+    val boxProto = SPref("boxProto", "smb")
+    val boxPort = SPref("boxPort", "21")
+    val boxUser = SPref("boxUser", "")
+    val boxPass = SPref("boxPass", "")
 
     // ---- Génération d'images (Cloudflare Workers AI) : lignes « idCompte:jeton », rotation automatique
     val cfModel = SPref("cfModel", "@cf/black-forest-labs/flux-1-schnell")
