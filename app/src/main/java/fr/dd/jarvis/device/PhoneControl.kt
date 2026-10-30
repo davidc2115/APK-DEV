@@ -194,11 +194,26 @@ class PhoneControl(private val ctx: Context) {
         return "⏯️ Commande média « $action » envoyée."
     }
 
-    /** Lance la navigation Google Maps vers une destination (d = voiture, w = marche, b = vélo, l = deux-roues). */
-    fun navigate(dest: String, mode: String): String {
+    /** Applications de navigation installées (nom affiché → paquet). */
+    fun navApps(): Map<String, String> = linkedMapOf("Waze" to "com.waze", "Google Maps" to "com.google.android.apps.maps").filterValues { installed(it) }
+
+    /** Lance la navigation vers une destination dans l'application [appli] (Waze, Google Maps ou autre ; vide = Google Maps). */
+    fun navigate(dest: String, mode: String, appli: String = "", point: Pair<Double, Double>? = null): String {
         val m = when (mode.trim().lowercase()) { "marche", "a pied", "à pied", "walking", "w" -> "w"; "velo", "vélo", "bicycling", "b" -> "b"; else -> "d" }
+        val a = appli.trim().lowercase()
+        if (a.contains("waze")) {
+            val uri = if (point != null) "waze://?ll=${point.first},${point.second}&navigate=yes" else "waze://?q=" + Uri.encode(dest) + "&navigate=yes"
+            val r = start(Intent.ACTION_VIEW, uri, "com.waze")
+            return r.ifBlank { "🧭 Waze : navigation vers $dest lancée." }
+        }
+        if (a.isNotBlank() && !a.contains("google") && !a.contains("maps")) {
+            val (pkg, label) = findPackage(a) ?: return "Application « $appli » introuvable."
+            val geo = if (point != null) "geo:${point.first},${point.second}?q=${point.first},${point.second}(${Uri.encode(dest)})" else "geo:0,0?q=" + Uri.encode(dest)
+            val r = start(Intent.ACTION_VIEW, geo, pkg)
+            return r.ifBlank { "🧭 $label : $dest ouvert." }
+        }
         val r = start(Intent.ACTION_VIEW, "google.navigation:q=" + Uri.encode(dest) + "&mode=$m", "com.google.android.apps.maps")
-        return r.ifBlank { "🧭 Navigation vers $dest lancée." }
+        return r.ifBlank { "🧭 Google Maps : navigation vers $dest lancée." }
     }
 
     fun openUrl(url: String): String {

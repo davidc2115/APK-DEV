@@ -151,9 +151,14 @@ class ToolBox(
             mapOf("secondes" to prop("Durée totale en secondes (ex. 10 min = 600)."), "libelle" to prop("Nom du minuteur (optionnel).")), listOf("secondes")))
         put(tool("chronometre", "Ouvre le chronomètre de l'Horloge (démarrage automatique impossible sous Android)."))
         put(tool("jouer_musique", "Lance la lecture d'un titre, artiste ou playlist dans une application de musique du téléphone (fonctionne aussi en arrière-plan).",
-            mapOf("requete" to prop("Titre, artiste ou style à écouter."), "appli" to prop("Application : spotify, youtube music, deezer, youtube, vlc… (optionnel : la première installée)."))))
+            mapOf("requete" to prop("Titre, artiste ou style à écouter."), "appli" to prop("Application : spotify, youtube music, deezer, youtube, vlc… (optionnel : la première installée)."), "toujours" to prop("« true » pour toujours utiliser cette application pour la musique."))))
         put(tool("controle_media", "Contrôle la lecture en cours : play, pause, next, previous, stop.", mapOf("action" to prop("play | pause | next | previous | stop")), listOf("action")))
-        put(tool("naviguer", "Lance la navigation GPS (Google Maps) vers une adresse.", mapOf("destination" to prop("Adresse ou lieu."), "mode" to prop("voiture (défaut), marche ou velo")), listOf("destination")))
+        put(tool("naviguer", "Lance la navigation GPS vers une adresse et démarre l'itinéraire (Waze, Google Maps ou autre appli). Si l'application n'est pas précisée et qu'aucune n'est mémorisée, l'outil demande laquelle : repose alors la question à l'utilisateur (et s'il veut « toujours » celle-ci ou « une seule fois »), puis rappelle l'outil.",
+            mapOf("destination" to prop("Adresse ou lieu."), "mode" to prop("voiture (défaut), marche ou velo"),
+                "appli" to prop("Application : Waze, Google Maps, ou autre (optionnel)."),
+                "toujours" to prop("« true » si l'utilisateur veut toujours utiliser cette application pour ce type de demande ; « false » pour cette fois seulement.")), listOf("destination")))
+        put(tool("appli_par_defaut", "Définit (ou efface) l'application utilisée par défaut pour un type de demande.",
+            mapOf("type" to prop("navigation | musique"), "appli" to prop("Nom de l'application, ou « aucune » pour redemander à chaque fois.")), listOf("type", "appli")))
         put(tool("obsidian_chercher", "Cherche du texte dans les notes du coffre Obsidian (noms et contenu).", mapOf("requete" to prop("Texte recherché.")), listOf("requete")))
         put(tool("obsidian_lire", "Lit une note Obsidian par son chemin relatif (ex. Contacts/Dupont.md).", mapOf("chemin" to prop("Chemin de la note.")), listOf("chemin")))
         put(tool("obsidian_lister", "Liste les notes du coffre Obsidian, éventuellement d'un dossier.", mapOf("dossier" to prop("Dossier (optionnel)."))))
@@ -268,9 +273,31 @@ class ToolBox(
         "alarme_supprimer" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.supprimerAlarme(a.optString("heure"), a.optString("libelle")) })
         "minuteur_creer" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.creerMinuteur(a.optString("secondes").toDoubleOrNull()?.toInt() ?: 0, a.optString("libelle")) })
         "chronometre" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.chronometre() })
-        "jouer_musique" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.playMusic(a.optString("requete"), a.optString("appli")) })
+        "jouer_musique" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.playMusic(a.optString("requete"), a.optString("appli").ifBlank { app.store.appPrefs["musique"].orEmpty() }.also { if (a.optString("toujours").lowercase() in setOf("true", "oui", "1") && a.optString("appli").isNotBlank()) app.store.setAppPref("musique", a.optString("appli").trim()) }) })
         "controle_media" -> ToolResult(app.phone.mediaKey(a.optString("action")))
-        "naviguer" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.navigate(a.optString("destination"), a.optString("mode")) })
+        "naviguer" -> {
+            var appli = a.optString("appli").trim()
+            val toujours = a.optString("toujours").trim().lowercase() in setOf("true", "oui", "1", "vrai")
+            if (appli.isBlank()) appli = app.store.appPrefs["navigation"].orEmpty()
+            val dispo = app.phone.navApps().keys
+            if (appli.isBlank() && dispo.size > 1)
+                ToolResult("CHOIX_REQUIS : demande à l'utilisateur avec quelle application lancer l'itinéraire (${dispo.joinToString(" ou ")}) et s'il veut la garder toujours ou une seule fois, puis rappelle naviguer avec appli et toujours.")
+            else {
+                if (appli.isBlank()) appli = dispo.firstOrNull().orEmpty()
+                if (toujours && a.optString("appli").isNotBlank()) app.store.setAppPref("navigation", a.optString("appli").trim())
+                val pt = if (appli.lowercase().contains("waze") || !appli.lowercase().contains("google")) runCatching { fr.dd.jarvis.societe.Geo.geocode(a.optString("destination")) }.getOrNull() else null
+                ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    app.phone.navigate(a.optString("destination"), a.optString("mode"), appli, pt?.let { it.lat to it.lon }) +
+                        (if (toujours && a.optString("appli").isNotBlank()) " (${a.optString("appli")} mémorisé pour les itinéraires)" else "")
+                })
+            }
+        }
+        "appli_par_defaut" -> {
+            val t = a.optString("type").trim().lowercase().let { if (it.startsWith("nav") || it.contains("itin")) "navigation" else if (it.startsWith("mus")) "musique" else it }
+            val ap = a.optString("appli").trim()
+            if (ap.lowercase() in setOf("aucune", "aucun", "rien", "demander", "")) { app.store.setAppPref(t, null); ToolResult("Plus d'application par défaut pour « $t » : je te demanderai à chaque fois.") }
+            else { app.store.setAppPref(t, ap); ToolResult("✅ $ap sera toujours utilisée pour « $t ».") }
+        }
         "obsidian_chercher" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             val r = app.obsidian.searchNotes(a.optString("requete"))
             if (r.isEmpty()) "Aucune note ne contient « ${a.optString("requete")} »." else r.joinToString("\n") { "- ${it.first}" + (if (it.second.isNotBlank()) " : …${it.second}…" else "") }

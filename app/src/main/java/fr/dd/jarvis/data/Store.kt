@@ -128,6 +128,15 @@ class Store(context: Context) {
         prefs.edit().putString(k, l.joinToString("\n")).apply()
     }
 
+    // ---- Applications par défaut par type de demande (navigation, musique…), lignes « type=application »
+    val appPrefs = androidx.compose.runtime.mutableStateMapOf<String, String>().also { m ->
+        readList("appPrefs").forEach { l -> l.substringBefore('=', "").takeIf { it.isNotBlank() }?.let { k -> m[k] = l.substringAfter('=') } }
+    }
+    fun setAppPref(type: String, app: String?) {
+        if (app.isNullOrBlank()) appPrefs.remove(type) else appPrefs[type] = app
+        writeList("appPrefs", appPrefs.map { "${it.key}=${it.value}" })
+    }
+
     // ---- Voix
     val speakReplies = BPref("speakReplies", true)
     val conversationMode = BPref("conversationMode", false)

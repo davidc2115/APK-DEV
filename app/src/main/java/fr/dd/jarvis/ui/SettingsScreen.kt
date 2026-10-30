@@ -120,6 +120,20 @@ fun SettingsScreen(app: JarvisApp) {
             )
         }
 
+        // ------------------------------------------------------------ Applications par défaut
+        item {
+            HudPanel(Modifier.fillMaxWidth(), title = "Applications par défaut") {
+                Text("Quand tu demandes un itinéraire ou de la musique, JARVIS te demande l'application s'il y en a plusieurs. Dis « toujours avec Waze » pour la mémoriser, ou « cette fois seulement » pour ne pas la garder.", color = HudDim, fontSize = 12.sp)
+                Spacer(Modifier.height(6.dp))
+                listOf("navigation" to "🧭 Itinéraires", "musique" to "🎵 Musique").forEach { (k, label) ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("$label : ${store.appPrefs[k] ?: "demander à chaque fois"}", color = HudText, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                        if (store.appPrefs[k] != null) Text("Réinitialiser", color = Color(0xFFFF4D6D), fontSize = 12.sp, modifier = Modifier.clickable { store.setAppPref(k, null) })
+                    }
+                }
+            }
+        }
+
         // ------------------------------------------------------------ Images (Cloudflare)
         item {
             CfPanel(store, app)

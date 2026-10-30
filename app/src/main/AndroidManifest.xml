@@ -30,6 +30,10 @@
             <action android:name="android.speech.RecognitionService" />
         </intent>
         <package android:name="moe.shizuku.privileged.api" />
+        <package android:name="com.waze" />
+        <package android:name="com.google.android.apps.maps" />
+        <package android:name="com.spotify.music" />
+        <package android:name="com.google.android.apps.youtube.music" />
     </queries>
 
     <application
