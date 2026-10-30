@@ -55,12 +55,12 @@ object GmailApi {
     /** Adresse du compte connecté (vérifie aussi que le jeton fonctionne). */
     suspend fun profile(token: String): String = withContext(Dispatchers.IO) { get(token, "$BASE/profile").optString("emailAddress") }
 
-    suspend fun fetchRecent(ctx: Context, accounts: List<String>, count: Int, unreadOnly: Boolean): List<MailItem> {
+    suspend fun fetchRecent(ctx: Context, accounts: List<String>, count: Int, unreadOnly: Boolean, full: Boolean = false, everywhere: Boolean = false): List<MailItem> {
         val all = mutableListOf<MailItem>()
         val errors = mutableListOf<String>()
         for (acc in accounts) {
             try {
-                all += fetchOne(ctx, acc, count, unreadOnly)
+                all += fetchOne(ctx, acc, count, unreadOnly, full, everywhere)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -71,17 +71,36 @@ object GmailApi {
         return all.sortedByDescending { it.date }.take(count)
     }
 
-    private suspend fun fetchOne(ctx: Context, account: String, count: Int, unreadOnly: Boolean): List<MailItem> {
+    /** Texte brut d'un message Gmail (partie text/plain, sinon HTML nettoyé). */
+    private fun texteMail(p: JSONObject?): String {
+        if (p == null) return ""
+        fun dec(d: String): String = try { String(android.util.Base64.decode(d, android.util.Base64.URL_SAFE), Charsets.UTF_8) } catch (e: Exception) { "" }
+        var plain = ""; var html = ""
+        fun walk(n: JSONObject) {
+            val mt = n.optString("mimeType")
+            val data = n.optJSONObject("body")?.optString("data").orEmpty()
+            if (data.isNotBlank()) { if (mt == "text/plain" && plain.isBlank()) plain = dec(data) else if (mt == "text/html" && html.isBlank()) html = dec(data) }
+            val parts = n.optJSONArray("parts")
+            for (i in 0 until (parts?.length() ?: 0)) walk(parts!!.getJSONObject(i))
+        }
+        walk(p)
+        val t = plain.ifBlank { html.replace(Regex("(?is)<(style|script)[^>]*>.*?</\\1>"), " ").replace(Regex("<[^>]+>"), " ") }
+        return t.replace("&nbsp;", " ").replace("&amp;", "&").replace(Regex("\\s+"), " ").trim()
+    }
+
+    private suspend fun fetchOne(ctx: Context, account: String, count: Int, unreadOnly: Boolean, full: Boolean = false, everywhere: Boolean = false): List<MailItem> {
         val auth = authorize(ctx, account)
         if (auth.hasResolution()) throw IllegalStateException("autorisation à renouveler (Réglages › Mails › Ajouter un compte Google).")
         val token = auth.accessToken ?: throw IllegalStateException("jeton Google indisponible.")
         return withContext(Dispatchers.IO) {
-            val q = if (unreadOnly) "&q=is:unread" else ""
+            val qs = listOfNotNull(if (unreadOnly) "is:unread" else null, if (everywhere) "-in:spam -in:trash -in:drafts" else null).joinToString(" ")
+            val q = if (qs.isNotBlank()) "&q=" + java.net.URLEncoder.encode(qs, "UTF-8") else ""
+            val inbox = if (everywhere) "" else "&labelIds=INBOX"
             // Pagination : l'API Gmail renvoie au plus 100 mails par page.
             val ids = mutableListOf<String>()
             var page: String? = null
             while (ids.size < count) {
-                val r = get(token, "$BASE/messages?maxResults=${minOf(100, count - ids.size)}&labelIds=INBOX$q" + (page?.let { "&pageToken=$it" } ?: ""))
+                val r = get(token, "$BASE/messages?maxResults=${minOf(100, count - ids.size)}$inbox$q" + (page?.let { "&pageToken=$it" } ?: ""))
                 val list = r.optJSONArray("messages")
                 for (i in 0 until (list?.length() ?: 0)) ids.add(list!!.getJSONObject(i).getString("id"))
                 page = r.optString("nextPageToken").takeIf { it.isNotBlank() } ?: break
@@ -91,7 +110,7 @@ object GmailApi {
                 ids.map { id ->
                     async {
                       gate.withPermit {
-                        val m = get(token, "$BASE/messages/$id?format=metadata&metadataHeaders=From&metadataHeaders=Subject")
+                        val m = if (full) get(token, "$BASE/messages/$id?format=full") else get(token, "$BASE/messages/$id?format=metadata&metadataHeaders=From&metadataHeaders=Subject")
                         val headers = m.optJSONObject("payload")?.optJSONArray("headers")
                         fun h(n: String): String {
                             for (i in 0 until (headers?.length() ?: 0)) {
@@ -109,6 +128,7 @@ object GmailApi {
                             unread = m.optJSONArray("labelIds")?.toString()?.contains("UNREAD") == true,
                             account = account,
                             id = id,
+                            body = if (full) texteMail(m.optJSONObject("payload")).take(1500) else "",
                             fromAddr = Regex("<([^>]+)>").find(h("From"))?.groupValues?.get(1)?.lowercase() ?: h("From").trim().lowercase()
                         )
                       }
@@ -152,8 +172,13 @@ object GmailApi {
                     }
                 }
                 for ((id, cat) in items) {
-                    val body = JSONObject().put("addLabelIds", org.json.JSONArray().put(existing[prefix + cat]))
-                    if (cat.substringBefore('/') in archiver) body.put("removeLabelIds", org.json.JSONArray().put("INBOX"))
+                    val target = existing[prefix + cat]
+                    val body = JSONObject().put("addLabelIds", org.json.JSONArray().put(target))
+                    // Re-tri : on retire les anciens libellés de catégorie de ce mail (il n'en garde qu'un, le bon).
+                    val remove = org.json.JSONArray()
+                    existing.forEach { (nm, lid) -> if (lid != target && nm.startsWith(prefix) && nm.removePrefix(prefix).substringBefore('/') in fr.dd.jarvis.ai.MailTri.CATEGORIES) remove.put(lid) }
+                    if (cat.substringBefore('/') in archiver) remove.put("INBOX")
+                    if (remove.length() > 0) body.put("removeLabelIds", remove)
                     post(token, "$BASE/messages/$id/modify", body)
                     n++
                 }

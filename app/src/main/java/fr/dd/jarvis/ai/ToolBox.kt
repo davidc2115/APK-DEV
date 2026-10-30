@@ -83,7 +83,8 @@ class ToolBox(
                 "compte" to prop("Compte mail précis (adresse ou partie), même s'il est désactivé. Vide = comptes actifs seulement."),
                 "count" to prop("Nombre de mails à trier (5 à 500). Par défaut 100 ; mets 300-500 pour « toute la boîte »."),
                 "unread_only" to prop("« true » pour ne trier que les non lus."),
-                "ranger" to prop("« true » pour appliquer les libellés dans Gmail."),
+                "toute_la_boite" to prop("« true » pour inclure aussi les mails déjà archivés (pas seulement la boîte de réception) : utile pour (re)trier tout un compte."),
+                "ranger" to prop("« true » pour appliquer les libellés dans Gmail. Un re-tri remplace les anciens libellés de catégorie par les bons."),
                 "archiver" to prop("« true » pour aussi retirer de la boîte de réception les newsletters et notifications (avec ranger).")
             )))
         put(tool("itineraire", "Itinéraire et temps de route. Sans destination : tournée des rendez-vous (avec lieu) de l'agenda d'un jour, enchaînés depuis la position ou le siège, avec heures de départ. Avec destination : trajet simple.",
@@ -549,7 +550,7 @@ class ToolBox(
         if (!store.mailConfigured()) return ToolResult("Les mails ne sont pas configurés (Réglages › Mails).")
         val count = (a.optString("count").toIntOrNull() ?: 100).coerceIn(5, 500)
         val mails = try {
-            app.mail.fetchRecent(count, a.optString("unread_only").equals("true", true), a.optString("compte"))
+            app.mail.fetchRecent(count, a.optString("unread_only").equals("true", true), a.optString("compte"), full = true, everywhere = a.optString("toute_la_boite").equals("true", true))
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
             return ToolResult("❌ Impossible de lire les mails : ${e.message}", direct = true)
         }

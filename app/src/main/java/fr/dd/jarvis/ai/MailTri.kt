@@ -23,7 +23,8 @@ object MailTri {
 Tu es l'agent Tri de mails de JARVIS (entreprise de maintenance photovoltaïque). Tu ranges chaque mail comme le ferait un assistant humain soigneux, pour qu'il soit facile à retrouver : d'après l'EXPÉDITEUR (nom + adresse), l'OBJET et le CONTENU.
 Catégories (une seule par mail) : ${CATEGORIES.joinToString(" | ")}.
 Urgent = attend une action ou une réponse rapide (relance, délai, panne, problème). Clients = échanges avec clients et prospects. Chantiers et planning = rendez-vous, interventions, sites, organisation. Fournisseurs et matériel = devis/commandes/livraisons d'onduleurs, panneaux, outillage. Factures et paiements = factures, devis, relances, règlements. Administratif = impôts, URSSAF, comptable, démarches, juridique. Banque et assurances = banque, assurances, crédits. Notifications = alertes automatiques de services/sites. Newsletters et promos = publicité, lettres d'information. Perso = le reste.
-Sous-catégorie = nom COURT (1 à 3 mots, sans « / ») de l'organisation, de la personne ou du sujet récurrent (ex. « Dupont », « Enedis », « Crédit Agricole », « Amazon », « Chantier Martin »). Un même expéditeur reçoit TOUJOURS la même sous-catégorie ; réutilise celles déjà indiquées entre parenthèses.
+IMPORTANT : un même expéditeur peut relever de PLUSIEURS catégories selon le contenu (ex. un magasin : ses publicités → Newsletters et promos, ses factures/tickets → Factures et paiements, une commande → Fournisseurs). Lis l'objet ET le texte du mail : classe d'après ce que le mail DIT, jamais d'après l'expéditeur seul. Les indications « déjà vu » ne sont que des repères.
+Sous-catégorie = nom COURT (1 à 3 mots, sans « / ») de l'organisation, de la personne ou du sujet récurrent (ex. « Dupont », « Enedis », « Crédit Agricole », « Amazon », « Chantier Martin »). Un même expéditeur garde TOUJOURS la même sous-catégorie (son nom), même si la catégorie change ; réutilise celles déjà vues.
 Réponds UNIQUEMENT par une ligne par mail, au format exact :
 numéro|catégorie|sous-catégorie|priorité (1 urgente, 2 normale, 3 faible)|action suggérée en 8 mots maximum (vide si aucune)
 N'invente rien et ne saute aucun numéro.
@@ -39,23 +40,19 @@ N'invente rien et ne saute aucun numéro.
         val aLLM = mutableListOf<Int>()
         mails.forEachIndexed { i, m ->
             val k = m.fromAddr.ifBlank { m.from.lowercase() }
-            val e = memo.optJSONObject(k)
-            // Expéditeur automatique déjà vu au moins 3 fois, toujours classé pareil : pas besoin de redemander à l'IA.
-            if (e != null && e.optInt("n") >= 3 && e.optString("cat") in ARCHIVABLES + "Banque et assurances") {
-                result[i] = Classe(m, e.optString("cat"), 3, "", e.optString("sub"))
-            } else aLLM += i
+            aLLM += i
         }
         val sem = kotlinx.coroutines.sync.Semaphore(3)
         var fait = 0
         kotlinx.coroutines.coroutineScope {
-            aLLM.chunked(30).map { idx ->
+            aLLM.chunked(20).map { idx ->
                 async {
                     sem.withPermit {
                         val lot = idx.map { mails[it] }
                         val user = "Aujourd'hui : ${Prompts.now()}\n\n" + lot.mapIndexed { i, m ->
                             val k = m.fromAddr.ifBlank { m.from.lowercase() }
-                            val prev = memo.optJSONObject(k)?.let { " (déjà classé : ${it.optString("cat")}/${it.optString("sub")})" }.orEmpty()
-                            "#${i + 1} De : ${m.from} <${m.fromAddr}>$prev | Objet : ${m.subject} | Extrait : ${m.snippet.take(220)}"
+                            val prev = memo.optJSONObject(k)?.let { o -> o.keys().asSequence().filter { c -> c.contains('/') || c in CATEGORIES }.map { c -> "$c ×${o.optInt(c)}" }.toList().takeIf { it.isNotEmpty() }?.joinToString(" ; ", " (déjà vu : ", ")") }.orEmpty()
+                            "#${i + 1} De : ${m.from} <${m.fromAddr}>$prev | Objet : ${m.subject} | Texte : ${m.body.ifBlank { m.snippet }.take(700)}"
                         }.joinToString("\n")
                         val rep = try { app.llm.agent(SYSTEM + app.memo.pour("mails", "tri"), user) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { "" }
                         val parsed = rep.lines().mapNotNull { l ->
@@ -78,9 +75,8 @@ N'invente rien et ne saute aucun numéro.
             out.forEach { c ->
                 val k = c.mail.fromAddr.ifBlank { c.mail.from.lowercase() }
                 if (k.isBlank() || c.cat == "Urgent") return@forEach
-                val old = memo.optJSONObject(k)
-                val same = old != null && old.optString("cat") == c.cat && old.optString("sub") == c.sub
-                memo.put(k, org.json.JSONObject().put("cat", c.cat).put("sub", c.sub).put("n", if (same) old!!.optInt("n") + 1 else 1))
+                val o = memo.optJSONObject(k) ?: org.json.JSONObject().also { memo.put(k, it) }
+                o.put(c.label, o.optInt(c.label) + 1)
             }
             fichier(app).writeText(memo.toString())
         }
