@@ -172,6 +172,8 @@ class VoiceManager(private val ctx: Context) {
     }
 
     private fun cleanForSpeech(t: String): String = t
+        .replace(Regex("!\\[[^\\]]*]\\([^)]*\\)"), "")
+        .replace(Regex("\\[[^\\]]*]\\(jarvis-file:[^)]*\\)"), "fichier créé")
         .replace(Regex("\\[([^\\]]+)]\\([^)]*\\)"), "$1")
         .replace(Regex("https?://\\S+"), "")
         .replace(Regex("[\\p{So}\\p{Sk}\\uFE0F\\u200D]"), "")

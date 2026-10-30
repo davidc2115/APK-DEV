@@ -19,6 +19,35 @@ import java.io.PrintWriter
 import java.io.StringWriter
 
 class JarvisApp : Application() {
+    // ---- Conversation partagée entre l'écran Chat et le mode vocal « Jarvis » (service)
+    val chat = androidx.compose.runtime.mutableStateListOf<fr.dd.jarvis.ai.ChatMsg>()
+    @Volatile var chatLoaded = false
+
+    @Synchronized fun chatCharger() {
+        if (chatLoaded) return
+        chatLoaded = true
+        runCatching {
+            val f = java.io.File(filesDir, "chat.json")
+            if (!f.exists()) return
+            val arr = org.json.JSONArray(f.readText())
+            val l = (0 until arr.length()).map { arr.getJSONObject(it).let { o -> fr.dd.jarvis.ai.ChatMsg(o.getBoolean("u"), o.getString("t"), o.optLong("ts")) } }
+            android.os.Handler(android.os.Looper.getMainLooper()).let { h -> if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) chat.addAll(l) else h.post { chat.addAll(l) } }
+        }
+    }
+
+    /** Ajoute un message (thread principal) et sauvegarde. */
+    fun chatAjouter(m: fr.dd.jarvis.ai.ChatMsg) {
+        chat.add(m); chatSauver()
+    }
+
+    fun chatSauver() {
+        runCatching {
+            val arr = org.json.JSONArray()
+            chat.toList().takeLast(200).forEach { arr.put(org.json.JSONObject().put("u", it.fromUser).put("t", it.text).put("ts", it.ts)) }
+            java.io.File(filesDir, "chat.json").writeText(arr.toString())
+        }
+    }
+
 
     lateinit var store: Store
         private set

@@ -172,9 +172,11 @@ class JarvisService : Service() {
     private fun process(cmd: String) {
         busy = true
         scope.launch {
-            history += ChatMsg(true, cmd)
-            val reply = try { brain.reply(history.takeLast(10)) { } } catch (e: CancellationException) { throw e } catch (e: Throwable) { "Erreur : ${e.message ?: e.javaClass.simpleName}" }
-            history += ChatMsg(false, reply)
+            val app = application as JarvisApp
+            app.chatCharger()
+            withContext(Dispatchers.Main) { app.chatAjouter(ChatMsg(true, cmd)) }
+            val reply = try { brain.reply(app.chat.toList().takeLast(10)) { } } catch (e: CancellationException) { throw e } catch (e: Throwable) { "Erreur : ${e.message ?: e.javaClass.simpleName}" }
+            withContext(Dispatchers.Main) { app.chatAjouter(ChatMsg(false, reply)) }
             notifier(cmd, reply)
             withContext(Dispatchers.Main) {
                 // La conversation continue : on réécoute après la réponse, pendant « convSeconds » secondes sans avoir à redire Jarvis.

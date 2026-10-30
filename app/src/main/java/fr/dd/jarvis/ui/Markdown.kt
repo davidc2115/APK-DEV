@@ -120,6 +120,10 @@ private fun MdLines(lines: List<String>, color: Color, accent: Color) {
                 val name = Regex("""jarvis-img:([^)\s]+)""").find(line)?.groupValues?.get(1).orEmpty()
                 ChatImage(name)
             }
+            line.contains("jarvis-file:") -> {
+                val m = Regex("""\[([^\]]*)]\(jarvis-file:([^)\s]+)\)""").find(line)
+                if (m != null) FichierChip(m.groupValues[1], m.groupValues[2], accent) else Line(inline(line, accent), color, 14.sp, FontWeight.Normal, accent, ctx)
+            }
             line.isBlank() -> Spacer(Modifier.height(4.dp))
             line.trim() == "---" || line.trim() == "***" -> {
                 Spacer(Modifier.height(4.dp))
@@ -199,5 +203,23 @@ private fun ChatImage(name: String) {
             }
         },
         contentScale = androidx.compose.ui.layout.ContentScale.FillWidth
+    )
+}
+
+
+@Composable
+private fun FichierChip(label: String, name: String, accent: Color) {
+    val ctx = LocalContext.current
+    val file = java.io.File(java.io.File(ctx.filesDir, "exports"), name.substringAfterLast('/'))
+    androidx.compose.material3.Text(
+        label, color = accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(vertical = 4.dp).clip(RoundedCornerShape(10.dp)).background(accent.copy(alpha = 0.14f))
+            .clickable {
+                runCatching {
+                    val uri = androidx.core.content.FileProvider.getUriForFile(ctx, ctx.packageName + ".files", file)
+                    val mime = fr.dd.jarvis.ai.Fichiers.mimeDe(file.name)
+                    ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Ouvrir " + file.name).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
+            }.padding(horizontal = 12.dp, vertical = 8.dp)
     )
 }

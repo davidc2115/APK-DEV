@@ -24,7 +24,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val store = app.store
     private val file = File(application.filesDir, "chat.json")
 
-    val messages = mutableStateListOf<ChatMsg>()
+    val messages: androidx.compose.runtime.snapshots.SnapshotStateList<ChatMsg> get() = app.chat
     var busy by mutableStateOf(false)
         private set
     var status by mutableStateOf("")
@@ -209,17 +209,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         archiveCurrent()
     }
 
-    private fun load() {
-        try {
-            if (!file.exists()) return
-            val arr = JSONArray(file.readText())
-            for (i in 0 until arr.length()) {
-                val o = arr.getJSONObject(i)
-                messages.add(ChatMsg(o.getBoolean("u"), o.getString("t"), o.optLong("ts")))
-            }
-        } catch (_: Exception) {
-        }
-    }
+    private fun load() { app.chatCharger() }
 
     override fun onCleared() {
         voice.release()
