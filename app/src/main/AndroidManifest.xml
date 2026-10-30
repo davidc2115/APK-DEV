@@ -100,6 +100,15 @@
             </intent-filter>
         </service>
         <service
+            android:name=".car.JarvisCarService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="androidx.car.app.CarAppService" />
+                <category android:name="androidx.car.app.category.POI" />
+            </intent-filter>
+        </service>
+        <meta-data android:name="androidx.car.app.minCarApiLevel" android:value="1" />
+        <service
             android:name=".service.JarvisSessionService"
             android:exported="true"
             android:permission="android.permission.BIND_VOICE_INTERACTION" />
