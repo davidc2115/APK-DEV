@@ -12,6 +12,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
+import kotlinx.coroutines.launch
 import fr.dd.jarvis.JarvisApp
 import fr.dd.jarvis.ai.Brain
 import fr.dd.jarvis.ai.ChatMsg
@@ -96,13 +97,26 @@ class JarvisService : Service() {
             else -> null
         }
         if (vosk == null) {
-            // Pas de détecteur : on n'écoute PAS en boucle (bips + déclenchements intempestifs). On prévient et on s'arrête.
-            app.store.wakeOn.set(false)
+            // Ni clé Picovoice ni modèle Vosk : on télécharge le détecteur hors-ligne (≈ 40 Mo, une seule fois), toujours SANS écoute en boucle.
             val nm = getSystemService(NotificationManager::class.java)
-            nm.notify(NOTIF + 1, NotificationCompat.Builder(this, JarvisApp.CHANNEL_WAKE).setSmallIcon(android.R.drawable.ic_btn_speak_now)
-                .setContentTitle("Écoute « Jarvis » non démarrée").setContentText("Ajoute une clé Picovoice (ou installe le détecteur hors-ligne) dans Réglages › Écoute.")
-                .setContentIntent(open).setAutoCancel(true).build())
-            stopSelf(); return START_NOT_STICKY
+            nm.notify(NOTIF + 1, NotificationCompat.Builder(this, JarvisApp.CHANNEL_WAKE).setSmallIcon(android.R.drawable.stat_sys_download)
+                .setContentTitle("JARVIS prépare l'écoute « Jarvis »").setContentText("Téléchargement du détecteur hors-ligne (≈ 40 Mo)…").setOngoing(true).build())
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                val msg = fr.dd.jarvis.voice.VoskModel.download(this@JarvisService) { }
+                main.post {
+                    if (running && fr.dd.jarvis.voice.VoskModel.ready(this@JarvisService)) {
+                        nm.cancel(NOTIF + 1)
+                        vosk = fr.dd.jarvis.voice.VoskWake(this@JarvisService) { main.post { onWakeWord() } }
+                        goIdle()
+                    } else if (running) {
+                        app.store.wakeOn.set(false)
+                        nm.notify(NOTIF + 1, NotificationCompat.Builder(this@JarvisService, JarvisApp.CHANNEL_WAKE).setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                            .setContentTitle("Écoute « Jarvis » non démarrée").setContentText(msg.take(120)).setAutoCancel(true).setContentIntent(open).build())
+                        stopSelf()
+                    }
+                }
+            }
+            return START_STICKY
         }
         runCatching { CarBridge.post(this, "Je suis prêt. Réponds pour me parler.") }   // conversation visible dans Android Auto
         main.postDelayed({ goIdle() }, 1200)

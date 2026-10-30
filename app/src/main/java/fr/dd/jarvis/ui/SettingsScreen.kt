@@ -435,13 +435,17 @@ fun SettingsScreen(app: JarvisApp) {
                 }
                 Spacer(Modifier.height(8.dp))
                 var picoInput by remember { mutableStateOf(store.picoKey.value) }
-                Text("Détecteur « Jarvis » comme « OK Google » (recommandé) : crée gratuitement une clé d'accès sur console.picovoice.ai (compte gratuit › AccessKey) et colle-la ici. Le mot « Jarvis » est reconnu hors-ligne, sans bip, et rien d'autre ne déclenche l'écoute.", color = HudDim, fontSize = 12.sp)
+                Text("Le mot « Jarvis » est reconnu hors-ligne par un détecteur gratuit installé automatiquement au premier démarrage de l'écoute (aucune clé nécessaire). Facultatif : une clé Picovoice gratuite (console.picovoice.ai › AccessKey) donne un détecteur encore plus fiable. Le mot d'éveil « Ok Google » lui-même est réservé au système : pour appeler JARVIS comme Google, définis-le en assistant par défaut (bouton ci-dessous) et appelle-le par appui long sur le bouton d'alimentation ou d'accueil.", color = HudDim, fontSize = 12.sp)
                 Spacer(Modifier.height(4.dp))
-                HudTextField(picoInput, { picoInput = it }, Modifier.fillMaxWidth(), label = "Clé d'accès Picovoice")
+                HudTextField(picoInput, { picoInput = it }, Modifier.fillMaxWidth(), label = "Clé Picovoice (facultatif)")
                 Spacer(Modifier.height(4.dp))
                 HudButton(if (store.picoKey.value == picoInput.trim() && picoInput.isNotBlank()) "Clé enregistrée ✓" else "Enregistrer la clé", filled = true, enabled = picoInput.trim() != store.picoKey.value) {
                     store.picoKey.set(picoInput.trim())
                     if (store.wakeOn.value) { fr.dd.jarvis.service.JarvisService.stop(ctx); fr.dd.jarvis.service.JarvisService.start(ctx) }
+                }
+                Spacer(Modifier.height(8.dp))
+                HudButton("Définir JARVIS comme assistant par défaut") {
+                    ctx.startActivity(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 }
                 Spacer(Modifier.height(8.dp))
                 var voskReady by remember { mutableStateOf(fr.dd.jarvis.voice.VoskModel.ready(ctx)) }

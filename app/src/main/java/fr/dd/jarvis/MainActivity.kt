@@ -72,6 +72,14 @@ class MainActivity : ComponentActivity() {
 
     private val vm: ChatViewModel by viewModels()
 
+    fun demarrerEcoute() { if (!vm.listening && !vm.busy) vm.toggleListening() }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleListen(intent)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(
@@ -82,11 +90,19 @@ class MainActivity : ComponentActivity() {
         if (app.store.wakeOn.value && !fr.dd.jarvis.service.JarvisService.running &&
             checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
         ) fr.dd.jarvis.service.JarvisService.start(this)
+        handleListen(intent)
         setContent {
             HudTheme(accentById(app.store.accent.value).color, app.store.tileAlpha.value) {
                 HudBackground { Root(app, vm) }
             }
         }
+    }
+}
+
+private fun MainActivity.handleListen(i: android.content.Intent?) {
+    if (i?.getBooleanExtra("listen", false) == true && checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+        i.removeExtra("listen")
+        window.decorView.postDelayed({ (this as? MainActivity)?.demarrerEcoute() }, 400)
     }
 }
 
