@@ -709,15 +709,18 @@ class ToolBox(
         if (candidats.isEmpty()) return ToolResult("Aucun compte Gmail ne correspond à « ${a.optString("compte")} ». Comptes : ${store.gmailAccounts.joinToString(", ")}")
         if (candidats.size > 1) return ToolResult("Plusieurs comptes Gmail correspondent : ${candidats.joinToString(", ")}. Précise lequel utiliser.")
         val compte = candidats[0]
-        if (!confirm("Envoyer ce mail depuis $compte ?\n\nÀ : $dest\nObjet : $sujet\n\n${corps.take(500)}", false))
-            return ToolResult("Envoi refusé par l'utilisateur.")
+        // force=true : une vraie confirmation à chaque fois (même si « toujours confirmer les actions sensibles » est désactivé),
+        // et direct=true sur les résultats ci-dessous : le ✅/❌ réel s'affiche tel quel, jamais reformulé par le modèle
+        // (qui pouvait annoncer un envoi réussi alors que l'appel avait en fait échoué).
+        if (!confirm("Envoyer ce mail depuis $compte ?\n\nÀ : $dest\nObjet : $sujet\n\n${corps.take(500)}", true))
+            return ToolResult("Envoi refusé par l'utilisateur.", direct = true)
         return try {
-            fr.dd.jarvis.device.GmailApi.envoyer(app, compte, dest, sujet, corps)
-            ToolResult("✅ Mail envoyé à $dest depuis $compte.")
+            val id = fr.dd.jarvis.device.GmailApi.envoyer(app, compte, dest, sujet, corps)
+            ToolResult("✅ Mail envoyé à $dest depuis $compte (id $id, visible dans le dossier « Envoyés » de $compte).", direct = true)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
-            ToolResult("❌ Envoi impossible : ${e.message}")
+            ToolResult("❌ Envoi impossible : ${e.message ?: e.javaClass.simpleName}", direct = true)
         }
     }
 

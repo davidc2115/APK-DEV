@@ -65,19 +65,25 @@ object GmailApi {
     /** Adresse du compte connecté (vérifie aussi que le jeton fonctionne). */
     suspend fun profile(token: String): String = withContext(Dispatchers.IO) { get(token, "$BASE/profile").optString("emailAddress") }
 
-    /** Envoie un email texte simple depuis [account]. Le scope gmail.modify déjà accordé couvre l'envoi (pas besoin de nouveau consentement). */
-    suspend fun envoyer(ctx: Context, account: String, destinataire: String, sujet: String, corps: String): Unit = withContext(Dispatchers.IO) {
+    /** Envoie un email texte simple depuis [account]. Le scope gmail.modify déjà accordé couvre l'envoi (pas besoin de nouveau consentement).
+     *  Retourne l'identifiant du message envoyé (preuve que Gmail l'a bien accepté), et échoue explicitement sinon. */
+    suspend fun envoyer(ctx: Context, account: String, destinataire: String, sujet: String, corps: String): String = withContext(Dispatchers.IO) {
         val auth = authorize(ctx, account)
-        if (auth.hasResolution()) throw IllegalStateException("autorisation à renouveler pour $account (Réglages › Mails).")
+        if (auth.hasResolution()) throw IllegalStateException("Autorisation Gmail à renouveler pour $account : ouvre Réglages › Mails et reconnecte ce compte (le consentement a expiré ou a changé).")
         val token = auth.accessToken ?: throw IllegalStateException("Connexion Gmail expirée pour $account : reconnecte le compte dans Réglages › Mails.")
         fun b64(s: String, flags: Int = android.util.Base64.NO_WRAP) = android.util.Base64.encodeToString(s.toByteArray(Charsets.UTF_8), flags)
         val raw = "From: $account\r\n" +
             "To: $destinataire\r\n" +
             "Subject: =?UTF-8?B?${b64(sujet)}?=\r\n" +
-            "Content-Type: text/plain; charset=UTF-8\r\n\r\n" +
+            "MIME-Version: 1.0\r\n" +
+            "Content-Type: text/plain; charset=UTF-8\r\n" +
+            "Content-Transfer-Encoding: 8bit\r\n\r\n" +
             corps
         val enc = b64(raw, android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING)
-        post(token, "$BASE/messages/send", JSONObject().put("raw", enc))
+        val reponse = post(token, "$BASE/messages/send", JSONObject().put("raw", enc))
+        // Gmail répond 200 avec un objet message {id, threadId, labelIds} quand c'est vraiment accepté : sans "id", quelque
+        // chose s'est mal passé silencieusement (ex. compte sans adresse d'envoi valide) — on le signale au lieu de dire « envoyé ».
+        reponse.optString("id").ifBlank { throw IllegalStateException("Gmail n'a pas confirmé l'envoi (réponse inattendue : ${reponse.toString().take(200)}).") }
     }
 
     suspend fun fetchRecent(ctx: Context, accounts: List<String>, count: Int, unreadOnly: Boolean, full: Boolean = false, everywhere: Boolean = false): List<MailItem> {
