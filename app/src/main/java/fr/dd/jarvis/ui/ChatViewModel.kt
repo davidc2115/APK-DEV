@@ -85,8 +85,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         confirmDeferred?.complete(ok)
     }
 
-    /** Micro touché : passe automatiquement en conversation (réponse parlée puis réécoute) jusqu'à ce qu'on le retouche ou qu'on dise « merci / c'est tout ». */
-    private var voiceSession = false
+    /** Micro touché : passe automatiquement en conversation (réponse parlée puis réécoute) jusqu'à ce qu'on le retouche ou qu'on dise « merci / c'est tout ».
+     *  Exposé en état Compose pour afficher l'orbe plein écran pendant toute la session (écoute, réflexion, réponse parlée). */
+    var voiceSession by mutableStateOf(false)
+        private set
     /** Fin de la conversation si l'utilisateur ne reparle plus (remise à jour à chaque écoute relancée). */
     private var voiceDeadline = 0L
     private val stopWords = Regex("^(merci|c'est tout|c est tout|stop|arrete|arrête|termine|terminé|fin|a plus tard|à plus tard|au revoir|laisse tomber|ça suffit|ca suffit)\\b.*", RegexOption.IGNORE_CASE)

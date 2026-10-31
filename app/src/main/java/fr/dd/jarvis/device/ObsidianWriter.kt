@@ -155,4 +155,59 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         val body = if (append) (readNote(p)?.trimEnd()?.plus("\n\n") ?: "") + content else content
         return saveBytes(folder, name, body.toByteArray(), "text/markdown")
     }
+
+    // ------------------------------------------------------------------ graphe (vue « Obsidian graph »)
+
+    data class GraphNode(val id: String, val label: String, val folder: String, val ghost: Boolean = false)
+    data class GraphEdge(val from: String, val to: String)
+    data class GraphData(val nodes: List<GraphNode>, val edges: List<GraphEdge>)
+
+    private val lienRegex = Regex("\\[\\[([^\\]|#]+)")
+
+    private fun idOf(path: String) = path.removeSuffix(".md").removeSuffix(".MD")
+    private fun labelOf(path: String) = idOf(path).substringAfterLast('/')
+    private fun folderOf(path: String) = idOf(path).substringBeforeLast('/', "")
+
+    /** Construit le graphe (nœuds = notes du coffre, arêtes = liens « [[...]] ») pour l'onglet Graphe.
+     *  Plafonné à [limiteNotes] notes et [limiteOctets] par note pour rester fluide sur un gros coffre. */
+    fun graph(limiteNotes: Int = 400, limiteOctets: Int = 60_000): GraphData {
+        val v = vaultRoot()
+        val fichiers: List<Pair<String, () -> String?>> =
+            if (v != null) allNotes(limiteNotes).map { (chemin, df) ->
+                chemin to { runCatching { ctx.contentResolver.openInputStream(df.uri)?.use { it.readBytes().take(limiteOctets).toByteArray().toString(Charsets.UTF_8) } }.getOrNull() }
+            }
+            else localRoot().walkTopDown().filter { it.isFile && it.name.endsWith(".md", true) }.take(limiteNotes).map { f ->
+                f.relativeTo(localRoot()).path to { runCatching { f.readText().take(limiteOctets) }.getOrNull() }
+            }.toList()
+
+        val nodesById = LinkedHashMap<String, GraphNode>()
+        for ((chemin, _) in fichiers) {
+            val id = idOf(chemin)
+            nodesById[id] = GraphNode(id, labelOf(chemin), folderOf(chemin))
+        }
+
+        // Pour retrouver une cible « [[Nom]] » même sans chemin complet : on indexe aussi par simple nom de fichier.
+        val parNom = HashMap<String, MutableList<String>>()
+        for (id in nodesById.keys) parNom.getOrPut(id.substringAfterLast('/').lowercase()) { mutableListOf() }.add(id)
+
+        val edges = mutableListOf<GraphEdge>()
+        val vus = HashSet<Pair<String, String>>()
+        for ((chemin, lire) in fichiers) {
+            val fromId = idOf(chemin)
+            val texte = lire() ?: continue
+            for (m in lienRegex.findAll(texte)) {
+                val cible = m.groupValues[1].trim().trim('/')
+                if (cible.isBlank()) continue
+                val cibleNorm = cible.removeSuffix(".md")
+                val toId = nodesById.keys.firstOrNull { it.equals(cibleNorm, true) }
+                    ?: parNom[cibleNorm.substringAfterLast('/').lowercase()]?.firstOrNull()
+                    ?: cibleNorm // note « fantôme » : lien vers une note qui n'existe pas (encore)
+                if (toId !in nodesById) nodesById[toId] = GraphNode(toId, toId.substringAfterLast('/'), toId.substringBeforeLast('/', ""), ghost = true)
+                if (fromId == toId) continue
+                val cle = if (fromId < toId) fromId to toId else toId to fromId
+                if (vus.add(cle)) edges += GraphEdge(fromId, toId)
+            }
+        }
+        return GraphData(nodesById.values.toList(), edges)
+    }
 }

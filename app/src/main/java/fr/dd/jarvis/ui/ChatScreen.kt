@@ -77,14 +77,33 @@ fun ChatScreen(vm: ChatViewModel, store: Store) {
 
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (vm.messages.isEmpty() && !vm.busy) {
-                Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    HudOrb(Modifier.size(96.dp))
-                    Text(
-                        "Écris ou parle à JARVIS.\nPlanning, mails, contacts, téléphone…",
-                        color = HudDim, fontSize = 14.sp, fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.padding(top = 16.dp)
-                    )
+            if (vm.voiceSession) {
+                VoiceOrbOverlay(vm, accent) { onMic() }
+            } else {
+                if (vm.messages.isEmpty() && !vm.busy) {
+                    Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        HudOrb(Modifier.size(96.dp))
+                        Text(
+                            "Écris ou parle à JARVIS.\nPlanning, mails, contacts, téléphone…",
+                            color = HudDim, fontSize = 14.sp, fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.padding(top = 16.dp)
+                        )
+                    }
+                }
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(vm.messages) { m -> Bubble(m) }
+                    if (vm.busy) {
+                        item {
+                            HudPanel(Modifier.fillMaxWidth(0.7f), title = "JARVIS") {
+                                Text(vm.status.ifBlank { "Réflexion…" }, color = HudDim, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+                            }
+                        }
+                    }
                 }
             }
             var menu by remember { mutableStateOf(false) }
@@ -99,21 +118,6 @@ fun ChatScreen(vm: ChatViewModel, store: Store) {
                         onClick = { store.conversationMode.set(!store.conversationMode.value); menu = false })
                     androidx.compose.material3.DropdownMenuItem(text = { Text("➕ Nouvelle conversation", color = HudText) }, onClick = { vm.nouvelle(); menu = false })
                     androidx.compose.material3.DropdownMenuItem(text = { Text("🗂️ Conversations", color = HudText) }, onClick = { showHistory = true; menu = false })
-                }
-            }
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                items(vm.messages) { m -> Bubble(m) }
-                if (vm.busy) {
-                    item {
-                        HudPanel(Modifier.fillMaxWidth(0.7f), title = "JARVIS") {
-                            Text(vm.status.ifBlank { "Réflexion…" }, color = HudDim, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
-                        }
-                    }
                 }
             }
         }
@@ -212,6 +216,36 @@ fun ChatScreen(vm: ChatViewModel, store: Store) {
             text = { Text(question) },
             confirmButton = { TextButton({ vm.answerConfirm(true) }) { Text("Autoriser", color = accent) } },
             dismissButton = { TextButton({ vm.answerConfirm(false) }) { Text("Refuser", color = HudDim) } }
+        )
+    }
+}
+
+/** Plein écran pendant une session de conversation vocale (déclenchée par le micro) : une orbe
+ *  dominante façon Obsidian-graph, avec le statut en direct (écoute / transcription / réflexion / réponse).
+ *  Un tap n'importe où arrête la session (= retoucher le micro). */
+@Composable
+private fun VoiceOrbOverlay(vm: ChatViewModel, accent: Color, onStop: () -> Unit) {
+    Column(
+        Modifier.fillMaxSize().clickable { onStop() },
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        HudOrb(Modifier.size(220.dp), active = vm.listening || vm.busy)
+        androidx.compose.foundation.layout.Spacer(Modifier.height(28.dp))
+        val label = when {
+            vm.partial.isNotBlank() -> vm.partial
+            vm.busy -> vm.status.ifBlank { "Je réfléchis…" }
+            vm.listening -> "Je t'écoute…"
+            else -> vm.status.ifBlank { "En conversation…" }
+        }
+        Text(
+            label, color = accent, fontSize = 16.sp, fontFamily = FontFamily.Monospace,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 32.dp)
+        )
+        androidx.compose.foundation.layout.Spacer(Modifier.height(10.dp))
+        Text(
+            "Touche l'écran pour arrêter", color = HudDim, fontSize = 12.sp, fontFamily = FontFamily.Monospace
         )
     }
 }
