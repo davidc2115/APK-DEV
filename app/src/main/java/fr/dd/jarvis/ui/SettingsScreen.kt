@@ -291,11 +291,12 @@ fun SettingsScreen(app: JarvisApp) {
         // ------------------------------------------------------------ Téléphone
         item {
             val a11yOn = remember(tick) { app.phone.accessibilityEnabled() }
+            val a11yInSettings = remember(tick) { app.phone.accessibilityInSettings() }
             val shInstalled = remember(tick) { ShizukuShell.installed(ctx) }
             val shRunning = remember(tick) { ShizukuShell.running() }
             val shGranted = remember(tick) { ShizukuShell.granted() }
             HudPanel(Modifier.fillMaxWidth(), title = "Contrôle du téléphone") {
-                StatusRow("Accessibilité (lire l'écran, toucher, défiler)", a11yOn)
+                StatusRow3("Accessibilité (lire l'écran, toucher, défiler)", a11yOn, a11yInSettings)
                 Spacer(Modifier.height(4.dp))
                 HudButton("Ouvrir les réglages d'accessibilité") {
                     ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -441,7 +442,7 @@ fun SettingsScreen(app: JarvisApp) {
                 StatusRow("Batterie sans restriction (arrière-plan)", batt)
                 StatusRow("Affichage par-dessus les autres applis (lancer des applis)", overlay)
                 StatusRow("Installer des applis", install)
-                StatusRow("Accessibilité", app.phone.accessibilityEnabled())
+                StatusRow3("Accessibilité", app.phone.accessibilityEnabled(), app.phone.accessibilityInSettings())
                 Spacer(Modifier.height(8.dp))
                 HudButton("Autoriser toutes les permissions Android", filled = true) {
                     all.launch(buildList {
@@ -576,6 +577,20 @@ private fun StatusRow(label: String, ok: Boolean) {
         Spacer(Modifier.width(8.dp))
         Text(label, color = HudText, fontSize = 13.sp)
     }
+}
+
+/** Comme StatusRow, mais distingue « activé dans Android mais pas encore connecté à JARVIS » (🟠) de « non activé » (⚪). */
+@Composable
+private fun StatusRow3(label: String, actif: Boolean, activeDansAndroid: Boolean) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(if (actif) "🟢" else if (activeDansAndroid) "🟠" else "⚪", fontSize = 12.sp)
+        Spacer(Modifier.width(8.dp))
+        Text(label, color = HudText, fontSize = 13.sp)
+    }
+    if (!actif && activeDansAndroid) Text(
+        "Activé dans Android mais pas encore connecté à JARVIS : redémarre JARVIS (ferme-la complètement et rouvre-la), et si ça persiste, ouvre « Infos de l'application » › ⋮ › « Autoriser les paramètres restreints » puis réessaie.",
+        color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(start = 20.dp, bottom = 4.dp)
+    )
 }
 
 @Composable

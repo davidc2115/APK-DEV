@@ -181,12 +181,17 @@ class PhoneControl(private val ctx: Context) {
             mapOf("query" to requete, "android.intent.extra.focus" to "vnd.android.cursor.item/*"))
         if (r.isNotBlank()) return r
         val nom = pkg?.let { findPackage(it)?.second ?: it } ?: "l'application de musique"
+        // Pas la peine d'essayer de piloter la session média si la permission qui le permet n'est pas accordée :
+        // c'est une autorisation À PART (« Accès aux notifications »), différente de l'Accessibilité.
+        if (!fr.dd.jarvis.service.JarvisNotificationListener.active) {
+            return "⚠️ $nom s'est ouverte, mais pour que je lance vraiment la lecture j'ai besoin de l'autorisation « Accès aux notifications » (différente de l'Accessibilité) : Réglages Android → Applications → JARVIS → Autorisations → Accès aux notifications → Activer. Une fois ça fait, redemande « lance la lecture »."
+        }
         // Ouvrir l'appli ne suffit pas : on pilote sa session média (comme un assistant) pour lancer vraiment la lecture.
         val etat = lancerLecture(pkg, requete)
         return when (etat) {
             "lecture" -> "🎵 « $requete » est en cours de lecture dans $nom."
             "session" -> "🎵 $nom est ouverte et j'ai demandé la lecture de « $requete », mais je n'ai pas pu confirmer qu'elle a démarré. Si rien ne joue, lance un titre une fois à la main dans $nom (première utilisation)."
-            else -> "⚠️ $nom s'est ouverte mais je n'ai pas pu la piloter (accès aux notifications de JARVIS requis : Réglages Android › Accès aux notifications › JARVIS). Appuie sur lecture dans $nom."
+            else -> "⚠️ $nom s'est ouverte mais je n'ai pas trouvé sa session de lecture (l'appli met parfois quelques secondes, ou doit être relancée manuellement une première fois). Réessaie, ou appuie sur lecture dans $nom."
         }
     }
 
