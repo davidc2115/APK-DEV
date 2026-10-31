@@ -67,6 +67,7 @@ fun SettingsScreen(app: JarvisApp) {
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         // ------------------------------------------------------------ Apparence
+        item { SectionHeader("Général") }
         item {
             HudPanel(Modifier.fillMaxWidth(), title = "Apparence") {
                 Text("Couleur du thème", color = HudDim, fontSize = 12.sp)
@@ -93,6 +94,7 @@ fun SettingsScreen(app: JarvisApp) {
         }
 
         // ------------------------------------------------------------ Cerveau Groq
+        item { SectionHeader("Intelligence artificielle") }
         item {
             KeyPanel(
                 title = "Cerveau — clés Groq (rotation automatique)",
@@ -121,6 +123,7 @@ fun SettingsScreen(app: JarvisApp) {
         }
 
         // ------------------------------------------------------------ Annonces vocales
+        item { SectionHeader("Communication") }
         item {
             var cible by remember { mutableStateOf("") }
             val picker = rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { r ->
@@ -130,7 +133,7 @@ fun SettingsScreen(app: JarvisApp) {
             HudPanel(Modifier.fillMaxWidth(), title = "Annonces vocales (SMS, mails, notifications)") {
                 Text("JARVIS annonce à voix haute l'arrivée d'un SMS, d'un mail ou d'une notification, même en arrière-plan, après la sonnerie de ton choix. Demande l'accès aux notifications (Réglages › Permissions).", color = HudDim, fontSize = 12.sp)
                 Spacer(Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     HudChip(if (store.annOn.value) "✅ Annonces actives" else "Annonces désactivées", store.annOn.value) { store.annOn.set(!store.annOn.value) }
                     HudChip("🎧 Écouteurs/voiture seulement", store.annPrive.value) { store.annPrive.set(!store.annPrive.value) }
                 }
@@ -184,6 +187,7 @@ fun SettingsScreen(app: JarvisApp) {
         }
 
         // ------------------------------------------------------------ Serveur (SSH + Home Assistant)
+        item { SectionHeader("Réseau et serveur") }
         item {
             ServeurPanel(store, app)
         }
@@ -244,7 +248,7 @@ fun SettingsScreen(app: JarvisApp) {
                     color = HudDim, fontSize = 12.sp
                 )
                 Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     HudButton("Choisir le coffre Obsidian") { picker.launch(null) }
                     if (store.obsidianUri.value.isNotBlank()) HudButton("Retirer") { store.obsidianUri.set("") }
                 }
@@ -258,7 +262,7 @@ fun SettingsScreen(app: JarvisApp) {
             HudPanel(Modifier.fillMaxWidth(), title = "Point du matin") {
                 Text("Chaque matin, JARVIS prépare ton planning du jour et le tri de tes mails, et t'envoie une notification.", color = HudDim, fontSize = 12.sp)
                 Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     HudChip(if (store.briefingOn.value) "✅ Activé" else "Désactivé", store.briefingOn.value) {
                         val on = !store.briefingOn.value
                         store.briefingOn.set(on)
@@ -289,6 +293,7 @@ fun SettingsScreen(app: JarvisApp) {
         }
 
         // ------------------------------------------------------------ Téléphone
+        item { SectionHeader("Téléphone et permissions") }
         item {
             val a11yOn = remember(tick) { app.phone.accessibilityEnabled() }
             val a11yInSettings = remember(tick) { app.phone.accessibilityInSettings() }
@@ -310,7 +315,7 @@ fun SettingsScreen(app: JarvisApp) {
                 StatusRow("Shizuku démarré", shRunning)
                 StatusRow("Shizuku autorisé pour JARVIS", shGranted)
                 Spacer(Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     HudButton("Autoriser Shizuku", enabled = shRunning && !shGranted) {
                         ShizukuShell.requestPermission()
                     }
@@ -318,14 +323,14 @@ fun SettingsScreen(app: JarvisApp) {
                 }
                 var shMsg by remember { mutableStateOf("") }
                 Spacer(Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    HudButton("Installer Shizuku (auto via ADB)", enabled = !shInstalled, filled = true) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    HudButton("Installer Shizuku (auto via ADB)", Modifier.fillMaxWidth(), enabled = !shInstalled, filled = true) {
                         scope.launch { shMsg = "⏳ Téléchargement et installation…"; shMsg = fr.dd.jarvis.device.ShizukuInstaller.installAuto(ctx); tick++ }
                     }
-                    HudButton("Installer manuellement", enabled = !shInstalled) {
+                    HudButton("Installer manuellement", Modifier.fillMaxWidth(), enabled = !shInstalled) {
                         scope.launch { shMsg = "⏳ Téléchargement…"; shMsg = fr.dd.jarvis.device.ShizukuInstaller.install(ctx) }
                     }
-                    HudButton("Démarrer Shizuku via ADB", enabled = shInstalled && !shRunning) {
+                    HudButton("Démarrer Shizuku via ADB", Modifier.fillMaxWidth(), enabled = shInstalled && !shRunning) {
                         scope.launch { shMsg = "⏳"; shMsg = fr.dd.jarvis.device.ShizukuInstaller.startViaAdb(ctx); tick++ }
                     }
                 }
@@ -351,7 +356,7 @@ fun SettingsScreen(app: JarvisApp) {
                         "4) Tire la notification JARVIS, saisis le code à 6 chiffres. Fini : à faire une seule fois.",
                     color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(vertical = 6.dp)
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     HudButton("Appairer", filled = true) {
                         if (android.os.Build.VERSION.SDK_INT >= 33) notifPerm.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                         else fr.dd.jarvis.device.AdbShell.postPairingNotification(ctx)
@@ -365,7 +370,7 @@ fun SettingsScreen(app: JarvisApp) {
                     }
                 }
                 Spacer(Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     HudButton("Déconnecter") { fr.dd.jarvis.device.AdbShell.disconnect(); adbMsg = "ADB déconnecté."; tick++ }
                     HudButton("Désactiver le débogage") {
                         scope.launch { adbMsg = "⏳"; adbMsg = fr.dd.jarvis.device.AdbShell.disableDebugging(ctx); tick++ }
@@ -474,6 +479,7 @@ fun SettingsScreen(app: JarvisApp) {
         }
 
         // ------------------------------------------------------------ Arrière-plan et agents autonomes
+        item { SectionHeader("Voix et automatisation") }
         item {
             val micLauncher = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { ok ->
                 if (ok) { store.wakeOn.set(true); fr.dd.jarvis.service.JarvisService.start(ctx) }
@@ -516,7 +522,7 @@ fun SettingsScreen(app: JarvisApp) {
                 }
                 if (voskMsg.isNotBlank()) Text(voskMsg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
                 Text("Sans clé Picovoice ni détecteur hors-ligne, l'écoute « Jarvis » ne démarre pas (plus d'écoute en boucle avec bips).", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(vertical = 4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Conversation ouverte", color = HudDim, fontSize = 12.sp)
                     listOf(15, 25, 45, 90).forEach { sec ->
                         HudChip("$sec s", store.convSeconds.value == sec) { store.convSeconds.set(sec) }
@@ -541,13 +547,13 @@ fun SettingsScreen(app: JarvisApp) {
                     HudChip("🔔 Notifications", store.agentNotifs.value) { store.agentNotifs.set(!store.agentNotifs.value) }
                 }
                 Spacer(Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     HudChip("🔔 Notifier chaque SMS / mail (en direct)", store.notifLive.value) { store.notifLive.set(!store.notifLive.value) }
                     HudChip("🏷️ Ranger les mails dans Gmail", store.agentRanger.value) { store.agentRanger.set(!store.agentRanger.value) }
                     HudChip("📥 Archiver pubs/notifs", store.agentArchiver.value) { store.agentArchiver.set(!store.agentArchiver.value) }
                 }
                 Spacer(Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Toutes les", color = HudDim, fontSize = 12.sp)
                     listOf(15, 30, 60).forEach { m ->
                         HudChip("$m min", store.agentMinutes.value == m) { store.agentMinutes.set(m); if (store.agentsOn.value) fr.dd.jarvis.work.AgentsScheduler.apply(ctx, store) }
@@ -568,6 +574,16 @@ fun SettingsScreen(app: JarvisApp) {
             )
         }
     }
+}
+
+@Composable
+private fun SectionHeader(title: String) {
+    Text(
+        title.uppercase(),
+        color = LocalAccent.current, fontSize = 12.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+        letterSpacing = 1.5.sp,
+        modifier = Modifier.padding(top = 6.dp, start = 2.dp, bottom = 2.dp)
+    )
 }
 
 @Composable
@@ -624,7 +640,7 @@ private fun KeyPanel(
         Spacer(Modifier.height(8.dp))
         HudTextField(input, { input = it }, Modifier.fillMaxWidth(), placeholder = "Colle une ou plusieurs clés (une par ligne)", singleLine = false, maxLines = 4)
         Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             HudButton("Ajouter", filled = true, enabled = input.isNotBlank()) {
                 onAdd(input)
                 input = ""
@@ -685,7 +701,7 @@ private fun CfPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.JarvisApp)
         Spacer(Modifier.height(6.dp))
         HudTextField(key, { key = it }, Modifier.fillMaxWidth(), label = "Clé API (jeton)")
         Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             HudButton("Ajouter", filled = true, enabled = id.isNotBlank() || key.isNotBlank()) {
                 val err = store.addCfAccount(id, key)
                 if (err == null) { id = ""; key = ""; msg = "✅ Compte enregistré." } else msg = "❌ $err"
@@ -747,7 +763,7 @@ private fun ServeurPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvi
         Spacer(Modifier.height(6.dp))
         HudTextField(store.ghToken.value, { store.ghToken.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Jeton GitHub (optionnel : dépôts privés, plus de requêtes)", password = true)
         Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             HudButton(if (busy) "Test…" else "Tester HA", enabled = !busy && fr.dd.jarvis.ai.Serveur.haConfigure(app)) {
                 scope.launch {
                     busy = true
@@ -789,7 +805,7 @@ private fun BoxPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.JarvisApp
         Spacer(Modifier.height(8.dp))
         HudTextField(store.boxHost.value, { store.boxHost.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Adresse de la box (vide = détectée sur le Wi-Fi)")
         Spacer(Modifier.height(6.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             HudChip("SMB (Windows)", selected = store.boxProto.value != "ftp") { store.boxProto.set("smb") }
             HudChip("FTP", selected = store.boxProto.value == "ftp") { store.boxProto.set("ftp") }
         }
