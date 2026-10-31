@@ -13,12 +13,16 @@ class Llm(private val store: Store) {
     private val geminiRing = KeyRing { store.geminiKeys.toList() }
     val groq = GroqClient(groqRing) { store.groqModel.value }
     val gemini = GeminiClient(geminiRing) { store.geminiModel.value }
+    /** Dernier recours du cerveau principal (appel d'outils), seulement si TOUTES les clés Groq sont épuisées. */
+    val cloudflare = CloudflareChatClient({ store.cfAccounts.toList() }) { store.cfChatModel.value }
 
     fun keyStatus(): String {
         val g = groqRing.count()
         val m = geminiRing.count()
+        val c = store.cfAccounts.count { it.contains(':') }
         return "Groq $g clé(s)" + (if (groqRing.pausedCount() > 0) " (${groqRing.pausedCount()} en pause)" else "") +
-            " · Gemini $m clé(s)" + (if (geminiRing.pausedCount() > 0) " (${geminiRing.pausedCount()} en pause)" else "")
+            " · Gemini $m clé(s)" + (if (geminiRing.pausedCount() > 0) " (${geminiRing.pausedCount()} en pause)" else "") +
+            " · Cloudflare $c compte(s) (dernier recours)"
     }
 
     /** Dernière erreur des agents (affichée quand un repli sans IA est utilisé). */
@@ -71,7 +75,9 @@ class Llm(private val store: Store) {
                 try { groq.chat(compacter(messages, 1), compacterSchema(tools, 1), 1000) }
                 catch (e2: ApiException) { if (e2.code == 413) groq.chat(compacter(messages, 2), compacterSchema(tools, 2), 700) else throw e2 }
             }
-            else -> throw e
+            // Toutes les clés Groq ont échoué (quota épuisé, clés en pause…) : Cloudflare en tout dernier recours, avec les
+            // comptes déjà configurés pour les images. S'il échoue aussi, on remonte l'erreur Groq d'origine (plus parlante).
+            else -> try { cloudflare.chat(messages, tools) } catch (e2: Exception) { throw e }
         }
     }
 

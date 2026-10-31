@@ -23,6 +23,34 @@ class PhoneControl(private val ctx: Context) {
 
     private fun needA11y(): String = "Le service d'accessibilité JARVIS n'est pas actif : va dans Réglages › Téléphone et permissions pour le réactiver (désactive puis réactive l'interrupteur dans Réglages Android › Accessibilité, et sur Xiaomi/MIUI vérifie aussi « Démarrage automatique » et la batterie sans restriction pour JARVIS)."
 
+    /** Force Android à rompre puis recréer la connexion aux services système (accès notifications, accessibilité) :
+     *  bascule le composant « désactivé » puis « activé », ce qui force une vraie reconnexion même quand
+     *  l'interrupteur des réglages Android semble actif mais que JARVIS reste indiqué comme déconnecté
+     *  (bug connu sur MIUI/Xiaomi : couper/remettre l'interrupteur système ne suffit pas toujours, et le
+     *  bouton « Accès notifications » de JARVIS se désactive dès qu'Android dit la permission accordée,
+     *  même si le service lui n'a jamais rebind). N'arrête pas l'appli (DONT_KILL_APP).
+     */
+    fun forcerReconnexionServices(): String {
+        val pm = ctx.packageManager
+        var touche = false
+        fun bascule(cls: Class<*>) = runCatching {
+            val cn = android.content.ComponentName(ctx, cls)
+            pm.setComponentEnabledSetting(cn, android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED, android.content.pm.PackageManager.DONT_KILL_APP)
+            Thread.sleep(400)
+            pm.setComponentEnabledSetting(cn, android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED, android.content.pm.PackageManager.DONT_KILL_APP)
+            touche = true
+        }
+        bascule(fr.dd.jarvis.service.JarvisNotificationListener::class.java)
+        bascule(fr.dd.jarvis.service.JarvisAccessibilityService::class.java)
+        if (Build.VERSION.SDK_INT >= 24) runCatching {
+            android.service.notification.NotificationListenerService.requestRebind(
+                android.content.ComponentName(ctx, fr.dd.jarvis.service.JarvisNotificationListener::class.java))
+        }
+        return if (touche)
+            "🔄 Reconnexion forcée envoyée à Android. Patiente 10-15 secondes puis appuie sur « Actualiser ». Si ça reste rouge : ferme complètement JARVIS depuis les applications récentes (pas juste l'écran) et rouvre-la — et sur Xiaomi/MIUI, vérifie dans l'appli Sécurité que « Démarrage automatique » est activé pour JARVIS et qu'elle n'est pas verrouillée/fermée automatiquement dans les apps récentes, sinon le système la tue en arrière-plan et elle ne peut plus se reconnecter tant qu'on ne la rouvre pas."
+        else "❌ Impossible de forcer la reconnexion sur ce téléphone."
+    }
+
     fun torch(on: Boolean): String {
         val cm = ctx.getSystemService(Context.CAMERA_SERVICE) as CameraManager
         val id = cm.cameraIdList.firstOrNull {

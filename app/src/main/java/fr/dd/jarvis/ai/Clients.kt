@@ -62,6 +62,43 @@ class GroqClient(private val ring: KeyRing, private val model: () -> String) {
     }
 }
 
+/** Cloudflare Workers AI (point d'accès compatible OpenAI) : cerveau de tout dernier recours, utilisé seulement quand
+ *  toutes les clés Groq sont épuisées. Réutilise les mêmes comptes Cloudflare (« idCompte:jeton ») que generer_image. */
+class CloudflareChatClient(private val accounts: () -> List<String>, private val model: () -> String) {
+    private var next = 0
+    private val cooldown = mutableMapOf<String, Long>()
+
+    suspend fun chat(messages: JSONArray, tools: JSONArray?): JSONObject = withContext(Dispatchers.IO) {
+        val list = accounts().filter { it.contains(':') }
+        if (list.isEmpty()) throw IllegalStateException("Aucun compte Cloudflare configuré (Réglages › Images).")
+        val now = System.currentTimeMillis()
+        val order = list.indices.map { (next + it) % list.size }
+        val (ready, cooling) = order.partition { (cooldown[list[it]] ?: 0L) <= now }
+        var last: ApiException? = null
+        for (i in ready + cooling) {
+            val (id, token) = list[i].split(":", limit = 2)
+            try {
+                val body = JSONObject().put("model", model().ifBlank { "@cf/meta/llama-3.3-70b-instruct-fp8-fast" })
+                    .put("messages", messages).put("temperature", 0.4)
+                if (tools != null && tools.length() > 0) { body.put("tools", tools); body.put("tool_choice", "auto") }
+                val req = Request.Builder().url("https://api.cloudflare.com/client/v4/accounts/$id/ai/v1/chat/completions")
+                    .header("Authorization", "Bearer $token").post(body.toString().toRequestBody(Http.JSON)).build()
+                val msg = Http.client.newCall(req).execute().use { resp ->
+                    val text = resp.body?.string().orEmpty()
+                    if (!resp.isSuccessful) throw ApiException(resp.code, "Cloudflare ${resp.code} : ${text.take(300)}")
+                    JSONObject(text).getJSONArray("choices").getJSONObject(0).getJSONObject("message")
+                }
+                next = (i + 1) % list.size
+                return@withContext msg
+            } catch (e: ApiException) {
+                last = e
+                cooldown[list[i]] = System.currentTimeMillis() + when (e.code) { 429 -> 60_000L; 401, 403 -> 600_000L; else -> 15_000L }
+            }
+        }
+        throw last ?: IllegalStateException("Cloudflare : toutes les requêtes ont échoué.")
+    }
+}
+
 /** Gemini (REST) : les agents spécialisés (planning, mails, contacts). */
 class GeminiClient(private val ring: KeyRing, private val model: () -> String) {
 

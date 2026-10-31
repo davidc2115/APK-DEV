@@ -104,6 +104,8 @@ class Store(context: Context) {
 
     // ---- Génération d'images (Cloudflare Workers AI) : lignes « idCompte:jeton », rotation automatique
     val cfModel = SPref("cfModel", "@cf/black-forest-labs/flux-1-schnell")
+    /** Modèle de conversation Cloudflare, utilisé uniquement en dernier recours quand toutes les clés Groq sont épuisées (mêmes comptes que les images). */
+    val cfChatModel = SPref("cfChatModel", "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
     val cfAccounts: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readList("cfAccounts")) }
     /** Ajoute un compte (ID + clé API). Retourne un message d'erreur, ou null si c'est bon. */
     fun addCfAccount(idRaw: String, keyRaw: String): String? {

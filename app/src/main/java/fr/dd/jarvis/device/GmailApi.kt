@@ -65,6 +65,21 @@ object GmailApi {
     /** Adresse du compte connecté (vérifie aussi que le jeton fonctionne). */
     suspend fun profile(token: String): String = withContext(Dispatchers.IO) { get(token, "$BASE/profile").optString("emailAddress") }
 
+    /** Envoie un email texte simple depuis [account]. Le scope gmail.modify déjà accordé couvre l'envoi (pas besoin de nouveau consentement). */
+    suspend fun envoyer(ctx: Context, account: String, destinataire: String, sujet: String, corps: String): Unit = withContext(Dispatchers.IO) {
+        val auth = authorize(ctx, account)
+        if (auth.hasResolution()) throw IllegalStateException("autorisation à renouveler pour $account (Réglages › Mails).")
+        val token = auth.accessToken ?: throw IllegalStateException("Connexion Gmail expirée pour $account : reconnecte le compte dans Réglages › Mails.")
+        fun b64(s: String, flags: Int = android.util.Base64.NO_WRAP) = android.util.Base64.encodeToString(s.toByteArray(Charsets.UTF_8), flags)
+        val raw = "From: $account\r\n" +
+            "To: $destinataire\r\n" +
+            "Subject: =?UTF-8?B?${b64(sujet)}?=\r\n" +
+            "Content-Type: text/plain; charset=UTF-8\r\n\r\n" +
+            corps
+        val enc = b64(raw, android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING)
+        post(token, "$BASE/messages/send", JSONObject().put("raw", enc))
+    }
+
     suspend fun fetchRecent(ctx: Context, accounts: List<String>, count: Int, unreadOnly: Boolean, full: Boolean = false, everywhere: Boolean = false): List<MailItem> {
         val all = mutableListOf<MailItem>()
         val errors = mutableListOf<String>()

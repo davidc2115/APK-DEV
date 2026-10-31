@@ -118,6 +118,13 @@ class ToolBox(
             mapOf("destinataire" to prop("Nom du contact ou numéro."), "texte" to prop("Contenu du SMS.")), listOf("destinataire", "texte")))
         put(tool("appeler_contact", "Appelle un contact (ou un numéro) directement.",
             mapOf("contact" to prop("Nom du contact ou numéro.")), listOf("contact")))
+        put(tool("mail_envoyer", "Envoie un email depuis un compte Gmail connecté (compte Google, pas IMAP). Demande toujours confirmation avant d'envoyer.",
+            mapOf(
+                "destinataire" to prop("Adresse email du destinataire."),
+                "sujet" to prop("Objet du mail."),
+                "corps" to prop("Contenu du mail (texte)."),
+                "compte" to prop("Compte Gmail à utiliser pour l'envoi (adresse ou partie). Vide = le seul compte connecté, ou demande si plusieurs.")
+            ), listOf("destinataire", "sujet", "corps")))
         put(tool("mail_compte", "Liste, active ou désactive un compte mail (désactivé = conservé mais ignoré par JARVIS, ses agents et le point du matin).",
             mapOf("action" to prop("lister | activer | desactiver"), "compte" to prop("Adresse ou partie de l'adresse (ou « imap »). Inutile pour lister.")), listOf("action")))
         put(tool("morning_briefing", "Point du jour : planning du jour et mails importants."))
@@ -264,6 +271,7 @@ class ToolBox(
         "morning_briefing" -> ToolResult(briefing(), direct = true)
         "trier_mails" -> trierMails(a)
         "mail_compte" -> mailCompte(a)
+        "mail_envoyer" -> mailEnvoyer(a)
         "marquer_mails_traites" -> marquerTraites(a)
         "lire_sms" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             fr.dd.jarvis.device.Telephony.lire(app, (a.optString("count").toIntOrNull() ?: 10).coerceIn(1, 30), a.optString("contact"), a.optString("non_lus").equals("true", true))
@@ -688,6 +696,29 @@ class ToolBox(
         val on = action.startsWith("activ") && !action.startsWith("desactiv") && !action.startsWith("désactiv")
         store.setMailActive(cible[0], on)
         return ToolResult(if (on) "🟢 ${cible[0]} activé : JARVIS le prend de nouveau en compte." else "⚪ ${cible[0]} désactivé (conservé) : ignoré par JARVIS, les agents et le point du matin, sauf si tu le demandes explicitement.")
+    }
+
+    private suspend fun mailEnvoyer(a: JSONObject): ToolResult {
+        if (store.gmailAccounts.isEmpty()) return ToolResult("Envoyer un mail demande un compte Google connecté (Réglages › Mails) — pas disponible en IMAP.")
+        val dest = a.optString("destinataire").trim()
+        val sujet = a.optString("sujet").trim()
+        val corps = a.optString("corps")
+        if (dest.isBlank() || !dest.contains("@")) return ToolResult("Adresse destinataire manquante ou invalide.")
+        val q = a.optString("compte").trim().lowercase()
+        val candidats = if (q.isBlank()) store.gmailAccounts.toList() else store.gmailAccounts.filter { it.lowercase().contains(q) }
+        if (candidats.isEmpty()) return ToolResult("Aucun compte Gmail ne correspond à « ${a.optString("compte")} ». Comptes : ${store.gmailAccounts.joinToString(", ")}")
+        if (candidats.size > 1) return ToolResult("Plusieurs comptes Gmail correspondent : ${candidats.joinToString(", ")}. Précise lequel utiliser.")
+        val compte = candidats[0]
+        if (!confirm("Envoyer ce mail depuis $compte ?\n\nÀ : $dest\nObjet : $sujet\n\n${corps.take(500)}", false))
+            return ToolResult("Envoi refusé par l'utilisateur.")
+        return try {
+            fr.dd.jarvis.device.GmailApi.envoyer(app, compte, dest, sujet, corps)
+            ToolResult("✅ Mail envoyé à $dest depuis $compte.")
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            ToolResult("❌ Envoi impossible : ${e.message}")
+        }
     }
 
     private suspend fun marquerTraites(a: JSONObject): ToolResult {

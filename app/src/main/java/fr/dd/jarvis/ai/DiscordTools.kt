@@ -49,10 +49,11 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
         tool("discord_role_attribuer", "Discord : donne ou retire un rôle à un membre du serveur.",
             mapOf("serveur" to prop("Nom ou ID du serveur (optionnel si un seul)."), "membre" to prop("Nom, pseudo ou ID du membre."),
                 "role" to prop("Nom (ou ID) du rôle."), "action" to prop("donner (défaut) ou retirer.")), listOf("membre", "role")),
-        tool("discord_salon_permission", "Discord : modifie l'accès d'un salon pour un rôle (autoriser, refuser, ou remettre par défaut) — c'est ce qui permet de garder un salon inaccessible même à un rôle qui a par ailleurs beaucoup de permissions (tant qu'il n'a pas « administrateur »).",
-            mapOf("serveur" to prop("Nom ou ID du serveur (optionnel si un seul)."), "salon" to prop("Nom (ou ID) du salon."),
+        tool("discord_salon_permission", "Discord : modifie l'accès d'un salon (ou de TOUS les salons d'un coup) pour un rôle (autoriser, refuser, ou remettre par défaut) — c'est ce qui permet de garder un salon inaccessible même à un rôle qui a par ailleurs beaucoup de permissions (tant qu'il n'a pas « administrateur »).",
+            mapOf("serveur" to prop("Nom ou ID du serveur (optionnel si un seul)."), "salon" to prop("Nom (ou ID) du salon. Inutile si « tous_les_salons » est à true."),
+                "tous_les_salons" to prop("« true » pour appliquer le même accès à TOUS les salons (texte, vocaux, annonces, forums) du serveur en une seule fois, au lieu d'un salon précis."),
                 "role" to prop("Nom (ou ID) du rôle concerné (ou utilise « membre » à la place pour un membre précis)."), "membre" to prop("Nom, pseudo ou ID d'un membre précis (optionnel, à la place de « role »)."),
-                "acces" to prop("voir_salon pour autoriser à voir/utiliser le salon, ou « refuser_voir_salon » pour le rendre invisible et inaccessible à ce rôle/membre, ou « defaut » pour effacer la règle spécifique à ce salon.")), listOf("salon", "acces"))
+                "acces" to prop("voir_salon pour autoriser à voir/utiliser le salon, ou « refuser_voir_salon » pour le rendre invisible et inaccessible à ce rôle/membre, ou « defaut » pour effacer la règle spécifique à ce(s) salon(s).")), listOf("acces"))
     )
 
     private fun guilde(a: JSONObject): String {
@@ -146,7 +147,6 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
         }
         "discord_salon_permission" -> {
             val gid = guilde(a)
-            val salon = Discord.trouverSalon(app, gid, a.optString("salon")) ?: return ToolResult("Salon « ${a.optString("salon")} » introuvable.")
             val roleArg = a.optString("role").trim(); val membreArg = a.optString("membre").trim()
             val (cibleId, cibleNom, type) = when {
                 roleArg.isNotBlank() -> {
@@ -162,13 +162,24 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
                 else -> return ToolResult("Précise un rôle ou un membre.")
             }
             val acces = a.optString("acces").trim().lowercase()
-            if (!confirm("Modifier l'accès de « ${salon.optString("name")} » pour $cibleNom ($acces) ?", true)) return ToolResult("Refusé par l'utilisateur.")
-            when {
-                acces.contains("refuser") -> Discord.salonPermission(app, salon.getString("id"), cibleId, type, 0L, Discord.Perm.VIEW_CHANNEL)
-                acces.contains("defaut") || acces.contains("default") -> Discord.salonPermissionSupprimer(app, salon.getString("id"), cibleId)
-                else -> Discord.salonPermission(app, salon.getString("id"), cibleId, type, Discord.Perm.VIEW_CHANNEL, 0L)
+            fun appliquer(channelId: String) = when {
+                acces.contains("refuser") -> Discord.salonPermission(app, channelId, cibleId, type, 0L, Discord.Perm.VIEW_CHANNEL)
+                acces.contains("defaut") || acces.contains("default") -> Discord.salonPermissionSupprimer(app, channelId, cibleId)
+                else -> Discord.salonPermission(app, channelId, cibleId, type, Discord.Perm.VIEW_CHANNEL, 0L)
             }
-            ToolResult("✅ Accès de « ${salon.optString("name")} » mis à jour pour $cibleNom.")
+            if (a.optString("tous_les_salons").equals("true", true)) {
+                val arr = Discord.salons(app, gid)
+                val ids = (0 until arr.length()).map { arr.getJSONObject(it) }.filter { it.optInt("type") != 4 } // on exclut les catégories, inutiles ici
+                if (!confirm("Modifier l'accès des ${ids.size} salon(s) du serveur pour $cibleNom ($acces) ?", true)) return ToolResult("Refusé par l'utilisateur.")
+                var erreurs = 0
+                ids.forEach { c -> runCatching { appliquer(c.getString("id")) }.onFailure { erreurs++ } }
+                ToolResult("✅ Accès mis à jour sur ${ids.size - erreurs}/${ids.size} salon(s) pour $cibleNom." + (if (erreurs > 0) " ($erreurs échec(s), probablement un salon où le bot n'a pas la main)." else ""))
+            } else {
+                val salon = Discord.trouverSalon(app, gid, a.optString("salon")) ?: return ToolResult("Salon « ${a.optString("salon")} » introuvable. Précise un nom de salon, ou mets tous_les_salons=true pour les appliquer tous d'un coup.")
+                if (!confirm("Modifier l'accès de « ${salon.optString("name")} » pour $cibleNom ($acces) ?", true)) return ToolResult("Refusé par l'utilisateur.")
+                appliquer(salon.getString("id"))
+                ToolResult("✅ Accès de « ${salon.optString("name")} » mis à jour pour $cibleNom.")
+            }
         }
         else -> ToolResult("Outil Discord inconnu.")
         }

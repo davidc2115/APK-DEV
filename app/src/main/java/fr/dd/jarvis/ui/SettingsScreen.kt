@@ -484,6 +484,7 @@ fun SettingsScreen(app: JarvisApp) {
                 Text("Avec l'ADB intégré connecté : permissions, accès aux notifications, accessibilité, batterie et arrière-plan sont accordés sans passer par les écrans Android.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(vertical = 4.dp))
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     HudButton("Accès notifications", enabled = !notifOn) { ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    HudButton("Forcer la reconnexion") { msg = app.phone.forcerReconnexionServices() }
                     HudButton("Batterie", enabled = !batt) {
                         ctx.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                     }
