@@ -118,7 +118,7 @@ class ToolBox(
             mapOf("destinataire" to prop("Nom du contact ou numéro."), "texte" to prop("Contenu du SMS.")), listOf("destinataire", "texte")))
         put(tool("appeler_contact", "Appelle un contact (ou un numéro) directement.",
             mapOf("contact" to prop("Nom du contact ou numéro.")), listOf("contact")))
-        put(tool("mail_envoyer", "Envoie un email depuis un compte Gmail connecté (compte Google, pas IMAP). Demande toujours confirmation avant d'envoyer.",
+        put(tool("mail_envoyer", "Envoie un email depuis un compte Gmail connecté (compte Google, pas IMAP), texte seul, SANS pièce jointe. Pour envoyer ou renvoyer un devis ou une facture, utilise document_email à la place (il joint le PDF). Demande toujours confirmation avant d'envoyer.",
             mapOf(
                 "destinataire" to prop("Adresse email du destinataire."),
                 "sujet" to prop("Objet du mail."),

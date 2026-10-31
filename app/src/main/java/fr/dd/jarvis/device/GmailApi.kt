@@ -65,20 +65,48 @@ object GmailApi {
     /** Adresse du compte connecté (vérifie aussi que le jeton fonctionne). */
     suspend fun profile(token: String): String = withContext(Dispatchers.IO) { get(token, "$BASE/profile").optString("emailAddress") }
 
-    /** Envoie un email texte simple depuis [account]. Le scope gmail.modify déjà accordé couvre l'envoi (pas besoin de nouveau consentement).
+    /** Une pièce jointe à envoyer avec un mail : nom de fichier, type MIME, contenu brut. */
+    data class PieceJointe(val nom: String, val mime: String, val bytes: ByteArray)
+
+    /** Envoie un email (texte, éventuellement avec pièces jointes) depuis [account]. Le scope gmail.modify déjà
+     *  accordé couvre l'envoi (pas besoin de nouveau consentement).
      *  Retourne l'identifiant du message envoyé (preuve que Gmail l'a bien accepté), et échoue explicitement sinon. */
-    suspend fun envoyer(ctx: Context, account: String, destinataire: String, sujet: String, corps: String): String = withContext(Dispatchers.IO) {
+    suspend fun envoyer(ctx: Context, account: String, destinataire: String, sujet: String, corps: String, piecesJointes: List<PieceJointe> = emptyList()): String = withContext(Dispatchers.IO) {
         val auth = authorize(ctx, account)
         if (auth.hasResolution()) throw IllegalStateException("Autorisation Gmail à renouveler pour $account : ouvre Réglages › Mails et reconnecte ce compte (le consentement a expiré ou a changé).")
         val token = auth.accessToken ?: throw IllegalStateException("Connexion Gmail expirée pour $account : reconnecte le compte dans Réglages › Mails.")
         fun b64(s: String, flags: Int = android.util.Base64.NO_WRAP) = android.util.Base64.encodeToString(s.toByteArray(Charsets.UTF_8), flags)
-        val raw = "From: $account\r\n" +
-            "To: $destinataire\r\n" +
-            "Subject: =?UTF-8?B?${b64(sujet)}?=\r\n" +
-            "MIME-Version: 1.0\r\n" +
-            "Content-Type: text/plain; charset=UTF-8\r\n" +
-            "Content-Transfer-Encoding: 8bit\r\n\r\n" +
-            corps
+        val raw = if (piecesJointes.isEmpty()) {
+            "From: $account\r\n" +
+                "To: $destinataire\r\n" +
+                "Subject: =?UTF-8?B?${b64(sujet)}?=\r\n" +
+                "MIME-Version: 1.0\r\n" +
+                "Content-Type: text/plain; charset=UTF-8\r\n" +
+                "Content-Transfer-Encoding: 8bit\r\n\r\n" +
+                corps
+        } else {
+            val boundary = "jarvis_${System.currentTimeMillis()}"
+            buildString {
+                append("From: $account\r\n")
+                append("To: $destinataire\r\n")
+                append("Subject: =?UTF-8?B?${b64(sujet)}?=\r\n")
+                append("MIME-Version: 1.0\r\n")
+                append("Content-Type: multipart/mixed; boundary=\"$boundary\"\r\n\r\n")
+                append("--$boundary\r\n")
+                append("Content-Type: text/plain; charset=UTF-8\r\n")
+                append("Content-Transfer-Encoding: 8bit\r\n\r\n")
+                append(corps).append("\r\n\r\n")
+                for (pj in piecesJointes) {
+                    append("--$boundary\r\n")
+                    append("Content-Type: ${pj.mime}; name=\"${pj.nom}\"\r\n")
+                    append("Content-Disposition: attachment; filename=\"${pj.nom}\"\r\n")
+                    append("Content-Transfer-Encoding: base64\r\n\r\n")
+                    append(android.util.Base64.encodeToString(pj.bytes, android.util.Base64.DEFAULT))
+                    append("\r\n\r\n")
+                }
+                append("--$boundary--")
+            }
+        }
         val enc = b64(raw, android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING)
         val reponse = post(token, "$BASE/messages/send", JSONObject().put("raw", enc))
         // Gmail répond 200 avec un objet message {id, threadId, labelIds} quand c'est vraiment accepté : sans "id", quelque

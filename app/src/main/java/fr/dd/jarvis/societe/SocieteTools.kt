@@ -19,7 +19,7 @@ class SocieteTools(
     companion object {
         val NAMES = setOf(
             "societe_info_set", "societe_info_get", "tarif_set", "tarif_delete", "regles_set", "client_ecrire", "client_fiche",
-            "document_creer", "document_action", "societe_liste", "employe_ecrire", "paie", "reserve_bilan",
+            "document_creer", "document_action", "document_email", "societe_liste", "employe_ecrire", "paie", "reserve_bilan",
             "presentation_modifier", "distance_deplacement"
         )
         private val KEYWORDS = Regex(
@@ -37,6 +37,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
 - Pour un devis ou une facture, identifie le client et l'installation (client_ecrire si le client n'existe pas encore). Si une information indispensable manque (client, prestation), demande-la en une phrase.
 - Le texte renvoyé par les outils société est déjà mis en forme et affiché tel quel : ne le répète pas.
 - Les montants sont toujours en euros, la TVA est gérée par l'application.
+- Pour envoyer un devis ou une facture par email (envoi initial ou relance), utilise TOUJOURS document_email : il joint le PDF du document au mail. N'utilise jamais mail_envoyer pour un devis/une facture, car il n'attache aucune pièce jointe.
 """.trimIndent()
     }
 
@@ -108,6 +109,13 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "action" to prop("afficher | convertir (devis → facture) | envoye | accepte | refuse | payee | annuler | exporter"),
             "mode_paiement" to prop("Pour « payee » : virement, chèque, CB, espèces…")
         ), listOf("numero", "action")),
+        tool("document_email", "Envoie (ou renvoie) un devis ou une facture par email, avec le PDF du document en pièce jointe (compte Gmail connecté requis, Réglages › Mails). Demande toujours confirmation avant l'envoi.", mapOf(
+            "numero" to prop("Numéro du devis/facture, ex. DEV-2026-0003."),
+            "destinataire" to prop("Adresse email du destinataire (optionnel : par défaut l'email enregistré du client)."),
+            "compte" to prop("Compte Gmail à utiliser pour l'envoi (optionnel ; vide = le seul compte connecté, ou demande si plusieurs)."),
+            "sujet" to prop("Objet du mail (optionnel, un objet par défaut est généré)."),
+            "message" to prop("Texte du mail (optionnel, un message par défaut est généré).")
+        ), listOf("numero")),
         tool("societe_liste", "Liste les clients, devis, factures, employés ou tarifs.", mapOf(
             "quoi" to prop("clients | devis | factures | employes | tarifs"),
             "filtre" to prop("Nom de client, statut ou année (optionnel).")
@@ -152,6 +160,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         "client_fiche" -> clientFiche(a)
         "document_creer" -> documentCreer(a)
         "document_action" -> documentAction(a)
+        "document_email" -> documentEmail(a)
         "societe_liste" -> liste(a)
         "employe_ecrire" -> employeEcrire(a)
         "paie" -> paie(a)
@@ -402,6 +411,43 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
                 svc.annuler(numero); ok("✅ ${doc.numero} annulé(e)." + (if (doc.type == "facture" && doc.statut == "payee") "\n⚠️ Si elle a été encaissée, un avoir est normalement nécessaire." else ""))
             }
             else -> err("Action inconnue : ${a.s("action")}.")
+        }
+    }
+
+    private suspend fun documentEmail(a: JSONObject): ToolResult {
+        val numero = a.s("numero").uppercase()
+        val doc = d.doc(numero) ?: return err("Document $numero introuvable.")
+        if (app.store.gmailAccounts.isEmpty()) return err("Envoyer un mail demande un compte Google connecté (Réglages › Mails) — pas disponible en IMAP.")
+        val client = d.client(doc.clientId)
+        val dest = a.s("destinataire").ifBlank { client?.email.orEmpty() }
+        if (dest.isBlank() || !dest.contains("@"))
+            return err("Adresse email du destinataire manquante" + (if (client != null) " (le client « ${client.nom} » n'a pas d'email enregistré — précise un destinataire, ou enregistre-le avec client_ecrire)." else "."))
+        val q = a.s("compte").lowercase()
+        val candidats = if (q.isBlank()) app.store.gmailAccounts.toList() else app.store.gmailAccounts.filter { it.lowercase().contains(q) }
+        if (candidats.isEmpty()) return err("Aucun compte Gmail ne correspond à « ${a.s("compte")} ». Comptes : ${app.store.gmailAccounts.joinToString(", ")}")
+        if (candidats.size > 1) return err("Plusieurs comptes Gmail correspondent : ${candidats.joinToString(", ")}. Précise lequel utiliser.")
+        val compte = candidats[0]
+        val estDevis = doc.type == "devis"
+        val typeLabel = if (estDevis) "devis" else "facture"
+        val article = if (estDevis) "le" else "la"
+        val accord = if (estDevis) "" else "e"
+        val sujet = a.s("sujet").ifBlank { "Votre $typeLabel ${doc.numero}" + (if (d.societe.nom.isNotBlank()) " — ${d.societe.nom}" else "") }
+        val corps = a.s("message").ifBlank {
+            "Bonjour,\n\nVeuillez trouver ci-joint votre $typeLabel ${doc.numero} (${euro(d.totaux(doc).ttc)} TTC).\n\nCordialement,\n${d.societe.nom.ifBlank { compte }}"
+        }
+        val nomFichier = "${doc.numero}.pdf"
+        val pdf = svc.pdfBytes(doc)
+        // force=true : une vraie confirmation à chaque fois ; direct=true : le ✅/❌ réel s'affiche tel quel, jamais reformulé.
+        if (!confirm("Envoyer $article $typeLabel ${doc.numero} par email depuis $compte ?\n\nÀ : $dest\nObjet : $sujet\nPièce jointe : $nomFichier\n\n${corps.take(400)}", true))
+            return ToolResult("Envoi refusé par l'utilisateur.", direct = true)
+        return try {
+            val id = fr.dd.jarvis.device.GmailApi.envoyer(app, compte, dest, sujet, corps, listOf(fr.dd.jarvis.device.GmailApi.PieceJointe(nomFichier, "application/pdf", pdf)))
+            if (estDevis && doc.statut == "brouillon") svc.changerStatut(numero, "envoye")
+            ToolResult("✅ ${typeLabel.replaceFirstChar { it.uppercase() }} ${doc.numero} envoyé$accord par email à $dest depuis $compte, PDF « $nomFichier » en pièce jointe (id $id).", direct = true)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            ToolResult("❌ Envoi impossible : ${e.message ?: e.javaClass.simpleName}", direct = true)
         }
     }
 

@@ -151,6 +151,9 @@ class SocieteService(
         return loc
     }
 
+    /** PDF du document (devis/facture), avec le logo s'il y en a un — utilisé pour l'envoyer en pièce jointe par email. */
+    fun pdfBytes(doc: Doc): ByteArray = PdfExporter.toPdf(Rendu.rendreDoc(data, doc), Logo.bitmap(ctx))
+
     fun exporterClient(c: Client): Pair<String, String> {
         val md = Rendu.rendreClient(data, c)
         return md to obsidian.saveIn("Société/Clients", c.nom, md)
