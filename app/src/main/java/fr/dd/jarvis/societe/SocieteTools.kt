@@ -38,6 +38,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
 - Le texte renvoyé par les outils société est déjà mis en forme et affiché tel quel : ne le répète pas.
 - Les montants sont toujours en euros, la TVA est gérée par l'application.
 - Pour envoyer un devis ou une facture par email (envoi initial ou relance), utilise TOUJOURS document_email : il joint le PDF du document au mail. N'utilise jamais mail_envoyer pour un devis/une facture, car il n'attache aucune pièce jointe.
+- N'invente JAMAIS un pourcentage de remise (remise_pct) pour qu'un devis atteigne un montant total donné par l'utilisateur : laisse remise_pct vide et affiche le vrai total (tarif + déplacement), quitte à dire explicitement qu'il dépasse le montant évoqué. Seule une remise que l'utilisateur chiffre lui-même explicitement doit être passée dans remise_pct.
 """.trimIndent()
     }
 
@@ -101,7 +102,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "lignes_libres" to prop("Lignes hors catalogue : « Fusible 32A:2:35.50; Câble:1:120 » (désignation:quantité:prix HT unitaire)."),
             "kwc" to prop("Puissance en kWc si l'installation n'est pas enregistrée."),
             "deplacement" to prop("« false » pour ne pas facturer de déplacement (par défaut : calculé depuis le siège)."),
-            "remise_pct" to prop("Remise exceptionnelle en % qui remplace la remise automatique (optionnel)."),
+            "remise_pct" to prop("Remise exceptionnelle en %, UNIQUEMENT si l'utilisateur a explicitement demandé un pourcentage de remise précis. Ne JAMAIS calculer ou deviner ce pourcentage toi-même pour faire correspondre un montant total désiré (ex. « un devis de 400 € tout compris ») : laisse ce champ vide et affiche le vrai total calculé par l'outil, déplacement inclus, même s'il diffère du montant que l'utilisateur avait en tête — il peut ensuite ajuster manuellement si besoin. Vide = remise automatique (fidélité/volume) selon les règles enregistrées."),
             "notes" to prop("Notes à afficher sur le document.")
         ), listOf("type", "client", "prestations")),
         tool("document_action", "Agit sur un devis ou une facture existant.", mapOf(
@@ -374,10 +375,12 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         val clientEff = if (siteFinal != null && client.sites.none { it.id == siteFinal.id }) client.copy(sites = client.sites + siteFinal).also { c2 ->
             svc.repo.update { it.copy(clients = it.clients.map { x -> if (x.id == c2.id) c2 else x }) }
         } else client
+        val remisePct = a.dbl("remise_pct")
         return try {
-            val r = svc.creerDocument(type, clientEff, siteFinal, prestations, libres, a.bool("deplacement"), a.dbl("remise_pct"), a.s("notes"))
+            val r = svc.creerDocument(type, clientEff, siteFinal, prestations, libres, a.bool("deplacement"), remisePct, a.s("notes"))
             val md = Rendu.rendreDoc(d, r.doc)
             ok("✅ ${if (type == "devis") "Devis" else "Facture"} **${r.doc.numero}** créé(e) — ${euro(d.totaux(r.doc).ttc)} TTC\n📁 ${r.emplacement}\n" +
+                (if (remisePct != null) "⚠️ Remise manuelle appliquée : ${nombre(remisePct)} % (demandée dans l'appel de l'outil, pas calculée automatiquement)\n" else "") +
                 (if (r.avertissements.isNotEmpty()) r.avertissements.joinToString("\n") { "⚠️ $it" } + "\n" else "") + "\n---\n\n$md")
         } catch (ex: IllegalArgumentException) {
             err(ex.message ?: "Création impossible.")
