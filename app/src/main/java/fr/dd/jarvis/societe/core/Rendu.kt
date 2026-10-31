@@ -3,8 +3,7 @@ package fr.dd.jarvis.societe.core
 import java.time.LocalDate
 
 object Rendu {
-    const val AVERTISSEMENT_PAIE =
-        "Bulletin simplifié à titre d'estimation (taux globaux). À faire valider par votre expert-comptable ou un logiciel de paie avant tout usage officiel."
+    const val AVERTISSEMENT_PAIE = Paie.AVERTISSEMENT
 
     fun statutLabel(type: String, s: String) = when (s) {
         "brouillon" -> "Brouillon"; "envoye" -> "Envoyé"; "accepte" -> "Accepté"; "refuse" -> "Refusé"
@@ -103,15 +102,27 @@ object Rendu {
             "employe_nom" to b.employe.nom, "poste" to b.employe.poste.ifBlank { "—" },
             "statut_label" to (if (b.employe.statut == "dirigeant") "dirigeant" else "salarié"),
             "mois" to b.mois, "mois_label" to moisLabel(b.mois),
+            "heures_hebdo" to nombre(b.employe.heuresHebdo), "heures_mensuelles" to nombre(b.heuresMensuelles),
+            "taux_horaire" to euro(b.tauxHoraire),
+            "net_vise" to (if (b.employe.netMensuelVise > 0) euro(b.employe.netMensuelVise) else ""),
             "brut_base" to euro(b.brutBase), "primes" to (if (b.primes > 0) euro(b.primes) else ""),
-            "brut" to euro(b.brut), "taux_salarial" to nombre(b.tauxSalarial),
-            "cotisations_salariales" to euro(b.cotisationsSalariales), "net_avant_impot" to euro(b.netAvantImpot),
+            "brut" to euro(b.brut),
+            "cotisations_salariales" to euro(b.totalCotisationsSalariales), "net_avant_impot" to euro(b.netAvantImpot),
             "taux_pas" to nombre(b.tauxPas), "pas" to euro(b.pas), "net_a_payer" to euro(b.netAPayer),
-            "net_a_payer_num" to num(b.netAPayer), "taux_patronal" to nombre(b.tauxPatronal),
-            "charges_patronales" to euro(b.chargesPatronales), "cout_employeur" to euro(b.coutEmployeur),
+            "net_a_payer_num" to num(b.netAPayer),
+            "charges_patronales" to euro(b.totalChargesPatronales), "cout_employeur" to euro(b.coutEmployeur),
             "avertissement" to AVERTISSEMENT_PAIE
         )
-        return Ctx(vars)
+        val lignes = b.lignes.map {
+            mapOf(
+                "libelle" to it.libelle, "base" to euro(it.base),
+                "taux_sal" to (if (it.tauxSalarial > 0) nombre(it.tauxSalarial) + " %" else "—"),
+                "montant_sal" to (if (it.montantSalarial > 0) euro(it.montantSalarial) else "—"),
+                "taux_pat" to (if (it.tauxPatronal > 0) nombre(it.tauxPatronal) + " %" else "—"),
+                "montant_pat" to (if (it.montantPatronal > 0) euro(it.montantPatronal) else "—")
+            )
+        }
+        return Ctx(vars, mapOf("cotisations" to lignes))
     }
 
     fun rendreDoc(d: SocieteData, doc: Doc) = Templates.render(d.modele(doc.type), docCtx(d, doc))

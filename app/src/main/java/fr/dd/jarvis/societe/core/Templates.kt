@@ -162,22 +162,33 @@ tags: [societe, paie]
 
 **Employeur** : {{societe_nom}} — {{societe_adresse}} {{#societe_siret}}· SIRET {{societe_siret}}{{/societe_siret}}
 **Salarié** : {{employe_nom}} — {{poste}} ({{statut_label}})
+**Base horaire** : {{heures_hebdo}} h/semaine · {{heures_mensuelles}} h/mois · taux horaire {{taux_horaire}}
+{{#net_vise}}**Net visé** : {{net_vise}} (brut recalculé automatiquement pour l'atteindre){{/net_vise}}
 
-| Rubrique | Taux | Montant |
-|---|---:|---:|
-| Salaire de base | | {{brut_base}} |
-{{#primes}}| Primes | | {{primes}} |
-{{/primes}}| **Salaire brut** | | **{{brut}}** |
-| Cotisations salariales | {{taux_salarial}} % | - {{cotisations_salariales}} |
-| **Net avant impôt** | | **{{net_avant_impot}}** |
-| Prélèvement à la source | {{taux_pas}} % | - {{pas}} |
-| **Net à payer** | | **{{net_a_payer}}** |
+| Rubrique | Montant |
+|---|---:|
+| Salaire de base | {{brut_base}} |
+{{#primes}}| Primes | {{primes}} |
+{{/primes}}| **Salaire brut** | **{{brut}}** |
+
+## Cotisations et contributions sociales
+| Rubrique | Base | Part salariale | Part patronale |
+|---|---:|---:|---:|
+{{#cotisations}}| {{libelle}} | {{base}} | {{taux_sal}} → {{montant_sal}} | {{taux_pat}} → {{montant_pat}} |
+{{/cotisations}}
+| **Total cotisations salariales** | | **- {{cotisations_salariales}}** | |
+
+| Rubrique | Montant |
+|---|---:|
+| **Net avant impôt** | **{{net_avant_impot}}** |
+| Prélèvement à la source | {{taux_pas}} % → - {{pas}} |
+| **Net à payer** | **{{net_a_payer}}** |
 
 ## Coût employeur
-| Rubrique | Taux | Montant |
-|---|---:|---:|
-| Charges patronales | {{taux_patronal}} % | {{charges_patronales}} |
-| **Coût total employeur** | | **{{cout_employeur}}** |
+| Rubrique | Montant |
+|---|---:|
+| Total charges patronales | {{charges_patronales}} |
+| **Coût total employeur** | **{{cout_employeur}}** |
 
 ⚠️ {{avertissement}}
 """.trimStart()

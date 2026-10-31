@@ -123,14 +123,22 @@ data class Employe(
     val nom: String,
     val poste: String = "",
     val statut: String = "salarie",                  // dirigeant | salarie
-    val brutMensuel: Double = 0.0,
+    val brutMensuel: Double = 0.0,                   // toujours le brut HT ; si saisi en net, recalculé automatiquement (voir netMensuelVise)
+    val netMensuelVise: Double = 0.0,                 // 0 = non utilisé ; sinon brutMensuel est recalculé pour atteindre ce net avant impôt
+    val heuresHebdo: Double = 35.0,                  // base contractuelle hebdomadaire (35, 39, 40…) → heures mensuelles = heuresHebdo × 52 / 12
     val tauxPas: Double = 0.0,                       // prélèvement à la source (%)
     val dateEntree: String = ""
 )
 
 @Serializable
 data class ConfigPaie(
-    val tauxSalarial: Double = 22.0,                 // % du brut — estimation globale à remplacer par tes taux réels
+    val cadre: Boolean = false,                      // régime cadre (AGIRC-ARRCO + APEC/CET) ou non-cadre
+    val plafondSecu: Double = 3925.0,                // plafond mensuel de la Sécurité sociale (PMSS) — à vérifier chaque année
+    val tauxAtmp: Double = 1.2,                      // taux accident du travail / maladies professionnelles (patronal, dépend de l'activité)
+    val tauxFormationPct: Double = 0.55,             // contribution formation professionnelle (patronal)
+    val tauxTaxeApprentissagePct: Double = 0.68,     // taxe d'apprentissage (patronal)
+    // Champs conservés pour compatibilité avec d'anciennes données ; plus utilisés par le calcul (voir Paie.kt).
+    val tauxSalarial: Double = 22.0,
     val tauxPatronal: Double = 42.0,
     val tauxSalarialDirigeant: Double = 22.0,
     val tauxPatronalDirigeant: Double = 55.0

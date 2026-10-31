@@ -123,11 +123,17 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         ), listOf("quoi")),
         tool("employe_ecrire", "Crée ou modifie le dirigeant ou un salarié (pour les bulletins de paie).", mapOf(
             "nom" to prop("Nom."), "poste" to prop("Poste."), "statut" to prop("dirigeant | salarie"),
-            "brut_mensuel" to prop("Salaire brut mensuel en €."), "taux_pas" to prop("Taux de prélèvement à la source en %."),
+            "brut_mensuel" to prop("Salaire brut mensuel en € (si le salaire est négocié en brut)."),
+            "net_mensuel" to prop("Salaire net mensuel visé (avant impôt) en € (si le salaire est négocié en net) : le brut nécessaire est recalculé automatiquement à chaque bulletin selon les cotisations réelles. Fournir soit brut_mensuel, soit net_mensuel, pas les deux."),
+            "heures_hebdo" to prop("Base horaire contractuelle hebdomadaire : 35 (défaut), 39, 40… — sert à calculer les heures mensuelles et le taux horaire affichés sur le bulletin."),
+            "taux_pas" to prop("Taux de prélèvement à la source en %."),
             "date_entree" to prop("Date d'entrée yyyy-MM-dd."),
-            "taux_salarial" to prop("Modifie le taux global de cotisations salariales en %."), "taux_patronal" to prop("Modifie le taux global de charges patronales en %.")
+            "cadre" to prop("« true » si le salarié (ou le dirigeant) est cadre (ajoute APEC/CET et le régime AGIRC-ARRCO) ; s'applique à toute l'équipe."),
+            "plafond_secu" to prop("Plafond mensuel de la Sécurité sociale (PMSS) en € — à vérifier/mettre à jour chaque année (s'applique à toute l'équipe)."),
+            "taux_atmp" to prop("Taux accident du travail / maladies professionnelles en % (dépend de l'activité ; s'applique à toute l'équipe)."),
+            "taux_formation" to prop("Taux de la contribution formation professionnelle en % (s'applique à toute l'équipe).")
         ), listOf("nom")),
-        tool("paie", "Produit le bulletin de paie (estimation simplifiée) d'un employé ou du dirigeant pour un mois.", mapOf(
+        tool("paie", "Produit le bulletin de paie DÉTAILLÉ (cotisations ligne par ligne : sécurité sociale, retraite, chômage, CSG/CRDS…) d'un employé ou du dirigeant pour un mois.", mapOf(
             "employe" to prop("Nom de l'employé."), "mois" to prop("yyyy-MM (par défaut le mois en cours)."), "primes" to prop("Primes du mois en € (optionnel).")
         ), listOf("employe")),
         tool("reserve_bilan", "Bilan de la réserve bénéfices d'une année et répartition dirigeant / salariés.", mapOf("annee" to prop("Année (par défaut l'année en cours)."))),
@@ -469,30 +475,50 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
                 if (l.isEmpty()) "Aucun document." else "# 🧾 ${if (type == "devis") "Devis" else "Factures"} (${l.size})\n\n| N° | Client | Date | TTC | Statut |\n|---|---|---|---:|---|\n" +
                     l.joinToString("\n") { "| ${it.numero} | ${d.client(it.clientId)?.nom.orEmpty()} | ${dateFr(it.date)} | ${euro(d.totaux(it).ttc)} | ${Rendu.statutLabel(it.type, it.statut)} |" }
             }
-            "employes", "employe", "salaries" -> if (d.employes.isEmpty()) "Aucun employé enregistré." else "# 👷 Équipe\n\n" + d.employes.joinToString("\n") { "- **${it.nom}** (${it.statut}) — ${it.poste.ifBlank { "—" }} — brut ${euro(it.brutMensuel)}/mois" }
+            "employes", "employe", "salaries" -> if (d.employes.isEmpty()) "Aucun employé enregistré." else "# 👷 Équipe\n\n" + d.employes.joinToString("\n") {
+                "- **${it.nom}** (${it.statut}) — ${it.poste.ifBlank { "—" }} — " +
+                    (if (it.netMensuelVise > 0) "net visé ${euro(it.netMensuelVise)}/mois (brut ${euro(it.brutMensuel)})" else "brut ${euro(it.brutMensuel)}/mois") +
+                    " — ${nombre(it.heuresHebdo)} h/semaine"
+            }
             else -> resume()
         })
     }
 
     private fun employeEcrire(a: JSONObject): ToolResult {
-        val ts = a.dbl("taux_salarial")
-        if (ts != null) svc.repo.update { it.copy(paie = it.paie.copy(tauxSalarial = ts, tauxSalarialDirigeant = ts)) }
-        val tp = a.dbl("taux_patronal")
-        if (tp != null) svc.repo.update { it.copy(paie = it.paie.copy(tauxPatronal = tp)) }
+        var cfg = d.paie
+        a.bool("cadre")?.let { cfg = cfg.copy(cadre = it) }
+        a.dbl("plafond_secu")?.let { cfg = cfg.copy(plafondSecu = it) }
+        a.dbl("taux_atmp")?.let { cfg = cfg.copy(tauxAtmp = it) }
+        a.dbl("taux_formation")?.let { cfg = cfg.copy(tauxFormationPct = it) }
+        val cfgFinal = cfg
+
         val nom = a.s("nom")
         val existant = d.employes.firstOrNull { normaliser(it.nom) == normaliser(nom) } ?: d.employes.firstOrNull { normaliser(it.nom).contains(normaliser(nom)) }
         val nouveau = existant == null
         var e: Employe = existant ?: Employe(svc.newId(), nom)
         if (a.hv("poste")) e = e.copy(poste = a.s("poste"))
         if (a.hv("statut")) e = e.copy(statut = if (normaliser(a.s("statut")).startsWith("dir") || normaliser(a.s("statut")) == "patron") "dirigeant" else "salarie")
+        val net = a.dbl("net_mensuel")
         val brut = a.dbl("brut_mensuel")
-        if (brut != null) e = e.copy(brutMensuel = brut)
+        if (net != null) {
+            val brutCalcule = Paie.brutDepuisNet(net, e.statut == "dirigeant", cfgFinal)
+            e = e.copy(netMensuelVise = net, brutMensuel = brutCalcule)
+        } else if (brut != null) {
+            e = e.copy(brutMensuel = brut, netMensuelVise = 0.0)
+        }
+        a.dbl("heures_hebdo")?.let { e = e.copy(heuresHebdo = it) }
         val pas = a.dbl("taux_pas")
         if (pas != null) e = e.copy(tauxPas = pas)
         if (a.hv("date_entree")) e = e.copy(dateEntree = a.s("date_entree"))
         val fin: Employe = e
-        svc.repo.update { it.copy(employes = if (nouveau) it.employes + fin else it.employes.map { x -> if (x.id == fin.id) fin else x }) }
-        return ok("✅ ${fin.nom} ${if (nouveau) "ajouté(e)" else "mis(e) à jour"} (${fin.statut}, brut ${euro(fin.brutMensuel)}/mois, PAS ${nombre(fin.tauxPas)} %).")
+        svc.repo.update {
+            it.copy(
+                paie = cfgFinal,
+                employes = if (nouveau) it.employes + fin else it.employes.map { x -> if (x.id == fin.id) fin else x }
+            )
+        }
+        val salaireTxt = if (fin.netMensuelVise > 0) "net visé ${euro(fin.netMensuelVise)}/mois (brut ${euro(fin.brutMensuel)})" else "brut ${euro(fin.brutMensuel)}/mois"
+        return ok("✅ ${fin.nom} ${if (nouveau) "ajouté(e)" else "mis(e) à jour"} (${fin.statut}, $salaireTxt, ${nombre(fin.heuresHebdo)} h/semaine, PAS ${nombre(fin.tauxPas)} %).")
     }
 
     private fun paie(a: JSONObject): ToolResult {

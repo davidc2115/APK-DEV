@@ -516,40 +516,74 @@ private fun PaieTab(app: JarvisApp) {
                 if (Regex("\\d{4}-\\d{2}").matches(mois)) bulletin = svc.bulletin(e, mois, 0.0).first
             }) {
                 Text("${e.nom} (${e.statut})", color = HudText, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                Text("${e.poste.ifBlank { "—" }} · brut ${euro(e.brutMensuel)}/mois · touche pour le bulletin de $mois", color = HudDim, fontSize = 12.sp)
+                Text(
+                    "${e.poste.ifBlank { "—" }} · " + (if (e.netMensuelVise > 0) "net visé ${euro(e.netMensuelVise)}/mois" else "brut ${euro(e.brutMensuel)}/mois") +
+                        " · ${nombre(e.heuresHebdo)} h/sem · touche pour le bulletin de $mois",
+                    color = HudDim, fontSize = 12.sp
+                )
                 TextButton({ editEmp = e }) { Text("✎ Modifier", color = LocalAccent.current, fontSize = 12.sp) }
             }
         }
     }
     bulletin?.let { md -> Dialogue("Bulletin", { bulletin = null }, actions = { Action("PDF") { svc.partagerPdf("Bulletin $mois", md) } }) { MarkdownText(md) } }
     bilan?.let { md -> Dialogue("Réserve", { bilan = null }) { MarkdownText(md) } }
-    if (adding) EmployeForm(null, d.employes.none { it.statut == "dirigeant" }, { adding = false }) { e ->
+    if (adding) EmployeForm(app, null, d.employes.none { it.statut == "dirigeant" }, { adding = false }) { e ->
         svc.repo.update { it.copy(employes = it.employes + e) }; adding = false
     }
     editEmp?.let { e0 ->
-        EmployeForm(e0, e0.statut == "dirigeant", { editEmp = null }) { e ->
+        EmployeForm(app, e0, e0.statut == "dirigeant", { editEmp = null }) { e ->
             svc.repo.update { x -> x.copy(employes = x.employes.map { if (it.id == e.id) e else it }) }; editEmp = null
         }
     }
 }
 
 @Composable
-private fun EmployeForm(initial: Employe?, dirDefaut: Boolean, onClose: () -> Unit, onSave: (Employe) -> Unit) {
+private fun EmployeForm(app: JarvisApp, initial: Employe?, dirDefaut: Boolean, onClose: () -> Unit, onSave: (Employe) -> Unit) {
+    val cfg = app.societe.data.paie
     var nom by remember { mutableStateOf(initial?.nom ?: "") }
     var poste by remember { mutableStateOf(initial?.poste ?: "") }
-    var brut by remember { mutableStateOf(initial?.let { nombre(it.brutMensuel) } ?: "") }
-    var pas by remember { mutableStateOf(initial?.let { nombre(it.tauxPas) } ?: "0") }
     var dir by remember { mutableStateOf(dirDefaut) }
+    var saisieNet by remember { mutableStateOf((initial?.netMensuelVise ?: 0.0) > 0) }
+    var montant by remember { mutableStateOf(initial?.let { if (it.netMensuelVise > 0) nombre(it.netMensuelVise) else nombre(it.brutMensuel) } ?: "") }
+    var heures by remember { mutableStateOf(nombre(initial?.heuresHebdo ?: 35.0)) }
+    var pas by remember { mutableStateOf(initial?.let { nombre(it.tauxPas) } ?: "0") }
+    fun n(t: String) = t.replace(',', '.').trim().toDoubleOrNull()
+    val montantNum = n(montant) ?: 0.0
+    val apercu = if (montantNum > 0.0) {
+        if (saisieNet) "≈ brut ${euro(Paie.brutDepuisNet(montantNum, dir, cfg))}/mois" else "≈ net avant impôt ${euro(Paie.netAvantImpotPour(montantNum, dir, cfg))}/mois"
+    } else ""
     Dialogue(if (initial == null) "Nouvel employé" else "Modifier ${initial.nom}", onClose, actions = {
         Action(if (initial == null) "Créer" else "Enregistrer") {
-            if (nom.isNotBlank()) onSave(Employe(initial?.id ?: java.util.UUID.randomUUID().toString().take(8), nom.trim(), poste, if (dir) "dirigeant" else "salarie",
-                brut.replace(',', '.').toDoubleOrNull() ?: 0.0, pas.replace(',', '.').toDoubleOrNull() ?: 0.0, initial?.dateEntree ?: LocalDate.now().toString()))
+            if (nom.isNotBlank()) {
+                val id = initial?.id ?: java.util.UUID.randomUUID().toString().take(8)
+                val statut = if (dir) "dirigeant" else "salarie"
+                val brutCalc = if (saisieNet) Paie.brutDepuisNet(montantNum, dir, cfg) else montantNum
+                onSave(Employe(
+                    id = id, nom = nom.trim(), poste = poste, statut = statut,
+                    brutMensuel = brutCalc, netMensuelVise = if (saisieNet) montantNum else 0.0,
+                    heuresHebdo = n(heures) ?: 35.0, tauxPas = n(pas) ?: 0.0,
+                    dateEntree = initial?.dateEntree ?: LocalDate.now().toString()
+                ))
+            }
         }
     }) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { HudChip("Dirigeant", dir) { dir = true }; HudChip("Salarié", !dir) { dir = false } }
         HudTextField(nom, { nom = it }, Modifier.fillMaxWidth(), label = "Nom")
         HudTextField(poste, { poste = it }, Modifier.fillMaxWidth(), label = "Poste")
-        HudTextField(brut, { brut = it }, Modifier.fillMaxWidth(), label = "Brut mensuel (€)")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HudChip("Saisie en brut", !saisieNet) { saisieNet = false }
+            HudChip("Saisie en net visé", saisieNet) { saisieNet = true }
+        }
+        HudTextField(montant, { montant = it }, Modifier.fillMaxWidth(), label = if (saisieNet) "Net mensuel visé (€, avant impôt)" else "Brut mensuel (€)")
+        if (apercu.isNotBlank()) Text(apercu, color = LocalAccent.current, fontSize = 12.sp)
+        if (saisieNet) Text("Le brut est recalculé automatiquement à chaque bulletin selon les cotisations réelles (il peut légèrement varier si les taux changent).", color = HudDim, fontSize = 11.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HudChip("35 h", heures == "35") { heures = "35" }
+            HudChip("39 h", heures == "39") { heures = "39" }
+            HudChip("40 h", heures == "40") { heures = "40" }
+        }
+        HudTextField(heures, { heures = it }, Modifier.fillMaxWidth(), label = "Base horaire hebdomadaire (h)")
+        Text("= ${nombre(Paie.heuresMensuelles(n(heures) ?: 35.0))} h/mois" + (if (montantNum > 0 && !saisieNet) " · taux horaire ≈ ${euro(round2(montantNum / Paie.heuresMensuelles(n(heures) ?: 35.0)))}" else ""), color = HudDim, fontSize = 11.sp)
         HudTextField(pas, { pas = it }, Modifier.fillMaxWidth(), label = "Prélèvement à la source (%)")
     }
 }
@@ -590,8 +624,10 @@ private fun ReglagesTab(app: JarvisApp) {
     var kmGratuit by remember { mutableStateOf(nombre(r.kmGratuits)) }
     var depMin by remember { mutableStateOf(nombre(r.deplacementMin)) }
     var ar by remember { mutableStateOf(r.allerRetour) }
-    var tauxS by remember { mutableStateOf(nombre(d.paie.tauxSalarial)) }
-    var tauxP by remember { mutableStateOf(nombre(d.paie.tauxPatronal)) }
+    var cadre by remember { mutableStateOf(d.paie.cadre) }
+    var plafondSecu by remember { mutableStateOf(nombre(d.paie.plafondSecu)) }
+    var tauxAtmp by remember { mutableStateOf(nombre(d.paie.tauxAtmp)) }
+    var tauxFormation by remember { mutableStateOf(nombre(d.paie.tauxFormationPct)) }
     var tarifEdit by remember { mutableStateOf(false) }
     var tarifInit by remember { mutableStateOf<Tarif?>(null) }
 
@@ -674,10 +710,16 @@ private fun ReglagesTab(app: JarvisApp) {
             }
         }
         item {
-            HudPanel(Modifier.fillMaxWidth(), title = "Paie (taux globaux estimés, %)") {
+            HudPanel(Modifier.fillMaxWidth(), title = "Paie (bulletins détaillés)") {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    HudTextField(tauxS, { tauxS = it }, Modifier.fillMaxWidth(), label = "Cotisations salariales")
-                    HudTextField(tauxP, { tauxP = it }, Modifier.fillMaxWidth(), label = "Charges patronales")
+                    Text("Taux standards du régime général déjà appliqués (sécurité sociale, retraite, chômage, CSG/CRDS…). Ajuste ici ce qui dépend de ton activité ou de ton équipe.", color = HudDim, fontSize = 11.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        HudChip("Non-cadre", !cadre) { cadre = false }
+                        HudChip("Cadre", cadre) { cadre = true }
+                    }
+                    HudTextField(plafondSecu, { plafondSecu = it }, Modifier.fillMaxWidth(), label = "Plafond mensuel Sécurité sociale (PMSS, €)")
+                    HudTextField(tauxAtmp, { tauxAtmp = it }, Modifier.fillMaxWidth(), label = "Taux accident du travail / maladies pro (%)")
+                    HudTextField(tauxFormation, { tauxFormation = it }, Modifier.fillMaxWidth(), label = "Contribution formation professionnelle (%)")
                 }
             }
         }
@@ -699,7 +741,10 @@ private fun ReglagesTab(app: JarvisApp) {
                             Pricing.parserSeuils(fid), Pricing.parserSeuils(vol), cumul, num(rmax) ?: 0.0,
                             it.regles.remiseSurDeplacement, num(kmPrix) ?: 0.0, num(kmGratuit) ?: 0.0, num(depMin) ?: 0.0, ar
                         ),
-                        paie = it.paie.copy(tauxSalarial = num(tauxS) ?: 22.0, tauxSalarialDirigeant = num(tauxS) ?: 22.0, tauxPatronal = num(tauxP) ?: 42.0)
+                        paie = it.paie.copy(
+                            cadre = cadre, plafondSecu = num(plafondSecu) ?: 3925.0,
+                            tauxAtmp = num(tauxAtmp) ?: 1.2, tauxFormationPct = num(tauxFormation) ?: 0.55
+                        )
                     )
                 }
                 saved = "✅ Enregistré"
