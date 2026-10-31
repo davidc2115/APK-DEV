@@ -163,7 +163,7 @@ class PhoneControl(private val ctx: Context) {
         return try { ctx.startActivity(launch); "Ouverture de $label." } catch (e: Exception) { "Impossible de lancer $label : ${e.message}" }
     }
 
-    /** Recherche et lecture d'un titre / artiste dans l'application de musique choisie (Spotify, YouTube Music, Deezer…). */
+    /** Recherche et lecture d'un titre / artiste dans l'application de musique choisie (Spotify, YouTube Music, Deezer…) ; pilote la session média en arrière-plan, sans forcément ouvrir l'appli à l'écran. */
     fun playMusic(requete: String, appli: String): String {
         if (requete.isBlank()) return "Que veux-tu écouter ?"
         val known = mapOf(
@@ -172,35 +172,46 @@ class PhoneControl(private val ctx: Context) {
         )
         val a = appli.trim().lowercase()
         var pkg: String? = if (a.isBlank()) null else known.entries.firstOrNull { a.contains(it.key) }?.value?.takeIf { installed(it) } ?: findPackage(a)?.first
-        if (a.isBlank()) pkg = known.values.firstOrNull { installed(it) }
-        if (a.contains("youtube") && !a.contains("music")) {
+        // Nom d'appli non reconnu (orthographe approximative dictée au micro) : plutôt qu'ouvrir une appli au hasard, repli sur la première appli de musique connue installée.
+        if (pkg == null) pkg = known.values.firstOrNull { installed(it) }
+        if (a.contains("youtube") && !a.contains("music") && pkg == null) {
             val r = start(Intent.ACTION_VIEW, "https://www.youtube.com/results?search_query=" + Uri.encode(requete), "com.google.android.youtube")
             return r.ifBlank { "Recherche « $requete » ouverte dans YouTube." }
         }
-        val r = start("android.media.action.MEDIA_PLAY_FROM_SEARCH", null, pkg,
-            mapOf("query" to requete, "android.intent.extra.focus" to "vnd.android.cursor.item/*"))
-        if (r.isNotBlank()) return r
         val nom = pkg?.let { findPackage(it)?.second ?: it } ?: "l'application de musique"
+        if (pkg == null) return "Aucune application de musique installée (Spotify, YouTube Music, Deezer…) : installe-en une, ou précise laquelle utiliser."
         // Pas la peine d'essayer de piloter la session média si la permission qui le permet n'est pas accordée :
         // c'est un « accès spécial », pas une autorisation listée dans la page Autorisations classique de l'appli.
         val accordee = androidx.core.app.NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
         if (!accordee) {
-            return "⚠️ $nom s'est ouverte, mais pour que je lance vraiment la lecture j'ai besoin de l'accès spécial « Accès aux notifications ». Il n'est PAS dans la page « Autorisations » classique de l'appli : ouvre JARVIS → Réglages → section Autorisations → bouton « Accès notifications », ou Réglages Android → Notifications → Accès aux notifications → JARVIS → Activer. Redemande ensuite « lance la lecture »."
+            return "⚠️ Pour lancer vraiment la lecture j'ai besoin de l'accès spécial « Accès aux notifications ». Il n'est PAS dans la page « Autorisations » classique de l'appli : ouvre JARVIS → Réglages → section Autorisations → bouton « Accès notifications », ou Réglages Android → Notifications → Accès aux notifications → JARVIS → Activer. Redemande ensuite « lance la lecture »."
         }
         if (!fr.dd.jarvis.service.JarvisNotificationListener.active) {
-            return "⚠️ $nom s'est ouverte ; l'accès aux notifications est activé dans Android mais pas encore connecté à JARVIS. Ferme complètement JARVIS (pas juste l'écran — depuis les applications récentes) puis rouvre-la, et redemande « lance la lecture »."
+            return "⚠️ L'accès aux notifications est activé dans Android mais pas encore connecté à JARVIS. Ferme complètement JARVIS (pas juste l'écran — depuis les applications récentes) puis rouvre-la, et redemande « lance la lecture »."
         }
-        // Ouvrir l'appli ne suffit pas : on pilote sa session média (comme un assistant) pour lancer vraiment la lecture.
-        val etat = lancerLecture(pkg, requete)
+        // 1) Une session média de cette appli tourne peut-être déjà (appli ouverte récemment) : on la pilote directement, sans rien ouvrir à l'écran.
+        var etat = lancerLecture(pkg, requete, ouvrir = false)
+        // 2) Sinon, il faut que l'appli démarre au moins une fois pour créer sa session — inévitable techniquement (Android n'offre
+        //    aucun moyen de faire jouer un titre dans une appli tierce sans qu'elle tourne). On la ramène ensuite en arrière-plan toute seule.
+        if (etat == "aucune") {
+            val launch = ctx.packageManager.getLaunchIntentForPackage(pkg)
+            if (launch == null) return "Impossible de lancer $nom."
+            try { ctx.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (e: Exception) { return "Impossible de lancer $nom : ${e.message}" }
+            etat = lancerLecture(pkg, requete, ouvrir = true)
+        }
         return when (etat) {
-            "lecture" -> "🎵 « $requete » est en cours de lecture dans $nom."
-            "session" -> "🎵 $nom est ouverte et j'ai demandé la lecture de « $requete », mais je n'ai pas pu confirmer qu'elle a démarré. Si rien ne joue, lance un titre une fois à la main dans $nom (première utilisation)."
-            else -> "⚠️ $nom s'est ouverte mais je n'ai pas trouvé sa session de lecture (l'appli met parfois quelques secondes, ou doit être relancée manuellement une première fois). Réessaie, ou appuie sur lecture dans $nom."
+            "lecture" -> {
+                // Lecture confirmée : on remet JARVIS (ou l'appli précédente) au premier plan, l'appli de musique reste en arrière-plan.
+                if (fr.dd.jarvis.service.JarvisAccessibilityService.instance != null) runCatching { fr.dd.jarvis.service.JarvisAccessibilityService.instance?.global(AccessibilityService.GLOBAL_ACTION_HOME) }
+                "🎵 « $requete » est en cours de lecture dans $nom (en arrière-plan)."
+            }
+            "session" -> "🎵 J'ai demandé la lecture de « $requete » dans $nom, mais je n'ai pas pu confirmer qu'elle a démarré. Si rien ne joue, ouvre $nom et lance un titre une fois à la main (première utilisation)."
+            else -> "⚠️ Je n'ai pas trouvé la session de lecture de $nom (l'appli met parfois quelques secondes, ou doit être connectée/ouverte manuellement une première fois). Réessaie, ou ouvre $nom toi-même une fois."
         }
     }
 
     /** Cherche la session média de [pkg] et lui demande de lire [requete] ; retourne « lecture » (confirmé), « session » (demandé) ou « aucune ». */
-    private fun lancerLecture(pkg: String?, requete: String): String {
+    private fun lancerLecture(pkg: String?, requete: String, ouvrir: Boolean): String {
         val msm = ctx.getSystemService(Context.MEDIA_SESSION_SERVICE) as android.media.session.MediaSessionManager
         val cn = android.content.ComponentName(ctx, fr.dd.jarvis.service.JarvisNotificationListener::class.java)
         fun ctrl(): android.media.session.MediaController? = try {
@@ -209,7 +220,9 @@ class PhoneControl(private val ctx: Context) {
         fun joue(c: android.media.session.MediaController) = c.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
         var c: android.media.session.MediaController? = null
         var t = 0
-        while (t < 10 && c == null) { Thread.sleep(1000); c = ctrl(); t++ }   // l'appli met quelques secondes à démarrer
+        // Si l'appli vient d'être lancée elle met quelques secondes à créer sa session ; si elle tournait déjà, inutile d'attendre longtemps.
+        val essais = if (ouvrir) 10 else 2
+        while (t < essais && c == null) { Thread.sleep(1000); c = ctrl(); t++ }
         if (c == null) return "aucune"
         if (joue(c) && t > 3) return "lecture"
         Thread.sleep(800)
