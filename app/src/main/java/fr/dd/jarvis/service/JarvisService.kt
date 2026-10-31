@@ -86,7 +86,7 @@ class JarvisService : Service() {
                 when {
                     confirm != null -> main.postDelayed({ listen() }, 400)
                     busy -> {}
-                    awake -> if (System.currentTimeMillis() > deadline) goIdle() else main.postDelayed({ listen() }, 300)
+                    awake -> if (System.currentTimeMillis() > deadline || failures >= 2) { failures = 0; voice?.speak("D'accord.") { goIdle() } } else main.postDelayed({ listen() }, 300)
                     vosk == null -> main.postDelayed({ listen() }, if (failures > 4) 5000L else 1200L) // repli sans Vosk : écoute en boucle
                 }
             }
@@ -133,6 +133,14 @@ class JarvisService : Service() {
         voice?.stopListening()
         val v = vosk
         if (v != null) {
+            // Laisse retomber l'écho de la voix de JARVIS (ou du bip) avant de réarmer l'écoute du mot « Jarvis »,
+            // sinon le micro peut se réentendre lui-même et redéclencher aussitôt (boucle de bips).
+            main.postDelayed({ rearmer(v) }, 900)
+        } else listen()
+    }
+
+    private fun rearmer(v: fr.dd.jarvis.voice.WakeDetector) {
+        if (running && !awake && !busy) {
             if (!v.start()) {
                 val err = (v as? fr.dd.jarvis.voice.PorcupineWake)?.error.orEmpty()
                 vosk?.release(); vosk = null
@@ -141,13 +149,18 @@ class JarvisService : Service() {
                     .setContentTitle("Détecteur « Jarvis » en échec").setContentText(err.ifBlank { "Impossible de démarrer l'écoute." }.take(120)).setAutoCancel(true).build())
                 stopSelf()
             }
-        } else listen()
+        }
     }
+
+    private var dernierReveil = 0L
 
     private fun onWakeWord() {
         if (!running || awake || busy) return
+        val maintenant = System.currentTimeMillis()
+        if (maintenant - dernierReveil < 2500) return   // écho du bip / de la voix de JARVIS pris pour « Jarvis »
+        dernierReveil = maintenant
         vosk?.stop()
-        awake = true; deadline = System.currentTimeMillis() + convMs()
+        awake = true; deadline = maintenant + convMs()
         voice?.speak("Oui ?") { deadline = System.currentTimeMillis() + convMs(); listen() }
     }
 
