@@ -87,7 +87,11 @@ class JarvisService : Service() {
                 when {
                     confirm != null -> main.postDelayed({ listen() }, 400)
                     busy -> {}
-                    awake -> if (System.currentTimeMillis() > deadline || failures >= 2) {
+                    // On ne quitte la conversation QUE quand le délai (convSeconds, réglable) est écoulé sans que l'utilisateur
+                    // reparle — jamais après seulement 1 ou 2 silences : un simple ERROR_NO_MATCH/SPEECH_TIMEOUT du
+                    // reconnaisseur arrive en quelques secondes à peine (bien avant la fin réelle du délai), et couper la
+                    // conversation dessus obligeait à redire « Jarvis » pour chaque nouvelle question — c'était le bug.
+                    awake -> if (System.currentTimeMillis() > deadline) {
                         failures = 0
                         // Rien compris de toute la conversation : probablement un faux réveil (bruit ambiant) — pas la peine de dire « D'accord » sur rien.
                         if (echangeReel) voice?.speak("D'accord.") { goIdle() } else goIdle()

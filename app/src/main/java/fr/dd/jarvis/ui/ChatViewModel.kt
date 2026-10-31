@@ -60,8 +60,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
         voice.onFail = { msg ->
             partial = ""
-            voiceSession = false   // silence ou erreur : la conversation vocale s'arrête
-            if (msg.isNotBlank()) status = msg
+            // Un silence simple (msg vide : aucune parole détectée) ne doit pas couper tout de suite la conversation —
+            // sinon il faut retoucher le micro pour chaque nouvelle question. On ne l'arrête vraiment que si l'utilisateur
+            // n'a rien redit depuis « convDeadline » (réglage Conversation, par défaut 25 s), ou en cas de vraie erreur.
+            if (msg.isBlank() && voiceSession && System.currentTimeMillis() < voiceDeadline) {
+                voice.startListening()
+            } else {
+                voiceSession = false
+                if (msg.isNotBlank()) status = msg
+            }
         }
     }
 
@@ -80,12 +87,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Micro touché : passe automatiquement en conversation (réponse parlée puis réécoute) jusqu'à ce qu'on le retouche ou qu'on dise « merci / c'est tout ». */
     private var voiceSession = false
+    /** Fin de la conversation si l'utilisateur ne reparle plus (remise à jour à chaque écoute relancée). */
+    private var voiceDeadline = 0L
     private val stopWords = Regex("^(merci|c'est tout|c est tout|stop|arrete|arrête|termine|terminé|fin|a plus tard|à plus tard|au revoir|laisse tomber|ça suffit|ca suffit)\\b.*", RegexOption.IGNORE_CASE)
 
     fun toggleListening() {
         if (listening) { voiceSession = false; voice.stopListening() } else {
             status = ""
             voiceSession = true
+            voiceDeadline = System.currentTimeMillis() + store.convSeconds.value * 1000L
             voice.stopSpeaking()
             voice.startListening()
         }
@@ -118,8 +128,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             status = ""
             persist()
             val conv = store.conversationMode.value || (fromVoice && voiceSession)
+            if (conv) voiceDeadline = System.currentTimeMillis() + store.convSeconds.value * 1000L
             if ((store.speakReplies.value || (fromVoice && voiceSession)) && (fromVoice || conv)) {
-                voice.speak(reply) { if (conv) voice.startListening() }
+                voice.speak(reply) { if (conv) { voiceDeadline = System.currentTimeMillis() + store.convSeconds.value * 1000L; voice.startListening() } }
             } else if (conv && fromVoice) {
                 voice.startListening()
             }
