@@ -47,7 +47,9 @@ class Brain(
             Prompts.brain(userName()) + app.memo.toutes() + (if (societeNeeded) "\n\n" + fr.dd.jarvis.societe.SocieteTools.PROMPT else "") +
                 (if (plan != null && plan.note.isNotBlank()) "\n\nAnalyse préalable de la demande (Gemini) — suis ce plan, avec les outils fournis : ${plan.note}" else "")))
         history.takeLast(16).forEach { m ->
-            messages.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(3000)))
+            // Avant : 3000 caractères, ce qui coupait une réponse listant beaucoup de fichiers/images générés (ex. 10 images pour un
+            // livre de coloriage ne laissait que les ~7 premières visibles au tour suivant, qui ne pouvait donc pas toutes les mettre dans un PDF).
+            messages.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(12000)))
         }
 
         repeat(6) {
@@ -91,7 +93,7 @@ class Brain(
                     ToolResult("Erreur : ${e.message}")
                 }
                 messages.put(
-                    JSONObject().put("role", "tool").put("tool_call_id", c.getString("id")).put("content", res.text.take(6000))
+                    JSONObject().put("role", "tool").put("tool_call_id", c.getString("id")).put("content", res.text.take(12000))
                 )
                 if (res.direct) direct.append(res.text).append("\n\n")
             }

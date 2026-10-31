@@ -16,9 +16,13 @@ object Discord {
 
     fun configure(app: JarvisApp) = app.store.discordToken.value.isNotBlank()
 
-    /** Nettoie le jeton collé par l'utilisateur : espaces, guillemets, et un éventuel préfixe « Bot » déjà présent (sinon on l'ajoute deux fois → 401). */
+    /** Nettoie le jeton collé par l'utilisateur : espaces, guillemets, un éventuel préfixe « Bot » déjà présent (sinon on l'ajoute
+     * deux fois → 401), ET tout caractère invisible/spécial que le clavier du téléphone peut coller sans qu'on le voie (espace
+     * insécable, guillemets typographiques, espace de largeur nulle…) : un simple trim() ne les enlève pas. On ne garde que
+     * l'alphabet d'un jeton Discord réel (lettres, chiffres, point, tiret, tiret bas). */
     private fun jeton(app: JarvisApp): String =
         app.store.discordToken.value.trim().trim('"', '\'').removePrefix("Bot ").removePrefix("bot ").trim()
+            .filter { it.isLetterOrDigit() && it.code < 128 || it == '.' || it == '-' || it == '_' }
 
     /** Diagnostic (sans révéler le jeton) : longueur, premiers/derniers caractères, pour vérifier qu'il n'est pas tronqué ou altéré. */
     private fun diagJeton(app: JarvisApp): String {
@@ -127,7 +131,7 @@ object Discord {
         }
         http.newCall(b.build()).execute().use { r ->
             val t = r.body?.string().orEmpty()
-            if (r.code == 401) throw IllegalStateException("Discord 401 : jeton refusé (${diagJeton(app)}). Réponse de Discord : ${t.take(200).ifBlank { "(vide)" }}. Vérifie que c'est bien le jeton du BOT (onglet Bot du developer portal \u203a \u00ab Reset Token \u00bb), pas le Client Secret/ID.")
+            if (r.code == 401) throw IllegalStateException("Discord 401 : jeton refusé (${diagJeton(app)}). Réponse de Discord : ${t.take(200).ifBlank { "(vide)" }}. Vérifie que c'est bien le jeton du BOT (onglet Bot du developer portal \u203a \u00ab Reset Token \u00bb), pas le Client Secret/ID. Si ce jeton fonctionne par ailleurs (ex. un bot lancé sur le serveur Debian) mais pas ici, c'est probablement un copier-coller différent : régénère un jeton (\u00ab Reset Token \u00bb), colle-le UNE SEULE fois dans Réglages \u203a Discord sans le retaper, et utilise ce même nouveau jeton partout.")
             if (r.code == 403) throw IllegalStateException("Discord 403 : le bot n'a pas la permission, ou son rôle n'est pas placé au-dessus du rôle concerné dans la hiérarchie du serveur.")
             if (r.code == 429) throw IllegalStateException("Discord : trop de requêtes, réessaie dans un instant.")
             if (!r.isSuccessful) throw IllegalStateException("Discord ${r.code} : ${t.take(300)}")
@@ -141,7 +145,7 @@ object Discord {
         if (method == "GET") b.get() else b.post((corps?.toString() ?: "{}").toRequestBody("application/json".toMediaType()))
         http.newCall(b.build()).execute().use { r ->
             val t = r.body?.string().orEmpty()
-            if (r.code == 401) throw IllegalStateException("Discord 401 : jeton refusé (${diagJeton(app)}). Réponse de Discord : ${t.take(200).ifBlank { "(vide)" }}. Vérifie que c'est bien le jeton du BOT (onglet Bot du developer portal \u203a \u00ab Reset Token \u00bb), pas le Client Secret/ID.")
+            if (r.code == 401) throw IllegalStateException("Discord 401 : jeton refusé (${diagJeton(app)}). Réponse de Discord : ${t.take(200).ifBlank { "(vide)" }}. Vérifie que c'est bien le jeton du BOT (onglet Bot du developer portal \u203a \u00ab Reset Token \u00bb), pas le Client Secret/ID. Si ce jeton fonctionne par ailleurs (ex. un bot lancé sur le serveur Debian) mais pas ici, c'est probablement un copier-coller différent : régénère un jeton (\u00ab Reset Token \u00bb), colle-le UNE SEULE fois dans Réglages \u203a Discord sans le retaper, et utilise ce même nouveau jeton partout.")
             if (r.code == 403) throw IllegalStateException("Discord 403 : le bot n'a pas la permission nécessaire.")
             if (!r.isSuccessful) throw IllegalStateException("Discord ${r.code} : ${t.take(300)}")
             return JSONArray(t)

@@ -109,6 +109,16 @@ object ImageGen {
         throw last ?: IllegalStateException("Génération impossible.")
     }
 
+    /** Retrouve une image déjà générée par son nom de fichier (ou « derniere »/« dernier » pour la plus récente). */
+    fun fichier(app: JarvisApp, nom: String): File? {
+        val dossier = File(app.filesDir, "images")
+        val n = nom.trim().removePrefix("jarvis-img:").trim()
+        if (n.isBlank() || n.lowercase() in setOf("derniere", "dernière", "dernier", "last", "recente", "récente")) {
+            return dossier.listFiles()?.filter { it.isFile }?.maxByOrNull { it.lastModified() }
+        }
+        return File(dossier, n).takeIf { it.exists() }
+    }
+
     /** Génère plusieurs images d'affilée (une par prompt) ; utile pour un livre de coloriage, une planche, etc. Une erreur sur un prompt n'arrête pas les autres. */
     suspend fun generateMany(app: JarvisApp, prompts: List<String>, modele: String = ""): List<Pair<String, File>> {
         val out = mutableListOf<Pair<String, File>>()

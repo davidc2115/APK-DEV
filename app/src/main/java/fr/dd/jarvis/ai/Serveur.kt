@@ -202,11 +202,25 @@ object Serveur {
         if (!haConfigure(app)) throw IllegalStateException("Home Assistant non configuré (Réglages › Serveur : adresse et jeton d'accès longue durée).")
         val b = Request.Builder().url(base(app) + chemin).header("Authorization", "Bearer ${app.store.haToken.value.trim()}")
         if (methode == "POST") b.post((corps?.toString() ?: "{}").toRequestBody("application/json".toMediaType())) else b.get()
-        http.newCall(b.build()).execute().use { r ->
-            val t = r.body?.string().orEmpty()
-            if (r.code == 401) throw IllegalStateException("Home Assistant 401 : jeton refusé (crée un « jeton d'accès longue durée » dans ton profil HA).")
-            if (!r.isSuccessful) throw IllegalStateException("Home Assistant ${r.code} : ${t.take(300)}")
-            return t
+        try {
+            http.newCall(b.build()).execute().use { r ->
+                val t = r.body?.string().orEmpty()
+                if (r.code == 401) throw IllegalStateException("Home Assistant 401 : jeton refusé (crée un « jeton d'accès longue durée » dans ton profil HA).")
+                if (!r.isSuccessful) throw IllegalStateException("Home Assistant ${r.code} : ${t.take(300)}")
+                return t
+            }
+        } catch (e: IllegalStateException) {
+            throw e
+        } catch (e: java.net.UnknownHostException) {
+            throw IllegalStateException("Home Assistant : adresse introuvable (« ${app.store.haUrl.value} »). Vérifie l'adresse dans Réglages › Serveur (faute de frappe, ou nom DNS qui ne résout plus).")
+        } catch (e: java.net.ConnectException) {
+            throw IllegalStateException("Home Assistant : connexion refusée sur « ${base(app)} ». Soit Home Assistant est arrêté (vérifie avec serveur_diagnostic), soit le port/l'adresse est faux dans Réglages › Serveur, soit le téléphone n'est pas sur le même réseau (et l'accès distant n'est pas configuré).")
+        } catch (e: java.net.SocketTimeoutException) {
+            throw IllegalStateException("Home Assistant : pas de réponse (délai dépassé) sur « ${base(app)} ». Le serveur est peut-être éteint/inaccessible depuis ce réseau, ou surchargé.")
+        } catch (e: javax.net.ssl.SSLException) {
+            throw IllegalStateException("Home Assistant : erreur TLS/SSL sur « ${base(app)} ». Si l'adresse commence par https:// mais que Home Assistant n'a pas de certificat valide configuré, utilise http:// à la place (Réglages › Serveur).")
+        } catch (e: Exception) {
+            throw IllegalStateException("Home Assistant : connexion impossible sur « ${base(app)} » (${e.javaClass.simpleName} : ${e.message}).")
         }
     }
 

@@ -189,7 +189,7 @@ object Fichiers {
         val dossierImg = File(app.filesDir, "images")
         val s = spec.trim().lowercase()
         if (Regex("^(derni[eè]res?(:\\d+)?|toutes?)$").matches(s)) {
-            val n = Regex(":(\\d+)$").find(s)?.groupValues?.get(1)?.toIntOrNull() ?: if (s.startsWith("tout")) Int.MAX_VALUE else 10
+            val n = Regex(":(\\d+)$").find(s)?.groupValues?.get(1)?.toIntOrNull() ?: if (s.startsWith("tout")) Int.MAX_VALUE else 30
             return dossierImg.listFiles()?.filter { it.isFile }?.sortedByDescending { it.lastModified() }?.take(n)?.map { "" to it.readBytes() }.orEmpty()
         }
         return spec.split(Regex("[,\\n]")).map { it.trim() }.filter { it.isNotBlank() }.mapNotNull { entree ->

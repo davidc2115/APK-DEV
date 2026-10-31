@@ -68,6 +68,28 @@ class GeminiClient(private val ring: KeyRing, private val model: () -> String) {
     suspend fun generate(system: String, user: String): String =
         ring.run { key -> withContext(Dispatchers.IO) { call(key, system, user, 4096) } }
 
+    /** Analyse une image (description, lecture de texte dedans, etc.) avec un modèle Gemini multimodal. */
+    suspend fun analyserImage(bytes: ByteArray, mimeType: String, question: String): String =
+        ring.run { key -> withContext(Dispatchers.IO) { callImage(key, bytes, mimeType, question) } }
+
+    private fun callImage(key: String, bytes: ByteArray, mimeType: String, question: String): String {
+        val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+        val body = JSONObject().put("contents", JSONArray().put(
+            JSONObject().put("role", "user").put("parts", JSONArray()
+                .put(JSONObject().put("text", question.ifBlank { "Décris cette image en détail, en français." }))
+                .put(JSONObject().put("inline_data", JSONObject().put("mime_type", mimeType).put("data", b64))))
+        )).put("generationConfig", JSONObject().put("temperature", 0.3).put("maxOutputTokens", 2048))
+        val req = Request.Builder().url("https://generativelanguage.googleapis.com/v1beta/models/${model()}:generateContent")
+            .header("x-goog-api-key", key).post(body.toString().toRequestBody(Http.JSON)).build()
+        val (code, text) = Http.fast.newCall(req).execute().use { it.code to it.body?.string().orEmpty() }
+        if (code !in 200..299) throw ApiException(code, "Gemini $code : ${text.take(300)}")
+        val cands = JSONObject(text).optJSONArray("candidates")
+        val parts = cands?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
+        val sb = StringBuilder()
+        if (parts != null) for (i in 0 until parts.length()) sb.append(parts.getJSONObject(i).optString("text", ""))
+        return sb.toString().trim().ifBlank { throw IllegalStateException("réponse vide") }
+    }
+
     suspend fun ping(key: String) = withContext(Dispatchers.IO) { call(key, "", "ping", 8) }
 
     /** Modèles « generateContent » disponibles pour cette clé. */
