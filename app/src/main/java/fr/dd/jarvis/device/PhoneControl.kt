@@ -226,20 +226,26 @@ class PhoneControl(private val ctx: Context) {
             msm.getActiveSessions(cn).firstOrNull { pkg == null || it.packageName == pkg }
         } catch (e: SecurityException) { null } catch (e: Exception) { null }
         fun joue(c: android.media.session.MediaController) = c.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+        fun titre(c: android.media.session.MediaController) = c.metadata?.getText(android.media.MediaMetadata.METADATA_KEY_TITLE)?.toString()
         var c: android.media.session.MediaController? = null
         var t = 0
         // Si l'appli vient d'être lancée elle met quelques secondes à créer sa session ; si elle tournait déjà, inutile d'attendre longtemps.
         val essais = if (ouvrir) 10 else 2
         while (t < essais && c == null) { Thread.sleep(1000); c = ctrl(); t++ }
         if (c == null) return "aucune"
-        if (joue(c) && t > 3) return "lecture"
+        // Important : on lance TOUJOURS la recherche demandée, même si une session est déjà en lecture — sinon JARVIS confirmait
+        // à tort le titre demandé alors que c'était juste le morceau précédent qui continuait (ou reprenait) de jouer.
+        // On retient le titre AVANT la recherche pour vérifier qu'il a bien changé (sinon « ça joue » peut juste être l'ancien titre).
+        val avant = titre(c)
         Thread.sleep(800)
         c.transportControls.playFromSearch(requete, android.os.Bundle())
-        for (i in 0 until 5) { Thread.sleep(1000); if (joue(c)) return "lecture" }
+        fun confirme() = joue(c) && titre(c) != avant
+        for (i in 0 until 6) { Thread.sleep(1000); if (confirme()) return "lecture" }
         c.transportControls.play()
-        for (i in 0 until 3) { Thread.sleep(1000); if (joue(c)) return "lecture" }
+        for (i in 0 until 3) { Thread.sleep(1000); if (confirme()) return "lecture" }
         mediaKey("play")
-        for (i in 0 until 3) { Thread.sleep(1000); if (joue(c)) return "lecture" }
+        for (i in 0 until 3) { Thread.sleep(1000); if (confirme()) return "lecture" }
+        // Le titre n'a jamais changé : on ne confirme pas à tort que le titre demandé joue.
         return "session"
     }
 
