@@ -20,6 +20,14 @@ object Discord {
     private fun jeton(app: JarvisApp): String =
         app.store.discordToken.value.trim().trim('"', '\'').removePrefix("Bot ").removePrefix("bot ").trim()
 
+    /** Diagnostic (sans révéler le jeton) : longueur, premiers/derniers caractères, pour vérifier qu'il n'est pas tronqué ou altéré. */
+    private fun diagJeton(app: JarvisApp): String {
+        val t = jeton(app)
+        if (t.isBlank()) return "(aucun jeton enregistré)"
+        val debut = t.take(6); val fin = t.takeLast(4)
+        return "longueur ${t.length}, commence par « $debut… », finit par « …$fin »"
+    }
+
     // ------------------------------------------------------------ permissions (bits officiels de l'API Discord v10)
     object Perm {
         const val CREATE_INSTANT_INVITE = 1L shl 0
@@ -109,7 +117,7 @@ object Discord {
 
     private fun req(app: JarvisApp, method: String, path: String, corps: JSONObject? = null): JSONObject {
         if (!configure(app)) throw IllegalStateException("Discord non configuré (Réglages › Discord : jeton du bot).")
-        val b = Request.Builder().url(API + path).header("Authorization", "Bot ${jeton(app)}")
+        val b = Request.Builder().url(API + path).header("Authorization", "Bot ${jeton(app)}").header("User-Agent", "DiscordBot (https://github.com/davidc2115/APK-DEV, 1.0)")
         when (method) {
             "POST" -> b.post((corps?.toString() ?: "{}").toRequestBody("application/json".toMediaType()))
             "PATCH" -> b.patch((corps?.toString() ?: "{}").toRequestBody("application/json".toMediaType()))
@@ -119,7 +127,7 @@ object Discord {
         }
         http.newCall(b.build()).execute().use { r ->
             val t = r.body?.string().orEmpty()
-            if (r.code == 401) throw IllegalStateException("Discord 401 : jeton de bot refusé. Vérifie que c'est bien le jeton du BOT (onglet Bot du developer portal \u203a \u00ab Reset Token \u00bb pour en générer un nouveau si tu l'as perdu), pas le Client Secret ni le Client ID, et qu'il n'a pas de préfixe « Bot » ni d'espace collé en trop.")
+            if (r.code == 401) throw IllegalStateException("Discord 401 : jeton refusé (${diagJeton(app)}). Réponse de Discord : ${t.take(200).ifBlank { "(vide)" }}. Vérifie que c'est bien le jeton du BOT (onglet Bot du developer portal \u203a \u00ab Reset Token \u00bb), pas le Client Secret/ID.")
             if (r.code == 403) throw IllegalStateException("Discord 403 : le bot n'a pas la permission, ou son rôle n'est pas placé au-dessus du rôle concerné dans la hiérarchie du serveur.")
             if (r.code == 429) throw IllegalStateException("Discord : trop de requêtes, réessaie dans un instant.")
             if (!r.isSuccessful) throw IllegalStateException("Discord ${r.code} : ${t.take(300)}")
@@ -129,11 +137,11 @@ object Discord {
 
     private fun reqArr(app: JarvisApp, method: String, path: String, corps: JSONObject? = null): JSONArray {
         if (!configure(app)) throw IllegalStateException("Discord non configuré (Réglages › Discord : jeton du bot).")
-        val b = Request.Builder().url(API + path).header("Authorization", "Bot ${jeton(app)}")
+        val b = Request.Builder().url(API + path).header("Authorization", "Bot ${jeton(app)}").header("User-Agent", "DiscordBot (https://github.com/davidc2115/APK-DEV, 1.0)")
         if (method == "GET") b.get() else b.post((corps?.toString() ?: "{}").toRequestBody("application/json".toMediaType()))
         http.newCall(b.build()).execute().use { r ->
             val t = r.body?.string().orEmpty()
-            if (r.code == 401) throw IllegalStateException("Discord 401 : jeton de bot refusé. Vérifie que c'est bien le jeton du BOT (onglet Bot du developer portal \u203a \u00ab Reset Token \u00bb pour en générer un nouveau si tu l'as perdu), pas le Client Secret ni le Client ID, et qu'il n'a pas de préfixe « Bot » ni d'espace collé en trop.")
+            if (r.code == 401) throw IllegalStateException("Discord 401 : jeton refusé (${diagJeton(app)}). Réponse de Discord : ${t.take(200).ifBlank { "(vide)" }}. Vérifie que c'est bien le jeton du BOT (onglet Bot du developer portal \u203a \u00ab Reset Token \u00bb), pas le Client Secret/ID.")
             if (r.code == 403) throw IllegalStateException("Discord 403 : le bot n'a pas la permission nécessaire.")
             if (!r.isSuccessful) throw IllegalStateException("Discord ${r.code} : ${t.take(300)}")
             return JSONArray(t)
