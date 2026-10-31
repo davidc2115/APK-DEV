@@ -52,6 +52,30 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
     fun save(fileBaseName: String, markdown: String): String = saveIn("Contacts", fileBaseName, markdown)
 
+    /** Supprime un fichier (coffre Obsidian ou dossier de l'application). Ne lève pas d'exception si absent. */
+    fun supprimerFichier(folder: String, fileName: String) {
+        val name = safe(fileName, "Fichier")
+        val uriStr = store.obsidianUri.value
+        try {
+            if (uriStr.isNotBlank()) {
+                val tree = DocumentFile.fromTreeUri(ctx, Uri.parse(uriStr))
+                if (tree != null && tree.canWrite()) {
+                    var cur: DocumentFile? = tree
+                    for (part in folder.split('/').filter { it.isNotBlank() }) cur = cur?.findFile(part)?.takeIf { it.isDirectory }
+                    cur?.findFile(name)?.delete()
+                }
+            }
+        } catch (_: Exception) { /* repli silencieux */ }
+        runCatching { File(File(ctx.getExternalFilesDir(null), folder), name).delete() }
+    }
+
+    /** Supprime les fichiers .md et .pdf associés à un document (même nom de base que saveIn/saveBytes). */
+    fun supprimer(folder: String, baseName: String) {
+        val base = safe(baseName, "Fiche")
+        supprimerFichier(folder, "$base.md")
+        supprimerFichier(folder, "$base.pdf")
+    }
+
     /** Relit une note du coffre Obsidian (ou du dossier de l'application) ; null si introuvable. */
     fun read(folder: String, fileName: String): String? {
         val name = safe(fileName, "Fichier")

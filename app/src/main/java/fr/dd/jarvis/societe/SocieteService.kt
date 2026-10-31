@@ -139,6 +139,22 @@ class SocieteService(
         return out
     }
 
+    /** Supprime définitivement un devis ou une facture (et les fichiers associés). Irréversible. */
+    fun supprimerDocument(numero: String): Doc? {
+        val doc = data.doc(numero) ?: return null
+        val dossier = "Société/" + if (doc.type == "devis") "Devis" else "Factures"
+        val client = data.client(doc.clientId)?.nom.orEmpty()
+        val base = "${doc.numero} ${client}".trim()
+        repo.update { d ->
+            d.copy(
+                docs = d.docs.filterNot { it.numero == numero },
+                provisions = d.provisions.filter { it.factureNumero != numero }
+            )
+        }
+        runCatching { obsidian.supprimer(dossier, base) }
+        return doc
+    }
+
     // ------------------------------------------------------------------ export (Obsidian + PDF)
 
     fun exporter(doc: Doc): String {

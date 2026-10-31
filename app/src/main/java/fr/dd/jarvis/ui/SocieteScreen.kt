@@ -270,6 +270,7 @@ private fun DocsTab(app: JarvisApp, type: String) {
     var editingDoc by remember { mutableStateOf<String?>(null) }
     var creating by remember { mutableStateOf(false) }
     var info by remember { mutableStateOf("") }
+    var confirmSuppr by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val list = d.docs.filter { it.type == type }.sortedByDescending { it.numero }
 
@@ -312,7 +313,25 @@ private fun DocsTab(app: JarvisApp, type: String) {
                     }
                 if (x.statut in setOf("brouillon", "envoye", "accepte", "a_payer")) Action("✎ Modifier") { editingDoc = x.numero; selected = null }
                 if (x.statut != "annulee" && x.statut != "refuse" && x.statut != "facture") Action("Annuler") { svc.annuler(x.numero); selected = null }
+                Action("🗑 Supprimer") { confirmSuppr = x.numero; selected = null }
             }) { MarkdownText(md) }
+        }
+    }
+
+    confirmSuppr?.let { num ->
+        val x = d.doc(num)
+        if (x == null) confirmSuppr = null else Dialogue("Supprimer ${x.numero} ?", { confirmSuppr = null }, actions = {
+            Action("Supprimer définitivement") {
+                svc.supprimerDocument(num)
+                info = "🗑️ ${x.numero} supprimé."
+                confirmSuppr = null
+            }
+        }) {
+            Text("Cette action est irréversible : le document sera totalement effacé (y compris son export dans Obsidian/PDF).", color = HudText, fontSize = 13.sp)
+            if (x.type == "facture") Text(
+                "⚠️ Une facture émise doit légalement garder une numérotation continue. La supprimer laisse un trou dans la séquence. Pour une facture déjà envoyée ou encaissée, préfère « Annuler » (qui conserve le numéro) — la suppression n'est vraiment indiquée que pour une erreur jamais envoyée.",
+                color = Color(0xFFFF4D6D), fontSize = 12.sp
+            )
         }
     }
 

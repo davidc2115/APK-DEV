@@ -107,7 +107,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         ), listOf("type", "client", "prestations")),
         tool("document_action", "Agit sur un devis ou une facture existant.", mapOf(
             "numero" to prop("Numéro, ex. DEV-2026-0003 ou FAC-2026-0001."),
-            "action" to prop("afficher | convertir (devis → facture) | envoye | accepte | refuse | payee | annuler | exporter"),
+            "action" to prop("afficher | convertir (devis → facture) | envoye | accepte | refuse | payee | annuler | exporter | supprimer"),
             "mode_paiement" to prop("Pour « payee » : virement, chèque, CB, espèces…")
         ), listOf("numero", "action")),
         tool("document_email", "Envoie (ou renvoie) un devis ou une facture par email, avec le PDF du document en pièce jointe (compte Gmail connecté requis, Réglages › Mails). Demande toujours confirmation avant l'envoi.", mapOf(
@@ -420,6 +420,14 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "annuler" -> {
                 if (!confirm("Annuler ${doc.numero} ? Le numéro reste conservé (une facture n'est jamais supprimée).", false)) return err("Refusé par l'utilisateur.")
                 svc.annuler(numero); ok("✅ ${doc.numero} annulé(e)." + (if (doc.type == "facture" && doc.statut == "payee") "\n⚠️ Si elle a été encaissée, un avoir est normalement nécessaire." else ""))
+            }
+            "supprimer", "effacer" -> {
+                val avertFacture = if (doc.type == "facture")
+                    "\n⚠️ Une facture émise doit légalement garder une numérotation continue : la supprimer laisse un trou dans la séquence. Pour une facture déjà envoyée, « Annuler » (qui garde le numéro) est en principe la bonne solution — un avoir si elle a été encaissée. Supprimer n'est recommandé que pour une erreur jamais envoyée."
+                else ""
+                if (!confirm("Supprimer DÉFINITIVEMENT ${doc.numero} ? Action irréversible.$avertFacture", true)) return err("Suppression refusée par l'utilisateur.")
+                svc.supprimerDocument(numero)
+                ok("🗑️ ${doc.numero} supprimé définitivement.")
             }
             else -> err("Action inconnue : ${a.s("action")}.")
         }
