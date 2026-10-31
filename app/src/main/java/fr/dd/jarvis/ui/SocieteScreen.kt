@@ -494,6 +494,7 @@ private fun PaieTab(app: JarvisApp) {
     var bilan by remember { mutableStateOf<String?>(null) }
     var adding by remember { mutableStateOf(false) }
     var editEmp by remember { mutableStateOf<Employe?>(null) }
+    var bulletinEmp by remember { mutableStateOf<Employe?>(null) }
     var mois by remember { mutableStateOf(LocalDate.now().toString().take(7)) }
 
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -513,7 +514,7 @@ private fun PaieTab(app: JarvisApp) {
         if (d.employes.isEmpty()) item { Text("Aucun employé. Le dirigeant se déclare aussi ici (statut dirigeant).", color = HudDim, fontSize = 13.sp) }
         items(d.employes, key = { it.id }) { e ->
             HudPanel(Modifier.fillMaxWidth(), onClick = {
-                if (Regex("\\d{4}-\\d{2}").matches(mois)) bulletin = svc.bulletin(e, mois, 0.0).first
+                if (Regex("\\d{4}-\\d{2}").matches(mois)) bulletinEmp = e
             }) {
                 Text("${e.nom} (${e.statut})", color = HudText, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Text(
@@ -534,6 +535,40 @@ private fun PaieTab(app: JarvisApp) {
         EmployeForm(app, e0, e0.statut == "dirigeant", { editEmp = null }) { e ->
             svc.repo.update { x -> x.copy(employes = x.employes.map { if (it.id == e.id) e else it }) }; editEmp = null
         }
+    }
+    bulletinEmp?.let { e ->
+        BulletinSaisieForm(e, mois, { bulletinEmp = null }) { heuresEff, netV, primes ->
+            bulletin = svc.bulletin(e, mois, primes, heuresEff, netV).first
+            bulletinEmp = null
+        }
+    }
+}
+
+/** Petite saisie avant génération d'un bulletin : heures standard (contrat), heures réellement effectuées (heures sup calculées auto), ou net réellement versé (heures déduites auto). */
+@Composable
+private fun BulletinSaisieForm(e: Employe, mois: String, onClose: () -> Unit, onGenerer: (heuresEffectuees: Double?, netVerse: Double?, primes: Double) -> Unit) {
+    var mode by remember { mutableStateOf(0) } // 0 = standard, 1 = heures effectuées, 2 = net versé
+    var saisie by remember { mutableStateOf("") }
+    var primes by remember { mutableStateOf("0") }
+    fun n(t: String) = t.replace(',', '.').trim().toDoubleOrNull()
+    Dialogue("Bulletin — ${e.nom} ($mois)", onClose, actions = {
+        Action("Générer") {
+            val v = n(saisie)
+            onGenerer(if (mode == 1) v else null, if (mode == 2) v else null, n(primes) ?: 0.0)
+        }
+    }) {
+        Text("Base contractuelle : ${nombre(e.heuresHebdo)} h/semaine.", color = HudDim, fontSize = 12.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HudChip("Heures standard", mode == 0) { mode = 0; saisie = "" }
+            HudChip("Heures effectuées", mode == 1) { mode = 1 }
+            HudChip("Net versé", mode == 2) { mode = 2 }
+        }
+        when (mode) {
+            1 -> HudTextField(saisie, { saisie = it }, Modifier.fillMaxWidth(), label = "Heures réellement travaillées ce mois")
+            2 -> HudTextField(saisie, { saisie = it }, Modifier.fillMaxWidth(), label = "Montant net réellement versé ce mois (€)")
+            else -> Text("Utilise les heures contractuelles du mois, sans heures supplémentaires.", color = HudDim, fontSize = 12.sp)
+        }
+        HudTextField(primes, { primes = it }, Modifier.fillMaxWidth(), label = "Primes du mois (€, optionnel)")
     }
 }
 

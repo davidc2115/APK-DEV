@@ -162,14 +162,23 @@ tags: [societe, paie]
 
 **Employeur** : {{societe_nom}} — {{societe_adresse}} {{#societe_siret}}· SIRET {{societe_siret}}{{/societe_siret}}
 **Salarié** : {{employe_nom}} — {{poste}} ({{statut_label}})
-**Base horaire** : {{heures_hebdo}} h/semaine · {{heures_mensuelles}} h/mois · taux horaire {{taux_horaire}}
-{{#net_vise}}**Net visé** : {{net_vise}} (brut recalculé automatiquement pour l'atteindre){{/net_vise}}
+**Base horaire** : {{heures_hebdo}} h/semaine · {{heures_contrat}} h/mois (contrat) · taux horaire {{taux_horaire}}
+{{#net_vise}}**Net visé (contrat)** : {{net_vise}} (brut recalculé automatiquement pour l'atteindre){{/net_vise}}
+**Heures retenues ce mois** : {{heures_effectuees}} h
+{{#heures_manquantes}}⚠️ Dont {{heures_manquantes}} h en-deçà de la base contractuelle (absence non rémunérée non calculée automatiquement).
+{{/heures_manquantes}}
 
-| Rubrique | Montant |
-|---|---:|
-| Salaire de base | {{brut_base}} |
-{{#primes}}| Primes | {{primes}} |
-{{/primes}}| **Salaire brut** | **{{brut}}** |
+| Rubrique | Détail | Montant |
+|---|---|---:|
+| Heures normales | {{heures_contrat}} h × {{taux_horaire}} | {{brut_heures_normales}} |
+{{#heures_sup25}}| Heures sup. à 25 % | {{heures_sup25}} h majorées 25 % | — |
+{{/heures_sup25}}{{#heures_sup50}}| Heures sup. à 50 % | {{heures_sup50}} h majorées 50 % | — |
+{{/heures_sup50}}{{#brut_heures_sup}}| **Total heures supplémentaires** | | **{{brut_heures_sup}}** |
+{{/brut_heures_sup}}{{#primes}}| Primes | | {{primes}} |
+{{/primes}}| **Salaire brut** | | **{{brut}}** |
+{{#reduction_heures_sup}}
+ℹ️ Réduction salariale heures sup. (loi TEPA) déjà incluse dans les cotisations ci-dessous : **- {{reduction_heures_sup}}**
+{{/reduction_heures_sup}}
 
 ## Cotisations et contributions sociales
 | Rubrique | Base | Part salariale | Part patronale |

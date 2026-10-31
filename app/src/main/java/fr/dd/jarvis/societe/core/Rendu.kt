@@ -98,12 +98,21 @@ object Rendu {
     }
 
     fun bulletinCtx(d: SocieteData, b: Bulletin): Ctx {
+        val heuresSup = b.heuresSup25 + b.heuresSup50
+        val heuresManquantes = (b.heuresContrat - b.heuresEffectuees).coerceAtLeast(0.0)
         val vars = societeVars(d) + mapOf(
             "employe_nom" to b.employe.nom, "poste" to b.employe.poste.ifBlank { "—" },
             "statut_label" to (if (b.employe.statut == "dirigeant") "dirigeant" else "salarié"),
             "mois" to b.mois, "mois_label" to moisLabel(b.mois),
-            "heures_hebdo" to nombre(b.employe.heuresHebdo), "heures_mensuelles" to nombre(b.heuresMensuelles),
+            "heures_hebdo" to nombre(b.employe.heuresHebdo), "heures_mensuelles" to nombre(b.heuresContrat),
+            "heures_contrat" to nombre(b.heuresContrat), "heures_effectuees" to nombre(b.heuresEffectuees),
+            "heures_sup" to (if (heuresSup > 0) nombre(heuresSup) else ""),
+            "heures_sup25" to (if (b.heuresSup25 > 0) nombre(b.heuresSup25) else ""),
+            "heures_sup50" to (if (b.heuresSup50 > 0) nombre(b.heuresSup50) else ""),
+            "heures_manquantes" to (if (heuresManquantes > 0) nombre(heuresManquantes) else ""),
             "taux_horaire" to euro(b.tauxHoraire),
+            "brut_heures_normales" to euro(b.brutHeuresNormales), "brut_heures_sup" to (if (b.brutHeuresSup > 0) euro(b.brutHeuresSup) else ""),
+            "reduction_heures_sup" to (if (b.reductionHeuresSup > 0) euro(b.reductionHeuresSup) else ""),
             "net_vise" to (if (b.employe.netMensuelVise > 0) euro(b.employe.netMensuelVise) else ""),
             "brut_base" to euro(b.brutBase), "primes" to (if (b.primes > 0) euro(b.primes) else ""),
             "brut" to euro(b.brut),
@@ -117,7 +126,11 @@ object Rendu {
             mapOf(
                 "libelle" to it.libelle, "base" to euro(it.base),
                 "taux_sal" to (if (it.tauxSalarial > 0) nombre(it.tauxSalarial) + " %" else "—"),
-                "montant_sal" to (if (it.montantSalarial > 0) euro(it.montantSalarial) else "—"),
+                "montant_sal" to when {
+                    it.montantSalarial > 0 -> euro(it.montantSalarial)
+                    it.montantSalarial < 0 -> "- " + euro(-it.montantSalarial) + " (réduction)"
+                    else -> "—"
+                },
                 "taux_pat" to (if (it.tauxPatronal > 0) nombre(it.tauxPatronal) + " %" else "—"),
                 "montant_pat" to (if (it.montantPatronal > 0) euro(it.montantPatronal) else "—")
             )

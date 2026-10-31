@@ -133,8 +133,10 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "taux_atmp" to prop("Taux accident du travail / maladies professionnelles en % (dépend de l'activité ; s'applique à toute l'équipe)."),
             "taux_formation" to prop("Taux de la contribution formation professionnelle en % (s'applique à toute l'équipe).")
         ), listOf("nom")),
-        tool("paie", "Produit le bulletin de paie DÉTAILLÉ (cotisations ligne par ligne : sécurité sociale, retraite, chômage, CSG/CRDS…) d'un employé ou du dirigeant pour un mois.", mapOf(
-            "employe" to prop("Nom de l'employé."), "mois" to prop("yyyy-MM (par défaut le mois en cours)."), "primes" to prop("Primes du mois en € (optionnel).")
+        tool("paie", "Produit le bulletin de paie DÉTAILLÉ (cotisations ligne par ligne : sécurité sociale, retraite, chômage, CSG/CRDS…) d'un employé ou du dirigeant pour un mois. Par défaut utilise les heures contractuelles. Pour un mois avec des heures supplémentaires ou une absence, renseigner SOIT heures_effectuees (le nombre d'heures réellement travaillées : les heures sup au-delà de la base contractuelle sont calculées et majorées automatiquement), SOIT net_verse (le montant net réellement versé ce mois-ci : le nombre d'heures travaillées est alors déduit automatiquement par calcul inverse). Ne JAMAIS renseigner les deux à la fois.", mapOf(
+            "employe" to prop("Nom de l'employé."), "mois" to prop("yyyy-MM (par défaut le mois en cours)."), "primes" to prop("Primes du mois en € (optionnel)."),
+            "heures_effectuees" to prop("Nombre d'heures réellement travaillées ce mois-ci (optionnel). Les heures au-delà de la base contractuelle sont automatiquement comptées en heures supplémentaires majorées 25 %/50 %. Ne pas renseigner en même temps que net_verse."),
+            "net_verse" to prop("Montant net réellement versé/transféré à l'employé ce mois-ci en € (optionnel). JARVIS calcule automatiquement le nombre d'heures (dont heures sup) qui correspond à ce net. Ne pas renseigner en même temps que heures_effectuees.")
         ), listOf("employe")),
         tool("reserve_bilan", "Bilan de la réserve bénéfices d'une année et répartition dirigeant / salariés.", mapOf("annee" to prop("Année (par défaut l'année en cours)."))),
         tool("presentation_modifier", "Modifie la présentation d'un modèle : fiche client, devis, facture, bulletin de paie ou planning. Peut aussi annuler la dernière modification ou revenir au modèle d'origine.", mapOf(
@@ -526,7 +528,10 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         val e = d.employes.firstOrNull { normaliser(it.nom) == n } ?: d.employes.firstOrNull { normaliser(it.nom).contains(n) }
             ?: return err("Employé introuvable. Le créer avec employe_ecrire. Équipe : ${d.employes.joinToString { it.nom }.ifBlank { "vide" }}")
         val mois = a.s("mois").takeIf { Regex("\\d{4}-\\d{2}").matches(it) } ?: LocalDate.now().toString().take(7)
-        val (md, loc) = svc.bulletin(e, mois, a.dbl("primes") ?: 0.0)
+        val heuresEff = a.dbl("heures_effectuees")
+        val netVerse = a.dbl("net_verse")
+        if (heuresEff != null && netVerse != null) return err("Renseigne soit heures_effectuees, soit net_verse, pas les deux à la fois.")
+        val (md, loc) = svc.bulletin(e, mois, a.dbl("primes") ?: 0.0, heuresEff, netVerse)
         return ok("✅ Bulletin enregistré : $loc\n\n---\n\n$md")
     }
 

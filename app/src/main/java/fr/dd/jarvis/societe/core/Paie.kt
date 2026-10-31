@@ -13,9 +13,14 @@ data class LigneCotisation(
 data class Bulletin(
     val employe: Employe,
     val mois: String,
-    val heuresMensuelles: Double,
-    val tauxHoraire: Double,
-    val brutBase: Double,
+    val heuresContrat: Double,          // heures mensuelles contractuelles (base 35h/39h/40h… mensualisée)
+    val heuresEffectuees: Double,       // heures réellement retenues pour ce bulletin (= heuresContrat si pas de saisie particulière)
+    val heuresSup25: Double,            // heures supplémentaires majorées à 25 %
+    val heuresSup50: Double,            // heures supplémentaires majorées à 50 %
+    val tauxHoraire: Double,            // taux horaire brut (déduit du salaire contractuel)
+    val brutHeuresNormales: Double,
+    val brutHeuresSup: Double,
+    val reductionHeuresSup: Double,     // réduction de cotisations salariales sur heures sup (loi TEPA), déjà comptée dans les lignes
     val primes: Double,
     val brut: Double,
     val lignes: List<LigneCotisation>,
@@ -27,7 +32,9 @@ data class Bulletin(
     val totalChargesPatronales: Double,
     val coutEmployeur: Double
 ) {
-    // Compatibilité avec l'ancien modèle (taux globaux équivalents, utilisés nulle part en interne désormais).
+    // Compatibilité avec l'ancien modèle.
+    val heuresMensuelles get() = heuresContrat
+    val brutBase get() = round2(brutHeuresNormales + brutHeuresSup)
     val cotisationsSalariales get() = totalCotisationsSalariales
     val chargesPatronales get() = totalChargesPatronales
 }
@@ -45,6 +52,8 @@ object Paie {
 
     const val AVERTISSEMENT =
         "Bulletin détaillé à titre d'estimation (taux standards du régime général, ordre de grandeur 2026, à ajuster si besoin dans Réglages › Paie). " +
+            "Heures supplémentaires majorées 25 %/50 % avec réduction forfaitaire de cotisations salariales (loi TEPA) ; " +
+            "l'exonération d'impôt sur le revenu des heures sup (plafond annuel 7 500 €) n'est pas modélisée (le PAS indiqué est donc une estimation haute en cas d'heures sup). " +
             "Ne remplace ni un logiciel de paie ni un expert-comptable — à faire valider avant tout usage officiel. " +
             "Un dirigeant travailleur non salarié (gérant majoritaire d'EURL/SARL) relève d'un régime différent (SSI), non couvert par ce calcul."
 
@@ -101,24 +110,77 @@ object Paie {
         return round2(hi)
     }
 
-    fun bulletin(e: Employe, cfg: ConfigPaie, mois: String, primes: Double = 0.0): Bulletin {
+    /** Seuil mensualisé des 8 premières heures sup/semaine (majorées à 25 %, loi, au-delà 50 %). */
+    private const val SEUIL_SUP_25 = 8.0 * 52.0 / 12.0 // ≈ 34,67 h/mois
+
+    /** Taux horaire brut contractuel (déduit du salaire — brut ou net visé — pour les heures contractuelles). */
+    fun tauxHoraire(e: Employe, cfg: ConfigPaie): Double {
         val dirigeant = e.statut == "dirigeant"
-        val brutBase = if (e.netMensuelVise > 0.0) brutDepuisNet(e.netMensuelVise, dirigeant, cfg) else round2(e.brutMensuel)
-        val brut = round2(brutBase + primes)
-        val lignes = cotisations(brut, dirigeant, cfg)
+        val brutContractuel = if (e.netMensuelVise > 0.0) brutDepuisNet(e.netMensuelVise, dirigeant, cfg) else round2(e.brutMensuel)
+        val heures = heuresMensuelles(e.heuresHebdo)
+        return if (heures > 0.0) round2(brutContractuel / heures) else 0.0
+    }
+
+    /** Bulletin pour un nombre d'heures effectuées donné (contractuelles par défaut) : les heures au-delà de la base
+     *  contractuelle sont majorées (25 % puis 50 % au-delà de 8 h/semaine) et bénéficient de la réduction de
+     *  cotisations salariales sur les heures supplémentaires (loi TEPA, taux forfaitaire de 11,31 %). */
+    fun bulletinPourHeures(e: Employe, cfg: ConfigPaie, mois: String, primes: Double, heuresEffectuees: Double): Bulletin {
+        val dirigeant = e.statut == "dirigeant"
+        val heuresContrat = heuresMensuelles(e.heuresHebdo)
+        val taux = tauxHoraire(e, cfg)
+        val sup = (heuresEffectuees - heuresContrat).coerceAtLeast(0.0)
+        val sup25 = minOf(sup, SEUIL_SUP_25)
+        val sup50 = maxOf(0.0, sup - SEUIL_SUP_25)
+        val heuresNormales = minOf(heuresEffectuees, heuresContrat)
+        val brutNormal = round2(taux * heuresNormales)
+        val brutSup = round2(taux * 1.25 * sup25 + taux * 1.5 * sup50)
+        val brut = round2(brutNormal + brutSup + primes)
+        val lignes = cotisations(brut, dirigeant, cfg).toMutableList()
+        val remunerationSup = brutSup
+        val reduction = if (remunerationSup > 0.0) round2(remunerationSup * 0.1131) else 0.0
+        if (reduction > 0.0) lignes += LigneCotisation("Réduction de cotisations salariales — heures supplémentaires (loi TEPA)", round2(remunerationSup), 0.0, -reduction, 0.0, 0.0)
         val totalSal = round2(lignes.sumOf { it.montantSalarial })
         val totalPat = round2(lignes.sumOf { it.montantPatronal })
         val netAvant = round2(brut - totalSal)
         val pas = round2(netAvant * e.tauxPas / 100.0)
-        val heures = heuresMensuelles(e.heuresHebdo)
         return Bulletin(
-            employe = e, mois = mois, heuresMensuelles = heures,
-            tauxHoraire = if (heures > 0.0) round2(brutBase / heures) else 0.0,
-            brutBase = brutBase, primes = round2(primes), brut = brut,
+            employe = e, mois = mois, heuresContrat = heuresContrat, heuresEffectuees = round2(heuresEffectuees),
+            heuresSup25 = round2(sup25), heuresSup50 = round2(sup50), tauxHoraire = taux,
+            brutHeuresNormales = brutNormal, brutHeuresSup = brutSup, reductionHeuresSup = reduction,
+            primes = round2(primes), brut = brut,
             lignes = lignes, totalCotisationsSalariales = totalSal, netAvantImpot = netAvant,
             tauxPas = e.tauxPas, pas = pas, netAPayer = round2(netAvant - pas),
             totalChargesPatronales = totalPat, coutEmployeur = round2(brut + totalPat)
         )
+    }
+
+    /** Nombre d'heures qu'il a fallu effectuer pour obtenir le NET RÉELLEMENT VERSÉ (net à payer, après PAS) donné,
+     *  par recherche dichotomique (recherche inverse de bulletinPourHeures). */
+    fun heuresDepuisNetVerse(netVerse: Double, e: Employe, cfg: ConfigPaie, mois: String, primes: Double): Double {
+        val heuresContrat = heuresMensuelles(e.heuresHebdo)
+        if (netVerse <= 0.0) return 0.0
+        var lo = 0.0
+        var hi = heuresContrat * 3.0 + 100.0
+        repeat(50) {
+            val mid = (lo + hi) / 2.0
+            if (bulletinPourHeures(e, cfg, mois, primes, mid).netAPayer < netVerse) lo = mid else hi = mid
+        }
+        return round2(hi)
+    }
+
+    /**
+     * Bulletin du mois. Par défaut, utilise les heures contractuelles (comportement d'avant). Si [heuresEffectuees]
+     * est fourni, les heures sup/manquantes et leur majoration sont calculées automatiquement. Si [netVerse] est
+     * fourni à la place (montant réellement viré au salarié ce mois-ci), le nombre d'heures effectuées est déduit
+     * automatiquement par recherche inverse.
+     */
+    fun bulletin(e: Employe, cfg: ConfigPaie, mois: String, primes: Double = 0.0, heuresEffectuees: Double? = null, netVerse: Double? = null): Bulletin {
+        val heures = when {
+            netVerse != null && netVerse > 0.0 -> heuresDepuisNetVerse(netVerse, e, cfg, mois, primes)
+            heuresEffectuees != null -> heuresEffectuees
+            else -> heuresMensuelles(e.heuresHebdo)
+        }
+        return bulletinPourHeures(e, cfg, mois, primes, heures)
     }
 }
 

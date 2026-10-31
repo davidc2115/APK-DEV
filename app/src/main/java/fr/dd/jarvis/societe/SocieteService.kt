@@ -159,8 +159,8 @@ class SocieteService(
         return md to obsidian.saveIn("Société/Clients", c.nom, md)
     }
 
-    fun bulletin(e: Employe, mois: String, primes: Double): Pair<String, String> {
-        val b = Paie.bulletin(e, data.paie, mois, primes)
+    fun bulletin(e: Employe, mois: String, primes: Double, heuresEffectuees: Double? = null, netVerse: Double? = null): Pair<String, String> {
+        val b = Paie.bulletin(e, data.paie, mois, primes, heuresEffectuees, netVerse)
         val md = Rendu.rendreBulletin(data, b)
         repo.update { d ->
             d.copy(bulletins = d.bulletins.filterNot { it.employeId == e.id && it.mois == mois } +
