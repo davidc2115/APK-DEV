@@ -52,6 +52,21 @@ object Box {
         return "smb://" + hote(app) + "/" + c + if (dossier && c.isNotEmpty()) "/" else ""
     }
 
+    /** URL avec identifiants intégrés (smb:// ou ftp://), pour une app externe (VLC…) qui lit le flux directement sans passer par JARVIS. */
+    fun urlLecture(app: JarvisApp, chemin: String): String {
+        val h = hote(app)
+        val smb = app.store.boxProto.value != "ftp"
+        val c = chemin.trim().trim('/').split('/').joinToString("/") { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
+        fun enc(s: String) = java.net.URLEncoder.encode(s, "UTF-8").replace("+", "%20")
+        return if (smb) {
+            val u = app.store.boxUser.value.trim()
+            (if (u.isBlank()) "smb://$h/$c" else "smb://${enc(u)}:${enc(app.store.boxPass.value)}@$h/$c")
+        } else {
+            val u = app.store.boxUser.value.trim().ifBlank { "anonymous" }
+            "ftp://${enc(u)}:${enc(app.store.boxPass.value.ifBlank { "jarvis@" })}@$h/$c"
+        }
+    }
+
     private fun smbListe(app: JarvisApp, chemin: String): String {
         val d = SmbFile(url(app, chemin, true), ctx(app))
         val l = d.listFiles().sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() })).filter { !it.name.startsWith(".") }
