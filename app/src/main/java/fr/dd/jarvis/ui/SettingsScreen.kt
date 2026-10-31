@@ -307,13 +307,27 @@ fun SettingsScreen(app: JarvisApp) {
             HudPanel(Modifier.fillMaxWidth(), title = "Contrôle du téléphone") {
                 StatusRow3("Accessibilité (lire l'écran, toucher, défiler)", a11yOn, a11yInSettings)
                 Spacer(Modifier.height(4.dp))
-                HudButton("Ouvrir les réglages d'accessibilité") {
-                    ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HudButton("Ouvrir les réglages d'accessibilité") {
+                        ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }
+                    if (a11yInSettings && !a11yOn) HudButton("Infos de l'application") {
+                        ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.fromParts("package", ctx.packageName, null)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }
                 }
-                Text(
-                    "Android 13+ : si l'option est grisée, ouvre « Infos de l'application » › ⋮ › « Autoriser les paramètres restreints », puis réessaie.",
-                    color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp, bottom = 10.dp)
-                )
+                Spacer(Modifier.height(10.dp))
+
+                val stockageOn = remember(tick) { fr.dd.jarvis.ai.Stockage.autorise() }
+                StatusRow("Accès à tous les fichiers (Téléchargements, Films, Musique…)", stockageOn)
+                Spacer(Modifier.height(4.dp))
+                HudButton(if (stockageOn) "✅ Autorisé" else "Autoriser l'accès à tous les fichiers", enabled = !stockageOn) {
+                    runCatching {
+                        ctx.startActivity(Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, android.net.Uri.fromParts("package", ctx.packageName, null)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }.onFailure {
+                        ctx.startActivity(Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
 
                 StatusRow("Shizuku installé", shInstalled)
                 StatusRow("Shizuku démarré", shRunning)
@@ -608,7 +622,7 @@ private fun StatusRow3(label: String, actif: Boolean, activeDansAndroid: Boolean
         Text(label, color = HudText, fontSize = 13.sp)
     }
     if (!actif && activeDansAndroid) Text(
-        "Activé dans Android mais pas encore connecté à JARVIS : redémarre JARVIS (ferme-la complètement et rouvre-la), et si ça persiste, ouvre « Infos de l'application » › ⋮ › « Autoriser les paramètres restreints » puis réessaie.",
+        "L'interrupteur est déjà activé dans Android, mais le service n'est toujours pas réellement connecté — c'est le signe du blocage « paramètres restreints » d'Android 13+ sur une app installée hors Play Store. Ça ne se répare PAS en redémarrant JARVIS ni en laissant l'interrupteur tel quel. 1) « Infos de l'application » › ⋮ (en haut à droite) › « Autoriser les paramètres restreints ». 2) Reviens dans les réglages d'accessibilité, DÉSACTIVE l'interrupteur puis RÉACTIVE-le (c'est cette bascule off→on qui force la vraie connexion).",
         color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(start = 20.dp, bottom = 4.dp)
     )
 }

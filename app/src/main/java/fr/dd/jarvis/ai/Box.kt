@@ -130,7 +130,16 @@ object Box {
                 if (smb) SmbFile(url(app, chemin, true), ctx(app)).mkdirs() else ftp(app) { c -> c.makeDirectory("/" + chemin.trim('/')) }
                 "📁 Dossier créé : /${chemin.trim('/')}"
             }
-            else -> "Action inconnue (partages, lister, lire, telecharger, envoyer, supprimer, dossier)."
+            "renommer", "deplacer" -> {
+                val dest = fichier.trim().trim('/')
+                if (dest.isBlank()) throw IllegalArgumentException("Précise le nouveau chemin/nom (paramètre « fichier »).")
+                if (smb) {
+                    val src = SmbFile(url(app, chemin, false), ctx(app))
+                    src.renameTo(SmbFile(url(app, dest, src.isDirectory), ctx(app)))
+                } else ftp(app) { c -> if (!c.rename("/" + chemin.trim('/'), "/$dest")) throw IllegalStateException("Renommage/déplacement refusé (chemin de destination déjà utilisé ou invalide).") }
+                "✅ /${chemin.trim('/')} → /$dest"
+            }
+            else -> "Action inconnue (partages, lister, lire, telecharger, envoyer, supprimer, dossier, renommer, deplacer)."
         }
     }
 }

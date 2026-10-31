@@ -212,6 +212,12 @@ class ToolBox(
             ), listOf("action")))
         put(tool("run_shell", "Exécute une commande shell sur le téléphone via adb/Shizuku (réservé aux besoins que phone_action ne couvre pas).",
             mapOf("command" to prop("Commande shell.")), listOf("command")))
+        put(tool("stockage_telephone", "Accède au stockage du téléphone (Téléchargements, Films, Musique, DCIM, etc., en dehors du dossier privé de JARVIS) : liste un dossier, lit un fichier texte, renomme, déplace, supprime, crée un dossier. Pratique pour réorganiser une bibliothèque de fichiers (ex. noms de films compatibles Plex).",
+            mapOf(
+                "action" to prop("lister | lire | renommer | deplacer | supprimer | dossier"),
+                "chemin" to prop("Chemin relatif à la racine du stockage (ex. « Movies/film.avi », vide = racine)."),
+                "destination" to prop("renommer/deplacer uniquement : le nouveau chemin complet (ex. « Movies/Dirty Dancing (1987).avi »).")
+            ), listOf("action")))
     }
 
     /** Les outils Société ne sont proposés au modèle que si la conversation les concerne (économie de contexte). */
@@ -426,6 +432,12 @@ class ToolBox(
         "ma_position" -> ToolResult(fr.dd.jarvis.device.Locator.describe(app))
         "phone_action" -> phoneAction(a)
         "run_shell" -> runShell(a)
+        "stockage_telephone" -> {
+            val act = a.optString("action").lowercase()
+            if (act == "supprimer" && !confirm("Supprimer « ${a.optString("chemin")} » du stockage du téléphone ?", true)) ToolResult("Refusé par l'utilisateur.")
+            else try { ToolResult(fr.dd.jarvis.ai.Stockage.action(act, a.optString("chemin"), a.optString("destination"))) }
+            catch (e: Exception) { ToolResult("❌ ${e.message ?: e.javaClass.simpleName}") }
+        }
         in SocieteTools.NAMES -> societe.execute(name, a)
         in ServeurTools.NAMES -> serveur.execute(name, a)
         in DiscordTools.NAMES -> discord.execute(name, a)
