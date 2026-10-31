@@ -21,7 +21,7 @@ class PhoneControl(private val ctx: Context) {
         return enabled.contains(ctx.packageName)
     }
 
-    private fun needA11y(): String = "Le service d'accessibilité JARVIS n'est pas actif (Réglages › Téléphone)."
+    private fun needA11y(): String = "Le service d'accessibilité JARVIS n'est pas actif : va dans Réglages › Téléphone et permissions pour le réactiver (désactive puis réactive l'interrupteur dans Réglages Android › Accessibilité, et sur Xiaomi/MIUI vérifie aussi « Démarrage automatique » et la batterie sans restriction pour JARVIS)."
 
     fun torch(on: Boolean): String {
         val cm = ctx.getSystemService(Context.CAMERA_SERVICE) as CameraManager
