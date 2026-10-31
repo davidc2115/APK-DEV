@@ -5,6 +5,7 @@ import fr.dd.jarvis.JarvisApp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -17,13 +18,31 @@ object ImageGen {
     private val http = OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(90, TimeUnit.SECONDS).callTimeout(100, TimeUnit.SECONDS).build()
     private var next = 0
     private val cooldown = mutableMapOf<String, Long>()
-    val MODELES = listOf("@cf/black-forest-labs/flux-1-schnell", "@cf/stabilityai/stable-diffusion-xl-base-1.0", "@cf/bytedance/stable-diffusion-xl-lightning", "@cf/lykon/dreamshaper-8-lcm")
+    // flux-2-dev : rendu réaliste haute qualité (plus lent). flux-2-klein-9b : qualité proche, plus rapide/léger. flux-1-schnell : le plus rapide.
+    val MODELES = listOf(
+        "@cf/black-forest-labs/flux-1-schnell",
+        "@cf/black-forest-labs/flux-2-dev",
+        "@cf/black-forest-labs/flux-2-klein-9b",
+        "@cf/stabilityai/stable-diffusion-xl-base-1.0",
+        "@cf/bytedance/stable-diffusion-xl-lightning",
+        "@cf/lykon/dreamshaper-8-lcm"
+    )
 
     private fun genere(account: String, model: String, prompt: String): ByteArray {
         val (id, token) = account.split(":", limit = 2)
-        val body = JSONObject().put("prompt", prompt).apply { if (model.contains("flux")) put("steps", 6) }
-        val req = Request.Builder().url("https://api.cloudflare.com/client/v4/accounts/$id/ai/run/$model")
-            .header("Authorization", "Bearer $token").post(body.toString().toRequestBody("application/json".toMediaType())).build()
+        // Les modèles flux-2-* (flux-2-dev, flux-2-klein) attendent du multipart/form-data, pas du JSON.
+        val req = if (model.contains("flux-2")) {
+            val form = MultipartBody.Builder().setType(MultipartBody.FORM)
+                .addFormDataPart("prompt", prompt)
+                .addFormDataPart("steps", "28")
+                .build()
+            Request.Builder().url("https://api.cloudflare.com/client/v4/accounts/$id/ai/run/$model")
+                .header("Authorization", "Bearer $token").post(form).build()
+        } else {
+            val body = JSONObject().put("prompt", prompt).apply { if (model.contains("flux")) put("steps", 6) }
+            Request.Builder().url("https://api.cloudflare.com/client/v4/accounts/$id/ai/run/$model")
+                .header("Authorization", "Bearer $token").post(body.toString().toRequestBody("application/json".toMediaType())).build()
+        }
         http.newCall(req).execute().use { r ->
             val ct = r.header("Content-Type").orEmpty()
             if (!r.isSuccessful) {
@@ -56,19 +75,28 @@ object ImageGen {
         } catch (e: Exception) { "Cloudflare $code : $brut" }
     }
 
+    /** Alias pratiques pour le paramètre « modele » de l'outil generer_image. */
+    private fun alias(modele: String): String = when (modele.trim().lowercase()) {
+        "flux", "flux2", "flux-2", "flux-2-dev", "flux dev" -> "@cf/black-forest-labs/flux-2-dev"
+        "flux-klein", "flux klein", "flux2klein", "flux-2-klein", "klein" -> "@cf/black-forest-labs/flux-2-klein-9b"
+        "flux-schnell", "flux schnell", "schnell", "flux-1", "flux1" -> "@cf/black-forest-labs/flux-1-schnell"
+        else -> modele
+    }
+
     /** Génère une image, la garde dans l'appli et dans Obsidian. Retourne (fichier, emplacement Obsidian). */
-    suspend fun generate(app: JarvisApp, prompt: String): Pair<File, String> = withContext(Dispatchers.IO) {
+    suspend fun generate(app: JarvisApp, prompt: String, modele: String = ""): Pair<File, String> = withContext(Dispatchers.IO) {
         val list = app.store.cfAccounts.filter { it.contains(':') }
         if (list.isEmpty()) throw IllegalStateException("Aucun compte Cloudflare : ajoute « idCompte:jeton » dans Réglages › Images.")
+        val model = modele.trim().let { if (it.isBlank()) app.store.cfModel.value.ifBlank { MODELES[0] } else alias(it) }
         val now = System.currentTimeMillis()
         val order = list.indices.map { (next + it) % list.size }
         val (ready, cooling) = order.partition { (cooldown[list[it]] ?: 0L) <= now }
         var last: Exception? = null
         for (i in ready + cooling) {
             try {
-                val bytes = genere(list[i], app.store.cfModel.value.ifBlank { MODELES[0] }, prompt)
+                val bytes = genere(list[i], model, prompt)
                 next = (i + 1) % list.size
-                val name = "img_" + java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.FRENCH).format(java.util.Date()) + ".png"
+                val name = "img_" + java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.FRENCH).format(java.util.Date()) + "_" + (100 + (Math.random() * 899).toInt()) + ".png"
                 val f = File(File(app.filesDir, "images").apply { mkdirs() }, name)
                 f.writeBytes(bytes)
                 val loc = runCatching { app.obsidian.saveBytes("JARVIS/Images", name, bytes, "image/png") }.getOrDefault("")
@@ -79,5 +107,14 @@ object ImageGen {
             } catch (e: Exception) { last = e }
         }
         throw last ?: IllegalStateException("Génération impossible.")
+    }
+
+    /** Génère plusieurs images d'affilée (une par prompt) ; utile pour un livre de coloriage, une planche, etc. Une erreur sur un prompt n'arrête pas les autres. */
+    suspend fun generateMany(app: JarvisApp, prompts: List<String>, modele: String = ""): List<Pair<String, File>> {
+        val out = mutableListOf<Pair<String, File>>()
+        for (p in prompts) {
+            runCatching { generate(app, p, modele) }.onSuccess { (f, _) -> out.add(p to f) }
+        }
+        return out
     }
 }

@@ -1,8 +1,10 @@
 package fr.dd.jarvis.ai
 
 import android.content.ContentValues
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 import android.os.Build
@@ -131,7 +133,8 @@ object Fichiers {
     }
 
     // ------------------------------------------------------------------ PDF
-    fun pdf(md: String, titre: String): ByteArray {
+    /** @param images une page pleine par image (ex. livre de coloriage), avec légende optionnelle ; ajoutées après le texte. */
+    fun pdf(md: String, titre: String, images: List<Pair<String, ByteArray>> = emptyList()): ByteArray {
         val doc = PdfDocument()
         val W = 595; val H = 842; val M = 42
         var page = doc.startPage(PdfDocument.PageInfo.Builder(W, H, 1).create())
@@ -158,9 +161,37 @@ object Fichiers {
                 else -> ecrire(sansMd(b.texte), 11f, false)
             }
         }
+        images.forEach { (legende, bytes) ->
+            nouvelle()
+            val bmp = runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }.getOrNull()
+            if (bmp != null) {
+                val maxW = (W - 2 * M).toFloat()
+                val maxH = (H - 2 * M).toFloat() - if (legende.isNotBlank()) 30f else 0f
+                val echelle = minOf(maxW / bmp.width, maxH / bmp.height, 1f).let { if (it <= 0f) 1f else it }
+                val dw = bmp.width * echelle; val dh = bmp.height * echelle
+                val gx = M + (maxW - dw) / 2
+                canvas.drawBitmap(bmp, null, RectF(gx, y, gx + dw, y + dh), null)
+                y += dh + 8
+                bmp.recycle()
+            } else { ecrire("⚠️ Image illisible.", 11f, false) }
+            if (legende.isNotBlank()) ecrire(sansMd(legende), 11f, false)
+        }
         doc.finishPage(page)
         val out = ByteArrayOutputStream(); doc.writeTo(out); doc.close()
         return out.toByteArray()
+    }
+
+    /** Résout la liste d'images (noms de fichiers générés par generer_image, avec légende optionnelle « nom.png::légende »)
+     * séparés par virgule ou retour à la ligne, en paires (légende, octets) prêtes pour pdf(). Ignore les fichiers introuvables. */
+    private fun images(app: JarvisApp, spec: String): List<Pair<String, ByteArray>> {
+        if (spec.isBlank()) return emptyList()
+        val dossierImg = File(app.filesDir, "images")
+        return spec.split(Regex("[,\\n]")).map { it.trim() }.filter { it.isNotBlank() }.mapNotNull { entree ->
+            val (nomBrut, legende) = if ("::" in entree) entree.split("::", limit = 2).let { it[0].trim() to it[1].trim() } else entree to ""
+            val nom = nomBrut.removePrefix("jarvis-img:").trim()
+            val f = File(dossierImg, nom)
+            if (f.exists()) legende to f.readBytes() else null
+        }
     }
 
     // ------------------------------------------------------------------ VCF depuis les contacts du téléphone
@@ -201,7 +232,7 @@ object Fichiers {
         val bytes: ByteArray = when (ext) {
             "docx" -> docx((if (titre.isNotBlank()) "# $titre\n\n" else "") + contenu)
             "xlsx" -> xlsx(contenu, a.optString("feuille"))
-            "pdf" -> pdf(contenu, titre)
+            "pdf" -> pdf(contenu, titre, images(app, a.optString("images")))
             "vcf" -> (if (contenu.isBlank() || contenu.trim().lowercase() in setOf("tous", "tout")) vcfContacts(app, a.optString("recherche")) else contenu).toByteArray()
             "csv" -> tableau(contenu).joinToString("\r\n") { r -> r.joinToString(";") { c -> if (c.contains(';') || c.contains('"') || c.contains('\n')) "\"" + c.replace("\"", "\"\"") + "\"" else c } }.let { "\uFEFF$it".toByteArray() }
             "html", "htm" -> (if (contenu.trimStart().startsWith("<")) contenu else {
@@ -231,7 +262,10 @@ object Fichiers {
         File(dossier(app), nom).writeBytes(bytes)
         val dl = runCatching { versTelechargements(app, nom, bytes, mime(ext)) }.getOrDefault(false)
         val ko = (bytes.size + 512) / 1024
-        return "[📎 $nom ($ko Ko)](jarvis-file:$nom)" + (if (dl) "\n📁 Aussi enregistré dans Téléchargements › JARVIS." else "")
+        val demandees = a.optString("images").split(Regex("[,\\n]")).map { it.trim() }.filter { it.isNotBlank() }
+        val manquantes = if (ext == "pdf" && demandees.isNotEmpty()) demandees.size - images(app, a.optString("images")).size else 0
+        return "[📎 $nom ($ko Ko)](jarvis-file:$nom)" + (if (dl) "\n📁 Aussi enregistré dans Téléchargements › JARVIS." else "") +
+            (if (manquantes > 0) "\n⚠️ $manquantes image(s) demandée(s) introuvable(s) (vérifie les noms de fichiers générés par generer_image)." else "")
     }
 
     private fun versTelechargements(app: JarvisApp, nom: String, bytes: ByteArray, mime: String): Boolean {

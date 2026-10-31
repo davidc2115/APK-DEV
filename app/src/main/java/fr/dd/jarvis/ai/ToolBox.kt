@@ -148,15 +148,18 @@ class ToolBox(
             mapOf("name" to prop("Nom du contact.")), listOf("name")))
         put(tool("meteo", "Météo précise (maintenant, prochaines heures, prévisions) à la position du téléphone, ou pour un lieu donné.",
             mapOf("lieu" to prop("Ville ou adresse (optionnel : par défaut la position actuelle du téléphone)."), "jours" to prop("Nombre de jours de prévision (1 à 7). Par défaut 3."))))
-        put(tool("generer_image", "Génère une image à partir d'une description (Cloudflare). L'image est affichée dans le chat et enregistrée dans Obsidian.",
-            mapOf("prompt" to prop("Description détaillée de l'image, rédigée en anglais (sujet, style, lumière, cadrage).")), listOf("prompt")))
+        put(tool("generer_image", "Génère une ou plusieurs images à partir d'une description (Cloudflare). Les images sont affichées dans le chat et enregistrées dans Obsidian. Pour plusieurs images (planche, livre de coloriage, série d'illustrations), mets une description par ligne dans « prompt » : chacune est générée séparément et le nom de fichier de chacune est renvoyé (utile ensuite pour creer_fichier avec format=pdf et le paramètre images).",
+            mapOf("prompt" to prop("Description détaillée de l'image, rédigée en anglais (sujet, style, lumière, cadrage). Pour plusieurs images, une description par ligne."),
+                "modele" to prop("Optionnel : « flux » (flux-2-dev, le plus réaliste/précis), « flux-klein » (flux-2-klein, qualité proche mais plus rapide) ou « flux-schnell » (le plus rapide, qualité moindre). Par défaut le modèle choisi dans Réglages › Images.")), listOf("prompt")))
         put(tool("agenda_afficher", "Affiche ou masque durablement un agenda entier (« ne plus afficher le planning de Thomas », « réaffiche-le »). Un agenda masqué disparaît du planning, de l'itinéraire, du point du jour et de l'écran Agenda tant qu'on ne le réaffiche pas.",
             mapOf("agenda" to prop("Nom (ou partie du nom) de l'agenda."), "afficher" to prop("true pour réafficher, false pour masquer.")), listOf("agenda", "afficher")))
-        put(tool("creer_fichier", "Crée un fichier téléchargeable que l'utilisateur peut ouvrir ou partager : pdf, docx (Word), xlsx (Excel), csv, vcf (contacts ; contenu « tous » ou nom = exporte les contacts du téléphone), ics, txt, md, html, json, xml, zip… Le texte (docx/pdf/html) accepte du Markdown (# titres, - puces, tableaux |a|b|). Pour xlsx/csv : contenu en lignes « a;b;c » ou JSON [[..],[..]] (une formule commence par =).",
+        put(tool("creer_fichier", "Crée un fichier téléchargeable que l'utilisateur peut ouvrir ou partager : pdf, docx (Word), xlsx (Excel), csv, vcf (contacts ; contenu « tous » ou nom = exporte les contacts du téléphone), ics, txt, md, html, json, xml, zip… Le texte (docx/pdf/html) accepte du Markdown (# titres, - puces, tableaux |a|b|). Pour xlsx/csv : contenu en lignes « a;b;c » ou JSON [[..],[..]] (une formule commence par =). Pour un PDF avec des images déjà générées (generer_image) — livre de coloriage, planche, album — utilise le paramètre « images » : chaque image devient une page entière, dans l'ordre donné, APRÈS le texte de « contenu ».",
             mapOf("nom" to prop("Nom du fichier sans extension."), "format" to prop("pdf, docx, xlsx, csv, vcf, ics, txt, md, html, json, xml, zip…"),
                 "contenu" to prop("Contenu du fichier (voir la description). Pour vcf : texte vCard, ou « tous »."), "titre" to prop("Titre du document (optionnel)."),
                 "feuille" to prop("Nom de la feuille Excel (optionnel)."), "recherche" to prop("vcf : filtre sur le nom des contacts à exporter (optionnel)."),
-                "inclure" to prop("zip : noms des fichiers déjà créés à inclure, séparés par des virgules.")), listOf("nom", "format")))
+                "inclure" to prop("zip : noms des fichiers déjà créés à inclure, séparés par des virgules."),
+                "images" to prop("Pour format=pdf uniquement : noms de fichiers d'images déjà générées par generer_image (ex. img_20261031_120000_123.png, visibles dans jarvis-img: des résultats précédents), séparés par une virgule ou un retour à la ligne — une par page, dans l'ordre. Ajoute une légende par image avec « nomFichier.png::légende ».")),
+            listOf("nom", "format")))
         put(tool("graphique", "Dessine un graphique (courbe, barres, camembert, aire) et l'affiche directement dans la conversation. Colle la sortie telle quelle dans la réponse.",
             mapOf("type" to prop("ligne, barres, camembert, donut ou aire."), "titre" to prop("Titre du graphique."),
                 "etiquettes" to JSONObject().put("type", "array").put("items", JSONObject().put("type", "string")).put("description", "Libellés de l'axe X (ou des parts)."),
@@ -300,8 +303,19 @@ class ToolBox(
         "create_contact_card" -> createCard(a)
         "meteo" -> ToolResult(fr.dd.jarvis.ai.Meteo.get(app, a.optString("lieu"), a.optString("jours").toIntOrNull() ?: 3))
         "generer_image" -> try {
-            val (f, loc) = fr.dd.jarvis.ai.ImageGen.generate(app, a.optString("prompt"))
-            ToolResult("![image](jarvis-img:${f.name})\n\n_${a.optString("prompt").take(160)}_" + (if (loc.isNotBlank()) "\n📁 $loc" else ""), direct = true)
+            val modele = a.optString("modele")
+            val prompts = a.optString("prompt").lines().map { it.trim() }.filter { it.isNotBlank() }
+            if (prompts.size <= 1) {
+                val p = prompts.firstOrNull() ?: a.optString("prompt")
+                val (f, loc) = fr.dd.jarvis.ai.ImageGen.generate(app, p, modele)
+                ToolResult("![image](jarvis-img:${f.name})\n\n_${p.take(160)}_" + (if (loc.isNotBlank()) "\n📁 $loc" else ""), direct = true)
+            } else {
+                val faites = fr.dd.jarvis.ai.ImageGen.generateMany(app, prompts, modele)
+                val manquees = prompts.size - faites.size
+                val texte = faites.joinToString("\n\n") { (p, f) -> "![image](jarvis-img:${f.name})\n\n_${p.take(160)}_" } +
+                    (if (manquees > 0) "\n\n⚠️ $manquees image(s) ont échoué." else "")
+                ToolResult(texte, direct = true)
+            }
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
             ToolResult("❌ Image impossible : ${e.message}")
         }
