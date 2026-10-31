@@ -204,10 +204,12 @@ object Fichiers {
     fun lister(app: JarvisApp, quoi: String, max: Int): String {
         val img = File(app.filesDir, "images").listFiles()?.filter { it.isFile }.orEmpty()
         val exp = dossier(app).listFiles()?.filter { it.isFile }.orEmpty()
+        val vid = dossierVideos(app).listFiles()?.filter { it.isFile }.orEmpty()
         val tous = when (quoi.trim().lowercase()) {
             "image", "images" -> img
+            "video", "vidéo", "videos", "vidéos" -> vid
             "fichier", "fichiers", "document", "documents", "export", "exports" -> exp
-            else -> img + exp
+            else -> img + exp + vid
         }.sortedByDescending { it.lastModified() }.take(max.takeIf { it > 0 } ?: 20)
         if (tous.isEmpty()) return "Aucun fichier généré pour l'instant."
         val fmt = java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.FRENCH)
@@ -232,6 +234,18 @@ object Fichiers {
     }
 
     fun dossier(app: JarvisApp) = File(app.filesDir, "exports").apply { mkdirs() }
+
+    fun dossierVideos(app: JarvisApp) = File(app.filesDir, "videos").apply { mkdirs() }
+
+    /** Retrouve une vidéo reçue (partagée depuis une autre appli, ex. TikTok) par son nom de fichier, ou « derniere » pour la plus récente. */
+    fun videoFichier(app: JarvisApp, nom: String): File? {
+        val d = dossierVideos(app)
+        val n = nom.trim().removePrefix("jarvis-video:").trim()
+        if (n.isBlank() || n.lowercase() in setOf("derniere", "dernière", "dernier", "last", "recente", "récente")) {
+            return d.listFiles()?.filter { it.isFile }?.maxByOrNull { it.lastModified() }
+        }
+        return File(d, n).takeIf { it.exists() }
+    }
 
     private fun mime(ext: String) = when (ext) {
         "pdf" -> "application/pdf"; "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"

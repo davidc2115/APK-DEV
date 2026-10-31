@@ -78,6 +78,26 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleListen(intent)
+        handleSharedVideo(intent)
+    }
+
+    /** Vidéo reçue via « Partager » depuis une autre appli (ex. TikTok) : on la garde dans JARVIS et on lance l'analyse. */
+    private fun handleSharedVideo(i: android.content.Intent?) {
+        if (i?.action != android.content.Intent.ACTION_SEND || i.type?.startsWith("video/") != true) return
+        @Suppress("DEPRECATION") val uri = i.getParcelableExtra<android.net.Uri>(android.content.Intent.EXTRA_STREAM) ?: return
+        i.removeExtra(android.content.Intent.EXTRA_STREAM)
+        val app = application as JarvisApp
+        val ext = contentResolver.getType(uri)?.substringAfterLast('/')?.takeIf { it.length in 2..4 } ?: "mp4"
+        val nom = "video_" + java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.FRENCH).format(java.util.Date()) + "_" + (100 + (Math.random() * 899).toInt()) + ".$ext"
+        runCatching {
+            contentResolver.openInputStream(uri)?.use { ins ->
+                java.io.File(fr.dd.jarvis.ai.Fichiers.dossierVideos(app), nom).outputStream().use { out -> ins.copyTo(out) }
+            } ?: throw IllegalStateException("flux illisible")
+        }.onSuccess {
+            vm.send("Analyse la vidéo que je viens de partager (fichier $nom).")
+        }.onFailure {
+            vm.send("Je n'ai pas réussi à récupérer la vidéo partagée : ${it.message}")
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -91,6 +111,7 @@ class MainActivity : ComponentActivity() {
             checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
         ) fr.dd.jarvis.service.JarvisService.start(this)
         handleListen(intent)
+        handleSharedVideo(intent)
         setContent {
             HudTheme(accentById(app.store.accent.value).color, app.store.tileAlpha.value) {
                 HudBackground { Root(app, vm) }

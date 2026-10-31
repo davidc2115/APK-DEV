@@ -165,6 +165,9 @@ class ToolBox(
         put(tool("analyser_image", "Analyse une image déjà générée par generer_image (ou envoyée par l'utilisateur) : décrit son contenu, répond à une question dessus, lit un texte qu'elle contient, etc.",
             mapOf("image" to prop("Nom de fichier de l'image (vu dans jarvis-img:... ou via fichiers_generes), ou « derniere » pour la dernière générée."),
                 "question" to prop("Ce qu'il faut regarder ou dire sur l'image (optionnel ; par défaut une description détaillée).")), listOf("image")))
+        put(tool("analyser_video", "Analyse une vidéo que l'utilisateur a partagée à JARVIS (bouton « Partager » de n'importe quelle appli, ex. TikTok, vers JARVIS) : avis sur l'accroche, le rythme/montage, la qualité, ce qui plaît ou non, et suggestions concrètes pour améliorer l'engagement (vues, likes, abonnés). Ne fonctionne que sur une vidéo déjà reçue par JARVIS, jamais sur un simple lien.",
+            mapOf("video" to prop("Nom de fichier de la vidéo reçue (vu dans jarvis-video:... ou via fichiers_generes), ou « derniere » pour la dernière partagée."),
+                "question" to prop("Ce qu'il faut regarder précisément (optionnel ; par défaut un avis général de créateur de contenu).")), listOf("video")))
         put(tool("graphique", "Dessine un graphique (courbe, barres, camembert, aire) et l'affiche directement dans la conversation. Colle la sortie telle quelle dans la réponse.",
             mapOf("type" to prop("ligne, barres, camembert, donut ou aire."), "titre" to prop("Titre du graphique."),
                 "etiquettes" to JSONObject().put("type", "array").put("items", JSONObject().put("type", "string")).put("description", "Libellés de l'axe X (ou des parts)."),
@@ -337,6 +340,18 @@ class ToolBox(
         }
         "creer_fichier" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { fr.dd.jarvis.ai.Fichiers.creer(app, a) }.getOrElse { "❌ Création impossible : ${it.message}" } }, direct = true)
         "fichiers_generes" -> ToolResult(fr.dd.jarvis.ai.Fichiers.lister(app, a.optString("quoi"), a.optString("max").toIntOrNull() ?: 20))
+        "analyser_video" -> try {
+            val f = fr.dd.jarvis.ai.Fichiers.videoFichier(app, a.optString("video"))
+                ?: return ToolResult("❌ Vidéo « ${a.optString("video")} » introuvable. Partage-la à JARVIS avec le bouton « Partager » de l'appli (ex. TikTok → Partager → JARVIS), puis réessaie.")
+            if (f.length() > 18L * 1024 * 1024) return ToolResult("❌ Vidéo trop lourde (${f.length() / 1024 / 1024} Mo) pour être analysée directement : il faudrait une version plus courte ou plus compressée.")
+            val mime = when (f.extension.lowercase()) { "mov" -> "video/quicktime"; "webm" -> "video/webm"; "mkv" -> "video/x-matroska"; "3gp" -> "video/3gpp"; else -> "video/mp4" }
+            val question = a.optString("question").ifBlank { "Donne un avis de créateur de contenu sur cette vidéo courte (type TikTok) : l'accroche des 3 premières secondes, le rythme et le montage, la qualité d'image/son, ce qui plaît et ce qui ne va pas, puis 2-3 suggestions concrètes pour améliorer l'engagement (vues, likes, abonnés). En français." }
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                ToolResult(app.llm.gemini.analyserImage(f.readBytes(), mime, question))
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
+            ToolResult("❌ Analyse impossible : ${e.message}")
+        }
         "analyser_image" -> try {
             val f = fr.dd.jarvis.ai.ImageGen.fichier(app, a.optString("image"))
                 ?: return ToolResult("❌ Image « ${a.optString("image")} » introuvable. Appelle fichiers_generes pour voir les noms exacts.")
