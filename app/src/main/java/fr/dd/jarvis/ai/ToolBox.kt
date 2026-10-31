@@ -298,7 +298,7 @@ class ToolBox(
         }
         "update_contact" -> updateContact(a)
         "create_contact_card" -> createCard(a)
-        "meteo" -> ToolResult(fr.dd.jarvis.ai.Meteo.get(app, a.optString("lieu"), a.optString("jours").toIntOrNull() ?: 3), direct = true)
+        "meteo" -> ToolResult(fr.dd.jarvis.ai.Meteo.get(app, a.optString("lieu"), a.optString("jours").toIntOrNull() ?: 3))
         "generer_image" -> try {
             val (f, loc) = fr.dd.jarvis.ai.ImageGen.generate(app, a.optString("prompt"))
             ToolResult("![image](jarvis-img:${f.name})\n\n_${a.optString("prompt").take(160)}_" + (if (loc.isNotBlank()) "\n📁 $loc" else ""), direct = true)

@@ -49,6 +49,7 @@ class JarvisService : Service() {
     private var vosk: fr.dd.jarvis.voice.WakeDetector? = null
     private var confirm: CompletableDeferred<Boolean>? = null
     private var failures = 0
+    private var echangeReel = false        // vrai dès qu'une vraie commande a été traitée pendant cette conversation (sert à ne pas dire « D'accord » sur un faux réveil)
     private val history = mutableListOf<ChatMsg>()
     private lateinit var app: JarvisApp
     private lateinit var brain: Brain
@@ -86,7 +87,11 @@ class JarvisService : Service() {
                 when {
                     confirm != null -> main.postDelayed({ listen() }, 400)
                     busy -> {}
-                    awake -> if (System.currentTimeMillis() > deadline || failures >= 2) { failures = 0; voice?.speak("D'accord.") { goIdle() } } else main.postDelayed({ listen() }, 300)
+                    awake -> if (System.currentTimeMillis() > deadline || failures >= 2) {
+                        failures = 0
+                        // Rien compris de toute la conversation : probablement un faux réveil (bruit ambiant) — pas la peine de dire « D'accord » sur rien.
+                        if (echangeReel) voice?.speak("D'accord.") { goIdle() } else goIdle()
+                    } else main.postDelayed({ listen() }, 300)
                     vosk == null -> main.postDelayed({ listen() }, if (failures > 4) 5000L else 1200L) // repli sans Vosk : écoute en boucle
                 }
             }
@@ -157,10 +162,10 @@ class JarvisService : Service() {
     private fun onWakeWord() {
         if (!running || awake || busy) return
         val maintenant = System.currentTimeMillis()
-        if (maintenant - dernierReveil < 2500) return   // écho du bip / de la voix de JARVIS pris pour « Jarvis »
+        if (maintenant - dernierReveil < 3500) return   // écho du bip / de la voix de JARVIS pris pour « Jarvis »
         dernierReveil = maintenant
         vosk?.stop()
-        awake = true; deadline = maintenant + convMs()
+        awake = true; deadline = maintenant + convMs(); echangeReel = false
         voice?.speak("Oui ?") { deadline = System.currentTimeMillis() + convMs(); listen() }
     }
 
@@ -183,7 +188,7 @@ class JarvisService : Service() {
     }
 
     private fun process(cmd: String) {
-        busy = true
+        busy = true; echangeReel = true
         scope.launch {
             val app = application as JarvisApp
             app.chatCharger()

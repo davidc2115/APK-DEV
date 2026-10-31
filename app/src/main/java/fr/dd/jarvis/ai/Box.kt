@@ -9,6 +9,7 @@ import jcifs.smb.SmbFile
 import org.apache.commons.net.ftp.FTP
 import org.apache.commons.net.ftp.FTPClient
 import java.io.File
+import java.io.InputStream
 import java.util.Properties
 
 /** Disque dur branché sur la box : partage SMB (Windows) ou FTP. Adresse de la box = réglage, sinon la passerelle du Wi-Fi. */
@@ -52,18 +53,40 @@ object Box {
         return "smb://" + hote(app) + "/" + c + if (dossier && c.isNotEmpty()) "/" else ""
     }
 
-    /** URL avec identifiants intégrés (smb:// ou ftp://), pour une app externe (VLC…) qui lit le flux directement sans passer par JARVIS. */
-    fun urlLecture(app: JarvisApp, chemin: String): String {
-        val h = hote(app)
-        val smb = app.store.boxProto.value != "ftp"
-        val c = chemin.trim().trim('/').split('/').joinToString("/") { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
-        fun enc(s: String) = java.net.URLEncoder.encode(s, "UTF-8").replace("+", "%20")
-        return if (smb) {
-            val u = app.store.boxUser.value.trim()
-            (if (u.isBlank()) "smb://$h/$c" else "smb://${enc(u)}:${enc(app.store.boxPass.value)}@$h/$c")
+    data class Flux(val stream: InputStream, val longueur: Long, val type: String)
+
+    fun mimeVideo(chemin: String): String = when (chemin.substringAfterLast('.', "").lowercase()) {
+        "mp4" -> "video/mp4"; "mkv" -> "video/x-matroska"; "avi" -> "video/x-msvideo"; "mov" -> "video/quicktime"
+        "webm" -> "video/webm"; "m4v" -> "video/mp4"; "ts" -> "video/mp2t"; "mp3" -> "audio/mpeg"; "flac" -> "audio/flac"
+        else -> "video/*"
+    }
+
+    /** Ouvre un flux de lecture (depuis un octet donné) pour un fichier de la box : utilisé par le relais HTTP local qui permet au lecteur
+     *  vidéo du téléphone (même l'app par défaut, sans besoin de VLC) de lire le fichier en streaming, avec recherche/avance (Range). */
+    fun ouvrirFlux(app: JarvisApp, chemin: String, offset: Long): Flux {
+        val type = mimeVideo(chemin)
+        return if (app.store.boxProto.value != "ftp") {
+            val f = SmbFile(url(app, chemin, false), ctx(app))
+            val ins = f.inputStream
+            if (offset > 0) ins.skip(offset)
+            Flux(ins, f.length(), type)
         } else {
+            val c = FTPClient()
+            c.connectTimeout = 8000; c.defaultTimeout = 0
+            c.connect(hote(app), app.store.boxPort.value.toIntOrNull() ?: 21)
             val u = app.store.boxUser.value.trim().ifBlank { "anonymous" }
-            "ftp://${enc(u)}:${enc(app.store.boxPass.value.ifBlank { "jarvis@" })}@$h/$c"
+            if (!c.login(u, app.store.boxPass.value.ifBlank { "jarvis@" })) { runCatching { c.disconnect() }; throw IllegalStateException("FTP : identifiants refusés.") }
+            c.enterLocalPassiveMode(); c.setFileType(FTP.BINARY_FILE_TYPE)
+            val chem = "/" + chemin.trim('/')
+            val longueur = c.listFiles(chem).firstOrNull()?.size ?: -1L
+            if (offset > 0) c.setRestartOffset(offset)
+            val ins = c.retrieveFileStream(chem) ?: throw IllegalStateException("Fichier introuvable sur la box.")
+            val enveloppe = object : InputStream() {
+                override fun read(): Int = ins.read()
+                override fun read(b: ByteArray, off: Int, len: Int): Int = ins.read(b, off, len)
+                override fun close() { runCatching { ins.close() }; runCatching { c.completePendingCommand() }; runCatching { c.logout() }; runCatching { c.disconnect() } }
+            }
+            Flux(enveloppe, longueur, type)
         }
     }
 

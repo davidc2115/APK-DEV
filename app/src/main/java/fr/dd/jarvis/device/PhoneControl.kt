@@ -297,17 +297,13 @@ class PhoneControl(private val ctx: Context) {
         return r.ifBlank { "🧭 Google Maps : navigation vers $dest lancée." }
     }
 
-    /** Lance la lecture d'une vidéo distante (URL smb://, ftp:// ou http(s)://) dans un lecteur vidéo installé (VLC en priorité, qui gère nativement SMB/FTP). */
-    fun lireVideoDistante(url: String): String {
-        val prefere = listOf("org.videolan.vlc", "com.mxtech.videoplayer.ad", "com.mxtech.videoplayer.pro").firstOrNull { installed(it) }
-        fun lancer(pkg: String?): Boolean = try {
-            val i = Intent(Intent.ACTION_VIEW).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).setDataAndType(Uri.parse(url), "video/*")
-            if (pkg != null) i.setPackage(pkg)
-            ctx.startActivity(i); true
-        } catch (e: Exception) { false }
-        if (lancer(prefere)) return "▶️ Lecture lancée" + (prefere?.let { " dans " + (findPackage(it)?.second ?: it) } ?: "") + "."
-        if (prefere != null && lancer(null)) return "▶️ Lecture lancée."
-        return "Impossible de lancer la lecture. Installe VLC (il gère nativement les flux SMB/FTP) ou ouvre le fichier manuellement avec une app vidéo compatible."
+    /** Lance la lecture d'une vidéo (URL http:// locale ou distante) dans le lecteur vidéo par défaut du téléphone — aucune app spécifique requise. */
+    fun lireVideoDistante(url: String, type: String = "video/*"): String {
+        return try {
+            val i = Intent(Intent.ACTION_VIEW).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).setDataAndType(Uri.parse(url), type)
+            ctx.startActivity(i)
+            "▶️ Lecture lancée dans le lecteur vidéo du téléphone."
+        } catch (e: Exception) { "Impossible de lancer la lecture : ${e.message}. Installe une app vidéo (VLC, MX Player…) si le téléphone n'en a aucune pour ce type de fichier." }
     }
 
     fun openUrl(url: String): String {
