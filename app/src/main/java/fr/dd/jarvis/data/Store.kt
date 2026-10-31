@@ -184,6 +184,10 @@ class Store(context: Context) {
     val agentLastFact = SPref("agentLastFact", "")
     val agentLastNotif = SPref("agentLastNotif", "0")
 
+    // ---- Discord (bot)
+    val discordToken = SPref("discordToken", "")
+    val discordGuildId = SPref("discordGuildId", "")
+
     // ---- Annonces vocales (SMS, mails, notifications) : mode par catégorie (off | annonce | lecture) et sonnerie (URI, « default » ou vide = aucune)
     val annOn = BPref("annOn", false)
     val annPrive = BPref("annPrive", false)

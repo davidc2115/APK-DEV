@@ -196,6 +196,10 @@ fun SettingsScreen(app: JarvisApp) {
             BoxPanel(store, app)
         }
 
+        item {
+            DiscordPanel(store, app)
+        }
+
         // ------------------------------------------------------------ Mails
         item {
             var result by remember { mutableStateOf("") }
@@ -791,6 +795,38 @@ private fun ServeurPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvi
     }
 }
 
+
+@Composable
+private fun DiscordPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.JarvisApp) {
+    val scope = rememberCoroutineScope()
+    var msg by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    HudPanel(Modifier.fillMaxWidth(), title = "Discord — bot (rôles et permissions de salons)") {
+        Text(
+            "Permet à JARVIS de créer et modifier des rôles (couleur, permissions), de les attribuer, et de modifier l'accès des salons. Crée un bot sur discord.com/developers/applications, copie son jeton, active les « Server Members Intent », et invite-le sur ton serveur avec les permissions « Gérer les rôles » et « Gérer les salons ». Place toujours son rôle au-dessus, dans la hiérarchie, de tous les rôles qu'il doit gérer.",
+            color = HudDim, fontSize = 12.sp
+        )
+        Spacer(Modifier.height(8.dp))
+        HudTextField(store.discordToken.value, { store.discordToken.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Jeton du bot", password = true)
+        Spacer(Modifier.height(6.dp))
+        HudTextField(store.discordGuildId.value, { store.discordGuildId.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Nom ou ID du serveur par défaut (optionnel si un seul)")
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HudButton(if (busy) "Test…" else "Tester", enabled = !busy && store.discordToken.value.isNotBlank()) {
+                scope.launch {
+                    busy = true
+                    msg = try {
+                        val arr = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.ai.Discord.guildes(app) }
+                        val noms = (0 until arr.length()).joinToString(", ") { arr.getJSONObject(it).optString("name") }
+                        "✅ Bot connecté. Serveurs : ${noms.ifBlank { "aucun" }}"
+                    } catch (e: Exception) { "❌ ${e.message}" }
+                    busy = false
+                }
+            }
+        }
+        if (msg.isNotBlank()) Text(msg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+    }
+}
 
 @Composable
 private fun BoxPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.JarvisApp) {
