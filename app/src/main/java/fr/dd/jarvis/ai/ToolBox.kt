@@ -158,8 +158,10 @@ class ToolBox(
                 "contenu" to prop("Contenu du fichier (voir la description). Pour vcf : texte vCard, ou « tous »."), "titre" to prop("Titre du document (optionnel)."),
                 "feuille" to prop("Nom de la feuille Excel (optionnel)."), "recherche" to prop("vcf : filtre sur le nom des contacts à exporter (optionnel)."),
                 "inclure" to prop("zip : noms des fichiers déjà créés à inclure, séparés par des virgules."),
-                "images" to prop("Pour format=pdf uniquement : noms de fichiers d'images déjà générées par generer_image (ex. img_20261031_120000_123.png, visibles dans jarvis-img: des résultats précédents), séparés par une virgule ou un retour à la ligne — une par page, dans l'ordre. Ajoute une légende par image avec « nomFichier.png::légende ».")),
+                "images" to prop("Pour format=pdf uniquement : noms de fichiers d'images déjà générées par generer_image (ex. img_20261031_120000_123.png, visibles dans jarvis-img: des résultats précédents), séparés par une virgule ou un retour à la ligne — une par page, dans l'ordre. Ajoute une légende par image avec « nomFichier.png::légende ». Si tu ne connais pas les noms exacts, mets « dernieres » (10 dernières), « dernieres:N » ou « toutes » plutôt que de deviner, ou appelle d'abord fichiers_generes.")),
             listOf("nom", "format")))
+        put(tool("fichiers_generes", "Liste les fichiers déjà créés par JARVIS (images de generer_image, documents de creer_fichier), les plus récents en premier, avec leur nom exact. À utiliser dès que l'utilisateur fait référence à une image ou un fichier déjà généré sans te redonner son nom exact, avant de dire que tu ne le retrouves pas.",
+            mapOf("quoi" to prop("images, fichiers (documents) ou tous (par défaut)."), "max" to prop("Nombre maximum à lister (par défaut 20).")), listOf()))
         put(tool("graphique", "Dessine un graphique (courbe, barres, camembert, aire) et l'affiche directement dans la conversation. Colle la sortie telle quelle dans la réponse.",
             mapOf("type" to prop("ligne, barres, camembert, donut ou aire."), "titre" to prop("Titre du graphique."),
                 "etiquettes" to JSONObject().put("type", "array").put("items", JSONObject().put("type", "string")).put("description", "Libellés de l'axe X (ou des parts)."),
@@ -331,6 +333,7 @@ class ToolBox(
             }
         }
         "creer_fichier" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { fr.dd.jarvis.ai.Fichiers.creer(app, a) }.getOrElse { "❌ Création impossible : ${it.message}" } }, direct = true)
+        "fichiers_generes" -> ToolResult(fr.dd.jarvis.ai.Fichiers.lister(app, a.optString("quoi"), a.optString("max").toIntOrNull() ?: 20))
         "graphique" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { fr.dd.jarvis.ai.Graphique.creer(app, a) }.getOrElse { "❌ Graphique impossible : ${it.message}" } }, direct = true)
         "conversations" -> {
             val fmt = java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.FRENCH)

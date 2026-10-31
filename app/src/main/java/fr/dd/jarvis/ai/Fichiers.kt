@@ -182,16 +182,36 @@ object Fichiers {
     }
 
     /** Résout la liste d'images (noms de fichiers générés par generer_image, avec légende optionnelle « nom.png::légende »)
-     * séparés par virgule ou retour à la ligne, en paires (légende, octets) prêtes pour pdf(). Ignore les fichiers introuvables. */
+     * séparés par virgule ou retour à la ligne, en paires (légende, octets) prêtes pour pdf(). Ignore les fichiers introuvables.
+     * Accepte aussi « dernieres », « dernieres:N » ou « toutes » pour reprendre les images générées récemment sans en connaître le nom. */
     private fun images(app: JarvisApp, spec: String): List<Pair<String, ByteArray>> {
         if (spec.isBlank()) return emptyList()
         val dossierImg = File(app.filesDir, "images")
+        val s = spec.trim().lowercase()
+        if (Regex("^(derni[eè]res?(:\\d+)?|toutes?)$").matches(s)) {
+            val n = Regex(":(\\d+)$").find(s)?.groupValues?.get(1)?.toIntOrNull() ?: if (s.startsWith("tout")) Int.MAX_VALUE else 10
+            return dossierImg.listFiles()?.filter { it.isFile }?.sortedByDescending { it.lastModified() }?.take(n)?.map { "" to it.readBytes() }.orEmpty()
+        }
         return spec.split(Regex("[,\\n]")).map { it.trim() }.filter { it.isNotBlank() }.mapNotNull { entree ->
             val (nomBrut, legende) = if ("::" in entree) entree.split("::", limit = 2).let { it[0].trim() to it[1].trim() } else entree to ""
             val nom = nomBrut.removePrefix("jarvis-img:").trim()
             val f = File(dossierImg, nom)
             if (f.exists()) legende to f.readBytes() else null
         }
+    }
+
+    /** Liste les fichiers déjà générés par JARVIS (images et documents créés via creer_fichier), les plus récents en premier. */
+    fun lister(app: JarvisApp, quoi: String, max: Int): String {
+        val img = File(app.filesDir, "images").listFiles()?.filter { it.isFile }.orEmpty()
+        val exp = dossier(app).listFiles()?.filter { it.isFile }.orEmpty()
+        val tous = when (quoi.trim().lowercase()) {
+            "image", "images" -> img
+            "fichier", "fichiers", "document", "documents", "export", "exports" -> exp
+            else -> img + exp
+        }.sortedByDescending { it.lastModified() }.take(max.takeIf { it > 0 } ?: 20)
+        if (tous.isEmpty()) return "Aucun fichier généré pour l'instant."
+        val fmt = java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.FRENCH)
+        return tous.joinToString("\n") { f -> "- ${f.name} (${fmt.format(java.util.Date(f.lastModified()))}, ${(f.length() + 512) / 1024} Ko)" }
     }
 
     // ------------------------------------------------------------------ VCF depuis les contacts du téléphone

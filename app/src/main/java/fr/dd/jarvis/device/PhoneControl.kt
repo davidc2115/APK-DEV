@@ -207,12 +207,25 @@ class PhoneControl(private val ctx: Context) {
             try { ctx.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (e: Exception) { return "Impossible de lancer $nom : ${e.message}" }
             etat = lancerLecture(pkg, requete, ouvrir = true)
         }
+        if (etat == "lecture") {
+            // Lecture confirmée : on remet JARVIS (ou l'appli précédente) au premier plan, l'appli de musique reste en arrière-plan.
+            if (fr.dd.jarvis.service.JarvisAccessibilityService.instance != null) runCatching { fr.dd.jarvis.service.JarvisAccessibilityService.instance?.global(AccessibilityService.GLOBAL_ACTION_HOME) }
+            return "🎵 « $requete » est en cours de lecture dans $nom (en arrière-plan)."
+        }
+        // Beaucoup d'applis tierces (YouTube Music, Spotify, Deezer…) n'implémentent pas vraiment playFromSearch() : la session existe
+        // mais ignore la recherche demandée. Plutôt que de laisser l'ancien titre tourner sans rien faire, on ouvre directement l'écran
+        // de recherche de l'appli (lien profond) pour que le morceau demandé soit déjà affiché, prêt à lancer.
+        val rechercheUrl: ((String) -> String)? = when (pkg) {
+            "com.google.android.apps.youtube.music" -> { q -> "https://music.youtube.com/search?q=" + Uri.encode(q) }
+            "com.spotify.music" -> { q -> "spotify:search:" + Uri.encode(q) }
+            "deezer.android.app" -> { q -> "deezer://search/" + Uri.encode(q) }
+            else -> null
+        }
+        if (rechercheUrl != null) {
+            val err = start(Intent.ACTION_VIEW, rechercheUrl(requete), pkg)
+            if (err.isBlank()) return "🔎 $nom ne confirme pas la lecture à distance de « $requete » : j'ai ouvert sa recherche avec ce titre déjà affiché, il ne reste plus qu'à appuyer sur lecture."
+        }
         return when (etat) {
-            "lecture" -> {
-                // Lecture confirmée : on remet JARVIS (ou l'appli précédente) au premier plan, l'appli de musique reste en arrière-plan.
-                if (fr.dd.jarvis.service.JarvisAccessibilityService.instance != null) runCatching { fr.dd.jarvis.service.JarvisAccessibilityService.instance?.global(AccessibilityService.GLOBAL_ACTION_HOME) }
-                "🎵 « $requete » est en cours de lecture dans $nom (en arrière-plan)."
-            }
             "session" -> "🎵 J'ai demandé la lecture de « $requete » dans $nom, mais je n'ai pas pu confirmer qu'elle a démarré. Si rien ne joue, ouvre $nom et lance un titre une fois à la main (première utilisation)."
             else -> "⚠️ Je n'ai pas trouvé la session de lecture de $nom (l'appli met parfois quelques secondes, ou doit être connectée/ouverte manuellement une première fois). Réessaie, ou ouvre $nom toi-même une fois."
         }
