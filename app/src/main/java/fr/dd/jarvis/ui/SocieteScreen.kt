@@ -42,7 +42,7 @@ import fr.dd.jarvis.ai.Prompts
 import fr.dd.jarvis.societe.core.*
 import java.time.LocalDate
 
-private val SUBS = listOf("Résumé", "Clients", "Devis", "Factures", "Paie", "Réglages")
+private val SUBS = listOf("Résumé", "Clients", "Devis", "Factures", "Équipe", "Fiches de paie", "Réglages")
 
 @Composable
 fun SocieteScreen(app: JarvisApp) {
@@ -56,7 +56,8 @@ fun SocieteScreen(app: JarvisApp) {
             1 -> ClientsTab(app)
             2 -> DocsTab(app, "devis")
             3 -> DocsTab(app, "facture")
-            4 -> PaieTab(app)
+            4 -> EquipeTab(app)
+            5 -> FichesPaieTab(app)
             else -> ReglagesTab(app)
         }
     }
@@ -484,25 +485,20 @@ private fun DocEditor(doc: Doc, onClose: () -> Unit, onSave: (Doc) -> Unit) {
     }
 }
 
-// ---------------------------------------------------------------------- Paie
+// ---------------------------------------------------------------------- Équipe (employés + dirigeant, base contractuelle)
 
 @Composable
-private fun PaieTab(app: JarvisApp) {
+private fun EquipeTab(app: JarvisApp) {
     val svc = app.societe
     val d = svc.data
-    var bulletin by remember { mutableStateOf<String?>(null) }
     var bilan by remember { mutableStateOf<String?>(null) }
     var adding by remember { mutableStateOf(false) }
     var editEmp by remember { mutableStateOf<Employe?>(null) }
-    var bulletinEmp by remember { mutableStateOf<Employe?>(null) }
-    var mois by remember { mutableStateOf(LocalDate.now().toString().take(7)) }
 
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
-            HudPanel(Modifier.fillMaxWidth(), title = "Bulletins de paie") {
-                Text("⚠️ Estimation simplifiée (taux globaux, modifiables dans Réglages). À faire valider par un expert-comptable ou un logiciel de paie.", color = HudDim, fontSize = 12.sp)
-                Spacer(Modifier.height(6.dp))
-                HudTextField(mois, { mois = it }, Modifier.fillMaxWidth(), label = "Mois (aaaa-mm)")
+            HudPanel(Modifier.fillMaxWidth(), title = "Équipe") {
+                Text("Déclare ici chaque salarié (ou toi-même en dirigeant) avec sa base contractuelle : 35h/39h/40h et le salaire net mensuel visé (ou brut). C'est cette base qui sert ensuite pour la création des fiches de paie.", color = HudDim, fontSize = 12.sp)
             }
         }
         item {
@@ -513,20 +509,17 @@ private fun PaieTab(app: JarvisApp) {
         }
         if (d.employes.isEmpty()) item { Text("Aucun employé. Le dirigeant se déclare aussi ici (statut dirigeant).", color = HudDim, fontSize = 13.sp) }
         items(d.employes, key = { it.id }) { e ->
-            HudPanel(Modifier.fillMaxWidth(), onClick = {
-                if (Regex("\\d{4}-\\d{2}").matches(mois)) bulletinEmp = e
-            }) {
+            HudPanel(Modifier.fillMaxWidth(), onClick = { editEmp = e }) {
                 Text("${e.nom} (${e.statut})", color = HudText, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Text(
                     "${e.poste.ifBlank { "—" }} · " + (if (e.netMensuelVise > 0) "net visé ${euro(e.netMensuelVise)}/mois" else "brut ${euro(e.brutMensuel)}/mois") +
-                        " · ${nombre(e.heuresHebdo)} h/sem · touche pour le bulletin de $mois",
+                        " · contrat ${nombre(e.heuresHebdo)} h/semaine",
                     color = HudDim, fontSize = 12.sp
                 )
                 TextButton({ editEmp = e }) { Text("✎ Modifier", color = LocalAccent.current, fontSize = 12.sp) }
             }
         }
     }
-    bulletin?.let { md -> Dialogue("Bulletin", { bulletin = null }, actions = { Action("PDF") { svc.partagerPdf("Bulletin $mois", md) } }) { MarkdownText(md) } }
     bilan?.let { md -> Dialogue("Réserve", { bilan = null }) { MarkdownText(md) } }
     if (adding) EmployeForm(app, null, d.employes.none { it.statut == "dirigeant" }, { adding = false }) { e ->
         svc.repo.update { it.copy(employes = it.employes + e) }; adding = false
@@ -536,39 +529,82 @@ private fun PaieTab(app: JarvisApp) {
             svc.repo.update { x -> x.copy(employes = x.employes.map { if (it.id == e.id) e else it }) }; editEmp = null
         }
     }
-    bulletinEmp?.let { e ->
-        BulletinSaisieForm(e, mois, { bulletinEmp = null }) { heuresEff, netV, primes ->
-            bulletin = svc.bulletin(e, mois, primes, heuresEff, netV).first
-            bulletinEmp = null
-        }
-    }
 }
 
-/** Petite saisie avant génération d'un bulletin : heures standard (contrat), heures réellement effectuées (heures sup calculées auto), ou net réellement versé (heures déduites auto). */
+// ---------------------------------------------------------------------- Fiches de paie (création d'un bulletin pour un mois)
+
 @Composable
-private fun BulletinSaisieForm(e: Employe, mois: String, onClose: () -> Unit, onGenerer: (heuresEffectuees: Double?, netVerse: Double?, primes: Double) -> Unit) {
-    var mode by remember { mutableStateOf(0) } // 0 = standard, 1 = heures effectuées, 2 = net versé
+private fun FichesPaieTab(app: JarvisApp) {
+    val svc = app.societe
+    val d = svc.data
+    var empId by remember { mutableStateOf(d.employes.firstOrNull()?.id) }
+    var mois by remember { mutableStateOf(LocalDate.now().toString().take(7)) }
+    var mode by remember { mutableStateOf(0) } // 0 = standard (contrat), 1 = heures effectuées, 2 = net versé
     var saisie by remember { mutableStateOf("") }
     var primes by remember { mutableStateOf("0") }
+    var bulletin by remember { mutableStateOf<String?>(null) }
+    var erreur by remember { mutableStateOf("") }
     fun n(t: String) = t.replace(',', '.').trim().toDoubleOrNull()
-    Dialogue("Bulletin — ${e.nom} ($mois)", onClose, actions = {
-        Action("Générer") {
-            val v = n(saisie)
-            onGenerer(if (mode == 1) v else null, if (mode == 2) v else null, n(primes) ?: 0.0)
+    val e = d.employes.firstOrNull { it.id == empId }
+
+    LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item {
+            HudPanel(Modifier.fillMaxWidth(), title = "Création d'une fiche de paie") {
+                Text("⚠️ Estimation simplifiée (taux standards, modifiables dans Réglages). À faire valider par un expert-comptable ou un logiciel de paie.", color = HudDim, fontSize = 12.sp)
+            }
         }
-    }) {
-        Text("Base contractuelle : ${nombre(e.heuresHebdo)} h/semaine.", color = HudDim, fontSize = 12.sp)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            HudChip("Heures standard", mode == 0) { mode = 0; saisie = "" }
-            HudChip("Heures effectuées", mode == 1) { mode = 1 }
-            HudChip("Net versé", mode == 2) { mode = 2 }
+        if (d.employes.isEmpty()) {
+            item { Text("Aucun employé déclaré. Ajoute d'abord ton équipe dans l'onglet Équipe.", color = HudDim, fontSize = 13.sp) }
+        } else {
+            item {
+                HudPanel(Modifier.fillMaxWidth(), title = "Qui et quand") {
+                    Text("Salarié / dirigeant", color = HudDim, fontSize = 12.sp)
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        d.employes.forEach { emp -> HudChip(emp.nom, selected = emp.id == empId) { empId = emp.id; bulletin = null; erreur = "" } }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    HudTextField(mois, { mois = it; bulletin = null }, Modifier.fillMaxWidth(), label = "Mois (aaaa-mm)")
+                }
+            }
+            if (e != null) item {
+                HudPanel(Modifier.fillMaxWidth(), title = "Ce mois-ci") {
+                    Text("Base contractuelle : ${nombre(e.heuresHebdo)} h/semaine.", color = HudDim, fontSize = 12.sp)
+                    Spacer(Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        HudChip("Heures standard", mode == 0) { mode = 0; saisie = ""; bulletin = null }
+                        HudChip("Heures effectuées", mode == 1) { mode = 1; bulletin = null }
+                        HudChip("Net versé", mode == 2) { mode = 2; bulletin = null }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    when (mode) {
+                        1 -> HudTextField(saisie, { saisie = it; bulletin = null }, Modifier.fillMaxWidth(), label = "Heures réellement travaillées ce mois")
+                        2 -> HudTextField(saisie, { saisie = it; bulletin = null }, Modifier.fillMaxWidth(), label = "Montant net réellement versé ce mois (€)")
+                        else -> Text("Heures contractuelles du mois, sans heure supplémentaire.", color = HudDim, fontSize = 12.sp)
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    HudTextField(primes, { primes = it; bulletin = null }, Modifier.fillMaxWidth(), label = "Primes du mois (€, optionnel)")
+                    if (erreur.isNotBlank()) { Spacer(Modifier.height(6.dp)); Text(erreur, color = Color(0xFFFF4D6D), fontSize = 12.sp) }
+                    Spacer(Modifier.height(8.dp))
+                    HudButton("Générer la fiche de paie") {
+                        if (!Regex("\\d{4}-\\d{2}").matches(mois)) { erreur = "Mois invalide (format aaaa-mm)."; return@HudButton }
+                        if (mode != 0 && n(saisie) == null) { erreur = "Renseigne une valeur valide."; return@HudButton }
+                        erreur = ""
+                        val heuresEff = if (mode == 1) n(saisie) else null
+                        val netV = if (mode == 2) n(saisie) else null
+                        bulletin = svc.bulletin(e, mois, n(primes) ?: 0.0, heuresEff, netV).first
+                    }
+                }
+            }
+            bulletin?.let { md ->
+                item {
+                    HudPanel(Modifier.fillMaxWidth(), title = "Bulletin généré") {
+                        MarkdownText(md)
+                        Spacer(Modifier.height(8.dp))
+                        HudButton("Partager en PDF") { svc.partagerPdf("Bulletin $mois", md) }
+                    }
+                }
+            }
         }
-        when (mode) {
-            1 -> HudTextField(saisie, { saisie = it }, Modifier.fillMaxWidth(), label = "Heures réellement travaillées ce mois")
-            2 -> HudTextField(saisie, { saisie = it }, Modifier.fillMaxWidth(), label = "Montant net réellement versé ce mois (€)")
-            else -> Text("Utilise les heures contractuelles du mois, sans heures supplémentaires.", color = HudDim, fontSize = 12.sp)
-        }
-        HudTextField(primes, { primes = it }, Modifier.fillMaxWidth(), label = "Primes du mois (€, optionnel)")
     }
 }
 
