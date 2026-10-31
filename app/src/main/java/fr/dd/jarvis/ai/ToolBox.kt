@@ -344,7 +344,7 @@ class ToolBox(
         "minuteur_creer" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.device.Horloge.creerMinuteur(app, a.optString("secondes").toDoubleOrNull()?.toInt() ?: 0, a.optString("libelle")) })
         "chronometre" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.device.Horloge.chronometre(app, a.optString("action")) })
         "alarmes_liste" -> ToolResult(fr.dd.jarvis.device.Horloge.liste(app), direct = true)
-        "jouer_musique" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.playMusic(a.optString("requete"), a.optString("appli").ifBlank { app.store.appPrefs["musique"].orEmpty() }.also { if (a.optString("toujours").lowercase() in setOf("true", "oui", "1") && a.optString("appli").isNotBlank()) app.store.setAppPref("musique", a.optString("appli").trim()) }) })
+        "jouer_musique" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.playMusic(a.optString("requete"), a.optString("appli").ifBlank { app.store.appPrefs["musique"].orEmpty() }.also { if (a.optString("toujours").lowercase() in setOf("true", "oui", "1") && a.optString("appli").isNotBlank()) app.store.setAppPref("musique", a.optString("appli").trim()) }) }, direct = true)
         "controle_media" -> ToolResult(app.phone.mediaKey(a.optString("action")))
         "naviguer" -> {
             var appli = a.optString("appli").trim()

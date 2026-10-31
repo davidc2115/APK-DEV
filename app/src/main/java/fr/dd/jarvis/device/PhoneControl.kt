@@ -182,9 +182,13 @@ class PhoneControl(private val ctx: Context) {
         if (r.isNotBlank()) return r
         val nom = pkg?.let { findPackage(it)?.second ?: it } ?: "l'application de musique"
         // Pas la peine d'essayer de piloter la session média si la permission qui le permet n'est pas accordée :
-        // c'est une autorisation À PART (« Accès aux notifications »), différente de l'Accessibilité.
+        // c'est un « accès spécial », pas une autorisation listée dans la page Autorisations classique de l'appli.
+        val accordee = androidx.core.app.NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
+        if (!accordee) {
+            return "⚠️ $nom s'est ouverte, mais pour que je lance vraiment la lecture j'ai besoin de l'accès spécial « Accès aux notifications ». Il n'est PAS dans la page « Autorisations » classique de l'appli : ouvre JARVIS → Réglages → section Autorisations → bouton « Accès notifications », ou Réglages Android → Notifications → Accès aux notifications → JARVIS → Activer. Redemande ensuite « lance la lecture »."
+        }
         if (!fr.dd.jarvis.service.JarvisNotificationListener.active) {
-            return "⚠️ $nom s'est ouverte, mais pour que je lance vraiment la lecture j'ai besoin de l'autorisation « Accès aux notifications » (différente de l'Accessibilité) : Réglages Android → Applications → JARVIS → Autorisations → Accès aux notifications → Activer. Une fois ça fait, redemande « lance la lecture »."
+            return "⚠️ $nom s'est ouverte ; l'accès aux notifications est activé dans Android mais pas encore connecté à JARVIS. Ferme complètement JARVIS (pas juste l'écran — depuis les applications récentes) puis rouvre-la, et redemande « lance la lecture »."
         }
         // Ouvrir l'appli ne suffit pas : on pilote sa session média (comme un assistant) pour lancer vraiment la lecture.
         val etat = lancerLecture(pkg, requete)
