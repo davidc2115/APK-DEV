@@ -182,7 +182,13 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 if (imps.isNotEmpty()) sb.append("\n**🖨️ Imprimantes (mDNS)** : " + imps.distinctBy { it.host }.joinToString(" · ") { "${it.nom} (${it.host})" } + "\n")
                 sb.append("\n💾 $neufs nouvel(s) appareil(s) enregistré(s)." + (if (pub.isNotBlank()) " 🌍 IP publique : **$pub**." else "") + (if (chg.isNotBlank()) "\n$chg" else ""))
                 sb.append("\n\n🔎 ${Reseau.diag}")
-                if (liste.size <= 2) sb.append("\n⚠️ Très peu d'appareils vus : la box isole peut-être les appareils Wi-Fi (« isolation AP/clients »), ou un VPN est actif. Essaie « scanne le réseau via le serveur » pour une analyse complète depuis le réseau du serveur.")
+                if (liste.size <= 2 && Serveur.sshConfigure(app)) {
+                    val l2 = runCatching { Serveur.scanReseau(app) }.getOrDefault(emptyList())
+                    if (l2.isNotEmpty()) {
+                        val n2 = Registre.appareils(app, l2, "Réseau du serveur")
+                        sb.append("\n\n## 🖥️ Vus depuis ton serveur Debian (${l2.size})\n| IP | MAC | Type | Ports |\n|---|---|---|---|\n" + l2.joinToString("\n") { "| ${it.ip} | ${it.info.removePrefix("MAC ")} | ${it.type} | ${it.ports.joinToString(",")} |" } + "\n💾 $n2 nouvel(s) enregistré(s).")
+                    }
+                } else if (liste.size <= 2) sb.append("\n⚠️ Très peu d'appareils vus : la box isole peut-être les appareils Wi-Fi (« isolation AP/clients »), ou un VPN est actif. Essaie « scanne le réseau via le serveur » pour une analyse complète depuis le réseau du serveur.")
                 ToolResult(sb.toString(), direct = true)
             }
             "appareil_sonder" -> {

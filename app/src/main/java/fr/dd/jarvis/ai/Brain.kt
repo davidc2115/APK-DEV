@@ -18,6 +18,19 @@ class Brain(
     suspend fun reply(history: List<ChatMsg>, onStatus: (String) -> Unit): String {
         val recent = history.takeLast(4).filter { it.fromUser }.joinToString(" ") { it.text }
         val societeOn = fr.dd.jarvis.societe.SocieteTools.concerned(recent)
+        // Recherche d'imprimante / scan du réseau : toujours par l'outil, jamais par le modèle (qui inventait des appareils).
+        val dernier = history.lastOrNull { it.fromUser }?.text.orEmpty().lowercase()
+        val outilDirect = when {
+            Regex("imprimante").containsMatchIn(dernier) && Regex("cherch|trouv|d[ée]tect|recherch|list|scan|quelle|o[uù] est|y a.t.il").containsMatchIn(dernier)
+                && !Regex("imprime[rz]? (ce|le|la|mon|ma|un|une|cette)|lance l.impression").containsMatchIn(dernier) -> "imprimantes_trouver"
+            Regex("(scan|analys|d[ée]tect|list|cherch|affich).{0,25}(r[ée]seau|wi-?fi|appareils)|appareils connect").containsMatchIn(dernier) -> "reseau_scanner"
+            else -> null
+        }
+        if (outilDirect != null) {
+            onStatus("⚙️ $outilDirect…")
+            val args = JSONObject(); if (dernier.contains("serveur")) args.put("via", "serveur")
+            return try { tools.execute(outilDirect, args).text } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { "❌ ${e.message}" }
+        }
         onStatus("🧠 Analyse de la demande…")
         val all = tools.schemaAll()
         val plan = try { Analyseur.analyser(app, history, all) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { null }
@@ -42,7 +55,14 @@ class Brain(
                 llm.groqChat(messages, schema)
             } catch (e: ApiException) {
                 // Llama génère parfois un appel d'outil mal formé : on réessaie sans outils plutôt que d'échouer.
-                if (e.code == 400 && (e.message ?: "").contains("tool_use_failed")) llm.groqChat(messages, null) else throw e
+                if (e.code == 400 && (e.message ?: "").contains("tool_use_failed")) {
+                    try { llm.groqChat(messages, schema) } catch (e2: ApiException) {
+                        if (e2.code != 400) throw e2
+                        val m2 = JSONArray(); for (k in 0 until messages.length()) m2.put(messages.get(k))
+                        m2.put(JSONObject().put("role", "system").put("content", "L'appel d'outil a échoué pour ce tour. N'invente AUCUNE donnée (appareils, imprimantes, mails, événements, fichiers) : dis simplement que l'action n'a pas pu être lancée et demande de réessayer."))
+                        llm.groqChat(m2, null)
+                    }
+                } else throw e
             }
             val calls = msg.optJSONArray("tool_calls")
             if (calls == null || calls.length() == 0) {

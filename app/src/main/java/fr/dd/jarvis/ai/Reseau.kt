@@ -77,6 +77,29 @@ object Reseau {
         catch (e: Exception) { -1 }
     }
 
+    /** Résultat brut d'une connexion TCP (pour le diagnostic) : ouvert, refusé, délai dépassé ou message d'erreur du système. */
+    private fun detailTcp(ip: String, port: Int, ms: Int = 1200): String = try {
+        Socket().use { sk -> runCatching { wifiNet?.bindSocket(sk) }; sk.connect(InetSocketAddress(ip, port), ms) }; "ouvert"
+    } catch (e: java.net.SocketTimeoutException) { "délai dépassé" }
+    catch (e: Exception) { (e.message ?: e.javaClass.simpleName).substringAfterLast(": ").take(48) }
+
+    /** Pourquoi le scan ne voit personne : permission réseau local, VPN, et réponse brute de la box. */
+    private fun diagBlocage(ctx: Context, i: Infos): String {
+        val sb = StringBuilder()
+        if (android.os.Build.VERSION.SDK_INT >= 36) {
+            val ok = androidx.core.content.ContextCompat.checkSelfPermission(ctx, "android.permission.ACCESS_LOCAL_NETWORK") == android.content.pm.PackageManager.PERMISSION_GRANTED
+            sb.append("Permission « Appareils à proximité / réseau local » : ${if (ok) "accordée" else "REFUSÉE ❌ (Réglages Android › Applications › JARVIS › Autorisations › Appareils à proximité)"}\n")
+        }
+        val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val vpn = cm.allNetworks.any { cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true }
+        sb.append("VPN actif : ${if (vpn) "oui ⚠️" else "non"}\n")
+        if (i.passerelle.isNotBlank()) {
+            sb.append("Box ${i.passerelle} : " + listOf(80, 443, 53).joinToString(" · ") { "port $it → ${detailTcp(i.passerelle, it)}" } + "\n")
+            sb.append("Ping box : ${runCatching { InetAddress.getByName(i.passerelle).isReachable(1200) }.getOrDefault(false)}")
+        }
+        return sb.toString().trim()
+    }
+
     private val PORTS = listOf(80, 443, 22, 445, 139, 9100, 631, 515, 8080, 8123, 5000, 554, 1883, 8009, 7000, 62078, 53, 23, 3389, 5900, 8000, 32400, 8096)
 
     private fun typeDe(p: List<Int>, titre: String): String {
@@ -145,6 +168,7 @@ object Reseau {
         val parIp = trouves.associateBy { it.ip }.toMutableMap()
         for (ip in (upnp.keys + mdns.keys)) if (!parIp.containsKey(ip) && prive(ip)) parIp[ip] = Appareil(ip, nomHote(ip), emptyList(), "", "❔ appareil")
         diag = "Sous-réseau ${hosts.first().substringBeforeLast('.')}.0/$pref (${hosts.size} adresses testées, liées au Wi-Fi ${if (wifiNet != null) "✔" else "✘ (réseau actif par défaut)"}) · réponses ICMP : ${icmpOk.get()} · TCP : ${tcpOk.get()} · UPnP : ${upnp.size} · mDNS : ${mdns.size}"
+        if (trouves.count { it.ip != i.ip } == 0 && upnp.isEmpty() && mdns.isEmpty()) diag += "\n" + diagBlocage(ctx, i)
         parIp.values.map { d ->
             val info = (upnp[d.ip].orEmpty().ifBlank { mdns[d.ip]?.distinct()?.joinToString(", ").orEmpty() }).take(70)
             d.copy(info = info)
