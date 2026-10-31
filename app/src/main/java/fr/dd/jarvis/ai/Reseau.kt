@@ -120,6 +120,23 @@ object Reseau {
         }
     }
 
+    /** Devine le fabricant depuis les 3 premiers octets de l'adresse MAC (table réduite aux marques courantes). */
+    fun fabricant(mac: String): String? {
+        val p = mac.uppercase().replace("-", ":").split(":").take(3).joinToString(":")
+        return OUI[p]
+    }
+    private val OUI = mapOf(
+        "F0:18:98" to "📱 Apple", "AC:DE:48" to "📱 Apple", "3C:06:30" to "📱 Apple", "A4:83:E7" to "📱 Apple", "DC:A6:32" to "🖥️ Raspberry Pi",
+        "B8:27:EB" to "🖥️ Raspberry Pi", "E4:5F:01" to "🖥️ Raspberry Pi", "28:CD:C4" to "📷 Caméra (Sonoff/eWeLink)", "EC:FA:BC" to "🔌 ESP/IoT (Espressif)",
+        "24:62:AB" to "🔌 ESP/IoT (Espressif)", "AC:67:B2" to "🔌 ESP/IoT (Espressif)", "CC:50:E3" to "🔌 ESP/IoT (Espressif)",
+        "00:17:88" to "💡 Philips Hue", "EC:B5:FA" to "📱 Samsung", "88:36:6C" to "📱 Samsung", "CC:07:AB" to "📱 Samsung",
+        "D8:50:E6" to "📱 Samsung", "F8:04:2E" to "📱 Samsung", "3C:5A:B4" to "📱 Google / Nest", "F4:F5:D8" to "📱 Google / Nest",
+        "64:16:66" to "📱 Xiaomi", "78:11:DC" to "📱 Xiaomi", "F8:A2:6D" to "📱 Xiaomi", "28:6C:07" to "📱 Xiaomi",
+        "00:1A:11" to "📺 TV (Google)", "D4:6A:6A" to "📺 Chromecast", "B0:F1:EC" to "📷 Caméra (TP-Link)", "50:C7:BF" to "🔌 TP-Link",
+        "98:DA:C4" to "🔌 TP-Link", "AC:84:C6" to "🔌 TP-Link", "A4:2B:B0" to "🏠 Xiaomi (domotique)", "70:B3:D5" to "🖥️ serveur (loué)",
+        "00:0C:29" to "🖥️ machine virtuelle (VMware)", "08:00:27" to "🖥️ machine virtuelle (VirtualBox)", "DC:A6:32" to "🖥️ Raspberry Pi"
+    )
+
     fun titreWeb(ip: String, port: Int): String {
         val url = (if (port == 443 || port == 8443) "https" else "http") + "://$ip:$port/"
         return runCatching {
@@ -184,15 +201,17 @@ object Reseau {
         // Ports essentiels (une imprimante en veille met parfois un moment à répondre) ; « fermé mais l'hôte répond » prouve aussi sa présence.
         for (p in ESSENTIELS) { val r = ouvert(ip, p, if (vivant) 500 else 300); if (r == 1) { ouverts += p; vivant = true } else if (r == 0) vivant = true }
         if (!vivant) for (p in RAPIDES) if (p !in ESSENTIELS) { val r = ouvert(ip, p, 250); if (r >= 0) { vivant = true; if (r == 1) ouverts += p } }
-        var nb: String? = null
-        if (!vivant) { nb = netbios(ip); if (nb != null) vivant = true }
+        var nb: String? = netbios(ip)
+        if (nb != null) vivant = true
         if (!vivant) return null
         tcpOk?.incrementAndGet()
         for (p in PORTS) if (p !in ESSENTIELS && p !in RAPIDES && ouvert(ip, p, 250) == 1) ouverts += p
         val web = ouverts.firstOrNull { it in listOf(80, 8080, 443, 8123, 5000, 8000) }
         val titre = web?.let { titreWeb(ip, it) }.orEmpty()
-        val nom = nomHote(ip).ifBlank { (nb ?: netbios(ip))?.takeIf { it != "?" }.orEmpty() }
-        return Appareil(ip, nom, ouverts, titre, typeDe(ouverts, titre))
+        val nom = nomHote(ip).ifBlank { nb?.takeIf { it != "?" }.orEmpty() }
+        var type = typeDe(ouverts, titre)
+        if (type == "❔ appareil" && ouverts.isEmpty()) type = "📱 appareil mobile/IoT (aucun service réseau ouvert)"
+        return Appareil(ip, nom, ouverts, titre, type)
     }
 
     /** Sonde un seul appareil (adresse privée uniquement) : ports ouverts, titre de la page web. */

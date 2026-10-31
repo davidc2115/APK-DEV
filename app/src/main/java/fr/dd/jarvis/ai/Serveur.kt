@@ -27,6 +27,21 @@ object Serveur {
     /** Autre machine à joindre en SSH avec des identifiants donnés par l'utilisateur (sinon le serveur des Réglages). */
     data class Cible(val hote: String, val port: Int, val user: String, val pass: String, val jump: Boolean = false)
 
+    /** Traduit l'erreur technique JSch en explication compréhensible (mauvais mot de passe, hôte injoignable, port fermé…). */
+    fun expliquer(e: Exception, hote: String, port: Int): String {
+        val m = (e.message ?: "").lowercase()
+        return when {
+            e is java.net.UnknownHostException -> "Adresse « $hote » introuvable (faute de frappe, ou nom qui ne se résout pas depuis ce réseau)."
+            m.contains("auth fail") || m.contains("auth cancel") -> "Authentification refusée : utilisateur, mot de passe ou clé incorrects (vérifie Réglages › Serveur)."
+            e is java.net.ConnectException || m.contains("connection refused") -> "Connexion refusée par $hote:$port — rien n'écoute sur ce port, ou un pare-feu bloque SSH."
+            e is java.net.NoRouteToHostException -> "$hote est injoignable depuis ce réseau (hors ligne, mauvaise IP, ou réseau différent)."
+            e is java.net.SocketTimeoutException || m.contains("timeout") -> "Pas de réponse de $hote:$port dans le délai imparti (pare-feu, port fermé, ou mauvaise adresse distante/redirection de port)."
+            m.contains("host key") -> "L'empreinte du serveur a changé (réinstallation ?) — efface « Empreinte mémorisée » dans Réglages › Serveur et réessaie."
+            m.contains("key") && m.contains("invalid") -> "Clé privée invalide ou mal collée (format PEM/OpenSSH attendu)."
+            else -> e.message ?: e.javaClass.simpleName
+        }
+    }
+
     private fun ouvrir(app: JarvisApp, cible: Cible? = null): Session {
         if (cible != null) {
             val s = JSch().getSession(cible.user, cible.hote, cible.port)
@@ -63,18 +78,21 @@ object Serveur {
     }
 
     private fun <T> session(app: JarvisApp, cible: Cible? = null, f: (Session) -> T): T {
-        if (cible != null && cible.jump) {
-            // Rebond par le serveur : tunnel SSH vers une machine de SON réseau local (accessible de n'importe où si le serveur l'est).
-            val main = ouvrir(app)
-            try {
-                val lp = main.setPortForwardingL(0, cible.hote, cible.port)
-                val s2 = JSch().getSession(cible.user, "127.0.0.1", lp)
-                s2.setPassword(cible.pass); s2.setConfig("StrictHostKeyChecking", "no"); s2.connect(15000)
-                try { return f(s2) } finally { runCatching { s2.disconnect() } }
-            } finally { runCatching { main.disconnect() } }
-        }
-        val s = ouvrir(app, cible)
-        try { return f(s) } finally { runCatching { s.disconnect() } }
+        val hote = cible?.hote ?: app.store.sshHost.value; val port = cible?.port ?: (app.store.sshPort.value.toIntOrNull() ?: 22)
+        try {
+            if (cible != null && cible.jump) {
+                // Rebond par le serveur : tunnel SSH vers une machine de SON réseau local (accessible de n'importe où si le serveur l'est).
+                val main = ouvrir(app)
+                try {
+                    val lp = main.setPortForwardingL(0, cible.hote, cible.port)
+                    val s2 = JSch().getSession(cible.user, "127.0.0.1", lp)
+                    s2.setPassword(cible.pass); s2.setConfig("StrictHostKeyChecking", "no"); s2.connect(15000)
+                    try { return f(s2) } finally { runCatching { s2.disconnect() } }
+                } finally { runCatching { main.disconnect() } }
+            }
+            val s = ouvrir(app, cible)
+            try { return f(s) } finally { runCatching { s.disconnect() } }
+        } catch (e: Exception) { throw IllegalStateException(expliquer(e, hote, port), e) }
     }
 
     /** Exécute une commande ; « sudo » utilise le mot de passe enregistré. Retourne (code de sortie, sortie). */
@@ -158,7 +176,9 @@ object Serveur {
         }
         return mac.keys.sortedBy { ip -> ip.split(".").map { it.toIntOrNull() ?: 0 }.fold(0L) { a, b -> a * 256 + b } }.map { ip ->
             val p = ports[ip].orEmpty().sorted()
-            Reseau.Appareil(ip, "", p, "", Reseau.typeDeApp(p, ""), "MAC ${mac[ip]}")
+            val m = mac[ip].orEmpty()
+            val type = Reseau.typeDeApp(p, "").let { t -> if (t == "❔ appareil") Reseau.fabricant(m) ?: t else t }
+            Reseau.Appareil(ip, "", p, "", type, "MAC $m")
         }
     }
 

@@ -17,6 +17,20 @@ object Box {
 
     fun hote(app: JarvisApp): String = app.store.boxHost.value.trim().ifBlank { Reseau.infos(app)?.passerelle.orEmpty() }
 
+    /** Traduit l'erreur SMB/FTP en explication compréhensible. */
+    private fun expliquer(e: Exception, h: String): String {
+        val m = (e.message ?: "").lowercase()
+        return when {
+            e is java.net.UnknownHostException -> "Adresse « $h » introuvable."
+            m.contains("logon failure") || m.contains("access is denied") || m.contains("access_denied") || m.contains("identifiants") -> "Identifiants refusés par la box : vérifie l'utilisateur et le mot de passe du partage dans Réglages › Box (ou laisse-les vides pour l'invité, s'il est autorisé)."
+            m.contains("stacksavana") || m.contains("logon_failure") -> "Identifiants refusés par la box."
+            e is java.net.ConnectException || m.contains("connection refused") -> "Connexion refusée par $h : le partage de fichiers n'est peut-être pas activé sur la box (interface de la box › réglages du disque dur / partage réseau)."
+            e is java.net.SocketTimeoutException || m.contains("timeout") -> "Pas de réponse de $h : vérifie l'adresse de la box dans Réglages › Box, et que le partage de fichiers est activé."
+            m.contains("no such file") || m.contains("does not exist") -> "Dossier ou partage introuvable à ce chemin."
+            else -> e.message ?: e.javaClass.simpleName
+        }
+    }
+
     private fun fmt(n: Long) = when { n >= 1 shl 30 -> "%.1f Go".format(n / 1073741824.0); n >= 1 shl 20 -> "%.1f Mo".format(n / 1048576.0); n >= 1024 -> "${n / 1024} Ko"; else -> "$n o" }
     private val dateFmt get() = java.text.SimpleDateFormat("dd/MM/yy HH:mm", java.util.Locale.FRENCH)
 
@@ -75,6 +89,10 @@ object Box {
         val h = hote(app)
         if (h.isBlank()) return "Adresse de la box inconnue : connecte-toi à son Wi-Fi ou renseigne-la dans Réglages › Box."
         val smb = app.store.boxProto.value != "ftp"
+        return try { actionInterne(app, action, chemin, fichier, h, smb) } catch (e: Exception) { throw IllegalStateException(expliquer(e, h), e) }
+    }
+
+    private fun actionInterne(app: JarvisApp, action: String, chemin: String, fichier: String, h: String, smb: Boolean): String {
         return when (action.lowercase()) {
             "partages", "lister" -> {
                 val c = if (action.lowercase() == "partages") "" else chemin
