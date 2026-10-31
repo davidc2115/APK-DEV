@@ -253,7 +253,7 @@ class ToolBox(
 
     // ------------------------------------------------------------------ exécution
 
-    suspend fun execute(name: String, a: JSONObject): ToolResult = when (name) {
+    suspend fun execute(name: String, a: JSONObject): ToolResult { return when (name) {
         "get_planning" -> getPlanning(a)
         "create_event" -> createEvent(a)
         "update_event" -> updateEvent(a)
@@ -487,7 +487,7 @@ class ToolBox(
         in ServeurTools.NAMES -> serveur.execute(name, a)
         in DiscordTools.NAMES -> discord.execute(name, a)
         else -> ToolResult("Outil inconnu : $name")
-    }
+    } }
 
     private val dayFmt = DateTimeFormatter.ofPattern("EEE dd/MM", Locale.FRENCH)
     private val timeFmt = DateTimeFormatter.ofPattern("HH:mm")
