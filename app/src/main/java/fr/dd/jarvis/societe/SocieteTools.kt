@@ -59,6 +59,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "tel" to prop("Téléphone."), "email" to prop("Email."), "iban" to prop("IBAN."), "bic" to prop("BIC."),
             "tva_defaut" to prop("Taux de TVA par défaut en % (ex. 20, 10, 5.5)."),
             "franchise_tva" to prop("« true » si TVA non applicable (micro-entreprise, art. 293 B)."),
+            "tarifs_saisis_ttc" to prop("« true » si les prix donnés pour tarif_set sont TTC (convertis en HT automatiquement) ; « false » (défaut) s'ils sont déjà HT."),
             "delai_paiement_jours" to prop("Délai de paiement des factures en jours."),
             "validite_devis_jours" to prop("Durée de validité des devis en jours."),
             "mentions" to prop("Mentions légales complémentaires (assurance décennale, RCS…)."),
@@ -174,6 +175,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         if (a.hv("bic")) s = s.copy(bic = a.s("bic"))
         a.dbl("tva_defaut")?.let { s = s.copy(tvaDefaut = it) }
         a.bool("franchise_tva")?.let { s = s.copy(franchiseTva = it) }
+        a.bool("tarifs_saisis_ttc")?.let { s = s.copy(tarifsSaisisTtc = it) }
         a.s("delai_paiement_jours").toIntOrNull()?.let { s = s.copy(delaiPaiementJours = it) }
         a.s("validite_devis_jours").toIntOrNull()?.let { s = s.copy(validiteDevisJours = it) }
         if (a.hv("mentions")) s = s.copy(mentions = a.s("mentions"))
@@ -193,7 +195,8 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             append("- 📍 Siège : ${s.adresse.ifBlank { "non renseigné" }}\n")
             append("- 📞 ${s.tel.ifBlank { "—" }} · ✉️ ${s.email.ifBlank { "—" }}\n")
             append("- IBAN : ${s.iban.ifBlank { "—" }}\n")
-            append("- TVA : " + (if (s.franchiseTva) "non applicable (art. 293 B)" else "${nombre(s.tvaDefaut)} %") + " · paiement ${s.delaiPaiementJours} j · devis valable ${s.validiteDevisJours} j\n\n")
+            append("- TVA : " + (if (s.franchiseTva) "non applicable (art. 293 B)" else "${nombre(s.tvaDefaut)} %") + " · paiement ${s.delaiPaiementJours} j · devis valable ${s.validiteDevisJours} j\n")
+            append("- Tarifs saisis en : " + (if (s.tarifsSaisisTtc) "TTC (convertis en HT à l'enregistrement)" else "HT") + "\n\n")
             append("## 💶 Tarifs\n")
             if (d.tarifs.isEmpty()) append("Aucun tarif enregistré.\n")
             d.tarifs.forEach { t -> append("- **${t.designation}** (${t.mode.name.lowercase()}) : ${Pricing.libelleTranches(t)}\n") }
@@ -219,10 +222,13 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         var tr = Pricing.parserTranches(a.s("tranches"))
         if (tr.isEmpty()) a.dbl("tranches")?.let { tr = listOf(Tranche(KWC_MAX, it)) }
         if (tr.isEmpty()) return err("Tranches illisibles. Format attendu : « 0-3:150; 3-9:220; 9+:350 ».")
+        val tva = a.dbl("tva") ?: d.societe.tvaDefaut
+        if (d.societe.tarifsSaisisTtc && !d.societe.franchiseTva) tr = tr.map { it.copy(prix = versHt(it.prix, tva, true)) }
         val existing = Pricing.trouverTarif(d.tarifs, nom)?.takeIf { normaliser(it.designation) == normaliser(nom) }
         val t = Tarif(existing?.designation ?: nom, mode, tr, a.dbl("tva"))
         svc.repo.update { it.copy(tarifs = it.tarifs.filterNot { x -> x.designation == t.designation } + t) }
-        return ok("✅ Tarif ${if (existing != null) "modifié" else "enregistré"} : **${t.designation}** (${mode.name.lowercase()}) — ${Pricing.libelleTranches(t)}")
+        val note = if (d.societe.tarifsSaisisTtc && !d.societe.franchiseTva) " (saisi en TTC, converti en HT)" else ""
+        return ok("✅ Tarif ${if (existing != null) "modifié" else "enregistré"} : **${t.designation}** (${mode.name.lowercase()}) — ${Pricing.libelleTranches(t)}$note")
     }
 
     private fun tarifDelete(a: JSONObject): ToolResult {

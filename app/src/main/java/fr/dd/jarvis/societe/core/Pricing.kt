@@ -10,6 +10,10 @@ import kotlin.math.round
 
 fun round2(x: Double): Double = round(x * 100.0) / 100.0
 
+/** Convertit un prix saisi en HT si la société saisit ses tarifs en TTC (Réglages › Société). Inchangé sinon. */
+fun versHt(prixSaisi: Double, tva: Double, saisieTtc: Boolean): Double =
+    if (saisieTtc && tva > 0.0) round2(prixSaisi / (1.0 + tva / 100.0)) else prixSaisi
+
 /** 1 234,56 € */
 fun euro(x: Double): String {
     val s = String.format(Locale.US, "%,.2f", x)
@@ -104,14 +108,20 @@ object Pricing {
         return Remise(pct, parts.joinToString(" ; "))
     }
 
-    /** Frais de déplacement pour une distance [kmAller] (trajet simple, siège → client). */
-    fun deplacement(r: Regles, kmAller: Double): Double {
-        if (kmAller <= 0.0) return 0.0
-        val factures = max(0.0, kmAller - r.kmGratuits)
-        val total = factures * (if (r.allerRetour) 2 else 1) * r.kmPrix
+    /** Détail des frais de déplacement : montant total, nombre de km réellement facturés (après km offerts et aller-retour),
+     *  et si le minimum forfaitaire a dû s'appliquer (auquel cas la ventilation « km × prix/km » ne correspond plus au montant). */
+    data class DeplacementDetail(val total: Double, val kmFactures: Double, val viaMinimum: Boolean)
+
+    fun deplacementDetail(r: Regles, kmAller: Double): DeplacementDetail {
+        if (kmAller <= 0.0) return DeplacementDetail(0.0, 0.0, false)
+        val kmFactures = round2(max(0.0, kmAller - r.kmGratuits) * (if (r.allerRetour) 2 else 1))
+        val montantKm = round2(kmFactures * r.kmPrix)
         val min = if (r.kmPrix > 0.0 || r.deplacementMin > 0.0) r.deplacementMin else 0.0
-        return round2(max(total, min))
+        return DeplacementDetail(round2(max(montantKm, min)), kmFactures, min > montantKm)
     }
+
+    /** Frais de déplacement pour une distance [kmAller] (trajet simple, siège → client). */
+    fun deplacement(r: Regles, kmAller: Double): Double = deplacementDetail(r, kmAller).total
 
     fun deplacementConfigure(r: Regles) = r.kmPrix > 0.0 || r.deplacementMin > 0.0
 
@@ -134,7 +144,6 @@ object Pricing {
     fun construireLignes(
         prestations: List<Triple<Tarif, Double, Double>>,   // (tarif, quantité demandée, puissance kWc)
         remisePct: Double,
-        fraisDeplacement: Double,
         distanceKm: Double?,
         regles: Regles,
         tvaDefaut: Double,
@@ -154,15 +163,34 @@ object Pricing {
                 tva = if (franchiseTva) 0.0 else (t.tva ?: tvaDefaut)
             )
         }
-        if (fraisDeplacement > 0.0) {
-            val km = distanceKm?.let { " (${nombre(round2(it))} km" + (if (regles.allerRetour) " aller, A/R" else "") + ")" } ?: ""
-            lignes += Ligne(
-                designation = "Frais de déplacement$km",
-                qte = 1.0, unite = "forfait", puHt = fraisDeplacement,
-                remisePct = if (regles.remiseSurDeplacement) remisePct else 0.0,
-                tva = if (franchiseTva) 0.0 else tvaDefaut,
-                genre = "deplacement"
-            )
+        if (distanceKm != null && distanceKm > 0.0 && deplacementConfigure(regles)) {
+            val det = deplacementDetail(regles, distanceKm)
+            if (det.total > 0.0) {
+                val sens = if (regles.allerRetour) " aller, A/R" else " aller simple"
+                val offerts = if (regles.kmGratuits > 0.0) " (${nombre(regles.kmGratuits)} km offerts)" else ""
+                if (regles.kmPrix > 0.0 && !det.viaMinimum) {
+                    // Ventilation réelle : nombre de km facturés × prix au km (au lieu d'un simple « forfait »).
+                    lignes += Ligne(
+                        designation = "Frais de déplacement – ${nombre(round2(distanceKm))} km$sens$offerts",
+                        qte = det.kmFactures, unite = "km", puHt = regles.kmPrix,
+                        remisePct = if (regles.remiseSurDeplacement) remisePct else 0.0,
+                        tva = if (franchiseTva) 0.0 else tvaDefaut,
+                        genre = "deplacement"
+                    )
+                } else {
+                    // Le minimum forfaitaire s'applique (ou seul un forfait est configuré, sans prix au km) : la ventilation
+                    // km × prix ne correspondrait plus au montant réellement facturé, donc on garde un forfait, mais en
+                    // indiquant quand même la distance parcourue pour que ce ne soit pas juste « 1 forfait » opaque.
+                    val suffixe = if (det.viaMinimum) " – forfait minimum" else ""
+                    lignes += Ligne(
+                        designation = "Frais de déplacement (${nombre(round2(distanceKm))} km$sens)$suffixe",
+                        qte = 1.0, unite = "forfait", puHt = det.total,
+                        remisePct = if (regles.remiseSurDeplacement) remisePct else 0.0,
+                        tva = if (franchiseTva) 0.0 else tvaDefaut,
+                        genre = "deplacement"
+                    )
+                }
+            }
         }
         return lignes to avertissements
     }

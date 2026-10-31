@@ -62,18 +62,16 @@ class SocieteService(
         val warn = mutableListOf<String>()
         val remise = remiseManuelle?.let { Remise(it, "remise exceptionnelle") } ?: d.remiseClient(client, date)
 
-        var frais = 0.0
         var km: Double? = null
         if (deplacement != false && Pricing.deplacementConfigure(d.regles)) {
             val r = distance(client, site)
             if (r == null) warn += "Distance introuvable (adresse du siège ou du client manquante/inconnue) : frais de déplacement non ajoutés."
             else {
                 km = r.km
-                frais = Pricing.deplacement(d.regles, r.km)
                 if (r.estime) warn += "Distance estimée à vol d'oiseau (service d'itinéraire indisponible)."
             }
         }
-        val (lignes, w) = Pricing.construireLignes(prestations, remise.pct, frais, km, d.regles, d.societe.tvaDefaut, d.societe.franchiseTva)
+        val (lignes, w) = Pricing.construireLignes(prestations, remise.pct, km, d.regles, d.societe.tvaDefaut, d.societe.franchiseTva)
         warn += w
         val toutes = lignes + libres.map {
             it.copy(remisePct = remise.pct, tva = if (d.societe.franchiseTva) 0.0 else it.tva)
@@ -149,7 +147,7 @@ class SocieteService(
         val client = data.client(doc.clientId)?.nom.orEmpty()
         val base = "${doc.numero} ${client}".trim()
         val loc = obsidian.saveIn(dossier, base, md)
-        runCatching { obsidian.saveBytes(dossier, "$base.pdf", PdfExporter.toPdf(md), "application/pdf") }
+        runCatching { obsidian.saveBytes(dossier, "$base.pdf", PdfExporter.toPdf(md, Logo.bitmap(ctx)), "application/pdf") }
         return loc
     }
 
@@ -192,10 +190,10 @@ class SocieteService(
 
     // ------------------------------------------------------------------ partage PDF
 
-    fun partagerPdf(nom: String, markdown: String) {
+    fun partagerPdf(nom: String, markdown: String, avecLogo: Boolean = false) {
         val dir = File(ctx.cacheDir, "share").apply { mkdirs() }
         val f = File(dir, nom.replace(Regex("[\\\\/:*?\"<>|]"), "_") + ".pdf")
-        f.writeBytes(PdfExporter.toPdf(markdown))
+        f.writeBytes(PdfExporter.toPdf(markdown, if (avecLogo) Logo.bitmap(ctx) else null))
         val uri = FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f)
         val i = Intent(Intent.ACTION_SEND).apply {
             type = "application/pdf"

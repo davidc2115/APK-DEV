@@ -1,8 +1,10 @@
 package fr.dd.jarvis.societe
 
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 import android.text.Layout
@@ -80,12 +82,26 @@ object PdfExporter {
         return out
     }
 
-    fun toPdf(markdown: String): ByteArray {
+    /** [logo] : dessiné en haute qualité (bitmap d'origine, filtré, jamais agrandi au-delà de sa résolution réelle) en
+     *  haut de la première page, au-dessus du contenu — qui démarre ensuite en dessous, sans jamais le chevaucher. */
+    fun toPdf(markdown: String, logo: Bitmap? = null): ByteArray {
         val doc = PdfDocument()
         var pageNum = 1
         var page = doc.startPage(PdfDocument.PageInfo.Builder(W, H, pageNum).create())
         var canvas: Canvas = page.canvas
         var y = M
+
+        if (logo != null && logo.width > 0 && logo.height > 0) {
+            val maxW = 150f; val maxH = 85f
+            // On ne force jamais une image en dessous de sa résolution réelle (en points PDF, 1pt ≈ 1,33 px à 96 dpi,
+            // donc une image de quelques centaines de pixels reste largement nette à cette taille d'affichage) : seule
+            // une image plus grande que la case réservée est réduite, jamais agrandie — garde le texte du logo net.
+            val ratio = minOf(maxW / logo.width, maxH / logo.height, 1f)
+            val w = logo.width * ratio; val h = logo.height * ratio
+            val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
+            canvas.drawBitmap(logo, null, RectF(M, y, M + w, y + h), p)
+            y += h + 12f
+        }
 
         fun nouvellePage() {
             doc.finishPage(page)

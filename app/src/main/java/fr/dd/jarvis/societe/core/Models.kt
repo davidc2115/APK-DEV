@@ -20,6 +20,7 @@ data class Societe(
     val bic: String = "",
     val tvaDefaut: Double = 20.0,
     val franchiseTva: Boolean = false,   // micro-entreprise : « TVA non applicable, art. 293 B du CGI »
+    val tarifsSaisisTtc: Boolean = false, // true : les prix saisis pour les tarifs sont TTC (convertis en HT à l'enregistrement) ; false : HT directement
     val delaiPaiementJours: Int = 30,
     val validiteDevisJours: Int = 30,
     val mentions: String = "",           // mentions légales complémentaires (assurance décennale, etc.)

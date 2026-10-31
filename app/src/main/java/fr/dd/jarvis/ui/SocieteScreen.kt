@@ -1,5 +1,8 @@
 package fr.dd.jarvis.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -8,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -28,6 +32,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -261,15 +267,21 @@ private fun DocsTab(app: JarvisApp, type: String) {
     val d = svc.data
     var selected by remember { mutableStateOf<String?>(null) }
     var editingDoc by remember { mutableStateOf<String?>(null) }
+    var creating by remember { mutableStateOf(false) }
     var info by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
     val list = d.docs.filter { it.type == type }.sortedByDescending { it.numero }
 
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
-            Text(
-                if (type == "devis") "Pour créer un devis, dis par exemple : « Fais un devis maintenance pour M. Dupont »."
-                else "Pour facturer : « Convertis le devis DEV-… en facture » ou « Fais une facture… ».", color = HudDim, fontSize = 12.sp
-            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(
+                    if (type == "devis") "Dis « Fais un devis maintenance pour M. Dupont », ou touche + pour en créer un manuellement."
+                    else "Dis « Convertis le devis DEV-… en facture », ou touche + pour une facture directe.", color = HudDim, fontSize = 12.sp,
+                    modifier = Modifier.weight(1f)
+                )
+                HudRoundButton(Icons.Filled.Add) { creating = true }
+            }
         }
         if (info.isNotBlank()) item { Text(info, color = LocalAccent.current, fontSize = 12.sp) }
         if (list.isEmpty()) item { Text("Aucun document.", color = HudDim, fontSize = 13.sp) }
@@ -286,8 +298,10 @@ private fun DocsTab(app: JarvisApp, type: String) {
         if (x == null) selected = null else {
             val md = Rendu.rendreDoc(d, x)
             Dialogue(x.numero, { selected = null }, actions = {
-                Action("PDF") { svc.partagerPdf(x.numero, md) }
+                Action("PDF") { svc.partagerPdf(x.numero, md, avecLogo = true) }
                 Action("Obsidian") { info = "📁 " + svc.exporter(x); selected = null }
+                if (x.type == "devis" && x.statut in setOf("brouillon", "envoye"))
+                    Action("✅ Valider") { svc.changerStatut(x.numero, "accepte"); info = "✅ ${x.numero} accepté"; selected = null }
                 if (x.type == "devis" && x.statut in setOf("brouillon", "envoye", "accepte"))
                     Action("→ Facture") { svc.convertirEnFacture(x).onSuccess { info = "✅ ${it.doc.numero} créée" }.onFailure { info = it.message ?: "" }; selected = null }
                 if (x.type == "facture" && x.statut == "a_payer")
@@ -307,6 +321,105 @@ private fun DocsTab(app: JarvisApp, type: String) {
             svc.repo.update { d0 -> d0.copy(docs = d0.docs.map { if (it.numero == nouveau.numero) nouveau else it }) }
             info = "✅ ${nouveau.numero} modifié · " + svc.exporter(nouveau)
             editingDoc = null
+        }
+    }
+    if (creating) DocCreator(app, type, onClose = { creating = false }) { client, site, lignes, deplacement, notes ->
+        scope.launch {
+            info = "⏳ Création…"
+            val r = runCatching { svc.creerDocument(type, client, site, emptyList(), lignes, deplacement, null, notes) }
+            info = r.fold(
+                { c -> "✅ ${c.doc.numero} créé" + (c.avertissements.takeIf { it.isNotEmpty() }?.joinToString("") { " · $it" } ?: "") },
+                { e -> "❌ ${e.message ?: e.javaClass.simpleName}" }
+            )
+            creating = false
+        }
+    }
+}
+
+@Composable
+private fun DocCreator(app: JarvisApp, type: String, onClose: () -> Unit, onCreate: (Client, Site?, List<Ligne>, Boolean, String) -> Unit) {
+    val svc = app.societe
+    val d = svc.data
+    var query by remember { mutableStateOf("") }
+    var client by remember { mutableStateOf<Client?>(null) }
+    var site by remember { mutableStateOf<Site?>(null) }
+    var deplacement by remember { mutableStateOf(Pricing.deplacementConfigure(d.regles)) }
+    var notes by remember { mutableStateOf("") }
+    var tarifPicker by remember { mutableStateOf(false) }
+    val lignes = remember { androidx.compose.runtime.mutableStateListOf<LigneDraft>() }
+    var err by remember { mutableStateOf("") }
+    fun n(t: String) = t.replace(',', '.').trim().toDoubleOrNull()
+    val matches = if (client != null || query.isBlank()) emptyList() else d.clients.filter { normaliser(it.nom).contains(normaliser(query)) }.take(6)
+
+    Dialogue(if (type == "devis") "Nouveau devis" else "Nouvelle facture", onClose, actions = {
+        Action("Créer") {
+            val c = client
+            if (c == null) { err = "Choisis un client." }
+            else if (lignes.isEmpty()) { err = "Ajoute au moins une ligne (ou une prestation depuis un tarif)." }
+            else {
+                val ls = lignes.map { l -> Ligne(l.des.trim().ifBlank { "Prestation" }, n(l.qte) ?: 1.0, l.unite.trim(), n(l.pu) ?: 0.0, 0.0, n(l.tva) ?: d.societe.tvaDefaut, "prestation") }
+                onCreate(c, site, ls, deplacement, notes)
+            }
+        }
+    }) {
+        if (client == null) {
+            HudTextField(query, { query = it }, Modifier.fillMaxWidth(), label = "Rechercher un client…")
+            matches.forEach { c -> HudPanel(Modifier.fillMaxWidth(), onClick = { client = c; query = c.nom }) { Text(c.nom, color = HudText, fontSize = 13.sp) } }
+            if (d.clients.isEmpty()) Text("Aucun client enregistré — crée-le d'abord dans l'onglet Clients.", color = HudDim, fontSize = 12.sp)
+        } else {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("👤 ${client!!.nom}", color = HudText, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                TextButton({ client = null; site = null; query = "" }) { Text("Changer", color = LocalAccent.current, fontSize = 12.sp) }
+            }
+            if (client!!.sites.isNotEmpty()) {
+                Text("Installation (optionnel)", color = HudDim, fontSize = 12.sp)
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    HudChip("Aucune", site == null) { site = null }
+                    client!!.sites.forEach { s -> HudChip(s.nom.ifBlank { "Installation" }, site?.id == s.id) { site = s } }
+                }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HudChip("+ frais de déplacement", deplacement) { deplacement = !deplacement }
+        }
+        Text("Lignes", color = LocalAccent.current, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        lignes.forEachIndexed { i, l ->
+            HudPanel(Modifier.fillMaxWidth()) {
+                HudTextField(l.des, { lignes[i] = l.copy(des = it) }, Modifier.fillMaxWidth(), label = "Désignation")
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    HudTextField(l.qte, { lignes[i] = l.copy(qte = it) }, Modifier.weight(1f), label = "Qté")
+                    HudTextField(l.unite, { lignes[i] = l.copy(unite = it) }, Modifier.weight(1f), label = "Unité")
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    HudTextField(l.pu, { lignes[i] = l.copy(pu = it) }, Modifier.weight(1f), label = "PU HT €")
+                    HudTextField(l.tva, { lignes[i] = l.copy(tva = it) }, Modifier.weight(1f), label = "TVA %")
+                }
+                TextButton({ lignes.removeAt(i) }) { Text("Supprimer la ligne", color = Color(0xFFFF4D6D), fontSize = 12.sp) }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HudButton("Ligne libre", icon = Icons.Filled.Add) { lignes += LigneDraft("", "1", "", "", "0", nombre(d.societe.tvaDefaut), "prestation") }
+            if (d.tarifs.isNotEmpty()) HudButton("Depuis un tarif") { tarifPicker = true }
+        }
+        HudTextField(notes, { notes = it }, Modifier.fillMaxWidth(), label = "Notes", singleLine = false)
+        if (err.isNotBlank()) Text(err, color = Color(0xFFFF4D6D), fontSize = 12.sp)
+    }
+
+    if (tarifPicker) {
+        Dialogue("Choisir un tarif", { tarifPicker = false }) {
+            d.tarifs.forEach { t ->
+                HudPanel(Modifier.fillMaxWidth(), onClick = {
+                    val kwc = site?.kwc ?: 0.0
+                    val p = Pricing.prix(t, kwc, 1.0)
+                    val pu = p.puHt
+                    if (pu == null) err = p.avertissement
+                    else lignes.add(LigneDraft(t.designation + (if (kwc > 0) " – ${nombre(kwc)} kWc" else ""), nombre(p.qte), p.unite, nombre(pu), "0", nombre(t.tva ?: d.societe.tvaDefaut), "prestation"))
+                    tarifPicker = false
+                }) {
+                    Text(t.designation, color = HudText, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("${t.mode.name.lowercase()} — ${Pricing.libelleTranches(t)}", color = HudDim, fontSize = 12.sp)
+                }
+            }
         }
     }
 }
@@ -459,6 +572,7 @@ private fun ReglagesTab(app: JarvisApp) {
     var bic by remember { mutableStateOf(s.bic) }
     var tva by remember { mutableStateOf(nombre(s.tvaDefaut)) }
     var franchise by remember { mutableStateOf(s.franchiseTva) }
+    var tarifsTtc by remember { mutableStateOf(s.tarifsSaisisTtc) }
     var delai by remember { mutableStateOf(s.delaiPaiementJours.toString()) }
     var validite by remember { mutableStateOf(s.validiteDevisJours.toString()) }
     var mentions by remember { mutableStateOf(s.mentions) }
@@ -481,7 +595,34 @@ private fun ReglagesTab(app: JarvisApp) {
     var tarifEdit by remember { mutableStateOf(false) }
     var tarifInit by remember { mutableStateOf<Tarif?>(null) }
 
+    val ctx = LocalContext.current
+    var logoVersion by remember { mutableStateOf(0) }
+    val logoBmp = remember(logoVersion) { fr.dd.jarvis.societe.Logo.bitmap(ctx) }
+    val logoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            runCatching { ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()?.let { bytes ->
+                if (fr.dd.jarvis.societe.Logo.enregistrer(ctx, bytes)) logoVersion++
+            }
+        }
+    }
+
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item {
+            HudPanel(Modifier.fillMaxWidth(), title = "Logo (devis et factures)") {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (logoBmp != null) {
+                        Image(logoBmp.asImageBitmap(), contentDescription = "Logo", modifier = Modifier.height(90.dp))
+                        Text("${logoBmp.width} × ${logoBmp.height} px — qualité d'origine conservée, redimensionné uniquement à l'affichage.", color = HudDim, fontSize = 11.sp)
+                    } else {
+                        Text("Aucun logo. Ajoute une image nette (PNG de préférence, fond transparent si possible) : elle apparaîtra en haut des PDF de devis et factures.", color = HudDim, fontSize = 12.sp)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        HudButton(if (logoBmp != null) "Changer le logo" else "Ajouter un logo") { logoPicker.launch("image/*") }
+                        if (logoBmp != null) HudButton("Retirer") { fr.dd.jarvis.societe.Logo.supprimer(ctx); logoVersion++ }
+                    }
+                }
+            }
+        }
         item {
             HudPanel(Modifier.fillMaxWidth(), title = "Société") {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -499,6 +640,11 @@ private fun ReglagesTab(app: JarvisApp) {
                         HudChip("Franchise TVA", franchise) { franchise = true }
                     }
                     HudTextField(tva, { tva = it }, Modifier.fillMaxWidth(), label = "TVA par défaut (%)")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        HudChip("Tarifs saisis en HT", !tarifsTtc) { tarifsTtc = false }
+                        HudChip("Tarifs saisis en TTC", tarifsTtc) { tarifsTtc = true }
+                    }
+                    if (tarifsTtc) Text("Les prix que tu saisis pour les tarifs (ci-dessous) sont compris comme TTC et convertis en HT automatiquement selon la TVA.", color = HudDim, fontSize = 11.sp)
                     HudTextField(delai, { delai = it }, Modifier.fillMaxWidth(), label = "Délai de paiement (jours)")
                     HudTextField(validite, { validite = it }, Modifier.fillMaxWidth(), label = "Validité des devis (jours)")
                     HudTextField(mentions, { mentions = it }, Modifier.fillMaxWidth(), label = "Mentions légales (assurance, RCS…)", singleLine = false)
@@ -544,7 +690,7 @@ private fun ReglagesTab(app: JarvisApp) {
                             adresse = adresse.trim(), tel = tel.trim(), email = email.trim(), iban = iban.trim(), bic = bic.trim(),
                             lat = if (adresse.trim() == it.societe.adresse) it.societe.lat else null,
                             lon = if (adresse.trim() == it.societe.adresse) it.societe.lon else null,
-                            franchiseTva = franchise, tvaDefaut = num(tva) ?: 20.0,
+                            franchiseTva = franchise, tvaDefaut = num(tva) ?: 20.0, tarifsSaisisTtc = tarifsTtc,
                             delaiPaiementJours = delai.toIntOrNull() ?: 30, validiteDevisJours = validite.toIntOrNull() ?: 30,
                             mentions = mentions, reservePct = (num(reserve) ?: 0.0).coerceIn(0.0, 100.0),
                             partDirigeantPct = (num(partDir) ?: 50.0).coerceIn(0.0, 100.0)
@@ -599,11 +745,14 @@ private fun ReglagesTab(app: JarvisApp) {
         var des by remember { mutableStateOf(ini?.designation ?: "") }
         var mode by remember { mutableStateOf(ini?.mode ?: Mode.FORFAIT) }
         var tr by remember { mutableStateOf(ini?.tranches?.sortedBy { it.jusquaKwc }?.joinToString("; ") { (if (it.jusquaKwc >= KWC_MAX) "+" else nombre(it.jusquaKwc)) + ":" + nombre(it.prix) } ?: "") }
+        var tvaTarif by remember { mutableStateOf(ini?.tva?.let { nombre(it) } ?: "") }
         Dialogue(if (ini == null) "Nouveau tarif" else "Modifier le tarif", { tarifEdit = false }, actions = {
             Action("Enregistrer") {
-                val t = Pricing.parserTranches(tr).ifEmpty { num(tr)?.let { listOf(Tranche(KWC_MAX, it)) } ?: emptyList() }
+                var t = Pricing.parserTranches(tr).ifEmpty { num(tr)?.let { listOf(Tranche(KWC_MAX, it)) } ?: emptyList() }
+                val tvaUtilisee = num(tvaTarif) ?: s.tvaDefaut
+                if (s.tarifsSaisisTtc && !s.franchiseTva) t = t.map { it.copy(prix = versHt(it.prix, tvaUtilisee, true)) }
                 if (des.isNotBlank() && t.isNotEmpty()) {
-                    svc.repo.update { it.copy(tarifs = it.tarifs.filterNot { x -> x.designation == des.trim() || x.designation == ini?.designation } + Tarif(des.trim(), mode, t, ini?.tva)) }
+                    svc.repo.update { it.copy(tarifs = it.tarifs.filterNot { x -> x.designation == des.trim() || x.designation == ini?.designation } + Tarif(des.trim(), mode, t, num(tvaTarif))) }
                     tarifEdit = false
                 }
             }
@@ -612,7 +761,9 @@ private fun ReglagesTab(app: JarvisApp) {
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Mode.values().forEach { m -> HudChip(m.name.lowercase(), m == mode) { mode = m } }
             }
-            HudTextField(tr, { tr = it }, Modifier.fillMaxWidth(), label = "Prix : 0-3:150; 3-9:220; 9+:350", singleLine = false)
+            HudTextField(tr, { tr = it }, Modifier.fillMaxWidth(), label = "Prix ${if (s.tarifsSaisisTtc) "TTC" else "HT"} : 0-3:150; 3-9:220; 9+:350", singleLine = false)
+            HudTextField(tvaTarif, { tvaTarif = it }, Modifier.fillMaxWidth(), label = "TVA de ce tarif (%, vide = ${nombre(s.tvaDefaut)} % par défaut)")
+            if (s.tarifsSaisisTtc && !s.franchiseTva) Text("Les prix ci-dessus sont compris comme TTC et seront enregistrés en HT.", color = HudDim, fontSize = 11.sp)
         }
     }
 }
