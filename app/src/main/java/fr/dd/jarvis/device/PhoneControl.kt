@@ -171,14 +171,22 @@ class PhoneControl(private val ctx: Context) {
             "deezer" to "deezer.android.app", "amazon music" to "com.amazon.mp3", "apple music" to "com.apple.android.music", "vlc" to "org.videolan.vlc"
         )
         val a = appli.trim().lowercase()
-        var pkg: String? = if (a.isBlank()) null else known.entries.firstOrNull { a.contains(it.key) }?.value?.takeIf { installed(it) } ?: findPackage(a)?.first
-        // Nom d'appli non reconnu (orthographe approximative dictée au micro) : plutôt qu'ouvrir une appli au hasard, repli sur la première appli de musique connue installée.
-        if (pkg == null) pkg = known.values.firstOrNull { installed(it) }
-        if (a.contains("youtube") && !a.contains("music") && pkg == null) {
+        var pkg: String? = when {
+            a.isBlank() -> null
+            installed(appli.trim()) -> appli.trim()   // déjà un nom de paquet exact (préférence mémorisée, résolue une fois pour toutes)
+            else -> known.entries.firstOrNull { a == it.key }?.value?.takeIf { installed(it) }   // correspondance exacte d'abord
+                ?: known.entries.firstOrNull { a.contains(it.key) }?.value?.takeIf { installed(it) }
+                ?: findPackage(a)?.first
+        }
+        // Rien n'a été précisé du tout (ni demandé ni mémorisé) : seulement là on choisit la première appli de musique installée.
+        if (pkg == null && a.isBlank()) pkg = musicApps().values.firstOrNull() ?: known.values.firstOrNull { installed(it) }
+        if (a.contains("youtube") && !a.contains("music") && a.isNotBlank() && pkg == null) {
             val r = start(Intent.ACTION_VIEW, "https://www.youtube.com/results?search_query=" + Uri.encode(requete), "com.google.android.youtube")
             return r.ifBlank { "Recherche « $requete » ouverte dans YouTube." }
         }
-        val nom = pkg?.let { findPackage(it)?.second ?: it } ?: "l'application de musique"
+        // Une appli précise a été demandée/mémorisée mais n'est pas installée : le dire, jamais en lancer une autre à la place.
+        if (pkg == null && a.isNotBlank()) return "« $appli » n'est pas installée ou introuvable sur ce téléphone. Applis de musique installées : ${musicApps().keys.joinToString(", ").ifBlank { "aucune détectée" }}."
+        val nom = pkg?.let { findPackage(it)?.second ?: musicApps().entries.firstOrNull { e -> e.value == it }?.key ?: it } ?: "l'application de musique"
         if (pkg == null) return "Aucune application de musique installée (Spotify, YouTube Music, Deezer…) : installe-en une, ou précise laquelle utiliser."
         // Pas la peine d'essayer de piloter la session média si la permission qui le permet n'est pas accordée :
         // c'est un « accès spécial », pas une autorisation listée dans la page Autorisations classique de l'appli.
@@ -249,6 +257,26 @@ class PhoneControl(private val ctx: Context) {
 
     /** Applications de navigation installées (nom affiché → paquet). */
     fun navApps(): Map<String, String> = linkedMapOf("Waze" to "com.waze", "Google Maps" to "com.google.android.apps.maps").filterValues { installed(it) }
+
+    /** Applications de musique RÉELLEMENT installées (interrogation du téléphone, jamais devinées) : tout paquet qui déclare
+     * un service de navigation média (Spotify, YouTube Music, Deezer, VLC, lecteurs constructeur…), nom affiché → paquet. */
+    fun musicApps(): Map<String, String> {
+        val pm = ctx.packageManager
+        val out = LinkedHashMap<String, String>()
+        runCatching {
+            pm.queryIntentServices(Intent("android.media.browse.MediaBrowserService"), 0).forEach { ri ->
+                val pkg = ri.serviceInfo.packageName
+                if (pkg == ctx.packageName) return@forEach
+                val label = runCatching { ri.serviceInfo.loadLabel(pm).toString() }.getOrDefault(pkg).ifBlank { pkg }
+                out[label] = pkg
+            }
+        }
+        // Filet de sécurité pour les applis connues qui ne déclarent pas ce service sur certains téléphones.
+        mapOf("Spotify" to "com.spotify.music", "YouTube Music" to "com.google.android.apps.youtube.music",
+            "Deezer" to "deezer.android.app", "Amazon Music" to "com.amazon.mp3", "Apple Music" to "com.apple.android.music", "VLC" to "org.videolan.vlc")
+            .forEach { (label, pkg) -> if (installed(pkg) && out.values.none { it == pkg }) out[label] = pkg }
+        return out
+    }
 
     /** Lance la navigation vers une destination dans l'application [appli] (Waze, Google Maps ou autre ; vide = Google Maps). */
     fun navigate(dest: String, mode: String, appli: String = "", point: Pair<Double, Double>? = null): String {

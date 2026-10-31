@@ -176,8 +176,9 @@ class ToolBox(
             mapOf("secondes" to prop("Durée totale en secondes (ex. 10 min = 600)."), "libelle" to prop("Nom du minuteur (optionnel).")), listOf("secondes")))
         put(tool("chronometre", "Chronomètre sans ouvrir d'application (notification avec compteur).", mapOf("action" to prop("demarrer (défaut) | arreter | etat"))))
         put(tool("alarmes_liste", "Liste les alarmes et minuteurs en cours."))
-        put(tool("jouer_musique", "Lance la lecture d'un titre, artiste ou playlist dans une application de musique du téléphone (fonctionne aussi en arrière-plan).",
-            mapOf("requete" to prop("Titre, artiste ou style à écouter."), "appli" to prop("Application : spotify, youtube music, deezer, youtube, vlc… (optionnel : la première installée)."), "toujours" to prop("« true » pour toujours utiliser cette application pour la musique."))))
+        put(tool("applis_musique", "Liste les applications de musique RÉELLEMENT installées sur le téléphone (jamais une liste inventée)."))
+        put(tool("jouer_musique", "Lance la lecture d'un titre, artiste ou playlist dans une application de musique du téléphone, en arrière-plan. Si l'application n'est pas précisée et qu'aucune n'est mémorisée et qu'il y en a plusieurs d'installées, l'outil demande laquelle (liste réelle) : repose alors la question à l'utilisateur (et s'il veut « toujours » ou « une seule fois »), puis rappelle l'outil.",
+            mapOf("requete" to prop("Titre, artiste ou style à écouter."), "appli" to prop("Nom exact d'une application RENVOYÉE PAR applis_musique ou déjà mémorisée (jamais une application supposée sans l'avoir vérifiée)."), "toujours" to prop("« true » pour toujours utiliser cette application pour la musique."))))
         put(tool("controle_media", "Contrôle la lecture en cours : play, pause, next, previous, stop.", mapOf("action" to prop("play | pause | next | previous | stop")), listOf("action")))
         put(tool("naviguer", "Lance la navigation GPS vers une adresse et démarre l'itinéraire (Waze, Google Maps ou autre appli). Si l'application n'est pas précisée et qu'aucune n'est mémorisée, l'outil demande laquelle : repose alors la question à l'utilisateur (et s'il veut « toujours » celle-ci ou « une seule fois »), puis rappelle l'outil.",
             mapOf("destination" to prop("Adresse ou lieu."), "mode" to prop("voiture (défaut), marche ou velo"),
@@ -344,7 +345,25 @@ class ToolBox(
         "minuteur_creer" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.device.Horloge.creerMinuteur(app, a.optString("secondes").toDoubleOrNull()?.toInt() ?: 0, a.optString("libelle")) })
         "chronometre" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.device.Horloge.chronometre(app, a.optString("action")) })
         "alarmes_liste" -> ToolResult(fr.dd.jarvis.device.Horloge.liste(app), direct = true)
-        "jouer_musique" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.playMusic(a.optString("requete"), a.optString("appli").ifBlank { app.store.appPrefs["musique"].orEmpty() }.also { if (a.optString("toujours").lowercase() in setOf("true", "oui", "1") && a.optString("appli").isNotBlank()) app.store.setAppPref("musique", a.optString("appli").trim()) }) }, direct = true)
+        "applis_musique" -> {
+            val m = app.phone.musicApps()
+            ToolResult(if (m.isEmpty()) "Aucune application de musique détectée sur ce téléphone." else "Applications de musique installées : " + m.keys.joinToString(", "), direct = true)
+        }
+        "jouer_musique" -> {
+            var appli = a.optString("appli").trim()
+            val toujours = a.optString("toujours").trim().lowercase() in setOf("true", "oui", "1", "vrai")
+            if (appli.isBlank()) appli = app.store.appPrefs["musique"].orEmpty()
+            val dispo = app.phone.musicApps()
+            if (appli.isBlank() && dispo.size > 1)
+                ToolResult("CHOIX_REQUIS : demande à l'utilisateur avec laquelle de ces applications lancer la musique (${dispo.keys.joinToString(" ou ")}) et s'il veut la garder toujours ou une seule fois, puis rappelle jouer_musique avec appli et toujours.")
+            else {
+                if (appli.isBlank()) appli = dispo.keys.firstOrNull().orEmpty()
+                // Mémorise le PAQUET exact (pas le texte dicté) : la prochaine fois, la résolution est sans ambiguïté.
+                val pkgChoisi = dispo[appli] ?: appli
+                if (toujours && appli.isNotBlank()) app.store.setAppPref("musique", pkgChoisi)
+                ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.playMusic(a.optString("requete"), pkgChoisi) }, direct = true)
+            }
+        }
         "controle_media" -> ToolResult(app.phone.mediaKey(a.optString("action")))
         "naviguer" -> {
             var appli = a.optString("appli").trim()
