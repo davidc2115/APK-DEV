@@ -540,6 +540,7 @@ fun SettingsScreen(app: JarvisApp) {
                 }
                 Spacer(Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    HudChip("🔔 Notifier chaque SMS / mail (en direct)", store.notifLive.value) { store.notifLive.set(!store.notifLive.value) }
                     HudChip("🏷️ Ranger les mails dans Gmail", store.agentRanger.value) { store.agentRanger.set(!store.agentRanger.value) }
                     HudChip("📥 Archiver pubs/notifs", store.agentArchiver.value) { store.agentArchiver.set(!store.agentArchiver.value) }
                 }

@@ -38,7 +38,7 @@ object AgentsScheduler {
     /** Passage immédiat d'un agent (« mails » ou « notifs ») à l'arrivée d'une notification, au plus une fois par minute et par agent. */
     @Synchronized fun declencher(ctx: Context, quoi: String) {
         val now = System.currentTimeMillis()
-        if (now - (dernier[quoi] ?: 0L) < 60_000L) return
+        if (now - (dernier[quoi] ?: 0L) < 25_000L) return
         dernier[quoi] = now
         val req = OneTimeWorkRequestBuilder<AgentsWorker>().setInputData(workDataOf("only" to quoi))
             .setInitialDelay(if (quoi == "mails") 20 else 3, TimeUnit.SECONDS)   // laisse Gmail synchroniser avant de lire la boîte
@@ -74,10 +74,11 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
     }
 
     override suspend fun doWork(): Result {
-        if (!store.agentsOn.value) return Result.success()
         val only = inputData.getString("only")
+        val tri = only == "mails" && store.notifLive.value
+        if (!store.agentsOn.value && !tri) return Result.success()
         val steps = listOf<Pair<String, suspend () -> Unit>>(
-            "Mails" to { if (store.agentMails.value && (only == null || only == "mails")) mails() },
+            "Mails" to { if (tri || (store.agentMails.value && (only == null || only == "mails"))) mails() },
             "Factures" to { if (store.agentFactures.value && only == null) factures() },
             "Planning" to { if (store.agentPlanning.value && only == null) planning() },
             "Notifications" to { if (store.agentNotifs.value && (only == null || only == "notifs")) notifs() }
@@ -111,7 +112,11 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
             journal.append(urgents.joinToString("") { "  - 🔴 ${it.mail.from} — ${it.mail.subject}\n" })
         }
         if (store.agentRanger.value && store.gmailAccounts.isNotEmpty()) {
-            runCatching { MailTri.ranger(app, classes, store.agentArchiver.value) }.onSuccess { journal.append("  - 🏷️ $it mail(s) rangés (libellés Urgent, Clients…)\n") }
+            runCatching { MailTri.ranger(app, classes, store.agentArchiver.value) }.onSuccess {
+                journal.append("  - 🏷️ $it mail(s) rangés (libellés Urgent, Clients…)\n")
+                if (store.notifLive.value) alert(2004, "🏷️ ${classes.size} mail(s) rangé(s) dans Gmail",
+                    classes.joinToString("\n") { "• ${it.label} — ${it.mail.from} : ${it.mail.subject}" })
+            }.onFailure { journal.append("  - ⚠️ Rangement Gmail : ${it.message?.take(100)}\n") }
         }
         writeSet("agent_seen_mails.txt", seen + nouveaux.map { key(it) })
     }

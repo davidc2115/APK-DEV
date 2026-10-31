@@ -106,6 +106,7 @@ class JarvisApp : Application() {
             nm.createNotificationChannel(NotificationChannel(CHANNEL_AGENTS, "Agents JARVIS (alertes)", NotificationManager.IMPORTANCE_HIGH))
             runCatching { fr.dd.jarvis.device.Horloge.channels(this) }
             nm.createNotificationChannel(NotificationChannel(CHANNEL_CAR, "Android Auto (conversation JARVIS)", NotificationManager.IMPORTANCE_HIGH))
+            nm.createNotificationChannel(NotificationChannel(CHANNEL_MSG, "SMS et mails (JARVIS en direct)", NotificationManager.IMPORTANCE_HIGH))
             nm.createNotificationChannel(NotificationChannel(CHANNEL_WAKE, "Écoute « Jarvis »", NotificationManager.IMPORTANCE_LOW))
         }
     }
@@ -128,6 +129,7 @@ class JarvisApp : Application() {
         const val CHANNEL_BRIEFING = "briefing"
         const val CHANNEL_AGENTS = "agents"
         const val CHANNEL_WAKE = "wake"
+        const val CHANNEL_MSG = "msg_live"
         const val CHANNEL_CAR = "car"
         const val CRASH_FILE = "last_crash.txt"
     }

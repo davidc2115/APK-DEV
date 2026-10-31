@@ -43,7 +43,24 @@ class JarvisNotificationListener : NotificationListenerService() {
     }
 
     override fun onListenerConnected() { active = true; recharger(applicationContext) }
-    override fun onListenerDisconnected() { active = false }
+    override fun onListenerDisconnected() {
+        active = false
+        runCatching { requestRebind(android.content.ComponentName(this, JarvisNotificationListener::class.java)) }
+    }
+
+    /** Notification JARVIS visible pour chaque nouveau SMS / mail (indépendante des agents et des annonces vocales). */
+    private fun notifier(sbn: StatusBarNotification, label: String, titre: String, texte: String, mail: Boolean) {
+        val ctx = applicationContext
+        if (android.os.Build.VERSION.SDK_INT >= 33 && androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) return
+        val pi = android.app.PendingIntent.getActivity(ctx, 0, android.content.Intent(ctx, fr.dd.jarvis.MainActivity::class.java), android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT)
+        val t = (if (mail) "📧 " else "💬 ") + titre.ifBlank { label }
+        val n = androidx.core.app.NotificationCompat.Builder(ctx, fr.dd.jarvis.JarvisApp.CHANNEL_MSG).setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setContentTitle(t).setContentText(texte.lineSequence().firstOrNull().orEmpty()).setSubText("JARVIS · $label")
+            .setStyle(androidx.core.app.NotificationCompat.BigTextStyle().bigText(texte.take(1200)))
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH).setDefaults(androidx.core.app.NotificationCompat.DEFAULT_ALL)
+            .setContentIntent(pi).setAutoCancel(true).build()
+        (ctx.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager).notify(6000 + (sbn.key.hashCode() and 0xFFF), n)
+    }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         try {
@@ -57,12 +74,16 @@ class JarvisNotificationListener : NotificationListenerService() {
             val label = try { packageManager.getApplicationLabel(packageManager.getApplicationInfo(sbn.packageName, 0)).toString() } catch (_: Exception) { sbn.packageName }
             add(Item(sbn.packageName, label, titre, texte, sbn.postTime))
             sauver(applicationContext)
+            val message = estMessage(sbn.packageName) || n.category == Notification.CATEGORY_MESSAGE
+            val mail = estMail(sbn.packageName)
+            val live = runCatching { (applicationContext as fr.dd.jarvis.JarvisApp).store.notifLive.value }.getOrDefault(true)
+            if (live && (message || mail)) runCatching { notifier(sbn, label, titre, texte, mail && !message) }
             // Agents « en direct » : un nouveau SMS / message / mail déclenche tout de suite le passage de l'agent concerné.
             runCatching {
                 val st = (applicationContext as fr.dd.jarvis.JarvisApp).store
-                if (st.agentsOn.value) when {
-                    estMail(sbn.packageName) && st.agentMails.value -> fr.dd.jarvis.work.AgentsScheduler.declencher(applicationContext, "mails")
-                    (estMessage(sbn.packageName) || n.category == Notification.CATEGORY_MESSAGE) && st.agentNotifs.value -> fr.dd.jarvis.work.AgentsScheduler.declencher(applicationContext, "notifs")
+                when {
+                    mail && (st.notifLive.value || (st.agentsOn.value && st.agentMails.value)) -> fr.dd.jarvis.work.AgentsScheduler.declencher(applicationContext, "mails")
+                    message && st.agentsOn.value && st.agentNotifs.value -> fr.dd.jarvis.work.AgentsScheduler.declencher(applicationContext, "notifs")
                 }
             }
             // Annonce vocale (SMS, mails, autres notifications choisies) avec sonnerie réglable
