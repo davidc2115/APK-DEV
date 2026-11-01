@@ -324,7 +324,10 @@ fun GraphScreen(app: JarvisApp) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {\n                    Text("J.A.R.V.I.S  /  MÉMOIRE", color = Color(0xFFB58AFF), fontFamily = FontFamily.Monospace, fontSize = 9.sp, letterSpacing = 2.sp)\n                    Text("GRAPHE OBSIDIAN", color = Color(0xFFE7D9FF), fontFamily = FontFamily.Monospace, fontSize = 16.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.4.sp)\n                }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("J.A.R.V.I.S  /  MÉMOIRE", color = Color(0xFFB58AFF), fontFamily = FontFamily.Monospace, fontSize = 9.sp, letterSpacing = 2.sp)
+                    Text("GRAPHE OBSIDIAN", color = Color(0xFFE7D9FF), fontFamily = FontFamily.Monospace, fontSize = 16.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.4.sp)
+                }
                 Text(
                     if (chargement) "Calcul de la disposition…" else "$totalNotes notes · ${aretes.size} liens · ${categories.size} dossiers" + (if (noeuds.size < totalNotes) " (${noeuds.size} affichées, $MAX_NOTES_PAR_DOSSIER/dossier max)" else ""),
                     color = HudDim, fontSize = 11.sp, fontFamily = FontFamily.Monospace
