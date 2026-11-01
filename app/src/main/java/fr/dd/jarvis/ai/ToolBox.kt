@@ -159,6 +159,8 @@ class ToolBox(
         put(tool("generer_image", "Génère une ou plusieurs images à partir d'une description (Cloudflare). Les images sont affichées dans le chat et enregistrées dans Obsidian. Pour plusieurs images (planche, livre de coloriage, série d'illustrations), mets une description par ligne dans « prompt » : chacune est générée séparément et le nom de fichier de chacune est renvoyé (utile ensuite pour creer_fichier avec format=pdf et le paramètre images).",
             mapOf("prompt" to prop("Description détaillée de l'image, rédigée en anglais (sujet, style, lumière, cadrage). Pour plusieurs images, une description par ligne."),
                 "modele" to prop("Optionnel : « flux » (flux-2-dev, le plus réaliste/précis), « flux-klein » (flux-2-klein, qualité proche mais plus rapide) ou « flux-schnell » (le plus rapide, qualité moindre). Par défaut le modèle choisi dans Réglages › Images.")), listOf("prompt")))
+        put(tool("animer_image", "Anime une image déjà générée par JARVIS avec Wan 2.2 (image vers vidéo). Le MP4 est enregistré dans JARVIS/Vidéos IA et dans Obsidian. Nécessite le Worker Cloudflare personnel configuré dans Réglages › Vidéo IA. Le service GPU public peut être lent ou indisponible.",
+            mapOf("image" to prop("Nom exact de l’image (jarvis-img:...) ou « derniere » pour la plus récente."), "prompt" to prop("Mouvement souhaité : caméra, sujet, ambiance, gestes (optionnel)."), "duree" to prop("Durée du clip en secondes, 0.5 à 4.5 (défaut 3.5).")), listOf("image")))
         put(tool("agenda_afficher", "Affiche ou masque durablement un agenda entier (« ne plus afficher le planning de Thomas », « réaffiche-le »). Un agenda masqué disparaît du planning, de l'itinéraire, du point du jour et de l'écran Agenda tant qu'on ne le réaffiche pas.",
             mapOf("agenda" to prop("Nom (ou partie du nom) de l'agenda."), "afficher" to prop("true pour réafficher, false pour masquer.")), listOf("agenda", "afficher")))
         put(tool("creer_fichier", "Crée un fichier téléchargeable que l'utilisateur peut ouvrir ou partager : pdf, docx (Word), xlsx (Excel), csv, vcf (contacts ; contenu « tous » ou nom = exporte les contacts du téléphone), ics, txt, md, html, json, xml, zip… Le texte (docx/pdf/html) accepte du Markdown (# titres, - puces, tableaux |a|b|). Pour xlsx/csv : contenu en lignes « a;b;c » ou JSON [[..],[..]] (une formule commence par =). Pour un PDF avec des images déjà générées (generer_image) — livre de coloriage, planche, album — utilise le paramètre « images » : chaque image devient une page entière, dans l'ordre donné, APRÈS le texte de « contenu ».",
@@ -344,6 +346,14 @@ class ToolBox(
             }
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
             ToolResult("❌ Image impossible : ${e.message}")
+        }
+        "animer_image" -> try {
+            val image = fr.dd.jarvis.ai.ImageGen.fichier(app, a.optString("image"))
+                ?: return ToolResult("❌ Image introuvable : ${a.optString("image")}. Utilise fichiers_generes pour retrouver son nom exact.")
+            val (video, loc) = fr.dd.jarvis.ai.ImageToVideoGen.generate(app, image, a.optString("prompt"), a.optString("duree").toDoubleOrNull() ?: 3.5)
+            ToolResult("🎬 Vidéo créée : ${video.name}\n📁 Enregistrée dans Jarvis › Vidéos IA" + (if (loc.isNotBlank()) "\n🗂️ Obsidian : $loc" else "") + "\n\nLe clip dure environ 3,5 secondes et peut être récupéré depuis les fichiers générés.", direct = true)
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
+            ToolResult("❌ Animation impossible : ${e.message}")
         }
         "agendas_liste" -> ToolResult(app.calendar.calendars().joinToString("\n") { (if (it.id in app.store.hiddenCals) "🚫 masqué : " else "✅ affiché : ") + app.calendar.displayName(it) }.ifBlank { "Aucun agenda." }, direct = true)
         "agenda_afficher" -> {
