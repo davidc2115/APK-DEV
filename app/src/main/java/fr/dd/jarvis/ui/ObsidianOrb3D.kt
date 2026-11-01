@@ -6,6 +6,12 @@ import android.opengl.GLSurfaceView
 import android.opengl.Matrix
 import android.view.MotionEvent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -62,6 +68,54 @@ fun ObsidianOrb3D(app: fr.dd.jarvis.JarvisApp) {
             },
             update = { view -> view.setGraph(nodes, relations); view.setSelectedNode(selectedNodeId) }
         )
+        // Habillage Jörmungand + cerveau : couche graphique translucide au-dessus du noyau 3D.
+        // Les points et liens restent ceux du graphe Room ; ce décor n'invente aucune donnée.
+        Canvas(Modifier.fillMaxSize()) {
+            val cx = size.width * 0.5f
+            val cy = size.height * 0.51f
+            val radius = size.minDimension * 0.39f
+            val serpent = Path().apply {
+                moveTo(cx - radius * 0.92f, cy + radius * 0.58f)
+                cubicTo(cx - radius * 1.30f, cy + radius * 0.10f, cx - radius * 0.92f, cy - radius * 1.02f, cx - radius * 0.08f, cy - radius * 1.02f)
+                cubicTo(cx + radius * 0.82f, cy - radius * 1.02f, cx + radius * 1.23f, cy - radius * 0.25f, cx + radius * 0.94f, cy + radius * 0.48f)
+                cubicTo(cx + radius * 0.70f, cy + radius * 1.02f, cx - radius * 0.18f, cy + radius * 1.14f, cx - radius * 0.72f, cy + radius * 0.70f)
+            }
+            drawPath(serpent, Brush.linearGradient(listOf(Color(0xFF170D28), Color(0xFF9B48E8), Color(0xFF28113E), Color(0xFFC18AFF))), style = Stroke(radius * 0.105f, cap = StrokeCap.Round))
+            drawPath(serpent, Color(0xFFCA9BFF).copy(alpha = 0.32f), style = Stroke(radius * 0.018f, cap = StrokeCap.Round))
+            // Écailles lumineuses stylisées le long de l'anneau.
+            for (i in 0 until 34) {
+                val a = i * (Math.PI.toFloat() * 2f / 34f)
+                val x = cx + cos(a) * radius * 0.98f
+                val y = cy + sin(a) * radius * 0.88f
+                drawLine(Color(0xFFD6B2FF).copy(alpha = 0.22f), Offset(x - 4f, y - 2f), Offset(x + 4f, y + 2f), strokeWidth = 1.3f)
+            }
+            // Tête du serpent, à droite, avec deux yeux violets.
+            val head = Offset(cx + radius * 0.91f, cy - radius * 0.56f)
+            drawCircle(Color(0xFF35134F), radius * 0.105f, head)
+            drawCircle(Color(0xFFB96CFF), radius * 0.025f, Offset(head.x + radius * 0.045f, head.y - radius * 0.025f))
+            drawCircle(Color(0xFFB96CFF), radius * 0.025f, Offset(head.x + radius * 0.045f, head.y + radius * 0.025f))
+            // Cerveau central lumineux, en deux hémisphères.
+            val brainW = radius * 0.62f
+            val brainH = radius * 0.43f
+            val brain = Path().apply {
+                moveTo(cx, cy - brainH)
+                cubicTo(cx - brainW * 0.95f, cy - brainH * 1.25f, cx - brainW * 1.12f, cy + brainH * 0.18f, cx - brainW * 0.28f, cy + brainH)
+                cubicTo(cx - brainW * 0.08f, cy + brainH * 1.12f, cx, cy + brainH * 0.82f, cx, cy + brainH * 0.70f)
+                cubicTo(cx, cy + brainH * 0.82f, cx + brainW * 0.08f, cy + brainH * 1.12f, cx + brainW * 0.28f, cy + brainH)
+                cubicTo(cx + brainW * 1.12f, cy + brainH * 0.18f, cx + brainW * 0.95f, cy - brainH * 1.25f, cx, cy - brainH)
+                close()
+            }
+            drawPath(brain, Color(0xFFB47AFF).copy(alpha = 0.13f))
+            drawPath(brain, Brush.linearGradient(listOf(Color(0xFFE0BFFF), Color(0xFF8E45D0), Color(0xFFD9A8FF))), style = Stroke(radius * 0.018f))
+            for (i in 0 until 13) {
+                val a = i * (Math.PI.toFloat() * 2f / 13f)
+                val x = cx + cos(a) * brainW * 0.72f
+                val y = cy + sin(a) * brainH * 0.66f
+                drawLine(Color(0xFFD7B0FF).copy(alpha = 0.48f), Offset(cx, cy), Offset(x, y), strokeWidth = 1.1f)
+                drawCircle(Color(0xFFE7CEFF).copy(alpha = 0.78f), radius * 0.018f, Offset(x, y))
+            }
+            drawLine(Color(0xFFE0C2FF).copy(alpha = 0.55f), Offset(cx, cy - brainH * 0.8f), Offset(cx, cy + brainH * 0.78f), strokeWidth = 1.2f)
+        }
         Column(
             Modifier.align(Alignment.TopCenter).padding(top = 18.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
