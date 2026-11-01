@@ -267,13 +267,14 @@ class ToolBox(
         "delete_event" -> deleteEvent(a)
         "set_event_color" -> setEventColor(a)
         "set_calendar_color" -> setCalendarColor(a)
-        "summarize_mails" -> summarizeMails(a)
+        "summarize_mails" -> if (!store.notifMailOn.value) ToolResult("📧 Les mails sont désactivés dans Réglages (Désactiver complètement une catégorie) : réactive-les pour que je puisse les consulter.") else summarizeMails(a)
         "morning_briefing" -> ToolResult(briefing(), direct = true)
-        "trier_mails" -> trierMails(a)
+        "trier_mails" -> if (!store.notifMailOn.value) ToolResult("📧 Les mails sont désactivés dans Réglages : réactive-les pour que je puisse les trier.") else trierMails(a)
         "mail_compte" -> mailCompte(a)
         "mail_envoyer" -> mailEnvoyer(a)
-        "marquer_mails_traites" -> marquerTraites(a)
-        "lire_sms" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        "marquer_mails_traites" -> if (!store.notifMailOn.value) ToolResult("📧 Les mails sont désactivés dans Réglages.") else marquerTraites(a)
+        "lire_sms" -> if (!store.notifSmsOn.value) ToolResult("💬 Les SMS / messages sont désactivés dans Réglages (Désactiver complètement une catégorie) : réactive-les pour que je puisse les consulter.")
+        else ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             fr.dd.jarvis.device.Telephony.lire(app, (a.optString("count").toIntOrNull() ?: 10).coerceIn(1, 30), a.optString("contact"), a.optString("non_lus").equals("true", true))
         }, direct = true)
         "envoyer_sms" -> {

@@ -225,15 +225,24 @@ class PhoneControl(private val ctx: Context) {
         if (!fr.dd.jarvis.service.JarvisNotificationListener.active) {
             return "⚠️ L'accès aux notifications est activé dans Android mais pas encore connecté à JARVIS. Ferme complètement JARVIS (pas juste l'écran — depuis les applications récentes) puis rouvre-la, et redemande « lance la lecture »."
         }
+        // 0) D'abord l'intent STANDARD Android « lecture depuis une recherche vocale » (android.media.action.MEDIA_PLAY_FROM_SEARCH,
+        //    celui qu'utilise « Dis Google, joue… ») : beaucoup plus d'applis l'implémentent que la recherche via MediaSession
+        //    (notamment les lecteurs locaux/constructeur qui n'implémentent jamais playFromSearch), et il envoie directement la
+        //    bonne requête à l'appli au lancement, au lieu de l'ouvrir « à l'aveugle » puis d'espérer qu'elle réagisse ensuite.
+        val viaRechercheVocale = demarrerDepuisRechercheVocale(pkg, requete)
         // 1) Une session média de cette appli tourne peut-être déjà (appli ouverte récemment) : on la pilote directement, sans rien ouvrir à l'écran.
-        var etat = lancerLecture(pkg, requete, ouvrir = false)
+        var etat = if (viaRechercheVocale) "aucune" else lancerLecture(pkg, requete, ouvrir = false)
         // 2) Sinon, il faut que l'appli démarre au moins une fois pour créer sa session — inévitable techniquement (Android n'offre
         //    aucun moyen de faire jouer un titre dans une appli tierce sans qu'elle tourne). On la ramène ensuite en arrière-plan toute seule.
         if (etat == "aucune") {
-            val launch = ctx.packageManager.getLaunchIntentForPackage(pkg)
-            if (launch == null) return "Impossible de lancer $nom."
-            try { ctx.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (e: Exception) { return "Impossible de lancer $nom : ${e.message}" }
-            etat = lancerLecture(pkg, requete, ouvrir = true)
+            if (!viaRechercheVocale) {
+                val launch = ctx.packageManager.getLaunchIntentForPackage(pkg)
+                if (launch == null) return "Impossible de lancer $nom."
+                try { ctx.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (e: Exception) { return "Impossible de lancer $nom : ${e.message}" }
+            }
+            // Si on est passé par la recherche vocale standard, la bonne requête a déjà été envoyée à l'appli au lancement :
+            // on se contente alors de vérifier que la lecture a démarré, sans relancer playFromSearch sur la session.
+            etat = lancerLecture(pkg, requete, ouvrir = true, dejaDemande = viaRechercheVocale)
         }
         if (etat == "lecture") {
             // Lecture confirmée : on remet JARVIS (ou l'appli précédente) au premier plan, l'appli de musique reste en arrière-plan.
@@ -259,8 +268,27 @@ class PhoneControl(private val ctx: Context) {
         }
     }
 
-    /** Cherche la session média de [pkg] et lui demande de lire [requete] ; retourne « lecture » (confirmé), « session » (demandé) ou « aucune ». */
-    private fun lancerLecture(pkg: String?, requete: String, ouvrir: Boolean): String {
+    /**
+     * Tente l'intent STANDARD Android de lecture depuis une recherche vocale (celui utilisé par Google Assistant / Android Auto
+     * pour « joue … »), beaucoup plus largement supporté par les applis tierces (y compris les lecteurs locaux/constructeur type
+     * VLC) que l'API optionnelle MediaController.playFromSearch(). On vérifie d'abord qu'une activité de [pkg] sait vraiment la
+     * gérer (resolveActivity scopé au paquet) avant de la lancer, pour ne pas ouvrir l'appli « à l'aveugle » si elle ne la gère pas.
+     */
+    private fun demarrerDepuisRechercheVocale(pkg: String, requete: String): Boolean {
+        val intent = Intent("android.media.action.MEDIA_PLAY_FROM_SEARCH").apply {
+            putExtra(android.app.SearchManager.QUERY, requete)
+            setPackage(pkg)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val gere = try { ctx.packageManager.resolveActivity(intent, 0) != null } catch (e: Exception) { false }
+        if (!gere) return false
+        return try { ctx.startActivity(intent); true } catch (e: Exception) { false }
+    }
+
+    /** Cherche la session média de [pkg] et lui demande de lire [requete] ; retourne « lecture » (confirmé), « session » (demandé) ou « aucune ».
+     *  [dejaDemande] : la requête a déjà été transmise à l'appli via l'intent standard de recherche vocale (demarrerDepuisRechercheVocale) —
+     *  on se contente alors de vérifier que la lecture démarre, sans renvoyer playFromSearch (qui serait redondant, voire ignoré en double). */
+    private fun lancerLecture(pkg: String?, requete: String, ouvrir: Boolean, dejaDemande: Boolean = false): String {
         val msm = ctx.getSystemService(Context.MEDIA_SESSION_SERVICE) as android.media.session.MediaSessionManager
         val cn = android.content.ComponentName(ctx, fr.dd.jarvis.service.JarvisNotificationListener::class.java)
         fun ctrl(): android.media.session.MediaController? = try {
@@ -279,7 +307,7 @@ class PhoneControl(private val ctx: Context) {
         // On retient le titre AVANT la recherche pour vérifier qu'il a bien changé (sinon « ça joue » peut juste être l'ancien titre).
         val avant = titre(c)
         Thread.sleep(800)
-        c.transportControls.playFromSearch(requete, android.os.Bundle())
+        if (!dejaDemande) c.transportControls.playFromSearch(requete, android.os.Bundle())
         fun confirme() = joue(c) && titre(c) != avant
         for (i in 0 until 6) { Thread.sleep(1000); if (confirme()) return "lecture" }
         c.transportControls.play()

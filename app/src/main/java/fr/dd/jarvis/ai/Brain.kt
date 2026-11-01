@@ -46,10 +46,15 @@ class Brain(
         messages.put(JSONObject().put("role", "system").put("content",
             Prompts.brain(userName()) + app.memo.toutes() + (if (societeNeeded) "\n\n" + fr.dd.jarvis.societe.SocieteTools.PROMPT else "") +
                 (if (plan != null && plan.note.isNotBlank()) "\n\nAnalyse préalable de la demande (Gemini) — suis ce plan, avec les outils fournis : ${plan.note}" else "")))
-        history.takeLast(16).forEach { m ->
-            // Avant : 3000 caractères, ce qui coupait une réponse listant beaucoup de fichiers/images générés (ex. 10 images pour un
-            // livre de coloriage ne laissait que les ~7 premières visibles au tour suivant, qui ne pouvait donc pas toutes les mettre dans un PDF).
-            messages.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(12000)))
+        // Réduction de tokens sans perte de précision : seuls les derniers échanges (où un détail précis — liste de fichiers,
+        // de SMS, de permissions… — a des chances d'être encore repris par la demande en cours) gardent le plafond large de
+        // 12000 caractères ; les tours plus anciens (qui ne servent plus qu'à garder le fil de la conversation) sont ramenés
+        // à 4000 caractères — largement assez pour une trentaine de lignes (noms de fichiers, SMS, etc.) sans repayer en
+        // entier, à chaque nouveau tour, le texte complet d'une réponse déjà ancienne et déjà traitée.
+        val recentHistory = history.takeLast(16)
+        recentHistory.forEachIndexed { idx, m ->
+            val cap = if (recentHistory.size - 1 - idx < 3) 12000 else 4000
+            messages.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(cap)))
         }
 
         repeat(6) {

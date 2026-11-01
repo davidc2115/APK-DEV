@@ -182,6 +182,11 @@ class Store(context: Context) {
     val agentNotifs = BPref("agentNotifs", true)
     val agentRanger = BPref("agentRanger", true)
     val notifLive = BPref("notifLive", true)
+    // Interrupteurs maîtres : désactive complètement la prise en compte d'une catégorie (plus aucune capture, notification JARVIS,
+    // annonce vocale ni agent en direct pour elle) — indépendant des réglages d'agents/annonces ci-dessus qui restent mémorisés.
+    val notifSmsOn = BPref("notifSmsOn", true)
+    val notifMailOn = BPref("notifMailOn", true)
+    val notifAutresOn = BPref("notifAutresOn", true)
     val agentMinutes = IPref("agentMinutes", 15)
     val agentLastFact = SPref("agentLastFact", "")
     val agentLastNotif = SPref("agentLastNotif", "0")

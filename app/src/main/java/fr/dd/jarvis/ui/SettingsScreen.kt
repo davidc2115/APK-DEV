@@ -553,6 +553,17 @@ fun SettingsScreen(app: JarvisApp) {
                 Spacer(Modifier.height(10.dp))
                 HudDivider()
                 Spacer(Modifier.height(8.dp))
+                Text("Désactiver complètement une catégorie (plus aucune capture, alerte, annonce vocale ni agent pour elle)", color = LocalAccent.current, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 13.sp)
+                Spacer(Modifier.height(6.dp))
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    HudChip(if (store.notifSmsOn.value) "💬 SMS / messages actifs" else "💬 SMS / messages désactivés", store.notifSmsOn.value) { store.notifSmsOn.set(!store.notifSmsOn.value) }
+                    HudChip(if (store.notifMailOn.value) "📧 Mails actifs" else "📧 Mails désactivés", store.notifMailOn.value) { store.notifMailOn.set(!store.notifMailOn.value) }
+                    HudChip(if (store.notifAutresOn.value) "🔔 Autres notifications actives" else "🔔 Autres notifications désactivées", store.notifAutresOn.value) { store.notifAutresOn.set(!store.notifAutresOn.value) }
+                }
+                Text("Une catégorie désactivée ici reste invisible pour JARVIS : il ne la voit plus du tout, même si tu le lui demandes directement.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                Spacer(Modifier.height(10.dp))
+                HudDivider()
+                Spacer(Modifier.height(8.dp))
                 Text("Agents autonomes (travaillent seuls, alertes + journal Obsidian « JARVIS/Journal »)", color = LocalAccent.current, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 13.sp)
                 Spacer(Modifier.height(6.dp))
                 HudChip(if (store.agentsOn.value) "✅ Agents actifs" else "Agents désactivés", store.agentsOn.value) {
