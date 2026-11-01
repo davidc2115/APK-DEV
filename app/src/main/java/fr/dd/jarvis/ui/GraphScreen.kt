@@ -114,7 +114,11 @@ private fun calculerDisposition(data: ObsidianWriter.GraphData): List<PosNoeud> 
     // Passe de « décollage » : la simulation ci-dessus laisse parfois plusieurs nœuds très liés au même hub
     // quasiment superposés (visible en grappe illisible). On écarte ici, sans y toucher sinon, toute paire de
     // nœuds plus proches que la somme de leurs rayons + marge, jusqu'à ce qu'il n'y ait plus de chevauchement.
-    fun rayonMonde(id: String) = 12f + min(degres[id] ?: 0, 10) * 2.4f
+    // Marge volontairement généreuse : le rayon réellement affiché à l'écran est ce rayon « monde » multiplié par la
+    // densité de l'écran ET par le zoom auto-adapté (calculés plus tard, inconnus ici) — avec un petit écart on se
+    // retrouvait donc avec des nœuds dont le DISQUE AFFICHÉ se chevauchait quand même une fois ces deux facteurs
+    // appliqués (visible en grappe façon « fleur » autour des notes très liées, qui cachait aussi les traits de lien).
+    fun rayonMonde(id: String) = 22f + min(degres[id] ?: 0, 10) * 3.2f
     repeat(80) {
         for (i in tries.indices) {
             val a = tries[i].id; val pa = pos[a]!!
@@ -122,7 +126,7 @@ private fun calculerDisposition(data: ObsidianWriter.GraphData): List<PosNoeud> 
                 val b = tries[j].id; val pb = pos[b]!!
                 val dx = pa.x - pb.x; val dy = pa.y - pb.y
                 var dist = hypot(dx, dy); if (dist < 0.01f) dist = 0.01f
-                val minDist = rayonMonde(a) + rayonMonde(b) + 30f
+                val minDist = rayonMonde(a) + rayonMonde(b) + 55f
                 if (dist < minDist) {
                     val push = (minDist - dist) / 2f
                     val ux = dx / dist; val uy = dy / dist
@@ -373,7 +377,7 @@ fun GraphScreen(app: JarvisApp) {
                         val estCerveau = pn.node.id == hubId
                         val couleur = if (pn.node.ghost) Color(0xFF999999) else couleurDossier(pn.node.folder, accent)
                         if (estCerveau) drawCircle(
-                            color = couleur.copy(alpha = 0.22f * pulse), radius = rayon * (2.6f + 0.5f * pulse), center = Offset(sx, sy)
+                            color = couleur.copy(alpha = 0.22f * pulse), radius = rayon * (1.5f + 0.3f * pulse), center = Offset(sx, sy)
                         )
                         drawCircle(
                             color = if (pn.node.ghost) couleur.copy(alpha = 0.4f) else if (estHub) couleur else couleur.copy(alpha = 0.8f),
@@ -385,18 +389,30 @@ fun GraphScreen(app: JarvisApp) {
                             style = Stroke(width = 1.6f * density * scale.coerceAtLeast(0.3f))
                         )
                         // Texte TOUJOURS affiché, quel que soit le zoom (y compris très dézoomé) : la taille a un plancher
-                        // lisible indépendant de l'échelle, plutôt qu'un seuil qui faisait disparaître tous les noms dès
-                        // qu'on dézoomait pour voir l'ensemble du graphe — exactement le moment où on en a le plus besoin.
+                        // lisible indépendant de l'échelle. Lisibilité assurée par une plaque sombre derrière le texte
+                        // plutôt qu'une ombre portée (Paint.setShadowLayer) : cette dernière ne s'affichait pas du tout
+                        // sur certains rendus accélérés matériellement (constaté sur MIUI) — le texte restait invisible
+                        // sans qu'aucune erreur ne remonte, exactement le symptôme observé.
                         drawContext.canvas.nativeCanvas.apply {
+                            val label = pn.node.label.take(22)
+                            val taille = (14f * density * scale.coerceIn(0.9f, 2.4f)) * (if (estCerveau) 1.15f else 1f)
                             val paint = android.graphics.Paint().apply {
-                                color = if (pn.node.ghost) android.graphics.Color.GRAY else android.graphics.Color.WHITE
-                                textSize = (14f * density * scale.coerceIn(0.9f, 2.4f)) * (if (estCerveau) 1.15f else 1f)
+                                color = if (pn.node.ghost) android.graphics.Color.LTGRAY else android.graphics.Color.WHITE
+                                textSize = taille
                                 isAntiAlias = true
                                 textAlign = android.graphics.Paint.Align.CENTER
                                 isFakeBoldText = estCerveau
-                                setShadowLayer(3.5f * density, 0f, 0f, android.graphics.Color.BLACK)
                             }
-                            drawText(pn.node.label.take(22), sx, sy + rayon + 16f * density, paint)
+                            val texteY = sy + rayon + 18f * density
+                            val largeur = paint.measureText(label)
+                            val fm = paint.fontMetrics
+                            val fond = android.graphics.Paint().apply { color = android.graphics.Color.argb(185, 8, 6, 18); isAntiAlias = true }
+                            drawRoundRect(
+                                sx - largeur / 2f - 6f * density, texteY + fm.ascent - 3f * density,
+                                sx + largeur / 2f + 6f * density, texteY + fm.descent + 3f * density,
+                                6f * density, 6f * density, fond
+                            )
+                            drawText(label, sx, texteY, paint)
                         }
                     }
                 }
