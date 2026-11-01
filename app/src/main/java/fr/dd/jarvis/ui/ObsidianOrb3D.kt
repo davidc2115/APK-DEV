@@ -116,14 +116,6 @@ fun ObsidianOrb3D(app: fr.dd.jarvis.JarvisApp) {
             }
             drawLine(Color(0xFFE0C2FF).copy(alpha = 0.55f), Offset(cx, cy - brainH * 0.8f), Offset(cx, cy + brainH * 0.78f), strokeWidth = 1.2f)
         }
-        Column(
-            Modifier.align(Alignment.TopCenter).padding(top = 18.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(5.dp)
-        ) {
-            Text("ORBE OBSIDIENNE", color = Color(0xFFE7D8FF), fontSize = 17.sp, letterSpacing = 3.sp)
-            Text("NOYAU DE CONNAISSANCES JARVIS", color = Color(0xFF9E80C9), fontSize = 9.sp, letterSpacing = 1.5.sp)
-        }
         if (selectedNode != null) {
             Column(
                 Modifier.align(Alignment.BottomCenter).padding(bottom = 112.dp)
@@ -137,31 +129,6 @@ fun ObsidianOrb3D(app: fr.dd.jarvis.JarvisApp) {
                 Text("FERMER", Modifier.clickable { selectedNodeId = null }, color = Color(0xFFD2B5FF), fontSize = 9.sp)
             }
         }
-        Row(
-            Modifier.align(Alignment.BottomCenter).padding(bottom = 20.dp)
-                .background(Color(0xCC10091B), RoundedCornerShape(18.dp))
-                .padding(horizontal = 18.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(22.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(nodes.size.toString(), color = Color(0xFFE6D5FF), fontSize = 18.sp)
-                Text("NOTES", color = Color(0xFF9D84BD), fontSize = 9.sp)
-            }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(relations.count { it.origin == "EXPLICIT" }.toString(), color = Color(0xFFE6D5FF), fontSize = 18.sp)
-                Text("LIENS", color = Color(0xFF9D84BD), fontSize = 9.sp)
-            }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(relations.count { it.toNodeId.startsWith("unresolved:") }.toString(), color = Color(0xFFE6D5FF), fontSize = 18.sp)
-                Text("À RÉSOUDRE", color = Color(0xFF9D84BD), fontSize = 9.sp)
-            }
-        }
-        Text(
-            "FAIS GLISSER POUR ORBITER  ·  PINCE POUR ZOOMER",
-            Modifier.align(Alignment.BottomCenter).padding(bottom = 91.dp),
-            color = Color(0xFF78658F), fontSize = 8.sp, letterSpacing = 1.sp
-        )
     }
 }
 
@@ -236,6 +203,7 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
     @Volatile private var graphLines = FloatArray(0)
     @Volatile private var pointBuffer: java.nio.FloatBuffer? = null
     @Volatile private var lineBuffer: java.nio.FloatBuffer? = null
+    @Volatile private var selectedPointBuffer: java.nio.FloatBuffer? = null
     private var vertexBuffer: java.nio.FloatBuffer? = null
     private var vertexCount = 0
     @Volatile private var surfaceWidth = 1
@@ -246,11 +214,14 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
     private val mv = FloatArray(16)
     private val mvp = FloatArray(16)
 
-    fun setSelectedNode(id: String?) { selectedNodeId = id }
+    fun setSelectedNode(id: String?) {
+        selectedNodeId = id
+        val index = nodeIds.indexOf(id)
+        selectedPointBuffer = if (index >= 0) nodePositions.getOrNull(index)?.let { makeBuffer(it) } else null
+    }
 
     fun setGraph(nodes: List<fr.dd.jarvis.data.graph.GraphNodeEntity>, relations: List<fr.dd.jarvis.data.graph.GraphRelationEntity>) {
-        val visible = nodes
-        val positions = HashMap<String, FloatArray>()
+        // L’ordre alphabétique donne des positions stables : ajouter une note ne redistribue pas tout le nuage.\n        val visible = nodes.sortedBy { it.id }\n        val positions = HashMap<String, FloatArray>()
         visible.forEachIndexed { index, node ->
             val y = 1f - 2f * (index + 0.5f) / max(visible.size, 1)
             val radius = sqrt(max(0f, 1f - y * y))
@@ -268,8 +239,7 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
         }
         graphLines = edges.toFloatArray()
         pointBuffer = makeBuffer(graphPoints)
-        lineBuffer = makeBuffer(graphLines)
-    }
+        lineBuffer = makeBuffer(graphLines)\n        val selectedIndex = nodeIds.indexOf(selectedNodeId)\n        selectedPointBuffer = if (selectedIndex >= 0) nodePositions.getOrNull(selectedIndex)?.let { makeBuffer(it) } else null\n    }
 
     private fun makeBuffer(values: FloatArray): java.nio.FloatBuffer {
         val b = ByteBuffer.allocateDirect(values.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
@@ -360,7 +330,7 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
         lineBuffer?.let { b ->
             b.position(0); GLES20.glVertexAttribPointer(graphPos, 3, GLES20.GL_FLOAT, false, 12, b)
             GLES20.glEnableVertexAttribArray(graphPos)
-            GLES20.glLineWidth(2.6f)
+            GLES20.glLineWidth(1.7f)
             GLES20.glUniform4f(GLES20.glGetUniformLocation(graphProgram, "uColor"), 0.62f, 0.24f, 0.92f, 0.95f)
             GLES20.glDrawArrays(GLES20.GL_LINES, 0, graphLines.size / 3)
             GLES20.glDisableVertexAttribArray(graphPos)
@@ -369,8 +339,15 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
             b.position(0); GLES20.glVertexAttribPointer(graphPos, 3, GLES20.GL_FLOAT, false, 12, b)
             GLES20.glEnableVertexAttribArray(graphPos)
             GLES20.glUniform4f(GLES20.glGetUniformLocation(graphProgram, "uColor"), 0.82f, 0.62f, 1f, 1f)
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(graphProgram, "uPointSize"), 38f)
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(graphProgram, "uPointSize"), 20f)
             GLES20.glDrawArrays(GLES20.GL_POINTS, 0, graphPoints.size / 3)
+            selectedPointBuffer?.let { selected ->
+                selected.position(0)
+                GLES20.glVertexAttribPointer(graphPos, 3, GLES20.GL_FLOAT, false, 12, selected)
+                GLES20.glUniform4f(GLES20.glGetUniformLocation(graphProgram, "uColor"), 0.96f, 0.72f, 1f, 1f)
+                GLES20.glUniform1f(GLES20.glGetUniformLocation(graphProgram, "uPointSize"), 48f)
+                GLES20.glDrawArrays(GLES20.GL_POINTS, 0, 1)
+            }
             GLES20.glDisableVertexAttribArray(graphPos)
         }
         GLES20.glDisable(GLES20.GL_BLEND)
