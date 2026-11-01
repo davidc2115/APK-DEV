@@ -97,6 +97,61 @@ object Box {
         }
     }
 
+
+    private val estVideo = setOf("mp4", "mkv", "avi", "mov", "webm", "m4v", "ts", "mpeg", "mpg", "3gp")
+
+    /** Recherche limitée dans les partages du disque USB. Le chemin retourné est directement réutilisable par lire_video_box. */
+    fun rechercherVideos(app: JarvisApp, recherche: String, dossier: String = ""): String {
+        val h = hote(app)
+        if (h.isBlank()) return "Adresse de la box inconnue : renseigne-la dans Réglages › Box ou connecte-toi à son Wi-Fi."
+        val q = recherche.trim().lowercase()
+        val resultats = mutableListOf<String>()
+        val visites = mutableSetOf<String>()
+        var examines = 0
+        fun ajouter(path: String, taille: Long) {
+            val nom = path.substringAfterLast('/').lowercase()
+            if (nom.substringAfterLast('.', "") in estVideo && (q.isBlank() || nom.contains(q) || path.lowercase().contains(q))) resultats.add("• $path · ${fmt(taille)}")
+        }
+        try {
+            if (app.store.boxProto.value != "ftp") {
+                val racine = dossier.trim().trim('/')
+                val depart = if (racine.isBlank()) SmbFile("smb://$h/", ctx(app)) else SmbFile(url(app, racine, true), ctx(app))
+                val pile = java.util.ArrayDeque<Pair<SmbFile, Int>>()
+                pile.add(depart to 0)
+                while (pile.isNotEmpty() && examines < 1800 && resultats.size < 30) {
+                    val (dir, depth) = pile.removeFirst()
+                    if (!visites.add(dir.path.lowercase())) continue
+                    for (entry in dir.listFiles()) {
+                        examines++
+                        if (entry.name.startsWith(".")) continue
+                        if (entry.isDirectory && depth < 5) pile.add(entry to depth + 1)
+                        else if (!entry.isDirectory) ajouter(entry.path.substringAfter("smb://$h/").trimEnd('/'), runCatching { entry.length() }.getOrDefault(0L))
+                        if (examines >= 1800 || resultats.size >= 30) break
+                    }
+                }
+            } else {
+                ftp(app) { c ->
+                    val pile = java.util.ArrayDeque<Pair<String, Int>>()
+                    pile.add(("/" + dossier.trim().trim('/')) to 0)
+                    while (pile.isNotEmpty() && examines < 1800 && resultats.size < 30) {
+                        val (dir, depth) = pile.removeFirst()
+                        if (!visites.add(dir)) continue
+                        for (entry in c.listFiles(dir)) {
+                            examines++
+                            if (entry.name.startsWith(".")) continue
+                            val path = (dir.trimEnd('/') + "/" + entry.name).replace("//", "/")
+                            if (entry.isDirectory && depth < 5) pile.add(path to depth + 1)
+                            else if (entry.isFile) ajouter(path.trimStart('/'), entry.size)
+                            if (examines >= 1800 || resultats.size >= 30) break
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) { throw IllegalStateException(expliquer(e, h), e) }
+        return if (resultats.isEmpty()) "Aucun film correspondant trouvé sur le disque de la box. Recherche limitée à 1 800 éléments et 5 niveaux de dossiers." else
+            "Films trouvés sur la box (chemins exacts) :\n" + resultats.joinToString("\n") + "\n\nPour lancer un film, utilise lire_video_box avec le chemin exact."
+    }
+
     private fun smbListe(app: JarvisApp, chemin: String): String {
         val d = SmbFile(url(app, chemin, true), ctx(app))
         val l = d.listFiles().sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() })).filter { !it.name.startsWith(".") }
