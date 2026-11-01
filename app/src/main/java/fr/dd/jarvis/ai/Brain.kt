@@ -61,14 +61,20 @@ class Brain(
             val msg = try {
                 llm.groqChat(messages, schema)
             } catch (e: ApiException) {
-                // Llama génère parfois un appel d'outil mal formé : on réessaie en interdisant explicitement un nouvel appel
-                // d'outil ce tour-ci (tool_choice=none), mais SANS retirer les définitions d'outils du contexte — les retirer
-                // provoquait une erreur Groq différente et pire ("Tool choice is none, but model called a tool"), non
-                // rattrapée, qui remontait brute jusqu'à l'utilisateur.
+                // Llama/GPT-OSS génère parfois un appel d'outil mal formé : on réessaie en interdisant explicitement un
+                // nouvel appel d'outil ce tour-ci (tool_choice=none), mais SANS retirer les définitions d'outils du
+                // contexte. Ça réduit le risque mais ne l'élimine pas : le modèle peut encore insister pour appeler un
+                // outil malgré la consigne, et Groq refuse alors la requête avec la MÊME erreur une seconde fois. On ne
+                // retente donc pas une 3e fois (ça ne ferait que répéter l'échec) : on répond proprement à la place,
+                // plutôt que de laisser cette erreur brute remonter jusqu'à l'utilisateur.
                 if (e.code == 400 && (e.message ?: "").contains("tool_use_failed")) {
-                    val m2 = JSONArray(); for (k in 0 until messages.length()) m2.put(messages.get(k))
-                    m2.put(JSONObject().put("role", "system").put("content", "L'appel d'outil a échoué pour ce tour. N'invente AUCUNE donnée (appareils, imprimantes, mails, événements, fichiers) : dis simplement que l'action n'a pas pu être lancée et demande de réessayer."))
-                    llm.groqChat(m2, schema, forceText = true)
+                    try {
+                        val m2 = JSONArray(); for (k in 0 until messages.length()) m2.put(messages.get(k))
+                        m2.put(JSONObject().put("role", "system").put("content", "L'appel d'outil a échoué pour ce tour. N'invente AUCUNE donnée (appareils, imprimantes, mails, événements, fichiers) : dis simplement que l'action n'a pas pu être lancée et demande de réessayer."))
+                        llm.groqChat(m2, schema, forceText = true)
+                    } catch (e2: kotlinx.coroutines.CancellationException) { throw e2 } catch (e2: Exception) {
+                        return "Désolé, j'ai buté sur cette demande (le modèle n'a pas réussi à formuler l'appel d'outil correctement). Peux-tu reformuler ou réessayer ?"
+                    }
                 } else throw e
             }
             val calls = msg.optJSONArray("tool_calls")
