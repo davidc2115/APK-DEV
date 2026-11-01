@@ -115,6 +115,7 @@ object Horloge {
         val h = match.groupValues[1].toIntOrNull() ?: return "Heure invalide : $heure."
         val mn = match.groupValues[2].toIntOrNull() ?: 0
         if (h !in 0..23 || mn !in 0..59) return "Heure invalide : $heure."
+        if (!accorderAccesExactParShizuku(c)) return "❌ Alarme non programmée : active « Alarmes et rappels » pour Jarvis ou démarre Shizuku et autorise Jarvis."
         if (!notificationsAutorisees(c)) return "❌ Alarme non programmée : autorise les notifications de JARVIS pour recevoir l'alerte."
         val low = jours.lowercase()
         val map = mapOf("dim" to 1, "lun" to 2, "mar" to 3, "mer" to 4, "jeu" to 5, "ven" to 6, "sam" to 7)
