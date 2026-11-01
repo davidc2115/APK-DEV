@@ -10,7 +10,11 @@ import org.json.JSONObject
 class TikTokTools(private val app: JarvisApp, private val confirm: suspend (String, Boolean) -> Boolean) {
 
     companion object {
-        val KEYWORDS = Regex("tiktok|tik tok|vues?\\b.*vid[ée]o|vid[ée]o.*(vues?|likes?)|mes vid[ée]os", RegexOption.IGNORE_CASE)
+        // « vid[ée]o » seul (pas seulement avec « tiktok ») : generer_image mis à part, c'est le seul outil capable de
+        // VRAIMENT générer une vidéo (tiktok_video) — sans ce mot-clé large, une demande du type « crée-moi une vidéo
+        // sur X » (sans dire « tiktok ») ne proposait pas l'outil au modèle, qui répondait alors en inventant un faux
+        // succès au lieu d'appeler quoi que ce soit.
+        val KEYWORDS = Regex("tiktok|tik tok|vid[ée]o", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
         val NAMES = setOf("tiktok_connexion", "tiktok_deconnexion", "tiktok_profil", "tiktok_mes_videos", "tiktok_analyse", "tiktok_script", "tiktok_video")
     }
