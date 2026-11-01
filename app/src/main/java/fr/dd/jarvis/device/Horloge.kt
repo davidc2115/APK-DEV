@@ -157,7 +157,7 @@ object Horloge {
         items.add(item)
         save(c, items)
         return try {
-            val exact = planifier(c, item)
+            planifier(c, item)
             val h = secondes / 3600
             val mi = secondes % 3600 / 60
             val se = secondes % 60
