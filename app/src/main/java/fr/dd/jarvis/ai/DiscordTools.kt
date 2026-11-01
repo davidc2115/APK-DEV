@@ -112,7 +112,7 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
                 a.optString("mentionnable").lowercase().takeIf { it.isNotBlank() }?.let { it in setOf("true", "oui", "1") })
             ToolResult("✅ Rôle « ${r.optString("name")} » créé sur le serveur « $gnom »." + (perms?.let { " Permissions : ${Discord.Perm.noms(it).joinToString(", ").ifBlank { "aucune" }}." } ?: "") +
                 "\n⚠️ N'oublie pas de placer ce rôle au-dessus, dans la hiérarchie du serveur, de tous les rôles qu'il doit dépasser (Discord ne le fait pas automatiquement)." +
-                "\nℹ️ S'il n'a encore aucun membre, il n'apparaîtra pas dans la liste des membres à droite (même avec « afficher séparément ») — il est bien visible dans Paramètres du serveur › Rôles.")
+                "\nℹ️ S'il n'a encore aucun membre, il n'apparaîtra pas dans la liste des membres à droite (même avec « afficher séparément ») — il est bien visible dans Paramètres du serveur › Rôles.", direct = true)
         }
         "discord_role_modifier" -> {
             val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
@@ -125,14 +125,14 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
                 a.optString("couleur").let { couleurHex(it) }, perms,
                 a.optString("affiche_separement").lowercase().takeIf { it.isNotBlank() }?.let { it in setOf("true", "oui", "1") },
                 a.optString("mentionnable").lowercase().takeIf { it.isNotBlank() }?.let { it in setOf("true", "oui", "1") })
-            ToolResult("✅ Rôle « ${r.optString("name")} » modifié sur le serveur « $gnom ».")
+            ToolResult("✅ Rôle « ${r.optString("name")} » modifié sur le serveur « $gnom ».", direct = true)
         }
         "discord_role_supprimer" -> {
             val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
             val role = Discord.trouverRole(app, gid, a.optString("role")) ?: return ToolResult("Rôle « ${a.optString("role")} » introuvable sur le serveur « $gnom ».")
             if (!confirm("Supprimer définitivement le rôle « ${role.optString("name")} » sur le serveur « $gnom » ?", true)) return ToolResult("Refusé par l'utilisateur.")
             Discord.roleSupprimer(app, gid, role.getString("id"))
-            ToolResult("🗑️ Rôle « ${role.optString("name")} » supprimé sur le serveur « $gnom ».")
+            ToolResult("🗑️ Rôle « ${role.optString("name")} » supprimé sur le serveur « $gnom ».", direct = true)
         }
         "discord_role_attribuer" -> {
             val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
@@ -145,7 +145,7 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             val retirer = a.optString("action").lowercase().startsWith("retir")
             if (!confirm("${if (retirer) "Retirer" else "Donner"} le rôle « ${role.optString("name")} » à $pseudo sur le serveur « $gnom » ?", true)) return ToolResult("Refusé par l'utilisateur.")
             if (retirer) Discord.roleRetirer(app, gid, userId, role.getString("id")) else Discord.roleAttribuer(app, gid, userId, role.getString("id"))
-            ToolResult(if (retirer) "✅ Rôle « ${role.optString("name")} » retiré à $pseudo sur « $gnom »." else "✅ Rôle « ${role.optString("name")} » donné à $pseudo sur « $gnom ».")
+            ToolResult(if (retirer) "✅ Rôle « ${role.optString("name")} » retiré à $pseudo sur « $gnom »." else "✅ Rôle « ${role.optString("name")} » donné à $pseudo sur « $gnom ».", direct = true)
         }
         "discord_salon_permission" -> {
             val gid = guilde(a)
@@ -175,12 +175,12 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
                 if (!confirm("Modifier l'accès des ${ids.size} salon(s) du serveur pour $cibleNom ($acces) ?", true)) return ToolResult("Refusé par l'utilisateur.")
                 var erreurs = 0
                 ids.forEach { c -> runCatching { appliquer(c.getString("id")) }.onFailure { erreurs++ } }
-                ToolResult("✅ Accès mis à jour sur ${ids.size - erreurs}/${ids.size} salon(s) pour $cibleNom." + (if (erreurs > 0) " ($erreurs échec(s), probablement un salon où le bot n'a pas la main)." else ""))
+                ToolResult("✅ Accès mis à jour sur ${ids.size - erreurs}/${ids.size} salon(s) pour $cibleNom." + (if (erreurs > 0) " ($erreurs échec(s), probablement un salon où le bot n'a pas la main)." else ""), direct = true)
             } else {
                 val salon = Discord.trouverSalon(app, gid, a.optString("salon")) ?: return ToolResult("Salon « ${a.optString("salon")} » introuvable. Précise un nom de salon, ou mets tous_les_salons=true pour les appliquer tous d'un coup.")
                 if (!confirm("Modifier l'accès de « ${salon.optString("name")} » pour $cibleNom ($acces) ?", true)) return ToolResult("Refusé par l'utilisateur.")
                 appliquer(salon.getString("id"))
-                ToolResult("✅ Accès de « ${salon.optString("name")} » mis à jour pour $cibleNom.")
+                ToolResult("✅ Accès de « ${salon.optString("name")} » mis à jour pour $cibleNom.", direct = true)
             }
         }
         else -> ToolResult("Outil Discord inconnu.")
