@@ -70,7 +70,7 @@ import kotlin.random.Random
 
 /** Combien de notes au plus affichées par dossier (en liste, le long du rayon qui part de son hub) — au-delà, elles
  *  comptent dans le total du dossier mais ne sont pas affichées individuellement (évite un graphe surchargé). */
-private const val MAX_NOTES_PAR_DOSSIER = 5
+private const val MAX_NOTES_PAR_DOSSIER = 12
 /** Au-delà de ce nombre de dossiers racine, les plus petits sont regroupés dans une catégorie « Autres » : jamais
  *  de notes perdues silencieusement, mais le cercle de hubs reste lisible même sur un très gros coffre. */
 private const val MAX_DOSSIERS = 16
@@ -328,27 +328,6 @@ fun GraphScreen(app: JarvisApp) {
     }
 
     Column(Modifier.fillMaxSize()) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("J.A.R.V.I.S  /  MÉMOIRE", color = Color(0xFFB58AFF), fontFamily = FontFamily.Monospace, fontSize = 9.sp, letterSpacing = 2.sp)
-                    Text("GRAPHE OBSIDIAN", color = Color(0xFFE7D9FF), fontFamily = FontFamily.Monospace, fontSize = 16.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.4.sp)
-                }
-                Text(
-                    if (chargement) "Calcul de la disposition…" else "$totalNotes notes · ${aretes.size} liens · ${categories.size} dossiers" + (if (noeuds.size < totalNotes) " (${noeuds.size} affichées, $MAX_NOTES_PAR_DOSSIER/dossier max)" else ""),
-                    color = HudDim, fontSize = 11.sp, fontFamily = FontFamily.Monospace
-                )
-            }
-            Text(
-                "⟲ Recalculer", color = accent, fontSize = 12.sp, fontFamily = FontFamily.Monospace,
-                modifier = Modifier.padding(6.dp).pointerInput(Unit) { detectTapGestures { version++ } }
-            )
-        }
-
         // Barre de recherche et filtres : ils mettent en évidence les éléments réels du coffre sans fabriquer de liens.
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
             Row(
@@ -366,19 +345,6 @@ fun GraphScreen(app: JarvisApp) {
                     }
                 )
                 if (recherche.isNotBlank()) Text("✕", color = HudDim, modifier = Modifier.clickable { recherche = "" }.padding(start = 8.dp))
-            }
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 7.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                val filtres = listOf<String?>(null) + categories.map { it.nom }
-                filtres.forEach { nom ->
-                    val actif = dossierActif == nom
-                    Text(
-                        nom ?: "Tous les dossiers",
-                        color = if (actif) Color.White else HudDim,
-                        fontSize = 10.sp, fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.background(if (actif) accent.copy(alpha = 0.32f) else Color(0x66150D22), RoundedCornerShape(20.dp))
-                            .clickable { dossierActif = nom }.padding(horizontal = 11.dp, vertical = 7.dp)
-                    )
-                }
             }
             if (requete.isNotBlank()) Text("${resultatsRecherche.size} résultat(s) · les correspondances sont éclairées dans le graphe", color = HudDim, fontSize = 10.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(top = 5.dp, start = 4.dp))
         }
@@ -558,6 +524,8 @@ fun GraphScreen(app: JarvisApp) {
                     val styleCerveau = TextStyle(color = Color.White, fontSize = (15f * scale.coerceIn(0.9f, 2.2f)).sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                     val yCerveau = cy + rayonCerveau + 12f * density
                     dessinerPlaqueEtTexte(mesureurTexte, "CERVEAU", styleCerveau, Offset(cx, yCerveau), density)
+                    val styleSousTitre = TextStyle(color = Color(0xFFE0D0FF), fontSize = (10.5f * scale.coerceIn(0.9f, 2.2f)).sp, fontFamily = FontFamily.Monospace, textAlign = TextAlign.Center)
+                    dessinerPlaqueEtTexte(mesureurTexte, "GRAPHE OBSIDIAN", styleSousTitre, Offset(cx, yCerveau + 24f * density), density)
 
                     for (cat in categories) {
                         val sx = cx + cat.pos.x * scale; val sy = cy + cat.pos.y * scale
