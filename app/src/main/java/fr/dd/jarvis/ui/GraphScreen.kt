@@ -64,10 +64,15 @@ import kotlin.random.Random
  *  de points dispersé au hasard) — avec un fond en nébuleuse violette pour l'ambiance. Disposition calculée une
  *  fois (force-directed par grappes) puis pan/zoom/tap à la main pour explorer. */
 
-private const val MAX_NOEUDS = 260
+/** Combien de notes au plus affichées par dossier (en liste, le long du rayon qui part de son hub) — au-delà, elles
+ *  comptent dans le total du dossier mais ne sont pas affichées individuellement (évite un graphe surchargé). */
+private const val MAX_NOTES_PAR_DOSSIER = 5
+/** Au-delà de ce nombre de dossiers racine, les plus petits sont regroupés dans une catégorie « Autres » : jamais
+ *  de notes perdues silencieusement, mais le cercle de hubs reste lisible même sur un très gros coffre. */
+private const val MAX_DOSSIERS = 16
 
 private data class PosNoeud(val node: ObsidianWriter.GraphNode, val pos: Offset, val degre: Int, val categorie: String)
-private data class CategorieInfo(val nom: String, val pos: Offset, val nbNotes: Int)
+private data class CategorieInfo(val nom: String, val pos: Offset, val nbNotes: Int, val nbAffichees: Int)
 
 /** Résultat complet de la disposition : nœuds positionnés + arêtes + hubs de dossiers, renvoyés ENSEMBLE (plus de
  *  variable globale partagée entre threads/écrans pour faire transiter les arêtes — source d'un bug réel : rien ne
@@ -79,132 +84,63 @@ private fun racineDossier(folder: String): String {
     return r.ifBlank { "Racine" }
 }
 
+private fun rayonHubMonde(nb: Int) = 30f + min(nb, 40) * 1.6f
+// Écart (en unités « monde ») entre deux notes consécutives du même dossier, et entre le hub et la première note :
+// volontairement très généreux (une étiquette fait au plus 22 caractères) pour qu'aucun chevauchement ne soit
+// possible même au zoom le plus fort.
+private const val ECART_NOTE = 150f
+
+/** Disposition ENTIÈREMENT déterministe (plus de simulation physique pour les notes, source des chevauchements
+ *  précédents) : un cercle de hubs de dossier autour du centre, puis — pour chaque dossier — ses notes alignées
+ *  en liste le long du RAYON qui part du centre à travers son hub, espacées d'un écart fixe généreux. Deux notes
+ *  ne peuvent donc jamais se chevaucher (alignées sur un même segment, à distance fixe), et deux dossiers voisins
+ *  ne peuvent pas se chevaucher non plus (leurs rayons divergent en s'éloignant du centre). */
 private fun calculerDisposition(data: ObsidianWriter.GraphData): Disposition {
+    if (data.nodes.isEmpty()) return Disposition(emptyList(), emptyList(), emptyList())
     val degres = HashMap<String, Int>()
     data.edges.forEach { e -> degres[e.from] = (degres[e.from] ?: 0) + 1; degres[e.to] = (degres[e.to] ?: 0) + 1 }
-    val tries = data.nodes.sortedByDescending { degres[it.id] ?: 0 }.take(MAX_NOEUDS)
-    val idsGardes = tries.map { it.id }.toHashSet()
-    val edges = data.edges.filter { it.from in idsGardes && it.to in idsGardes }
 
-    val n = tries.size
-    if (n == 0) return Disposition(emptyList(), emptyList(), emptyList())
+    val parCategorieBrut = data.nodes.groupBy { racineDossier(it.folder) }
+    val trieesParTaille = parCategorieBrut.keys.sortedByDescending { parCategorieBrut[it]!!.size }
+    val parCategorie = LinkedHashMap<String, List<ObsidianWriter.GraphNode>>()
+    trieesParTaille.take(MAX_DOSSIERS).forEach { parCategorie[it] = parCategorieBrut[it]!! }
+    val surplus = trieesParTaille.drop(MAX_DOSSIERS)
+    if (surplus.isNotEmpty()) parCategorie["Autres"] = surplus.flatMap { parCategorieBrut[it]!! }
 
-    // Regroupement par dossier racine (catégorie) : chaque catégorie obtient un hub fixe, placé en cercle autour du
-    // centre — c'est CE positionnement, pas la simulation de forces, qui organise tout le graphe par dossier.
-    val parCategorie = tries.groupBy { racineDossier(it.folder) }
-    val categories = parCategorie.keys.sortedByDescending { parCategorie[it]!!.size }
+    val categories = parCategorie.keys.toList()
     val nbCat = categories.size.coerceAtLeast(1)
-    // Rayon du cercle de hubs : croît avec le nombre de catégories pour garder de la place entre elles, et avec le
-    // nombre de notes (un coffre avec beaucoup de notes a des grappes plus larges, qui ont besoin de plus d'écart).
-    val rayonCategories = 230f + nbCat * 34f + min(n, 150) * 1.1f
+    // Rayon du cercle de hubs : croît avec le nombre de dossiers pour garder de la place entre leurs rayons.
+    val rayonCategories = 230f + nbCat * 30f
     val posCategorie = HashMap<String, Offset>()
     categories.forEachIndexed { i, cat ->
         val angle = (i.toFloat() / nbCat) * 2 * Math.PI.toFloat()
         posCategorie[cat] = Offset(cos(angle) * rayonCategories, sin(angle) * rayonCategories)
     }
 
-    // Sous-dossiers (chemin complet) : une légère attraction mutuelle entre notes du MÊME sous-dossier, en plus de
-    // la gravité vers le hub de leur catégorie — ça fait émerger des petites grappes de sous-dossier à l'intérieur
-    // de la grappe de leur dossier parent, sans avoir besoin de dessiner un second niveau de hubs.
-    val parSousDossier = tries.filter { it.folder.isNotBlank() }.groupBy { it.folder }.filterValues { it.size > 1 }
-
-    val rnd = Random(7)
-    val pos = HashMap<String, Offset>()
-    val catDe = HashMap<String, String>()
-    tries.forEach { node ->
-        val cat = racineDossier(node.folder)
-        catDe[node.id] = cat
+    val noeuds = mutableListOf<PosNoeud>()
+    val catInfos = mutableListOf<CategorieInfo>()
+    for (cat in categories) {
         val hub = posCategorie[cat]!!
-        val tailleCat = parCategorie[cat]!!.size
-        val etalement = 36f + min(tailleCat, 35) * 5f
-        val angle = rnd.nextFloat() * 2 * Math.PI.toFloat()
-        val rayon = 26f + rnd.nextFloat() * etalement
-        pos[node.id] = Offset(hub.x + cos(angle) * rayon, hub.y + sin(angle) * rayon)
+        val dist = hypot(hub.x, hub.y).coerceAtLeast(0.001f)
+        val u = Offset(hub.x / dist, hub.y / dist)
+        val notesCat = parCategorie[cat]!!
+        // Tri : notes les plus liées d'abord (plus représentatives), puis par sous-dossier (chemin complet) pour
+        // garder les notes d'un même sous-dossier côte à côte dans la liste — nod au « sous-dossier » demandé,
+        // sans avoir besoin d'un second niveau de hubs qui aurait vite surchargé l'écran.
+        val ordre = notesCat.sortedWith(
+            compareByDescending<ObsidianWriter.GraphNode> { degres[it.id] ?: 0 }.thenBy { it.folder }.thenBy { it.label }
+        )
+        val affichees = ordre.take(MAX_NOTES_PAR_DOSSIER)
+        affichees.forEachIndexed { k, node ->
+            val r = rayonHubMonde(notesCat.size) + ECART_NOTE * (k + 1)
+            val p = Offset(hub.x + u.x * r, hub.y + u.y * r)
+            noeuds += PosNoeud(node, p, degres[node.id] ?: 0, cat)
+        }
+        catInfos += CategorieInfo(cat, hub, notesCat.size, affichees.size)
     }
-
-    val k = 44f
-    val disp = HashMap<String, Offset>()
-    repeat(130) { iter ->
-        tries.forEach { disp[it.id] = Offset.Zero }
-        // Répulsion : seulement entre notes de la MÊME catégorie — nettement moins cher que la répulsion globale
-        // d'avant (O(n²) sur TOUT le graphe), et ça garde chaque grappe compacte sans être perturbée par les autres,
-        // puisque les hubs sont de toute façon fixes (pas besoin de répulsion inter-catégories).
-        parCategorie.values.forEach { groupe ->
-            for (i in groupe.indices) {
-                val a = groupe[i].id; val pa = pos[a]!!
-                for (j in i + 1 until groupe.size) {
-                    val b = groupe[j].id; val pb = pos[b]!!
-                    var dx = pa.x - pb.x; var dy = pa.y - pb.y
-                    var dist = hypot(dx, dy); if (dist < 0.01f) dist = 0.01f
-                    val force = (k * k) / dist
-                    val fx = dx / dist * force; val fy = dy / dist * force
-                    disp[a] = disp[a]!!.let { Offset(it.x + fx, it.y + fy) }
-                    disp[b] = disp[b]!!.let { Offset(it.x - fx, it.y - fy) }
-                }
-            }
-        }
-        // Arêtes réelles (liens « [[...]] ») : peuvent traverser les catégories, c'est voulu — ça garde les vrais
-        // liens visibles même entre deux dossiers différents.
-        for (e in edges) {
-            val pa = pos[e.from] ?: continue; val pb = pos[e.to] ?: continue
-            var dx = pa.x - pb.x; var dy = pa.y - pb.y
-            var dist = hypot(dx, dy); if (dist < 0.01f) dist = 0.01f
-            val force = (dist * dist) / (k * 4f)
-            val fx = dx / dist * force; val fy = dy / dist * force
-            disp[e.from] = disp[e.from]!!.let { Offset(it.x - fx, it.y - fy) }
-            disp[e.to] = disp[e.to]!!.let { Offset(it.x + fx, it.y + fy) }
-        }
-        // Gravité vers le hub de SA PROPRE catégorie (pas vers l'origine) : c'est ce qui organise tout en grappes
-        // par dossier au lieu d'un nuage global façon confettis dispersés sur tout l'écran.
-        tries.forEach { node ->
-            val hub = posCategorie[catDe[node.id]]!!
-            val p = pos[node.id]!!
-            disp[node.id] = disp[node.id]!!.let { Offset(it.x - (p.x - hub.x) * 0.07f, it.y - (p.y - hub.y) * 0.07f) }
-        }
-        // Attraction douce vers le centre de masse du sous-dossier (chemin complet).
-        parSousDossier.values.forEach { groupe ->
-            var sx = 0f; var sy = 0f
-            groupe.forEach { val p = pos[it.id]!!; sx += p.x; sy += p.y }
-            val cxg = sx / groupe.size; val cyg = sy / groupe.size
-            groupe.forEach { node ->
-                val p = pos[node.id]!!
-                disp[node.id] = disp[node.id]!!.let { Offset(it.x + (cxg - p.x) * 0.05f, it.y + (cyg - p.y) * 0.05f) }
-            }
-        }
-        val temp = 20f * (1f - iter / 130f)
-        tries.forEach { node ->
-            val d = disp[node.id]!!
-            val dist = hypot(d.x, d.y).coerceAtLeast(0.01f)
-            val lim = min(dist, temp)
-            pos[node.id] = pos[node.id]!!.let { Offset(it.x + d.x / dist * lim, it.y + d.y / dist * lim) }
-        }
-    }
-    // Passe de « décollage » (par catégorie, puisque les catégories sont déjà séparées par construction) : écarte
-    // toute paire plus proche que la somme de leurs rayons + marge généreuse (le rayon réellement affiché à l'écran
-    // est ce rayon « monde » multiplié par densité ET zoom, inconnus ici — marge large pour rester correct malgré ça).
-    fun rayonMonde(id: String) = 20f + min(degres[id] ?: 0, 10) * 3f
-    repeat(60) {
-        parCategorie.values.forEach { groupe ->
-            for (i in groupe.indices) {
-                val a = groupe[i].id; val pa = pos[a]!!
-                for (j in i + 1 until groupe.size) {
-                    val b = groupe[j].id; val pb = pos[b]!!
-                    val dx = pa.x - pb.x; val dy = pa.y - pb.y
-                    var dist = hypot(dx, dy); if (dist < 0.01f) dist = 0.01f
-                    val minDist = rayonMonde(a) + rayonMonde(b) + 50f
-                    if (dist < minDist) {
-                        val push = (minDist - dist) / 2f
-                        val ux = dx / dist; val uy = dy / dist
-                        pos[a] = Offset(pa.x + ux * push, pa.y + uy * push)
-                        pos[b] = Offset(pb.x - ux * push, pb.y - uy * push)
-                    }
-                }
-            }
-        }
-    }
-    val noeuds = tries.map { PosNoeud(it, pos[it.id]!!, degres[it.id] ?: 0, catDe[it.id]!!) }
-    val catInfos = categories.map { CategorieInfo(it, posCategorie[it]!!, parCategorie[it]!!.size) }
-    return Disposition(noeuds, edges, catInfos)
+    val idsAffiches = noeuds.map { it.node.id }.toHashSet()
+    val aretes = data.edges.filter { it.from in idsAffiches && it.to in idsAffiches }
+    return Disposition(noeuds, aretes, catInfos)
 }
 
 /** Couleur stable par dossier (premier niveau du chemin), pour repérer visuellement les groupes de notes
@@ -390,7 +326,7 @@ fun GraphScreen(app: JarvisApp) {
             Column {
                 Text("GRAPHE OBSIDIAN", color = accent, fontFamily = FontFamily.Monospace, fontSize = 15.sp, letterSpacing = 2.sp)
                 Text(
-                    if (chargement) "Calcul de la disposition…" else "$totalNotes notes · ${aretes.size} liens · ${categories.size} dossiers" + (if (totalNotes > MAX_NOEUDS) " (affiche les $MAX_NOEUDS plus connectées)" else ""),
+                    if (chargement) "Calcul de la disposition…" else "$totalNotes notes · ${aretes.size} liens · ${categories.size} dossiers" + (if (noeuds.size < totalNotes) " (${noeuds.size} affichées, $MAX_NOTES_PAR_DOSSIER/dossier max)" else ""),
                     color = HudDim, fontSize = 11.sp, fontFamily = FontFamily.Monospace
                 )
             }
@@ -570,6 +506,19 @@ fun GraphScreen(app: JarvisApp) {
                             fontWeight = FontWeight.Normal, textAlign = TextAlign.Center
                         )
                         dessinerPlaqueEtTexte(mesureurTexte, label, style, Offset(sx, sy + rayon + 8f * density), density)
+                    }
+                    // « +N autres » au bout du rayon de chaque dossier qui a plus de notes que l'affichage n'en montre.
+                    for (cat in categories) {
+                        val masquees = cat.nbNotes - cat.nbAffichees
+                        if (masquees <= 0) continue
+                        val hub = cat.pos
+                        val dist = hypot(hub.x, hub.y).coerceAtLeast(0.001f)
+                        val u = Offset(hub.x / dist, hub.y / dist)
+                        val r = rayonHubMonde(cat.nbNotes) + ECART_NOTE * (cat.nbAffichees + 1)
+                        val p = Offset(hub.x + u.x * r, hub.y + u.y * r)
+                        val sx = cx + p.x * scale; val sy = cy + p.y * scale
+                        val styleN = TextStyle(color = HudDim, fontSize = (11.5f * scale.coerceIn(0.9f, 2.2f)).sp, fontFamily = FontFamily.Monospace, textAlign = TextAlign.Center)
+                        dessinerPlaqueEtTexte(mesureurTexte, "+$masquees autres…", styleN, Offset(sx, sy), density)
                     }
                 }
 
