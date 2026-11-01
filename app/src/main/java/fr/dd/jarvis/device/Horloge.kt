@@ -121,7 +121,7 @@ object Horloge {
         val items = load(c)
         items.removeAll { it.optInt("id") == id }
         items.add(item)
-        if (!runCatching { save(c, items) }.getOrDefault(false)) return "❌ Impossible d'enregistrer l'alarme sur cet appareil."
+        save(c, items)
         return try {
             planifier(c, item)
             "⏰ Alarme JARVIS programmée à %02d:%02d%s. Elle sonnera en arrière-plan sans ouvrir l'application Horloge.".format(
