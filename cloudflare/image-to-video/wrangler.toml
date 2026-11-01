@@ -1,0 +1,10 @@
+name = "jarvis-image-to-video"
+main = "src/index.ts"
+compatibility_date = "2025-05-01"
+
+[vars]
+HF_SPACE_BASE = "https://cbensimon-wan2-2-fp8da-aoti-preview2.hf.space"
+HF_FN_NAME = "generate_video"
+
+[observability]
+enabled = true
