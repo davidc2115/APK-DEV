@@ -190,6 +190,15 @@ class Store(context: Context) {
     val discordToken = SPref("discordToken", "")
     val discordGuildId = SPref("discordGuildId", "")
 
+    // ---- TikTok (OAuth, compte personnel)
+    val tiktokClientKey = SPref("tiktokClientKey", "")
+    val tiktokClientSecret = SPref("tiktokClientSecret", "")
+    val tiktokAccessToken = SPref("tiktokAccessToken", "")
+    val tiktokRefreshToken = SPref("tiktokRefreshToken", "")
+    val tiktokOpenId = SPref("tiktokOpenId", "")
+    val tiktokTokenExpiry = SPref("tiktokTokenExpiry", "0")   // epoch secondes
+    val tiktokOAuthState = SPref("tiktokOAuthState", "")      // anti-CSRF, vérifié au retour
+
     // ---- Annonces vocales (SMS, mails, notifications) : mode par catégorie (off | annonce | lecture) et sonnerie (URI, « default » ou vide = aucune)
     val annOn = BPref("annOn", false)
     val annPrive = BPref("annPrive", false)

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Connexion TikTok — JARVIS</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; background:#0b1424; color:#cfe8ff; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; text-align:center; }
+  .box { max-width:420px; padding:24px; }
+  a { color:#4fd1ff; }
+</style>
+</head>
+<body>
+  <div class="box">
+    <p>Retour vers JARVIS…</p>
+    <p id="fallback" style="display:none;">Si l'application ne s'ouvre pas automatiquement, <a id="lien" href="#">touche ici</a>.</p>
+  </div>
+  <script>
+    // Relais pour l'OAuth2 TikTok : TikTok n'accepte qu'un redirect_uri en https (pas de schéma personnalisé),
+    // cette page se contente de relayer immédiatement la réponse (code/state/error) vers l'application JARVIS
+    // via un lien de schéma personnalisé, intercepté par un intent-filter Android (fr.dd.jarvis://tiktok-callback).
+    var qs = window.location.search || "";
+    var cible = "fr.dd.jarvis://tiktok-callback" + qs;
+    document.getElementById("lien").href = cible;
+    window.location.replace(cible);
+    setTimeout(function () { document.getElementById("fallback").style.display = "block"; }, 1200);
+  </script>
+</body>
+</html>

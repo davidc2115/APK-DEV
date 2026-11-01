@@ -200,6 +200,10 @@ fun SettingsScreen(app: JarvisApp) {
             DiscordPanel(store, app)
         }
 
+        item {
+            TikTokPanel(store, app)
+        }
+
         // ------------------------------------------------------------ Mails
         item {
             var result by remember { mutableStateOf("") }
@@ -834,6 +838,59 @@ private fun DiscordPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvi
                         val arr = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.ai.Discord.guildes(app) }
                         val noms = (0 until arr.length()).joinToString(", ") { arr.getJSONObject(it).optString("name") }
                         "✅ Bot connecté. Serveurs : ${noms.ifBlank { "aucun" }}"
+                    } catch (e: Exception) { "❌ ${e.message}" }
+                    busy = false
+                }
+            }
+        }
+        if (msg.isNotBlank()) Text(msg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+    }
+}
+
+@Composable
+private fun TikTokPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.JarvisApp) {
+    val scope = rememberCoroutineScope()
+    var msg by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    val connecte = store.tiktokAccessToken.value.isNotBlank()
+    HudPanel(Modifier.fillMaxWidth(), title = "TikTok — compte personnel") {
+        Text(
+            "Permet à JARVIS de lire les statistiques de TES vidéos (vues, likes, commentaires, partages) et de te conseiller pour en faire plus — pas de comparaison avec d'autres comptes, ces données ne sont pas publiques. " +
+                "Sur developers.tiktok.com (ton app « Jarvis21 ») : passe l'app en mode Bac à sable (Sandbox, pas de validation requise), ajoute le produit Login Kit avec les scopes user.info.basic et video.list, " +
+                "ajoute l'URI de redirection ci-dessous dans Login Kit, puis ajoute ton propre compte TikTok comme « utilisateur de test ».",
+            color = HudDim, fontSize = 12.sp
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Text("URI de redirection : " + fr.dd.jarvis.ai.TikTok.REDIRECT_URI, color = HudText, fontSize = 11.sp, modifier = Modifier.weight(1f))
+            Text("Copier", color = HudDim, fontSize = 12.sp, modifier = Modifier.clickable {
+                val cm = app.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("redirect_uri", fr.dd.jarvis.ai.TikTok.REDIRECT_URI))
+            })
+        }
+        Spacer(Modifier.height(8.dp))
+        HudTextField(store.tiktokClientKey.value, { store.tiktokClientKey.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Clé client (Client Key)")
+        Spacer(Modifier.height(6.dp))
+        HudTextField(store.tiktokClientSecret.value, { store.tiktokClientSecret.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Secret client (Client Secret)", password = true)
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text((if (connecte) "✅ Compte connecté" else "⬜ Compte non connecté"), color = HudText, fontSize = 12.sp, modifier = Modifier.weight(1f))
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HudButton(if (busy) "…" else "Se connecter", enabled = !busy && store.tiktokClientKey.value.isNotBlank() && store.tiktokClientSecret.value.isNotBlank()) {
+                val state = java.util.UUID.randomUUID().toString()
+                store.tiktokOAuthState.set(state)
+                val err = app.phone.start(android.content.Intent.ACTION_VIEW, fr.dd.jarvis.ai.TikTok.urlAutorisation(app, state), null)
+                msg = if (err.isNotBlank()) "❌ $err" else ""
+            }
+            if (connecte) HudButton("Se déconnecter", enabled = !busy) { fr.dd.jarvis.ai.TikTok.deconnecter(app); msg = "Déconnecté." }
+            HudButton(if (busy) "Test…" else "Tester", enabled = !busy && connecte) {
+                scope.launch {
+                    busy = true
+                    msg = try {
+                        val u = fr.dd.jarvis.ai.TikTok.monProfil(app)
+                        "✅ ${u.optString("display_name")} — ${u.optLong("follower_count")} abonnés, ${u.optLong("video_count")} vidéos"
                     } catch (e: Exception) { "❌ ${e.message}" }
                     busy = false
                 }

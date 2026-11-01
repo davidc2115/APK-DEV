@@ -66,6 +66,13 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="video/*" />
             </intent-filter>
+            <!-- Retour OAuth TikTok (via la page relais GitHub Pages, cf. TikTok.kt) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="fr.dd.jarvis" android:host="tiktok-callback" />
+            </intent-filter>
         </activity>
 
         <service

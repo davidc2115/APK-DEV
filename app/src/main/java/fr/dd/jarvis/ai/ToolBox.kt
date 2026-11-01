@@ -22,6 +22,7 @@ class ToolBox(
     private val societe = SocieteTools(app, confirm)
     private val serveur = ServeurTools(app, confirm)
     private val discord = DiscordTools(app, confirm)
+    private val tiktok = TikTokTools(app, confirm)
     private val store get() = app.store
     private val llm get() = app.llm
 
@@ -241,13 +242,14 @@ class ToolBox(
     /** Les outils Société ne sont proposés au modèle que si la conversation les concerne (économie de contexte). */
     fun schemaFor(recentUserText: String): JSONArray {
         val soc = SocieteTools.concerned(recentUserText); val srv = ServeurTools.concerned(recentUserText)
-        val dis = DiscordTools.concerned(recentUserText)
-        if (!soc && !srv && !dis) return schema
+        val dis = DiscordTools.concerned(recentUserText); val tik = TikTokTools.concerned(recentUserText)
+        if (!soc && !srv && !dis && !tik) return schema
         return JSONArray().also { out ->
             for (i in 0 until schema.length()) out.put(schema.get(i))
             if (soc) societe.schema.forEach { out.put(it) }
             if (srv) serveur.schema.forEach { out.put(it) }
             if (dis) discord.schema.forEach { out.put(it) }
+            if (tik) tiktok.schema.forEach { out.put(it) }
         }
     }
 
@@ -256,6 +258,7 @@ class ToolBox(
         societe.schema.forEach { out.put(it) }
         serveur.schema.forEach { out.put(it) }
         discord.schema.forEach { out.put(it) }
+        tiktok.schema.forEach { out.put(it) }
     }
 
     // ------------------------------------------------------------------ exécution
@@ -494,6 +497,7 @@ class ToolBox(
         in SocieteTools.NAMES -> societe.execute(name, a)
         in ServeurTools.NAMES -> serveur.execute(name, a)
         in DiscordTools.NAMES -> discord.execute(name, a)
+        in TikTokTools.NAMES -> tiktok.execute(name, a)
         else -> ToolResult("Outil inconnu : $name")
     } }
 

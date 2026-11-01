@@ -68,6 +68,8 @@ import fr.dd.jarvis.ui.PlanningScreen
 import fr.dd.jarvis.ui.SettingsScreen
 import fr.dd.jarvis.ui.SocieteScreen
 import fr.dd.jarvis.ui.accentById
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.launch
 import java.io.File
 
 class MainActivity : ComponentActivity() {
@@ -81,6 +83,32 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         handleListen(intent)
         handleSharedVideo(intent)
+        handleTikTokCallback(intent)
+    }
+
+    /** Retour de la connexion OAuth TikTok (via la page relais GitHub Pages → fr.dd.jarvis://tiktok-callback?...). */
+    private fun handleTikTokCallback(i: android.content.Intent?) {
+        val uri = i?.data ?: return
+        if (uri.scheme != "fr.dd.jarvis" || uri.host != "tiktok-callback") return
+        i.data = null
+        val app = application as JarvisApp
+        val erreur = uri.getQueryParameter("error")
+        val etatAttendu = app.store.tiktokOAuthState.value
+        app.store.tiktokOAuthState.set("")
+        if (erreur != null) {
+            android.widget.Toast.makeText(this, "❌ Connexion TikTok refusée : ${uri.getQueryParameter("error_description") ?: erreur}", android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
+        val code = uri.getQueryParameter("code")
+        val etat = uri.getQueryParameter("state")
+        if (code.isNullOrBlank() || etat != etatAttendu) {
+            android.widget.Toast.makeText(this, "❌ Retour TikTok invalide (code manquant ou state incorrect).", android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
+        vm.viewModelScope.launch {
+            val r = fr.dd.jarvis.ai.TikTok.echangerCode(app, code)
+            android.widget.Toast.makeText(this@MainActivity, r, android.widget.Toast.LENGTH_LONG).show()
+        }
     }
 
     /** Vidéo reçue via « Partager » depuis une autre appli (ex. TikTok) : on la garde dans JARVIS et on lance l'analyse. */
@@ -114,6 +142,7 @@ class MainActivity : ComponentActivity() {
         ) fr.dd.jarvis.service.JarvisService.start(this)
         handleListen(intent)
         handleSharedVideo(intent)
+        handleTikTokCallback(intent)
         setContent {
             HudTheme(accentById(app.store.accent.value).color, app.store.tileAlpha.value) {
                 HudBackground { Root(app, vm) }
