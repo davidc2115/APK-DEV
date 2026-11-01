@@ -29,9 +29,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -54,7 +55,13 @@ private const val MAX_NOEUDS = 260
 
 private data class PosNoeud(val node: ObsidianWriter.GraphNode, val pos: Offset, val degre: Int)
 
-private fun calculerDisposition(data: ObsidianWriter.GraphData): List<PosNoeud> {
+/** Résultat complet de la disposition : nœuds positionnés + arêtes correspondantes, renvoyés ENSEMBLE
+ *  (plus de variable globale partagée entre threads/écrans pour faire transiter les arêtes — source d'un bug
+ *  réel : rien ne garantissait qu'elle ne soit pas réécrite entre le calcul et sa lecture si GraphBackdrop et
+ *  GraphScreen tournaient en même temps, par exemple pendant une transition d'écran). */
+private data class Disposition(val noeuds: List<PosNoeud>, val aretes: List<ObsidianWriter.GraphEdge>)
+
+private fun calculerDisposition(data: ObsidianWriter.GraphData): Disposition {
     val degres = HashMap<String, Int>()
     data.edges.forEach { e -> degres[e.from] = (degres[e.from] ?: 0) + 1; degres[e.to] = (degres[e.to] ?: 0) + 1 }
     val tries = data.nodes.sortedByDescending { degres[it.id] ?: 0 }.take(MAX_NOEUDS)
@@ -62,7 +69,7 @@ private fun calculerDisposition(data: ObsidianWriter.GraphData): List<PosNoeud> 
     val edges = data.edges.filter { it.from in idsGardes && it.to in idsGardes }
 
     val n = tries.size
-    if (n == 0) return emptyList()
+    if (n == 0) return Disposition(emptyList(), emptyList())
     // Avec peu de notes (petit coffre), un k trop faible entassait tout au centre, illisible une fois dézoomé pour
     // tout faire tenir à l'écran. 170 donne un graphe nettement plus aéré, surtout quand n est petit (cas courant ici).
     val k = 170f / kotlin.math.sqrt(n.toFloat().coerceAtLeast(1f))
@@ -136,8 +143,7 @@ private fun calculerDisposition(data: ObsidianWriter.GraphData): List<PosNoeud> 
             }
         }
     }
-    return tries.map { PosNoeud(it, pos[it.id]!!, degres[it.id] ?: 0) }
-        .also { l -> edgesCache = edges }
+    return Disposition(tries.map { PosNoeud(it, pos[it.id]!!, degres[it.id] ?: 0) }, edges)
 }
 
 /** Couleur stable par dossier (premier niveau du chemin), pour repérer visuellement les groupes de notes
@@ -149,9 +155,6 @@ private fun couleurDossier(folder: String, accent: Color): Color {
     val hue = (h % 360).toFloat()
     return Color.hsv(hue, 0.55f, 1f)
 }
-
-// Rempli par calculerDisposition() juste avant le retour ; lu par le Composable pour tracer les arêtes.
-private var edgesCache: List<ObsidianWriter.GraphEdge> = emptyList()
 
 /** Version purement visuelle (sans barre, sans tap/zoom/pan, sans fiche de note) du graphe Obsidian, utilisée
  *  comme fond pendant une session de conversation vocale. [active] (écoute/réflexion en cours) l'éclaircit
@@ -166,11 +169,10 @@ fun GraphBackdrop(app: JarvisApp, modifier: Modifier = Modifier, active: Boolean
 
     LaunchedEffect(Unit) {
         val resultat = withContext(Dispatchers.Default) {
-            val data = app.obsidian.graph()
-            calculerDisposition(data) to edgesCache
+            calculerDisposition(app.obsidian.graph())
         }
-        noeuds = resultat.first
-        aretes = resultat.second
+        noeuds = resultat.noeuds
+        aretes = resultat.aretes
     }
 
     val pulse by androidx.compose.animation.core.rememberInfiniteTransition(label = "graphePulse").animateFloat(
@@ -247,12 +249,11 @@ fun GraphScreen(app: JarvisApp) {
         chargement = true
         val resultat = withContext(Dispatchers.Default) {
             val data = app.obsidian.graph()
-            val dispo = calculerDisposition(data)
-            Triple(dispo, edgesCache, data.nodes.size)
+            calculerDisposition(data) to data.nodes.size
         }
-        noeuds = resultat.first
-        aretes = resultat.second
-        totalNotes = resultat.third
+        noeuds = resultat.first.noeuds
+        aretes = resultat.first.aretes
+        totalNotes = resultat.second
         chargement = false
     }
 
@@ -269,6 +270,11 @@ fun GraphScreen(app: JarvisApp) {
         ), label = "hubPulse"
     )
     val hubId = remember(noeuds) { noeuds.maxByOrNull { it.degre }?.takeIf { it.degre > 0 }?.node?.id }
+    // API Compose standard pour le texte (TextMeasurer + DrawScope.drawText), à la place de l'ancien
+    // android.graphics.Paint via nativeCanvas : ce dernier restait invisible sur certains rendus matériels
+    // (constaté même sur des nœuds totalement isolés, sans rien à proximité pour les recouvrir — donc pas
+    // un simple souci de chevauchement mais bien un problème du chemin de rendu nativeCanvas lui-même).
+    val mesureurTexte = rememberTextMeasurer()
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -304,7 +310,10 @@ fun GraphScreen(app: JarvisApp) {
                         // Doit pouvoir descendre bien en dessous de 1 pour qu'un graphe large (notes peu reliées entre
                         // elles) tienne entièrement à l'écran dès l'ouverture, plutôt que de forcer un zoom minimum qui
                         // laisse la majorité des notes hors-écran (il fallait alors les chercher en déplaçant la vue).
-                        val s = (minOf(canvasW / largeur, canvasH / hauteur) * 0.85f).coerceIn(0.15f, 6f)
+                        // Plafond aligné sur celui du pincer-zoomer (4f) : un cadrage initial plus zoomé que ce que
+                        // l'utilisateur peut ensuite atteindre lui-même n'a pas de sens, et rendait les cercles
+                        // disproportionnés sur un petit coffre (peu de notes = petite zone = fort zoom auto).
+                        val s = (minOf(canvasW / largeur, canvasH / hauteur) * 0.85f).coerceIn(0.15f, 4f)
                         scale = s
                         offset = Offset(-(minX + maxX) / 2f * s, -(minY + maxY) / 2f * s)
                     }
@@ -355,10 +364,17 @@ fun GraphScreen(app: JarvisApp) {
                     val cx = size.width / 2f + offset.x
                     val cy = size.height / 2f + offset.y
 
+                    // Rayon plafonné en pixels écran (pas seulement en unités « monde ») : quel que soit le résultat du
+                    // calcul de disposition ou du zoom auto-adapté, un nœud ne peut plus jamais devenir assez gros pour
+                    // avaler ses voisins (et donc cacher leurs traits de lien et leur texte dessous) — filet de sécurité
+                    // indépendant de la justesse du calcul de décollage plus haut.
+                    fun rayonEcran(pn: PosNoeud) = ((10f + min(pn.degre, 10) * 2.2f) * density * scale).coerceIn(5f * density, 34f * density)
+
                     // Tailles en fonction de la densité de l'écran (`density`, ici le float du DrawScope) : avant, des tailles
                     // fixes en pixels bruts (rayon 6, trait 1.2…) étaient quasi invisibles sur un écran haute résolution
                     // (ex. 3 px = 1 dp), d'où des nœuds réduits à des points perdus dans le vide.
-                    val lignePaint = Color(0x6690B8FF)
+                    // Passe 1/3 : les traits de lien, tout en dessous.
+                    val lignePaint = Color(0x9990B8FF)
                     for (a in aretes) {
                         val pa = parId[a.from]?.pos ?: continue
                         val pb = parId[a.to]?.pos ?: continue
@@ -366,13 +382,14 @@ fun GraphScreen(app: JarvisApp) {
                             color = lignePaint,
                             start = Offset(cx + pa.x * scale, cy + pa.y * scale),
                             end = Offset(cx + pb.x * scale, cy + pb.y * scale),
-                            strokeWidth = 2f * density * scale.coerceAtLeast(0.4f)
+                            strokeWidth = 2.2f * density * scale.coerceAtLeast(0.4f)
                         )
                     }
+                    // Passe 2/3 : les cercles des nœuds (et leur halo), par-dessus les traits.
                     for (pn in noeuds) {
                         val sx = cx + pn.pos.x * scale
                         val sy = cy + pn.pos.y * scale
-                        val rayon = (10f + min(pn.degre, 10) * 2.2f) * density * scale
+                        val rayon = rayonEcran(pn)
                         val estHub = pn.degre >= 5
                         val estCerveau = pn.node.id == hubId
                         val couleur = if (pn.node.ghost) Color(0xFF999999) else couleurDossier(pn.node.folder, accent)
@@ -388,32 +405,36 @@ fun GraphScreen(app: JarvisApp) {
                             color = couleur.copy(alpha = 0.3f), radius = rayon * 2f, center = Offset(sx, sy),
                             style = Stroke(width = 1.6f * density * scale.coerceAtLeast(0.3f))
                         )
-                        // Texte TOUJOURS affiché, quel que soit le zoom (y compris très dézoomé) : la taille a un plancher
-                        // lisible indépendant de l'échelle. Lisibilité assurée par une plaque sombre derrière le texte
-                        // plutôt qu'une ombre portée (Paint.setShadowLayer) : cette dernière ne s'affichait pas du tout
-                        // sur certains rendus accélérés matériellement (constaté sur MIUI) — le texte restait invisible
-                        // sans qu'aucune erreur ne remonte, exactement le symptôme observé.
-                        drawContext.canvas.nativeCanvas.apply {
-                            val label = pn.node.label.take(22)
-                            val taille = (14f * density * scale.coerceIn(0.9f, 2.4f)) * (if (estCerveau) 1.15f else 1f)
-                            val paint = android.graphics.Paint().apply {
-                                color = if (pn.node.ghost) android.graphics.Color.LTGRAY else android.graphics.Color.WHITE
-                                textSize = taille
-                                isAntiAlias = true
-                                textAlign = android.graphics.Paint.Align.CENTER
-                                isFakeBoldText = estCerveau
-                            }
-                            val texteY = sy + rayon + 18f * density
-                            val largeur = paint.measureText(label)
-                            val fm = paint.fontMetrics
-                            val fond = android.graphics.Paint().apply { color = android.graphics.Color.argb(185, 8, 6, 18); isAntiAlias = true }
-                            drawRoundRect(
-                                sx - largeur / 2f - 6f * density, texteY + fm.ascent - 3f * density,
-                                sx + largeur / 2f + 6f * density, texteY + fm.descent + 3f * density,
-                                6f * density, 6f * density, fond
-                            )
-                            drawText(label, sx, texteY, paint)
-                        }
+                    }
+                    // Passe 3/3 : TOUS les textes en dernier, par-dessus absolument tout — aucun cercle dessiné après
+                    // ne peut donc plus jamais recouvrir le label d'un nœud dessiné avant lui.
+                    for (pn in noeuds) {
+                        val sx = cx + pn.pos.x * scale
+                        val sy = cy + pn.pos.y * scale
+                        val rayon = rayonEcran(pn)
+                        val estCerveau = pn.node.id == hubId
+                        val label = pn.node.label.take(22)
+                        val taille = (13.5f * scale.coerceIn(0.9f, 2.2f)) * (if (estCerveau) 1.15f else 1f)
+                        val style = androidx.compose.ui.text.TextStyle(
+                            color = if (pn.node.ghost) Color.LightGray else Color.White,
+                            fontSize = taille.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = if (estCerveau) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Normal,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                        val resultatTexte = mesureurTexte.measure(label, style)
+                        val texteY = sy + rayon + 10f * density
+                        val topLeft = Offset(sx - resultatTexte.size.width / 2f, texteY)
+                        drawRoundRect(
+                            color = Color(0xB9080614),
+                            topLeft = Offset(topLeft.x - 6f * density, topLeft.y - 3f * density),
+                            size = androidx.compose.ui.geometry.Size(
+                                resultatTexte.size.width + 12f * density,
+                                resultatTexte.size.height + 6f * density
+                            ),
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f * density, 6f * density)
+                        )
+                        drawText(resultatTexte, topLeft = topLeft)
                     }
                 }
             }
