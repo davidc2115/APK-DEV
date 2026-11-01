@@ -163,11 +163,20 @@ object Horloge {
         save(c, items)
         return try {
             planifier(c, item)
+            val notification = NotificationCompat.Builder(c, CH_RUN)
+                .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+                .setContentTitle("⏳ Minuteur JARVIS")
+                .setContentText(libelle.ifBlank { "Compte à rebours en cours" })
+                .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .setWhen(at).setUsesChronometer(true).setChronometerCountDown(true)
+                .setOngoing(true).setOnlyAlertOnce(true)
+                .addAction(0, "Annuler", pi(c, id, ACT_STOP)).build()
+            nm(c).notify(id, notification)
             val h = secondes / 3600
             val mi = secondes % 3600 / 60
             val se = secondes % 60
             val txt = listOfNotNull(if (h > 0) "$h h" else null, if (mi > 0) "$mi min" else null, if (se > 0) "$se s" else null).joinToString(" ")
-            "⏳ Minuteur JARVIS de $txt lancé en arrière-plan, sans ouvrir l'application Horloge."
+            "⏳ Minuteur JARVIS de $txt lancé en arrière-plan. Le compte à rebours est visible dans les notifications."
         } catch (e: Exception) {
             save(c, items.filterNot { it.optInt("id") == id })
             "❌ Android a refusé le minuteur : ${e.message ?: e.javaClass.simpleName}."
@@ -243,7 +252,7 @@ object Horloge {
         val n = NotificationCompat.Builder(c, CH_ALARM).setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
             .setContentTitle(if (timer) "⏳ Minuteur terminé" else "⏰ Alarme").setContentText(label.ifBlank { if (timer) "Le temps est écoulé." else "C'est l'heure !" })
             .setPriority(NotificationCompat.PRIORITY_MAX).setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setAutoCancel(true).setTimeoutAfter(90_000)
+            .setOngoing(true).setAutoCancel(false)
             .setContentIntent(PendingIntent.getActivity(c, 8, Intent(c, fr.dd.jarvis.MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE))
             .addAction(0, "Arrêter", pi(c, id, ACT_STOP)).build()
         n.flags = n.flags or android.app.Notification.FLAG_INSISTENT   // le son se répète jusqu'à l'arrêt
@@ -285,7 +294,7 @@ class HorlogeReceiver : BroadcastReceiver() {
         when (intent.action) {
             Horloge.ACT_FIRE -> Horloge.sonner(context, id)
             Horloge.ACT_STOP -> Horloge.arreter(context, id)
-            Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> Horloge.restaurer(context)
+            Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED, "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" -> Horloge.restaurer(context)
         }
     }
 }
