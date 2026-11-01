@@ -23,7 +23,7 @@ import java.time.ZoneId
  * Chronomètre : notification avec compteur. Les alarmes sont conservées et replanifiées au redémarrage du téléphone.
  */
 object Horloge {
-    const val CH_ALARM = "horloge_alarme"
+    const val CH_ALARM = "horloge_alarme_v2"
     const val CH_RUN = "horloge_en_cours"
     const val ACT_FIRE = "fr.dd.jarvis.HORLOGE_FIRE"
     const val ACT_STOP = "fr.dd.jarvis.HORLOGE_STOP"
@@ -77,21 +77,22 @@ object Horloge {
     private fun pi(c: Context, id: Int, action: String, flags: Int = PendingIntent.FLAG_IMMUTABLE, extra: (Intent) -> Unit = {}): PendingIntent =
         PendingIntent.getBroadcast(c, id, Intent(c, HorlogeReceiver::class.java).setAction(action).putExtra("id", id).also(extra), PendingIntent.FLAG_UPDATE_CURRENT or flags)
 
-    private fun planifier(c: Context, o: JSONObject): Boolean {
+    private fun accorderAccesExactParShizuku(c: Context): Boolean {
+        if (exactAutorise(c)) return true
+        if (!ShizukuShell.ready()) return false
+        ShizukuShell.exec("cmd appops set " + c.packageName + " SCHEDULE_EXACT_ALARM allow")
+        return exactAutorise(c)
+    }
+
+    private fun planifier(c: Context, o: JSONObject) {
         val id = o.getInt("id")
         val at = o.getLong("at")
         val operation = pi(c, id, ACT_FIRE)
         val manager = am(c)
-        return if (android.os.Build.VERSION.SDK_INT < 31 || manager.canScheduleExactAlarms()) {
-            val show = PendingIntent.getActivity(c, 7, Intent(c, fr.dd.jarvis.MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-            manager.setAlarmClock(AlarmManager.AlarmClockInfo(at, show), operation)
-            true
-        } else {
-            manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, operation)
-            false
-        }
+        check(exactAutorise(c)) { "Accès Alarmes et rappels non accordé." }
+        val show = PendingIntent.getActivity(c, 7, Intent(c, fr.dd.jarvis.MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        manager.setAlarmClock(AlarmManager.AlarmClockInfo(at, show), operation)
     }
-
     private fun prochaine(h: Int, m: Int, days: List<Int>): Long {
         val now = LocalDateTime.now()
         var d = now.toLocalDate().atTime(h, m)
@@ -131,10 +132,10 @@ object Horloge {
         items.add(item)
         save(c, items)
         return try {
-            val exact = planifier(c, item)
+            planifier(c, item)
             "⏰ Alarme JARVIS programmée à %02d:%02d%s. Elle sonnera en arrière-plan sans ouvrir l'application Horloge.%s".format(
                 h, mn, if (libelle.isNotBlank()) " — $libelle" else "",
-                if (exact) "" else " Précision réduite : autorise « Alarmes et rappels » pour une sonnerie à l'heure exacte."
+                ""
             )
         } catch (e: Exception) {
             save(c, items.filterNot { it.optInt("id") == id })
@@ -145,7 +146,7 @@ object Horloge {
     /** Minuteur JARVIS en arrière-plan : AlarmManager exact + notification/son à échéance. */
     fun creerMinuteur(c: Context, secondes: Int, libelle: String): String {
         if (secondes <= 0) return "Durée du minuteur invalide."
-        if (!exactAutorise(c)) return messageAccesExact()
+        if (!accorderAccesExactParShizuku(c)) return "Minuteur non lancé : autorise Alarmes et rappels ou démarre Shizuku et accorde son accès à Jarvis."
         if (!notificationsAutorisees(c)) return "❌ Minuteur non lancé : autorise les notifications de JARVIS pour voir et entendre la fin du compte à rebours."
         val id = nouvelId(c)
         val at = System.currentTimeMillis() + secondes * 1000L
@@ -160,7 +161,7 @@ object Horloge {
             val mi = secondes % 3600 / 60
             val se = secondes % 60
             val txt = listOfNotNull(if (h > 0) "$h h" else null, if (mi > 0) "$mi min" else null, if (se > 0) "$se s" else null).joinToString(" ")
-            "⏳ Minuteur JARVIS de $txt lancé en arrière-plan, sans ouvrir l'application Horloge." + if (exact) "" else " Android peut retarder légèrement la sonnerie : autorise « Alarmes et rappels » pour une précision exacte."
+            "⏳ Minuteur JARVIS de $txt lancé en arrière-plan, sans ouvrir l'application Horloge."
         } catch (e: Exception) {
             save(c, items.filterNot { it.optInt("id") == id })
             "❌ Android a refusé le minuteur : ${e.message ?: e.javaClass.simpleName}."
