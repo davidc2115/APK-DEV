@@ -175,6 +175,8 @@ class ToolBox(
         put(tool("analyser_image", "Analyse une image déjà générée par generer_image (ou envoyée par l'utilisateur) : décrit son contenu, répond à une question dessus, lit un texte qu'elle contient, etc.",
             mapOf("image" to prop("Nom de fichier de l'image (vu dans jarvis-img:... ou via fichiers_generes), ou « derniere » pour la dernière générée."),
                 "question" to prop("Ce qu'il faut regarder ou dire sur l'image (optionnel ; par défaut une description détaillée).")), listOf("image")))
+        put(tool("rechercher_videos_box", "Recherche des films sur le disque dur USB branché à la box (partages SMB/FTP). Retourne les chemins exacts ; ne lance pas la lecture.", mapOf("recherche" to prop("Titre ou fragment du nom du film (optionnel pour lister les vidéos)."), "dossier" to prop("Dossier de départ sur le partage (optionnel)."))))
+        put(tool("lire_video_box", "Lit un film stocké sur le disque dur branché à la box : ouvre le sélecteur Android avec les lecteurs vidéo compatibles installés, sans télécharger le film entier.", mapOf("chemin" to prop("Chemin exact du film retourné par rechercher_videos_box, sans smb://.")), listOf("chemin")))
         put(tool("analyser_video", "Analyse une vidéo que l'utilisateur a partagée à JARVIS (bouton « Partager » de n'importe quelle appli, ex. TikTok, vers JARVIS) : avis sur l'accroche, le rythme/montage, la qualité, ce qui plaît ou non, et suggestions concrètes pour améliorer l'engagement (vues, likes, abonnés). Ne fonctionne que sur une vidéo déjà reçue par JARVIS, jamais sur un simple lien.",
             mapOf("video" to prop("Nom de fichier de la vidéo reçue (vu dans jarvis-video:... ou via fichiers_generes), ou « derniere » pour la dernière partagée."),
                 "question" to prop("Ce qu'il faut regarder précisément (optionnel ; par défaut un avis général de créateur de contenu).")), listOf("video")))
@@ -368,6 +370,14 @@ class ToolBox(
         }
         "creer_fichier" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { fr.dd.jarvis.ai.Fichiers.creer(app, a) }.getOrElse { "❌ Création impossible : ${it.message}" } }, direct = true)
         "fichiers_generes" -> ToolResult(fr.dd.jarvis.ai.Fichiers.lister(app, a.optString("quoi"), a.optString("max").toIntOrNull() ?: 20))
+        "rechercher_videos_box" -> try {
+            ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.ai.Box.rechercherVideos(app, a.optString("recherche"), a.optString("dossier")) }, direct = true)
+        } catch (e: Exception) { ToolResult("❌ Recherche sur le disque de la box impossible : ${e.message}", direct = true) }
+        "lire_video_box" -> try {
+            val chemin = a.optString("chemin").trim().trimStart('/')
+            if (chemin.isBlank()) ToolResult("Chemin du film manquant.")
+            else ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { fr.dd.jarvis.device.MediaServeur.ouvrir(app, chemin) }, direct = true)
+        } catch (e: Exception) { ToolResult("❌ Impossible d'ouvrir ce film : ${e.message}", direct = true) }
         "analyser_video" -> try {
             val f = fr.dd.jarvis.ai.Fichiers.videoFichier(app, a.optString("video"))
                 ?: return ToolResult("❌ Vidéo « ${a.optString("video")} » introuvable. Partage-la à JARVIS avec le bouton « Partager » de l'appli (ex. TikTok → Partager → JARVIS), puis réessaie.")
