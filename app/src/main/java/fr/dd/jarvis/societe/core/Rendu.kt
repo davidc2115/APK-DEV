@@ -100,12 +100,14 @@ object Rendu {
     fun bulletinCtx(d: SocieteData, b: Bulletin): Ctx {
         val heuresSup = b.heuresSup25 + b.heuresSup50
         val heuresManquantes = (b.heuresContrat - b.heuresEffectuees).coerceAtLeast(0.0)
+        val heuresNormales = minOf(b.heuresEffectuees, b.heuresContrat)
         val vars = societeVars(d) + mapOf(
             "employe_nom" to b.employe.nom, "poste" to b.employe.poste.ifBlank { "—" },
             "statut_label" to (if (b.employe.statut == "dirigeant") "dirigeant" else "salarié"),
             "mois" to b.mois, "mois_label" to moisLabel(b.mois),
             "heures_hebdo" to nombre(b.employe.heuresHebdo), "heures_mensuelles" to nombre(b.heuresContrat),
             "heures_contrat" to nombre(b.heuresContrat), "heures_effectuees" to nombre(b.heuresEffectuees),
+            "heures_normales" to nombre(heuresNormales),
             "heures_sup" to (if (heuresSup > 0) nombre(heuresSup) else ""),
             "heures_sup25" to (if (b.heuresSup25 > 0) nombre(b.heuresSup25) else ""),
             "heures_sup50" to (if (b.heuresSup50 > 0) nombre(b.heuresSup50) else ""),

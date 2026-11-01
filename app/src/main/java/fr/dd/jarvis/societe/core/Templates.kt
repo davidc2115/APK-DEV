@@ -170,7 +170,7 @@ tags: [societe, paie]
 
 | Rubrique | Détail | Montant |
 |---|---|---:|
-| Heures normales | {{heures_contrat}} h × {{taux_horaire}} | {{brut_heures_normales}} |
+| Heures normales | {{heures_normales}} h × {{taux_horaire}} | {{brut_heures_normales}} |
 {{#heures_sup25}}| Heures sup. à 25 % | {{heures_sup25}} h majorées 25 % | — |
 {{/heures_sup25}}{{#heures_sup50}}| Heures sup. à 50 % | {{heures_sup50}} h majorées 50 % | — |
 {{/heures_sup50}}{{#brut_heures_sup}}| **Total heures supplémentaires** | | **{{brut_heures_sup}}** |
