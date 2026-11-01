@@ -48,9 +48,16 @@ object Box {
         return if (u.isBlank()) base.withCredentials(NtlmPasswordAuthenticator(null, "guest", "")) else base.withCredentials(NtlmPasswordAuthenticator(null, u, app.store.boxPass.value))
     }
 
+    /** smb:// est une URL : un nom de dossier/fichier avec espace, accent ou caractère spécial (&, %, #, +…) doit être
+     *  encodé segment par segment, sinon jcifs résout un chemin légèrement différent de celui demandé — certains
+     *  dossiers semblaient alors vides (ou introuvables) simplement parce que leur nom contenait un de ces caractères,
+     *  alors que les dossiers au nom « simple » fonctionnaient très bien. */
+    private fun encodeSegment(s: String) = java.net.URLEncoder.encode(s, "UTF-8").replace("+", "%20")
+
     private fun url(app: JarvisApp, chemin: String, dossier: Boolean): String {
         val c = chemin.trim().trim('/')
-        return "smb://" + hote(app) + "/" + c + if (dossier && c.isNotEmpty()) "/" else ""
+        val encode = if (c.isEmpty()) "" else c.split('/').joinToString("/") { encodeSegment(it) }
+        return "smb://" + hote(app) + "/" + encode + if (dossier && encode.isNotEmpty()) "/" else ""
     }
 
     data class Flux(val stream: InputStream, val longueur: Long, val type: String)
