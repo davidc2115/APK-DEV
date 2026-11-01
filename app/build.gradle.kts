@@ -63,7 +63,10 @@ android {
 }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2024.06.00")
+    // BOM relevé en même temps que Kotlin 2.2.21 (Phase 2 de l'Orbe Obsidienne) : avec le nouveau
+    // plugin Compose Compiler (Kotlin 2.x), un runtime Compose trop ancien (2024.06.00) peut planter
+    // au tout premier rendu (incompatibilité de version du Composer), avant même le premier écran.
+    val composeBom = platform("androidx.compose:compose-bom:2025.01.00")
     implementation(composeBom)
 
     implementation("androidx.core:core-ktx:1.13.1")

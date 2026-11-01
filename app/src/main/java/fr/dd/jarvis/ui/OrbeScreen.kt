@@ -43,66 +43,18 @@ fun OrbeScreen(app: JarvisApp) {
     Box(Modifier.fillMaxSize()) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
+            // Toute la création de la scène 3D est protégée : un appareil sans OpenGL ES 3.0 (ou tout
+            // autre souci Filament) doit afficher un message, jamais faire planter l'app entière.
             factory = { ctx ->
-                val sceneView = SceneView(ctx)
-                val materialLoader = MaterialLoader(sceneView.engine, ctx)
-
-                // Matériau « obsidienne violette » : noir très sombre, forte réflectance,
-                // faible rugosité pour des reflets nets façon verre volcanique.
-                val materiau = materialLoader.createColorInstance(
-                    Color(0xFF130018).toArgb(),
-                    0.35f,  // metallic
-                    0.25f,  // roughness
-                    0.9f    // reflectance
-                )
-
-                val sphere = SphereNode(
-                    engine = sceneView.engine,
-                    radius = 0.6f,
-                    center = Float3(0f, 0f, 0f),
-                    stacks = 32,
-                    slices = 32,
-                    materialInstance = materiau,
-                    builderApply = {}
-                )
-                sceneView.addChildNode(sphere)
-                sceneView.cameraNode.position = Float3(0f, 0f, 2.2f)
-
-                // Lumière principale violette pour faire ressortir les reflets, plus une lumière
-                // d'appoint froide en contre-jour.
-                val applyLumierePrincipale: (LightManager.Builder) -> Unit = { builder ->
-                    builder.color(0.70f, 0.49f, 1.0f)
-                        .intensity(120_000f)
-                        .direction(-0.5f, -0.8f, -0.3f)
+                try {
+                    creerVueOrbe(ctx)
+                } catch (e: Throwable) {
+                    android.widget.TextView(ctx).apply {
+                        text = "Orbe 3D indisponible sur cet appareil :\n${e.message ?: e.javaClass.simpleName}"
+                        setTextColor(android.graphics.Color.LTGRAY)
+                        setPadding(32, 32, 32, 32)
+                    }
                 }
-                val lumierePrincipale = LightNode(
-                    engine = sceneView.engine,
-                    type = LightManager.Type.DIRECTIONAL,
-                    apply = applyLumierePrincipale
-                )
-                sceneView.addChildNode(lumierePrincipale)
-
-                val applyLumiereAppoint: (LightManager.Builder) -> Unit = { builder ->
-                    builder.color(0.36f, 0.88f, 1.0f)
-                        .intensity(35_000f)
-                        .direction(0.6f, 0.5f, 0.6f)
-                }
-                val lumiereAppoint = LightNode(
-                    engine = sceneView.engine,
-                    type = LightManager.Type.DIRECTIONAL,
-                    apply = applyLumiereAppoint
-                )
-                sceneView.addChildNode(lumiereAppoint)
-
-                // Rotation automatique douce sur l'axe Y. La rotation tactile (orbite caméra) est
-                // gérée nativement par le gestionnaire de gestes par défaut de SceneView.
-                var angleAuto = 0f
-                sceneView.onFrame = { _ ->
-                    angleAuto += 0.15f
-                    sphere.rotation = Float3(sphere.rotation.x, angleAuto, sphere.rotation.z)
-                }
-
-                sceneView
             }
         )
 
@@ -115,4 +67,66 @@ fun OrbeScreen(app: JarvisApp) {
             )
         }
     }
+}
+
+private fun creerVueOrbe(ctx: android.content.Context): android.view.View {
+    val sceneView = SceneView(ctx)
+    val materialLoader = MaterialLoader(sceneView.engine, ctx)
+
+    // Matériau « obsidienne violette » : noir très sombre, forte réflectance,
+    // faible rugosité pour des reflets nets façon verre volcanique.
+    val materiau = materialLoader.createColorInstance(
+        Color(0xFF130018).toArgb(),
+        0.35f,  // metallic
+        0.25f,  // roughness
+        0.9f    // reflectance
+    )
+
+    val sphere = SphereNode(
+        engine = sceneView.engine,
+        radius = 0.6f,
+        center = Float3(0f, 0f, 0f),
+        stacks = 32,
+        slices = 32,
+        materialInstance = materiau,
+        builderApply = {}
+    )
+    sceneView.addChildNode(sphere)
+    sceneView.cameraNode.position = Float3(0f, 0f, 2.2f)
+
+    // Lumière principale violette pour faire ressortir les reflets, plus une lumière
+    // d'appoint froide en contre-jour.
+    val applyLumierePrincipale: (LightManager.Builder) -> Unit = { builder ->
+        builder.color(0.70f, 0.49f, 1.0f)
+            .intensity(120_000f)
+            .direction(-0.5f, -0.8f, -0.3f)
+    }
+    val lumierePrincipale = LightNode(
+        engine = sceneView.engine,
+        type = LightManager.Type.DIRECTIONAL,
+        apply = applyLumierePrincipale
+    )
+    sceneView.addChildNode(lumierePrincipale)
+
+    val applyLumiereAppoint: (LightManager.Builder) -> Unit = { builder ->
+        builder.color(0.36f, 0.88f, 1.0f)
+            .intensity(35_000f)
+            .direction(0.6f, 0.5f, 0.6f)
+    }
+    val lumiereAppoint = LightNode(
+        engine = sceneView.engine,
+        type = LightManager.Type.DIRECTIONAL,
+        apply = applyLumiereAppoint
+    )
+    sceneView.addChildNode(lumiereAppoint)
+
+    // Rotation automatique douce sur l'axe Y. La rotation tactile (orbite caméra) est
+    // gérée nativement par le gestionnaire de gestes par défaut de SceneView.
+    var angleAuto = 0f
+    sceneView.onFrame = { _ ->
+        angleAuto += 0.15f
+        sphere.rotation = Float3(sphere.rotation.x, angleAuto, sphere.rotation.z)
+    }
+
+    return sceneView
 }
