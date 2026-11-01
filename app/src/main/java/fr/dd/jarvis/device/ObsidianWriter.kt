@@ -18,9 +18,21 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     private fun subDir(root: DocumentFile, path: String): DocumentFile {
         var cur = root
         for (part in path.split('/').filter { it.isNotBlank() }) {
-            cur = cur.findFile(part)?.takeIf { it.isDirectory } ?: cur.createDirectory(part) ?: return cur
+            cur = cur.trouverLoose(part)?.takeIf { it.isDirectory } ?: cur.createDirectory(part) ?: return cur
         }
         return cur
+    }
+
+    /**
+     * Équivalent de DocumentFile.findFile(), mais insensible aux accents/majuscules et aux formes de
+     * normalisation Unicode (NFC/NFD) : certains fournisseurs de stockage Android renvoient les noms de
+     * fichiers accentués dans une forme différente de celle demandée, ce qui fait échouer un findFile()
+     * exact — et donc, silencieusement, une suppression ou une recherche de dossier/fichier existant.
+     */
+    private fun DocumentFile.trouverLoose(nom: String): DocumentFile? {
+        findFile(nom)?.let { return it }
+        val cible = normaliseNom(nom)
+        return listFiles().firstOrNull { f -> f.name?.let { normaliseNom(it) == cible } == true }
     }
 
     /** [folder] peut contenir des sous-dossiers : « Société/Devis ». Retourne l'emplacement lisible. */
@@ -32,7 +44,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                 val tree = DocumentFile.fromTreeUri(ctx, Uri.parse(uriStr))
                 if (tree != null && tree.canWrite()) {
                     val dir = subDir(tree, folder)
-                    val target = dir.findFile(name) ?: dir.createFile(mime, name)
+                    val target = dir.trouverLoose(name) ?: dir.createFile(mime, name)
                     if (target != null) {
                         ctx.contentResolver.openOutputStream(target.uri, "wt")?.use { it.write(bytes) }
                         return "coffre Obsidian › ${folder.replace("/", " › ")} › $name"
@@ -70,28 +82,48 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         }
     }
 
-    /** Supprime un fichier (coffre Obsidian ou dossier de l'application). Ne lève pas d'exception si absent. */
-    fun supprimerFichier(folder: String, fileName: String) {
+    /**
+     * Supprime un fichier (coffre Obsidian ou dossier de l'application). Ne lève pas d'exception si absent.
+     * Retourne vrai si un fichier a réellement été supprimé (jamais vrai en cas d'échec silencieux :
+     * c'était le bug — on affichait « supprimé » même quand rien n'avait disparu du coffre).
+     */
+    fun supprimerFichier(folder: String, fileName: String): Boolean {
         val name = safe(fileName, "Fichier")
         val uriStr = store.obsidianUri.value
+        var effectue = false
         try {
             if (uriStr.isNotBlank()) {
                 val tree = DocumentFile.fromTreeUri(ctx, Uri.parse(uriStr))
                 if (tree != null && tree.canWrite()) {
                     var cur: DocumentFile? = tree
-                    for (part in folder.split('/').filter { it.isNotBlank() }) cur = cur?.findFile(part)?.takeIf { it.isDirectory }
-                    cur?.findFile(name)?.delete()
+                    for (part in folder.split('/').filter { it.isNotBlank() }) cur = cur?.trouverLoose(part)?.takeIf { it.isDirectory }
+                    val cible = cur?.trouverLoose(name)
+                    if (cible != null) effectue = cible.delete()
                 }
             }
         } catch (_: Exception) { /* repli silencieux */ }
-        runCatching { File(File(ctx.getExternalFilesDir(null), folder), name).delete() }
+        val localFile = File(File(ctx.getExternalFilesDir(null), folder), name)
+        if (localFile.exists() && localFile.delete()) effectue = true
+        return effectue
     }
 
-    /** Supprime les fichiers .md et .pdf associés à un document (même nom de base que saveIn/saveBytes). */
-    fun supprimer(folder: String, baseName: String) {
+    /**
+     * Supprime les fichiers .md et .pdf associés à un document (même nom de base que saveIn/saveBytes).
+     * Retourne vrai si au moins un des deux a réellement été supprimé.
+     */
+    fun supprimer(folder: String, baseName: String): Boolean {
         val base = safe(baseName, "Fiche")
-        supprimerFichier(folder, "$base.md")
-        supprimerFichier(folder, "$base.pdf")
+        val md = supprimerFichier(folder, "$base.md")
+        val pdf = supprimerFichier(folder, "$base.pdf")
+        return md || pdf
+    }
+
+    /** Supprime une note par son chemin relatif (ex. « Contacts/Dupont.md »). Vrai si elle a bien disparu. */
+    fun supprimerNote(chemin: String): Boolean {
+        val p = withMd(chemin)
+        val folder = p.substringBeforeLast('/', "")
+        val name = p.substringAfterLast('/')
+        return supprimerFichier(folder, name)
     }
 
     /** Relit une note du coffre Obsidian (ou du dossier de l'application) ; null si introuvable. */

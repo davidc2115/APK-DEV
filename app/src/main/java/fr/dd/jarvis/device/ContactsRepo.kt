@@ -140,6 +140,22 @@ class ContactsRepo(private val ctx: Context) {
         return true
     }
 
+    /** Supprime définitivement le contact (et toutes ses « raw contacts », si plusieurs comptes sont fusionnés). */
+    fun delete(contactId: Long): Boolean {
+        val lookupUri = ContactsContract.Contacts.CONTENT_URI.buildUpon()
+            .appendPath(contactId.toString()).build()
+        val supprimes = runCatching { ctx.contentResolver.delete(lookupUri, null, null) }.getOrDefault(0)
+        if (supprimes > 0) return true
+        // Repli : certains fournisseurs n'acceptent la suppression que via l'URI RawContacts.
+        return runCatching {
+            ctx.contentResolver.delete(
+                ContactsContract.RawContacts.CONTENT_URI,
+                "${ContactsContract.RawContacts.CONTACT_ID} = ?",
+                arrayOf(contactId.toString())
+            ) > 0
+        }.getOrDefault(false)
+    }
+
     private fun rawContactId(contactId: Long): Long? {
         ctx.contentResolver.query(
             ContactsContract.RawContacts.CONTENT_URI, arrayOf(ContactsContract.RawContacts._ID),

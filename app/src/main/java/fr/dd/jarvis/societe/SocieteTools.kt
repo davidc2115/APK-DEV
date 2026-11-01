@@ -426,8 +426,9 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
                     "\n⚠️ Une facture émise doit légalement garder une numérotation continue : la supprimer laisse un trou dans la séquence. Pour une facture déjà envoyée, « Annuler » (qui garde le numéro) est en principe la bonne solution — un avoir si elle a été encaissée. Supprimer n'est recommandé que pour une erreur jamais envoyée."
                 else ""
                 if (!confirm("Supprimer DÉFINITIVEMENT ${doc.numero} ? Action irréversible.$avertFacture", true)) return err("Suppression refusée par l'utilisateur.")
-                svc.supprimerDocument(numero)
-                ok("🗑️ ${doc.numero} supprimé définitivement.")
+                val (_, fichierSupprime) = svc.supprimerDocument(numero) ?: return err("Introuvable.")
+                if (fichierSupprime) ok("🗑️ ${doc.numero} supprimé définitivement (fiche effacée du coffre Obsidian).")
+                else ok("🗑️ ${doc.numero} retiré de la liste, mais le fichier n'a pas pu être retrouvé dans le coffre Obsidian pour être effacé (déjà supprimé manuellement, ou dossier/nom différent) — à vérifier et supprimer à la main si besoin.")
             }
             else -> err("Action inconnue : ${a.s("action")}.")
         }

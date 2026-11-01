@@ -212,6 +212,12 @@ class ToolBox(
         put(tool("obsidian_ecrire", "Crée, remplace ou complète une note Obsidian.", mapOf(
             "chemin" to prop("Chemin relatif de la note (ex. JARVIS/Idées.md)."), "contenu" to prop("Contenu Markdown."),
             "ajouter" to prop("« true » pour ajouter à la fin de la note existante au lieu de la remplacer.")), listOf("chemin", "contenu")))
+        put(tool("obsidian_supprimer", "Supprime DÉFINITIVEMENT une note du coffre Obsidian (fiche contact, devis, facture, ou toute autre note). Utilise obsidian_lister ou obsidian_chercher avant si le chemin exact n'est pas connu. Pour une fiche contact, utilise plutôt supprimer_contact_card (plus simple : juste le nom).",
+            mapOf("chemin" to prop("Chemin relatif exact de la note (ex. Contacts/Dupont.md, Société/Devis/D-2026-012 Dupont.md).")), listOf("chemin")))
+        put(tool("supprimer_contact_card", "Supprime DÉFINITIVEMENT la fiche contact (Markdown Obsidian) d'un contact, où qu'elle soit rangée sous Contacts. Trouve la fiche à partir du seul nom, pas besoin du chemin exact.",
+            mapOf("name" to prop("Nom du contact dont la fiche doit être supprimée.")), listOf("name")))
+        put(tool("delete_contact", "Supprime DÉFINITIVEMENT un contact du téléphone (trouvé par son nom).",
+            mapOf("name" to prop("Nom du contact à supprimer.")), listOf("name")))
         put(tool("lire_notifications", "Lit les notifications récentes du téléphone (WhatsApp, SMS, mails, banque…). Nécessite l'accès aux notifications.",
             mapOf("count" to prop("Nombre maximum (1 à 40). Par défaut 15."), "appli" to prop("Filtrer par application (optionnel)."), "minutes" to prop("Seulement celles des N dernières minutes (optionnel)."))))
         put(tool("memoire_ajouter", "Enregistre une consigne durable de l'utilisateur dans la note Obsidian « Mémoire JARVIS » (remplace la consigne du même sujet).",
@@ -320,6 +326,7 @@ class ToolBox(
         }
         "update_contact" -> updateContact(a)
         "create_contact_card" -> createCard(a)
+        "delete_contact" -> deleteContact(a)
         "meteo" -> ToolResult(fr.dd.jarvis.ai.Meteo.get(app, a.optString("lieu"), a.optString("jours").toIntOrNull() ?: 3))
         "generer_image" -> try {
             val modele = a.optString("modele")
@@ -467,6 +474,27 @@ class ToolBox(
             val existe = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.obsidian.readNote(chemin) != null }
             if (existe && !append && !confirm("Remplacer le contenu de la note « $chemin » ?", false)) ToolResult("Refusé par l'utilisateur.")
             else ToolResult("✅ Note enregistrée : " + kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.obsidian.writeNote(chemin, a.optString("contenu"), append) })
+        }
+        "obsidian_supprimer" -> {
+            val chemin = a.optString("chemin")
+            if (chemin.isBlank()) ToolResult("Chemin manquant.")
+            else if (!confirm("Supprimer DÉFINITIVEMENT la note « $chemin » du coffre Obsidian ?", true)) ToolResult("Suppression refusée par l'utilisateur.")
+            else {
+                val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.obsidian.supprimerNote(chemin) }
+                if (ok) ToolResult("🗑️ Note « $chemin » supprimée.")
+                else ToolResult("❌ Note introuvable à cet emplacement (déjà supprimée, ou chemin différent) : « $chemin ». Vérifie le chemin exact avec obsidian_lister.")
+            }
+        }
+        "supprimer_contact_card" -> {
+            val name = a.optString("name")
+            val chemin = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.obsidian.ficheExistante("Contacts", name) }
+            if (chemin == null) ToolResult("Aucune fiche trouvée pour « $name » sous Contacts.")
+            else if (!confirm("Supprimer DÉFINITIVEMENT la fiche « $chemin » ?", true)) ToolResult("Suppression refusée par l'utilisateur.")
+            else {
+                val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.obsidian.supprimerNote(chemin) }
+                if (ok) ToolResult("🗑️ Fiche « $chemin » supprimée.")
+                else ToolResult("❌ La fiche « $chemin » n'a pas pu être supprimée (problème d'accès au coffre Obsidian).")
+            }
         }
         "lire_notifications" -> {
             val svc = fr.dd.jarvis.service.JarvisNotificationListener
@@ -850,6 +878,18 @@ class ToolBox(
             a.optString("email").ifBlank { null }, a.optString("company").ifBlank { null }, a.optString("note").ifBlank { null }
         )
         return ToolResult(if (ok) "Contact « ${c.name} » mis à jour." else "Échec de la mise à jour.")
+    }
+
+    private suspend fun deleteContact(a: JSONObject): ToolResult {
+        if (!app.contacts.hasPermission()) return ToolResult("Permission contacts manquante.")
+        val found = app.contacts.search(a.optString("name"), 5)
+        if (found.isEmpty()) return ToolResult("Contact introuvable.")
+        if (found.size > 1 && found.none { it.name.equals(a.optString("name"), true) })
+            return ToolResult("Plusieurs contacts correspondent : ${found.joinToString { it.name }}. Préciser le nom.")
+        val c = found.firstOrNull { it.name.equals(a.optString("name"), true) } ?: found.first()
+        if (!confirm("Supprimer DÉFINITIVEMENT le contact « ${c.name} » du téléphone ?", true)) return ToolResult("Suppression refusée par l'utilisateur.")
+        val ok = app.contacts.delete(c.id)
+        return ToolResult(if (ok) "🗑️ Contact « ${c.name} » supprimé du téléphone." else "❌ Échec de la suppression du contact « ${c.name} ».")
     }
 
     private suspend fun createCard(a: JSONObject): ToolResult {
