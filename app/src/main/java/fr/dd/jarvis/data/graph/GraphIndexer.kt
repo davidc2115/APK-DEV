@@ -36,6 +36,7 @@ class GraphIndexer(
 
         // Remplacement atomique de l'index ; aucune écriture dans le coffre Markdown.
         database.withTransaction {
+            database.graphDao().clearRelations()
             database.graphDao().clearNodes()
             if (entities.isNotEmpty()) database.graphDao().insertNodes(entities)
         }
