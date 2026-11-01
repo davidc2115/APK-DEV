@@ -2,6 +2,9 @@ package fr.dd.jarvis.ui
 
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -12,6 +15,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -281,6 +285,8 @@ fun GraphScreen(app: JarvisApp) {
     var version by remember { mutableStateOf(0) }
     var selection by remember { mutableStateOf<ObsidianWriter.GraphNode?>(null) }
     var apercu by remember { mutableStateOf("") }
+    var recherche by remember { mutableStateOf("") }
+    var dossierActif by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(version) {
         chargement = true
@@ -316,6 +322,10 @@ fun GraphScreen(app: JarvisApp) {
     val etoiles = remember { (0 until 90).map { i -> Triple(Random(i * 7 + 1).nextFloat(), Random(i * 13 + 2).nextFloat(), Random(i * 19 + 3).nextFloat()) } }
 
     val isolees = remember(noeuds) { noeuds.count { it.degre == 0 && !it.node.ghost } }
+    val requete = recherche.trim().lowercase()
+    val resultatsRecherche = remember(noeuds, requete) {
+        if (requete.isBlank()) emptySet() else noeuds.filter { it.node.label.lowercase().contains(requete) || it.node.folder.lowercase().contains(requete) }.map { it.node.id }.toSet()
+    }
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -337,6 +347,40 @@ fun GraphScreen(app: JarvisApp) {
                 "⟲ Recalculer", color = accent, fontSize = 12.sp, fontFamily = FontFamily.Monospace,
                 modifier = Modifier.padding(6.dp).pointerInput(Unit) { detectTapGestures { version++ } }
             )
+        }
+
+        // Barre de recherche et filtres : ils mettent en évidence les éléments réels du coffre sans fabriquer de liens.
+        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+            Row(
+                Modifier.fillMaxWidth().background(Color(0xCC10091C), RoundedCornerShape(12.dp)).padding(horizontal = 12.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("⌕", color = accent, fontSize = 20.sp)
+                BasicTextField(
+                    value = recherche, onValueChange = { recherche = it },
+                    modifier = Modifier.weight(1f).padding(start = 9.dp),
+                    singleLine = true, textStyle = TextStyle(color = HudText, fontSize = 13.sp, fontFamily = FontFamily.Monospace),
+                    decorationBox = { inner ->
+                        if (recherche.isBlank()) Text("Rechercher une note ou un dossier…", color = HudDim, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                        inner()
+                    }
+                )
+                if (recherche.isNotBlank()) Text("✕", color = HudDim, modifier = Modifier.clickable { recherche = "" }.padding(start = 8.dp))
+            }
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 7.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                val filtres = listOf<String?>(null) + categories.map { it.nom }
+                filtres.forEach { nom ->
+                    val actif = dossierActif == nom
+                    Text(
+                        nom ?: "Tous les dossiers",
+                        color = if (actif) Color.White else HudDim,
+                        fontSize = 10.sp, fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.background(if (actif) accent.copy(alpha = 0.32f) else Color(0x66150D22), RoundedCornerShape(20.dp))
+                            .clickable { dossierActif = nom }.padding(horizontal = 11.dp, vertical = 7.dp)
+                    )
+                }
+            }
+            if (requete.isNotBlank()) Text("${resultatsRecherche.size} résultat(s) · les correspondances sont éclairées dans le graphe", color = HudDim, fontSize = 10.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(top = 5.dp, start = 4.dp))
         }
 
         BoxWithConstraints(Modifier.weight(1f).fillMaxSize()) {
@@ -488,7 +532,7 @@ fun GraphScreen(app: JarvisApp) {
                         val sx = cx + cat.pos.x * scale; val sy = cy + cat.pos.y * scale
                         val r = rayonHubEcran(cat)
                         drawCircle(color = hcol.copy(alpha = 0.2f * pulse), radius = r * (1.4f + 0.25f * pulse), center = Offset(sx, sy))
-                        drawCircle(color = hcol.copy(alpha = 0.92f), radius = r, center = Offset(sx, sy))
+                        drawCircle(color = hcol.copy(alpha = if (dossierActif == null || dossierActif == cat.nom) 0.92f else 0.18f), radius = r, center = Offset(sx, sy))
                         drawCircle(color = Color.White.copy(alpha = 0.35f), radius = r, center = Offset(sx, sy), style = Stroke(width = 1.4f * density))
                         dessinerIconeDossier(Offset(sx, sy), r * 0.78f, Color.White.copy(alpha = 0.92f))
                     }
@@ -500,7 +544,7 @@ fun GraphScreen(app: JarvisApp) {
                         val estHub = pn.degre >= 5
                         val couleur = if (pn.node.ghost) Color(0xFF999999) else couleurDossier(pn.node.folder, accent)
                         drawCircle(
-                            color = if (pn.node.ghost) couleur.copy(alpha = 0.4f) else if (estHub) couleur else couleur.copy(alpha = 0.82f),
+                            color = if (pn.node.ghost) couleur.copy(alpha = 0.4f) else if (requete.isNotBlank() && resultatsRecherche.isNotEmpty()) { if (pn.node.id in resultatsRecherche) Color(0xFFFFD36E) else couleur.copy(alpha = 0.16f) } else if (dossierActif != null && pn.categorie != dossierActif) couleur.copy(alpha = 0.14f) else if (estHub) couleur else couleur.copy(alpha = 0.82f),
                             radius = rayon,
                             center = Offset(sx, sy)
                         )
