@@ -762,19 +762,28 @@ private fun GraphScreen2DClean(app: JarvisApp) {
             val radius = size.minDimension * 0.39f * zoom
             val byId = nodes.associateBy { it.id }
             val brainRadius = (size.minDimension * 0.075f).coerceAtLeast(24f)
-            drawCircle(Color(0xFF9E62F4).copy(alpha = 0.12f), brainRadius * 2.3f, center)
-            drawCircle(
-                Brush.radialGradient(listOf(Color(0xFFB58AFF), Color(0xFF512A79), Color(0xFF10091B)), center, brainRadius * 1.7f),
-                brainRadius, center
-            )
-            drawCircle(Color(0xFFD8B9FF).copy(alpha = 0.65f), brainRadius, center, style = Stroke(1.4f))
-            // Fines dendrites partant du noyau, décoratives et distinctes des relations de notes.
-            repeat(18) { i ->
-                val a = i * (Math.PI.toFloat() * 2f / 18f)
-                val r1 = brainRadius * 0.8f
-                val r2 = brainRadius * (1.25f + (i % 3) * 0.12f)
-                drawLine(Color(0xFFB986FF).copy(alpha = 0.28f), center + Offset(cos(a) * r1, sin(a) * r1),
-                    center + Offset(cos(a) * r2, sin(a) * r2), strokeWidth = 1.1f)
+            drawCircle(Color(0xFF9E62F4).copy(alpha = 0.14f), brainRadius * 2.45f, center)
+            // Noyau cérébral bilobé : une silhouette identifiable, pas une grosse bulle de dossier.
+            val brain = Path().apply {
+                moveTo(center.x, center.y - brainRadius * 0.88f)
+                cubicTo(center.x - brainRadius * 0.28f, center.y - brainRadius * 1.12f, center.x - brainRadius * 0.92f, center.y - brainRadius * 0.86f, center.x - brainRadius * 0.88f, center.y - brainRadius * 0.22f)
+                cubicTo(center.x - brainRadius * 1.18f, center.y + brainRadius * 0.18f, center.x - brainRadius * 0.72f, center.y + brainRadius * 0.92f, center.x - brainRadius * 0.18f, center.y + brainRadius * 0.78f)
+                cubicTo(center.x - brainRadius * 0.06f, center.y + brainRadius * 0.98f, center.x, center.y + brainRadius * 0.82f, center.x, center.y + brainRadius * 0.72f)
+                cubicTo(center.x, center.y + brainRadius * 0.82f, center.x + brainRadius * 0.06f, center.y + brainRadius * 0.98f, center.x + brainRadius * 0.18f, center.y + brainRadius * 0.78f)
+                cubicTo(center.x + brainRadius * 0.72f, center.y + brainRadius * 0.92f, center.x + brainRadius * 1.18f, center.y + brainRadius * 0.18f, center.x + brainRadius * 0.88f, center.y - brainRadius * 0.22f)
+                cubicTo(center.x + brainRadius * 0.92f, center.y - brainRadius * 0.86f, center.x + brainRadius * 0.28f, center.y - brainRadius * 1.12f, center.x, center.y - brainRadius * 0.88f)
+                close()
+            }
+            drawPath(brain, Brush.radialGradient(listOf(Color(0xFFB58AFF), Color(0xFF512A79), Color(0xFF10091B)), center, brainRadius * 1.7f))
+            drawPath(brain, Color(0xFFD8B9FF).copy(alpha = 0.72f), style = Stroke(1.4f))
+            drawLine(Color(0xFFE2C9FF).copy(alpha = 0.55f), Offset(center.x, center.y - brainRadius * 0.72f), Offset(center.x, center.y + brainRadius * 0.7f), 1.1f)
+            // Petits sillons lumineux internes, distincts des relations réelles entre notes.
+            repeat(8) { i ->
+                val side = if (i % 2 == 0) -1f else 1f
+                val y = center.y - brainRadius * 0.48f + (i / 2) * brainRadius * 0.3f
+                val x = center.x + side * brainRadius * (0.22f + (i % 3) * 0.12f)
+                drawLine(Color(0xFFE3C9FF).copy(alpha = 0.34f), Offset(center.x, y), Offset(x, y + side * brainRadius * 0.12f), 1.15f)
+                drawCircle(Color(0xFFE8D5FF).copy(alpha = 0.72f), 1.7f, Offset(x, y + side * brainRadius * 0.12f))
             }
             // Relations explicites uniquement : aucune arête n'est inventée pour remplir la scène.
             edges.forEach { edge ->
@@ -791,7 +800,8 @@ private fun GraphScreen2DClean(app: JarvisApp) {
                 val p = positions[node.id] ?: return@forEach
                 val point = center + Offset(p.x * radius, p.y * radius)
                 val isSelected = selected?.id == node.id
-                val color = if (node.ghost) Color(0xFF8B8494) else Color(0xFFC18AFF)
+                // Une teinte stable par dossier, sans créer de hubs ni de bulles de catégories.
+                val color = if (node.ghost) Color(0xFF8B8494) else couleurDossier(node.folder, Color(0xFFC18AFF))
                 val related = node.id in selectedNeighborhood
                 val dim = selected != null && !related
                 drawCircle(color.copy(alpha = if (isSelected) 0.52f else if (dim) 0.035f else if (related) 0.28f else 0.16f), if (isSelected) 23f else if (related) 16f else 13f, point)
