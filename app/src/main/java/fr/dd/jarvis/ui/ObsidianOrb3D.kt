@@ -60,7 +60,7 @@ fun ObsidianOrb3D(app: fr.dd.jarvis.JarvisApp) {
                     surface.onNodeSelected = { id -> selectedNodeId = id }
                 }
             },
-            update = { view -> view.setGraph(nodes, relations) }
+            update = { view -> view.setGraph(nodes, relations); view.setSelectedNode(selectedNodeId) }
         )
         Column(
             Modifier.align(Alignment.TopCenter).padding(top = 18.dp),
@@ -116,7 +116,7 @@ private class ObsidianOrbSurface(context: Context) : GLSurfaceView(context) {
     var onNodeSelected: ((String) -> Unit)? = null
     private var downX = 0f
     private var downY = 0f
-    fun setGraph(nodes: List<fr.dd.jarvis.data.graph.GraphNodeEntity>, relations: List<fr.dd.jarvis.data.graph.GraphRelationEntity>) = orbRenderer.setGraph(nodes, relations)
+    fun setGraph(nodes: List<fr.dd.jarvis.data.graph.GraphNodeEntity>, relations: List<fr.dd.jarvis.data.graph.GraphRelationEntity>) = orbRenderer.setGraph(nodes, relations)\n    fun setSelectedNode(id: String?) = orbRenderer.setSelectedNode(id)
 
     init {
         setEGLContextClientVersion(2)
@@ -170,7 +170,7 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
     @Volatile private var lastX = 0f
     @Volatile private var lastY = 0f
     @Volatile private var pinchStart = 0f
-    @Volatile private var nodeIds: List<String> = emptyList()
+    @Volatile private var nodeIds: List<String> = emptyList()\n    @Volatile private var selectedNodeId: String? = null
     @Volatile private var nodePositions: List<FloatArray> = emptyList()
     @Volatile private var hitMatrix = FloatArray(16)
 
@@ -197,7 +197,7 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
             val y = 1f - 2f * (index + 0.5f) / max(visible.size, 1)
             val radius = sqrt(max(0f, 1f - y * y))
             val theta = index * 2.3999632f
-            positions[node.id] = floatArrayOf(1.48f * radius * cos(theta), 1.48f * y, 1.48f * radius * sin(theta))
+            positions[node.id] = floatArrayOf(1.035f * radius * cos(theta), 1.035f * y, 1.035f * radius * sin(theta))
         }
         nodeIds = visible.map { it.id }
         nodePositions = visible.map { positions.getValue(it.id) }
@@ -369,7 +369,7 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
         private const val GRAPH_VERTEX_SHADER = """
             uniform mat4 uMvp;
             attribute vec3 aPosition;
-            void main() { gl_Position = uMvp * vec4(aPosition, 1.0); gl_PointSize = 30.0; }
+            uniform float uPointSize;\n            void main() { gl_Position = uMvp * vec4(aPosition, 1.0); gl_PointSize = uPointSize; }
         """
         private const val GRAPH_FRAGMENT_SHADER = """
             precision mediump float;
