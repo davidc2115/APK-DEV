@@ -34,6 +34,11 @@ object Horloge {
     private fun nm(c: Context) = c.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     private fun am(c: Context) = c.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
+    /** Android 12+ exige un accès spécial pour programmer une alarme exacte fiable en veille. */
+    private fun exactAutorise(c: Context): Boolean = android.os.Build.VERSION.SDK_INT < 31 || am(c).canScheduleExactAlarms()
+
+    private fun messageAccesExact(): String = "❌ Action non programmée : Android n'autorise pas encore les alarmes exactes pour JARVIS. Active une seule fois « Alarmes et rappels » dans Réglages Android > Applications > Accès spécial des applications > Alarmes et rappels > JARVIS. Ensuite, les alarmes et minuteurs seront lancés directement en arrière-plan, sans confirmation à chaque demande."
+
     /** Ne jamais annoncer un minuteur/chronomètre actif si Android bloque ses notifications. */
     private fun notificationsAutorisees(c: Context): Boolean {
         if (android.os.Build.VERSION.SDK_INT >= 33 &&
@@ -91,6 +96,7 @@ object Horloge {
         val m = Regex("(\\d{1,2})\\s*(?:[:hH]\\s*(\\d{1,2})?)?").find(heure.trim()) ?: return "Heure d'alarme non comprise : « $heure »."
         val h = m.groupValues[1].toInt(); val mn = m.groupValues[2].toIntOrNull() ?: 0
         if (h !in 0..23 || mn !in 0..59) return "Heure invalide : $heure."
+        if (!exactAutorise(c)) return messageAccesExact()
         val map = mapOf("dim" to 1, "lun" to 2, "mar" to 3, "mer" to 4, "jeu" to 5, "ven" to 6, "sam" to 7)
         val low = jours.lowercase()
         val days = mutableListOf<Int>()
@@ -101,19 +107,22 @@ object Horloge {
         val id = (System.currentTimeMillis() % 1_000_000_000L).toInt()
         val at = prochaine(h, mn, days)
         val o = JSONObject().put("id", id).put("kind", "alarm").put("at", at).put("label", libelle).put("h", h).put("m", mn).put("days", JSONArray(days))
-        val l = load(c); l.add(o); save(c, l); planifier(c, o)
+        try { planifier(c, o) } catch (e: SecurityException) { return messageAccesExact() } catch (e: Exception) { return "❌ Impossible de programmer l'alarme : ${e.message ?: e.javaClass.simpleName}." }
+        val l = load(c); l.add(o); save(c, l)
         val quand = java.time.Instant.ofEpochMilli(at).atZone(ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("EEEE d MMM 'à' HH:mm", java.util.Locale.FRENCH))
         return "⏰ Alarme réglée : $quand" + (if (days.isNotEmpty()) " (répétée : ${jours.trim()})" else "") + (if (libelle.isNotBlank()) " — $libelle" else "") + "."
     }
 
     fun creerMinuteur(c: Context, secondes: Int, libelle: String): String {
         if (secondes <= 0) return "Durée du minuteur invalide."
+        if (!exactAutorise(c)) return messageAccesExact()
         if (!notificationsAutorisees(c)) return "❌ Minuteur non lancé : autorise les notifications de JARVIS dans Android (Réglages > Applications > JARVIS > Notifications), puis réessaie."
         channels(c)
         val id = (System.currentTimeMillis() % 1_000_000_000L).toInt()
         val at = System.currentTimeMillis() + secondes * 1000L
         val o = JSONObject().put("id", id).put("kind", "timer").put("at", at).put("label", libelle).put("days", JSONArray())
-        val l = load(c); l.add(o); save(c, l); planifier(c, o)
+        try { planifier(c, o) } catch (e: SecurityException) { return messageAccesExact() } catch (e: Exception) { return "❌ Impossible de lancer le minuteur : ${e.message ?: e.javaClass.simpleName}." }
+        val l = load(c); l.add(o); save(c, l)
         // Compte à rebours visible dans la barre de notifications.
         val n = enDirect(NotificationCompat.Builder(c, CH_RUN)).setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS).setContentText("Temps restant")
