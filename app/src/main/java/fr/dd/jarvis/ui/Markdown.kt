@@ -116,6 +116,10 @@ private fun MdLines(lines: List<String>, color: Color, accent: Color) {
                 while (i < lines.size && lines[i].trimStart().startsWith("|")) { rows += lines[i].trimEnd(); i++ }
                 Table(rows, color, accent, ctx)
             }
+            line.contains("jarvis-video-ia:") -> {
+                val name = Regex("""jarvis-video-ia:([^)\\s]+)""").find(line)?.groupValues?.get(1).orEmpty()
+                ChatVideo(name, accent)
+            }
             line.startsWith("![") && line.contains("jarvis-img:") -> {
                 val name = Regex("""jarvis-img:([^)\s]+)""").find(line)?.groupValues?.get(1).orEmpty()
                 ChatImage(name)
@@ -221,5 +225,30 @@ private fun FichierChip(label: String, name: String, accent: Color) {
                     ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Ouvrir " + file.name).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 }
             }.padding(horizontal = 12.dp, vertical = 8.dp)
+    )
+}
+
+
+@Composable
+private fun ChatVideo(name: String, accent: Color) {
+    val ctx = LocalContext.current
+    val file = java.io.File(java.io.File(ctx.filesDir, "videos_ia"), name.substringAfterLast('/'))
+    androidx.material3.Text(
+        "▶ Lire la vidéo · " + file.name,
+        color = accent,
+        fontSize = 14.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(vertical = 6.dp).clip(RoundedCornerShape(10.dp))
+            .background(accent.copy(alpha = 0.14f)).clickable {
+                if (!file.exists()) return@clickable
+                runCatching {
+                    val uri = androidx.core.content.FileProvider.getUriForFile(ctx, ctx.packageName + ".files", file)
+                    ctx.startActivity(Intent.createChooser(
+                        Intent(Intent.ACTION_VIEW).setDataAndType(uri, "video/mp4")
+                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
+                        "Lire la vidéo"
+                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
+            }.padding(horizontal = 12.dp, vertical = 9.dp)
     )
 }
