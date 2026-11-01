@@ -40,6 +40,28 @@ class Store(context: Context) {
         }
     }
 
+    // Clés API sensibles : stockage séparé, chiffré uniquement. Aucun repli en clair.
+    private val secretPrefs: SharedPreferences? = runCatching {
+        val key = MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+        EncryptedSharedPreferences.create(
+            context, "jarvis_api_secrets", key,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+    }.getOrNull()
+
+    inner class SecretPref(private val key: String) {
+        var value by mutableStateOf(secretPrefs?.getString(key, "") ?: "")
+            private set
+        val available: Boolean get() = secretPrefs != null
+        fun set(v: String) {
+            val secure = secretPrefs ?: throw IllegalStateException("Le stockage chiffré Android est indisponible : la clé API n'a pas été enregistrée.")
+            secure.edit().putString(key, v).apply()
+            value = v
+        }
+        fun clear() = set("")
+    }
+
     inner class BPref(private val key: String, def: Boolean) {
         var value by mutableStateOf(prefs.getBoolean(key, def))
             private set
@@ -201,6 +223,7 @@ class Store(context: Context) {
     // carte bancaire, token créé sur huggingface.co/settings/tokens (lecture suffit). Pollinations.ai exige
     // maintenant un abonnement payant ("Pollen") même pour la vidéo — plus utilisable gratuitement.
     val huggingFaceToken = SPref("huggingFaceToken", "")
+    val falApiKey = SecretPref("falApiKey")
     // ---- Worker Cloudflare personnel pour animer une image avec Wan 2.2 (sans token Hugging Face côté Android)
     val imageVideoWorkerUrl = SPref("imageVideoWorkerUrl", "")
     val imageVideoWorkerToken = SPref("imageVideoWorkerToken", "")
