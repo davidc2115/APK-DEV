@@ -113,31 +113,43 @@ private fun calculerDisposition(data: ObsidianWriter.GraphData): Disposition {
 
     val categories = parCategorie.keys.toList()
     val nbCat = categories.size.coerceAtLeast(1)
-    // Rayon du cercle de hubs : croît avec le nombre de dossiers pour garder de la place entre leurs rayons.
-    val rayonCategories = 230f + nbCat * 30f
+    // Composition radiale compacte, pensée d'abord pour le format portrait du téléphone.
+    // Les hubs occupent un anneau autour du noyau, et non un grand cercle qui écrase tout au zoom.
+    val rayonCategories = 172f + min(nbCat, 8) * 13f
     val posCategorie = HashMap<String, Offset>()
     categories.forEachIndexed { i, cat ->
-        val angle = (i.toFloat() / nbCat) * 2 * Math.PI.toFloat()
-        posCategorie[cat] = Offset(cos(angle) * rayonCategories, sin(angle) * rayonCategories)
+        val angle = (-Math.PI / 2.0 + (i.toFloat() / nbCat) * 2.0 * Math.PI).toFloat()
+        posCategorie[cat] = Offset(
+            cos(angle) * rayonCategories * 0.88f,
+            sin(angle) * rayonCategories
+        )
     }
 
     val noeuds = mutableListOf<PosNoeud>()
     val catInfos = mutableListOf<CategorieInfo>()
     for (cat in categories) {
         val hub = posCategorie[cat]!!
-        val dist = hypot(hub.x, hub.y).coerceAtLeast(0.001f)
-        val u = Offset(hub.x / dist, hub.y / dist)
+        val angleBase = kotlin.math.atan2(hub.y, hub.x)
         val notesCat = parCategorie[cat]!!
-        // Tri : notes les plus liées d'abord (plus représentatives), puis par sous-dossier (chemin complet) pour
-        // garder les notes d'un même sous-dossier côte à côte dans la liste — nod au « sous-dossier » demandé,
-        // sans avoir besoin d'un second niveau de hubs qui aurait vite surchargé l'écran.
         val ordre = notesCat.sortedWith(
-            compareByDescending<ObsidianWriter.GraphNode> { degres[it.id] ?: 0 }.thenBy { it.folder }.thenBy { it.label }
+            compareByDescending<ObsidianWriter.GraphNode> { degres[it.id] ?: 0 }
+                .thenBy { it.folder }.thenBy { it.label }
         )
         val affichees = ordre.take(MAX_NOTES_PAR_DOSSIER)
+        // Les notes forment une couronne autour de leur dossier. L'espacement angulaire évite
+        // l'empilement des étiquettes observé dans la version précédente.
+        val ecartAngle = when {
+            affichees.size <= 2 -> 0.72f
+            affichees.size <= 5 -> 0.48f
+            else -> 0.30f
+        }
         affichees.forEachIndexed { k, node ->
-            val r = rayonHubMonde(notesCat.size) + ECART_NOTE * (k + 1)
-            val p = Offset(hub.x + u.x * r, hub.y + u.y * r)
+            val angle = angleBase + (k - (affichees.size - 1) / 2f) * ecartAngle
+            val rayon = 112f + min(affichees.size, 8) * 3f
+            val p = Offset(
+                hub.x + cos(angle) * rayon,
+                hub.y + sin(angle) * rayon
+            )
             noeuds += PosNoeud(node, p, degres[node.id] ?: 0, cat)
         }
         catInfos += CategorieInfo(cat, hub, notesCat.size, affichees.size)
@@ -419,7 +431,7 @@ fun GraphScreen(app: JarvisApp) {
                     // pour avaler ses voisins (et donc cacher leurs traits de lien et leur texte dessous).
                     fun rayonEcran(pn: PosNoeud) = ((10f + min(pn.degre, 10) * 2.2f) * density * scale).coerceIn(5f * density, 34f * density)
                     fun rayonHubEcran(cat: CategorieInfo) = ((30f + min(cat.nbNotes, 40) * 1.6f) * density * scale).coerceIn(16f * density, 64f * density)
-                    val rayonCerveau = (46f * density * scale).coerceIn(22f * density, 90f * density)
+                    val rayonCerveau = (66f * density * scale).coerceIn(34f * density, 112f * density)
 
                     // Passe 1 : arêtes structurelles (cerveau→dossier, dossier→note), sous tout le reste.
                     for (cat in categories) {
@@ -454,11 +466,11 @@ fun GraphScreen(app: JarvisApp) {
                     // Passe 3 : noyau d'obsidienne — sphère sombre, reflet violet et orbites holographiques.
                     val centre = Offset(cx, cy)
                     val violet = Color(0xFF9B62FF)
-                    drawCircle(color = violet.copy(alpha = 0.12f * pulse), radius = rayonCerveau * (2.15f + 0.18f * pulse), center = centre)
-                    drawCircle(color = violet.copy(alpha = 0.18f), radius = rayonCerveau * 1.55f, center = centre, style = Stroke(width = 1.2f * density))
+                    drawCircle(color = violet.copy(alpha = 0.12f * pulse), radius = rayonCerveau * (2.65f + 0.22f * pulse), center = centre)
+                    drawCircle(color = violet.copy(alpha = 0.18f), radius = rayonCerveau * 1.72f, center = centre, style = Stroke(width = 1.6f * density))
                     drawCircle(
                         brush = Brush.radialGradient(
-                            colors = listOf(Color(0xFF56347D), Color(0xFF21172F), Color(0xFF07060B)),
+                            colors = listOf(Color(0xFF8A55C9), Color(0xFF29143F), Color(0xFF090610)),
                             center = Offset(cx - rayonCerveau * 0.28f, cy - rayonCerveau * 0.34f),
                             radius = rayonCerveau * 1.65f
                         ),
@@ -466,7 +478,7 @@ fun GraphScreen(app: JarvisApp) {
                         center = centre
                     )
                     drawCircle(color = Color(0xFFC9A7FF).copy(alpha = 0.72f), radius = rayonCerveau, center = centre, style = Stroke(width = 1.5f * density))
-                    drawCircle(color = Color.White.copy(alpha = 0.12f), radius = rayonCerveau * 0.76f, center = Offset(cx - rayonCerveau * 0.12f, cy - rayonCerveau * 0.18f), style = Stroke(width = 1f * density))
+                    drawCircle(color = Color.White.copy(alpha = 0.12f), radius = rayonCerveau * 0.76f, center = Offset(cx - rayonCerveau * 0.12f, cy - rayonCerveau * 0.18f), style = Stroke(width = 1.3f * density))
                     // Anneaux orbitaux inclinés autour du noyau.
                     drawOval(
                         color = Color(0xFFB58AFF).copy(alpha = 0.68f * pulse),
