@@ -6,6 +6,7 @@ import android.opengl.GLSurfaceView
 import android.opengl.Matrix
 import android.view.MotionEvent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -43,12 +47,18 @@ fun ObsidianOrb3D(app: fr.dd.jarvis.JarvisApp) {
     val nodes by app.knowledgeRepository.observeNodes().collectAsState(initial = emptyList())
     val relations by app.knowledgeRepository.observeRelations().collectAsState(initial = emptyList())
 
-    val surfaceHolder = androidx.compose.runtime.remember { arrayOfNulls<ObsidianOrbSurface>(1) }
+    var selectedNodeId by remember { mutableStateOf<String?>(null) }
+    val selectedNode = nodes.firstOrNull { it.id == selectedNodeId }
+    val selectedRelations = relations.filter { it.fromNodeId == selectedNodeId || it.toNodeId == selectedNodeId }
+    val surfaceHolder = remember { arrayOfNulls<ObsidianOrbSurface>(1) }
     Box(Modifier.fillMaxSize().background(Color(0xFF030208))) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { context ->
-                ObsidianOrbSurface(context).also { surfaceHolder[0] = it }
+                ObsidianOrbSurface(context).also { surface ->
+                    surfaceHolder[0] = surface
+                    surface.onNodeSelected = { id -> selectedNodeId = id }
+                }
             },
             update = { view -> view.setGraph(nodes, relations) }
         )
@@ -59,6 +69,19 @@ fun ObsidianOrb3D(app: fr.dd.jarvis.JarvisApp) {
         ) {
             Text("ORBE OBSIDIENNE", color = Color(0xFFE7D8FF), fontSize = 17.sp, letterSpacing = 3.sp)
             Text("NOYAU DE CONNAISSANCES JARVIS", color = Color(0xFF9E80C9), fontSize = 9.sp, letterSpacing = 1.5.sp)
+        }
+        if (selectedNode != null) {
+            Column(
+                Modifier.align(Alignment.BottomCenter).padding(bottom = 112.dp)
+                    .background(Color(0xE6170D25), RoundedCornerShape(16.dp))
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(selectedNode.title, color = Color(0xFFF0E5FF), fontSize = 14.sp)
+                Text(selectedNode.sourcePath, color = Color(0xFFB69ACF), fontSize = 10.sp)
+                Text("${selectedRelations.size} relation(s) · ${selectedNode.type}", color = Color(0xFF9D84BD), fontSize = 10.sp)
+                Text("FERMER", Modifier.clickable { selectedNodeId = null }, color = Color(0xFFD2B5FF), fontSize = 9.sp)
+            }
         }
         Row(
             Modifier.align(Alignment.BottomCenter).padding(bottom = 20.dp)
@@ -90,6 +113,9 @@ fun ObsidianOrb3D(app: fr.dd.jarvis.JarvisApp) {
 
 private class ObsidianOrbSurface(context: Context) : GLSurfaceView(context) {
     private val orbRenderer = ObsidianOrbRenderer()
+    var onNodeSelected: ((String) -> Unit)? = null
+    private var downX = 0f
+    private var downY = 0f
     fun setGraph(nodes: List<fr.dd.jarvis.data.graph.GraphNodeEntity>, relations: List<fr.dd.jarvis.data.graph.GraphRelationEntity>) = orbRenderer.setGraph(nodes, relations)
 
     init {
@@ -99,6 +125,7 @@ private class ObsidianOrbSurface(context: Context) : GLSurfaceView(context) {
         setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
+                    downX = event.x; downY = event.y
                     orbRenderer.touch(event.x, event.y, 0f, 0f)
                     true
                 }
@@ -116,7 +143,13 @@ private class ObsidianOrbSurface(context: Context) : GLSurfaceView(context) {
                     }
                     true
                 }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> true
+                MotionEvent.ACTION_UP -> {
+                    if (event.pointerCount == 1 && kotlin.math.hypot((event.x - downX).toDouble(), (event.y - downY).toDouble()) < 14.0) {
+                        orbRenderer.hitTest(event.x, event.y)?.let { onNodeSelected?.invoke(it) }
+                    }
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> true
                 else -> true
             }
         }
@@ -137,6 +170,9 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
     @Volatile private var lastX = 0f
     @Volatile private var lastY = 0f
     @Volatile private var pinchStart = 0f
+    @Volatile private var nodeIds: List<String> = emptyList()
+    @Volatile private var nodePositions: List<FloatArray> = emptyList()
+    @Volatile private var hitMatrix = FloatArray(16)
 
     private var program = 0
     private var graphProgram = 0
@@ -146,6 +182,8 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
     @Volatile private var lineBuffer: java.nio.FloatBuffer? = null
     private var vertexBuffer: java.nio.FloatBuffer? = null
     private var vertexCount = 0
+    @Volatile private var surfaceWidth = 1
+    @Volatile private var surfaceHeight = 1
     private val projection = FloatArray(16)
     private val view = FloatArray(16)
     private val model = FloatArray(16)
@@ -161,7 +199,9 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
             val theta = index * 2.3999632f
             positions[node.id] = floatArrayOf(1.48f * radius * cos(theta), 1.48f * y, 1.48f * radius * sin(theta))
         }
-        graphPoints = positions.values.flatMap { it.toList() }.toFloatArray()
+        nodeIds = visible.map { it.id }
+        nodePositions = visible.map { positions.getValue(it.id) }
+        graphPoints = nodePositions.flatMap { it.toList() }.toFloatArray()
         val edges = ArrayList<Float>()
         relations.filter { it.origin == "EXPLICIT" }.forEach { relation ->
             val a = positions[relation.fromNodeId]
@@ -179,6 +219,23 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
     }
 
     fun touch(x: Float, y: Float, dx: Float, dy: Float) { lastX = x; lastY = y }
+    fun hitTest(x: Float, y: Float): String? {
+        val matrix = hitMatrix
+        var bestId: String? = null
+        var bestDistance = 30f * 30f
+        nodePositions.forEachIndexed { index, point ->
+            val clip = FloatArray(4)
+            Matrix.multiplyMV(clip, 0, matrix, 0, floatArrayOf(point[0], point[1], point[2], 1f), 0)
+            if (clip[3] > 0.01f) {
+                val sx = (clip[0] / clip[3] + 1f) * surfaceWidth * 0.5f
+                val sy = (1f - clip[1] / clip[3]) * surfaceHeight * 0.5f
+                val dx = sx - x; val dy = sy - y
+                val distance = dx * dx + dy * dy
+                if (distance < bestDistance) { bestDistance = distance; bestId = nodeIds.getOrNull(index) }
+            }
+        }
+        return bestId
+    }
     fun drag(x: Float, y: Float) {
         angleY += (x - lastX) * 0.55f
         angleX = (angleX + (y - lastY) * 0.45f).coerceIn(-85f, 85f)
@@ -202,6 +259,7 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
+        surfaceWidth = width; surfaceHeight = height
         GLES20.glViewport(0, 0, width, height)
         val ratio = width.toFloat() / max(height, 1)
         Matrix.perspectiveM(projection, 0, 42f, ratio, 0.1f, 20f)
@@ -216,6 +274,7 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
         Matrix.scaleM(model, 0, zoom, zoom, zoom)
         Matrix.multiplyMM(mv, 0, view, 0, model, 0)
         Matrix.multiplyMM(mvp, 0, projection, 0, mv, 0)
+        hitMatrix = mvp.copyOf()
 
         GLES20.glUseProgram(program)
         val pos = GLES20.glGetAttribLocation(program, "aPosition")
