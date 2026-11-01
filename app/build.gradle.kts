@@ -105,4 +105,9 @@ dependencies {
     implementation("org.slf4j:slf4j-nop:1.7.36")
     implementation("com.sun.mail:android-mail:1.6.7")
     implementation("com.sun.mail:android-activation:1.6.7")
+
+    // Montage vidéo (assemble plusieurs clips générés par tiktok_video en une seule vidéo)
+    // Version 1.4.x : compatible compileSdk 34 (les versions plus récentes de Media3 exigent compileSdk 35/36).
+    implementation("androidx.media3:media3-transformer:1.4.1")
+    implementation("androidx.media3:media3-common:1.4.1")
 }

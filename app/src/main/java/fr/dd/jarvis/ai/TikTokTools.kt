@@ -12,7 +12,7 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
     companion object {
         val KEYWORDS = Regex("tiktok|tik tok|vues?\\b.*vid[ée]o|vid[ée]o.*(vues?|likes?)|mes vid[ée]os", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
-        val NAMES = setOf("tiktok_connexion", "tiktok_deconnexion", "tiktok_profil", "tiktok_mes_videos", "tiktok_analyse", "tiktok_script")
+        val NAMES = setOf("tiktok_connexion", "tiktok_deconnexion", "tiktok_profil", "tiktok_mes_videos", "tiktok_analyse", "tiktok_script", "tiktok_video")
     }
 
     private fun prop(d: String) = JSONObject().put("type", "string").put("description", d)
@@ -35,7 +35,16 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
                 "sujet" to prop("Le sujet ou l'idée de la vidéo."),
                 "duree" to prop("Durée visée en secondes (optionnel, ex. 30)."),
                 "objectif" to prop("Ce que la vidéo doit privilégier : vues, abonnés, ventes, notoriété… (optionnel).")
-            ), listOf("sujet"))
+            ), listOf("sujet")),
+        tool("tiktok_video", "TikTok : génère VRAIMENT une vidéo (pas juste un script) à partir d'un sujet ou d'un script déjà écrit — découpe en plans, génère chaque plan avec un service gratuit de génération vidéo IA (Pollinations.ai, communautaire, SANS garantie de service ni quota illimité : peut être lent, en partie indisponible ou en quota atteint certains jours), puis monte les plans réussis en une seule vidéo verticale. Enregistre le résultat dans le coffre Obsidian (dossier « Vidéos TikTok »). Préviens toujours l'utilisateur si un ou plusieurs plans ont échoué (quota/service) plutôt que de le passer sous silence.",
+            mapOf(
+                "sujet" to prop("Le sujet de la vidéo (si aucun script déjà écrit n'est fourni)."),
+                "script" to prop("Un script déjà écrit (ex. sortie de tiktok_script) à utiliser comme base plutôt que de repartir du sujet seul (optionnel)."),
+                "duree_plan" to prop("Durée visée par plan en secondes, 4 à 10 (optionnel, défaut 6)."),
+                "format" to prop("« vertical » (9:16, par défaut, pour TikTok) ou « horizontal » (16:9)."),
+                "son" to prop("true pour inclure du son généré avec la vidéo (modèle veo uniquement), false pour une vidéo muette (optionnel, défaut true)."),
+                "modele" to prop("« veo » (par défaut, qualité cinématique, gère le son) ou « seedance » (sans son).")
+            ), listOf())
     )
 
     suspend fun execute(name: String, a: JSONObject): ToolResult = withContext(Dispatchers.IO) {
@@ -98,6 +107,17 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
                 val script = app.llm.agent(Prompts.TIKTOK_SCRIPT, user)
                 val emplacement = runCatching { app.obsidian.saveIn("Scripts TikTok", sujet.take(60), script) }.getOrNull()
                 ToolResult(script + (emplacement?.let { "\n\n📁 $it" } ?: ""), direct = true)
+            }
+            "tiktok_video" -> {
+                val sujet = a.optString("sujet").trim()
+                val script = a.optString("script").trim()
+                if (sujet.isBlank() && script.isBlank()) return ToolResult("Précise le sujet de la vidéo (ou donne le script à utiliser).")
+                val duree = (a.optString("duree_plan").toIntOrNull() ?: 6).coerceIn(4, 10)
+                val vertical = a.optString("format").trim().lowercase() != "horizontal"
+                val audio = a.optString("son").trim().lowercase().let { it.isBlank() || it in setOf("true", "oui", "1", "vrai") }
+                val modele = a.optString("modele").trim().lowercase().let { if (it == "seedance") "seedance" else "veo" }
+                val (fichier, message) = VideoGen.genererVideo(app, sujet, script, duree, vertical, audio, modele)
+                ToolResult(message, direct = true)
             }
             else -> ToolResult("Outil TikTok inconnu.")
         }
