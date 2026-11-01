@@ -14,7 +14,7 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
         val NAMES = setOf(
             "discord_guildes", "discord_roles", "discord_salons", "discord_role_creer", "discord_role_modifier",
-            "discord_role_supprimer", "discord_role_attribuer", "discord_salon_permission"
+            "discord_role_supprimer", "discord_role_position", "discord_role_attribuer", "discord_salon_permission"
         )
     }
 
@@ -46,6 +46,9 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
                 "affiche_separement" to prop("« true »/« false » (optionnel)."), "mentionnable" to prop("« true »/« false » (optionnel).")), listOf("role")),
         tool("discord_role_supprimer", "Discord : supprime définitivement un rôle du serveur.",
             mapOf("serveur" to prop("Nom ou ID du serveur (optionnel si un seul)."), "role" to prop("Nom (ou ID) du rôle à supprimer.")), listOf("role")),
+        tool("discord_role_position", "Discord : change la position d'un rôle dans la hiérarchie du serveur (plus un rôle est haut, plus il l'emporte sur les rôles en dessous — c'est ce qui permet à un rôle de gérer/dépasser les rôles inférieurs).",
+            mapOf("serveur" to prop("Nom ou ID du serveur (optionnel si un seul)."), "role" to prop("Nom (ou ID) du rôle à déplacer."),
+                "position" to prop("« haut » ou « maximum » pour le placer le plus haut possible (Discord ne permet jamais de dépasser le rôle le plus haut du bot JARVIS lui-même), « bas » pour le mettre tout en bas (juste au-dessus de @everyone), ou un nombre pour une position précise.")), listOf("role", "position")),
         tool("discord_role_attribuer", "Discord : donne ou retire un rôle à un membre du serveur.",
             mapOf("serveur" to prop("Nom ou ID du serveur (optionnel si un seul)."), "membre" to prop("Nom, pseudo ou ID du membre."),
                 "role" to prop("Nom (ou ID) du rôle."), "action" to prop("donner (défaut) ou retirer.")), listOf("membre", "role")),
@@ -53,7 +56,11 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             mapOf("serveur" to prop("Nom ou ID du serveur (optionnel si un seul)."), "salon" to prop("Nom (ou ID) du salon. Inutile si « tous_les_salons » est à true."),
                 "tous_les_salons" to prop("« true » pour appliquer le même accès à TOUS les salons (texte, vocaux, annonces, forums) du serveur en une seule fois, au lieu d'un salon précis."),
                 "role" to prop("Nom (ou ID) du rôle concerné (ou utilise « membre » à la place pour un membre précis)."), "membre" to prop("Nom, pseudo ou ID d'un membre précis (optionnel, à la place de « role »)."),
-                "acces" to prop("voir_salon pour autoriser à voir/utiliser le salon, ou « refuser_voir_salon » pour le rendre invisible et inaccessible à ce rôle/membre, ou « defaut » pour effacer la règle spécifique à ce(s) salon(s).")), listOf("acces"))
+                "acces" to prop("« voir_salon » pour AJOUTER le droit de voir/utiliser ce salon, sans toucher aux autres permissions déjà accordées par ailleurs (donc si le rôle a beaucoup de permissions au niveau du serveur, elles restent actives ici aussi). " +
+                    "« voir_salon_seulement » pour autoriser à voir ce salon ET interdire explicitement tout le reste dans CE salon précis, même si le rôle a par ailleurs beaucoup de permissions au niveau du serveur — c'est ce qu'il faut utiliser pour un salon où le rôle doit être limité à la lecture malgré ses autres permissions. " +
+                    "« toutes_permissions » pour autoriser toutes les permissions applicables dans ce salon. " +
+                    "« refuser_voir_salon » pour rendre le salon invisible et inaccessible à ce rôle/membre. " +
+                    "« defaut » pour effacer la règle spécifique à ce(s) salon(s) (retour à l'héritage normal des permissions du serveur).")), listOf("acces"))
     )
 
     private fun guildeObj(a: JSONObject): JSONObject {
@@ -134,6 +141,22 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             Discord.roleSupprimer(app, gid, role.getString("id"))
             ToolResult("🗑️ Rôle « ${role.optString("name")} » supprimé sur le serveur « $gnom ».", direct = true)
         }
+        "discord_role_position" -> {
+            val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
+            val role = Discord.trouverRole(app, gid, a.optString("role")) ?: return ToolResult("Rôle « ${a.optString("role")} » introuvable sur le serveur « $gnom ».")
+            val posArg = a.optString("position").trim().lowercase()
+            val maxBot = Discord.rolePositionMaxBot(app, gid)
+            val auMaximum = posArg.contains("haut") || posArg.contains("maximum") || posArg.contains("max")
+            val position = when {
+                auMaximum -> maxOf(1, maxBot - 1)
+                posArg.contains("bas") || posArg.contains("minimum") || posArg.contains("min") -> 1
+                else -> posArg.toIntOrNull() ?: return ToolResult("Position invalide : « ${a.optString("position")} » (attendu : « haut », « bas », ou un nombre).")
+            }
+            if (!confirm("Déplacer le rôle « ${role.optString("name")} » en position $position sur le serveur « $gnom » ?", true)) return ToolResult("Refusé par l'utilisateur.")
+            Discord.roleDeplacer(app, gid, role.getString("id"), position)
+            ToolResult("✅ Rôle « ${role.optString("name")} » déplacé en position $position sur « $gnom »." +
+                (if (auMaximum) " C'est le plus haut possible : Discord ne permet jamais de dépasser le rôle le plus haut que JARVIS possède lui-même sur ce serveur." else ""), direct = true)
+        }
         "discord_role_attribuer" -> {
             val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
             val role = Discord.trouverRole(app, gid, a.optString("role")) ?: return ToolResult("Rôle « ${a.optString("role")} » introuvable sur le serveur « $gnom ».")
@@ -164,7 +187,17 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
                 else -> return ToolResult("Précise un rôle ou un membre.")
             }
             val acces = a.optString("acces").trim().lowercase()
+            // Autoriser « voir_salon » n'ajoute QUE la permission de voir ce salon : si le rôle a par ailleurs beaucoup de
+            // permissions au niveau du serveur (ex. toutes_sauf_administrateur), elles restent actives dans ce salon aussi,
+            // puisqu'une autorisation de salon ne fait qu'AJOUTER un droit, jamais retirer ceux déjà accordés ailleurs.
+            // Pour un salon vraiment limité à la lecture malgré des permissions larges au niveau du serveur, il faut
+            // explicitement INTERDIRE tout le reste dans ce salon (« seulement »/« uniquement »).
+            val toutSaufVoir = Discord.Perm.TOUT_SAUF_ADMINISTRATEUR and Discord.Perm.VIEW_CHANNEL.inv()
             fun appliquer(channelId: String) = when {
+                acces.contains("seulement") || acces.contains("uniquement") ->
+                    Discord.salonPermission(app, channelId, cibleId, type, Discord.Perm.VIEW_CHANNEL, toutSaufVoir)
+                acces.contains("toutes") || acces.contains("tout") ->
+                    Discord.salonPermission(app, channelId, cibleId, type, Discord.Perm.TOUT_SAUF_ADMINISTRATEUR, 0L)
                 acces.contains("refuser") -> Discord.salonPermission(app, channelId, cibleId, type, 0L, Discord.Perm.VIEW_CHANNEL)
                 acces.contains("defaut") || acces.contains("default") -> Discord.salonPermissionSupprimer(app, channelId, cibleId)
                 else -> Discord.salonPermission(app, channelId, cibleId, type, Discord.Perm.VIEW_CHANNEL, 0L)

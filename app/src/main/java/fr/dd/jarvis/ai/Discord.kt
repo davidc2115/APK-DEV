@@ -81,22 +81,29 @@ object Discord {
         const val CREATE_EVENTS = 1L shl 44
         const val USE_EXTERNAL_SOUNDS = 1L shl 45
         const val SEND_VOICE_MESSAGES = 1L shl 46
+        const val SET_VOICE_CHANNEL_STATUS = 1L shl 48
         const val SEND_POLLS = 1L shl 49
+        const val USE_EXTERNAL_APPS = 1L shl 50
+        const val PIN_MESSAGES = 1L shl 51
+        const val BYPASS_SLOWMODE = 1L shl 52
 
         val NOMS = linkedMapOf(
             "creer_invitation" to CREATE_INSTANT_INVITE, "expulser_membres" to KICK_MEMBERS, "bannir_membres" to BAN_MEMBERS,
             "administrateur" to ADMINISTRATOR, "gerer_salons" to MANAGE_CHANNELS, "gerer_serveur" to MANAGE_GUILD,
-            "ajouter_reactions" to ADD_REACTIONS, "voir_journal_audit" to VIEW_AUDIT_LOG, "voir_salon" to VIEW_CHANNEL,
-            "envoyer_messages" to SEND_MESSAGES, "gerer_messages" to MANAGE_MESSAGES, "integrer_liens" to EMBED_LINKS,
+            "ajouter_reactions" to ADD_REACTIONS, "voir_journal_audit" to VIEW_AUDIT_LOG, "voix_prioritaire" to PRIORITY_SPEAKER,
+            "video" to STREAM, "voir_salon" to VIEW_CHANNEL,
+            "envoyer_messages" to SEND_MESSAGES, "messages_synthese_vocale" to SEND_TTS_MESSAGES, "gerer_messages" to MANAGE_MESSAGES, "integrer_liens" to EMBED_LINKS,
             "joindre_fichiers" to ATTACH_FILES, "historique_messages" to READ_MESSAGE_HISTORY, "mentionner_tout_le_monde" to MENTION_EVERYONE,
-            "emojis_externes" to USE_EXTERNAL_EMOJIS, "se_connecter_vocal" to CONNECT, "parler_vocal" to SPEAK,
-            "rendre_muet" to MUTE_MEMBERS, "rendre_sourd" to DEAFEN_MEMBERS, "deplacer_membres" to MOVE_MEMBERS,
+            "emojis_externes" to USE_EXTERNAL_EMOJIS, "voir_statistiques_serveur" to VIEW_GUILD_INSIGHTS, "se_connecter_vocal" to CONNECT, "parler_vocal" to SPEAK,
+            "rendre_muet" to MUTE_MEMBERS, "rendre_sourd" to DEAFEN_MEMBERS, "deplacer_membres" to MOVE_MEMBERS, "detection_voix" to USE_VAD,
             "changer_pseudo" to CHANGE_NICKNAME, "gerer_pseudos" to MANAGE_NICKNAMES, "gerer_roles" to MANAGE_ROLES,
             "gerer_webhooks" to MANAGE_WEBHOOKS, "gerer_emojis_stickers" to MANAGE_GUILD_EXPRESSIONS, "utiliser_commandes" to USE_APPLICATION_COMMANDS,
-            "gerer_evenements" to MANAGE_EVENTS, "gerer_fils" to MANAGE_THREADS, "creer_fils_publics" to CREATE_PUBLIC_THREADS,
-            "creer_fils_prives" to CREATE_PRIVATE_THREADS, "stickers_externes" to USE_EXTERNAL_STICKERS, "moderer_membres" to MODERATE_MEMBERS,
-            "utiliser_soundboard" to USE_SOUNDBOARD, "sons_externes" to USE_EXTERNAL_SOUNDS, "messages_vocaux" to SEND_VOICE_MESSAGES,
-            "sondages" to SEND_POLLS
+            "gerer_evenements" to MANAGE_EVENTS, "creer_evenements" to CREATE_EVENTS, "gerer_fils" to MANAGE_THREADS, "creer_fils_publics" to CREATE_PUBLIC_THREADS,
+            "creer_fils_prives" to CREATE_PRIVATE_THREADS, "messages_fils" to SEND_MESSAGES_IN_THREADS, "stickers_externes" to USE_EXTERNAL_STICKERS,
+            "activites" to USE_EMBEDDED_ACTIVITIES, "moderer_membres" to MODERATE_MEMBERS, "statistiques_monetisation" to VIEW_CREATOR_MONETIZATION_ANALYTICS,
+            "utiliser_soundboard" to USE_SOUNDBOARD, "creer_emojis_stickers" to CREATE_GUILD_EXPRESSIONS, "sons_externes" to USE_EXTERNAL_SOUNDS,
+            "messages_vocaux" to SEND_VOICE_MESSAGES, "statut_salon_vocal" to SET_VOICE_CHANNEL_STATUS, "sondages" to SEND_POLLS,
+            "applications_externes" to USE_EXTERNAL_APPS, "epingler_messages" to PIN_MESSAGES, "ignorer_mode_lent" to BYPASS_SLOWMODE
         )
 
         /** Toutes les permissions connues SAUF « Administrateur » : donne un contrôle quasi total tout en respectant les
@@ -178,6 +185,39 @@ object Discord {
     }
 
     fun roleSupprimer(app: JarvisApp, guildId: String, roleId: String) { req(app, "DELETE", "/guilds/$guildId/roles/$roleId") }
+
+    /** Identité du bot JARVIS lui-même (utile pour connaître ses propres rôles, donc jusqu'où il peut monter un rôle dans la hiérarchie). */
+    fun moi(app: JarvisApp): JSONObject = req(app, "GET", "/users/@me")
+
+    /** Position la plus haute parmi les rôles que le bot possède lui-même sur ce serveur (0 si aucun rôle au-delà de @everyone) :
+     *  Discord refuse (403) de placer un rôle à une position supérieure ou égale au rôle le plus haut du bot. */
+    fun rolePositionMaxBot(app: JarvisApp, guildId: String): Int {
+        val monId = moi(app).getString("id")
+        val mesRoles = (membre(app, guildId, monId).optJSONArray("roles") ?: JSONArray()).let { arr -> (0 until arr.length()).map { arr.getString(it) }.toSet() }
+        val arr = roles(app, guildId)
+        var max = 0
+        for (i in 0 until arr.length()) {
+            val r = arr.getJSONObject(i)
+            if (mesRoles.contains(r.getString("id"))) max = maxOf(max, r.optInt("position"))
+        }
+        return max
+    }
+
+    /** Déplace un rôle à une position donnée dans la hiérarchie du serveur (1 = juste au-dessus de @everyone). */
+    fun roleDeplacer(app: JarvisApp, guildId: String, roleId: String, position: Int) {
+        if (!configure(app)) throw IllegalStateException("Discord non configuré (Réglages › Discord : jeton du bot).")
+        val corps = JSONArray().put(JSONObject().put("id", roleId).put("position", position))
+        val b = Request.Builder().url("$API/guilds/$guildId/roles").header("Authorization", "Bot ${jeton(app)}")
+            .header("User-Agent", "DiscordBot (https://github.com/davidc2115/APK-DEV, 1.0)")
+            .patch(corps.toString().toRequestBody("application/json".toMediaType()))
+        http.newCall(b.build()).execute().use { r ->
+            val t = r.body?.string().orEmpty()
+            if (r.code == 401) throw IllegalStateException("Discord 401 : jeton refusé (${diagJeton(app)}).")
+            if (r.code == 403) throw IllegalStateException("Discord 403 : le bot n'a pas la permission « Gérer les rôles », ou son propre rôle n'est pas assez haut dans la hiérarchie pour déplacer celui-ci à cette position.")
+            if (r.code == 429) throw IllegalStateException("Discord : trop de requêtes, réessaie dans un instant.")
+            if (!r.isSuccessful) throw IllegalStateException("Discord ${r.code} : ${t.take(300)}")
+        }
+    }
 
     fun roleAttribuer(app: JarvisApp, guildId: String, userId: String, roleId: String) { req(app, "PUT", "/guilds/$guildId/members/$userId/roles/$roleId") }
     fun roleRetirer(app: JarvisApp, guildId: String, userId: String, roleId: String) { req(app, "DELETE", "/guilds/$guildId/members/$userId/roles/$roleId") }
