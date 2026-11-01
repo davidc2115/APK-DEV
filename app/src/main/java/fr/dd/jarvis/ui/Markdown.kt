@@ -117,7 +117,7 @@ private fun MdLines(lines: List<String>, color: Color, accent: Color) {
                 Table(rows, color, accent, ctx)
             }
             line.contains("jarvis-video-ia:") -> {
-                val name = Regex("""jarvis-video-ia:([^)\\s]+)""").find(line)?.groupValues?.get(1).orEmpty()
+                val name = Regex("""jarvis-video-ia:([^)]+)""").find(line)?.groupValues?.get(1).orEmpty()
                 ChatVideo(name, accent)
             }
             line.startsWith("![") && line.contains("jarvis-img:") -> {
