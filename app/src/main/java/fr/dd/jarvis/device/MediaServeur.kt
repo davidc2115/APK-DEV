@@ -36,7 +36,7 @@ object MediaServeur {
         }
         val handlers = app.packageManager.queryIntentActivities(view, 0)
         if (handlers.isEmpty()) {
-            medias.remove(id)
+            medias.remove(Uri.parse(url).lastPathSegment.orEmpty())
             return "Aucun lecteur compatible n'est détecté pour le format ${Box.mimeVideo(chemin)}. Installe ou active un lecteur vidéo puis réessaie."
         }
         app.startActivity(Intent.createChooser(view, "Lire le film avec…").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
