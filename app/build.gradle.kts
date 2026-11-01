@@ -2,16 +2,17 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.serialization")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
     namespace = "fr.dd.jarvis"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "fr.dd.jarvis"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0.0"
     }
@@ -47,16 +48,14 @@ android {
         compose = true
         buildConfig = true
     }
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.14"
-    }
     packaging {
         resources {
             excludes += setOf(
                 "/META-INF/{AL2.0,LGPL2.1}",
                 "META-INF/LICENSE*",
                 "META-INF/NOTICE*",
-                "META-INF/DEPENDENCIES"
+                "META-INF/DEPENDENCIES",
+                "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
             )
             pickFirsts += setOf("META-INF/mailcap", "META-INF/mimetypes.default")
         }
@@ -110,4 +109,7 @@ dependencies {
     // Version 1.4.x : compatible compileSdk 34 (les versions plus récentes de Media3 exigent compileSdk 35/36).
     implementation("androidx.media3:media3-transformer:1.4.1")
     implementation("androidx.media3:media3-common:1.4.1")
+
+    // Orbe 3D (moteur Filament via SceneView) — Phase 2/3 du projet « Orbe Obsidienne ».
+    implementation("io.github.sceneview:sceneview:2.3.4")
 }
