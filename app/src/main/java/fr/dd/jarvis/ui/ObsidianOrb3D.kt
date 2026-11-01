@@ -50,7 +50,7 @@ fun ObsidianOrb3D(app: fr.dd.jarvis.JarvisApp) {
             factory = { context ->
                 ObsidianOrbSurface(context).also { surfaceHolder[0] = it }
             },
-            update = { }
+            update = { view -> view.setGraph(nodes, relations) }
         )
         Column(
             Modifier.align(Alignment.TopCenter).padding(top = 18.dp),
@@ -90,6 +90,7 @@ fun ObsidianOrb3D(app: fr.dd.jarvis.JarvisApp) {
 
 private class ObsidianOrbSurface(context: Context) : GLSurfaceView(context) {
     private val orbRenderer = ObsidianOrbRenderer()
+    fun setGraph(nodes: List<fr.dd.jarvis.data.graph.GraphNodeEntity>, relations: List<fr.dd.jarvis.data.graph.GraphRelationEntity>) = orbRenderer.setGraph(nodes, relations)
 
     init {
         setEGLContextClientVersion(2)
@@ -138,6 +139,11 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
     @Volatile private var pinchStart = 0f
 
     private var program = 0
+    private var graphProgram = 0
+    @Volatile private var graphPoints = FloatArray(0)
+    @Volatile private var graphLines = FloatArray(0)
+    @Volatile private var pointBuffer: java.nio.FloatBuffer? = null
+    @Volatile private var lineBuffer: java.nio.FloatBuffer? = null
     private var vertexBuffer: java.nio.FloatBuffer? = null
     private var vertexCount = 0
     private val projection = FloatArray(16)
@@ -145,6 +151,32 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
     private val model = FloatArray(16)
     private val mv = FloatArray(16)
     private val mvp = FloatArray(16)
+
+    fun setGraph(nodes: List<fr.dd.jarvis.data.graph.GraphNodeEntity>, relations: List<fr.dd.jarvis.data.graph.GraphRelationEntity>) {
+        val visible = nodes.take(160)
+        val positions = HashMap<String, FloatArray>()
+        visible.forEachIndexed { index, node ->
+            val y = 1f - 2f * (index + 0.5f) / max(visible.size, 1)
+            val radius = sqrt(max(0f, 1f - y * y))
+            val theta = index * 2.3999632f
+            positions[node.id] = floatArrayOf(1.48f * radius * cos(theta), 1.48f * y, 1.48f * radius * sin(theta))
+        }
+        graphPoints = positions.values.flatMap { it.toList() }.toFloatArray()
+        val edges = ArrayList<Float>()
+        relations.filter { it.origin == "EXPLICIT" }.forEach { relation ->
+            val a = positions[relation.fromNodeId]
+            val b = positions[relation.toNodeId]
+            if (a != null && b != null) { edges.addAll(a.toList()); edges.addAll(b.toList()) }
+        }
+        graphLines = edges.toFloatArray()
+        pointBuffer = makeBuffer(graphPoints)
+        lineBuffer = makeBuffer(graphLines)
+    }
+
+    private fun makeBuffer(values: FloatArray): java.nio.FloatBuffer {
+        val b = ByteBuffer.allocateDirect(values.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
+        b.put(values); b.position(0); return b
+    }
 
     fun touch(x: Float, y: Float, dx: Float, dy: Float) { lastX = x; lastY = y }
     fun drag(x: Float, y: Float) {
@@ -163,6 +195,7 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
         GLES20.glEnable(GLES20.GL_DEPTH_TEST)
         GLES20.glDisable(GLES20.GL_CULL_FACE)
         program = createProgram(VERTEX_SHADER, FRAGMENT_SHADER)
+        graphProgram = createProgram(GRAPH_VERTEX_SHADER, GRAPH_FRAGMENT_SHADER)
         vertexBuffer = createSphere(64, 48)
         vertexCount = 64 * 48 * 6
         Matrix.setLookAtM(view, 0, 0f, 0f, 3.3f, 0f, 0f, 0f, 0f, 1f, 0f)
@@ -199,6 +232,24 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
         GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, vertexCount)
         GLES20.glDisableVertexAttribArray(pos)
         GLES20.glDisableVertexAttribArray(normal)
+
+        GLES20.glUseProgram(graphProgram)
+        GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(graphProgram, "uMvp"), 1, false, mvp, 0)
+        val graphPos = GLES20.glGetAttribLocation(graphProgram, "aPosition")
+        lineBuffer?.let { b ->
+            b.position(0); GLES20.glVertexAttribPointer(graphPos, 3, GLES20.GL_FLOAT, false, 12, b)
+            GLES20.glEnableVertexAttribArray(graphPos)
+            GLES20.glUniform4f(GLES20.glGetUniformLocation(graphProgram, "uColor"), 0.30f, 0.10f, 0.60f, 0.8f)
+            GLES20.glDrawArrays(GLES20.GL_LINES, 0, graphLines.size / 3)
+            GLES20.glDisableVertexAttribArray(graphPos)
+        }
+        pointBuffer?.let { b ->
+            b.position(0); GLES20.glVertexAttribPointer(graphPos, 3, GLES20.GL_FLOAT, false, 12, b)
+            GLES20.glEnableVertexAttribArray(graphPos)
+            GLES20.glUniform4f(GLES20.glGetUniformLocation(graphProgram, "uColor"), 0.82f, 0.62f, 1f, 1f)
+            GLES20.glDrawArrays(GLES20.GL_POINTS, 0, graphPoints.size / 3)
+            GLES20.glDisableVertexAttribArray(graphPos)
+        }
     }
 
     private fun createSphere(stacks: Int, slices: Int): java.nio.FloatBuffer {
@@ -250,6 +301,20 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
     }
 
     companion object {
+        private const val GRAPH_VERTEX_SHADER = """
+            uniform mat4 uMvp;
+            attribute vec3 aPosition;
+            void main() { gl_Position = uMvp * vec4(aPosition, 1.0); gl_PointSize = 7.0; }
+        """
+        private const val GRAPH_FRAGMENT_SHADER = """
+            precision mediump float;
+            uniform vec4 uColor;
+            void main() {
+                vec2 p = gl_PointCoord - vec2(0.5);
+                float glow = 1.0 - smoothstep(0.18, 0.5, length(p));
+                gl_FragColor = vec4(uColor.rgb, uColor.a * glow);
+            }
+        """
         private const val VERTEX_SHADER = """
             uniform mat4 uMvp;
             uniform mat4 uModel;
