@@ -63,8 +63,9 @@ private fun calculerDisposition(data: ObsidianWriter.GraphData): List<PosNoeud> 
 
     val n = tries.size
     if (n == 0) return emptyList()
-    // Plus petit qu'avant (220) : les nœuds restaient beaucoup trop espacés les uns des autres, surtout avec peu de notes.
-    val k = 110f / kotlin.math.sqrt(n.toFloat().coerceAtLeast(1f))
+    // Avec peu de notes (petit coffre), un k trop faible entassait tout au centre, illisible une fois dézoomé pour
+    // tout faire tenir à l'écran. 170 donne un graphe nettement plus aéré, surtout quand n est petit (cas courant ici).
+    val k = 170f / kotlin.math.sqrt(n.toFloat().coerceAtLeast(1f))
     val rnd = Random(7)
     val pos = HashMap<String, Offset>()
     tries.forEachIndexed { i, node ->
@@ -109,15 +110,15 @@ private fun calculerDisposition(data: ObsidianWriter.GraphData): List<PosNoeud> 
     // Passe de « décollage » : la simulation ci-dessus laisse parfois plusieurs nœuds très liés au même hub
     // quasiment superposés (visible en grappe illisible). On écarte ici, sans y toucher sinon, toute paire de
     // nœuds plus proches que la somme de leurs rayons + marge, jusqu'à ce qu'il n'y ait plus de chevauchement.
-    fun rayonMonde(id: String) = 9f + min(degres[id] ?: 0, 10) * 2f
-    repeat(60) {
+    fun rayonMonde(id: String) = 12f + min(degres[id] ?: 0, 10) * 2.4f
+    repeat(80) {
         for (i in tries.indices) {
             val a = tries[i].id; val pa = pos[a]!!
             for (j in i + 1 until tries.size) {
                 val b = tries[j].id; val pb = pos[b]!!
                 val dx = pa.x - pb.x; val dy = pa.y - pb.y
                 var dist = hypot(dx, dy); if (dist < 0.01f) dist = 0.01f
-                val minDist = rayonMonde(a) + rayonMonde(b) + 6f
+                val minDist = rayonMonde(a) + rayonMonde(b) + 22f
                 if (dist < minDist) {
                     val push = (minDist - dist) / 2f
                     val ux = dx / dist; val uy = dy / dist
@@ -250,6 +251,17 @@ fun GraphScreen(app: JarvisApp) {
     var scale by remember { mutableStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
 
+    // Le « cerveau » du graphe : la note la plus liée, mise en avant par un halo pulsant (repère visuel clair,
+    // même compact), à la place de l'ancienne orbe centrale qui disparaissait complètement dans ce nouvel écran.
+    val pulse by androidx.compose.animation.core.rememberInfiniteTransition(label = "hubPulse").animateFloat(
+        initialValue = 0.5f, targetValue = 1f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            androidx.compose.animation.core.tween(1400, easing = androidx.compose.animation.core.LinearEasing),
+            androidx.compose.animation.core.RepeatMode.Reverse
+        ), label = "hubPulse"
+    )
+    val hubId = remember(noeuds) { noeuds.maxByOrNull { it.degre }?.takeIf { it.degre > 0 }?.node?.id }
+
     Column(Modifier.fillMaxSize()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
@@ -281,7 +293,7 @@ fun GraphScreen(app: JarvisApp) {
                     val largeur = (maxX - minX).coerceAtLeast(40f); val hauteur = (maxY - minY).coerceAtLeast(40f)
                     val canvasW = with(localDensity) { maxWidth.toPx() }; val canvasH = with(localDensity) { maxHeight.toPx() }
                     if (canvasW > 0f && canvasH > 0f) {
-                        val s = (minOf(canvasW / largeur, canvasH / hauteur) * 0.78f).coerceIn(0.6f, 8f)
+                        val s = (minOf(canvasW / largeur, canvasH / hauteur) * 0.85f).coerceIn(1.1f, 10f)
                         scale = s
                         offset = Offset(-(minX + maxX) / 2f * s, -(minY + maxY) / 2f * s)
                     }
@@ -335,7 +347,7 @@ fun GraphScreen(app: JarvisApp) {
                     // Tailles en fonction de la densité de l'écran (`density`, ici le float du DrawScope) : avant, des tailles
                     // fixes en pixels bruts (rayon 6, trait 1.2…) étaient quasi invisibles sur un écran haute résolution
                     // (ex. 3 px = 1 dp), d'où des nœuds réduits à des points perdus dans le vide.
-                    val lignePaint = Color(0x4490B8FF)
+                    val lignePaint = Color(0x6690B8FF)
                     for (a in aretes) {
                         val pa = parId[a.from]?.pos ?: continue
                         val pb = parId[a.to]?.pos ?: continue
@@ -343,15 +355,19 @@ fun GraphScreen(app: JarvisApp) {
                             color = lignePaint,
                             start = Offset(cx + pa.x * scale, cy + pa.y * scale),
                             end = Offset(cx + pb.x * scale, cy + pb.y * scale),
-                            strokeWidth = 1.4f * density * scale.coerceAtLeast(0.4f)
+                            strokeWidth = 2f * density * scale.coerceAtLeast(0.4f)
                         )
                     }
                     for (pn in noeuds) {
                         val sx = cx + pn.pos.x * scale
                         val sy = cy + pn.pos.y * scale
-                        val rayon = (7f + min(pn.degre, 10) * 1.8f) * density * scale
+                        val rayon = (10f + min(pn.degre, 10) * 2.2f) * density * scale
                         val estHub = pn.degre >= 5
+                        val estCerveau = pn.node.id == hubId
                         val couleur = if (pn.node.ghost) Color(0xFF999999) else couleurDossier(pn.node.folder, accent)
+                        if (estCerveau) drawCircle(
+                            color = couleur.copy(alpha = 0.22f * pulse), radius = rayon * (2.6f + 0.5f * pulse), center = Offset(sx, sy)
+                        )
                         drawCircle(
                             color = if (pn.node.ghost) couleur.copy(alpha = 0.4f) else if (estHub) couleur else couleur.copy(alpha = 0.8f),
                             radius = rayon,
@@ -367,12 +383,13 @@ fun GraphScreen(app: JarvisApp) {
                             drawContext.canvas.nativeCanvas.apply {
                                 val paint = android.graphics.Paint().apply {
                                     color = if (pn.node.ghost) android.graphics.Color.GRAY else android.graphics.Color.WHITE
-                                    textSize = (13f * density * scale.coerceIn(0.85f, 2f))
+                                    textSize = (14f * density * scale.coerceIn(0.9f, 2.4f)) * (if (estCerveau) 1.15f else 1f)
                                     isAntiAlias = true
                                     textAlign = android.graphics.Paint.Align.CENTER
-                                    setShadowLayer(3f * density, 0f, 0f, android.graphics.Color.BLACK)
+                                    isFakeBoldText = estCerveau
+                                    setShadowLayer(3.5f * density, 0f, 0f, android.graphics.Color.BLACK)
                                 }
-                                drawText(pn.node.label.take(22), sx, sy + rayon + 15f * density, paint)
+                                drawText(pn.node.label.take(22), sx, sy + rayon + 16f * density, paint)
                             }
                         }
                     }
