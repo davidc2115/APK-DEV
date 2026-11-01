@@ -2,6 +2,7 @@ package fr.dd.jarvis.ui
 
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -12,7 +13,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -26,14 +30,22 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import fr.dd.jarvis.JarvisApp
@@ -42,24 +54,30 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.cos
 import kotlin.math.hypot
+import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 import kotlin.random.Random
 
-/** Vue « graphe » du coffre Obsidian : chaque note est un nœud, chaque lien « [[...]] » une arête —
- *  dans le style d'un graphe de connaissances (orbe central pour les notes très liées, nœuds satellites
- *  reliés par des traits, comme la vue graphe native d'Obsidian). Disposition calculée une fois (force-directed
- *  léger) puis pan/zoom/tap à la main pour explorer. */
+/** Vue « graphe » du coffre Obsidian, organisée PAR DOSSIER — un « cerveau » central, un hub coloré avec icône
+ *  par dossier racine, et les notes de chaque dossier qui gravitent autour de leur propre hub (plutôt qu'un nuage
+ *  de points dispersé au hasard) — avec un fond en nébuleuse violette pour l'ambiance. Disposition calculée une
+ *  fois (force-directed par grappes) puis pan/zoom/tap à la main pour explorer. */
 
 private const val MAX_NOEUDS = 260
 
-private data class PosNoeud(val node: ObsidianWriter.GraphNode, val pos: Offset, val degre: Int)
+private data class PosNoeud(val node: ObsidianWriter.GraphNode, val pos: Offset, val degre: Int, val categorie: String)
+private data class CategorieInfo(val nom: String, val pos: Offset, val nbNotes: Int)
 
-/** Résultat complet de la disposition : nœuds positionnés + arêtes correspondantes, renvoyés ENSEMBLE
- *  (plus de variable globale partagée entre threads/écrans pour faire transiter les arêtes — source d'un bug
- *  réel : rien ne garantissait qu'elle ne soit pas réécrite entre le calcul et sa lecture si GraphBackdrop et
- *  GraphScreen tournaient en même temps, par exemple pendant une transition d'écran). */
-private data class Disposition(val noeuds: List<PosNoeud>, val aretes: List<ObsidianWriter.GraphEdge>)
+/** Résultat complet de la disposition : nœuds positionnés + arêtes + hubs de dossiers, renvoyés ENSEMBLE (plus de
+ *  variable globale partagée entre threads/écrans pour faire transiter les arêtes — source d'un bug réel : rien ne
+ *  garantissait qu'elle ne soit pas réécrite entre le calcul et sa lecture si deux écrans tournaient en même temps). */
+private data class Disposition(val noeuds: List<PosNoeud>, val aretes: List<ObsidianWriter.GraphEdge>, val categories: List<CategorieInfo>)
+
+private fun racineDossier(folder: String): String {
+    val r = folder.substringBefore('/').trim()
+    return r.ifBlank { "Racine" }
+}
 
 private fun calculerDisposition(data: ObsidianWriter.GraphData): Disposition {
     val degres = HashMap<String, Int>()
@@ -69,48 +87,91 @@ private fun calculerDisposition(data: ObsidianWriter.GraphData): Disposition {
     val edges = data.edges.filter { it.from in idsGardes && it.to in idsGardes }
 
     val n = tries.size
-    if (n == 0) return Disposition(emptyList(), emptyList())
-    // Avec peu de notes (petit coffre), un k trop faible entassait tout au centre, illisible une fois dézoomé pour
-    // tout faire tenir à l'écran. 170 donne un graphe nettement plus aéré, surtout quand n est petit (cas courant ici).
-    val k = 170f / kotlin.math.sqrt(n.toFloat().coerceAtLeast(1f))
+    if (n == 0) return Disposition(emptyList(), emptyList(), emptyList())
+
+    // Regroupement par dossier racine (catégorie) : chaque catégorie obtient un hub fixe, placé en cercle autour du
+    // centre — c'est CE positionnement, pas la simulation de forces, qui organise tout le graphe par dossier.
+    val parCategorie = tries.groupBy { racineDossier(it.folder) }
+    val categories = parCategorie.keys.sortedByDescending { parCategorie[it]!!.size }
+    val nbCat = categories.size.coerceAtLeast(1)
+    // Rayon du cercle de hubs : croît avec le nombre de catégories pour garder de la place entre elles, et avec le
+    // nombre de notes (un coffre avec beaucoup de notes a des grappes plus larges, qui ont besoin de plus d'écart).
+    val rayonCategories = 230f + nbCat * 34f + min(n, 150) * 1.1f
+    val posCategorie = HashMap<String, Offset>()
+    categories.forEachIndexed { i, cat ->
+        val angle = (i.toFloat() / nbCat) * 2 * Math.PI.toFloat()
+        posCategorie[cat] = Offset(cos(angle) * rayonCategories, sin(angle) * rayonCategories)
+    }
+
+    // Sous-dossiers (chemin complet) : une légère attraction mutuelle entre notes du MÊME sous-dossier, en plus de
+    // la gravité vers le hub de leur catégorie — ça fait émerger des petites grappes de sous-dossier à l'intérieur
+    // de la grappe de leur dossier parent, sans avoir besoin de dessiner un second niveau de hubs.
+    val parSousDossier = tries.filter { it.folder.isNotBlank() }.groupBy { it.folder }.filterValues { it.size > 1 }
+
     val rnd = Random(7)
     val pos = HashMap<String, Offset>()
-    tries.forEachIndexed { i, node ->
-        val angle = (i.toFloat() / n) * 2 * Math.PI.toFloat()
-        val rayon = 80f + rnd.nextFloat() * 60f
-        pos[node.id] = Offset(cos(angle) * rayon, sin(angle) * rayon)
+    val catDe = HashMap<String, String>()
+    tries.forEach { node ->
+        val cat = racineDossier(node.folder)
+        catDe[node.id] = cat
+        val hub = posCategorie[cat]!!
+        val tailleCat = parCategorie[cat]!!.size
+        val etalement = 36f + min(tailleCat, 35) * 5f
+        val angle = rnd.nextFloat() * 2 * Math.PI.toFloat()
+        val rayon = 26f + rnd.nextFloat() * etalement
+        pos[node.id] = Offset(hub.x + cos(angle) * rayon, hub.y + sin(angle) * rayon)
     }
+
+    val k = 44f
     val disp = HashMap<String, Offset>()
-    repeat(140) { iter ->
+    repeat(130) { iter ->
         tries.forEach { disp[it.id] = Offset.Zero }
-        for (i in tries.indices) {
-            val a = tries[i].id
-            val pa = pos[a]!!
-            for (j in i + 1 until tries.size) {
-                val b = tries[j].id
-                val pb = pos[b]!!
-                var dx = pa.x - pb.x; var dy = pa.y - pb.y
-                var dist = hypot(dx, dy); if (dist < 0.01f) dist = 0.01f
-                val force = (k * k) / dist
-                val fx = dx / dist * force; val fy = dy / dist * force
-                disp[a] = disp[a]!!.let { Offset(it.x + fx, it.y + fy) }
-                disp[b] = disp[b]!!.let { Offset(it.x - fx, it.y - fy) }
+        // Répulsion : seulement entre notes de la MÊME catégorie — nettement moins cher que la répulsion globale
+        // d'avant (O(n²) sur TOUT le graphe), et ça garde chaque grappe compacte sans être perturbée par les autres,
+        // puisque les hubs sont de toute façon fixes (pas besoin de répulsion inter-catégories).
+        parCategorie.values.forEach { groupe ->
+            for (i in groupe.indices) {
+                val a = groupe[i].id; val pa = pos[a]!!
+                for (j in i + 1 until groupe.size) {
+                    val b = groupe[j].id; val pb = pos[b]!!
+                    var dx = pa.x - pb.x; var dy = pa.y - pb.y
+                    var dist = hypot(dx, dy); if (dist < 0.01f) dist = 0.01f
+                    val force = (k * k) / dist
+                    val fx = dx / dist * force; val fy = dy / dist * force
+                    disp[a] = disp[a]!!.let { Offset(it.x + fx, it.y + fy) }
+                    disp[b] = disp[b]!!.let { Offset(it.x - fx, it.y - fy) }
+                }
             }
         }
+        // Arêtes réelles (liens « [[...]] ») : peuvent traverser les catégories, c'est voulu — ça garde les vrais
+        // liens visibles même entre deux dossiers différents.
         for (e in edges) {
             val pa = pos[e.from] ?: continue; val pb = pos[e.to] ?: continue
             var dx = pa.x - pb.x; var dy = pa.y - pb.y
             var dist = hypot(dx, dy); if (dist < 0.01f) dist = 0.01f
-            val force = (dist * dist) / (k * 3f)
+            val force = (dist * dist) / (k * 4f)
             val fx = dx / dist * force; val fy = dy / dist * force
             disp[e.from] = disp[e.from]!!.let { Offset(it.x - fx, it.y - fy) }
             disp[e.to] = disp[e.to]!!.let { Offset(it.x + fx, it.y + fy) }
         }
-        // Gravité légère vers le centre : sans ça, une note isolée (sans aucun lien) ne subit QUE la répulsion et
-        // dérive indéfiniment loin du reste du graphe au fil des itérations — un coffre avec beaucoup de notes peu
-        // liées se retrouvait éclaté sur une zone énorme, la plupart des notes hors-écran même dézoomé à fond.
-        tries.forEach { node -> val p = pos[node.id]!!; disp[node.id] = disp[node.id]!!.let { Offset(it.x - p.x * 0.02f, it.y - p.y * 0.02f) } }
-        val temp = 24f * (1f - iter / 140f)
+        // Gravité vers le hub de SA PROPRE catégorie (pas vers l'origine) : c'est ce qui organise tout en grappes
+        // par dossier au lieu d'un nuage global façon confettis dispersés sur tout l'écran.
+        tries.forEach { node ->
+            val hub = posCategorie[catDe[node.id]]!!
+            val p = pos[node.id]!!
+            disp[node.id] = disp[node.id]!!.let { Offset(it.x - (p.x - hub.x) * 0.07f, it.y - (p.y - hub.y) * 0.07f) }
+        }
+        // Attraction douce vers le centre de masse du sous-dossier (chemin complet).
+        parSousDossier.values.forEach { groupe ->
+            var sx = 0f; var sy = 0f
+            groupe.forEach { val p = pos[it.id]!!; sx += p.x; sy += p.y }
+            val cxg = sx / groupe.size; val cyg = sy / groupe.size
+            groupe.forEach { node ->
+                val p = pos[node.id]!!
+                disp[node.id] = disp[node.id]!!.let { Offset(it.x + (cxg - p.x) * 0.05f, it.y + (cyg - p.y) * 0.05f) }
+            }
+        }
+        val temp = 20f * (1f - iter / 130f)
         tries.forEach { node ->
             val d = disp[node.id]!!
             val dist = hypot(d.x, d.y).coerceAtLeast(0.01f)
@@ -118,42 +179,81 @@ private fun calculerDisposition(data: ObsidianWriter.GraphData): Disposition {
             pos[node.id] = pos[node.id]!!.let { Offset(it.x + d.x / dist * lim, it.y + d.y / dist * lim) }
         }
     }
-    // Passe de « décollage » : la simulation ci-dessus laisse parfois plusieurs nœuds très liés au même hub
-    // quasiment superposés (visible en grappe illisible). On écarte ici, sans y toucher sinon, toute paire de
-    // nœuds plus proches que la somme de leurs rayons + marge, jusqu'à ce qu'il n'y ait plus de chevauchement.
-    // Marge volontairement généreuse : le rayon réellement affiché à l'écran est ce rayon « monde » multiplié par la
-    // densité de l'écran ET par le zoom auto-adapté (calculés plus tard, inconnus ici) — avec un petit écart on se
-    // retrouvait donc avec des nœuds dont le DISQUE AFFICHÉ se chevauchait quand même une fois ces deux facteurs
-    // appliqués (visible en grappe façon « fleur » autour des notes très liées, qui cachait aussi les traits de lien).
-    fun rayonMonde(id: String) = 22f + min(degres[id] ?: 0, 10) * 3.2f
-    repeat(80) {
-        for (i in tries.indices) {
-            val a = tries[i].id; val pa = pos[a]!!
-            for (j in i + 1 until tries.size) {
-                val b = tries[j].id; val pb = pos[b]!!
-                val dx = pa.x - pb.x; val dy = pa.y - pb.y
-                var dist = hypot(dx, dy); if (dist < 0.01f) dist = 0.01f
-                val minDist = rayonMonde(a) + rayonMonde(b) + 55f
-                if (dist < minDist) {
-                    val push = (minDist - dist) / 2f
-                    val ux = dx / dist; val uy = dy / dist
-                    pos[a] = Offset(pa.x + ux * push, pa.y + uy * push)
-                    pos[b] = Offset(pb.x - ux * push, pb.y - uy * push)
+    // Passe de « décollage » (par catégorie, puisque les catégories sont déjà séparées par construction) : écarte
+    // toute paire plus proche que la somme de leurs rayons + marge généreuse (le rayon réellement affiché à l'écran
+    // est ce rayon « monde » multiplié par densité ET zoom, inconnus ici — marge large pour rester correct malgré ça).
+    fun rayonMonde(id: String) = 20f + min(degres[id] ?: 0, 10) * 3f
+    repeat(60) {
+        parCategorie.values.forEach { groupe ->
+            for (i in groupe.indices) {
+                val a = groupe[i].id; val pa = pos[a]!!
+                for (j in i + 1 until groupe.size) {
+                    val b = groupe[j].id; val pb = pos[b]!!
+                    val dx = pa.x - pb.x; val dy = pa.y - pb.y
+                    var dist = hypot(dx, dy); if (dist < 0.01f) dist = 0.01f
+                    val minDist = rayonMonde(a) + rayonMonde(b) + 50f
+                    if (dist < minDist) {
+                        val push = (minDist - dist) / 2f
+                        val ux = dx / dist; val uy = dy / dist
+                        pos[a] = Offset(pa.x + ux * push, pa.y + uy * push)
+                        pos[b] = Offset(pb.x - ux * push, pb.y - uy * push)
+                    }
                 }
             }
         }
     }
-    return Disposition(tries.map { PosNoeud(it, pos[it.id]!!, degres[it.id] ?: 0) }, edges)
+    val noeuds = tries.map { PosNoeud(it, pos[it.id]!!, degres[it.id] ?: 0, catDe[it.id]!!) }
+    val catInfos = categories.map { CategorieInfo(it, posCategorie[it]!!, parCategorie[it]!!.size) }
+    return Disposition(noeuds, edges, catInfos)
 }
 
 /** Couleur stable par dossier (premier niveau du chemin), pour repérer visuellement les groupes de notes
  *  (Contacts, Société/Devis, Journal…) dans le graphe — une teinte dérivée du nom, toujours la même. */
-private fun couleurDossier(folder: String, accent: Color): Color {
-    val racine = folder.substringBefore('/').trim()
-    if (racine.isBlank()) return accent
-    val h = (racine.lowercase().fold(0) { acc, c -> acc * 31 + c.code } and 0xFFFFFF)
+private fun couleurDossier(folder: String, accent: Color): Color = couleurCategorie(racineDossier(folder), accent)
+
+private fun couleurCategorie(categorie: String, accent: Color): Color {
+    if (categorie == "Racine") return accent
+    val h = (categorie.lowercase().fold(0) { acc, c -> acc * 31 + c.code } and 0xFFFFFF)
     val hue = (h % 360).toFloat()
     return Color.hsv(hue, 0.55f, 1f)
+}
+
+/** Dessine un petit glyphe « dossier » simple (sans dépendance à une police d'icônes), centré sur [centre]. */
+private fun DrawScope.dessinerIconeDossier(centre: Offset, taille: Float, couleur: Color) {
+    val w = taille; val h = taille * 0.76f
+    val trait = (taille * 0.1f).coerceAtLeast(1.4f)
+    val chemin = Path().apply {
+        moveTo(centre.x - w / 2f, centre.y - h / 2f + h * 0.2f)
+        lineTo(centre.x - w / 2f + w * 0.22f, centre.y - h / 2f)
+        lineTo(centre.x - w / 2f + w * 0.42f, centre.y - h / 2f)
+        lineTo(centre.x - w / 2f + w * 0.55f, centre.y - h / 2f + h * 0.2f)
+        lineTo(centre.x + w / 2f, centre.y - h / 2f + h * 0.2f)
+        lineTo(centre.x + w / 2f, centre.y + h / 2f)
+        lineTo(centre.x - w / 2f, centre.y + h / 2f)
+        close()
+    }
+    drawPath(chemin, color = couleur, style = Stroke(width = trait))
+}
+
+/** Petit décor de fond façon « nébuleuse » (dégradé violet + anneaux concentriques + poussière d'étoiles), pour
+ *  l'ambiance demandée — fixe par rapport à l'écran (ne bouge pas avec le pan/zoom du graphe lui-même, sauf les
+ *  anneaux qui entourent la structure et suivent donc le cadrage). */
+private fun DrawScope.dessinerNebuleuse(etoiles: List<Triple<Float, Float, Float>>, cx: Float, cy: Float, rayonStructure: Float) {
+    drawRect(
+        brush = Brush.radialGradient(
+            colors = listOf(Color(0xFF2A1452), Color(0xFF140A2E), Color(0xFF07040F)),
+            center = Offset(size.width / 2f, size.height / 2f),
+            radius = max(size.width, size.height) * 0.85f
+        ),
+        size = size
+    )
+    for ((fx, fy, a) in etoiles) {
+        drawCircle(color = Color.White.copy(alpha = a * 0.5f), radius = (a * 2.2f + 0.6f) * density, center = Offset(fx * size.width, fy * size.height))
+    }
+    if (rayonStructure > 0f) {
+        drawCircle(color = Color(0xFF9B6BFF).copy(alpha = 0.16f), radius = rayonStructure, center = Offset(cx, cy), style = Stroke(width = 1.4f * density))
+        drawCircle(color = Color(0xFF9B6BFF).copy(alpha = 0.09f), radius = rayonStructure * 1.16f, center = Offset(cx, cy), style = Stroke(width = 1f * density))
+    }
 }
 
 /** Version purement visuelle (sans barre, sans tap/zoom/pan, sans fiche de note) du graphe Obsidian, utilisée
@@ -240,6 +340,7 @@ fun GraphScreen(app: JarvisApp) {
     var chargement by remember { mutableStateOf(true) }
     var noeuds by remember { mutableStateOf<List<PosNoeud>>(emptyList()) }
     var aretes by remember { mutableStateOf<List<ObsidianWriter.GraphEdge>>(emptyList()) }
+    var categories by remember { mutableStateOf<List<CategorieInfo>>(emptyList()) }
     var totalNotes by remember { mutableStateOf(0) }
     var version by remember { mutableStateOf(0) }
     var selection by remember { mutableStateOf<ObsidianWriter.GraphNode?>(null) }
@@ -253,6 +354,7 @@ fun GraphScreen(app: JarvisApp) {
         }
         noeuds = resultat.first.noeuds
         aretes = resultat.first.aretes
+        categories = resultat.first.categories
         totalNotes = resultat.second
         chargement = false
     }
@@ -260,8 +362,8 @@ fun GraphScreen(app: JarvisApp) {
     var scale by remember { mutableStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
 
-    // Le « cerveau » du graphe : la note la plus liée, mise en avant par un halo pulsant (repère visuel clair,
-    // même compact), à la place de l'ancienne orbe centrale qui disparaissait complètement dans ce nouvel écran.
+    // Pulsation du cerveau central (toujours présent, virtuel — ne correspond plus à une note précise mais au
+    // graphe dans son ensemble, comme dans une vraie vue « cerveau de connaissances ») et des hubs de dossier.
     val pulse by androidx.compose.animation.core.rememberInfiniteTransition(label = "hubPulse").animateFloat(
         initialValue = 0.5f, targetValue = 1f,
         animationSpec = androidx.compose.animation.core.infiniteRepeatable(
@@ -269,12 +371,15 @@ fun GraphScreen(app: JarvisApp) {
             androidx.compose.animation.core.RepeatMode.Reverse
         ), label = "hubPulse"
     )
-    val hubId = remember(noeuds) { noeuds.maxByOrNull { it.degre }?.takeIf { it.degre > 0 }?.node?.id }
     // API Compose standard pour le texte (TextMeasurer + DrawScope.drawText), à la place de l'ancien
     // android.graphics.Paint via nativeCanvas : ce dernier restait invisible sur certains rendus matériels
     // (constaté même sur des nœuds totalement isolés, sans rien à proximité pour les recouvrir — donc pas
     // un simple souci de chevauchement mais bien un problème du chemin de rendu nativeCanvas lui-même).
     val mesureurTexte = rememberTextMeasurer()
+    // Poussière d'étoiles fixe (ambiance nébuleuse), générée une seule fois.
+    val etoiles = remember { (0 until 90).map { i -> Triple(Random(i * 7 + 1).nextFloat(), Random(i * 13 + 2).nextFloat(), Random(i * 19 + 3).nextFloat()) } }
+
+    val isolees = remember(noeuds) { noeuds.count { it.degre == 0 && !it.node.ghost } }
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -285,7 +390,7 @@ fun GraphScreen(app: JarvisApp) {
             Column {
                 Text("GRAPHE OBSIDIAN", color = accent, fontFamily = FontFamily.Monospace, fontSize = 15.sp, letterSpacing = 2.sp)
                 Text(
-                    if (chargement) "Calcul de la disposition…" else "$totalNotes notes · ${aretes.size} liens" + (if (totalNotes > MAX_NOEUDS) " (affiche les $MAX_NOEUDS plus connectées)" else ""),
+                    if (chargement) "Calcul de la disposition…" else "$totalNotes notes · ${aretes.size} liens · ${categories.size} dossiers" + (if (totalNotes > MAX_NOEUDS) " (affiche les $MAX_NOEUDS plus connectées)" else ""),
                     color = HudDim, fontSize = 11.sp, fontFamily = FontFamily.Monospace
                 )
             }
@@ -297,22 +402,16 @@ fun GraphScreen(app: JarvisApp) {
 
         BoxWithConstraints(Modifier.weight(1f).fillMaxSize()) {
             val localDensity = LocalDensity.current
-            // Cadrage automatique : dès que la disposition est calculée, on choisit le zoom et le centrage pour que le
-            // graphe entier tienne bien dans l'écran (avant : zoom fixe à 1, ce qui laissait les nœuds minuscules et
-            // perdus dans un immense vide si le graphe calculé était plus petit — ou plus grand — que l'écran).
-            LaunchedEffect(noeuds) {
+            // Cadrage automatique : englobe maintenant aussi les hubs de dossier (pas seulement les notes) et le
+            // centre virtuel (0,0), pour que toute la structure — pas juste le nuage de notes — tienne à l'écran.
+            LaunchedEffect(noeuds, categories) {
                 if (noeuds.isNotEmpty()) {
-                    val minX = noeuds.minOf { it.pos.x }; val maxX = noeuds.maxOf { it.pos.x }
-                    val minY = noeuds.minOf { it.pos.y }; val maxY = noeuds.maxOf { it.pos.y }
+                    val xs = noeuds.map { it.pos.x } + categories.map { it.pos.x } + listOf(0f)
+                    val ys = noeuds.map { it.pos.y } + categories.map { it.pos.y } + listOf(0f)
+                    val minX = xs.min(); val maxX = xs.max(); val minY = ys.min(); val maxY = ys.max()
                     val largeur = (maxX - minX).coerceAtLeast(40f); val hauteur = (maxY - minY).coerceAtLeast(40f)
                     val canvasW = with(localDensity) { maxWidth.toPx() }; val canvasH = with(localDensity) { maxHeight.toPx() }
                     if (canvasW > 0f && canvasH > 0f) {
-                        // Doit pouvoir descendre bien en dessous de 1 pour qu'un graphe large (notes peu reliées entre
-                        // elles) tienne entièrement à l'écran dès l'ouverture, plutôt que de forcer un zoom minimum qui
-                        // laisse la majorité des notes hors-écran (il fallait alors les chercher en déplaçant la vue).
-                        // Plafond aligné sur celui du pincer-zoomer (4f) : un cadrage initial plus zoomé que ce que
-                        // l'utilisateur peut ensuite atteindre lui-même n'a pas de sens, et rendait les cercles
-                        // disproportionnés sur un petit coffre (peu de notes = petite zone = fort zoom auto).
                         val s = (minOf(canvasW / largeur, canvasH / hauteur) * 0.85f).coerceIn(0.15f, 4f)
                         scale = s
                         offset = Offset(-(minX + maxX) / 2f * s, -(minY + maxY) / 2f * s)
@@ -363,41 +462,79 @@ fun GraphScreen(app: JarvisApp) {
                 ) {
                     val cx = size.width / 2f + offset.x
                     val cy = size.height / 2f + offset.y
+                    val rayonStructureEcran = if (categories.isNotEmpty()) categories.maxOf { hypot(it.pos.x, it.pos.y) } * scale else 0f
+                    dessinerNebuleuse(etoiles, cx, cy, rayonStructureEcran)
 
-                    // Rayon plafonné en pixels écran (pas seulement en unités « monde ») : quel que soit le résultat du
-                    // calcul de disposition ou du zoom auto-adapté, un nœud ne peut plus jamais devenir assez gros pour
-                    // avaler ses voisins (et donc cacher leurs traits de lien et leur texte dessous) — filet de sécurité
-                    // indépendant de la justesse du calcul de décollage plus haut.
+                    // Rayons plafonnés en pixels écran (pas seulement en unités « monde ») : quel que soit le résultat
+                    // du calcul de disposition ou du zoom auto-adapté, un nœud ne peut plus jamais devenir assez gros
+                    // pour avaler ses voisins (et donc cacher leurs traits de lien et leur texte dessous).
                     fun rayonEcran(pn: PosNoeud) = ((10f + min(pn.degre, 10) * 2.2f) * density * scale).coerceIn(5f * density, 34f * density)
+                    fun rayonHubEcran(cat: CategorieInfo) = ((30f + min(cat.nbNotes, 40) * 1.6f) * density * scale).coerceIn(16f * density, 64f * density)
+                    val rayonCerveau = (46f * density * scale).coerceIn(22f * density, 90f * density)
 
-                    // Tailles en fonction de la densité de l'écran (`density`, ici le float du DrawScope) : avant, des tailles
-                    // fixes en pixels bruts (rayon 6, trait 1.2…) étaient quasi invisibles sur un écran haute résolution
-                    // (ex. 3 px = 1 dp), d'où des nœuds réduits à des points perdus dans le vide.
-                    // Passe 1/3 : les traits de lien, tout en dessous.
-                    val lignePaint = Color(0x9990B8FF)
+                    // Passe 1 : arêtes structurelles (cerveau→dossier, dossier→note), sous tout le reste.
+                    for (cat in categories) {
+                        val hcol = couleurCategorie(cat.nom, accent)
+                        drawLine(
+                            color = hcol.copy(alpha = 0.5f),
+                            start = Offset(cx, cy), end = Offset(cx + cat.pos.x * scale, cy + cat.pos.y * scale),
+                            strokeWidth = 2.6f * density * scale.coerceAtLeast(0.4f)
+                        )
+                    }
+                    for (pn in noeuds) {
+                        val hub = categories.find { it.nom == pn.categorie } ?: continue
+                        val hcol = couleurCategorie(pn.categorie, accent)
+                        drawLine(
+                            color = hcol.copy(alpha = 0.28f),
+                            start = Offset(cx + hub.pos.x * scale, cy + hub.pos.y * scale),
+                            end = Offset(cx + pn.pos.x * scale, cy + pn.pos.y * scale),
+                            strokeWidth = 1.4f * density * scale.coerceAtLeast(0.4f)
+                        )
+                    }
+                    // Passe 2 : vrais liens « [[...]] » entre notes (par-dessus les traits de structure, plus nets).
                     for (a in aretes) {
                         val pa = parId[a.from]?.pos ?: continue
                         val pb = parId[a.to]?.pos ?: continue
                         drawLine(
-                            color = lignePaint,
+                            color = Color(0xFFBFA6FF).copy(alpha = 0.75f),
                             start = Offset(cx + pa.x * scale, cy + pa.y * scale),
                             end = Offset(cx + pb.x * scale, cy + pb.y * scale),
                             strokeWidth = 2.2f * density * scale.coerceAtLeast(0.4f)
                         )
                     }
-                    // Passe 2/3 : les cercles des nœuds (et leur halo), par-dessus les traits.
+                    // Passe 3 : cerveau central (virtuel), toujours présent.
+                    drawCircle(color = accent.copy(alpha = 0.18f * pulse), radius = rayonCerveau * (1.7f + 0.3f * pulse), center = Offset(cx, cy))
+                    drawCircle(color = accent.copy(alpha = 0.95f), radius = rayonCerveau, center = Offset(cx, cy))
+                    drawCircle(color = Color.White.copy(alpha = 0.5f), radius = rayonCerveau, center = Offset(cx, cy), style = Stroke(width = 1.6f * density))
+                    repeat(8) { i ->
+                        val a = (i / 8f) * 2 * Math.PI.toFloat()
+                        val r1 = rayonCerveau * 1.05f; val r2 = rayonCerveau * (1.35f + 0.15f * pulse)
+                        drawLine(
+                            color = accent.copy(alpha = 0.35f * pulse),
+                            start = Offset(cx + cos(a) * r1, cy + sin(a) * r1),
+                            end = Offset(cx + cos(a) * r2, cy + sin(a) * r2),
+                            strokeWidth = 1.4f * density
+                        )
+                    }
+                    // Passe 4 : hubs de dossier (cercle coloré + icône + halo).
+                    for (cat in categories) {
+                        val hcol = couleurCategorie(cat.nom, accent)
+                        val sx = cx + cat.pos.x * scale; val sy = cy + cat.pos.y * scale
+                        val r = rayonHubEcran(cat)
+                        drawCircle(color = hcol.copy(alpha = 0.2f * pulse), radius = r * (1.4f + 0.25f * pulse), center = Offset(sx, sy))
+                        drawCircle(color = hcol.copy(alpha = 0.92f), radius = r, center = Offset(sx, sy))
+                        drawCircle(color = Color.White.copy(alpha = 0.35f), radius = r, center = Offset(sx, sy), style = Stroke(width = 1.4f * density))
+                        dessinerIconeDossier(Offset(sx, sy), r * 0.78f, Color.White.copy(alpha = 0.92f))
+                    }
+                    // Passe 5 : cercles des notes, par-dessus les traits.
                     for (pn in noeuds) {
                         val sx = cx + pn.pos.x * scale
                         val sy = cy + pn.pos.y * scale
                         val rayon = rayonEcran(pn)
                         val estHub = pn.degre >= 5
-                        val estCerveau = pn.node.id == hubId
                         val couleur = if (pn.node.ghost) Color(0xFF999999) else couleurDossier(pn.node.folder, accent)
-                        if (estCerveau) drawCircle(
-                            color = couleur.copy(alpha = 0.22f * pulse), radius = rayon * (1.5f + 0.3f * pulse), center = Offset(sx, sy)
-                        )
                         drawCircle(
-                            color = if (pn.node.ghost) couleur.copy(alpha = 0.4f) else if (estHub) couleur else couleur.copy(alpha = 0.8f),
+                            color = if (pn.node.ghost) couleur.copy(alpha = 0.4f) else if (estHub) couleur else couleur.copy(alpha = 0.82f),
                             radius = rayon,
                             center = Offset(sx, sy)
                         )
@@ -406,37 +543,58 @@ fun GraphScreen(app: JarvisApp) {
                             style = Stroke(width = 1.6f * density * scale.coerceAtLeast(0.3f))
                         )
                     }
-                    // Passe 3/3 : TOUS les textes en dernier, par-dessus absolument tout — aucun cercle dessiné après
-                    // ne peut donc plus jamais recouvrir le label d'un nœud dessiné avant lui.
+                    // Passe 6 : TOUS les textes en dernier, par-dessus absolument tout — aucun cercle dessiné après
+                    // ne peut donc plus jamais recouvrir un label dessiné avant lui.
+                    val styleCerveau = TextStyle(color = Color.White, fontSize = (15f * scale.coerceIn(0.9f, 2.2f)).sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                    val yCerveau = cy + rayonCerveau + 12f * density
+                    dessinerPlaqueEtTexte(mesureurTexte, "CERVEAU", styleCerveau, Offset(cx, yCerveau), density)
+
+                    for (cat in categories) {
+                        val sx = cx + cat.pos.x * scale; val sy = cy + cat.pos.y * scale
+                        val r = rayonHubEcran(cat)
+                        val styleCat = TextStyle(
+                            color = Color.White, fontSize = (14.5f * scale.coerceIn(0.9f, 2.2f)).sp,
+                            fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center
+                        )
+                        dessinerPlaqueEtTexte(mesureurTexte, "${cat.nom} (${cat.nbNotes})", styleCat, Offset(sx, sy + r + 10f * density), density)
+                    }
                     for (pn in noeuds) {
                         val sx = cx + pn.pos.x * scale
                         val sy = cy + pn.pos.y * scale
                         val rayon = rayonEcran(pn)
-                        val estCerveau = pn.node.id == hubId
                         val label = pn.node.label.take(22)
-                        val taille = (13.5f * scale.coerceIn(0.9f, 2.2f)) * (if (estCerveau) 1.15f else 1f)
-                        val style = androidx.compose.ui.text.TextStyle(
+                        val taille = 13f * scale.coerceIn(0.9f, 2.2f)
+                        val style = TextStyle(
                             color = if (pn.node.ghost) Color.LightGray else Color.White,
-                            fontSize = taille.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = if (estCerveau) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Normal,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            fontSize = taille.sp, fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Normal, textAlign = TextAlign.Center
                         )
-                        val resultatTexte = mesureurTexte.measure(label, style)
-                        val texteY = sy + rayon + 10f * density
-                        val topLeft = Offset(sx - resultatTexte.size.width / 2f, texteY)
-                        drawRoundRect(
-                            color = Color(0xB9080614),
-                            topLeft = Offset(topLeft.x - 6f * density, topLeft.y - 3f * density),
-                            size = androidx.compose.ui.geometry.Size(
-                                resultatTexte.size.width + 12f * density,
-                                resultatTexte.size.height + 6f * density
-                            ),
-                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f * density, 6f * density)
-                        )
-                        drawText(resultatTexte, topLeft = topLeft)
+                        dessinerPlaqueEtTexte(mesureurTexte, label, style, Offset(sx, sy + rayon + 8f * density), density)
                     }
                 }
+
+                // Légende des dossiers (couleurs) — comme dans une vraie vue de connaissances.
+                if (categories.isNotEmpty()) Column(
+                    Modifier.align(Alignment.BottomStart).padding(10.dp)
+                        .background(Color(0xCC0B0618), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                ) {
+                    Text("DOSSIERS", color = HudDim, fontSize = 10.sp, fontFamily = FontFamily.Monospace, letterSpacing = 1.sp)
+                    categories.take(8).forEach { cat ->
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 3.dp)) {
+                            Box(Modifier.size(9.dp).background(couleurCategorie(cat.nom, accent), CircleShape))
+                            Text("  ${cat.nom} · ${cat.nbNotes}", color = HudText, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                        }
+                    }
+                    if (categories.size > 8) Text("+${categories.size - 8} autres…", color = HudDim, fontSize = 10.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(top = 3.dp))
+                }
+                if (isolees > 0) Text(
+                    "⚠ $isolees note(s) isolée(s) (aucun lien)",
+                    color = HudDim, fontSize = 10.sp, fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(10.dp)
+                        .background(Color(0xCC0B0618), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                )
             }
         }
     }
@@ -459,4 +617,20 @@ fun GraphScreen(app: JarvisApp) {
             confirmButton = { TextButton({ selection = null }) { Text("Fermer", color = accent) } }
         )
     }
+}
+
+/** Dessine une petite plaque sombre derrière [texte] (centré horizontalement sur [centreHaut].x, qui commence à
+ *  [centreHaut].y) puis le texte par-dessus — factorisé car utilisé pour le cerveau, chaque hub et chaque note. */
+private fun DrawScope.dessinerPlaqueEtTexte(
+    mesureur: androidx.compose.ui.text.TextMeasurer, texte: String, style: TextStyle, centreHaut: Offset, density: Float
+) {
+    val resultat = mesureur.measure(texte, style)
+    val topLeft = Offset(centreHaut.x - resultat.size.width / 2f, centreHaut.y)
+    drawRoundRect(
+        color = Color(0xB9080614),
+        topLeft = Offset(topLeft.x - 6f * density, topLeft.y - 3f * density),
+        size = Size(resultat.size.width + 12f * density, resultat.size.height + 6f * density),
+        cornerRadius = CornerRadius(6f * density, 6f * density)
+    )
+    drawText(resultat, topLeft = topLeft)
 }
