@@ -64,16 +64,18 @@ class Llm(private val store: Store) {
         if (e.code == 404 && autoFixGroq()) groq.plain(system, user) else throw e
     }
 
-    /** Appel du cerveau ; si le modèle n'existe plus (404), choisit automatiquement un modèle disponible. */
-    suspend fun groqChat(messages: org.json.JSONArray, tools: org.json.JSONArray?): org.json.JSONObject = try {
-        groq.chat(messages, tools, 1800)
+    /** Appel du cerveau ; si le modèle n'existe plus (404), choisit automatiquement un modèle disponible.
+     *  [forceText] = interdit explicitement un appel d'outil ce tour-ci (reprise après un échec), en gardant les outils
+     *  visibles pour le modèle plutôt que de les retirer (ce qui provoquait une erreur Groq, cf. Clients.kt). */
+    suspend fun groqChat(messages: org.json.JSONArray, tools: org.json.JSONArray?, forceText: Boolean = false): org.json.JSONObject = try {
+        groq.chat(messages, tools, 1800, forceText)
     } catch (e: ApiException) {
         when {
-            e.code == 404 && autoFixGroq() -> groq.chat(messages, tools, 1800)
+            e.code == 404 && autoFixGroq() -> groq.chat(messages, tools, 1800, forceText)
             // 413 : requête trop grosse pour la limite de jetons/minute du modèle → on compacte (historique, résultats d'outils, schéma) et on réessaie.
             e.code == 413 || (e.code == 429 && (e.message ?: "").contains("tokens per minute", true) && (e.message ?: "").contains("Requested")) -> {
-                try { groq.chat(compacter(messages, 1), compacterSchema(tools, 1), 1000) }
-                catch (e2: ApiException) { if (e2.code == 413) groq.chat(compacter(messages, 2), compacterSchema(tools, 2), 700) else throw e2 }
+                try { groq.chat(compacter(messages, 1), compacterSchema(tools, 1), 1000, forceText) }
+                catch (e2: ApiException) { if (e2.code == 413) groq.chat(compacter(messages, 2), compacterSchema(tools, 2), 700, forceText) else throw e2 }
             }
             // Toutes les clés Groq ont échoué (quota épuisé, clés en pause…) : Cloudflare en tout dernier recours, avec les
             // comptes déjà configurés pour les images. S'il échoue aussi, on remonte l'erreur Groq d'origine (plus parlante).

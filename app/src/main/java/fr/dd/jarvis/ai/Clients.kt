@@ -10,8 +10,8 @@ import org.json.JSONObject
 /** Groq (API compatible OpenAI) : le « cerveau » principal, avec appel d'outils. */
 class GroqClient(private val ring: KeyRing, private val model: () -> String) {
 
-    suspend fun chat(messages: JSONArray, tools: JSONArray?, out: Int = 2048): JSONObject =
-        ring.run { key -> withContext(Dispatchers.IO) { call(key, messages, tools, 1024, Http.client, out) } }
+    suspend fun chat(messages: JSONArray, tools: JSONArray?, out: Int = 2048, forceText: Boolean = false): JSONObject =
+        ring.run { key -> withContext(Dispatchers.IO) { call(key, messages, tools, 1024, Http.client, out, forceText) } }
 
     suspend fun plain(system: String, user: String): String {
         val msgs = JSONArray()
@@ -39,7 +39,7 @@ class GroqClient(private val ring: KeyRing, private val model: () -> String) {
         }
     }
 
-    private fun call(key: String, messages: JSONArray, tools: JSONArray?, maxTokens: Int, client: okhttp3.OkHttpClient = Http.client, out: Int = 2048): JSONObject {
+    private fun call(key: String, messages: JSONArray, tools: JSONArray?, maxTokens: Int, client: okhttp3.OkHttpClient = Http.client, out: Int = 2048, forceText: Boolean = false): JSONObject {
         val mdl = model()
         val body = JSONObject()
             .put("model", mdl)
@@ -48,7 +48,11 @@ class GroqClient(private val ring: KeyRing, private val model: () -> String) {
             .put("max_tokens", if (maxTokens == 1) 1 else out)
         if (tools != null && tools.length() > 0) {
             body.put("tools", tools)
-            body.put("tool_choice", "auto")
+            // forceText=true : garde les définitions d'outils visibles (évite au modèle de se sentir « coupé » du contexte
+            // précédent où il appelait des outils) mais lui interdit explicitement d'en appeler un ce tour-ci — plus fiable
+            // que de retirer complètement « tools », ce qui provoquait parfois une erreur Groq « Tool choice is none, but
+            // model called a tool » (le modèle tentait quand même un appel malgré l'absence de outils déclarés).
+            body.put("tool_choice", if (forceText) "none" else "auto")
         }
         // Modèles « de raisonnement » (gpt-oss, deepseek-r1, qwen3…) : par défaut Groq laisse leur réflexion interne (chain-of-
         // thought) dans le texte de réponse — on demande explicitement de ne garder QUE la réponse finale, pour que JARVIS

@@ -61,14 +61,14 @@ class Brain(
             val msg = try {
                 llm.groqChat(messages, schema)
             } catch (e: ApiException) {
-                // Llama génère parfois un appel d'outil mal formé : on réessaie sans outils plutôt que d'échouer.
+                // Llama génère parfois un appel d'outil mal formé : on réessaie en interdisant explicitement un nouvel appel
+                // d'outil ce tour-ci (tool_choice=none), mais SANS retirer les définitions d'outils du contexte — les retirer
+                // provoquait une erreur Groq différente et pire ("Tool choice is none, but model called a tool"), non
+                // rattrapée, qui remontait brute jusqu'à l'utilisateur.
                 if (e.code == 400 && (e.message ?: "").contains("tool_use_failed")) {
-                    try { llm.groqChat(messages, schema) } catch (e2: ApiException) {
-                        if (e2.code != 400) throw e2
-                        val m2 = JSONArray(); for (k in 0 until messages.length()) m2.put(messages.get(k))
-                        m2.put(JSONObject().put("role", "system").put("content", "L'appel d'outil a échoué pour ce tour. N'invente AUCUNE donnée (appareils, imprimantes, mails, événements, fichiers) : dis simplement que l'action n'a pas pu être lancée et demande de réessayer."))
-                        llm.groqChat(m2, null)
-                    }
+                    val m2 = JSONArray(); for (k in 0 until messages.length()) m2.put(messages.get(k))
+                    m2.put(JSONObject().put("role", "system").put("content", "L'appel d'outil a échoué pour ce tour. N'invente AUCUNE donnée (appareils, imprimantes, mails, événements, fichiers) : dis simplement que l'action n'a pas pu être lancée et demande de réessayer."))
+                    llm.groqChat(m2, schema, forceText = true)
                 } else throw e
             }
             val calls = msg.optJSONArray("tool_calls")

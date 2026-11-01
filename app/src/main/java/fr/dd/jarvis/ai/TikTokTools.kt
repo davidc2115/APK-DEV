@@ -12,7 +12,7 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
     companion object {
         val KEYWORDS = Regex("tiktok|tik tok|vues?\\b.*vid[ée]o|vid[ée]o.*(vues?|likes?)|mes vid[ée]os", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
-        val NAMES = setOf("tiktok_connexion", "tiktok_deconnexion", "tiktok_profil", "tiktok_mes_videos", "tiktok_analyse")
+        val NAMES = setOf("tiktok_connexion", "tiktok_deconnexion", "tiktok_profil", "tiktok_mes_videos", "tiktok_analyse", "tiktok_script")
     }
 
     private fun prop(d: String) = JSONObject().put("type", "string").put("description", d)
@@ -29,7 +29,13 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
         tool("tiktok_mes_videos", "TikTok : liste les dernières vidéos du compte connecté avec leurs statistiques (vues, likes, commentaires, partages).",
             mapOf("nombre" to prop("Nombre de vidéos à récupérer, 1 à 20 (optionnel, défaut 15)."))),
         tool("tiktok_analyse", "TikTok : analyse les vidéos du compte (statistiques + bonnes pratiques générales du réseau social) pour dire ce qui marche, ce qui ne marche pas, et comment améliorer les vues/likes. Ne compare PAS à des vidéos concurrentes précises (données non disponibles publiquement) : s'appuie sur les statistiques propres au compte et les tendances générales connues de TikTok.",
-            mapOf("nombre" to prop("Nombre de vidéos à analyser, 1 à 20 (optionnel, défaut 15).")))
+            mapOf("nombre" to prop("Nombre de vidéos à analyser, 1 à 20 (optionnel, défaut 15)."))),
+        tool("tiktok_script", "TikTok : écrit un script complet et prêt à tourner pour une nouvelle vidéo à partir d'un sujet (accroche, découpage de plans minuté, textes à l'écran, appel à l'action, légende + hashtags). S'appuie sur les statistiques des vidéos précédentes du compte si connecté, pour repérer ce qui marche déjà. Enregistre le script dans le coffre Obsidian (dossier « Scripts TikTok »).",
+            mapOf(
+                "sujet" to prop("Le sujet ou l'idée de la vidéo."),
+                "duree" to prop("Durée visée en secondes (optionnel, ex. 30)."),
+                "objectif" to prop("Ce que la vidéo doit privilégier : vues, abonnés, ventes, notoriété… (optionnel).")
+            ), listOf("sujet"))
     )
 
     suspend fun execute(name: String, a: JSONObject): ToolResult = withContext(Dispatchers.IO) {
@@ -77,6 +83,21 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
                 // car il doit raisonner et donner des conseils — le texte seul serait juste une liste brute.
                 ToolResult("Statistiques des vidéos du compte TikTok de l'utilisateur :\n$tableau\n\n" +
                     "Analyse ces statistiques (quelles vidéos marchent le mieux et pourquoi probablement — durée, sujet, moment), et donne des conseils concrets pour améliorer les vues/likes en t'appuyant sur les bonnes pratiques générales connues de TikTok (accroche dans les 1ers secondes, durée optimale, fréquence de publication, usage des sons tendance, sous-titres, appel à l'interaction, heures de publication). Précise clairement que tu n'as pas accès aux vidéos concurrentes ni aux tendances en temps réel du réseau, seulement à des bonnes pratiques générales et aux statistiques propres au compte.")
+            }
+            "tiktok_script" -> {
+                val sujet = a.optString("sujet").trim()
+                if (sujet.isBlank()) return ToolResult("Précise le sujet de la vidéo.")
+                val stats = if (TikTok.connecte(app)) runCatching {
+                    val vids = TikTok.mesVideos(app, 15)
+                    if (vids.length() == 0) "" else "\n\nStatistiques des vidéos précédentes de l'utilisateur (repère ce qui a déjà marché) :\n" +
+                        (0 until vids.length()).joinToString("\n") { video(vids.getJSONObject(it)) }
+                }.getOrDefault("") else ""
+                val user = "Sujet : $sujet" +
+                    (a.optString("duree").trim().takeIf { it.isNotBlank() }?.let { "\nDurée visée : ${it}s" } ?: "") +
+                    (a.optString("objectif").trim().takeIf { it.isNotBlank() }?.let { "\nObjectif principal : $it" } ?: "") + stats
+                val script = app.llm.agent(Prompts.TIKTOK_SCRIPT, user)
+                val emplacement = runCatching { app.obsidian.saveIn("Scripts TikTok", sujet.take(60), script) }.getOrNull()
+                ToolResult(script + (emplacement?.let { "\n\n📁 $it" } ?: ""), direct = true)
             }
             else -> ToolResult("Outil TikTok inconnu.")
         }
