@@ -675,6 +675,12 @@ private fun GraphScreen2DClean(app: JarvisApp) {
 
     // Disposition de constellation déterministe : les liens réels attirent leurs notes,
     // les notes se repoussent pour éviter un anneau uniforme et les grappes artificielles par dossier.
+    val selectedNeighborhood = remember(selected, edges) {
+        val current = selected?.id ?: return@remember emptySet<String>()
+        edges.filter { it.from == current || it.to == current }
+            .flatMap { listOf(it.from, it.to) }.toSet() + current
+    }
+
     val positions = remember(nodes, edges) {
         val count = nodes.size
         if (count == 0) emptyMap() else {
@@ -775,10 +781,10 @@ private fun GraphScreen2DClean(app: JarvisApp) {
                 val a = positions[edge.from] ?: return@forEach
                 val b = positions[edge.to] ?: return@forEach
                 drawLine(
-                    Color(0xFFB987FF).copy(alpha = 0.58f),
+                    Color(0xFFB987FF).copy(alpha = if (selected == null) 0.58f else if (edge.from in selectedNeighborhood && edge.to in selectedNeighborhood) 0.9f else 0.07f),
                     center + Offset(a.x * radius, a.y * radius),
                     center + Offset(b.x * radius, b.y * radius),
-                    strokeWidth = 1.25f
+                    strokeWidth = if (selected != null && edge.from in selectedNeighborhood && edge.to in selectedNeighborhood) 2.0f else 1.25f
                 )
             }
             nodes.forEach { node ->
@@ -786,8 +792,10 @@ private fun GraphScreen2DClean(app: JarvisApp) {
                 val point = center + Offset(p.x * radius, p.y * radius)
                 val isSelected = selected?.id == node.id
                 val color = if (node.ghost) Color(0xFF8B8494) else Color(0xFFC18AFF)
-                drawCircle(color.copy(alpha = if (isSelected) 0.42f else 0.16f), if (isSelected) 23f else 13f, point)
-                drawCircle(if (isSelected) Color.White else color, if (isSelected) 7.5f else 4.2f, point)
+                val related = node.id in selectedNeighborhood
+                val dim = selected != null && !related
+                drawCircle(color.copy(alpha = if (isSelected) 0.52f else if (dim) 0.035f else if (related) 0.28f else 0.16f), if (isSelected) 23f else if (related) 16f else 13f, point)
+                drawCircle((if (isSelected) Color.White else color).copy(alpha = if (dim) 0.12f else 1f), if (isSelected) 7.5f else 4.2f, point)
                 if (isSelected) drawCircle(Color(0xFFE4C9FF), 13f, point, style = Stroke(1.5f))
             }
         }
