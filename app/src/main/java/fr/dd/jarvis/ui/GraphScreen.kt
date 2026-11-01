@@ -139,9 +139,8 @@ private fun calculerDisposition(data: ObsidianWriter.GraphData): Disposition {
         // Les notes forment une couronne autour de leur dossier. L'espacement angulaire évite
         // l'empilement des étiquettes observé dans la version précédente.
         val ecartAngle = when {
-            affichees.size <= 2 -> 0.72f
-            affichees.size <= 5 -> 0.48f
-            else -> 0.30f
+            affichees.size <= 5 -> 0.95f
+            else -> 0.38f
         }
         affichees.forEachIndexed { k, node ->
             val angle = angleBase + (k - (affichees.size - 1) / 2f) * ecartAngle
@@ -552,8 +551,8 @@ fun GraphScreen(app: JarvisApp) {
                         val sx = cx + pn.pos.x * scale
                         val sy = cy + pn.pos.y * scale
                         val rayon = rayonEcran(pn)
-                        val label = pn.node.label.take(22)
-                        val taille = 13f * scale.coerceIn(0.9f, 2.2f)
+                        val label = pn.node.label.take(18)
+                        val taille = 11.5f * scale.coerceIn(0.9f, 2.2f)
                         val style = TextStyle(
                             color = if (pn.node.ghost) Color.LightGray else Color.White,
                             fontSize = taille.sp, fontFamily = FontFamily.Monospace,
