@@ -351,7 +351,7 @@ class ToolBox(
             val image = fr.dd.jarvis.ai.ImageGen.fichier(app, a.optString("image"))
                 ?: return ToolResult("❌ Image introuvable : ${a.optString("image")}. Utilise fichiers_generes pour retrouver son nom exact.")
             val (video, loc) = fr.dd.jarvis.ai.ImageToVideoGen.generate(app, image, a.optString("prompt"), a.optString("duree").toDoubleOrNull() ?: 3.5)
-            ToolResult("🎬 Vidéo créée : ${video.name}\n📁 Enregistrée dans Jarvis › Vidéos IA" + (if (loc.isNotBlank()) "\n🗂️ Obsidian : $loc" else "") + "\n\nLe clip dure environ 3,5 secondes et peut être récupéré depuis les fichiers générés.", direct = true)
+            ToolResult("🎬 Vidéo créée : ${video.name}\\n\\n[▶ Lire la vidéo](jarvis-video-ia:${video.name})\\n\\n📁 Enregistrée dans Jarvis › Vidéos IA" + (if (loc.isNotBlank()) "\\n🗂️ Obsidian : $loc" else ""), direct = true)
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
             ToolResult("❌ Animation impossible : ${e.message}")
         }
