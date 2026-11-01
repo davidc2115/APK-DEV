@@ -34,16 +34,33 @@ class GraphIndexer(
             )
         }
 
-        // Remplacement atomique de l'index ; aucune écriture dans le coffre Markdown.
+        val relations = graph.references.map { reference ->
+            GraphRelationEntity(
+                fromNodeId = "markdown:${reference.from}",
+                toNodeId = if (reference.resolved) {
+                    "markdown:${reference.to}"
+                } else {
+                    "unresolved:${reference.rawTarget.lowercase()}"
+                },
+                type = "WIKILINK",
+                origin = "EXPLICIT",
+                sourcePath = reference.from + ".md",
+                updatedAt = indexedAt
+            )
+        }.distinctBy { Triple(it.fromNodeId, it.toNodeId, it.type) }
+
+        // Remplacement atomique de l'index : notes et liens correspondent au même instantané.
+        // Une cible absente est conservée comme référence unresolved:* sans créer de nœud artificiel.
         database.withTransaction {
             database.graphDao().clearRelations()
             database.graphDao().clearNodes()
             if (entities.isNotEmpty()) database.graphDao().insertNodes(entities)
+            if (relations.isNotEmpty()) database.graphDao().insertRelations(relations)
         }
 
         GraphIndexReport(
             indexedNotes = entities.size,
-            unresolvedReferences = graph.nodes.count { it.ghost },
+            unresolvedReferences = relations.count { it.toNodeId.startsWith("unresolved:") },
             indexedAt = indexedAt
         )
     }
