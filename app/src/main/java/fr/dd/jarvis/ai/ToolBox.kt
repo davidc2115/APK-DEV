@@ -152,7 +152,7 @@ class ToolBox(
             mapOf("format" to prop("« xx xx xx xx xx » (défaut : 06 12 34 56 78) ou « international » (+33 6 12 34 56 78)."),
                 "supprimer_doublons" to prop("« false » pour garder les doublons ; par défaut true."),
                 "apercu" to prop("« true » pour seulement montrer ce qui changerait, sans rien modifier."))))
-        put(tool("create_contact_card", "Génère la fiche contact complète (Markdown Obsidian) d'un contact et l'enregistre dans le dossier Contacts (ou un sous-dossier).",
+        put(tool("create_contact_card", "Génère la fiche contact complète (Markdown Obsidian) d'un contact et l'enregistre dans le dossier Contacts (ou un sous-dossier). Vérifie déjà seul si une fiche existe pour ce nom (n'importe où sous Contacts) et la met à jour à sa place au lieu d'en créer une deuxième : ne jamais appeler obsidian_lire ou chercher une fiche existante avant, c'est inutile et consomme des tokens pour rien.",
             mapOf("name" to prop("Nom du contact."), "sous_dossier" to prop("Sous-dossier de « Contacts » où ranger la fiche (ex. « Clients », « Fournisseurs », « Famille »). Optionnel : vide = directement dans Contacts.")), listOf("name")))
         put(tool("meteo", "Météo précise (maintenant, prochaines heures, prévisions) à la position du téléphone, ou pour un lieu donné.",
             mapOf("lieu" to prop("Ville ou adresse (optionnel : par défaut la position actuelle du téléphone)."), "jours" to prop("Nombre de jours de prévision (1 à 7). Par défaut 3."))))
@@ -860,12 +860,39 @@ class ToolBox(
         return ToolResult(buildCard(c, a.optString("sous_dossier")), direct = true)
     }
 
-    /** Génère la fiche via l'agent Contacts puis l'écrit dans le dossier Obsidian (Contacts, ou un sous-dossier). */
+    /**
+     * Génère la fiche via l'agent Contacts puis l'écrit dans le dossier Obsidian (Contacts, ou un sous-dossier).
+     * Cherche d'abord une fiche existante pour ce nom (n'importe où sous Contacts, insensible aux
+     * accents/majuscules/espaces) afin de ne jamais créer de doublon : si elle existe déjà et que les
+     * coordonnées n'ont pas changé, on la renvoie telle quelle sans repasser par l'IA (plus rapide,
+     * aucun token consommé) ; sinon on met à jour CETTE fiche (même emplacement) au lieu d'en créer une autre.
+     */
     suspend fun buildCard(c: fr.dd.jarvis.device.ContactInfo, sousDossier: String = ""): String {
+        val cheminExistant = app.obsidian.ficheExistante("Contacts", c.name)
+        if (cheminExistant != null) {
+            val contenuActuel = app.obsidian.readNote(cheminExistant)
+            if (contenuActuel != null && coordonneesInchangees(contenuActuel, c)) {
+                return "✅ Fiche « ${c.name} » déjà à jour : coffre Obsidian › $cheminExistant\n\n---\n\n$contenuActuel"
+            }
+        }
         val md = llm.agent(Prompts.CONTACT_CARD + app.memo.pour("contacts", "fiche", "fiches"), "Date du jour : ${LocalDate.now()}\n\n${c.toPrompt()}")
-        val dossier = "Contacts" + sousDossier.trim().trim('/').let { if (it.isBlank()) "" else "/$it" }
-        val where = app.obsidian.saveIn(dossier, c.name, md)
+        val where = if (cheminExistant != null) {
+            // Réécrit la fiche trouvée à son emplacement actuel (même sous-dossier) : jamais de doublon.
+            app.obsidian.writeNote(cheminExistant, md, append = false)
+        } else {
+            val dossier = "Contacts" + sousDossier.trim().trim('/').let { if (it.isBlank()) "" else "/$it" }
+            app.obsidian.saveIn(dossier, c.name, md)
+        }
         return "✅ Fiche « ${c.name} » enregistrée : $where\n\n---\n\n$md"
+    }
+
+    /** Vrai si les coordonnées du contact (téléphones/emails/société) apparaissent déjà telles quelles dans la fiche. */
+    private fun coordonneesInchangees(fiche: String, c: fr.dd.jarvis.device.ContactInfo): Boolean {
+        val f = fiche
+        if (c.company.isNotBlank() && !f.contains(c.company)) return false
+        if (c.phones.any { it.isNotBlank() && !f.contains(it) }) return false
+        if (c.emails.any { it.isNotBlank() && !f.contains(it) }) return false
+        return true
     }
 
     private suspend fun phoneAction(a: JSONObject): ToolResult {

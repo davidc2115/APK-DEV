@@ -52,6 +52,24 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
     fun save(fileBaseName: String, markdown: String): String = saveIn("Contacts", fileBaseName, markdown)
 
+    private fun normaliseNom(s: String): String =
+        java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}"), "") // retire les accents
+            .lowercase().trim().replace(Regex("\\s+"), " ")
+
+    /**
+     * Cherche une fiche déjà existante pour [nom] n'importe où sous [racine] (ex. « Contacts »),
+     * insensible aux accents/majuscules/espaces, afin d'éviter de créer un doublon (« Jean Dupont »
+     * vs « jean  dupont » vs « Jean DUPONT »…). Retourne le chemin relatif exact (avec .md) si trouvé.
+     */
+    fun ficheExistante(racine: String, nom: String): String? {
+        val cible = normaliseNom(nom)
+        if (cible.isBlank()) return null
+        return listNotes(racine).firstOrNull { chemin ->
+            normaliseNom(chemin.substringAfterLast('/').removeSuffix(".md")) == cible
+        }
+    }
+
     /** Supprime un fichier (coffre Obsidian ou dossier de l'application). Ne lève pas d'exception si absent. */
     fun supprimerFichier(folder: String, fileName: String) {
         val name = safe(fileName, "Fichier")
