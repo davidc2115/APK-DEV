@@ -295,7 +295,7 @@ fun GraphScreen(app: JarvisApp) {
             }
         }
         Box(Modifier.weight(1f).fillMaxSize()) {
-            if (showOrb) ObsidianOrb3D(app) else GraphScreen2D(app)
+            if (showOrb) ObsidianOrb3D(app) else GraphScreen2DClean(app)
         }
     }
 }
@@ -650,4 +650,92 @@ private fun DrawScope.dessinerPlaqueEtTexte(
         cornerRadius = CornerRadius(6f * density, 6f * density)
     )
     drawText(resultat, topLeft = topLeft)
+}
+
+
+/**
+ * Vue 2D épurée : un seul réseau de notes, sans hubs géants ni libellés permanents.
+ * Les noms n'apparaissent qu'à la sélection afin de conserver un graphe lisible sur téléphone.
+ */
+@Composable
+private fun GraphScreen2DClean(app: JarvisApp) {
+    var nodes by remember { mutableStateOf<List<ObsidianWriter.GraphNode>>(emptyList()) }
+    var edges by remember { mutableStateOf<List<ObsidianWriter.GraphEdge>>(emptyList()) }
+    var selected by remember { mutableStateOf<ObsidianWriter.GraphNode?>(null) }
+    var loading by remember { mutableStateOf(true) }
+    val textMeasurer = rememberTextMeasurer()
+
+    LaunchedEffect(Unit) {
+        val graph = withContext(Dispatchers.IO) { app.obsidian.graph() }
+        nodes = graph.nodes
+        edges = graph.edges
+        loading = false
+    }
+
+    val positions = remember(nodes) {
+        nodes.mapIndexed { index, node ->
+            val angle = (-Math.PI / 2.0 + index * (2.0 * Math.PI / nodes.size.coerceAtLeast(1))).toFloat()
+            node.id to Offset(cos(angle), sin(angle))
+        }.toMap()
+    }
+
+    Box(Modifier.fillMaxSize().background(
+        Brush.radialGradient(
+            listOf(Color(0xFF211034), Color(0xFF0B0813), Color(0xFF030308)),
+            radius = 950f
+        )
+    )) {
+        Canvas(
+            Modifier.fillMaxSize().pointerInput(nodes, positions) {
+                detectTapGestures { tap ->
+                    val nearest = nodes.mapNotNull { node ->
+                        val p = positions[node.id] ?: return@mapNotNull null
+                        val point = Offset(size.width / 2f + p.x * size.minDimension * 0.31f,
+                            size.height / 2f + p.y * size.minDimension * 0.31f)
+                        val d = (point - tap).getDistance()
+                        if (d < 42f) node to d else null
+                    }.minByOrNull { it.second }
+                    selected = nearest?.first
+                }
+            }
+        ) {
+            val center = Offset(size.width / 2f, size.height / 2f)
+            val radius = size.minDimension * 0.31f
+            drawCircle(Color(0xFF9C62E8).copy(alpha = 0.08f), radius * 1.22f, center)
+            drawCircle(Color(0xFF9C62E8).copy(alpha = 0.22f), radius * 1.22f, center, style = Stroke(1.2f))
+            for (edge in edges) {
+                val a = positions[edge.from] ?: continue
+                val b = positions[edge.to] ?: continue
+                val start = Offset(center.x + a.x * radius, center.y + a.y * radius)
+                val end = Offset(center.x + b.x * radius, center.y + b.y * radius)
+                drawLine(Color(0xFFB987FF).copy(alpha = 0.75f), start, end, strokeWidth = 2.2f)
+            }
+            nodes.forEach { node ->
+                val p = positions[node.id] ?: return@forEach
+                val point = Offset(center.x + p.x * radius, center.y + p.y * radius)
+                val isSelected = selected?.id == node.id
+                val color = if (node.ghost) Color(0xFF8B8494) else Color(0xFFB77BFF)
+                drawCircle(color.copy(alpha = 0.17f), if (isSelected) 30f else 20f, point)
+                drawCircle(if (isSelected) Color.White else color, if (isSelected) 9f else 6.5f, point)
+                if (isSelected) drawCircle(Color(0xFFE4C9FF), 15f, point, style = Stroke(1.5f))
+            }
+        }
+        Column(Modifier.align(Alignment.TopCenter).padding(top = 22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("GRAPHE OBSIDIAN", color = Color(0xFFE8D9FF), fontSize = 16.sp, letterSpacing = 3.sp)
+            Text("${nodes.size} NOTES  ·  ${edges.size} LIENS", color = Color(0xFF9F83BF), fontSize = 10.sp, letterSpacing = 1.5.sp)
+        }
+        if (loading) CircularProgressIndicator(Modifier.align(Alignment.Center), color = Color(0xFFB77BFF))
+        selected?.let { node ->
+            Column(
+                Modifier.align(Alignment.BottomCenter).padding(bottom = 22.dp)
+                    .background(Color(0xE8171025), RoundedCornerShape(14.dp))
+                    .padding(horizontal = 18.dp, vertical = 12.dp)
+            ) {
+                Text(node.label, color = Color.White, fontSize = 14.sp)
+                Text(if (node.ghost) "Référence non résolue" else node.folder.ifBlank { "Note" },
+                    color = Color(0xFFB99AD8), fontSize = 10.sp)
+                TextButton(onClick = { selected = null }) { Text("FERMER", color = Color(0xFFD5B6FF)) }
+            }
+        }
+    }
 }
