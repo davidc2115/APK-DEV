@@ -126,26 +126,6 @@ object Horloge {
         return "⏳ Minuteur de $txt lancé" + (if (libelle.isNotBlank()) " ($libelle)" else "") + " — sans ouvrir aucune application."
     }
 
-    fun creerMinuteur(c: Context, secondes: Int, libelle: String): String {
-        if (secondes <= 0) return "Durée du minuteur invalide."
-        if (!notificationsAutorisees(c)) return "❌ Minuteur non lancé : autorise les notifications de JARVIS dans Android (Réglages > Applications > JARVIS > Notifications), puis réessaie."
-        channels(c)
-        val id = (System.currentTimeMillis() % 1_000_000_000L).toInt()
-        val at = System.currentTimeMillis() + secondes * 1000L
-        val o = JSONObject().put("id", id).put("kind", "timer").put("at", at).put("label", libelle).put("days", JSONArray())
-        val l = load(c); l.add(o); save(c, l); planifier(c, o)
-        // Compte à rebours visible dans la barre de notifications.
-        val n = enDirect(NotificationCompat.Builder(c, CH_RUN)).setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-            .setCategory(NotificationCompat.CATEGORY_PROGRESS).setContentText("Temps restant")
-            .setContentTitle("⏳ Minuteur" + (if (libelle.isNotBlank()) " — $libelle" else "")).setWhen(at).setUsesChronometer(true).setChronometerCountDown(true)
-            .setOngoing(true).setOnlyAlertOnce(true).setTimeoutAfter(secondes * 1000L + 2000)
-            .addAction(0, "Annuler", pi(c, id, ACT_STOP)).build()
-        runCatching { nm(c).notify(id, n) }
-        val h = secondes / 3600; val mi = secondes % 3600 / 60; val se = secondes % 60
-        val txt = listOfNotNull(if (h > 0) "$h h" else null, if (mi > 0) "$mi min" else null, if (se > 0) "$se s" else null).joinToString(" ")
-        return "⏳ Minuteur de $txt lancé" + (if (libelle.isNotBlank()) " ($libelle)" else "") + " — sans ouvrir aucune application."
-    }
-
     fun supprimerAlarme(c: Context, heure: String, libelle: String): String {
         val l = load(c)
         val m = Regex("(\\d{1,2})\\s*[:hH]\\s*(\\d{0,2})").find(heure)
