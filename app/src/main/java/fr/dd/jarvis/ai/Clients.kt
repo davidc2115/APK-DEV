@@ -40,14 +40,21 @@ class GroqClient(private val ring: KeyRing, private val model: () -> String) {
     }
 
     private fun call(key: String, messages: JSONArray, tools: JSONArray?, maxTokens: Int, client: okhttp3.OkHttpClient = Http.client, out: Int = 2048): JSONObject {
+        val mdl = model()
         val body = JSONObject()
-            .put("model", model())
+            .put("model", mdl)
             .put("messages", messages)
             .put("temperature", 0.4)
             .put("max_tokens", if (maxTokens == 1) 1 else out)
         if (tools != null && tools.length() > 0) {
             body.put("tools", tools)
             body.put("tool_choice", "auto")
+        }
+        // Modèles « de raisonnement » (gpt-oss, deepseek-r1, qwen3…) : par défaut Groq laisse leur réflexion interne (chain-of-
+        // thought) dans le texte de réponse — on demande explicitement de ne garder QUE la réponse finale, pour que JARVIS
+        // n'affiche jamais ce raisonnement brut à l'utilisateur. Les deux paramètres sont mutuellement exclusifs selon Groq.
+        if (Regex("gpt-oss|deepseek|qwen3|-r1\\b|reasoning|minimax", RegexOption.IGNORE_CASE).containsMatchIn(mdl)) {
+            if (mdl.contains("gpt-oss", true)) body.put("include_reasoning", false) else body.put("reasoning_format", "hidden")
         }
         val req = Request.Builder()
             .url("https://api.groq.com/openai/v1/chat/completions")
@@ -57,9 +64,20 @@ class GroqClient(private val ring: KeyRing, private val model: () -> String) {
         return client.newCall(req).execute().use { resp ->
             val text = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) throw ApiException(resp.code, "Groq ${resp.code} : ${text.take(300)}")
-            JSONObject(text).getJSONArray("choices").getJSONObject(0).getJSONObject("message")
+            val msg = JSONObject(text).getJSONArray("choices").getJSONObject(0).getJSONObject("message")
+            if (msg.has("content") && !msg.isNull("content")) msg.put("content", nettoyerRaisonnement(msg.optString("content")))
+            msg
         }
     }
+}
+
+/** Sécurité commune (Groq + Cloudflare) : si un modèle de raisonnement laisse quand même fuiter sa réflexion interne dans le
+ *  texte malgré les paramètres ci-dessus, on la retire ici avant affichage — balises <think>…</think>, ou tout ce qui suit
+ *  une balise <think> restée ouverte (réponse coupée en pleine réflexion). */
+internal fun nettoyerRaisonnement(s: String): String {
+    var r = s.replace(Regex("(?is)<think>.*?</think>"), "")
+    r = r.replace(Regex("(?is)<think>.*$"), "")
+    return r.trim().ifBlank { s.trim() }   // ne jamais renvoyer une réponse vide si tout a été reconnu comme « raisonnement »
 }
 
 /** Cloudflare Workers AI (point d'accès compatible OpenAI) : cerveau de tout dernier recours, utilisé seulement quand
@@ -86,7 +104,9 @@ class CloudflareChatClient(private val accounts: () -> List<String>, private val
                 val msg = Http.client.newCall(req).execute().use { resp ->
                     val text = resp.body?.string().orEmpty()
                     if (!resp.isSuccessful) throw ApiException(resp.code, "Cloudflare ${resp.code} : ${text.take(300)}")
-                    JSONObject(text).getJSONArray("choices").getJSONObject(0).getJSONObject("message")
+                    val m = JSONObject(text).getJSONArray("choices").getJSONObject(0).getJSONObject("message")
+                    if (m.has("content") && !m.isNull("content")) m.put("content", nettoyerRaisonnement(m.optString("content")))
+                    m
                 }
                 next = (i + 1) % list.size
                 return@withContext msg

@@ -1,10 +1,12 @@
 package fr.dd.jarvis.ui
 
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,6 +31,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -60,7 +63,8 @@ private fun calculerDisposition(data: ObsidianWriter.GraphData): List<PosNoeud> 
 
     val n = tries.size
     if (n == 0) return emptyList()
-    val k = 220f / kotlin.math.sqrt(n.toFloat().coerceAtLeast(1f))
+    // Plus petit qu'avant (220) : les nœuds restaient beaucoup trop espacés les uns des autres, surtout avec peu de notes.
+    val k = 110f / kotlin.math.sqrt(n.toFloat().coerceAtLeast(1f))
     val rnd = Random(7)
     val pos = HashMap<String, Offset>()
     tries.forEachIndexed { i, node ->
@@ -109,6 +113,85 @@ private fun calculerDisposition(data: ObsidianWriter.GraphData): List<PosNoeud> 
 // Rempli par calculerDisposition() juste avant le retour ; lu par le Composable pour tracer les arêtes.
 private var edgesCache: List<ObsidianWriter.GraphEdge> = emptyList()
 
+/** Version purement visuelle (sans barre, sans tap/zoom/pan, sans fiche de note) du graphe Obsidian, utilisée
+ *  comme fond pendant une session de conversation vocale. [active] (écoute/réflexion en cours) l'éclaircit
+ *  légèrement, pour garder le repère visuel qu'offrait l'ancienne orbe pulsante. */
+@Composable
+fun GraphBackdrop(app: JarvisApp, modifier: Modifier = Modifier, active: Boolean = false) {
+    val accent = LocalAccent.current
+    var noeuds by remember { mutableStateOf<List<PosNoeud>>(emptyList()) }
+    var aretes by remember { mutableStateOf<List<ObsidianWriter.GraphEdge>>(emptyList()) }
+    var scale by remember { mutableStateOf(1f) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
+
+    LaunchedEffect(Unit) {
+        val resultat = withContext(Dispatchers.Default) {
+            val data = app.obsidian.graph()
+            calculerDisposition(data) to edgesCache
+        }
+        noeuds = resultat.first
+        aretes = resultat.second
+    }
+
+    val pulse by androidx.compose.animation.core.rememberInfiniteTransition(label = "graphePulse").animateFloat(
+        initialValue = 0.72f, targetValue = 1f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            androidx.compose.animation.core.tween(1100, easing = androidx.compose.animation.core.LinearEasing),
+            androidx.compose.animation.core.RepeatMode.Reverse
+        ), label = "graphePulse"
+    )
+    val eclat = if (active) pulse else 0.82f
+
+    BoxWithConstraints(modifier) {
+        val localDensity = LocalDensity.current
+        LaunchedEffect(noeuds) {
+            if (noeuds.isNotEmpty()) {
+                val minX = noeuds.minOf { it.pos.x }; val maxX = noeuds.maxOf { it.pos.x }
+                val minY = noeuds.minOf { it.pos.y }; val maxY = noeuds.maxOf { it.pos.y }
+                val largeur = (maxX - minX).coerceAtLeast(40f); val hauteur = (maxY - minY).coerceAtLeast(40f)
+                val canvasW = with(localDensity) { maxWidth.toPx() }; val canvasH = with(localDensity) { maxHeight.toPx() }
+                if (canvasW > 0f && canvasH > 0f) {
+                    val s = (minOf(canvasW / largeur, canvasH / hauteur) * 0.8f).coerceIn(0.5f, 8f)
+                    scale = s
+                    offset = Offset(-(minX + maxX) / 2f * s, -(minY + maxY) / 2f * s)
+                }
+            }
+        }
+        if (noeuds.isNotEmpty()) {
+            val parId = remember(noeuds) { noeuds.associateBy { it.node.id } }
+            Canvas(Modifier.fillMaxSize()) {
+                val cx = size.width / 2f + offset.x
+                val cy = size.height / 2f + offset.y
+                for (a in aretes) {
+                    val pa = parId[a.from]?.pos ?: continue
+                    val pb = parId[a.to]?.pos ?: continue
+                    drawLine(
+                        color = Color(0x3390B8FF).copy(alpha = 0.27f * eclat),
+                        start = Offset(cx + pa.x * scale, cy + pa.y * scale),
+                        end = Offset(cx + pb.x * scale, cy + pb.y * scale),
+                        strokeWidth = 1.3f * density * scale.coerceAtLeast(0.4f)
+                    )
+                }
+                for (pn in noeuds) {
+                    val sx = cx + pn.pos.x * scale
+                    val sy = cy + pn.pos.y * scale
+                    val rayon = (7f + min(pn.degre, 10) * 1.8f) * density * scale
+                    val estHub = pn.degre >= 5
+                    val base = if (pn.node.ghost) Color(0xFF999999) else accent
+                    drawCircle(
+                        color = base.copy(alpha = eclat * (if (pn.node.ghost) 0.33f else if (estHub) 0.9f else 0.55f)),
+                        radius = rayon, center = Offset(sx, sy)
+                    )
+                    if (estHub) drawCircle(
+                        color = accent.copy(alpha = 0.2f * eclat), radius = rayon * 2f, center = Offset(sx, sy),
+                        style = Stroke(width = 1.5f * density * scale.coerceAtLeast(0.3f))
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun GraphScreen(app: JarvisApp) {
     val accent = LocalAccent.current
@@ -155,7 +238,24 @@ fun GraphScreen(app: JarvisApp) {
             )
         }
 
-        Box(Modifier.weight(1f).fillMaxSize()) {
+        BoxWithConstraints(Modifier.weight(1f).fillMaxSize()) {
+            val localDensity = LocalDensity.current
+            // Cadrage automatique : dès que la disposition est calculée, on choisit le zoom et le centrage pour que le
+            // graphe entier tienne bien dans l'écran (avant : zoom fixe à 1, ce qui laissait les nœuds minuscules et
+            // perdus dans un immense vide si le graphe calculé était plus petit — ou plus grand — que l'écran).
+            LaunchedEffect(noeuds) {
+                if (noeuds.isNotEmpty()) {
+                    val minX = noeuds.minOf { it.pos.x }; val maxX = noeuds.maxOf { it.pos.x }
+                    val minY = noeuds.minOf { it.pos.y }; val maxY = noeuds.maxOf { it.pos.y }
+                    val largeur = (maxX - minX).coerceAtLeast(40f); val hauteur = (maxY - minY).coerceAtLeast(40f)
+                    val canvasW = with(localDensity) { maxWidth.toPx() }; val canvasH = with(localDensity) { maxHeight.toPx() }
+                    if (canvasW > 0f && canvasH > 0f) {
+                        val s = (minOf(canvasW / largeur, canvasH / hauteur) * 0.78f).coerceIn(0.6f, 8f)
+                        scale = s
+                        offset = Offset(-(minX + maxX) / 2f * s, -(minY + maxY) / 2f * s)
+                    }
+                }
+            }
             if (chargement && noeuds.isEmpty()) {
                 Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator(color = accent)
@@ -201,7 +301,10 @@ fun GraphScreen(app: JarvisApp) {
                     val cx = size.width / 2f + offset.x
                     val cy = size.height / 2f + offset.y
 
-                    val lignePaint = Color(0x3390B8FF)
+                    // Tailles en fonction de la densité de l'écran (`density`, ici le float du DrawScope) : avant, des tailles
+                    // fixes en pixels bruts (rayon 6, trait 1.2…) étaient quasi invisibles sur un écran haute résolution
+                    // (ex. 3 px = 1 dp), d'où des nœuds réduits à des points perdus dans le vide.
+                    val lignePaint = Color(0x4490B8FF)
                     for (a in aretes) {
                         val pa = parId[a.from]?.pos ?: continue
                         val pb = parId[a.to]?.pos ?: continue
@@ -209,32 +312,32 @@ fun GraphScreen(app: JarvisApp) {
                             color = lignePaint,
                             start = Offset(cx + pa.x * scale, cy + pa.y * scale),
                             end = Offset(cx + pb.x * scale, cy + pb.y * scale),
-                            strokeWidth = 1.2f * scale.coerceAtLeast(0.4f)
+                            strokeWidth = 1.4f * density * scale.coerceAtLeast(0.4f)
                         )
                     }
                     for (pn in noeuds) {
                         val sx = cx + pn.pos.x * scale
                         val sy = cy + pn.pos.y * scale
-                        val rayon = (6f + min(pn.degre, 10) * 1.6f) * scale
+                        val rayon = (7f + min(pn.degre, 10) * 1.8f) * density * scale
                         val estHub = pn.degre >= 5
                         drawCircle(
-                            color = if (pn.node.ghost) Color(0x55777777) else if (estHub) accent else accent.copy(alpha = 0.55f),
+                            color = if (pn.node.ghost) Color(0x66999999) else if (estHub) accent else accent.copy(alpha = 0.65f),
                             radius = rayon,
                             center = Offset(sx, sy)
                         )
                         if (estHub) drawCircle(
-                            color = accent.copy(alpha = 0.22f), radius = rayon * 2f, center = Offset(sx, sy),
-                            style = Stroke(width = 1.5f * scale.coerceAtLeast(0.3f))
+                            color = accent.copy(alpha = 0.25f), radius = rayon * 2f, center = Offset(sx, sy),
+                            style = Stroke(width = 1.6f * density * scale.coerceAtLeast(0.3f))
                         )
-                        if (scale > 0.6f) {
+                        if (rayon > 9f * density) {
                             drawContext.canvas.nativeCanvas.apply {
                                 val paint = android.graphics.Paint().apply {
                                     color = if (pn.node.ghost) android.graphics.Color.GRAY else android.graphics.Color.WHITE
-                                    textSize = 11f * scale.coerceIn(0.6f, 1.6f)
+                                    textSize = 12f * density * scale.coerceIn(0.6f, 1.8f)
                                     isAntiAlias = true
                                     textAlign = android.graphics.Paint.Align.CENTER
                                 }
-                                drawText(pn.node.label.take(22), sx, sy + rayon + 13f, paint)
+                                drawText(pn.node.label.take(22), sx, sy + rayon + 14f * density, paint)
                             }
                         }
                     }

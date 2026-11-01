@@ -46,11 +46,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import fr.dd.jarvis.JarvisApp
 import fr.dd.jarvis.ai.ChatMsg
 import fr.dd.jarvis.data.Store
 
 @Composable
-fun ChatScreen(vm: ChatViewModel, store: Store) {
+fun ChatScreen(vm: ChatViewModel, store: Store, app: JarvisApp) {
     val ctx = LocalContext.current
     val accent = LocalAccent.current
     val listState = rememberLazyListState()
@@ -78,7 +79,7 @@ fun ChatScreen(vm: ChatViewModel, store: Store) {
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (vm.voiceSession) {
-                VoiceOrbOverlay(vm, accent) { onMic() }
+                VoiceOrbOverlay(vm, app, accent) { onMic() }
             } else {
                 if (vm.messages.isEmpty() && !vm.busy) {
                     Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -220,33 +221,34 @@ fun ChatScreen(vm: ChatViewModel, store: Store) {
     }
 }
 
-/** Plein écran pendant une session de conversation vocale (déclenchée par le micro) : une orbe
- *  dominante façon Obsidian-graph, avec le statut en direct (écoute / transcription / réflexion / réponse).
- *  Un tap n'importe où arrête la session (= retoucher le micro). */
+/** Plein écran pendant une session de conversation vocale (déclenchée par le micro) : le graphe Obsidian en
+ *  fond (à la place du micro/orbe), qui s'éclaircit légèrement pendant l'écoute/la réflexion, avec le statut
+ *  en direct (écoute / transcription / réflexion / réponse). Un tap n'importe où arrête la session.
+ *  Purement visuel ici (pas de tap sur un nœud ni de zoom/pan) : le graphe interactif reste dans l'onglet Graphe. */
 @Composable
-private fun VoiceOrbOverlay(vm: ChatViewModel, accent: Color, onStop: () -> Unit) {
-    Column(
-        Modifier.fillMaxSize().clickable { onStop() },
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        HudOrb(Modifier.size(220.dp), active = vm.listening || vm.busy)
-        androidx.compose.foundation.layout.Spacer(Modifier.height(28.dp))
-        val label = when {
-            vm.partial.isNotBlank() -> vm.partial
-            vm.busy -> vm.status.ifBlank { "Je réfléchis…" }
-            vm.listening -> "Je t'écoute…"
-            else -> vm.status.ifBlank { "En conversation…" }
+private fun VoiceOrbOverlay(vm: ChatViewModel, app: JarvisApp, accent: Color, onStop: () -> Unit) {
+    Box(Modifier.fillMaxSize().clickable { onStop() }) {
+        GraphBackdrop(app, Modifier.fillMaxSize(), active = vm.listening || vm.busy)
+        Column(
+            Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 36.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Bottom
+        ) {
+            val label = when {
+                vm.partial.isNotBlank() -> vm.partial
+                vm.busy -> vm.status.ifBlank { "Je réfléchis…" }
+                vm.listening -> "Je t'écoute…"
+                else -> vm.status.ifBlank { "En conversation…" }
+            }
+            Text(
+                label, color = accent, fontSize = 16.sp, fontFamily = FontFamily.Monospace,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+            androidx.compose.foundation.layout.Spacer(Modifier.height(10.dp))
+            Text(
+                "Touche l'écran pour arrêter", color = HudDim, fontSize = 12.sp, fontFamily = FontFamily.Monospace
+            )
         }
-        Text(
-            label, color = accent, fontSize = 16.sp, fontFamily = FontFamily.Monospace,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 32.dp)
-        )
-        androidx.compose.foundation.layout.Spacer(Modifier.height(10.dp))
-        Text(
-            "Touche l'écran pour arrêter", color = HudDim, fontSize = 12.sp, fontFamily = FontFamily.Monospace
-        )
     }
 }
 

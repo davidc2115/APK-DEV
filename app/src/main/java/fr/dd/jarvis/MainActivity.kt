@@ -176,7 +176,7 @@ private fun Root(app: JarvisApp, vm: ChatViewModel) {
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (tab) {
-                0 -> ChatScreen(vm, app.store)
+                0 -> ChatScreen(vm, app.store, app)
                 1 -> PlanningScreen(app)
                 2 -> MailScreen(app)
                 3 -> ContactsScreen(app)
