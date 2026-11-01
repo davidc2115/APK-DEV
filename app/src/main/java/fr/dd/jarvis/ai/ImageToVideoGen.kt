@@ -67,17 +67,18 @@ object ImageToVideoGen {
 
             var completed = false
             var lastStatus = "IN_QUEUE"
-            repeat(200) {
+            var attempts = 0
+            while (!completed && attempts < 200) {
                 delay(3000)
+                attempts++
                 val status = executeJson(
                     Request.Builder().url(statusUrl).header("Authorization", "Key $key").get().build(), key
                 )
                 lastStatus = status.optString("status", "UNKNOWN")
                 when (lastStatus) {
-                    "COMPLETED" -> { completed = true; return@repeat }
+                    "COMPLETED" -> completed = true
                     "FAILED", "CANCELLED" -> throw ApiException(500, "fal.ai a échoué : ${status.optString("error", "génération refusée")}")
                 }
-                if (completed) return@repeat
             }
             if (!completed) throw ApiException(408, "La génération prend trop de temps (dernier état : $lastStatus). Réessaie plus tard.")
 
