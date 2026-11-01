@@ -23,6 +23,8 @@ import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -219,19 +221,26 @@ private fun Root(app: JarvisApp, vm: ChatViewModel) {
             }
         }
 
-        // Barre de navigation HUD
+        // Barre de navigation HUD — défilable horizontalement : avec 8 onglets (dont « Orbe »), les
+        // libellés n'ont plus la place de tenir sur une ligne en SpaceEvenly (« RÉGLAGES » retombait
+        // sur 3 lignes). En défilement, chaque onglet garde sa taille lisible normale.
         if (!imeOpen) Row(
-            Modifier.fillMaxWidth().background(accent.copy(alpha = 0.08f)).border(1.dp, accent.copy(alpha = 0.35f)).padding(vertical = 6.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly
+            Modifier.fillMaxWidth().background(accent.copy(alpha = 0.08f)).border(1.dp, accent.copy(alpha = 0.35f))
+                .horizontalScroll(rememberScrollState())
+                .padding(vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             tabs.forEachIndexed { i, t ->
                 val sel = i == tab
                 Column(
-                    Modifier.clickable { tab = i }.padding(horizontal = 8.dp, vertical = 2.dp),
+                    Modifier.clickable { tab = i }.padding(horizontal = 10.dp, vertical = 2.dp).widthIn(min = 56.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Icon(t.icon, null, tint = if (sel) accent else HudDim, modifier = Modifier.size(24.dp))
-                    Text(t.label.uppercase(), color = if (sel) accent else HudDim, fontSize = 9.sp, letterSpacing = 1.sp, fontFamily = FontFamily.Monospace)
+                    Text(
+                        t.label.uppercase(), color = if (sel) accent else HudDim, fontSize = 9.sp,
+                        letterSpacing = 1.sp, fontFamily = FontFamily.Monospace, maxLines = 1, softWrap = false
+                    )
                 }
             }
         }
