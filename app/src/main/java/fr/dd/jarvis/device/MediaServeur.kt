@@ -19,12 +19,17 @@ object MediaServeur {
     private val medias = ConcurrentHashMap<String, Media>()
     @Volatile private var serveur: ServerSocket? = null
 
+    /** URL HTTP locale réutilisable par les lecteurs Android et par le lecteur intégré de Jarvis. */
+    fun url(app: JarvisApp, chemin: String): String {
+        demarrer()
+        val id = UUID.randomUUID().toString().replace("-", "")
+        medias[id] = Media(app, chemin)
+        return "http://127.0.0.1:$PORT/$id"
+    }
+
     /** Prépare un flux indépendant et ouvre le sélecteur Android des lecteurs vidéo réellement installés. */
     fun ouvrir(app: JarvisApp, chemin: String): String {
-        val id = UUID.randomUUID().toString().replace("-", "")
-        demarrer()
-        medias[id] = Media(app, chemin)
-        val url = "http://127.0.0.1:$PORT/$id"
+        val url = url(app, chemin)
         val view = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(Uri.parse(url), Box.mimeVideo(chemin))
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
