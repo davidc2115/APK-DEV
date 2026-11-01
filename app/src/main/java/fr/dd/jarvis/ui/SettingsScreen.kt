@@ -918,17 +918,17 @@ private fun TikTokPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvis
 @Composable
 private fun PollinationsPanel(store: fr.dd.jarvis.data.Store) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    HudPanel(Modifier.fillMaxWidth(), title = "Vidéo IA — tiktok_video (Pollinations.ai)") {
+    HudPanel(Modifier.fillMaxWidth(), title = "Vidéo IA — tiktok_video (Hugging Face)") {
         Text(
-            "Service GRATUIT (sans carte bancaire) utilisé par tiktok_video pour générer les plans de la vidéo — mais communautaire et sans garantie de service (quota limité, peut être lent ou indisponible). " +
-                "Crée ta clé gratuite en quelques secondes sur enter.pollinations.ai/keys, puis colle-la ici.",
+            "Service GRATUIT (compte Hugging Face, sans carte bancaire) utilisé par tiktok_video pour générer les plans de la vidéo — mais avec un vrai quota GPU journalier limité (≈5 min/jour en compte gratuit) : peut être lent (file d'attente partagée) ou refuser une fois le quota du jour épuisé. " +
+                "Crée ton compte et ton token (lecture suffit) en quelques secondes sur huggingface.co/settings/tokens, puis colle-le ici.",
             color = HudDim, fontSize = 12.sp
         )
         Spacer(Modifier.height(8.dp))
-        HudTextField(store.pollinationsApiKey.value, { store.pollinationsApiKey.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Clé API Pollinations", password = true)
+        HudTextField(store.huggingFaceToken.value, { store.huggingFaceToken.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Token Hugging Face", password = true)
         Spacer(Modifier.height(6.dp))
-        Text("Ouvrir enter.pollinations.ai/keys", color = HudDim, fontSize = 12.sp, modifier = Modifier.clickable {
-            ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://enter.pollinations.ai/keys")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        Text("Ouvrir huggingface.co/settings/tokens", color = HudDim, fontSize = 12.sp, modifier = Modifier.clickable {
+            ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://huggingface.co/settings/tokens")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
         })
     }
 }

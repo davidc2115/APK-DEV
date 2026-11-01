@@ -197,8 +197,10 @@ class Store(context: Context) {
     val tiktokRefreshToken = SPref("tiktokRefreshToken", "")
     val tiktokOpenId = SPref("tiktokOpenId", "")
 
-    // ---- Génération vidéo IA (tiktok_video) : service gratuit Pollinations.ai, clé requise (gratuite, sur enter.pollinations.ai/keys)
-    val pollinationsApiKey = SPref("pollinationsApiKey", "")
+    // ---- Génération vidéo IA (tiktok_video) : Hugging Face (ZeroGPU, Spaces officiels), compte gratuit sans
+    // carte bancaire, token créé sur huggingface.co/settings/tokens (lecture suffit). Pollinations.ai exige
+    // maintenant un abonnement payant ("Pollen") même pour la vidéo — plus utilisable gratuitement.
+    val huggingFaceToken = SPref("huggingFaceToken", "")
     val tiktokTokenExpiry = SPref("tiktokTokenExpiry", "0")   // epoch secondes
     val tiktokOAuthState = SPref("tiktokOAuthState", "")      // anti-CSRF, vérifié au retour
 
