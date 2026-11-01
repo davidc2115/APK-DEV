@@ -197,6 +197,28 @@ object Horloge {
 
     private fun annuler(c: Context, id: Int) { runCatching { am(c).cancel(pi(c, id, ACT_FIRE)) }; runCatching { nm(c).cancel(id) } }
 
+    fun diagnostic(c: Context): String {
+        channels(c)
+        val exact = exactAutorise(c)
+        val notifications = notificationsAutorisees(c)
+        val next = am(c).nextAlarmClock?.triggerTime?.let {
+            java.time.Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault())
+                .format(java.time.format.DateTimeFormatter.ofPattern("dd/MM HH:mm:ss"))
+        } ?: "aucune alarme système"
+        val chrono = prefs(c).getLong("chrono", 0L)
+        val saved = load(c)
+        return buildString {
+            appendLine("Diagnostic Horloge JARVIS")
+            appendLine("Android API : ${android.os.Build.VERSION.SDK_INT}")
+            appendLine("Alarmes exactes : ${if (exact) "AUTORISÉES" else "REFUSÉES"}")
+            appendLine("Shizuku : ${if (!ShizukuShell.installed(c)) "non installé" else if (!ShizukuShell.running()) "installé, non démarré" else if (!ShizukuShell.granted()) "démarré, accès JARVIS refusé" else "prêt"}")
+            appendLine("Notifications : ${if (notifications) "autorisées" else "bloquées"}")
+            appendLine("Prochaine alarme système : $next")
+            appendLine("Alarmes/minuteurs enregistrés : ${saved.size}")
+            append("Chronomètre : ${if (chrono == 0L) "arrêté" else "actif depuis " + formater(System.currentTimeMillis() - chrono)}")
+        }
+    }
+
     fun liste(c: Context): String {
         val f = java.time.format.DateTimeFormatter.ofPattern("EEE d MMM HH:mm", java.util.Locale.FRENCH)
         val l = load(c).sortedBy { it.optLong("at") }
