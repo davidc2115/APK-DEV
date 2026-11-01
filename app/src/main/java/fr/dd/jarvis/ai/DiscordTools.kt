@@ -56,13 +56,14 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
                 "acces" to prop("voir_salon pour autoriser à voir/utiliser le salon, ou « refuser_voir_salon » pour le rendre invisible et inaccessible à ce rôle/membre, ou « defaut » pour effacer la règle spécifique à ce(s) salon(s).")), listOf("acces"))
     )
 
-    private fun guilde(a: JSONObject): String {
+    private fun guildeObj(a: JSONObject): JSONObject {
         val demande = a.optString("serveur").trim().ifBlank { app.store.discordGuildId.value.trim() }
-        val g = Discord.trouverGuilde(app, demande) ?: throw IllegalStateException(
+        return Discord.trouverGuilde(app, demande) ?: throw IllegalStateException(
             if (demande.isBlank()) "Le bot est présent sur plusieurs serveurs : précise lequel (nom ou ID), ou enregistre un serveur par défaut dans Réglages › Discord." else "Serveur « $demande » introuvable parmi ceux où le bot est présent."
         )
-        return g.getString("id")
     }
+
+    private fun guilde(a: JSONObject): String = guildeObj(a).getString("id")
 
     suspend fun execute(name: String, a: JSONObject): ToolResult = withContext(Dispatchers.IO) {
         try { run(name, a) } catch (e: kotlinx.coroutines.CancellationException) { throw e }
@@ -99,51 +100,52 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
                 }, direct = true)
         }
         "discord_role_creer" -> {
-            val gid = guilde(a)
+            val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
             val nom = a.optString("nom").trim()
             if (nom.isBlank()) return ToolResult("Nom du rôle manquant.")
             val perms = a.optString("permissions").let { if (it.isBlank()) null else Discord.Perm.parse(it) }
             val admin = perms != null && (perms and Discord.Perm.ADMINISTRATOR) != 0L
-            if (!confirm("Créer le rôle « $nom »" + (if (admin) " avec TOUTES les permissions, y compris Administrateur (ignore toujours les restrictions de salon)" else "") + " ?", true))
+            if (!confirm("Créer le rôle « $nom » sur le serveur « $gnom »" + (if (admin) " avec TOUTES les permissions, y compris Administrateur (ignore toujours les restrictions de salon)" else "") + " ?", true))
                 return ToolResult("Refusé par l'utilisateur.")
             val r = Discord.roleCreer(app, gid, nom, a.optString("couleur").let { couleurHex(it) }, perms,
                 a.optString("affiche_separement").lowercase().takeIf { it.isNotBlank() }?.let { it in setOf("true", "oui", "1") },
                 a.optString("mentionnable").lowercase().takeIf { it.isNotBlank() }?.let { it in setOf("true", "oui", "1") })
-            ToolResult("✅ Rôle « ${r.optString("name")} » créé." + (perms?.let { " Permissions : ${Discord.Perm.noms(it).joinToString(", ").ifBlank { "aucune" }}." } ?: "") +
-                "\n⚠️ N'oublie pas de placer ce rôle au-dessus, dans la hiérarchie du serveur, de tous les rôles qu'il doit dépasser (Discord ne le fait pas automatiquement).")
+            ToolResult("✅ Rôle « ${r.optString("name")} » créé sur le serveur « $gnom »." + (perms?.let { " Permissions : ${Discord.Perm.noms(it).joinToString(", ").ifBlank { "aucune" }}." } ?: "") +
+                "\n⚠️ N'oublie pas de placer ce rôle au-dessus, dans la hiérarchie du serveur, de tous les rôles qu'il doit dépasser (Discord ne le fait pas automatiquement)." +
+                "\nℹ️ S'il n'a encore aucun membre, il n'apparaîtra pas dans la liste des membres à droite (même avec « afficher séparément ») — il est bien visible dans Paramètres du serveur › Rôles.")
         }
         "discord_role_modifier" -> {
-            val gid = guilde(a)
-            val role = Discord.trouverRole(app, gid, a.optString("role")) ?: return ToolResult("Rôle « ${a.optString("role")} » introuvable.")
+            val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
+            val role = Discord.trouverRole(app, gid, a.optString("role")) ?: return ToolResult("Rôle « ${a.optString("role")} » introuvable sur le serveur « $gnom ».")
             val perms = a.optString("permissions").let { if (it.isBlank()) null else Discord.Perm.parse(it) }
             val admin = perms != null && (perms and Discord.Perm.ADMINISTRATOR) != 0L
-            if (!confirm("Modifier le rôle « ${role.optString("name")} »" + (if (admin) " (ajout d'Administrateur : ignorera alors toujours les restrictions de salon)" else "") + " ?", true))
+            if (!confirm("Modifier le rôle « ${role.optString("name")} » sur le serveur « $gnom »" + (if (admin) " (ajout d'Administrateur : ignorera alors toujours les restrictions de salon)" else "") + " ?", true))
                 return ToolResult("Refusé par l'utilisateur.")
             val r = Discord.roleModifier(app, gid, role.getString("id"), a.optString("nouveau_nom").trim().ifBlank { null },
                 a.optString("couleur").let { couleurHex(it) }, perms,
                 a.optString("affiche_separement").lowercase().takeIf { it.isNotBlank() }?.let { it in setOf("true", "oui", "1") },
                 a.optString("mentionnable").lowercase().takeIf { it.isNotBlank() }?.let { it in setOf("true", "oui", "1") })
-            ToolResult("✅ Rôle « ${r.optString("name")} » modifié.")
+            ToolResult("✅ Rôle « ${r.optString("name")} » modifié sur le serveur « $gnom ».")
         }
         "discord_role_supprimer" -> {
-            val gid = guilde(a)
-            val role = Discord.trouverRole(app, gid, a.optString("role")) ?: return ToolResult("Rôle « ${a.optString("role")} » introuvable.")
-            if (!confirm("Supprimer définitivement le rôle « ${role.optString("name")} » ?", true)) return ToolResult("Refusé par l'utilisateur.")
+            val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
+            val role = Discord.trouverRole(app, gid, a.optString("role")) ?: return ToolResult("Rôle « ${a.optString("role")} » introuvable sur le serveur « $gnom ».")
+            if (!confirm("Supprimer définitivement le rôle « ${role.optString("name")} » sur le serveur « $gnom » ?", true)) return ToolResult("Refusé par l'utilisateur.")
             Discord.roleSupprimer(app, gid, role.getString("id"))
-            ToolResult("🗑️ Rôle « ${role.optString("name")} » supprimé.")
+            ToolResult("🗑️ Rôle « ${role.optString("name")} » supprimé sur le serveur « $gnom ».")
         }
         "discord_role_attribuer" -> {
-            val gid = guilde(a)
-            val role = Discord.trouverRole(app, gid, a.optString("role")) ?: return ToolResult("Rôle « ${a.optString("role")} » introuvable.")
+            val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
+            val role = Discord.trouverRole(app, gid, a.optString("role")) ?: return ToolResult("Rôle « ${a.optString("role")} » introuvable sur le serveur « $gnom ».")
             val membres = Discord.chercherMembres(app, gid, a.optString("membre"))
-            if (membres.length() == 0) return ToolResult("Membre « ${a.optString("membre")} » introuvable.")
+            if (membres.length() == 0) return ToolResult("Membre « ${a.optString("membre")} » introuvable sur le serveur « $gnom ».")
             val m = membres.getJSONObject(0)
             val userId = m.getJSONObject("user").getString("id")
             val pseudo = m.optString("nick").ifBlank { m.getJSONObject("user").optString("username") }
             val retirer = a.optString("action").lowercase().startsWith("retir")
-            if (!confirm("${if (retirer) "Retirer" else "Donner"} le rôle « ${role.optString("name")} » à $pseudo ?", true)) return ToolResult("Refusé par l'utilisateur.")
+            if (!confirm("${if (retirer) "Retirer" else "Donner"} le rôle « ${role.optString("name")} » à $pseudo sur le serveur « $gnom » ?", true)) return ToolResult("Refusé par l'utilisateur.")
             if (retirer) Discord.roleRetirer(app, gid, userId, role.getString("id")) else Discord.roleAttribuer(app, gid, userId, role.getString("id"))
-            ToolResult(if (retirer) "✅ Rôle « ${role.optString("name")} » retiré à $pseudo." else "✅ Rôle « ${role.optString("name")} » donné à $pseudo.")
+            ToolResult(if (retirer) "✅ Rôle « ${role.optString("name")} » retiré à $pseudo sur « $gnom »." else "✅ Rôle « ${role.optString("name")} » donné à $pseudo sur « $gnom ».")
         }
         "discord_salon_permission" -> {
             val gid = guilde(a)
