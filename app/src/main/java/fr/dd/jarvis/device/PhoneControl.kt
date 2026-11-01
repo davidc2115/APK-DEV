@@ -259,7 +259,11 @@ class PhoneControl(private val ctx: Context) {
             else -> null
         }
         if (rechercheUrl != null) {
-            val err = start(Intent.ACTION_VIEW, rechercheUrl(requete), pkg)
+            // D'abord en forçant le paquet (ouvre directement dans l'appli) ; si ce paquet précis ne déclare pas ce lien exact
+            // (ActivityNotFoundException → start() renvoie une erreur), on retente sans forcer le paquet plutôt que d'abandonner,
+            // pour laisser Android résoudre lui-même le lien (navigateur si besoin, mieux que rien).
+            var err = start(Intent.ACTION_VIEW, rechercheUrl(requete), pkg)
+            if (err.isNotBlank()) err = start(Intent.ACTION_VIEW, rechercheUrl(requete), null)
             if (err.isBlank()) return "🔎 $nom ne confirme pas la lecture à distance de « $requete » : j'ai ouvert sa recherche avec ce titre déjà affiché, il ne reste plus qu'à appuyer sur lecture."
         }
         return when (etat) {

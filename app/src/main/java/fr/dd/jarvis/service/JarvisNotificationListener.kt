@@ -71,20 +71,11 @@ class JarvisNotificationListener : NotificationListenerService() {
             val titre = e.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
             val texte = (e.getCharSequence(Notification.EXTRA_BIG_TEXT) ?: e.getCharSequence(Notification.EXTRA_TEXT))?.toString().orEmpty()
             if (titre.isBlank() && texte.isBlank()) return
-            val message = estMessage(sbn.packageName) || n.category == Notification.CATEGORY_MESSAGE
-            val mail = estMail(sbn.packageName)
-            // Interrupteur maître par catégorie (Réglages) : si désactivé, JARVIS ignore complètement cette notification —
-            // aucune capture, aucune alerte, aucune annonce vocale, aucun agent en direct déclenché par elle.
-            val store0 = runCatching { (applicationContext as fr.dd.jarvis.JarvisApp).store }.getOrNull()
-            val categorieActive = when {
-                message -> store0?.notifSmsOn?.value ?: true
-                mail -> store0?.notifMailOn?.value ?: true
-                else -> store0?.notifAutresOn?.value ?: true
-            }
-            if (!categorieActive) return
             val label = try { packageManager.getApplicationLabel(packageManager.getApplicationInfo(sbn.packageName, 0)).toString() } catch (_: Exception) { sbn.packageName }
             add(Item(sbn.packageName, label, titre, texte, sbn.postTime))
             sauver(applicationContext)
+            val message = estMessage(sbn.packageName) || n.category == Notification.CATEGORY_MESSAGE
+            val mail = estMail(sbn.packageName)
             val live = runCatching { (applicationContext as fr.dd.jarvis.JarvisApp).store.notifLive.value }.getOrDefault(true)
             if (live && (message || mail)) runCatching { notifier(sbn, label, titre, texte, mail && !message) }
             // Agents « en direct » : un nouveau SMS / message / mail déclenche tout de suite le passage de l'agent concerné.
