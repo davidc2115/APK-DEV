@@ -77,10 +77,19 @@ object Horloge {
     private fun pi(c: Context, id: Int, action: String, flags: Int = PendingIntent.FLAG_IMMUTABLE, extra: (Intent) -> Unit = {}): PendingIntent =
         PendingIntent.getBroadcast(c, id, Intent(c, HorlogeReceiver::class.java).setAction(action).putExtra("id", id).also(extra), PendingIntent.FLAG_UPDATE_CURRENT or flags)
 
-    private fun planifier(c: Context, o: JSONObject) {
-        val id = o.getInt("id"); val at = o.getLong("at")
-        val show = PendingIntent.getActivity(c, 7, Intent(c, fr.dd.jarvis.MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
-        am(c).setAlarmClock(AlarmManager.AlarmClockInfo(at, show), pi(c, id, ACT_FIRE))
+    private fun planifier(c: Context, o: JSONObject): Boolean {
+        val id = o.getInt("id")
+        val at = o.getLong("at")
+        val operation = pi(c, id, ACT_FIRE)
+        val manager = am(c)
+        return if (android.os.Build.VERSION.SDK_INT < 31 || manager.canScheduleExactAlarms()) {
+            val show = PendingIntent.getActivity(c, 7, Intent(c, fr.dd.jarvis.MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            manager.setAlarmClock(AlarmManager.AlarmClockInfo(at, show), operation)
+            true
+        } else {
+            manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, operation)
+            false
+        }
     }
 
     private fun prochaine(h: Int, m: Int, days: List<Int>): Long {
@@ -105,7 +114,6 @@ object Horloge {
         val h = match.groupValues[1].toIntOrNull() ?: return "Heure invalide : $heure."
         val mn = match.groupValues[2].toIntOrNull() ?: 0
         if (h !in 0..23 || mn !in 0..59) return "Heure invalide : $heure."
-        if (!exactAutorise(c)) return messageAccesExact()
         if (!notificationsAutorisees(c)) return "❌ Alarme non programmée : autorise les notifications de JARVIS pour recevoir l'alerte."
         val low = jours.lowercase()
         val map = mapOf("dim" to 1, "lun" to 2, "mar" to 3, "mer" to 4, "jeu" to 5, "ven" to 6, "sam" to 7)
@@ -123,9 +131,10 @@ object Horloge {
         items.add(item)
         save(c, items)
         return try {
-            planifier(c, item)
-            "⏰ Alarme JARVIS programmée à %02d:%02d%s. Elle sonnera en arrière-plan sans ouvrir l'application Horloge.".format(
-                h, mn, if (libelle.isNotBlank()) " — $libelle" else ""
+            val exact = planifier(c, item)
+            "⏰ Alarme JARVIS programmée à %02d:%02d%s. Elle sonnera en arrière-plan sans ouvrir l'application Horloge.%s".format(
+                h, mn, if (libelle.isNotBlank()) " — $libelle" else "",
+                if (exact) "" else " Précision réduite : autorise « Alarmes et rappels » pour une sonnerie à l'heure exacte."
             )
         } catch (e: Exception) {
             save(c, items.filterNot { it.optInt("id") == id })
@@ -146,12 +155,12 @@ object Horloge {
         items.add(item)
         save(c, items)
         return try {
-            planifier(c, item)
+            val exact = planifier(c, item)
             val h = secondes / 3600
             val mi = secondes % 3600 / 60
             val se = secondes % 60
             val txt = listOfNotNull(if (h > 0) "$h h" else null, if (mi > 0) "$mi min" else null, if (se > 0) "$se s" else null).joinToString(" ")
-            "⏳ Minuteur JARVIS de $txt lancé en arrière-plan, sans ouvrir l'application Horloge."
+            "⏳ Minuteur JARVIS de $txt lancé en arrière-plan, sans ouvrir l'application Horloge." + if (exact) "" else " Android peut retarder légèrement la sonnerie : autorise « Alarmes et rappels » pour une précision exacte."
         } catch (e: Exception) {
             save(c, items.filterNot { it.optInt("id") == id })
             "❌ Android a refusé le minuteur : ${e.message ?: e.javaClass.simpleName}."
@@ -197,11 +206,16 @@ object Horloge {
                 else {
                     val now = System.currentTimeMillis()
                     prefs(c).edit().putLong("chrono", now).commit()
-                    val n = enDirect(NotificationCompat.Builder(c, CH_RUN)).setSmallIcon(android.R.drawable.ic_lock_idle_alarm).setContentTitle("⏱️ Chronomètre").setContentText("Temps écoulé").setCategory(NotificationCompat.CATEGORY_STOPWATCH)
-                        .setWhen(now).setUsesChronometer(true).setOngoing(true).setOnlyAlertOnce(true)
-                        .addAction(0, "Arrêter", pi(c, CHRONO_ID, ACT_STOP)).build()
-                    runCatching { nm(c).notify(CHRONO_ID, n) }
-                    "⏱️ Chronomètre démarré (visible dans la barre de notifications), sans ouvrir aucune application."
+                    try {
+                        val n = enDirect(NotificationCompat.Builder(c, CH_RUN)).setSmallIcon(android.R.drawable.ic_lock_idle_alarm).setContentTitle("⏱️ Chronomètre").setContentText("Temps écoulé").setCategory(NotificationCompat.CATEGORY_STOPWATCH)
+                            .setWhen(now).setUsesChronometer(true).setOngoing(true).setOnlyAlertOnce(true)
+                            .addAction(0, "Arrêter", pi(c, CHRONO_ID, ACT_STOP)).build()
+                        nm(c).notify(CHRONO_ID, n)
+                        "⏱️ Chronomètre démarré en arrière-plan."
+                    } catch (e: Exception) {
+                        prefs(c).edit().putLong("chrono", 0L).commit()
+                        "❌ Le chronomètre n'a pas pu démarrer : ${e.message ?: e.javaClass.simpleName}. Vérifie les notifications de JARVIS."
+                    }
                 }
             }
         }
