@@ -92,63 +92,69 @@ object Horloge {
         return d.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
     }
 
-    fun creerAlarme(c: Context, heure: String, libelle: String, jours: String): String {
-        val m = Regex("(\\d{1,2})\\s*(?:[:hH]\\s*(\\d{1,2})?)?").find(heure.trim())
-            ?: return "Heure d'alarme non comprise : « $heure »."
-        val h = m.groupValues[1].toIntOrNull() ?: return "Heure invalide : $heure."
-        val mn = m.groupValues[2].toIntOrNull() ?: 0
-        if (h !in 0..23 || mn !in 0..59) return "Heure invalide : $heure."
+    private fun nouvelId(c: Context): Int {
+        val id = prefs(c).getInt("next_id", 10000)
+        prefs(c).edit().putInt("next_id", if (id >= 2_000_000_000) 10000 else id + 1).commit()
+        return id
+    }
 
-        val intent = Intent(android.provider.AlarmClock.ACTION_SET_ALARM).apply {
-            putExtra(android.provider.AlarmClock.EXTRA_HOUR, h)
-            putExtra(android.provider.AlarmClock.EXTRA_MINUTES, mn)
-            putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, libelle.ifBlank { "JARVIS" })
-            putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, true)
-            val low = jours.lowercase()
-            val map = mapOf("dim" to 1, "lun" to 2, "mar" to 3, "mer" to 4, "jeu" to 5, "ven" to 6, "sam" to 7)
-            val days = when {
-                low.contains("tous") || low.contains("quotidien") -> (1..7).toList()
-                low.contains("semaine") || low.contains("ouvr") -> (2..6).toList()
-                else -> map.filterKeys { low.contains(it) }.values.toList()
-            }
-            if (days.isNotEmpty()) putExtra(android.provider.AlarmClock.EXTRA_DAYS, days.toIntArray())
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    /** Programme une alarme JARVIS en arrière-plan, sans lancer l'application Horloge native. */
+    fun creerAlarme(c: Context, heure: String, libelle: String, jours: String): String {
+        val match = Regex("(\\d{1,2})\\s*(?:[:hH]\\s*(\\d{1,2})?)?").find(heure.trim())
+            ?: return "Heure d'alarme non comprise : « $heure »."
+        val h = match.groupValues[1].toIntOrNull() ?: return "Heure invalide : $heure."
+        val mn = match.groupValues[2].toIntOrNull() ?: 0
+        if (h !in 0..23 || mn !in 0..59) return "Heure invalide : $heure."
+        if (!exactAutorise(c)) return messageAccesExact()
+        if (!notificationsAutorisees(c)) return "❌ Alarme non programmée : autorise les notifications de JARVIS pour recevoir l'alerte."
+        val low = jours.lowercase()
+        val map = mapOf("dim" to 1, "lun" to 2, "mar" to 3, "mer" to 4, "jeu" to 5, "ven" to 6, "sam" to 7)
+        val days = when {
+            low.contains("tous") || low.contains("quotidien") -> (1..7).toList()
+            low.contains("semaine") || low.contains("ouvr") -> (2..6).toList()
+            else -> map.filterKeys { low.contains(it) }.values.toList()
         }
+        val id = nouvelId(c)
+        val at = prochaine(h, mn, days)
+        val item = JSONObject().put("id", id).put("kind", "alarm").put("at", at)
+            .put("h", h).put("m", mn).put("label", libelle).put("days", JSONArray(days))
+        val items = load(c)
+        items.removeAll { it.optInt("id") == id }
+        items.add(item)
+        if (!runCatching { save(c, items) }.getOrDefault(false)) return "❌ Impossible d'enregistrer l'alarme sur cet appareil."
         return try {
-            if (intent.resolveActivity(c.packageManager) == null) {
-                "❌ Aucune application Horloge compatible n'a été trouvée. Aucune alarme n'a été créée."
-            } else {
-                c.startActivity(intent)
-                "⏰ Demande d'alarme transmise à l'Horloge Android pour %02d:%02d%s. Je ne peux pas confirmer son enregistrement dans la liste native depuis Android.".format(
-                    h, mn, if (libelle.isNotBlank()) " — $libelle" else ""
-                )
-            }
+            planifier(c, item)
+            "⏰ Alarme JARVIS programmée à %02d:%02d%s. Elle sonnera en arrière-plan sans ouvrir l'application Horloge.".format(
+                h, mn, if (libelle.isNotBlank()) " — $libelle" else ""
+            )
         } catch (e: Exception) {
-            "❌ L'Horloge Android n'a pas accepté la demande : ${e.message ?: e.javaClass.simpleName}. Aucune réussite ne peut être confirmée."
+            save(c, items.filterNot { it.optInt("id") == id })
+            "❌ Android a refusé la programmation de l'alarme : ${e.message ?: e.javaClass.simpleName}."
         }
     }
 
-        fun creerMinuteur(c: Context, secondes: Int, libelle: String): String {
+    /** Minuteur JARVIS en arrière-plan : AlarmManager exact + notification/son à échéance. */
+    fun creerMinuteur(c: Context, secondes: Int, libelle: String): String {
         if (secondes <= 0) return "Durée du minuteur invalide."
-        val intent = Intent(android.provider.AlarmClock.ACTION_SET_TIMER).apply {
-            putExtra(android.provider.AlarmClock.EXTRA_LENGTH, secondes)
-            putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, libelle.ifBlank { "JARVIS" })
-            putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, true)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
+        if (!exactAutorise(c)) return messageAccesExact()
+        if (!notificationsAutorisees(c)) return "❌ Minuteur non lancé : autorise les notifications de JARVIS pour voir et entendre la fin du compte à rebours."
+        val id = nouvelId(c)
+        val at = System.currentTimeMillis() + secondes * 1000L
+        val item = JSONObject().put("id", id).put("kind", "timer").put("at", at)
+            .put("h", 0).put("m", 0).put("label", libelle).put("days", JSONArray())
+        val items = load(c)
+        items.add(item)
+        save(c, items)
         return try {
-            if (intent.resolveActivity(c.packageManager) == null) {
-                "❌ Aucune application Horloge compatible n'a été trouvée. Le minuteur n'a pas été lancé."
-            } else {
-                c.startActivity(intent)
-                val h = secondes / 3600
-                val mi = secondes % 3600 / 60
-                val se = secondes % 60
-                val txt = listOfNotNull(if (h > 0) "$h h" else null, if (mi > 0) "$mi min" else null, if (se > 0) "$se s" else null).joinToString(" ")
-                "⏳ Demande de minuteur de $txt transmise à l'Horloge Android. Je ne peux pas confirmer son démarrage effectif depuis Jarvis."
-            }
+            planifier(c, item)
+            val h = secondes / 3600
+            val mi = secondes % 3600 / 60
+            val se = secondes % 60
+            val txt = listOfNotNull(if (h > 0) "$h h" else null, if (mi > 0) "$mi min" else null, if (se > 0) "$se s" else null).joinToString(" ")
+            "⏳ Minuteur JARVIS de $txt lancé en arrière-plan, sans ouvrir l'application Horloge."
         } catch (e: Exception) {
-            "❌ L'Horloge Android n'a pas accepté le minuteur : ${e.message ?: e.javaClass.simpleName}. Aucun minuteur Jarvis n'a été lancé."
+            save(c, items.filterNot { it.optInt("id") == id })
+            "❌ Android a refusé le minuteur : ${e.message ?: e.javaClass.simpleName}."
         }
     }
 
