@@ -161,7 +161,7 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         GLES20.glClearColor(0.012f, 0.008f, 0.022f, 1f)
         GLES20.glEnable(GLES20.GL_DEPTH_TEST)
-        GLES20.glEnable(GLES20.GL_CULL_FACE)
+        GLES20.glDisable(GLES20.GL_CULL_FACE)
         program = createProgram(VERTEX_SHADER, FRAGMENT_SHADER)
         vertexBuffer = createSphere(64, 48)
         vertexCount = 64 * 48 * 6
