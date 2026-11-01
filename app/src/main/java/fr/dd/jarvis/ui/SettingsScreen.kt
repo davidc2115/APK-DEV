@@ -925,7 +925,14 @@ private fun PollinationsPanel(store: fr.dd.jarvis.data.Store) {
             color = HudDim, fontSize = 12.sp
         )
         Spacer(Modifier.height(8.dp))
-        HudTextField(store.huggingFaceToken.value, { store.huggingFaceToken.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Token Hugging Face", password = true)
+        HudTextField(store.huggingFaceToken.value, { store.huggingFaceToken.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Token Hugging Face (vidéo texte)", password = true)
+        Spacer(Modifier.height(14.dp))
+        Text("Animation d’une image existante — Wan 2.2 sans compte Hugging Face dans Jarvis", color = HudText, fontSize = 13.sp)
+        Text("Déploie le Worker fourni dans le dossier cloudflare/image-to-video. Configure ensuite son URL et le même jeton secret ici. Le GPU public reste partagé : attente et indisponibilités possibles.", color = HudDim, fontSize = 12.sp)
+        Spacer(Modifier.height(6.dp))
+        HudTextField(store.imageVideoWorkerUrl.value, { store.imageVideoWorkerUrl.set(it.trim()) }, Modifier.fillMaxWidth(), label = "URL du Worker Cloudflare")
+        Spacer(Modifier.height(6.dp))
+        HudTextField(store.imageVideoWorkerToken.value, { store.imageVideoWorkerToken.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Jeton privé du Worker", password = true)
         Spacer(Modifier.height(6.dp))
         Text("Ouvrir huggingface.co/settings/tokens", color = HudDim, fontSize = 12.sp, modifier = Modifier.clickable {
             ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://huggingface.co/settings/tokens")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
