@@ -2,17 +2,16 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.serialization")
-    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
     namespace = "fr.dd.jarvis"
-    compileSdk = 35
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "fr.dd.jarvis"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 34
         versionCode = 1
         versionName = "1.0.0"
     }
@@ -48,14 +47,16 @@ android {
         compose = true
         buildConfig = true
     }
+    composeOptions {
+        kotlinCompilerExtensionVersion = "1.5.14"
+    }
     packaging {
         resources {
             excludes += setOf(
                 "/META-INF/{AL2.0,LGPL2.1}",
                 "META-INF/LICENSE*",
                 "META-INF/NOTICE*",
-                "META-INF/DEPENDENCIES",
-                "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
+                "META-INF/DEPENDENCIES"
             )
             pickFirsts += setOf("META-INF/mailcap", "META-INF/mimetypes.default")
         }
@@ -63,20 +64,7 @@ android {
 }
 
 dependencies {
-    // BOM relevé en même temps que Kotlin 2.2.21 (Phase 2 de l'Orbe Obsidienne) : avec le nouveau
-    // plugin Compose Compiler (Kotlin 2.x), un runtime Compose trop ancien (2024.06.00) peut planter
-    // au tout premier rendu (incompatibilité de version du Composer), avant même le premier écran.
-    //
-    // enforcedPlatform (et non platform) : la dépendance SceneView (Orbe 3D) réclame en transitif
-    // androidx.compose.ui:ui / foundation en version 1.10.0, plus récente que celles de ce BOM, alors
-    // que androidx.compose.material3 reste lui sur la version du BOM — un simple platform() aurait
-    // laissé Gradle prendre la version la plus haute UNIQUEMENT pour ui/foundation, créant un mélange
-    // de versions entre clickable (foundation, nouveau) et le ripple interne de material3 (ancien) :
-    // exactement le crash « clickable only supports IndicationNodeFactory » observé au premier
-    // lancement. enforcedPlatform force TOUT le module Compose à la même version cohérente du BOM,
-    // quoi que SceneView réclame par ailleurs (son intégration Compose n'est de toute façon pas
-    // utilisée ici : l'Orbe passe par la vue classique SceneView/AndroidView, pas par Compose).
-    val composeBom = enforcedPlatform("androidx.compose:compose-bom:2025.01.00")
+    val composeBom = platform("androidx.compose:compose-bom:2024.06.00")
     implementation(composeBom)
 
     implementation("androidx.core:core-ktx:1.13.1")
