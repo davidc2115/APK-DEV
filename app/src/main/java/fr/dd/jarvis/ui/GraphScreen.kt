@@ -177,7 +177,7 @@ private fun DrawScope.dessinerIconeDossier(centre: Offset, taille: Float, couleu
 private fun DrawScope.dessinerNebuleuse(etoiles: List<Triple<Float, Float, Float>>, cx: Float, cy: Float, rayonStructure: Float) {
     drawRect(
         brush = Brush.radialGradient(
-            colors = listOf(Color(0xFF2A1452), Color(0xFF140A2E), Color(0xFF07040F)),
+            colors = listOf(Color(0xFF211034), Color(0xFF0B0813), Color(0xFF030308)),
             center = Offset(size.width / 2f, size.height / 2f),
             radius = max(size.width, size.height) * 0.85f
         ),
@@ -324,7 +324,7 @@ fun GraphScreen(app: JarvisApp) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column {
-                Text("GRAPHE OBSIDIAN", color = accent, fontFamily = FontFamily.Monospace, fontSize = 15.sp, letterSpacing = 2.sp)
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {\n                    Text("J.A.R.V.I.S  /  MÉMOIRE", color = Color(0xFFB58AFF), fontFamily = FontFamily.Monospace, fontSize = 9.sp, letterSpacing = 2.sp)\n                    Text("GRAPHE OBSIDIAN", color = Color(0xFFE7D9FF), fontFamily = FontFamily.Monospace, fontSize = 16.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.4.sp)\n                }
                 Text(
                     if (chargement) "Calcul de la disposition…" else "$totalNotes notes · ${aretes.size} liens · ${categories.size} dossiers" + (if (noeuds.size < totalNotes) " (${noeuds.size} affichées, $MAX_NOTES_PAR_DOSSIER/dossier max)" else ""),
                     color = HudDim, fontSize = 11.sp, fontFamily = FontFamily.Monospace
@@ -432,25 +432,52 @@ fun GraphScreen(app: JarvisApp) {
                         val pa = parId[a.from]?.pos ?: continue
                         val pb = parId[a.to]?.pos ?: continue
                         drawLine(
-                            color = Color(0xFFBFA6FF).copy(alpha = 0.75f),
+                            color = Color(0xFFD5BFFF).copy(alpha = 0.82f),
                             start = Offset(cx + pa.x * scale, cy + pa.y * scale),
                             end = Offset(cx + pb.x * scale, cy + pb.y * scale),
                             strokeWidth = 2.2f * density * scale.coerceAtLeast(0.4f)
                         )
                     }
-                    // Passe 3 : cerveau central (virtuel), toujours présent.
-                    drawCircle(color = accent.copy(alpha = 0.18f * pulse), radius = rayonCerveau * (1.7f + 0.3f * pulse), center = Offset(cx, cy))
-                    drawCircle(color = accent.copy(alpha = 0.95f), radius = rayonCerveau, center = Offset(cx, cy))
-                    drawCircle(color = Color.White.copy(alpha = 0.5f), radius = rayonCerveau, center = Offset(cx, cy), style = Stroke(width = 1.6f * density))
-                    repeat(8) { i ->
-                        val a = (i / 8f) * 2 * Math.PI.toFloat()
-                        val r1 = rayonCerveau * 1.05f; val r2 = rayonCerveau * (1.35f + 0.15f * pulse)
+                    // Passe 3 : noyau d'obsidienne — sphère sombre, reflet violet et orbites holographiques.
+                    val centre = Offset(cx, cy)
+                    val violet = Color(0xFF9B62FF)
+                    drawCircle(color = violet.copy(alpha = 0.12f * pulse), radius = rayonCerveau * (2.15f + 0.18f * pulse), center = centre)
+                    drawCircle(color = violet.copy(alpha = 0.18f), radius = rayonCerveau * 1.55f, center = centre, style = Stroke(width = 1.2f * density))
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color(0xFF56347D), Color(0xFF21172F), Color(0xFF07060B)),
+                            center = Offset(cx - rayonCerveau * 0.28f, cy - rayonCerveau * 0.34f),
+                            radius = rayonCerveau * 1.65f
+                        ),
+                        radius = rayonCerveau,
+                        center = centre
+                    )
+                    drawCircle(color = Color(0xFFC9A7FF).copy(alpha = 0.72f), radius = rayonCerveau, center = centre, style = Stroke(width = 1.5f * density))
+                    drawCircle(color = Color.White.copy(alpha = 0.12f), radius = rayonCerveau * 0.76f, center = Offset(cx - rayonCerveau * 0.12f, cy - rayonCerveau * 0.18f), style = Stroke(width = 1f * density))
+                    // Anneaux orbitaux inclinés autour du noyau.
+                    drawOval(
+                        color = Color(0xFFB58AFF).copy(alpha = 0.68f * pulse),
+                        topLeft = Offset(cx - rayonCerveau * 1.55f, cy - rayonCerveau * 0.48f),
+                        size = Size(rayonCerveau * 3.1f, rayonCerveau * 0.96f),
+                        style = Stroke(width = 1.25f * density)
+                    )
+                    drawOval(
+                        color = Color(0xFF7D4AC4).copy(alpha = 0.52f),
+                        topLeft = Offset(cx - rayonCerveau * 1.35f, cy - rayonCerveau * 0.28f),
+                        size = Size(rayonCerveau * 2.7f, rayonCerveau * 0.56f),
+                        style = Stroke(width = 1f * density)
+                    )
+                    repeat(10) { i ->
+                        val a = (i / 10f) * 2 * Math.PI.toFloat()
+                        val r1 = rayonCerveau * 0.72f
+                        val r2 = rayonCerveau * (1.12f + 0.08f * pulse)
                         drawLine(
-                            color = accent.copy(alpha = 0.35f * pulse),
+                            color = Color(0xFFDCCBFF).copy(alpha = 0.38f * pulse),
                             start = Offset(cx + cos(a) * r1, cy + sin(a) * r1),
                             end = Offset(cx + cos(a) * r2, cy + sin(a) * r2),
-                            strokeWidth = 1.4f * density
+                            strokeWidth = 1.1f * density
                         )
+                        drawCircle(color = Color(0xFFDCCBFF).copy(alpha = 0.72f), radius = 1.8f * density, center = Offset(cx + cos(a) * r2, cy + sin(a) * r2))
                     }
                     // Passe 4 : hubs de dossier (cercle coloré + icône + halo).
                     for (cat in categories) {
@@ -551,7 +578,7 @@ fun GraphScreen(app: JarvisApp) {
     selection?.let { node ->
         AlertDialog(
             onDismissRequest = { selection = null },
-            containerColor = Color(0xFF0B1424), titleContentColor = accent, textContentColor = HudText,
+            containerColor = Color(0xFF100B19), titleContentColor = Color(0xFFB58AFF), textContentColor = HudText,
             title = { Text(node.label, fontFamily = FontFamily.Monospace) },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
