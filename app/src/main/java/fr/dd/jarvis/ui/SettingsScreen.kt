@@ -918,23 +918,51 @@ private fun TikTokPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvis
 @Composable
 private fun PollinationsPanel(store: fr.dd.jarvis.data.Store) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    HudPanel(Modifier.fillMaxWidth(), title = "Vidéo IA — tiktok_video (Hugging Face)") {
+    HudPanel(Modifier.fillMaxWidth(), title = "Vidéo IA — fal.ai / Wan 2.2") {
         Text(
-            "Service GRATUIT (compte Hugging Face, sans carte bancaire) utilisé par tiktok_video pour générer les plans de la vidéo — mais avec un vrai quota GPU journalier limité (≈5 min/jour en compte gratuit) : peut être lent (file d'attente partagée) ou refuser une fois le quota du jour épuisé. " +
-                "Crée ton compte et ton token (lecture suffit) en quelques secondes sur huggingface.co/settings/tokens, puis colle-le ici.",
+            "Anime une image de ton coffre avec Wan 2.2. Jarvis envoie l'image directement à fal.ai, suit la file de génération puis télécharge le MP4. Aucun Worker Cloudflare ni serveur personnel n'est nécessaire.",
             color = HudDim, fontSize = 12.sp
         )
         Spacer(Modifier.height(8.dp))
-        HudTextField(store.huggingFaceToken.value, { store.huggingFaceToken.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Token Hugging Face (vidéo texte)", password = true)
+        if (store.falApiKey.available) {
+            HudTextField(
+                store.falApiKey.value,
+                { value -> runCatching { store.falApiKey.set(value.trim()) } },
+                Modifier.fillMaxWidth(),
+                label = "Clé API fal.ai",
+                password = true
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                HudButton("Créer / gérer ma clé API") {
+                    ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://fal.ai/dashboard/keys")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
+                HudButton("Effacer la clé") { store.falApiKey.clear() }
+            }
+        } else {
+            Text(
+                "⚠️ Le stockage chiffré Android est indisponible sur cet appareil. Jarvis refuse d'enregistrer la clé en clair.",
+                color = HudText, fontSize = 12.sp
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Modèle : Wan 2.2 5B · image vers vidéo · jusqu'à 5 secondes · 720p. La facturation dépend du modèle et des paramètres fal.ai : vérifie ton solde et tes limites avant chaque utilisation.",
+            color = HudDim, fontSize = 11.sp
+        )
+        Text(
+            "Confidentialité : l'image choisie et le prompt sont envoyés à fal.ai pour la génération. La clé est conservée dans le stockage chiffré Android ; une clé utilisée dans une application mobile peut toutefois être extraite d'un appareil compromis.",
+            color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp)
+        )
         Spacer(Modifier.height(14.dp))
-        Text("Animation d’une image existante — Wan 2.2 sans compte Hugging Face dans Jarvis", color = HudText, fontSize = 13.sp)
-        Text("Déploie le Worker fourni dans le dossier cloudflare/image-to-video. Configure ensuite son URL et le même jeton secret ici. Le GPU public reste partagé : attente et indisponibilités possibles.", color = HudDim, fontSize = 12.sp)
+        Text("Vidéo texte — Hugging Face (fonction TikTok existante)", color = HudText, fontSize = 13.sp)
+        Text(
+            "Ce réglage reste indépendant de l'animation d'image fal.ai.",
+            color = HudDim, fontSize = 11.sp
+        )
         Spacer(Modifier.height(6.dp))
-        HudTextField(store.imageVideoWorkerUrl.value, { store.imageVideoWorkerUrl.set(it.trim()) }, Modifier.fillMaxWidth(), label = "URL du Worker Cloudflare")
-        Spacer(Modifier.height(6.dp))
-        HudTextField(store.imageVideoWorkerToken.value, { store.imageVideoWorkerToken.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Jeton privé du Worker", password = true)
-        Spacer(Modifier.height(6.dp))
-        Text("Ouvrir huggingface.co/settings/tokens", color = HudDim, fontSize = 12.sp, modifier = Modifier.clickable {
+        HudTextField(store.huggingFaceToken.value, { store.huggingFaceToken.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Token Hugging Face (vidéo texte)", password = true)
+        Text("Créer un token Hugging Face", color = HudDim, fontSize = 12.sp, modifier = Modifier.clickable {
             ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://huggingface.co/settings/tokens")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
         })
     }
