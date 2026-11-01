@@ -37,6 +37,11 @@
         </intent>
         <intent>
             <action android:name="android.speech.RecognitionService" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <data android:mimeType="video/*" />
+        </intent>
         </intent>
         <package android:name="moe.shizuku.privileged.api" />
         <package android:name="com.waze" />
