@@ -369,7 +369,7 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
         private const val GRAPH_VERTEX_SHADER = """
             uniform mat4 uMvp;
             attribute vec3 aPosition;
-            void main() { gl_Position = uMvp * vec4(aPosition, 1.0); gl_PointSize = 13.0; }
+            void main() { gl_Position = uMvp * vec4(aPosition, 1.0); gl_PointSize = 30.0; }
         """
         private const val GRAPH_FRAGMENT_SHADER = """
             precision mediump float;
