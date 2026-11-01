@@ -324,7 +324,7 @@ fun GraphScreen(app: JarvisApp) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column {
-                Text("GRAPHE OBSIDIAN", color = accent, fontFamily = FontFamily.Monospace, fontSize = 15.sp, letterSpacing = 2.sp)
+                Text("ORBE — GRAPHE OBSIDIAN", color = accent, fontFamily = FontFamily.Monospace, fontSize = 15.sp, letterSpacing = 2.sp)
                 Text(
                     if (chargement) "Calcul de la disposition…" else "$totalNotes notes · ${aretes.size} liens · ${categories.size} dossiers" + (if (noeuds.size < totalNotes) " (${noeuds.size} affichées, $MAX_NOTES_PAR_DOSSIER/dossier max)" else ""),
                     color = HudDim, fontSize = 11.sp, fontFamily = FontFamily.Monospace
