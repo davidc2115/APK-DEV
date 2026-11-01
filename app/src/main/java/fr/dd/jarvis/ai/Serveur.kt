@@ -182,6 +182,32 @@ object Serveur {
         }
     }
 
+    // ------------------------------------------------------------------ Scan de ports (depuis le téléphone, sans SSH)
+
+    /** Ports SSH non standards les plus courants (au cas où le port configuré est faux). */
+    val PORTS_SSH_COURANTS = listOf(22, 222, 2222, 2022, 22022, 50022, 10022, 2200, 8022)
+    /** Autres services serveur fréquents, utiles pour un diagnostic plus large. */
+    val PORTS_SERVICES_COURANTS = listOf(80, 443, 8080, 8443, 8123, 3000, 9000, 9090, 32400, 445, 139, 21, 3306, 5432, 6379, 8096, 1883)
+
+    /** Teste une liste de ports TCP sur [hote] DIRECTEMENT DEPUIS LE TÉLÉPHONE (ne passe pas par SSH, donc fonctionne même
+     *  quand SSH ne se connecte pas) : utile pour retrouver le bon port quand celui des Réglages est faux. Ne marche que si
+     *  le téléphone peut atteindre cette adresse (même réseau local que le serveur, ou port déjà redirigé vers l'extérieur). */
+    fun scannerPorts(hote: String, ports: List<Int>): List<Pair<Int, Boolean>> {
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(24)
+        return try {
+            ports.map { p -> pool.submit(java.util.concurrent.Callable { p to fr.dd.jarvis.ai.Reseau.ouvertTcp(hote, p, 1200) }) }.map { it.get() }
+        } finally { pool.shutdown() }
+    }
+
+    /** Si un port ouvert répond bien comme un serveur SSH, sa bannière commence par « SSH-… » ; sinon null. */
+    fun banniereSsh(hote: String, port: Int, ms: Int = 1500): String? = try {
+        java.net.Socket().use { sk ->
+            sk.connect(java.net.InetSocketAddress(hote, port), ms)
+            sk.soTimeout = ms
+            sk.getInputStream().bufferedReader().readLine()?.takeIf { it.startsWith("SSH-") }
+        }
+    } catch (e: Exception) { null }
+
     fun q(s: String) = "'" + s.replace("'", "'\\''") + "'"
 
     private val DANGER = Regex(

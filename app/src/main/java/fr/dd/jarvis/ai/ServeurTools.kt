@@ -3,6 +3,8 @@ package fr.dd.jarvis.ai
 import fr.dd.jarvis.JarvisApp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -12,7 +14,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
     companion object {
         val KEYWORDS = Regex("home ?assistant|domotique|\\bha\\b|ssh|serveur|server|yaml|docker|lumi[èe]re|volet|thermostat|automatisation|automation|sc[èe]ne\\b|configuration\\.yaml|debian|raspberry|esphome|zigbee|mqtt|capteur|\\bprise\\b|interrupteur|box|livebox|freebox|bbox|disque|nas|\\bftp\\b|\\bsmb\\b|r[ée]seau|wifi|wi-fi|imprim|scann|\\bip\\b|adresse ip|github|\\bgit\\b|canon|epson|brother|\\bhp\\b|appareils?\\b|script|\\bcode\\b|ping|port", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
-        val NAMES = setOf("ha_entites", "ha_etat", "ha_service", "ha_config", "ssh_commande", "ssh_fichier", "serveur_diagnostic", "reseau_infos", "reseau_scanner", "appareil_sonder", "appareil_page", "imprimantes_trouver", "imprimer", "ssh_script", "github", "appareils_liste", "appareil_nommer", "ip_publique", "box_disque")
+        val NAMES = setOf("ha_entites", "ha_etat", "ha_service", "ha_config", "ssh_commande", "ssh_fichier", "serveur_diagnostic", "serveur_scan_ports", "reseau_infos", "reseau_scanner", "appareil_sonder", "appareil_page", "imprimantes_trouver", "imprimer", "ssh_script", "github", "appareils_liste", "appareil_nommer", "ip_publique", "box_disque")
     }
 
     private fun prop(d: String) = JSONObject().put("type", "string").put("description", d)
@@ -40,8 +42,10 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
             mapOf("action" to prop("lire | ecrire | lister"), "chemin" to prop("Chemin absolu sur le serveur."), "contenu" to prop("ecrire : contenu complet.")), listOf("action", "chemin")),
         tool("ssh_script", "Serveur SSH : envoie et exécute un script complet (bash ou python3, plusieurs lignes) sur le serveur Debian ; sert à installer, configurer, récupérer des données (git clone, curl…), automatiser.",
             mapOf("code" to prop("Code du script (plusieurs lignes)."), "langage" to prop("bash (défaut) ou python3."), "delai" to prop("Délai maximal en secondes (défaut 120).")), listOf("code")),
-        tool("github", "GitHub (public, ou privé si un jeton est enregistré) : lit un fichier, liste un dossier, derniers commits, dernière version (release), infos ou recherche de dépôts.",
-            mapOf("action" to prop("fichier | liste | commits | release | depot | recherche"), "depot" to prop("owner/repo (ex. home-assistant/core), ou mots de la recherche."), "chemin" to prop("Chemin du fichier ou dossier."), "ref" to prop("Branche, tag ou commit (optionnel).")), listOf("action", "depot")),
+        tool("github", "GitHub (public, ou privé avec un jeton enregistré dans Réglages › Serveur) : lit un fichier, liste un dossier, derniers commits, dernière version (release), infos ou recherche de dépôts. Si le jeton a les droits d'écriture (« repo » / « Contents: Read and write »), peut aussi CRÉER ou MODIFIER un fichier directement sur GitHub (action=ecrire), ou COPIER un fichier d'un chemin/dépôt vers un autre (action=copier) — sans passer par le serveur SSH ni un clone local.",
+            mapOf("action" to prop("fichier | liste | commits | release | depot | recherche | ecrire | copier"), "depot" to prop("owner/repo (ex. home-assistant/core), ou mots de la recherche."), "chemin" to prop("Chemin du fichier ou dossier (chemin SOURCE pour « copier »)."), "ref" to prop("Branche, tag ou commit à lire (optionnel)."),
+                "contenu" to prop("ecrire : contenu complet du fichier à écrire."), "message" to prop("ecrire/copier : message de commit (optionnel)."), "branche" to prop("ecrire/copier : branche de destination (optionnel, défaut : branche par défaut du dépôt)."),
+                "vers_depot" to prop("copier : dépôt de destination (optionnel, défaut : même dépôt que « depot »)."), "vers_chemin" to prop("copier : chemin de destination.")), listOf("action", "depot")),
         tool("reseau_infos", "Réseau : adresse IP privée du téléphone, passerelle (box), adresse IP publique ; avec le serveur SSH configuré, ses adresses IP privée(s) et publique.",
             mapOf("serveur" to prop("« oui » pour inclure aussi les adresses du serveur Debian."))),
         tool("reseau_scanner", "Réseau : analyse complète du réseau Wi-Fi local (appareils connectés, adresses IP, noms, ports ouverts, type : imprimante, caméra, TV, serveur, NAS, Home Assistant…), enregistre tous les appareils et l'IP publique pour la connexion à distance. Réseau local uniquement. via=serveur analyse le réseau du serveur Debian (avec adresses MAC), utile à distance.", mapOf("via" to prop("local (défaut, Wi-Fi du téléphone) ou serveur (réseau du serveur Debian)."))),
@@ -58,7 +62,9 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
         tool("ip_publique", "Réseau : détecte l'adresse IP publique actuelle (téléphone et, si SSH configuré, serveur) et l'enregistre pour une connexion à distance ; signale si elle a changé.", emptyMap()),
         tool("box_disque", "Box internet : accède au disque dur USB branché sur la box (SMB ou FTP, selon Réglages › Box) : liste les partages et dossiers, lit un fichier texte, le télécharge dans l'appli, y envoie un fichier créé par JARVIS, crée un dossier, supprime, renomme ou déplace un fichier/dossier (utile pour réorganiser une bibliothèque de films/séries pour Plex, par exemple), ou lance directement la lecture d'une vidéo dans le lecteur vidéo du téléphone (aucune app spécifique requise, pas de téléchargement).",
             mapOf("action" to prop("partages | lister | lire | telecharger | envoyer | supprimer | dossier | renommer | deplacer | lire_telephone"), "chemin" to prop("Chemin sur la box : partage/dossier/fichier (ex. « Disque dur/Photos/2026 »). Pour renommer/deplacer : le chemin ACTUEL (source)."), "fichier" to prop("envoyer : nom du fichier créé par JARVIS à copier sur la box. renommer/deplacer : le NOUVEAU chemin complet sur la box (ex. « Disque dur/Films/Dirty Dancing (1987).avi »).")), listOf("action")),
-        tool("serveur_diagnostic", "Diagnostic rapide du serveur : charge, mémoire, disque, conteneurs Docker et derniers logs de Home Assistant.", emptyMap())
+        tool("serveur_diagnostic", "Diagnostic rapide du serveur : charge, mémoire, disque, conteneurs Docker et derniers logs de Home Assistant.", emptyMap()),
+        tool("serveur_scan_ports", "Dépannage réseau : teste DIRECTEMENT DEPUIS LE TÉLÉPHONE (pas besoin que SSH fonctionne) quels ports répondent sur le serveur — utile en premier recours quand SSH refuse de se connecter (mauvais port probable). Teste les ports SSH non standards les plus courants et quelques ports de services courants, identifie lequel répond vraiment comme un serveur SSH (bannière « SSH-… »), et peut corriger le port SSH dans Réglages si tu le demandes et que l'utilisateur confirme. Ne fonctionne que si le téléphone peut atteindre cette adresse (même réseau local que le serveur, ou port déjà redirigé vers l'extérieur).",
+            mapOf("hote" to prop("Adresse à tester (optionnel, défaut : l'adresse du serveur dans Réglages)."), "ports" to prop("Ports supplémentaires à tester, séparés par des virgules (optionnel, en plus des ports courants).")))
     )
 
     private fun sortie(r: Pair<Int, String>, max: Int = 5500): String {
@@ -114,6 +120,30 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 ToolResult("# 🖥️ Serveur\n```\n" + sortie(r, 6000) + "\n```" +
                     "\n\n_Le test « Home Assistant (local) » est fait DEPUIS le serveur Debian : s'il répond en local mais pas depuis le téléphone, le problème est le réseau entre le téléphone et le serveur (ou l'adresse/port dans Réglages › Serveur), pas Home Assistant lui-même._")
             }
+            "serveur_scan_ports" -> {
+                val hote = a.optString("hote").trim().ifBlank { app.store.sshHost.value.trim() }
+                if (hote.isBlank()) return ToolResult("Aucune adresse à tester : précise « hote », ou renseigne l'adresse du serveur dans Réglages › Serveur.")
+                val extra = a.optString("ports").split(",").mapNotNull { it.trim().toIntOrNull() }
+                val ports = (Serveur.PORTS_SSH_COURANTS + Serveur.PORTS_SERVICES_COURANTS + extra).distinct()
+                val ouverts = Serveur.scannerPorts(hote, ports).filter { it.second }.map { it.first }
+                if (ouverts.isEmpty()) return ToolResult(
+                    "Aucun des ${ports.size} ports testés ne répond sur $hote. Soit le téléphone n'a pas accès à cette adresse depuis ce réseau (es-tu sur le même Wi-Fi que le serveur ? sinon le port doit être redirigé vers l'extérieur sur la box, avec l'adresse publique/DDNS renseignée dans Réglages › Serveur › Adresse distante), soit le serveur est éteint.")
+                val sb = StringBuilder("# 🔎 Ports ouverts sur $hote\n")
+                val sshTrouves = mutableListOf<Int>()
+                ouverts.sorted().forEach { p ->
+                    val banniere = Serveur.banniereSsh(hote, p)
+                    if (banniere != null) { sshTrouves += p; sb.append("- **$p** 🔑 confirmé SSH (« ${banniere.take(60)} »)\n") } else sb.append("- $p\n")
+                }
+                val portActuel = app.store.sshPort.value.toIntOrNull() ?: 22
+                if (sshTrouves.isNotEmpty() && portActuel !in sshTrouves) {
+                    sb.append("\n⚠️ Le port SSH des Réglages ($portActuel) ne répond pas comme SSH, mais le port **${sshTrouves.first()}** si. ")
+                    if (confirm("Mettre à jour le port SSH dans Réglages sur ${sshTrouves.first()} ?", true)) {
+                        app.store.sshPort.set(sshTrouves.first().toString())
+                        sb.append("✅ Port SSH mis à jour sur ${sshTrouves.first()}.")
+                    } else sb.append("Tu peux le corriger toi-même dans Réglages › Serveur.")
+                }
+                ToolResult(sb.toString(), direct = true)
+            }
             "ha_config" -> haConfig(a)
             "ssh_script" -> {
                 ssh()
@@ -126,7 +156,15 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 val r = Serveur.exec(app, "${if (py) "python3" else "bash"} $f; c=\$?; rm -f $f; exit \$c", (a.optString("delai").toIntOrNull() ?: 120).coerceIn(10, 900))
                 ToolResult("```\n" + sortie(r) + "\n```")
             }
-            "github" -> ToolResult(github(a))
+            "github" -> {
+                val act = a.optString("action").lowercase()
+                if (act in setOf("ecrire", "copier")) {
+                    val cible = if (act == "copier") "${a.optString("depot")}/${a.optString("chemin")} → ${a.optString("vers_depot").ifBlank { a.optString("depot") }}/${a.optString("vers_chemin")}"
+                        else "${a.optString("depot")}/${a.optString("chemin")}"
+                    if (!confirm("GitHub : $act $cible ?", true)) return ToolResult("Refusé par l'utilisateur.")
+                    ToolResult(github(a), direct = true)
+                } else ToolResult(github(a))
+            }
             "appareils_liste" -> ToolResult(Registre.liste(app), direct = true)
             "appareil_nommer" -> ToolResult(if (Registre.nommer(app, a.optString("ip").trim(), a.optString("nom").trim())) "✅ ${a.optString("ip")} s'appelle maintenant « ${a.optString("nom")} »." else "Appareil inconnu : lance d'abord une analyse du réseau.")
             "ip_publique" -> {
@@ -266,10 +304,61 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
         }
     }
 
+    /** Écriture GitHub (création/modification d'un fichier) : demande toujours un jeton avec les droits d'écriture. */
+    private fun ghPut(url: String, body: JSONObject): JSONObject {
+        val token = app.store.ghToken.value.trim()
+        if (token.isBlank()) throw IllegalStateException("Écriture GitHub impossible : ajoute un jeton GitHub (droits « Contents: Read and write », ou scope « repo » pour un ancien jeton) dans Réglages › Serveur.")
+        val b = okhttp3.Request.Builder().url(url).header("Accept", "application/vnd.github+json").header("User-Agent", "JARVIS").header("Authorization", "Bearer $token")
+            .put(body.toString().toRequestBody("application/json".toMediaType()))
+        gh.newCall(b.build()).execute().use { r ->
+            val t = r.body?.string().orEmpty()
+            if (r.code == 401 || r.code == 403) throw IllegalStateException("GitHub ${r.code} : jeton refusé ou droits insuffisants (il faut la permission « Contents: Read and write » sur ce dépôt).")
+            if (r.code == 404) throw IllegalStateException("Dépôt ou chemin introuvable sur GitHub (« $url »).")
+            if (r.code == 409) throw IllegalStateException("Conflit GitHub : le fichier a changé entre-temps sur GitHub, relis-le puis réessaie.")
+            if (!r.isSuccessful) throw IllegalStateException("GitHub ${r.code} : ${t.take(300)}")
+            return JSONObject(t)
+        }
+    }
+
+    /** Lit le sha courant d'un fichier GitHub s'il existe déjà (nécessaire pour le modifier, pas pour le créer). */
+    private fun ghSha(depot: String, chemin: String, ref: String): String? = runCatching {
+        JSONObject(ghGet("https://api.github.com/repos/$depot/contents/$chemin" + if (ref.isNotBlank()) "?ref=$ref" else "")).optString("sha").takeIf { it.isNotBlank() }
+    }.getOrNull()
+
     private fun github(a: JSONObject): String {
         val d = a.optString("depot").trim().removePrefix("https://github.com/").trim('/')
         val ref = a.optString("ref").trim(); val ch = a.optString("chemin").trim().trim('/')
         return when (a.optString("action").lowercase()) {
+            "ecrire" -> {
+                if (ch.isBlank()) return "Précise le chemin du fichier (paramètre « chemin »)."
+                val branche = a.optString("branche").trim()
+                val sha = ghSha(d, ch, branche)
+                val body = JSONObject()
+                    .put("message", a.optString("message").trim().ifBlank { (if (sha != null) "Modifié" else "Créé") + " par JARVIS : $ch" })
+                    .put("content", android.util.Base64.encodeToString(a.optString("contenu").toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP))
+                sha?.let { body.put("sha", it) }
+                branche.takeIf { it.isNotBlank() }?.let { body.put("branch", it) }
+                val r = ghPut("https://api.github.com/repos/$d/contents/$ch", body)
+                "✅ `$ch` " + (if (sha != null) "modifié" else "créé") + " sur `$d`" + (if (branche.isNotBlank()) " (branche $branche)" else "") +
+                    " — commit `${r.optJSONObject("commit")?.optString("sha")?.take(7)}`."
+            }
+            "copier" -> {
+                if (ch.isBlank()) return "Précise le chemin source (paramètre « chemin »)."
+                val versChemin = a.optString("vers_chemin").trim().trim('/')
+                if (versChemin.isBlank()) return "Précise le chemin de destination (paramètre « vers_chemin »)."
+                val versDepot = a.optString("vers_depot").trim().removePrefix("https://github.com/").trim('/').ifBlank { d }
+                val src = JSONObject(ghGet("https://api.github.com/repos/$d/contents/$ch" + if (ref.isNotBlank()) "?ref=$ref" else ""))
+                if (src.optString("type") != "file") return "« $ch » n'est pas un fichier (copie de dossier non supportée pour l'instant)."
+                val brancheDest = a.optString("branche").trim()
+                val shaDest = ghSha(versDepot, versChemin, brancheDest)
+                val body = JSONObject()
+                    .put("message", a.optString("message").trim().ifBlank { "Copié par JARVIS : $d/$ch → $versDepot/$versChemin" })
+                    .put("content", src.optString("content").replace("\n", ""))
+                shaDest?.let { body.put("sha", it) }
+                brancheDest.takeIf { it.isNotBlank() }?.let { body.put("branch", it) }
+                ghPut("https://api.github.com/repos/$versDepot/contents/$versChemin", body)
+                "✅ Copié : `$d/$ch` → `$versDepot/$versChemin`" + (if (brancheDest.isNotBlank()) " (branche $brancheDest)" else "") + "."
+            }
             "fichier" -> {
                 val j = JSONObject(ghGet("https://api.github.com/repos/$d/contents/$ch" + if (ref.isNotBlank()) "?ref=$ref" else ""))
                 val txt = String(android.util.Base64.decode(j.optString("content").replace("\n", ""), android.util.Base64.DEFAULT), Charsets.UTF_8)
