@@ -190,6 +190,8 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
     private val mv = FloatArray(16)
     private val mvp = FloatArray(16)
 
+    fun setSelectedNode(id: String?) { selectedNodeId = id }
+
     fun setGraph(nodes: List<fr.dd.jarvis.data.graph.GraphNodeEntity>, relations: List<fr.dd.jarvis.data.graph.GraphRelationEntity>) {
         val visible = nodes.take(160)
         val positions = HashMap<String, FloatArray>()
@@ -302,7 +304,8 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
         lineBuffer?.let { b ->
             b.position(0); GLES20.glVertexAttribPointer(graphPos, 3, GLES20.GL_FLOAT, false, 12, b)
             GLES20.glEnableVertexAttribArray(graphPos)
-            GLES20.glUniform4f(GLES20.glGetUniformLocation(graphProgram, "uColor"), 0.30f, 0.10f, 0.60f, 0.8f)
+            GLES20.glLineWidth(2.0f)
+            GLES20.glUniform4f(GLES20.glGetUniformLocation(graphProgram, "uColor"), 0.62f, 0.24f, 0.92f, 0.95f)
             GLES20.glDrawArrays(GLES20.GL_LINES, 0, graphLines.size / 3)
             GLES20.glDisableVertexAttribArray(graphPos)
         }
@@ -310,6 +313,7 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
             b.position(0); GLES20.glVertexAttribPointer(graphPos, 3, GLES20.GL_FLOAT, false, 12, b)
             GLES20.glEnableVertexAttribArray(graphPos)
             GLES20.glUniform4f(GLES20.glGetUniformLocation(graphProgram, "uColor"), 0.82f, 0.62f, 1f, 1f)
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(graphProgram, "uPointSize"), 32f)
             GLES20.glDrawArrays(GLES20.GL_POINTS, 0, graphPoints.size / 3)
             GLES20.glDisableVertexAttribArray(graphPos)
         }
