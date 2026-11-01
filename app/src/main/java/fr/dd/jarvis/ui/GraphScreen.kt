@@ -287,6 +287,21 @@ fun GraphBackdrop(app: JarvisApp, modifier: Modifier = Modifier, active: Boolean
 
 @Composable
 fun GraphScreen(app: JarvisApp) {
+    var showOrb by remember { mutableStateOf(true) }
+    Column(Modifier.fillMaxSize().background(Color(0xFF030208))) {
+        Row(Modifier.fillMaxWidth().background(Color(0xFF0D0815)).padding(horizontal = 14.dp, vertical = 5.dp), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = { showOrb = !showOrb }) {
+                Text(if (showOrb) "GRAPHE 2D" else "ORBE 3D", color = Color(0xFFC7A5FF), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+            }
+        }
+        Box(Modifier.weight(1f).fillMaxSize()) {
+            if (showOrb) ObsidianOrb3D(app) else GraphScreen2D(app)
+        }
+    }
+}
+
+@Composable
+private fun GraphScreen2D(app: JarvisApp) {
     val accent = LocalAccent.current
     var chargement by remember { mutableStateOf(true) }
     var noeuds by remember { mutableStateOf<List<PosNoeud>>(emptyList()) }
