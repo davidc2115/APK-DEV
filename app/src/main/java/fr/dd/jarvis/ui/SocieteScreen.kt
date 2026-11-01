@@ -25,11 +25,14 @@ import androidx.compose.material3.TextButton
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -47,6 +50,10 @@ private val SUBS = listOf("Résumé", "Clients", "Devis", "Factures", "Équipe",
 @Composable
 fun SocieteScreen(app: JarvisApp) {
     var sub by remember { mutableIntStateOf(0) }
+    // Réaligne la liste Devis/Factures sur le coffre à chaque ouverture de l'onglet : un document
+    // supprimé directement dans Obsidian (hors JARVIS) ne prévient sinon personne, et la liste ici
+    // restait périmée tant que l'app n'était pas relancée.
+    LaunchedEffect(Unit) { withContext(Dispatchers.Default) { app.societe.synchroniserAvecCoffre() } }
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             SUBS.forEachIndexed { i, t -> HudChip(t, selected = i == sub) { sub = i } }

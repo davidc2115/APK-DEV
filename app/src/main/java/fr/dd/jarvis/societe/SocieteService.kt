@@ -159,6 +159,31 @@ class SocieteService(
         return doc to fichierSupprime
     }
 
+    /**
+     * Retire du JSON (index local) les devis/factures dont le fichier Obsidian n'existe plus — cas d'une
+     * suppression faite directement dans Obsidian (ou sur le téléphone), en dehors de JARVIS : rien ne
+     * prévenait alors JARVIS, et la liste Devis/Factures restait périmée (« le coffre sur l'application
+     * ne se remet pas à jour »). Le JSON n'est qu'un index pour aller vite ; le coffre reste la vraie
+     * source de vérité, donc on l'aligne dessus à chaque appel. Sans effet si rien n'a changé.
+     */
+    fun synchroniserAvecCoffre() {
+        if (data.docs.isEmpty()) return
+        val manquants = data.docs.filter { doc ->
+            val dossier = "Société/" + if (doc.type == "devis") "Devis" else "Factures"
+            val client = data.client(doc.clientId)?.nom.orEmpty()
+            val base = "${doc.numero} ${client}".trim()
+            obsidian.ficheExistante(dossier, base) == null
+        }
+        if (manquants.isEmpty()) return
+        val numeros = manquants.map { it.numero }.toSet()
+        repo.update { d ->
+            d.copy(
+                docs = d.docs.filterNot { it.numero in numeros },
+                provisions = d.provisions.filter { it.factureNumero !in numeros }
+            )
+        }
+    }
+
     // ------------------------------------------------------------------ export (Obsidian + PDF)
 
     fun exporter(doc: Doc): String {

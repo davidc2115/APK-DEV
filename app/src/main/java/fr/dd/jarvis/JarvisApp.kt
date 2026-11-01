@@ -83,6 +83,7 @@ class JarvisApp : Application() {
         Thread { runCatching { memo.load() } }.start()
         societe = SocieteService(this, SocieteRepo(this), obsidian)
         societe.data.modeles["planning"]?.let { fr.dd.jarvis.ai.Prompts.planningFormat = it }
+        Thread { runCatching { societe.synchroniserAvecCoffre() } }.start()
         createChannel()
         if (store.briefingOn.value) Scheduler.schedule(this, store)
         fr.dd.jarvis.work.AgentsScheduler.apply(this, store)
