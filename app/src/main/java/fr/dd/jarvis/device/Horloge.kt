@@ -34,6 +34,14 @@ object Horloge {
     private fun nm(c: Context) = c.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     private fun am(c: Context) = c.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
+    /** Ne jamais annoncer un minuteur/chronomètre actif si Android bloque ses notifications. */
+    private fun notificationsAutorisees(c: Context): Boolean {
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            c.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) return false
+        return androidx.core.app.NotificationManagerCompat.from(c).areNotificationsEnabled()
+    }
+
     fun channels(c: Context) {
         if (android.os.Build.VERSION.SDK_INT < 26) return
         val snd = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM) ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
@@ -100,6 +108,7 @@ object Horloge {
 
     fun creerMinuteur(c: Context, secondes: Int, libelle: String): String {
         if (secondes <= 0) return "Durée du minuteur invalide."
+        if (!notificationsAutorisees(c)) return "❌ Minuteur non lancé : autorise les notifications de JARVIS dans Android (Réglages > Applications > JARVIS > Notifications), puis réessaie."
         channels(c)
         val id = (System.currentTimeMillis() % 1_000_000_000L).toInt()
         val at = System.currentTimeMillis() + secondes * 1000L
@@ -152,6 +161,7 @@ object Horloge {
                 if (debut == 0L) "Le chronomètre n'est pas lancé." else "⏱️ Temps écoulé : " + formater(System.currentTimeMillis() - debut) + "."
             else -> {
                 if (debut != 0L) "⏱️ Chronomètre déjà lancé : " + formater(System.currentTimeMillis() - debut) + "."
+                else if (!notificationsAutorisees(c)) "❌ Chronomètre non lancé : autorise les notifications de JARVIS dans Android (Réglages > Applications > JARVIS > Notifications), puis réessaie."
                 else {
                     val now = System.currentTimeMillis()
                     prefs(c).edit().putLong("chrono", now).commit()
