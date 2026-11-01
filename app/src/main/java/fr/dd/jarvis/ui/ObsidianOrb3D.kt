@@ -292,6 +292,10 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
         GLES20.glDisableVertexAttribArray(pos)
         GLES20.glDisableVertexAttribArray(normal)
 
+        // Les nœuds forment une constellation autour de la sphère : ils ne doivent pas disparaître derrière l'obsidienne.
+        GLES20.glDisable(GLES20.GL_DEPTH_TEST)
+        GLES20.glEnable(GLES20.GL_BLEND)
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
         GLES20.glUseProgram(graphProgram)
         GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(graphProgram, "uMvp"), 1, false, mvp, 0)
         val graphPos = GLES20.glGetAttribLocation(graphProgram, "aPosition")
@@ -309,6 +313,8 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
             GLES20.glDrawArrays(GLES20.GL_POINTS, 0, graphPoints.size / 3)
             GLES20.glDisableVertexAttribArray(graphPos)
         }
+        GLES20.glDisable(GLES20.GL_BLEND)
+        GLES20.glEnable(GLES20.GL_DEPTH_TEST)
     }
 
     private fun createSphere(stacks: Int, slices: Int): java.nio.FloatBuffer {
@@ -363,7 +369,7 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
         private const val GRAPH_VERTEX_SHADER = """
             uniform mat4 uMvp;
             attribute vec3 aPosition;
-            void main() { gl_Position = uMvp * vec4(aPosition, 1.0); gl_PointSize = 7.0; }
+            void main() { gl_Position = uMvp * vec4(aPosition, 1.0); gl_PointSize = 13.0; }
         """
         private const val GRAPH_FRAGMENT_SHADER = """
             precision mediump float;
