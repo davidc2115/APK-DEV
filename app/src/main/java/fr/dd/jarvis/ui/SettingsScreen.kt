@@ -572,6 +572,7 @@ fun SettingsScreen(app: JarvisApp) {
                 HudDivider()
                 Spacer(Modifier.height(8.dp))
                 Text("Agents autonomes (travaillent seuls, alertes + journal Obsidian « JARVIS/Journal »)", color = LocalAccent.current, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 13.sp)
+                Text("⚠️ Système séparé des réglages SMS/mail ci-dessus : même bannière et annonces vocales coupées, ces agents envoient LEURS PROPRES notifications (ex. « 🔔 Notifications importantes ») en tournant tout seuls en arrière-plan. Pour tout couper : désactive « Agents actifs » ci-dessous, ou juste la catégorie concernée.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp, bottom = 4.dp))
                 Spacer(Modifier.height(6.dp))
                 HudChip(if (store.agentsOn.value) "✅ Agents actifs" else "Agents désactivés", store.agentsOn.value) {
                     store.agentsOn.set(!store.agentsOn.value); fr.dd.jarvis.work.AgentsScheduler.apply(ctx, store)
