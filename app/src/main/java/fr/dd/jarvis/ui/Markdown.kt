@@ -233,7 +233,7 @@ private fun FichierChip(label: String, name: String, accent: Color) {
 private fun ChatVideo(name: String, accent: Color) {
     val ctx = LocalContext.current
     val file = java.io.File(java.io.File(ctx.filesDir, "videos_ia"), name.substringAfterLast('/'))
-    androidx.material3.Text(
+    androidx.compose.material3.Text(
         "▶ Lire la vidéo · " + file.name,
         color = accent,
         fontSize = 14.sp,
