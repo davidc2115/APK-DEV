@@ -663,7 +663,8 @@ private fun GraphScreen2DClean(app: JarvisApp) {
     var edges by remember { mutableStateOf<List<ObsidianWriter.GraphEdge>>(emptyList()) }
     var selected by remember { mutableStateOf<ObsidianWriter.GraphNode?>(null) }
     var loading by remember { mutableStateOf(true) }
-    val textMeasurer = rememberTextMeasurer()
+    var zoom by remember { mutableStateOf(1f) }
+    var pan by remember { mutableStateOf(Offset.Zero) }
 
     LaunchedEffect(Unit) {
         val graph = withContext(Dispatchers.IO) { app.obsidian.graph() }
@@ -672,52 +673,122 @@ private fun GraphScreen2DClean(app: JarvisApp) {
         loading = false
     }
 
-    val positions = remember(nodes) {
-        nodes.mapIndexed { index, node ->
-            val angle = (-Math.PI / 2.0 + index * (2.0 * Math.PI / nodes.size.coerceAtLeast(1))).toFloat()
-            node.id to Offset(cos(angle), sin(angle))
-        }.toMap()
+    // Disposition de constellation déterministe : les liens réels attirent leurs notes,
+    // les notes se repoussent pour éviter un anneau uniforme et les grappes artificielles par dossier.
+    val positions = remember(nodes, edges) {
+        val count = nodes.size
+        if (count == 0) emptyMap() else {
+            val index = nodes.mapIndexed { i, node -> node.id to i }.toMap()
+            val x = FloatArray(count) { i ->
+                val a = i * 2.3999632f
+                val r = 0.24f + 0.76f * kotlin.math.sqrt((i + 0.5f) / count.toFloat())
+                cos(a) * r
+            }
+            val y = FloatArray(count) { i ->
+                val a = i * 2.3999632f
+                val r = 0.24f + 0.76f * kotlin.math.sqrt((i + 0.5f) / count.toFloat())
+                sin(a) * r
+            }
+            val links = edges.mapNotNull { e ->
+                val a = index[e.from] ?: return@mapNotNull null
+                val b = index[e.to] ?: return@mapNotNull null
+                if (a == b) null else a to b
+            }
+            val iterations = if (count <= 450) 54 else 18
+            repeat(iterations) {
+                val fx = FloatArray(count) { -x[it] * 0.012f }
+                val fy = FloatArray(count) { -y[it] * 0.012f }
+                if (count <= 450) {
+                    for (i in 0 until count) for (j in i + 1 until count) {
+                        val dx = x[i] - x[j]
+                        val dy = y[i] - y[j]
+                        val d2 = (dx * dx + dy * dy).coerceAtLeast(0.0025f)
+                        val force = 0.0018f / d2
+                        fx[i] += dx * force; fy[i] += dy * force
+                        fx[j] -= dx * force; fy[j] -= dy * force
+                    }
+                }
+                links.forEach { (a, b) ->
+                    val dx = x[b] - x[a]
+                    val dy = y[b] - y[a]
+                    fx[a] += dx * 0.018f; fy[a] += dy * 0.018f
+                    fx[b] -= dx * 0.018f; fy[b] -= dy * 0.018f
+                }
+                val step = if (count <= 450) 0.72f else 0.48f
+                for (i in 0 until count) {
+                    x[i] += (fx[i] * step).coerceIn(-0.035f, 0.035f)
+                    y[i] += (fy[i] * step).coerceIn(-0.035f, 0.035f)
+                }
+            }
+            val extent = maxOf(x.maxOf { kotlin.math.abs(it) }, y.maxOf { kotlin.math.abs(it) }, 0.001f)
+            nodes.mapIndexed { i, node -> node.id to Offset(x[i] / extent, y[i] / extent) }.toMap()
+        }
     }
 
     Box(Modifier.fillMaxSize().background(
         Brush.radialGradient(
-            listOf(Color(0xFF211034), Color(0xFF0B0813), Color(0xFF030308)),
-            radius = 950f
+            listOf(Color(0xFF25113B), Color(0xFF0D0817), Color(0xFF030308)),
+            radius = 1100f
         )
     )) {
         Canvas(
-            Modifier.fillMaxSize().pointerInput(nodes, positions) {
-                detectTapGestures { tap ->
-                    val nearest = nodes.mapNotNull { node ->
-                        val p = positions[node.id] ?: return@mapNotNull null
-                        val point = Offset(size.width / 2f + p.x * minOf(size.width, size.height) * 0.31f,
-                            size.height / 2f + p.y * minOf(size.width, size.height) * 0.31f)
-                        val d = (point - tap).getDistance()
-                        if (d < 42f) node to d else null
-                    }.minByOrNull { it.second }
-                    selected = nearest?.first
+            Modifier.fillMaxSize()
+                .pointerInput(nodes, positions) {
+                    detectTransformGestures { _, panChange, zoomChange, _ ->
+                        zoom = (zoom * zoomChange).coerceIn(0.55f, 4.5f)
+                        pan += panChange
+                    }
                 }
-            }
+                .pointerInput(nodes, positions, zoom, pan) {
+                    detectTapGestures { tap ->
+                        val radius = minOf(size.width, size.height) * 0.39f * zoom
+                        val center = Offset(size.width / 2f + pan.x, size.height / 2f + pan.y)
+                        selected = nodes.mapNotNull { node ->
+                            val p = positions[node.id] ?: return@mapNotNull null
+                            val point = center + Offset(p.x * radius, p.y * radius)
+                            val d = (point - tap).getDistance()
+                            if (d < 30f) node to d else null
+                        }.minByOrNull { it.second }?.first
+                    }
+                }
         ) {
-            val center = Offset(size.width / 2f, size.height / 2f)
-            val radius = size.minDimension * 0.31f
-            drawCircle(Color(0xFF9C62E8).copy(alpha = 0.08f), radius * 1.22f, center)
-            drawCircle(Color(0xFF9C62E8).copy(alpha = 0.22f), radius * 1.22f, center, style = Stroke(1.2f))
-            for (edge in edges) {
-                val a = positions[edge.from] ?: continue
-                val b = positions[edge.to] ?: continue
-                val start = Offset(center.x + a.x * radius, center.y + a.y * radius)
-                val end = Offset(center.x + b.x * radius, center.y + b.y * radius)
-                drawLine(Color(0xFFB987FF).copy(alpha = 0.75f), start, end, strokeWidth = 2.2f)
+            val center = Offset(size.width / 2f + pan.x, size.height / 2f + pan.y)
+            val radius = size.minDimension * 0.39f * zoom
+            val byId = nodes.associateBy { it.id }
+            val brainRadius = (size.minDimension * 0.075f).coerceAtLeast(24f)
+            drawCircle(Color(0xFF9E62F4).copy(alpha = 0.12f), brainRadius * 2.3f, center)
+            drawCircle(
+                Brush.radialGradient(listOf(Color(0xFFB58AFF), Color(0xFF512A79), Color(0xFF10091B)), center, brainRadius * 1.7f),
+                brainRadius, center
+            )
+            drawCircle(Color(0xFFD8B9FF).copy(alpha = 0.65f), brainRadius, center, style = Stroke(1.4f))
+            // Fines dendrites partant du noyau, décoratives et distinctes des relations de notes.
+            repeat(18) { i ->
+                val a = i * (Math.PI.toFloat() * 2f / 18f)
+                val r1 = brainRadius * 0.8f
+                val r2 = brainRadius * (1.25f + (i % 3) * 0.12f)
+                drawLine(Color(0xFFB986FF).copy(alpha = 0.28f), center + Offset(cos(a) * r1, sin(a) * r1),
+                    center + Offset(cos(a) * r2, sin(a) * r2), strokeWidth = 1.1f)
+            }
+            // Relations explicites uniquement : aucune arête n'est inventée pour remplir la scène.
+            edges.forEach { edge ->
+                val a = positions[edge.from] ?: return@forEach
+                val b = positions[edge.to] ?: return@forEach
+                drawLine(
+                    Color(0xFFB987FF).copy(alpha = 0.58f),
+                    center + Offset(a.x * radius, a.y * radius),
+                    center + Offset(b.x * radius, b.y * radius),
+                    strokeWidth = 1.25f
+                )
             }
             nodes.forEach { node ->
                 val p = positions[node.id] ?: return@forEach
-                val point = Offset(center.x + p.x * radius, center.y + p.y * radius)
+                val point = center + Offset(p.x * radius, p.y * radius)
                 val isSelected = selected?.id == node.id
-                val color = if (node.ghost) Color(0xFF8B8494) else Color(0xFFB77BFF)
-                drawCircle(color.copy(alpha = 0.17f), if (isSelected) 30f else 20f, point)
-                drawCircle(if (isSelected) Color.White else color, if (isSelected) 9f else 6.5f, point)
-                if (isSelected) drawCircle(Color(0xFFE4C9FF), 15f, point, style = Stroke(1.5f))
+                val color = if (node.ghost) Color(0xFF8B8494) else Color(0xFFC18AFF)
+                drawCircle(color.copy(alpha = if (isSelected) 0.42f else 0.16f), if (isSelected) 23f else 13f, point)
+                drawCircle(if (isSelected) Color.White else color, if (isSelected) 7.5f else 4.2f, point)
+                if (isSelected) drawCircle(Color(0xFFE4C9FF), 13f, point, style = Stroke(1.5f))
             }
         }
         Column(Modifier.align(Alignment.TopCenter).padding(top = 22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
