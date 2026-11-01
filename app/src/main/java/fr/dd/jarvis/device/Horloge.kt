@@ -89,7 +89,7 @@ object Horloge {
     }
 
     fun creerAlarme(c: Context, heure: String, libelle: String, jours: String): String {
-        val m = Regex("(\\\\d{1,2})\\\\s*(?:[:hH]\\\\s*(\\\\d{1,2})?)?").find(heure.trim())
+        val m = Regex("(\\d{1,2})\\s*(?:[:hH]\\s*(\\d{1,2})?)?").find(heure.trim())
             ?: return "Heure d'alarme non comprise : « $heure »."
         val h = m.groupValues[1].toInt()
         val mn = m.groupValues[2].toIntOrNull() ?: 0
@@ -109,7 +109,7 @@ object Horloge {
             putExtra(AlarmClock.EXTRA_MINUTES, mn)
             putExtra(AlarmClock.EXTRA_MESSAGE, libelle.ifBlank { "JARVIS" })
             putExtra(AlarmClock.EXTRA_SKIP_UI, false)
-            if (days.isNotEmpty()) putExtra(AlarmClock.EXTRA_DAYS, days.toIntArray())
+            if (days.isNotEmpty()) putIntegerArrayListExtra(AlarmClock.EXTRA_DAYS, ArrayList(days))
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         return if (intent.resolveActivity(c.packageManager) != null) {
