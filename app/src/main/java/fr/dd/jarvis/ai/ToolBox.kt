@@ -152,8 +152,8 @@ class ToolBox(
             mapOf("format" to prop("« xx xx xx xx xx » (défaut : 06 12 34 56 78) ou « international » (+33 6 12 34 56 78)."),
                 "supprimer_doublons" to prop("« false » pour garder les doublons ; par défaut true."),
                 "apercu" to prop("« true » pour seulement montrer ce qui changerait, sans rien modifier."))))
-        put(tool("create_contact_card", "Génère la fiche contact complète (Markdown Obsidian) d'un contact et l'enregistre.",
-            mapOf("name" to prop("Nom du contact.")), listOf("name")))
+        put(tool("create_contact_card", "Génère la fiche contact complète (Markdown Obsidian) d'un contact et l'enregistre dans le dossier Contacts (ou un sous-dossier).",
+            mapOf("name" to prop("Nom du contact."), "sous_dossier" to prop("Sous-dossier de « Contacts » où ranger la fiche (ex. « Clients », « Fournisseurs », « Famille »). Optionnel : vide = directement dans Contacts.")), listOf("name")))
         put(tool("meteo", "Météo précise (maintenant, prochaines heures, prévisions) à la position du téléphone, ou pour un lieu donné.",
             mapOf("lieu" to prop("Ville ou adresse (optionnel : par défaut la position actuelle du téléphone)."), "jours" to prop("Nombre de jours de prévision (1 à 7). Par défaut 3."))))
         put(tool("generer_image", "Génère une ou plusieurs images à partir d'une description (Cloudflare). Les images sont affichées dans le chat et enregistrées dans Obsidian. Pour plusieurs images (planche, livre de coloriage, série d'illustrations), mets une description par ligne dans « prompt » : chacune est générée séparément et le nom de fichier de chacune est renvoyé (utile ensuite pour creer_fichier avec format=pdf et le paramètre images).",
@@ -817,7 +817,10 @@ class ToolBox(
         val impayes = app.societe.impayees()
         val user = "Utilisateur : ${store.userName.value.ifBlank { "l'utilisateur" }}\nMaintenant : ${Prompts.now()}\n\n" +
             "=== AGENDA DU JOUR ===\n$planning\n\n=== MAILS NON LUS ===\n$mails\n\n=== FACTURES IMPAYÉES ===\n${impayes.ifBlank { "Aucune." }}"
-        return llm.agent(Prompts.briefing() + app.memo.pour("briefing"), user)
+        val texte = llm.agent(Prompts.briefing() + app.memo.pour("briefing"), user)
+        // Archive chaque point du matin dans son propre dossier du coffre Obsidian (un fichier par jour).
+        runCatching { app.obsidian.saveIn("Points du matin", LocalDate.now().toString(), texte) }
+        return texte
     }
 
     private suspend fun searchContacts(a: JSONObject): ToolResult {
@@ -854,13 +857,14 @@ class ToolBox(
         val found = app.contacts.search(a.optString("name"), 5)
         val c = found.firstOrNull { it.name.equals(a.optString("name"), true) } ?: found.firstOrNull()
             ?: return ToolResult("Contact introuvable.")
-        return ToolResult(buildCard(c), direct = true)
+        return ToolResult(buildCard(c, a.optString("sous_dossier")), direct = true)
     }
 
-    /** Génère la fiche via l'agent Contacts puis l'écrit dans le dossier Obsidian. */
-    suspend fun buildCard(c: fr.dd.jarvis.device.ContactInfo): String {
+    /** Génère la fiche via l'agent Contacts puis l'écrit dans le dossier Obsidian (Contacts, ou un sous-dossier). */
+    suspend fun buildCard(c: fr.dd.jarvis.device.ContactInfo, sousDossier: String = ""): String {
         val md = llm.agent(Prompts.CONTACT_CARD + app.memo.pour("contacts", "fiche", "fiches"), "Date du jour : ${LocalDate.now()}\n\n${c.toPrompt()}")
-        val where = app.obsidian.save(c.name, md)
+        val dossier = "Contacts" + sousDossier.trim().trim('/').let { if (it.isBlank()) "" else "/$it" }
+        val where = app.obsidian.saveIn(dossier, c.name, md)
         return "✅ Fiche « ${c.name} » enregistrée : $where\n\n---\n\n$md"
     }
 

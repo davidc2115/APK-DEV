@@ -461,7 +461,13 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             return ToolResult("Envoi refusé par l'utilisateur.", direct = true)
         return try {
             val id = fr.dd.jarvis.device.GmailApi.envoyer(app, compte, dest, sujet, corps, listOf(fr.dd.jarvis.device.GmailApi.PieceJointe(nomFichier, "application/pdf", pdf)))
-            if (estDevis && doc.statut == "brouillon") svc.changerStatut(numero, "envoye")
+            val premierEnvoi = estDevis && doc.statut == "brouillon"
+            if (premierEnvoi) svc.changerStatut(numero, "envoye")
+            // Trace de l'envoi (initial ou relance) dans le coffre Obsidian, par client, pour garder l'historique des échanges.
+            runCatching {
+                val ligne = "- ${java.time.LocalDate.now()} — ${if (premierEnvoi) "Envoi" else "Relance"} $typeLabel **${doc.numero}** (${euro(d.totaux(doc).ttc)} TTC) à $dest"
+                app.obsidian.writeNote("Société/Relances/${(client?.nom ?: dest).replace('/', '-')}.md", ligne, append = true)
+            }
             ToolResult("✅ ${typeLabel.replaceFirstChar { it.uppercase() }} ${doc.numero} envoyé$accord par email à $dest depuis $compte, PDF « $nomFichier » en pièce jointe (id $id).", direct = true)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e

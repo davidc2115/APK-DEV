@@ -137,6 +137,16 @@ fun SettingsScreen(app: JarvisApp) {
                     HudChip(if (store.annOn.value) "✅ Annonces actives" else "Annonces désactivées", store.annOn.value) { store.annOn.set(!store.annOn.value) }
                     HudChip("🎧 Écouteurs/voiture seulement", store.annPrive.value) { store.annPrive.set(!store.annPrive.value) }
                 }
+                Spacer(Modifier.height(10.dp))
+                HudDivider()
+                Spacer(Modifier.height(8.dp))
+                Text("Bannière Android (notification visible dans la barre, en plus de l'annonce vocale ci-dessus)", color = HudText, fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                Spacer(Modifier.height(4.dp))
+                Text("Indépendant des agents en arrière-plan (qui continuent de tourner pareil) : ne coupe que l'affichage d'une notification JARVIS pour chaque SMS/mail reçu.", color = HudDim, fontSize = 11.sp)
+                Spacer(Modifier.height(6.dp))
+                HudChip(if (store.notifLive.value) "✅ Bannière affichée" else "🔕 Bannière coupée", store.notifLive.value) { store.notifLive.set(!store.notifLive.value) }
+                Spacer(Modifier.height(10.dp))
+                HudDivider()
                 fr.dd.jarvis.device.Annonces.CATEGORIES.forEach { (cat, label) ->
                     Spacer(Modifier.height(8.dp))
                     Text(label, color = HudText, fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
@@ -571,10 +581,10 @@ fun SettingsScreen(app: JarvisApp) {
                 }
                 Spacer(Modifier.height(6.dp))
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    HudChip("🔔 Notifier chaque SMS / mail (en direct)", store.notifLive.value) { store.notifLive.set(!store.notifLive.value) }
                     HudChip("🏷️ Ranger les mails dans Gmail", store.agentRanger.value) { store.agentRanger.set(!store.agentRanger.value) }
                     HudChip("📥 Archiver pubs/notifs", store.agentArchiver.value) { store.agentArchiver.set(!store.agentArchiver.value) }
                 }
+                Text("(La bannière Android pour chaque SMS/mail se règle dans « Annonces vocales » ci-dessus, pas ici.)", color = HudDim, fontSize = 10.sp)
                 Spacer(Modifier.height(6.dp))
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Toutes les", color = HudDim, fontSize = 12.sp)

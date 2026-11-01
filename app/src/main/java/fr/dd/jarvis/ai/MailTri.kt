@@ -69,8 +69,16 @@ N'invente rien et ne saute aucun numéro.
                 }
             }.forEach { it.await() }
         }
+        // Devis, factures et relances d'un client CONNU (fiche Société) : regroupés sous son seul libellé « Clients/Nom »
+        // plutôt qu'éclatés entre « Clients/Nom » et « Factures et paiements/Nom » — tout ce qui le concerne au même endroit.
+        val clientsConnus = runCatching { app.societe.data }.getOrNull()
+        val result2 = result.mapIndexed { i, c ->
+            val base = c ?: Classe(mails[i], "Perso", 2, "")
+            if (clientsConnus != null && base.cat == "Factures et paiements" && base.sub.isNotBlank() && clientsConnus.chercherClients(base.sub).isNotEmpty())
+                base.copy(cat = "Clients") else base
+        }
         // Mémorise les expéditeurs pour garder le même rangement la prochaine fois.
-        val out = result.mapIndexed { i, c -> c ?: Classe(mails[i], "Perso", 2, "") }
+        val out = result2
         runCatching {
             out.forEach { c ->
                 val k = c.mail.fromAddr.ifBlank { c.mail.from.lowercase() }

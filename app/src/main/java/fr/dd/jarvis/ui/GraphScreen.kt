@@ -106,8 +106,39 @@ private fun calculerDisposition(data: ObsidianWriter.GraphData): List<PosNoeud> 
             pos[node.id] = pos[node.id]!!.let { Offset(it.x + d.x / dist * lim, it.y + d.y / dist * lim) }
         }
     }
+    // Passe de « décollage » : la simulation ci-dessus laisse parfois plusieurs nœuds très liés au même hub
+    // quasiment superposés (visible en grappe illisible). On écarte ici, sans y toucher sinon, toute paire de
+    // nœuds plus proches que la somme de leurs rayons + marge, jusqu'à ce qu'il n'y ait plus de chevauchement.
+    fun rayonMonde(id: String) = 9f + min(degres[id] ?: 0, 10) * 2f
+    repeat(60) {
+        for (i in tries.indices) {
+            val a = tries[i].id; val pa = pos[a]!!
+            for (j in i + 1 until tries.size) {
+                val b = tries[j].id; val pb = pos[b]!!
+                val dx = pa.x - pb.x; val dy = pa.y - pb.y
+                var dist = hypot(dx, dy); if (dist < 0.01f) dist = 0.01f
+                val minDist = rayonMonde(a) + rayonMonde(b) + 6f
+                if (dist < minDist) {
+                    val push = (minDist - dist) / 2f
+                    val ux = dx / dist; val uy = dy / dist
+                    pos[a] = Offset(pa.x + ux * push, pa.y + uy * push)
+                    pos[b] = Offset(pb.x - ux * push, pb.y - uy * push)
+                }
+            }
+        }
+    }
     return tries.map { PosNoeud(it, pos[it.id]!!, degres[it.id] ?: 0) }
         .also { l -> edgesCache = edges }
+}
+
+/** Couleur stable par dossier (premier niveau du chemin), pour repérer visuellement les groupes de notes
+ *  (Contacts, Société/Devis, Journal…) dans le graphe — une teinte dérivée du nom, toujours la même. */
+private fun couleurDossier(folder: String, accent: Color): Color {
+    val racine = folder.substringBefore('/').trim()
+    if (racine.isBlank()) return accent
+    val h = (racine.lowercase().fold(0) { acc, c -> acc * 31 + c.code } and 0xFFFFFF)
+    val hue = (h % 360).toFloat()
+    return Color.hsv(hue, 0.55f, 1f)
 }
 
 // Rempli par calculerDisposition() juste avant le retour ; lu par le Composable pour tracer les arêtes.
@@ -177,7 +208,7 @@ fun GraphBackdrop(app: JarvisApp, modifier: Modifier = Modifier, active: Boolean
                     val sy = cy + pn.pos.y * scale
                     val rayon = (7f + min(pn.degre, 10) * 1.8f) * density * scale
                     val estHub = pn.degre >= 5
-                    val base = if (pn.node.ghost) Color(0xFF999999) else accent
+                    val base = if (pn.node.ghost) Color(0xFF999999) else couleurDossier(pn.node.folder, accent)
                     drawCircle(
                         color = base.copy(alpha = eclat * (if (pn.node.ghost) 0.33f else if (estHub) 0.9f else 0.55f)),
                         radius = rayon, center = Offset(sx, sy)
@@ -320,24 +351,28 @@ fun GraphScreen(app: JarvisApp) {
                         val sy = cy + pn.pos.y * scale
                         val rayon = (7f + min(pn.degre, 10) * 1.8f) * density * scale
                         val estHub = pn.degre >= 5
+                        val couleur = if (pn.node.ghost) Color(0xFF999999) else couleurDossier(pn.node.folder, accent)
                         drawCircle(
-                            color = if (pn.node.ghost) Color(0x66999999) else if (estHub) accent else accent.copy(alpha = 0.65f),
+                            color = if (pn.node.ghost) couleur.copy(alpha = 0.4f) else if (estHub) couleur else couleur.copy(alpha = 0.8f),
                             radius = rayon,
                             center = Offset(sx, sy)
                         )
                         if (estHub) drawCircle(
-                            color = accent.copy(alpha = 0.25f), radius = rayon * 2f, center = Offset(sx, sy),
+                            color = couleur.copy(alpha = 0.3f), radius = rayon * 2f, center = Offset(sx, sy),
                             style = Stroke(width = 1.6f * density * scale.coerceAtLeast(0.3f))
                         )
-                        if (rayon > 9f * density) {
+                        // Texte toujours affiché (tant qu'on ne dézoome pas à l'extrême) : avant, un seuil sur le rayon
+                        // masquait le nom de la quasi-totalité des nœuds — taille plancher lisible, indépendante du zoom.
+                        if (scale > 0.3f) {
                             drawContext.canvas.nativeCanvas.apply {
                                 val paint = android.graphics.Paint().apply {
                                     color = if (pn.node.ghost) android.graphics.Color.GRAY else android.graphics.Color.WHITE
-                                    textSize = 12f * density * scale.coerceIn(0.6f, 1.8f)
+                                    textSize = (13f * density * scale.coerceIn(0.85f, 2f))
                                     isAntiAlias = true
                                     textAlign = android.graphics.Paint.Align.CENTER
+                                    setShadowLayer(3f * density, 0f, 0f, android.graphics.Color.BLACK)
                                 }
-                                drawText(pn.node.label.take(22), sx, sy + rayon + 14f * density, paint)
+                                drawText(pn.node.label.take(22), sx, sy + rayon + 15f * density, paint)
                             }
                         }
                     }
