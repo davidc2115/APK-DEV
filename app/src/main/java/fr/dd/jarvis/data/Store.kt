@@ -201,6 +201,9 @@ class Store(context: Context) {
     // carte bancaire, token créé sur huggingface.co/settings/tokens (lecture suffit). Pollinations.ai exige
     // maintenant un abonnement payant ("Pollen") même pour la vidéo — plus utilisable gratuitement.
     val huggingFaceToken = SPref("huggingFaceToken", "")
+    // ---- Worker Cloudflare personnel pour animer une image avec Wan 2.2 (sans token Hugging Face côté Android)
+    val imageVideoWorkerUrl = SPref("imageVideoWorkerUrl", "")
+    val imageVideoWorkerToken = SPref("imageVideoWorkerToken", "")
     val tiktokTokenExpiry = SPref("tiktokTokenExpiry", "0")   // epoch secondes
     val tiktokOAuthState = SPref("tiktokOAuthState", "")      // anti-CSRF, vérifié au retour
 
