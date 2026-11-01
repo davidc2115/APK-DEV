@@ -234,7 +234,13 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
     data class GraphNode(val id: String, val label: String, val folder: String, val ghost: Boolean = false)
     data class GraphEdge(val from: String, val to: String)
-    data class GraphData(val nodes: List<GraphNode>, val edges: List<GraphEdge>)
+    /** Lien Markdown orienté : from référence to. Une cible absente reste une référence, pas un faux nœud. */
+    data class GraphReference(val from: String, val to: String, val resolved: Boolean, val rawTarget: String)
+    data class GraphData(
+        val nodes: List<GraphNode>,
+        val edges: List<GraphEdge>,
+        val references: List<GraphReference> = emptyList()
+    )
 
     private val lienRegex = Regex("\\[\\[([^\\]|#]+)")
 
@@ -265,23 +271,37 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         for (id in nodesById.keys) parNom.getOrPut(id.substringAfterLast('/').lowercase()) { mutableListOf() }.add(id)
 
         val edges = mutableListOf<GraphEdge>()
-        val vus = HashSet<Pair<String, String>>()
+        val references = mutableListOf<GraphReference>()
+        val vusReferences = HashSet<Pair<String, String>>()
+        val vusEdges = HashSet<Pair<String, String>>()
         for ((chemin, lire) in fichiers) {
             val fromId = idOf(chemin)
             val texte = lire() ?: continue
             for (m in lienRegex.findAll(texte)) {
                 val cible = m.groupValues[1].trim().trim('/')
                 if (cible.isBlank()) continue
-                val cibleNorm = cible.removeSuffix(".md")
+                val cibleNorm = cible.removeSuffix(".md").removeSuffix(".MD")
                 val toId = nodesById.keys.firstOrNull { it.equals(cibleNorm, true) }
                     ?: parNom[cibleNorm.substringAfterLast('/').lowercase()]?.firstOrNull()
-                    ?: cibleNorm // note « fantôme » : lien vers une note qui n'existe pas (encore)
-                if (toId !in nodesById) nodesById[toId] = GraphNode(toId, toId.substringAfterLast('/'), toId.substringBeforeLast('/', ""), ghost = true)
+                    ?: cibleNorm
                 if (fromId == toId) continue
+
+                // Une relation est toujours orientée depuis la note qui contient le wikilink.
+                if (vusReferences.add(fromId to toId)) {
+                    references += GraphReference(
+                        from = fromId,
+                        to = toId,
+                        resolved = toId in nodesById,
+                        rawTarget = cible
+                    )
+                }
+
+                // Conservation temporaire du format d'arêtes utilisé par l'ancienne vue 2D.
+                // La nouvelle indexation Room consomme exclusivement references, sans perdre le sens du lien.
                 val cle = if (fromId < toId) fromId to toId else toId to fromId
-                if (vus.add(cle)) edges += GraphEdge(fromId, toId)
+                if (vusEdges.add(cle)) edges += GraphEdge(fromId, toId)
             }
         }
-        return GraphData(nodesById.values.toList(), edges)
+        return GraphData(nodesById.values.toList(), edges, references)
     }
 }
