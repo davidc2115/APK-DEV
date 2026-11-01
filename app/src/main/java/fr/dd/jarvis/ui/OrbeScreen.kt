@@ -73,13 +73,21 @@ private fun creerVueOrbe(ctx: android.content.Context): android.view.View {
     val sceneView = SceneView(ctx)
     val materialLoader = MaterialLoader(sceneView.engine, ctx)
 
-    // Matériau « obsidienne violette » : noir très sombre, forte réflectance,
-    // faible rugosité pour des reflets nets façon verre volcanique.
+    // SceneView crée par défaut un éclairage ambiant (IBL) neutre assez lumineux : combiné à une
+    // réflectance élevée, ça « lave » le noir obsidienne en gris clair avec de gros reflets blancs
+    // soufflés (c'est ce que l'utilisateur a vu). Sans lumière d'ambiance par défaut, seules nos deux
+    // lumières directionnelles (violette + cyan, ci-dessous) éclairent la sphère : elle reste noire
+    // dans l'ombre et ne montre que des reflets colorés nets, façon verre volcanique sombre.
+    sceneView.indirectLight = null
+
+    // Matériau « obsidienne violette » : noir très sombre, réflectance modérée et rugosité un peu
+    // plus élevée qu'avant pour que les reflets des lumières colorées restent des reflets nets,
+    // pas des aplats blancs soufflés.
     val materiau = materialLoader.createColorInstance(
         Color(0xFF130018).toArgb(),
         0.35f,  // metallic
-        0.25f,  // roughness
-        0.9f    // reflectance
+        0.35f,  // roughness (était 0.25 : un peu plus mat pour éviter les reflets soufflés)
+        0.6f    // reflectance (était 0.9 : trop proche du miroir pur sans contrôle d'IBL)
     )
 
     val sphere = SphereNode(
