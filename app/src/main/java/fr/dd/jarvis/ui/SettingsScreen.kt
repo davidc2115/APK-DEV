@@ -214,6 +214,10 @@ fun SettingsScreen(app: JarvisApp) {
             TikTokPanel(store, app)
         }
 
+        item {
+            PollinationsPanel(store)
+        }
+
         // ------------------------------------------------------------ Mails
         item {
             var result by remember { mutableStateOf("") }
@@ -907,6 +911,24 @@ private fun TikTokPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvis
             }
         }
         if (msg.isNotBlank()) Text(msg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+    }
+}
+
+@Composable
+private fun PollinationsPanel(store: fr.dd.jarvis.data.Store) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    HudPanel(Modifier.fillMaxWidth(), title = "Vidéo IA — tiktok_video (Pollinations.ai)") {
+        Text(
+            "Service GRATUIT (sans carte bancaire) utilisé par tiktok_video pour générer les plans de la vidéo — mais communautaire et sans garantie de service (quota limité, peut être lent ou indisponible). " +
+                "Crée ta clé gratuite en quelques secondes sur enter.pollinations.ai/keys, puis colle-la ici.",
+            color = HudDim, fontSize = 12.sp
+        )
+        Spacer(Modifier.height(8.dp))
+        HudTextField(store.pollinationsApiKey.value, { store.pollinationsApiKey.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Clé API Pollinations", password = true)
+        Spacer(Modifier.height(6.dp))
+        Text("Ouvrir enter.pollinations.ai/keys", color = HudDim, fontSize = 12.sp, modifier = Modifier.clickable {
+            ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://enter.pollinations.ai/keys")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        })
     }
 }
 

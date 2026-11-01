@@ -28,8 +28,11 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
         tool("tiktok_profil", "TikTok : informations du compte connecté (nom, abonnés, nombre de vidéos, total de likes)."),
         tool("tiktok_mes_videos", "TikTok : liste les dernières vidéos du compte connecté avec leurs statistiques (vues, likes, commentaires, partages).",
             mapOf("nombre" to prop("Nombre de vidéos à récupérer, 1 à 20 (optionnel, défaut 15)."))),
-        tool("tiktok_analyse", "TikTok : analyse les vidéos du compte (statistiques + bonnes pratiques générales du réseau social) pour dire ce qui marche, ce qui ne marche pas, et comment améliorer les vues/likes. Ne compare PAS à des vidéos concurrentes précises (données non disponibles publiquement) : s'appuie sur les statistiques propres au compte et les tendances générales connues de TikTok.",
-            mapOf("nombre" to prop("Nombre de vidéos à analyser, 1 à 20 (optionnel, défaut 15)."))),
+        tool("tiktok_analyse", "TikTok : analyse les vidéos du compte (statistiques + bonnes pratiques générales du réseau social) pour dire ce qui marche, ce qui ne marche pas, et comment améliorer les vues/likes. Si l'utilisateur demande d'analyser UNE vidéo précise (par son titre ou son sujet, ex. « analyse ma vidéo sur les pompiers »), passe ce titre/sujet dans le paramètre « video » pour une analyse ciblée sur cette seule vidéo — n'utilise JAMAIS tiktok_mes_videos pour ça (qui ne fait que lister, sans analyser). Sans « video », analyse l'ensemble des dernières vidéos. Ne compare PAS à des vidéos concurrentes précises (données non disponibles publiquement) : s'appuie sur les statistiques propres au compte et les tendances générales connues de TikTok.",
+            mapOf(
+                "nombre" to prop("Nombre de vidéos à analyser, 1 à 20 (optionnel, défaut 15 ; ignoré si « video » est donné)."),
+                "video" to prop("Titre ou mot-clé identifiant UNE vidéo précise du compte à analyser seule, plutôt que l'ensemble (optionnel).")
+            )),
         tool("tiktok_script", "TikTok : écrit un script complet et prêt à tourner pour une nouvelle vidéo à partir d'un sujet (accroche, découpage de plans minuté, textes à l'écran, appel à l'action, légende + hashtags). S'appuie sur les statistiques des vidéos précédentes du compte si connecté, pour repérer ce qui marche déjà. Enregistre le script dans le coffre Obsidian (dossier « Scripts TikTok »).",
             mapOf(
                 "sujet" to prop("Le sujet ou l'idée de la vidéo."),
@@ -52,9 +55,11 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
         catch (e: Exception) { ToolResult("❌ ${e.message ?: e.javaClass.simpleName}") }
     }
 
+    private fun titre(o: JSONObject): String = o.optString("title").ifBlank { o.optString("video_description").take(50).ifBlank { "(sans titre)" } }
+
     private fun video(o: JSONObject): String {
         val date = runCatching { java.time.Instant.ofEpochSecond(o.optLong("create_time")).atZone(java.time.ZoneId.systemDefault()).toLocalDate().toString() }.getOrDefault("?")
-        return "- « ${o.optString("title").ifBlank { o.optString("video_description").take(50).ifBlank { "(sans titre)" } }} » ($date, ${o.optInt("duration")}s) — 👁️ ${o.optLong("view_count")} · ❤️ ${o.optLong("like_count")} · 💬 ${o.optLong("comment_count")} · 🔁 ${o.optLong("share_count")}"
+        return "- « ${titre(o)} » ($date, ${o.optInt("duration")}s) — 👁️ ${o.optLong("view_count")} · ❤️ ${o.optLong("like_count")} · 💬 ${o.optLong("comment_count")} · 🔁 ${o.optLong("share_count")}"
     }
 
     private suspend fun run(name: String, a: JSONObject): ToolResult {
@@ -84,6 +89,21 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
             }
             "tiktok_analyse" -> {
                 if (!TikTok.connecte(app)) return ToolResult("Aucun compte TikTok connecté : utilise tiktok_connexion.")
+                val filtre = a.optString("video").trim()
+                if (filtre.isNotBlank()) {
+                    val vids = TikTok.mesVideos(app, 50)
+                    if (vids.length() == 0) return ToolResult("Aucune vidéo trouvée sur ce compte : rien à analyser.")
+                    val tous = (0 until vids.length()).map { vids.getJSONObject(it) }
+                    val mot = filtre.lowercase()
+                    val trouvees = tous.filter { titre(it).lowercase().contains(mot) }
+                    when {
+                        trouvees.isEmpty() -> return ToolResult("Aucune vidéo ne correspond à « $filtre ». Vidéos disponibles :\n" + tous.joinToString("\n") { video(it) }, direct = true)
+                        trouvees.size > 1 -> return ToolResult("Plusieurs vidéos correspondent à « $filtre », précise laquelle :\n" + trouvees.joinToString("\n") { video(it) }, direct = true)
+                    }
+                    val v = trouvees[0]
+                    return ToolResult("Statistiques de CETTE vidéo précise du compte TikTok de l'utilisateur (titre : « ${titre(v)} ») :\n${video(v)}\n\n" +
+                        "Analyse UNIQUEMENT cette vidéo (ne parle d'AUCUNE autre vidéo du compte) : ce qui explique probablement ses résultats (durée, sujet, moment de publication), ce qui a bien fonctionné et ce qui aurait pu être amélioré, puis 2-3 suggestions concrètes pour une prochaine vidéo similaire. Précise que tu n'as pas accès aux vidéos concurrentes ni aux tendances en temps réel du réseau.")
+                }
                 val n = (a.optString("nombre").toIntOrNull() ?: 15).coerceIn(1, 20)
                 val vids = TikTok.mesVideos(app, n)
                 if (vids.length() == 0) return ToolResult("Aucune vidéo trouvée sur ce compte : rien à analyser.")

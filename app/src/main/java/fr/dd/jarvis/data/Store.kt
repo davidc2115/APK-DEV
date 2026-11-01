@@ -196,6 +196,9 @@ class Store(context: Context) {
     val tiktokAccessToken = SPref("tiktokAccessToken", "")
     val tiktokRefreshToken = SPref("tiktokRefreshToken", "")
     val tiktokOpenId = SPref("tiktokOpenId", "")
+
+    // ---- Génération vidéo IA (tiktok_video) : service gratuit Pollinations.ai, clé requise (gratuite, sur enter.pollinations.ai/keys)
+    val pollinationsApiKey = SPref("pollinationsApiKey", "")
     val tiktokTokenExpiry = SPref("tiktokTokenExpiry", "0")   // epoch secondes
     val tiktokOAuthState = SPref("tiktokOAuthState", "")      // anti-CSRF, vérifié au retour
 

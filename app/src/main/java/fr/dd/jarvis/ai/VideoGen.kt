@@ -32,17 +32,20 @@ object VideoGen {
     fun dossier(app: JarvisApp) = File(app.filesDir, "videos_ia").apply { mkdirs() }
 
     /** Génère un plan (clip) ; retourne les octets mp4. Erreur explicite si le quota gratuit est atteint ou le service indisponible. */
-    private fun genereClip(prompt: String, dureeDemandee: Int, ratio: String, audio: Boolean, modele: String): ByteArray {
+    private fun genereClip(app: JarvisApp, prompt: String, dureeDemandee: Int, ratio: String, audio: Boolean, modele: String): ByteArray {
+        val cle = app.store.pollinationsApiKey.value.trim()
+        if (cle.isBlank()) throw ApiException(401, "clé API Pollinations manquante — Pollinations exige maintenant une clé gratuite (créée en quelques secondes sur enter.pollinations.ai/keys, sans carte bancaire) : ajoute-la dans Réglages › Vidéo IA")
         val duree = if (modele == "seedance") dureeDemandee.coerceIn(2, 10) else listOf(4, 6, 8).minBy { kotlin.math.abs(it - dureeDemandee) }
         val url = "https://gen.pollinations.ai/image/" + java.net.URLEncoder.encode(prompt, "UTF-8").replace("+", "%20") +
             "?model=$modele&duration=$duree&aspectRatio=$ratio" + (if (modele == "veo") "&audio=$audio" else "")
-        val req = Request.Builder().url(url).build()
+        val req = Request.Builder().url(url).header("Authorization", "Bearer $cle").build()
         http.newCall(req).execute().use { r ->
             val bytes = r.body?.bytes() ?: ByteArray(0)
             val ct = r.header("Content-Type").orEmpty()
             if (!r.isSuccessful || !ct.startsWith("video")) {
                 val brut = String(bytes.copyOf(minOf(bytes.size, 300)))
                 val msg = when {
+                    r.code == 401 || r.code == 403 -> "clé API Pollinations refusée (vérifie qu'elle est bien à jour dans Réglages › Vidéo IA)"
                     r.code == 429 -> "quota gratuit Pollinations atteint pour l'instant (service communautaire sans garantie)"
                     r.code >= 500 || r.code == 0 -> "service de génération vidéo gratuit temporairement indisponible"
                     else -> "génération refusée (${r.code}) : $brut"
@@ -68,6 +71,8 @@ object VideoGen {
     suspend fun genererVideo(
         app: JarvisApp, sujet: String, script: String, dureePlan: Int, vertical: Boolean, audio: Boolean, modele: String
     ): Pair<File?, String> = withContext(Dispatchers.IO) {
+        if (app.store.pollinationsApiKey.value.isBlank())
+            return@withContext null to "❌ Il manque une clé API Pollinations (gratuite, sans carte bancaire) : crée-en une en quelques secondes sur enter.pollinations.ai/keys, puis ajoute-la dans Réglages › Vidéo IA."
         val listePlans = plans(app, sujet, script)
         if (listePlans.isEmpty()) return@withContext null to "❌ Impossible de découper le sujet en plans filmables."
         val ratio = if (vertical) "9:16" else "16:9"
@@ -75,7 +80,7 @@ object VideoGen {
         val echecs = mutableListOf<String>()
         listePlans.forEachIndexed { i, plan ->
             try {
-                val bytes = genereClip(plan, dureePlan, ratio, audio, modele)
+                val bytes = genereClip(app, plan, dureePlan, ratio, audio, modele)
                 val f = File(dossier(app), "clip_${System.currentTimeMillis()}_$i.mp4")
                 f.writeBytes(bytes)
                 clips.add(f)

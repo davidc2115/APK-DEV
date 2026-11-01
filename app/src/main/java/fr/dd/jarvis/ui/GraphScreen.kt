@@ -99,6 +99,10 @@ private fun calculerDisposition(data: ObsidianWriter.GraphData): List<PosNoeud> 
             disp[e.from] = disp[e.from]!!.let { Offset(it.x - fx, it.y - fy) }
             disp[e.to] = disp[e.to]!!.let { Offset(it.x + fx, it.y + fy) }
         }
+        // Gravité légère vers le centre : sans ça, une note isolée (sans aucun lien) ne subit QUE la répulsion et
+        // dérive indéfiniment loin du reste du graphe au fil des itérations — un coffre avec beaucoup de notes peu
+        // liées se retrouvait éclaté sur une zone énorme, la plupart des notes hors-écran même dézoomé à fond.
+        tries.forEach { node -> val p = pos[node.id]!!; disp[node.id] = disp[node.id]!!.let { Offset(it.x - p.x * 0.02f, it.y - p.y * 0.02f) } }
         val temp = 24f * (1f - iter / 140f)
         tries.forEach { node ->
             val d = disp[node.id]!!
@@ -118,7 +122,7 @@ private fun calculerDisposition(data: ObsidianWriter.GraphData): List<PosNoeud> 
                 val b = tries[j].id; val pb = pos[b]!!
                 val dx = pa.x - pb.x; val dy = pa.y - pb.y
                 var dist = hypot(dx, dy); if (dist < 0.01f) dist = 0.01f
-                val minDist = rayonMonde(a) + rayonMonde(b) + 22f
+                val minDist = rayonMonde(a) + rayonMonde(b) + 30f
                 if (dist < minDist) {
                     val push = (minDist - dist) / 2f
                     val ux = dx / dist; val uy = dy / dist
@@ -293,7 +297,10 @@ fun GraphScreen(app: JarvisApp) {
                     val largeur = (maxX - minX).coerceAtLeast(40f); val hauteur = (maxY - minY).coerceAtLeast(40f)
                     val canvasW = with(localDensity) { maxWidth.toPx() }; val canvasH = with(localDensity) { maxHeight.toPx() }
                     if (canvasW > 0f && canvasH > 0f) {
-                        val s = (minOf(canvasW / largeur, canvasH / hauteur) * 0.85f).coerceIn(1.1f, 10f)
+                        // Doit pouvoir descendre bien en dessous de 1 pour qu'un graphe large (notes peu reliées entre
+                        // elles) tienne entièrement à l'écran dès l'ouverture, plutôt que de forcer un zoom minimum qui
+                        // laisse la majorité des notes hors-écran (il fallait alors les chercher en déplaçant la vue).
+                        val s = (minOf(canvasW / largeur, canvasH / hauteur) * 0.85f).coerceIn(0.15f, 6f)
                         scale = s
                         offset = Offset(-(minX + maxX) / 2f * s, -(minY + maxY) / 2f * s)
                     }
@@ -377,20 +384,19 @@ fun GraphScreen(app: JarvisApp) {
                             color = couleur.copy(alpha = 0.3f), radius = rayon * 2f, center = Offset(sx, sy),
                             style = Stroke(width = 1.6f * density * scale.coerceAtLeast(0.3f))
                         )
-                        // Texte toujours affiché (tant qu'on ne dézoome pas à l'extrême) : avant, un seuil sur le rayon
-                        // masquait le nom de la quasi-totalité des nœuds — taille plancher lisible, indépendante du zoom.
-                        if (scale > 0.3f) {
-                            drawContext.canvas.nativeCanvas.apply {
-                                val paint = android.graphics.Paint().apply {
-                                    color = if (pn.node.ghost) android.graphics.Color.GRAY else android.graphics.Color.WHITE
-                                    textSize = (14f * density * scale.coerceIn(0.9f, 2.4f)) * (if (estCerveau) 1.15f else 1f)
-                                    isAntiAlias = true
-                                    textAlign = android.graphics.Paint.Align.CENTER
-                                    isFakeBoldText = estCerveau
-                                    setShadowLayer(3.5f * density, 0f, 0f, android.graphics.Color.BLACK)
-                                }
-                                drawText(pn.node.label.take(22), sx, sy + rayon + 16f * density, paint)
+                        // Texte TOUJOURS affiché, quel que soit le zoom (y compris très dézoomé) : la taille a un plancher
+                        // lisible indépendant de l'échelle, plutôt qu'un seuil qui faisait disparaître tous les noms dès
+                        // qu'on dézoomait pour voir l'ensemble du graphe — exactement le moment où on en a le plus besoin.
+                        drawContext.canvas.nativeCanvas.apply {
+                            val paint = android.graphics.Paint().apply {
+                                color = if (pn.node.ghost) android.graphics.Color.GRAY else android.graphics.Color.WHITE
+                                textSize = (14f * density * scale.coerceIn(0.9f, 2.4f)) * (if (estCerveau) 1.15f else 1f)
+                                isAntiAlias = true
+                                textAlign = android.graphics.Paint.Align.CENTER
+                                isFakeBoldText = estCerveau
+                                setShadowLayer(3.5f * density, 0f, 0f, android.graphics.Color.BLACK)
                             }
+                            drawText(pn.node.label.take(22), sx, sy + rayon + 16f * density, paint)
                         }
                     }
                 }
