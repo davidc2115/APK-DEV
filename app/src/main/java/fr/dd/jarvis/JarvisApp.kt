@@ -6,6 +6,14 @@ import android.app.NotificationManager
 import android.os.Build
 import fr.dd.jarvis.ai.Llm
 import fr.dd.jarvis.data.Store
+import fr.dd.jarvis.data.graph.GraphDatabase
+import fr.dd.jarvis.data.graph.GraphIndexer
+import fr.dd.jarvis.data.graph.GraphIndexReport
+import fr.dd.jarvis.data.graph.KnowledgeRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import fr.dd.jarvis.device.CalendarRepo
 import fr.dd.jarvis.device.ContactsRepo
 import fr.dd.jarvis.device.MailRepo
@@ -62,6 +70,11 @@ class JarvisApp : Application() {
         private set
     lateinit var obsidian: ObsidianWriter
         private set
+    lateinit var knowledgeRepository: KnowledgeRepository
+        private set
+    @Volatile var graphIndexReport: GraphIndexReport? = null
+        private set
+    private val graphScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     lateinit var phone: PhoneControl
         private set
     lateinit var memo: fr.dd.jarvis.device.Memo
@@ -78,6 +91,11 @@ class JarvisApp : Application() {
         mail = MailRepo(this, store)
         contacts = ContactsRepo(this)
         obsidian = ObsidianWriter(this, store)
+        val graphDatabase = GraphDatabase.getInstance(this)
+        val graphIndexer = GraphIndexer(graphDatabase, obsidian)
+        knowledgeRepository = KnowledgeRepository(graphDatabase, graphIndexer)
+        // Indexation initiale asynchrone : ne bloque pas le démarrage ni l'interface.
+        graphScope.launch { graphIndexReport = runCatching { knowledgeRepository.rebuildMarkdownIndex() }.getOrNull() }
         phone = PhoneControl(this)
         memo = fr.dd.jarvis.device.Memo(this, obsidian)
         Thread { runCatching { memo.load() } }.start()
