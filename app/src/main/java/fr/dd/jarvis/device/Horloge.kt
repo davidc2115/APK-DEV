@@ -24,7 +24,7 @@ import java.time.ZoneId
  */
 object Horloge {
     const val CH_ALARM = "horloge_alarme_v2"
-    const val CH_RUN = "horloge_en_cours"
+    const val CH_RUN = "horloge_en_cours_v2"
     const val ACT_FIRE = "fr.dd.jarvis.HORLOGE_FIRE"
     const val ACT_STOP = "fr.dd.jarvis.HORLOGE_STOP"
     private const val PREFS = "horloge"
@@ -41,10 +41,15 @@ object Horloge {
 
     /** Ne jamais annoncer un minuteur/chronomètre actif si Android bloque ses notifications. */
     private fun notificationsAutorisees(c: Context): Boolean {
+        channels(c)
         if (android.os.Build.VERSION.SDK_INT >= 33 &&
             c.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
         ) return false
-        return androidx.core.app.NotificationManagerCompat.from(c).areNotificationsEnabled()
+        if (!androidx.core.app.NotificationManagerCompat.from(c).areNotificationsEnabled()) return false
+        if (android.os.Build.VERSION.SDK_INT >= 26 &&
+            nm(c).getNotificationChannel(CH_RUN)?.importance == NotificationManager.IMPORTANCE_NONE
+        ) return false
+        return true
     }
 
     fun channels(c: Context) {
