@@ -690,8 +690,8 @@ private fun GraphScreen2DClean(app: JarvisApp) {
                 detectTapGestures { tap ->
                     val nearest = nodes.mapNotNull { node ->
                         val p = positions[node.id] ?: return@mapNotNull null
-                        val point = Offset(size.width / 2f + p.x * size.minDimension * 0.31f,
-                            size.height / 2f + p.y * size.minDimension * 0.31f)
+                        val point = Offset(size.width / 2f + p.x * minOf(size.width, size.height) * 0.31f,
+                            size.height / 2f + p.y * minOf(size.width, size.height) * 0.31f)
                         val d = (point - tap).getDistance()
                         if (d < 42f) node to d else null
                     }.minByOrNull { it.second }
