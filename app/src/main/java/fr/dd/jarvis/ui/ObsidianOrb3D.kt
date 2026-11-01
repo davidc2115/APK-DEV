@@ -116,7 +116,8 @@ private class ObsidianOrbSurface(context: Context) : GLSurfaceView(context) {
     var onNodeSelected: ((String) -> Unit)? = null
     private var downX = 0f
     private var downY = 0f
-    fun setGraph(nodes: List<fr.dd.jarvis.data.graph.GraphNodeEntity>, relations: List<fr.dd.jarvis.data.graph.GraphRelationEntity>) = orbRenderer.setGraph(nodes, relations)\n    fun setSelectedNode(id: String?) = orbRenderer.setSelectedNode(id)
+    fun setGraph(nodes: List<fr.dd.jarvis.data.graph.GraphNodeEntity>, relations: List<fr.dd.jarvis.data.graph.GraphRelationEntity>) = orbRenderer.setGraph(nodes, relations)
+    fun setSelectedNode(id: String?) = orbRenderer.setSelectedNode(id)
 
     init {
         setEGLContextClientVersion(2)
@@ -170,7 +171,8 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
     @Volatile private var lastX = 0f
     @Volatile private var lastY = 0f
     @Volatile private var pinchStart = 0f
-    @Volatile private var nodeIds: List<String> = emptyList()\n    @Volatile private var selectedNodeId: String? = null
+    @Volatile private var nodeIds: List<String> = emptyList()
+    @Volatile private var selectedNodeId: String? = null
     @Volatile private var nodePositions: List<FloatArray> = emptyList()
     @Volatile private var hitMatrix = FloatArray(16)
 
@@ -373,7 +375,8 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
         private const val GRAPH_VERTEX_SHADER = """
             uniform mat4 uMvp;
             attribute vec3 aPosition;
-            uniform float uPointSize;\n            void main() { gl_Position = uMvp * vec4(aPosition, 1.0); gl_PointSize = uPointSize; }
+            uniform float uPointSize; { gl_Position = uMvp * vec4(aPosition, 1.0); gl_PointSize = uPointSize; }
+            void main() { gl_Position = uMvp * vec4(aPosition, 1.0); gl_PointSize = uPointSize; }
         """
         private const val GRAPH_FRAGMENT_SHADER = """
             precision mediump float;
