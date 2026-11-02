@@ -689,7 +689,7 @@ private fun GraphScreen2DClean(app: JarvisApp) {
             .toSortedMap()
         groups.keys.mapIndexed { index, name ->
             val angle = -Math.PI / 2.0 + index * 2.0 * Math.PI / groups.size.coerceAtLeast(1)
-            name to Offset((cos(angle) * 0.52).toFloat(), (sin(angle) * 0.52).toFloat())
+            name to Offset((cos(angle) * 0.60).toFloat(), (sin(angle) * 0.60).toFloat())
         }.toMap()
     }
     val positions = remember(nodes, edges, groupCenters) {
@@ -700,7 +700,7 @@ private fun GraphScreen2DClean(app: JarvisApp) {
             val ordered = members.sortedBy { it.id }
             ordered.forEachIndexed { i, node ->
                 val angle = i * 2.3999632f
-                val ring = 0.14f + 0.13f * kotlin.math.sqrt((i + 0.5f) / ordered.size.coerceAtLeast(1))
+                val ring = 0.18f + 0.17f * kotlin.math.sqrt((i + 0.5f) / ordered.size.coerceAtLeast(1))
                 result[node.id] = Offset(
                     (hub.x + cos(angle) * ring).coerceIn(-0.94f, 0.94f),
                     (hub.y + sin(angle) * ring).coerceIn(-0.94f, 0.94f)
@@ -785,7 +785,7 @@ private fun GraphScreen2DClean(app: JarvisApp) {
                     Color(0xFFD0B0FF).copy(alpha = if (selected == null) 0.72f else if (edge.from in selectedNeighborhood && edge.to in selectedNeighborhood) 0.96f else 0.055f),
                     center + Offset(a.x * radius, a.y * radius),
                     center + Offset(b.x * radius, b.y * radius),
-                    strokeWidth = if (selected != null && edge.from in selectedNeighborhood && edge.to in selectedNeighborhood) 2.2f else 1.55f
+                    strokeWidth = if (selected != null && edge.from in selectedNeighborhood && edge.to in selectedNeighborhood) 2.8f else 2.0f
                 )
             }
             nodes.forEach { node ->
@@ -796,8 +796,8 @@ private fun GraphScreen2DClean(app: JarvisApp) {
                 val color = if (node.ghost) Color(0xFF8B8494) else couleurDossier(node.folder, Color(0xFFC18AFF))
                 val related = node.id in selectedNeighborhood
                 val dim = selected != null && !related
-                drawCircle(color.copy(alpha = if (isSelected) 0.52f else if (dim) 0.035f else if (related) 0.28f else 0.16f), if (isSelected) 23f else if (related) 16f else 13f, point)
-                drawCircle((if (isSelected) Color.White else color).copy(alpha = if (dim) 0.12f else 1f), if (isSelected) 7.5f else 4.2f, point)
+                drawCircle(color.copy(alpha = if (isSelected) 0.52f else if (dim) 0.035f else if (related) 0.28f else 0.16f), if (isSelected) 27f else if (related) 19f else 16f, point)
+                drawCircle((if (isSelected) Color.White else color).copy(alpha = if (dim) 0.12f else 1f), if (isSelected) 9f else 5.2f, point)
                 if (isSelected) drawCircle(Color(0xFFE4C9FF), 13f, point, style = Stroke(1.5f))
             }
         }
