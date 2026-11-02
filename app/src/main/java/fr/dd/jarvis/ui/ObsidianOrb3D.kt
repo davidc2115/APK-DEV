@@ -141,7 +141,7 @@ private class ObsidianOrbSurface(context: Context) : GLSurfaceView(context) {
 private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
     @Volatile private var angleX = -12f
     @Volatile private var angleY = 0f
-    @Volatile private var zoom = 1.12f
+    @Volatile private var zoom = 1.22f
     @Volatile private var lastX = 0f
     @Volatile private var lastY = 0f
     @Volatile private var pinchStart = 0f
