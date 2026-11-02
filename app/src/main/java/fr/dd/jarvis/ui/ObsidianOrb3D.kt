@@ -141,7 +141,7 @@ private class ObsidianOrbSurface(context: Context) : GLSurfaceView(context) {
 private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
     @Volatile private var angleX = -12f
     @Volatile private var angleY = 0f
-    @Volatile private var zoom = 1f
+    @Volatile private var zoom = 1.12f
     @Volatile private var lastX = 0f
     @Volatile private var lastY = 0f
     @Volatile private var pinchStart = 0f
@@ -320,14 +320,14 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
                 GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, detailVertexCount)
             }
             // Deux lobes principaux, puis des replis organiques pour éviter l'aspect de deux simples billes.
-            drawDetail(-0.19f, 0.035f, 1.01f, 0.37f, 0.31f, 0.22f, 0.65f, 0.42f)
-            drawDetail(0.19f, 0.035f, 1.01f, 0.37f, 0.31f, 0.22f, 0.82f, 0.46f)
-            drawDetail(-0.31f, 0.16f, 1.075f, 0.17f, 0.105f, 0.12f, 0.74f, 0.48f)
-            drawDetail(-0.27f, -0.14f, 1.075f, 0.18f, 0.105f, 0.12f, 0.78f, 0.48f)
-            drawDetail(-0.08f, 0.25f, 1.075f, 0.16f, 0.095f, 0.12f, 0.70f, 0.44f)
-            drawDetail(0.08f, -0.23f, 1.075f, 0.16f, 0.095f, 0.12f, 0.82f, 0.48f)
-            drawDetail(0.28f, 0.16f, 1.075f, 0.17f, 0.105f, 0.12f, 0.86f, 0.5f)
-            drawDetail(0.30f, -0.12f, 1.075f, 0.17f, 0.105f, 0.12f, 0.90f, 0.48f)
+            drawDetail(-0.20f, -0.30f, 0.88f, 0.40f, 0.34f, 0.24f, 0.65f, 0.42f)
+            drawDetail(0.20f, -0.30f, 0.88f, 0.40f, 0.34f, 0.24f, 0.82f, 0.46f)
+            drawDetail(-0.33f, -0.16f, 0.96f, 0.17f, 0.105f, 0.12f, 0.74f, 0.48f)
+            drawDetail(-0.29f, -0.44f, 0.96f, 0.18f, 0.105f, 0.12f, 0.78f, 0.48f)
+            drawDetail(-0.09f, -0.05f, 0.96f, 0.16f, 0.095f, 0.12f, 0.70f, 0.44f)
+            drawDetail(0.09f, -0.53f, 0.96f, 0.16f, 0.095f, 0.12f, 0.82f, 0.48f)
+            drawDetail(0.30f, -0.16f, 0.96f, 0.17f, 0.105f, 0.12f, 0.86f, 0.5f)
+            drawDetail(0.32f, -0.42f, 0.96f, 0.17f, 0.105f, 0.12f, 0.90f, 0.48f)
         }
         GLES20.glDisableVertexAttribArray(pos)
         GLES20.glDisableVertexAttribArray(normal)
@@ -344,7 +344,7 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
         lineBuffer?.let { b ->
             b.position(0); GLES20.glVertexAttribPointer(graphPos, 3, GLES20.GL_FLOAT, false, 12, b)
             GLES20.glEnableVertexAttribArray(graphPos)
-            GLES20.glLineWidth(1.7f)
+            GLES20.glLineWidth(2.0f)
             GLES20.glUniform4f(GLES20.glGetUniformLocation(graphProgram, "uColor"), 0.72f, 0.34f, 1f, 0.88f)
             GLES20.glDrawArrays(GLES20.GL_LINES, 0, graphLines.size / 3)
             GLES20.glDisableVertexAttribArray(graphPos)
@@ -353,7 +353,7 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
             b.position(0); GLES20.glVertexAttribPointer(graphPos, 3, GLES20.GL_FLOAT, false, 12, b)
             GLES20.glEnableVertexAttribArray(graphPos)
             GLES20.glUniform4f(GLES20.glGetUniformLocation(graphProgram, "uColor"), 0.82f, 0.62f, 1f, 1f)
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(graphProgram, "uPointSize"), 26f)
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(graphProgram, "uPointSize"), 32f)
             GLES20.glDrawArrays(GLES20.GL_POINTS, 0, graphPoints.size / 3)
             selectedPointBuffer?.let { selected ->
                 selected.position(0)
