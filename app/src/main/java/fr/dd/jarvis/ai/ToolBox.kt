@@ -46,6 +46,11 @@ class ToolBox(
                 "calendar" to prop("Nom d'un agenda précis (optionnel)."),
                 "question" to prop("Question précise de l'utilisateur sur le planning (optionnel).")
             )))
+        put(tool("analyser_planning_clients", "Analyse les rendez-vous de l'agenda pour compléter les fiches clients Société. Gère plusieurs clients dans un même événement et extrait uniquement les informations explicitement présentes : téléphone, adresse, puissance kWc, onduleur, contact et détails du rendez-vous. Demande confirmation avant toute modification.", mapOf(
+            "date" to prop("Date de début yyyy-MM-dd. Par défaut aujourd'hui."),
+            "days" to prop("Nombre de jours à analyser (1 à 90). Par défaut 30."),
+            "calendar" to prop("Nom d'un agenda précis (optionnel).")
+        )))
         put(tool("create_event", "Crée un rendez-vous dans l'agenda.",
             mapOf(
                 "title" to prop("Titre du rendez-vous."),
@@ -278,6 +283,7 @@ class ToolBox(
 
     suspend fun execute(name: String, a: JSONObject): ToolResult { return when (name) {
         "get_planning" -> getPlanning(a)
+        "analyser_planning_clients" -> analyserPlanningClients(a)
         "create_event" -> createEvent(a)
         "update_event" -> updateEvent(a)
         "delete_event" -> deleteEvent(a)
@@ -716,6 +722,125 @@ class ToolBox(
             sb.append("\n")
         }
         return sb.toString().trim()
+    }
+
+    private fun cleClient(s: String): String =
+        java.text.Normalizer.normalize(s.trim(), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}+"), "").lowercase().replace(Regex("[^a-z0-9]+"), " ").trim()
+
+    private suspend fun analyserPlanningClients(a: JSONObject): ToolResult {
+        if (!app.calendar.hasPermission()) return ToolResult("Permission de lecture de l'agenda manquante.")
+        val from = runCatching { a.optString("date").takeIf { it.isNotBlank() }?.let { LocalDate.parse(it.take(10)) } ?: LocalDate.now() }.getOrElse { LocalDate.now() }
+        val days = (a.optString("days").toIntOrNull() ?: 30).coerceIn(1, 90)
+        val calendarName = a.optString("calendar").trim()
+        val calId = calendarName.takeIf { it.isNotBlank() }?.let { app.calendar.findCalendar(it, false)?.id }
+        if (calendarName.isNotBlank() && calId == null) return ToolResult("Agenda « $calendarName » introuvable.")
+        val events = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            app.calendar.events(from, days, onlyVisible = true)
+        }.filter { calId == null || it.calId == calId }.take(80)
+        if (events.isEmpty()) return ToolResult("📅 Aucun rendez-vous à analyser du $from sur $days jour(s).", direct = true)
+        val clients = app.societe.data.clients
+        if (clients.isEmpty()) return ToolResult("Aucune fiche client Société n'existe encore.")
+        val known = clients.joinToString("\n") { c ->
+            "- ${c.nom}" + if (c.sites.isEmpty()) "" else " | " + c.sites.joinToString("; ") { "${it.nom} ${it.adresse}".trim() }
+        }
+        val zone = ZoneId.systemDefault()
+        val eventById = events.associateBy { it.id.toString() }
+        val source = events.joinToString("\n\n") { e ->
+            val z = if (e.allDay) java.time.ZoneOffset.UTC else zone
+            val st = java.time.Instant.ofEpochMilli(e.begin).atZone(z)
+            val en = java.time.Instant.ofEpochMilli(e.end).atZone(z)
+            "ID=${e.id} | DATE=" + (if (e.allDay) st.toLocalDate().toString() else st.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")) + "–" + en.format(DateTimeFormatter.ofPattern("HH:mm"))) +
+                "\nTITRE=${e.title}\nLIEU=${e.location}\nDESCRIPTION=${fr.dd.jarvis.device.HtmlText.text(e.description).take(2500)}"
+        }
+        val system = """
+Retourne uniquement un tableau JSON valide. Tu extrais des données de rendez-vous pour des fiches clients d'une entreprise photovoltaïque.
+UNE entrée par client et par rendez-vous: si un événement cite deux clients, retourne deux objets séparés avec le même event_id. Ne fusionne jamais deux clients.
+Le champ client doit ext exactement un nom de la liste connue ci-dessous. Ignore les personnes non clientes et n'invente aucun client.
+N'extrais que les informations explicitement présentes dans le titre, le lieu ou la description. N'infère jamais téléphone, adresse, puissance ni modèle d'onduleur.
+Chaque objet utilise ces clés : {"event_id":"id","client":"nom exact","contact":"","phone":"","email":","client_address":"","site_name":"","site_address":"","kwc":null,"inverter":"","panels":null,"commissioning_date":"","notes":""}
+Valeurs absentes : "" ou null. kwc = nombre en kWc, panels = entier. Distingue adresse client et adresse d'installation. Le lieu du rendez-vous est une adresse de site uniquement s'il s'agit clairement du lieu d'intervention.Clients et installations existants :
+$known
+""".trimIndent()
+        val raw = try { app.llm.agent(system, "Période : $from sur $days jours). Événements :\n$source") }
+        catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { return ToolResult("❌ Analyse IA impossible : ${e.message?.take(180)}") }
+        val first = raw.indexOf('['); val last = raw.lastIndexOf(']')
+        if (first < 0 || last <= first) return ToolResult("❌ Réponse structurée absente. Aucune fiche modifiée.")
+        val rows = try { JSONArray(raw.substring(first, last + 1)) }
+        catch (e: Exception) { return ToolResult("❌ Réponse JSON illisible. Aucune fiche modifiée.") }
+        data class Pending(val clientId: String, val nom: String, val args: JSONObject, val eventTag: String, val note: String)
+        val pending = mutableListOf<Pending>()
+        val ignored = linkedSetOf<String>()
+        for (i in 0 until rows.length()) {
+            val row = rows.optJSONObject(i) ?: continue
+            val event = eventById[row.optString("event_id").trim()] ?: continue
+            val nom = row.optString("client").trim()
+            val match = clients.filter { cleClient(it.nom) == cleClient(nom) }.singleOrNull()
+            if (match == null) { if (nom.isNotBlank()) ignored += nom; continue }
+            val current = app.societe.data.clients.firstOrNull { it.id == match.id } ?: match
+            fun v(k: String) = if (row.isNull(k)) "" else row.optString(k, "").trim().takeUnless { it == "null" }.orEmpty()
+            val args = JSONObject().put("nom", current.nom)
+            fun fill(k: String, old: String, out: String = k, valid: (String) -> Boolean = { it.isNotBlank() }) {
+                val value = v(k)
+                if (old.isBlank() && value.isNotBlank() && valid(value)) args.put(out, value)
+            }
+            fill("contact", current.contact)
+            fill("phone", current.tel, "tel") { it.count(Char::isDigit) in 9..15 }
+            fill("email", current.email) { it.contains("@") }
+            fill("client_address", current.adresse, "adresse") { it.length >= 6 }
+
+            val siteName = v("site_name"); val siteAddress = v("site_address")
+            val ref = listOf(siteName, siteAddress).firstOrNull { it.isNotBlank() }.orEmpty()
+            val site = current.sites.firstOrNull { ref.isNotBlank() && (cleClient(it.nom) == cleClient(ref) || cleClient(it.adresse) == cleClient(ref)) }
+                ?: if (ref.isBlank() && current.sites.size == 1) current.sites.first() else null
+            val kwc = v("kwc").replace(',', '.').replace(Regex("[^0-9.]"), "").toDoubleOrNull()?.takeIf { it in 0.1..5000.0 }
+            val inverter = v("inverter"); val panels = v("panels").toIntOrNull()?.takeIf { it in 1..100000 }
+            val miseEnService = v("commissioning_date")
+            val hasSite = siteName.isNotBlank() || siteAddress.isNotBlank() || kwc != null || inverter.isNotBlank() || panels != null || miseEnService.isNotBlank()
+            val safeSite = site != null || ref.isNotBlank() || (current.sites.isEmpty() && hasSite)
+            if (safeSite && hasSite) {
+                if (site != null) {
+                    args.put("site_nom", site.nom.ifBlank { siteName })
+                    args.put("site_adresse", site.adresse.ifBlank { siteAddress })
+                } else {
+                    if (siteName.isNotBlank()) args.put("site_nom", siteName)
+                    if (siteAddress.isNotBlank()) args.put("site_adresse", siteAddress)
+                    if (current.sites.isEmpty() && siteName.isBlank() && siteAddress.isBlank()) args.put("site_nom", "Installation principale")
+                }
+                if (kwc != null && (site == null || site.kwc <= 0.0)) args.put("kwc", kwc.toString())
+                if (inverter.isNotBlank() && (site == null || site.onduleur.isBlank())) args.put("onduleur", inverter)
+                if (panels != null && (site == null || site.nbPanneaux <= 0)) args.put("nb_panneaux", panels.toString())
+                if (miseEnService.isNotBlank() && (site == null || site.miseEnService.isBlank())) args.put("mise_en_service", miseEnService)
+            }
+            val z = if (event.allDay) java.time.ZoneOffset.UTC else zone
+            val date = if (event.allDay) java.time.Instant.ofEpochMilli(event.begin).atZone(z).toLocalDate().toString()
+                else java.time.Instant.ofEpochMilli(event.begin).atZone(z).format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"))
+            val tag = "agenda #${event.id}"
+            val note = "📅 Rendez-vous $date — ${event.title} ($tag)" +
+                event.location.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty() +
+                v("notes").takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
+            pending += Pending(current.id, current.nom, args, tag, note)
+        }
+        if (pending.isEmpty()) return ToolResult("📅 Analyse terminée : aucune donnée nouvelle vérifiable trouvée." +
+            if (ignored.isNotEmpty()) "\nNoms non reconnus : ${ignored.joinToString()}" else "", direct = true)
+        val preview = pending.joinToString("\n") { p ->
+            val fields = listOf("tel" to "📞", "adresse" to "📍", "contact" to "👤", "email" to "✉️", "kwc" to "⚡", "onduleur" to "🔌")
+                .mapNotNull { (k, em) -> p.args.optString(k).takeIf { it.isNotBlank() }?.let { "$em $it" } }
+            "} ${p.nom} : " + (fields + "📅 rendez-vous").joinToString(" · ")
+        }
+        if (!confirm("J'ai trouvé ${pending.size} association(s) rendez-vous/client. Les champs déjà renseignés ne seront pas écrasées.\n\n$preview\n\nConfirmer l'enregistrement ?", false))
+            return ToolResult("Aucune fiche modifiée : confirmation refusée.", direct = true)
+        var saved = 0
+        for (p in pending) {
+            val live = app.societe.data.clients.firstOrNull { it.id == p.clientId }
+            val args = JSONObject(p.args.toString())
+            if (live != null && !live.notes.contains(p.eventTag)) args.put("notes", (live.notes.trimEnd() + if (live.notes.isBlank()) "" else "\n") + p.note)
+            val result = societe.execute("client_ecrire", args)
+            if (result.text.startsWith("✅")) saved++
+        }
+        return ToolResult("✅ ${saved} fiche(s) client mise(s) à jour à partir du planning.\n\n$preview" +
+            if (ignored.isNotEmpty()) "\n⚠️ Noms non reconnus, ignorés : ${ignored.joinToString()}" else "", direct = true)
     }
 
     private suspend fun createEvent(a: JSONObject): ToolResult {
