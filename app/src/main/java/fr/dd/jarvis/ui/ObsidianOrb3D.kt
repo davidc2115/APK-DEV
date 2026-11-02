@@ -319,15 +319,18 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
                 GLES20.glVertexAttribPointer(normal, 3, GLES20.GL_FLOAT, false, 24, detail)
                 GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, detailVertexCount)
             }
-            // Deux lobes principaux, puis des replis organiques pour éviter l'aspect de deux simples billes.
-            drawDetail(-0.20f, -0.30f, 0.88f, 0.40f, 0.34f, 0.24f, 0.65f, 0.42f)
-            drawDetail(0.20f, -0.30f, 0.88f, 0.40f, 0.34f, 0.24f, 0.82f, 0.46f)
-            drawDetail(-0.33f, -0.16f, 0.96f, 0.17f, 0.105f, 0.12f, 0.74f, 0.48f)
-            drawDetail(-0.29f, -0.44f, 0.96f, 0.18f, 0.105f, 0.12f, 0.78f, 0.48f)
-            drawDetail(-0.09f, -0.05f, 0.96f, 0.16f, 0.095f, 0.12f, 0.70f, 0.44f)
-            drawDetail(0.09f, -0.53f, 0.96f, 0.16f, 0.095f, 0.12f, 0.82f, 0.48f)
-            drawDetail(0.30f, -0.16f, 0.96f, 0.17f, 0.105f, 0.12f, 0.86f, 0.5f)
-            drawDetail(0.32f, -0.42f, 0.96f, 0.17f, 0.105f, 0.12f, 0.90f, 0.48f)
+            // Le cerveau est centré et légèrement en avant de la surface de l'obsidienne.
+            // Le relief dépasse juste assez de la sphère pour rester visible avec le depth test actif.
+            drawDetail(-0.205f, 0.035f, 1.055f, 0.405f, 0.315f, 0.205f, 0.65f, 0.40f)
+            drawDetail(0.205f, 0.035f, 1.055f, 0.405f, 0.315f, 0.205f, 0.82f, 0.43f)
+            // Sillon médian et replis corticaux : reliefs plus petits, intégrés aux deux lobes.
+            drawDetail(0f, 0.025f, 1.105f, 0.105f, 0.205f, 0.115f, 0.76f, 0.34f)
+            drawDetail(-0.335f, 0.105f, 1.105f, 0.145f, 0.095f, 0.105f, 0.74f, 0.44f)
+            drawDetail(-0.265f, -0.105f, 1.115f, 0.155f, 0.085f, 0.105f, 0.78f, 0.46f)
+            drawDetail(-0.105f, 0.205f, 1.115f, 0.145f, 0.085f, 0.105f, 0.70f, 0.42f)
+            drawDetail(0.105f, -0.105f, 1.115f, 0.155f, 0.085f, 0.105f, 0.82f, 0.46f)
+            drawDetail(0.265f, 0.205f, 1.105f, 0.145f, 0.095f, 0.105f, 0.86f, 0.46f)
+            drawDetail(0.335f, -0.085f, 1.105f, 0.145f, 0.095f, 0.105f, 0.90f, 0.44f)
         }
         GLES20.glDisableVertexAttribArray(pos)
         GLES20.glDisableVertexAttribArray(normal)
