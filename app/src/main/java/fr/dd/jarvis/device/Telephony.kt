@@ -23,6 +23,48 @@ object Telephony {
         return c.name to c.phones.first().filter { it.isDigit() || it == '+' }
     }
 
+    /** Identifie un numéro dans les contacts Android, les clients de la société et les fiches Obsidian. */
+    fun identifierAppel(app: fr.dd.jarvis.JarvisApp, numero: String): String? {
+        val digits = numero.filter { it.isDigit() }
+        if (digits.length < 8) return null
+        val key = digits.takeLast(8)
+        val matches = linkedSetOf<String>()
+
+        // 1) Carnet d'adresses natif Android.
+        if (app.contacts.hasPermission()) {
+            runCatching {
+                app.contacts.search(key, 500).forEach { contact ->
+                    if (contact.phones.any { it.filter(Char::isDigit).takeLast(8) == key }) {
+                        matches += "${contact.name} (contact du téléphone)"
+                    }
+                }
+            }
+        }
+
+        // 2) Répertoire clients intégré à JARVIS.
+        runCatching {
+            app.societe.data.clients.forEach { client ->
+                val nums = listOf(client.tel, client.contact)
+                if (nums.any { it.filter(Char::isDigit).let { d -> d.length >= 8 && d.takeLast(8) == key } }) {
+                    matches += "${client.nom} (client)"
+                }
+            }
+        }
+
+        // 3) Fiches du coffre Obsidian : on confirme le numéro dans le contenu, pas seulement le nom du fichier.
+        runCatching {
+            app.obsidian.searchNotes(key, 30).forEach { (path, _) ->
+                val note = app.obsidian.readNote(path).orEmpty()
+                val numbers = Regex("""(?:\\+?\\d[\\d .()/-]{6,}\\d)""").findAll(note)
+                    .map { it.value.filter(Char::isDigit) }
+                if (numbers.any { it.length >= 8 && it.takeLast(8) == key }) {
+                    matches += "${path.substringAfterLast('/').removeSuffix(".md")} (Obsidian)"
+                }
+            }
+        }
+        return matches.takeIf { it.isNotEmpty() }?.joinToString(" · ")
+    }
+
     fun lire(app: fr.dd.jarvis.JarvisApp, count: Int, de: String, nonLus: Boolean): String {
         if (!ok(app, Manifest.permission.READ_SMS)) return "Permission SMS non accordée (Réglages › Contrôle du téléphone › Autoriser SMS et appels)."
         val num = if (de.isBlank()) null else (resolve(app, de)?.second ?: de)
