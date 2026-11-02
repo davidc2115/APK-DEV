@@ -4,6 +4,7 @@ import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.provider.AlarmClock
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -127,12 +128,12 @@ object Horloge {
             low.contains("semaine") || low.contains("ouvr") -> (2..6).toList()
             else -> dayMap.filter { low.contains(it.first) }.map { it.second }
         }
-        val intent = Intent(AlarmManager.ACTION_SET_ALARM).apply {
-            putExtra(AlarmManager.EXTRA_HOUR, h)
-            putExtra(AlarmManager.EXTRA_MINUTES, mn)
-            putExtra(AlarmManager.EXTRA_MESSAGE, libelle.ifBlank { "Alarme" })
-            putExtra(AlarmManager.EXTRA_SKIP_UI, true)
-            if (days.isNotEmpty()) putExtra(AlarmManager.EXTRA_DAYS, ArrayList(days))
+        val intent = Intent(AlarmClock.ACTION_SET_ALARM).apply {
+            putExtra(AlarmClock.EXTRA_HOUR, h)
+            putExtra(AlarmClock.EXTRA_MINUTES, mn)
+            putExtra(AlarmClock.EXTRA_MESSAGE, libelle.ifBlank { "Alarme" })
+            putExtra(AlarmClock.EXTRA_SKIP_UI, true)
+            if (days.isNotEmpty()) putExtra(AlarmClock.EXTRA_DAYS, ArrayList(days))
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         return try {
@@ -149,8 +150,8 @@ object Horloge {
     /** Crée et démarre un compte à rebours dans l'application Horloge native. */
     fun creerMinuteur(c: Context, secondes: Int, libelle: String): String {
         if (secondes <= 0) return "Durée du minuteur invalide."
-        val intent = Intent(AlarmManager.ACTION_SET_TIMER).apply {
-            putExtra(AlarmManager.EXTRA_LENGTH, secondes)
+        val intent = Intent(AlarmClock.ACTION_SET_TIMER).apply {
+            putExtra(AlarmClock.EXTRA_LENGTH, secondes)
             putExtra(AlarmManager.EXTRA_MESSAGE, libelle.ifBlank { "Minuteur" })
             putExtra(AlarmManager.EXTRA_SKIP_UI, true)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -215,7 +216,7 @@ object Horloge {
     // On ouvre l'application Horloge sur son écran de chronomètres ; aucun faux démarrage interne n'est annoncé.
     fun chronometre(c: Context, action: String): String {
         val a = action.trim().lowercase()
-        val intent = Intent(AlarmManager.ACTION_SHOW_TIMERS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val intent = Intent(AlarmClock.ACTION_SHOW_TIMERS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return try {
             if (intent.resolveActivity(c.packageManager) == null) {
                 val launch = c.packageManager.getLaunchIntentForPackage("com.android.deskclock")
