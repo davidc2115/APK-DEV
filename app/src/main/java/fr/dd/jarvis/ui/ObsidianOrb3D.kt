@@ -222,7 +222,8 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
 
     fun setGraph(nodes: List<fr.dd.jarvis.data.graph.GraphNodeEntity>, relations: List<fr.dd.jarvis.data.graph.GraphRelationEntity>) {
         // L’ordre alphabétique donne des positions stables : ajouter une note ne redistribue pas tout le nuage.
-        val visible = nodes.sortedBy { it.id }\n        val positions = HashMap<String, FloatArray>()
+        val visible = nodes.sortedBy { it.id }
+        val positions = HashMap<String, FloatArray>()
         visible.forEachIndexed { index, node ->
             val y = 1f - 2f * (index + 0.5f) / max(visible.size, 1)
             val radius = sqrt(max(0f, 1f - y * y))
@@ -242,7 +243,8 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
         pointBuffer = makeBuffer(graphPoints)
         lineBuffer = makeBuffer(graphLines)
         val selectedIndex = nodeIds.indexOf(selectedNodeId)
-        selectedPointBuffer = if (selectedIndex >= 0) nodePositions.getOrNull(selectedIndex)?.let { makeBuffer(it) } else null\n    }
+        selectedPointBuffer = if (selectedIndex >= 0) nodePositions.getOrNull(selectedIndex)?.let { makeBuffer(it) } else null
+    }
 
     private fun makeBuffer(values: FloatArray): java.nio.FloatBuffer {
         val b = ByteBuffer.allocateDirect(values.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
