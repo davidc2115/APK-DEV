@@ -74,7 +74,7 @@ class JarvisNotificationListener : NotificationListenerService() {
             if (titre.isBlank() && texte.isBlank()) return
             val label = try { packageManager.getApplicationLabel(packageManager.getApplicationInfo(sbn.packageName, 0)).toString() } catch (_: Exception) { sbn.packageName }
             if (appel) {
-                val candidat = Regex("(?:\\\\+?\\\\d[\\\\d .()/-]{6,}\\\\d)").find("$titre $texte")?.value.orEmpty()
+                val candidat = Regex("(?:\\+?\\d[\\d .()/-]{6,}\\d)").find("$titre $texte")?.value.orEmpty()
                 val app = applicationContext as? fr.dd.jarvis.JarvisApp
                 val identite = if (candidat.isNotBlank() && app != null) runCatching { fr.dd.jarvis.device.Telephony.identifierAppel(app, candidat) }.getOrNull() else null
                 if (!identite.isNullOrBlank()) titre = "$identite · $titre".trim(' ', '·')
