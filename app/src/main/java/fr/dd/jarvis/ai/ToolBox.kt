@@ -839,7 +839,10 @@ class ToolBox(
             if (current.adresse.isBlank() && !args.has("adresse") && event.location.isNotBlank()) args.put("adresse", event.location.trim())
 
             val siteName = value("site_name")
-            val siteAddress = value("site_address")
+            val siteAddress = value("site_address").ifBlank {
+                // Le champ LIEU de Google Agenda est l'adresse d'intervention ; il complète aussi la fiche du site.
+                if (value("kwc").isNotBlank() || value("inverter").isNotBlank()) event.location.trim() else ""
+            }
             val reference = listOf(siteName, siteAddress).firstOrNull { it.isNotBlank() }.orEmpty()
             val site = current.sites.firstOrNull {
                 reference.isNotBlank() && (cleClient(it.nom) == cleClient(reference) || cleClient(it.adresse) == cleClient(reference))
