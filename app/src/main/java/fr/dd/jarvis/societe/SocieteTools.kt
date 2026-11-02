@@ -361,7 +361,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         }
         if (a.hv("notes")) c = c.copy(notes = a.s("notes"))
         var siteTxt = ""
-        if (a.hv("site_nom") || a.hv("site_adresse") || a.hv("kwc")) {
+        if (a.hv("site_nom") || a.hv("site_adresse") || a.hv("kwc") || a.hv("onduleur") || a.hv("nb_panneaux") || a.hv("mise_en_service") || a.hv("site_notes")) {
             val ref = a.s("site_nom").ifBlank { a.s("site_adresse") }
             val trouve = c.sites.firstOrNull { x -> ref.isNotBlank() && (normaliser(x.nom) == normaliser(ref) || normaliser(x.adresse) == normaliser(ref)) }
                 ?: (if (ref.isBlank() && c.sites.size == 1) c.sites.first() else null)
