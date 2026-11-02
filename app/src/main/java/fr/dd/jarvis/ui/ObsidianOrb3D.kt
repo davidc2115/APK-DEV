@@ -68,54 +68,7 @@ fun ObsidianOrb3D(app: fr.dd.jarvis.JarvisApp) {
             },
             update = { view -> view.setGraph(nodes, relations); view.setSelectedNode(selectedNodeId) }
         )
-        // Habillage Jörmungand + cerveau : couche graphique translucide au-dessus du noyau 3D.
-        // Les points et liens restent ceux du graphe Room ; ce décor n'invente aucune donnée.
-        Canvas(Modifier.fillMaxSize()) {
-            val cx = size.width * 0.5f
-            val cy = size.height * 0.51f
-            val radius = size.minDimension * 0.39f
-            val serpent = Path().apply {
-                moveTo(cx - radius * 0.92f, cy + radius * 0.58f)
-                cubicTo(cx - radius * 1.30f, cy + radius * 0.10f, cx - radius * 0.92f, cy - radius * 1.02f, cx - radius * 0.08f, cy - radius * 1.02f)
-                cubicTo(cx + radius * 0.82f, cy - radius * 1.02f, cx + radius * 1.23f, cy - radius * 0.25f, cx + radius * 0.94f, cy + radius * 0.48f)
-                cubicTo(cx + radius * 0.70f, cy + radius * 1.02f, cx - radius * 0.18f, cy + radius * 1.14f, cx - radius * 0.72f, cy + radius * 0.70f)
-            }
-            drawPath(serpent, Brush.linearGradient(listOf(Color(0xFF170D28), Color(0xFF9B48E8), Color(0xFF28113E), Color(0xFFC18AFF))), style = Stroke(radius * 0.105f, cap = StrokeCap.Round))
-            drawPath(serpent, Color(0xFFCA9BFF).copy(alpha = 0.32f), style = Stroke(radius * 0.018f, cap = StrokeCap.Round))
-            // Écailles lumineuses stylisées le long de l'anneau.
-            for (i in 0 until 34) {
-                val a = i * (Math.PI.toFloat() * 2f / 34f)
-                val x = cx + cos(a) * radius * 0.98f
-                val y = cy + sin(a) * radius * 0.88f
-                drawLine(Color(0xFFD6B2FF).copy(alpha = 0.22f), Offset(x - 4f, y - 2f), Offset(x + 4f, y + 2f), strokeWidth = 1.3f)
-            }
-            // Tête du serpent, à droite, avec deux yeux violets.
-            val head = Offset(cx + radius * 0.91f, cy - radius * 0.56f)
-            drawCircle(Color(0xFF35134F), radius * 0.105f, head)
-            drawCircle(Color(0xFFB96CFF), radius * 0.025f, Offset(head.x + radius * 0.045f, head.y - radius * 0.025f))
-            drawCircle(Color(0xFFB96CFF), radius * 0.025f, Offset(head.x + radius * 0.045f, head.y + radius * 0.025f))
-            // Cerveau central lumineux, en deux hémisphères.
-            val brainW = radius * 0.62f
-            val brainH = radius * 0.43f
-            val brain = Path().apply {
-                moveTo(cx, cy - brainH)
-                cubicTo(cx - brainW * 0.95f, cy - brainH * 1.25f, cx - brainW * 1.12f, cy + brainH * 0.18f, cx - brainW * 0.28f, cy + brainH)
-                cubicTo(cx - brainW * 0.08f, cy + brainH * 1.12f, cx, cy + brainH * 0.82f, cx, cy + brainH * 0.70f)
-                cubicTo(cx, cy + brainH * 0.82f, cx + brainW * 0.08f, cy + brainH * 1.12f, cx + brainW * 0.28f, cy + brainH)
-                cubicTo(cx + brainW * 1.12f, cy + brainH * 0.18f, cx + brainW * 0.95f, cy - brainH * 1.25f, cx, cy - brainH)
-                close()
-            }
-            drawPath(brain, Color(0xFFB47AFF).copy(alpha = 0.13f))
-            drawPath(brain, Brush.linearGradient(listOf(Color(0xFFE0BFFF), Color(0xFF8E45D0), Color(0xFFD9A8FF))), style = Stroke(radius * 0.018f))
-            for (i in 0 until 13) {
-                val a = i * (Math.PI.toFloat() * 2f / 13f)
-                val x = cx + cos(a) * brainW * 0.72f
-                val y = cy + sin(a) * brainH * 0.66f
-                drawLine(Color(0xFFD7B0FF).copy(alpha = 0.48f), Offset(cx, cy), Offset(x, y), strokeWidth = 1.1f)
-                drawCircle(Color(0xFFE7CEFF).copy(alpha = 0.78f), radius * 0.018f, Offset(x, y))
-            }
-            drawLine(Color(0xFFE0C2FF).copy(alpha = 0.55f), Offset(cx, cy - brainH * 0.8f), Offset(cx, cy + brainH * 0.78f), strokeWidth = 1.2f)
-        }
+        // Le cerveau et Jörmungand sont désormais rendus dans la scène OpenGL (géométrie 3D).
         if (selectedNode != null) {
             Column(
                 Modifier.align(Alignment.BottomCenter).padding(bottom = 112.dp)
@@ -205,6 +158,10 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
     @Volatile private var lineBuffer: java.nio.FloatBuffer? = null
     @Volatile private var selectedPointBuffer: java.nio.FloatBuffer? = null
     private var vertexBuffer: java.nio.FloatBuffer? = null
+    private var serpentBuffer: java.nio.FloatBuffer? = null
+    private var serpentVertexCount = 0
+    private var detailSphere: java.nio.FloatBuffer? = null
+    private var detailVertexCount = 0
     private var vertexCount = 0
     @Volatile private var surfaceWidth = 1
     @Volatile private var surfaceHeight = 1
@@ -288,6 +245,10 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
         graphProgram = createProgram(GRAPH_VERTEX_SHADER, GRAPH_FRAGMENT_SHADER)
         vertexBuffer = createSphere(64, 48)
         vertexCount = 64 * 48 * 6
+        detailSphere = createSphere(24, 20)
+        detailVertexCount = 24 * 20 * 6
+        serpentBuffer = createSerpentTube(180, 14)
+        serpentVertexCount = 180 * 14 * 6
         Matrix.setLookAtM(view, 0, 0f, 0f, 3.3f, 0f, 0f, 0f, 0f, 1f, 0f)
     }
 
@@ -321,9 +282,48 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
         GLES20.glVertexAttribPointer(normal, 3, GLES20.GL_FLOAT, false, 24, buffer)
         GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(program, "uMvp"), 1, false, mvp, 0)
         GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(program, "uModel"), 1, false, model, 0)
+        GLES20.glUniform3f(GLES20.glGetUniformLocation(program, "uTint"), 0.72f, 0.66f, 0.88f)
+        GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uEmission"), 0f)
         GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, vertexCount)
+
+        // Jörmungand : véritable corps tubulaire maillé, enroulé autour de l'obsidienne.
+        serpentBuffer?.let { serpent ->
+            serpent.position(0)
+            GLES20.glVertexAttribPointer(pos, 3, GLES20.GL_FLOAT, false, 24, serpent)
+            serpent.position(3)
+            GLES20.glVertexAttribPointer(normal, 3, GLES20.GL_FLOAT, false, 24, serpent)
+            GLES20.glUniform3f(GLES20.glGetUniformLocation(program, "uTint"), 0.34f, 0.13f, 0.55f)
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uEmission"), 0.12f)
+            GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, serpentVertexCount)
+        }
+
+        // Cerveau bilobé en volume, placé devant la sphère : deux hémisphères organiques.
+        val detail = detailSphere
+        if (detail != null) {
+            fun drawDetail(x: Float, y: Float, z: Float, sx: Float, sy: Float, sz: Float, tint: Float, emission: Float) {
+                val part = model.copyOf()
+                Matrix.translateM(part, 0, x, y, z)
+                Matrix.scaleM(part, 0, sx, sy, sz)
+                val partMvp = FloatArray(16)
+                Matrix.multiplyMM(partMvp, 0, projection, 0, view, 0)
+                Matrix.multiplyMM(partMvp, 0, partMvp, 0, part, 0)
+                GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(program, "uMvp"), 1, false, partMvp, 0)
+                GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(program, "uModel"), 1, false, part, 0)
+                GLES20.glUniform3f(GLES20.glGetUniformLocation(program, "uTint"), 0.72f + tint * 0.28f, 0.32f + tint * 0.30f, 0.95f)
+                GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uEmission"), emission)
+                detail.position(0)
+                GLES20.glVertexAttribPointer(pos, 3, GLES20.GL_FLOAT, false, 24, detail)
+                detail.position(3)
+                GLES20.glVertexAttribPointer(normal, 3, GLES20.GL_FLOAT, false, 24, detail)
+                GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, detailVertexCount)
+            }
+            drawDetail(-0.19f, 0.035f, 1.01f, 0.34f, 0.30f, 0.20f, 0.65f, 0.38f)
+            drawDetail(0.19f, 0.035f, 1.01f, 0.34f, 0.30f, 0.20f, 0.82f, 0.42f)
+        }
         GLES20.glDisableVertexAttribArray(pos)
         GLES20.glDisableVertexAttribArray(normal)
+        GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(program, "uMvp"), 1, false, mvp, 0)
+        GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(program, "uModel"), 1, false, model, 0)
 
         // Les nœuds forment une constellation autour de la sphère : ils ne doivent pas disparaître derrière l'obsidienne.
         GLES20.glDisable(GLES20.GL_DEPTH_TEST)
@@ -357,6 +357,44 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
         }
         GLES20.glDisable(GLES20.GL_BLEND)
         GLES20.glEnable(GLES20.GL_DEPTH_TEST)
+    }
+
+    /** Tube fermé en maillage triangulé : corps continu de serpent, et non un trait 2D. */
+    private fun createSerpentTube(steps: Int, sides: Int): java.nio.FloatBuffer {
+        val values = ArrayList<Float>(steps * sides * 36)
+        fun point(t: Double, side: Double): FloatArray {
+            val a = t * Math.PI * 2.0
+            val cx = 1.045 * cos(a)
+            val cy = 0.91 * sin(a)
+            val cz = 0.18 + 0.30 * sin(a * 2.0 + 0.55)
+            val tx = -1.045 * sin(a)
+            val ty = 0.91 * cos(a)
+            val tl = kotlin.math.sqrt(tx * tx + ty * ty)
+            val nx = ty / tl
+            val ny = -tx / tl
+            val q = side * Math.PI * 2.0
+            val radius = 0.073 + 0.012 * (0.5 + 0.5 * sin(a * 3.0))
+            val radial = cos(q) * radius
+            return floatArrayOf(
+                (cx + nx * radial).toFloat(),
+                (cy + ny * radial).toFloat(),
+                (cz + sin(q) * radius).toFloat(),
+                (nx * cos(q)).toFloat(),
+                (ny * cos(q)).toFloat(),
+                sin(q).toFloat()
+            )
+        }
+        fun add(v: FloatArray) { values.add(v[0]); values.add(v[1]); values.add(v[2]); values.add(v[3]); values.add(v[4]); values.add(v[5]) }
+        for (i in 0 until steps) for (j in 0 until sides) {
+            val t0 = i.toDouble() / steps
+            val t1 = (i + 1).toDouble() / steps
+            val s0 = j.toDouble() / sides
+            val s1 = (j + 1).toDouble() / sides
+            val a = point(t0, s0); val b = point(t1, s0); val c = point(t1, s1); val d = point(t0, s1)
+            add(a); add(b); add(c); add(a); add(c); add(d)
+        }
+        val bytes = ByteBuffer.allocateDirect(values.size * 4).order(ByteOrder.nativeOrder())
+        return bytes.asFloatBuffer().apply { values.forEach { put(it) }; position(0) }
     }
 
     private fun createSphere(stacks: Int, slices: Int): java.nio.FloatBuffer {
@@ -430,6 +468,8 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
             attribute vec3 aNormal;
             varying vec3 vPosition;
             varying vec3 vNormal;
+            uniform vec3 uTint;
+            uniform float uEmission;
             void main() {
                 vec4 world = uModel * vec4(aPosition, 1.0);
                 vPosition = world.xyz;
@@ -481,7 +521,7 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
                 float fineVeins = 1.0 - smoothstep(0.006, 0.025, abs(sin((vPosition.x * 17.0 + vPosition.y * 13.0 + warp * 8.0) * 2.1)));
                 veins = max(veins, fineVeins * 0.24);
 
-                vec3 base = vec3(0.012, 0.009, 0.022) + grain * vec3(0.025, 0.018, 0.038);
+                vec3 base = (vec3(0.012, 0.009, 0.022) + grain * vec3(0.025, 0.018, 0.038)) * uTint;
                 vec3 purple = vec3(0.38, 0.12, 0.72) * veins * (0.55 + warp);
                 vec3 color = base * (0.34 + diffuse * 0.48);
                 color += purple;
@@ -489,6 +529,7 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
                 color += vec3(0.72, 0.48, 1.0) * specular * 0.9;
                 float innerGlow = exp(-length(vPosition.xy) * 8.0) * 0.22;
                 color += vec3(0.34, 0.08, 0.68) * innerGlow;
+                color += uTint * uEmission * (0.55 + grain * 0.45);
                 gl_FragColor = vec4(color, 1.0);
             }
         """
