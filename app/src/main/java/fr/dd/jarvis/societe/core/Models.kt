@@ -25,7 +25,9 @@ data class Societe(
     val validiteDevisJours: Int = 30,
     val mentions: String = "",           // mentions légales complémentaires (assurance décennale, etc.)
     val reservePct: Double = 0.0,        // % du HT de chaque facture encaissée mis de côté (réserve bénéfices)
-    val partDirigeantPct: Double = 50.0  // répartition de la réserve en fin d'année : % dirigeant (dividende), reste aux salariés
+    val partDirigeantPct: Double = 50.0,
+    val kmlCouleurParticulier: String = "#20A45A",
+    val kmlCouleurProfessionnel: String = "#2878D0"
 )
 
 enum class Mode { FORFAIT, PAR_KWC, HEURE, UNITE }
