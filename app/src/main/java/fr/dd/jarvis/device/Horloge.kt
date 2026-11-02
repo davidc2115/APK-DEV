@@ -113,73 +113,58 @@ object Horloge {
         return id
     }
 
-    /** Programme une alarme JARVIS en arrière-plan, sans lancer l'application Horloge native. */
+    /** Transmet la création d'une alarme à l'application Horloge native Android/Xiaomi. */
     fun creerAlarme(c: Context, heure: String, libelle: String, jours: String): String {
         val match = Regex("(\\d{1,2})\\s*(?:[:hH]\\s*(\\d{1,2})?)?").find(heure.trim())
             ?: return "Heure d'alarme non comprise : « $heure »."
         val h = match.groupValues[1].toIntOrNull() ?: return "Heure invalide : $heure."
         val mn = match.groupValues[2].toIntOrNull() ?: 0
         if (h !in 0..23 || mn !in 0..59) return "Heure invalide : $heure."
-        if (!accorderAccesExactParShizuku(c)) return "❌ Alarme non programmée : active « Alarmes et rappels » pour Jarvis ou démarre Shizuku et autorise Jarvis."
-        if (!notificationsAutorisees(c)) return "❌ Alarme non programmée : autorise les notifications de JARVIS pour recevoir l'alerte."
         val low = jours.lowercase()
-        val map = mapOf("dim" to 1, "lun" to 2, "mar" to 3, "mer" to 4, "jeu" to 5, "ven" to 6, "sam" to 7)
+        val dayMap = listOf("dim" to 1, "lun" to 2, "mar" to 3, "mer" to 4, "jeu" to 5, "ven" to 6, "sam" to 7)
         val days = when {
             low.contains("tous") || low.contains("quotidien") -> (1..7).toList()
             low.contains("semaine") || low.contains("ouvr") -> (2..6).toList()
-            else -> map.filterKeys { low.contains(it) }.values.toList()
+            else -> dayMap.filter { low.contains(it.first) }.map { it.second }
         }
-        val id = nouvelId(c)
-        val at = prochaine(h, mn, days)
-        val item = JSONObject().put("id", id).put("kind", "alarm").put("at", at)
-            .put("h", h).put("m", mn).put("label", libelle).put("days", JSONArray(days))
-        val items = load(c)
-        items.removeAll { it.optInt("id") == id }
-        items.add(item)
-        save(c, items)
+        val intent = Intent(AlarmManager.ACTION_SET_ALARM).apply {
+            putExtra(AlarmManager.EXTRA_HOUR, h)
+            putExtra(AlarmManager.EXTRA_MINUTES, mn)
+            putExtra(AlarmManager.EXTRA_MESSAGE, libelle.ifBlank { "Alarme" })
+            putExtra(AlarmManager.EXTRA_SKIP_UI, true)
+            if (days.isNotEmpty()) putExtra(AlarmManager.EXTRA_DAYS, ArrayList(days))
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
         return try {
-            planifier(c, item)
-            "⏰ Alarme JARVIS programmée à %02d:%02d%s. Elle sonnera en arrière-plan sans ouvrir l'application Horloge.%s".format(
-                h, mn, if (libelle.isNotBlank()) " — $libelle" else "",
-                ""
+            if (intent.resolveActivity(c.packageManager) == null) return "❌ Aucune application Horloge compatible n'a été trouvée pour créer cette alarme."
+            c.startActivity(intent)
+            "⏰ Demande envoyée à l'application Horloge native : %02d:%02d%s. Vérifie sa présence dans ses alarmes.".format(
+                h, mn, if (libelle.isNotBlank()) " — $libelle" else ""
             )
         } catch (e: Exception) {
-            save(c, items.filterNot { it.optInt("id") == id })
-            "❌ Android a refusé la programmation de l'alarme : ${e.message ?: e.javaClass.simpleName}."
+            "❌ Impossible de transmettre l'alarme à l'Horloge native : ${e.message ?: e.javaClass.simpleName}."
         }
     }
 
-    /** Minuteur JARVIS en arrière-plan : AlarmManager exact + notification/son à échéance. */
+    /** Crée et démarre un compte à rebours dans l'application Horloge native. */
     fun creerMinuteur(c: Context, secondes: Int, libelle: String): String {
         if (secondes <= 0) return "Durée du minuteur invalide."
-        if (!accorderAccesExactParShizuku(c)) return "Minuteur non lancé : autorise Alarmes et rappels ou démarre Shizuku et accorde son accès à Jarvis."
-        if (!notificationsAutorisees(c)) return "❌ Minuteur non lancé : autorise les notifications de JARVIS pour voir et entendre la fin du compte à rebours."
-        val id = nouvelId(c)
-        val at = System.currentTimeMillis() + secondes * 1000L
-        val item = JSONObject().put("id", id).put("kind", "timer").put("at", at)
-            .put("h", 0).put("m", 0).put("label", libelle).put("days", JSONArray())
-        val items = load(c)
-        items.add(item)
-        save(c, items)
+        val intent = Intent(AlarmManager.ACTION_SET_TIMER).apply {
+            putExtra(AlarmManager.EXTRA_LENGTH, secondes)
+            putExtra(AlarmManager.EXTRA_MESSAGE, libelle.ifBlank { "Minuteur" })
+            putExtra(AlarmManager.EXTRA_SKIP_UI, true)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
         return try {
-            planifier(c, item)
-            val notification = NotificationCompat.Builder(c, CH_RUN)
-                .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-                .setContentTitle("⏳ Minuteur JARVIS")
-                .setContentText(libelle.ifBlank { "Compte à rebours en cours" })
-                .setCategory(NotificationCompat.CATEGORY_ALARM)
-                .setWhen(at).setUsesChronometer(true).setChronometerCountDown(true)
-                .setOngoing(true).setOnlyAlertOnce(true)
-                .addAction(0, "Annuler", pi(c, id, ACT_STOP)).build()
-            nm(c).notify(id, notification)
+            if (intent.resolveActivity(c.packageManager) == null) return "❌ Aucune application Horloge compatible n'a été trouvée pour créer ce minuteur."
+            c.startActivity(intent)
             val h = secondes / 3600
             val mi = secondes % 3600 / 60
             val se = secondes % 60
             val txt = listOfNotNull(if (h > 0) "$h h" else null, if (mi > 0) "$mi min" else null, if (se > 0) "$se s" else null).joinToString(" ")
-            "⏳ Minuteur JARVIS de $txt lancé en arrière-plan. Le compte à rebours est visible dans les notifications."
+            "⏳ Minuteur de $txt transmis à l'application Horloge native. Vérifie qu'il apparaît et démarre dans ses minuteurs."
         } catch (e: Exception) {
-            save(c, items.filterNot { it.optInt("id") == id })
-            "❌ Android a refusé le minuteur : ${e.message ?: e.javaClass.simpleName}."
+            "❌ Impossible de transmettre le minuteur à l'Horloge native : ${e.message ?: e.javaClass.simpleName}."
         }
     }
 
@@ -226,36 +211,29 @@ object Horloge {
         return l.joinToString("\n") { (if (it.optString("kind") == "alarm") "⏰ " else "⏳ ") + java.time.Instant.ofEpochMilli(it.optLong("at")).atZone(ZoneId.systemDefault()).format(f) + (it.optString("label").takeIf { s -> s.isNotBlank() }?.let { s -> " — $s" } ?: "") }
     }
 
-    // ---- chronomètre (notification avec compteur)
+    // ---- Chronomètre natif : Android ne définit pas d'action publique standard pour démarrer le chrono.
+    // On ouvre l'application Horloge sur son écran de chronomètres ; aucun faux démarrage interne n'est annoncé.
     fun chronometre(c: Context, action: String): String {
-        channels(c)
         val a = action.trim().lowercase()
-        val debut = prefs(c).getLong("chrono", 0L)
-        return when {
-            a.startsWith("arr") || a.startsWith("stop") || a.startsWith("fin") -> {
-                if (debut == 0L) "Le chronomètre n'est pas lancé."
-                else { prefs(c).edit().putLong("chrono", 0L).commit(); nm(c).cancel(CHRONO_ID); "⏱️ Chronomètre arrêté : " + formater(System.currentTimeMillis() - debut) + "." }
+        val intent = Intent(AlarmManager.ACTION_SHOW_TIMERS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return try {
+            if (intent.resolveActivity(c.packageManager) == null) {
+                val launch = c.packageManager.getLaunchIntentForPackage("com.android.deskclock")
+                    ?: c.packageManager.getLaunchIntentForPackage("com.google.android.deskclock")
+                    ?: return "❌ Impossible de trouver l'application Horloge native."
+                c.startActivity(launch)
+            } else {
+                c.startActivity(intent)
             }
-            a.startsWith("etat") || a.startsWith("état") || a.startsWith("temps") || a.startsWith("lap") || a.startsWith("tour") ->
-                if (debut == 0L) "Le chronomètre n'est pas lancé." else "⏱️ Temps écoulé : " + formater(System.currentTimeMillis() - debut) + "."
-            else -> {
-                if (debut != 0L) "⏱️ Chronomètre déjà lancé : " + formater(System.currentTimeMillis() - debut) + "."
-                else if (!notificationsAutorisees(c)) "❌ Chronomètre non lancé : autorise les notifications de JARVIS dans Android (Réglages > Applications > JARVIS > Notifications), puis réessaie."
-                else {
-                    val now = System.currentTimeMillis()
-                    prefs(c).edit().putLong("chrono", now).commit()
-                    try {
-                        val n = enDirect(NotificationCompat.Builder(c, CH_RUN)).setSmallIcon(android.R.drawable.ic_lock_idle_alarm).setContentTitle("⏱️ Chronomètre").setContentText("Temps écoulé").setCategory(NotificationCompat.CATEGORY_STOPWATCH)
-                            .setWhen(now).setUsesChronometer(true).setOngoing(true).setOnlyAlertOnce(true)
-                            .addAction(0, "Arrêter", pi(c, CHRONO_ID, ACT_STOP)).build()
-                        nm(c).notify(CHRONO_ID, n)
-                        "⏱️ Chronomètre démarré en arrière-plan."
-                    } catch (e: Exception) {
-                        prefs(c).edit().putLong("chrono", 0L).commit()
-                        "❌ Le chronomètre n'a pas pu démarrer : ${e.message ?: e.javaClass.simpleName}. Vérifie les notifications de JARVIS."
-                    }
-                }
+            if (a.startsWith("arr") || a.startsWith("stop") || a.startsWith("fin")) {
+                "Horloge native ouverte. Android ne fournit pas d'action publique universelle pour arrêter le chronomètre : termine-le dans l'application."
+            } else if (a.startsWith("etat") || a.startsWith("état") || a.startsWith("temps") || a.startsWith("lap") || a.startsWith("tour")) {
+                "Horloge native ouverte. Consulte le temps directement dans l'onglet Chronomètre."
+            } else {
+                "⏱️ Horloge native ouverte. Android ne fournit pas d'API publique universelle pour appuyer automatiquement sur Démarrer dans l'onglet Chronomètre ; appuie sur Démarrer dans l'application."
             }
+        } catch (e: Exception) {
+            "❌ Impossible d'ouvrir le chronomètre natif : ${e.message ?: e.javaClass.simpleName}."
         }
     }
 
