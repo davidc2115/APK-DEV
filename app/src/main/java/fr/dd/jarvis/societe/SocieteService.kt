@@ -282,13 +282,13 @@ class SocieteService(
         val manquants = mutableListOf<String>()
         data class KmlPoint(val nom: String, val client: String, val type: String, val adresse: String, val description: String, val point: Geo.Point)
         val pts = mutableListOf<KmlPoint>()
-        val filtre = recherche.trim().lowercase()
+        val filtre = normaliser(recherche.trim())
         for (c in data.clients) {
             val cibles = if (c.sites.isEmpty()) listOf(null) else c.sites
             for (site in cibles) {
                 val adr = site?.adresse?.ifBlank { null } ?: c.adresse
                 val nomSite = site?.nom?.ifBlank { null } ?: "Adresse client"
-                val searchable = listOf(c.nom, c.contact, c.type, c.adresse, c.email, site?.nom.orEmpty(), adr, site?.onduleur.orEmpty()).joinToString(" ").lowercase()
+                val searchable = normaliser(listOf(c.nom, c.contact, c.type, c.tel, c.adresse, c.email, site?.nom.orEmpty(), adr, site?.onduleur.orEmpty(), site?.notes.orEmpty()).joinToString(" "))
                 if (filtre.isNotBlank() && !searchable.contains(filtre)) continue
                 val particulier = c.type.contains("part", ignoreCase = true)
                 val emoji = if (particulier) "🏠" else "🏢"
@@ -356,11 +356,21 @@ class SocieteService(
             append("<Style id=\"particulier\"><IconStyle><color>${kmlColor(hq.kmlCouleurParticulier)}</color><scale>1.15</scale><Icon><href>https://maps.google.com/mapfiles/kml/pushpin/wht-pushpin.png</href></Icon></IconStyle></Style>\n")
             append("<Style id=\"professionnel\"><IconStyle><color>${kmlColor(hq.kmlCouleurProfessionnel)}</color><scale>1.15</scale><Icon><href>https://maps.google.com/mapfiles/kml/pushpin/wht-pushpin.png</href></Icon></IconStyle></Style>\n")
             append("<Style id=\"siege\"><IconStyle><color>ff00a5ff</color><scale>1.25</scale><Icon><href>http://maps.google.com/mapfiles/kml/pushpin/blue-pushpin.png</href></Icon></IconStyle></Style>\n")
-            if (hq.lat != null && hq.lon != null) append("<Placemark><name>🏭 Siège ${esc(hq.nom)}</name><styleUrl>#siege</styleUrl><description>${esc(hq.adresse)}</description><Point><coordinates>${hq.lon},${hq.lat},0</coordinates></Point></Placemark>\n")
-            pointsAffichage.forEach { item ->
-                append("<Placemark><name>${esc(item.nom)}</name><styleUrl>#${item.type}</styleUrl><description><![CDATA[${item.description}]]></description>")
-                append("<ExtendedData><Data name=\"client\"><value>${esc(item.client)}</value></Data><Data name=\"type_client\"><value>${item.type}</value></Data><Data name=\"adresse\"><value>${esc(item.adresse)}</value></Data></ExtendedData>")
-                append("<Point><coordinates>${item.point.lon},${item.point.lat},0</coordinates></Point></Placemark>\n")
+            if (hq.lat != null && hq.lon != null) {
+                append("<Folder><name>Siège</name><Placemark><name>🏭 Siège ${esc(hq.nom)}</name><styleUrl>#siege</styleUrl><description>${esc(hq.adresse)}</description><Point><coordinates>${hq.lon},${hq.lat},0</coordinates></Point></Placemark></Folder>\\n")
+            }
+            listOf("professionnel", "particulier").forEach { categorie ->
+                val categoriePoints = pointsAffichage.filter { it.type == categorie }
+                if (categoriePoints.isNotEmpty()) {
+                    val titre = if (categorie == "professionnel") "Clients professionnels" else "Clients particuliers"
+                    append("<Folder><name>$titre (${categoriePoints.size})</name>\\n")
+                    categoriePoints.forEach { item ->
+                        append("<Placemark><name>${esc(item.nom)}</name><styleUrl>#${item.type}</styleUrl><description><![CDATA[${item.description}]]></description>")
+                        append("<ExtendedData><Data name=\\"client\\"><value>${esc(item.client)}</value></Data><Data name=\\"type_client\\"><value>${item.type}</value></Data><Data name=\\"adresse\\"><value>${esc(item.adresse)}</value></Data></ExtendedData>")
+                        append("<Point><coordinates>${item.point.lon},${item.point.lat},0</coordinates></Point></Placemark>\\n")
+                    }
+                    append("</Folder>\\n")
+                }
             }
             append("</Document></kml>\n")
         }
