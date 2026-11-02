@@ -90,42 +90,112 @@ private class ObsidianOrbSurface(context: Context) : GLSurfaceView(context) {
     var onNodeSelected: ((String) -> Unit)? = null
     private var downX = 0f
     private var downY = 0f
-    fun setGraph(nodes: List<fr.dd.jarvis.data.graph.GraphNodeEntity>, relations: List<fr.dd.jarvis.data.graph.GraphRelationEntity>) {
-        // Les dossiers forment des constellations distinctes, réparties sur une coque sphérique.
-        val groups = nodes.filter { it.availability == "PRESENT" }.groupBy { it.folder.ifBlank { "Racine" } }.toSortedMap()
-        val positions = HashMap<String, FloatArray>(nodes.size)
-        val groupList = groups.entries.toList()
-        groupList.forEachIndexed { groupIndex, entry ->
-            val count = groupList.size.coerceAtLeast(1)
-            val cy = 1f - 2f * (groupIndex + 0.5f) / count
-            val cr = sqrt(max(0f, 1f - cy * cy))
-            val theta = groupIndex * 2.3999632f
-            val center = floatArrayOf(cr * cos(theta), cy, cr * sin(theta))
-            var ux = -center[2]; var uy = 0f; var uz = center[0]
-            val ul = sqrt(ux * ux + uz * uz).coerceAtLeast(0.0001f)
-            ux /= ul; uz /= ul
-            val vx = center[1] * uz - center[2] * uy
-            val vy = center[2] * ux - center[0] * uz
-            val vz = center[0] * uy - center[1] * ux
-            val members = entry.value.sortedWith(compareBy<fr.dd.jarvis.data.graph.GraphNodeEntity> { it.title.lowercase() }.thenBy { it.id })
-            members.forEachIndexed { index, node ->
-                val r = if (members.size <= 1) 0f else 0.34f * sqrt((index + 0.5f) / members.size)
-                val a = index * 2.3999632f
-                val x = center[0] + r * (ux * cos(a) + vx * sin(a))
-                val y = center[1] + r * (uy * cos(a) + vy * sin(a))
-                val z = center[2] + r * (uz * cos(a) + vz * sin(a))
-                val length = sqrt(x * x + y * y + z * z).coerceAtLeast(0.0001f)
-                positions[node.id] = floatArrayOf(1.52f * x / length, 1.52f * y / length, 1.52f * z / length)
+    fun setGraph(nodes: List<fr.dd.jarvis.data.graph.GraphNodeEntity>, relations: List<fr.dd.jarvis.data.graph.GraphRelationEntity>) = orbRenderer.setGraph(nodes, relations)
+    fun setSelectedNode(id: String?) = orbRenderer.setSelectedNode(id)
+
+    init {
+        setEGLContextClientVersion(2)
+        setRenderer(orbRenderer)
+        renderMode = RENDERMODE_CONTINUOUSLY
+        setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = event.x; downY = event.y
+                    orbRenderer.touch(event.x, event.y, 0f, 0f)
+                    true
+                }
+                MotionEvent.ACTION_POINTER_DOWN -> {
+                    if (event.pointerCount >= 2) orbRenderer.setPinchStart(distance(event))
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (event.pointerCount >= 2) {
+                        val d = distance(event)
+                        orbRenderer.pinch(d)
+                        orbRenderer.setPinchStart(d)
+                    } else {
+                        orbRenderer.drag(event.x, event.y)
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (event.pointerCount == 1 && kotlin.math.hypot((event.x - downX).toDouble(), (event.y - downY).toDouble()) < 14.0) {
+                        orbRenderer.hitTest(event.x, event.y)?.let { onNodeSelected?.invoke(it) }
+                    }
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> true
+                else -> true
             }
         }
-        val visible = nodes.filter { positions.containsKey(it.id) }.sortedBy { it.id }
+    }
+
+    private fun distance(e: MotionEvent): Float {
+        if (e.pointerCount < 2) return 0f
+        val dx = e.getX(0) - e.getX(1)
+        val dy = e.getY(0) - e.getY(1)
+        return sqrt(dx * dx + dy * dy)
+    }
+}
+
+private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
+    @Volatile private var angleX = -12f
+    @Volatile private var angleY = 0f
+    @Volatile private var zoom = 1f
+    @Volatile private var lastX = 0f
+    @Volatile private var lastY = 0f
+    @Volatile private var pinchStart = 0f
+    @Volatile private var nodeIds: List<String> = emptyList()
+    @Volatile private var selectedNodeId: String? = null
+    @Volatile private var nodePositions: List<FloatArray> = emptyList()
+    @Volatile private var hitMatrix = FloatArray(16)
+
+    private var program = 0
+    private var graphProgram = 0
+    @Volatile private var graphPoints = FloatArray(0)
+    @Volatile private var graphLines = FloatArray(0)
+    @Volatile private var pointBuffer: java.nio.FloatBuffer? = null
+    @Volatile private var lineBuffer: java.nio.FloatBuffer? = null
+    @Volatile private var selectedPointBuffer: java.nio.FloatBuffer? = null
+    private var vertexBuffer: java.nio.FloatBuffer? = null
+    private var serpentBuffer: java.nio.FloatBuffer? = null
+    private var serpentVertexCount = 0
+    private var detailSphere: java.nio.FloatBuffer? = null
+    private var detailVertexCount = 0
+    private var vertexCount = 0
+    @Volatile private var surfaceWidth = 1
+    @Volatile private var surfaceHeight = 1
+    private val projection = FloatArray(16)
+    private val view = FloatArray(16)
+    private val model = FloatArray(16)
+    private val mv = FloatArray(16)
+    private val mvp = FloatArray(16)
+
+    fun setSelectedNode(id: String?) {
+        selectedNodeId = id
+        val index = nodeIds.indexOf(id)
+        selectedPointBuffer = if (index >= 0) nodePositions.getOrNull(index)?.let { makeBuffer(it) } else null
+    }
+
+    fun setGraph(nodes: List<fr.dd.jarvis.data.graph.GraphNodeEntity>, relations: List<fr.dd.jarvis.data.graph.GraphRelationEntity>) {
+        // L’ordre alphabétique donne des positions stables : ajouter une note ne redistribue pas tout le nuage.
+        val visible = nodes.sortedBy { it.id }
+        val positions = HashMap<String, FloatArray>()
+        visible.forEachIndexed { index, node ->
+            val y = 1f - 2f * (index + 0.5f) / max(visible.size, 1)
+            val radius = sqrt(max(0f, 1f - y * y))
+            val theta = index * 2.3999632f
+            // Les nœuds sont répartis sur une couronne extérieure, distincte du volume de l'orbe.
+            positions[node.id] = floatArrayOf(1.48f * radius * cos(theta), 1.42f * y, 1.48f * radius * sin(theta))
+        }
         nodeIds = visible.map { it.id }
         nodePositions = visible.map { positions.getValue(it.id) }
         graphPoints = nodePositions.flatMap { it.toList() }.toFloatArray()
         val edges = ArrayList<Float>()
-        relations.asSequence().filter { it.origin == "EXPLICIT" && positions.containsKey(it.fromNodeId) && positions.containsKey(it.toNodeId) }.forEach { relation ->
-            edges.addAll(positions.getValue(relation.fromNodeId).toList())
-            edges.addAll(positions.getValue(relation.toNodeId).toList())
+        relations.filter { it.origin == "EXPLICIT" }.forEach { relation ->
+            val a = positions[relation.fromNodeId]
+            val b = positions[relation.toNodeId]
+            if (a != null && b != null) { edges.addAll(a.toList()); edges.addAll(b.toList()) }
         }
         graphLines = edges.toFloatArray()
         pointBuffer = makeBuffer(graphPoints)
@@ -133,6 +203,7 @@ private class ObsidianOrbSurface(context: Context) : GLSurfaceView(context) {
         val selectedIndex = nodeIds.indexOf(selectedNodeId)
         selectedPointBuffer = if (selectedIndex >= 0) nodePositions.getOrNull(selectedIndex)?.let { makeBuffer(it) } else null
     }
+
     private fun makeBuffer(values: FloatArray): java.nio.FloatBuffer {
         val b = ByteBuffer.allocateDirect(values.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
         b.put(values); b.position(0); return b
