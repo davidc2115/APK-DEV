@@ -1070,7 +1070,24 @@ private fun BoxPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.JarvisApp
             color = HudDim, fontSize = 12.sp
         )
         Spacer(Modifier.height(8.dp))
-        HudTextField(store.boxHost.value, { store.boxHost.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Adresse de la box (vide = détectée sur le Wi-Fi)")
+        HudTextField(store.boxHost.value, { store.boxHost.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Adresse locale de la box (passerelle Wi-Fi)")
+        Spacer(Modifier.height(6.dp))
+        HudButton(if (busy) "Diagnostic…" else "Détecter la box et l'IP publique", enabled = !busy) {
+            scope.launch {
+                busy = true
+                msg = try {
+                    val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        val local = fr.dd.jarvis.ai.Reseau.infos(app)
+                        val publicIp = fr.dd.jarvis.ai.Reseau.ippPublique()
+                        local to publicIp
+                    }
+                    val local = result.first
+                    if (store.boxHost.value.isBlank() && !local?.passerelle.isNullOrBlank()) store.boxHost.set(local!!.passerelle)
+                    "Réseau local : ${local?.ip ?: "indisponible"} · Passerelle/box : ${local?.passerelle ?: "indisponible"} · IP publique : ${result.second.ifBlank { "indisponible" }}. La redirection distante doit encore être validée selon les fonctions de ta box et ton opérateur."
+                } catch (e: Exception) { "❌ Diagnostic réseau : ${e.message ?: e.javaClass.simpleName}" }
+                busy = false
+            }
+        }
         Spacer(Modifier.height(6.dp))
         Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             HudChip("SMB (Windows)", selected = store.boxProto.value != "ftp") { store.boxProto.set("smb") }
