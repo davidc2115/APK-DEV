@@ -160,8 +160,9 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
     private var vertexBuffer: java.nio.FloatBuffer? = null
     private var serpentBuffer: java.nio.FloatBuffer? = null
     private var serpentVertexCount = 0
-    private var detailSphere: java.nio.FloatBuffer? = null
-    private var detailVertexCount = 0
+    private var leftBrainBuffer: java.nio.FloatBuffer? = null
+    private var rightBrainBuffer: java.nio.FloatBuffer? = null
+    private var brainVertexCount = 0
     private var vertexCount = 0
     @Volatile private var surfaceWidth = 1
     @Volatile private var surfaceHeight = 1
@@ -246,8 +247,9 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
         graphProgram = createProgram(GRAPH_VERTEX_SHADER, GRAPH_FRAGMENT_SHADER)
         vertexBuffer = createSphere(64, 48)
         vertexCount = 64 * 48 * 6
-        detailSphere = createSphere(24, 20)
-        detailVertexCount = 24 * 20 * 6
+        leftBrainBuffer = createBrainHemisphere(36, 36, -1f)
+        rightBrainBuffer = createBrainHemisphere(36, 36, 1f)
+        brainVertexCount = 36 * 36 * 6
         serpentBuffer = createSerpentTube(180, 14)
         serpentVertexCount = 180 * 14 * 6
         Matrix.setLookAtM(view, 0, 0f, 0f, 4.0f, 0f, 0f, 0f, 0f, 1f, 0f)
@@ -298,42 +300,29 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
             GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, serpentVertexCount)
         }
 
-        // Cerveau bilobé en volume, placé devant la sphère : deux hémisphères organiques.
-        val detail = detailSphere
-        if (detail != null) {
-            fun drawDetail(x: Float, y: Float, z: Float, sx: Float, sy: Float, sz: Float, tint: Float, emission: Float) {
-                val part = model.copyOf()
-                Matrix.translateM(part, 0, x, y, z)
-                Matrix.scaleM(part, 0, sx, sy, sz)
-                val pv = FloatArray(16)
-                val partMvp = FloatArray(16)
-                Matrix.multiplyMM(pv, 0, projection, 0, view, 0)
-                Matrix.multiplyMM(partMvp, 0, pv, 0, part, 0)
-                GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(program, "uMvp"), 1, false, partMvp, 0)
-                GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(program, "uModel"), 1, false, part, 0)
-                GLES20.glUniform3f(GLES20.glGetUniformLocation(program, "uTint"), 0.72f + tint * 0.28f, 0.32f + tint * 0.30f, 0.95f)
-                GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uEmission"), emission)
-                detail.position(0)
-                GLES20.glVertexAttribPointer(pos, 3, GLES20.GL_FLOAT, false, 24, detail)
-                detail.position(3)
-                GLES20.glVertexAttribPointer(normal, 3, GLES20.GL_FLOAT, false, 24, detail)
-                GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, detailVertexCount)
-            }
-            // Le cerveau est centré et légèrement en avant de la surface de l'obsidienne.
-            // Le relief dépasse juste assez de la sphère pour rester visible avec le depth test actif.
-            drawDetail(-0.245f, 0.015f, 1.075f, 0.485f, 0.385f, 0.255f, 0.65f, 0.48f)
-            drawDetail(0.245f, 0.015f, 1.075f, 0.485f, 0.385f, 0.255f, 0.82f, 0.50f)
-            // Sillon central et gyri : plis en relief qui donnent une silhouette cérébrale lisible.
-            drawDetail(0f, 0.015f, 1.145f, 0.105f, 0.285f, 0.145f, 0.76f, 0.42f)
-            drawDetail(-0.405f, 0.155f, 1.155f, 0.205f, 0.105f, 0.135f, 0.74f, 0.50f)
-            drawDetail(-0.335f, -0.115f, 1.165f, 0.205f, 0.105f, 0.135f, 0.78f, 0.52f)
-            drawDetail(-0.145f, 0.285f, 1.155f, 0.185f, 0.105f, 0.135f, 0.70f, 0.48f)
-            drawDetail(-0.115f, -0.285f, 1.165f, 0.185f, 0.105f, 0.135f, 0.72f, 0.50f)
-            drawDetail(0.145f, 0.285f, 1.155f, 0.185f, 0.105f, 0.135f, 0.86f, 0.50f)
-            drawDetail(0.335f, 0.115f, 1.165f, 0.205f, 0.105f, 0.135f, 0.90f, 0.52f)
-            drawDetail(0.405f, -0.155f, 1.155f, 0.205f, 0.105f, 0.135f, 0.88f, 0.50f)
-            drawDetail(0.115f, -0.285f, 1.165f, 0.185f, 0.105f, 0.135f, 0.84f, 0.48f)
+        // Noyau cérébral : deux hémisphères maillés avec reliefs gyri/sillons intégrés
+        // dans la géométrie (plus de chapelet de petites sphères lisses).
+        fun drawBrain(buffer: java.nio.FloatBuffer?, x: Float, tint: Float) {
+            if (buffer == null) return
+            val part = model.copyOf()
+            Matrix.translateM(part, 0, x, 0.015f, 1.045f)
+            Matrix.scaleM(part, 0, 0.72f, 0.53f, 0.55f)
+            val pv = FloatArray(16)
+            val partMvp = FloatArray(16)
+            Matrix.multiplyMM(pv, 0, projection, 0, view, 0)
+            Matrix.multiplyMM(partMvp, 0, pv, 0, part, 0)
+            GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(program, "uMvp"), 1, false, partMvp, 0)
+            GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(program, "uModel"), 1, false, part, 0)
+            GLES20.glUniform3f(GLES20.glGetUniformLocation(program, "uTint"), 0.82f + tint * 0.16f, 0.38f + tint * 0.20f, 1.0f)
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uEmission"), 0.38f)
+            buffer.position(0)
+            GLES20.glVertexAttribPointer(pos, 3, GLES20.GL_FLOAT, false, 24, buffer)
+            buffer.position(3)
+            GLES20.glVertexAttribPointer(normal, 3, GLES20.GL_FLOAT, false, 24, buffer)
+            GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, brainVertexCount)
         }
+        drawBrain(leftBrainBuffer, -0.205f, 0.72f)
+        drawBrain(rightBrainBuffer, 0.205f, 0.94f)
         GLES20.glDisableVertexAttribArray(pos)
         GLES20.glDisableVertexAttribArray(normal)
         GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(program, "uMvp"), 1, false, mvp, 0)
@@ -406,6 +395,42 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
             val s1 = (j + 1).toDouble() / sides
             val a = point(t0, s0); val b = point(t1, s0); val c = point(t1, s1); val d = point(t0, s1)
             add(a); add(b); add(c); add(a); add(c); add(d)
+        }
+        val bytes = ByteBuffer.allocateDirect(values.size * 4).order(ByteOrder.nativeOrder())
+        return bytes.asFloatBuffer().apply { values.forEach { put(it) }; position(0) }
+    }
+
+    /**
+     * Hémisphère cérébral organique : surface triangulée et plis intégrés au maillage.
+     * side=-1 dessine le lobe gauche, side=1 le lobe droit.
+     */
+    private fun createBrainHemisphere(steps: Int, slices: Int, side: Float): java.nio.FloatBuffer {
+        val values = ArrayList<Float>(steps * slices * 36)
+        fun vertex(phi: Double, theta: Double) {
+            val fold = 1.0 +
+                0.045 * sin(phi * 9.0 + sin(theta * 5.0) * 0.85) +
+                0.026 * sin(phi * 17.0 - theta * 8.0) +
+                0.014 * sin(phi * 25.0 + theta * 13.0)
+            val ring = sin(phi) * fold
+            val x = (side * cos(theta) * ring * 0.58).toFloat()
+            val y = (cos(phi) * fold * 0.82).toFloat()
+            val z = (sin(theta) * ring * 0.52).toFloat()
+            val nx = x / (0.58f * 0.58f)
+            val ny = y / (0.82f * 0.82f)
+            val nz = z / (0.52f * 0.52f)
+            val length = sqrt(nx * nx + ny * ny + nz * nz).coerceAtLeast(0.0001f)
+            values.add(x); values.add(y); values.add(z)
+            values.add(nx / length); values.add(ny / length); values.add(nz / length)
+        }
+        for (i in 0 until steps) {
+            val p0 = Math.PI * i / steps
+            val p1 = Math.PI * (i + 1) / steps
+            for (j in 0 until slices) {
+                val t0 = -Math.PI / 2.0 + Math.PI * j / slices
+                val t1 = -Math.PI / 2.0 + Math.PI * (j + 1) / slices
+                vertex(p0, t0); vertex(p1, t0); vertex(p1, t1)
+                vertex(p0, t0); vertex(p1, t1); vertex(p0, t1)
+            }
         }
         val bytes = ByteBuffer.allocateDirect(values.size * 4).order(ByteOrder.nativeOrder())
         return bytes.asFloatBuffer().apply { values.forEach { put(it) }; position(0) }
