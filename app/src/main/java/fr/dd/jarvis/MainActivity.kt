@@ -87,7 +87,6 @@ class MainActivity : ComponentActivity() {
         handleListen(intent)
         handleSharedVideo(intent)
         handleSharedKml(intent)
-        handleSharedKml(intent)
         handleTikTokCallback(intent)
     }
 
@@ -182,7 +181,6 @@ class MainActivity : ComponentActivity() {
         ) fr.dd.jarvis.service.JarvisService.start(this)
         handleListen(intent)
         handleSharedVideo(intent)
-        handleSharedKml(intent)
         handleSharedKml(intent)
         handleTikTokCallback(intent)
         setContent {
