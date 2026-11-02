@@ -152,8 +152,8 @@ object Horloge {
         if (secondes <= 0) return "Durée du minuteur invalide."
         val intent = Intent(AlarmClock.ACTION_SET_TIMER).apply {
             putExtra(AlarmClock.EXTRA_LENGTH, secondes)
-            putExtra(AlarmManager.EXTRA_MESSAGE, libelle.ifBlank { "Minuteur" })
-            putExtra(AlarmManager.EXTRA_SKIP_UI, true)
+            putExtra("android.intent.extra.alarm.MESSAGE", libelle.ifBlank { "Minuteur" })
+            putExtra("android.intent.extra.alarm.SKIP_UI", true)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         return try {
