@@ -320,7 +320,7 @@ class SocieteService(
             if (hq.lat != null && hq.lon != null)
                 append("<Placemark><name>Siège ${esc(hq.nom)}</name><description>${esc(hq.adresse)}</description><Point><coordinates>${hq.lon},${hq.lat},0</coordinates></Point></Placemark>\n")
             pts.forEach { (n, dsc, p) ->
-                append("<Placemark><name>${esc(n)}</name><description><![CDATA[$dsc]]></description><Point><coordinates>${p.lon},${p.lat},0</coordinates></Point></Placemark>\\n")
+                append("<Placemark><name>${esc(n)}</name><description><![CDATA[$dsc]]></description><Point><coordinates>${p.lon},${p.lat},0</coordinates></Point></Placemark>\n")
             }
             append("</Document></kml>\n")
         }
