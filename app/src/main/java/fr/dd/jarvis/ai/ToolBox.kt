@@ -231,6 +231,8 @@ class ToolBox(
                 "texte" to prop("La consigne complète, formulée clairement (structure, rubriques, calendrier à utiliser, exemples).")
             ), listOf("sujet", "texte")))
         put(tool("memoire_lire", "Affiche les consignes enregistrées dans la mémoire JARVIS."))
+        put(tool("reglage_jarvis", "Consulte ou modifie directement les réglages non sensibles de JARVIS depuis le chat ou la voix. N'utilise jamais cet outil pour les clés API, mots de passe, tokens, adresses serveur ou paramètres de sécurité.",
+            mapOf("action" to prop("lire | modifier"), "reglage" to prop("confirmations | analyse_gemini | conversation | reponses_vocales | ecoute_continue | annonces | agents | agents_mails | agents_factures | agents_planning | agents_notifications | notifications_banniere | bips | duree_conversation"), "valeur" to prop("true/false pour les interrupteurs ; nombre de secondes pour duree_conversation.")), listOf("action", "reglage")))
         put(tool("memoire_oublier", "Supprime la consigne d'un sujet.", mapOf("sujet" to prop("Sujet à oublier.")), listOf("sujet")))
         put(tool("factures_impayees", "Liste les factures émises non encore payées (avec retards)."))
         put(tool("export_kml", "Génère un fichier KML (Google Earth / Google My Maps) avec les points GPS des clients et installations, enregistré dans Obsidian et partageable."))
@@ -531,6 +533,7 @@ class ToolBox(
             }
         }
         "memoire_ajouter" -> ToolResult("✅ Consigne « ${a.optString("sujet")} » enregistrée (" + app.memo.set(a.optString("sujet"), a.optString("texte")) + ").")
+        "reglage_jarvis" -> reglerJarvis(a)
         "memoire_lire" -> ToolResult(app.memo.all().entries.joinToString("\n\n") { "**${it.key}** : ${it.value}" }.ifBlank { "Aucune consigne enregistrée." }, direct = true)
         "memoire_oublier" -> ToolResult(if (app.memo.remove(a.optString("sujet"))) "Consigne oubliée." else "Aucune consigne pour ce sujet.")
         "factures_impayees" -> ToolResult(app.societe.impayees().ifBlank { "✅ Aucune facture impayée." }, direct = true)
@@ -550,6 +553,56 @@ class ToolBox(
         in TikTokTools.NAMES -> tiktok.execute(name, a)
         else -> ToolResult("Outil inconnu : $name")
     } }
+
+    private fun reglerJarvis(a: JSONObject): ToolResult {
+        val action = a.optString("action").trim().lowercase()
+        val key = a.optString("reglage").trim().lowercase()
+        val raw = a.optString("valeur").trim().lowercase()
+        val bool = when(raw) { "true", "oui", "on", "active", "activé", "activer" -> true; "false", "non", "off", "désactive", "désactivé", "desactive", "desactivé" -> false; else -> null }
+        val s = app.store
+        val labels = mapOf("confirmations" to "confirmation des actions sensibles", "analyse_gemini" to "analyse Gemini", "conversation" to "mode conversation", "reponses_vocales" to "réponses vocales", "ecoute_continue" to "écoute continue", "annonces" to "annonces vocales", "agents" to "agents autonomes", "agents_mails" to "agent mails", "agents_factures" to "agent factures/devis", "agents_planning" to "agent planning", "agents_notifications" to "agent notifications", "notifications_banniere" to "bannières de notification", "bips" to "bips d'écoute")
+        fun current(): Boolean? = when(key) {
+            "confirmations" -> s.confirmSensitive.value
+            "analyse_gemini" -> s.analyseGemini.value
+            "conversation" -> s.conversationMode.value
+            "reponses_vocales" -> s.speakReplies.value
+            "ecoute_continue" -> s.wakeOn.value
+            "annonces" -> s.annOn.value
+            "agents" -> s.agentsOn.value
+            "agents_mails" -> s.agentMails.value
+            "agents_factures" -> s.agentFactures.value
+            "agents_planning" -> s.agentPlanning.value
+            "agents_notifications" -> s.agentNotifs.value
+            "notifications_banniere" -> s.notifLive.value
+            "bips" -> s.muteBeeps.value
+            else -> null
+        }
+        if (key == "duree_conversation") {
+            if (action == "lire") return ToolResult("Durée de conversation : ${s.convSeconds.value} secondes.", direct = true)
+            val n = a.optString("valeur").toIntOrNull()?.coerceIn(5, 180) ?: return ToolResult("Indique une durée entre 5 et 180 secondes.")
+            s.convSeconds.set(n)
+            return ToolResult("✅ Durée de conversation réglée sur $n secondes.", direct = true)
+        }
+        if (key !in labels) return ToolResult("Réglage non pris en charge ou sensible. Réglages modifiables : ${labels.values.joinToString(", ")} et durée de conversation.")
+        if (action == "lire") return ToolResult("${labels[key]} : ${if (current() == true) "activé" else "désactivé"}.", direct = true)
+        if (action != "modifier" || bool == null) return ToolResult("Indique si tu veux activer ou désactiver ${labels[key]}.")
+        when(key) {
+            "confirmations" -> s.confirmSensitive.set(bool)
+            "analyse_gemini" -> s.analyseGemini.set(bool)
+            "conversation" -> s.conversationMode.set(bool)
+            "reponses_vocales" -> s.speakReplies.set(bool)
+            "ecoute_continue" -> { s.wakeOn.set(bool); fr.dd.jarvis.service.JarvisService.stop(app); if (bool) fr.dd.jarvis.service.JarvisService.start(app) }
+            "annonces" -> s.annOn.set(bool)
+            "agents" -> { s.agentsOn.set(bool); fr.dd.jarvis.work.AgentsScheduler.apply(app, s) }
+            "agents_mails" -> s.agentMails.set(bool)
+            "agents_factures" -> s.agentFactures.set(bool)
+            "agents_planning" -> s.agentPlanning.set(bool)
+            "agents_notifications" -> s.agentNotifs.set(bool)
+            "notifications_banniere" -> s.notifLive.set(bool)
+            "bips" -> s.muteBeeps.set(bool)
+        }
+        return ToolResult("✅ ${labels[key].replaceFirstChar { it.uppercase() }} ${if (bool) "activé" else "désactivé"} dans les réglages JARVIS.", direct = true)
+    }
 
     private val dayFmt = DateTimeFormatter.ofPattern("EEE dd/MM", Locale.FRENCH)
     private val timeFmt = DateTimeFormatter.ofPattern("HH:mm")
