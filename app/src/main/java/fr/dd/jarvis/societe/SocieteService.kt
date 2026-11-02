@@ -306,7 +306,7 @@ class SocieteService(
                     if (s != null && s.miseEnService.isNotBlank()) append("<p><b>Mise en service :</b> ${esc(s.miseEnService)}</p>")
                     if (s != null && s.onduleur.isNotBlank()) append("<p><b>Onduleur :</b> ${esc(s.onduleur)}</p>")
                     if (s != null && s.nbPanneaux > 0) append("<p><b>Nombre de panneaux :</b> ${s.nbPanneaux}</p>")
-                    if (s != null && s.notes.isNotBlank()) append("<p><b>Notes installation :</b><br>${esc(s.notes).replace("\\n", "<br>")}</p>")
+                    if (s != null && s.notes.isNotBlank()) append("<p><b>Notes installation :</b><br>${esc(s.notes).replace("\n", "<br>")}</p>")
                     append("</div>")
                 }.replace("]]>", "]]]]><![CDATA[>")
 
@@ -320,7 +320,7 @@ class SocieteService(
             if (hq.lat != null && hq.lon != null)
                 append("<Placemark><name>Siège ${esc(hq.nom)}</name><description>${esc(hq.adresse)}</description><Point><coordinates>${hq.lon},${hq.lat},0</coordinates></Point></Placemark>\n")
             pts.forEach { (n, dsc, p) ->
-                append("<Placemark><name>${esc(n)}</name><description>${esc(dsc)}</description><Point><coordinates>${p.lon},${p.lat},0</coordinates></Point></Placemark>\n")
+                append("<Placemark><name>${esc(n)}</name><description><![CDATA[$dsc]]></description><Point><coordinates>${p.lon},${p.lat},0</coordinates></Point></Placemark>\\n")
             }
             append("</Document></kml>\n")
         }
