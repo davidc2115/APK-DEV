@@ -331,15 +331,33 @@ class SocieteService(
                 pts += KmlPoint(label, c.nom, if (particulier) "particulier" else "professionnel", adr, description, point)
             }
         }
+        // Google Earth superpose les repères ayant exactement les mêmes coordonnées.
+        // On conserve les coordonnées GPS réelles dans les fiches ; seul l'affichage KML est décalé.
+        val groupesMemeAdresse = pts.indices.groupBy { i ->
+            val p = pts[i].point
+            String.format(java.util.Locale.US, "%.6f|%.6f", p.lat, p.lon)
+        }
+        val pointsAffichage = pts.mapIndexed { index, item ->
+            val groupe = groupesMemeAdresse.values.firstOrNull { index in it }.orEmpty()
+            if (groupe.size <= 1) item else {
+                val rang = groupe.indexOf(index)
+                val angle = 2.0 * Math.PI * rang / groupe.size - Math.PI / 2.0
+                val rayonMetres = 9.0 + groupe.size.coerceAtMost(8) * 1.2
+                val latOffset = rayonMetres * kotlin.math.cos(angle) / 111320.0
+                val lonScale = kotlin.math.cos(Math.toRadians(item.point.lat)).coerceAtLeast(0.15)
+                val lonOffset = rayonMetres * kotlin.math.sin(angle) / (111320.0 * lonScale)
+                item.copy(point = Geo.Point(item.point.lat + latOffset, item.point.lon + lonOffset))
+            }
+        }
         val hq = data.societe
         val kml = buildString {
             append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<kml xmlns=\"http://www.opengis.net/kml/2.2\"><Document>\n")
             append("<name>${esc(hq.nom.ifBlank { "Clients" })} — clients</name>\n")
-            append("<Style id=\"particulier\"><IconStyle><color>${kmlColor(hq.kmlCouleurParticulier)}</color><scale>1.15</scale><Icon><href>https://maps.google.com/mapfiles/kml/pushpin/homegardenbusiness.png</href></Icon></IconStyle></Style>\n")
-            append("<Style id=\"professionnel\"><IconStyle><color>${kmlColor(hq.kmlCouleurProfessionnel)}</color><scale>1.15</scale><Icon><href>https://maps.google.com/mapfiles/kml/pushpin/business.png</href></Icon></IconStyle></Style>\n")
+            append("<Style id=\"particulier\"><IconStyle><color>${kmlColor(hq.kmlCouleurParticulier)}</color><scale>1.15</scale><Icon><href>https://maps.google.com/mapfiles/kml/pushpin/ylw-pushpin.png</href></Icon></IconStyle></Style>\n")
+            append("<Style id=\"professionnel\"><IconStyle><color>${kmlColor(hq.kmlCouleurProfessionnel)}</color><scale>1.15</scale><Icon><href>https://maps.google.com/mapfiles/kml/pushpin/red-pushpin.png</href></Icon></IconStyle></Style>\n")
             append("<Style id=\"siege\"><IconStyle><color>ff00a5ff</color><scale>1.25</scale><Icon><href>https://maps.google.com/mapfiles/kml/pushpin/blue-pushpin.png</href></Icon></IconStyle></Style>\n")
             if (hq.lat != null && hq.lon != null) append("<Placemark><name>🏭 Siège ${esc(hq.nom)}</name><styleUrl>#siege</styleUrl><description>${esc(hq.adresse)}</description><Point><coordinates>${hq.lon},${hq.lat},0</coordinates></Point></Placemark>\n")
-            pts.forEach { item ->
+            pointsAffichage.forEach { item ->
                 append("<Placemark><name>${esc(item.nom)}</name><styleUrl>#${item.type}</styleUrl><description><![CDATA[${item.description}]]></description>")
                 append("<ExtendedData><Data name=\"client\"><value>${esc(item.client)}</value></Data><Data name=\"type_client\"><value>${item.type}</value></Data><Data name=\"adresse\"><value>${esc(item.adresse)}</value></Data></ExtendedData>")
                 append("<Point><coordinates>${item.point.lon},${item.point.lat},0</coordinates></Point></Placemark>\n")
