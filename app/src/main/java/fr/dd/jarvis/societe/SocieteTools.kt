@@ -20,12 +20,12 @@ class SocieteTools(
         val NAMES = setOf(
             "societe_info_set", "societe_info_get", "tarif_set", "tarif_delete", "regles_set", "client_ecrire", "client_fiche",
             "document_creer", "document_action", "document_email", "societe_liste", "employe_ecrire", "paie", "reserve_bilan",
-            "presentation_modifier", "distance_deplacement", "clients_importer_kml"
+            "presentation_modifier", "distance_deplacement"
         )
         private val KEYWORDS = Regex(
             "devis|factur|client|soci[ée]t[ée]|tarif|remise|d[ée]placement|paie|salaire|bulletin|r[ée]serve|dividende|b[ée]n[ée]fice|" +
                 "installation|photovolta|kwc|fiche|pr[ée]sentation|mise en forme|mise en page|si[èe]ge|employ[ée]|prix|onduleur|maintenance|" +
-                "entretien|planning|agenda|pdf|obsidian|distance|itin[ée]raire|km|fid[ée]lit[ée]|kml|google earth|carte des clients",
+                "entretien|planning|agenda|pdf|obsidian|distance|itin[ée]raire|km|fid[ée]lit[ée]",
             RegexOption.IGNORE_CASE
         )
         fun concerned(text: String) = KEYWORDS.containsMatchIn(text)
@@ -34,7 +34,6 @@ class SocieteTools(
 Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu disposes d'outils pour : enregistrer les informations de l'entreprise (siège, SIRET, IBAN, TVA…), les tarifs par puissance (kWc), les règles de remise (fidélité, nombre d'installations) et de déplacement, les clients et leurs installations, créer des devis et factures, convertir un devis en facture, marquer une facture payée (mise en réserve), produire des bulletins de paie, le bilan de la réserve, et modifier la présentation des documents.
 - Quand l'utilisateur donne un tarif, une règle ou une information sur la société, enregistre-la immédiatement avec l'outil adapté : c'est ainsi que tu la gardes en mémoire.
 - Ne calcule jamais un montant toi-même : les outils font tous les calculs (tarif par puissance, remises, déplacement, TVA).
-- Pour importer les clients d’un fichier KML partagé vers JARVIS, utilise clients_importer_kml : crée/met à jour une fiche client par groupe KML et une installation par Placemark avec ses coordonnées GPS. Ne prétends pas avoir importé un fichier tant que l’outil ne confirme pas.
 - Pour un devis ou une facture, identifie le client et l'installation (client_ecrire si le client n'existe pas encore). Si une information indispensable manque (client, prestation), demande-la en une phrase.
 - Le texte renvoyé par les outils société est déjà mis en forme et affiché tel quel : ne le répète pas.
 - Les montants sont toujours en euros, la TVA est gérée par l'application.
@@ -55,7 +54,6 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
     }
 
     val schema: List<JSONObject> = listOf(
-        tool("clients_importer_kml", "Importe le dernier fichier KML partagé avec JARVIS. Crée ou met à jour une fiche par client et une installation par Placemark, en conservant latitude/longitude pour un point GPS par installation. Les fiches sont exportées dans Obsidian/Société/Clients.", mapOf()),
         tool("societe_info_set", "Enregistre les informations de la société (seuls les champs fournis sont modifiés).", mapOf(
             "nom" to prop("Nom de la société."), "forme" to prop("Forme juridique (EURL, SASU, micro-entreprise…)."),
             "siret" to prop("SIRET."), "tva_num" to prop("N° de TVA intracommunautaire."),
@@ -178,7 +176,6 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         "reserve_bilan" -> ok(svc.bilanTexte(a.s("annee").toIntOrNull() ?: LocalDate.now().year))
         "presentation_modifier" -> presentation(a)
         "distance_deplacement" -> distanceTool(a)
-        "clients_importer_kml" -> ok(svc.importerKmlEnAttente())
         else -> err("Outil inconnu : $name")
     }
 
