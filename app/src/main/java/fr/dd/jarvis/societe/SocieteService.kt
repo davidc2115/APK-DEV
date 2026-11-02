@@ -353,9 +353,9 @@ class SocieteService(
         val kml = buildString {
             append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<kml xmlns=\"http://www.opengis.net/kml/2.2\"><Document>\n")
             append("<name>${esc(hq.nom.ifBlank { "Clients" })} — clients</name>\n")
-            append("<Style id=\"particulier\"><IconStyle><color>${kmlColor(hq.kmlCouleurParticulier)}</color><scale>1.15</scale><Icon><href>https://maps.google.com/mapfiles/kml/pushpin/ylw-pushpin.png</href></Icon></IconStyle></Style>\n")
-            append("<Style id=\"professionnel\"><IconStyle><color>${kmlColor(hq.kmlCouleurProfessionnel)}</color><scale>1.15</scale><Icon><href>https://maps.google.com/mapfiles/kml/pushpin/red-pushpin.png</href></Icon></IconStyle></Style>\n")
-            append("<Style id=\"siege\"><IconStyle><color>ff00a5ff</color><scale>1.25</scale><Icon><href>https://maps.google.com/mapfiles/kml/pushpin/blue-pushpin.png</href></Icon></IconStyle></Style>\n")
+            append("<Style id=\"particulier\"><IconStyle><color>${kmlColor(hq.kmlCouleurParticulier)}</color><scale>1.15</scale><Icon><href>http://maps.google.com/mapfiles/kml/pushpin/ylw-pushpin.png</href></Icon></IconStyle></Style>\n")
+            append("<Style id=\"professionnel\"><IconStyle><color>${kmlColor(hq.kmlCouleurProfessionnel)}</color><scale>1.15</scale><Icon><href>http://maps.google.com/mapfiles/kml/pushpin/red-pushpin.png</href></Icon></IconStyle></Style>\n")
+            append("<Style id=\"siege\"><IconStyle><color>ff00a5ff</color><scale>1.25</scale><Icon><href>http://maps.google.com/mapfiles/kml/pushpin/blue-pushpin.png</href></Icon></IconStyle></Style>\n")
             if (hq.lat != null && hq.lon != null) append("<Placemark><name>🏭 Siège ${esc(hq.nom)}</name><styleUrl>#siege</styleUrl><description>${esc(hq.adresse)}</description><Point><coordinates>${hq.lon},${hq.lat},0</coordinates></Point></Placemark>\n")
             pointsAffichage.forEach { item ->
                 append("<Placemark><name>${esc(item.nom)}</name><styleUrl>#${item.type}</styleUrl><description><![CDATA[${item.description}]]></description>")
