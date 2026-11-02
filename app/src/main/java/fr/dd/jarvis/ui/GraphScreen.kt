@@ -70,7 +70,7 @@ import kotlin.random.Random
 
 /** Combien de notes au plus affichées par dossier (en liste, le long du rayon qui part de son hub) — au-delà, elles
  *  comptent dans le total du dossier mais ne sont pas affichées individuellement (évite un graphe surchargé). */
-private const val MAX_NOTES_PAR_DOSSIER = 12
+private const val MAX_NOTES_PAR_DOSSIER = 18
 /** Au-delà de ce nombre de dossiers racine, les plus petits sont regroupés dans une catégorie « Autres » : jamais
  *  de notes perdues silencieusement, mais le cercle de hubs reste lisible même sur un très gros coffre. */
 private const val MAX_DOSSIERS = 16
@@ -139,12 +139,13 @@ private fun calculerDisposition(data: ObsidianWriter.GraphData): Disposition {
         // Les notes forment une couronne autour de leur dossier. L'espacement angulaire évite
         // l'empilement des étiquettes observé dans la version précédente.
         val ecartAngle = when {
-            affichees.size <= 5 -> 0.95f
-            else -> 0.38f
+            affichees.size <= 4 -> 1.05f
+            affichees.size <= 7 -> 0.72f
+            else -> 0.52f
         }
         affichees.forEachIndexed { k, node ->
             val angle = angleBase + (k - (affichees.size - 1) / 2f) * ecartAngle
-            val rayon = 112f + min(affichees.size, 8) * 3f
+            val rayon = 158f + min(affichees.size, 8) * 5f
             val p = Offset(
                 hub.x + cos(angle) * rayon,
                 hub.y + sin(angle) * rayon
