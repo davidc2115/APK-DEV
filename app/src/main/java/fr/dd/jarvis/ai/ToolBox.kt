@@ -762,7 +762,7 @@ class ToolBox(
         if (eventId != null && scopedEvents.isEmpty()) return ToolResult("Aucun rendez-vous trouvé avec l'identifiant #$eventId.", direct = true)
         if (eventTitle.isNotBlank() && scopedEvents.size > 1) return ToolResult("Plusieurs rendez-vous correspondent à « $eventTitle ». Donne l'identifiant #id ou une date pour que je n'en sélectionne qu'un.", direct = true)
         if (clientQuery.isNotBlank() && scopedEvents.isEmpty()) return ToolResult("Aucun rendez-vous ne correspond au client « $clientQuery » sur la période demandée.", direct = true)
-        val events = (if (allRequested) periodEvents else scopedEvents).take(80)
+        val events = (if (allRequested && eventId == null && eventTitle.isBlank() && clientQuery.isBlank()) periodEvents else scopedEvents).take(80)
         if (events.isEmpty()) return ToolResult("Aucun rendez-vous à analyser sur la période demandée.", direct = true)
 
         val clients = app.societe.data.clients
