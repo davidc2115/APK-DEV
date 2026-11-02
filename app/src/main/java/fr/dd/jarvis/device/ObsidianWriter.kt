@@ -104,19 +104,19 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                 if (cur == null) { dossierTrouve = false; break }
             }
             val cible = if (dossierTrouve) cur?.trouverLoose(name) else null
+            var supprime = false
             if (cible != null) {
-                // Si le fichier du coffre existe mais que le coffre est en lecture seule, ne pas
-                // supprimer une éventuelle copie locale et annoncer à tort que la fiche a disparu.
                 if (!tree.canWrite()) return false
                 cible.delete()
-                val resteDansCoffre = cur?.listFiles()?.any { it.uri == cible.uri } == true
-                if (resteDansCoffre) return false
+                if (cur?.listFiles()?.any { it.uri == cible.uri } == true) return false
+                supprime = true
             }
             // Certaines écritures ont été basculées localement lorsque le fournisseur SAF était indisponible.
-            if (localFile.exists() && !runCatching { localFile.delete() && !localFile.exists() }.getOrDefault(false)) return false
-            val resteDansCoffre = if (dossierTrouve && cur != null)
-                cur!!.trouverLoose(name) != null else false
-            !resteDansCoffre && !localFile.exists() && (cible != null || !dossierTrouve || !tree.canWrite() || !localFile.exists())
+            if (localFile.exists()) {
+                if (!runCatching { localFile.delete() && !localFile.exists() }.getOrDefault(false)) return false
+                supprime = true
+            }
+            supprime
         } catch (_: Exception) {
             false
         }
