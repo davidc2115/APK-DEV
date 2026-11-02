@@ -55,7 +55,7 @@ object Telephony {
         runCatching {
             app.obsidian.searchNotes(key, 30).forEach { (path, _) ->
                 val note = app.obsidian.readNote(path).orEmpty()
-                val numbers = Regex("""(?:\\+?\\d[\\d .()/-]{6,}\\d)""").findAll(note)
+                val numbers = Regex("""(?:\+?\d[\d .()/-]{6,}\d)""").findAll(note)
                     .map { it.value.filter(Char::isDigit) }
                 if (numbers.any { it.length >= 8 && it.takeLast(8) == key }) {
                     matches += "${path.substringAfterLast('/').removeSuffix(".md")} (Obsidian)"
