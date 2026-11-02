@@ -90,21 +90,26 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     fun supprimerFichier(folder: String, fileName: String): Boolean {
         val name = safe(fileName, "Fichier")
         val uriStr = store.obsidianUri.value
-        var effectue = false
-        try {
-            if (uriStr.isNotBlank()) {
-                val tree = DocumentFile.fromTreeUri(ctx, Uri.parse(uriStr))
-                if (tree != null && tree.canWrite()) {
-                    var cur: DocumentFile? = tree
-                    for (part in folder.split('/').filter { it.isNotBlank() }) cur = cur?.trouverLoose(part)?.takeIf { it.isDirectory }
-                    val cible = cur?.trouverLoose(name)
-                    if (cible != null) effectue = cible.delete()
+        if (uriStr.isNotBlank()) {
+            // Si un coffre Obsidian est configuré, ne jamais supprimer à sa place un fichier
+            // local homonyme : cela donnait un faux succès alors que la note du coffre restait présente.
+            return try {
+                val tree = DocumentFile.fromTreeUri(ctx, Uri.parse(uriStr)) ?: return false
+                if (!tree.canWrite()) return false
+                var cur: DocumentFile? = tree
+                for (part in folder.split('/').filter { it.isNotBlank() }) {
+                    cur = cur?.trouverLoose(part)?.takeIf { it.isDirectory } ?: return false
                 }
+                val cible = cur?.trouverLoose(name) ?: return false
+                cible.delete()
+                cur?.listFiles()?.none { it.uri == cible.uri } == true
+            } catch (_: Exception) {
+                false
             }
-        } catch (_: Exception) { /* repli silencieux */ }
-        val localFile = File(File(ctx.getExternalFilesDir(null), folder), name)
-        if (localFile.exists() && localFile.delete()) effectue = true
-        return effectue
+        }
+        val localFile = File(File(localRoot(), folder), name)
+        if (!localFile.exists()) return false
+        return runCatching { localFile.delete() && !localFile.exists() }.getOrDefault(false)
     }
 
     /**
@@ -173,9 +178,11 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     /** Notes du coffre (chemins relatifs), éventuellement dans un dossier. */
     fun listNotes(folder: String = ""): List<String> {
         val f = folder.trim().trim('/')
-        val v = vaultRoot()
-        if (v != null) return allNotes().map { it.first }.filter { f.isEmpty() || it.startsWith("$f/") }.sorted()
-        return File(localRoot(), f).walkTopDown().filter { it.isFile && it.name.endsWith(".md", true) }.map { it.relativeTo(localRoot()).path }.sorted().toList()
+        val vaultNotes = if (vaultRoot() != null) allNotes().map { it.first } else emptyList()
+        val localDir = File(localRoot(), f)
+        val localNotes = if (localDir.exists()) localDir.walkTopDown().filter { it.isFile && it.name.endsWith(".md", true) }
+            .map { it.relativeTo(localRoot()).path }.toList() else emptyList()
+        return (vaultNotes.filter { f.isEmpty() || it.startsWith("$f/") } + localNotes).distinct().sorted()
     }
 
     /** Recherche texte (nom + contenu). Retourne (chemin, extrait). */
@@ -214,11 +221,15 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         if (v != null) {
             var cur: DocumentFile? = v
             for (part in p.split('/').filter { it.isNotBlank() }) cur = cur?.findFile(part)
-            val f = cur?.takeIf { it.isFile } ?: return null
-            return runCatching { ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes().toString(Charsets.UTF_8) } }.getOrNull()
+            val f = cur?.takeIf { it.isFile }
+            if (f != null) {
+                val content = runCatching { ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes().toString(Charsets.UTF_8) } }.getOrNull()
+                if (content != null) return content
+            }
         }
-        val f = File(localRoot(), p)
-        return if (f.isFile) f.readText() else null
+        // saveBytes peut avoir utilisé le stockage local si le coffre SAF était en lecture seule.
+        val local = File(localRoot(), p)
+        return if (local.isFile) runCatching { local.readText() }.getOrNull() else null
     }
 
     /** Écrit (ou ajoute à la fin de) une note. Retourne l'emplacement. */
