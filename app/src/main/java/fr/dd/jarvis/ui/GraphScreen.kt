@@ -681,54 +681,32 @@ private fun GraphScreen2DClean(app: JarvisApp) {
             .flatMap { listOf(it.from, it.to) }.toSet() + current
     }
 
-    val positions = remember(nodes, edges) {
-        val count = nodes.size
-        if (count == 0) emptyMap() else {
-            val index = nodes.mapIndexed { i, node -> node.id to i }.toMap()
-            val x = FloatArray(count) { i ->
-                val a = i * 2.3999632f
-                val r = 0.24f + 0.76f * kotlin.math.sqrt((i + 0.5f) / count.toFloat())
-                cos(a) * r
+    // Les notes sont regroupées autour de leur véritable dossier Obsidian.
+    // Les rayons cerveau→dossier→note sont des liens de structure, séparés des wikiliens réels.
+    val groupCenters = remember(nodes) {
+        val groups = nodes.groupBy { it.folder.substringBefore('/').trim().ifBlank { "Racine" } }
+            .toSortedMap()
+        groups.keys.mapIndexed { index, name ->
+            val angle = -Math.PI / 2.0 + index * 2.0 * Math.PI / groups.size.coerceAtLeast(1)
+            name to Offset((cos(angle) * 0.47).toFloat(), (sin(angle) * 0.47).toFloat())
+        }.toMap()
+    }
+    val positions = remember(nodes, edges, groupCenters) {
+        val grouped = nodes.groupBy { it.folder.substringBefore('/').trim().ifBlank { "Racine" } }
+        val result = HashMap<String, Offset>()
+        grouped.forEach { (folder, members) ->
+            val hub = groupCenters[folder] ?: Offset.Zero
+            val ordered = members.sortedBy { it.id }
+            ordered.forEachIndexed { i, node ->
+                val angle = i * 2.3999632f
+                val ring = 0.105f + 0.105f * kotlin.math.sqrt((i + 0.5f) / ordered.size.coerceAtLeast(1))
+                result[node.id] = Offset(
+                    (hub.x + cos(angle) * ring).coerceIn(-0.94f, 0.94f),
+                    (hub.y + sin(angle) * ring).coerceIn(-0.94f, 0.94f)
+                )
             }
-            val y = FloatArray(count) { i ->
-                val a = i * 2.3999632f
-                val r = 0.24f + 0.76f * kotlin.math.sqrt((i + 0.5f) / count.toFloat())
-                sin(a) * r
-            }
-            val links = edges.mapNotNull { e ->
-                val a = index[e.from] ?: return@mapNotNull null
-                val b = index[e.to] ?: return@mapNotNull null
-                if (a == b) null else a to b
-            }
-            val iterations = if (count <= 450) 54 else 18
-            repeat(iterations) {
-                val fx = FloatArray(count) { -x[it] * 0.012f }
-                val fy = FloatArray(count) { -y[it] * 0.012f }
-                if (count <= 450) {
-                    for (i in 0 until count) for (j in i + 1 until count) {
-                        val dx = x[i] - x[j]
-                        val dy = y[i] - y[j]
-                        val d2 = (dx * dx + dy * dy).coerceAtLeast(0.0025f)
-                        val force = 0.0018f / d2
-                        fx[i] += dx * force; fy[i] += dy * force
-                        fx[j] -= dx * force; fy[j] -= dy * force
-                    }
-                }
-                links.forEach { (a, b) ->
-                    val dx = x[b] - x[a]
-                    val dy = y[b] - y[a]
-                    fx[a] += dx * 0.018f; fy[a] += dy * 0.018f
-                    fx[b] -= dx * 0.018f; fy[b] -= dy * 0.018f
-                }
-                val step = if (count <= 450) 0.72f else 0.48f
-                for (i in 0 until count) {
-                    x[i] += (fx[i] * step).coerceIn(-0.035f, 0.035f)
-                    y[i] += (fy[i] * step).coerceIn(-0.035f, 0.035f)
-                }
-            }
-            val extent = maxOf(x.maxOf { kotlin.math.abs(it) }, y.maxOf { kotlin.math.abs(it) }, 0.001f)
-            nodes.mapIndexed { i, node -> node.id to Offset(x[i] / extent, y[i] / extent) }.toMap()
         }
+        result
     }
 
     Box(Modifier.fillMaxSize().background(
@@ -784,6 +762,19 @@ private fun GraphScreen2DClean(app: JarvisApp) {
                 val x = center.x + side * brainRadius * (0.22f + (i % 3) * 0.12f)
                 drawLine(Color(0xFFE3C9FF).copy(alpha = 0.34f), Offset(center.x, y), Offset(x, y + side * brainRadius * 0.12f), 1.15f)
                 drawCircle(Color(0xFFE8D5FF).copy(alpha = 0.72f), 1.7f, Offset(x, y + side * brainRadius * 0.12f))
+            }
+            // Branches d'organisation réelles : cerveau → dossier → notes du dossier.
+            groupCenters.forEach { (folder, hub) ->
+                val hubPoint = center + Offset(hub.x * radius, hub.y * radius)
+                val folderColor = couleurDossier(folder, Color(0xFFC18AFF))
+                drawLine(folderColor.copy(alpha = 0.42f), center, hubPoint, strokeWidth = 1.8f)
+                nodes.filter { it.folder.substringBefore('/').trim().ifBlank { "Racine" } == folder }.forEach { node ->
+                    val p = positions[node.id] ?: return@forEach
+                    drawLine(folderColor.copy(alpha = 0.24f), hubPoint, center + Offset(p.x * radius, p.y * radius), strokeWidth = 1.1f)
+                }
+                drawCircle(folderColor.copy(alpha = 0.16f), 17f, hubPoint)
+                drawCircle(folderColor.copy(alpha = 0.92f), 5.5f, hubPoint)
+                drawCircle(Color.White.copy(alpha = 0.62f), 1.5f, hubPoint)
             }
             // Relations explicites uniquement : aucune arête n'est inventée pour remplir la scène.
             edges.forEach { edge ->
