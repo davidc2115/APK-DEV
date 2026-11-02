@@ -180,7 +180,8 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         "reserve_bilan" -> ok(svc.bilanTexte(a.s("annee").toIntOrNull() ?: LocalDate.now().year))
         "presentation_modifier" -> presentation(a)
         "distance_deplacement" -> distanceTool(a)
-        "clients_exporter_kml" -> ok(svc.exporterKml(a.s("recherche")))\n        "kml_couleurs_set" -> kmlCouleursSet(a)
+        "clients_exporter_kml" -> ok(svc.exporterKml(a.s("recherche")))
+        "kml_couleurs_set" -> kmlCouleursSet(a)
         else -> err("Outil inconnu : $name")
     }
 
