@@ -207,6 +207,10 @@ fun SettingsScreen(app: JarvisApp) {
         }
 
         item {
+            ImprimantePanel(store, app)
+        }
+
+        item {
             DiscordPanel(store, app)
         }
 
@@ -984,6 +988,74 @@ private fun PollinationsPanel(store: fr.dd.jarvis.data.Store) {
         Text("Créer un token Hugging Face", color = HudDim, fontSize = 12.sp, modifier = Modifier.clickable {
             ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://huggingface.co/settings/tokens")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
         })
+    }
+}
+
+
+@Composable
+private fun ImprimantePanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.JarvisApp) {
+    val scope = rememberCoroutineScope()
+    var msg by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    HudPanel(Modifier.fillMaxWidth(), title = "Imprimante réseau — accès local et distant") {
+        Text(
+            "Détecte les imprimantes IPP annoncées sur le Wi-Fi. Une fois enregistrée, Jarvis peut envoyer les impressions localement ou passer par le serveur Debian lorsque le téléphone est en 4G/5G. Le serveur Debian doit rester allumé et joignable en SSH.",
+            color = HudDim, fontSize = 12.sp
+        )
+        Spacer(Modifier.height(8.dp))
+        HudTextField(store.printerHost.value, { store.printerHost.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Adresse IP de l'imprimante")
+        Spacer(Modifier.height(6.dp))
+        HudTextField(store.printerPath.value, { store.printerPath.set(it.trim().ifBlank { "/ipp/print" }) }, Modifier.fillMaxWidth(), label = "Chemin IPP (détecté automatiquement)")
+        if (store.printerName.value.isNotBlank()) {
+            Text("Imprimante enregistrée : ${store.printerName.value}", color = HudText, fontSize = 12.sp)
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HudButton(if (busy) "Recherche…" else "Détecter sur le Wi-Fi", enabled = !busy) {
+                scope.launch {
+                    busy = true
+                    msg = try {
+                        val found = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            val services = fr.dd.jarvis.ai.Reseau.decouvrir(app, listOf("_ipp._tcp", "_ipps._tcp", "_printer._tcp"), 5000)
+                            val ips = services.map { it.host }.distinct().take(12)
+                            var result: fr.dd.jarvis.ai.Impression.Imprimante? = null
+                            for (ip in ips) {
+                                val service = services.firstOrNull { it.host == ip }
+                                result = fr.dd.jarvis.ai.Impression.interroger(app, ip, "local", service?.chemin?.ifBlank { null })
+                                if (result != null) break
+                            }
+                            result
+                        }
+                        if (found != null) {
+                            store.printerHost.set(found.ip)
+                            store.printerName.set(found.nom)
+                            store.printerPath.set(found.chemin)
+                            "✅ ${found.nom} détectée sur ${found.ip}."
+                        } else "Aucune imprimante IPP détectée. Vérifie qu'elle est sur le même Wi-Fi et que le service IPP est activé."
+                    } catch (e: Exception) { "❌ ${e.message ?: e.javaClass.simpleName}" }
+                    busy = false
+                }
+            }
+            HudButton(if (busy) "Test…" else "Tester l'accès", enabled = !busy && store.printerHost.value.isNotBlank()) {
+                scope.launch {
+                    busy = true
+                    msg = try {
+                        val via = if (fr.dd.jarvis.ai.Reseau.infos(app)?.wifi == true) "local" else "serveur"
+                        val p = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            fr.dd.jarvis.ai.Impression.interroger(app, store.printerHost.value.trim(), via, store.printerPath.value.trim())
+                        }
+                        if (p != null) {
+                            store.printerName.set(p.nom)
+                            store.printerPath.set(p.chemin)
+                            "✅ ${p.nom} — ${p.modele.ifBlank { p.ip }} — ${p.etat} (via ${if (via == "serveur") "Debian" else "Wi-Fi"})."
+                        } else "❌ Imprimante inaccessible par ${if (via == "serveur") "le serveur Debian" else "le Wi-Fi"}. Vérifie SSH et l'adresse IPP."
+                    } catch (e: Exception) { "❌ ${e.message ?: e.javaClass.simpleName}" }
+                    busy = false
+                }
+            }
+        }
+        Text("À distance, Jarvis utilise SSH vers Debian puis IPP sur le réseau local. Aucun port 631 ne doit être ouvert sur Internet.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+        if (msg.isNotBlank()) Text(msg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
     }
 }
 
