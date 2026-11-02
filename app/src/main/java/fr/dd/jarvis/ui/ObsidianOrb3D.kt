@@ -4,574 +4,582 @@ import android.content.Context
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.opengl.Matrix
-import android.view.MotionEvent
-import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import fr.dd.jarvis.JarvisApp
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.nio.FloatBuffer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
+import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.sin
-import kotlin.math.sqrt
+import kotlin.math.tan
+import kotlin.random.Random
 
 /**
- * Première scène 3D native de l'Orbe Obsidienne.
- * OpenGL ES 2.0 évite d'ajouter un moteur externe et fonctionne hors ligne.
- * Les notes et relations affichées dans l'overlay viennent exclusivement de l'index Room.
+ * Orbe Obsidienne 3D : la même constellation que la vue 2D (style de l'image de référence), posée sur un dôme
+ * en perspective autour d'une vraie sphère d'obsidienne 3D (OpenGL ES 2.0, sans moteur externe).
+ *
+ *  - OpenGL dessine la profondeur : sphère d'obsidienne (veines violettes, reflets), anneaux orbitaux, étoiles.
+ *  - Une couche Compose dessine par-dessus, à la position projetée de chaque élément 3D, les hubs, étiquettes,
+ *    flèches et le cerveau néon, exactement dans le style 2D (toujours face à l'écran, donc toujours lisibles).
+ *  - Caméra : léger balancement automatique ; glisser pour tourner, pincer pour zoomer, toucher pour ouvrir.
  */
 @Composable
-fun ObsidianOrb3D(app: fr.dd.jarvis.JarvisApp) {
-    val nodes by app.knowledgeRepository.observeNodes().collectAsState(initial = emptyList())
-    val relations by app.knowledgeRepository.observeRelations().collectAsState(initial = emptyList())
+fun ObsidianOrb3D(app: JarvisApp, enTete: @Composable () -> Unit = {}) {
+    val etat = rememberConstellation(app)
+    var noteOuverte by remember { mutableStateOf<String?>(null) }
+    var hubListe by remember { mutableStateOf<String?>(null) }
+    val c = etat.constellation
+    if (c == null) ChargementEnCours(etat.erreur, enTete)
+    else Orbe3DVue(c, enTete, onNote = { noteOuverte = it }, onHub = { cle -> if (c.hub(cle)?.type == TypeHub.DOSSIER) hubListe = cle })
+    DialoguesConstellation(app, c, noteOuverte, { noteOuverte = it }, hubListe, { hubListe = it })
+}
 
-    var selectedNodeId by remember { mutableStateOf<String?>(null) }
-    val selectedNode = nodes.firstOrNull { it.id == selectedNodeId }
-    val selectedRelations = relations.filter { it.fromNodeId == selectedNodeId || it.toNodeId == selectedNodeId }
-    val surfaceHolder = remember { arrayOfNulls<ObsidianOrbSurface>(1) }
-    Box(Modifier.fillMaxSize().background(Color(0xFF030208))) {
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { context ->
-                ObsidianOrbSurface(context).also { surface ->
-                    surfaceHolder[0] = surface
-                    surface.onNodeSelected = { id -> selectedNodeId = id }
-                }
-            },
-            update = { view -> view.setGraph(nodes, relations); view.setSelectedNode(selectedNodeId) }
-        )
-        // Le cerveau et Jörmungand sont désormais rendus dans la scène OpenGL (géométrie 3D).
-        if (selectedNode != null) {
-            Column(
-                Modifier.align(Alignment.BottomCenter).padding(bottom = 112.dp)
-                    .background(Color(0xE6170D25), RoundedCornerShape(16.dp))
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Text(selectedNode.title, color = Color(0xFFF0E5FF), fontSize = 14.sp)
-                Text(selectedNode.sourcePath, color = Color(0xFFB69ACF), fontSize = 10.sp)
-                Text("${selectedRelations.size} relation(s) · ${selectedNode.type}", color = Color(0xFF9D84BD), fontSize = 10.sp)
-                Text("FERMER", Modifier.clickable { selectedNodeId = null }, color = Color(0xFFD2B5FF), fontSize = 9.sp)
-            }
-        }
+/** Unité « monde » 3D = 64 dp de la mise en page 2D (le rayon du cerveau). */
+private const val DP_PAR_UNITE = 64f
+private const val FOV_Y = 40f
+
+/** Position 3D d'un point de la mise en page 2D : dôme qui s'éloigne vers les bords (y écran vers le bas → y monde vers le haut). */
+private fun versDome(p: Pt, avance: Float = 0f): FloatArray {
+    val x = p.x / DP_PAR_UNITE; val y = -p.y / DP_PAR_UNITE
+    val z = -(x * x + y * y) * 0.045f + avance
+    return floatArrayOf(x, y, z)
+}
+
+/** Caméra partagée entre la couche Compose et le rendu OpenGL (mêmes matrices des deux côtés). */
+private class Camera3D {
+    @Volatile var lacet = 0f      // rotation autour de Y (degrés)
+    @Volatile var tangage = -10f  // rotation autour de X (degrés)
+    @Volatile var zoom = 1f
+    @Volatile var distance = 9f
+    @Volatile var tempsCoeur = 0f
+    /** Décalage vertical de l'image (en coordonnées normalisées) : recentre la constellation entre l'en-tête et le
+     *  bas de l'écran sans déplacer le centre de rotation (la sphère). */
+    @Volatile var decalageNdcY = 0f
+
+    fun projection(largeur: Float, hauteur: Float): FloatArray {
+        val p = FloatArray(16); val t = FloatArray(16); val out = FloatArray(16)
+        Matrix.perspectiveM(p, 0, FOV_Y, largeur / max(hauteur, 1f), 0.1f, 60f)
+        Matrix.setIdentityM(t, 0); t[13] = decalageNdcY
+        Matrix.multiplyMM(out, 0, t, 0, p, 0)
+        return out
+    }
+
+    fun matrices(largeur: Float, hauteur: Float, mvp: FloatArray, mv: FloatArray, modele: FloatArray = FloatArray(16)) {
+        val proj = projection(largeur, hauteur); val vue = FloatArray(16)
+        Matrix.setLookAtM(vue, 0, 0f, 0f, distance, 0f, 0f, 0f, 0f, 1f, 0f)
+        Matrix.setIdentityM(modele, 0)
+        Matrix.rotateM(modele, 0, tangage, 1f, 0f, 0f)
+        Matrix.rotateM(modele, 0, lacet, 0f, 1f, 0f)
+        Matrix.scaleM(modele, 0, zoom, zoom, zoom)
+        Matrix.multiplyMM(mv, 0, vue, 0, modele, 0)
+        Matrix.multiplyMM(mvp, 0, proj, 0, mv, 0)
     }
 }
 
-private class ObsidianOrbSurface(context: Context) : GLSurfaceView(context) {
-    private val orbRenderer = ObsidianOrbRenderer()
-    var onNodeSelected: ((String) -> Unit)? = null
-    private var downX = 0f
-    private var downY = 0f
-    fun setGraph(nodes: List<fr.dd.jarvis.data.graph.GraphNodeEntity>, relations: List<fr.dd.jarvis.data.graph.GraphRelationEntity>) = orbRenderer.setGraph(nodes, relations)
-    fun setSelectedNode(id: String?) = orbRenderer.setSelectedNode(id)
+/** Point projeté : position écran, profondeur (distance devant la caméra) et pixels par unité monde à cet endroit. */
+private data class Projete(val ecran: Offset, val profondeur: Float, val pxParUnite: Float, val zVue: Float)
 
+private fun projeter(mvp: FloatArray, mv: FloatArray, p: FloatArray, w: Float, h: Float, zoom: Float): Projete? {
+    val clip = FloatArray(4)
+    Matrix.multiplyMV(clip, 0, mvp, 0, floatArrayOf(p[0], p[1], p[2], 1f), 0)
+    if (clip[3] < 0.05f) return null
+    val vue = FloatArray(4)
+    Matrix.multiplyMV(vue, 0, mv, 0, floatArrayOf(p[0], p[1], p[2], 1f), 0)
+    val prof = -vue[2]
+    val sx = (clip[0] / clip[3] + 1f) * w * 0.5f
+    val sy = (1f - clip[1] / clip[3]) * h * 0.5f
+    val ppu = zoom * (h * 0.5f) / (tan(Math.toRadians(FOV_Y / 2.0)).toFloat() * prof)
+    return Projete(Offset(sx, sy), prof, ppu, vue[2])
+}
+
+/** [avecOpenGl] et [tempsFixe] servent uniquement aux captures d'écran hors appareil (pas d'OpenGL, image figée). */
+@Composable
+internal fun Orbe3DVue(
+    c: Constellation, enTete: @Composable () -> Unit, onNote: (String) -> Unit, onHub: (String) -> Unit,
+    avecOpenGl: Boolean = true, tempsFixe: Float? = null
+) {
+    val camera = remember { Camera3D() }
+    val mesureur = rememberTextMeasurer(cacheSize = 200)
+    val fontScale = LocalDensity.current.fontScale
+    val dens = LocalDensity.current.density
+    var temps by remember { mutableFloatStateOf(0f) }
+    var lacetUser by remember { mutableFloatStateOf(0f) }
+    var tangageUser by remember { mutableFloatStateOf(0f) }
+    var zoomUser by remember { mutableFloatStateOf(1f) }
+    var dernierGeste by remember { mutableFloatStateOf(-100f) }
+    var taille by remember { mutableStateOf(androidx.compose.ui.geometry.Size.Zero) }
+    val surface = remember { arrayOfNulls<OrbeSurface>(1) }
+
+    // Positions 3D de chaque élément de la constellation (hubs un peu en avant du dôme, étiquettes dessus).
+    val pos3d = remember(c) {
+        val m = HashMap<String, FloatArray>()
+        c.hubs.forEach { m["hub:${it.cle}"] = versDome(it.pos, 0.25f) }
+        c.etiquettes.forEach { m[it.id] = versDome(it.pos, 0.12f) }
+        m
+    }
+    // Recul de caméra : toute la constellation tient dans l'écran (portrait) au zoom 1.
+    // La zone utile exclut l'en-tête (~64 dp) et la consigne du bas (~28 dp) ; l'image est recentrée sur la
+    // constellation (et non sur la sphère) par un décalage vertical de la projection.
+    val (distanceAuto, decalageAuto) = remember(c, taille) {
+        val hx = max(abs(c.minX), abs(c.maxX)) / DP_PAR_UNITE + 0.4f
+        val haut = -c.minY / DP_PAR_UNITE; val bas = -c.maxY / DP_PAR_UNITE
+        val cy = (haut + bas) / 2f; val hy = (haut - bas) / 2f + 0.4f
+        val tanY = tan(Math.toRadians(FOV_Y / 2.0)).toFloat()
+        val h = if (taille.height > 0f) taille.height else 1600f
+        val w = if (taille.width > 0f) taille.width else 800f
+        val hDispo = (h - 92f * dens).coerceAtLeast(h * 0.6f)
+        val d = max(hx / (tanY * w / h), hy / (tanY * hDispo / h)) * 1.06f + 0.6f
+        val cibleNdc = 1f - 2f * (64f * dens + hDispo / 2f) / h
+        d to (cibleNdc - cy / (tanY * d))
+    }
+
+    // Horloge d'animation : balancement doux de la caméra quand l'utilisateur ne touche pas l'écran.
+    if (tempsFixe != null) temps = tempsFixe
+    else LaunchedEffect(Unit) {
+        var avant = 0L
+        while (true) {
+            withFrameNanos { t ->
+                if (avant != 0L) temps += ((t - avant) / 1e9f).coerceAtMost(0.1f)
+                avant = t
+            }
+        }
+    }
+
+    Box(Modifier.fillMaxSize().background(Color(0xFF030106))) {
+        if (avecOpenGl) AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { ctx -> OrbeSurface(ctx, camera).also { surface[0] = it } }
+        ) else Canvas(Modifier.fillMaxSize()) {
+            // Substitut 2D de la sphère OpenGL (captures d'écran hors appareil uniquement).
+            val r = size.height * 0.5f / (tan(Math.toRadians(FOV_Y / 2.0)).toFloat() * camera.distance) * camera.zoom
+            val ctr = Offset(size.width / 2f, size.height * 0.5f * (1f - camera.decalageNdcY))
+            drawCircle(Brush.radialGradient(listOf(Color(0xFF2A1446), Color(0xFF0B0617), Color(0xFF020104)), ctr - Offset(r * 0.3f, r * 0.35f), r * 1.4f), r, ctr)
+        }
+        DisposableEffect(Unit) {
+            onDispose { runCatching { surface[0]?.onPause() } }
+        }
+        val zones = remember { HashMap<String, Rect>() }
+        Canvas(
+            Modifier.fillMaxSize()
+                .pointerInput(Unit) {
+                    detectTransformGestures { _, pan, zoom, _ ->
+                        dernierGeste = temps
+                        zoomUser = (zoomUser * zoom).coerceIn(0.6f, 3.2f)
+                        lacetUser = (lacetUser + pan.x * 0.25f).coerceIn(-75f, 75f)
+                        tangageUser = (tangageUser + pan.y * 0.2f).coerceIn(-60f, 60f)
+                    }
+                }
+                .pointerInput(c) {
+                    detectTapGestures { tap ->
+                        val id = zones.entries.firstOrNull { it.value.inflate(6f * dens).contains(tap) }?.key ?: return@detectTapGestures
+                        when {
+                            id.startsWith("hub:") -> onHub(id.removePrefix("hub:"))
+                            else -> c.etiquettes.firstOrNull { it.id == id }?.let { e ->
+                                if (e.type == TypeEtiquette.NOTE) onNote(e.noteId!!) else if (e.type == TypeEtiquette.PLUS) onHub(e.hub)
+                            }
+                        }
+                    }
+                }
+        ) {
+            if (taille != size) taille = size
+            // Caméra mise à jour pendant le DESSIN (et non la composition) : seul ce Canvas est redessiné à
+            // chaque image, l'écran n'est pas recomposé 60 fois par seconde.
+            val calme = (temps - dernierGeste).coerceIn(0f, 4f) / 4f
+            camera.lacet = lacetUser + calme * 18f * sin(temps * 0.22f)
+            camera.tangage = (-8f + tangageUser + calme * 5f * sin(temps * 0.15f)).coerceIn(-75f, 75f)
+            camera.zoom = zoomUser
+            camera.distance = distanceAuto
+            camera.decalageNdcY = decalageAuto
+            camera.tempsCoeur = temps
+            val mvp = FloatArray(16); val mv = FloatArray(16)
+            camera.matrices(size.width, size.height, mvp, mv)
+            fun proj(id: String) = pos3d[id]?.let { projeter(mvp, mv, it, size.width, size.height, camera.zoom) }
+            val centre = projeter(mvp, mv, floatArrayOf(0f, 0f, 0f), size.width, size.height, camera.zoom) ?: return@Canvas
+            val rCoeur = centre.pxParUnite * 1f
+            val pulse = 0.84f + 0.16f * sin(temps * 2.2f)
+            val profRef = camera.distance
+            fun alphaProfondeur(p: Projete) = (1.1f - (p.profondeur - profRef) * 0.15f).coerceIn(0.5f, 1f)
+            // Un élément derrière la sphère (plus loin que le centre et projeté sur son disque) est masqué.
+            fun cache(p: Projete) = p.zVue < centre.zVue - 0.2f && (p.ecran - centre.ecran).getDistance() < rCoeur * 0.98f
+
+            // Halo autour de la sphère (anneau transparent au centre pour ne pas voiler l'obsidienne).
+            drawCircle(
+                Brush.radialGradient(
+                    0f to Color.Transparent, 0.52f to Color.Transparent, 0.56f to Neon.violetVif.copy(alpha = 0.5f * pulse),
+                    0.75f to Neon.violetProfond.copy(alpha = 0.18f), 1f to Color.Transparent,
+                    center = centre.ecran, radius = rCoeur * 1.85f
+                ), rCoeur * 1.85f, centre.ecran
+            )
+
+            // Toile cerveau → hubs, puis flèches hub → étiquettes.
+            val hubsAnneau = c.hubs.filter { it.type != TypeHub.TAGS }
+            val hubsProj = hubsAnneau.mapNotNull { h -> proj("hub:${h.cle}")?.let { h to it } }
+            dessinerToile(centre.ecran, rCoeur, hubsProj.filterNot { cache(it.second) }.map { (h, p) -> p.ecran to h.rayon / DP_PAR_UNITE * p.pxParUnite }, rCoeur / DP_PAR_UNITE, pulse)
+            for (e in c.etiquettes) {
+                if (e.type == TypeEtiquette.TAG) continue
+                val h = c.hub(e.hub) ?: continue
+                val ph = proj("hub:${h.cle}") ?: continue
+                val pe = proj(e.id) ?: continue
+                if (cache(pe)) continue
+                val rH = h.rayon / DP_PAR_UNITE * ph.pxParUnite
+                val d = pe.ecran - ph.ecran
+                val l = d.getDistance().coerceAtLeast(1f)
+                val a = ph.ecran + d * (rH * 1.13f / l)
+                val ke = pe.pxParUnite / DP_PAR_UNITE
+                val b = ph.ecran + d * ((l - (e.w / 2f + 6f) * ke * abs(d.x / l) - (e.h / 2f + 6f) * ke * abs(d.y / l)).coerceAtLeast(0f) / l)
+                fleche(a, b, Neon.violet, 1.4f * ke, alphaProfondeur(pe) * 0.95f)
+            }
+            c.hub("__tags")?.let { _ ->
+                val pt = proj("hub:__tags")
+                if (pt != null && !cache(pt)) {
+                    drawLine(Neon.violet.copy(alpha = 0.55f), centre.ecran + Offset(0f, rCoeur), pt.ecran, 1.4f * pt.pxParUnite / DP_PAR_UNITE)
+                    c.etiquettes.filter { it.type == TypeEtiquette.TAG }.forEach { e ->
+                        proj(e.id)?.let { pe -> drawLine(Neon.violet.copy(alpha = 0.4f), pt.ecran, pe.ecran, 1f * pe.pxParUnite / DP_PAR_UNITE) }
+                    }
+                }
+            }
+            // Vrais liens [[wikilinks]] (flèche vers la note citée).
+            val parNote = c.etiquettes.filter { it.noteId != null }.associateBy { it.noteId!! }
+            for (l in c.liens) {
+                val ea = parNote[l.de] ?: continue; val eb = parNote[l.vers] ?: continue
+                val pa = proj(ea.id) ?: continue; val pb = proj(eb.id) ?: continue
+                if (cache(pa) || cache(pb)) continue
+                fleche(pa.ecran, pb.ecran, Neon.lavande, 1.5f * pb.pxParUnite / DP_PAR_UNITE, 0.75f, courbe = courbeVersCentre(pa.ecran, pb.ecran, centre.ecran))
+            }
+
+            // Cerveau néon par-dessus la sphère d'obsidienne 3D (liseré, cerveau, textes).
+            drawCircle(Neon.lavande.copy(alpha = 0.9f), rCoeur, centre.ecran, style = Stroke(max(rCoeur * 0.02f, 1.5f)))
+            drawCircle(Neon.violetVif.copy(alpha = 0.35f), rCoeur * 1.03f, centre.ecran, style = Stroke(rCoeur * 0.07f))
+            dessinerNoyau(centre.ecran, rCoeur, pulse, mesureur, fontScale, sphere = false, sousTitre = "Orbe Obsidienne")
+
+            // Hubs et étiquettes, du plus lointain au plus proche (les proches passent devant).
+            zones.clear()
+            data class Element(val id: String, val p: Projete)
+            val elements = (c.hubs.map { "hub:${it.cle}" } + c.etiquettes.map { it.id })
+                .mapNotNull { id -> proj(id)?.let { Element(id, it) } }
+                .sortedByDescending { it.p.profondeur }
+            for (el in elements) {
+                if (cache(el.p)) continue
+                val a = alphaProfondeur(el.p)
+                val kk = el.p.pxParUnite / DP_PAR_UNITE
+                if (el.id.startsWith("hub:")) {
+                    val h = c.hub(el.id.removePrefix("hub:")) ?: continue
+                    if (h.type == TypeHub.TAGS) dessinerHubTags(h, el.p.ecran, kk, mesureur, fontScale, a)
+                    else {
+                        val r = h.rayon * kk
+                        dessinerHub(h, el.p.ecran, r, mesureur, fontScale, a, pulse = pulse)
+                        zones[el.id] = Rect(el.p.ecran - Offset(r, r), androidx.compose.ui.geometry.Size(2 * r, 2 * r))
+                    }
+                } else {
+                    val e = c.etiquettes.firstOrNull { it.id == el.id } ?: continue
+                    zones[e.id] = dessinerEtiquette(e, el.p.ecran, kk, mesureur, fontScale, a, taillePxMin = 8f * dens)
+                }
+            }
+        }
+
+        // En-tête : titre + bascule 2D/3D.
+        Row(
+            Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)
+                .background(Neon.fondPanneau, RoundedCornerShape(12.dp))
+                .border(1.dp, Neon.violet.copy(alpha = 0.75f), RoundedCornerShape(12.dp))
+                .padding(horizontal = 12.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconeCompose(Icone.CERVEAU, 18.dp)
+            Column(Modifier.padding(start = 8.dp).weight(1f)) {
+                Text("Orbe Obsidienne", color = Neon.blancViolet, fontSize = 14.sp, fontFamily = Neon.serif, fontWeight = FontWeight.Bold)
+                Text("${c.totalNotes} notes · ${c.totalLiens} liens · ${c.totalTags} tags · ${c.totalPieces} pièces", color = Neon.sousTitre, fontSize = 10.sp, fontFamily = Neon.serif)
+            }
+            enTete()
+        }
+        Text(
+            "Glisser pour tourner · pincer pour zoomer · toucher une note",
+            color = Neon.sousTitre.copy(alpha = 0.7f), fontSize = 10.sp, fontFamily = Neon.serif,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp)
+        )
+        if (c.vide) Text(
+            "Aucune note trouvée : choisis ton coffre Obsidian dans Réglages.",
+            color = Neon.sousTitre, fontSize = 13.sp, fontFamily = Neon.serif,
+            modifier = Modifier.align(Alignment.Center).padding(32.dp)
+        )
+    }
+}
+
+// ================================================================================================ OpenGL
+
+private class OrbeSurface(context: Context, camera: Camera3D) : GLSurfaceView(context) {
     init {
         setEGLContextClientVersion(2)
-        setRenderer(orbRenderer)
+        setRenderer(OrbeRenderer(camera))
         renderMode = RENDERMODE_CONTINUOUSLY
-        setOnTouchListener { _, event ->
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    downX = event.x; downY = event.y
-                    orbRenderer.touch(event.x, event.y, 0f, 0f)
-                    true
-                }
-                MotionEvent.ACTION_POINTER_DOWN -> {
-                    if (event.pointerCount >= 2) orbRenderer.setPinchStart(distance(event))
-                    true
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    if (event.pointerCount >= 2) {
-                        val d = distance(event)
-                        orbRenderer.pinch(d)
-                        orbRenderer.setPinchStart(d)
-                    } else {
-                        orbRenderer.drag(event.x, event.y)
-                    }
-                    true
-                }
-                MotionEvent.ACTION_UP -> {
-                    if (event.pointerCount == 1 && kotlin.math.hypot((event.x - downX).toDouble(), (event.y - downY).toDouble()) < 14.0) {
-                        orbRenderer.hitTest(event.x, event.y)?.let { onNodeSelected?.invoke(it) }
-                    }
-                    true
-                }
-                MotionEvent.ACTION_CANCEL -> true
-                else -> true
-            }
-        }
-    }
-
-    private fun distance(e: MotionEvent): Float {
-        if (e.pointerCount < 2) return 0f
-        val dx = e.getX(0) - e.getX(1)
-        val dy = e.getY(0) - e.getY(1)
-        return sqrt(dx * dx + dy * dy)
     }
 }
 
-private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
-    @Volatile private var angleX = -12f
-    @Volatile private var angleY = 0f
-    @Volatile private var zoom = 1.22f
-    @Volatile private var lastX = 0f
-    @Volatile private var lastY = 0f
-    @Volatile private var pinchStart = 0f
-    @Volatile private var nodeIds: List<String> = emptyList()
-    @Volatile private var selectedNodeId: String? = null
-    @Volatile private var nodePositions: List<FloatArray> = emptyList()
-    @Volatile private var hitMatrix = FloatArray(16)
-
-    private var program = 0
-    private var graphProgram = 0
-    @Volatile private var graphPoints = FloatArray(0)
-    @Volatile private var graphLines = FloatArray(0)
-    @Volatile private var pointBuffer: java.nio.FloatBuffer? = null
-    @Volatile private var lineBuffer: java.nio.FloatBuffer? = null
-    @Volatile private var selectedPointBuffer: java.nio.FloatBuffer? = null
-    private var vertexBuffer: java.nio.FloatBuffer? = null
-    private var serpentBuffer: java.nio.FloatBuffer? = null
-    private var serpentVertexCount = 0
-    private var leftBrainBuffer: java.nio.FloatBuffer? = null
-    private var rightBrainBuffer: java.nio.FloatBuffer? = null
-    private var brainVertexCount = 0
-    private var vertexCount = 0
-    @Volatile private var surfaceWidth = 1
-    @Volatile private var surfaceHeight = 1
-    private val projection = FloatArray(16)
-    private val view = FloatArray(16)
-    private val model = FloatArray(16)
-    private val mv = FloatArray(16)
-    private val mvp = FloatArray(16)
-
-    fun setSelectedNode(id: String?) {
-        selectedNodeId = id
-        val index = nodeIds.indexOf(id)
-        selectedPointBuffer = if (index >= 0) nodePositions.getOrNull(index)?.let { makeBuffer(it) } else null
-    }
-
-    fun setGraph(nodes: List<fr.dd.jarvis.data.graph.GraphNodeEntity>, relations: List<fr.dd.jarvis.data.graph.GraphRelationEntity>) {
-        // L’ordre alphabétique donne des positions stables : ajouter une note ne redistribue pas tout le nuage.
-        val visible = nodes.sortedBy { it.id }
-        val positions = HashMap<String, FloatArray>()
-        visible.forEachIndexed { index, node ->
-            val y = 1f - 2f * (index + 0.5f) / max(visible.size, 1)
-            val radius = sqrt(max(0f, 1f - y * y))
-            val theta = index * 2.3999632f
-            // Les nœuds sont répartis sur une couronne extérieure, distincte du volume de l'orbe.
-            positions[node.id] = floatArrayOf(1.30f * radius * cos(theta), 1.26f * y, 1.30f * radius * sin(theta))
-        }
-        nodeIds = visible.map { it.id }
-        nodePositions = visible.map { positions.getValue(it.id) }
-        graphPoints = nodePositions.flatMap { it.toList() }.toFloatArray()
-        val edges = ArrayList<Float>()
-        relations.filter { it.origin == "EXPLICIT" }.forEach { relation ->
-            val a = positions[relation.fromNodeId]
-            val b = positions[relation.toNodeId]
-            if (a != null && b != null) { edges.addAll(a.toList()); edges.addAll(b.toList()) }
-        }
-        graphLines = edges.toFloatArray()
-        pointBuffer = makeBuffer(graphPoints)
-        lineBuffer = makeBuffer(graphLines)
-        val selectedIndex = nodeIds.indexOf(selectedNodeId)
-        selectedPointBuffer = if (selectedIndex >= 0) nodePositions.getOrNull(selectedIndex)?.let { makeBuffer(it) } else null
-    }
-
-    private fun makeBuffer(values: FloatArray): java.nio.FloatBuffer {
-        val b = ByteBuffer.allocateDirect(values.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
-        b.put(values); b.position(0); return b
-    }
-
-    fun touch(x: Float, y: Float, dx: Float, dy: Float) { lastX = x; lastY = y }
-    fun hitTest(x: Float, y: Float): String? {
-        val matrix = hitMatrix
-        var bestId: String? = null
-        var bestDistance = 30f * 30f
-        nodePositions.forEachIndexed { index, point ->
-            val clip = FloatArray(4)
-            Matrix.multiplyMV(clip, 0, matrix, 0, floatArrayOf(point[0], point[1], point[2], 1f), 0)
-            if (clip[3] > 0.01f) {
-                val sx = (clip[0] / clip[3] + 1f) * surfaceWidth * 0.5f
-                val sy = (1f - clip[1] / clip[3]) * surfaceHeight * 0.5f
-                val dx = sx - x; val dy = sy - y
-                val distance = dx * dx + dy * dy
-                if (distance < bestDistance) { bestDistance = distance; bestId = nodeIds.getOrNull(index) }
-            }
-        }
-        return bestId
-    }
-    fun drag(x: Float, y: Float) {
-        angleY += (x - lastX) * 0.55f
-        angleX = (angleX + (y - lastY) * 0.45f).coerceIn(-85f, 85f)
-        lastX = x
-        lastY = y
-    }
-    fun setPinchStart(value: Float) { pinchStart = value }
-    fun pinch(value: Float) {
-        if (pinchStart > 0f && value > 0f) zoom = (zoom * (value / pinchStart)).coerceIn(0.62f, 2.5f)
-    }
+/**
+ * Rendu OpenGL : étoiles (parallaxe), sphère d'obsidienne au centre (veines violettes, reflets, liseré
+ * fresnel) et deux anneaux orbitaux inclinés. Toute erreur de shader est attrapée : la scène reste alors
+ * simplement noire derrière la couche Compose, au lieu de faire planter l'application.
+ */
+private class OrbeRenderer(private val camera: Camera3D) : GLSurfaceView.Renderer {
+    private var programme = 0
+    private var programmePoints = 0
+    private var sphere: FloatBuffer? = null
+    private var nbSphere = 0
+    private var etoiles: FloatBuffer? = null
+    private var nbEtoiles = 0
+    private var anneaux: FloatBuffer? = null
+    private var nbAnneau = 0
+    private var largeur = 1f
+    private var hauteur = 1f
+    private var ok = false
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
-        GLES20.glClearColor(0.012f, 0.008f, 0.022f, 1f)
-        GLES20.glEnable(GLES20.GL_DEPTH_TEST)
-        GLES20.glDisable(GLES20.GL_CULL_FACE)
-        program = createProgram(VERTEX_SHADER, FRAGMENT_SHADER)
-        graphProgram = createProgram(GRAPH_VERTEX_SHADER, GRAPH_FRAGMENT_SHADER)
-        vertexBuffer = createSphere(64, 48)
-        vertexCount = 64 * 48 * 6
-        leftBrainBuffer = createBrainHemisphere(36, 36, -1f)
-        rightBrainBuffer = createBrainHemisphere(36, 36, 1f)
-        brainVertexCount = 36 * 36 * 6
-        serpentBuffer = createSerpentTube(180, 14)
-        serpentVertexCount = 180 * 14 * 6
-        Matrix.setLookAtM(view, 0, 0f, 0f, 4.0f, 0f, 0f, 0f, 0f, 1f, 0f)
+        GLES20.glClearColor(0.012f, 0.005f, 0.024f, 1f)
+        ok = runCatching {
+            programme = creerProgramme(VS_SPHERE, FS_SPHERE)
+            programmePoints = creerProgramme(VS_POINTS, FS_POINTS)
+            sphere = creerSphere(64, 48); nbSphere = 64 * 48 * 6
+            val r = Random(11)
+            val e = FloatArray(420 * 4)
+            for (i in 0 until 420) {
+                val u = r.nextFloat() * 2f - 1f; val t = r.nextFloat() * 2f * PI.toFloat()
+                val s = kotlin.math.sqrt(1f - u * u); val rad = 7f + r.nextFloat() * 6f
+                e[i * 4] = s * cos(t) * rad; e[i * 4 + 1] = u * rad; e[i * 4 + 2] = s * sin(t) * rad; e[i * 4 + 3] = r.nextFloat()
+            }
+            etoiles = tampon(e); nbEtoiles = 420
+            // Deux anneaux orbitaux autour de la sphère (cercles inclinés), en points serrés pour un trait lumineux.
+            val n = 360
+            val a = FloatArray(n * 2 * 4)
+            for (i in 0 until n) {
+                val t = 2f * PI.toFloat() * i / n
+                val r1 = 1.32f
+                a[i * 4] = cos(t) * r1; a[i * 4 + 1] = sin(t) * r1 * 0.22f; a[i * 4 + 2] = sin(t) * r1; a[i * 4 + 3] = 0.6f + 0.4f * sin(t * 3f)
+                val r2 = 1.55f; val j = n + i
+                a[j * 4] = cos(t) * r2; a[j * 4 + 1] = cos(t) * r2 * 0.35f; a[j * 4 + 2] = sin(t) * r2 * 0.9f; a[j * 4 + 3] = 0.5f + 0.5f * cos(t * 2f)
+            }
+            anneaux = tampon(a); nbAnneau = n * 2
+            true
+        }.getOrDefault(false)
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
-        surfaceWidth = width; surfaceHeight = height
+        largeur = width.toFloat(); hauteur = height.toFloat()
         GLES20.glViewport(0, 0, width, height)
-        val ratio = width.toFloat() / max(height, 1)
-        Matrix.perspectiveM(projection, 0, 46f, ratio, 0.1f, 20f)
     }
 
     override fun onDrawFrame(gl: GL10?) {
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
-        if (program == 0) return
-        Matrix.setIdentityM(model, 0)
-        Matrix.rotateM(model, 0, angleY, 0f, 1f, 0f)
-        Matrix.rotateM(model, 0, angleX, 1f, 0f, 0f)
-        Matrix.scaleM(model, 0, zoom, zoom, zoom)
-        Matrix.multiplyMM(mv, 0, view, 0, model, 0)
-        Matrix.multiplyMM(mvp, 0, projection, 0, mv, 0)
-        hitMatrix = mvp.copyOf()
+        if (!ok) return
+        runCatching { dessiner() }
+    }
 
-        GLES20.glUseProgram(program)
-        val pos = GLES20.glGetAttribLocation(program, "aPosition")
-        val normal = GLES20.glGetAttribLocation(program, "aNormal")
-        val buffer = vertexBuffer ?: return
-        buffer.position(0)
-        GLES20.glEnableVertexAttribArray(pos)
-        GLES20.glVertexAttribPointer(pos, 3, GLES20.GL_FLOAT, false, 24, buffer)
-        buffer.position(3)
-        GLES20.glEnableVertexAttribArray(normal)
-        GLES20.glVertexAttribPointer(normal, 3, GLES20.GL_FLOAT, false, 24, buffer)
-        GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(program, "uMvp"), 1, false, mvp, 0)
-        GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(program, "uModel"), 1, false, model, 0)
-        GLES20.glUniform3f(GLES20.glGetUniformLocation(program, "uTint"), 0.72f, 0.66f, 0.88f)
-        GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uEmission"), 0f)
-        GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, vertexCount)
+    private fun dessiner() {
+        val mvp = FloatArray(16); val mv = FloatArray(16); val modele = FloatArray(16)
+        camera.matrices(largeur, hauteur, mvp, mv, modele)
 
-        // Jörmungand : véritable corps tubulaire maillé, enroulé autour de l'obsidienne.
-        serpentBuffer?.let { serpent ->
-            serpent.position(0)
-            GLES20.glVertexAttribPointer(pos, 3, GLES20.GL_FLOAT, false, 24, serpent)
-            serpent.position(3)
-            GLES20.glVertexAttribPointer(normal, 3, GLES20.GL_FLOAT, false, 24, serpent)
-            GLES20.glUniform3f(GLES20.glGetUniformLocation(program, "uTint"), 0.34f, 0.13f, 0.55f)
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uEmission"), 0.12f)
-            GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, serpentVertexCount)
-        }
-
-        // Noyau cérébral : deux hémisphères maillés avec reliefs gyri/sillons intégrés
-        // dans la géométrie (plus de chapelet de petites sphères lisses).
-        fun drawBrain(buffer: java.nio.FloatBuffer?, x: Float, tint: Float) {
-            if (buffer == null) return
-            val part = model.copyOf()
-            Matrix.translateM(part, 0, x, 0.015f, 1.045f)
-            Matrix.scaleM(part, 0, 0.72f, 0.53f, 0.55f)
-            val pv = FloatArray(16)
-            val partMvp = FloatArray(16)
-            Matrix.multiplyMM(pv, 0, projection, 0, view, 0)
-            Matrix.multiplyMM(partMvp, 0, pv, 0, part, 0)
-            GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(program, "uMvp"), 1, false, partMvp, 0)
-            GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(program, "uModel"), 1, false, part, 0)
-            GLES20.glUniform3f(GLES20.glGetUniformLocation(program, "uTint"), 0.82f + tint * 0.16f, 0.38f + tint * 0.20f, 1.0f)
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uEmission"), 0.38f)
-            buffer.position(0)
-            GLES20.glVertexAttribPointer(pos, 3, GLES20.GL_FLOAT, false, 24, buffer)
-            buffer.position(3)
-            GLES20.glVertexAttribPointer(normal, 3, GLES20.GL_FLOAT, false, 24, buffer)
-            GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, brainVertexCount)
-        }
-        drawBrain(leftBrainBuffer, -0.205f, 0.72f)
-        drawBrain(rightBrainBuffer, 0.205f, 0.94f)
-        GLES20.glDisableVertexAttribArray(pos)
-        GLES20.glDisableVertexAttribArray(normal)
-        GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(program, "uMvp"), 1, false, mvp, 0)
-        GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(program, "uModel"), 1, false, model, 0)
-
-        // Les nœuds forment une constellation autour de la sphère : ils ne doivent pas disparaître derrière l'obsidienne.
+        // Étoiles (additif, sans profondeur).
         GLES20.glDisable(GLES20.GL_DEPTH_TEST)
         GLES20.glEnable(GLES20.GL_BLEND)
-        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
-        GLES20.glUseProgram(graphProgram)
-        GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(graphProgram, "uMvp"), 1, false, mvp, 0)
-        val graphPos = GLES20.glGetAttribLocation(graphProgram, "aPosition")
-        lineBuffer?.let { b ->
-            b.position(0); GLES20.glVertexAttribPointer(graphPos, 3, GLES20.GL_FLOAT, false, 12, b)
-            GLES20.glEnableVertexAttribArray(graphPos)
-            GLES20.glLineWidth(2.8f)
-            GLES20.glUniform4f(GLES20.glGetUniformLocation(graphProgram, "uColor"), 0.72f, 0.34f, 1f, 0.88f)
-            GLES20.glDrawArrays(GLES20.GL_LINES, 0, graphLines.size / 3)
-            GLES20.glDisableVertexAttribArray(graphPos)
-        }
-        pointBuffer?.let { b ->
-            b.position(0); GLES20.glVertexAttribPointer(graphPos, 3, GLES20.GL_FLOAT, false, 12, b)
-            GLES20.glEnableVertexAttribArray(graphPos)
-            GLES20.glUniform4f(GLES20.glGetUniformLocation(graphProgram, "uColor"), 0.82f, 0.62f, 1f, 1f)
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(graphProgram, "uPointSize"), 42f)
-            GLES20.glDrawArrays(GLES20.GL_POINTS, 0, graphPoints.size / 3)
-            selectedPointBuffer?.let { selected ->
-                selected.position(0)
-                GLES20.glVertexAttribPointer(graphPos, 3, GLES20.GL_FLOAT, false, 12, selected)
-                GLES20.glUniform4f(GLES20.glGetUniformLocation(graphProgram, "uColor"), 0.96f, 0.72f, 1f, 1f)
-                GLES20.glUniform1f(GLES20.glGetUniformLocation(graphProgram, "uPointSize"), 62f)
-                GLES20.glDrawArrays(GLES20.GL_POINTS, 0, 1)
-            }
-            GLES20.glDisableVertexAttribArray(graphPos)
-        }
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE)
+        dessinerPoints(etoiles, nbEtoiles, mvp, 2.2f, 0.85f, 0.78f, 1f, 0.75f)
+
+        // Sphère d'obsidienne (tourne lentement sur elle-même, indépendamment de la caméra).
         GLES20.glDisable(GLES20.GL_BLEND)
         GLES20.glEnable(GLES20.GL_DEPTH_TEST)
+        GLES20.glDepthMask(true)
+        val modeleSphere = FloatArray(16)
+        System.arraycopy(modele, 0, modeleSphere, 0, 16)
+        Matrix.rotateM(modeleSphere, 0, camera.tempsCoeur * 7f, 0.2f, 1f, 0f)
+        val proj = camera.projection(largeur, hauteur); val vue = FloatArray(16); val mvpSphere = FloatArray(16); val tmp = FloatArray(16)
+        Matrix.setLookAtM(vue, 0, 0f, 0f, camera.distance, 0f, 0f, 0f, 0f, 1f, 0f)
+        Matrix.multiplyMM(tmp, 0, vue, 0, modeleSphere, 0)
+        Matrix.multiplyMM(mvpSphere, 0, proj, 0, tmp, 0)
+        GLES20.glUseProgram(programme)
+        val aPos = GLES20.glGetAttribLocation(programme, "aPosition")
+        val aNor = GLES20.glGetAttribLocation(programme, "aNormal")
+        val b = sphere ?: return
+        b.position(0); GLES20.glEnableVertexAttribArray(aPos); GLES20.glVertexAttribPointer(aPos, 3, GLES20.GL_FLOAT, false, 24, b)
+        b.position(3); GLES20.glEnableVertexAttribArray(aNor); GLES20.glVertexAttribPointer(aNor, 3, GLES20.GL_FLOAT, false, 24, b)
+        GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(programme, "uMvp"), 1, false, mvpSphere, 0)
+        GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(programme, "uModele"), 1, false, modeleSphere, 0)
+        GLES20.glUniform3f(GLES20.glGetUniformLocation(programme, "uOeil"), 0f, 0f, camera.distance)
+        GLES20.glUniform1f(GLES20.glGetUniformLocation(programme, "uTemps"), camera.tempsCoeur)
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, nbSphere)
+        GLES20.glDisableVertexAttribArray(aPos); GLES20.glDisableVertexAttribArray(aNor)
+
+        // Anneaux orbitaux : testés en profondeur (la sphère cache la partie arrière), sans écrire la profondeur.
+        GLES20.glEnable(GLES20.GL_BLEND)
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE)
+        GLES20.glDepthMask(false)
+        dessinerPoints(anneaux, nbAnneau, mvp, 3.2f, 0.72f, 0.45f, 1f, 0.55f)
+        GLES20.glDepthMask(true)
+        GLES20.glDisable(GLES20.GL_BLEND)
     }
 
-    /** Tube fermé en maillage triangulé : corps continu de serpent, et non un trait 2D. */
-    private fun createSerpentTube(steps: Int, sides: Int): java.nio.FloatBuffer {
-        val values = ArrayList<Float>(steps * sides * 36)
-        fun point(t: Double, side: Double): FloatArray {
-            val a = t * Math.PI * 2.0
-            val cx = 1.045 * cos(a)
-            val cy = 0.91 * sin(a)
-            val cz = 0.18 + 0.30 * sin(a * 2.0 + 0.55)
-            val tx = -1.045 * sin(a)
-            val ty = 0.91 * cos(a)
-            val tl = kotlin.math.sqrt(tx * tx + ty * ty)
-            val nx = ty / tl
-            val ny = -tx / tl
-            val q = side * Math.PI * 2.0
-            val radius = 0.073 + 0.012 * (0.5 + 0.5 * sin(a * 3.0))
-            val radial = cos(q) * radius
-            return floatArrayOf(
-                (cx + nx * radial).toFloat(),
-                (cy + ny * radial).toFloat(),
-                (cz + sin(q) * radius).toFloat(),
-                (nx * cos(q)).toFloat(),
-                (ny * cos(q)).toFloat(),
-                sin(q).toFloat()
-            )
-        }
-        fun add(v: FloatArray) { values.add(v[0]); values.add(v[1]); values.add(v[2]); values.add(v[3]); values.add(v[4]); values.add(v[5]) }
-        for (i in 0 until steps) for (j in 0 until sides) {
-            val t0 = i.toDouble() / steps
-            val t1 = (i + 1).toDouble() / steps
-            val s0 = j.toDouble() / sides
-            val s1 = (j + 1).toDouble() / sides
-            val a = point(t0, s0); val b = point(t1, s0); val c = point(t1, s1); val d = point(t0, s1)
-            add(a); add(b); add(c); add(a); add(c); add(d)
-        }
-        val bytes = ByteBuffer.allocateDirect(values.size * 4).order(ByteOrder.nativeOrder())
-        return bytes.asFloatBuffer().apply { values.forEach { put(it) }; position(0) }
+    private fun dessinerPoints(b: FloatBuffer?, n: Int, mvp: FloatArray, taille: Float, r: Float, g: Float, bl: Float, a: Float) {
+        if (b == null || n == 0) return
+        GLES20.glUseProgram(programmePoints)
+        val aPos = GLES20.glGetAttribLocation(programmePoints, "aPosition")
+        val aEc = GLES20.glGetAttribLocation(programmePoints, "aEclat")
+        b.position(0); GLES20.glEnableVertexAttribArray(aPos); GLES20.glVertexAttribPointer(aPos, 3, GLES20.GL_FLOAT, false, 16, b)
+        b.position(3); GLES20.glEnableVertexAttribArray(aEc); GLES20.glVertexAttribPointer(aEc, 1, GLES20.GL_FLOAT, false, 16, b)
+        GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(programmePoints, "uMvp"), 1, false, mvp, 0)
+        GLES20.glUniform1f(GLES20.glGetUniformLocation(programmePoints, "uTaille"), taille * max(1f, hauteur / 900f))
+        GLES20.glUniform4f(GLES20.glGetUniformLocation(programmePoints, "uCouleur"), r, g, bl, a)
+        GLES20.glDrawArrays(GLES20.GL_POINTS, 0, n)
+        GLES20.glDisableVertexAttribArray(aPos); GLES20.glDisableVertexAttribArray(aEc)
     }
 
-    /**
-     * Hémisphère cérébral organique : surface triangulée et plis intégrés au maillage.
-     * side=-1 dessine le lobe gauche, side=1 le lobe droit.
-     */
-    private fun createBrainHemisphere(steps: Int, slices: Int, side: Float): java.nio.FloatBuffer {
-        val values = ArrayList<Float>(steps * slices * 36)
-        fun vertex(phi: Double, theta: Double) {
-            val fold = 1.0 +
-                0.045 * sin(phi * 9.0 + sin(theta * 5.0) * 0.85) +
-                0.026 * sin(phi * 17.0 - theta * 8.0) +
-                0.014 * sin(phi * 25.0 + theta * 13.0)
-            val ring = sin(phi) * fold
-            val x = (side * cos(theta) * ring * 0.58).toFloat()
-            val y = (cos(phi) * fold * 0.82).toFloat()
-            val z = (sin(theta) * ring * 0.52).toFloat()
-            val nx = x / (0.58f * 0.58f)
-            val ny = y / (0.82f * 0.82f)
-            val nz = z / (0.52f * 0.52f)
-            val length = sqrt(nx * nx + ny * ny + nz * nz).coerceAtLeast(0.0001f)
-            values.add(x); values.add(y); values.add(z)
-            values.add(nx / length); values.add(ny / length); values.add(nz / length)
+    private fun tampon(v: FloatArray): FloatBuffer =
+        ByteBuffer.allocateDirect(v.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().apply { put(v); position(0) }
+
+    private fun creerSphere(piles: Int, tranches: Int): FloatBuffer {
+        val v = FloatArray(piles * tranches * 6 * 6)
+        var k = 0
+        fun sommet(phi: Double, theta: Double) {
+            val x = (sin(phi) * cos(theta)).toFloat(); val y = cos(phi).toFloat(); val z = (sin(phi) * sin(theta)).toFloat()
+            v[k++] = x; v[k++] = y; v[k++] = z; v[k++] = x; v[k++] = y; v[k++] = z
         }
-        for (i in 0 until steps) {
-            val p0 = Math.PI * i / steps
-            val p1 = Math.PI * (i + 1) / steps
-            for (j in 0 until slices) {
-                val t0 = -Math.PI / 2.0 + Math.PI * j / slices
-                val t1 = -Math.PI / 2.0 + Math.PI * (j + 1) / slices
-                vertex(p0, t0); vertex(p1, t0); vertex(p1, t1)
-                vertex(p0, t0); vertex(p1, t1); vertex(p0, t1)
+        for (i in 0 until piles) {
+            val p0 = PI * i / piles; val p1 = PI * (i + 1) / piles
+            for (j in 0 until tranches) {
+                val t0 = 2 * PI * j / tranches; val t1 = 2 * PI * (j + 1) / tranches
+                sommet(p0, t0); sommet(p1, t0); sommet(p1, t1)
+                sommet(p0, t0); sommet(p1, t1); sommet(p0, t1)
             }
         }
-        val bytes = ByteBuffer.allocateDirect(values.size * 4).order(ByteOrder.nativeOrder())
-        return bytes.asFloatBuffer().apply { values.forEach { put(it) }; position(0) }
+        return tampon(v)
     }
 
-    private fun createSphere(stacks: Int, slices: Int): java.nio.FloatBuffer {
-        val values = ArrayList<Float>(stacks * slices * 36)
-        fun vertex(phi: Double, theta: Double) {
-            val x = (sin(phi) * cos(theta)).toFloat()
-            val y = cos(phi).toFloat()
-            val z = (sin(phi) * sin(theta)).toFloat()
-            values.add(x); values.add(y); values.add(z)
-            values.add(x); values.add(y); values.add(z)
-        }
-        for (i in 0 until stacks) {
-            val p0 = Math.PI * i / stacks
-            val p1 = Math.PI * (i + 1) / stacks
-            for (j in 0 until slices) {
-                val t0 = 2.0 * Math.PI * j / slices
-                val t1 = 2.0 * Math.PI * (j + 1) / slices
-                vertex(p0, t0); vertex(p1, t0); vertex(p1, t1)
-                vertex(p0, t0); vertex(p1, t1); vertex(p0, t1)
-            }
-        }
-        val bytes = ByteBuffer.allocateDirect(values.size * 4).order(ByteOrder.nativeOrder())
-        return bytes.asFloatBuffer().apply { values.forEach { put(it) }; position(0) }
+    private fun creerProgramme(vs: String, fs: String): Int {
+        val v = shader(GLES20.GL_VERTEX_SHADER, vs); val f = shader(GLES20.GL_FRAGMENT_SHADER, fs)
+        val p = GLES20.glCreateProgram()
+        GLES20.glAttachShader(p, v); GLES20.glAttachShader(p, f); GLES20.glLinkProgram(p)
+        val st = IntArray(1); GLES20.glGetProgramiv(p, GLES20.GL_LINK_STATUS, st, 0)
+        check(st[0] == GLES20.GL_TRUE) { "Liaison du shader impossible : " + GLES20.glGetProgramInfoLog(p) }
+        return p
     }
 
-    private fun createProgram(vertexSource: String, fragmentSource: String): Int {
-        val vs = compileShader(GLES20.GL_VERTEX_SHADER, vertexSource)
-        val fs = compileShader(GLES20.GL_FRAGMENT_SHADER, fragmentSource)
-        return GLES20.glCreateProgram().also {
-            GLES20.glAttachShader(it, vs)
-            GLES20.glAttachShader(it, fs)
-            GLES20.glLinkProgram(it)
-            val status = IntArray(1)
-            GLES20.glGetProgramiv(it, GLES20.GL_LINK_STATUS, status, 0)
-            check(status[0] == GLES20.GL_TRUE) { "Échec de liaison du shader 3D" }
-            GLES20.glDeleteShader(vs)
-            GLES20.glDeleteShader(fs)
-        }
-    }
-
-    private fun compileShader(type: Int, source: String): Int {
-        val shader = GLES20.glCreateShader(type)
-        GLES20.glShaderSource(shader, source)
-        GLES20.glCompileShader(shader)
-        val status = IntArray(1)
-        GLES20.glGetShaderiv(shader, GLES20.GL_COMPILE_STATUS, status, 0)
-        check(status[0] == GLES20.GL_TRUE) { GLES20.glGetShaderInfoLog(shader) }
-        return shader
+    private fun shader(type: Int, src: String): Int {
+        val s = GLES20.glCreateShader(type)
+        GLES20.glShaderSource(s, src); GLES20.glCompileShader(s)
+        val st = IntArray(1); GLES20.glGetShaderiv(s, GLES20.GL_COMPILE_STATUS, st, 0)
+        check(st[0] == GLES20.GL_TRUE) { "Compilation du shader impossible : " + GLES20.glGetShaderInfoLog(s) }
+        return s
     }
 
     companion object {
-        private const val GRAPH_VERTEX_SHADER = """
+        const val VS_POINTS = """
             uniform mat4 uMvp;
+            uniform float uTaille;
             attribute vec3 aPosition;
-            uniform float uPointSize;
-            void main() { gl_Position = uMvp * vec4(aPosition, 1.0); gl_PointSize = uPointSize; }
-        """
-        private const val GRAPH_FRAGMENT_SHADER = """
-            precision mediump float;
-            uniform vec4 uColor;
+            attribute float aEclat;
+            varying float vEclat;
             void main() {
-                vec2 p = gl_PointCoord - vec2(0.5);
-                float glow = 1.0 - smoothstep(0.18, 0.5, length(p));
-                gl_FragColor = vec4(uColor.rgb, uColor.a * glow);
+                gl_Position = uMvp * vec4(aPosition, 1.0);
+                gl_PointSize = uTaille * (0.6 + aEclat);
+                vEclat = aEclat;
             }
         """
-        private const val VERTEX_SHADER = """
+        const val FS_POINTS = """
+            precision mediump float;
+            uniform vec4 uCouleur;
+            varying float vEclat;
+            void main() {
+                vec2 p = gl_PointCoord - vec2(0.5);
+                float halo = 1.0 - smoothstep(0.05, 0.5, length(p));
+                gl_FragColor = vec4(uCouleur.rgb, uCouleur.a * halo * (0.35 + 0.65 * vEclat));
+            }
+        """
+        const val VS_SPHERE = """
             uniform mat4 uMvp;
-            uniform mat4 uModel;
+            uniform mat4 uModele;
             attribute vec3 aPosition;
             attribute vec3 aNormal;
-            varying vec3 vPosition;
-            varying vec3 vNormal;
-            uniform vec3 uTint;
-            uniform float uEmission;
+            varying vec3 vMonde;
+            varying vec3 vNormale;
+            varying vec3 vLocal;
             void main() {
-                vec4 world = uModel * vec4(aPosition, 1.0);
-                vPosition = world.xyz;
-                vNormal = normalize(mat3(uModel) * aNormal);
+                vMonde = (uModele * vec4(aPosition, 1.0)).xyz;
+                vNormale = normalize(mat3(uModele) * aNormal);
+                vLocal = aPosition;
                 gl_Position = uMvp * vec4(aPosition, 1.0);
             }
         """
-        private const val FRAGMENT_SHADER = """
+        const val FS_SPHERE = """
             precision mediump float;
-            uniform vec3 uTint;
-            uniform float uEmission;
-            varying vec3 vPosition;
-            varying vec3 vNormal;
-
-            float hash31(vec3 p) {
-                p = fract(p * 0.1031);
-                p += dot(p, p.yzx + 33.33);
-                return fract((p.x + p.y) * p.z);
+            uniform vec3 uOeil;
+            uniform float uTemps;
+            varying vec3 vMonde;
+            varying vec3 vNormale;
+            varying vec3 vLocal;
+            float h31(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.yzx + 33.33); return fract((p.x + p.y) * p.z); }
+            float bruit(vec3 p) {
+                vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+                return mix(mix(mix(h31(i), h31(i + vec3(1.0, 0.0, 0.0)), f.x), mix(h31(i + vec3(0.0, 1.0, 0.0)), h31(i + vec3(1.0, 1.0, 0.0)), f.x), f.y),
+                           mix(mix(h31(i + vec3(0.0, 0.0, 1.0)), h31(i + vec3(1.0, 0.0, 1.0)), f.x), mix(h31(i + vec3(0.0, 1.0, 1.0)), h31(i + vec3(1.0, 1.0, 1.0)), f.x), f.y), f.z);
             }
-            float noise3(vec3 p) {
-                vec3 i = floor(p);
-                vec3 f = fract(p);
-                f = f * f * (3.0 - 2.0 * f);
-                return mix(mix(mix(hash31(i), hash31(i + vec3(1,0,0)), f.x),
-                               mix(hash31(i + vec3(0,1,0)), hash31(i + vec3(1,1,0)), f.x), f.y),
-                           mix(mix(hash31(i + vec3(0,0,1)), hash31(i + vec3(1,0,1)), f.x),
-                               mix(hash31(i + vec3(0,1,1)), hash31(i + vec3(1,1,1)), f.x), f.y), f.z);
-            }
-            float fbm(vec3 p) {
-                float v = 0.0;
-                float a = 0.5;
-                for (int i = 0; i < 4; i++) {
-                    v += noise3(p) * a;
-                    p *= 2.03;
-                    a *= 0.5;
-                }
-                return v;
-            }
+            float fbm(vec3 p) { float v = 0.0; float a = 0.5; for (int i = 0; i < 4; i++) { v += bruit(p) * a; p *= 2.03; a *= 0.5; } return v; }
             void main() {
-                vec3 n = normalize(vNormal);
-                vec3 viewDir = normalize(vec3(0.0, 0.0, 3.3) - vPosition);
-                vec3 lightDir = normalize(vec3(-0.55, 0.8, 1.0));
-                float diffuse = max(dot(n, lightDir), 0.0);
-                float specular = pow(max(dot(reflect(-lightDir, n), viewDir), 0.0), 38.0);
-                float fresnel = pow(1.0 - max(dot(n, viewDir), 0.0), 3.0);
-
-                float grain = fbm(vPosition * 19.0);
-                float warp = fbm(vPosition * 5.5);
-                float crackField = abs(fbm(vPosition * 12.0 + warp * 2.2) - 0.48);
-                float veins = 1.0 - smoothstep(0.012, 0.055, crackField);
-                float fineVeins = 1.0 - smoothstep(0.006, 0.025, abs(sin((vPosition.x * 17.0 + vPosition.y * 13.0 + warp * 8.0) * 2.1)));
-                veins = max(veins, fineVeins * 0.24);
-
-                vec3 base = (vec3(0.012, 0.009, 0.022) + grain * vec3(0.025, 0.018, 0.038)) * uTint;
-                vec3 purple = vec3(0.38, 0.12, 0.72) * veins * (0.55 + warp);
-                vec3 color = base * (0.34 + diffuse * 0.48);
-                color += purple;
-                color += vec3(0.28, 0.13, 0.48) * fresnel * 0.65;
-                color += vec3(0.72, 0.48, 1.0) * specular * 0.9;
-                float innerGlow = exp(-length(vPosition.xy) * 8.0) * 0.22;
-                color += vec3(0.34, 0.08, 0.68) * innerGlow;
-                color += uTint * uEmission * (0.55 + grain * 0.45);
-                gl_FragColor = vec4(color, 1.0);
+                vec3 n = normalize(vNormale);
+                vec3 vue = normalize(uOeil - vMonde);
+                vec3 l1 = normalize(vec3(-0.6, 0.75, 0.9));
+                vec3 l2 = normalize(vec3(0.8, -0.3, 0.5));
+                float diff = max(dot(n, l1), 0.0);
+                float spec = pow(max(dot(reflect(-l1, n), vue), 0.0), 60.0);
+                float spec2 = pow(max(dot(reflect(-l2, n), vue), 0.0), 24.0);
+                float fres = pow(1.0 - max(dot(n, vue), 0.0), 2.6);
+                float deform = fbm(vLocal * 3.2 + vec3(0.0, uTemps * 0.05, 0.0));
+                float fissure = abs(fbm(vLocal * 6.5 + deform * 2.4) - 0.5);
+                float veines = 1.0 - smoothstep(0.008, 0.045, fissure);
+                float grain = fbm(vLocal * 22.0);
+                vec3 base = vec3(0.012, 0.008, 0.022) + grain * vec3(0.02, 0.012, 0.035);
+                vec3 couleur = base * (0.45 + 0.55 * diff);
+                couleur += vec3(0.34, 0.1, 0.7) * veines * (0.35 + 0.5 * deform);
+                couleur += vec3(0.45, 0.22, 0.85) * fres * 0.85;
+                couleur += vec3(0.85, 0.7, 1.0) * spec * 0.9 + vec3(0.55, 0.3, 1.0) * spec2 * 0.35;
+                gl_FragColor = vec4(couleur, 1.0);
             }
         """
     }

@@ -179,6 +179,22 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         }
     }
 
+    /** Même parcours que [walk], mais relève AUSSI les pièces jointes (images, PDF, audio, vidéo…) en un seul
+     *  passage : sur un coffre SAF, chaque listFiles() coûte cher, on évite donc de parcourir l'arbre deux fois. */
+    private fun walkAvecPieces(
+        dir: DocumentFile, prefix: String,
+        notes: MutableList<Pair<String, DocumentFile>>, pieces: MutableList<String>,
+        limiteNotes: Int, limitePieces: Int
+    ) {
+        for (f in dir.listFiles()) {
+            if (notes.size >= limiteNotes && pieces.size >= limitePieces) return
+            val n = f.name ?: continue
+            if (f.isDirectory) { if (!n.startsWith(".")) walkAvecPieces(f, "$prefix$n/", notes, pieces, limiteNotes, limitePieces) }
+            else if (n.endsWith(".md", true)) { if (notes.size < limiteNotes) notes += (prefix + n) to f }
+            else if (!n.startsWith(".") && pieces.size < limitePieces) pieces += prefix + n
+        }
+    }
+
     private fun allNotes(limit: Int = 2500): List<Pair<String, DocumentFile>> {
         val r = vaultRoot() ?: return emptyList()
         return mutableListOf<Pair<String, DocumentFile>>().also { walk(r, "", it, limit) }
@@ -256,13 +272,52 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     data class GraphEdge(val from: String, val to: String)
     /** Lien Markdown orienté : from référence to. Une cible absente reste une référence, pas un faux nœud. */
     data class GraphReference(val from: String, val to: String, val resolved: Boolean, val rawTarget: String)
+    /** Fichier non-Markdown réellement présent dans le coffre (image, PDF, audio, vidéo, autre). */
+    data class GraphAttachment(val path: String, val name: String, val kind: String)
     data class GraphData(
         val nodes: List<GraphNode>,
         val edges: List<GraphEdge>,
-        val references: List<GraphReference> = emptyList()
+        val references: List<GraphReference> = emptyList(),
+        /** Étiquettes réellement écrites dans chaque note (#tag dans le texte ou « tags: » du frontmatter). */
+        val tags: Map<String, List<String>> = emptyMap(),
+        /** Pièces jointes réellement présentes dans le coffre (aucune n'est inventée). */
+        val attachments: List<GraphAttachment> = emptyList()
     )
 
     private val lienRegex = Regex("\\[\\[([^\\]|#]+)")
+    // #tag Obsidian : précédé d'un début de ligne ou d'un blanc, commence par une lettre (exclut « # Titre » et les
+    // couleurs « #FF00AA » qui commencent souvent par un chiffre), lettres/chiffres/_/-// ensuite.
+    private val tagRegex = Regex("(?:^|(?<=\\s))#(\\p{L}[\\p{L}\\p{N}_/-]*)")
+    private val frontmatterRegex = Regex("\\A---\\s*\\n([\\s\\S]*?)\\n---")
+
+    private fun typePiece(nom: String): String = when (nom.substringAfterLast('.', "").lowercase()) {
+        "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "heic" -> "IMAGE"
+        "pdf" -> "PDF"
+        "mp3", "m4a", "wav", "ogg", "flac", "aac", "opus" -> "AUDIO"
+        "mp4", "mov", "webm", "mkv", "avi", "3gp" -> "VIDEO"
+        else -> "FICHIER"
+    }
+
+    /** Étiquettes d'une note : #tags du texte (hors blocs de code) + liste « tags: » du frontmatter YAML. */
+    private fun extraireTags(texte: String): List<String> {
+        val out = LinkedHashSet<String>()
+        frontmatterRegex.find(texte)?.groupValues?.get(1)?.let { fm ->
+            val lignes = fm.lines()
+            val i = lignes.indexOfFirst { it.trimStart().startsWith("tags:", true) }
+            if (i >= 0) {
+                val enLigne = lignes[i].substringAfter(':').trim().trim('[', ']')
+                enLigne.split(',').map { it.trim().trim('"', '\'', '#') }.filter { it.isNotBlank() }.forEach { out += it }
+                for (l in lignes.drop(i + 1)) {
+                    val t = l.trim()
+                    if (!t.startsWith("-")) break
+                    t.removePrefix("-").trim().trim('"', '\'', '#').takeIf { it.isNotBlank() }?.let { out += it }
+                }
+            }
+        }
+        val sansCode = texte.replace(Regex("```[\\s\\S]*?```"), " ")
+        tagRegex.findAll(sansCode).forEach { out += it.groupValues[1].trimEnd('/', '-') }
+        return out.filter { it.isNotBlank() }.take(30)
+    }
 
     private fun idOf(path: String) = path.removeSuffix(".md").removeSuffix(".MD")
     private fun labelOf(path: String) = idOf(path).substringAfterLast('/')
@@ -270,15 +325,25 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
     /** Construit le graphe (nœuds = notes du coffre, arêtes = liens « [[...]] ») pour l'onglet Graphe.
      *  Plafonné à [limiteNotes] notes et [limiteOctets] par note pour rester fluide sur un gros coffre. */
-    fun graph(limiteNotes: Int = 400, limiteOctets: Int = 60_000): GraphData {
+    fun graph(limiteNotes: Int = 400, limiteOctets: Int = 60_000, limitePieces: Int = 800): GraphData {
         val v = vaultRoot()
+        val cheminsPieces = mutableListOf<String>()
         val fichiers: List<Pair<String, () -> String?>> =
-            if (v != null) allNotes(limiteNotes).map { (chemin, df) ->
-                chemin to { runCatching { ctx.contentResolver.openInputStream(df.uri)?.use { it.readBytes().take(limiteOctets).toByteArray().toString(Charsets.UTF_8) } }.getOrNull() }
+            if (v != null) {
+                val notesSaf = mutableListOf<Pair<String, DocumentFile>>()
+                runCatching { walkAvecPieces(v, "", notesSaf, cheminsPieces, limiteNotes, limitePieces) }
+                notesSaf.map { (chemin, df) ->
+                    chemin to { runCatching { ctx.contentResolver.openInputStream(df.uri)?.use { it.readBytes().take(limiteOctets).toByteArray().toString(Charsets.UTF_8) } }.getOrNull() }
+                }
+            } else {
+                val tous = localRoot().walkTopDown().filter { it.isFile && !it.name.startsWith(".") }.toList()
+                tous.filter { !it.name.endsWith(".md", true) }.take(limitePieces).forEach { cheminsPieces += it.relativeTo(localRoot()).path }
+                tous.filter { it.name.endsWith(".md", true) }.take(limiteNotes).map { f ->
+                    f.relativeTo(localRoot()).path to { runCatching { f.readText().take(limiteOctets) }.getOrNull() }
+                }
             }
-            else localRoot().walkTopDown().filter { it.isFile && it.name.endsWith(".md", true) }.take(limiteNotes).map { f ->
-                f.relativeTo(localRoot()).path to { runCatching { f.readText().take(limiteOctets) }.getOrNull() }
-            }.toList()
+        val pieces = cheminsPieces.map { p -> GraphAttachment(p, p.substringAfterLast('/'), typePiece(p)) }
+        val tagsParNote = HashMap<String, List<String>>()
 
         val nodesById = LinkedHashMap<String, GraphNode>()
         for ((chemin, _) in fichiers) {
@@ -297,6 +362,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         for ((chemin, lire) in fichiers) {
             val fromId = idOf(chemin)
             val texte = lire() ?: continue
+            runCatching { extraireTags(texte) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { tagsParNote[fromId] = it }
             for (m in lienRegex.findAll(texte)) {
                 val cible = m.groupValues[1].trim().trim('/')
                 if (cible.isBlank()) continue
@@ -322,6 +388,6 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                 if (vusEdges.add(cle)) edges += GraphEdge(fromId, toId)
             }
         }
-        return GraphData(nodesById.values.toList(), edges, references)
+        return GraphData(nodesById.values.toList(), edges, references, tagsParNote, pieces)
     }
 }
