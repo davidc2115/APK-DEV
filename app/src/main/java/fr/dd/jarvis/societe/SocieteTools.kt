@@ -18,7 +18,7 @@ class SocieteTools(
 
     companion object {
         val NAMES = setOf(
-            "societe_info_set", "societe_info_get", "tarif_set", "tarif_delete", "regles_set", "client_ecrire", "client_fiche",
+            "societe_info_set", "societe_info_get", "tarif_set", "tarif_delete", "regles_set", "client_ecrire", "client_fiche", "client_supprimer",
             "document_creer", "document_action", "document_email", "societe_liste", "employe_ecrire", "paie", "reserve_bilan",
             "presentation_modifier", "distance_deplacement", "clients_exporter_kml", "kml_couleurs_set"
         )
@@ -100,6 +100,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "onduleur" to prop("Modèle d'onduleur."), "nb_panneaux" to prop("Nombre de panneaux."), "site_notes" to prop("Notes sur l'installation.")
         ), listOf("nom")),
         tool("client_fiche", "Affiche la fiche client complète et l'enregistre dans le coffre Obsidian.", mapOf("nom" to prop("Nom du client.")), listOf("nom")),
+        tool("client_supprimer", "Supprime définitivement une fiche client de la base Société après confirmation. Refuse la suppression si des devis ou factures sont encore liés afin de préserver l’historique comptable.", mapOf("nom" to prop("Nom exact du client à supprimer.")), listOf("nom")),
         tool("document_creer", "Crée un devis ou une facture (tarifs, remises et déplacement calculés automatiquement), l'enregistre en Markdown et PDF dans Obsidian.", mapOf(
             "type" to prop("devis | facture"), "client" to prop("Nom du client."), "installation" to prop("Nom ou adresse de l'installation (optionnel si une seule)."),
             "prestations" to prop("Prestations du catalogue de tarifs : « Maintenance annuelle; Contrôle onduleur:2 » (nom[:quantité], séparées par « ; »)."),
@@ -171,6 +172,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         "regles_set" -> reglesSet(a)
         "client_ecrire" -> clientEcrire(a)
         "client_fiche" -> clientFiche(a)
+        "client_supprimer" -> clientSupprimer(a)
         "document_creer" -> documentCreer(a)
         "document_action" -> documentAction(a)
         "document_email" -> documentEmail(a)
@@ -302,6 +304,30 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         else -> try { LocalDate.parse(s.take(10)).toString() } catch (e: Exception) { "" }
     }
 
+    private suspend fun clientSupprimer(a: JSONObject): ToolResult {
+        val nom = a.s("nom")
+        if (nom.isBlank()) return err("Nom du client manquant.")
+        val trouves = d.chercherClients(nom)
+        val exact = trouves.filter { normaliser(it.nom) == normaliser(nom) }
+        val cible = when {
+            exact.size == 1 -> exact.first()
+            exact.size > 1 -> return err("Plusieurs fiches portent ce nom. Précise un autre identifiant.")
+            trouves.size == 1 -> trouves.first()
+            trouves.size > 1 -> return err("Plusieurs clients correspondent : ${trouves.joinToString { it.nom }}. Précise le nom exact.")
+            else -> return err("Aucune fiche client trouvée pour « $nom ».")
+        }
+        val documents = d.docs.filter { it.clientId == cible.id }
+        if (documents.isNotEmpty()) {
+            val liste = documents.take(8).joinToString(", ") { it.numero }
+            return err("La fiche « ${cible.nom} » est liée à ${documents.size} devis/facture(s) ($liste${if (documents.size > 8) "…" else ""}). Je bloque la suppression pour ne pas casser l’historique comptable. Il faut d’abord transférer ou traiter ces documents.")
+        }
+        if (!confirm("Supprimer définitivement la fiche client « ${cible.nom} » et ses ${cible.sites.size} installation(s) de la base Société ? Cette action est irréversible.", true))
+            return err("Suppression refusée. La fiche « ${cible.nom} » est conservée.")
+        svc.repo.update { data -> data.copy(clients = data.clients.filterNot { it.id == cible.id }) }
+        val removed = d.clients.none { it.id == cible.id }
+        return if (removed) ok("🗑️ Fiche client « ${cible.nom} » et ses installations supprimées de la base Société.")
+            else err("❌ La fiche « ${cible.nom} » est toujours présente après la tentative de suppression. Aucune confirmation de réussite.")
+    }
     private fun clientEcrire(a: JSONObject): ToolResult {
         val nom = a.s("nom")
         val trouves = d.chercherClients(nom)
