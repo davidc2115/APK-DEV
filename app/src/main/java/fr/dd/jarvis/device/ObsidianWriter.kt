@@ -90,28 +90,37 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     fun supprimerFichier(folder: String, fileName: String): Boolean {
         val name = safe(fileName, "Fichier")
         val uriStr = store.obsidianUri.value
-        if (uriStr.isNotBlank()) {
-            // Si un coffre Obsidian est configuré, ne jamais supprimer à sa place un fichier
-            // local homonyme : cela donnait un faux succès alors que la note du coffre restait présente.
-            return try {
-                val tree = DocumentFile.fromTreeUri(ctx, Uri.parse(uriStr)) ?: return false
-                if (!tree.canWrite()) return false
-                var cur: DocumentFile? = tree
-                for (part in folder.split('/').filter { it.isNotBlank() }) {
-                    cur = cur?.trouverLoose(part)?.takeIf { it.isDirectory } ?: return false
-                }
-                val cible = cur?.trouverLoose(name) ?: return false
-                cible.delete()
-                cur?.listFiles()?.none { it.uri == cible.uri } == true
-            } catch (_: Exception) {
-                false
-            }
-        }
         val localFile = File(File(localRoot(), folder), name)
-        if (!localFile.exists()) return false
-        return runCatching { localFile.delete() && !localFile.exists() }.getOrDefault(false)
+        if (uriStr.isBlank()) {
+            if (!localFile.exists()) return false
+            return runCatching { localFile.delete() && !localFile.exists() }.getOrDefault(false)
+        }
+        return try {
+            val tree = DocumentFile.fromTreeUri(ctx, Uri.parse(uriStr)) ?: return false
+            var cur: DocumentFile? = tree
+            var dossierTrouve = true
+            for (part in folder.split('/').filter { it.isNotBlank() }) {
+                cur = cur?.trouverLoose(part)?.takeIf { it.isDirectory }
+                if (cur == null) { dossierTrouve = false; break }
+            }
+            val cible = if (dossierTrouve) cur?.trouverLoose(name) else null
+            if (cible != null) {
+                // Si le fichier du coffre existe mais que le coffre est en lecture seule, ne pas
+                // supprimer une éventuelle copie locale et annoncer à tort que la fiche a disparu.
+                if (!tree.canWrite()) return false
+                cible.delete()
+                val resteDansCoffre = cur?.listFiles()?.any { it.uri == cible.uri } == true
+                if (resteDansCoffre) return false
+            }
+            // Certaines écritures ont été basculées localement lorsque le fournisseur SAF était indisponible.
+            if (localFile.exists() && !runCatching { localFile.delete() && !localFile.exists() }.getOrDefault(false)) return false
+            val resteDansCoffre = if (dossierTrouve && cur != null)
+                cur!!.trouverLoose(name) != null else false
+            !resteDansCoffre && !localFile.exists() && (cible != null || !dossierTrouve || !tree.canWrite() || !localFile.exists())
+        } catch (_: Exception) {
+            false
+        }
     }
-
     /**
      * Supprime les fichiers .md et .pdf associés à un document (même nom de base que saveIn/saveBytes).
      * Retourne vrai si au moins un des deux a réellement été supprimé.
