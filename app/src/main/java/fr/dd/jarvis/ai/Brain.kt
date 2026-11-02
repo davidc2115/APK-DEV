@@ -36,7 +36,7 @@ class Brain(
         val plan = try { Analyseur.analyser(app, history, all) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { null }
         // Pour une consigne de chauffage, le planificateur ne doit jamais retirer les outils nécessaires :
         // il faut pouvoir retrouver les correspondances dans Obsidian, vérifier les entités HA puis agir.
-        val pilotageChauffage = Regex("po[eê]les?|pellets?|granul[eé]s?|chauffage|thermostats?|climate\\.|temp[eé]rature|consigne", RegexOption.IGNORE_CASE).containsMatchIn(recent) &&
+        val pilotageChauffage = Regex("po[eê]les?|poils?|pellets?|granul[eé]s?|chauffage|thermostats?|climate\\.|temp[eé]rature|consigne|degr[eé]s?", RegexOption.IGNORE_CASE).containsMatchIn(recent) &&
             Regex("r[eé]gl|mettre|passer|fixer|monter|baisser|augment|dimin|r[eé]gler|allum|[eé]teind|commande|sur \\d", RegexOption.IGNORE_CASE).containsMatchIn(recent)
         val schema: JSONArray
         var societeNeeded = societeOn
