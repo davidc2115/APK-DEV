@@ -738,7 +738,6 @@ class ToolBox(
         val calendarName = a.optString("calendar").trim()
         val selectedCalendar = if (calendarName.isBlank()) null else app.calendar.findCalendar(calendarName, false)
             ?: return ToolResult("Agenda introuvable : " + calendarName)
-        val calendars = app.calendar.calendars().associateBy { it.id }
         val events = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             app.calendar.events(from, days, onlyVisible = true)
         }.filter { selectedCalendar == null || it.calId == selectedCalendar.id }.take(80)
@@ -857,6 +856,7 @@ class ToolBox(
             val note = "📅 Rendez-vous " + date + " — " + event.title + " (" + tag + ")" +
                 event.location.takeIf { it.isNotBlank() }?.let { " · " + it }.orEmpty() +
                 value("notes").takeIf { it.isNotBlank() }?.let { " · " + it }.orEmpty()
+            if (current.notes.contains(tag) && args.length() == 1) continue
             pending += Pending(current.id, current.nom, args, tag, note)
         }
         if (pending.isEmpty()) {
