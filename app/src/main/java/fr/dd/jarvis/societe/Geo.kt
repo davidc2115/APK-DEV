@@ -34,20 +34,24 @@ object Geo {
         null
     }
 
-    private fun pointFromNominatim(body: String?): Point? = try {
-        val arr = JSONArray(body ?: return null)
-        if (arr.length() == 0) null else arr.getJSONObject(0).let {
-            Point(it.getString("lat").toDouble(), it.getString("lon").toDouble())
-        }
-    } catch (_: Exception) { null }
+    private fun pointFromNominatim(body: String?): Point? {
+        return try {
+            val arr = JSONArray(body ?: return null)
+            if (arr.length() == 0) null else arr.getJSONObject(0).let {
+                Point(it.getString("lat").toDouble(), it.getString("lon").toDouble())
+            }
+        } catch (_: Exception) { null }
+    }
 
-    private fun pointFromPhoton(body: String?): Point? = try {
-        val features = JSONObject(body ?: return null).getJSONArray("features")
-        if (features.length() == 0) null else {
-            val coords = features.getJSONObject(0).getJSONObject("geometry").getJSONArray("coordinates")
-            Point(coords.getDouble(1), coords.getDouble(0))
-        }
-    } catch (_: Exception) { null }
+    private fun pointFromPhoton(body: String?): Point? {
+        return try {
+            val features = JSONObject(body ?: return null).getJSONArray("features")
+            if (features.length() == 0) null else {
+                val coords = features.getJSONObject(0).getJSONObject("geometry").getJSONArray("coordinates")
+                Point(coords.getDouble(1), coords.getDouble(0))
+            }
+        } catch (_: Exception) { null }
+    }
 
     /**
      * Essaie l'adresse complète, puis la commune seule si le lieu-dit/la ferme n'est pas référencé.
