@@ -447,6 +447,27 @@ fun DrawScope.dessinerToile(centre: Offset, rCentre: Float, hubs: List<Pair<Offs
         val b = ConstellationLayout.bordCercle(Pt(h.x, h.y), r, Pt(centre.x, centre.y)).let { Offset(it.x, it.y) }
         drawLine(Neon.violetVif.copy(alpha = 0.2f * alpha * pulse), a, b, 9f * k, StrokeCap.Round)
         drawLine(Brush.linearGradient(listOf(Neon.lavande.copy(alpha = 0.95f * alpha), Neon.violet.copy(alpha = 0.7f * alpha)), a, b), a, b, 2f * k, StrokeCap.Round)
+        // Veines d'énergie : deux éclairs dentelés qui serpentent le long du faisceau (forme fixe par hub,
+        // seule l'intensité pulse — pas de scintillement aléatoire à chaque image).
+        val graine = (h.x * 7f + h.y * 13f).toInt()
+        for (v in 0 until 2) {
+            val rnd = Random(graine * 31 + v)
+            val d = b - a
+            val l = hypot(d.x, d.y).coerceAtLeast(1f)
+            val nx = -d.y / l; val ny = d.x / l
+            val p = Path().apply {
+                moveTo(a.x, a.y)
+                val n = 9
+                for (i in 1 until n) {
+                    val t = i / n.toFloat()
+                    val ecart = (rnd.nextFloat() - 0.5f) * l * 0.09f * sin(t * PI.toFloat())
+                    lineTo(a.x + d.x * t + nx * ecart, a.y + d.y * t + ny * ecart)
+                }
+                lineTo(b.x, b.y)
+            }
+            drawPath(p, Neon.violetVif.copy(alpha = 0.22f * alpha * pulse), style = Stroke(4f * k, cap = StrokeCap.Round, join = StrokeJoin.Round))
+            drawPath(p, Neon.blancViolet.copy(alpha = 0.5f * alpha * pulse), style = Stroke(0.8f * k, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        }
     }
     if (tries.size < 3) return
     // Anneaux de la toile (comme une toile d'araignée lumineuse), avec petits nœuds aux croisements.

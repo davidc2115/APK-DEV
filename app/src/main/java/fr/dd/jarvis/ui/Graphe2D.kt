@@ -258,6 +258,9 @@ fun ConstellationVue(
         // l'origine/l'échelle du premier affichage).
         val geometrie by rememberUpdatedState(origine to k)
 
+        // Décor (serpent-dragon, veines, arbre, ruines, cercle runique), rendu une fois en tâche de fond.
+        val fond = rememberFondDragon(largeurPx.toInt(), hauteurPx.toInt(), synchrone = !animer)
+
         // Rectangles des étiquettes dessinées (pour le toucher), remplis pendant le dessin.
         val zonesEtiquettes = remember { HashMap<String, Rect>() }
 
@@ -296,7 +299,7 @@ fun ConstellationVue(
                     }
                 }
         ) {
-            dessinerFondCosmique(decor, pulse)
+            if (fond != null) drawImage(fond) else dessinerFondCosmique(decor, pulse)
             val centre = origine
             val rCentre = c.rayonCerveau * k
             // Grand rayonnement violet autour du cerveau, comme le cœur lumineux de l'image de référence.

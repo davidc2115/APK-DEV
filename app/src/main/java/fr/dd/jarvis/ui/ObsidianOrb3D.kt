@@ -10,6 +10,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -32,6 +33,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -139,6 +141,18 @@ internal fun Orbe3DVue(
     c: Constellation, enTete: @Composable () -> Unit, onNote: (String) -> Unit, onHub: (String) -> Unit,
     avecOpenGl: Boolean = true, tempsFixe: Float? = null
 ) {
+    // Taille connue dès la composition (et non après le premier dessin) : décor et cadrage prêts tout de suite.
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        Orbe3DContenu(c, enTete, onNote, onHub, avecOpenGl, tempsFixe,
+            androidx.compose.ui.geometry.Size(constraints.maxWidth.toFloat(), constraints.maxHeight.toFloat()))
+    }
+}
+
+@Composable
+private fun Orbe3DContenu(
+    c: Constellation, enTete: @Composable () -> Unit, onNote: (String) -> Unit, onHub: (String) -> Unit,
+    avecOpenGl: Boolean, tempsFixe: Float?, taille: androidx.compose.ui.geometry.Size
+) {
     val camera = remember { Camera3D() }
     val mesureur = rememberTextMeasurer(cacheSize = 200)
     val fontScale = LocalDensity.current.fontScale
@@ -148,7 +162,6 @@ internal fun Orbe3DVue(
     var tangageUser by remember { mutableFloatStateOf(0f) }
     var zoomUser by remember { mutableFloatStateOf(1f) }
     var dernierGeste by remember { mutableFloatStateOf(-100f) }
-    var taille by remember { mutableStateOf(androidx.compose.ui.geometry.Size.Zero) }
     val surface = remember { arrayOfNulls<OrbeSurface>(1) }
 
     // Positions 3D de chaque élément de la constellation (hubs un peu en avant du dôme, étiquettes dessus).
@@ -186,12 +199,18 @@ internal fun Orbe3DVue(
         }
     }
 
+    // Décor (serpent-dragon, veines, arbre, ruines, cercle runique) : rendu une fois, puis envoyé à OpenGL comme
+    // texture plein écran derrière la sphère.
+    val fond = rememberFondDragon(taille.width.toInt(), taille.height.toInt(), synchrone = !avecOpenGl)
+    LaunchedEffect(fond) { fond?.let { f -> surface[0]?.rendu?.definirFond(f.asAndroidBitmap()) } }
+
     Box(Modifier.fillMaxSize().background(Color(0xFF030106))) {
         if (avecOpenGl) AndroidView(
             modifier = Modifier.fillMaxSize(),
-            factory = { ctx -> OrbeSurface(ctx, camera).also { surface[0] = it } }
+            factory = { ctx -> OrbeSurface(ctx, camera).also { surface[0] = it; fond?.let { f -> it.rendu.definirFond(f.asAndroidBitmap()) } } }
         ) else Canvas(Modifier.fillMaxSize()) {
             // Substitut 2D de la sphère OpenGL (captures d'écran hors appareil uniquement).
+            if (fond != null) drawImage(fond)
             val r = size.height * 0.5f / (tan(Math.toRadians(FOV_Y / 2.0)).toFloat() * camera.distance) * camera.zoom
             val ctr = Offset(size.width / 2f, size.height * 0.5f * (1f - camera.decalageNdcY))
             drawCircle(Brush.radialGradient(listOf(Color(0xFF2A1446), Color(0xFF0B0617), Color(0xFF020104)), ctr - Offset(r * 0.3f, r * 0.35f), r * 1.4f), r, ctr)
@@ -222,7 +241,6 @@ internal fun Orbe3DVue(
                     }
                 }
         ) {
-            if (taille != size) taille = size
             // Caméra mise à jour pendant le DESSIN (et non la composition) : seul ce Canvas est redessiné à
             // chaque image, l'écran n'est pas recomposé 60 fois par seconde.
             val calme = (temps - dernierGeste).coerceIn(0f, 4f) / 4f
@@ -349,9 +367,10 @@ internal fun Orbe3DVue(
 // ================================================================================================ OpenGL
 
 private class OrbeSurface(context: Context, camera: Camera3D) : GLSurfaceView(context) {
+    val rendu = OrbeRenderer(camera)
     init {
         setEGLContextClientVersion(2)
-        setRenderer(OrbeRenderer(camera))
+        setRenderer(rendu)
         renderMode = RENDERMODE_CONTINUOUSLY
     }
 }
@@ -373,10 +392,24 @@ private class OrbeRenderer(private val camera: Camera3D) : GLSurfaceView.Rendere
     private var largeur = 1f
     private var hauteur = 1f
     private var ok = false
+    private var programmeFond = 0
+    private var textureFond = 0
+    private var quad: FloatBuffer? = null
+    /** Décor à envoyer en texture (posé depuis le thread UI, chargé sur le thread OpenGL). */
+    @Volatile private var fondEnAttente: android.graphics.Bitmap? = null
+    @Volatile private var fondCourant: android.graphics.Bitmap? = null
+
+    fun definirFond(b: android.graphics.Bitmap) { if (b !== fondCourant) fondEnAttente = b }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         GLES20.glClearColor(0.012f, 0.005f, 0.024f, 1f)
+        // Contexte OpenGL (re)créé : l'ancienne texture n'existe plus, on recharge le décor.
+        textureFond = 0
+        fondCourant?.let { if (fondEnAttente == null) fondEnAttente = it }
+        fondCourant = null
         ok = runCatching {
+            programmeFond = creerProgramme(VS_FOND, FS_FOND)
+            quad = tampon(floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f))
             programme = creerProgramme(VS_SPHERE, FS_SPHERE)
             programmePoints = creerProgramme(VS_POINTS, FS_POINTS)
             sphere = creerSphere(64, 48); nbSphere = 64 * 48 * 6
@@ -418,11 +451,40 @@ private class OrbeRenderer(private val camera: Camera3D) : GLSurfaceView.Rendere
         val mvp = FloatArray(16); val mv = FloatArray(16); val modele = FloatArray(16)
         camera.matrices(largeur, hauteur, mvp, mv, modele)
 
-        // Étoiles (additif, sans profondeur).
+        // Décor plein écran (serpent-dragon…), léger effet de parallaxe quand la caméra tourne.
         GLES20.glDisable(GLES20.GL_DEPTH_TEST)
+        fondEnAttente?.let { b ->
+            fondEnAttente = null
+            if (!b.isRecycled) {
+                if (textureFond == 0) { val t = IntArray(1); GLES20.glGenTextures(1, t, 0); textureFond = t[0] }
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureFond)
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+                android.opengl.GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, b, 0)
+                fondCourant = b
+            }
+        }
+        if (textureFond != 0 && fondCourant != null) {
+            GLES20.glUseProgram(programmeFond)
+            val aPos = GLES20.glGetAttribLocation(programmeFond, "aPos")
+            val q = quad
+            if (q != null) {
+                q.position(0); GLES20.glEnableVertexAttribArray(aPos); GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 8, q)
+                GLES20.glActiveTexture(GLES20.GL_TEXTURE0); GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureFond)
+                GLES20.glUniform1i(GLES20.glGetUniformLocation(programmeFond, "uTex"), 0)
+                GLES20.glUniform2f(GLES20.glGetUniformLocation(programmeFond, "uDecalage"),
+                    (camera.lacet / 75f).coerceIn(-1f, 1f) * 0.012f, (camera.tangage / 75f).coerceIn(-1f, 1f) * -0.012f)
+                GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+                GLES20.glDisableVertexAttribArray(aPos)
+            }
+        }
+
+        // Étoiles (additif, sans profondeur) : plus discrètes quand le décor est présent (il a ses propres étoiles).
         GLES20.glEnable(GLES20.GL_BLEND)
         GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE)
-        dessinerPoints(etoiles, nbEtoiles, mvp, 2.2f, 0.85f, 0.78f, 1f, 0.75f)
+        dessinerPoints(etoiles, nbEtoiles, mvp, 2.2f, 0.85f, 0.78f, 1f, if (fondCourant != null) 0.35f else 0.75f)
 
         // Sphère d'obsidienne (tourne lentement sur elle-même, indépendamment de la caméra).
         GLES20.glDisable(GLES20.GL_BLEND)
@@ -510,6 +572,21 @@ private class OrbeRenderer(private val camera: Camera3D) : GLSurfaceView.Rendere
     }
 
     companion object {
+        const val VS_FOND = """
+            attribute vec2 aPos;
+            uniform vec2 uDecalage;
+            varying vec2 vUv;
+            void main() {
+                vUv = vec2((aPos.x + 1.0) * 0.5, (1.0 - aPos.y) * 0.5) * 0.97 + vec2(0.015) + uDecalage;
+                gl_Position = vec4(aPos, 0.0, 1.0);
+            }
+        """
+        const val FS_FOND = """
+            precision mediump float;
+            uniform sampler2D uTex;
+            varying vec2 vUv;
+            void main() { gl_FragColor = texture2D(uTex, vUv); }
+        """
         const val VS_POINTS = """
             uniform mat4 uMvp;
             uniform float uTaille;
