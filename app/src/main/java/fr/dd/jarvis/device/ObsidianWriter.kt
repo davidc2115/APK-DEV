@@ -106,7 +106,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             val cible = if (dossierTrouve) cur?.trouverLoose(name) else null
             var supprime = false
             if (cible != null) {
-                if (!tree.canWrite()) return false
+                if (!cible.canWrite()) return false
                 cible.delete()
                 if (cur?.listFiles()?.any { it.uri == cible.uri } == true) return false
                 supprime = true
