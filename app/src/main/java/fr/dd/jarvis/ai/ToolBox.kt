@@ -50,7 +50,11 @@ class ToolBox(
         put(tool("analyser_planning_clients", "Analyse les rendez-vous de l'agenda pour compléter les fiches clients Société. Gère plusieurs clients dans un même événement et extrait uniquement les informations explicitement présentes : téléphone, adresse, puissance kWc, onduleur, contact et détails du rendez-vous. Demande confirmation avant toute modification.", mapOf(
             "date" to prop("Date de début yyyy-MM-dd. Par défaut aujourd'hui."),
             "days" to prop("Nombre de jours à analyser (1 à 90). Par défaut 30."),
-            "calendar" to prop("Nom d'un agenda précis (optionnel).")
+            "calendar" to prop("Nom d'un agenda précis (optionnel)."),
+            "event_id" to prop("Identifiant exact du rendez-vous (#id), pour n'importer que cet événement."),
+            "event_title" to prop("Titre ou expression distinctive d'un seul rendez-vous à importer ; si plusieurs résultats correspondent, demande une précision."),
+            "client" to prop("Nom exact ou distinctif d'un seul client : limite l'import aux rendez-vous de ce client uniquement."),
+            "all" to prop("true uniquement si l'utilisateur demande explicitement de créer/mettre à jour les fiches de TOUS les rendez-vous du planning.")
         )))
         put(tool("create_event", "Crée un rendez-vous dans l'agenda.",
             mapOf(
@@ -737,12 +741,28 @@ class ToolBox(
             if (date.isBlank()) LocalDate.now() else LocalDate.parse(date.take(10))
         }.getOrElse { LocalDate.now() }
         val days = (a.optString("days").toIntOrNull() ?: 30).coerceIn(1, 90)
+        val eventId = a.optString("event_id").trim().removePrefix("#").takeIf { it.isNotBlank() }
+        val eventTitle = a.optString("event_title").trim()
+        val clientQuery = a.optString("client").trim()
+        val allRequested = a.optString("all").trim().lowercase() in setOf("true", "oui", "1", "vrai")
+        if (eventId == null && eventTitle.isBlank() && clientQuery.isBlank() && !allRequested) {
+            return ToolResult("Pour éviter de créer toutes les fiches du planning par erreur, précise le rendez-vous (titre ou identifiant #id) ou le nom du client. Je ne traiterai tout le planning que si tu me le demandes explicitement.", direct = true)
+        }
         val calendarName = a.optString("calendar").trim()
         val selectedCalendar = if (calendarName.isBlank()) null else app.calendar.findCalendar(calendarName, false)
             ?: return ToolResult("Agenda introuvable : " + calendarName)
-        val events = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val periodEvents = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             app.calendar.events(from, days, onlyVisible = true)
-        }.filter { selectedCalendar == null || it.calId == selectedCalendar.id }.take(80)
+        }.filter { selectedCalendar == null || it.calId == selectedCalendar.id }
+        val scopedEvents = periodEvents.filter { event ->
+            (eventId == null || event.id.toString() == eventId) &&
+                (eventTitle.isBlank() || event.title.contains(eventTitle, ignoreCase = true)) &&
+                (clientQuery.isBlank() || cleClient(event.title + " " + event.description).contains(cleClient(clientQuery)))
+        }
+        if (eventId != null && scopedEvents.isEmpty()) return ToolResult("Aucun rendez-vous trouvé avec l'identifiant #$eventId.", direct = true)
+        if (eventTitle.isNotBlank() && scopedEvents.size > 1) return ToolResult("Plusieurs rendez-vous correspondent à « $eventTitle ». Donne l'identifiant #id ou une date pour que je n'en sélectionne qu'un.", direct = true)
+        if (clientQuery.isNotBlank() && scopedEvents.isEmpty()) return ToolResult("Aucun rendez-vous ne correspond au client « $clientQuery » sur la période demandée.", direct = true)
+        val events = (if (allRequested) periodEvents else scopedEvents).take(80)
         if (events.isEmpty()) return ToolResult("Aucun rendez-vous à analyser sur la période demandée.", direct = true)
 
         val clients = app.societe.data.clients
