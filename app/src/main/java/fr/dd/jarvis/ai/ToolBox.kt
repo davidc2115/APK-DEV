@@ -522,8 +522,9 @@ class ToolBox(
             else if (!confirm("Supprimer DÉFINITIVEMENT la fiche « $chemin » ?", true)) ToolResult("Suppression refusée par l'utilisateur.")
             else {
                 val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.obsidian.supprimerNote(chemin) }
-                if (ok) ToolResult("🗑️ Fiche « $chemin » supprimée.")
-                else ToolResult("❌ La fiche « $chemin » n'a pas pu être supprimée (problème d'accès au coffre Obsidian).")
+                val encorePresente = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { chemin in app.obsidian.listNotes("Contacts") }
+                if (ok && !encorePresente) ToolResult("🗑️ Fiche « $chemin » supprimée et absence vérifiée dans le coffre.")
+                else ToolResult("❌ La fiche « $chemin » est toujours présente ou le coffre n'a pas confirmé sa suppression. Vérifie les droits d'écriture et l'emplacement Obsidian.")
             }
         }
         "lire_notifications" -> {
@@ -1117,11 +1118,16 @@ class ToolBox(
 
     private suspend fun updateContact(a: JSONObject): ToolResult {
         if (!app.contacts.hasPermission()) return ToolResult("Permission contacts manquante.")
-        val found = app.contacts.search(a.optString("name"), 5)
+        val nomDemande = a.optString("name").trim()
+        if (nomDemande.isBlank()) return ToolResult("Nom du contact manquant.")
+        fun cleNom(value: String) = java.text.Normalizer.normalize(value.trim(), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}+"), "").lowercase().replace(Regex("\\s+"), " ")
+        val found = app.contacts.search(nomDemande, 20)
         if (found.isEmpty()) return ToolResult("Contact introuvable.")
-        if (found.size > 1 && found.none { it.name.equals(a.optString("name"), true) })
-            return ToolResult("Plusieurs contacts correspondent : ${found.joinToString { it.name }}. Préciser le nom.")
-        val c = found.firstOrNull { it.name.equals(a.optString("name"), true) } ?: found.first()
+        val exact = found.filter { cleNom(it.name) == cleNom(nomDemande) }
+        if (exact.size > 1) return ToolResult("Plusieurs contacts portent exactement ce nom : ${exact.joinToString { it.name + " (ID " + it.id + ")" }}. Précise lequel.")
+        if (exact.isEmpty() && found.size > 1) return ToolResult("Plusieurs contacts correspondent : ${found.joinToString { it.name }}. Précise le nom exact.")
+        val c = exact.singleOrNull() ?: found.singleOrNull() ?: return ToolResult("Contact ambigu : précise son nom complet.")
         val ok = app.contacts.update(
             c.id, a.optString("new_name").ifBlank { null }, a.optString("phone").ifBlank { null },
             a.optString("email").ifBlank { null }, a.optString("company").ifBlank { null }, a.optString("note").ifBlank { null }
