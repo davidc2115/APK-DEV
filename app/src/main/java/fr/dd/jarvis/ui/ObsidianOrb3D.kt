@@ -186,7 +186,7 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
             val radius = sqrt(max(0f, 1f - y * y))
             val theta = index * 2.3999632f
             // Les nœuds sont répartis sur une couronne extérieure, distincte du volume de l'orbe.
-            positions[node.id] = floatArrayOf(1.48f * radius * cos(theta), 1.42f * y, 1.48f * radius * sin(theta))
+            positions[node.id] = floatArrayOf(1.30f * radius * cos(theta), 1.26f * y, 1.30f * radius * sin(theta))
         }
         nodeIds = visible.map { it.id }
         nodePositions = visible.map { positions.getValue(it.id) }
@@ -321,16 +321,18 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
             }
             // Le cerveau est centré et légèrement en avant de la surface de l'obsidienne.
             // Le relief dépasse juste assez de la sphère pour rester visible avec le depth test actif.
-            drawDetail(-0.205f, 0.035f, 1.055f, 0.405f, 0.315f, 0.205f, 0.65f, 0.40f)
-            drawDetail(0.205f, 0.035f, 1.055f, 0.405f, 0.315f, 0.205f, 0.82f, 0.43f)
-            // Sillon médian et replis corticaux : reliefs plus petits, intégrés aux deux lobes.
-            drawDetail(0f, 0.025f, 1.105f, 0.105f, 0.205f, 0.115f, 0.76f, 0.34f)
-            drawDetail(-0.335f, 0.105f, 1.105f, 0.145f, 0.095f, 0.105f, 0.74f, 0.44f)
-            drawDetail(-0.265f, -0.105f, 1.115f, 0.155f, 0.085f, 0.105f, 0.78f, 0.46f)
-            drawDetail(-0.105f, 0.205f, 1.115f, 0.145f, 0.085f, 0.105f, 0.70f, 0.42f)
-            drawDetail(0.105f, -0.105f, 1.115f, 0.155f, 0.085f, 0.105f, 0.82f, 0.46f)
-            drawDetail(0.265f, 0.205f, 1.105f, 0.145f, 0.095f, 0.105f, 0.86f, 0.46f)
-            drawDetail(0.335f, -0.085f, 1.105f, 0.145f, 0.095f, 0.105f, 0.90f, 0.44f)
+            drawDetail(-0.245f, 0.015f, 1.075f, 0.485f, 0.385f, 0.255f, 0.65f, 0.48f)
+            drawDetail(0.245f, 0.015f, 1.075f, 0.485f, 0.385f, 0.255f, 0.82f, 0.50f)
+            // Sillon central et gyri : plis en relief qui donnent une silhouette cérébrale lisible.
+            drawDetail(0f, 0.015f, 1.145f, 0.105f, 0.285f, 0.145f, 0.76f, 0.42f)
+            drawDetail(-0.405f, 0.155f, 1.155f, 0.205f, 0.105f, 0.135f, 0.74f, 0.50f)
+            drawDetail(-0.335f, -0.115f, 1.165f, 0.205f, 0.105f, 0.135f, 0.78f, 0.52f)
+            drawDetail(-0.145f, 0.285f, 1.155f, 0.185f, 0.105f, 0.135f, 0.70f, 0.48f)
+            drawDetail(-0.115f, -0.285f, 1.165f, 0.185f, 0.105f, 0.135f, 0.72f, 0.50f)
+            drawDetail(0.145f, 0.285f, 1.155f, 0.185f, 0.105f, 0.135f, 0.86f, 0.50f)
+            drawDetail(0.335f, 0.115f, 1.165f, 0.205f, 0.105f, 0.135f, 0.90f, 0.52f)
+            drawDetail(0.405f, -0.155f, 1.155f, 0.205f, 0.105f, 0.135f, 0.88f, 0.50f)
+            drawDetail(0.115f, -0.285f, 1.165f, 0.185f, 0.105f, 0.135f, 0.84f, 0.48f)
         }
         GLES20.glDisableVertexAttribArray(pos)
         GLES20.glDisableVertexAttribArray(normal)
@@ -347,7 +349,7 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
         lineBuffer?.let { b ->
             b.position(0); GLES20.glVertexAttribPointer(graphPos, 3, GLES20.GL_FLOAT, false, 12, b)
             GLES20.glEnableVertexAttribArray(graphPos)
-            GLES20.glLineWidth(2.0f)
+            GLES20.glLineWidth(2.8f)
             GLES20.glUniform4f(GLES20.glGetUniformLocation(graphProgram, "uColor"), 0.72f, 0.34f, 1f, 0.88f)
             GLES20.glDrawArrays(GLES20.GL_LINES, 0, graphLines.size / 3)
             GLES20.glDisableVertexAttribArray(graphPos)
@@ -356,13 +358,13 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
             b.position(0); GLES20.glVertexAttribPointer(graphPos, 3, GLES20.GL_FLOAT, false, 12, b)
             GLES20.glEnableVertexAttribArray(graphPos)
             GLES20.glUniform4f(GLES20.glGetUniformLocation(graphProgram, "uColor"), 0.82f, 0.62f, 1f, 1f)
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(graphProgram, "uPointSize"), 32f)
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(graphProgram, "uPointSize"), 42f)
             GLES20.glDrawArrays(GLES20.GL_POINTS, 0, graphPoints.size / 3)
             selectedPointBuffer?.let { selected ->
                 selected.position(0)
                 GLES20.glVertexAttribPointer(graphPos, 3, GLES20.GL_FLOAT, false, 12, selected)
                 GLES20.glUniform4f(GLES20.glGetUniformLocation(graphProgram, "uColor"), 0.96f, 0.72f, 1f, 1f)
-                GLES20.glUniform1f(GLES20.glGetUniformLocation(graphProgram, "uPointSize"), 54f)
+                GLES20.glUniform1f(GLES20.glGetUniformLocation(graphProgram, "uPointSize"), 62f)
                 GLES20.glDrawArrays(GLES20.GL_POINTS, 0, 1)
             }
             GLES20.glDisableVertexAttribArray(graphPos)
