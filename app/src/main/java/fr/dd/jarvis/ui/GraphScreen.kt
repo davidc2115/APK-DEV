@@ -689,7 +689,7 @@ private fun GraphScreen2DClean(app: JarvisApp) {
             .toSortedMap()
         groups.keys.mapIndexed { index, name ->
             val angle = -Math.PI / 2.0 + index * 2.0 * Math.PI / groups.size.coerceAtLeast(1)
-            name to Offset((cos(angle) * 0.47).toFloat(), (sin(angle) * 0.47).toFloat())
+            name to Offset((cos(angle) * 0.52).toFloat(), (sin(angle) * 0.52).toFloat())
         }.toMap()
     }
     val positions = remember(nodes, edges, groupCenters) {
@@ -700,7 +700,7 @@ private fun GraphScreen2DClean(app: JarvisApp) {
             val ordered = members.sortedBy { it.id }
             ordered.forEachIndexed { i, node ->
                 val angle = i * 2.3999632f
-                val ring = 0.105f + 0.105f * kotlin.math.sqrt((i + 0.5f) / ordered.size.coerceAtLeast(1))
+                val ring = 0.14f + 0.13f * kotlin.math.sqrt((i + 0.5f) / ordered.size.coerceAtLeast(1))
                 result[node.id] = Offset(
                     (hub.x + cos(angle) * ring).coerceIn(-0.94f, 0.94f),
                     (hub.y + sin(angle) * ring).coerceIn(-0.94f, 0.94f)
@@ -782,10 +782,10 @@ private fun GraphScreen2DClean(app: JarvisApp) {
                 val a = positions[edge.from] ?: return@forEach
                 val b = positions[edge.to] ?: return@forEach
                 drawLine(
-                    Color(0xFFB987FF).copy(alpha = if (selected == null) 0.58f else if (edge.from in selectedNeighborhood && edge.to in selectedNeighborhood) 0.9f else 0.07f),
+                    Color(0xFFD0B0FF).copy(alpha = if (selected == null) 0.72f else if (edge.from in selectedNeighborhood && edge.to in selectedNeighborhood) 0.96f else 0.055f),
                     center + Offset(a.x * radius, a.y * radius),
                     center + Offset(b.x * radius, b.y * radius),
-                    strokeWidth = if (selected != null && edge.from in selectedNeighborhood && edge.to in selectedNeighborhood) 2.0f else 1.25f
+                    strokeWidth = if (selected != null && edge.from in selectedNeighborhood && edge.to in selectedNeighborhood) 2.2f else 1.55f
                 )
             }
             nodes.forEach { node ->
