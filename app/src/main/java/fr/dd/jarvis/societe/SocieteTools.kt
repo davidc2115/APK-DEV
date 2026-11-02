@@ -20,7 +20,7 @@ class SocieteTools(
         val NAMES = setOf(
             "societe_info_set", "societe_info_get", "tarif_set", "tarif_delete", "regles_set", "client_ecrire", "client_fiche",
             "document_creer", "document_action", "document_email", "societe_liste", "employe_ecrire", "paie", "reserve_bilan",
-            "presentation_modifier", "distance_deplacement", "clients_exporter_kml"
+            "presentation_modifier", "distance_deplacement", "clients_exporter_kml", "kml_couleurs_set"
         )
         private val KEYWORDS = Regex(
             "devis|factur|client|soci[ée]t[ée]|tarif|remise|d[ée]placement|paie|salaire|bulletin|r[ée]serve|dividende|b[ée]n[ée]fice|" +
@@ -34,7 +34,7 @@ class SocieteTools(
 Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu disposes d'outils pour : enregistrer les informations de l'entreprise (siège, SIRET, IBAN, TVA…), les tarifs par puissance (kWc), les règles de remise (fidélité, nombre d'installations) et de déplacement, les clients et leurs installations, créer des devis et factures, convertir un devis en facture, marquer une facture payée (mise en réserve), produire des bulletins de paie, le bilan de la réserve, et modifier la présentation des documents.
 - Quand l'utilisateur donne un tarif, une règle ou une information sur la société, enregistre-la immédiatement avec l'outil adapté : c'est ainsi que tu la gardes en mémoire.
 - Ne calcule jamais un montant toi-même : les outils font tous les calculs (tarif par puissance, remises, déplacement, TVA).
-- Quand l’utilisateur demande une carte KML des clients ou des installations pour Google Earth, utilise clients_exporter_kml. Le fichier contient un point GPS par installation et la fiche client complète dans la description de chaque point ; n’importe pas de KML dans JARVIS.
+- Quand l’utilisateur demande une carte KML des clients ou des installations pour Google Earth, utilise clients_exporter_kml. Le fichier contient une fiche HTML illustrée (emojis), un repère coloré selon particulier/professionnel et des champs de recherche par client, type et adresse. Si un nom est donné, passe-le dans recherche pour filtrer la carte.\n- Si l’utilisateur demande de changer les couleurs des clients sur Google Earth, utilise kml_couleurs_set pour enregistrer les couleurs puis régénère le KML avec clients_exporter_kml.
 - Pour un devis ou une facture, identifie le client et l'installation (client_ecrire si le client n'existe pas encore). Si une information indispensable manque (client, prestation), demande-la en une phrase.
 - Le texte renvoyé par les outils société est déjà mis en forme et affiché tel quel : ne le répète pas.
 - Les montants sont toujours en euros, la TVA est gérée par l'application.
@@ -55,7 +55,8 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
     }
 
     val schema: List<JSONObject> = listOf(
-        tool("clients_exporter_kml", "Génère le fichier KML des clients pour Google Earth : un point GPS par installation, avec la fiche client et les détails de l’installation dans la description du point.", mapOf()),
+        tool("clients_exporter_kml", "Génère le fichier KML Google Earth avec fiches contact colorées, emojis, noms de clients et données de recherche. Peut filtrer les clients par nom, société, adresse ou installation.", mapOf("recherche" to prop("Texte facultatif pour exporter uniquement les clients correspondant à un nom, une société, une adresse ou une installation."))),
+        tool("kml_couleurs_set", "Définit les couleurs des repères Google Earth pour les clients particuliers et professionnels. Couleurs au format hexadécimal #RRGGBB.", mapOf("particuliers" to prop("Couleur hexadécimale des clients particuliers, par exemple #20A45A."), "professionnels" to prop("Couleur hexadécimale des clients professionnels, par exemple #2878D0."))),
         tool("societe_info_set", "Enregistre les informations de la société (seuls les champs fournis sont modifiés).", mapOf(
             "nom" to prop("Nom de la société."), "forme" to prop("Forme juridique (EURL, SASU, micro-entreprise…)."),
             "siret" to prop("SIRET."), "tva_num" to prop("N° de TVA intracommunautaire."),
@@ -178,8 +179,26 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         "reserve_bilan" -> ok(svc.bilanTexte(a.s("annee").toIntOrNull() ?: LocalDate.now().year))
         "presentation_modifier" -> presentation(a)
         "distance_deplacement" -> distanceTool(a)
-        "clients_exporter_kml" -> ok(svc.exporterKml())
+        "clients_exporter_kml" -> ok(svc.exporterKml(a.s("recherche")))\n        "kml_couleurs_set" -> kmlCouleursSet(a)
         else -> err("Outil inconnu : $name")
+    }
+
+    private fun kmlCouleursSet(a: JSONObject): ToolResult {
+        fun couleur(k: String): String? {
+            val value = a.s(k).uppercase().let { if (it.startsWith("#")) it else "#$it" }
+            return value.takeIf { it.matches(Regex("#[0-9A-F]{6}")) }
+        }
+        val particulier = couleur("particuliers")
+        val professionnel = couleur("professionnels")
+        if (particulier == null && professionnel == null)
+            return err("Couleur invalide. Utilise le format hexadécimal #RRGGBB, par exemple #20A45A.")
+        val before = d.societe
+        val after = before.copy(
+            kmlCouleurParticulier = particulier ?: before.kmlCouleurParticulier,
+            kmlCouleurProfessionnel = professionnel ?: before.kmlCouleurProfessionnel
+        )
+        svc.repo.update { it.copy(societe = after) }
+        return ok("🎨 Couleurs Google Earth enregistrées.\\n- 🏠 Particuliers : ${after.kmlCouleurParticulier}\\n- 🏢 Professionnels : ${after.kmlCouleurProfessionnel}\\n\\nDemande maintenant « exporte la carte KML » pour appliquer les couleurs aux repères.")
     }
 
     private fun infoSet(a: JSONObject): ToolResult {
