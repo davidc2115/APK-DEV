@@ -382,7 +382,8 @@ class SocieteService(
                 else if (rawName.contains(" - ")) rawName.substringAfter(" - ").trim()
                 else if (client != rawName) rawName else "Installation 1"
             }
-            val coords = text(p, "coordinates").trim().substringBefore(Regex("\\s").find(text(p, "coordinates"))?.value ?: "\u0000").split(',')
+            val coordText = text(p, "coordinates").trim()
+            val coords = coordText.substringBefore(' ').split(',')
             val lon = coords.getOrNull(0)?.toDoubleOrNull()
             val lat = coords.getOrNull(1)?.toDoubleOrNull()
             val address = data(p, "adresse").ifBlank { field(desc, "Adresse").ifBlank { desc.lineSequence().firstOrNull().orEmpty() } }
