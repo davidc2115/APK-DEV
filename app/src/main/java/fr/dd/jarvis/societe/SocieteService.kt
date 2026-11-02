@@ -332,7 +332,7 @@ class SocieteService(
     fun importerKml(xml: String): String {
         val placemarks = try {
             val factory = javax.xml.parsers.DocumentBuilderFactory.newInstance().apply { isNamespaceAware = true }
-            runCatching { setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
+            runCatching { factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
             val doc = factory.newDocumentBuilder().parse(org.xml.sax.InputSource(java.io.StringReader(xml)))
             val all = doc.getElementsByTagNameNS("*", "Placemark")
             (0 until all.length).mapNotNull { all.item(it) as? org.w3c.dom.Element }
