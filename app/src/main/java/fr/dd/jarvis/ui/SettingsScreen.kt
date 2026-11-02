@@ -434,6 +434,7 @@ fun SettingsScreen(app: JarvisApp) {
                 val screeningRole = Build.VERSION.SDK_INT >= 29 && roleManager?.isRoleAvailable(android.app.role.RoleManager.ROLE_CALL_SCREENING) == true
                 val screeningOn = screeningRole && roleManager?.isRoleHeld(android.app.role.RoleManager.ROLE_CALL_SCREENING) == true
                 val callRoleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { tick++ }
+                val overlayCallerId = Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(ctx)
                 StatusRow("Identification des appels entrants (fiches JARVIS + Obsidian)", screeningOn)
                 Text("JARVIS peut identifier un appelant même s'il n'est pas dans les contacts Android. Android doit autoriser JARVIS comme application d'identification ; l'application Téléphone native continue de gérer l'appel.", color = HudDim, fontSize = 11.sp)
                 Spacer(Modifier.height(4.dp))
@@ -441,6 +442,12 @@ fun SettingsScreen(app: JarvisApp) {
                     if (Build.VERSION.SDK_INT >= 29 && roleManager != null) callRoleLauncher.launch(roleManager.createRequestRoleIntent(android.app.role.RoleManager.ROLE_CALL_SCREENING))
                 }
                 if (!screeningRole) Text("Le rôle Android d'identification des appels n'est pas disponible sur cette version.", color = HudDim, fontSize = 11.sp)
+                if (screeningOn) {
+                    StatusRow("Bandeau d'identification au-dessus de l'appel", overlayCallerId)
+                    if (!overlayCallerId) HudButton("Autoriser l'affichage du nom pendant l'appel") {
+                        ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + ctx.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }
+                }
                 Spacer(Modifier.height(10.dp))
                 var smsOk by remember { mutableStateOf(fr.dd.jarvis.device.Telephony.smsGranted(ctx) && fr.dd.jarvis.device.Telephony.callGranted(ctx)) }
                 val smsPerm = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) {
