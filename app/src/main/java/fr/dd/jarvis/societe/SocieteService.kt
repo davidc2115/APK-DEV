@@ -299,7 +299,7 @@ class SocieteService(
                     if (c.email.isNotBlank()) append("<p><b>E-mail :</b> ${esc(c.email)}</p>")
                     if (c.adresse.isNotBlank()) append("<p><b>Adresse client :</b> ${esc(c.adresse)}</p>")
                     if (c.depuis.isNotBlank()) append("<p><b>Client depuis :</b> ${esc(c.depuis)}</p>")
-                    if (c.notes.isNotBlank()) append("<p><b>Notes client :</b><br>${esc(c.notes).replace("\\n", "<br>")}</p>")
+                    if (c.notes.isNotBlank()) append("<p><b>Notes client :</b><br>${esc(c.notes).replace("\n", "<br>")}</p>")
                     append("<hr><h3>Installation : ${esc(s?.nom?.ifBlank { "Installation" } ?: "Adresse client")}</h3>")
                     if (adr.isNotBlank()) append("<p><b>Adresse :</b> ${esc(adr)}</p>")
                     if (s != null && s.kwc > 0) append("<p><b>Puissance :</b> ${nombre(s.kwc)} kWc</p>")
