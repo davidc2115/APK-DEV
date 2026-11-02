@@ -28,9 +28,9 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
         tool("ha_entites", "Home Assistant : liste/recherche les appareils et capteurs (lumières, volets, températures…) avec leur état.",
             mapOf("recherche" to prop("Mot du nom ou de l'identifiant (optionnel)."), "domaine" to prop("light, switch, sensor, climate, cover, automation… (optionnel)."))),
         tool("ha_etat", "Home Assistant : état détaillé d'une entité.", mapOf("entity_id" to prop("ex. light.salon")), listOf("entity_id")),
-        tool("ha_service", "Home Assistant : commande un appareil ou lance un service (allumer, éteindre, ouvrir un volet, régler un thermostat, déclencher une automatisation…).",
-            mapOf("domaine" to prop("ex. light, switch, climate, cover, automation, scene, script, homeassistant."), "service" to prop("ex. turn_on, turn_off, toggle, set_temperature, trigger, reload_all."),
-                "entity_id" to prop("Entité(s), séparées par des virgules (optionnel)."), "donnees" to prop("Paramètres JSON (optionnel), ex. {\"brightness_pct\":50}.")), listOf("domaine", "service")),
+        tool("ha_service", "Home Assistant : exécute réellement une commande sur un appareil. Pour un poêle/thermostat : climate.set_temperature avec donnees {temperature: 20}, climate.set_hvac_mode si pris en charge. Pour une télévision/lecteur : media_player.turn_on, media_player.turn_off, media_player.volume_set avec {volume_level: 0.35}, media_player.volume_up, media_player.volume_down, media_player.media_play_pause, media_player.select_source avec {source: \"…\"}. Pour une lumière : light.turn_on/off. Cherche d'abord l'identifiant exact avec ha_entites, puis utilise ha_etat pour connaître les attributs et capacités. N'annonce jamais le succès avant le résultat de l'appel.",
+            mapOf("domaine" to prop("Domaine HA exact : climate, media_player, light, switch, cover, automation, scene, script…"), "service" to prop("Service HA exact : set_temperature, turn_on, turn_off, volume_set, volume_up, volume_down, select_source, media_play_pause…"),
+                "entity_id" to prop("Identifiant exact de l'entité, ex. climate.poele ou media_player.television."), "donnees" to JSONObject().put("type", "object").put("description", "Objet JSON de paramètres du service. Exemples : {temperature: 20}, {volume_level: 0.35}, {source: \"HDMI 1\"}. Laisser vide si aucun paramètre n'est nécessaire.")), listOf("domaine", "service")),
         tool("ha_config", "Home Assistant : configuration complète sur le serveur (fichiers YAML dans le dossier de config : configuration.yaml, automations.yaml, scripts.yaml, scenes.yaml, secrets.yaml, packages/…). Actions : lister | lire | ecrire (sauvegarde auto + validation, restauration si invalide) | sauvegardes | restaurer | valider | recharger | redemarrer | journal (erreurs). Toujours lire le fichier avant de le modifier et réécrire le fichier ENTIER.",
             mapOf("action" to prop("lister | lire | ecrire | sauvegardes | restaurer | valider | recharger | redemarrer | journal"), "fichier" to prop("Chemin relatif au dossier de config, ex. automations.yaml (ou dossier pour lister)."),
                 "contenu" to prop("ecrire : contenu complet du fichier. restaurer : nom de la sauvegarde (.jarvis-bak-…)."), "quoi" to prop("recharger : all | automation | script | scene | core (défaut all).")), listOf("action")),
@@ -86,7 +86,11 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 val d = a.optString("domaine").trim(); val s = a.optString("service").trim(); val e = a.optString("entity_id").trim()
                 val sensible = (d in setOf("lock", "alarm_control_panel") || s in setOf("restart", "stop", "unlock", "alarm_disarm", "open_cover") && d != "light") || (d == "homeassistant" && s in setOf("restart", "stop"))
                 if (sensible && !confirm("Home Assistant : exécuter $d.$s ${e}?", true)) return ToolResult("Refusé par l'utilisateur.")
-                val data = a.optString("donnees").trim().takeIf { it.startsWith("{") }?.let { runCatching { JSONObject(it) }.getOrNull() }
+                val data = when (val raw = a.opt("donnees")) {
+                    is JSONObject -> JSONObject(raw.toString())
+                    is String -> raw.trim().takeIf { it.startsWith("{") }?.let { runCatching { JSONObject(it) }.getOrNull() }
+                    else -> null
+                }
                 ToolResult(Serveur.haService(app, d, s, e, data))
             }
             "ssh_commande" -> {
