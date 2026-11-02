@@ -745,8 +745,7 @@ class ToolBox(
         if (events.isEmpty()) return ToolResult("Aucun rendez-vous à analyser sur la période demandée.", direct = true)
 
         val clients = app.societe.data.clients
-        if (clients.isEmpty()) return ToolResult("Aucune fiche client Société n'existe encore.")
-        val known = clients.joinToString("\n") { c ->
+        val known = if (clients.isEmpty()) "Aucune fiche client existante : les nouveaux clients peuvent être créés uniquement si leur nom est explicitement identifiable dans le titre ou la description d'un rendez-vous." else clients.joinToString("\n") { c ->
             "- " + c.nom + if (c.sites.isEmpty()) "" else " | installations : " +
                 c.sites.joinToString("; ") { (it.nom + " " + it.adresse).trim() }
         }
@@ -767,7 +766,7 @@ class ToolBox(
             "Tu extrais les données des rendez-vous pour compléter des fiches clients d'une entreprise photovoltaïque.",
             "Retourne uniquement un tableau JSON valide, sans Markdown ni commentaire.",
             "Une entrée par client ET par installation photovoltaïque dans chaque rendez-vous. Si un client possède deux installations décrites (ex. BRISCOT 1 et BRISCOT 2), retourne DEUX objets avec le même event_id et le même client, un objet par installation. Si plusieurs clients sont cités, sépare aussi chaque client. Ne fusionne jamais deux installations.",
-            "Le champ client doit reprendre exactement un nom de la liste connue. Ignore les personnes non clientes et n'invente aucun client.",
+            "Si le client existe, reprends exactement son nom dans la liste connue. Si aucune fiche ne correspond, tu peux extraire un nouveau nom de client UNIQUEMENT s'il est explicitement identifiable dans le titre ou la description (ex. « CE - BRISCOT 1/2 - téléphone » => client « BRISCOT »). Ne crée jamais un nom à partir d'une supposition. Ignore les événements sans nom client certain.",
             "N'extrais que les informations explicitement présentes dans le titre, le lieu ou la description. N'infère jamais un téléphone, une adresse, une puissance ou un modèle d'onduleur.",
             "Chaque objet utilise les clés : event_id, client, contact, phone, email, client_address, site_name, site_address, kwc, inverter, panels, commissioning_date, notes.",
             "Les champs absents sont des chaînes vides ou null. kwc doit toujours être converti en kWc : une valeur en Wc se divise par 1000 (99 830 Wc = 99.83 kWc ; 35 640 Wc = 35.64 kWc). panels un entier. Distingue l'adresse du client de l'adresse du site.",
@@ -798,13 +797,26 @@ class ToolBox(
         for (i in 0 until rows.length()) {
             val row = rows.optJSONObject(i) ?: continue
             val event = eventById[row.optString("event_id").trim()] ?: continue
-            val name = row.optString("client").trim()
-            val client = clients.filter { cleClient(it.nom) == cleClient(name) }.singleOrNull()
-            if (client == null) {
+            var name = row.optString("client").trim().takeUnless { it.equals("null", true) || it.equals("undefined", true) }.orEmpty()
+            // Certains modèles renvoient "null" lorsqu'aucune fiche n'existe encore.
+            // Dans ce cas, récupère uniquement le nom explicite placé après le préfixe CE/RDV du titre.
+            if (name.isBlank()) {
+                val titleMatch = Regex("""(?i)^(?:CE|RDV|RENDEZ[- ]?VOUS|CLIENT)\\s*[-:]\\s*(.+?)(?:\\s+\\d+(?:\\s*/\\s*\\d+)?)?(?:\\s*[-–|].*)?$""").find(event.title.trim())
+                name = titleMatch?.groupValues?.getOrNull(1)?.trim().orEmpty()
+            }
+            val existingMatches = clients.filter { cleClient(it.nom) == cleClient(name) }
+            val existing = existingMatches.singleOrNull()
+            val sourceText = cleClient(event.title + " " + event.description)
+            val explicitNewName = name.length >= 3 && cleClient(name).let { normalized ->
+                normalized.isNotBlank() && sourceText.contains(normalized)
+            }
+            if (existingMatches.size > 1 || (existing == null && !explicitNewName)) {
                 if (name.isNotBlank()) ignored += name
                 continue
             }
-            val current = app.societe.data.clients.firstOrNull { it.id == client.id } ?: client
+            val current = app.societe.data.clients.firstOrNull { it.id == existing?.id }
+                ?: existing
+                ?: Client(svc.newId(), name, depuis = LocalDate.now().toString())
             fun value(key: String): String {
                 if (row.isNull(key)) return ""
                 return row.optString(key, "").trim().takeUnless { it == "null" }.orEmpty()
