@@ -801,8 +801,10 @@ class ToolBox(
             // Certains modèles renvoient "null" lorsqu'aucune fiche n'existe encore.
             // Dans ce cas, récupère uniquement le nom explicite placé après le préfixe CE/RDV du titre.
             if (name.isBlank()) {
-                val titleMatch = Regex("""(?i)^(?:CE|RDV|RENDEZ[- ]?VOUS|CLIENT)\\s*[-:]\\s*(.+?)(?:\\s+\\d+(?:\\s*/\\s*\\d+)?)?(?:\\s*[-–|].*)?$""").find(event.title.trim())
-                name = titleMatch?.groupValues?.getOrNull(1)?.trim().orEmpty()
+                val titleMatch = Regex("""(?i)^(?:CE|RDV|RENDEZ[- ]?VOUS|CLIENT)\s*[-:]\s*(.+?)(?:\s*[-–|].*)?$""").find(event.title.trim())
+                name = titleMatch?.groupValues?.getOrNull(1)?.trim()
+                    ?.replace(Regex("""\s+\d+(?:\s*/\s*\d+)?$"""), "")
+                    ?.trim().orEmpty()
             }
             val existingMatches = clients.filter { cleClient(it.nom) == cleClient(name) }
             val existing = existingMatches.singleOrNull()
