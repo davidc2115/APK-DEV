@@ -684,30 +684,17 @@ private fun GraphScreen2DClean(app: JarvisApp) {
 
     // Les notes sont regroupées autour de leur véritable dossier Obsidian.
     // Les rayons cerveau→dossier→note sont des liens de structure, séparés des wikiliens réels.
-    val groupCenters = remember(nodes) {
-        val groups = nodes.groupBy { it.folder.substringBefore('/').trim().ifBlank { "Racine" } }
-            .toSortedMap()
-        groups.keys.mapIndexed { index, name ->
-            val angle = -Math.PI / 2.0 + index * 2.0 * Math.PI / groups.size.coerceAtLeast(1)
-            name to Offset((cos(angle) * 0.60).toFloat(), (sin(angle) * 0.60).toFloat())
+    // Répartition globale en spirale de Fibonacci : les notes restent espacées même
+    // lorsque plusieurs centaines d'éléments viennent du même dossier.
+    // Les dossiers restent identifiables par leur teinte, sans hubs artificiels qui tassent le centre.
+    val positions = remember(nodes) {
+        val ordered = nodes.sortedBy { it.id }
+        val count = ordered.size.coerceAtLeast(1)
+        ordered.mapIndexed { index, node ->
+            val radius = (0.12f + 0.82f * kotlin.math.sqrt((index + 0.5f) / count)).coerceAtMost(0.94f)
+            val angle = index * 2.3999632f
+            node.id to Offset(cos(angle) * radius, sin(angle) * radius)
         }.toMap()
-    }
-    val positions = remember(nodes, edges, groupCenters) {
-        val grouped = nodes.groupBy { it.folder.substringBefore('/').trim().ifBlank { "Racine" } }
-        val result = HashMap<String, Offset>()
-        grouped.forEach { (folder, members) ->
-            val hub = groupCenters[folder] ?: Offset.Zero
-            val ordered = members.sortedBy { it.id }
-            ordered.forEachIndexed { i, node ->
-                val angle = i * 2.3999632f
-                val ring = 0.18f + 0.17f * kotlin.math.sqrt((i + 0.5f) / ordered.size.coerceAtLeast(1))
-                result[node.id] = Offset(
-                    (hub.x + cos(angle) * ring).coerceIn(-0.94f, 0.94f),
-                    (hub.y + sin(angle) * ring).coerceIn(-0.94f, 0.94f)
-                )
-            }
-        }
-        result
     }
 
     Box(Modifier.fillMaxSize().background(
@@ -763,19 +750,6 @@ private fun GraphScreen2DClean(app: JarvisApp) {
                 val x = center.x + side * brainRadius * (0.22f + (i % 3) * 0.12f)
                 drawLine(Color(0xFFE3C9FF).copy(alpha = 0.34f), Offset(center.x, y), Offset(x, y + side * brainRadius * 0.12f), 1.15f)
                 drawCircle(Color(0xFFE8D5FF).copy(alpha = 0.72f), 1.7f, Offset(x, y + side * brainRadius * 0.12f))
-            }
-            // Branches d'organisation réelles : cerveau → dossier → notes du dossier.
-            groupCenters.forEach { (folder, hub) ->
-                val hubPoint = center + Offset(hub.x * radius, hub.y * radius)
-                val folderColor = couleurDossier(folder, Color(0xFFC18AFF))
-                drawLine(folderColor.copy(alpha = 0.42f), center, hubPoint, strokeWidth = 1.8f)
-                nodes.filter { it.folder.substringBefore('/').trim().ifBlank { "Racine" } == folder }.forEach { node ->
-                    val p = positions[node.id] ?: return@forEach
-                    drawLine(folderColor.copy(alpha = 0.24f), hubPoint, center + Offset(p.x * radius, p.y * radius), strokeWidth = 1.1f)
-                }
-                drawCircle(folderColor.copy(alpha = 0.16f), 17f, hubPoint)
-                drawCircle(folderColor.copy(alpha = 0.92f), 5.5f, hubPoint)
-                drawCircle(Color.White.copy(alpha = 0.62f), 1.5f, hubPoint)
             }
             // Relations explicites uniquement : aucune arête n'est inventée pour remplir la scène.
             edges.forEach { edge ->
