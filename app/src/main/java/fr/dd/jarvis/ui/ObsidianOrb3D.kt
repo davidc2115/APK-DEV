@@ -480,6 +480,8 @@ private class ObsidianOrbRenderer : GLSurfaceView.Renderer {
         """
         private const val FRAGMENT_SHADER = """
             precision mediump float;
+            uniform vec3 uTint;
+            uniform float uEmission;
             varying vec3 vPosition;
             varying vec3 vNormal;
 
