@@ -205,14 +205,16 @@ private class ObsidianOrbSurface(context: Context) : GLSurfaceView(context) {
         detailVertexCount = 24 * 20 * 6
         serpentBuffer = createSerpentTube(180, 14)
         serpentVertexCount = 180 * 14 * 6
-        Matrix.setLookAtM(view, 0, 0f, 0f, 3.3f, 0f, 0f, 0f, 0f, 1f, 0f)
+        // Recul suffisant pour garder la constellation complète dans le cadre en portrait,
+// sans couper les nœuds extérieurs sur les écrans étroits.
+        Matrix.setLookAtM(view, 0, 0f, 0f, 4.0f, 0f, 0f, 0f, 0f, 1f, 0f)
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
         surfaceWidth = width; surfaceHeight = height
         GLES20.glViewport(0, 0, width, height)
         val ratio = width.toFloat() / max(height, 1)
-        Matrix.perspectiveM(projection, 0, 42f, ratio, 0.1f, 20f)
+        Matrix.perspectiveM(projection, 0, 46f, ratio, 0.1f, 20f)
     }
 
     override fun onDrawFrame(gl: GL10?) {
