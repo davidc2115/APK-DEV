@@ -123,6 +123,10 @@ class Store(context: Context) {
     val boxPort = SPref("boxPort", "21")
     val boxUser = SPref("boxUser", "")
     val boxPass = SPref("boxPass", "")
+    // ---- Imprimante réseau découverte (IPP), utilisable localement ou via le serveur Debian
+    val printerHost = SPref("printerHost", "")
+    val printerName = SPref("printerName", "")
+    val printerPath = SPref("printerPath", "/ipp/print")
 
     // ---- Génération d'images (Cloudflare Workers AI) : lignes « idCompte:jeton », rotation automatique
     val cfModel = SPref("cfModel", "@cf/black-forest-labs/flux-1-schnell")
