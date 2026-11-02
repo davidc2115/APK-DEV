@@ -379,7 +379,7 @@ class SocieteService(
         File(dir, "Clients.kml").writeBytes(kml.toByteArray())
         "# 🗺️ Export KML\n\n${pts.size} point(s) GPS enregistrés : $loc\n" +
             (if (filtre.isNotBlank()) "🔎 Filtre appliqué : **${esc(recherche)}**\n" else "") +
-            (if (manquants.isNotEmpty()) "\n⚠️ Adresse introuvable ou absente : ${manquants.joinToString(", ")}\n" else "") +
+            (if (manquants.isNotEmpty()) "\n⚠️ Coordonnées GPS non trouvées (adresse absente ou non reconnue par les services cartographiques) : ${manquants.joinToString(", ")}\n" else "") +
             "\nLes noms des repères contiennent le client et l'installation. Les données étendues « client », « type_client » et « adresse » accompagnent chaque repère pour faciliter la recherche dans les lieux importés."
     }
 
