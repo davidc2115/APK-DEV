@@ -403,7 +403,7 @@ class SocieteService(
             var client = existing ?: Client(newId(), nom, depuis = LocalDate.now().toString())
             if (client.tel.isBlank()) client = client.copy(tel = items.firstNotNullOfOrNull { it.phone.takeIf(String::isNotBlank) }.orEmpty())
             items.forEachIndexed { index, row ->
-                val siteName = row.site.ifBlank { "Installation ${index + 1}" }
+                val siteName = if (row.site == "Installation 1" && items.size > 1) "Installation ${index + 1}" else row.site.ifBlank { "Installation ${index + 1}" }
                 val same = client.sites.firstOrNull { normaliser(it.nom) == normaliser(siteName) ||
                     (row.address.isNotBlank() && normaliser(it.adresse) == normaliser(row.address)) ||
                     (row.lat != null && row.lon != null && it.lat == row.lat && it.lon == row.lon) }
