@@ -270,69 +270,90 @@ class SocieteService(
 
     private fun esc(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    /** Géocode (une fois) les installations sans coordonnées puis écrit Clients.kml dans Obsidian. */
-    suspend fun exporterKml(): String = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+    /** Convertit #RRGGBB en couleur KML aabbggrr. */
+    private fun kmlColor(hex: String): String {
+        val h = hex.removePrefix("#")
+        if (!h.matches(Regex("[0-9A-Fa-f]{6}"))) return "ff20a450"
+        return "ff" + h.substring(4, 6) + h.substring(2, 4) + h.substring(0, 2)
+    }
+
+    /** Exporte les clients en KML : fiches HTML illustrées, styles par catégorie et données indexées. */
+    suspend fun exporterKml(recherche: String = ""): String = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         val manquants = mutableListOf<String>()
-        val pts = mutableListOf<Triple<String, String, Geo.Point>>() // nom, description, point
+        data class KmlPoint(val nom: String, val client: String, val type: String, val adresse: String, val description: String, val point: Geo.Point)
+        val pts = mutableListOf<KmlPoint>()
+        val filtre = recherche.trim().lowercase()
         for (c in data.clients) {
             val cibles = if (c.sites.isEmpty()) listOf(null) else c.sites
-            for (s in cibles) {
-                val adr = s?.adresse?.ifBlank { null } ?: c.adresse
-                val label = if (s != null && s.nom.isNotBlank()) "${c.nom} — ${s.nom}" else c.nom
-                var p = if (s?.lat != null && s.lon != null) Geo.Point(s.lat, s.lon) else null
-                if (p == null && adr.isNotBlank()) {
-                    p = Geo.geocode(adr)
-                    kotlinx.coroutines.delay(1100) // politesse envers Nominatim (1 requête/s)
-                    if (p != null && s != null) {
-                        repo.update { d -> d.copy(clients = d.clients.map { x ->
-                            if (x.id != c.id) x else x.copy(sites = x.sites.map { y -> if (y.id == s.id) y.copy(lat = p.lat, lon = p.lon) else y })
+            for (site in cibles) {
+                val adr = site?.adresse?.ifBlank { null } ?: c.adresse
+                val nomSite = site?.nom?.ifBlank { null } ?: "Adresse client"
+                val searchable = listOf(c.nom, c.contact, c.type, c.adresse, c.email, site?.nom.orEmpty(), adr, site?.onduleur.orEmpty()).joinToString(" ").lowercase()
+                if (filtre.isNotBlank() && !searchable.contains(filtre)) continue
+                val particulier = c.type.contains("part", ignoreCase = true)
+                val emoji = if (particulier) "🏠" else "🏢"
+                val label = "$emoji ${c.nom} — $nomSite"
+                var point = if (site?.lat != null && site.lon != null) Geo.Point(site.lat, site.lon) else null
+                if (point == null && adr.isNotBlank()) {
+                    point = Geo.geocode(adr)
+                    kotlinx.coroutines.delay(1100)
+                    if (point != null && site != null) {
+                        val geocodePoint = point
+                        repo.update { current -> current.copy(clients = current.clients.map { x ->
+                            if (x.id != c.id) x else x.copy(sites = x.sites.map { y ->
+                                if (y.id == site.id) y.copy(lat = geocodePoint.lat, lon = geocodePoint.lon) else y
+                            })
                         }) }
                     }
                 }
-                if (p == null) { manquants += label; continue }
-                val desc = buildString {
-                    // Google Earth affiche cette fiche HTML quand on sélectionne le point.
-                    append("<div><h2>${esc(c.nom)}</h2>")
-                    if (c.type.isNotBlank()) append("<p><b>Type :</b> ${esc(c.type)}</p>")
-                    if (c.contact.isNotBlank()) append("<p><b>Contact :</b> ${esc(c.contact)}</p>")
-                    if (c.tel.isNotBlank()) append("<p><b>Téléphone :</b> ${esc(c.tel)}</p>")
-                    if (c.email.isNotBlank()) append("<p><b>E-mail :</b> ${esc(c.email)}</p>")
-                    if (c.adresse.isNotBlank()) append("<p><b>Adresse client :</b> ${esc(c.adresse)}</p>")
-                    if (c.depuis.isNotBlank()) append("<p><b>Client depuis :</b> ${esc(c.depuis)}</p>")
-                    if (c.notes.isNotBlank()) append("<p><b>Notes client :</b><br>${esc(c.notes).replace("\n", "<br>")}</p>")
-                    append("<hr><h3>Installation : ${esc(s?.nom?.ifBlank { "Installation" } ?: "Adresse client")}</h3>")
-                    if (adr.isNotBlank()) append("<p><b>Adresse :</b> ${esc(adr)}</p>")
-                    if (s != null && s.kwc > 0) append("<p><b>Puissance :</b> ${nombre(s.kwc)} kWc</p>")
-                    if (s != null && s.miseEnService.isNotBlank()) append("<p><b>Mise en service :</b> ${esc(s.miseEnService)}</p>")
-                    if (s != null && s.onduleur.isNotBlank()) append("<p><b>Onduleur :</b> ${esc(s.onduleur)}</p>")
-                    if (s != null && s.nbPanneaux > 0) append("<p><b>Nombre de panneaux :</b> ${s.nbPanneaux}</p>")
-                    if (s != null && s.notes.isNotBlank()) append("<p><b>Notes installation :</b><br>${esc(s.notes).replace("\n", "<br>")}</p>")
+                if (point == null) { manquants += label; continue }
+                val couleur = if (particulier) data.societe.kmlCouleurParticulier else data.societe.kmlCouleurProfessionnel
+                val description = buildString {
+                    append("<div style='font-family:Arial,sans-serif;color:#202124'>")
+                    append("<div style='padding:12px 14px;background:$couleur;color:white;border-radius:8px'>")
+                    append("<h2 style='margin:0'>$emoji ${esc(c.nom)}</h2>")
+                    append("<div style='font-size:13px;margin-top:4px'>${if (particulier) "Client particulier" else "Client professionnel"}</div></div>")
+                    if (c.contact.isNotBlank()) append("<p>👤 <b>Contact :</b> ${esc(c.contact)}</p>")
+                    if (c.tel.isNotBlank()) append("<p>📞 <b>Téléphone :</b> ${esc(c.tel)}</p>")
+                    if (c.email.isNotBlank()) append("<p>✉️ <b>E-mail :</b> ${esc(c.email)}</p>")
+                    if (c.adresse.isNotBlank()) append("<p>📍 <b>Adresse client :</b> ${esc(c.adresse)}</p>")
+                    if (c.depuis.isNotBlank()) append("<p>🗓️ <b>Client depuis :</b> ${esc(c.depuis)}</p>")
+                    if (c.notes.isNotBlank()) append("<p>📝 <b>Notes client :</b><br>${esc(c.notes).replace("\n", "<br>")}</p>")
+                    append("<hr><h3>☀️ Installation : ${esc(nomSite)}</h3>")
+                    if (adr.isNotBlank()) append("<p>📍 <b>Adresse :</b> ${esc(adr)}</p>")
+                    if (site != null && site.kwc > 0) append("<p>⚡ <b>Puissance :</b> ${nombre(site.kwc)} kWc</p>")
+                    if (site != null && site.miseEnService.isNotBlank()) append("<p>📅 <b>Mise en service :</b> ${esc(site.miseEnService)}</p>")
+                    if (site != null && site.onduleur.isNotBlank()) append("<p>🔌 <b>Onduleur :</b> ${esc(site.onduleur)}</p>")
+                    if (site != null && site.nbPanneaux > 0) append("<p>🔋 <b>Nombre de panneaux :</b> ${site.nbPanneaux}</p>")
+                    if (site != null && site.notes.isNotBlank()) append("<p>📝 <b>Notes installation :</b><br>${esc(site.notes).replace("\n", "<br>")}</p>")
                     append("</div>")
                 }.replace("]]>", "]]]]><![CDATA[>")
-
-                pts += Triple(label, desc, p)
+                pts += KmlPoint(label, c.nom, if (particulier) "particulier" else "professionnel", adr, description, point)
             }
         }
         val hq = data.societe
         val kml = buildString {
             append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<kml xmlns=\"http://www.opengis.net/kml/2.2\"><Document>\n")
             append("<name>${esc(hq.nom.ifBlank { "Clients" })} — clients</name>\n")
-            if (hq.lat != null && hq.lon != null)
-                append("<Placemark><name>Siège ${esc(hq.nom)}</name><description>${esc(hq.adresse)}</description><Point><coordinates>${hq.lon},${hq.lat},0</coordinates></Point></Placemark>\n")
-            pts.forEach { (n, dsc, p) ->
-                append("<Placemark><name>${esc(n)}</name><description><![CDATA[$dsc]]></description><Point><coordinates>${p.lon},${p.lat},0</coordinates></Point></Placemark>\n")
+            append("<Style id=\"particulier\"><IconStyle><color>${kmlColor(hq.kmlCouleurParticulier)}</color><scale>1.15</scale><Icon><href>https://maps.google.com/mapfiles/kml/pushpin/homegardenbusiness.png</href></Icon></IconStyle></Style>\n")
+            append("<Style id=\"professionnel\"><IconStyle><color>${kmlColor(hq.kmlCouleurProfessionnel)}</color><scale>1.15</scale><Icon><href>https://maps.google.com/mapfiles/kml/pushpin/business.png</href></Icon></IconStyle></Style>\n")
+            append("<Style id=\"siege\"><IconStyle><color>ff00a5ff</color><scale>1.25</scale><Icon><href>https://maps.google.com/mapfiles/kml/pushpin/blue-pushpin.png</href></Icon></IconStyle></Style>\n")
+            if (hq.lat != null && hq.lon != null) append("<Placemark><name>🏭 Siège ${esc(hq.nom)}</name><styleUrl>#siege</styleUrl><description>${esc(hq.adresse)}</description><Point><coordinates>${hq.lon},${hq.lat},0</coordinates></Point></Placemark>\n")
+            pts.forEach { item ->
+                append("<Placemark><name>${esc(item.nom)}</name><styleUrl>#${item.type}</styleUrl><description><![CDATA[${item.description}]]></description>")
+                append("<ExtendedData><Data name=\"client\"><value>${esc(item.client)}</value></Data><Data name=\"type_client\"><value>${item.type}</value></Data><Data name=\"adresse\"><value>${esc(item.adresse)}</value></Data></ExtendedData>")
+                append("<Point><coordinates>${item.point.lon},${item.point.lat},0</coordinates></Point></Placemark>\n")
             }
             append("</Document></kml>\n")
         }
         val loc = obsidian.saveBytes("Société/Cartes", "Clients.kml", kml.toByteArray(), "application/vnd.google-earth.kml+xml")
-        // copie partageable
         val dir = File(ctx.cacheDir, "share").apply { mkdirs() }
         File(dir, "Clients.kml").writeBytes(kml.toByteArray())
         "# 🗺️ Export KML\n\n${pts.size} point(s) GPS enregistrés : $loc\n" +
+            (if (filtre.isNotBlank()) "🔎 Filtre appliqué : **${esc(recherche)}**\n" else "") +
             (if (manquants.isNotEmpty()) "\n⚠️ Adresse introuvable ou absente : ${manquants.joinToString(", ")}\n" else "") +
-            "\nOuvre ce fichier dans Google Earth pour consulter la fiche de chaque client en sélectionnant son installation."
+            "\nLes noms des repères contiennent le client et l'installation. Les données étendues « client », « type_client » et « adresse » accompagnent chaque repère pour faciliter la recherche dans les lieux importés."
     }
-
 
     fun partagerKml() {
         val f = File(File(ctx.cacheDir, "share"), "Clients.kml")
