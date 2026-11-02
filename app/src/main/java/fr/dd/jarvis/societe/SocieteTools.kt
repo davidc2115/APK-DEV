@@ -200,7 +200,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             kmlCouleurProfessionnel = professionnel ?: before.kmlCouleurProfessionnel
         )
         svc.repo.update { it.copy(societe = after) }
-        return ok("🎨 Couleurs Google Earth enregistrées.\\n- 🏠 Particuliers : ${after.kmlCouleurParticulier}\\n- 🏢 Professionnels : ${after.kmlCouleurProfessionnel}\\n\\nDemande maintenant « exporte la carte KML » pour appliquer les couleurs aux repères.")
+        return ok("🎨 Couleurs Google Earth enregistrées.\n- 🏠 Particuliers : ${after.kmlCouleurParticulier}\n- 🏢 Professionnels : ${after.kmlCouleurProfessionnel}\n\nDemande maintenant « exporte la carte KML » pour appliquer les couleurs aux repères.")
     }
 
     private fun infoSet(a: JSONObject): ToolResult {
