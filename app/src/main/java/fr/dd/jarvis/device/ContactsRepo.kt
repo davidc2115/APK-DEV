@@ -140,20 +140,31 @@ class ContactsRepo(private val ctx: Context) {
         return true
     }
 
-    /** Supprime définitivement le contact (et toutes ses « raw contacts », si plusieurs comptes sont fusionnés). */
+    /** Supprime toutes les lignes sources du contact, puis vérifie qu'il a réellement disparu du carnet. */
     fun delete(contactId: Long): Boolean {
-        val lookupUri = ContactsContract.Contacts.CONTENT_URI.buildUpon()
-            .appendPath(contactId.toString()).build()
-        val supprimes = runCatching { ctx.contentResolver.delete(lookupUri, null, null) }.getOrDefault(0)
-        if (supprimes > 0) return true
-        // Repli : certains fournisseurs n'acceptent la suppression que via l'URI RawContacts.
-        return runCatching {
-            ctx.contentResolver.delete(
+        if (!hasPermission()) return false
+        val resolver = ctx.contentResolver
+        runCatching {
+            resolver.delete(
                 ContactsContract.RawContacts.CONTENT_URI,
                 "${ContactsContract.RawContacts.CONTACT_ID} = ?",
                 arrayOf(contactId.toString())
-            ) > 0
-        }.getOrDefault(false)
+            )
+        }
+        // Certains fournisseurs ne permettent la suppression qu'avec l'URI agrégée Contacts.
+        val lookupUri = ContactsContract.Contacts.CONTENT_URI.buildUpon()
+            .appendPath(contactId.toString()).build()
+        runCatching { resolver.delete(lookupUri, null, null) }
+        val stillThere = runCatching {
+            resolver.query(
+                ContactsContract.Contacts.CONTENT_URI,
+                arrayOf(ContactsContract.Contacts._ID),
+                "${ContactsContract.Contacts._ID} = ?",
+                arrayOf(contactId.toString()),
+                null
+            )?.use { it.moveToFirst() } ?: true
+        }.getOrDefault(true)
+        return !stillThere
     }
 
     private fun rawContactId(contactId: Long): Long? {
