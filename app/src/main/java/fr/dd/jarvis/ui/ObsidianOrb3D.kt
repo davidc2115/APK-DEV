@@ -91,74 +91,48 @@ private class ObsidianOrbSurface(context: Context) : GLSurfaceView(context) {
     private var downX = 0f
     private var downY = 0f
     fun setGraph(nodes: List<fr.dd.jarvis.data.graph.GraphNodeEntity>, relations: List<fr.dd.jarvis.data.graph.GraphRelationEntity>) {
-        // Les notes sont d'abord regroupées par leur vrai dossier Obsidian : chaque dossier forme
-        // une petite constellation distincte sur la coque externe, au lieu d'un nuage uniforme.
-        // Les positions restent déterministes : l'ordre et l'ajout d'une note ne déplacent pas
-        // arbitrairement les autres groupes.
-        val groups = nodes
-            .filter { it.availability == "PRESENT" }
-            .groupBy { it.folder.ifBlank { "Racine" } }
-            .toSortedMap()
+        // Les dossiers forment des constellations distinctes, réparties sur une coque sphérique.
+        val groups = nodes.filter { it.availability == "PRESENT" }.groupBy { it.folder.ifBlank { "Racine" } }.toSortedMap()
         val positions = HashMap<String, FloatArray>(nodes.size)
         val groupList = groups.entries.toList()
         groupList.forEachIndexed { groupIndex, entry ->
-            val groupCount = groupList.size.coerceAtLeast(1)
-            val centerY = 1f - 2f * (groupIndex + 0.5f) / groupCount
-            val centerRadius = sqrt(max(0f, 1f - centerY * centerY))
-            val centerTheta = groupIndex * 2.3999632f
-            val center = floatArrayOf(
-                centerRadius * cos(centerTheta),
-                centerY,
-                centerRadius * sin(centerTheta)
-            )
-
-            // Base tangentielle au point central : les notes d'un même dossier restent proches,
-            // mais sont étalées sur une calotte sphérique pour éviter les amas illisibles.
-            var ux = -center[2]
-            var uy = 0f
-            var uz = center[0]
-            val uLength = sqrt(ux * ux + uy * uy + uz * uz).coerceAtLeast(0.0001f)
-            ux /= uLength; uy /= uLength; uz /= uLength
+            val count = groupList.size.coerceAtLeast(1)
+            val cy = 1f - 2f * (groupIndex + 0.5f) / count
+            val cr = sqrt(max(0f, 1f - cy * cy))
+            val theta = groupIndex * 2.3999632f
+            val center = floatArrayOf(cr * cos(theta), cy, cr * sin(theta))
+            var ux = -center[2]; var uy = 0f; var uz = center[0]
+            val ul = sqrt(ux * ux + uz * uz).coerceAtLeast(0.0001f)
+            ux /= ul; uz /= ul
             val vx = center[1] * uz - center[2] * uy
             val vy = center[2] * ux - center[0] * uz
             val vz = center[0] * uy - center[1] * ux
-
             val members = entry.value.sortedWith(compareBy<fr.dd.jarvis.data.graph.GraphNodeEntity> { it.title.lowercase() }.thenBy { it.id })
-            members.forEachIndexed { memberIndex, node ->
-                val localRadius = if (members.size <= 1) 0f else 0.34f * sqrt((memberIndex + 0.5f) / members.size)
-                val localAngle = memberIndex * 2.3999632f
-                val dx = center[0] + localRadius * (ux * cos(localAngle) + vx * sin(localAngle))
-                val dy = center[1] + localRadius * (uy * cos(localAngle) + vy * sin(localAngle))
-                val dz = center[2] + localRadius * (uz * cos(localAngle) + vz * sin(localAngle))
-                val length = sqrt(dx * dx + dy * dy + dz * dz).coerceAtLeast(0.0001f)
-                val shellRadius = 1.52f
-                positions[node.id] = floatArrayOf(shellRadius * dx / length, shellRadius * dy / length, shellRadius * dz / length)
+            members.forEachIndexed { index, node ->
+                val r = if (members.size <= 1) 0f else 0.34f * sqrt((index + 0.5f) / members.size)
+                val a = index * 2.3999632f
+                val x = center[0] + r * (ux * cos(a) + vx * sin(a))
+                val y = center[1] + r * (uy * cos(a) + vy * sin(a))
+                val z = center[2] + r * (uz * cos(a) + vz * sin(a))
+                val length = sqrt(x * x + y * y + z * z).coerceAtLeast(0.0001f)
+                positions[node.id] = floatArrayOf(1.52f * x / length, 1.52f * y / length, 1.52f * z / length)
             }
         }
-
         val visible = nodes.filter { positions.containsKey(it.id) }.sortedBy { it.id }
         nodeIds = visible.map { it.id }
         nodePositions = visible.map { positions.getValue(it.id) }
         graphPoints = nodePositions.flatMap { it.toList() }.toFloatArray()
-
-        // Seuls les liens explicites entre deux notes réellement indexées sont dessinés.
-        // Les références non résolues et les relations suggérées ne deviennent jamais de faux liens.
         val edges = ArrayList<Float>()
-        relations.asSequence()
-            .filter { it.origin == "EXPLICIT" && positions.containsKey(it.fromNodeId) && positions.containsKey(it.toNodeId) }
-            .forEach { relation ->
-                val a = positions[relation.fromNodeId]!!
-                val b = positions[relation.toNodeId]!!
-                edges.addAll(a.toList())
-                edges.addAll(b.toList())
-            }
+        relations.asSequence().filter { it.origin == "EXPLICIT" && positions.containsKey(it.fromNodeId) && positions.containsKey(it.toNodeId) }.forEach { relation ->
+            edges.addAll(positions.getValue(relation.fromNodeId).toList())
+            edges.addAll(positions.getValue(relation.toNodeId).toList())
+        }
         graphLines = edges.toFloatArray()
         pointBuffer = makeBuffer(graphPoints)
         lineBuffer = makeBuffer(graphLines)
         val selectedIndex = nodeIds.indexOf(selectedNodeId)
         selectedPointBuffer = if (selectedIndex >= 0) nodePositions.getOrNull(selectedIndex)?.let { makeBuffer(it) } else null
     }
-
     private fun makeBuffer(values: FloatArray): java.nio.FloatBuffer {
         val b = ByteBuffer.allocateDirect(values.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
         b.put(values); b.position(0); return b
@@ -205,8 +179,6 @@ private class ObsidianOrbSurface(context: Context) : GLSurfaceView(context) {
         detailVertexCount = 24 * 20 * 6
         serpentBuffer = createSerpentTube(180, 14)
         serpentVertexCount = 180 * 14 * 6
-        // Recul suffisant pour garder la constellation complète dans le cadre en portrait,
-// sans couper les nœuds extérieurs sur les écrans étroits.
         Matrix.setLookAtM(view, 0, 0f, 0f, 4.0f, 0f, 0f, 0f, 0f, 1f, 0f)
     }
 
