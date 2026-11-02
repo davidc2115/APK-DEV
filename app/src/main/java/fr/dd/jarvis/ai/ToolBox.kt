@@ -574,7 +574,7 @@ class ToolBox(
             "agents_planning" -> s.agentPlanning.value
             "agents_notifications" -> s.agentNotifs.value
             "notifications_banniere" -> s.notifLive.value
-            "bips" -> s.muteBeeps.value
+            "bips" -> !s.muteBeeps.value
             else -> null
         }
         if (key == "duree_conversation") {
@@ -599,7 +599,7 @@ class ToolBox(
             "agents_planning" -> s.agentPlanning.set(bool)
             "agents_notifications" -> s.agentNotifs.set(bool)
             "notifications_banniere" -> s.notifLive.set(bool)
-            "bips" -> s.muteBeeps.set(bool)
+            "bips" -> s.muteBeeps.set(!bool)
         }
         return ToolResult("✅ ${labels[key].replaceFirstChar { it.uppercase() }} ${if (bool) "activé" else "désactivé"} dans les réglages JARVIS.", direct = true)
     }
