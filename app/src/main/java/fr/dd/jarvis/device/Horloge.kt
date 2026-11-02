@@ -131,8 +131,8 @@ object Horloge {
         val intent = Intent(AlarmClock.ACTION_SET_ALARM).apply {
             putExtra(AlarmClock.EXTRA_HOUR, h)
             putExtra(AlarmClock.EXTRA_MINUTES, mn)
-            putExtra(AlarmClock.EXTRA_MESSAGE, libelle.ifBlank { "Alarme" })
-            putExtra(AlarmClock.EXTRA_SKIP_UI, true)
+            putExtra("android.intent.extra.alarm.MESSAGE", libelle.ifBlank { "Alarme" })
+            putExtra("android.intent.extra.alarm.SKIP_UI", true)
             if (days.isNotEmpty()) putExtra(AlarmClock.EXTRA_DAYS, ArrayList(days))
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
