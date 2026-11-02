@@ -761,16 +761,16 @@ class ToolBox(
                     en.format(DateTimeFormatter.ofPattern("HH:mm"))
             "ID=" + e.id + " | DATE=" + date + "\nTITRE=" + e.title +
                 "\nLIEU=" + e.location + "\nDESCRIPTION=" +
-                fr.dd.jarvis.device.HtmlText.text(e.description).take(2500)
+                fr.dd.jarvis.device.HtmlText.lines(e.description).joinToString("\n").take(5000)
         }
         val system = listOf(
             "Tu extrais les données des rendez-vous pour compléter des fiches clients d'une entreprise photovoltaïque.",
             "Retourne uniquement un tableau JSON valide, sans Markdown ni commentaire.",
-            "Une entrée par client et par rendez-vous. Si un événement cite deux clients, retourne deux objets distincts avec le même event_id. Ne fusionne jamais deux clients.",
+            "Une entrée par client ET par installation photovoltaïque dans chaque rendez-vous. Si un client possède deux installations décrites (ex. BRISCOT 1 et BRISCOT 2), retourne DEUX objets avec le même event_id et le même client, un objet par installation. Si plusieurs clients sont cités, sépare aussi chaque client. Ne fusionne jamais deux installations.",
             "Le champ client doit reprendre exactement un nom de la liste connue. Ignore les personnes non clientes et n'invente aucun client.",
             "N'extrais que les informations explicitement présentes dans le titre, le lieu ou la description. N'infère jamais un téléphone, une adresse, une puissance ou un modèle d'onduleur.",
             "Chaque objet utilise les clés : event_id, client, contact, phone, email, client_address, site_name, site_address, kwc, inverter, panels, commissioning_date, notes.",
-            "Les champs absents sont des chaînes vides ou null. kwc est un nombre en kWc, panels un entier. Distingue l'adresse du client de l'adresse du site.",
+            "Les champs absents sont des chaînes vides ou null. kwc doit toujours être converti en kWc : une valeur en Wc se divise par 1000 (99 830 Wc = 99.83 kWc ; 35 640 Wc = 35.64 kWc). panels un entier. Distingue l'adresse du client de l'adresse du site.",
             "Le lieu du rendez-vous n'est une adresse de site que s'il s'agit clairement du lieu d'intervention.",
             "Clients et installations existants :",
             known
@@ -816,8 +816,13 @@ class ToolBox(
             }
             fill("contact", current.contact, "contact") { true }
             fill("phone", current.tel, "tel") { it.count { ch -> ch.isDigit() } in 9..15 }
+            if (current.tel.isBlank() && !args.has("tel")) {
+                val phone = Regex("""(?<!\d)(?:0[1-9](?:[ .-]?\d{2}){4}|\+33[ .-]?[1-9](?:[ .-]?\d{2}){4})(?!\d)""").find(event.title + " " + event.description)?.value
+                if (phone != null) args.put("tel", phone)
+            }
             fill("email", current.email, "email") { it.contains("@") }
             fill("client_address", current.adresse, "adresse") { it.length >= 6 }
+            if (current.adresse.isBlank() && !args.has("adresse") && event.location.isNotBlank()) args.put("adresse", event.location.trim())
 
             val siteName = value("site_name")
             val siteAddress = value("site_address")
@@ -825,8 +830,10 @@ class ToolBox(
             val site = current.sites.firstOrNull {
                 reference.isNotBlank() && (cleClient(it.nom) == cleClient(reference) || cleClient(it.adresse) == cleClient(reference))
             } ?: if (reference.isBlank() && current.sites.size == 1) current.sites.first() else null
-            val kwc = value("kwc").replace(',', '.').replace(Regex("[^0-9.]"), "")
-                .toDoubleOrNull()?.takeIf { it in 0.1..5000.0 }
+            val kwcRaw = value("kwc").trim()
+            val kwcNumber = kwcRaw.replace(',', '.').replace(Regex("[^0-9.]"), "").toDoubleOrNull()
+            val kwc = kwcNumber?.let { if (Regex("""\bWc\b""", RegexOption.IGNORE_CASE).containsMatchIn(kwcRaw) && !Regex("""kWc""", RegexOption.IGNORE_CASE).containsMatchIn(kwcRaw)) it / 1000.0 else it }
+                ?.takeIf { it in 0.1..5000.0 }
             val inverter = value("inverter")
             val panels = value("panels").toIntOrNull()?.takeIf { it in 1..100000 }
             val commissioning = value("commissioning_date")
