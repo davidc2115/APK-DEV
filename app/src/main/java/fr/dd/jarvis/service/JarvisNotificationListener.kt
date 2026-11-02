@@ -66,12 +66,20 @@ class JarvisNotificationListener : NotificationListenerService() {
         try {
             if (sbn.packageName == packageName) return
             val n = sbn.notification ?: return
-            if ((n.flags and Notification.FLAG_GROUP_SUMMARY) != 0 || (n.flags and Notification.FLAG_ONGOING_EVENT) != 0) return
+            val appel = n.category == Notification.CATEGORY_CALL
+            if ((n.flags and Notification.FLAG_GROUP_SUMMARY) != 0 || ((n.flags and Notification.FLAG_ONGOING_EVENT) != 0 && !appel)) return
             val e = n.extras
-            val titre = e.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
+            var titre = e.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
             val texte = (e.getCharSequence(Notification.EXTRA_BIG_TEXT) ?: e.getCharSequence(Notification.EXTRA_TEXT))?.toString().orEmpty()
             if (titre.isBlank() && texte.isBlank()) return
             val label = try { packageManager.getApplicationLabel(packageManager.getApplicationInfo(sbn.packageName, 0)).toString() } catch (_: Exception) { sbn.packageName }
+            if (appel) {
+                val candidat = Regex("(?:\\\\+?\\\\d[\\\\d .()/-]{6,}\\\\d)").find("$titre $texte")?.value.orEmpty()
+                val app = applicationContext as? fr.dd.jarvis.JarvisApp
+                val identite = if (candidat.isNotBlank() && app != null) runCatching { fr.dd.jarvis.device.Telephony.identifierAppel(app, candidat) }.getOrNull() else null
+                if (!identite.isNullOrBlank()) titre = "$identite · $titre".trim(' ', '·')
+                else if (titre.isBlank()) titre = "Appel entrant"
+            }
             add(Item(sbn.packageName, label, titre, texte, sbn.postTime))
             sauver(applicationContext)
             val message = estMessage(sbn.packageName) || n.category == Notification.CATEGORY_MESSAGE
