@@ -4,6 +4,7 @@ import fr.dd.jarvis.JarvisApp
 import fr.dd.jarvis.device.PhoneControl
 import fr.dd.jarvis.device.ShizukuShell
 import fr.dd.jarvis.societe.SocieteTools
+import fr.dd.jarvis.societe.core.Client
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.LocalDate
@@ -818,7 +819,7 @@ class ToolBox(
             }
             val current = app.societe.data.clients.firstOrNull { it.id == existing?.id }
                 ?: existing
-                ?: Client(svc.newId(), name, depuis = LocalDate.now().toString())
+                ?: Client(app.societe.newId(), name, depuis = LocalDate.now().toString())
             fun value(key: String): String {
                 if (row.isNull(key)) return ""
                 return row.optString(key, "").trim().takeUnless { it == "null" }.orEmpty()
