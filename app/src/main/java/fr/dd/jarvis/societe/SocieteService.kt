@@ -291,11 +291,25 @@ class SocieteService(
                 }
                 if (p == null) { manquants += label; continue }
                 val desc = buildString {
-                    append(adr)
-                    if (c.tel.isNotBlank()) append("\nTél : ${c.tel}")
-                    if (s != null && s.kwc > 0) append("\n${nombre(s.kwc)} kWc")
-                    if (s != null && s.notes.isNotBlank()) append("\n${s.notes}")
-                }
+                    // Google Earth affiche cette fiche HTML quand on sélectionne le point.
+                    append("<div><h2>${esc(c.nom)}</h2>")
+                    if (c.type.isNotBlank()) append("<p><b>Type :</b> ${esc(c.type)}</p>")
+                    if (c.contact.isNotBlank()) append("<p><b>Contact :</b> ${esc(c.contact)}</p>")
+                    if (c.tel.isNotBlank()) append("<p><b>Téléphone :</b> ${esc(c.tel)}</p>")
+                    if (c.email.isNotBlank()) append("<p><b>E-mail :</b> ${esc(c.email)}</p>")
+                    if (c.adresse.isNotBlank()) append("<p><b>Adresse client :</b> ${esc(c.adresse)}</p>")
+                    if (c.depuis.isNotBlank()) append("<p><b>Client depuis :</b> ${esc(c.depuis)}</p>")
+                    if (c.notes.isNotBlank()) append("<p><b>Notes client :</b><br>${esc(c.notes).replace("\\n", "<br>")}</p>")
+                    append("<hr><h3>Installation : ${esc(s?.nom?.ifBlank { "Installation" } ?: "Adresse client")}</h3>")
+                    if (adr.isNotBlank()) append("<p><b>Adresse :</b> ${esc(adr)}</p>")
+                    if (s != null && s.kwc > 0) append("<p><b>Puissance :</b> ${nombre(s.kwc)} kWc</p>")
+                    if (s != null && s.miseEnService.isNotBlank()) append("<p><b>Mise en service :</b> ${esc(s.miseEnService)}</p>")
+                    if (s != null && s.onduleur.isNotBlank()) append("<p><b>Onduleur :</b> ${esc(s.onduleur)}</p>")
+                    if (s != null && s.nbPanneaux > 0) append("<p><b>Nombre de panneaux :</b> ${s.nbPanneaux}</p>")
+                    if (s != null && s.notes.isNotBlank()) append("<p><b>Notes installation :</b><br>${esc(s.notes).replace("\\n", "<br>")}</p>")
+                    append("</div>")
+                }.replace("]]>", "]]]]><![CDATA[>")
+
                 pts += Triple(label, desc, p)
             }
         }
@@ -325,14 +339,14 @@ class SocieteService(
         val fichier = File(ctx.filesDir, "clients_a_importer.kml")
         if (!fichier.isFile) return "Aucun KML reçu. Depuis le gestionnaire de fichiers ou Google Earth, partage le fichier KML vers JARVIS, puis demande « importe les clients du KML »."
         val xml = runCatching { fichier.readText(Charsets.UTF_8) }.getOrElse { return "Lecture du KML impossible : ${it.message}" }
-        return importerKml(xml).also { if (it.startsWith("Import KML terminé")) runCatching { fichier.delete() } }
+        return importerKml(xml).also { runCatching { fichier.delete() } }
     }
 
     /** Analyse KML/KMZ non compressé. Les coordonnées KML sont longitude,latitude,altitude. */
     fun importerKml(xml: String): String {
         val placemarks = try {
             val factory = javax.xml.parsers.DocumentBuilderFactory.newInstance().apply { isNamespaceAware = true }
-            runCatching { factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
+            runCatching { setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
             val doc = factory.newDocumentBuilder().parse(org.xml.sax.InputSource(java.io.StringReader(xml)))
             val all = doc.getElementsByTagNameNS("*", "Placemark")
             (0 until all.length).mapNotNull { all.item(it) as? org.w3c.dom.Element }
@@ -403,7 +417,7 @@ class SocieteService(
             var client = existing ?: Client(newId(), nom, depuis = LocalDate.now().toString())
             if (client.tel.isBlank()) client = client.copy(tel = items.firstNotNullOfOrNull { it.phone.takeIf(String::isNotBlank) }.orEmpty())
             items.forEachIndexed { index, row ->
-                val siteName = if (row.site == "Installation 1" && items.size > 1) "Installation ${index + 1}" else row.site.ifBlank { "Installation ${index + 1}" }
+                val siteName = row.site.ifBlank { "Installation ${index + 1}" }
                 val same = client.sites.firstOrNull { normaliser(it.nom) == normaliser(siteName) ||
                     (row.address.isNotBlank() && normaliser(it.adresse) == normaliser(row.address)) ||
                     (row.lat != null && row.lon != null && it.lat == row.lat && it.lon == row.lon) }
