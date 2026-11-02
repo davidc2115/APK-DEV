@@ -20,12 +20,12 @@ class SocieteTools(
         val NAMES = setOf(
             "societe_info_set", "societe_info_get", "tarif_set", "tarif_delete", "regles_set", "client_ecrire", "client_fiche",
             "document_creer", "document_action", "document_email", "societe_liste", "employe_ecrire", "paie", "reserve_bilan",
-            "presentation_modifier", "distance_deplacement"
+            "presentation_modifier", "distance_deplacement", "clients_exporter_kml"
         )
         private val KEYWORDS = Regex(
             "devis|factur|client|soci[ée]t[ée]|tarif|remise|d[ée]placement|paie|salaire|bulletin|r[ée]serve|dividende|b[ée]n[ée]fice|" +
                 "installation|photovolta|kwc|fiche|pr[ée]sentation|mise en forme|mise en page|si[èe]ge|employ[ée]|prix|onduleur|maintenance|" +
-                "entretien|planning|agenda|pdf|obsidian|distance|itin[ée]raire|km|fid[ée]lit[ée]",
+                "entretien|planning|agenda|pdf|obsidian|distance|itin[ée]raire|km|fid[ée]lit[ée]|kml|google earth|carte des clients",
             RegexOption.IGNORE_CASE
         )
         fun concerned(text: String) = KEYWORDS.containsMatchIn(text)
@@ -33,7 +33,7 @@ class SocieteTools(
         val PROMPT = """
 Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu disposes d'outils pour : enregistrer les informations de l'entreprise (siège, SIRET, IBAN, TVA…), les tarifs par puissance (kWc), les règles de remise (fidélité, nombre d'installations) et de déplacement, les clients et leurs installations, créer des devis et factures, convertir un devis en facture, marquer une facture payée (mise en réserve), produire des bulletins de paie, le bilan de la réserve, et modifier la présentation des documents.
 - Quand l'utilisateur donne un tarif, une règle ou une information sur la société, enregistre-la immédiatement avec l'outil adapté : c'est ainsi que tu la gardes en mémoire.
-- Ne calcule jamais un montant toi-même : les outils font tous les calculs (tarif par puissance, remises, déplacement, TVA).
+- Ne calcule jamais un montant toi-même : les outils font tous les calculs (tarif par puissance, remises, déplacement, TVA).\n- Quand l’utilisateur demande une carte KML des clients ou des installations pour Google Earth, utilise clients_exporter_kml. Le fichier contient un point GPS par installation et la fiche client complète dans la description de chaque point ; n’importe pas de KML dans JARVIS.
 - Pour un devis ou une facture, identifie le client et l'installation (client_ecrire si le client n'existe pas encore). Si une information indispensable manque (client, prestation), demande-la en une phrase.
 - Le texte renvoyé par les outils société est déjà mis en forme et affiché tel quel : ne le répète pas.
 - Les montants sont toujours en euros, la TVA est gérée par l'application.
