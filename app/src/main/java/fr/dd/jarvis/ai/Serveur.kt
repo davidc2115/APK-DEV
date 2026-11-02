@@ -231,8 +231,10 @@ object Serveur {
         try {
             http.newCall(b.build()).execute().use { r ->
                 val t = r.body?.string().orEmpty()
-                if (r.code == 401) throw IllegalStateException("Home Assistant 401 : jeton refusé (crée un « jeton d'accès longue durée » dans ton profil HA).")
-                if (!r.isSuccessful) throw IllegalStateException("Home Assistant ${r.code} : ${t.take(300)}")
+                if (r.code == 401) throw IllegalStateException("Home Assistant 401 : le jeton est invalide ou expiré. Dans Home Assistant, connecte-toi avec le compte qui possède les droits d'administration, puis crée un nouveau jeton d'accès longue durée dans ton profil et remplace-le dans JARVIS › Réglages › Serveur.")
+                if (r.code == 403) throw IllegalStateException("Home Assistant 403 — action interdite pour le compte associé au jeton. Ce n'est pas une permission Android/Shizuku : le jeton reprend les droits du compte Home Assistant qui l'a créé. Vérifie que ce compte peut piloter cet appareil et, si nécessaire, crée un nouveau jeton depuis un compte administrateur. Détail HA : ${t.take(500)}")
+                if (r.code == 404) throw IllegalStateException("Home Assistant 404 : service ou entité introuvable. Vérifie le domaine, le nom du service et l'identifiant exact de l'appareil. Détail HA : ${t.take(400)}")
+                if (!r.isSuccessful) throw IllegalStateException("Home Assistant ${r.code} : ${t.take(500)}")
                 return t
             }
         } catch (e: IllegalStateException) {
