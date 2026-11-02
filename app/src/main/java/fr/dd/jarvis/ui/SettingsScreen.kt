@@ -1021,7 +1021,7 @@ private fun ImprimantePanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Ja
                             var result: fr.dd.jarvis.ai.Impression.Imprimante? = null
                             for (ip in ips) {
                                 val service = services.firstOrNull { it.host == ip }
-                                result = fr.dd.jarvis.ai.Impression.interroger(app, ip, "local", service?.chemin?.ifBlank { null })
+                                result = fr.dd.jarvis.ai.Impression.interroger(app, ip, "local", service?.chemin?.takeIf { it.isNotBlank() })
                                 if (result != null) break
                             }
                             result
