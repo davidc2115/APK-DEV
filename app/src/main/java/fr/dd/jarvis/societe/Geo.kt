@@ -61,9 +61,9 @@ object Geo {
 
         val parts = full.split(",").map { it.trim() }.filter { it.isNotBlank() }
         val commune = parts.drop(1).joinToString(", ").takeIf { it.isNotBlank() }
-        val queries = listOf(full, commune, parts.lastOrNull()?.let { last ->
-            if (last.contains("France", ignoreCase = true)) last else "$last, France"
-        }).filterNotNull().distinct()
+        val localite = parts.lastOrNull { !it.contains("France", ignoreCase = true) }
+        val queries = listOf(full, commune, localite?.let { if (it.contains("France", ignoreCase = true)) it else "$it, France" })
+            .filterNotNull().distinct()
 
         for (query in queries) {
             val nominatimUrl = "https://nominatim.openstreetmap.org/search".toHttpUrl().newBuilder()
