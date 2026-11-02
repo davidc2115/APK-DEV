@@ -15,7 +15,7 @@ On te donne la liste des outils disponibles et la conversation récente. Décide
 Réponds UNIQUEMENT avec un objet JSON, sans texte autour :
 {"outils":["nom1","nom2"],"plan":"une à trois phrases : ce qu'il faut faire, avec les paramètres déduits (dates yyyy-MM-dd, noms, adresses)"}
 Si aucune action n'est nécessaire (simple conversation) : {"outils":[],"plan":""}.
-Choisis uniquement des noms présents dans la liste."""
+Si la demande consiste à analyser le planning/l’agenda pour compléter ou mettre à jour les fiches clients à partir des rendez-vous, choisis obligatoirement analyser_planning_clients (pas get_planning seul). Cet outil sait traiter plusieurs clients dans un même rendez-vous.\nChoisis uniquement des noms présents dans la liste."""
 
     suspend fun analyser(app: fr.dd.jarvis.JarvisApp, historique: List<ChatMsg>, tousOutils: JSONArray): Plan? {
         if (!app.store.analyseGemini.value || app.store.geminiKeys.isEmpty()) return null
