@@ -325,7 +325,7 @@ class SocieteService(
         val fichier = File(ctx.filesDir, "clients_a_importer.kml")
         if (!fichier.isFile) return "Aucun KML reçu. Depuis le gestionnaire de fichiers ou Google Earth, partage le fichier KML vers JARVIS, puis demande « importe les clients du KML »."
         val xml = runCatching { fichier.readText(Charsets.UTF_8) }.getOrElse { return "Lecture du KML impossible : ${it.message}" }
-        return importerKml(xml).also { runCatching { fichier.delete() } }
+        return importerKml(xml).also { if (it.startsWith("Import KML terminé")) runCatching { fichier.delete() } }
     }
 
     /** Analyse KML/KMZ non compressé. Les coordonnées KML sont longitude,latitude,altitude. */
