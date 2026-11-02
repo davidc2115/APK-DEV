@@ -601,7 +601,7 @@ class ToolBox(
             "notifications_banniere" -> s.notifLive.set(bool)
             "bips" -> s.muteBeeps.set(!bool)
         }
-        return ToolResult("✅ ${labels[key].replaceFirstChar { it.uppercase() }} ${if (bool) "activé" else "désactivé"} dans les réglages JARVIS.", direct = true)
+        return ToolResult("✅ ${labels.getValue(key).replaceFirstChar { it.uppercase() }} ${if (bool) "activé" else "désactivé"} dans les réglages JARVIS.", direct = true)
     }
 
     private val dayFmt = DateTimeFormatter.ofPattern("EEE dd/MM", Locale.FRENCH)
