@@ -67,7 +67,7 @@ class JarvisCallScreeningService : CallScreeningService() {
             lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
         })
         val notification = NotificationCompat.Builder(this, channelId)
-            .setSmallIcon(fr.dd.jarvis.R.drawable.ic_launcher)
+            .setSmallIcon(android.R.drawable.sym_call_incoming)
             .setContentTitle("Appel entrant identifié · $name")
             .setContentText(number).setCategory(NotificationCompat.CATEGORY_CALL)
             .setPriority(NotificationCompat.PRIORITY_MAX).setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
