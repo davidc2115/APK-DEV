@@ -25,8 +25,8 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
     }
 
     val schema: List<JSONObject> = listOf(
-        tool("ha_entites", "Home Assistant : liste/recherche les appareils et capteurs (lumières, volets, températures…) avec leur état.",
-            mapOf("recherche" to prop("Mot du nom ou de l'identifiant (optionnel)."), "domaine" to prop("light, switch, sensor, climate, cover, automation… (optionnel)."))),
+        tool("ha_entites", "Home Assistant : liste/recherche les appareils et capteurs (lumières, volets, températures…) avec leur état. La liste est paginée : si total > affichées, rappelle l'outil avec le décalage suivant pour parcourir toutes les entités.",
+            mapOf("recherche" to prop("Mot du nom ou de l'identifiant (optionnel)."), "domaine" to prop("light, switch, sensor, climate, cover, automation… (optionnel)."), "decalage" to prop("Index de départ (0 par défaut ; utiliser affichées comme prochain décalage)."), "limite" to prop("Nombre d'entités à afficher (défaut 100, maximum 250)."))),
         tool("ha_etat", "Home Assistant : état détaillé d'une entité.", mapOf("entity_id" to prop("ex. light.salon")), listOf("entity_id")),
         tool("ha_service", "Home Assistant : exécute réellement une commande sur un appareil. Pour un poêle/thermostat : climate.set_temperature avec donnees {temperature: 20}, climate.set_hvac_mode si pris en charge. Pour une télévision/lecteur : media_player.turn_on, media_player.turn_off, media_player.volume_set avec {volume_level: 0.35}, media_player.volume_up, media_player.volume_down, media_player.media_play_pause, media_player.select_source avec {source: \"…\"}. Pour une lumière : light.turn_on/off. Cherche d'abord l'identifiant exact avec ha_entites, puis utilise ha_etat pour connaître les attributs et capacités. N'annonce jamais le succès avant le résultat de l'appel.",
             mapOf("domaine" to prop("Domaine HA exact : climate, media_player, light, switch, cover, automation, scene, script…"), "service" to prop("Service HA exact : set_temperature, turn_on, turn_off, volume_set, volume_up, volume_down, select_source, media_play_pause…"),
@@ -80,7 +80,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
     private suspend fun run(name: String, a: JSONObject): ToolResult {
         fun ssh() { if (!Serveur.sshConfigure(app)) throw IllegalStateException("SSH non configuré (Réglages › Serveur : adresse, utilisateur, mot de passe ou clé).") }
         return when (name) {
-            "ha_entites" -> ToolResult(Serveur.haEntites(app, a.optString("recherche"), a.optString("domaine")), direct = true)
+            "ha_entites" -> ToolResult(Serveur.haEntites(app, a.optString("recherche"), a.optString("domaine"), a.optString("decalage").toIntOrNull() ?: 0, a.optString("limite").toIntOrNull() ?: 100), direct = true)
             "ha_etat" -> ToolResult(Serveur.haEtat(app, a.optString("entity_id").trim()))
             "ha_service" -> {
                 val d = a.optString("domaine").trim(); val s = a.optString("service").trim(); val e = a.optString("entity_id").trim()
