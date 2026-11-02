@@ -144,7 +144,7 @@ private fun ClientsTab(app: JarvisApp) {
     var query by remember { mutableStateOf("") }
     var info by remember { mutableStateOf("") }
     val kmlScope = rememberCoroutineScope()
-    val list = d.clients.filter { query.isBlank() || normaliser(it.nom).contains(normaliser(query)) }.sortedBy { normaliser(it.nom) }
+    val list = d.clients.filter { client -> query.isBlank() || normaliser(listOf(client.nom, client.contact, client.type, client.tel, client.email, client.adresse, client.sites.joinToString(" ") { site -> "${site.nom} ${site.adresse} ${site.onduleur}" }).joinToString(" ")).contains(normaliser(query)) }.sortedBy { normaliser(it.nom) }
 
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
@@ -157,7 +157,7 @@ private fun ClientsTab(app: JarvisApp) {
             HudButton("🗺️ Exporter les points GPS (KML Google Earth)") {
                 kmlScope.launch {
                     info = "⏳ Géolocalisation des adresses…"
-                    info = runCatching { svc.exporterKml().lines().drop(2).joinToString("\n").trim() }.getOrElse { "❌ ${it.message}" }
+                    info = runCatching { svc.exporterKml(query).lines().drop(2).joinToString("\n").trim() }.getOrElse { "❌ ${it.message}" }
                     svc.partagerKml()
                 }
             }
