@@ -430,6 +430,18 @@ fun SettingsScreen(app: JarvisApp) {
                     locPerm.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))
                 }
                 Spacer(Modifier.height(8.dp))
+                val roleManager = if (Build.VERSION.SDK_INT >= 29) ctx.getSystemService(android.app.role.RoleManager::class.java) else null
+                val screeningRole = Build.VERSION.SDK_INT >= 29 && roleManager?.isRoleAvailable(android.app.role.RoleManager.ROLE_CALL_SCREENING) == true
+                val screeningOn = screeningRole && roleManager?.isRoleHeld(android.app.role.RoleManager.ROLE_CALL_SCREENING) == true
+                val callRoleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { tick++ }
+                StatusRow("Identification des appels entrants (fiches JARVIS + Obsidian)", screeningOn)
+                Text("JARVIS peut identifier un appelant même s'il n'est pas dans les contacts Android. Android doit autoriser JARVIS comme application d'identification ; l'application Téléphone native continue de gérer l'appel.", color = HudDim, fontSize = 11.sp)
+                Spacer(Modifier.height(4.dp))
+                HudButton(if (screeningOn) "Identification des appels activée ✓" else "Activer l'identification des appels", enabled = screeningRole && !screeningOn) {
+                    if (Build.VERSION.SDK_INT >= 29 && roleManager != null) callRoleLauncher.launch(roleManager.createRequestRoleIntent(android.app.role.RoleManager.ROLE_CALL_SCREENING))
+                }
+                if (!screeningRole) Text("Le rôle Android d'identification des appels n'est pas disponible sur cette version.", color = HudDim, fontSize = 11.sp)
+                Spacer(Modifier.height(10.dp))
                 var smsOk by remember { mutableStateOf(fr.dd.jarvis.device.Telephony.smsGranted(ctx) && fr.dd.jarvis.device.Telephony.callGranted(ctx)) }
                 val smsPerm = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) {
                     smsOk = fr.dd.jarvis.device.Telephony.smsGranted(ctx) && fr.dd.jarvis.device.Telephony.callGranted(ctx)
