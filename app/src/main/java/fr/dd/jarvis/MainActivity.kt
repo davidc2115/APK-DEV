@@ -86,43 +86,7 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         handleListen(intent)
         handleSharedVideo(intent)
-        handleSharedKml(intent)
         handleTikTokCallback(intent)
-    }
-
-    /** Reçoit un fichier KML partagé depuis Fichiers, Google Earth ou une autre application. */
-    private fun handleSharedKml(i: android.content.Intent?) {
-        if (i?.action != android.content.Intent.ACTION_SEND) return
-        @Suppress("DEPRECATION")
-        val uri = i.getParcelableExtra<android.net.Uri>(android.content.Intent.EXTRA_STREAM) ?: return
-        val mime = i.type.orEmpty()
-        val name = runCatching {
-            contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-                if (c.moveToFirst()) c.getString(0).orEmpty() else ""
-            }
-        }.getOrDefault("")
-        if (!name.endsWith(".kml", true) && !mime.contains("kml", true) && !mime.contains("google-earth", true)) return
-        i.removeExtra(android.content.Intent.EXTRA_STREAM)
-        runCatching {
-            val out = File((application as JarvisApp).filesDir, "clients_a_importer.kml")
-            contentResolver.openInputStream(uri)?.use { input ->
-                out.outputStream().use { output ->
-                    val buffer = ByteArray(8192)
-                    var total = 0L
-                    while (true) {
-                        val n = input.read(buffer)
-                        if (n < 0) break
-                        total += n
-                        require(total <= 25L * 1024L * 1024L) { "Fichier KML trop volumineux (limite 25 Mo)." }
-                        output.write(buffer, 0, n)
-                    }
-                }
-            } ?: error("Fichier inaccessible")
-        }.onSuccess {
-            android.widget.Toast.makeText(this, "KML reçu. Demande à JARVIS : « importe les clients du KML ».", android.widget.Toast.LENGTH_LONG).show()
-        }.onFailure {
-            android.widget.Toast.makeText(this, "Réception KML impossible : ${it.message}", android.widget.Toast.LENGTH_LONG).show()
-        }
     }
 
     /** Retour de la connexion OAuth TikTok (via la page relais GitHub Pages → fr.dd.jarvis://tiktok-callback?...). */
@@ -181,7 +145,6 @@ class MainActivity : ComponentActivity() {
         ) fr.dd.jarvis.service.JarvisService.start(this)
         handleListen(intent)
         handleSharedVideo(intent)
-        handleSharedKml(intent)
         handleTikTokCallback(intent)
         setContent {
             HudTheme(accentById(app.store.accent.value).color, app.store.tileAlpha.value) {
