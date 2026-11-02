@@ -72,11 +72,6 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="video/*" />
             </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.SEND" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="application/vnd.google-earth.kml+xml" />
-            </intent-filter>
             <!-- Retour OAuth TikTok (via la page relais GitHub Pages, cf. TikTok.kt) -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
