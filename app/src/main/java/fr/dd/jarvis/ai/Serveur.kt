@@ -252,18 +252,23 @@ object Serveur {
         }
     }
 
-    fun haEntites(app: JarvisApp, recherche: String, domaine: String): String {
+    fun haEntites(app: JarvisApp, recherche: String, domaine: String, decalage: Int = 0, limite: Int = 100): String {
         val arr = JSONArray(ha(app, "GET", "/api/states"))
         val q = recherche.trim().lowercase(); val d = domaine.trim().lowercase()
         val l = (0 until arr.length()).map { arr.getJSONObject(it) }.filter { o ->
             val id = o.getString("entity_id")
             (d.isBlank() || id.startsWith("$d.")) && (q.isBlank() || id.lowercase().contains(q) || o.optJSONObject("attributes")?.optString("friendly_name").orEmpty().lowercase().contains(q))
-        }
-        if (l.isEmpty()) return "Aucune entité trouvée (${arr.length()} au total)."
-        return "# 🏠 Entités (${l.size}${if (l.size > 60) ", 60 affichées" else ""})\n\n" + l.take(60).joinToString("\n") { o ->
+        }.sortedBy { it.optString("entity_id") }
+        if (l.isEmpty()) return "Aucune entité trouvée (${arr.length()} au total dans Home Assistant)."
+        val debut = decalage.coerceIn(0, l.size)
+        val taille = limite.coerceIn(1, 250)
+        val page = l.drop(debut).take(taille)
+        val fin = debut + page.size
+        val suite = if (fin < l.size) "\n\nIl reste ${l.size - fin} entité(s). Pour continuer, rappelle ha_entites avec decalage=$fin et la même recherche/domaine." else "\n\nToutes les entités correspondant au filtre ont été parcourues."
+        return "# 🏠 Entités : ${l.size} résultat(s) · affichage ${if (page.isEmpty()) 0 else debut + 1}–$fin\n\n" + page.joinToString("\n") { o ->
             val a = o.optJSONObject("attributes"); val unit = a?.optString("unit_of_measurement").orEmpty()
             "- `${o.getString("entity_id")}` · ${a?.optString("friendly_name").orEmpty()} : **${o.getString("state")}$unit**"
-        }
+        } + suite
     }
 
     fun haEtat(app: JarvisApp, id: String): String {
