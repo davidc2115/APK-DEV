@@ -140,6 +140,10 @@ class JarvisService : Service() {
         wake = (getSystemService(POWER_SERVICE) as PowerManager).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "jarvis:wake").apply { setReferenceCounted(false); acquire() }
         val tools = ToolBox(app) { q, _ -> voiceConfirm(q) }
         brain = Brain(app.llm, tools, app) { app.store.userName.value }
+        // Hermès installé : on s'assure que sa passerelle tourne dans Termux (après un redémarrage du téléphone par ex.).
+        if (app.store.hermesInstalle.value && app.store.hermesMode.value != "off") scope.launch {
+            runCatching { fr.dd.jarvis.hermes.PontMcp.demarrer(app); if (!fr.dd.jarvis.hermes.Hermes.enLigne(force = true)) fr.dd.jarvis.hermes.Hermes.relancerSiBesoin(app) }
+        }
         voice = VoiceManager(this).also { v ->
             v.muteBeeps = app.store.muteBeeps.value
             v.bargeIn = app.store.coupeParole.value

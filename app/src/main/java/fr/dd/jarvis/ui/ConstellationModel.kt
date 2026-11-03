@@ -244,8 +244,8 @@ object ConstellationLayout {
         // ---- tags réels (les plus fréquents)
         val compteTags = HashMap<String, Int>()
         data.tags.forEach { (id, l) -> if (id in ids) l.distinct().forEach { t -> compteTags[t] = (compteTags[t] ?: 0) + 1 } }
-        val tagsAffiches = compteTags.entries.sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key.lowercase() })
-            .take(MAX_TAGS).map { it.key }
+        // Les #tags ne sont plus affichés dans l'Orbe ni le Graphe (ni pastilles « #… », ni hub « Tags ») : vue plus épurée.
+        val tagsAffiches = emptyList<String>()
 
         // ---- état déplié / replié : par défaut chaque catégorie montre ses sous-dossiers (repliés)
         val deplies: Set<String> = depliesDemandes ?: categories.toSet()

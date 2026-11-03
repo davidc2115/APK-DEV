@@ -70,7 +70,7 @@ import kotlin.math.min
 
 /** Filtres de l'image de référence : chacun masque/affiche une couche réelle du graphe. */
 enum class FiltreGraphe(val libelle: String, val icone: Icone) {
-    DOSSIERS("Dossiers", Icone.DOSSIER), TAGS("Tags", Icone.ETIQUETTE), PIECES("Pièces jointes", Icone.TROMBONE),
+    DOSSIERS("Dossiers", Icone.DOSSIER), PIECES("Pièces jointes", Icone.TROMBONE),
     ENTRANTS("Liens entrants", Icone.NOTE), SORTANTS("Liens sortants", Icone.NOTE)
 }
 
@@ -153,7 +153,6 @@ fun DialoguesConstellation(
         val noeud = c?.notesParHub?.values?.flatten()?.firstOrNull { it.id == id }
         val entrants = c?.tousLiens?.filter { it.vers == id }?.map { it.de.substringAfterLast('/') }.orEmpty()
         val sortants = c?.tousLiens?.filter { it.de == id }?.map { it.vers.substringAfterLast('/') }.orEmpty()
-        val tags = c?.tagsParNote?.get(id).orEmpty()
         AlertDialog(
             onDismissRequest = { onNote(null) },
             containerColor = Color(0xFF0E0819), titleContentColor = Neon.lavande, textContentColor = Neon.blancViolet,
@@ -161,7 +160,6 @@ fun DialoguesConstellation(
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     Text(noeud?.folder?.ifBlank { "Racine du coffre" } ?: "", color = Neon.violet, fontSize = 11.sp, fontFamily = Neon.serif)
-                    if (tags.isNotEmpty()) Text(tags.joinToString("  ") { "#$it" }, color = Neon.sousTitre, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
                     Text("→ Liens entrants (${entrants.size}) : ${entrants.joinToString().ifBlank { "aucun" }}", color = Neon.sousTitre, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
                     Text("← Liens sortants (${sortants.size}) : ${sortants.joinToString().ifBlank { "aucun" }}", color = Neon.sousTitre, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp, bottom = 8.dp))
                     if (apercu == null) CircularProgressIndicator(color = Neon.violet, modifier = Modifier.size(22.dp))
@@ -388,7 +386,7 @@ fun ConstellationVue(
             drawCircle(Brush.radialGradient(listOf(Neon.violetVif.copy(alpha = 0.2f * pulse), Neon.violetProfond.copy(alpha = 0.08f), Color.Transparent), centre, rCentre * 4.2f), rCentre * 4.2f, centre)
             val voirDossiers = FiltreGraphe.DOSSIERS in filtres
             val voirPieces = FiltreGraphe.PIECES in filtres
-            val voirTags = FiltreGraphe.TAGS in filtres
+            val voirTags = false
             fun hubVisible(h: Hub) = when (h.type) { TypeHub.DOSSIER -> voirDossiers; TypeHub.PIECES -> voirPieces; TypeHub.TAGS -> voirTags }
             val hubsAnneau = c.hubs.filter { it.type != TypeHub.TAGS && it.niveau == 0 && hubVisible(it) }
 
@@ -573,7 +571,7 @@ fun ConstellationVue(
 
         // Compteurs discrets sous le panneau de recherche + bouton de rechargement.
         Text(
-            "${c.totalNotes} notes · ${c.totalLiens} liens · ${c.totalTags} tags · ${c.totalPieces} pièces  ⟲",
+            "${c.totalNotes} notes · ${c.totalLiens} liens · ${c.totalPieces} pièces  ⟲",
             color = Neon.sousTitre.copy(alpha = 0.85f), fontSize = 9.sp, fontFamily = Neon.serif,
             // À gauche (la tête du dragon occupe le coin droit), sur une pastille sombre pour rester lisible sur le corps.
             modifier = Modifier.align(Alignment.TopStart).padding(top = if (filtresOuverts) 116.dp else 84.dp, start = 14.dp)

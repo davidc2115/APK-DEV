@@ -106,6 +106,8 @@ class JarvisApp : Application() {
         societe.data.modeles["planning"]?.let { fr.dd.jarvis.ai.Prompts.planningFormat = it }
         Thread { runCatching { societe.synchroniserAvecCoffre() } }.start()
         createChannel()
+        // Pont MCP local (outils de Jarvis pour Hermès) : seulement si Hermès est utilisé.
+        if (store.hermesMode.value != "off" && store.hermesInstalle.value) runCatching { fr.dd.jarvis.hermes.PontMcp.demarrer(this) }
         if (store.briefingOn.value) Scheduler.schedule(this, store)
         fr.dd.jarvis.work.AgentsScheduler.apply(this, store)
         fr.dd.jarvis.work.ReseauScheduler.apply(this, store)

@@ -454,35 +454,46 @@ object Geo {
     data class Adresse(val libelle: String, val numero: String, val rue: String, val codePostal: String, val ville: String, val distance: Int?, val source: String)
 
     /**
-     * Adresse précise d'un point GPS (n°, rue, code postal, ville) : Base Adresse Nationale (IGN) d'abord, au numéro
-     * près en France ; OpenStreetMap ensuite. Null si rien n'est trouvé.
+     * Adresse précise d'un point GPS (n°, rue, code postal, ville) :
+     *  1. Base Adresse Nationale (IGN) — au numéro près quand le point est près d'une adresse ;
+     *  2. OpenStreetMap (Nominatim) — bâtiment numéroté, sinon route/rue la plus proche avec lieu-dit, CP et commune
+     *     (cas d'un point en campagne, sur une départementale, où la BAN ne renvoie rien) ;
+     *  3. à défaut, le point d'adresse BAN même lointain, en le signalant.
      */
     suspend fun adresseDe(p: Point): Adresse? = withContext(Dispatchers.IO) {
+        var banLointaine: Adresse? = null
         runCatching {
             val url = "https://data.geopf.fr/geocodage/reverse".toHttpUrl().newBuilder()
                 .addQueryParameter("lon", f6(p.lon)).addQueryParameter("lat", f6(p.lat))
                 .addQueryParameter("index", "address").addQueryParameter("limit", "1").build()
-            val f = JSONObject(get(url.toString()) ?: "{}").optJSONArray("features")?.optJSONObject(0)
-            val pr = f?.optJSONObject("properties")
+            val pr = JSONObject(get(url.toString()) ?: "{}").optJSONArray("features")?.optJSONObject(0)?.optJSONObject("properties")
             if (pr != null && pr.optString("label").isNotBlank()) {
                 val d = pr.optDouble("distance", Double.NaN).takeIf { !it.isNaN() }?.toInt()
-                // Au-delà de ~250 m, le point d'adresse le plus proche n'est probablement pas le bon bâtiment.
-                if (d == null || d <= 250) return@withContext Adresse(pr.optString("label"), pr.optString("housenumber"),
-                    pr.optString("street").ifBlank { pr.optString("name") }, pr.optString("postcode"), pr.optString("city"), d, "Base Adresse Nationale (IGN)")
+                val a = Adresse(pr.optString("label"), pr.optString("housenumber"), pr.optString("street").ifBlank { pr.optString("name") },
+                    pr.optString("postcode"), pr.optString("city"), d, "Base Adresse Nationale (IGN)")
+                // Au-delà de ~150 m, le point d'adresse le plus proche n'est probablement pas le bon bâtiment.
+                if (d == null || d <= 150) return@withContext a else banLointaine = a
             }
         }
-        runCatching {
+        val osm = runCatching {
             val url = "https://nominatim.openstreetmap.org/reverse".toHttpUrl().newBuilder()
                 .addQueryParameter("format", "jsonv2").addQueryParameter("addressdetails", "1").addQueryParameter("zoom", "18")
+                .addQueryParameter("accept-language", "fr")
                 .addQueryParameter("lat", f6(p.lat)).addQueryParameter("lon", f6(p.lon)).build()
             val o = JSONObject(getOsm(url.toString()) ?: "{}")
             val a = o.optJSONObject("address") ?: return@runCatching null
-            val num = a.optString("house_number"); val rue = a.optString("road").ifBlank { a.optString("hamlet") }
+            val num = a.optString("house_number")
+            val rue = a.optString("road").ifBlank { a.optString("pedestrian") }.ifBlank { a.optString("footway") }.ifBlank { a.optString("path") }
             val cp = a.optString("postcode"); val ville = villeOsm(a)
-            val libelle = listOf(listOf(num, rue).filter { it.isNotBlank() }.joinToString(" "), listOf(cp, ville).filter { it.isNotBlank() }.joinToString(" "))
-                .filter { it.isNotBlank() }.joinToString(", ").ifBlank { o.optString("display_name") }
-            if (libelle.isBlank()) null else Adresse(libelle, num, rue, cp, ville, null, "OpenStreetMap")
+            val lieuDit = listOf("hamlet", "isolated_dwelling", "locality", "city_district", "suburb", "quarter", "neighbourhood")
+                .map { a.optString(it) }.firstOrNull { it.isNotBlank() && !it.equals(ville, true) && !it.equals(rue, true) }.orEmpty()
+            val d = runCatching { haversine(p, Point(o.getString("lat").toDouble(), o.getString("lon").toDouble())) * 1000 }.getOrNull()?.toInt()
+            val libelle = listOf(listOf(num, rue).filter { it.isNotBlank() }.joinToString(" "), lieuDit,
+                listOf(cp, ville).filter { it.isNotBlank() }.joinToString(" ")).filter { it.isNotBlank() }.joinToString(", ")
+                .ifBlank { o.optString("display_name") }
+            if (libelle.isBlank()) null else Adresse(libelle, num, rue, cp, ville, d, "OpenStreetMap")
         }.getOrNull()
+        osm ?: banLointaine
     }
 
     /** Raccourci : seulement le point (itinéraires, trajets). */

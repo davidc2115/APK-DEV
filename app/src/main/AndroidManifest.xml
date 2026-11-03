@@ -24,6 +24,8 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Hermès : Jarvis lance l'installation et la passerelle dans Termux (RUN_COMMAND) -->
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -44,6 +46,7 @@
             <data android:mimeType="video/*" />
         </intent>
         <package android:name="moe.shizuku.privileged.api" />
+        <package android:name="com.termux" />
         <package android:name="com.waze" />
         <package android:name="com.google.android.apps.maps" />
         <package android:name="com.spotify.music" />

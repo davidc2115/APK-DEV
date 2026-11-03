@@ -28,10 +28,18 @@ class Brain(
             Regex("(scan|analys|d[ée]tect|list|cherch|affich).{0,25}(r[ée]seau|wi-?fi|appareils)|appareils connect").containsMatchIn(dernier) -> "reseau_scanner"
             else -> null
         }
+        positionDirecte(dernier, history, onStatus)?.let { return it }
         if (outilDirect != null) {
             onStatus("⚙️ $outilDirect…")
             val args = JSONObject(); if (dernier.contains("serveur")) args.put("via", "serveur")
             return try { tools.execute(outilDirect, args).text } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { "❌ ${e.message}" }
+        }
+        // Hermès (Termux) est le cerveau principal quand il est installé : commandes rapides → Groq, le reste → Hermès.
+        val choix = fr.dd.jarvis.hermes.Routeur.choisir(app, history.lastOrNull { it.fromUser }?.text.orEmpty())
+        if (choix.cible == fr.dd.jarvis.hermes.Routeur.Cible.HERMES) {
+            val r = fr.dd.jarvis.hermes.Hermes.repondre(app, history, tools, userName(), onStatus)
+            if (r != null) return r
+            onStatus("Hermès indisponible : Groq prend le relais…")
         }
         onStatus("🧠 Analyse de la demande…")
         val all = tools.schemaAll()
@@ -45,7 +53,9 @@ class Brain(
         if (plan != null && plan.outils.isNotEmpty()) {
             val indispensables = if (pilotageChauffage) listOf("obsidian_chercher", "obsidian_lire", "ha_entites", "ha_etat", "ha_service") else emptyList()
             val reglageDirect = Regex("r[eé]glage|param[eè]tre|mode conversation|[eé]coute continue|annonce vocale|r[eé]ponse vocale|confirmation|agent autonome|bips|analyse gemini|gemini|agents? autonomes?|notifications banni[eè]re", RegexOption.IGNORE_CASE).containsMatchIn(recent)
-            val keep = (plan.outils + indispensables + (if (reglageDirect) listOf("reglage_jarvis") else emptyList()) + (if (planningClientsSync) listOf("analyser_planning_clients") else emptyList()) + listOf("memoire_ajouter")).toSet()
+            val keep = (plan.outils + indispensables + (if (reglageDirect) listOf("reglage_jarvis") else emptyList()) + (if (planningClientsSync) listOf("analyser_planning_clients") else emptyList()) + listOf("memoire_ajouter") +
+                (if (fr.dd.jarvis.hermes.Hermes.enLigneConnu()) listOf("hermes_deleguer") else emptyList()) +
+                (if (Regex("herm[eè]s|termux", RegexOption.IGNORE_CASE).containsMatchIn(recent)) listOf("hermes") else emptyList())).toSet()
             schema = JSONArray()
             for (i in 0 until all.length()) if (all.getJSONObject(i).getJSONObject("function").getString("name") in keep) schema.put(all.get(i))
             if (plan.outils.any { it in fr.dd.jarvis.societe.SocieteTools.NAMES }) societeNeeded = true
@@ -120,5 +130,61 @@ class Brain(
             onStatus("Réflexion…")
         }
         return "Je n'ai pas réussi à terminer cette opération."
+    }
+
+    /**
+     * « Où suis-je ? / ma localisation exacte » → l'outil ma_position, toujours (adresse précise + GPS) ;
+     * « mets à jour la fiche X avec ma localisation » → client_ecrire avec la position et l'adresse du téléphone,
+     * sans jamais redemander l'adresse à l'utilisateur.
+     */
+    private suspend fun positionDirecte(dernier: String, history: List<ChatMsg>, onStatus: (String) -> Unit): String? {
+        val n = fr.dd.jarvis.societe.core.normaliser(dernier)
+        val parlePosition = Regex("\\b(ma|mon) (localisation|position|geolocalisation|emplacement|point gps|adresse actuelle)|\\bou (je suis|suis je|est ce que je suis|je me trouve)\\b|\\b(ici meme|ou on est)\\b").containsMatchIn(n)
+        val enAttente = attentePosition?.takeIf { System.currentTimeMillis() - it.second < 5 * 60_000 }
+        val majFiche = Regex("\\b(a jour|mets?|met|mettre|maj|actualise|enregistre|ajoute|renseigne|complete|modifie|corrige)\\b").containsMatchIn(n) &&
+            Regex("\\b(fiche|client|installation|site|chantier)").containsMatchIn(n)
+        val clients = app.societe.data.clients
+        if (enAttente != null && !parlePosition) {
+            // Réponse à « laquelle de ses installations ? »
+            val c = clients.firstOrNull { it.id == enAttente.first } ?: return null.also { attentePosition = null }
+            val site = siteNomme(c, n) ?: if (Regex("\\b(toutes?|tous|les deux|les \\d+|chacune)\\b").containsMatchIn(n)) "toutes" else return null
+            attentePosition = null
+            return majPosition(c.nom, site, onStatus)
+        }
+        if (!parlePosition) return null
+        if (majFiche) {
+            val c = clients.filter { it.nom.isNotBlank() && Regex("\\b" + Regex.escape(fr.dd.jarvis.societe.core.normaliser(it.nom)) + "\\b").containsMatchIn(n) }
+                .maxByOrNull { it.nom.length }
+                ?: clients.filter { c -> fr.dd.jarvis.societe.core.normaliser(c.nom).split(" ").any { m -> m.length >= 4 && Regex("\\b$m\\b").containsMatchIn(n) } }.singleOrNull()
+                ?: return null // client non reconnu : le cerveau s'en charge (avec les mêmes consignes)
+            val site = siteNomme(c, n) ?: when {
+                Regex("\\b(toutes?|tous|deux|les \\d+|ses installations|chaque installation|chacune)\\b").containsMatchIn(n) -> "toutes"
+                c.sites.size <= 1 -> ""
+                else -> {
+                    attentePosition = c.id to System.currentTimeMillis()
+                    return "📍 ${c.nom} a ${c.sites.size} installations : ${c.sites.joinToString { "« ${it.nom} »" }}. Laquelle se trouve ici ? Réponds par son nom, ou « toutes »."
+                }
+            }
+            return majPosition(c.nom, site, onStatus)
+        }
+        // « envoie ma position à… », « trajet depuis ma position », météo… : le cerveau garde la main.
+        if (Regex("\\b(envoie|envoyer|partage|sms|message|mail|agenda|rendez vous|itineraire|trajet|route|distance|meteo|temps qu il fait|emmene|guide)").containsMatchIn(n)) return null
+        onStatus("📍 Localisation…")
+        return tools.execute("ma_position", JSONObject()).text
+    }
+
+    private fun siteNomme(c: fr.dd.jarvis.societe.core.Client, n: String): String? =
+        c.sites.filter { it.nom.isNotBlank() && n.contains(fr.dd.jarvis.societe.core.normaliser(it.nom)) }.maxByOrNull { it.nom.length }?.nom
+
+    private suspend fun majPosition(client: String, site: String, onStatus: (String) -> Unit): String {
+        onStatus("📍 Relevé de la position et de l'adresse…")
+        val args = JSONObject().put("nom", client).put("site_gps", "ma position").put("site_adresse", "ma position")
+        if (site.isNotBlank()) args.put("site_nom", site)
+        return tools.execute("client_ecrire", args).text
+    }
+
+    companion object {
+        /** Client dont on attend l'installation concernée par « ma position » (id, horodatage). */
+        @Volatile private var attentePosition: Pair<String, Long>? = null
     }
 }

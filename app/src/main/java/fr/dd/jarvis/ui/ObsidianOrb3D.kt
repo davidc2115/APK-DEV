@@ -395,7 +395,7 @@ private fun Orbe3DContenu(
             IconeCompose(Icone.CERVEAU, 18.dp)
             Column(Modifier.padding(start = 8.dp).weight(1f)) {
                 Text("Orbe Obsidienne", color = Neon.blancViolet, fontSize = 14.sp, fontFamily = Neon.serif, fontWeight = FontWeight.Bold)
-                Text("${c.totalNotes} notes · ${c.totalLiens} liens · ${c.totalTags} tags · ${c.totalPieces} pièces", color = Neon.sousTitre, fontSize = 10.sp, fontFamily = Neon.serif)
+                Text("${c.totalNotes} notes · ${c.totalLiens} liens · ${c.totalPieces} pièces", color = Neon.sousTitre, fontSize = 10.sp, fontFamily = Neon.serif)
             }
             enTete()
         }

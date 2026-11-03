@@ -122,6 +122,71 @@ fun SettingsScreen(app: JarvisApp) {
             )
         }
 
+        // ------------------------------------------------------------ Hermès (Termux)
+        item {
+            val h = fr.dd.jarvis.hermes.HermesTermux
+            var hTick by remember { mutableIntStateOf(0) }
+            var hMsg by remember { mutableStateOf("") }
+            var enLigne by remember { mutableStateOf(false) }
+            val termuxOk = remember(tick, hTick) { h.termuxInstalle(ctx) }
+            val permOk = remember(tick, hTick) { h.permissionOk(ctx) }
+            androidx.compose.runtime.LaunchedEffect(tick, hTick, h.message) { enLigne = fr.dd.jarvis.hermes.Hermes.enLigne(force = true) }
+            val permLauncher = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { hTick++ }
+            HudPanel(Modifier.fillMaxWidth(), title = "Hermès — cerveau principal (Termux)") {
+                Text(
+                    "Hermès (Nous Research) tourne dans Termux sur ce téléphone et devient le cerveau principal : il réfléchit avec Gemini " +
+                        "et agit avec tous les outils de JARVIS. Groq garde les commandes rapides (appels, SMS, musique, agenda, domotique, Android Auto), " +
+                        "Gemini reste l'agent spécialisé (analyse, mails, planning, images).",
+                    color = HudDim, fontSize = 12.sp
+                )
+                Spacer(Modifier.height(6.dp))
+                StatusRow("Termux installé", termuxOk)
+                StatusRow("Permission « commandes Termux » accordée à JARVIS", permOk)
+                StatusRow("Hermès en ligne (127.0.0.1:${h.PORT_API})", enLigne)
+                Spacer(Modifier.height(6.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    HudButton(if (termuxOk) "1. Termux ✅" else "1. Installer Termux", Modifier.fillMaxWidth(), enabled = !termuxOk, filled = !termuxOk) {
+                        scope.launch { hMsg = "⏳ Téléchargement de Termux…"; hMsg = h.installerTermux(ctx); hTick++ }
+                    }
+                    HudButton("2. Autoriser JARVIS dans Termux", Modifier.fillMaxWidth(), enabled = termuxOk, filled = termuxOk && !enLigne) {
+                        if (!permOk && !fr.dd.jarvis.device.AdbShell.hasKey(ctx)) permLauncher.launch(h.PERMISSION)
+                        else scope.launch { hMsg = "⏳ Autorisation…"; hMsg = h.autoriser(app); hTick++ }
+                    }
+                    HudButton(if (store.hermesInstalle.value) "3. Réinstaller / mettre à jour Hermès" else "3. Installer Hermès", Modifier.fillMaxWidth(), enabled = termuxOk && permOk, filled = termuxOk && permOk && !store.hermesInstalle.value) {
+                        fr.dd.jarvis.hermes.PontMcp.progression.clear()
+                        hMsg = h.installer(app)
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HudButton("Configurer", enabled = permOk) { hMsg = h.configurer(app) }
+                    HudButton("Démarrer", enabled = permOk && !enLigne) { hMsg = h.demarrer(app) }
+                    HudButton("Arrêter", enabled = permOk && enLigne) { hMsg = h.arreter(app) }
+                    HudButton("Actualiser") { hTick++ }
+                }
+                if (hMsg.isNotBlank()) Text(hMsg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+                val lignes = fr.dd.jarvis.hermes.PontMcp.progression
+                if (lignes.isNotEmpty()) Column(Modifier.padding(top = 6.dp)) {
+                    lignes.takeLast(8).forEach { Text(it, color = HudText, fontSize = 11.sp, fontFamily = FontFamily.Monospace) }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("Répartition des demandes", color = HudDim, fontSize = 12.sp)
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("auto" to "Hermès principal", "demande" to "Si je dis « Hermès »", "off" to "Désactivé").forEach { (id, nom) ->
+                        HudChip(nom, selected = store.hermesMode.value == id) { store.hermesMode.set(id) }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                HudTextField(store.hermesModele.value, { store.hermesModele.set(it.trim()) }, Modifier.fillMaxWidth(),
+                    label = "Modèle Gemini d'Hermès (vide = ${store.geminiModel.value.ifBlank { "modèle des agents" }})")
+                Text(
+                    "Après un changement de clé ou de modèle, touche « Configurer ». Avec l'ADB intégré appairé, l'étape 2 est automatique ; " +
+                        "sinon colle la commande copiée dans Termux une seule fois. Xiaomi : batterie de Termux sur « Aucune restriction ».",
+                    color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp)
+                )
+            }
+        }
+
         // ------------------------------------------------------------ Annonces vocales
         item { SectionHeader("Communication") }
         item {

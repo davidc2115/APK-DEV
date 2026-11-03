@@ -1,0 +1,168 @@
+package fr.dd.jarvis.hermes
+
+import fr.dd.jarvis.JarvisApp
+import fr.dd.jarvis.ai.ChatMsg
+import fr.dd.jarvis.ai.ToolBox
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
+import org.json.JSONObject
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+import java.util.concurrent.TimeUnit
+
+/**
+ * Client de la passerelle Hermès (API compatible OpenAI sur http://127.0.0.1:8642, jeton Bearer).
+ * Hermès raisonne avec Gemini et agit sur le téléphone grâce aux outils de Jarvis exposés par [PontMcp].
+ */
+object Hermes {
+    private val JSON = "application/json".toMediaType()
+    private val rapide = OkHttpClient.Builder().connectTimeout(1500, TimeUnit.MILLISECONDS).readTimeout(2500, TimeUnit.MILLISECONDS).build()
+    private val lent = OkHttpClient.Builder().connectTimeout(3, TimeUnit.SECONDS).readTimeout(300, TimeUnit.SECONDS)
+        .callTimeout(330, TimeUnit.SECONDS).build()
+
+    @Volatile private var enLigneCache = false
+    @Volatile private var verifieA = 0L
+    @Volatile private var relanceA = 0L
+
+    fun marquerEnLigne(v: Boolean) { enLigneCache = v; verifieA = System.currentTimeMillis() }
+
+    /** Dernier état connu, sans réseau (pour décider vite d'exposer l'outil de délégation). */
+    fun enLigneConnu() = enLigneCache
+
+    suspend fun enLigne(force: Boolean = false): Boolean = withContext(Dispatchers.IO) {
+        if (!force && System.currentTimeMillis() - verifieA < 15_000) return@withContext enLigneCache
+        val ok = runCatching {
+            rapide.newCall(Request.Builder().url("http://127.0.0.1:${HermesTermux.PORT_API}/health").build()).execute().use { it.isSuccessful }
+        }.getOrDefault(false)
+        marquerEnLigne(ok); ok
+    }
+
+    /** Hermès est hors ligne alors qu'il est installé : on relance sa passerelle (au plus une fois par minute). */
+    fun relancerSiBesoin(app: JarvisApp) {
+        if (!app.store.hermesInstalle.value || app.store.hermesMode.value == "off") return
+        if (System.currentTimeMillis() - relanceA < 60_000) return
+        relanceA = System.currentTimeMillis()
+        HermesTermux.demarrer(app)
+    }
+
+    private fun systeme(app: JarvisApp, userName: String): String {
+        val maintenant = LocalDateTime.now().format(DateTimeFormatter.ofPattern("EEEE d MMMM yyyy, HH:mm", Locale.FRENCH))
+        return """
+Tu es Hermès, le cerveau principal de JARVIS, l'assistant personnel de ${userName.ifBlank { "l'utilisateur" }} sur son smartphone Android. Nous sommes le $maintenant.
+Réponds toujours en français, de façon naturelle et concise : ta réponse est souvent lue à voix haute (évite les tableaux et le Markdown chargé).
+Tu travailles en équipe :
+- toi (Hermès) : raisonnement, tâches en plusieurs étapes, recherche web, rédaction, code et scripts dans Termux, mémoire long terme, compétences et tâches planifiées ;
+- les outils de JARVIS, via le serveur MCP « jarvis » (outils mcp__jarvis__*) : téléphone (appels, SMS, applis, réglages), agenda, mails, contacts, musique, réveils, domotique, coffre Obsidian (obsidian_fichiers, obsidian_lire…), société (clients, devis, factures, paie, KML), localisation précise (ma_position), génération d'images/vidéos. Pour TOUTE action sur le téléphone ou les données de l'utilisateur, utilise ces outils plutôt que des commandes shell ; n'invente jamais leur contenu.
+Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume-les au lieu de les recopier en entier.
+""".trim() + app.memo.toutes().let { if (it.isBlank()) "" else "\n\nConsignes mémorisées par JARVIS :$it" }
+    }
+
+    /**
+     * Confie la conversation à Hermès. Renvoie sa réponse, ou null s'il est indisponible (l'appelant bascule alors
+     * sur le cerveau Groq). Pendant l'appel, les outils exposés à Hermès sont ceux de [boite] (mêmes confirmations).
+     */
+    suspend fun repondre(app: JarvisApp, history: List<ChatMsg>, boite: ToolBox?, userName: String, onStatus: (String) -> Unit): String? {
+        if (!enLigne()) { relancerSiBesoin(app); return null }
+        val messages = JSONArray().put(JSONObject().put("role", "system").put("content", systeme(app, userName)))
+        val recents = history.takeLast(12)
+        recents.forEachIndexed { i, m ->
+            val cap = if (recents.size - 1 - i < 3) 8000 else 2500
+            messages.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(cap)))
+        }
+        return appeler(app, messages, boite, onStatus)
+    }
+
+    /** Délégation d'une tâche précise (outil hermes_deleguer du cerveau Groq). */
+    suspend fun deleguer(app: JarvisApp, tache: String, boite: ToolBox?, userName: String): String? {
+        if (!enLigne(force = true)) { relancerSiBesoin(app); return null }
+        val messages = JSONArray().put(JSONObject().put("role", "system").put("content", systeme(app, userName)))
+            .put(JSONObject().put("role", "user").put("content", tache))
+        return appeler(app, messages, boite) {}
+    }
+
+    private suspend fun appeler(app: JarvisApp, messages: JSONArray, boite: ToolBox?, onStatus: (String) -> Unit): String? {
+        PontMcp.demarrer(app)
+        val precedente = PontMcp.boiteActive
+        if (boite != null) PontMcp.boiteActive = boite
+        onStatus("🪽 Hermès réfléchit…")
+        return try {
+            withContext(Dispatchers.IO) {
+                val corps = JSONObject().put("model", "hermes-agent").put("messages", messages).put("stream", false)
+                val req = Request.Builder().url("http://127.0.0.1:${HermesTermux.PORT_API}/v1/chat/completions")
+                    .header("Authorization", "Bearer ${app.store.hermesCle.value}")
+                    .header("X-Hermes-Session-Key", "jarvis")
+                    .post(corps.toString().toRequestBody(JSON)).build()
+                lent.newCall(req).execute().use { r ->
+                    val txt = r.body?.string().orEmpty()
+                    if (!r.isSuccessful) {
+                        if (r.code == 401) HermesTermux.message = "⚠️ Hermès refuse la clé de Jarvis : touche « Configurer Hermès »."
+                        return@withContext null
+                    }
+                    JSONObject(txt).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
+                        ?.optString("content").orEmpty().trim().ifBlank { null }
+                }
+            }
+        } catch (e: CancellationException) { throw e } catch (e: Exception) {
+            marquerEnLigne(false); relancerSiBesoin(app); null
+        } finally {
+            PontMcp.boiteActive = precedente
+        }
+    }
+}
+
+/**
+ * Répartition des demandes (mode « auto ») :
+ *  - Hermès, cerveau principal : questions ouvertes, recherche, analyse, rédaction, code, automatisations, tâches
+ *    en plusieurs étapes, et tout ce qui n'est pas une commande rapide ;
+ *  - Groq (cerveau réflexe de Jarvis, outils filtrés, ~1 s) : commandes du téléphone, Android Auto, agenda, musique,
+ *    domotique, société, fichiers Obsidian ;
+ *  - Gemini : agents spécialisés à l'intérieur des outils (analyse de la demande, mails, planning, vision, images).
+ */
+object Routeur {
+    enum class Cible { HERMES, JARVIS }
+    data class Choix(val cible: Cible, val raison: String)
+
+    private val NOMME = Regex("\\bherm[eè]s\\b", RegexOption.IGNORE_CASE)
+    private val COMMANDE = Regex(
+        "\\b(appel(le|er)?|t[ée]l[ée]phone (à|a)|rappelle|sms|texto|envoie (un |le )?(message|mail|sms)|r[ée]pond(s|re) (à|au)|" +
+            "musique|chanson|playlist|joue|mets (du|de la|la|le|un)|lecture|pause|suivant|volume|" +
+            "alarme|r[ée]veil|minuteur|chrono|rappel|agenda|calendrier|planning|rendez.vous|rdv|[ée]v[ée]nement|" +
+            "allume|[ée]teins|lumi[èe]re|lampe|torche|chauffage|po[êe]le|thermostat|volet|prise|wi-?fi|bluetooth|luminosit[ée]|" +
+            "itin[ée]raire|navigation|emm[èe]ne|guide.moi|waze|trajet|" +
+            "ouvre|lance (l.app|l.application)|ferme|capture|photo|" +
+            "devis|factur|client|fiche|paie|bulletin|tarif|kml|google earth|" +
+            "obsidian|coffre|dossier|fichier|note|" +
+            "image|dessin|coloriage|vid[ée]o|tiktok|discord|imprim|scann|" +
+            "m[ée]t[ée]o|quelle heure|batterie|ma position|ma localisation|o[uù] suis.je|" +
+            "mails?|courriels?|bo[iî]te de r[ée]ception|contacts?|r[ée]glage)",
+        RegexOption.IGNORE_CASE
+    )
+    private val COMPLEXE = Regex(
+        "recherch|sur internet|sur le web|compar|analys|expliqu|pourquoi|comment (faire|fonctionne|marche)|r[ée]dige|[ée]cris (un|une|moi)|" +
+            "r[ée]sum|synth[èe]se|rapport|article|code|script|programme|python|bash|automatis|tous les (jours|matins|soirs|lundis|mois)|" +
+            "chaque (jour|semaine|mois|matin)|surveille|planifie|plan d.action|strat[ée]gie|[ée]tapes|projet|apprends|comp[ée]tence|" +
+            "conseil|id[ée]es?|propose|optimise|calcul|traduis|https?://",
+        RegexOption.IGNORE_CASE
+    )
+    private val BREF = Regex("^(merci|ok|okay|d.accord|super|parfait|salut|bonjour|bonsoir|coucou|oui|non|stop|annule|c.est bon)[ !.,]*\\S{0,12}$", RegexOption.IGNORE_CASE)
+
+    fun choisir(app: JarvisApp, texte: String): Choix {
+        val mode = app.store.hermesMode.value
+        if (mode == "off" || !app.store.hermesInstalle.value) return Choix(Cible.JARVIS, "Hermès désactivé")
+        val t = texte.trim()
+        if (NOMME.containsMatchIn(t)) return Choix(Cible.HERMES, "Hermès demandé")
+        if (mode != "auto") return Choix(Cible.JARVIS, "Hermès seulement sur demande")
+        if (app.enVoiture) return Choix(Cible.JARVIS, "Android Auto : réponse rapide")
+        if (BREF.matches(t)) return Choix(Cible.JARVIS, "réponse courte")
+        val complexe = COMPLEXE.containsMatchIn(t)
+        if (COMMANDE.containsMatchIn(t) && !(complexe && t.length > 90)) return Choix(Cible.JARVIS, "commande du téléphone")
+        return Choix(Cible.HERMES, if (complexe) "tâche complexe" else "cerveau principal")
+    }
+}

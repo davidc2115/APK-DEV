@@ -67,9 +67,9 @@ object Locator {
             append(")\n")
             if (adresse != null) {
                 append("🏠 Adresse : ${adresse.libelle}")
-                adresse.distance?.let { if (it > 15) append(" (point d'adresse le plus proche, à ~$it m)") }
+                adresse.distance?.let { if (it > 25) append(if (adresse.numero.isBlank()) " (voie la plus proche, à ~$it m)" else " (adresse la plus proche, à ~$it m)") }
                 append("\n")
-            } else append("🏠 Adresse : aucune adresse postale trouvée à cet endroit (zone sans numéro, champ, route…).\n")
+            } else append("🏠 Adresse : service d'adresses injoignable pour l'instant (réseau ?) — les coordonnées ci-dessus restent exactes.\n")
             append("🗺️ ${Geo.lienGoogleMaps(p)}")
         }
     }

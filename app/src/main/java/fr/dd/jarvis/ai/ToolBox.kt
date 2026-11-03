@@ -259,6 +259,11 @@ class ToolBox(
         put(tool("memoire_oublier", "Supprime la consigne d'un sujet.", mapOf("sujet" to prop("Sujet à oublier.")), listOf("sujet")))
         put(tool("factures_impayees", "Liste les factures émises non encore payées (avec retards)."))
         put(tool("export_kml", "Génère un fichier KML (Google Earth / Google My Maps) avec les points GPS des clients et installations, enregistré dans Obsidian et partageable."))
+        put(tool("hermes", "Gère Hermès, l'agent IA installé dans Termux qui sert de cerveau principal : état, installation, configuration (clés, modèle), démarrage, arrêt, mode de répartition.",
+            mapOf("action" to prop("etat | installer | configurer | demarrer | arreter | mode"),
+                "mode" to prop("Pour action=mode : auto (Hermès cerveau principal, Groq pour les commandes rapides) | demande (Hermès seulement quand on le nomme) | off.")), listOf("action")))
+        put(tool("hermes_deleguer", "Confie à Hermès (agent autonome : recherche web, analyse, rédaction, code, tâches en plusieurs étapes, mémoire long terme) une tâche complexe ou longue. Décris la tâche complète et le résultat attendu.",
+            mapOf("tache" to prop("La tâche détaillée, avec tout le contexte utile.")), listOf("tache")))
         put(tool("ma_position", "Donne la position GPS actuelle du téléphone (fix frais, format Google Maps) et l'ADRESSE PRÉCISE correspondante (numéro, rue, code postal, ville). Pour enregistrer cette position sur une fiche client, utilise client_ecrire avec site_gps = « ma position » (et site_adresse = « ma position » pour l'adresse)."))
         put(tool("phone_action", "Agit sur le téléphone. Actions : torch_on, torch_off, open_app, open_url, volume, wifi_on, wifi_off, bluetooth_on, bluetooth_off, data_on, data_off, brightness, call, back, home, recents, notifications, quick_settings, lock, screenshot, read_screen, click_text, type_text, scroll_down, scroll_up, tap.",
             mapOf(
@@ -295,6 +300,32 @@ class ToolBox(
         serveur.schema.forEach { out.put(it) }
         discord.schema.forEach { out.put(it) }
         tiktok.schema.forEach { out.put(it) }
+    }
+
+    private suspend fun hermesGerer(action: String, mode: String): String {
+        val h = fr.dd.jarvis.hermes.HermesTermux
+        return when (action.lowercase()) {
+            "installer" -> when {
+                !h.termuxInstalle(app) -> "Termux n'est pas installé : ouvre Réglages › Hermès (Termux) et touche « 1. Installer Termux »."
+                !h.permissionOk(app) -> "Accorde d'abord la permission Termux à JARVIS : Réglages › Hermès (Termux) › « 2. Autoriser »."
+                else -> h.installer(app)
+            }
+            "configurer" -> h.configurer(app)
+            "demarrer" -> h.demarrer(app)
+            "arreter" -> h.arreter(app)
+            "mode" -> {
+                val m = mode.lowercase().let { if (it.startsWith("dem")) "demande" else if (it.startsWith("of") || it.startsWith("dés") || it.startsWith("des")) "off" else "auto" }
+                app.store.hermesMode.set(m)
+                "Mode Hermès : " + when (m) { "auto" -> "cerveau principal (Groq pour les commandes rapides)"; "demande" -> "seulement quand tu le nommes"; else -> "désactivé" } + "."
+            }
+            else -> {
+                val enLigne = fr.dd.jarvis.hermes.Hermes.enLigne(force = true)
+                "Hermès : " + (if (enLigne) "🟢 en ligne" else "⚪ hors ligne") +
+                    " · Termux " + (if (h.termuxInstalle(app)) "installé" else "absent") +
+                    " · mode " + app.store.hermesMode.value +
+                    (if (h.message.isNotBlank()) "\nDernière étape : ${h.message}" else "")
+            }
+        }
     }
 
     // ------------------------------------------------------------------ exécution
@@ -624,6 +655,10 @@ class ToolBox(
         "factures_impayees" -> ToolResult(app.societe.impayees().ifBlank { "✅ Aucune facture impayée." }, direct = true)
         "export_kml" -> ToolResult(app.societe.exporterKml(), direct = true)
         "ma_position" -> ToolResult(fr.dd.jarvis.device.Locator.describe(app))
+        "hermes" -> ToolResult(hermesGerer(a.optString("action"), a.optString("mode")))
+        "hermes_deleguer" -> fr.dd.jarvis.hermes.Hermes.deleguer(app, a.optString("tache"), this, app.store.userName.value)
+            ?.let { ToolResult(it, direct = true) }
+            ?: ToolResult("Hermès est indisponible pour l'instant (non installé ou arrêté). Réponds toi-même au mieux.")
         "phone_action" -> phoneAction(a)
         "run_shell" -> runShell(a)
         "stockage_telephone" -> {
