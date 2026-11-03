@@ -106,6 +106,11 @@ object Impression {
 
     /** Interroge l'imprimante en essayant les points d'accès IPP usuels (http 631, https 631, https 443) et plusieurs chemins. */
     fun interroger(app: JarvisApp, ip: String, via: String = "local", chemin: String? = null): Imprimante? {
+        // Initialise explicitement le Wi-Fi avant toute requête IPP, même si l'adresse IP a été fournie manuellement.
+        if (via != "serveur") {
+            val wifi = Reseau.infos(app)
+            if (wifi?.wifi != true) { trace.append("  Aucun réseau Wi-Fi local actif sur le téléphone.\\n"); return null }
+        }
         val points = mutableListOf<Pair<String, Int>>()
         for ((sch, port) in listOf("http" to 631, "https" to 631, "https" to 443, "http" to 80)) {
             if (via == "local" && !Reseau.ouvertTcp(ip, port)) { trace.append("  port $port fermé ou muet sur $ip\n"); continue }
