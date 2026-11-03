@@ -42,7 +42,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 "configuration" to prop("JSON Lovelace complet pour creer/modifier/refaire. Inclure views et les cartes/sections souhaitées."),
                 "vue" to prop("Index de la vue (0 par défaut) pour carte_ajouter."),
                 "section" to prop("Index de la section (0 par défaut) dans une vue Sections."),
-                "carte" to prop("JSON d'une carte Lovelace à ajouter, ex. {\\"type\\":\\"tile\\",\\"entity\\":\\"light.salon\\"}."),
+                "carte" to prop("JSON d'une carte Lovelace à ajouter, ex. {\"type\":\"tile\",\"entity\":\"light.salon\"}."),
                 "vue_json" to prop("JSON complet de la nouvelle vue à ajouter.")), listOf("action")),
         tool("ssh_commande", "Serveur SSH : exécute une commande shell sur le serveur (Debian) et retourne la sortie. Contrôle complet : docker, systemctl, apt, logs, réseau… Les commandes destructrices demandent une confirmation.",
             mapOf("commande" to prop("Commande shell."), "delai" to prop("Délai maximal en secondes (défaut 60)."),
