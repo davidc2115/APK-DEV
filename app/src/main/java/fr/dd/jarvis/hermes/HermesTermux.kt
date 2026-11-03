@@ -317,11 +317,27 @@ if [ -z "${'$'}{MODE}" ]; then
     bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
     || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
   p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
+  INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
+  : > "${'$'}{INSTALL_LOG}"
+  p "⏳ Installation des dépendances Hermès démarrée. Suivi actif toutes les 20 secondes."
   proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root \
-    bash -c 'set -e; mkdir -p /root/.hermes; printf "pillow-heif==1.4.0\\n" > /root/.hermes/jarvis-constraints.txt; export UV_CONSTRAINT=/root/.hermes/jarvis-constraints.txt PIP_CONSTRAINT=/root/.hermes/jarvis-constraints.txt; HEIF_VER=$(pkg-config --modversion libheif); dpkg --compare-versions "${'$'}HEIF_VER" ge 1.19.0 || { echo "libheif ${'$'}HEIF_VER trop ancien (>=1.19.0 requis)"; exit 1; }; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' 2>&1 \
-    | tee -a "${'$'}{LOG}" | while IFS= read -r l; do
-        case "${'$'}{l}" in *✓*|*✔*|*rror*|*ailed*|*ready*|*nstalled*) p "   ${'$'}(printf '%s' "${'$'}{l}" | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-110)";; esac
-      done
+    bash -c 'set -e; mkdir -p /root/.hermes; printf "pillow-heif==1.4.0\\n" > /root/.hermes/jarvis-constraints.txt; export UV_CONSTRAINT=/root/.hermes/jarvis-constraints.txt PIP_CONSTRAINT=/root/.hermes/jarvis-constraints.txt; HEIF_VER=$(pkg-config --modversion libheif) || { echo "pkg-config ne trouve pas libheif"; exit 1; }; dpkg --compare-versions "${'$'}HEIF_VER" ge 1.19.0 || { echo "libheif ${'$'}HEIF_VER trop ancien (>=1.19.0 requis)"; exit 1; }; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+  INSTALL_PID=$!
+  while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
+    sleep 20
+    if kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; then
+      DERNIERES="$(tail -n 3 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\\x1b\\[[0-9;]*m//g' | cut -c1-115 | tr '\\n' ' ')"
+      p "⏳ Hermès installe ses composants : ${'$'}{DERNIERES:-travail en cours, aucune nouvelle sortie pour le moment}."
+    fi
+  done
+  wait "${'$'}{INSTALL_PID}"
+  INSTALL_RC=$?
+  cat "${'$'}{INSTALL_LOG}" >> "${'$'}{LOG}"
+  if [ "${'$'}{INSTALL_RC}" -ne 0 ]; then
+    p "❌ L’installation d’Hermès a échoué (code ${'$'}{INSTALL_RC}). Dernières lignes :"
+    tail -n 10 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit "${'$'}{INSTALL_RC}"
+  fi
   if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
     MODE=proot
   else
