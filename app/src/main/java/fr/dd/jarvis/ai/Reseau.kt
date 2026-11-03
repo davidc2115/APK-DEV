@@ -108,7 +108,7 @@ object Reseau {
     private fun typeDe(p: List<Int>, titre: String): String {
         val t = titre.lowercase()
         return when {
-            9100 in p || 631 in p || 515 in p || listOf("printer", "imprim", "canon", "epson", "brother", "laserjet", "officejet", "pixma", "ecotank").any { t.contains(it) } -> "🖨️ imprimante"
+            9100 in p || 631 in p || 515 in p || 8611 in p || listOf("printer", "imprim", "canon", "epson", "brother", "laserjet", "officejet", "pixma", "ecotank").any { t.contains(it) } -> "🖨️ imprimante"
             8123 in p || t.contains("home assistant") -> "🏠 Home Assistant"
             554 in p || t.contains("camera") || t.contains("hikvision") || t.contains("dahua") -> "📷 caméra"
             62078 in p -> "📱 iPhone/iPad"
