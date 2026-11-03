@@ -283,7 +283,10 @@ termux-wake-lock >/dev/null 2>&1 || true
 # Le dépôt APT Termux officiel d'Hermès est actuellement signalé comme cassé par Nous Research.
 # On utilise donc la version Linux officielle dans Debian, plutôt que le paquet Android instable.
 if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative source incomplète supprimée."; fi
-if [ -L "${'p "📦 Mise à jour de Termux et installation de proot-distro…"
+if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; then rm -f "${'$'}{PREFIX}/bin/hermes"; fi
+# Supprime une ancienne source APT Hermès potentiellement cassée avant pkg update.
+rm -f "${'$'}{PREFIX}/etc/apt/sources.list.d/hermes-agent.list" "${'$'}{PREFIX}/etc/apt/keyrings/hermes-agent.asc"
+p "📦 Mise à jour de Termux et installation de proot-distro…"
 pkg update -y >> "${'$'}{LOG}" 2>&1 || { p "❌ Mise à jour Termux impossible. Journal : ~/.hermes/logs/jarvis-install.log"; tail -n 8 "${'$'}{LOG}" | while IFS= read -r l; do p "   ${'$'}{l}"; done; exit 1; }
 pkg install -y proot-distro curl util-linux >> "${'$'}{LOG}" 2>&1 || { p "❌ Installation de proot-distro impossible."; tail -n 8 "${'$'}{LOG}" | while IFS= read -r l; do p "   ${'$'}{l}"; done; exit 1; }
 case "${'$'}(uname -m)" in aarch64) ;; *) p "❌ Architecture ${'$'}(uname -m) : Hermès sur Android nécessite ARM64 (aarch64)."; exit 1;; esac
