@@ -308,7 +308,7 @@ if [ -z "${'$'}{MODE}" ]; then
   proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/bin:/bin bash -c 'printf "CC="; command -v cc; cc --version | head -n1; printf "ARCH="; uname -m; printf "LIBC="; ldd --version | head -n1' >> "${'$'}{LOG}" 2>&1
   p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
   INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
-  : > "${'{INSTALL_LOG}"}{INSTALL_LOG}"
+  : > "${'$'}{INSTALL_LOG}"
   p "⏳ Installation des dépendances Hermès démarrée. Variables de compilation Android neutralisées."
   proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
     PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
