@@ -27,7 +27,7 @@ class MusicTools(private val app: JarvisApp) {
             .put("description", "Ouvre une recherche de titre ou d'artiste directement dans YT Music Morphe, si l'application accepte le lien de recherche YouTube Music.")
             .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject().put("requete", prop("Titre, artiste ou morceau recherché."))).put("required", JSONArray().put("requete"))))
     )
-    fun execute(name: String, a: JSONObject): ToolResult = try {
+    suspend fun execute(name: String, a: JSONObject): ToolResult = try {
         when (name) {
             "musique_etat" -> ToolResult(Musique.etat(app), direct = true)
             "musique_commander" -> ToolResult(Musique.commander(app, a.optString("action")), direct = true)
