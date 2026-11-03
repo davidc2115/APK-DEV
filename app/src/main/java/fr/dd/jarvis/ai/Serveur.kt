@@ -170,7 +170,7 @@ object Serveur {
             "while read ip; do (ping -c1 -W1 \$ip >/dev/null 2>&1) & while [ \$(jobs -rp | wc -l) -ge 48 ]; do wait -n 2>/dev/null || break; done; done; wait; sleep 1; " +
             "ip neigh show | awk '\$1 ~ /^[0-9]+\\./ && \$0 !~ /FAILED/ {mac=\"\"; for(i=1;i<=NF;i++) if(\$i==\"lladdr\" && i<NF) mac=\$(i+1); print \"N \"\$1\" \"mac}'; " +
             "for ip in \$(ip neigh show | awk '\$1 ~ /^[0-9]+\\./ && \$0 !~ /FAILED/ {print \$1}' | sort -u); do " +
-            "(for p in 22 80 443 445 631 9100 8123 8080 554 1883; do timeout 0.8 bash -c \"echo >/dev/tcp/\\$ip/\\$p\" 2>/dev/null && echo \"P \\$ip \\$p\"; done) & " +
+            "(for p in 22 80 443 445 631 9100 8123 8080 554 1883; do timeout 0.8 bash -c \"echo >/dev/tcp/\$ip/\$p\" 2>/dev/null && echo \"P \$ip \$p\"; done) & " +
             "while [ \$(jobs -rp | wc -l) -ge 48 ]; do wait -n 2>/dev/null || break; done; done; wait";
         val r = exec(app, commande, 180).second
         val mac = HashMap<String, String>(); val ports = HashMap<String, MutableList<Int>>()
