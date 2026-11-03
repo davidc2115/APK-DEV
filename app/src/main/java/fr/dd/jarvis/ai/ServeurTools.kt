@@ -14,7 +14,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
     companion object {
         val KEYWORDS = Regex("home ?assistant|domotique|\\bha\\b|ssh|serveur|server|yaml|docker|lumi[èe]re|volet|thermostat|automatisation|automation|sc[èe]ne\\b|configuration\\.yaml|debian|raspberry|esphome|zigbee|mqtt|capteur|\\bprise\\b|interrupteur|box|livebox|freebox|bbox|disque|nas|\\bftp\\b|\\bsmb\\b|r[ée]seau|wifi|wi-fi|imprim|scann|\\bip\\b|adresse ip|github|\\bgit\\b|canon|epson|brother|\\bhp\\b|appareils?\\b|script|\\bcode\\b|ping|port|volume|\\bson\\b|t[ée]l[ée]\\b|t[ée]l[ée]vision|\\btv\\b|chauffage|climatisation|temp[ée]rature|consigne|po[êe]le|poil|degr[ée]s|granul[ée]s|pellet|chaudi[èe]re|radiateur|thermique|climate|media_player|lecteur multim[ée]dia|luminosit[ée]|store\\b|persienne|\\ballume\\b|allumer|[ée]teins?\\b|[ée]teindre", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
-        val NAMES = setOf("ha_entites", "ha_etat", "ha_service", "ha_config", "ssh_commande", "ssh_fichier", "serveur_diagnostic", "serveur_scan_ports", "reseau_infos", "reseau_scanner", "appareil_sonder", "appareil_page", "imprimantes_trouver", "imprimer", "ssh_script", "github", "appareils_liste", "appareil_nommer", "ip_publique", "box_disque")
+        val NAMES = setOf("ha_entites", "ha_etat", "ha_service", "ha_config", "ha_dashboard", "ssh_commande", "ssh_fichier", "serveur_diagnostic", "serveur_scan_ports", "reseau_infos", "reseau_scanner", "appareil_sonder", "appareil_page", "imprimantes_trouver", "imprimer", "ssh_script", "github", "appareils_liste", "appareil_nommer", "ip_publique", "box_disque")
     }
 
     private fun prop(d: String) = JSONObject().put("type", "string").put("description", d)
@@ -34,6 +34,16 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
         tool("ha_config", "Home Assistant : configuration complète sur le serveur (fichiers YAML dans le dossier de config : configuration.yaml, automations.yaml, scripts.yaml, scenes.yaml, secrets.yaml, packages/…). Actions : lister | lire | ecrire (sauvegarde auto + validation, restauration si invalide) | sauvegardes | restaurer | valider | recharger | redemarrer | journal (erreurs). Toujours lire le fichier avant de le modifier et réécrire le fichier ENTIER.",
             mapOf("action" to prop("lister | lire | ecrire | sauvegardes | restaurer | valider | recharger | redemarrer | journal"), "fichier" to prop("Chemin relatif au dossier de config, ex. automations.yaml (ou dossier pour lister)."),
                 "contenu" to prop("ecrire : contenu complet du fichier. restaurer : nom de la sauvegarde (.jarvis-bak-…)."), "quoi" to prop("recharger : all | automation | script | scene | core (défaut all).")), listOf("action")),
+        tool("ha_dashboard", "Home Assistant Lovelace : crée, liste, lit et refait les tableaux de bord en mode stockage via WebSocket. Peut créer un tableau de bord complet, remplacer toute sa présentation avec une configuration JSON Lovelace, ajouter des cartes dans une vue/section, ajouter une vue ou supprimer un tableau. Avant toute modification, Jarvis sauvegarde automatiquement l'ancienne configuration dans son stockage local. Pour modifier, lire d'abord puis fournir la configuration complète. Les actions destructrices demandent confirmation.",
+            mapOf("action" to prop("lister | lire | creer | modifier | refaire | carte_ajouter | vue_ajouter | supprimer"),
+                "url_path" to prop("Chemin du tableau de bord (ex. maison, energie, salon). Vide pour le tableau par défaut lors de lire."),
+                "titre" to prop("Titre du nouveau tableau lors de creer."),
+                "icone" to prop("Icône MDI (ex. mdi:home, mdi:lightbulb-group)."),
+                "configuration" to prop("JSON Lovelace complet pour creer/modifier/refaire. Inclure views et les cartes/sections souhaitées."),
+                "vue" to prop("Index de la vue (0 par défaut) pour carte_ajouter."),
+                "section" to prop("Index de la section (0 par défaut) dans une vue Sections."),
+                "carte" to prop("JSON d'une carte Lovelace à ajouter, ex. {\\"type\\":\\"tile\\",\\"entity\\":\\"light.salon\\"}."),
+                "vue_json" to prop("JSON complet de la nouvelle vue à ajouter.")), listOf("action")),
         tool("ssh_commande", "Serveur SSH : exécute une commande shell sur le serveur (Debian) et retourne la sortie. Contrôle complet : docker, systemctl, apt, logs, réseau… Les commandes destructrices demandent une confirmation.",
             mapOf("commande" to prop("Commande shell."), "delai" to prop("Délai maximal en secondes (défaut 60)."),
                 "hote" to prop("Autre machine à joindre en SSH (IP/nom) au lieu du serveur des Réglages (optionnel)."), "utilisateur" to prop("Utilisateur de cette autre machine."),
@@ -80,6 +90,14 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
     private suspend fun run(name: String, a: JSONObject): ToolResult {
         fun ssh() { if (!Serveur.sshConfigure(app)) throw IllegalStateException("SSH non configuré (Réglages › Serveur : adresse, utilisateur, mot de passe ou clé).") }
         return when (name) {
+            "ha_dashboard" -> {
+                val action = a.optString("action").lowercase()
+                if (action in setOf("creer", "modifier", "refaire", "carte_ajouter", "vue_ajouter", "supprimer")) {
+                    val cible = a.optString("url_path").ifBlank { "tableau par défaut" }
+                    if (!confirm("Home Assistant : effectuer « $action » sur $cible ? Une sauvegarde sera créée avant modification.", true)) return ToolResult("Opération annulée.")
+                }
+                ToolResult(HomeAssistantDashboard.execute(app, action, a), direct = true)
+            }
             "ha_entites" -> ToolResult(Serveur.haEntites(app, a.optString("recherche"), a.optString("domaine"), a.optString("decalage").toIntOrNull() ?: 0, a.optString("limite").toIntOrNull() ?: 100), direct = true)
             "ha_etat" -> ToolResult(Serveur.haEtat(app, a.optString("entity_id").trim()))
             "ha_service" -> {
