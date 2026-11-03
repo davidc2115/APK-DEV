@@ -97,7 +97,7 @@ object HomeAssistantDashboard {
                     if (raw.isBlank()) return "Fournis le JSON Lovelace complet dans configuration. Lis d'abord le tableau avec action=lire."
                     val old = config(s, path)
                     val replacement = JSONObject(raw)
-                    if (replacement.optJSONArray("views")?.length() ?: 0 < 1) return "Configuration refusée : au moins une vue est requise."
+                    if ((replacement.optJSONArray("views")?.length() ?: 0) < 1) return "Configuration refusée : au moins une vue est requise."
                     backup(app, path, old); save(s, path, replacement)
                     return "Présentation de /$path remplacée. Une sauvegarde locale de l'ancienne version a été créée."
                 }
