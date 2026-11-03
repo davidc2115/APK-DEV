@@ -58,7 +58,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
 
     val schema: List<JSONObject> = listOf(
         tool("clients_exporter_kml", "Génère le fichier KML Google Earth avec fiches contact colorées, emojis, noms de clients et données de recherche. Peut filtrer les clients par nom, société, adresse ou installation.", mapOf("recherche" to prop("Texte facultatif pour exporter uniquement les clients correspondant à un nom, une société, une adresse ou une installation."))),
-        tool("kml_couleurs_set", "Définit les couleurs des repères Google Earth pour les clients particuliers et professionnels. Couleurs au format hexadécimal #RRGGBB.", mapOf("particuliers" to prop("Couleur hexadécimale des clients particuliers, par exemple #20A45A."), "professionnels" to prop("Couleur hexadécimale des clients professionnels, par exemple #2878D0."))),
+        tool("kml_couleurs_set", "Définit les couleurs des repères Google Earth : clients particuliers, clients professionnels et siège. Couleur au format #RRGGBB ou nom simple (vert, bleu, rouge, orange, jaune, violet, rose, turquoise, marron, noir, blanc, gris).", mapOf("particuliers" to prop("Couleur des clients particuliers, ex. #20A45A ou « vert »."), "professionnels" to prop("Couleur des clients professionnels, ex. #2878D0 ou « bleu »."), "siege" to prop("Couleur du repère du siège, ex. #FF9800 ou « orange »."))),
         tool("societe_info_set", "Enregistre les informations de la société (seuls les champs fournis sont modifiés).", mapOf(
             "nom" to prop("Nom de la société."), "forme" to prop("Forme juridique (EURL, SASU, micro-entreprise…)."),
             "siret" to prop("SIRET."), "tva_num" to prop("N° de TVA intracommunautaire."),
@@ -189,21 +189,32 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
     }
 
     private fun kmlCouleursSet(a: JSONObject): ToolResult {
+        val noms = mapOf(
+            "vert" to "#20A45A", "bleu" to "#2878D0", "rouge" to "#E53935", "orange" to "#FF9800", "jaune" to "#FDD835",
+            "violet" to "#8E24AA", "rose" to "#EC407A", "turquoise" to "#00ACC1", "cyan" to "#00ACC1", "marron" to "#795548",
+            "noir" to "#212121", "blanc" to "#FFFFFF", "gris" to "#9E9E9E"
+        )
         fun couleur(k: String): String? {
-            val value = a.s(k).uppercase().let { if (it.startsWith("#")) it else "#$it" }
+            val brut = a.s(k).trim()
+            if (brut.isBlank()) return null
+            val nom = java.text.Normalizer.normalize(brut.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}"), "")
+            noms[nom]?.let { return it }
+            val value = brut.uppercase().let { if (it.startsWith("#")) it else "#$it" }
             return value.takeIf { it.matches(Regex("#[0-9A-F]{6}")) }
         }
         val particulier = couleur("particuliers")
         val professionnel = couleur("professionnels")
-        if (particulier == null && professionnel == null)
-            return err("Couleur invalide. Utilise le format hexadécimal #RRGGBB, par exemple #20A45A.")
+        val siege = couleur("siege")
+        if (particulier == null && professionnel == null && siege == null)
+            return err("Couleur invalide. Utilise #RRGGBB (par exemple #20A45A) ou un nom simple : ${noms.keys.joinToString()}.")
         val before = d.societe
         val after = before.copy(
             kmlCouleurParticulier = particulier ?: before.kmlCouleurParticulier,
-            kmlCouleurProfessionnel = professionnel ?: before.kmlCouleurProfessionnel
+            kmlCouleurProfessionnel = professionnel ?: before.kmlCouleurProfessionnel,
+            kmlCouleurSiege = siege ?: before.kmlCouleurSiege
         )
         svc.repo.update { it.copy(societe = after) }
-        return ok("🎨 Couleurs Google Earth enregistrées.\n- 🏠 Particuliers : ${after.kmlCouleurParticulier}\n- 🏢 Professionnels : ${after.kmlCouleurProfessionnel}\n\nDemande maintenant « exporte la carte KML » pour appliquer les couleurs aux repères.")
+        return ok("🎨 Couleurs Google Earth enregistrées.\n- 🏠 Particuliers : ${after.kmlCouleurParticulier}\n- 🏢 Professionnels : ${after.kmlCouleurProfessionnel}\n- 🏭 Siège : ${after.kmlCouleurSiege}\n\nDemande maintenant « exporte la carte KML » pour appliquer les couleurs aux repères.")
     }
 
     private fun infoSet(a: JSONObject): ToolResult {

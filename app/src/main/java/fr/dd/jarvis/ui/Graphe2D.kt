@@ -204,6 +204,17 @@ fun ConstellationVue(
     var zoomUser by remember(c) { mutableStateOf(1f) }
     var panUser by remember(c) { mutableStateOf(Offset.Zero) }
 
+    // Horloge continue (secondes) pour le serpent-dragon ; figée à 0 pour les captures hors appareil.
+    var temps by remember { mutableStateOf(0f) }
+    if (animer) LaunchedEffect(Unit) {
+        var avant = 0L
+        while (true) {
+            androidx.compose.runtime.withFrameNanos { tn ->
+                if (avant != 0L) temps += ((tn - avant) / 1e9f).coerceAtMost(0.1f)
+                avant = tn
+            }
+        }
+    }
     val pulse = if (animer) {
         val t by rememberInfiniteTransition(label = "cerveau").animateFloat(
             0.78f, 1f, infiniteRepeatable(tween(1600, easing = LinearEasing), RepeatMode.Reverse), label = "pulse"
@@ -258,8 +269,10 @@ fun ConstellationVue(
         // l'origine/l'échelle du premier affichage).
         val geometrie by rememberUpdatedState(origine to k)
 
-        // Décor (serpent-dragon, veines, arbre, ruines, cercle runique), rendu une fois en tâche de fond.
+        // Décor (veines, arbre, ruines, cercle runique), rendu une fois en tâche de fond ; serpent-dragon animé par-dessus.
         val fond = rememberFondDragon(largeurPx.toInt(), hauteurPx.toInt(), synchrone = !animer)
+        val dragon = rememberDragon(largeurPx.toInt(), synchrone = !animer)
+        val outilsDragon = remember { OutilsDragon() }
 
         // Rectangles des étiquettes dessinées (pour le toucher), remplis pendant le dessin.
         val zonesEtiquettes = remember { HashMap<String, Rect>() }
@@ -300,6 +313,7 @@ fun ConstellationVue(
                 }
         ) {
             if (fond != null) drawImage(fond) else dessinerFondCosmique(decor, pulse)
+            if (dragon != null) dessinerDragon(dragon, outilsDragon, temps)
             val centre = origine
             val rCentre = c.rayonCerveau * k
             // Grand rayonnement violet autour du cerveau, comme le cœur lumineux de l'image de référence.

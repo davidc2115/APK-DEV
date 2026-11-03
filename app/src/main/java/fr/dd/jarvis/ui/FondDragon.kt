@@ -33,8 +33,7 @@ import kotlin.math.sqrt
 import kotlin.random.Random
 
 /**
- * Décor de fond « Cerveau / Graphe Obsidian », dans l'esprit de l'image de référence : serpent-dragon noir
- * enroulé autour de l'écran (écailles, épines, reflets, tête cornue gueule ouverte et œil lumineux), veines
+ * Décor de fond « Cerveau / Graphe Obsidian », dans l'esprit de l'image de référence : veines
  * d'énergie violettes, arbre mort, ruines, rochers flottants, cercle runique et cristal, nébuleuse étoilée.
  *
  * Tout est dessiné par le code (aucune image embarquée), une seule fois, dans un Bitmap logiciel — en tâche de
@@ -125,7 +124,7 @@ private class PeintreDragon(private val g: Canvas, private val W: Float, private
         branche(W * 0.5f, H * 0.37f, (-PI / 2).toFloat(), H * 0.075f, 26f * u, 8)
         ruine(W * 0.1f, H * 0.93f, W * 0.1f); ruine(W * 0.9f, H * 0.94f, W * 0.09f)
         cercleRunique(W * 0.5f, H * 0.885f, W * 0.34f, H * 0.03f)
-        serpent()
+        // Le serpent-dragon n'est plus figé dans le décor : il est animé à chaque image (voir DragonAnime).
     }
 
     // ------------------------------------------------------------------------------------ nébuleuse & étoiles
@@ -244,7 +243,7 @@ private class PeintreDragon(private val g: Canvas, private val W: Float, private
     // ------------------------------------------------------------------------------------ serpent-dragon
     private fun sgnPow(v: Float, e: Float) = sign(v) * abs(v).pow(e)
 
-    private fun serpent() {
+    @Suppress("unused") private fun serpentFige() {
         val cx0 = W * 0.5f; val cy0 = H * 0.545f; val rx = W * 0.43f; val ry = H * 0.385f
         fun boucle(th: Float): FloatArray {
             val ond = 1f + 0.03f * sin(th * 4f + 0.7f) + 0.012f * sin(th * 9f)

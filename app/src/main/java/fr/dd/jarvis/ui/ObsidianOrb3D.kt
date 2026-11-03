@@ -202,6 +202,8 @@ private fun Orbe3DContenu(
     // Décor (serpent-dragon, veines, arbre, ruines, cercle runique) : rendu une fois, puis envoyé à OpenGL comme
     // texture plein écran derrière la sphère.
     val fond = rememberFondDragon(taille.width.toInt(), taille.height.toInt(), synchrone = !avecOpenGl)
+    val dragon = rememberDragon(taille.width.toInt(), synchrone = !avecOpenGl)
+    val outilsDragon = remember { OutilsDragon() }
     LaunchedEffect(fond) { fond?.let { f -> surface[0]?.rendu?.definirFond(f.asAndroidBitmap()) } }
 
     Box(Modifier.fillMaxSize().background(Color(0xFF030106))) {
@@ -261,6 +263,8 @@ private fun Orbe3DContenu(
             // Un élément derrière la sphère (plus loin que le centre et projeté sur son disque) est masqué.
             fun cache(p: Projete) = p.zVue < centre.zVue - 0.2f && (p.ecran - centre.ecran).getDistance() < rCoeur * 0.98f
 
+            // Serpent-dragon animé autour de l'écran (sous le graphe, loin de la sphère centrale).
+            if (dragon != null) dessinerDragon(dragon, outilsDragon, temps)
             // Halo autour de la sphère (anneau transparent au centre pour ne pas voiler l'obsidienne).
             drawCircle(
                 Brush.radialGradient(

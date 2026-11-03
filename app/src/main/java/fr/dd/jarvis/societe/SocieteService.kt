@@ -355,21 +355,23 @@ class SocieteService(
             append("<name>${esc(hq.nom.ifBlank { "Clients" })} — clients</name>\n")
             append("<Style id=\"particulier\"><IconStyle><color>${kmlColor(hq.kmlCouleurParticulier)}</color><scale>1.15</scale><Icon><href>https://maps.google.com/mapfiles/kml/pushpin/wht-pushpin.png</href></Icon></IconStyle></Style>\n")
             append("<Style id=\"professionnel\"><IconStyle><color>${kmlColor(hq.kmlCouleurProfessionnel)}</color><scale>1.15</scale><Icon><href>https://maps.google.com/mapfiles/kml/pushpin/wht-pushpin.png</href></Icon></IconStyle></Style>\n")
-            append("<Style id=\"siege\"><IconStyle><color>ff00a5ff</color><scale>1.25</scale><Icon><href>http://maps.google.com/mapfiles/kml/pushpin/blue-pushpin.png</href></Icon></IconStyle></Style>\n")
+            // Punaise BLANCHE teintée, comme pour les clients : Google Earth MULTIPLIE la couleur par celle de l'icône,
+            // une punaise bleue teintée en orange donnait un repère olive foncé au lieu de la couleur choisie.
+            append("<Style id=\"siege\"><IconStyle><color>${kmlColor(hq.kmlCouleurSiege)}</color><scale>1.25</scale><Icon><href>https://maps.google.com/mapfiles/kml/pushpin/wht-pushpin.png</href></Icon></IconStyle></Style>\n")
             if (hq.lat != null && hq.lon != null) {
-                append("<Folder><name>Siège</name><Placemark><name>🏭 Siège ${esc(hq.nom)}</name><styleUrl>#siege</styleUrl><description>${esc(hq.adresse)}</description><Point><coordinates>${hq.lon},${hq.lat},0</coordinates></Point></Placemark></Folder>\\n")
+                append("<Folder><name>Siège</name><Placemark><name>🏭 Siège ${esc(hq.nom)}</name><styleUrl>#siege</styleUrl><description>${esc(hq.adresse)}</description><Point><coordinates>${hq.lon},${hq.lat},0</coordinates></Point></Placemark></Folder>\n")
             }
             listOf("professionnel", "particulier").forEach { categorie ->
                 val categoriePoints = pointsAffichage.filter { it.type == categorie }
                 if (categoriePoints.isNotEmpty()) {
                     val titre = if (categorie == "professionnel") "Clients professionnels" else "Clients particuliers"
-                    append("<Folder><name>$titre (${categoriePoints.size})</name>\\n")
+                    append("<Folder><name>$titre (${categoriePoints.size})</name>\n")
                     categoriePoints.forEach { item ->
                         append("<Placemark><name>${esc(item.nom)}</name><Snippet maxLines=\"2\">${esc(item.client)} — ${esc(item.adresse)}</Snippet><styleUrl>#${item.type}</styleUrl><description><![CDATA[${item.description}]]></description>")
                         append("<ExtendedData><Data name=\"client\"><value>${esc(item.client)}</value></Data><Data name=\"type_client\"><value>${item.type}</value></Data><Data name=\"adresse\"><value>${esc(item.adresse)}</value></Data></ExtendedData>")
-                        append("<Point><coordinates>${item.point.lon},${item.point.lat},0</coordinates></Point></Placemark>\\n")
+                        append("<Point><coordinates>${item.point.lon},${item.point.lat},0</coordinates></Point></Placemark>\n")
                     }
-                    append("</Folder>\\n")
+                    append("</Folder>\n")
                 }
             }
             append("</Document></kml>\n")

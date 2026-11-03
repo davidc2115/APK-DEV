@@ -27,7 +27,8 @@ data class Societe(
     val reservePct: Double = 0.0,        // % du HT de chaque facture encaissée mis de côté (réserve bénéfices)
     val partDirigeantPct: Double = 50.0,
     val kmlCouleurParticulier: String = "#20A45A",
-    val kmlCouleurProfessionnel: String = "#2878D0"
+    val kmlCouleurProfessionnel: String = "#2878D0",
+    val kmlCouleurSiege: String = "#FF9800"
 )
 
 enum class Mode { FORFAIT, PAR_KWC, HEURE, UNITE }
