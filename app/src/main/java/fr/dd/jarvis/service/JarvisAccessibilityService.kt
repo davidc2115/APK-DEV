@@ -99,6 +99,36 @@ class JarvisAccessibilityService : AccessibilityService() {
         return dispatchGesture(g, null, null)
     }
 
+
+    /** Sélectionne le résultat le plus proche de la requête dans une liste de résultats accessible. */
+    fun clickBestMatch(query: String): String {
+        val root = rootInActiveWindow ?: return "Écran de résultats inaccessible."
+        val terms = query.lowercase(java.util.Locale.ROOT).split(Regex("[^\\p{L}\\p{N}]+")).filter { it.length >= 2 }.distinct()
+        if (terms.isEmpty()) return "Recherche trop courte pour sélectionner un résultat."
+        data class Candidate(val node: AccessibilityNodeInfo, val score: Int, val label: String)
+        val found = mutableListOf<Candidate>()
+        fun walk(node: AccessibilityNodeInfo?) {
+            if (node == null) return
+            val label = (node.text?.toString() ?: node.contentDescription?.toString()).orEmpty()
+            if (label.isNotBlank()) {
+                val normalized = label.lowercase(java.util.Locale.ROOT)
+                val score = terms.count { normalized.contains(it) }
+                if (score > 0) {
+                    var clickable: AccessibilityNodeInfo? = node
+                    while (clickable != null && !clickable.isClickable) clickable = clickable.parent
+                    if (clickable != null) found += Candidate(clickable, score, label)
+                }
+            }
+            for (i in 0 until node.childCount) walk(node.getChild(i))
+        }
+        walk(root)
+        val best = found.maxByOrNull { it.score } ?: return "Aucun résultat correspondant détecté. Aucun morceau n'a été lancé."
+        val threshold = if (terms.size >= 3) 2 else 1
+        if (best.score < threshold) return "Résultat trop incertain (« " + best.label + " ») : aucun lancement automatique."
+        return if (best.node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) "Résultat sélectionné : " + best.label
+            else "Résultat trouvé mais Android a refusé le clic."
+    }
+
     /** Défile vers le bas (le contenu monte) ou vers le haut. */
     fun scroll(down: Boolean): Boolean {
         val m = resources.displayMetrics
