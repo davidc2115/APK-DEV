@@ -513,6 +513,18 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         }
     }
 
+    /** Fichier local lisible (pour un montage vidéo…) d'un fichier du coffre : direct si possible, sinon copie dans [dossier]. */
+    fun versFichierLocal(chemin: String, dossier: File): File? {
+        val c = resoudre(chemin) ?: return null
+        racineFichier()?.let { r -> return fichierSur(r, c).takeIf { it.isFile } }
+        val f = trouver(c)?.takeIf { it.isFile } ?: return null
+        val sortie = File(dossier.apply { mkdirs() }, c.substringAfterLast('/'))
+        return runCatching {
+            ctx.contentResolver.openInputStream(f.uri)?.use { i -> sortie.outputStream().use { o -> i.copyTo(o) } } ?: return null
+            sortie
+        }.getOrNull()
+    }
+
     /** Description (prompt) de chaque image générée par JARVIS, par nom de fichier. */
     private fun descriptionsImages(): Map<String, String> = runCatching {
         val f = File(ctx.filesDir, "images_descriptions.json")

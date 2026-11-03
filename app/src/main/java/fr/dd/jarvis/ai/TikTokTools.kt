@@ -14,9 +14,9 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
         // VRAIMENT générer une vidéo (tiktok_video) — sans ce mot-clé large, une demande du type « crée-moi une vidéo
         // sur X » (sans dire « tiktok ») ne proposait pas l'outil au modèle, qui répondait alors en inventant un faux
         // succès au lieu d'appeler quoi que ce soit.
-        val KEYWORDS = Regex("tiktok|tik tok|vid[ée]o", RegexOption.IGNORE_CASE)
+        val KEYWORDS = Regex("tiktok|tik tok|vid[ée]o|montage|clip|reels?|shorts?", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
-        val NAMES = setOf("tiktok_connexion", "tiktok_deconnexion", "tiktok_profil", "tiktok_mes_videos", "tiktok_analyse", "tiktok_script", "tiktok_video")
+        val NAMES = setOf("tiktok_connexion", "tiktok_deconnexion", "tiktok_profil", "tiktok_mes_videos", "tiktok_analyse", "tiktok_script", "tiktok_video", "video_montage")
     }
 
     private fun prop(d: String) = JSONObject().put("type", "string").put("description", d)
@@ -43,13 +43,34 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
                 "duree" to prop("Durée visée en secondes (optionnel, ex. 30)."),
                 "objectif" to prop("Ce que la vidéo doit privilégier : vues, abonnés, ventes, notoriété… (optionnel).")
             ), listOf("sujet")),
-        tool("tiktok_video", "TikTok : génère VRAIMENT une vidéo (pas juste un script) à partir d'un sujet ou d'un script déjà écrit — découpe en plans, génère chaque plan avec un service gratuit de génération vidéo IA (Hugging Face, ZeroGPU, compte gratuit sans carte bancaire mais avec un vrai quota journalier limité : peut être lent, en partie indisponible, ou en quota atteint pour la journée), puis monte les plans réussis en une seule vidéo verticale MUETTE (pas de son généré). Enregistre le résultat dans le coffre Obsidian (dossier « Vidéos TikTok »). Préviens toujours l'utilisateur si un ou plusieurs plans ont échoué (quota/service) plutôt que de le passer sous silence.",
+        tool("tiktok_video", "TikTok : crée VRAIMENT une ou plusieurs vidéos TikTok montées (pas juste un script), d'une durée précise : plans générés par IA (fal.ai) et/ou vidéos et images existantes, texte incrusté, voix off, musique ou chanson avec paroles. Le montage tourne en arrière-plan (quelques minutes) et le résultat arrive dans le chat. Ne demande pas de précisions inutiles : valeurs par défaut raisonnables.",
             mapOf(
-                "sujet" to prop("Le sujet de la vidéo (si aucun script déjà écrit n'est fourni)."),
-                "script" to prop("Un script déjà écrit (ex. sortie de tiktok_script) à utiliser comme base plutôt que de repartir du sujet seul (optionnel)."),
-                "duree_plan" to prop("Durée visée par plan en secondes, 2 à 5 (optionnel, défaut 3 — le modèle gratuit ne va pas au-delà de 5s par plan)."),
-                "format" to prop("« vertical » (9:16, par défaut, pour TikTok) ou « horizontal » (16:9).")
-            ), listOf())
+                "sujet" to prop("Le sujet / ce que doit raconter la vidéo."),
+                "script" to prop("Script déjà écrit à suivre (optionnel, ex. sortie de tiktok_script)."),
+                "duree" to prop("Durée TOTALE de chaque vidéo en secondes (5 à 180, défaut 30). Le montage enchaîne autant de plans que nécessaire pour l'atteindre exactement."),
+                "nombre" to prop("Nombre de vidéos différentes à créer (1 à 5, défaut 1) — chacune avec un angle différent."),
+                "format" to prop("vertical (9:16, défaut) ou horizontal (16:9)."),
+                "musique" to prop("« auto » (défaut : musique générée selon le sujet), « aucune », un style (ex. « lo-fi calme », « rock énergique »), ou un fichier existant (chemin du coffre, Music/…)."),
+                "paroles" to prop("Pour une CHANSON avec paroles chantées : « auto » (paroles écrites par l'IA) ou le texte des paroles. Vide = musique instrumentale."),
+                "voix_off" to prop("« auto » (défaut : narration écrite par l'IA et lue par la synthèse vocale), « aucune », ou le texte exact à dire."),
+                "textes" to prop("« true » (défaut) pour incruster du texte à l'écran sur chaque plan, « false » sinon."),
+                "sources" to prop("Vidéos/images EXISTANTES à monter, séparées par « ; » : chemins ou dossiers du coffre (ex. « JARVIS/Images/Coloriage pompier »), fichiers du téléphone (« DCIM/Camera/xxx.mp4 »), « dernieres_videos:5 », « dernieres_images:8 », jarvis-video-ia:… Des plans IA complètent si la durée n'est pas atteinte."),
+                "garder_son" to prop("« true » pour garder le son d'origine des vidéos existantes (mixé sous la musique/voix).")
+            )),
+        tool("video_montage", "Crée une ou plusieurs vidéos (montage) de durée précise, pour n'importe quel usage (souvenir, présentation, publicité, réseaux…) : enchaîne des plans IA et/ou des vidéos/images existantes jusqu'à la durée voulue, avec texte à l'écran, voix off, musique (générée ou fichier) ou chanson avec paroles chantées. Tourne en arrière-plan ; le résultat arrive dans le chat. Utilise-le pour toute demande de vidéo montée, de clip musical, ou de « montage de plusieurs vidéos ».",
+            mapOf(
+                "sujet" to prop("Le sujet / ce que doit raconter la vidéo."),
+                "script" to prop("Script déjà écrit à suivre (optionnel, ex. sortie de tiktok_script)."),
+                "duree" to prop("Durée TOTALE de chaque vidéo en secondes (5 à 180, défaut 30). Le montage enchaîne autant de plans que nécessaire pour l'atteindre exactement."),
+                "nombre" to prop("Nombre de vidéos différentes à créer (1 à 5, défaut 1) — chacune avec un angle différent."),
+                "format" to prop("vertical (9:16, défaut) ou horizontal (16:9)."),
+                "musique" to prop("« auto » (défaut : musique générée selon le sujet), « aucune », un style (ex. « lo-fi calme », « rock énergique »), ou un fichier existant (chemin du coffre, Music/…)."),
+                "paroles" to prop("Pour une CHANSON avec paroles chantées : « auto » (paroles écrites par l'IA) ou le texte des paroles. Vide = musique instrumentale."),
+                "voix_off" to prop("« auto » (défaut : narration écrite par l'IA et lue par la synthèse vocale), « aucune », ou le texte exact à dire."),
+                "textes" to prop("« true » (défaut) pour incruster du texte à l'écran sur chaque plan, « false » sinon."),
+                "sources" to prop("Vidéos/images EXISTANTES à monter, séparées par « ; » : chemins ou dossiers du coffre (ex. « JARVIS/Images/Coloriage pompier »), fichiers du téléphone (« DCIM/Camera/xxx.mp4 »), « dernieres_videos:5 », « dernieres_images:8 », jarvis-video-ia:… Des plans IA complètent si la durée n'est pas atteinte."),
+                "garder_son" to prop("« true » pour garder le son d'origine des vidéos existantes (mixé sous la musique/voix).")
+            ))
     )
 
     suspend fun execute(name: String, a: JSONObject): ToolResult = withContext(Dispatchers.IO) {
@@ -130,14 +151,25 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
                 val emplacement = runCatching { app.obsidian.saveIn("Scripts TikTok", sujet.take(60), script) }.getOrNull()
                 ToolResult(script + (emplacement?.let { "\n\n📁 $it" } ?: ""), direct = true)
             }
-            "tiktok_video" -> {
+            "tiktok_video", "video_montage" -> {
                 val sujet = a.optString("sujet").trim()
                 val script = a.optString("script").trim()
-                if (sujet.isBlank() && script.isBlank()) return ToolResult("Précise le sujet de la vidéo (ou donne le script à utiliser).")
-                val duree = (a.optString("duree_plan").toIntOrNull() ?: 3).coerceIn(2, 5)
-                val vertical = a.optString("format").trim().lowercase() != "horizontal"
-                val (fichier, message) = VideoGen.genererVideo(app, sujet, script, duree, vertical)
-                ToolResult(message, direct = true)
+                if (sujet.isBlank() && script.isBlank() && a.optString("sources").isBlank()) return ToolResult("Précise le sujet de la vidéo (ou les vidéos/images à monter).")
+                fun vrai(k: String, def: Boolean) = a.optString(k).trim().lowercase().let { if (it.isBlank()) def else it in setOf("true", "oui", "1", "yes") }
+                val d = Montage.Demande(
+                    sujet = sujet.ifBlank { script.take(80) }, script = script,
+                    dureeS = a.optString("duree").filter { it.isDigit() }.toIntOrNull() ?: 30,
+                    format = a.optString("format").ifBlank { "vertical" },
+                    nombre = a.optString("nombre").filter { it.isDigit() }.toIntOrNull() ?: 1,
+                    musique = a.optString("musique").ifBlank { "auto" },
+                    paroles = a.optString("paroles").trim(),
+                    voixOff = a.optString("voix_off").ifBlank { "auto" },
+                    textes = vrai("textes", true),
+                    sources = a.optString("sources").trim(),
+                    garderSon = vrai("garder_son", false),
+                    tiktok = name == "tiktok_video"
+                )
+                ToolResult(Montage.lancer(app, d), direct = true)
             }
             else -> ToolResult("Outil TikTok inconnu.")
         }

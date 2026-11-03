@@ -42,7 +42,7 @@ object VideoGen {
 
     /** Génère un plan (clip) via le Space Hugging Face ; retourne les octets mp4. Erreur explicite si le token
      *  manque/est refusé, si le quota GPU gratuit du jour est épuisé, ou si le service est indisponible. */
-    private fun genereClip(app: JarvisApp, prompt: String, dureeDemandee: Int, vertical: Boolean): ByteArray {
+    internal fun genereClip(app: JarvisApp, prompt: String, dureeDemandee: Int, vertical: Boolean): ByteArray {
         // Clé fal.ai configurée : génération fiable (payante) avec Wan 2.2 sur fal.ai, plutôt que le service gratuit à quota.
         if (ImageToVideoGen.disponible(app)) return ImageToVideoGen.clipTexte(app, prompt, dureeDemandee.toDouble(), if (vertical) "9:16" else "16:9")
         val token = app.store.huggingFaceToken.value.trim()

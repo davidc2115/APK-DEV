@@ -117,8 +117,32 @@ object ImageToVideoGen {
         return file to location
     }
 
-    /** Soumet [input] à la file fal.ai de [modele], attend la fin, renvoie les octets du MP4 produit. */
-    private fun executer(modele: String, input: JSONObject, key: String): ByteArray {
+    /**
+     * Musique générée par fal.ai : instrumentale (Stable Audio 3, jusqu'à 380 s) ou chanson avec PAROLES chantées
+     * (MiniMax Music 3) quand [paroles] est fourni. Renvoie (octets, extension).
+     */
+    fun musique(app: JarvisApp, description: String, secondes: Double, paroles: String = ""): Pair<ByteArray, String> {
+        val key = cle(app)
+        return if (paroles.isNotBlank()) {
+            val input = JSONObject().put("prompt", description.ifBlank { "catchy modern pop song" })
+                .put("lyrics", paroles).put("duration", secondes.coerceIn(10.0, 300.0))
+            executer("minimax/music-3", input, key, ::urlAudio) to "wav"
+        } else {
+            val input = JSONObject().put("prompt", description.ifBlank { "upbeat modern background music, no vocals" })
+                .put("duration", secondes.coerceIn(5.0, 380.0)).put("output_format", "mp3")
+            executer("fal-ai/stable-audio-3/medium/text-to-audio", input, key, ::urlAudio) to "mp3"
+        }
+    }
+
+    private fun urlVideo(result: JSONObject) = result.optJSONObject("video")?.optString("url").orEmpty()
+        .ifBlank { result.optJSONArray("videos")?.optJSONObject(0)?.optString("url").orEmpty() }
+
+    private fun urlAudio(result: JSONObject) = result.optJSONObject("audio")?.optString("url").orEmpty()
+        .ifBlank { result.optJSONObject("audio_file")?.optString("url").orEmpty() }
+        .ifBlank { result.optJSONArray("audios")?.optJSONObject(0)?.optString("url").orEmpty() }
+
+    /** Soumet [input] à la file fal.ai de [modele], attend la fin, renvoie les octets du fichier produit (vidéo par défaut). */
+    private fun executer(modele: String, input: JSONObject, key: String, extraire: (JSONObject) -> String = ::urlVideo): ByteArray {
         val accepted = executeJson(
             Request.Builder().url("https://queue.fal.run/$modele")
                 .header("Authorization", "Key $key")
@@ -155,15 +179,15 @@ object ImageToVideoGen {
 
         // Le résultat (ou l'erreur détaillée si la génération a échoué) se lit sur response_url.
         val result = executeJson(Request.Builder().url(responseUrl).header("Authorization", "Key $key").get().build())
-        val videoUrl = result.optJSONObject("video")?.optString("url").orEmpty()
-            .ifBlank { result.optJSONArray("videos")?.optJSONObject(0)?.optString("url").orEmpty() }
-        if (!videoUrl.startsWith("https://")) {
+        val videoUrl = extraire(result)
+        if (!videoUrl.startsWith("https://") && !videoUrl.startsWith("data:")) {
             val detail = result.optString("detail").ifBlank { result.toString().take(200) }
-            throw ApiException(0, "fal.ai n'a pas renvoyé de vidéo : $detail")
+            throw ApiException(0, "fal.ai n'a pas renvoyé de fichier : $detail")
         }
+        if (videoUrl.startsWith("data:")) return Base64.decode(videoUrl.substringAfter(','), Base64.DEFAULT)
         return http.newCall(Request.Builder().url(videoUrl).get().build()).execute().use { response ->
-            if (!response.isSuccessful) throw ApiException(response.code, "Téléchargement du MP4 impossible (${response.code}).")
-            response.body?.bytes() ?: throw ApiException(0, "Le MP4 reçu est vide.")
+            if (!response.isSuccessful) throw ApiException(response.code, "Téléchargement du fichier fal.ai impossible (${response.code}).")
+            response.body?.bytes() ?: throw ApiException(0, "Le fichier reçu est vide.")
         }
     }
 

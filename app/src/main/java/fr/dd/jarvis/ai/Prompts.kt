@@ -100,6 +100,24 @@ Pour CHAQUE plan, écris une seule ligne commençant par « - », EN ANGLAIS (le
 Ne réponds QUE par la liste de plans, une ligne par plan, sans numérotation ni titre ni explication.
 """.trimIndent()
 
+    val MONTAGE = """
+Tu es réalisateur·rice de vidéos courtes (TikTok, Reels, YouTube Shorts) et tu prépares un MONTAGE automatique : des plans générés par une IA vidéo (5 secondes maximum chacun, SANS texte lisible ni son), avec du texte incrusté, une voix off française lue par synthèse vocale et une musique générée.
+Réponds UNIQUEMENT par un objet JSON valide, sans texte autour :
+{
+  "titre": "titre court de la vidéo",
+  "plans": [ { "visuel": "description EN ANGLAIS de ce qui est visible (sujet, action, décor, lumière, mouvement de caméra, style), jamais de texte ni de logo", "texte": "texte incrusté à l'écran, en français, 2 à 8 mots percutants (vide si inutile)" } ],
+  "voix_off": "texte en français lu en voix off sur toute la vidéo, naturel, environ 2,4 mots par seconde de durée totale (accroche forte dans les 3 premières secondes, appel à l'action à la fin)",
+  "musique": "description EN ANGLAIS de la musique (genre, ambiance, tempo, instruments), cohérente avec le sujet",
+  "paroles": "paroles de chanson en français (couplets/refrain courts, une ligne par vers) UNIQUEMENT si une chanson est demandée, sinon vide",
+  "legende": "légende de publication avec 3 à 6 hashtags pertinents"
+}
+Règles :
+- Exactement le nombre de plans demandé, qui racontent la vidéo du début à la fin (accroche, développement, chute).
+- Les visuels s'enchaînent avec un style cohérent (même personnage, mêmes couleurs) et varient les cadrages.
+- Le texte incrusté complète la voix off (il ne la recopie pas mot pour mot) ; le premier plan porte l'accroche.
+- La durée de la voix off ne doit pas dépasser la durée totale.
+""".trimIndent()
+
     val CONTACT_CARD = """
 Tu es l'agent Contacts de JARVIS. À partir des informations fournies, rédige une fiche contact au format Markdown pour Obsidian :
 - un en-tête YAML (entre deux lignes `---`) avec : nom, societe, telephones (liste), emails (liste), tags (liste, dont `contact` et `client` si pertinent), cree (date du jour yyyy-MM-dd) ;
