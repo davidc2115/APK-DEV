@@ -332,12 +332,10 @@ if [ -z "${'$'}{MODE}" ]; then
     exit "${'$'}{INSTALL_RC}"
   fi
   if proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
-    p "❌ Hermès a terminé sans créer son interpréteur Python (venv/bin/python). Installation refusée pour éviter un faux succès."
+    MODE=proot
+  else
     p "❌ Hermès a terminé sans créer son interpréteur Python (venv/bin/python). Installation refusée pour éviter un faux succès."
     tail -n 12 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
-    exit 1
-  fi
-    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
     exit 1
   fi
 fi
