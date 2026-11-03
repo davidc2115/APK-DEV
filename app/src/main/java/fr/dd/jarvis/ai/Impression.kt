@@ -35,12 +35,16 @@ object Impression {
     private fun ByteArrayOutputStream.attr(tag: Int, name: String, value: String) { write(tag); s(name.length); write(name.toByteArray()); val b = value.toByteArray(); s(b.size); write(b) }
     private fun ByteArrayOutputStream.int(name: String, v: Int) { write(0x21); s(name.length); write(name.toByteArray()); s(4); write(v ushr 24 and 255); write(v ushr 16 and 255); write(v ushr 8 and 255); write(v and 255) }
 
+    /** Garantit un chemin HTTP absolu : un service mDNS peut annoncer « ipp/print » sans slash initial. */
+    private fun normaliserChemin(chemin: String): String = "/" + chemin.trim().trimStart('/').ifBlank { "ipp/print" }
+
     private fun requete(op: Int, ip: String, chemin: String, extra: ByteArrayOutputStream.() -> Unit, doc: ByteArray? = null, schema: String = "http", port: Int = 631): ByteArray {
+        val cheminUrl = normaliserChemin(chemin)
         val o = ByteArrayOutputStream()
         o.write(1); o.write(1); o.s(op); o.write(0); o.write(0); o.write(0); o.write(1)
         o.write(0x01)
         o.attr(0x47, "attributes-charset", "utf-8"); o.attr(0x48, "attributes-natural-language", "fr")
-        o.attr(0x45, "printer-uri", (if (schema == "https") "ipps" else "ipp") + "://$ip:$port$chemin")
+        o.attr(0x45, "printer-uri", (if (schema == "https") "ipps" else "ipp") + "://$ip:$port$cheminUrl")
         o.extra()
         o.write(0x03)
         if (doc != null) o.write(doc)
@@ -80,7 +84,7 @@ object Impression {
     @Volatile var trace = StringBuilder()
 
     private fun envoyer(app: JarvisApp, via: String, ip: String, chemin: String, corps: ByteArray, schema: String = "http", port: Int = 631): ByteArray? {
-        val url = "$schema://$ip:$port$chemin"
+        val url = "$schema://$ip:$port${normaliserChemin(chemin)}"
         if (via != "serveur") {
             val r = Request.Builder().url(url).post(corps.toRequestBody("application/ipp".toMediaType())).build()
             return try {
@@ -116,7 +120,7 @@ object Impression {
             if (via == "local" && !Reseau.ouvertTcp(ip, port)) { trace.append("  port $port fermé ou muet sur $ip\n"); continue }
             points += sch to port
         }
-        for ((sch, port) in points) for (c in listOfNotNull(chemin) + CHEMINS) {
+        for ((sch, port) in points) for (c in (listOfNotNull(chemin) + CHEMINS).map(::normaliserChemin).distinct()) {
             val rep = envoyer(app, via, ip, c, requete(0x000B, ip, c, ATTRS, null, sch, port), sch, port) ?: continue
             val (st, at) = parse(rep)
             if (st in 0..2 && at.isNotEmpty()) return Imprimante(ip, c, at, sch, port)
