@@ -42,7 +42,8 @@ object HomeAssistantDashboard {
                 val r = next()
                 if (r.optInt("id", -1) == id) {
                     if (!r.optBoolean("success", false)) throw IllegalStateException("Home Assistant refuse $type : ${r.optJSONObject("error")?.optString("message") ?: r}")
-                    val result = r.opt("result")\n                    return if (result is JSONObject) result else JSONObject().put("_value", result)
+                    val result = r.opt("result")
+                    return if (result is JSONObject) result else JSONObject().put("_value", result)
                 }
             }
             throw IllegalStateException("Réponse manquante pour $type.")
