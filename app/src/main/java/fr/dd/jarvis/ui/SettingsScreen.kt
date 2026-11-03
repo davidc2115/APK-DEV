@@ -1175,15 +1175,23 @@ private fun ImprimantePanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Ja
                 scope.launch {
                     busy = true
                     msg = try {
-                        val via = if (fr.dd.jarvis.ai.Reseau.infos(app)?.wifi == true) "local" else "serveur"
+                        var via = "local"
                         val p = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            fr.dd.jarvis.ai.Impression.interroger(app, store.printerHost.value.trim(), via, store.printerPath.value.trim())
+                            val ip = store.printerHost.value.trim()
+                            val chemin = store.printerPath.value.trim()
+                            val direct = if (fr.dd.jarvis.ai.Reseau.infos(app)?.wifi == true)
+                                fr.dd.jarvis.ai.Impression.interroger(app, ip, "local", chemin) else null
+                            if (direct != null) direct
+                            else if (fr.dd.jarvis.ai.Serveur.sshConfigure(app)) {
+                                via = "serveur"
+                                fr.dd.jarvis.ai.Impression.interroger(app, ip, "serveur", chemin)
+                            } else null
                         }
                         if (p != null) {
                             store.printerName.set(p.nom)
                             store.printerPath.set(p.chemin)
                             "✅ ${p.nom} — ${p.modele.ifBlank { p.ip }} — ${p.etat} (via ${if (via == "serveur") "Debian" else "Wi-Fi"})."
-                        } else "❌ Imprimante inaccessible par ${if (via == "serveur") "le serveur Debian" else "le Wi-Fi"}. Vérifie SSH et l'adresse IPP."
+                        } else "❌ Imprimante inaccessible en direct et via Debian. Vérifie SSH, l'adresse IPP et que Debian peut joindre l'imprimante."
                     } catch (e: Exception) { "❌ ${e.message ?: e.javaClass.simpleName}" }
                     busy = false
                 }
