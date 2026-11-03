@@ -187,6 +187,36 @@ fun SettingsScreen(app: JarvisApp) {
             }
         }
 
+        // ------------------------------------------------------------ Android Auto
+        item {
+            val aa = "com.google.android.projection.gearhead"
+            val aaInstalle = remember(tick) { runCatching { ctx.packageManager.getPackageInfo(aa, 0); true }.getOrDefault(false) }
+            HudPanel(Modifier.fillMaxWidth(), title = "Android Auto") {
+                StatusRow("Android Auto installé sur le téléphone", aaInstalle)
+                StatusRow("Connecté à la voiture en ce moment", app.enVoiture)
+                Text(
+                    "JARVIS n'est pas installé depuis le Play Store : Android Auto le cache tant que « Sources inconnues » n'est pas activé (à faire une seule fois) :\n" +
+                        "1) Touche « Ouvrir Android Auto » ci-dessous, descends tout en bas et touche 10 fois « Version » (accepte le mode développeur).\n" +
+                        "2) Menu ⋮ en haut à droite › « Paramètres pour les développeurs » › coche « Sources inconnues ».\n" +
+                        "3) Reviens dans Android Auto › « Personnaliser le lanceur » (ou « Écran ») et coche JARVIS.\n" +
+                        "4) Débranche puis rebranche le téléphone (ou redémarre Android Auto) : JARVIS apparaît dans la liste des applis de la voiture.\n" +
+                        "CarPlay est réservé aux iPhone : une appli Android ne peut pas y apparaître.",
+                    color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(vertical = 6.dp)
+                )
+                HudButton("Ouvrir Android Auto", Modifier.fillMaxWidth(), enabled = aaInstalle, filled = true) {
+                    val pm = ctx.packageManager
+                    val reglages = runCatching {
+                        pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).setPackage(aa), 0)
+                            .map { it.activityInfo }.filter { it.exported }
+                            .sortedByDescending { it.name.contains("setting", true) }.firstOrNull()
+                            ?.let { Intent(Intent.ACTION_MAIN).setClassName(it.packageName, it.name) }
+                    }.getOrNull() ?: pm.getLaunchIntentForPackage(aa)
+                    runCatching { ctx.startActivity((reglages ?: Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$aa"))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                        .onFailure { ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$aa")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                }
+            }
+        }
+
         // ------------------------------------------------------------ Annonces vocales
         item { SectionHeader("Communication") }
         item {

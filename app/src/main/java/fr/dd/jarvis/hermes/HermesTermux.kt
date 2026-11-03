@@ -217,6 +217,10 @@ p() { echo "${'$'}*"; command -v curl >/dev/null 2>&1 && curl -s -m 4 -X POST -H
             appendLine("  api_server:")
             appendLine("    enabled: true")
             appendLine("    port: $PORT_API")
+            // Outils de Jarvis exposés directement au modèle (sinon Hermès les cache derrière tool_search / tool_call).
+            appendLine("tools:")
+            appendLine("  tool_search:")
+            appendLine("    enabled: \"off\"")
         }
         return """
 H="${'$'}HOME/.hermes"; mkdir -p "${'$'}H/logs"
@@ -229,10 +233,13 @@ setenv API_SERVER_MODEL_NAME hermes-agent
 ${if (gemini.isNotBlank()) "setenv GOOGLE_API_KEY ${q(gemini)}" else "p '⚠️ Aucune clé Gemini dans Jarvis : ajoute-en une (Réglages › Agents Gemini) puis « Configurer Hermès ».'"}
 ${if (groq.isNotBlank()) "setenv GROQ_API_KEY ${q(groq)}" else ""}
 chmod 600 "${'$'}H/.env"
+# Version de schéma de la configuration installée : conservée, sinon Hermès croit à une vieille config et la migre.
+CV=${'$'}(grep -m1 '^_config_version:' "${'$'}H/config.yaml" 2>/dev/null || grep -m1 '^_config_version:' "${'$'}H/config.yaml.avant-jarvis" 2>/dev/null)
 if [ -f "${'$'}H/config.yaml" ] && ! grep -q 'Géré par Jarvis' "${'$'}H/config.yaml"; then cp "${'$'}H/config.yaml" "${'$'}H/config.yaml.avant-jarvis"; p "💾 Ancienne configuration d'Hermès sauvegardée (config.yaml.avant-jarvis)."; fi
 cat > "${'$'}H/config.yaml" <<'JARVIS_YAML'
 ${yaml.trimEnd()}
 JARVIS_YAML
+[ -n "${'$'}CV" ] && printf '%s\n' "${'$'}CV" >> "${'$'}H/config.yaml"
 p "⚙️ Configuration écrite : modèle Gemini $modele${if (groq.isNotBlank()) ", Groq en secours" else ""}, pont MCP Jarvis, API locale :$PORT_API."
 """.trimIndent()
     }
