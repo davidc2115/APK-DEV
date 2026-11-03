@@ -287,25 +287,10 @@ if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; the
 pkg update -y >/dev/null 2>&1 || apt-get update >/dev/null 2>&1
 ${'$'}{APT} install curl gnupg util-linux >/dev/null 2>&1 || p "⚠️ Paquets de base : échec partiel."
 case "${'$'}(uname -m)" in aarch64) ;; *) p "⚠️ Architecture ${'$'}(uname -m) : seul aarch64 est pris en charge officiellement.";; esac
+# Forcer Debian sous proot : le compilateur Android/Bionic ne peut pas construire pillow-heif.
+# Dans Debian aarch64/glibc, uv peut récupérer la roue manylinux précompilée.
 MODE=""
-if hermes --version >/dev/null 2>&1; then MODE=natif; fi
-if [ -z "${'$'}{MODE}" ]; then
-  p "🔐 Essai du dépôt officiel signé de Nous Research…"
-  mkdir -p "${'$'}{PREFIX}/etc/apt/keyrings"
-  FP=""
-  if curl -fsSL https://hermes-assets.nousresearch.com/releases/termux/stable/key.asc -o "${'$'}{PREFIX}/etc/apt/keyrings/hermes-agent.asc" 2>/dev/null; then
-    FP=${'$'}(gpg --show-keys --with-colons "${'$'}{PREFIX}/etc/apt/keyrings/hermes-agent.asc" 2>/dev/null | awk -F: '/^fpr:/ {print ${'$'}10; exit}')
-  fi
-  if [ "${'$'}{FP}" = "$EMPREINTE" ]; then
-    printf '%s\n' "deb [signed-by=${'$'}{PREFIX}/etc/apt/keyrings/hermes-agent.asc] https://hermes-assets.nousresearch.com/releases/termux/stable hermes-stable main" > "${'$'}{PREFIX}/etc/apt/sources.list.d/hermes-agent.list"
-    apt-get update >/dev/null 2>&1
-    ${'$'}{APT} install hermes-agent >> "${'$'}{LOG}" 2>&1 && hermes --version >/dev/null 2>&1 && MODE=natif
-  else
-    rm -f "${'$'}{PREFIX}/etc/apt/keyrings/hermes-agent.asc" "${'$'}{PREFIX}/etc/apt/sources.list.d/hermes-agent.list"
-    [ -n "${'$'}{FP}" ] && p "⛔ Empreinte de la clé du dépôt inattendue : dépôt ignoré par sécurité."
-  fi
-  [ -z "${'$'}{MODE}" ] && p "ℹ️ Paquet Termux officiel indisponible : installation dans une Debian légère (proot), méthode fiable."
-fi
+p "ℹ️ Installation dans Debian légère (proot) pour éviter les compilations incompatibles avec Android."
 if [ -z "${'$'}{MODE}" ]; then
   ${'$'}{APT} install proot-distro >> "${'$'}{LOG}" 2>&1 || { p "❌ Impossible d'installer proot-distro (réseau ?)."; exit 1; }
   if ! proot-distro login debian -- true >/dev/null 2>&1; then
@@ -321,7 +306,7 @@ if [ -z "${'$'}{MODE}" ]; then
   : > "${'$'}{INSTALL_LOG}"
   p "⏳ Installation des dépendances Hermès démarrée. Suivi actif toutes les 20 secondes."
   proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root \
-    bash -c 'set -e; mkdir -p /root/.hermes; printf "pillow-heif==1.4.0\\n" > /root/.hermes/jarvis-constraints.txt; export UV_CONSTRAINT=/root/.hermes/jarvis-constraints.txt PIP_CONSTRAINT=/root/.hermes/jarvis-constraints.txt; HEIF_VER=$(pkg-config --modversion libheif) || { echo "pkg-config ne trouve pas libheif"; exit 1; }; dpkg --compare-versions "${'$'}HEIF_VER" ge 1.19.0 || { echo "libheif ${'$'}HEIF_VER trop ancien (>=1.19.0 requis)"; exit 1; }; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+    bash -c 'set -e; mkdir -p /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
   INSTALL_PID=$!
   while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
     sleep 20
