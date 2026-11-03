@@ -162,23 +162,29 @@ object Serveur {
 
     fun lister(app: JarvisApp, dossier: String): String = exec(app, "ls -lAh --time-style=long-iso ${q(dossier)} | head -150").second
 
-    /** Analyse du réseau local DU SERVEUR (ping + table de voisinage = adresses MAC + ports courants) ; fonctionne même si le téléphone est ailleurs. */
+    /** Analyse le LAN du serveur Debian : sous-réseaux réellement configurés, table ARP/neigh et ports TCP.
+     *  Les appareils sans adresse MAC connue restent visibles dans les résultats. */
     fun scanReseau(app: JarvisApp): List<Reseau.Appareil> {
-        val r = exec(app, "net=\$(ip -4 -o addr show scope global | awk '{print \$4}' | head -1); b=\$(echo \$net | cut -d/ -f1 | cut -d. -f1-3); " +
-            "for i in \$(seq 1 254); do (ping -c1 -W1 \$b.\$i >/dev/null 2>&1) & done; wait; sleep 1; " +
-            "ip neigh show | grep -v FAILED | awk '{print \"N\",\$1,\$5}' | grep -E '^N [0-9]+\\.'; " +
-            "for ip in \$(ip neigh show | grep -v FAILED | awk '{print \$1}' | grep -E '^[0-9]+\\.'); do (for p in 22 80 443 445 631 9100 8123 8080 554 1883; do timeout 0.6 bash -c \"echo >/dev/tcp/\$ip/\$p\" 2>/dev/null && echo \"P \$ip \$p\"; done) & done; wait", 150).second
+        val commande = "nets=\$(ip -4 route show scope link | awk '\$1 ~ /^[0-9]+\\./ {print \$1}' | sort -u); " +
+            "for net in \$nets; do python3 -c 'import ipaddress,sys; n=ipaddress.ip_network(sys.argv[1],strict=False); print(\"\\n\".join(str(x) for x in n.hosts()) if n.num_addresses <= 1024 else \"\")' \$net; done | " +
+            "while read ip; do (ping -c1 -W1 \$ip >/dev/null 2>&1) & while [ \$(jobs -rp | wc -l) -ge 48 ]; do wait -n 2>/dev/null || break; done; done; wait; sleep 1; " +
+            "ip neigh show | awk '\$1 ~ /^[0-9]+\\./ && \$0 !~ /FAILED/ {mac=\"\"; for(i=1;i<=NF;i++) if(\$i==\"lladdr\" && i<NF) mac=\$(i+1); print \"N \"\$1\" \"mac}'; " +
+            "for ip in \$(ip neigh show | awk '\$1 ~ /^[0-9]+\\./ && \$0 !~ /FAILED/ {print \$1}' | sort -u); do " +
+            "(for p in 22 80 443 445 631 9100 8123 8080 554 1883; do timeout 0.8 bash -c \"echo >/dev/tcp/\\$ip/\\$p\" 2>/dev/null && echo \"P \\$ip \\$p\"; done) & " +
+            "while [ \$(jobs -rp | wc -l) -ge 48 ]; do wait -n 2>/dev/null || break; done; done; wait";
+        val r = exec(app, commande, 180).second
         val mac = HashMap<String, String>(); val ports = HashMap<String, MutableList<Int>>()
+        val vus = LinkedHashSet<String>()
         r.lines().forEach { l ->
-            val t = l.trim().split(" ")
-            if (t.size >= 3 && t[0] == "N") mac[t[1]] = t[2]
-            if (t.size >= 3 && t[0] == "P") ports.getOrPut(t[1]) { mutableListOf() }.add(t[2].toIntOrNull() ?: 0)
+            val t = l.trim().split(Regex("\\s+"))
+            if (t.size >= 2 && t[0] == "N") { vus += t[1]; if (t.size >= 3 && t[2].matches(Regex("(?i)([0-9a-f]{2}:){5}[0-9a-f]{2}"))) mac[t[1]] = t[2] }
+            if (t.size >= 3 && t[0] == "P") { vus += t[1]; ports.getOrPut(t[1]) { mutableListOf() }.add(t[2].toIntOrNull() ?: 0) }
         }
-        return mac.keys.sortedBy { ip -> ip.split(".").map { it.toIntOrNull() ?: 0 }.fold(0L) { a, b -> a * 256 + b } }.map { ip ->
-            val p = ports[ip].orEmpty().sorted()
+        return vus.sortedBy { ip -> ip.split(".").map { it.toIntOrNull() ?: 0 }.fold(0L) { a, b -> a * 256 + b } }.map { ip ->
+            val p = ports[ip].orEmpty().distinct().sorted()
             val m = mac[ip].orEmpty()
-            val type = Reseau.typeDeApp(p, "").let { t -> if (t == "❔ appareil") Reseau.fabricant(m) ?: t else t }
-            Reseau.Appareil(ip, "", p, "", type, "MAC $m")
+            val type = Reseau.typeDeApp(p, "").let { t -> if (t == "❔ appareil" && m.isNotBlank()) Reseau.fabricant(m) ?: t else t }
+            Reseau.Appareil(ip, "", p, "", type, if (m.isNotBlank()) "MAC $m" else "MAC inconnue")
         }
     }
 
