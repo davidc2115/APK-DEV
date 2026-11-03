@@ -300,7 +300,205 @@ if ! proot-distro login debian -- true >/dev/null 2>&1; then
 fi
 p "🔧 Préparation de Debian (paquets système)…"
 proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD DEBIAN_FRONTEND=noninteractive \
-  bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps' >> "${'$'}{LOG}" 2>&1 &
+  bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev' >> "${'
+PID=$!
+while kill -0 "${'$'}{PID}" 2>/dev/null; do
+  p "⏳ Debian : mise à jour et installation des dépendances…"
+  sleep 15
+done
+wait "${'$'}{PID}" || { p "❌ Préparation de Debian impossible. Dernières lignes :"; tail -n 12 "${'$'}{LOG}" | while IFS= read -r l; do p "   ${'$'}{l}"; done; exit 1; }
+p "⬇️ Installateur officiel Linux aarch64 d'Hermès : téléchargement et configuration…"
+INSTALL_LOG="${'$'}{H}/logs/hermes-source-install.log"
+: > "${'$'}{INSTALL_LOG}"
+proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root \
+  bash -c 'set -e; mkdir -p /root/.hermes; printf "pillow-heif==1.4.0\\n" > /root/.hermes/jarvis-constraints.txt; export UV_CONSTRAINT=/root/.hermes/jarvis-constraints.txt PIP_CONSTRAINT=/root/.hermes/jarvis-constraints.txt; HEIF_VER=$(pkg-config --modversion libheif); dpkg --compare-versions "$HEIF_VER" ge 1.19.0 || { echo "libheif $HEIF_VER trop ancien (>=1.19.0 requis)"; exit 1; }; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' \
+  > "${'
+PID=$!
+while kill -0 "${'$'}{PID}" 2>/dev/null; do
+  DERNIERE="${'$'}(tail -n 1 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-100)"
+  if [ -n "${'$'}{DERNIERE}" ]; then p "⏳ Hermès : ${'$'}{DERNIERE}"; else p "⏳ Hermès : installation Linux en cours…"; fi
+  sleep 15
+done
+wait "${'$'}{PID}" || { p "❌ L'installateur officiel a échoué. Dernières lignes :"; tail -n 15 "${'$'}{INSTALL_LOG}" | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-110)"; done; exit 1; }
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+  MODE=proot
+else
+  p "❌ Hermès n'est pas exécutable après installation. Dernières lignes :"
+  tail -n 15 "${'$'}{INSTALL_LOG}" | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-110)"; done
+  exit 1
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé dans Debian (proot)."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}
+}{LOG}" 2>&1 &
+PID=$!
+while kill -0 "${'$'}{PID}" 2>/dev/null; do
+  p "⏳ Debian : mise à jour et installation des dépendances…"
+  sleep 15
+done
+wait "${'$'}{PID}" || { p "❌ Préparation de Debian impossible. Dernières lignes :"; tail -n 12 "${'$'}{LOG}" | while IFS= read -r l; do p "   ${'$'}{l}"; done; exit 1; }
+p "⬇️ Installateur officiel Linux aarch64 d'Hermès : téléchargement et configuration…"
+INSTALL_LOG="${'$'}{H}/logs/hermes-source-install.log"
+: > "${'$'}{INSTALL_LOG}"
+proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root \
+  bash -c 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' \
+  > "${'$'}{INSTALL_LOG}" 2>&1 &
+PID=$!
+while kill -0 "${'$'}{PID}" 2>/dev/null; do
+  DERNIERE="${'$'}(tail -n 1 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-100)"
+  if [ -n "${'$'}{DERNIERE}" ]; then p "⏳ Hermès : ${'$'}{DERNIERE}"; else p "⏳ Hermès : installation Linux en cours…"; fi
+  sleep 15
+done
+wait "${'$'}{PID}" || { p "❌ L'installateur officiel a échoué. Dernières lignes :"; tail -n 15 "${'$'}{INSTALL_LOG}" | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-110)"; done; exit 1; }
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+  MODE=proot
+else
+  p "❌ Hermès n'est pas exécutable après installation. Dernières lignes :"
+  tail -n 15 "${'$'}{INSTALL_LOG}" | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-110)"; done
+  exit 1
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé dans Debian (proot)."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}
+}{INSTALL_LOG}" 2>&1 &
+PID=$!
+while kill -0 "${'$'}{PID}" 2>/dev/null; do
+  DERNIERE="${'$'}(tail -n 1 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-100)"
+  if [ -n "${'$'}{DERNIERE}" ]; then p "⏳ Hermès : ${'$'}{DERNIERE}"; else p "⏳ Hermès : installation Linux en cours…"; fi
+  sleep 15
+done
+wait "${'$'}{PID}" || { p "❌ L'installateur officiel a échoué. Dernières lignes :"; tail -n 15 "${'$'}{INSTALL_LOG}" | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-110)"; done; exit 1; }
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+  MODE=proot
+else
+  p "❌ Hermès n'est pas exécutable après installation. Dernières lignes :"
+  tail -n 15 "${'$'}{INSTALL_LOG}" | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-110)"; done
+  exit 1
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé dans Debian (proot)."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}
+}{LOG}" 2>&1 &
 PID=$!
 while kill -0 "${'$'}{PID}" 2>/dev/null; do
   p "⏳ Debian : mise à jour et installation des dépendances…"
