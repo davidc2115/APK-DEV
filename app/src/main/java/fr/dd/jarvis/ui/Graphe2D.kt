@@ -313,7 +313,7 @@ fun ConstellationVue(
                 }
         ) {
             if (fond != null) drawImage(fond) else dessinerFondCosmique(decor, pulse)
-            if (dragon != null) dessinerDragon(dragon, outilsDragon, temps)
+            if (dragon != null) dessinerDragon(dragon, outilsDragon, temps, margeHaut = 44.dp.toPx())
             val centre = origine
             val rCentre = c.rayonCerveau * k
             // Grand rayonnement violet autour du cerveau, comme le cœur lumineux de l'image de référence.
@@ -385,7 +385,7 @@ fun ConstellationVue(
                 }
             }
             // 5. Noyau, puis hubs, puis étiquettes (le texte toujours au-dessus des traits).
-            dessinerNoyau(centre, rCentre, pulse, mesureur, fontScale)
+            dessinerNoyau(centre, rCentre, pulse, mesureur, fontScale, cerveau = dragon?.cerveau)
             for (h in c.hubs) {
                 if (!hubVisible(h)) continue
                 if (h.type == TypeHub.TAGS) dessinerHubTags(h, ecran(h.pos), k, mesureur, fontScale)
@@ -491,8 +491,10 @@ fun ConstellationVue(
         // Compteurs discrets sous le panneau de recherche + bouton de rechargement.
         Text(
             "${c.totalNotes} notes · ${c.totalLiens} liens · ${c.totalTags} tags · ${c.totalPieces} pièces  ⟲",
-            color = Neon.sousTitre.copy(alpha = 0.75f), fontSize = 9.sp, fontFamily = Neon.serif,
-            modifier = Modifier.align(Alignment.TopEnd).padding(top = if (filtresOuverts) 118.dp else 86.dp, end = 12.dp).clickable { onRecharger() }
+            color = Neon.sousTitre.copy(alpha = 0.85f), fontSize = 9.sp, fontFamily = Neon.serif,
+            // À gauche (la tête du dragon occupe le coin droit), sur une pastille sombre pour rester lisible sur le corps.
+            modifier = Modifier.align(Alignment.TopStart).padding(top = if (filtresOuverts) 116.dp else 84.dp, start = 14.dp)
+                .background(Color(0xB307040E), RoundedCornerShape(50)).clickable { onRecharger() }.padding(horizontal = 8.dp, vertical = 2.dp)
         )
         if (c.vide) Text(
             "Aucune note trouvée : choisis ton coffre Obsidian dans Réglages.",

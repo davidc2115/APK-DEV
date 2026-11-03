@@ -313,7 +313,7 @@ private fun Orbe3DContenu(
             // Cerveau néon par-dessus la sphère d'obsidienne 3D (liseré, cerveau, textes).
             drawCircle(Neon.lavande.copy(alpha = 0.9f), rCoeur, centre.ecran, style = Stroke(max(rCoeur * 0.02f, 1.5f)))
             drawCircle(Neon.violetVif.copy(alpha = 0.35f), rCoeur * 1.03f, centre.ecran, style = Stroke(rCoeur * 0.07f))
-            dessinerNoyau(centre.ecran, rCoeur, pulse, mesureur, fontScale, sphere = false, sousTitre = "Orbe Obsidienne")
+            dessinerNoyau(centre.ecran, rCoeur, pulse, mesureur, fontScale, sphere = false, sousTitre = "Orbe Obsidienne", cerveau = dragon?.cerveau)
 
             // Hubs et étiquettes, du plus lointain au plus proche (les proches passent devant).
             zones.clear()

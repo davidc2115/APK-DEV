@@ -121,7 +121,9 @@ private class PeintreDragon(private val g: Canvas, private val W: Float, private
             val y = H * 0.1f + rnd() * H * 0.8f
             rocher(x, y, (6f + rnd() * 22f) * u)
         }
-        branche(W * 0.5f, H * 0.37f, (-PI / 2).toFloat(), H * 0.075f, 26f * u, 8)
+        // Deux arbres morts noueux, sous le corps du dragon (comme de part et d'autre de « Projets » sur la référence).
+        branche(W * 0.27f, H * 0.37f, (-PI / 2).toFloat() - 0.14f, H * 0.05f, 15f * u, 7)
+        branche(W * 0.75f, H * 0.385f, (-PI / 2).toFloat() + 0.16f, H * 0.045f, 13f * u, 7)
         ruine(W * 0.1f, H * 0.93f, W * 0.1f); ruine(W * 0.9f, H * 0.94f, W * 0.09f)
         cercleRunique(W * 0.5f, H * 0.885f, W * 0.34f, H * 0.03f)
         // Le serpent-dragon n'est plus figé dans le décor : il est animé à chaque image (voir DragonAnime).
@@ -181,7 +183,7 @@ private class PeintreDragon(private val g: Canvas, private val W: Float, private
         val p = Path().apply { moveTo(x, y); quadTo(mx, my, x2, y2) }
         if (w > 3f * u) lueur(p, c(140, 70, 230), w + 4f * u, 4f * u, 0.22f)
         trait(p, hex("#0a0612"), w)
-        trait(p, c(160, 110, 230, 0.35f), max(0.7f * u, w * 0.18f))
+        trait(p, c(160, 110, 230, if (w > 8f * u) 0.16f else 0.3f), max(0.7f * u, w * 0.12f))
         val k = 2 + if (rnd() < 0.4f) 1 else 0
         for (i in 0 until k) branche(x2, y2, ang + (i - (k - 1) / 2f) * 0.55f + (rnd() - 0.5f) * 0.3f, len * (0.68f + rnd() * 0.12f), w * 0.66f, prof - 1)
     }

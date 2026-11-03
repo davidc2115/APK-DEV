@@ -6,6 +6,8 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
@@ -19,6 +21,8 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
 import kotlin.math.PI
@@ -28,6 +32,7 @@ import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.random.Random
 
@@ -304,7 +309,7 @@ fun DrawScope.dessinerCerveauSeul(c: Offset, s: Float, eclat: Float) {
 /** Noyau central : sphère d'obsidienne au liseré néon, cerveau lumineux, « CERVEAU / Graphe Obsidian / ∞ ». */
 fun DrawScope.dessinerNoyau(
     c: Offset, r: Float, pulse: Float, mesureur: TextMeasurer, fontScale: Float,
-    sphere: Boolean = true, sousTitre: String = "Graphe Obsidian"
+    sphere: Boolean = true, sousTitre: String = "Graphe Obsidian", cerveau: ImageBitmap? = null
 ) {
     if (sphere) {
         drawCircle(Brush.radialGradient(listOf(Neon.violetVif.copy(alpha = 0.42f * pulse), Neon.violetProfond.copy(alpha = 0.12f), Color.Transparent), c, r * 1.85f), r * 1.85f, c)
@@ -327,7 +332,15 @@ fun DrawScope.dessinerNoyau(
         // Reflet vitreux en haut à gauche.
         drawArc(Color.White.copy(alpha = 0.18f), 200f, 70f, false, Offset(c.x - r * 0.82f, c.y - r * 0.82f), Size(r * 1.64f, r * 1.64f), style = Stroke(r * 0.05f, cap = StrokeCap.Round))
     }
-    dessinerCerveauSeul(Offset(c.x, c.y - r * 0.3f), r * 0.5f, pulse)
+    if (cerveau != null && cerveau.width > 0) {
+        // Le cerveau lumineux de l'image de référence (gros plan peint), qui pulse doucement.
+        val lw = r * 1.55f * (0.985f + 0.015f * pulse); val lh = lw * cerveau.height / cerveau.width
+        val cc = Offset(c.x, c.y - r * 0.33f)
+        drawCircle(Brush.radialGradient(listOf(Neon.violetVif.copy(alpha = 0.35f * pulse), Color.Transparent), cc, lw * 0.62f), lw * 0.62f, cc)
+        drawImage(cerveau, IntOffset.Zero, IntSize(cerveau.width, cerveau.height),
+            IntOffset((cc.x - lw / 2).roundToInt(), (cc.y - lh / 2).roundToInt()), IntSize(lw.roundToInt(), lh.roundToInt()),
+            alpha = (0.88f + 0.12f * pulse).coerceIn(0f, 1f), filterQuality = FilterQuality.High)
+    } else dessinerCerveauSeul(Offset(c.x, c.y - r * 0.3f), r * 0.5f, pulse)
     texteCentre(mesureur, "CERVEAU", Offset(c.x, c.y + r * 0.27f), r * 0.24f, Neon.blancViolet, fontScale, gras = true, largeurMax = r * 1.6f, espacement = 0.06f)
     texteCentre(mesureur, sousTitre, Offset(c.x, c.y + r * 0.5f), r * 0.135f, Neon.sousTitre, fontScale, largeurMax = r * 1.5f)
     // Symbole infini.
