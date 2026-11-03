@@ -107,21 +107,23 @@ object HomeAssistantDashboard {
                     if (raw.isBlank()) return "JSON de la carte requis."
                     val c = config(s, path); val views = c.optJSONArray("views") ?: return "Aucune vue dans ce tableau."
                     val vi = a.optInt("vue", 0).coerceIn(0, views.length() - 1); val view = views.getJSONObject(vi)
+                    backup(app, path, c)
                     val sections = view.optJSONArray("sections")
                     if (sections != null && sections.length() > 0) {
                         val si = a.optInt("section", 0).coerceIn(0, sections.length() - 1)
                         val section = sections.getJSONObject(si)
                         (section.optJSONArray("cards") ?: JSONArray().also { section.put("cards", it) }).put(JSONObject(raw))
                     } else (view.optJSONArray("cards") ?: JSONArray().also { view.put("cards", it) }).put(JSONObject(raw))
-                    backup(app, path, c); save(s, path, c)
+                    save(s, path, c)
                     return "Carte ajoutée à la vue ${view.optString("title", vi.toString())} de /$path. Sauvegarde créée."
                 }
                 "vue_ajouter" -> {
                     if (path.isBlank()) return "url_path obligatoire."
                     val raw = a.optString("vue_json").trim()
                     if (raw.isBlank()) return "JSON de la nouvelle vue requis."
-                    val c = config(s, path); (c.optJSONArray("views") ?: JSONArray().also { c.put("views", it) }).put(JSONObject(raw))
-                    backup(app, path, c); save(s, path, c)
+                    val c = config(s, path); backup(app, path, c)
+                    (c.optJSONArray("views") ?: JSONArray().also { c.put("views", it) }).put(JSONObject(raw))
+                    save(s, path, c)
                     return "Nouvelle vue ajoutée à /$path. Sauvegarde créée."
                 }
                 else -> return "Actions : lister, lire, creer, modifier, refaire, carte_ajouter, vue_ajouter, supprimer."
