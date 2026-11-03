@@ -81,6 +81,9 @@ class JarvisApp : Application() {
         private set
     lateinit var societe: SocieteService
         private set
+    /** Téléphone connecté à Android Auto (projection sur l'écran de la voiture). */
+    @Volatile var enVoiture = false
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -106,6 +109,11 @@ class JarvisApp : Application() {
         if (store.briefingOn.value) Scheduler.schedule(this, store)
         fr.dd.jarvis.work.AgentsScheduler.apply(this, store)
         fr.dd.jarvis.work.ReseauScheduler.apply(this, store)
+        runCatching {
+            androidx.car.app.connection.CarConnection(this).type.observeForever { t ->
+                enVoiture = t == androidx.car.app.connection.CarConnection.CONNECTION_TYPE_PROJECTION
+            }
+        }
         // Connexion à un Wi-Fi : analyse automatique du réseau (appareils + IP publique).
         runCatching {
             val cm = getSystemService(android.net.ConnectivityManager::class.java)

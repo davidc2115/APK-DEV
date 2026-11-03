@@ -200,6 +200,12 @@ class Store(context: Context) {
     // ---- Arrière-plan : écoute « Jarvis » et agents autonomes
     val wakeOn = BPref("wakeOn", false)
     val convSeconds = IPref("convSeconds", 25)
+    /** Fin de la conversation vocale après ce nombre de secondes sans parole (après la réponse de JARVIS). */
+    val silenceSec = IPref("silenceSec", 6)
+    /** Couper la parole à JARVIS en reprenant la parole pendant qu'il répond. */
+    val coupeParole = BPref("coupeParole", true)
+    /** Voix en mode « appel » sur le haut-parleur pendant la réponse (annulation d'écho : coupure de parole fiable). */
+    val duplex = BPref("duplex", true)
     val muteBeeps = BPref("muteBeeps", true)
     val agentsOn = BPref("agentsOn", false)
     val agentMails = BPref("agentMails", true)

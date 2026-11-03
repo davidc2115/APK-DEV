@@ -73,7 +73,7 @@ class PorcupineWake(private val ctx: Context, private val accessKey: String, pri
                 mgr = ai.picovoice.porcupine.PorcupineManager.Builder()
                     .setAccessKey(accessKey.trim())
                     .setKeyword(ai.picovoice.porcupine.Porcupine.BuiltInKeyword.JARVIS)
-                    .setSensitivity(0.65f)
+                    .setSensitivity(0.75f)      // un peu plus sensible : moins de « Jarvis » manqués (un faux réveil ne coûte qu'un bip)
                     .build(ctx, ai.picovoice.porcupine.PorcupineManagerCallback { onWake() })
             }
             mgr?.start(); true
@@ -88,36 +88,57 @@ class PorcupineWake(private val ctx: Context, private val accessKey: String, pri
     override fun release() { try { mgr?.stop(); mgr?.delete() } catch (_: Throwable) {}; mgr = null }
 }
 
+/**
+ * Détecteur « Jarvis » hors-ligne (Vosk). La grammaire contient, en plus de « jarvis », des mots anglais proches
+ * (« service », « travis », « harvest »…) : un mot qui ressemble sans être « Jarvis » est rangé ailleurs au lieu de
+ * déclencher. Le réveil part dès que « jarvis » apparaît de façon stable dans la reconnaissance en cours (sans attendre
+ * la fin de la phrase), ou à la fin d'une phrase avec une bonne confiance — pour enchaîner « Jarvis… » et la demande.
+ */
 class VoskWake(private val ctx: Context, private val onWake: () -> Unit) : WakeDetector {
     private var model: Model? = null
     private var service: SpeechService? = null
     @Volatile private var fired = false
+
+    companion object {
+        /** Mots du modèle anglais qui servent de leurres autour de « jarvis » (tous présents dans son vocabulaire). */
+        private val GRAMMAIRE = listOf(
+            "jarvis", "service", "travis", "harvest", "charles", "nervous", "marvel", "garage", "jars", "office",
+            "yes", "no", "okay", "hey", "alexa", "google", "[unk]"
+        )
+        internal fun contientJarvis(texte: String) = Regex("\\bjarvis\\b").containsMatchIn(texte)
+    }
 
     override fun start(): Boolean {
         if (!VoskModel.ready(ctx)) return false
         return try {
             LibVosk.setLogLevel(LogLevel.WARNINGS)
             if (model == null) model = Model(VoskModel.dir(ctx).absolutePath)
-            val rec = Recognizer(model, 16000f, "[\"jarvis\", \"[unk]\"]")
+            val rec = Recognizer(model, 16000f, GRAMMAIRE.joinToString(", ", "[", "]") { "\"$it\"" })
             rec.setWords(true)
             fired = false
+            var stables = 0
             service = SpeechService(rec, 16000f).also { s ->
                 s.startListening(object : RecognitionListener {
-                    // Seuls les résultats définitifs comptent (plus de déclenchement sur les résultats partiels / bruits),
-                    // et le mot « jarvis » doit être reconnu avec une bonne confiance.
+                    // Fin de phrase : « jarvis » reconnu avec une confiance suffisante et une durée plausible.
                     private fun check(j: String?) {
                         if (fired || j == null) return
                         try {
                             val arr = org.json.JSONObject(j).optJSONArray("result") ?: return
                             for (i in 0 until arr.length()) {
                                 val w = arr.getJSONObject(i)
-                                if (w.optString("word") == "jarvis" && w.optDouble("conf", 0.0) >= 0.9 && w.optDouble("end", 0.0) - w.optDouble("start", 0.0) >= 0.25) {
+                                if (w.optString("word") == "jarvis" && w.optDouble("conf", 0.0) >= 0.75 && w.optDouble("end", 0.0) - w.optDouble("start", 0.0) >= 0.2) {
                                     fired = true; onWake(); return
                                 }
                             }
                         } catch (_: Throwable) {}
                     }
-                    override fun onPartialResult(hypothesis: String?) {}
+                    // En cours de phrase : « jarvis » présent dans deux résultats partiels successifs (≈ 0,4 s) → réveil immédiat.
+                    override fun onPartialResult(hypothesis: String?) {
+                        if (fired || hypothesis == null) return
+                        val p = runCatching { org.json.JSONObject(hypothesis).optString("partial") }.getOrDefault("")
+                        stables = if (contientJarvis(p)) stables + 1 else 0
+                        if (stables >= 2) { fired = true; onWake() }
+                    }
                     override fun onResult(hypothesis: String?) = check(hypothesis)
                     override fun onFinalResult(hypothesis: String?) = check(hypothesis)
                     override fun onError(exception: Exception?) {}

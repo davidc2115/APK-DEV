@@ -6,12 +6,70 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.NoiseSuppressor
+import kotlin.math.max
 import kotlin.math.sqrt
 
 /**
+ * Détection de prise de parole trame par trame (20 ms), indépendante d'Android pour pouvoir être testée.
+ * Le seuil s'adapte au bruit de fond ET à l'écho résiduel de la voix de JARVIS (ce que le micro entend encore du
+ * haut-parleur après l'annulation d'écho) : seule une voix nettement au-dessus de cet écho, pendant ~200 ms sur 300 ms,
+ * déclenche — pas un éclat isolé, ni la voix de JARVIS elle-même.
+ */
+class DetecteurParole(
+    private val echauffement: Int = 20,          // 400 ms pour mesurer l'écho de JARVIS et le bruit de fond
+    private val minimum: Double = 420.0,         // niveau absolu minimal d'une voix proche (PCM 16 bits)
+    private val ratioBruit: Double = 3.5,
+    private val ratioEcho: Double = 1.8,
+    private val fenetre: Int = 15,               // 300 ms
+    private val requis: Int = 10                 // dont ≈ 200 ms de voix
+) {
+    private var n = 0
+    private val chauffe = ArrayList<Double>()
+    private var plancher = 0.0
+    private var echo = 0.0
+    private val voix = BooleanArray(fenetre)
+
+    /** Ajoute une trame (niveau RMS, taux de passage par zéro) ; vrai quand l'utilisateur prend la parole. */
+    fun trame(rms: Double, zcr: Double): Boolean {
+        n++
+        if (n <= echauffement) {
+            chauffe += rms
+            if (n == echauffement) {
+                val tri = chauffe.sorted()
+                plancher = max(tri.first(), 30.0)
+                echo = tri[((tri.size - 1) * 0.85).toInt()]
+            }
+            return false
+        }
+        val seuil = max(minimum, max(plancher * ratioBruit, echo * ratioEcho))
+        val estVoix = rms > seuil && zcr in 0.01..0.4
+        if (!estVoix) {
+            // Enveloppe haute de l'écho (monte vite, redescend lentement) et bruit de fond (lent).
+            echo = if (rms > echo) 0.8 * echo + 0.2 * rms else 0.99 * echo + 0.01 * rms
+            plancher = if (rms < plancher) 0.7 * plancher + 0.3 * rms else 0.995 * plancher + 0.005 * rms
+        }
+        voix[n % fenetre] = estVoix
+        return voix.count { it } >= requis
+    }
+
+    companion object {
+        /** Niveau RMS et taux de passage par zéro d'une trame PCM 16 bits. */
+        fun mesurer(buf: ShortArray, len: Int): Pair<Double, Double> {
+            if (len <= 0) return 0.0 to 0.0
+            var s = 0.0; var z = 0
+            for (i in 0 until len) {
+                val v = buf[i].toDouble(); s += v * v
+                if (i > 0 && (buf[i] >= 0) != (buf[i - 1] >= 0)) z++
+            }
+            return sqrt(s / len) to z.toDouble() / len
+        }
+    }
+}
+
+/**
  * Détecte que l'utilisateur se remet à parler pendant que JARVIS parle (« couper la parole »).
- * Micro en mode communication (annulation d'écho du téléphone), niveau mesuré pendant le début de la phrase de JARVIS,
- * déclenchement quand la voix dépasse nettement ce niveau de façon continue.
+ * Micro en mode communication (annulation d'écho et réduction de bruit du téléphone) ; à démarrer quand la voix de
+ * JARVIS commence réellement (les 400 premières ms servent à mesurer son écho).
  */
 class BargeIn(private val onVoix: () -> Unit) {
     @Volatile private var run = false
@@ -34,18 +92,12 @@ class BargeIn(private val onVoix: () -> Unit) {
                 if (NoiseSuppressor.isAvailable()) ns = NoiseSuppressor.create(rec.audioSessionId)?.also { it.enabled = true }
                 rec.startRecording()
                 val buf = ShortArray(rate / 50)            // trames de 20 ms
-                var t = 0; var base = 0.0; var fort = 0
+                val det = DetecteurParole()
                 while (run) {
                     val n = rec.read(buf, 0, buf.size)
                     if (n <= 0) continue
-                    var s = 0.0
-                    for (i in 0 until n) s += buf[i] * buf[i].toDouble()
-                    val rms = sqrt(s / n)
-                    t++
-                    if (t <= 25) { base = maxOf(base, rms); continue }   // 500 ms : niveau résiduel de la voix de JARVIS
-                    val seuil = maxOf(base * 2.6, 1700.0)
-                    fort = if (rms > seuil) fort + 1 else 0
-                    if (fort >= 6) { run = false; onVoix(); break }       // ≈ 120 ms de voix continue
+                    val (rms, zcr) = DetecteurParole.mesurer(buf, n)
+                    if (det.trame(rms, zcr)) { run = false; onVoix(); break }
                 }
             } catch (_: Throwable) {
             } finally {

@@ -546,7 +546,7 @@ fun SettingsScreen(app: JarvisApp) {
             }
             var runMsg by remember { mutableStateOf("") }
             HudPanel(Modifier.fillMaxWidth(), title = "Arrière-plan — écoute et agents autonomes") {
-                Text("Écoute « Jarvis » : dis « Jarvis, lance un itinéraire vers chez Dupont » même écran éteint. Utilise le micro en continu (notification permanente, consommation batterie).", color = HudDim, fontSize = 12.sp)
+                Text("Écoute « Jarvis » : dis « Jarvis », attends le petit bip, puis ta demande (« lance un itinéraire vers chez Dupont »), même écran éteint. Utilise le micro en continu (notification permanente, consommation batterie).", color = HudDim, fontSize = 12.sp)
                 Spacer(Modifier.height(6.dp))
                 HudChip(if (store.wakeOn.value) "✅ Écoute « Jarvis » active" else "Écoute « Jarvis » désactivée", store.wakeOn.value) {
                     if (store.wakeOn.value) { store.wakeOn.set(false); fr.dd.jarvis.service.JarvisService.stop(ctx) }
@@ -569,6 +569,34 @@ fun SettingsScreen(app: JarvisApp) {
                     ctx.startActivity(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 }
                 Spacer(Modifier.height(8.dp))
+                // ---- Fonctionnement en arrière-plan (Xiaomi / HyperOS ferme les applis qui écoutent en continu)
+                var tArr by remember { mutableStateOf(0) }
+                val battOk = remember(tArr) { (ctx.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager).isIgnoringBatteryOptimizations(ctx.packageName) }
+                fun ouvrir(vararg intents: Intent) {
+                    for (i in intents) if (runCatching { ctx.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess) return
+                }
+                val details = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}"))
+                Text("Pour que l'écoute tourne en permanence, écran éteint et appli fermée :", color = HudText, fontSize = 12.sp)
+                StatusRow("Batterie sans restriction", battOk)
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HudButton("Batterie", enabled = !battOk) {
+                        ouvrir(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${ctx.packageName}")), details)
+                    }
+                    HudButton("Démarrage auto (Xiaomi)") {
+                        ouvrir(Intent().setComponent(android.content.ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity")), details)
+                    }
+                    HudButton("Économie d'énergie (Xiaomi)") {
+                        ouvrir(
+                            Intent("miui.intent.action.HIDDEN_APPS_CONFIG_ACTIVITY").putExtra("package_name", ctx.packageName).putExtra("package_label", "JARVIS"),
+                            Intent().setComponent(android.content.ComponentName("com.miui.powerkeeper", "com.miui.powerkeeper.ui.HiddenAppsConfigActivity"))
+                                .putExtra("package_name", ctx.packageName).putExtra("package_label", "JARVIS"),
+                            details
+                        )
+                    }
+                    HudButton("Actualiser") { tArr++ }
+                }
+                Text("Sur Xiaomi : active « Démarrage automatique », mets l'économie d'énergie sur « Aucune restriction », et verrouille JARVIS dans les applis récentes (appui long sur sa vignette → cadenas). Après un redémarrage du téléphone, Android interdit de rallumer le micro tout seul : une notification « Relancer l'écoute » apparaît, un toucher suffit. Définir JARVIS comme assistant par défaut (bouton au-dessus) lui permet aussi de rouvrir le micro plus facilement.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                Spacer(Modifier.height(8.dp))
                 var voskReady by remember { mutableStateOf(fr.dd.jarvis.voice.VoskModel.ready(ctx)) }
                 var voskMsg by remember { mutableStateOf("") }
                 StatusRow("Détecteur hors-ligne de secours (Vosk)", voskReady)
@@ -583,12 +611,24 @@ fun SettingsScreen(app: JarvisApp) {
                 if (voskMsg.isNotBlank()) Text(voskMsg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
                 Text("Sans clé Picovoice ni détecteur hors-ligne, l'écoute « Jarvis » ne démarre pas (plus d'écoute en boucle avec bips).", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(vertical = 4.dp))
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Conversation ouverte", color = HudDim, fontSize = 12.sp)
-                    listOf(15, 25, 45, 90).forEach { sec ->
-                        HudChip("$sec s", store.convSeconds.value == sec) { store.convSeconds.set(sec) }
+                    Text("Fin après", color = HudDim, fontSize = 12.sp)
+                    listOf(4, 6, 8, 12).forEach { sec ->
+                        HudChip("$sec s de silence", store.silenceSec.value == sec) { store.silenceSec.set(sec) }
                     }
                 }
-                Text("Après « Jarvis », tu peux enchaîner les demandes sans répéter le mot, tant que tu parles dans ce délai. Dis « merci » ou « c'est tout » pour terminer.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                Text("Après « Jarvis », tu enchaînes les demandes sans répéter le mot. Quand JARVIS a répondu et que tu ne dis plus rien pendant ce délai, la conversation se referme d'elle-même (petit bip descendant). « Merci » ou « c'est tout » la termine aussi.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                Spacer(Modifier.height(6.dp))
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    HudChip(if (store.coupeParole.value) "✋ Couper la parole : oui" else "Couper la parole : non", store.coupeParole.value) {
+                        store.coupeParole.set(!store.coupeParole.value)
+                        if (store.wakeOn.value) { fr.dd.jarvis.service.JarvisService.stop(ctx); fr.dd.jarvis.service.JarvisService.start(ctx) }
+                    }
+                    HudChip(if (store.duplex.value) "📞 Mode duplex : oui" else "Mode duplex : non", store.duplex.value) {
+                        store.duplex.set(!store.duplex.value)
+                        if (store.wakeOn.value) { fr.dd.jarvis.service.JarvisService.stop(ctx); fr.dd.jarvis.service.JarvisService.start(ctx) }
+                    }
+                }
+                Text("Couper la parole : si tu reparles pendant que JARVIS répond, il se tait et t'écoute. Mode duplex (haut-parleur du téléphone seulement) : sa voix passe en mode « appel » le temps de la réponse, pour que l'annulation d'écho du téléphone ne confonde pas sa voix avec la tienne — la coupure est bien plus fiable. Le volume suit alors celui des appels ; désactive-le si la voix te semble trop faible.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
                 Spacer(Modifier.height(6.dp))
                 HudChip(if (store.muteBeeps.value) "🔇 Bips coupés pendant l'écoute" else "Bips actifs", store.muteBeeps.value) { store.muteBeeps.set(!store.muteBeeps.value) }
                 Spacer(Modifier.height(10.dp))

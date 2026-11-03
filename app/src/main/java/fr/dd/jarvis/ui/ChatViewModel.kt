@@ -60,16 +60,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
         voice.onFail = { msg ->
             partial = ""
-            // Un silence simple (msg vide : aucune parole détectée) ne doit pas couper tout de suite la conversation —
-            // sinon il faut retoucher le micro pour chaque nouvelle question. On ne l'arrête vraiment que si l'utilisateur
-            // n'a rien redit depuis « convDeadline » (réglage Conversation, par défaut 25 s), ou en cas de vraie erreur.
-            if (msg.isBlank() && voiceSession && System.currentTimeMillis() < voiceDeadline) {
-                voice.startListening()
+            // Phrase entendue mais pas comprise : on réécoute (3 fois au plus) ; vraie erreur : on arrête et on l'affiche.
+            if (msg.isBlank() && voiceSession && ++incompris < 3) {
+                ecouter()
             } else {
                 voiceSession = false
                 if (msg.isNotBlank()) status = msg
             }
         }
+        // Personne n'a reparlé dans le délai : la conversation se referme d'elle-même (comme Gemini).
+        voice.onSilence = { partial = ""; voiceSession = false }
     }
 
     private suspend fun askConfirm(question: String): Boolean {
@@ -89,17 +89,25 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      *  Exposé en état Compose pour afficher l'orbe plein écran pendant toute la session (écoute, réflexion, réponse parlée). */
     var voiceSession by mutableStateOf(false)
         private set
-    /** Fin de la conversation si l'utilisateur ne reparle plus (remise à jour à chaque écoute relancée). */
-    private var voiceDeadline = 0L
+    /** Phrases non comprises d'affilée pendant la conversation vocale. */
+    private var incompris = 0
+    private fun silenceMs() = store.silenceSec.value.coerceIn(3, 30) * 1000L
+
+    /** Écoute dans la conversation : se referme seule après « silenceSec » secondes sans parole. */
+    private fun ecouter(delai: Long = silenceMs()) {
+        voice.bargeIn = store.coupeParole.value
+        voice.duplex = store.duplex.value
+        voice.ecouterConversation(delai)
+    }
     private val stopWords = Regex("^(merci|c'est tout|c est tout|stop|arrete|arrête|termine|terminé|fin|a plus tard|à plus tard|au revoir|laisse tomber|ça suffit|ca suffit)\\b.*", RegexOption.IGNORE_CASE)
 
     fun toggleListening() {
         if (listening) { voiceSession = false; voice.stopListening() } else {
             status = ""
             voiceSession = true
-            voiceDeadline = System.currentTimeMillis() + store.convSeconds.value * 1000L
+            incompris = 0
             voice.stopSpeaking()
-            voice.startListening()
+            ecouter(maxOf(silenceMs(), 8000L))
         }
     }
 
@@ -130,11 +138,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             status = ""
             persist()
             val conv = store.conversationMode.value || (fromVoice && voiceSession)
-            if (conv) voiceDeadline = System.currentTimeMillis() + store.convSeconds.value * 1000L
+            if (conv) incompris = 0
+            voice.bargeIn = store.coupeParole.value
+            voice.duplex = store.duplex.value
             if ((store.speakReplies.value || (fromVoice && voiceSession)) && (fromVoice || conv)) {
-                voice.speak(reply) { if (conv) { voiceDeadline = System.currentTimeMillis() + store.convSeconds.value * 1000L; voice.startListening() } }
+                // Réponse parlée (que l'on peut couper en parlant), puis réécoute ; fin automatique après quelques secondes de silence.
+                voice.speak(reply) { if (conv && (voiceSession || store.conversationMode.value)) ecouter() }
             } else if (conv && fromVoice) {
-                voice.startListening()
+                ecouter()
             }
         }
     }
