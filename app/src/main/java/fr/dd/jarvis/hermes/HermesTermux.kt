@@ -377,10 +377,6 @@ p "✅ Hermès installé (${'$'}{MODE})."
      * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
      * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
      */
-    /**
-     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
-     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
-     */
     fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
         if (arguments.isEmpty()) return "❌ Commande Hermès vide."
         PontMcp.demarrer(app)
