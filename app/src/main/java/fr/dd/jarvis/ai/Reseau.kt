@@ -35,6 +35,9 @@ object Reseau {
     val clientLax: OkHttpClient get() = http
     fun ouvertTcp(ip: String, port: Int, ms: Int = 1500) = ouvert(ip, port, ms) == 1
 
+    /** Client HTTP attaché explicitement au Wi-Fi, même si Android préfère les données mobiles. */
+    fun clientWifi(): OkHttpClient = wifiNet?.let { runCatching { http.newBuilder().socketFactory(it.socketFactory).build() }.getOrNull() } ?: http
+
     private fun trustAll(): Pair<javax.net.ssl.SSLSocketFactory, javax.net.ssl.X509TrustManager> {
         val tm = object : javax.net.ssl.X509TrustManager {
             override fun checkClientTrusted(c: Array<java.security.cert.X509Certificate>?, a: String?) {}
@@ -100,7 +103,7 @@ object Reseau {
         return sb.toString().trim()
     }
 
-    private val PORTS = listOf(80, 443, 22, 445, 139, 9100, 631, 515, 8080, 8123, 5000, 554, 1883, 8009, 7000, 62078, 53, 23, 3389, 5900, 8000, 32400, 8096)
+    private val PORTS = listOf(80, 443, 22, 445, 139, 9100, 631, 515, 8611, 8080, 8123, 5000, 554, 1883, 8009, 7000, 62078, 53, 23, 3389, 5900, 8000, 32400, 8096)
 
     private fun typeDe(p: List<Int>, titre: String): String {
         val t = titre.lowercase()
@@ -153,7 +156,7 @@ object Reseau {
     }.getOrDefault("")
 
     private val pool = Executors.newFixedThreadPool(160).asCoroutineDispatcher()
-    private val ESSENTIELS = listOf(631, 9100, 80, 443, 515, 22, 445, 8080)
+    private val ESSENTIELS = listOf(631, 9100, 80, 443, 515, 8611, 22, 445, 8080)
     private val RAPIDES = listOf(80, 443, 22, 445, 62078, 8009, 5353, 8080)
 
     /** Nom NetBIOS (PC Windows, NAS, imprimantes) par requête UDP 137 : répond même quand TCP est filtré. */
@@ -181,7 +184,7 @@ object Reseau {
         val icmpOk = java.util.concurrent.atomic.AtomicInteger(); val tcpOk = java.util.concurrent.atomic.AtomicInteger()
         val trouves = coroutineScope { hosts.map { h -> async { sonder(h, icmpOk, tcpOk) } }.awaitAll() }.filterNotNull()
         val upnp = runCatching { ssdp(ctx) }.getOrDefault(emptyMap())
-        val mdns = runCatching { decouvrir(ctx, listOf("_http._tcp", "_googlecast._tcp", "_airplay._tcp", "_smb._tcp", "_ssh._tcp", "_hap._tcp", "_workstation._tcp", "_ipp._tcp", "_companion-link._tcp", "_spotify-connect._tcp"), 3500) }.getOrDefault(emptyList()).groupBy({ it.host }, { it.nom })
+        val mdns = runCatching { decouvrir(ctx, listOf("_http._tcp", "_googlecast._tcp", "_airplay._tcp", "_smb._tcp", "_ssh._tcp", "_hap._tcp", "_workstation._tcp", "_ipp._tcp", "_ipps._tcp", "_printer._tcp", "_pdl-datastream._tcp", "_canon-bjnp1._tcp", "_companion-link._tcp", "_spotify-connect._tcp"), 3500) }.getOrDefault(emptyList()).groupBy({ it.host }, { it.nom })
         val parIp = trouves.associateBy { it.ip }.toMutableMap()
         for (ip in (upnp.keys + mdns.keys)) if (!parIp.containsKey(ip) && prive(ip)) parIp[ip] = Appareil(ip, nomHote(ip), emptyList(), "", "❔ appareil")
         diag = "Sous-réseau ${hosts.first().substringBeforeLast('.')}.0/$pref (${hosts.size} adresses testées, liées au Wi-Fi ${if (wifiNet != null) "✔" else "✘ (réseau actif par défaut)"}) · réponses ICMP : ${icmpOk.get()} · TCP : ${tcpOk.get()} · UPnP : ${upnp.size} · mDNS : ${mdns.size}"
