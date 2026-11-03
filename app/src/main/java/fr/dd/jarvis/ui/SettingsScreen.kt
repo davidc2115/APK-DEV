@@ -187,6 +187,100 @@ fun SettingsScreen(app: JarvisApp) {
             }
         }
 
+        // ------------------------------------------------------------ Centre d'extensions Hermès
+        item {
+            var extTab by remember { mutableStateOf("skills") }
+            var extName by remember { mutableStateOf("") }
+            var extMsg by remember { mutableStateOf("") }
+            var extConfirm by remember { mutableStateOf("") }
+            fun runHermesExtension(args: List<String>, confirm: Boolean = false) {
+                val key = args.joinToString(" ")
+                if (confirm && extConfirm != key) {
+                    extConfirm = key
+                    extMsg = "⚠️ Confirme en retouchant l'action : $key"
+                    return
+                }
+                extConfirm = ""
+                fr.dd.jarvis.hermes.PontMcp.progression.clear()
+                extMsg = fr.dd.jarvis.hermes.HermesTermux.lancerExtension(app, args, "Centre d'extensions Hermès")
+            }
+            HudPanel(Modifier.fillMaxWidth(), title = "Centre d'extensions — Hermès") {
+                Text("Gestion directe des Skills, Plugins, serveurs MCP et outils de ton installation Hermes. Les commandes sont exécutées dans Debian, sans réinstaller Hermes ni réécrire sa configuration.", color = HudDim, fontSize = 12.sp)
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("skills" to "Skills", "plugins" to "Plugins", "mcp" to "MCP", "tools" to "Outils").forEach { (id, label) ->
+                        HudChip(label, selected = extTab == id) { extTab = id; extConfirm = ""; extMsg = "" }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                HudTextField(extName, { extName = it }, Modifier.fillMaxWidth(), label = when (extTab) {
+                    "skills" -> "Nom ou identifiant de Skill"
+                    "plugins" -> "Nom, identifiant ou dépôt Git du Plugin"
+                    "mcp" -> "Nom du serveur ou identifiant du catalogue"
+                    else -> "Nom de l'outil"
+                })
+                Spacer(Modifier.height(8.dp))
+                when (extTab) {
+                    "skills" -> {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            HudButton("Lister") { runHermesExtension(listOf("skills", "list", "--source", "all")) }
+                            HudButton("Rechercher") { if (extName.isNotBlank()) runHermesExtension(listOf("skills", "search", extName.trim())) }
+                            HudButton("Inspecter") { if (extName.isNotBlank()) runHermesExtension(listOf("skills", "inspect", extName.trim())) }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            HudButton("Installer") { if (extName.isNotBlank()) runHermesExtension(listOf("skills", "install", extName.trim(), "--yes"), true) }
+                            HudButton("Mettre à jour") { runHermesExtension(listOf("skills", "update"), true) }
+                            HudButton("Vérifier") { runHermesExtension(if (extName.isBlank()) listOf("skills", "check") else listOf("skills", "check", extName.trim())) }
+                        }
+                        HudButton("Désinstaller") { if (extName.isNotBlank()) runHermesExtension(listOf("skills", "uninstall", extName.trim(), "--yes"), true) }
+                    }
+                    "plugins" -> {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            HudButton("Lister") { runHermesExtension(listOf("plugins", "list", "--json")) }
+                            HudButton("Rechercher") { if (extName.isNotBlank()) runHermesExtension(listOf("plugins", "search", "--json", extName.trim())) }
+                            HudButton("Capacités") { if (extName.isNotBlank()) runHermesExtension(listOf("plugins", "capabilities", extName.trim())) }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            HudButton("Télécharger désactivé") { if (extName.isNotBlank()) runHermesExtension(listOf("plugins", "install", extName.trim(), "--no-deps", "--no-enable"), true) }
+                            HudButton("Activer sans override") { if (extName.isNotBlank()) runHermesExtension(listOf("plugins", "enable", extName.trim(), "--no-allow-tool-override"), true) }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            HudButton("Désactiver") { if (extName.isNotBlank()) runHermesExtension(listOf("plugins", "disable", extName.trim()), true) }
+                            HudButton("Supprimer") { if (extName.isNotBlank()) runHermesExtension(listOf("plugins", "remove", extName.trim()), true) }
+                        }
+                        Text("Le téléchargement laisse le plugin désactivé et n'installe pas ses dépendances. Consulte ses capacités avant activation ; l'autorisation de remplacer les outils intégrés n'est jamais accordée ici.", color = HudDim, fontSize = 11.sp)
+                    }
+                    "mcp" -> {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            HudButton("Serveurs installés") { runHermesExtension(listOf("mcp", "list")) }
+                            HudButton("Catalogue") { runHermesExtension(listOf("mcp", "catalog")) }
+                            HudButton("Tester") { if (extName.isNotBlank()) runHermesExtension(listOf("mcp", "test", extName.trim())) }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            HudButton("Installer catalogue") { if (extName.isNotBlank()) runHermesExtension(listOf("mcp", "install", extName.trim()), true) }
+                            HudButton("Configurer") { if (extName.isNotBlank()) runHermesExtension(listOf("mcp", "configure", extName.trim())) }
+                            HudButton("Supprimer") { if (extName.isNotBlank() && extName.trim() != "jarvis") runHermesExtension(listOf("mcp", "remove", extName.trim()), true) }
+                        }
+                        Text("Le pont MCP jarvis reliant Hermes à ton téléphone est protégé contre la suppression depuis ce panneau. Pour ajouter un serveur personnalisé, utilise hermes mcp add avec une URL ou une commande.", color = HudDim, fontSize = 11.sp)
+                    }
+                    else -> {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            HudButton("Lister") { runHermesExtension(listOf("tools", "list", "--platform", "cli")) }
+                            HudButton("Activer") { if (extName.isNotBlank()) runHermesExtension(listOf("tools", "enable", extName.trim(), "--platform", "cli"), true) }
+                            HudButton("Désactiver") { if (extName.isNotBlank()) runHermesExtension(listOf("tools", "disable", extName.trim(), "--platform", "cli"), true) }
+                        }
+                    }
+                }
+                if (extMsg.isNotBlank()) Text(extMsg, color = HudText, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+                Spacer(Modifier.height(8.dp))
+                Text("Sortie Hermes", color = HudDim, fontSize = 12.sp)
+                val extLines = fr.dd.jarvis.hermes.PontMcp.progression
+                if (extLines.isEmpty()) Text("Aucun résultat pour le moment. Lance une commande ci-dessus.", color = HudDim, fontSize = 11.sp)
+                else Column(Modifier.height(220.dp).verticalScroll(androidx.compose.foundation.rememberScrollState())) {
+                    extLines.takeLast(40).forEach { Text(it, color = HudText, fontSize = 11.sp, fontFamily = FontFamily.Monospace) }
+                }
+            }
+        }
         // ------------------------------------------------------------ Android Auto
         item {
             val aa = "com.google.android.projection.gearhead"
