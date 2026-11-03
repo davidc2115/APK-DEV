@@ -298,15 +298,22 @@ if [ -z "${'$'}{MODE}" ]; then
     proot-distro install debian >> "${'$'}{LOG}" 2>&1 || { p "❌ Installation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
   fi
   p "📦 Préparation de Debian (git, curl…)…"
-  proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD DEBIAN_FRONTEND=noninteractive \
-    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
+  # Debian doit utiliser exclusivement ses outils glibc : --termux-home peut transmettre des variables
+  # de compilation Termux (CC=aarch64-linux-android-clang) qui contaminent uv/pip dans proot.
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive \
+    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev libwebp-dev python3 python3-venv python3-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
     || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  p "🔎 Vérification du compilateur Debian (GCC, glibc)…"
+  proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/bin:/bin bash -c 'printf "CC="; command -v cc; cc --version | head -n1; printf "ARCH="; uname -m; printf "LIBC="; ldd --version | head -n1' >> "${LOG}" 2>&1
   p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
-  INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
-  : > "${'$'}{INSTALL_LOG}"
-  p "⏳ Installation des dépendances Hermès démarrée. Suivi actif toutes les 20 secondes."
-  proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root \
-    bash -c 'set -e; mkdir -p /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+  INSTALL_LOG="${H}/logs/hermes-installer.log"
+  : > "${INSTALL_LOG}"
+  p "⏳ Installation des dépendances Hermès démarrée. Variables de compilation Android neutralisées."
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${INSTALL_LOG}" 2>&1 &
   INSTALL_PID=$!
   while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
     sleep 20
