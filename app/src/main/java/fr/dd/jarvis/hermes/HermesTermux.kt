@@ -314,7 +314,7 @@ if [ -z "${'$'}{MODE}" ]; then
     PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1 \
     UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python UV_CACHE_DIR=/var/cache/uv \
-    bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /usr/local/share/uv/python /var/cache/uv /root/.hermes; rm -rf /root/.hermes/hermes-agent/venv /root/.hermes/hermes-agent/.venv; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'
+    bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /usr/local/share/uv/python /var/cache/uv /root/.hermes; rm -rf /root/.hermes/hermes-agent/venv /root/.hermes/hermes-agent/.venv; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
   INSTALL_PID=$!
   while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
     sleep 20
@@ -331,12 +331,12 @@ if [ -z "${'$'}{MODE}" ]; then
     tail -n 10 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
     exit "${'$'}{INSTALL_RC}"
   fi
-  if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
+  if proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
     p "❌ Hermès a terminé sans créer son interpréteur Python (venv/bin/python). Installation refusée pour éviter un faux succès."
-    tail -n 12 "${'
-    MODE=proot
-  else
-    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
+    p "❌ Hermès a terminé sans créer son interpréteur Python (venv/bin/python). Installation refusée pour éviter un faux succès."
+    tail -n 12 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit 1
+  fi
     tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
     exit 1
   fi
