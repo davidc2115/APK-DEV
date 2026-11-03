@@ -334,13 +334,7 @@ if [ -z "${'$'}{MODE}" ]; then
   p "🔎 Vérification de l'environnement Python Hermes…"
   if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
     p "❌ Installation incomplète : /root/.hermes/hermes-agent/venv/bin/python est absent. La configuration et le démarrage sont interrompus."
-    tail -n 15 "${'{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "§{l}" | cut -c1-120)"; done
-    exit 1
-  fi
-}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'{l}" | cut -c1-120)"; done
-    exit 1
-  fi
-}{l}" | cut -c1-120)"; done
+    tail -n 15 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
     exit 1
   fi
   if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
