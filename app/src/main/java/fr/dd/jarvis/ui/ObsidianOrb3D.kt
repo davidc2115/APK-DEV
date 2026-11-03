@@ -71,10 +71,11 @@ fun ObsidianOrb3D(app: JarvisApp, enTete: @Composable () -> Unit = {}) {
     val etat = rememberConstellation(app)
     var noteOuverte by remember { mutableStateOf<String?>(null) }
     var hubListe by remember { mutableStateOf<String?>(null) }
-    val c = etat.constellation
+    val c = constellationDe(etat)
     if (c == null) ChargementEnCours(etat.erreur, enTete)
     else Orbe3DVue(c, enTete, onNote = { noteOuverte = it }, onHub = { cle -> if (c.hub(cle)?.type != TypeHub.PIECES && c.hub(cle)?.type != TypeHub.TAGS) hubListe = cle },
-        onFichier = { chemin -> app.obsidian.ouvrirFichier(chemin) })
+        onFichier = { chemin -> app.obsidian.ouvrirFichier(chemin) },
+        onBasculer = { chemin -> etat.deplies = ConstellationLayout.basculer(c.deplies, chemin) })
     DialoguesConstellation(app, c, noteOuverte, { noteOuverte = it }, hubListe, { hubListe = it })
 }
 
@@ -140,11 +141,11 @@ private fun projeter(mvp: FloatArray, mv: FloatArray, p: FloatArray, w: Float, h
 @Composable
 internal fun Orbe3DVue(
     c: Constellation, enTete: @Composable () -> Unit, onNote: (String) -> Unit, onHub: (String) -> Unit,
-    avecOpenGl: Boolean = true, tempsFixe: Float? = null, onFichier: (String) -> Unit = {}
+    avecOpenGl: Boolean = true, tempsFixe: Float? = null, onFichier: (String) -> Unit = {}, onBasculer: (String) -> Unit = {}
 ) {
     // Taille connue dès la composition (et non après le premier dessin) : décor et cadrage prêts tout de suite.
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        Orbe3DContenu(c, enTete, onNote, onHub, onFichier, avecOpenGl, tempsFixe,
+        Orbe3DContenu(c, enTete, onNote, onHub, onFichier, onBasculer, avecOpenGl, tempsFixe,
             androidx.compose.ui.geometry.Size(constraints.maxWidth.toFloat(), constraints.maxHeight.toFloat()))
     }
 }
@@ -152,7 +153,7 @@ internal fun Orbe3DVue(
 @Composable
 private fun Orbe3DContenu(
     c: Constellation, enTete: @Composable () -> Unit, onNote: (String) -> Unit, onHub: (String) -> Unit, onFichier: (String) -> Unit,
-    avecOpenGl: Boolean, tempsFixe: Float?, taille: androidx.compose.ui.geometry.Size
+    onBasculer: (String) -> Unit, avecOpenGl: Boolean, tempsFixe: Float?, taille: androidx.compose.ui.geometry.Size
 ) {
     val parId = remember(c) { c.etiquettes.associateBy { it.id } }
     val camera = remember { Camera3D() }
@@ -241,10 +242,18 @@ private fun Orbe3DContenu(
                     }
                 }
                 .pointerInput(c) {
-                    detectTapGestures { tap ->
-                        val id = zones.entries.firstOrNull { it.value.inflate(6f * dens).contains(tap) }?.key ?: return@detectTapGestures
+                    detectTapGestures(onLongPress = { p ->
+                        // Appui long sur un cercle de dossier : son contenu complet.
+                        zones.entries.firstOrNull { it.key.startsWith("hub:") && it.value.inflate(6f * dens).contains(p) }?.key?.let { onHub(it.removePrefix("hub:")) }
+                    }) { tap ->
+                        // Les étiquettes (dessinées au-dessus) passent avant les cercles.
+                        val touches = zones.entries.filter { it.value.inflate(6f * dens).contains(tap) }.map { it.key }
+                        val id = touches.firstOrNull { !it.startsWith("hub:") } ?: touches.firstOrNull() ?: return@detectTapGestures
                         when {
-                            id.startsWith("hub:") -> onHub(id.removePrefix("hub:"))
+                            id.startsWith("hub:") -> {
+                                val h = c.hub(id.removePrefix("hub:"))
+                                if (h != null && h.depliable) onBasculer(h.cle) else onHub(id.removePrefix("hub:"))
+                            }
                             else -> c.etiquettes.firstOrNull { it.id == id }?.let { e ->
                                 when (e.type) {
                                     TypeEtiquette.NOTE -> onNote(e.noteId!!)
@@ -274,7 +283,7 @@ private fun Orbe3DContenu(
             val rCoeur = centre.pxParUnite * 1f
             val pulse = 0.84f + 0.16f * sin(temps * 2.2f)
             val profRef = camera.distance
-            fun alphaProfondeur(p: Projete) = (1.1f - (p.profondeur - profRef) * 0.15f).coerceIn(0.5f, 1f)
+            fun alphaProfondeur(p: Projete) = (1.1f - (p.profondeur - profRef) * 0.12f).coerceIn(0.72f, 1f)
             // Un élément derrière la sphère (plus loin que le centre et projeté sur son disque) est masqué.
             fun cache(p: Projete) = p.zVue < centre.zVue - 0.2f && (p.ecran - centre.ecran).getDistance() < rCoeur * 0.98f
 
@@ -290,9 +299,20 @@ private fun Orbe3DContenu(
             )
 
             // Toile cerveau → hubs, puis flèches hub → étiquettes.
-            val hubsAnneau = c.hubs.filter { it.type != TypeHub.TAGS }
+            val hubsAnneau = c.hubs.filter { it.type != TypeHub.TAGS && it.niveau == 0 }
             val hubsProj = hubsAnneau.mapNotNull { h -> proj("hub:${h.cle}")?.let { h to it } }
             dessinerToile(centre.ecran, rCoeur, hubsProj.filterNot { cache(it.second) }.map { (h, p) -> p.ecran to h.rayon / DP_PAR_UNITE * p.pxParUnite }, rCoeur / DP_PAR_UNITE, pulse)
+            // Catégorie → cercles de sous-dossiers.
+            for (h in c.hubs) {
+                val p = h.parent?.let { c.hub(it) } ?: continue
+                val pp = proj("hub:${p.cle}") ?: continue
+                val ph = proj("hub:${h.cle}") ?: continue
+                if (cache(pp) || cache(ph)) continue
+                val d = ph.ecran - pp.ecran
+                val l = d.getDistance().coerceAtLeast(1f)
+                val rP = p.rayon / DP_PAR_UNITE * pp.pxParUnite; val rH = h.rayon / DP_PAR_UNITE * ph.pxParUnite
+                dessinerLienDossier(pp.ecran + d * (rP * 1.13f / l), pp.ecran + d * ((l - rH * 1.16f).coerceAtLeast(0f) / l), ph.pxParUnite / DP_PAR_UNITE, pulse, alphaProfondeur(ph))
+            }
             for (e in c.etiquettes) {
                 if (e.type == TypeEtiquette.TAG) continue
                 val h = c.hub(e.hub) ?: continue
@@ -354,6 +374,7 @@ private fun Orbe3DContenu(
                     else {
                         val r = h.rayon * kk
                         dessinerHub(h, el.p.ecran, r, mesureur, fontScale, a, pulse = pulse)
+                        if (h.depliable) dessinerBadgeDepli(el.p.ecran + Offset(0f, r * 1.02f), max(r * 0.22f, 7f * kk), h.deplie, a)
                         zones[el.id] = Rect(el.p.ecran - Offset(r, r), androidx.compose.ui.geometry.Size(2 * r, 2 * r))
                     }
                 } else {

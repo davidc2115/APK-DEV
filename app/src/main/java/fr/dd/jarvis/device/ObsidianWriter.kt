@@ -273,68 +273,202 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
     // ------------------------------------------------------------------ fichiers et dossiers DU COFFRE (pas du téléphone)
 
-    /** Élément du coffre (note, image, PDF, dossier…) par chemin relatif, insensible aux accents/majuscules. */
+    /** Élément du coffre (note, image, PDF, dossier…) par chemin relatif EXACT (déjà résolu), insensible aux accents/majuscules. */
     private fun trouver(chemin: String): DocumentFile? {
         var cur: DocumentFile? = vaultRoot() ?: return null
         for (part in chemin.trim().trim('/').split('/').filter { it.isNotBlank() }) cur = cur?.trouverLoose(part)
         return cur
     }
 
-    /** Racine « fichier » utilisable directement : le coffre lui-même (accès à tous les fichiers) ou, sans coffre choisi, le dossier local. */
+    /**
+     * Racine « fichier » utilisable directement : le coffre lui-même (accès à tous les fichiers, contrôlé contre la
+     * vue Android du coffre) ou, sans coffre choisi, le dossier local. Null : passer par le coffre SAF.
+     */
     private fun racineFichier(): File? = fichierCoffre() ?: if (vaultRoot() == null) localRoot() else null
 
     private fun fichierSur(racine: File, chemin: String): File {
         val r = racine.canonicalFile
         val f = File(r, chemin.trim().trim('/')).canonicalFile
-        if (!f.path.startsWith(r.path)) throw IllegalArgumentException("Chemin hors du coffre.")
+        if (f.path != r.path && !f.path.startsWith(r.path + File.separator)) throw IllegalArgumentException("Chemin hors du coffre.")
         return f
     }
 
-    /** Vrai si [chemin] existe dans le coffre. */
-    fun existe(chemin: String): Boolean = racineFichier()?.let { fichierSur(it, chemin).exists() } ?: (trouver(chemin) != null)
+    /** Clé de comparaison tolérante : sans accents, majuscules, espaces doubles, « _ » / « - », ni pluriel en s/x. */
+    private fun cleNom(s: String): String = normaliseNom(s.replace('_', ' ').replace('-', ' ')).replace(Regex("\\s+"), " ").let {
+        if (it.length > 3 && (it.endsWith("s") || it.endsWith("x"))) it.dropLast(1) else it
+    }
+
+    /** Noms des éléments directs d'un dossier du coffre (chemin réel), avec « est un dossier ». Null si introuvable. */
+    private fun enfants(dossier: String): List<Pair<String, Boolean>>? {
+        racineFichier()?.let { r ->
+            val d = fichierSur(r, dossier)
+            return d.takeIf { it.isDirectory }?.listFiles()?.filter { !it.name.startsWith(".") }?.map { it.name to it.isDirectory }
+        }
+        val d = (if (dossier.isBlank()) vaultRoot() else trouver(dossier))?.takeIf { it.isDirectory } ?: return null
+        return d.listFiles().mapNotNull { f -> f.name?.takeIf { !it.startsWith(".") }?.let { it to f.isDirectory } }
+    }
+
+    private fun correspondance(noms: List<Pair<String, Boolean>>, voulu: String, dossierSeul: Boolean = false): String? {
+        val c = noms.filter { !dossierSeul || it.second }
+        return c.firstOrNull { it.first == voulu }?.first
+            ?: c.firstOrNull { normaliseNom(it.first) == normaliseNom(voulu) }?.first
+            ?: c.firstOrNull { cleNom(it.first) == cleNom(voulu) }?.first
+            ?: c.firstOrNull { cleNom(it.first.substringBeforeLast('.')) == cleNom(voulu) }?.first
+    }
+
+    /**
+     * Retrouve un élément du coffre même si le chemin est écrit approximativement (« Jarvis/image » → « JARVIS/Images ») :
+     * majuscules, accents, singulier/pluriel, extension omise. Chemin réel, ou null s'il n'existe pas.
+     */
+    fun resoudre(chemin: String): String? {
+        val parts = chemin.trim().trim('/').split('/').filter { it.isNotBlank() }
+        var courant = ""
+        for ((i, part) in parts.withIndex()) {
+            val noms = enfants(courant) ?: return null
+            val m = correspondance(noms, part, dossierSeul = i < parts.size - 1) ?: return null
+            courant = if (courant.isEmpty()) m else "$courant/$m"
+        }
+        return courant
+    }
+
+    /** Tous les éléments du coffre (chemin, est un dossier), hors dossiers cachés. Parcours rapide (fichiers directs ou requêtes SAF groupées). */
+    fun toutLister(limite: Int = 20_000): List<Pair<String, Boolean>> {
+        val out = ArrayList<Pair<String, Boolean>>()
+        racineFichier()?.let { r ->
+            r.walkTopDown().onEnter { it == r || !it.name.startsWith(".") }.forEach { f ->
+                if (out.size < limite && f != r && !f.name.startsWith(".")) out += f.relativeTo(r).path.replace(File.separatorChar, '/') to f.isDirectory
+            }
+            return out
+        }
+        val v = vaultRoot() ?: return out
+        val id = idCoffre() ?: return out
+        fun parcourir(docId: String, prefixe: String, profondeur: Int) {
+            val enfantsUri = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(v.uri, docId)
+            val sous = mutableListOf<Pair<String, String>>()
+            runCatching {
+                ctx.contentResolver.query(enfantsUri, arrayOf(android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME, android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE), null, null, null)?.use { c ->
+                    while (c.moveToNext() && out.size < limite) {
+                        val nom = c.getString(1) ?: continue
+                        if (nom.startsWith(".")) continue
+                        val dossier = c.getString(2) == android.provider.DocumentsContract.Document.MIME_TYPE_DIR
+                        out += (prefixe + nom) to dossier
+                        if (dossier) sous += c.getString(0) to "$prefixe$nom/"
+                    }
+                }
+            }
+            if (profondeur < 10) sous.forEach { (sid, p) -> parcourir(sid, p, profondeur + 1) }
+        }
+        parcourir(id, "", 0)
+        return out
+    }
+
+    /**
+     * Chemin de dossier à utiliser pour [chemin] : chaque partie existante est retrouvée malgré majuscules / accents /
+     * pluriel, et un premier dossier absent de la racine mais présent une seule fois ailleurs est repris (« images » →
+     * « JARVIS/Images ») au lieu d'en créer un nouveau à côté. Les parties restantes seront créées.
+     */
+    fun cheminDossier(chemin: String): String {
+        val parts = chemin.trim().trim('/').split('/').filter { it.isNotBlank() }
+        if (parts.isEmpty()) return ""
+        var base = ""
+        var i = 0
+        val racine = enfants("").orEmpty()
+        val premier = correspondance(racine, parts[0], dossierSeul = true)
+        if (premier != null) { base = premier; i = 1 }
+        else {
+            val voulu = cleNom(parts[0])
+            val candidats = toutLister().filter { it.second && cleNom(it.first.substringAfterLast('/')) == voulu }.map { it.first }
+            if (candidats.size == 1) { base = candidats[0]; i = 1 }
+        }
+        while (i < parts.size) {
+            val m = correspondance(enfants(base).orEmpty(), parts[i], dossierSeul = true) ?: break
+            base = if (base.isEmpty()) m else "$base/$m"; i++
+        }
+        val reste = parts.drop(i).joinToString("/") { safe(it, "Dossier") }
+        return listOf(base, reste).filter { it.isNotBlank() }.joinToString("/")
+    }
+
+    /** Vrai si [chemin] existe dans le coffre (écriture approximative tolérée). */
+    fun existe(chemin: String): Boolean = resoudre(chemin) != null
 
     /** Retrouve un fichier du coffre à partir de son seul nom (premier trouvé), pour « déplace img_….png ». */
     fun chercherParNom(nom: String): String? {
-        val cible = normaliseNom(nom.trim())
-        racineFichier()?.let { r ->
-            return r.walkTopDown().onEnter { it == r || !it.name.startsWith(".") }.firstOrNull { it.isFile && normaliseNom(it.name) == cible }?.relativeTo(r)?.path
-        }
-        val v = vaultRoot() ?: return null
-        val notes = mutableListOf<Pair<String, DocumentFile>>(); val pieces = mutableListOf<String>()
-        runCatching { walkAvecPieces(v, "", notes, pieces, 5000, 5000) }
-        return (notes.map { it.first } + pieces).firstOrNull { normaliseNom(it.substringAfterLast('/')) == cible }
+        val cible = cleNom(nom.trim())
+        return toutLister().firstOrNull { !it.second && (cleNom(it.first.substringAfterLast('/')) == cible || cleNom(it.first.substringAfterLast('/').substringBeforeLast('.')) == cible) }?.first
     }
+
+    /**
+     * Fichiers (et dossiers si [dossiers]) du coffre dont le NOM correspond à [motif] : motif avec * ou ?, sinon tous
+     * les mots du motif présents dans le nom (sans accents ni majuscules). Les images générées par JARVIS sont aussi
+     * retrouvées par leur description d'origine.
+     */
+    fun chercherFichiers(motif: String, dossiers: Boolean = false, limite: Int = 200): List<String> {
+        val m = motif.trim().trim('"', '\'')
+        if (m.isBlank()) return emptyList()
+        val tout = toutLister()
+        val descriptions = descriptionsImages()
+        val dansDossier = m.substringBeforeLast('/', "").let { if (it.isBlank()) null else resoudre(it) ?: it }
+        val nomMotif = m.substringAfterLast('/')
+        val glob = nomMotif.contains('*') || nomMotif.contains('?')
+        val re = if (glob) Regex("^" + nomMotif.split('*').joinToString(".*") { p -> p.split('?').joinToString(".") { Regex.escape(normaliseNom(it)) } } + "$") else null
+        val mots = cleNom(nomMotif.replace('*', ' ').replace('?', ' ')).split(' ').filter { it.length >= 2 }
+        val candidats = tout.asSequence().filter { (p, estDossier) -> (dossiers || !estDossier) && (dansDossier == null || p.startsWith("$dansDossier/")) }
+        fun parMots() = candidats.filter { (p, _) ->
+            val nom = p.substringAfterLast('/')
+            val texte = cleNom(nom.replace('.', ' ')) + " " + (descriptions[nom]?.let { cleNom(it) } ?: "")
+            mots.isNotEmpty() && mots.all { texte.contains(it) }
+        }.map { it.first }.take(limite).toList()
+        if (re == null) return parMots()
+        // Motif avec * ou ? : d'abord sur le nom exact, sinon sur les mots (nom ou description d'image).
+        val parMotif = candidats.filter { (p, _) ->
+            val nom = normaliseNom(p.substringAfterLast('/'))
+            re.matches(nom) || re.matches(nom.substringBeforeLast('.'))
+        }.map { it.first }.take(limite).toList()
+        return parMotif.ifEmpty { parMots() }
+    }
+
+    /** Description (prompt) de chaque image générée par JARVIS, par nom de fichier. */
+    private fun descriptionsImages(): Map<String, String> = runCatching {
+        val f = File(ctx.filesDir, "images_descriptions.json")
+        if (!f.isFile) emptyMap() else org.json.JSONObject(f.readText()).let { j -> j.keys().asSequence().associateWith { j.optString(it) } }
+    }.getOrDefault(emptyMap())
 
     /** Fichiers d'un dossier du coffre (noms seuls), du plus récent au plus ancien quand les noms sont datés. */
     fun fichiersDe(dossier: String): List<String> {
-        racineFichier()?.let { r -> return fichierSur(r, dossier).listFiles()?.filter { it.isFile }?.map { it.name }?.sortedDescending().orEmpty() }
-        return trouver(dossier)?.takeIf { it.isDirectory }?.listFiles()?.filter { it.isFile }?.mapNotNull { it.name }?.sortedDescending().orEmpty()
+        val d = resoudre(dossier) ?: return emptyList()
+        return enfants(d).orEmpty().filter { !it.second }.map { it.first }.sortedDescending()
     }
 
-    /** Crée un dossier du coffre (sous-dossiers compris) s'il n'existe pas. */
-    fun creerDossier(chemin: String): String {
-        val c = chemin.trim().trim('/')
+    /** Crée un dossier du coffre (sous-dossiers compris) s'il n'existe pas ; renvoie le chemin réel utilisé. */
+    fun creerDossierChemin(chemin: String): String {
+        val c = cheminDossier(chemin)
         if (c.isBlank()) throw IllegalArgumentException("Nom de dossier manquant.")
         racineFichier()?.let { r ->
             val d = fichierSur(r, c)
             if (!d.isDirectory && !d.mkdirs()) throw IllegalStateException("Création du dossier refusée.")
-            return "coffre › ${c.replace("/", " › ")}"
+            return c
         }
         val tree = vaultRoot()?.takeIf { it.canWrite() } ?: throw IllegalStateException("Coffre Obsidian non choisi ou en lecture seule (Réglages).")
         subDir(tree, c)
         if (trouver(c)?.isDirectory != true) throw IllegalStateException("Création du dossier « $c » refusée par le stockage.")
-        return "coffre › ${c.replace("/", " › ")}"
+        return c
     }
+
+    /** Crée un dossier du coffre (sous-dossiers compris) s'il n'existe pas. */
+    fun creerDossier(chemin: String): String = "coffre › " + creerDossierChemin(chemin).replace("/", " › ")
 
     /** Déplace une note, une image, un fichier ou un dossier du coffre dans [dossierCible] (créé au besoin). */
     fun deplacer(source: String, dossierCible: String): String {
-        val src = source.trim().trim('/')
-        val dest = dossierCible.trim().trim('/')
+        val src = resoudre(source) ?: throw IllegalArgumentException("Introuvable dans le coffre : ${source.trim().trim('/')}")
+        val dest = creerDossierChemin(dossierCible)
         racineFichier()?.let { r ->
             val f = fichierSur(r, src)
             if (!f.exists()) throw IllegalArgumentException("Introuvable dans le coffre : $src")
             val d = fichierSur(r, dest).apply { mkdirs() }
+            if (f.isDirectory && d.canonicalPath.startsWith(f.canonicalPath)) throw IllegalArgumentException("Impossible de déplacer un dossier dans lui-même.")
             val cible = File(d, f.name)
+            if (cible.canonicalPath == f.canonicalPath) return "${f.name} est déjà dans coffre › ${dest.replace("/", " › ")}"
             if (cible.exists()) throw IllegalStateException("« ${f.name} » existe déjà dans $dest")
             if (!f.renameTo(cible)) { f.copyRecursively(cible); f.deleteRecursively() }
             return "${f.name} → coffre › ${dest.replace("/", " › ")}"
@@ -343,8 +477,8 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         val f = trouver(src) ?: throw IllegalArgumentException("Introuvable dans le coffre : $src")
         val parent = if (src.contains('/')) trouver(src.substringBeforeLast('/')) ?: tree else tree
         val nom = f.name ?: src.substringAfterLast('/')
-        val d = subDir(tree, dest)
-        if (dest.isNotBlank() && trouver(dest)?.isDirectory != true) throw IllegalStateException("Impossible de créer le dossier « $dest » dans le coffre.")
+        if (src.substringBeforeLast('/', "") == dest) return "$nom est déjà dans coffre › ${dest.replace("/", " › ")}"
+        val d = trouver(dest)?.takeIf { it.isDirectory } ?: throw IllegalStateException("Impossible de créer le dossier « $dest » dans le coffre.")
         if (d.trouverLoose(nom) != null) throw IllegalStateException("« $nom » existe déjà dans $dest")
         // Déplacement natif (même stockage) ; sinon copie puis suppression de l'original.
         val deplace = runCatching { android.provider.DocumentsContract.moveDocument(ctx.contentResolver, f.uri, parent.uri, d.uri) }.getOrNull()
@@ -360,12 +494,11 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
     /** Renomme un élément du coffre (le dossier ne change pas). */
     fun renommer(chemin: String, nouveauNom: String): String {
-        val c = chemin.trim().trim('/')
+        val c = resoudre(chemin) ?: throw IllegalArgumentException("Introuvable dans le coffre : ${chemin.trim().trim('/')}")
         val n = safe(nouveauNom.trim(), "")
         if (n.isBlank()) throw IllegalArgumentException("Nouveau nom manquant.")
         racineFichier()?.let { r ->
             val f = fichierSur(r, c)
-            if (!f.exists()) throw IllegalArgumentException("Introuvable dans le coffre : $c")
             val cible = File(f.parentFile, n)
             if (cible.exists()) throw IllegalStateException("« $n » existe déjà.")
             if (!f.renameTo(cible)) throw IllegalStateException("Renommage refusé.")
@@ -377,21 +510,24 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         return "$ancien → $n"
     }
 
-    /** Contenu d'un dossier du coffre : sous-dossiers puis fichiers de tous types (notes, images, PDF…). */
+    /** Contenu d'un dossier du coffre : sous-dossiers puis fichiers de tous types (notes, images avec leur description…). */
     fun listerDossier(chemin: String): String {
-        val c = chemin.trim().trim('/')
-        val entrees: List<Pair<String, Boolean>> = racineFichier()?.let { r ->
-            val d = fichierSur(r, c)
-            if (!d.isDirectory) return "Dossier introuvable dans le coffre : ${c.ifBlank { "racine" }}"
-            d.listFiles()?.filter { !it.name.startsWith(".") }?.map { it.name to it.isDirectory }.orEmpty()
-        } ?: run {
-            val d = (if (c.isBlank()) vaultRoot() else trouver(c))?.takeIf { it.isDirectory } ?: return "Dossier introuvable dans le coffre : ${c.ifBlank { "racine" }}"
-            d.listFiles().mapNotNull { f -> f.name?.takeIf { !it.startsWith(".") }?.let { it to f.isDirectory } }
-        }
-        if (entrees.isEmpty()) return "📂 coffre › ${c.ifBlank { "racine" }} : (vide)"
+        val c = resoudre(chemin) ?: return "Dossier introuvable dans le coffre : ${chemin.trim().trim('/').ifBlank { "racine" }}" +
+            proches(chemin).let { if (it.isEmpty()) "" else "\nDossiers proches : " + it.joinToString(", ") }
+        val entrees = enfants(c) ?: return "« $c » n'est pas un dossier."
+        if (entrees.isEmpty()) return "📂 coffre › ${c.replace("/", " › ").ifBlank { "racine" }} : (vide)"
+        val descriptions = descriptionsImages()
         val tri = entrees.sortedWith(compareBy({ !it.second }, { it.first.lowercase() }))
-        return "📂 coffre › ${c.replace("/", " › ").ifBlank { "racine" }}\n" + tri.take(300).joinToString("\n") { (n, dir) -> if (dir) "📁 $n" else "📄 $n" } +
-            (if (tri.size > 300) "\n… (${tri.size} éléments)" else "")
+        return "📂 coffre › ${c.replace("/", " › ").ifBlank { "racine" }}\n" + tri.take(300).joinToString("\n") { (n, dir) ->
+            if (dir) "📁 $n" else "📄 $n" + (descriptions[n]?.let { " — « ${it.take(80)} »" } ?: "")
+        } + (if (tri.size > 300) "\n… (${tri.size} éléments)" else "")
+    }
+
+    /** Dossiers dont le nom ressemble à la fin de [chemin] (aide quand un dossier demandé est introuvable). */
+    private fun proches(chemin: String): List<String> {
+        val voulu = cleNom(chemin.trim().trim('/').substringAfterLast('/'))
+        if (voulu.length < 2) return emptyList()
+        return toutLister().filter { it.second && cleNom(it.first.substringAfterLast('/')).let { n -> n.contains(voulu) || voulu.contains(n) } }.map { it.first }.take(8)
     }
 
     // ------------------------------------------------------------------ graphe (vue « Obsidian graph »)
@@ -453,18 +589,45 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     private fun labelOf(path: String) = idOf(path).substringAfterLast('/')
     private fun folderOf(path: String) = idOf(path).substringBeforeLast('/', "")
 
+    /** Identifiant SAF du dossier du coffre (gère aussi un lien « document dans une arborescence »). */
+    private fun idCoffre(): String? = vaultRoot()?.uri?.let { u ->
+        runCatching { android.provider.DocumentsContract.getDocumentId(u) }.getOrNull()
+            ?: runCatching { android.provider.DocumentsContract.getTreeDocumentId(u) }.getOrNull()
+    }
+
+    @Volatile private var cacheDirect: Triple<String, Long, File?>? = null
+
     /**
      * Dossier du coffre sur le stockage du téléphone, lisible directement (bien plus rapide que l'accès SAF) quand le
-     * coffre est sur le stockage principal et que l'accès à tous les fichiers est accordé ; null sinon.
+     * coffre est sur le stockage principal et que l'accès à tous les fichiers est accordé ; null sinon. Garde-fous :
+     * jamais la racine du téléphone, et le contenu lu doit être celui que montre Android pour le coffre choisi —
+     * sinon on reste sur l'accès SAF (c'était la cause des dossiers créés à la racine du téléphone).
      */
     fun fichierCoffre(): File? {
-        val uri = store.obsidianUri.value.takeIf { it.isNotBlank() }?.let { runCatching { Uri.parse(it) }.getOrNull() } ?: return null
-        if (uri.authority != "com.android.externalstorage.documents") return null
+        val cle = store.obsidianUri.value
+        val maintenant = System.currentTimeMillis()
+        cacheDirect?.let { (c, t, f) -> if (c == cle && maintenant - t < 60_000) return f?.takeIf { it.isDirectory } }
+        val f = runCatching { calculerFichierCoffre() }.getOrNull()
+        cacheDirect = Triple(cle, maintenant, f)
+        return f
+    }
+
+    private fun calculerFichierCoffre(): File? {
+        val v = vaultRoot() ?: return null
+        if (v.uri.authority != "com.android.externalstorage.documents") return null
         if (android.os.Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) return null
-        val id = runCatching { android.provider.DocumentsContract.getTreeDocumentId(uri) }.getOrNull() ?: return null
-        if (!id.startsWith("primary:")) return null
-        val f = File(android.os.Environment.getExternalStorageDirectory(), id.removePrefix("primary:"))
-        return f.takeIf { it.isDirectory && it.canRead() && it.listFiles() != null }
+        val id = idCoffre() ?: return null
+        val rel = when {
+            id.startsWith("primary:") -> id.removePrefix("primary:")
+            id.startsWith("home:") -> "Documents/" + id.removePrefix("home:")
+            else -> return null
+        }.trim('/')
+        if (rel.isBlank()) return null
+        val f = File(android.os.Environment.getExternalStorageDirectory(), rel)
+        if (!f.isDirectory || !f.canRead()) return null
+        val direct = f.list()?.filterNot { it.startsWith(".") }?.map { normaliseNom(it) }?.toSet() ?: return null
+        val saf = v.listFiles().mapNotNull { it.name }.filterNot { it.startsWith(".") }.map { normaliseNom(it) }.toSet()
+        return f.takeIf { direct == saf }
     }
 
     /**
@@ -480,9 +643,8 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             direct != null -> direct.walkTopDown().onEnter { it == direct || !it.name.startsWith(".") }
                 .forEach { f -> if (f != direct && !f.name.startsWith(".")) mix(f.relativeTo(direct).path, f.lastModified(), if (f.isFile) f.length() else -1) }
             v != null -> {
-                val tree = Uri.parse(store.obsidianUri.value)
-                val racine = runCatching { android.provider.DocumentsContract.getTreeDocumentId(tree) }.getOrNull() ?: return 0L
-                signatureSaf(tree, racine, "", 0) { c, d, t -> mix(c, d, t) }
+                val racine = idCoffre() ?: return 0L
+                signatureSaf(v.uri, racine, "", 0) { c, d, t -> mix(c, d, t) }
             }
             else -> localRoot().walkTopDown().forEach { f -> mix(f.path, f.lastModified(), if (f.isFile) f.length() else -1) }
         }
@@ -514,7 +676,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
     /** Ouvre un fichier du coffre (PDF, image, audio…) dans l'application adaptée du téléphone. */
     fun ouvrirFichier(chemin: String): Boolean {
-        val propre = chemin.trim().trim('/')
+        val propre = resoudre(chemin) ?: chemin.trim().trim('/')
         val mime = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(propre.substringAfterLast('.', "").lowercase()) ?: "*/*"
         var uri: Uri? = null
         val v = vaultRoot()

@@ -96,9 +96,16 @@ object ImageGen {
             try {
                 val bytes = genere(list[i], model, prompt)
                 next = (i + 1) % list.size
-                val name = "img_" + java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.FRENCH).format(java.util.Date()) + "_" + (100 + (Math.random() * 899).toInt()) + ".png"
-                val f = File(File(app.filesDir, "images").apply { mkdirs() }, name)
+                // Nom daté + quelques mots de la description : l'image se retrouve aussi par son sujet (dans Obsidian comme par JARVIS).
+                val sujet = java.text.Normalizer.normalize(prompt.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
+                    .replace(Regex("[^a-z0-9]+"), " ").trim().split(' ').filter { it.length > 2 && it !in setOf("the", "and", "with", "for", "style", "detailed", "high", "quality") }
+                    .take(4).joinToString("-").take(40)
+                val name = "img_" + java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.FRENCH).format(java.util.Date()) +
+                    (if (sujet.isNotBlank()) "_$sujet" else "") + "_" + (100 + (Math.random() * 899).toInt()) + ".png"
+                val dossierImages = File(app.filesDir, "images").apply { mkdirs() }
+                val f = File(dossierImages, name)
                 f.writeBytes(bytes)
+                memoriserDescription(dossierImages, name, prompt)
                 val loc = runCatching { app.obsidian.saveBytes("JARVIS/Images", name, bytes, "image/png") }.getOrDefault("")
                 return@withContext f to loc
             } catch (e: ApiException) {
@@ -107,6 +114,18 @@ object ImageGen {
             } catch (e: Exception) { last = e }
         }
         throw last ?: IllegalStateException("Génération impossible.")
+    }
+
+    /** Garde la description (prompt) de chaque image générée, pour la retrouver plus tard par son sujet. */
+    @Synchronized
+    private fun memoriserDescription(dossier: File, nom: String, prompt: String) {
+        runCatching {
+            // À côté du dossier des images (et non dedans) : il ne doit jamais passer pour une image.
+            val f = File(dossier.parentFile, "images_descriptions.json")
+            val j = if (f.isFile) JSONObject(f.readText()) else JSONObject()
+            j.put(nom, prompt.take(300))
+            f.writeText(j.toString())
+        }
     }
 
     /** Retrouve une image déjà générée par son nom de fichier (ou « derniere »/« dernier » pour la plus récente). */

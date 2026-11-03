@@ -39,6 +39,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
 - Si l’utilisateur demande d’analyser son planning pour ajouter les rendez-vous aux fiches clients, utilise TOUJOURS analyser_planning_clients (et pas seulement get_planning). Cet outil traite chaque client séparément, même lorsqu’un rendez-vous en mentionne plusieurs, extrait les coordonnées et les caractéristiques photovoltaïques explicitement présentes, puis demande confirmation avant l’enregistrement. Ne crée pas de nouveau client à partir d’un nom incertain.
 - Quand l’utilisateur demande une carte KML des clients ou des installations pour Google Earth, utilise clients_exporter_kml. Le fichier contient une fiche HTML illustrée (emojis), un repère coloré selon particulier/professionnel et des champs de recherche par client, type et adresse. Si un nom est donné, passe-le dans recherche pour filtrer la carte.\n- Si l’utilisateur demande de changer les couleurs des clients sur Google Earth, utilise kml_couleurs_set pour enregistrer les couleurs puis régénère le KML avec clients_exporter_kml.
 - Si l’utilisateur donne des coordonnées GPS pour une installation (copiées de Google Maps « 47.541558, 4.459845 », en degrés-minutes-secondes 47°32'29.6"N 4°27'35.4"E, ou un lien Google Maps), passe-les TELLES QUELLES dans site_gps de client_ecrire (avec site_nom si le client a plusieurs installations) ; pour le siège, dans gps de societe_info_set. Ces coordonnées priment sur l’adresse et ne sont jamais recalculées.
+- Si l’utilisateur est sur place et demande d’enregistrer « ma position », « ma localisation exacte », « ici »… sur une fiche client, appelle client_ecrire avec site_gps = « ma position » ET site_adresse = « ma position » (l’outil relève le GPS du téléphone et l’adresse précise correspondante) ; ne demande pas l’adresse. S’il parle de toutes ses installations (« ses deux installations »), mets site_nom = « toutes ».
 - Pour voir ou améliorer la précision des positions GPS des clients, utilise clients_gps (relocaliser=true pour recalculer avec la Base Adresse Nationale). N’invente jamais de coordonnées.
 - Pour un devis ou une facture, identifie le client et l'installation (client_ecrire si le client n'existe pas encore). Si une information indispensable manque (client, prestation), demande-la en une phrase.
 - Le texte renvoyé par les outils société est déjà mis en forme et affiché tel quel : ne le répète pas.
@@ -104,10 +105,11 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "tel" to prop("Téléphone."), "email" to prop("Email."), "adresse" to prop("Adresse postale du client."),
             "depuis" to prop("Date de début de la relation yyyy-MM-dd (ou année) pour l'ancienneté/fidélité."),
             "notes" to prop("Notes."),
-            "site_nom" to prop("Nom de l'installation (ex. « Toiture garage »)."), "site_adresse" to prop("Adresse de l'installation."),
+            "site_nom" to prop("Nom de l'installation (ex. « Toiture garage »). « toutes » pour appliquer la mise à jour à toutes les installations du client."),
+            "site_adresse" to prop("Adresse de l'installation. « ma position » = adresse précise (n°, rue, code postal, ville) de l'endroit où se trouve le téléphone."),
             "kwc" to prop("Puissance de l'installation en kWc."), "mise_en_service" to prop("Date de mise en service yyyy-MM-dd."),
             "onduleur" to prop("Modèle d'onduleur."), "nb_panneaux" to prop("Nombre de panneaux."), "site_notes" to prop("Notes sur l'installation."),
-            "site_gps" to prop("Coordonnées GPS exactes de l'installation telles que copiées dans Google Maps (« 47.541558, 4.459845 »), en degrés-minutes-secondes (47°32'29.6\"N 4°27'35.4\"E) ou lien Google Maps. Prioritaires sur l'adresse.")
+            "site_gps" to prop("Coordonnées GPS exactes de l'installation telles que copiées dans Google Maps (« 47.541558, 4.459845 »), en degrés-minutes-secondes (47°32'29.6\"N 4°27'35.4\"E) ou lien Google Maps. Prioritaires sur l'adresse. « ma position » = position GPS actuelle du téléphone (quand l'utilisateur est sur place).")
         ), listOf("nom")),
         tool("client_fiche", "Affiche la fiche client complète et l'enregistre dans le coffre Obsidian.", mapOf("nom" to prop("Nom du client.")), listOf("nom")),
         tool("client_supprimer", "Supprime définitivement une fiche client de la base Société après confirmation. Refuse la suppression si des devis ou factures sont encore liés afin de préserver l’historique comptable.", mapOf("nom" to prop("Nom exact du client à supprimer.")), listOf("nom")),
@@ -374,7 +376,53 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             ok("🗑️ Fiche client « ${cible.nom} », ses installations et sa fiche Markdown Obsidian supprimées.")
         else err("⚠️ La fiche client « ${cible.nom} » a bien été retirée de la base Société, mais sa copie Markdown Obsidian est encore présente ou inaccessible : ${markdownPath}. Vérifie les droits d'écriture du coffre.")
     }
-    private suspend fun clientEcrire(a: JSONObject): ToolResult {
+    /** « ma position », « ma localisation exacte », « ici », « où je suis »… = position actuelle du téléphone. */
+    private fun estMaPosition(t: String): Boolean {
+        val n = normaliser(t).trim()
+        return n == "ici" || Regex("\\b(ma|mon|notre)\\s+(position|localisation|emplacement|geolocalisation|point gps)|position (actuelle|du telephone|gps actuelle)|ou je suis|ou je me trouve|sur place").containsMatchIn(n)
+    }
+    private fun estToutes(t: String) =
+        Regex("^(toutes?|tous|les deux|les \\d+|toutes? (les|ses) (installations?|sites?)|tous (les|ses) sites?|les deux installations?)$").matches(normaliser(t).trim())
+
+    /**
+     * client_ecrire : remplace « ma position » (site_gps / site_adresse) par la position FRAÎCHE du téléphone et l'adresse
+     * précise correspondante, et applique la mise à jour à toutes les installations si site_nom = « toutes ».
+     */
+    private suspend fun clientEcrire(entree: JSONObject): ToolResult {
+        val a = JSONObject(entree.toString())
+        var infoPos = ""
+        val gpsIci = a.hv("site_gps") && estMaPosition(a.s("site_gps"))
+        val adresseIci = a.hv("site_adresse") && estMaPosition(a.s("site_adresse"))
+        if (gpsIci || adresseIci) {
+            val (p, precision) = fr.dd.jarvis.device.Locator.pointPrecis(app)
+                ?: return err("Position du téléphone indisponible : active la localisation (et l'autorisation de localisation pour Jarvis), puis réessaie.")
+            val adr = Geo.adresseDe(p)
+            // Sur place : le point du téléphone vaut pour l'installation, même si seule l'adresse a été demandée.
+            if (gpsIci || !a.hv("site_gps")) a.put("site_gps", Geo.texteGps(p))
+            a.put("_gps_source", "position du téléphone sur place (± ${precision.toInt()} m)")
+            if (adresseIci) { if (adr != null) a.put("site_adresse", adr.libelle) else a.remove("site_adresse") }
+            infoPos = "\n📍 Position du téléphone : ${Geo.texteGps(p)} (± ${precision.toInt()} m)" +
+                (adr?.let { "\n🏠 Adresse à cet endroit : ${it.libelle}" + (it.distance?.takeIf { d -> d > 15 }?.let { d -> " (point d'adresse le plus proche, ~$d m)" } ?: "") }
+                    ?: "\n🏠 Aucune adresse postale trouvée à cet endroit : seules les coordonnées GPS sont enregistrées.")
+        }
+        if (a.hv("site_nom") && estToutes(a.s("site_nom"))) {
+            val c = d.chercherClients(a.s("nom")).let { l -> l.firstOrNull { normaliser(it.nom) == normaliser(a.s("nom")) } ?: l.singleOrNull() }
+            if (c != null && c.sites.isNotEmpty()) {
+                val res = c.sites.map { site ->
+                    val un = JSONObject(a.toString()).put("site_nom", site.nom)
+                    clientEcrireUn(un)
+                }
+                res.firstOrNull { !it.direct }?.let { return it }
+                return ok("✅ ${c.nom} : ${c.sites.size} installation(s) mise(s) à jour (${c.sites.joinToString { it.nom }}).$infoPos" +
+                    res.joinToString("") { r -> r.text.lines().filter { it.startsWith("☀️") || it.startsWith("🛰️") }.joinToString("\n", prefix = "\n") })
+            }
+            a.remove("site_nom")
+        }
+        val r = clientEcrireUn(a)
+        return if (infoPos.isBlank()) r else r.copy(text = r.text + infoPos)
+    }
+
+    private suspend fun clientEcrireUn(a: JSONObject): ToolResult {
         val nom = a.s("nom")
         val trouves = d.chercherClients(nom)
         if (trouves.size > 1 && trouves.none { normaliser(it.nom) == normaliser(nom) })
@@ -397,7 +445,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         if (a.hv("site_nom") || a.hv("site_adresse") || a.hv("kwc") || a.hv("onduleur") || a.hv("nb_panneaux") || a.hv("mise_en_service") || a.hv("site_notes") || gpsSaisi != null) {
             val ref = a.s("site_nom").ifBlank { a.s("site_adresse") }
             if (gpsSaisi != null && ref.isBlank() && c.sites.size > 1)
-                return err("${c.nom} a plusieurs installations (${c.sites.joinToString { it.nom }}). Pour laquelle sont ces coordonnées GPS ? (site_nom)")
+                return err("${c.nom} a plusieurs installations (${c.sites.joinToString { it.nom }}). Pour laquelle sont ces coordonnées GPS ? (site_nom, ou « toutes » pour toutes ses installations)")
             val trouve = c.sites.firstOrNull { x -> ref.isNotBlank() && (normaliser(x.nom) == normaliser(ref) || normaliser(x.adresse) == normaliser(ref)) }
                 ?: (if (ref.isBlank() && c.sites.size == 1) c.sites.first() else null)
             val isNew = trouve == null
@@ -407,7 +455,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             if (a.hv("site_adresse") && normaliser(a.s("site_adresse")) != normaliser(site.adresse))
                 site = site.copy(adresse = a.s("site_adresse"), distanceKm = null, distanceCle = "", lat = null, lon = null, gpsPrecision = "", gpsTrouve = "")
             if (gpsSaisi != null) site = site.copy(
-                lat = gpsSaisi.lat, lon = gpsSaisi.lon, gpsPrecision = Geo.Precision.MANUELLE.name, gpsTrouve = "coordonnées GPS saisies",
+                lat = gpsSaisi.lat, lon = gpsSaisi.lon, gpsPrecision = Geo.Precision.MANUELLE.name, gpsTrouve = a.s("_gps_source").ifBlank { "coordonnées GPS saisies" },
                 distanceKm = null, dureeMin = null, distanceCle = ""
             )
             val kwc = a.dbl("kwc")
@@ -420,7 +468,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             val fin: Site = site
             c = c.copy(sites = if (isNew) c.sites + fin else c.sites.map { if (it.id == fin.id) fin else it })
             siteTxt = "\n☀️ Installation : ${fin.nom} — ${nombre(fin.kwc)} kWc — ${fin.adresse}" +
-                (if (gpsSaisi != null) "\n🛰️ GPS : ${Geo.texteGps(gpsSaisi)} (coordonnées saisies, format Google Maps) — ${Geo.texteDms(gpsSaisi)}" else "")
+                (if (gpsSaisi != null) "\n🛰️ GPS : ${Geo.texteGps(gpsSaisi)} (${a.s("_gps_source").ifBlank { "coordonnées saisies" }}, format Google Maps) — ${Geo.texteDms(gpsSaisi)}" else "")
         }
         val final: Client = c
         svc.repo.update { it.copy(clients = if (nouveau) it.clients + final else it.clients.map { x -> if (x.id == final.id) final else x }) }

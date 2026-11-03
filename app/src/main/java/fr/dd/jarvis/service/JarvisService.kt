@@ -52,10 +52,11 @@ class JarvisService : Service() {
         fun notifierReprise(ctx: Context, texte: String) {
             val pi = PendingIntent.getForegroundService(ctx, 5, Intent(ctx, JarvisService::class.java).setAction(ACTION_RELANCER),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-            val n = NotificationCompat.Builder(ctx, JarvisApp.CHANNEL_AGENTS).setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            // Canal discret (aucun son) et une seule alerte : plus de bips à répétition quand Android bloque le micro.
+            val n = NotificationCompat.Builder(ctx, JarvisApp.CHANNEL_WAKE).setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setContentTitle("Écoute « Jarvis » en pause").setContentText(texte)
-                .setStyle(NotificationCompat.BigTextStyle().bigText(texte))
-                .setPriority(NotificationCompat.PRIORITY_HIGH).setContentIntent(pi).setAutoCancel(true)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(texte)).setOnlyAlertOnce(true).setSilent(true)
+                .setContentIntent(pi).setAutoCancel(true)
                 .addAction(android.R.drawable.ic_btn_speak_now, "Relancer l'écoute", pi).build()
             runCatching { ctx.getSystemService(NotificationManager::class.java).notify(NOTIF_REPRISE, n) }
         }
@@ -90,11 +91,20 @@ class JarvisService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    private var texteEcoute = "Dis « Jarvis », attends le bip, puis ta demande"
+
+    /** Met à jour le texte de la notification permanente (état du détecteur), sans son. */
+    private fun majNotification(texte: String) {
+        if (texte == texteEcoute) return
+        texteEcoute = texte
+        runCatching { getSystemService(NotificationManager::class.java).notify(NOTIF, notificationEcoute()) }
+    }
+
     private fun notificationEcoute(): Notification {
         val pi = PendingIntent.getService(this, 1, Intent(this, JarvisService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE)
         val open = PendingIntent.getActivity(this, 2, Intent(this, fr.dd.jarvis.MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(this, JarvisApp.CHANNEL_WAKE).setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentTitle("JARVIS à l'écoute").setContentText("Dis « Jarvis », attends le bip, puis ta demande").setOngoing(true)
+            .setContentTitle("JARVIS à l'écoute").setContentText(texteEcoute).setOngoing(true).setOnlyAlertOnce(true).setSilent(true)
             .setContentIntent(open).addAction(0, "Arrêter", pi).build()
     }
 
@@ -159,7 +169,7 @@ class JarvisService : Service() {
             app.store.picoKey.value.isNotBlank() -> fr.dd.jarvis.voice.PorcupineWake(this, app.store.picoKey.value) { main.post { onWakeWord() } }
             fr.dd.jarvis.voice.VoskModel.ready(this) -> fr.dd.jarvis.voice.VoskWake(this) { main.post { onWakeWord() } }
             else -> null
-        }
+        }?.also { brancher(it) }
         main.postDelayed(surveillance, 30_000)
         if (vosk == null) {
             // Ni clé Picovoice ni modèle Vosk : on télécharge le détecteur hors-ligne (≈ 40 Mo, une seule fois), toujours SANS écoute en boucle.
@@ -172,7 +182,7 @@ class JarvisService : Service() {
                 main.post {
                     if (running && fr.dd.jarvis.voice.VoskModel.ready(this@JarvisService)) {
                         nm.cancel(NOTIF + 1)
-                        vosk = fr.dd.jarvis.voice.VoskWake(this@JarvisService) { main.post { onWakeWord() } }
+                        vosk = fr.dd.jarvis.voice.VoskWake(this@JarvisService) { main.post { onWakeWord() } }.also { brancher(it) }
                         goIdle()
                     } else if (running) {
                         app.store.wakeOn.set(false)
@@ -213,20 +223,58 @@ class JarvisService : Service() {
     private fun finConversation() {
         if (!awake) return
         awake = false
+        if (!echangeReel && incompris == 0) noterFauxReveil() else vosk?.exigence = exigenceCourante()
         if (echangeReel) voice?.carillon(montant = false) { goIdle() } ?: goIdle() else goIdle()
     }
 
+    /** Le détecteur prévient s'il s'arrête tout seul (micro perdu, erreur) : on le relance au lieu de rester sourd. */
+    private fun brancher(v: fr.dd.jarvis.voice.WakeDetector) {
+        v.onPanne = { main.post { if (running && !awake && !busy && vosk === v) { v.stop(); main.postDelayed({ rearmer(v) }, 1500) } } }
+        v.exigence = exigenceCourante()
+    }
+
+    private var echecsReveil = 0
+
+    /**
+     * (Re)démarre l'écoute du mot « Jarvis ». Un échec (micro occupé par une autre appli, appel…) ne coupe plus le
+     * service : on réessaie avec un délai croissant ; une clé Picovoice refusée bascule sur le détecteur hors-ligne.
+     */
     private fun rearmer(v: fr.dd.jarvis.voice.WakeDetector) {
-        if (running && !awake && !busy) {
-            if (!v.start()) {
-                val err = (v as? fr.dd.jarvis.voice.PorcupineWake)?.error.orEmpty()
-                vosk?.release(); vosk = null
-                app.store.wakeOn.set(false)
-                getSystemService(NotificationManager::class.java).notify(NOTIF + 1, NotificationCompat.Builder(this, JarvisApp.CHANNEL_WAKE).setSmallIcon(android.R.drawable.ic_btn_speak_now)
-                    .setContentTitle("Détecteur « Jarvis » en échec").setContentText(err.ifBlank { "Impossible de démarrer l'écoute." }.take(120)).setAutoCancel(true).build())
-                stopSelf()
-            }
+        main.removeCallbacks(relance)
+        if (!running || awake || busy || vosk !== v) return
+        if (v.start()) {
+            echecsReveil = 0
+            majNotification("Dis « Jarvis », attends le bip, puis ta demande")
+            return
         }
+        echecsReveil++
+        val err = (v as? fr.dd.jarvis.voice.PorcupineWake)?.error.orEmpty()
+        if (v is fr.dd.jarvis.voice.PorcupineWake && echecsReveil >= 2 && fr.dd.jarvis.voice.VoskModel.ready(this)) {
+            v.release()
+            vosk = fr.dd.jarvis.voice.VoskWake(this) { main.post { onWakeWord() } }.also { brancher(it) }
+            majNotification("Clé Picovoice refusée (${err.take(60)}) : détecteur hors-ligne utilisé")
+            main.postDelayed({ vosk?.let { rearmer(it) } }, 500)
+            return
+        }
+        val delai = when (echecsReveil) { 1 -> 1500L; 2 -> 4000L; 3 -> 10_000L; else -> 30_000L }
+        majNotification("Micro occupé : nouvelle tentative dans ${delai / 1000} s" + (if (err.isNotBlank()) " (${err.take(60)})" else ""))
+        main.postDelayed(relance, delai)
+    }
+
+    private val relance = Runnable { vosk?.let { rearmer(it) } }
+
+    // ---- faux réveils : si « Jarvis » se déclenche tout seul (télé, conversation), le détecteur devient plus strict.
+    private val fauxReveils = ArrayDeque<Long>()
+
+    private fun exigenceCourante(): Int {
+        val maintenant = System.currentTimeMillis()
+        while (fauxReveils.isNotEmpty() && maintenant - fauxReveils.first() > 15 * 60_000) fauxReveils.removeFirst()
+        return when { fauxReveils.size >= 4 -> 3; fauxReveils.size >= 2 -> 2; else -> 1 }
+    }
+
+    private fun noterFauxReveil() {
+        fauxReveils.addLast(System.currentTimeMillis())
+        vosk?.exigence = exigenceCourante()
     }
 
     private var dernierReveil = 0L
@@ -320,6 +368,7 @@ class JarvisService : Service() {
     override fun onDestroy() {
         running = false
         main.removeCallbacks(surveillance)
+        main.removeCallbacks(relance)
         scope.cancel()
         vosk?.release(); vosk = null
         voice?.release(); voice = null

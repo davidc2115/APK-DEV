@@ -450,6 +450,41 @@ object Geo {
         best?.loc?.also { cache[cle] = it }
     }
 
+    /** Adresse postale retrouvée à partir d'un point GPS ([distance] = écart en mètres avec le point d'adresse). */
+    data class Adresse(val libelle: String, val numero: String, val rue: String, val codePostal: String, val ville: String, val distance: Int?, val source: String)
+
+    /**
+     * Adresse précise d'un point GPS (n°, rue, code postal, ville) : Base Adresse Nationale (IGN) d'abord, au numéro
+     * près en France ; OpenStreetMap ensuite. Null si rien n'est trouvé.
+     */
+    suspend fun adresseDe(p: Point): Adresse? = withContext(Dispatchers.IO) {
+        runCatching {
+            val url = "https://data.geopf.fr/geocodage/reverse".toHttpUrl().newBuilder()
+                .addQueryParameter("lon", f6(p.lon)).addQueryParameter("lat", f6(p.lat))
+                .addQueryParameter("index", "address").addQueryParameter("limit", "1").build()
+            val f = JSONObject(get(url.toString()) ?: "{}").optJSONArray("features")?.optJSONObject(0)
+            val pr = f?.optJSONObject("properties")
+            if (pr != null && pr.optString("label").isNotBlank()) {
+                val d = pr.optDouble("distance", Double.NaN).takeIf { !it.isNaN() }?.toInt()
+                // Au-delà de ~250 m, le point d'adresse le plus proche n'est probablement pas le bon bâtiment.
+                if (d == null || d <= 250) return@withContext Adresse(pr.optString("label"), pr.optString("housenumber"),
+                    pr.optString("street").ifBlank { pr.optString("name") }, pr.optString("postcode"), pr.optString("city"), d, "Base Adresse Nationale (IGN)")
+            }
+        }
+        runCatching {
+            val url = "https://nominatim.openstreetmap.org/reverse".toHttpUrl().newBuilder()
+                .addQueryParameter("format", "jsonv2").addQueryParameter("addressdetails", "1").addQueryParameter("zoom", "18")
+                .addQueryParameter("lat", f6(p.lat)).addQueryParameter("lon", f6(p.lon)).build()
+            val o = JSONObject(getOsm(url.toString()) ?: "{}")
+            val a = o.optJSONObject("address") ?: return@runCatching null
+            val num = a.optString("house_number"); val rue = a.optString("road").ifBlank { a.optString("hamlet") }
+            val cp = a.optString("postcode"); val ville = villeOsm(a)
+            val libelle = listOf(listOf(num, rue).filter { it.isNotBlank() }.joinToString(" "), listOf(cp, ville).filter { it.isNotBlank() }.joinToString(" "))
+                .filter { it.isNotBlank() }.joinToString(", ").ifBlank { o.optString("display_name") }
+            if (libelle.isBlank()) null else Adresse(libelle, num, rue, cp, ville, null, "OpenStreetMap")
+        }.getOrNull()
+    }
+
     /** Raccourci : seulement le point (itinéraires, trajets). */
     suspend fun geocode(adresse: String): Point? = localiser(adresse)?.point
 

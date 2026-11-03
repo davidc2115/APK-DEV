@@ -45,7 +45,14 @@ data class Hub(
     val type: TypeHub,
     val total: Int,
     val pos: Pt,
-    val rayon: Float
+    val rayon: Float,
+    /** Catégorie d'un sous-dossier affiché en cercle (null pour une catégorie). */
+    val parent: String? = null,
+    /** 0 = catégorie (dossier racine), 1 = sous-dossier. */
+    val niveau: Int = 0,
+    /** A du contenu à montrer (sous-dossiers ou fichiers) : se déplie / se replie d'un toucher. */
+    val depliable: Boolean = false,
+    val deplie: Boolean = false
 )
 
 data class Etiquette(
@@ -96,6 +103,8 @@ data class Constellation(
     val notesParHub: Map<String, List<ObsidianWriter.GraphNode>>,
     /** Arborescence réelle : chemin de dossier ("" = racine, "Autres" = catégories regroupées) → contenu. */
     val dossiers: Map<String, ContenuDossier>,
+    /** Dossiers dépliés dans cette mise en page (catégories et sous-dossiers). */
+    val deplies: Set<String>,
     val tagsParNote: Map<String, List<String>>,
     val totalNotes: Int,
     val totalLiens: Int,
@@ -162,11 +171,18 @@ object ConstellationLayout {
     private fun nom(chemin: String) = chemin.substringAfterLast('/')
 
     /** Une ligne d'étiquettes à côté d'un hub : un dossier et ses fichiers, ou un fichier seul. */
-    private class Rangee(val tete: Etiquette, val feuilles: List<Etiquette>) {
-        val hauteur get() = max(H_ETIQUETTE + 9f, feuilles.size * PAS_FEUILLE + 6f)
+    const val RAYON_SOUS = 32f
+
+    /** Une ligne à côté d'une catégorie : un sous-dossier en cercle (et ses fichiers s'il est déplié), ou un fichier. */
+    private class Rangee(val sous: Hub?, val tete: Etiquette?, val feuilles: List<Etiquette>) {
+        val hauteur get() = if (sous != null) max(2 * RAYON_SOUS + 28f, feuilles.size * PAS_FEUILLE + 12f) else H_ETIQUETTE + 9f
     }
 
-    fun construire(data: ObsidianWriter.GraphData): Constellation {
+    /** Déplie [chemin] s'il est replié, le replie (avec tout ce qu'il contient) s'il est déplié. */
+    fun basculer(deplies: Set<String>, chemin: String): Set<String> =
+        if (chemin in deplies) deplies.filterTo(HashSet()) { it != chemin && !it.startsWith("$chemin/") } else deplies + chemin
+
+    fun construire(data: ObsidianWriter.GraphData, depliesDemandes: Set<String>? = null): Constellation {
         val notes = data.nodes.filterNot { it.ghost }
         val ids = notes.map { it.id }.toHashSet()
         // Liens réels orientés entre notes existantes (les cibles absentes ne deviennent pas des nœuds).
@@ -231,58 +247,66 @@ object ConstellationLayout {
         val tagsAffiches = compteTags.entries.sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key.lowercase() })
             .take(MAX_TAGS).map { it.key }
 
-        // ---- étiquettes de chaque catégorie : sous-dossiers (branches) + leurs fichiers, puis fichiers de la racine
-        val nbBranches = categories.sumOf { cat -> if (cat == "Racine") 0 else min(dossiers[cat]?.sousDossiers?.size ?: 0, MAX_SOUS_DOSSIERS) }
-        val feuillesParBranche = when { nbBranches <= 8 -> 3; nbBranches <= 18 -> 2; else -> 1 }
-        fun etiquetteNote(n: ObsidianWriter.GraphNode, cat: String, parent: String?, feuille: Boolean): Etiquette {
+        // ---- état déplié / replié : par défaut chaque catégorie montre ses sous-dossiers (repliés)
+        val deplies: Set<String> = depliesDemandes ?: categories.toSet()
+
+        fun etiquetteNote(n: ObsidianWriter.GraphNode, hub: String, feuille: Boolean): Etiquette {
             val t = court(n.label, if (feuille) 18 else 20)
-            val e = if (feuille) 0.88f else 1f
-            return Etiquette("note:${n.id}", t, Icone.NOTE, TypeEtiquette.NOTE, cat, noteId = n.id, pos = Pt(0f, 0f),
-                w = largeurEtiquette(t) * e, h = if (feuille) H_FEUILLE else H_ETIQUETTE, parent = parent, echelle = e)
+            val e = if (feuille) 0.9f else 1f
+            return Etiquette("note:${n.id}", t, Icone.NOTE, TypeEtiquette.NOTE, hub, noteId = n.id, pos = Pt(0f, 0f),
+                w = largeurEtiquette(t) * e, h = if (feuille) H_FEUILLE else H_ETIQUETTE, echelle = e)
         }
-        fun etiquettePiece(a: ObsidianWriter.GraphAttachment, cat: String, parent: String?, feuille: Boolean): Etiquette {
+        fun etiquettePiece(a: ObsidianWriter.GraphAttachment, hub: String, feuille: Boolean): Etiquette {
             val t = court(a.name, if (feuille) 18 else 20)
-            val e = if (feuille) 0.88f else 1f
-            return Etiquette("fichier:${a.path}", t, iconePiece(a.kind), TypeEtiquette.FICHIER, cat, pos = Pt(0f, 0f),
-                w = largeurEtiquette(t) * e, h = if (feuille) H_FEUILLE else H_ETIQUETTE, parent = parent, chemin = a.path, echelle = e)
+            val e = if (feuille) 0.9f else 1f
+            return Etiquette("fichier:${a.path}", t, iconePiece(a.kind), TypeEtiquette.FICHIER, hub, pos = Pt(0f, 0f),
+                w = largeurEtiquette(t) * e, h = if (feuille) H_FEUILLE else H_ETIQUETTE, chemin = a.path, echelle = e)
         }
-        fun etiquetteDossier(d: String, cat: String, parent: String?, feuille: Boolean): Etiquette {
+        fun etiquetteDossier(d: String, hub: String): Etiquette {
             val t = court(nom(d), 16) + " · " + total(d)
-            val e = if (feuille) 0.88f else 1.04f
-            return Etiquette("dir:$d", t, iconeDossier(nom(d)), TypeEtiquette.DOSSIER, cat, pos = Pt(0f, 0f),
-                w = largeurEtiquette(t) * e, h = if (feuille) H_FEUILLE else H_ETIQUETTE + 2f, parent = parent, dossier = d, echelle = e)
+            return Etiquette("dir:$d", t, iconeDossier(nom(d)), TypeEtiquette.DOSSIER, hub, pos = Pt(0f, 0f),
+                w = largeurEtiquette(t) * 0.9f, h = H_FEUILLE, dossier = d, echelle = 0.9f)
         }
-        fun plus(cat: String, dossier: String, n: Int, mot: String, parent: String? = null): Etiquette {
+        fun plus(hub: String, dossier: String, n: Int, mot: String, feuille: Boolean = false): Etiquette {
             val t = "+$n $mot"
-            return Etiquette("plus:$dossier:$mot", t, Icone.NOTE, TypeEtiquette.PLUS, cat, pos = Pt(0f, 0f),
-                w = largeurEtiquette(t, false), h = H_ETIQUETTE, parent = parent, dossier = dossier)
+            return Etiquette("plus:$dossier:$mot", t, Icone.NOTE, TypeEtiquette.PLUS, hub, pos = Pt(0f, 0f),
+                w = largeurEtiquette(t, false), h = if (feuille) H_FEUILLE else H_ETIQUETTE, dossier = dossier, echelle = if (feuille) 0.9f else 1f)
         }
-        /** Fichiers d'un dossier, les plus reliés d'abord ; à défaut ses sous-dossiers. */
-        fun feuilles(d: String, cat: String, parent: String, n: Int): List<Etiquette> {
-            val c = dossiers[d] ?: return emptyList()
-            val out = mutableListOf<Etiquette>()
-            c.notes.sortedWith(compareByDescending<ObsidianWriter.GraphNode> { degre(it.id) }.thenBy { it.label.lowercase() })
-                .take(n).forEach { out += etiquetteNote(it, cat, parent, true) }
-            c.pieces.take(n - out.size).forEach { out += etiquettePiece(it, cat, parent, true) }
-            c.sousDossiers.take((n - out.size).coerceAtLeast(0)).forEach { out += etiquetteDossier(it, cat, parent, true) }
-            return out
+        val parDegre = compareByDescending<ObsidianWriter.GraphNode> { degre(it.id) }.thenBy { it.label.lowercase() }
+        fun contenuDe(cat: String) = dossiers[when (cat) { "Autres" -> "Autres"; "Racine" -> "Racine"; else -> cat }]
+        fun sousTitreDe(c: ContenuDossier?): String {
+            val nd = c?.sousDossiers?.size ?: 0
+            val tot = c?.total ?: 0
+            return if (nd > 0) "${pluriel(nd, "dossier", "dossiers")} · $tot" else pluriel(tot, "fichier", "fichiers")
         }
+
         val rangeesParCat = LinkedHashMap<String, List<Rangee>>()
         for (cat in categories) {
+            val c = contenuDe(cat) ?: continue
+            if (cat !in deplies) { rangeesParCat[cat] = emptyList(); continue }
             val rangees = mutableListOf<Rangee>()
-            val chemin = cat
-            val c = dossiers[when (cat) { "Autres" -> "Autres"; "Racine" -> "Racine"; else -> chemin }] ?: continue
             val branches = c.sousDossiers.take(MAX_SOUS_DOSSIERS)
             branches.forEach { d ->
-                val tete = etiquetteDossier(d, cat, null, false)
-                rangees += Rangee(tete, if (cat == "Autres") emptyList() else feuilles(d, cat, tete.id, feuillesParBranche))
+                val cd = dossiers[d]
+                val depliable = cd != null && (cd.sousDossiers.isNotEmpty() || cd.notes.isNotEmpty() || cd.pieces.isNotEmpty())
+                val ouvert = depliable && d in deplies && cat != "Autres"
+                val sous = Hub(d, nom(d), sousTitreDe(cd), iconeDossier(nom(d)), TypeHub.DOSSIER, cd?.total ?: 0, Pt(0f, 0f), RAYON_SOUS,
+                    parent = cat, niveau = 1, depliable = depliable, deplie = ouvert)
+                val feuilles = mutableListOf<Etiquette>()
+                if (ouvert && cd != null) {
+                    val fichiers = cd.notes.sortedWith(parDegre).map { etiquetteNote(it, d, true) } + cd.pieces.map { etiquettePiece(it, d, true) }
+                    cd.sousDossiers.take(3).forEach { feuilles += etiquetteDossier(it, d) }
+                    fichiers.take(6).forEach { feuilles += it }
+                    val reste = fichiers.size - 6 + (cd.sousDossiers.size - 3).coerceAtLeast(0)
+                    if (reste > 0) feuilles += plus(d, d, reste, "autres", feuille = true)
+                }
+                rangees += Rangee(sous, null, feuilles)
             }
-            if (c.sousDossiers.size > branches.size) rangees += Rangee(plus(cat, c.chemin, c.sousDossiers.size - branches.size, "dossiers"), emptyList())
+            if (c.sousDossiers.size > branches.size) rangees += Rangee(null, plus(cat, c.chemin, c.sousDossiers.size - branches.size, "dossiers"), emptyList())
             val nbRacine = if (branches.isEmpty()) 5 else 3
-            val fichiersRacine = c.notes.sortedWith(compareByDescending<ObsidianWriter.GraphNode> { degre(it.id) }.thenBy { it.label.lowercase() })
-                .map { etiquetteNote(it, cat, null, false) } + c.pieces.map { etiquettePiece(it, cat, null, false) }
-            fichiersRacine.take(nbRacine).forEach { rangees += Rangee(it, emptyList()) }
-            if (fichiersRacine.size > nbRacine) rangees += Rangee(plus(cat, c.chemin, fichiersRacine.size - nbRacine, "autres"), emptyList())
+            val fichiersRacine = c.notes.sortedWith(parDegre).map { etiquetteNote(it, cat, false) } + c.pieces.map { etiquettePiece(it, cat, false) }
+            fichiersRacine.take(nbRacine).forEach { rangees += Rangee(null, it, emptyList()) }
+            if (fichiersRacine.size > nbRacine) rangees += Rangee(null, plus(cat, c.chemin, fichiersRacine.size - nbRacine, "autres"), emptyList())
             rangeesParCat[cat] = rangees
         }
 
@@ -307,19 +331,21 @@ object ConstellationLayout {
         val positions = positionsPonderees(poidsParEmplacement, rx, ry)
         val hubs = mutableListOf<Hub>()
         categories.forEachIndexed { i, cat ->
-            val c = dossiers[if (cat == "Racine") "Racine" else cat]
-            val nbDossiers = c?.sousDossiers?.size ?: 0
-            val tot = c?.total ?: 0
+            val c = contenuDe(cat)
             val titre = when (cat) { "Racine" -> "Coffre"; else -> nom(cat) }
-            val sous = if (nbDossiers > 0) "${pluriel(nbDossiers, "dossier", "dossiers")} · $tot" else pluriel(tot, "fichier", "fichiers")
-            hubs += Hub(cat, titre, sous, iconeDossier(nom(cat)), TypeHub.DOSSIER, tot, positions[emplacementDe[i]], RAYON_HUB)
+            val depliable = c != null && (c.sousDossiers.isNotEmpty() || c.notes.isNotEmpty() || c.pieces.isNotEmpty())
+            hubs += Hub(cat, titre, sousTitreDe(c), iconeDossier(nom(cat)), TypeHub.DOSSIER, c?.total ?: 0, positions[emplacementDe[i]], RAYON_HUB,
+                depliable = depliable, deplie = depliable && cat in deplies)
         }
         if (aPieces) hubs += Hub("__pieces", "Pièces jointes", "Médias & fichiers", Icone.TROMBONE, TypeHub.PIECES, pieces.size, Pt(0f, ry * 0.98f), RAYON_HUB)
 
         // ---- placement des étiquettes autour de chaque hub
         val etiquettes = mutableListOf<Etiquette>()
-        for (hub in hubs) {
-            if (hub.type == TypeHub.DOSSIER) etiquettes += placerBranches(hub, rangeesParCat[hub.cle].orEmpty())
+        for (hub in hubs.toList()) {
+            if (hub.type == TypeHub.DOSSIER) {
+                val (sousHubs, ets) = placerBranches(hub, rangeesParCat[hub.cle].orEmpty())
+                hubs += sousHubs; etiquettes += ets
+            }
             else if (hub.type == TypeHub.PIECES) {
                 val items = ordreTypes.map { kind ->
                     val t = "${libellePiece(kind)} · ${piecesParType[kind]!!.size}"
@@ -378,7 +404,7 @@ object ConstellationLayout {
         return Constellation(
             hubs = hubs, etiquettes = etiquettes, liens = liens, tousLiens = liensTous,
             sansLienEntrant = sansEntrant, orphelins = orphelins,
-            notesParHub = notesParHub, dossiers = dossiers, tagsParNote = data.tags.filterKeys { it in ids },
+            notesParHub = notesParHub, dossiers = dossiers, deplies = deplies, tagsParNote = data.tags.filterKeys { it in ids },
             totalNotes = notes.size, totalLiens = liensTous.size, totalTags = compteTags.size, totalPieces = pieces.size,
             rayonCerveau = RAYON_CERVEAU,
             minX = minX, minY = minY, maxX = maxX, maxY = maxY
@@ -424,12 +450,13 @@ object ConstellationLayout {
     }
 
     /**
-     * Branches d'une catégorie : chaque rangée (un sous-dossier, ou un fichier de la racine) est posée à côté du hub,
-     * vers l'extérieur ; les fichiers d'un sous-dossier prolongent sa branche un cran plus loin. Hub sur le côté :
-     * une colonne ; hub du haut ou du bas : deux colonnes, une de chaque côté.
+     * Branches d'une catégorie : chaque rangée (un sous-dossier en cercle, ou un fichier de la racine) est posée à côté
+     * du hub, vers l'extérieur ; les fichiers d'un sous-dossier déplié prolongent sa branche un cran plus loin.
+     * Hub sur le côté : une colonne ; hub du haut ou du bas : deux colonnes, une de chaque côté.
      */
-    private fun placerBranches(hub: Hub, rangees: List<Rangee>): List<Etiquette> {
-        if (rangees.isEmpty()) return emptyList()
+    private fun placerBranches(hub: Hub, rangees: List<Rangee>): Pair<List<Hub>, List<Etiquette>> {
+        if (rangees.isEmpty()) return emptyList<Hub>() to emptyList()
+        val hubs = mutableListOf<Hub>()
         val out = mutableListOf<Etiquette>()
         val cote = abs(hub.pos.x) > 60f
         val colonnes: List<Pair<Float, List<Rangee>>> =
@@ -442,16 +469,20 @@ object ConstellationLayout {
             var y = hub.pos.y - hauteur / 2f - (if (!cote && hub.pos.y < 0) hauteur * 0.25f else 0f)
             for (r in rs) {
                 val cy = y + r.hauteur / 2f
-                val tete = r.tete.copy(pos = Pt(hub.pos.x + sx * (hub.rayon + 24f + r.tete.w / 2f), cy))
-                out += tete
-                r.feuilles.forEachIndexed { j, f ->
-                    val fy = cy + (j - (r.feuilles.size - 1) / 2f) * PAS_FEUILLE
-                    out += f.copy(pos = Pt(tete.pos.x + sx * (tete.w / 2f + 26f + f.w / 2f), fy))
+                if (r.sous != null) {
+                    val sous = r.sous.copy(pos = Pt(hub.pos.x + sx * (hub.rayon + 30f + RAYON_SOUS), cy))
+                    hubs += sous
+                    r.feuilles.forEachIndexed { j, f ->
+                        val fy = cy + (j - (r.feuilles.size - 1) / 2f) * PAS_FEUILLE
+                        out += f.copy(pos = Pt(sous.pos.x + sx * (RAYON_SOUS + 26f + f.w / 2f), fy))
+                    }
+                } else if (r.tete != null) {
+                    out += r.tete.copy(pos = Pt(hub.pos.x + sx * (hub.rayon + 24f + r.tete.w / 2f), cy))
                 }
                 y += r.hauteur
             }
         }
-        return out
+        return hubs to out
     }
 
     /**

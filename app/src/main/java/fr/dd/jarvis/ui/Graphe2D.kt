@@ -76,7 +76,10 @@ enum class FiltreGraphe(val libelle: String, val icone: Icone) {
 
 /** Charge le coffre réel et construit la constellation (partagé par la vue 2D et l'Orbe 3D). */
 class ChargementConstellation {
-    var constellation by mutableStateOf<Constellation?>(null)
+    /** Données réelles du coffre ; la mise en page dépend en plus des dossiers dépliés (voir [constellationDe]). */
+    var donnees by mutableStateOf<ObsidianWriter.GraphData?>(null)
+    /** Dossiers dépliés choisis par l'utilisateur (null = par défaut : catégories dépliées, sous-dossiers repliés). */
+    var deplies by mutableStateOf<Set<String>?>(null)
     var erreur by mutableStateOf<String?>(null)
     var version by mutableStateOf(0)
     /** Empreinte du coffre au moment de la dernière construction (0 = inconnue). */
@@ -97,11 +100,11 @@ fun rememberConstellation(app: JarvisApp): ChargementConstellation {
         val r = withContext(Dispatchers.IO) {
             runCatching {
                 etat.signature = runCatching { app.obsidian.signature() }.getOrDefault(0L)
-                ConstellationLayout.construire(app.obsidian.graph())
+                app.obsidian.graph()
             }
         }
         etat.enCours = false
-        r.onSuccess { etat.constellation = it }.onFailure { etat.erreur = it.message ?: it.javaClass.simpleName }
+        r.onSuccess { etat.donnees = it }.onFailure { etat.erreur = it.message ?: it.javaClass.simpleName }
     }
     LaunchedEffect(Unit) {
         while (true) {
@@ -112,6 +115,14 @@ fun rememberConstellation(app: JarvisApp): ChargementConstellation {
         }
     }
     return etat
+}
+
+/** Mise en page de la constellation pour l'état déplié/replié courant (recalculée à chaque bascule). */
+@Composable
+fun constellationDe(etat: ChargementConstellation): Constellation? {
+    val d = etat.donnees ?: return null
+    val deplies = etat.deplies
+    return remember(d, deplies) { ConstellationLayout.construire(d, deplies) }
 }
 
 @Composable
@@ -201,11 +212,12 @@ fun GrapheCerveau2D(app: JarvisApp, enTete: @Composable () -> Unit = {}) {
     val etat = rememberConstellation(app)
     var noteOuverte by remember { mutableStateOf<String?>(null) }
     var hubListe by remember { mutableStateOf<String?>(null) }
-    val c = etat.constellation
+    val c = constellationDe(etat)
     if (c == null) ChargementEnCours(etat.erreur, enTete)
     else ConstellationVue(
         c = c, enTete = enTete,
         onNote = { noteOuverte = it },
+        onBasculer = { chemin -> etat.deplies = ConstellationLayout.basculer(c.deplies, chemin) },
         onHub = { cle -> if (c.hub(cle)?.type != TypeHub.PIECES && c.hub(cle)?.type != TypeHub.TAGS) hubListe = cle },
         onFichier = { chemin -> app.obsidian.ouvrirFichier(chemin) },
         onRecharger = { etat.version++ }
@@ -225,6 +237,7 @@ fun ConstellationVue(
     onNote: (String) -> Unit = {},
     onHub: (String) -> Unit = {},
     onFichier: (String) -> Unit = {},
+    onBasculer: (String) -> Unit = {},
     onRecharger: () -> Unit = {},
     animer: Boolean = true
 ) {
@@ -330,30 +343,41 @@ fun ConstellationVue(
                     }
                 }
                 .pointerInput(c, filtres) {
-                    detectTapGestures { tap ->
+                    fun hubSous(tap: Offset): Hub? {
                         val (o, kk) = geometrie
-                        fun ecranT(p: Pt) = Offset(o.x + p.x * kk, o.y + p.y * kk)
-                        // Étiquettes d'abord (dessinées au-dessus), puis hubs, puis cerveau.
-                        val e = zonesEtiquettes.entries.firstOrNull { it.value.inflate(6f * dens).contains(tap) }?.key
-                            ?.let { id -> c.etiquettes.firstOrNull { it.id == id } }
-                        when {
-                            e != null && e.type == TypeEtiquette.NOTE -> { noteActive = e.noteId; onNote(e.noteId!!) }
-                            e != null && e.type == TypeEtiquette.TAG -> tagActif = if (tagActif == e.tag) null else e.tag
-                            e != null && e.type == TypeEtiquette.PLUS -> onHub(e.dossier ?: e.hub)
-                            e != null && e.type == TypeEtiquette.DOSSIER -> { hubActif = e.hub; onHub(e.dossier!!) }
-                            e != null && e.type == TypeEtiquette.FICHIER -> onFichier(e.chemin!!)
-                            e != null -> hubActif = if (hubActif == e.hub) null else e.hub
-                            else -> {
-                                val h = c.hubs.firstOrNull { hb -> val q = ecranT(hb.pos); hypot(tap.x - q.x, tap.y - q.y) < max(hb.rayon, 30f) * kk + 8f * dens }
-                                if (h != null) {
-                                    if (h.type == TypeHub.TAGS) tagActif = null
-                                    else if (hubActif == h.cle) onHub(h.cle) else hubActif = h.cle
-                                } else if (hypot(tap.x - o.x, tap.y - o.y) < c.rayonCerveau * kk) {
-                                    hubActif = null; tagActif = null; noteActive = null; recherche = ""
+                        return c.hubs.filter { it.rayon > 0f }.map { hb -> hb to hypot(tap.x - (o.x + hb.pos.x * kk), tap.y - (o.y + hb.pos.y * kk)) }
+                            .filter { (hb, d) -> d < max(hb.rayon, 30f) * kk + 8f * dens }.minByOrNull { it.second }?.first
+                    }
+                    detectTapGestures(
+                        // Appui long sur un cercle de dossier : son contenu complet (sous-dossiers, notes, fichiers).
+                        onLongPress = { p -> hubSous(p)?.let { h -> if (h.type == TypeHub.DOSSIER) onHub(h.cle) } },
+                        onTap = { tap ->
+                            val (o, kk) = geometrie
+                            // Étiquettes d'abord (dessinées au-dessus), puis cercles (déplier / replier), puis cerveau.
+                            val e = zonesEtiquettes.entries.firstOrNull { it.value.inflate(6f * dens).contains(tap) }?.key
+                                ?.let { id -> c.etiquettes.firstOrNull { it.id == id } }
+                            when {
+                                e != null && e.type == TypeEtiquette.NOTE -> { noteActive = e.noteId; onNote(e.noteId!!) }
+                                e != null && e.type == TypeEtiquette.TAG -> tagActif = if (tagActif == e.tag) null else e.tag
+                                e != null && e.type == TypeEtiquette.PLUS -> onHub(e.dossier ?: e.hub)
+                                e != null && e.type == TypeEtiquette.DOSSIER -> onHub(e.dossier!!)
+                                e != null && e.type == TypeEtiquette.FICHIER -> onFichier(e.chemin!!)
+                                e != null -> hubActif = if (hubActif == e.hub) null else e.hub
+                                else -> {
+                                    val h = hubSous(tap)
+                                    when {
+                                        h == null -> if (hypot(tap.x - o.x, tap.y - o.y) < c.rayonCerveau * kk) {
+                                            hubActif = null; tagActif = null; noteActive = null; recherche = ""
+                                        }
+                                        h.type == TypeHub.TAGS -> tagActif = null
+                                        h.depliable -> { hubActif = null; onBasculer(h.cle) }
+                                        h.type == TypeHub.DOSSIER -> onHub(h.cle)
+                                        else -> hubActif = if (hubActif == h.cle) null else h.cle
+                                    }
                                 }
                             }
                         }
-                    }
+                    )
                 }
         ) {
             if (fond != null) drawImage(fond) else dessinerFondCosmique(decor, pulse)
@@ -366,7 +390,7 @@ fun ConstellationVue(
             val voirPieces = FiltreGraphe.PIECES in filtres
             val voirTags = FiltreGraphe.TAGS in filtres
             fun hubVisible(h: Hub) = when (h.type) { TypeHub.DOSSIER -> voirDossiers; TypeHub.PIECES -> voirPieces; TypeHub.TAGS -> voirTags }
-            val hubsAnneau = c.hubs.filter { it.type != TypeHub.TAGS && hubVisible(it) }
+            val hubsAnneau = c.hubs.filter { it.type != TypeHub.TAGS && it.niveau == 0 && hubVisible(it) }
 
             fun alphaEtiquette(e: Etiquette): Float {
                 val filtreActif = requete.isNotBlank() || tagActif != null || hubActif != null || noteActive != null
@@ -387,7 +411,12 @@ fun ConstellationVue(
             // 1. Toile d'énergie cerveau → hubs.
             dessinerToile(centre, rCentre, hubsAnneau.map { ecran(it.pos) to it.rayon * k }, k, pulse)
 
-            // 2. Branches : hub → sous-dossiers et fichiers de la racine, puis sous-dossier → ses fichiers.
+            // 2. Branches : catégorie → cercles de sous-dossiers, puis chaque cercle → ses fichiers.
+            for (h in c.hubs) {
+                val p = h.parent?.let { c.hub(it) } ?: continue
+                if (!hubVisible(p)) continue
+                dessinerLienDossier(ecran(ConstellationLayout.bordCercle(p.pos, p.rayon * 1.13f, h.pos)), ecran(ConstellationLayout.bordCercle(h.pos, h.rayon * 1.16f, p.pos)), k, pulse, alphaHub(h))
+            }
             for (e in c.etiquettes) {
                 if (e.type == TypeEtiquette.TAG) continue
                 val h = c.hub(e.hub) ?: continue
@@ -440,7 +469,10 @@ fun ConstellationVue(
             for (h in c.hubs) {
                 if (!hubVisible(h)) continue
                 if (h.type == TypeHub.TAGS) dessinerHubTags(h, ecran(h.pos), k, mesureur, fontScale)
-                else dessinerHub(h, ecran(h.pos), h.rayon * k, mesureur, fontScale, alphaHub(h), actif = h.cle == hubActif, pulse = pulse)
+                else {
+                    dessinerHub(h, ecran(h.pos), h.rayon * k, mesureur, fontScale, alphaHub(h), actif = h.cle == hubActif, pulse = pulse)
+                    if (h.depliable) dessinerBadgeDepli(ecran(Pt(h.pos.x, h.pos.y + h.rayon * 1.02f)), max(h.rayon * 0.22f, 7f) * k, h.deplie, alphaHub(h))
+                }
             }
             zonesEtiquettes.clear()
             for (e in c.etiquettes) {

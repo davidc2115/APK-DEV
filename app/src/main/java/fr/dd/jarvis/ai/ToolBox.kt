@@ -226,9 +226,10 @@ class ToolBox(
         put(tool("appli_par_defaut", "Définit (ou efface) l'application utilisée par défaut pour un type de demande.",
             mapOf("type" to prop("navigation | musique"), "appli" to prop("Nom de l'application, ou « aucune » pour redemander à chaque fois.")), listOf("type", "appli")))
         put(tool("obsidian_chercher", "Cherche du texte dans les notes du coffre Obsidian (noms et contenu).", mapOf("requete" to prop("Texte recherché.")), listOf("requete")))
-        put(tool("obsidian_fichiers", "Gère les dossiers et fichiers DU COFFRE OBSIDIAN (jamais le stockage du téléphone) : lister un dossier (notes, images, PDF…), créer un dossier ou sous-dossier, déplacer des notes / images / fichiers / dossiers vers un dossier du coffre (créé au besoin), renommer. Les images générées par JARVIS sont dans « JARVIS/Images » (référence jarvis-img:NOM). Pour déplacer les dernières images générées : chemins = « dernieres_images:N ».",
+        put(tool("obsidian_fichiers", "Gère les dossiers et fichiers DU COFFRE OBSIDIAN configuré dans les Réglages (jamais le stockage du téléphone) : lister un dossier, CHERCHER des fichiers/dossiers par nom ou sujet dans tout le coffre, créer un dossier ou sous-dossier, déplacer des notes / images / fichiers / dossiers vers un dossier du coffre (créé au besoin), renommer. Les chemins peuvent être approximatifs (majuscules, accents, singulier/pluriel : « Jarvis/image » trouve « JARVIS/Images »), et un dossier comme « images/Coloriages » est créé DANS le dossier « Images » existant du coffre plutôt qu'à côté. Les images générées par JARVIS sont dans « JARVIS/Images » (référence jarvis-img:NOM) et se retrouvent aussi par leur description (en anglais, ex. « coloring firefighter »). Pour déplacer les dernières images générées : chemins = « dernieres_images:N ». En cas de doute sur un emplacement, commence par chercher ou lister.",
             mapOf(
-                "action" to prop("lister | dossier | deplacer | renommer"),
+                "action" to prop("lister | chercher | dossier | deplacer | renommer"),
+                "motif" to prop("chercher : mots du nom ou du sujet (ex. « coloriage pompier », « coloring firefighter »), ou motif avec * (ex. « *pompier* »)."),
                 "chemin" to prop("lister/dossier : chemin du dossier dans le coffre (ex. « Images/Coloriages ») ; renommer : élément à renommer."),
                 "chemins" to prop("deplacer : éléments à déplacer, séparés par « ; » ou des retours à la ligne — chemins du coffre, noms jarvis-img:…, simples noms de fichiers, ou « dernieres_images:N »."),
                 "destination" to prop("deplacer : dossier du coffre de destination (ex. « Images/Coloriages »), créé s'il n'existe pas."),
@@ -258,7 +259,7 @@ class ToolBox(
         put(tool("memoire_oublier", "Supprime la consigne d'un sujet.", mapOf("sujet" to prop("Sujet à oublier.")), listOf("sujet")))
         put(tool("factures_impayees", "Liste les factures émises non encore payées (avec retards)."))
         put(tool("export_kml", "Génère un fichier KML (Google Earth / Google My Maps) avec les points GPS des clients et installations, enregistré dans Obsidian et partageable."))
-        put(tool("ma_position", "Donne la position GPS actuelle du téléphone (adresse approximative)."))
+        put(tool("ma_position", "Donne la position GPS actuelle du téléphone (fix frais, format Google Maps) et l'ADRESSE PRÉCISE correspondante (numéro, rue, code postal, ville). Pour enregistrer cette position sur une fiche client, utilise client_ecrire avec site_gps = « ma position » (et site_adresse = « ma position » pour l'adresse)."))
         put(tool("phone_action", "Agit sur le téléphone. Actions : torch_on, torch_off, open_app, open_url, volume, wifi_on, wifi_off, bluetooth_on, bluetooth_off, data_on, data_off, brightness, call, back, home, recents, notifications, quick_settings, lock, screenshot, read_screen, click_text, type_text, scroll_down, scroll_up, tap.",
             mapOf(
                 "action" to prop("Nom de l'action."),
@@ -544,6 +545,12 @@ class ToolBox(
                 val o = app.obsidian
                 when (a.optString("action").trim().lowercase()) {
                     "lister" -> ToolResult(o.listerDossier(a.optString("chemin")), direct = true)
+                    "chercher", "rechercher" -> {
+                        val motif = a.optString("motif").ifBlank { a.optString("chemins") }.ifBlank { a.optString("chemin") }
+                        val r = o.chercherFichiers(motif, dossiers = true)
+                        ToolResult(if (r.isEmpty()) "Aucun fichier ni dossier du coffre ne correspond à « $motif »." else
+                            "🔎 ${r.size} élément(s) du coffre pour « $motif » :\n" + r.take(80).joinToString("\n") { "- $it" } + (if (r.size > 80) "\n…" else ""))
+                    }
                     "dossier", "creer", "créer" -> ToolResult("📁 Dossier prêt : " + o.creerDossier(a.optString("chemin").ifBlank { a.optString("destination") }), direct = true)
                     "renommer" -> ToolResult("✏️ " + o.renommer(a.optString("chemin"), a.optString("nouveau_nom")), direct = true)
                     "deplacer", "déplacer" -> {
@@ -553,20 +560,22 @@ class ToolBox(
                         // Références acceptées : chemin du coffre, jarvis-img:NOM, simple nom de fichier, ou les N dernières images générées.
                         val sources = brut.split(';', '\n').map { it.trim().trim('"', '\'') }.filter { it.isNotBlank() }.flatMap { r ->
                             val m = Regex("(?i)^(dernieres?|derni[eè]res?)_images?:(\\d+)$").find(r)
+                            val images = o.resoudre("JARVIS/Images") ?: "JARVIS/Images"
                             when {
-                                m != null -> o.fichiersDe("JARVIS/Images").take(m.groupValues[2].toInt().coerceIn(1, 100)).map { "JARVIS/Images/$it" }
-                                r.startsWith("jarvis-img:") -> listOf("JARVIS/Images/" + r.removePrefix("jarvis-img:").trim())
-                                o.existe(r) -> listOf(r)
-                                !r.contains('/') && o.existe("JARVIS/Images/$r") -> listOf("JARVIS/Images/$r")
-                                else -> listOf(o.chercherParNom(r.substringAfterLast('/')) ?: r)
+                                m != null -> o.fichiersDe(images).filter { !it.endsWith(".json") }.take(m.groupValues[2].toInt().coerceIn(1, 100)).map { "$images/$it" }
+                                r.startsWith("jarvis-img:") -> listOf(r.removePrefix("jarvis-img:").trim().let { n -> o.resoudre("$images/$n") ?: o.chercherParNom(n) ?: "$images/$n" })
+                                // Motif (*) ou description : TOUS les fichiers qui correspondent.
+                                r.contains('*') || r.contains('?') -> o.chercherFichiers(r).ifEmpty { listOf(r) }
+                                o.resoudre(r) != null -> listOf(o.resoudre(r)!!)
+                                !r.contains('/') && o.resoudre("$images/$r") != null -> listOf(o.resoudre("$images/$r")!!)
+                                else -> listOfNotNull(o.chercherParNom(r.substringAfterLast('/'))).ifEmpty { o.chercherFichiers(r).ifEmpty { listOf(r) } }
                             }
                         }.distinct()
                         if (sources.isEmpty()) return@withContext ToolResult("Aucun élément à déplacer : donne les noms (jarvis-img:…) ou « dernieres_images:N ».")
-                        o.creerDossier(dest)
                         val ok = mutableListOf<String>(); val ko = mutableListOf<String>()
                         sources.forEach { src -> runCatching { o.deplacer(src, dest) }.onSuccess { ok += it }.onFailure { ko += "$src : ${it.message}" } }
                         ToolResult(buildString {
-                            if (ok.isNotEmpty()) append("📦 ${ok.size} élément(s) déplacé(s) dans le coffre › ${dest.replace("/", " › ")} :\n" + ok.joinToString("\n") { "- $it" })
+                            if (ok.isNotEmpty()) append("📦 ${ok.size} élément(s) déplacé(s) dans le coffre :\n" + ok.joinToString("\n") { "- $it" })
                             if (ko.isNotEmpty()) append((if (ok.isNotEmpty()) "\n\n" else "") + "❌ Non déplacé(s) :\n" + ko.joinToString("\n") { "- $it" })
                         }, direct = true)
                     }

@@ -369,8 +369,26 @@ fun DrawScope.dessinerHub(
     drawCircle((if (actif) Color.White else Neon.lavande).copy(alpha = 0.95f * alpha), r, c, style = Stroke(max(r * 0.04f, 1.4f)))
     drawArc(Color.White.copy(alpha = 0.16f * alpha), 205f, 60f, false, Offset(c.x - r * 0.8f, c.y - r * 0.8f), Size(r * 1.6f, r * 1.6f), style = Stroke(r * 0.05f, cap = StrokeCap.Round))
     dessinerIcone(hub.icone, Offset(c.x, c.y - r * 0.4f), r * 0.5f, Neon.violet, alpha)
-    texteCentre(mesureur, hub.titre, Offset(c.x, c.y + r * 0.13f), max(r * 0.31f, 8.5f * density), Neon.blancViolet.copy(alpha = alpha), fontScale, gras = true, largeurMax = r * 1.78f)
+    val titre = if (hub.titre.length > 14 && r < 60f * density) hub.titre.take(13) + "…" else hub.titre
+    texteCentre(mesureur, titre, Offset(c.x, c.y + r * 0.13f), max(r * 0.31f, 8.5f * density), Neon.blancViolet.copy(alpha = alpha), fontScale, gras = true, largeurMax = r * 1.78f)
     texteCentre(mesureur, hub.sousTitre, Offset(c.x, c.y + r * 0.5f), max(r * 0.2f, 6.5f * density), Neon.sousTitre.copy(alpha = alpha), fontScale, largeurMax = r * 1.6f)
+}
+
+/** Pastille « + » (replié) / « − » (déplié) au bas d'un cercle de dossier qui a du contenu. */
+fun DrawScope.dessinerBadgeDepli(c: Offset, r: Float, deplie: Boolean, alpha: Float = 1f) {
+    drawCircle(Neon.violetVif.copy(alpha = 0.35f * alpha), r * 1.5f, c)
+    drawCircle(Neon.obsidienne, r, c, alpha = alpha)
+    drawCircle(Neon.lavande.copy(alpha = 0.95f * alpha), r, c, style = Stroke(max(r * 0.14f, 1f)))
+    val l = r * 0.52f; val w = max(r * 0.17f, 1.2f)
+    drawLine(Neon.blancViolet.copy(alpha = alpha), Offset(c.x - l, c.y), Offset(c.x + l, c.y), w, StrokeCap.Round)
+    if (!deplie) drawLine(Neon.blancViolet.copy(alpha = alpha), Offset(c.x, c.y - l), Offset(c.x, c.y + l), w, StrokeCap.Round)
+}
+
+/** Lien catégorie → sous-dossier : faisceau néon (halo + cœur), comme la toile du cerveau vers les hubs. */
+fun DrawScope.dessinerLienDossier(a: Offset, b: Offset, k: Float, pulse: Float, alpha: Float = 1f) {
+    drawLine(Neon.violetVif.copy(alpha = 0.16f * pulse * alpha), a, b, 7f * k, StrokeCap.Round)
+    drawLine(Neon.violet.copy(alpha = 0.55f * alpha), a, b, 2.4f * k, StrokeCap.Round)
+    drawLine(Neon.lavande.copy(alpha = 0.9f * alpha), a, b, 1f * k, StrokeCap.Round)
 }
 
 /** Petit hub « Tags » : pastille allongée avec icône d'étiquette, comme sur l'image. */
