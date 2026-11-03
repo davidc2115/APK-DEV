@@ -110,7 +110,7 @@ class JarvisAccessibilityService : AccessibilityService() {
         fun walk(node: AccessibilityNodeInfo?) {
             if (node == null) return
             val label = (node.text?.toString() ?: node.contentDescription?.toString()).orEmpty()
-            if (label.isNotBlank()) {
+            if (label.isNotBlank() && node.className?.toString()?.endsWith("EditText") != true && !node.isEditable) {
                 val normalized = label.lowercase(java.util.Locale.ROOT)
                 val score = terms.count { normalized.contains(it) }
                 if (score > 0) {
@@ -122,9 +122,7 @@ class JarvisAccessibilityService : AccessibilityService() {
             for (i in 0 until node.childCount) walk(node.getChild(i))
         }
         walk(root)
-        val best = found.maxByOrNull { it.score } ?: return "Aucun résultat correspondant détecté. Aucun morceau n'a été lancé."
-        val threshold = if (terms.size >= 3) 2 else 1
-        if (best.score < threshold) return "Résultat trop incertain (« " + best.label + " ») : aucun lancement automatique."
+        val best = found.maxWithOrNull(compareBy<Candidate> { it.score }.thenBy { it.label.length }) ?: return "Aucun résultat correspondant détecté. Aucun morceau n'a été lancé."
         return if (best.node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) "Résultat sélectionné : " + best.label
             else "Résultat trouvé mais Android a refusé le clic."
     }
