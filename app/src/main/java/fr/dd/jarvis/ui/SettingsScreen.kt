@@ -1225,7 +1225,7 @@ private fun BoxPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.JarvisApp
                         local to publicIp
                     }
                     val local = result.first
-                    if (store.boxHost.value.isBlank() && !local?.passerelle.isNullOrBlank()) store.boxHost.set(local!!.passerelle)
+                    if (!local?.passerelle.isNullOrBlank() && fr.dd.jarvis.ai.Reseau.prive(local!!.passerelle)) store.boxHost.set(local.passerelle)
                     "Réseau local : ${local?.ip ?: "indisponible"} · Passerelle/box : ${local?.passerelle ?: "indisponible"} · IP publique : ${result.second.ifBlank { "indisponible" }}. La redirection distante doit encore être validée selon les fonctions de ta box et ton opérateur."
                 } catch (e: Exception) { "❌ Diagnostic réseau : ${e.message ?: e.javaClass.simpleName}" }
                 busy = false
