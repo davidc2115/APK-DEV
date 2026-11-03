@@ -1,5 +1,7 @@
 package fr.dd.jarvis.societe.core
 
+import fr.dd.jarvis.societe.Geo
+
 import java.time.LocalDate
 
 object Rendu {
@@ -63,6 +65,17 @@ object Rendu {
         return Ctx(vars, mapOf("lignes" to lignes, "tva_lignes" to tva))
     }
 
+    /** Coordonnées GPS d'une installation au format Google Maps (vides si inconnues). */
+    private fun gpsVars(s: Site): Map<String, String> {
+        if (s.lat == null || s.lon == null) return mapOf("gps" to "", "gps_dms" to "", "precision_gps" to "", "lien_maps" to "")
+        val p = Geo.Point(s.lat, s.lon)
+        return mapOf(
+            "gps" to Geo.texteGps(p), "gps_dms" to Geo.texteDms(p),
+            "precision_gps" to (Geo.precisionDe(s.gpsPrecision) ?: Geo.Precision.INCONNUE).libelle,
+            "lien_maps" to Geo.lienGoogleMaps(p)
+        )
+    }
+
     fun clientCtx(d: SocieteData, c: Client, aujourdhui: LocalDate = LocalDate.now()): Ctx {
         val r = d.remiseClient(c, aujourdhui)
         val vars = societeVars(d) + mapOf(
@@ -79,7 +92,7 @@ object Rendu {
                 "mise_en_service" to it.miseEnService.ifBlank { "—" }, "onduleur" to it.onduleur.ifBlank { "—" },
                 "nb_panneaux" to (if (it.nbPanneaux > 0) it.nbPanneaux.toString() else "—"),
                 "distance_km" to (it.distanceKm?.let { k -> nombre(round2(k)) } ?: "—"), "notes" to it.notes
-            )
+            ) + gpsVars(it)
         }
         val docs = d.docs.filter { it.clientId == c.id }.sortedByDescending { it.date }.map {
             mapOf(
@@ -146,7 +159,7 @@ object Rendu {
 
     /** Données fictives pour valider un modèle réécrit (balises autorisées + rendu sans erreur). */
     fun exemple(type: String): Ctx {
-        val site = Site("s1", "Toiture Sud", "12 rue des Lilas 31000 Toulouse", 9.0, "2021-05-01", "Fronius", 20, "RAS", distanceKm = 25.0)
+        val site = Site("s1", "Toiture Sud", "12 rue des Lilas 31000 Toulouse", 9.0, "2021-05-01", "Fronius", 20, "RAS", lat = 43.604652, lon = 1.444209, distanceKm = 25.0, gpsPrecision = "NUMERO")
         val cl = Client("c1", "Client Exemple", adresse = "12 rue des Lilas 31000 Toulouse", sites = listOf(site), depuis = "2015-01-01")
         val d = SocieteData(
             societe = Societe(nom = "Ma Société", adresse = "1 rue du Siège", tel = "0600000000", iban = "FR76", bic = "BIC", mentions = "Mentions"),

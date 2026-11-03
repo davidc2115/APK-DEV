@@ -134,7 +134,8 @@ tags: [societe, client]
 - 📍 {{adresse}}
 - Mise en service : {{mise_en_service}} · Onduleur : {{onduleur}} · Panneaux : {{nb_panneaux}}
 - Distance depuis le siège : {{distance_km}} km
-{{#notes}}- 📝 {{notes}}
+{{#gps}}- 🛰️ GPS : `{{gps}}` ({{precision_gps}}) · [Google Maps]({{lien_maps}})
+{{/gps}}{{#notes}}- 📝 {{notes}}
 {{/notes}}
 {{/sites}}
 ## 🧾 Historique

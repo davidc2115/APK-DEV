@@ -26,27 +26,138 @@ class SocieteService(
     suspend fun distance(client: Client, site: Site?): Geo.Route? {
         val hq = data.societe
         val dest = site?.adresse?.ifBlank { null } ?: client.adresse
-        if (hq.adresse.isBlank() || dest.isBlank()) return null
+        if (hq.adresse.isBlank() || (dest.isBlank() && site?.lat == null)) return null
         val key = cle(hq.adresse, dest)
         if (site != null && site.distanceKm != null && site.distanceCle == key)
             return Geo.Route(site.distanceKm, site.dureeMin ?: 0.0, false)
 
-        val origin = if (hq.lat != null && hq.lon != null) Geo.Point(hq.lat, hq.lon)
-        else Geo.geocode(hq.adresse)?.also { p -> repo.update { it.copy(societe = it.societe.copy(lat = p.lat, lon = p.lon)) } }
-            ?: return null
-        val to = (if (site?.lat != null && site.lon != null && site.distanceCle.substringAfter('|') == normaliser(dest)) Geo.Point(site.lat, site.lon) else Geo.geocode(dest))
-            ?: return null
+        val origin = localiserSiege()?.point ?: return null
+        val to = localiser(client, site)?.point ?: return null
         val route = Geo.route(origin, to) ?: return null
         if (site != null && !route.estime) {
             repo.update { d ->
                 d.copy(clients = d.clients.map { c ->
                     if (c.id != client.id) c else c.copy(sites = c.sites.map { s ->
-                        if (s.id == site.id) s.copy(lat = to.lat, lon = to.lon, distanceKm = route.km, dureeMin = route.minutes, distanceCle = key) else s
+                        if (s.id == site.id) s.copy(distanceKm = route.km, dureeMin = route.minutes, distanceCle = key) else s
                     })
                 })
             }
         }
         return route
+    }
+
+    // ------------------------------------------------------------------ géolocalisation (GPS)
+
+    /** Position enregistrée d'une installation, avec sa précision ; null si aucune. */
+    fun positionEnregistree(site: Site?): Geo.Localisation? {
+        if (site?.lat == null || site.lon == null) return null
+        return Geo.Localisation(Geo.Point(site.lat, site.lon), Geo.precisionDe(site.gpsPrecision) ?: Geo.Precision.INCONNUE, site.gpsTrouve)
+    }
+
+    /**
+     * Position d'une installation (ou de l'adresse du client s'il n'en a pas). Les positions déjà vérifiées sont
+     * réutilisées ; celles calculées avant le contrôle de précision (« non vérifiée ») sont recalculées une fois ;
+     * [forcer] recalcule tout, sauf les coordonnées saisies à la main qui ne sont jamais écrasées.
+     */
+    suspend fun localiser(c: Client, site: Site?, forcer: Boolean = false): Geo.Localisation? {
+        val adr = site?.adresse?.ifBlank { null } ?: c.adresse
+        val connue = positionEnregistree(site)
+        if (connue != null && (connue.precision == Geo.Precision.MANUELLE || (!forcer && connue.precision != Geo.Precision.INCONNUE))) return connue
+        if (adr.isBlank()) return connue
+        val nouvelle = Geo.localiser(adr) ?: return connue
+        if (connue != null && connue.precision != Geo.Precision.INCONNUE && connue.precision.rang > nouvelle.precision.rang) return connue
+        if (site != null) enregistrerPosition(c.id, site.id, nouvelle)
+        return nouvelle
+    }
+
+    /** Enregistre la position d'une installation ; la distance au siège est recalculée si le point a bougé. */
+    fun enregistrerPosition(clientId: String, siteId: String, loc: Geo.Localisation) {
+        repo.update { d ->
+            d.copy(clients = d.clients.map { x ->
+                if (x.id != clientId) x else x.copy(sites = x.sites.map { y ->
+                    if (y.id != siteId) y else {
+                        val bouge = y.lat == null || y.lon == null || Geo.haversine(Geo.Point(y.lat, y.lon), loc.point) > 0.03
+                        y.copy(
+                            lat = loc.point.lat, lon = loc.point.lon, gpsPrecision = loc.precision.name, gpsTrouve = loc.trouve,
+                            distanceKm = if (bouge) null else y.distanceKm, dureeMin = if (bouge) null else y.dureeMin,
+                            distanceCle = if (bouge) "" else y.distanceCle
+                        )
+                    }
+                })
+            })
+        }
+    }
+
+    /** Position du siège (point de départ des déplacements), même logique que pour les installations. */
+    suspend fun localiserSiege(forcer: Boolean = false): Geo.Localisation? {
+        val s = data.societe
+        val connue = if (s.lat != null && s.lon != null)
+            Geo.Localisation(Geo.Point(s.lat, s.lon), Geo.precisionDe(s.gpsPrecision) ?: Geo.Precision.INCONNUE) else null
+        if (connue != null && (connue.precision == Geo.Precision.MANUELLE || (!forcer && connue.precision != Geo.Precision.INCONNUE))) return connue
+        if (s.adresse.isBlank()) return connue
+        val nouvelle = Geo.localiser(s.adresse) ?: return connue
+        if (connue != null && connue.precision != Geo.Precision.INCONNUE && connue.precision.rang > nouvelle.precision.rang) return connue
+        repo.update { d ->
+            d.copy(
+                societe = d.societe.copy(lat = nouvelle.point.lat, lon = nouvelle.point.lon, gpsPrecision = nouvelle.precision.name),
+                // Le point de départ a bougé : les distances en cache sont à recalculer.
+                clients = if (connue != null && Geo.haversine(connue.point, nouvelle.point) <= 0.03) d.clients
+                else d.clients.map { c -> c.copy(sites = c.sites.map { it.copy(distanceKm = null, dureeMin = null, distanceCle = "") }) }
+            )
+        }
+        return nouvelle
+    }
+
+    /** Ligne lisible : « 47.541558, 4.459845 · adresse exacte ». */
+    fun texteGps(loc: Geo.Localisation) = "${Geo.texteGps(loc.point)} · ${loc.precision.libelle}"
+
+    private fun iconePrecision(p: Geo.Precision) = when {
+        p.exacte -> "🎯"
+        p.rang >= Geo.Precision.LIEU_DIT.rang -> "📍"
+        else -> "⚠️"
+    }
+
+    /**
+     * Rapport des coordonnées GPS de toutes les installations (format Google Maps), positions approximatives en tête.
+     * [relocaliser] recalcule les positions non saisies à la main.
+     */
+    suspend fun rapportGps(recherche: String = "", relocaliser: Boolean = false): String = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val filtre = normaliser(recherche.trim())
+        data class Ligne(val texte: String, val rang: Int)
+        val lignes = mutableListOf<Ligne>()
+        val introuvables = mutableListOf<String>()
+        for (c in data.clients) {
+            for (site in (if (c.sites.isEmpty()) listOf(null) else c.sites)) {
+                val adr = site?.adresse?.ifBlank { null } ?: c.adresse
+                val nom = "${c.nom} — ${site?.nom?.ifBlank { null } ?: "Adresse client"}"
+                if (filtre.isNotBlank() && !normaliser("$nom $adr").contains(filtre)) continue
+                val loc = localiser(c, site, forcer = relocaliser)
+                if (loc == null) { introuvables += "$nom (${adr.ifBlank { "pas d'adresse" }})"; continue }
+                val reconnu = if (loc.trouve.isNotBlank() && loc.precision != Geo.Precision.MANUELLE) " — reconnu : _${loc.trouve}_" else ""
+                lignes += Ligne("- ${iconePrecision(loc.precision)} **$nom** : `${Geo.texteGps(loc.point)}` · ${loc.precision.libelle} · [Google Maps](${Geo.lienGoogleMaps(loc.point)})$reconnu", loc.precision.rang)
+            }
+        }
+        val siege = localiserSiege(forcer = relocaliser)
+        buildString {
+            append("# 🛰️ Coordonnées GPS des installations\n\n")
+            if (siege != null) append("🏭 **Siège** : `${Geo.texteGps(siege.point)}` · ${siege.precision.libelle}\n\n")
+            val approx = lignes.filter { it.rang < Geo.Precision.NUMERO.rang }.sortedBy { it.rang }
+            val exactes = lignes.filter { it.rang >= Geo.Precision.NUMERO.rang }
+            if (approx.isNotEmpty()) {
+                append("## ⚠️ À vérifier (${approx.size})\n")
+                approx.forEach { append(it.texte).append('\n') }
+                append("\n")
+            }
+            if (exactes.isNotEmpty()) {
+                append("## 🎯 Positions précises (${exactes.size})\n")
+                exactes.forEach { append(it.texte).append('\n') }
+                append("\n")
+            }
+            if (introuvables.isNotEmpty()) append("## ❌ Introuvables\n" + introuvables.joinToString("\n") { "- $it" } + "\n\n")
+            if (lignes.isEmpty() && introuvables.isEmpty()) append("Aucune installation.\n\n")
+            append("_Format Google Maps (latitude, longitude). Pour corriger une position : dans Google Maps, appui long sur le toit de l'installation, ")
+            append("touche les coordonnées pour les copier, puis dis « coordonnées GPS de [client] : 47.xxxxxx, 4.xxxxxx »._")
+        }
     }
 
     // ------------------------------------------------------------------ documents
@@ -277,10 +388,30 @@ class SocieteService(
         return "ff" + h.substring(4, 6) + h.substring(2, 4) + h.substring(0, 2)
     }
 
-    /** Exporte les clients en KML : fiches HTML illustrées, styles par catégorie et données indexées. */
+    /** Bloc « Coordonnées GPS » d'une fiche KML : format Google Maps, degrés-minutes-secondes, précision, liens. */
+    private fun blocGps(loc: Geo.Localisation): String = buildString {
+        val p = loc.point
+        val couleur = when { loc.precision.exacte -> "#188038"; loc.precision.rang >= Geo.Precision.LIEU_DIT.rang -> "#E37400"; else -> "#D93025" }
+        append("<hr><h3>🛰️ Coordonnées GPS</h3>")
+        append("<p style='font-size:15px;margin:4px 0'><b>${Geo.texteGps(p)}</b></p>")
+        append("<p style='color:#5f6368;margin:2px 0'>${Geo.texteDms(p).replace("\"", "&quot;")}</p>")
+        append("<p>${iconePrecision(loc.precision)} <b>Précision :</b> <span style='color:$couleur'>${loc.precision.libelle}</span>")
+        if (loc.trouve.isNotBlank() && loc.precision != Geo.Precision.MANUELLE)
+            append("<br><span style='color:#5f6368;font-size:12px'>Adresse reconnue : ${esc(loc.trouve)}</span>")
+        append("</p>")
+        if (!loc.precision.exacte)
+            append("<p style='color:#D93025;font-size:12px'>Position approximative. Dans Google Maps, appui long sur le toit de l'installation, copie les coordonnées puis dis à Jarvis « coordonnées GPS de ce client : 47.xxxxxx, 4.xxxxxx ».</p>")
+        append("<p><a href='${Geo.lienGoogleMaps(p).replace("&", "&amp;")}'>🗺️ Ouvrir dans Google Maps</a> &nbsp;·&nbsp; ")
+        append("<a href='${Geo.lienItineraire(p).replace("&", "&amp;")}'>🚗 Itinéraire</a></p>")
+    }
+
+    /** Exporte les clients en KML : fiches HTML illustrées, styles par catégorie, coordonnées GPS et données indexées. */
     suspend fun exporterKml(recherche: String = ""): String = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         val manquants = mutableListOf<String>()
-        data class KmlPoint(val nom: String, val client: String, val type: String, val adresse: String, val description: String, val point: Geo.Point)
+        data class KmlPoint(
+            val nom: String, val client: String, val type: String, val adresse: String, val description: String,
+            val point: Geo.Point, val loc: Geo.Localisation
+        )
         val pts = mutableListOf<KmlPoint>()
         val filtre = normaliser(recherche.trim())
         for (c in data.clients) {
@@ -293,20 +424,10 @@ class SocieteService(
                 val particulier = c.type.contains("part", ignoreCase = true)
                 val emoji = if (particulier) "🏠" else "🏢"
                 val label = "$emoji ${c.nom} — $nomSite"
-                var point = if (site?.lat != null && site.lon != null) Geo.Point(site.lat, site.lon) else null
-                if (point == null && adr.isNotBlank()) {
-                    point = Geo.geocode(adr)
-                    kotlinx.coroutines.delay(1100)
-                    if (point != null && site != null) {
-                        val geocodePoint = point
-                        repo.update { current -> current.copy(clients = current.clients.map { x ->
-                            if (x.id != c.id) x else x.copy(sites = x.sites.map { y ->
-                                if (y.id == site.id) y.copy(lat = geocodePoint.lat, lon = geocodePoint.lon) else y
-                            })
-                        }) }
-                    }
-                }
-                if (point == null) { manquants += label; continue }
+                // Position vérifiée (Base Adresse Nationale / OpenStreetMap) ou coordonnées saisies ; Geo espace lui-même
+                // les requêtes OpenStreetMap (1 par seconde).
+                val loc = localiser(c, site)
+                if (loc == null) { manquants += label; continue }
                 val couleur = if (particulier) data.societe.kmlCouleurParticulier else data.societe.kmlCouleurProfessionnel
                 val description = buildString {
                     append("<div style='font-family:Arial,sans-serif;color:#202124'>")
@@ -314,7 +435,7 @@ class SocieteService(
                     append("<h2 style='margin:0'>$emoji ${esc(c.nom)}</h2>")
                     append("<div style='font-size:13px;margin-top:4px'>${if (particulier) "Client particulier" else "Client professionnel"}</div></div>")
                     if (c.contact.isNotBlank()) append("<p>👤 <b>Contact :</b> ${esc(c.contact)}</p>")
-                    if (c.tel.isNotBlank()) append("<p>📞 <b>Téléphone :</b> ${esc(c.tel)}</p>")
+                    if (c.tel.isNotBlank()) append("<p>📞 <b>Téléphone :</b> <a href='tel:${c.tel.filter { it.isDigit() || it == '+' }}'>${esc(c.tel)}</a></p>")
                     if (c.email.isNotBlank()) append("<p>✉️ <b>E-mail :</b> ${esc(c.email)}</p>")
                     if (c.adresse.isNotBlank()) append("<p>📍 <b>Adresse client :</b> ${esc(c.adresse)}</p>")
                     if (c.depuis.isNotBlank()) append("<p>🗓️ <b>Client depuis :</b> ${esc(c.depuis)}</p>")
@@ -326,17 +447,15 @@ class SocieteService(
                     if (site != null && site.onduleur.isNotBlank()) append("<p>🔌 <b>Onduleur :</b> ${esc(site.onduleur)}</p>")
                     if (site != null && site.nbPanneaux > 0) append("<p>🔋 <b>Nombre de panneaux :</b> ${site.nbPanneaux}</p>")
                     if (site != null && site.notes.isNotBlank()) append("<p>📝 <b>Notes installation :</b><br>${esc(site.notes).replace("\n", "<br>")}</p>")
+                    append(blocGps(loc))
                     append("</div>")
                 }.replace("]]>", "]]]]><![CDATA[>")
-                pts += KmlPoint(label, c.nom, if (particulier) "particulier" else "professionnel", adr, description, point)
+                pts += KmlPoint(label, c.nom, if (particulier) "particulier" else "professionnel", adr, description, loc.point, loc)
             }
         }
-        // Google Earth superpose les repères ayant exactement les mêmes coordonnées.
-        // On conserve les coordonnées GPS réelles dans les fiches ; seul l'affichage KML est décalé.
-        val groupesMemeAdresse = pts.indices.groupBy { i ->
-            val p = pts[i].point
-            String.format(java.util.Locale.US, "%.6f|%.6f", p.lat, p.lon)
-        }
+        // Google Earth superpose les repères ayant exactement les mêmes coordonnées : seul l'AFFICHAGE est décalé de
+        // quelques mètres ; les coordonnées GPS de la fiche et des données restent les vraies.
+        val groupesMemeAdresse = pts.indices.groupBy { i -> Geo.texteGps(pts[i].point) }
         val pointsAffichage = pts.mapIndexed { index, item ->
             val groupe = groupesMemeAdresse.values.firstOrNull { index in it }.orEmpty()
             if (groupe.size <= 1) item else {
@@ -349,6 +468,7 @@ class SocieteService(
                 item.copy(point = Geo.Point(item.point.lat + latOffset, item.point.lon + lonOffset))
             }
         }
+        val siege = localiserSiege()
         val hq = data.societe
         val kml = buildString {
             append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<kml xmlns=\"http://www.opengis.net/kml/2.2\"><Document>\n")
@@ -358,8 +478,10 @@ class SocieteService(
             // Punaise BLANCHE teintée, comme pour les clients : Google Earth MULTIPLIE la couleur par celle de l'icône,
             // une punaise bleue teintée en orange donnait un repère olive foncé au lieu de la couleur choisie.
             append("<Style id=\"siege\"><IconStyle><color>${kmlColor(hq.kmlCouleurSiege)}</color><scale>1.25</scale><Icon><href>https://maps.google.com/mapfiles/kml/pushpin/wht-pushpin.png</href></Icon></IconStyle></Style>\n")
-            if (hq.lat != null && hq.lon != null) {
-                append("<Folder><name>Siège</name><Placemark><name>🏭 Siège ${esc(hq.nom)}</name><styleUrl>#siege</styleUrl><description>${esc(hq.adresse)}</description><Point><coordinates>${hq.lon},${hq.lat},0</coordinates></Point></Placemark></Folder>\n")
+            if (siege != null) {
+                val desc = "<div style='font-family:Arial,sans-serif;color:#202124'><h2 style='margin:0'>🏭 ${esc(hq.nom.ifBlank { "Siège" })}</h2><p>📍 ${esc(hq.adresse)}</p>${blocGps(siege)}</div>"
+                append("<Folder><name>Siège</name><Placemark><name>🏭 Siège ${esc(hq.nom)}</name><styleUrl>#siege</styleUrl><description><![CDATA[$desc]]></description>")
+                append("<Point><coordinates>${Geo.texteKml(siege.point)}</coordinates></Point></Placemark></Folder>\n")
             }
             listOf("professionnel", "particulier").forEach { categorie ->
                 val categoriePoints = pointsAffichage.filter { it.type == categorie }
@@ -368,8 +490,10 @@ class SocieteService(
                     append("<Folder><name>$titre (${categoriePoints.size})</name>\n")
                     categoriePoints.forEach { item ->
                         append("<Placemark><name>${esc(item.nom)}</name><Snippet maxLines=\"2\">${esc(item.client)} — ${esc(item.adresse)}</Snippet><styleUrl>#${item.type}</styleUrl><description><![CDATA[${item.description}]]></description>")
-                        append("<ExtendedData><Data name=\"client\"><value>${esc(item.client)}</value></Data><Data name=\"type_client\"><value>${item.type}</value></Data><Data name=\"adresse\"><value>${esc(item.adresse)}</value></Data></ExtendedData>")
-                        append("<Point><coordinates>${item.point.lon},${item.point.lat},0</coordinates></Point></Placemark>\n")
+                        append("<ExtendedData><Data name=\"client\"><value>${esc(item.client)}</value></Data><Data name=\"type_client\"><value>${item.type}</value></Data><Data name=\"adresse\"><value>${esc(item.adresse)}</value></Data>")
+                        append("<Data name=\"gps\"><value>${Geo.texteGps(item.loc.point)}</value></Data><Data name=\"latitude\"><value>${"%.6f".format(java.util.Locale.US, item.loc.point.lat)}</value></Data>")
+                        append("<Data name=\"longitude\"><value>${"%.6f".format(java.util.Locale.US, item.loc.point.lon)}</value></Data><Data name=\"precision_gps\"><value>${esc(item.loc.precision.libelle)}</value></Data></ExtendedData>")
+                        append("<Point><coordinates>${Geo.texteKml(item.point)}</coordinates></Point></Placemark>\n")
                     }
                     append("</Folder>\n")
                 }
@@ -379,10 +503,24 @@ class SocieteService(
         val loc = obsidian.saveBytes("Société/Cartes", "Clients.kml", kml.toByteArray(), "application/vnd.google-earth.kml+xml")
         val dir = File(ctx.cacheDir, "share").apply { mkdirs() }
         File(dir, "Clients.kml").writeBytes(kml.toByteArray())
-        "# 🗺️ Export KML\n\n${pts.size} point(s) GPS enregistrés : $loc\n" +
-            (if (filtre.isNotBlank()) "🔎 Filtre appliqué : **${esc(recherche)}**\n" else "") +
-            (if (manquants.isNotEmpty()) "\n⚠️ Coordonnées GPS non trouvées (adresse absente ou non reconnue par les services cartographiques) : ${manquants.joinToString(", ")}\n" else "") +
-            "\nLes noms des repères contiennent le client et l'installation. Les données étendues « client », « type_client » et « adresse » accompagnent chaque repère pour faciliter la recherche dans les lieux importés."
+        val parPrecision = pts.groupingBy { it.loc.precision }.eachCount()
+        val approximatifs = pts.filter { !it.loc.precision.exacte }.sortedBy { it.loc.precision.rang }
+        buildString {
+            append("# 🗺️ Export KML\n\n${pts.size} point(s) GPS enregistrés : $loc\n")
+            if (filtre.isNotBlank()) append("🔎 Filtre appliqué : **${esc(recherche)}**\n")
+            if (pts.isNotEmpty()) {
+                append("\n🎯 Précision : ")
+                append(Geo.Precision.values().filter { (parPrecision[it] ?: 0) > 0 }.joinToString(" · ") { "${parPrecision[it]} ${it.libelle}" })
+                append("\n")
+            }
+            if (approximatifs.isNotEmpty()) {
+                append("\n⚠️ Positions approximatives à vérifier :\n")
+                approximatifs.forEach { append("- ${it.nom} : `${Geo.texteGps(it.loc.point)}` (${it.loc.precision.libelle})\n") }
+                append("\n💡 Pour une position exacte : dans Google Maps, appui long sur le toit de l'installation, copie les coordonnées et dis « coordonnées GPS de [client] : 47.xxxxxx, 4.xxxxxx ».\n")
+            }
+            if (manquants.isNotEmpty()) append("\n❌ Coordonnées GPS non trouvées (adresse absente ou non reconnue) : ${manquants.joinToString(", ")}\n")
+            append("\nChaque fiche affiche les coordonnées au format Google Maps (« latitude, longitude ») et Google Earth (degrés-minutes-secondes), la précision, et des liens « Ouvrir dans Google Maps » / « Itinéraire ». Les données étendues « client », « type_client », « adresse » et « gps » accompagnent chaque repère.")
+        }
     }
 
     fun partagerKml() {

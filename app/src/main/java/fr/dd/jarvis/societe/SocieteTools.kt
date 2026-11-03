@@ -20,12 +20,13 @@ class SocieteTools(
         val NAMES = setOf(
             "societe_info_set", "societe_info_get", "tarif_set", "tarif_delete", "regles_set", "client_ecrire", "client_fiche", "client_supprimer",
             "document_creer", "document_action", "document_email", "societe_liste", "employe_ecrire", "paie", "reserve_bilan",
-            "presentation_modifier", "distance_deplacement", "clients_exporter_kml", "kml_couleurs_set"
+            "presentation_modifier", "distance_deplacement", "clients_exporter_kml", "kml_couleurs_set", "clients_gps"
         )
         private val KEYWORDS = Regex(
             "devis|factur|client|soci[ée]t[ée]|tarif|remise|d[ée]placement|paie|salaire|bulletin|r[ée]serve|dividende|b[ée]n[ée]fice|" +
                 "installation|photovolta|kwc|fiche|pr[ée]sentation|mise en forme|mise en page|si[èe]ge|employ[ée]|prix|onduleur|maintenance|" +
-                "entretien|planning|agenda|pdf|obsidian|distance|itin[ée]raire|km|fid[ée]lit[ée]|kml|google earth|carte des clients",
+                "entretien|planning|agenda|pdf|obsidian|distance|itin[ée]raire|km|fid[ée]lit[ée]|kml|google earth|carte des clients|" +
+                "gps|coordonn[ée]es|g[ée]oloc|localis|latitude|longitude|google maps",
             RegexOption.IGNORE_CASE
         )
         fun concerned(text: String) = KEYWORDS.containsMatchIn(text)
@@ -37,6 +38,8 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
 - Quand l’utilisateur demande de supprimer une fiche client, utilise client_supprimer (jamais client_ecrire). Ne dis que la fiche est supprimée que si l’outil confirme sa disparition. Si des devis/factures y sont liés, explique que la suppression est bloquée pour préserver l’historique.
 - Si l’utilisateur demande d’analyser son planning pour ajouter les rendez-vous aux fiches clients, utilise TOUJOURS analyser_planning_clients (et pas seulement get_planning). Cet outil traite chaque client séparément, même lorsqu’un rendez-vous en mentionne plusieurs, extrait les coordonnées et les caractéristiques photovoltaïques explicitement présentes, puis demande confirmation avant l’enregistrement. Ne crée pas de nouveau client à partir d’un nom incertain.
 - Quand l’utilisateur demande une carte KML des clients ou des installations pour Google Earth, utilise clients_exporter_kml. Le fichier contient une fiche HTML illustrée (emojis), un repère coloré selon particulier/professionnel et des champs de recherche par client, type et adresse. Si un nom est donné, passe-le dans recherche pour filtrer la carte.\n- Si l’utilisateur demande de changer les couleurs des clients sur Google Earth, utilise kml_couleurs_set pour enregistrer les couleurs puis régénère le KML avec clients_exporter_kml.
+- Si l’utilisateur donne des coordonnées GPS pour une installation (copiées de Google Maps « 47.541558, 4.459845 », en degrés-minutes-secondes 47°32'29.6"N 4°27'35.4"E, ou un lien Google Maps), passe-les TELLES QUELLES dans site_gps de client_ecrire (avec site_nom si le client a plusieurs installations) ; pour le siège, dans gps de societe_info_set. Ces coordonnées priment sur l’adresse et ne sont jamais recalculées.
+- Pour voir ou améliorer la précision des positions GPS des clients, utilise clients_gps (relocaliser=true pour recalculer avec la Base Adresse Nationale). N’invente jamais de coordonnées.
 - Pour un devis ou une facture, identifie le client et l'installation (client_ecrire si le client n'existe pas encore). Si une information indispensable manque (client, prestation), demande-la en une phrase.
 - Le texte renvoyé par les outils société est déjà mis en forme et affiché tel quel : ne le répète pas.
 - Les montants sont toujours en euros, la TVA est gérée par l'application.
@@ -58,11 +61,16 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
 
     val schema: List<JSONObject> = listOf(
         tool("clients_exporter_kml", "Génère le fichier KML Google Earth avec fiches contact colorées, emojis, noms de clients et données de recherche. Peut filtrer les clients par nom, société, adresse ou installation.", mapOf("recherche" to prop("Texte facultatif pour exporter uniquement les clients correspondant à un nom, une société, une adresse ou une installation."))),
+        tool("clients_gps", "Affiche les coordonnées GPS (format Google Maps « latitude, longitude ») et la précision de localisation (adresse exacte, rue, lieu-dit, commune, saisie) de chaque installation, positions approximatives en tête. relocaliser=true recalcule les positions avec la Base Adresse Nationale (IGN) puis OpenStreetMap, sans toucher aux coordonnées saisies à la main.", mapOf(
+            "recherche" to prop("Nom de client, d'installation ou d'adresse pour filtrer (optionnel)."),
+            "relocaliser" to prop("« true » pour recalculer les positions (hors coordonnées saisies).")
+        )),
         tool("kml_couleurs_set", "Définit les couleurs des repères Google Earth : clients particuliers, clients professionnels et siège. Couleur au format #RRGGBB ou nom simple (vert, bleu, rouge, orange, jaune, violet, rose, turquoise, marron, noir, blanc, gris).", mapOf("particuliers" to prop("Couleur des clients particuliers, ex. #20A45A ou « vert »."), "professionnels" to prop("Couleur des clients professionnels, ex. #2878D0 ou « bleu »."), "siege" to prop("Couleur du repère du siège, ex. #FF9800 ou « orange »."))),
         tool("societe_info_set", "Enregistre les informations de la société (seuls les champs fournis sont modifiés).", mapOf(
             "nom" to prop("Nom de la société."), "forme" to prop("Forme juridique (EURL, SASU, micro-entreprise…)."),
             "siret" to prop("SIRET."), "tva_num" to prop("N° de TVA intracommunautaire."),
             "adresse" to prop("Adresse du siège (point de départ des déplacements)."),
+            "gps" to prop("Coordonnées GPS exactes du siège, copiées de Google Maps (« 47.541558, 4.459845 »), en degrés-minutes-secondes ou lien Google Maps."),
             "tel" to prop("Téléphone."), "email" to prop("Email."), "iban" to prop("IBAN."), "bic" to prop("BIC."),
             "tva_defaut" to prop("Taux de TVA par défaut en % (ex. 20, 10, 5.5)."),
             "franchise_tva" to prop("« true » si TVA non applicable (micro-entreprise, art. 293 B)."),
@@ -98,7 +106,8 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "notes" to prop("Notes."),
             "site_nom" to prop("Nom de l'installation (ex. « Toiture garage »)."), "site_adresse" to prop("Adresse de l'installation."),
             "kwc" to prop("Puissance de l'installation en kWc."), "mise_en_service" to prop("Date de mise en service yyyy-MM-dd."),
-            "onduleur" to prop("Modèle d'onduleur."), "nb_panneaux" to prop("Nombre de panneaux."), "site_notes" to prop("Notes sur l'installation.")
+            "onduleur" to prop("Modèle d'onduleur."), "nb_panneaux" to prop("Nombre de panneaux."), "site_notes" to prop("Notes sur l'installation."),
+            "site_gps" to prop("Coordonnées GPS exactes de l'installation telles que copiées dans Google Maps (« 47.541558, 4.459845 »), en degrés-minutes-secondes (47°32'29.6\"N 4°27'35.4\"E) ou lien Google Maps. Prioritaires sur l'adresse.")
         ), listOf("nom")),
         tool("client_fiche", "Affiche la fiche client complète et l'enregistre dans le coffre Obsidian.", mapOf("nom" to prop("Nom du client.")), listOf("nom")),
         tool("client_supprimer", "Supprime définitivement une fiche client de la base Société après confirmation. Refuse la suppression si des devis ou factures sont encore liés afin de préserver l’historique comptable.", mapOf("nom" to prop("Nom exact du client à supprimer.")), listOf("nom")),
@@ -185,6 +194,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         "distance_deplacement" -> distanceTool(a)
         "clients_exporter_kml" -> ok(svc.exporterKml(a.s("recherche")))
         "kml_couleurs_set" -> kmlCouleursSet(a)
+        "clients_gps" -> ok(svc.rapportGps(a.s("recherche"), a.bool("relocaliser") == true))
         else -> err("Outil inconnu : $name")
     }
 
@@ -217,14 +227,25 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         return ok("🎨 Couleurs Google Earth enregistrées.\n- 🏠 Particuliers : ${after.kmlCouleurParticulier}\n- 🏢 Professionnels : ${after.kmlCouleurProfessionnel}\n- 🏭 Siège : ${after.kmlCouleurSiege}\n\nDemande maintenant « exporte la carte KML » pour appliquer les couleurs aux repères.")
     }
 
-    private fun infoSet(a: JSONObject): ToolResult {
+    /** Coordonnées GPS saisies (texte Google Maps, degrés-minutes-secondes ou lien, y compris lien court). */
+    private suspend fun lireGps(texte: String): Geo.Point? =
+        Geo.lireCoordonnees(texte) ?: Geo.localiser(texte)?.takeIf { it.precision == Geo.Precision.MANUELLE }?.point
+
+    private val aideGps = "Format attendu : « 47.541558, 4.459845 » (dans Google Maps : appui long sur le lieu, puis touche les coordonnées pour les copier), " +
+        "47°32'29.6\"N 4°27'35.4\"E, ou un lien Google Maps."
+
+    private suspend fun infoSet(a: JSONObject): ToolResult {
         val before = d.societe
         var s = before
         if (a.hv("nom")) s = s.copy(nom = a.s("nom"))
         if (a.hv("forme")) s = s.copy(forme = a.s("forme"))
         if (a.hv("siret")) s = s.copy(siret = a.s("siret"))
         if (a.hv("tva_num")) s = s.copy(tvaNum = a.s("tva_num"))
-        if (a.hv("adresse")) s = s.copy(adresse = a.s("adresse"), lat = null, lon = null)
+        if (a.hv("adresse")) s = s.copy(adresse = a.s("adresse"), lat = null, lon = null, gpsPrecision = "")
+        if (a.hv("gps")) {
+            val p = lireGps(a.s("gps")) ?: return err("Coordonnées GPS du siège illisibles : « ${a.s("gps")} ». $aideGps")
+            s = s.copy(lat = p.lat, lon = p.lon, gpsPrecision = Geo.Precision.MANUELLE.name)
+        }
         if (a.hv("tel")) s = s.copy(tel = a.s("tel"))
         if (a.hv("email")) s = s.copy(email = a.s("email"))
         if (a.hv("iban")) s = s.copy(iban = a.s("iban"))
@@ -353,7 +374,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             ok("🗑️ Fiche client « ${cible.nom} », ses installations et sa fiche Markdown Obsidian supprimées.")
         else err("⚠️ La fiche client « ${cible.nom} » a bien été retirée de la base Société, mais sa copie Markdown Obsidian est encore présente ou inaccessible : ${markdownPath}. Vérifie les droits d'écriture du coffre.")
     }
-    private fun clientEcrire(a: JSONObject): ToolResult {
+    private suspend fun clientEcrire(a: JSONObject): ToolResult {
         val nom = a.s("nom")
         val trouves = d.chercherClients(nom)
         if (trouves.size > 1 && trouves.none { normaliser(it.nom) == normaliser(nom) })
@@ -372,14 +393,23 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         }
         if (a.hv("notes")) c = c.copy(notes = a.s("notes"))
         var siteTxt = ""
-        if (a.hv("site_nom") || a.hv("site_adresse") || a.hv("kwc") || a.hv("onduleur") || a.hv("nb_panneaux") || a.hv("mise_en_service") || a.hv("site_notes")) {
+        val gpsSaisi = if (a.hv("site_gps")) lireGps(a.s("site_gps")) ?: return err("Coordonnées GPS illisibles : « ${a.s("site_gps")} ». $aideGps") else null
+        if (a.hv("site_nom") || a.hv("site_adresse") || a.hv("kwc") || a.hv("onduleur") || a.hv("nb_panneaux") || a.hv("mise_en_service") || a.hv("site_notes") || gpsSaisi != null) {
             val ref = a.s("site_nom").ifBlank { a.s("site_adresse") }
+            if (gpsSaisi != null && ref.isBlank() && c.sites.size > 1)
+                return err("${c.nom} a plusieurs installations (${c.sites.joinToString { it.nom }}). Pour laquelle sont ces coordonnées GPS ? (site_nom)")
             val trouve = c.sites.firstOrNull { x -> ref.isNotBlank() && (normaliser(x.nom) == normaliser(ref) || normaliser(x.adresse) == normaliser(ref)) }
                 ?: (if (ref.isBlank() && c.sites.size == 1) c.sites.first() else null)
             val isNew = trouve == null
             var site: Site = trouve ?: Site(svc.newId(), a.s("site_nom").ifBlank { "Installation ${c.sites.size + 1}" }, a.s("site_adresse").ifBlank { c.adresse })
             if (a.hv("site_nom")) site = site.copy(nom = a.s("site_nom"))
-            if (a.hv("site_adresse")) site = site.copy(adresse = a.s("site_adresse"), distanceKm = null, distanceCle = "")
+            // Nouvelle adresse : l'ancienne position GPS ne vaut plus (elle sera recalculée), sauf coordonnées fournies.
+            if (a.hv("site_adresse") && normaliser(a.s("site_adresse")) != normaliser(site.adresse))
+                site = site.copy(adresse = a.s("site_adresse"), distanceKm = null, distanceCle = "", lat = null, lon = null, gpsPrecision = "", gpsTrouve = "")
+            if (gpsSaisi != null) site = site.copy(
+                lat = gpsSaisi.lat, lon = gpsSaisi.lon, gpsPrecision = Geo.Precision.MANUELLE.name, gpsTrouve = "coordonnées GPS saisies",
+                distanceKm = null, dureeMin = null, distanceCle = ""
+            )
             val kwc = a.dbl("kwc")
             if (kwc != null) site = site.copy(kwc = kwc)
             if (a.hv("mise_en_service")) site = site.copy(miseEnService = a.s("mise_en_service"))
@@ -389,7 +419,8 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             if (a.hv("site_notes")) site = site.copy(notes = a.s("site_notes"))
             val fin: Site = site
             c = c.copy(sites = if (isNew) c.sites + fin else c.sites.map { if (it.id == fin.id) fin else it })
-            siteTxt = "\n☀️ Installation : ${fin.nom} — ${nombre(fin.kwc)} kWc — ${fin.adresse}"
+            siteTxt = "\n☀️ Installation : ${fin.nom} — ${nombre(fin.kwc)} kWc — ${fin.adresse}" +
+                (if (gpsSaisi != null) "\n🛰️ GPS : ${Geo.texteGps(gpsSaisi)} (coordonnées saisies, format Google Maps) — ${Geo.texteDms(gpsSaisi)}" else "")
         }
         val final: Client = c
         svc.repo.update { it.copy(clients = if (nouveau) it.clients + final else it.clients.map { x -> if (x.id == final.id) final else x }) }

@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import fr.dd.jarvis.JarvisApp
 import fr.dd.jarvis.ai.Prompts
+import fr.dd.jarvis.societe.Geo
 import fr.dd.jarvis.societe.core.*
 import java.time.LocalDate
 
@@ -197,8 +198,14 @@ private fun ClientsTab(app: JarvisApp) {
 
 private data class SiteDraft(
     val id: String, val nom: String, val adresse: String, val kwc: String, val mes: String,
-    val onduleur: String, val panneaux: String, val notes: String
+    val onduleur: String, val panneaux: String, val notes: String,
+    /** Coordonnées GPS au format Google Maps (« 47.541558, 4.459845 »), vide si inconnues. */
+    val gps: String = ""
 )
+
+/** Coordonnées enregistrées d'une installation, au format Google Maps ; vide si aucune. */
+private fun gpsTexte(s: Site?): String =
+    if (s?.lat != null && s.lon != null) Geo.texteGps(Geo.Point(s.lat, s.lon)) else ""
 
 @Composable
 private fun ClientForm(initial: Client?, onClose: () -> Unit, onSave: (Client) -> Unit) {
@@ -212,7 +219,7 @@ private fun ClientForm(initial: Client?, onClose: () -> Unit, onSave: (Client) -
     var pro by remember { mutableStateOf(initial?.type == "professionnel") }
     val sites = remember {
         androidx.compose.runtime.mutableStateListOf<SiteDraft>().also { l ->
-            initial?.sites?.forEach { l += SiteDraft(it.id, it.nom, it.adresse, if (it.kwc > 0) nombre(it.kwc) else "", it.miseEnService, it.onduleur, if (it.nbPanneaux > 0) it.nbPanneaux.toString() else "", it.notes) }
+            initial?.sites?.forEach { l += SiteDraft(it.id, it.nom, it.adresse, if (it.kwc > 0) nombre(it.kwc) else "", it.miseEnService, it.onduleur, if (it.nbPanneaux > 0) it.nbPanneaux.toString() else "", it.notes, gpsTexte(it)) }
         }
     }
     Dialogue(if (initial == null) "Nouveau client" else "Modifier ${initial.nom}", onClose, actions = {
@@ -220,14 +227,27 @@ private fun ClientForm(initial: Client?, onClose: () -> Unit, onSave: (Client) -
             if (nom.isNotBlank()) {
                 val newSites = sites.map { d ->
                     val old = initial?.sites?.firstOrNull { it.id == d.id }
-                    val adr = d.adresse.ifBlank { adresse }
                     val same = old != null && old.adresse == d.adresse
-                    Site(
+                    // Coordonnées modifiées à la main (format Google Maps, DMS ou lien) : prioritaires et jamais recalculées.
+                    val gpsAvant = gpsTexte(old)
+                    val saisi = if (d.gps.isNotBlank() && d.gps.trim() != gpsAvant) Geo.lireCoordonnees(d.gps) else null
+                    val efface = d.gps.isBlank() && gpsAvant.isNotBlank()
+                    val base = Site(
                         d.id, d.nom.ifBlank { "Installation" }, d.adresse, d.kwc.replace(',', '.').toDoubleOrNull() ?: 0.0,
-                        d.mes, d.onduleur, d.panneaux.toIntOrNull() ?: 0, d.notes,
-                        if (same) old?.lat else null, if (same) old?.lon else null,
-                        if (same) old?.distanceKm else null, if (same) old?.dureeMin else null, if (same) old?.distanceCle ?: "" else ""
-                    ).also { adr.length }
+                        d.mes, d.onduleur, d.panneaux.toIntOrNull() ?: 0, d.notes
+                    )
+                    when {
+                        saisi != null -> base.copy(lat = saisi.lat, lon = saisi.lon, gpsPrecision = Geo.Precision.MANUELLE.name, gpsTrouve = "coordonnées GPS saisies")
+                        same && !efface && old != null -> base.copy(
+                            lat = old.lat, lon = old.lon, gpsPrecision = old.gpsPrecision, gpsTrouve = old.gpsTrouve,
+                            distanceKm = old.distanceKm, dureeMin = old.dureeMin, distanceCle = old.distanceCle
+                        )
+                        // Adresse modifiée ou coordonnées effacées : la position sera recalculée (sauf saisie manuelle conservée).
+                        old != null && !efface && Geo.precisionDe(old.gpsPrecision) == Geo.Precision.MANUELLE -> base.copy(
+                            lat = old.lat, lon = old.lon, gpsPrecision = old.gpsPrecision, gpsTrouve = old.gpsTrouve
+                        )
+                        else -> base
+                    }
                 }
                 onSave(Client(
                     initial?.id ?: java.util.UUID.randomUUID().toString().take(8), nom.trim(), if (pro) "professionnel" else "particulier",
@@ -253,6 +273,19 @@ private fun ClientForm(initial: Client?, onClose: () -> Unit, onSave: (Client) -
             HudPanel(Modifier.fillMaxWidth()) {
                 HudTextField(d.nom, { sites[i] = d.copy(nom = it) }, Modifier.fillMaxWidth(), label = "Nom de l'installation")
                 HudTextField(d.adresse, { sites[i] = d.copy(adresse = it) }, Modifier.fillMaxWidth(), label = "Adresse (vide = celle du client)")
+                HudTextField(d.gps, { sites[i] = d.copy(gps = it) }, Modifier.fillMaxWidth(), label = "Coordonnées GPS (comme Google Maps : 47.541558, 4.459845)")
+                val ancien = initial?.sites?.firstOrNull { it.id == d.id }
+                val lisible = d.gps.isBlank() || Geo.lireCoordonnees(d.gps) != null
+                Text(
+                    when {
+                        !lisible -> "Format non reconnu : colle les coordonnées copiées dans Google Maps (appui long sur le toit → touche les coordonnées), des degrés-minutes-secondes ou un lien Google Maps."
+                        d.gps.isBlank() -> "Vide : la position sera calculée depuis l'adresse (Base Adresse Nationale)."
+                        d.gps.trim() != gpsTexte(ancien) -> "Coordonnées saisies : elles seront utilisées telles quelles."
+                        else -> "Précision : " + (Geo.precisionDe(ancien?.gpsPrecision) ?: Geo.Precision.INCONNUE).libelle +
+                            (ancien?.gpsTrouve?.takeIf { it.isNotBlank() && ancien.gpsPrecision != Geo.Precision.MANUELLE.name }?.let { " — $it" } ?: "")
+                    },
+                    color = if (lisible) HudDim else Color(0xFFFF4D6D), fontSize = 11.sp
+                )
                 HudTextField(d.kwc, { sites[i] = d.copy(kwc = it) }, Modifier.fillMaxWidth(), label = "Puissance (kWc)")
                 HudTextField(d.mes, { sites[i] = d.copy(mes = it) }, Modifier.fillMaxWidth(), label = "Mise en service (aaaa-mm-jj)")
                 HudTextField(d.onduleur, { sites[i] = d.copy(onduleur = it) }, Modifier.fillMaxWidth(), label = "Onduleur")
@@ -262,7 +295,7 @@ private fun ClientForm(initial: Client?, onClose: () -> Unit, onSave: (Client) -
             }
         }
         HudButton("Ajouter une installation", icon = Icons.Filled.Add) {
-            sites += SiteDraft(java.util.UUID.randomUUID().toString().take(8), "Installation ${sites.size + 1}", "", "", "", "", "", "")
+            sites += SiteDraft(java.util.UUID.randomUUID().toString().take(8), "Installation ${sites.size + 1}", "", "", "", "", "", "", "")
         }
     }
 }
@@ -829,6 +862,7 @@ private fun ReglagesTab(app: JarvisApp) {
                             adresse = adresse.trim(), tel = tel.trim(), email = email.trim(), iban = iban.trim(), bic = bic.trim(),
                             lat = if (adresse.trim() == it.societe.adresse) it.societe.lat else null,
                             lon = if (adresse.trim() == it.societe.adresse) it.societe.lon else null,
+                            gpsPrecision = if (adresse.trim() == it.societe.adresse) it.societe.gpsPrecision else "",
                             franchiseTva = franchise, tvaDefaut = num(tva) ?: 20.0, tarifsSaisisTtc = tarifsTtc,
                             delaiPaiementJours = delai.toIntOrNull() ?: 30, validiteDevisJours = validite.toIntOrNull() ?: 30,
                             mentions = mentions, reservePct = (num(reserve) ?: 0.0).coerceIn(0.0, 100.0),

@@ -14,6 +14,7 @@ data class Societe(
     val adresse: String = "",            // siège : point de départ des déplacements
     val lat: Double? = null,
     val lon: Double? = null,
+    val gpsPrecision: String = "",       // Geo.Precision (MANUELLE si coordonnées saisies)
     val tel: String = "",
     val email: String = "",
     val iban: String = "",
@@ -74,7 +75,9 @@ data class Site(
     val lon: Double? = null,
     val distanceKm: Double? = null,
     val dureeMin: Double? = null,
-    val distanceCle: String = ""                     // « adresse siège|adresse site » pour savoir si le cache est valide
+    val distanceCle: String = "",                    // « adresse siège|adresse site » pour savoir si le cache est valide
+    val gpsPrecision: String = "",                   // Geo.Precision : MANUELLE, NUMERO, RUE, LIEU_DIT, COMMUNE ; vide = ancien calcul non vérifié
+    val gpsTrouve: String = ""                       // adresse officielle reconnue (Base Adresse Nationale / OpenStreetMap)
 )
 
 @Serializable
