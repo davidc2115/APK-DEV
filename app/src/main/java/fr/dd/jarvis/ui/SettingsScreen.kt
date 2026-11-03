@@ -260,7 +260,7 @@ fun SettingsScreen(app: JarvisApp) {
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             HudButton("Installer catalogue") { if (extName.isNotBlank()) runHermesExtension(listOf("mcp", "install", extName.trim()), true) }
                             HudButton("Configurer") { if (extName.isNotBlank()) runHermesExtension(listOf("mcp", "configure", extName.trim())) }
-                            HudButton("Supprimer") { if (extName.isNotBlank() && extName.trim() != "jarvis") runHermesExtension(listOf("mcp", "remove", extName.trim()), true) }
+                            HudButton("Supprimer") { if (extName.isNotBlank() && !extName.trim().equals("jarvis", ignoreCase = true)) runHermesExtension(listOf("mcp", "remove", extName.trim()), true) }
                         }
                         Text("Le pont MCP jarvis reliant Hermes à ton téléphone est protégé contre la suppression depuis ce panneau. Pour ajouter un serveur personnalisé, utilise hermes mcp add avec une URL ou une commande.", color = HudDim, fontSize = 11.sp)
                     }
