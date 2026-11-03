@@ -377,28 +377,18 @@ p "✅ Hermès installé (${'$'}{MODE})."
      * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
      * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
      */
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
     fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
         if (arguments.isEmpty()) return "❌ Commande Hermès vide."
         PontMcp.demarrer(app)
         val cli = arguments.joinToString(" ") { q(it) }
         val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
-        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"${'
-    fun surProgression(app: JarvisApp, ligne: String) {
-        if (ligne == "pong") return
-        android.os.Handler(android.os.Looper.getMainLooper()).post {
-            message = ligne
-            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
-        }
-        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
-        if (important) runCatching {
-            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
-                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
-                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
-        }
-    }
-}}ligne\"; done"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
         message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
-        return executer(app, prelude(app) + "\\n" + commandeTermux, libelle = libelle)
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
             ?: "🚀 Commande envoyée à Hermès."
     }
     /** Appelé par le pont local à chaque ligne de progression du script. */
