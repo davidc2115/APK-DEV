@@ -56,7 +56,7 @@ object Musique {
         return "Commande « $action » envoyée à YT Music Morphe. L'état réel sera vérifié à la prochaine lecture de la session."
     }
 
-    fun rechercher(ctx: Context, requete: String): String {
+    suspend fun rechercher(ctx: Context, requete: String): String {
         if (requete.isBlank()) return "Précise le titre ou l'artiste à rechercher."
         val url = "https://music.youtube.com/search?q=" + URLEncoder.encode(requete, "UTF-8")
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
@@ -65,7 +65,15 @@ object Musique {
         }
         return try {
             ctx.startActivity(intent)
-            "Recherche « $requete » ouverte dans YT Music Morphe."
+            kotlinx.coroutines.delay(2800)
+            val access = fr.dd.jarvis.service.JarvisAccessibilityService.instance
+                ?: return "Recherche ouverte dans YT Music Morphe, mais la sélection automatique nécessite d'activer le service Accessibilité de JARVIS. Aucun morceau n'a été lancé."
+            val selection = access.clickBestMatch(requete)
+            if (!selection.startsWith("Résultat sélectionné :")) return "Recherche ouverte dans YT Music Morphe. " + selection
+            kotlinx.coroutines.delay(1400)
+            val verification = etat(ctx)
+            if (verification.contains("En lecture")) selection + "\n✅ Lecture détectée :\n" + verification
+            else selection + "\nLe résultat a été sélectionné, mais la lecture n'est pas confirmée. État : " + verification
         } catch (_: Exception) {
             val fallback = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             try {
