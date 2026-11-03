@@ -42,7 +42,7 @@ object HomeAssistantDashboard {
                 val r = next()
                 if (r.optInt("id", -1) == id) {
                     if (!r.optBoolean("success", false)) throw IllegalStateException("Home Assistant refuse $type : ${r.optJSONObject("error")?.optString("message") ?: r}")
-                    return r.optJSONObject("result") ?: JSONObject()
+                    val result = r.opt("result")\n                    return if (result is JSONObject) result else JSONObject().put("_value", result)
                 }
             }
             throw IllegalStateException("Réponse manquante pour $type.")
@@ -69,7 +69,7 @@ object HomeAssistantDashboard {
             val path = a.optString("url_path").trim()
             when (action.lowercase()) {
                 "lister" -> {
-                    val arr = s.command("lovelace/dashboards/list").optJSONArray("dashboards") ?: JSONArray()
+                    val listed = s.command("lovelace/dashboards/list")\n                    val arr = listed.optJSONArray("_value") ?: listed.optJSONArray("dashboards") ?: JSONArray()
                     return if (arr.length() == 0) "Aucun tableau de bord personnalisé." else (0 until arr.length()).joinToString("\n") { i ->
                         val d = arr.getJSONObject(i)
                         "- ${d.optString("title")} · /${d.optString("url_path")} · ${d.optString("icon")} · ${d.optString("mode")}"
