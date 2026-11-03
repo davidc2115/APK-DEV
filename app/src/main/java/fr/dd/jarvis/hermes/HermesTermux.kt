@@ -318,7 +318,7 @@ if [ -z "${'$'}{MODE}" ]; then
     || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
   p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
   proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root \
-    bash -c 'set -e; mkdir -p /root/.hermes; printf "pillow-heif==1.4.0\\n" > /root/.hermes/jarvis-constraints.txt; export UV_CONSTRAINT=/root/.hermes/jarvis-constraints.txt PIP_CONSTRAINT=/root/.hermes/jarvis-constraints.txt; HEIF_VER=$(pkg-config --modversion libheif); dpkg --compare-versions "${' ge 1.19.0 || { echo "libheif $HEIF_VER trop ancien (>=1.19.0 requis)"; exit 1; }; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' 2>&1 \
+    bash -c 'set -e; mkdir -p /root/.hermes; printf "pillow-heif==1.4.0\\n" > /root/.hermes/jarvis-constraints.txt; export UV_CONSTRAINT=/root/.hermes/jarvis-constraints.txt PIP_CONSTRAINT=/root/.hermes/jarvis-constraints.txt; HEIF_VER=$(pkg-config --modversion libheif); dpkg --compare-versions "${'$'}HEIF_VER" ge 1.19.0 || { echo "libheif ${'$'}HEIF_VER trop ancien (>=1.19.0 requis)"; exit 1; }; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' 2>&1 \
     | tee -a "${'$'}{LOG}" | while IFS= read -r l; do
         case "${'$'}{l}" in *✓*|*✔*|*rror*|*ailed*|*ready*|*nstalled*) p "   ${'$'}(printf '%s' "${'$'}{l}" | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-110)";; esac
       done
