@@ -29,6 +29,7 @@ class Brain(
             else -> null
         }
         positionDirecte(dernier, history, onStatus)?.let { return it }
+        rangementDirect(history, onStatus)?.let { return it }
         if (outilDirect != null) {
             onStatus("⚙️ $outilDirect…")
             val args = JSONObject(); if (dernier.contains("serveur")) args.put("via", "serveur")
@@ -171,6 +172,43 @@ class Brain(
         if (Regex("\\b(envoie|envoyer|partage|sms|message|mail|agenda|rendez vous|itineraire|trajet|route|distance|meteo|temps qu il fait|emmene|guide)").containsMatchIn(n)) return null
         onStatus("📍 Localisation…")
         return tools.execute("ma_position", JSONObject()).text
+    }
+
+    /**
+     * « Range / déplace tous les fichiers (images…) dont le nom contient X dans le (sous-)dossier Y » : la demande est
+     * comprise par un agent (motif, type, destination, y compris sur plusieurs messages) puis exécutée d'un coup par
+     * obsidian_fichiers/trier — sans jamais exiger les noms exacts des fichiers.
+     */
+    private suspend fun rangementDirect(history: List<ChatMsg>, onStatus: (String) -> Unit): String? {
+        val users = history.filter { it.fromUser }.takeLast(3).map { fr.dd.jarvis.societe.core.normaliser(it.text) }
+        val n = users.lastOrNull() ?: return null
+        val verbe = Regex("\\b(deplace[rz]?|range[rz]?|mets|mettre|met|place[rz]?|trie[rz]?|classe[rz]?|bouge[rz]?|transfere[rz]?|regroupe[rz]?|organise[rz]?)\\b")
+        val objet = Regex("\\b(fichiers?|images?|photos?|documents?|pdf|notes?|videos?|coloriages?)\\b")
+        val critere = Regex("\\b(nomme|nommes|nommee|nommees|appele|appeles|appelee|appelees|comport|contien|contenant|comportant|dont le nom|leur nom|le nom|avec le mot|qui ont)")
+        val direct = verbe.containsMatchIn(n) && objet.containsMatchIn(n) && (critere.containsMatchIn(n) || n.contains("dossier"))
+        val suite = !direct && users.size >= 2 && users.dropLast(1).any { verbe.containsMatchIn(it) && objet.containsMatchIn(it) } &&
+            (objet.containsMatchIn(n) || critere.containsMatchIn(n) || n.contains("dossier"))
+        if (!direct && !suite) return null
+        // Rangement du stockage du téléphone (Téléchargements, DCIM…) : ce n'est pas le coffre.
+        if (Regex("telechargement|download|dcim|galerie|camera|whatsapp").containsMatchIn(n) && !Regex("coffre|obsidian|jarvis").containsMatchIn(n)) return null
+        onStatus("🗂️ Analyse du rangement…")
+        val contexte = history.takeLast(6).joinToString("\n") { (if (it.fromUser) "Utilisateur : " else "Jarvis : ") + it.text.take(400) }
+        val sys = """Tu analyses une demande de RANGEMENT de fichiers dans le coffre Obsidian. Réponds UNIQUEMENT par un objet JSON :
+{"ranger": true ou false, "motif": "mots que le NOM des fichiers doit contenir, sans article ni « dans leur nom »", "types": "images|pdf|notes|videos|audio|tous", "source": "dossier où chercher, ou vide", "destination": "dossier de destination tel que dit par l'utilisateur, ou vide", "sous_dossier": true ou false}
+- ranger=false si la DERNIÈRE demande n'est pas de déplacer/ranger/trier des fichiers d'après leur nom.
+- Tiens compte des messages précédents : une réponse courte peut compléter une demande antérieure (motif ou destination).
+- sous_dossier=true si l'utilisateur parle d'un « sous-dossier » ou ne donne qu'un simple nom de dossier."""
+        val brut = try { app.llm.agent(sys, contexte) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { return null }
+        val j = runCatching { JSONObject(brut.substring(brut.indexOf('{'), brut.lastIndexOf('}') + 1)) }.getOrNull() ?: return null
+        if (!j.optBoolean("ranger")) return null
+        val motif = j.optString("motif").trim()
+        val dest = j.optString("destination").trim()
+        if (motif.isBlank()) return null
+        if (dest.isBlank()) return "🗂️ Dans quel dossier du coffre dois-je ranger les fichiers « $motif » ? (par exemple « un sous-dossier $motif »)"
+        onStatus("🗂️ Rangement des fichiers « $motif »…")
+        return tools.execute("obsidian_fichiers", JSONObject().put("action", "trier").put("motif", motif).put("destination", dest)
+            .put("types", j.optString("types").ifBlank { "tous" }).put("chemin", j.optString("source"))
+            .put("sous_dossier", j.optBoolean("sous_dossier", true).toString())).text
     }
 
     private fun siteNomme(c: fr.dd.jarvis.societe.core.Client, n: String): String? =

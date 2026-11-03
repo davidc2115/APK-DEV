@@ -173,9 +173,18 @@ object ConstellationLayout {
     /** Une ligne d'étiquettes à côté d'un hub : un dossier et ses fichiers, ou un fichier seul. */
     const val RAYON_SOUS = 32f
 
-    /** Une ligne à côté d'une catégorie : un sous-dossier en cercle (et ses fichiers s'il est déplié), ou un fichier. */
-    private class Rangee(val sous: Hub?, val tete: Etiquette?, val feuilles: List<Etiquette>) {
-        val hauteur get() = if (sous != null) max(2 * RAYON_SOUS + 28f, feuilles.size * PAS_FEUILLE + 12f) else H_ETIQUETTE + 9f
+    /** Rayon du cercle d'un dossier selon sa profondeur (1 = sous-dossier d'une catégorie). */
+    fun rayonNiveau(niveau: Int) = when (niveau) { 0 -> RAYON_HUB; 1 -> RAYON_SOUS; 2 -> 28f; else -> 25f }
+
+    /**
+     * Une ligne d'une branche : un DOSSIER en cercle (avec, s'il est déplié, ses propres sous-dossiers en cercles et
+     * ses fichiers en liste), ou un fichier / un « +N ». Les dossiers sont des cercles à toutes les profondeurs.
+     */
+    private class Rangee(val sous: Hub?, val tete: Etiquette?, val enfants: List<Rangee> = emptyList(), val feuille: Boolean = false) {
+        val hauteur: Float by lazy {
+            if (sous != null) max(2 * sous.rayon + 28f, enfants.sumOf { it.hauteur.toDouble() }.toFloat() + 12f)
+            else if (feuille) PAS_FEUILLE else H_ETIQUETTE + 9f
+        }
     }
 
     /** Déplie [chemin] s'il est replié, le replie (avec tout ce qu'il contient) s'il est déplié. */
@@ -280,33 +289,37 @@ object ConstellationLayout {
             return if (nd > 0) "${pluriel(nd, "dossier", "dossiers")} · $tot" else pluriel(tot, "fichier", "fichiers")
         }
 
+        /** Dossier en cercle ; déplié : ses sous-dossiers (cercles, récursivement) puis ses fichiers (liste). */
+        fun rangeeDossier(d: String, parent: String, niveau: Int, fige: Boolean = false): Rangee {
+            val cd = dossiers[d]
+            val depliable = cd != null && (cd.sousDossiers.isNotEmpty() || cd.notes.isNotEmpty() || cd.pieces.isNotEmpty())
+            val ouvert = depliable && d in deplies && !fige && niveau < 9
+            val sous = Hub(d, nom(d), sousTitreDe(cd), iconeDossier(nom(d)), TypeHub.DOSSIER, cd?.total ?: 0, Pt(0f, 0f), rayonNiveau(niveau),
+                parent = parent, niveau = niveau, depliable = depliable, deplie = ouvert)
+            val enfants = mutableListOf<Rangee>()
+            if (ouvert && cd != null) {
+                val sd = cd.sousDossiers.take(MAX_SOUS_DOSSIERS)
+                sd.forEach { enfants += rangeeDossier(it, d, niveau + 1) }
+                if (cd.sousDossiers.size > sd.size) enfants += Rangee(null, plus(d, d, cd.sousDossiers.size - sd.size, "dossiers", feuille = true), feuille = true)
+                val fichiers = cd.notes.sortedWith(parDegre).map { etiquetteNote(it, d, true) } + cd.pieces.map { etiquettePiece(it, d, true) }
+                fichiers.take(6).forEach { enfants += Rangee(null, it, feuille = true) }
+                if (fichiers.size > 6) enfants += Rangee(null, plus(d, d, fichiers.size - 6, "autres", feuille = true), feuille = true)
+            }
+            return Rangee(sous, null, enfants)
+        }
+
         val rangeesParCat = LinkedHashMap<String, List<Rangee>>()
         for (cat in categories) {
             val c = contenuDe(cat) ?: continue
             if (cat !in deplies) { rangeesParCat[cat] = emptyList(); continue }
             val rangees = mutableListOf<Rangee>()
             val branches = c.sousDossiers.take(MAX_SOUS_DOSSIERS)
-            branches.forEach { d ->
-                val cd = dossiers[d]
-                val depliable = cd != null && (cd.sousDossiers.isNotEmpty() || cd.notes.isNotEmpty() || cd.pieces.isNotEmpty())
-                val ouvert = depliable && d in deplies && cat != "Autres"
-                val sous = Hub(d, nom(d), sousTitreDe(cd), iconeDossier(nom(d)), TypeHub.DOSSIER, cd?.total ?: 0, Pt(0f, 0f), RAYON_SOUS,
-                    parent = cat, niveau = 1, depliable = depliable, deplie = ouvert)
-                val feuilles = mutableListOf<Etiquette>()
-                if (ouvert && cd != null) {
-                    val fichiers = cd.notes.sortedWith(parDegre).map { etiquetteNote(it, d, true) } + cd.pieces.map { etiquettePiece(it, d, true) }
-                    cd.sousDossiers.take(3).forEach { feuilles += etiquetteDossier(it, d) }
-                    fichiers.take(6).forEach { feuilles += it }
-                    val reste = fichiers.size - 6 + (cd.sousDossiers.size - 3).coerceAtLeast(0)
-                    if (reste > 0) feuilles += plus(d, d, reste, "autres", feuille = true)
-                }
-                rangees += Rangee(sous, null, feuilles)
-            }
-            if (c.sousDossiers.size > branches.size) rangees += Rangee(null, plus(cat, c.chemin, c.sousDossiers.size - branches.size, "dossiers"), emptyList())
+            branches.forEach { d -> rangees += rangeeDossier(d, cat, 1, cat == "Autres") }
+            if (c.sousDossiers.size > branches.size) rangees += Rangee(null, plus(cat, c.chemin, c.sousDossiers.size - branches.size, "dossiers"))
             val nbRacine = if (branches.isEmpty()) 5 else 3
             val fichiersRacine = c.notes.sortedWith(parDegre).map { etiquetteNote(it, cat, false) } + c.pieces.map { etiquettePiece(it, cat, false) }
-            fichiersRacine.take(nbRacine).forEach { rangees += Rangee(null, it, emptyList()) }
-            if (fichiersRacine.size > nbRacine) rangees += Rangee(null, plus(cat, c.chemin, fichiersRacine.size - nbRacine, "autres"), emptyList())
+            fichiersRacine.take(nbRacine).forEach { rangees += Rangee(null, it) }
+            if (fichiersRacine.size > nbRacine) rangees += Rangee(null, plus(cat, c.chemin, fichiersRacine.size - nbRacine, "autres"))
             rangeesParCat[cat] = rangees
         }
 
@@ -468,21 +481,27 @@ object ConstellationLayout {
             // Hub du haut : les branches montent un peu (elles ne doivent pas redescendre vers le cerveau).
             var y = hub.pos.y - hauteur / 2f - (if (!cote && hub.pos.y < 0) hauteur * 0.25f else 0f)
             for (r in rs) {
-                val cy = y + r.hauteur / 2f
-                if (r.sous != null) {
-                    val sous = r.sous.copy(pos = Pt(hub.pos.x + sx * (hub.rayon + 30f + RAYON_SOUS), cy))
-                    hubs += sous
-                    r.feuilles.forEachIndexed { j, f ->
-                        val fy = cy + (j - (r.feuilles.size - 1) / 2f) * PAS_FEUILLE
-                        out += f.copy(pos = Pt(sous.pos.x + sx * (RAYON_SOUS + 26f + f.w / 2f), fy))
-                    }
-                } else if (r.tete != null) {
-                    out += r.tete.copy(pos = Pt(hub.pos.x + sx * (hub.rayon + 24f + r.tete.w / 2f), cy))
-                }
+                placer(r, hub.pos.x, hub.rayon, y + r.hauteur / 2f, sx, hubs, out)
                 y += r.hauteur
             }
         }
         return hubs to out
+    }
+
+    /** Pose une rangée à droite (sx = 1) ou à gauche (sx = -1) de son parent, puis ses enfants un cran plus loin. */
+    private fun placer(r: Rangee, xParent: Float, rParent: Float, cy: Float, sx: Float, hubs: MutableList<Hub>, out: MutableList<Etiquette>) {
+        if (r.sous != null) {
+            val sous = r.sous.copy(pos = Pt(xParent + sx * (rParent + 30f + r.sous.rayon), cy))
+            hubs += sous
+            val total = r.enfants.sumOf { it.hauteur.toDouble() }.toFloat()
+            var y = cy - total / 2f
+            for (e in r.enfants) {
+                placer(e, sous.pos.x, sous.rayon, y + e.hauteur / 2f, sx, hubs, out)
+                y += e.hauteur
+            }
+        } else if (r.tete != null) {
+            out += r.tete.copy(pos = Pt(xParent + sx * (rParent + (if (r.feuille) 26f else 24f) + r.tete.w / 2f), cy))
+        }
     }
 
     /**

@@ -237,74 +237,94 @@ p "⚙️ Configuration écrite : modèle Gemini $modele${if (groq.isNotBlank())
 """.trimIndent()
     }
 
+    /**
+     * Démarrage de la passerelle : Hermès natif Termux (paquet officiel) ou, le plus souvent, Hermès installé dans
+     * Debian (proot-distro) — le dossier ~/.hermes est partagé avec Termux (--termux-home), la configuration écrite
+     * par Jarvis vaut donc pour les deux, et 127.0.0.1 est le même réseau que celui de Jarvis.
+     */
     internal val demarrage = """
-H="${'$'}HOME/.hermes"; mkdir -p "${'$'}H/logs"
+H="${'$'}{HOME}/.hermes"; mkdir -p "${'$'}{H}/logs"
 termux-wake-lock >/dev/null 2>&1 || true
 pkill -f 'hermes gateway' >/dev/null 2>&1; sleep 1
-if command -v setsid >/dev/null 2>&1; then setsid nohup hermes gateway run >> "${'$'}H/logs/gateway.log" 2>&1 < /dev/null &
-else nohup hermes gateway run >> "${'$'}H/logs/gateway.log" 2>&1 < /dev/null & fi
-for i in ${'$'}(seq 1 45); do
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
   if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
   sleep 2
 done
 p "❌ Hermès ne répond pas. Dernières lignes du journal :"
-tail -n 6 "${'$'}H/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}l"; done
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
 exit 1
 """.trimIndent()
 
+    /**
+     * Installation. Le paquet Termux officiel d'Hermès est (pour l'instant) indisponible, et l'installation « pip »
+     * directement dans Termux échoue (dépendances sans version Android). Contournement fiable : une Debian légère
+     * dans Termux (proot-distro, sans root) où l'installateur officiel Linux aarch64 fonctionne normalement.
+     */
     internal val installation = """
 export DEBIAN_FRONTEND=noninteractive
 APT="apt-get -y -o Dpkg::Options::=--force-confnew -o Dpkg::Options::=--force-confdef"
-p "🚀 Installation d'Hermès lancée (5 à 20 min selon le réseau, le téléphone reste utilisable)."
+H="${'$'}{HOME}/.hermes"; mkdir -p "${'$'}{H}/logs"; LOG="${'$'}{H}/logs/jarvis-install.log"
+p "🚀 Installation d'Hermès lancée (10 à 25 min, le téléphone reste utilisable)."
 termux-wake-lock >/dev/null 2>&1 || true
+# Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
+pkill -f 'pip install -q -e' >/dev/null 2>&1
+if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative d'installation supprimée."; fi
+if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; then rm -f "${'$'}{PREFIX}/bin/hermes"; fi
 pkg update -y >/dev/null 2>&1 || apt-get update >/dev/null 2>&1
-${'$'}APT install curl gnupg util-linux >/dev/null 2>&1 || p "⚠️ Paquets de base : échec partiel."
-p "📦 Mise à jour des paquets Termux…"
-${'$'}APT full-upgrade >/dev/null 2>&1 || true
+${'$'}{APT} install curl gnupg util-linux >/dev/null 2>&1 || p "⚠️ Paquets de base : échec partiel."
 case "${'$'}(uname -m)" in aarch64) ;; *) p "⚠️ Architecture ${'$'}(uname -m) : seul aarch64 est pris en charge officiellement.";; esac
-if ! hermes --version >/dev/null 2>&1; then
-  p "🔐 Ajout du dépôt officiel signé de Nous Research…"
-  mkdir -p "${'$'}PREFIX/etc/apt/keyrings"
+MODE=""
+if hermes --version >/dev/null 2>&1; then MODE=natif; fi
+if [ -z "${'$'}{MODE}" ]; then
+  p "🔐 Essai du dépôt officiel signé de Nous Research…"
+  mkdir -p "${'$'}{PREFIX}/etc/apt/keyrings"
   FP=""
-  if curl -fsSL https://hermes-assets.nousresearch.com/releases/termux/stable/key.asc -o "${'$'}PREFIX/etc/apt/keyrings/hermes-agent.asc"; then
-    FP=${'$'}(gpg --show-keys --with-colons "${'$'}PREFIX/etc/apt/keyrings/hermes-agent.asc" 2>/dev/null | awk -F: '/^fpr:/ {print ${'$'}10; exit}')
-  else
-    p "ℹ️ Dépôt Termux officiel d'Hermès indisponible pour le moment."
+  if curl -fsSL https://hermes-assets.nousresearch.com/releases/termux/stable/key.asc -o "${'$'}{PREFIX}/etc/apt/keyrings/hermes-agent.asc" 2>/dev/null; then
+    FP=${'$'}(gpg --show-keys --with-colons "${'$'}{PREFIX}/etc/apt/keyrings/hermes-agent.asc" 2>/dev/null | awk -F: '/^fpr:/ {print ${'$'}10; exit}')
   fi
-  if [ -z "${'$'}FP" ]; then
-    rm -f "${'$'}PREFIX/etc/apt/keyrings/hermes-agent.asc"
-  elif [ "${'$'}FP" = "$EMPREINTE" ]; then
-    printf '%s\n' "deb [signed-by=${'$'}PREFIX/etc/apt/keyrings/hermes-agent.asc] https://hermes-assets.nousresearch.com/releases/termux/stable hermes-stable main" > "${'$'}PREFIX/etc/apt/sources.list.d/hermes-agent.list"
+  if [ "${'$'}{FP}" = "$EMPREINTE" ]; then
+    printf '%s\n' "deb [signed-by=${'$'}{PREFIX}/etc/apt/keyrings/hermes-agent.asc] https://hermes-assets.nousresearch.com/releases/termux/stable hermes-stable main" > "${'$'}{PREFIX}/etc/apt/sources.list.d/hermes-agent.list"
     apt-get update >/dev/null 2>&1
-    p "⬇️ Installation du paquet hermes-agent…"
-    ${'$'}APT install hermes-agent >/dev/null 2>&1 || p "⚠️ Le paquet officiel n'a pas pu s'installer."
+    ${'$'}{APT} install hermes-agent >> "${'$'}{LOG}" 2>&1 && hermes --version >/dev/null 2>&1 && MODE=natif
   else
-    p "⛔ Empreinte de la clé du dépôt inattendue (${'$'}FP) : dépôt ignoré par sécurité."
-    rm -f "${'$'}PREFIX/etc/apt/keyrings/hermes-agent.asc"
+    rm -f "${'$'}{PREFIX}/etc/apt/keyrings/hermes-agent.asc" "${'$'}{PREFIX}/etc/apt/sources.list.d/hermes-agent.list"
+    [ -n "${'$'}{FP}" ] && p "⛔ Empreinte de la clé du dépôt inattendue : dépôt ignoré par sécurité."
+  fi
+  [ -z "${'$'}{MODE}" ] && p "ℹ️ Paquet Termux officiel indisponible : installation dans une Debian légère (proot), méthode fiable."
+fi
+if [ -z "${'$'}{MODE}" ]; then
+  ${'$'}{APT} install proot-distro >> "${'$'}{LOG}" 2>&1 || { p "❌ Impossible d'installer proot-distro (réseau ?)."; exit 1; }
+  if ! proot-distro login debian -- true >/dev/null 2>&1; then
+    p "🐧 Téléchargement de Debian (≈ 50 Mo)…"
+    proot-distro install debian >> "${'$'}{LOG}" 2>&1 || { p "❌ Installation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  fi
+  p "📦 Préparation de Debian (git, curl…)…"
+  proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD DEBIAN_FRONTEND=noninteractive \
+    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps' >> "${'$'}{LOG}" 2>&1 \
+    || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
+  proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root \
+    bash -c 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' 2>&1 \
+    | tee -a "${'$'}{LOG}" | while IFS= read -r l; do
+        case "${'$'}{l}" in *✓*|*✔*|*rror*|*ailed*|*ready*|*nstalled*) p "   ${'$'}(printf '%s' "${'$'}{l}" | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-110)";; esac
+      done
+  if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+    MODE=proot
+  else
+    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
+    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
+    exit 1
   fi
 fi
-if ! hermes --version >/dev/null 2>&1; then
-  p "🛠️ Installation depuis les sources (paquet officiel indisponible, compilation : plus long)…"
-  ${'$'}APT install git python python-pip python-psutil rust clang make binutils pkg-config libffi openssl >/dev/null 2>&1
-  SRC="${'$'}HOME/hermes-agent"
-  if [ -d "${'$'}SRC/.git" ]; then git -C "${'$'}SRC" pull --ff-only >/dev/null 2>&1; else git clone --depth 1 https://github.com/NousResearch/hermes-agent.git "${'$'}SRC" >/dev/null 2>&1; fi
-  python -m venv --system-site-packages "${'$'}SRC/.venv" && . "${'$'}SRC/.venv/bin/activate"
-  pip install -q -U pip wheel >/dev/null 2>&1
-  [ -f "${'$'}SRC/scripts/install_psutil_android.py" ] && python "${'$'}SRC/scripts/install_psutil_android.py" >/dev/null 2>&1
-  export ANDROID_API_LEVEL=${'$'}(getprop ro.build.version.sdk)
-  [ "${'$'}(uname -m)" = aarch64 ] && export CARGO_BUILD_TARGET=aarch64-linux-android
-  p "🐍 Installation des dépendances Python…"
-  pip install -q -e "${'$'}SRC[termux]" > "${'$'}HOME/.hermes-pip.log" 2>&1 || pip install -q -e "${'$'}SRC" >> "${'$'}HOME/.hermes-pip.log" 2>&1
-  AIOHTTP_NO_EXTENSIONS=1 pip install -q aiohttp >> "${'$'}HOME/.hermes-pip.log" 2>&1 || true
-  deactivate 2>/dev/null
-  [ -x "${'$'}SRC/.venv/bin/hermes" ] && ln -sf "${'$'}SRC/.venv/bin/hermes" "${'$'}PREFIX/bin/hermes"
-fi
-if ! hermes --version >/dev/null 2>&1; then
-  p "❌ Hermès n'a pas pu être installé. Détails : ~/.hermes-pip.log dans Termux."
-  tail -n 4 "${'$'}HOME/.hermes-pip.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}l"; done
-  exit 1
-fi
-p "✅ Hermès installé : ${'$'}(hermes --version 2>/dev/null | head -n 1)"
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé (${'$'}{MODE})."
 """.trimIndent()
 
     /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */

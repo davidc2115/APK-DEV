@@ -321,7 +321,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
      * majuscules, accents, singulier/pluriel, extension omise. Chemin réel, ou null s'il n'existe pas.
      */
     fun resoudre(chemin: String): String? {
-        val parts = chemin.trim().trim('/').split('/').filter { it.isNotBlank() }
+        val parts = relatif(chemin).split('/').filter { it.isNotBlank() }
         var courant = ""
         for ((i, part) in parts.withIndex()) {
             val noms = enfants(courant) ?: return null
@@ -330,6 +330,41 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         }
         return courant
     }
+
+    /** Chemin du coffre sur le téléphone (ex. « Documents/Obsidian jarvis »), d'après le dossier choisi dans les Réglages. */
+    fun cheminPhysiqueCoffre(): String? = idCoffre()?.substringAfter(':', "")?.trim('/')?.takeIf { it.isNotBlank() }
+
+    /**
+     * Ramène un chemin donné « comme sur le téléphone » à un chemin DU COFFRE : « Documents/Obsidian jarvis/JARVIS/Images »,
+     * « /storage/emulated/0/Documents/Obsidian jarvis/… », « Obsidian jarvis/… », « coffre › JARVIS › Images » → « JARVIS/Images ».
+     */
+    fun relatif(chemin: String): String {
+        var c = chemin.trim().trim('"', '\'', '«', '»').replace('\\', '/').replace("›", "/")
+            .split('/').map { it.trim() }.filter { it.isNotBlank() }.joinToString("/")
+        c = c.replace(Regex("^(?i)(storage/emulated/0|storage/self/primary|sdcard|stockage interne|stockage partag[ée]|internal storage|m[ée]moire interne)(/|$)"), "")
+        cheminPhysiqueCoffre()?.let { phys ->
+            val p = phys.split('/').filter { it.isNotBlank() }.map { cleNom(it) }
+            val parts = c.split('/').filter { it.isNotBlank() }
+            val k = (p.size downTo 1).firstOrNull { n -> parts.size >= n && parts.take(n).map { cleNom(it) } == p.takeLast(n) } ?: 0
+            if (k > 0) c = parts.drop(k).joinToString("/")
+        }
+        c = c.replace(Regex("^(?i)(le |mon )?coffre( obsidian)?(/|$)"), "")
+        return c.trim('/')
+    }
+
+    /** Vrai si [chemin] (chemin du téléphone) désigne le coffre ou un élément du coffre. */
+    fun estDansCoffre(chemin: String): Boolean {
+        val phys = cheminPhysiqueCoffre() ?: return false
+        val p = phys.split('/').filter { it.isNotBlank() }.map { cleNom(it) }
+        val parts = chemin.trim().replace('\\', '/').replace(Regex("^(?i)/?(storage/emulated/0|sdcard)/"), "").split('/').filter { it.isNotBlank() }.map { cleNom(it) }
+        return parts.size >= p.size && parts.take(p.size) == p
+    }
+
+    /** Mots significatifs d'un nom (sans accents, pluriels, articles) pour les recherches « dont le nom contient… ». */
+    private fun motsCles(s: String): List<String> =
+        normaliseNom(s.replace(Regex("[_\\-.*?()\\[\\]]"), " ")).split(Regex("\\s+"))
+            .filter { it.length >= 2 && it !in MOTS_VIDES }
+            .map { if (it.length > 3 && (it.endsWith("s") || it.endsWith("x"))) it.dropLast(1) else it }
 
     /** Tous les éléments du coffre (chemin, est un dossier), hors dossiers cachés. Parcours rapide (fichiers directs ou requêtes SAF groupées). */
     fun toutLister(limite: Int = 20_000): List<Pair<String, Boolean>> {
@@ -369,7 +404,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
      * « JARVIS/Images ») au lieu d'en créer un nouveau à côté. Les parties restantes seront créées.
      */
     fun cheminDossier(chemin: String): String {
-        val parts = chemin.trim().trim('/').split('/').filter { it.isNotBlank() }
+        val parts = relatif(chemin).split('/').filter { it.isNotBlank() }
         if (parts.isEmpty()) return ""
         var base = ""
         var i = 0
@@ -412,11 +447,11 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         val nomMotif = m.substringAfterLast('/')
         val glob = nomMotif.contains('*') || nomMotif.contains('?')
         val re = if (glob) Regex("^" + nomMotif.split('*').joinToString(".*") { p -> p.split('?').joinToString(".") { Regex.escape(normaliseNom(it)) } } + "$") else null
-        val mots = cleNom(nomMotif.replace('*', ' ').replace('?', ' ')).split(' ').filter { it.length >= 2 }
+        val mots = motsCles(nomMotif)
         val candidats = tout.asSequence().filter { (p, estDossier) -> (dossiers || !estDossier) && (dansDossier == null || p.startsWith("$dansDossier/")) }
         fun parMots() = candidats.filter { (p, _) ->
             val nom = p.substringAfterLast('/')
-            val texte = cleNom(nom.replace('.', ' ')) + " " + (descriptions[nom]?.let { cleNom(it) } ?: "")
+            val texte = (motsCles(nom.substringBeforeLast('.')) + (descriptions[nom]?.let { motsCles(it) } ?: emptyList())).joinToString(" ")
             mots.isNotEmpty() && mots.all { texte.contains(it) }
         }.map { it.first }.take(limite).toList()
         if (re == null) return parMots()
@@ -426,6 +461,56 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             re.matches(nom) || re.matches(nom.substringBeforeLast('.'))
         }.map { it.first }.take(limite).toList()
         return parMotif.ifEmpty { parMots() }
+    }
+
+    /**
+     * Range dans [destination] TOUS les fichiers du coffre dont le nom contient les mots de [motif] (ou correspond au
+     * motif avec *), filtrés par [types] (images, pdf, notes, videos, audio, tous) et éventuellement limités au dossier
+     * [source]. Une destination simple (« Coloriage pompier ») devient un sous-dossier du dossier où se trouvent les
+     * fichiers, sauf si un dossier de ce nom existe déjà. Rien n'est déplacé hors du coffre.
+     */
+    fun trier(motif: String, destination: String, types: String = "tous", source: String = "", sousDossier: Boolean = true): String {
+        val m = motif.trim().trim('"', '\'', '«', '»').trim()
+        if (m.isBlank()) return "Précise les mots que doit contenir le nom des fichiers."
+        val src = relatif(source).takeIf { it.isNotBlank() }?.let { resoudre(it) ?: return "Dossier introuvable dans le coffre : $source" }
+        val exts = when {
+            types.contains("image", true) || types.contains("photo", true) -> setOf("png", "jpg", "jpeg", "webp", "gif", "heic", "bmp", "svg")
+            types.contains("pdf", true) -> setOf("pdf")
+            types.contains("note", true) || types.contains("markdown", true) -> setOf("md")
+            types.contains("vid", true) -> setOf("mp4", "mov", "webm", "mkv", "3gp")
+            types.contains("audio", true) || types.contains("son", true) -> setOf("mp3", "m4a", "ogg", "wav", "flac", "aac")
+            else -> null
+        }
+        val destRel = relatif(destination)
+        var fichiers = chercherFichiers(if (src != null) "$src/$m" else m, dossiers = false, limite = 5000)
+            .filter { f -> exts == null || f.substringAfterLast('.', "").lowercase() in exts }
+        if (fichiers.isEmpty()) return "Aucun fichier du coffre dont le nom contient « $m »" + (if (src != null) " dans coffre › ${src.replace("/", " › ")}" else "") + "."
+        // Dossier commun aux fichiers trouvés (pour créer le sous-dossier au bon endroit).
+        val parents = fichiers.map { it.substringBeforeLast('/', "") }
+        var commun = parents.first()
+        parents.forEach { p -> while (commun.isNotEmpty() && p != commun && !p.startsWith("$commun/")) commun = commun.substringBeforeLast('/', "") }
+        val dest = when {
+            destRel.isBlank() -> return "Précise le dossier de destination."
+            resoudre(destRel)?.let { r -> enfants(r) != null } == true -> resoudre(destRel)!!
+            !destRel.contains('/') && commun.isNotBlank() && resoudre("$commun/$destRel") != null -> resoudre("$commun/$destRel")!!
+            !destRel.contains('/') && sousDossier && commun.isNotBlank() -> {
+                // Un dossier de ce nom existe déjà ailleurs (une seule fois) : on le reprend ; sinon sous-dossier à côté des fichiers.
+                val voulu = cleNom(destRel)
+                toutLister().filter { it.second && cleNom(it.first.substringAfterLast('/')) == voulu }.map { it.first }.singleOrNull()
+                    ?: "$commun/${safe(destRel, "Dossier")}"
+            }
+            else -> cheminDossier(destRel)
+        }
+        val reel = creerDossierChemin(dest)
+        fichiers = fichiers.filter { it.substringBeforeLast('/', "") != reel }
+        if (fichiers.isEmpty()) return "✅ Tous les fichiers « $m » sont déjà dans coffre › ${reel.replace("/", " › ")}."
+        val ok = mutableListOf<String>(); val ko = mutableListOf<String>()
+        fichiers.forEach { f -> runCatching { deplacer(f, reel) }.onSuccess { ok += f.substringAfterLast('/') }.onFailure { ko += "${f.substringAfterLast('/')} : ${it.message}" } }
+        return buildString {
+            append("📦 ${ok.size} fichier(s) « $m » rangé(s) dans coffre › ${reel.replace("/", " › ")}")
+            if (ok.isNotEmpty()) append("\n" + ok.take(40).joinToString("\n") { "- $it" } + (if (ok.size > 40) "\n… et ${ok.size - 40} autres" else ""))
+            if (ko.isNotEmpty()) append("\n\n❌ Non déplacé(s) :\n" + ko.take(20).joinToString("\n") { "- $it" })
+        }
     }
 
     /** Description (prompt) de chaque image générée par JARVIS, par nom de fichier. */
@@ -764,5 +849,10 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             }
         }
         return GraphData(nodesById.values.toList(), edges, references, tagsParNote, pieces, dossiers.map { it.replace(File.separatorChar, '/') })
+    }
+
+    private companion object {
+        val MOTS_VIDES = setOf("le", "la", "les", "un", "une", "des", "du", "de", "d", "l", "et", "ou", "a", "au", "aux", "en", "dans", "leur", "nom",
+            "fichier", "fichiers", "image", "images", "the", "of", "and")
     }
 }

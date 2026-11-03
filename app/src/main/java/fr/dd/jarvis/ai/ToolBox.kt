@@ -228,8 +228,10 @@ class ToolBox(
         put(tool("obsidian_chercher", "Cherche du texte dans les notes du coffre Obsidian (noms et contenu).", mapOf("requete" to prop("Texte recherché.")), listOf("requete")))
         put(tool("obsidian_fichiers", "Gère les dossiers et fichiers DU COFFRE OBSIDIAN configuré dans les Réglages (jamais le stockage du téléphone) : lister un dossier, CHERCHER des fichiers/dossiers par nom ou sujet dans tout le coffre, créer un dossier ou sous-dossier, déplacer des notes / images / fichiers / dossiers vers un dossier du coffre (créé au besoin), renommer. Les chemins peuvent être approximatifs (majuscules, accents, singulier/pluriel : « Jarvis/image » trouve « JARVIS/Images »), et un dossier comme « images/Coloriages » est créé DANS le dossier « Images » existant du coffre plutôt qu'à côté. Les images générées par JARVIS sont dans « JARVIS/Images » (référence jarvis-img:NOM) et se retrouvent aussi par leur description (en anglais, ex. « coloring firefighter »). Pour déplacer les dernières images générées : chemins = « dernieres_images:N ». En cas de doute sur un emplacement, commence par chercher ou lister.",
             mapOf(
-                "action" to prop("lister | chercher | dossier | deplacer | renommer"),
-                "motif" to prop("chercher : mots du nom ou du sujet (ex. « coloriage pompier », « coloring firefighter »), ou motif avec * (ex. « *pompier* »)."),
+                "action" to prop("lister | chercher | dossier | deplacer | trier | renommer. « trier » range d'un coup TOUS les fichiers dont le NOM contient des mots (motif) dans un dossier : utilise-le dès que l'utilisateur parle de fichiers « nommés / qui contiennent / qui comportent X » — ne demande JAMAIS les noms exacts."),
+                "types" to prop("trier : images | pdf | notes | videos | audio | tous (défaut : tous)."),
+                "sous_dossier" to prop("trier : « true » (défaut) = une destination sans « / » est créée dans le dossier où se trouvent les fichiers."),
+                "motif" to prop("chercher / trier : mots du nom ou du sujet (ex. « coloriage pompier », « coloring firefighter »), ou motif avec * (ex. « *pompier* »)."),
                 "chemin" to prop("lister/dossier : chemin du dossier dans le coffre (ex. « Images/Coloriages ») ; renommer : élément à renommer."),
                 "chemins" to prop("deplacer : éléments à déplacer, séparés par « ; » ou des retours à la ligne — chemins du coffre, noms jarvis-img:…, simples noms de fichiers, ou « dernieres_images:N »."),
                 "destination" to prop("deplacer : dossier du coffre de destination (ex. « Images/Coloriages »), créé s'il n'existe pas."),
@@ -584,9 +586,13 @@ class ToolBox(
                     }
                     "dossier", "creer", "créer" -> ToolResult("📁 Dossier prêt : " + o.creerDossier(a.optString("chemin").ifBlank { a.optString("destination") }), direct = true)
                     "renommer" -> ToolResult("✏️ " + o.renommer(a.optString("chemin"), a.optString("nouveau_nom")), direct = true)
+                    "trier", "ranger", "classer" -> ToolResult(o.trier(a.optString("motif").ifBlank { a.optString("chemins") }, a.optString("destination"),
+                        a.optString("types").ifBlank { "tous" }, a.optString("chemin"), !a.optString("sous_dossier").equals("false", true)), direct = true)
                     "deplacer", "déplacer" -> {
                         val dest = a.optString("destination").trim().trim('/')
                         if (dest.isBlank()) return@withContext ToolResult("Précise le dossier de destination dans le coffre (paramètre destination).")
+                        if (a.optString("chemins").isBlank() && a.optString("motif").isNotBlank())
+                            return@withContext ToolResult(o.trier(a.optString("motif"), dest, a.optString("types").ifBlank { "tous" }, a.optString("chemin")), direct = true)
                         val brut = a.optString("chemins").ifBlank { a.optString("chemin") }
                         // Références acceptées : chemin du coffre, jarvis-img:NOM, simple nom de fichier, ou les N dernières images générées.
                         val sources = brut.split(';', '\n').map { it.trim().trim('"', '\'') }.filter { it.isNotBlank() }.flatMap { r ->
@@ -663,6 +669,21 @@ class ToolBox(
         "run_shell" -> runShell(a)
         "stockage_telephone" -> {
             val act = a.optString("action").lowercase()
+            val o = app.obsidian
+            // Un chemin qui pointe DANS le coffre Obsidian (ex. « Documents/Obsidian jarvis/JARVIS/Images ») est traité dans le coffre.
+            val dansCoffre = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { o.estDansCoffre(a.optString("chemin")) }.getOrDefault(false) }
+            if (dansCoffre && act != "supprimer" && act != "lire") return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    val c = o.relatif(a.optString("chemin")); val d = o.relatif(a.optString("destination"))
+                    when (act) {
+                        "lister" -> ToolResult(o.listerDossier(c), direct = true)
+                        "dossier" -> ToolResult("📁 Dossier prêt : " + o.creerDossier(c), direct = true)
+                        "deplacer" -> ToolResult("📦 " + o.deplacer(c, if (d.substringAfterLast('/').contains('.')) d.substringBeforeLast('/', "") else d), direct = true)
+                        "renommer" -> ToolResult("✏️ " + o.renommer(c, d.substringAfterLast('/')), direct = true)
+                        else -> ToolResult(o.listerDossier(c), direct = true)
+                    }
+                } catch (e: Exception) { ToolResult("❌ ${e.message ?: e.javaClass.simpleName}") }
+            }
             if (act == "supprimer" && !confirm("Supprimer « ${a.optString("chemin")} » du stockage du téléphone ?", true)) ToolResult("Refusé par l'utilisateur.")
             else try { ToolResult(fr.dd.jarvis.ai.Stockage.action(act, a.optString("chemin"), a.optString("destination"))) }
             catch (e: Exception) { ToolResult("❌ ${e.message ?: e.javaClass.simpleName}") }
