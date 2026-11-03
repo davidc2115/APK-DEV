@@ -70,7 +70,8 @@ object HomeAssistantDashboard {
             val path = a.optString("url_path").trim()
             when (action.lowercase()) {
                 "lister" -> {
-                    val listed = s.command("lovelace/dashboards/list")\n                    val arr = listed.optJSONArray("_value") ?: listed.optJSONArray("dashboards") ?: JSONArray()
+                    val listed = s.command("lovelace/dashboards/list")
+                    val arr = listed.optJSONArray("_value") ?: listed.optJSONArray("dashboards") ?: JSONArray()
                     return if (arr.length() == 0) "Aucun tableau de bord personnalisé." else (0 until arr.length()).joinToString("\n") { i ->
                         val d = arr.getJSONObject(i)
                         "- ${d.optString("title")} · /${d.optString("url_path")} · ${d.optString("icon")} · ${d.optString("mode")}"
