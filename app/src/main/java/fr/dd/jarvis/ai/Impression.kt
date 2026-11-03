@@ -84,7 +84,7 @@ object Impression {
         if (via != "serveur") {
             val r = Request.Builder().url(url).post(corps.toRequestBody("application/ipp".toMediaType())).build()
             return try {
-                (if (schema == "https") Reseau.clientLax else http).newCall(r).execute().use { resp ->
+                Reseau.clientWifi().newCall(r).execute().use { resp ->
                     val b = resp.body?.bytes()
                     trace.append("  $url → HTTP ${resp.code}${if (resp.code != 200) "" else " (${b?.size ?: 0} octets)"}\n")
                     if (resp.isSuccessful) b else null
