@@ -281,7 +281,7 @@ H="${'$'}{HOME}/.hermes"; mkdir -p "${'$'}{H}/logs"; LOG="${'$'}{H}/logs/jarvis-
 p "🚀 Installation d'Hermès lancée (10 à 25 min, le téléphone reste utilisable)."
 termux-wake-lock >/dev/null 2>&1 || true
 # Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
-pkill -f 'pip install -q -e' >/dev/null 2>&1
+# Ne pas utiliser pkill -f ici : le motif figure dans la commande RUN_COMMAND elle-même et peut tuer ce script parent.
 if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative d'installation supprimée."; fi
 if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; then rm -f "${'$'}{PREFIX}/bin/hermes"; fi
 pkg update -y >/dev/null 2>&1 || apt-get update >/dev/null 2>&1
