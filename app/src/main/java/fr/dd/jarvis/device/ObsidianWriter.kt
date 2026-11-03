@@ -184,12 +184,17 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     private fun walkAvecPieces(
         dir: DocumentFile, prefix: String,
         notes: MutableList<Pair<String, DocumentFile>>, pieces: MutableList<String>,
-        limiteNotes: Int, limitePieces: Int
+        limiteNotes: Int, limitePieces: Int, dossiers: MutableList<String>? = null
     ) {
         for (f in dir.listFiles()) {
             if (notes.size >= limiteNotes && pieces.size >= limitePieces) return
             val n = f.name ?: continue
-            if (f.isDirectory) { if (!n.startsWith(".")) walkAvecPieces(f, "$prefix$n/", notes, pieces, limiteNotes, limitePieces) }
+            if (f.isDirectory) {
+                if (!n.startsWith(".")) {
+                    dossiers?.add(prefix + n)
+                    walkAvecPieces(f, "$prefix$n/", notes, pieces, limiteNotes, limitePieces, dossiers)
+                }
+            }
             else if (n.endsWith(".md", true)) { if (notes.size < limiteNotes) notes += (prefix + n) to f }
             else if (!n.startsWith(".") && pieces.size < limitePieces) pieces += prefix + n
         }
@@ -266,6 +271,129 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         return saveBytes(folder, name, body.toByteArray(), "text/markdown")
     }
 
+    // ------------------------------------------------------------------ fichiers et dossiers DU COFFRE (pas du téléphone)
+
+    /** Élément du coffre (note, image, PDF, dossier…) par chemin relatif, insensible aux accents/majuscules. */
+    private fun trouver(chemin: String): DocumentFile? {
+        var cur: DocumentFile? = vaultRoot() ?: return null
+        for (part in chemin.trim().trim('/').split('/').filter { it.isNotBlank() }) cur = cur?.trouverLoose(part)
+        return cur
+    }
+
+    /** Racine « fichier » utilisable directement : le coffre lui-même (accès à tous les fichiers) ou, sans coffre choisi, le dossier local. */
+    private fun racineFichier(): File? = fichierCoffre() ?: if (vaultRoot() == null) localRoot() else null
+
+    private fun fichierSur(racine: File, chemin: String): File {
+        val r = racine.canonicalFile
+        val f = File(r, chemin.trim().trim('/')).canonicalFile
+        if (!f.path.startsWith(r.path)) throw IllegalArgumentException("Chemin hors du coffre.")
+        return f
+    }
+
+    /** Vrai si [chemin] existe dans le coffre. */
+    fun existe(chemin: String): Boolean = racineFichier()?.let { fichierSur(it, chemin).exists() } ?: (trouver(chemin) != null)
+
+    /** Retrouve un fichier du coffre à partir de son seul nom (premier trouvé), pour « déplace img_….png ». */
+    fun chercherParNom(nom: String): String? {
+        val cible = normaliseNom(nom.trim())
+        racineFichier()?.let { r ->
+            return r.walkTopDown().onEnter { it == r || !it.name.startsWith(".") }.firstOrNull { it.isFile && normaliseNom(it.name) == cible }?.relativeTo(r)?.path
+        }
+        val v = vaultRoot() ?: return null
+        val notes = mutableListOf<Pair<String, DocumentFile>>(); val pieces = mutableListOf<String>()
+        runCatching { walkAvecPieces(v, "", notes, pieces, 5000, 5000) }
+        return (notes.map { it.first } + pieces).firstOrNull { normaliseNom(it.substringAfterLast('/')) == cible }
+    }
+
+    /** Fichiers d'un dossier du coffre (noms seuls), du plus récent au plus ancien quand les noms sont datés. */
+    fun fichiersDe(dossier: String): List<String> {
+        racineFichier()?.let { r -> return fichierSur(r, dossier).listFiles()?.filter { it.isFile }?.map { it.name }?.sortedDescending().orEmpty() }
+        return trouver(dossier)?.takeIf { it.isDirectory }?.listFiles()?.filter { it.isFile }?.mapNotNull { it.name }?.sortedDescending().orEmpty()
+    }
+
+    /** Crée un dossier du coffre (sous-dossiers compris) s'il n'existe pas. */
+    fun creerDossier(chemin: String): String {
+        val c = chemin.trim().trim('/')
+        if (c.isBlank()) throw IllegalArgumentException("Nom de dossier manquant.")
+        racineFichier()?.let { r ->
+            val d = fichierSur(r, c)
+            if (!d.isDirectory && !d.mkdirs()) throw IllegalStateException("Création du dossier refusée.")
+            return "coffre › ${c.replace("/", " › ")}"
+        }
+        val tree = vaultRoot()?.takeIf { it.canWrite() } ?: throw IllegalStateException("Coffre Obsidian non choisi ou en lecture seule (Réglages).")
+        subDir(tree, c)
+        if (trouver(c)?.isDirectory != true) throw IllegalStateException("Création du dossier « $c » refusée par le stockage.")
+        return "coffre › ${c.replace("/", " › ")}"
+    }
+
+    /** Déplace une note, une image, un fichier ou un dossier du coffre dans [dossierCible] (créé au besoin). */
+    fun deplacer(source: String, dossierCible: String): String {
+        val src = source.trim().trim('/')
+        val dest = dossierCible.trim().trim('/')
+        racineFichier()?.let { r ->
+            val f = fichierSur(r, src)
+            if (!f.exists()) throw IllegalArgumentException("Introuvable dans le coffre : $src")
+            val d = fichierSur(r, dest).apply { mkdirs() }
+            val cible = File(d, f.name)
+            if (cible.exists()) throw IllegalStateException("« ${f.name} » existe déjà dans $dest")
+            if (!f.renameTo(cible)) { f.copyRecursively(cible); f.deleteRecursively() }
+            return "${f.name} → coffre › ${dest.replace("/", " › ")}"
+        }
+        val tree = vaultRoot()?.takeIf { it.canWrite() } ?: throw IllegalStateException("Coffre Obsidian non choisi ou en lecture seule (Réglages).")
+        val f = trouver(src) ?: throw IllegalArgumentException("Introuvable dans le coffre : $src")
+        val parent = if (src.contains('/')) trouver(src.substringBeforeLast('/')) ?: tree else tree
+        val nom = f.name ?: src.substringAfterLast('/')
+        val d = subDir(tree, dest)
+        if (dest.isNotBlank() && trouver(dest)?.isDirectory != true) throw IllegalStateException("Impossible de créer le dossier « $dest » dans le coffre.")
+        if (d.trouverLoose(nom) != null) throw IllegalStateException("« $nom » existe déjà dans $dest")
+        // Déplacement natif (même stockage) ; sinon copie puis suppression de l'original.
+        val deplace = runCatching { android.provider.DocumentsContract.moveDocument(ctx.contentResolver, f.uri, parent.uri, d.uri) }.getOrNull()
+        if (deplace == null) {
+            if (f.isDirectory) throw IllegalStateException("Ce stockage ne permet pas de déplacer un dossier entier.")
+            val copie = d.createFile(f.type ?: "application/octet-stream", nom) ?: throw IllegalStateException("Copie impossible dans « $dest ».")
+            ctx.contentResolver.openInputStream(f.uri)?.use { i -> ctx.contentResolver.openOutputStream(copie.uri, "wt")?.use { o -> i.copyTo(o) } }
+                ?: throw IllegalStateException("Lecture de « $nom » impossible.")
+            f.delete()
+        }
+        return "$nom → coffre › ${dest.replace("/", " › ").ifBlank { "racine" }}"
+    }
+
+    /** Renomme un élément du coffre (le dossier ne change pas). */
+    fun renommer(chemin: String, nouveauNom: String): String {
+        val c = chemin.trim().trim('/')
+        val n = safe(nouveauNom.trim(), "")
+        if (n.isBlank()) throw IllegalArgumentException("Nouveau nom manquant.")
+        racineFichier()?.let { r ->
+            val f = fichierSur(r, c)
+            if (!f.exists()) throw IllegalArgumentException("Introuvable dans le coffre : $c")
+            val cible = File(f.parentFile, n)
+            if (cible.exists()) throw IllegalStateException("« $n » existe déjà.")
+            if (!f.renameTo(cible)) throw IllegalStateException("Renommage refusé.")
+            return "${f.name} → $n"
+        }
+        val f = trouver(c) ?: throw IllegalArgumentException("Introuvable dans le coffre : $c")
+        val ancien = f.name
+        if (!f.renameTo(n)) throw IllegalStateException("Renommage refusé par le stockage.")
+        return "$ancien → $n"
+    }
+
+    /** Contenu d'un dossier du coffre : sous-dossiers puis fichiers de tous types (notes, images, PDF…). */
+    fun listerDossier(chemin: String): String {
+        val c = chemin.trim().trim('/')
+        val entrees: List<Pair<String, Boolean>> = racineFichier()?.let { r ->
+            val d = fichierSur(r, c)
+            if (!d.isDirectory) return "Dossier introuvable dans le coffre : ${c.ifBlank { "racine" }}"
+            d.listFiles()?.filter { !it.name.startsWith(".") }?.map { it.name to it.isDirectory }.orEmpty()
+        } ?: run {
+            val d = (if (c.isBlank()) vaultRoot() else trouver(c))?.takeIf { it.isDirectory } ?: return "Dossier introuvable dans le coffre : ${c.ifBlank { "racine" }}"
+            d.listFiles().mapNotNull { f -> f.name?.takeIf { !it.startsWith(".") }?.let { it to f.isDirectory } }
+        }
+        if (entrees.isEmpty()) return "📂 coffre › ${c.ifBlank { "racine" }} : (vide)"
+        val tri = entrees.sortedWith(compareBy({ !it.second }, { it.first.lowercase() }))
+        return "📂 coffre › ${c.replace("/", " › ").ifBlank { "racine" }}\n" + tri.take(300).joinToString("\n") { (n, dir) -> if (dir) "📁 $n" else "📄 $n" } +
+            (if (tri.size > 300) "\n… (${tri.size} éléments)" else "")
+    }
+
     // ------------------------------------------------------------------ graphe (vue « Obsidian graph »)
 
     data class GraphNode(val id: String, val label: String, val folder: String, val ghost: Boolean = false)
@@ -281,7 +409,9 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         /** Étiquettes réellement écrites dans chaque note (#tag dans le texte ou « tags: » du frontmatter). */
         val tags: Map<String, List<String>> = emptyMap(),
         /** Pièces jointes réellement présentes dans le coffre (aucune n'est inventée). */
-        val attachments: List<GraphAttachment> = emptyList()
+        val attachments: List<GraphAttachment> = emptyList(),
+        /** Tous les dossiers du coffre (chemins relatifs), y compris les dossiers encore vides. */
+        val dossiers: List<String> = emptyList()
     )
 
     private val lienRegex = Regex("\\[\\[([^\\]|#]+)")
@@ -323,23 +453,105 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     private fun labelOf(path: String) = idOf(path).substringAfterLast('/')
     private fun folderOf(path: String) = idOf(path).substringBeforeLast('/', "")
 
-    /** Construit le graphe (nœuds = notes du coffre, arêtes = liens « [[...]] ») pour l'onglet Graphe.
-     *  Plafonné à [limiteNotes] notes et [limiteOctets] par note pour rester fluide sur un gros coffre. */
-    fun graph(limiteNotes: Int = 400, limiteOctets: Int = 60_000, limitePieces: Int = 800): GraphData {
+    /**
+     * Dossier du coffre sur le stockage du téléphone, lisible directement (bien plus rapide que l'accès SAF) quand le
+     * coffre est sur le stockage principal et que l'accès à tous les fichiers est accordé ; null sinon.
+     */
+    fun fichierCoffre(): File? {
+        val uri = store.obsidianUri.value.takeIf { it.isNotBlank() }?.let { runCatching { Uri.parse(it) }.getOrNull() } ?: return null
+        if (uri.authority != "com.android.externalstorage.documents") return null
+        if (android.os.Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) return null
+        val id = runCatching { android.provider.DocumentsContract.getTreeDocumentId(uri) }.getOrNull() ?: return null
+        if (!id.startsWith("primary:")) return null
+        val f = File(android.os.Environment.getExternalStorageDirectory(), id.removePrefix("primary:"))
+        return f.takeIf { it.isDirectory && it.canRead() && it.listFiles() != null }
+    }
+
+    /**
+     * Empreinte rapide de l'arborescence du coffre (chemins, dates, tailles) : elle change dès qu'un dossier ou un
+     * fichier est ajouté, supprimé, renommé ou modifié. Sert à rafraîchir l'Orbe et le Graphe tout seuls.
+     */
+    fun signature(): Long {
+        var h = 1125899906842597L
+        fun mix(chemin: String, date: Long, taille: Long) { h = 31 * (31 * (31 * h + chemin.hashCode()) + date) + taille }
+        val direct = fichierCoffre()
         val v = vaultRoot()
+        when {
+            direct != null -> direct.walkTopDown().onEnter { it == direct || !it.name.startsWith(".") }
+                .forEach { f -> if (f != direct && !f.name.startsWith(".")) mix(f.relativeTo(direct).path, f.lastModified(), if (f.isFile) f.length() else -1) }
+            v != null -> {
+                val tree = Uri.parse(store.obsidianUri.value)
+                val racine = runCatching { android.provider.DocumentsContract.getTreeDocumentId(tree) }.getOrNull() ?: return 0L
+                signatureSaf(tree, racine, "", 0) { c, d, t -> mix(c, d, t) }
+            }
+            else -> localRoot().walkTopDown().forEach { f -> mix(f.path, f.lastModified(), if (f.isFile) f.length() else -1) }
+        }
+        return h
+    }
+
+    /** Parcours SAF par requêtes groupées (une par dossier) : beaucoup plus léger que DocumentFile.listFiles(). */
+    private fun signatureSaf(tree: Uri, docId: String, prefixe: String, profondeur: Int, mix: (String, Long, Long) -> Unit) {
+        val enfants = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(tree, docId)
+        val colonnes = arrayOf(
+            android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID, android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE, android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+            android.provider.DocumentsContract.Document.COLUMN_SIZE
+        )
+        val sous = mutableListOf<Pair<String, String>>()
+        runCatching {
+            ctx.contentResolver.query(enfants, colonnes, null, null, null)?.use { c ->
+                while (c.moveToNext()) {
+                    val nom = c.getString(1) ?: continue
+                    if (nom.startsWith(".")) continue
+                    val dossier = c.getString(2) == android.provider.DocumentsContract.Document.MIME_TYPE_DIR
+                    mix(prefixe + nom, if (c.isNull(3)) 0L else c.getLong(3), if (dossier || c.isNull(4)) -1L else c.getLong(4))
+                    if (dossier) sous += c.getString(0) to "$prefixe$nom/"
+                }
+            }
+        }
+        if (profondeur < 12) sous.forEach { (id, p) -> signatureSaf(tree, id, p, profondeur + 1, mix) }
+    }
+
+    /** Ouvre un fichier du coffre (PDF, image, audio…) dans l'application adaptée du téléphone. */
+    fun ouvrirFichier(chemin: String): Boolean {
+        val propre = chemin.trim().trim('/')
+        val mime = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(propre.substringAfterLast('.', "").lowercase()) ?: "*/*"
+        var uri: Uri? = null
+        val v = vaultRoot()
+        if (v != null) {
+            var cur: DocumentFile? = v
+            for (part in propre.split('/').filter { it.isNotBlank() }) cur = cur?.findFile(part)
+            uri = cur?.takeIf { it.isFile }?.uri
+        }
+        if (uri == null) return false
+        return runCatching {
+            ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW).setDataAndType(uri, mime)
+                .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        }.isSuccess
+    }
+
+    /** Construit le graphe (nœuds = notes du coffre, arêtes = liens « [[...]] », dossiers, pièces jointes) pour l'Orbe
+     *  et le Graphe. Toutes les notes et tous les dossiers sont relevés (jusqu'à [limiteNotes]) ; le contenu n'est lu
+     *  (liens, tags) que pour [limiteLecture] notes, plafonné à [limiteOctets] par note, pour rester fluide. */
+    fun graph(limiteNotes: Int = 3000, limiteOctets: Int = 60_000, limitePieces: Int = 3000, limiteLecture: Int = 700): GraphData {
+        val v = vaultRoot()
+        val direct = fichierCoffre()
         val cheminsPieces = mutableListOf<String>()
+        val dossiers = mutableListOf<String>()
         val fichiers: List<Pair<String, () -> String?>> =
-            if (v != null) {
-                val notesSaf = mutableListOf<Pair<String, DocumentFile>>()
-                runCatching { walkAvecPieces(v, "", notesSaf, cheminsPieces, limiteNotes, limitePieces) }
-                notesSaf.map { (chemin, df) ->
-                    chemin to { runCatching { ctx.contentResolver.openInputStream(df.uri)?.use { it.readBytes().take(limiteOctets).toByteArray().toString(Charsets.UTF_8) } }.getOrNull() }
+            if (direct != null || v == null) {
+                val racine = direct ?: localRoot()
+                val tous = racine.walkTopDown().onEnter { it == racine || !it.name.startsWith(".") }.filter { it != racine && !it.name.startsWith(".") }.toList()
+                tous.filter { it.isDirectory }.forEach { dossiers += it.relativeTo(racine).path }
+                tous.filter { it.isFile && !it.name.endsWith(".md", true) }.take(limitePieces).forEach { cheminsPieces += it.relativeTo(racine).path }
+                tous.filter { it.isFile && it.name.endsWith(".md", true) }.take(limiteNotes).map { f ->
+                    f.relativeTo(racine).path to { runCatching { f.readText().take(limiteOctets) }.getOrNull() }
                 }
             } else {
-                val tous = localRoot().walkTopDown().filter { it.isFile && !it.name.startsWith(".") }.toList()
-                tous.filter { !it.name.endsWith(".md", true) }.take(limitePieces).forEach { cheminsPieces += it.relativeTo(localRoot()).path }
-                tous.filter { it.name.endsWith(".md", true) }.take(limiteNotes).map { f ->
-                    f.relativeTo(localRoot()).path to { runCatching { f.readText().take(limiteOctets) }.getOrNull() }
+                val notesSaf = mutableListOf<Pair<String, DocumentFile>>()
+                runCatching { walkAvecPieces(v, "", notesSaf, cheminsPieces, limiteNotes, limitePieces, dossiers) }
+                notesSaf.map { (chemin, df) ->
+                    chemin to { runCatching { ctx.contentResolver.openInputStream(df.uri)?.use { it.readBytes().take(limiteOctets).toByteArray().toString(Charsets.UTF_8) } }.getOrNull() }
                 }
             }
         val pieces = cheminsPieces.map { p -> GraphAttachment(p, p.substringAfterLast('/'), typePiece(p)) }
@@ -352,6 +564,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         }
 
         // Pour retrouver une cible « [[Nom]] » même sans chemin complet : on indexe aussi par simple nom de fichier.
+        val parIdMinuscule = nodesById.keys.associateBy { it.lowercase() }
         val parNom = HashMap<String, MutableList<String>>()
         for (id in nodesById.keys) parNom.getOrPut(id.substringAfterLast('/').lowercase()) { mutableListOf() }.add(id)
 
@@ -359,7 +572,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         val references = mutableListOf<GraphReference>()
         val vusReferences = HashSet<Pair<String, String>>()
         val vusEdges = HashSet<Pair<String, String>>()
-        for ((chemin, lire) in fichiers) {
+        for ((chemin, lire) in fichiers.take(limiteLecture)) {
             val fromId = idOf(chemin)
             val texte = lire() ?: continue
             runCatching { extraireTags(texte) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { tagsParNote[fromId] = it }
@@ -367,7 +580,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                 val cible = m.groupValues[1].trim().trim('/')
                 if (cible.isBlank()) continue
                 val cibleNorm = cible.removeSuffix(".md").removeSuffix(".MD")
-                val toId = nodesById.keys.firstOrNull { it.equals(cibleNorm, true) }
+                val toId = parIdMinuscule[cibleNorm.lowercase()]
                     ?: parNom[cibleNorm.substringAfterLast('/').lowercase()]?.firstOrNull()
                     ?: cibleNorm
                 if (fromId == toId) continue
@@ -388,6 +601,6 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                 if (vusEdges.add(cle)) edges += GraphEdge(fromId, toId)
             }
         }
-        return GraphData(nodesById.values.toList(), edges, references, tagsParNote, pieces)
+        return GraphData(nodesById.values.toList(), edges, references, tagsParNote, pieces, dossiers.map { it.replace(File.separatorChar, '/') })
     }
 }

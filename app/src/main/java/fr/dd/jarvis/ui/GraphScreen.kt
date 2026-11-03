@@ -223,7 +223,7 @@ fun GraphBackdrop(app: JarvisApp, modifier: Modifier = Modifier, active: Boolean
 
     LaunchedEffect(Unit) {
         val resultat = withContext(Dispatchers.Default) {
-            calculerDisposition(app.obsidian.graph())
+            calculerDisposition(app.obsidian.graph(limiteNotes = 400, limitePieces = 800, limiteLecture = 400))
         }
         noeuds = resultat.noeuds
         aretes = resultat.aretes

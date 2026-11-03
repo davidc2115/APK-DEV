@@ -43,6 +43,8 @@ object VideoGen {
     /** Génère un plan (clip) via le Space Hugging Face ; retourne les octets mp4. Erreur explicite si le token
      *  manque/est refusé, si le quota GPU gratuit du jour est épuisé, ou si le service est indisponible. */
     private fun genereClip(app: JarvisApp, prompt: String, dureeDemandee: Int, vertical: Boolean): ByteArray {
+        // Clé fal.ai configurée : génération fiable (payante) avec Wan 2.2 sur fal.ai, plutôt que le service gratuit à quota.
+        if (ImageToVideoGen.disponible(app)) return ImageToVideoGen.clipTexte(app, prompt, dureeDemandee.toDouble(), if (vertical) "9:16" else "16:9")
         val token = app.store.huggingFaceToken.value.trim()
         if (token.isBlank()) throw ApiException(401, "token Hugging Face manquant — crée-en un gratuit (aucune carte bancaire) sur huggingface.co/settings/tokens puis ajoute-le dans Réglages › Vidéo IA")
         val duree = dureeDemandee.coerceIn(2, 5) // le modèle gratuit (Wan 2.2) ne va pas au-delà de 5s par plan
@@ -148,8 +150,8 @@ object VideoGen {
     suspend fun genererVideo(
         app: JarvisApp, sujet: String, script: String, dureePlan: Int, vertical: Boolean
     ): Pair<File?, String> = withContext(Dispatchers.IO) {
-        if (app.store.huggingFaceToken.value.isBlank())
-            return@withContext null to "❌ Il manque un token Hugging Face (gratuit, sans carte bancaire) : crée-en un en quelques secondes sur huggingface.co/settings/tokens, puis ajoute-le dans Réglages › Vidéo IA."
+        if (!ImageToVideoGen.disponible(app) && app.store.huggingFaceToken.value.isBlank())
+            return@withContext null to "❌ Aucun service vidéo configuré : ajoute ta clé fal.ai (ou un token Hugging Face gratuit, sans carte bancaire, sur huggingface.co/settings/tokens) dans Réglages › Vidéo IA."
         val listePlans = plans(app, sujet, script)
         if (listePlans.isEmpty()) return@withContext null to "❌ Impossible de découper le sujet en plans filmables."
         val clips = mutableListOf<File>()
@@ -172,7 +174,8 @@ object VideoGen {
         val fFinal = if (assemble.name == nomFinal) assemble else File(dossier(app), nomFinal).also { assemble.copyTo(it, overwrite = true) }
         val loc = runCatching { app.obsidian.saveBytes("JARVIS/Vidéos TikTok", nomFinal, fFinal.readBytes(), "video/mp4") }.getOrDefault("")
         val msg = buildString {
-            append("🎬 Vidéo générée (${clips.size}/${listePlans.size} plans réussis) : ${fFinal.name}")
+            append("🎬 Vidéo générée (${clips.size}/${listePlans.size} plans réussis" + (if (ImageToVideoGen.disponible(app)) ", fal.ai" else "") + ") : ${fFinal.name}")
+            append("\n\n[▶ Lire la vidéo](jarvis-video-ia:${fFinal.name})")
             if (loc.isNotBlank()) append("\n📁 $loc")
             if (echecs.isNotEmpty()) { append("\n⚠️ Plans manquants :\n"); append(echecs.joinToString("\n")) }
         }

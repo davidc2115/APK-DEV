@@ -171,6 +171,10 @@ class ToolBox(
                 "modele" to prop("Optionnel : « flux » (flux-2-dev, le plus réaliste/précis), « flux-klein » (flux-2-klein, qualité proche mais plus rapide) ou « flux-schnell » (le plus rapide, qualité moindre). Par défaut le modèle choisi dans Réglages › Images.")), listOf("prompt")))
         put(tool("animer_image", "Anime une image déjà générée par JARVIS avec fal.ai / Wan 2.2 (image vers vidéo). Nécessite une clé fal.ai configurée dans Réglages › Vidéo IA. Le MP4 est téléchargé puis enregistré dans JARVIS/Vidéos IA et dans Obsidian. Génération payante selon le tarif fal.ai.",
             mapOf("image" to prop("Nom exact de l’image (jarvis-img:...) ou « derniere » pour la plus récente."), "prompt" to prop("Mouvement souhaité : caméra, sujet, ambiance, gestes (optionnel)."), "duree" to prop("Durée du clip en secondes, 0.5 à 4.5 (défaut 3.5).")), listOf("image")))
+        put(tool("generer_video", "Génère une courte vidéo IA (un clip de 2 à 5 s, Wan 2.2) à partir d'une description, avec fal.ai si une clé est configurée (sinon le service gratuit Hugging Face). Pour animer une image existante, passe son nom dans « image ». Pour une vidéo TikTok montée en plusieurs plans, utilise plutôt tiktok_video. Le MP4 est enregistré dans JARVIS/Vidéos IA et Obsidian, et affiché dans le chat.",
+            mapOf("prompt" to prop("Description détaillée de la scène, rédigée en anglais (sujet, action, caméra, lumière, style)."),
+                "duree" to prop("Durée en secondes, 2 à 5 (défaut 5)."), "format" to prop("vertical (défaut), horizontal ou carre."),
+                "image" to prop("Optionnel : image à animer (jarvis-img:... ou « derniere »).")), listOf("prompt")))
         put(tool("agenda_afficher", "Affiche ou masque durablement un agenda entier (« ne plus afficher le planning de Thomas », « réaffiche-le »). Un agenda masqué disparaît du planning, de l'itinéraire, du point du jour et de l'écran Agenda tant qu'on ne le réaffiche pas.",
             mapOf("agenda" to prop("Nom (ou partie du nom) de l'agenda."), "afficher" to prop("true pour réafficher, false pour masquer.")), listOf("agenda", "afficher")))
         put(tool("creer_fichier", "Crée un fichier téléchargeable que l'utilisateur peut ouvrir ou partager : pdf, docx (Word), xlsx (Excel), csv, vcf (contacts ; contenu « tous » ou nom = exporte les contacts du téléphone), ics, txt, md, html, json, xml, zip… Le texte (docx/pdf/html) accepte du Markdown (# titres, - puces, tableaux |a|b|). Pour xlsx/csv : contenu en lignes « a;b;c » ou JSON [[..],[..]] (une formule commence par =). Pour un PDF avec des images déjà générées (generer_image) — livre de coloriage, planche, album — utilise le paramètre « images » : chaque image devient une page entière, dans l'ordre donné, APRÈS le texte de « contenu ».",
@@ -222,6 +226,14 @@ class ToolBox(
         put(tool("appli_par_defaut", "Définit (ou efface) l'application utilisée par défaut pour un type de demande.",
             mapOf("type" to prop("navigation | musique"), "appli" to prop("Nom de l'application, ou « aucune » pour redemander à chaque fois.")), listOf("type", "appli")))
         put(tool("obsidian_chercher", "Cherche du texte dans les notes du coffre Obsidian (noms et contenu).", mapOf("requete" to prop("Texte recherché.")), listOf("requete")))
+        put(tool("obsidian_fichiers", "Gère les dossiers et fichiers DU COFFRE OBSIDIAN (jamais le stockage du téléphone) : lister un dossier (notes, images, PDF…), créer un dossier ou sous-dossier, déplacer des notes / images / fichiers / dossiers vers un dossier du coffre (créé au besoin), renommer. Les images générées par JARVIS sont dans « JARVIS/Images » (référence jarvis-img:NOM). Pour déplacer les dernières images générées : chemins = « dernieres_images:N ».",
+            mapOf(
+                "action" to prop("lister | dossier | deplacer | renommer"),
+                "chemin" to prop("lister/dossier : chemin du dossier dans le coffre (ex. « Images/Coloriages ») ; renommer : élément à renommer."),
+                "chemins" to prop("deplacer : éléments à déplacer, séparés par « ; » ou des retours à la ligne — chemins du coffre, noms jarvis-img:…, simples noms de fichiers, ou « dernieres_images:N »."),
+                "destination" to prop("deplacer : dossier du coffre de destination (ex. « Images/Coloriages »), créé s'il n'existe pas."),
+                "nouveau_nom" to prop("renommer : nouveau nom (avec extension).")
+            ), listOf("action")))
         put(tool("obsidian_lire", "Lit une note Obsidian par son chemin relatif (ex. Contacts/Dupont.md).", mapOf("chemin" to prop("Chemin de la note.")), listOf("chemin")))
         put(tool("obsidian_lister", "Liste les notes du coffre Obsidian, éventuellement d'un dossier.", mapOf("dossier" to prop("Dossier (optionnel)."))))
         put(tool("obsidian_ecrire", "Crée, remplace ou complète une note Obsidian.", mapOf(
@@ -254,7 +266,7 @@ class ToolBox(
             ), listOf("action")))
         put(tool("run_shell", "Exécute une commande shell sur le téléphone via adb/Shizuku (réservé aux besoins que phone_action ne couvre pas).",
             mapOf("command" to prop("Commande shell.")), listOf("command")))
-        put(tool("stockage_telephone", "Accède au stockage du téléphone (Téléchargements, Films, Musique, DCIM, etc., en dehors du dossier privé de JARVIS) : liste un dossier, lit un fichier texte, renomme, déplace, supprime, crée un dossier. Pratique pour réorganiser une bibliothèque de fichiers (ex. noms de films compatibles Plex).",
+        put(tool("stockage_telephone", "Accède au stockage du téléphone (Téléchargements, Films, Musique, DCIM, etc., en dehors du dossier privé de JARVIS ET du coffre Obsidian — pour tout ce qui concerne le coffre ou les images générées, utilise obsidian_fichiers) : liste un dossier, lit un fichier texte, renomme, déplace, supprime, crée un dossier. Pratique pour réorganiser une bibliothèque de fichiers (ex. noms de films compatibles Plex).",
             mapOf(
                 "action" to prop("lister | lire | renommer | deplacer | supprimer | dossier"),
                 "chemin" to prop("Chemin relatif à la racine du stockage (ex. « Movies/film.avi », vide = racine)."),
@@ -362,6 +374,23 @@ class ToolBox(
             }
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
             ToolResult("❌ Image impossible : ${e.message}")
+        }
+        "generer_video" -> try {
+            val prompt = a.optString("prompt").trim()
+            val duree = a.optString("duree").replace(',', '.').toDoubleOrNull() ?: 5.0
+            val nomImage = a.optString("image").trim()
+            val (video, loc) = when {
+                nomImage.isNotBlank() -> {
+                    val image = fr.dd.jarvis.ai.ImageGen.fichier(app, nomImage)
+                        ?: return ToolResult("❌ Image introuvable : $nomImage. Utilise fichiers_generes pour retrouver son nom exact.")
+                    fr.dd.jarvis.ai.ImageToVideoGen.generate(app, image, prompt, duree)
+                }
+                fr.dd.jarvis.ai.ImageToVideoGen.disponible(app) -> fr.dd.jarvis.ai.ImageToVideoGen.texteVersVideo(app, prompt, duree, a.optString("format").ifBlank { "vertical" })
+                else -> return ToolResult("❌ Aucune clé fal.ai : ajoute-la dans Réglages › Vidéo IA pour générer une vidéo. (Sans clé, tiktok_video utilise le service gratuit Hugging Face, plus lent et limité.)")
+            }
+            ToolResult("🎬 Vidéo créée (fal.ai) : ${video.name}\n\n[▶ Lire la vidéo](jarvis-video-ia:${video.name})\n\n📁 Enregistrée dans Jarvis › Vidéos IA" + (if (loc.isNotBlank()) "\n🗂️ Obsidian : $loc" else ""), direct = true)
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
+            ToolResult("❌ Vidéo impossible : ${e.message}")
         }
         "animer_image" -> try {
             val image = fr.dd.jarvis.ai.ImageGen.fichier(app, a.optString("image"))
@@ -509,6 +538,41 @@ class ToolBox(
             val existe = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.obsidian.readNote(chemin) != null }
             if (existe && !append && !confirm("Remplacer le contenu de la note « $chemin » ?", false)) ToolResult("Refusé par l'utilisateur.")
             else ToolResult("✅ Note enregistrée : " + kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.obsidian.writeNote(chemin, a.optString("contenu"), append) })
+        }
+        "obsidian_fichiers" -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val o = app.obsidian
+                when (a.optString("action").trim().lowercase()) {
+                    "lister" -> ToolResult(o.listerDossier(a.optString("chemin")), direct = true)
+                    "dossier", "creer", "créer" -> ToolResult("📁 Dossier prêt : " + o.creerDossier(a.optString("chemin").ifBlank { a.optString("destination") }), direct = true)
+                    "renommer" -> ToolResult("✏️ " + o.renommer(a.optString("chemin"), a.optString("nouveau_nom")), direct = true)
+                    "deplacer", "déplacer" -> {
+                        val dest = a.optString("destination").trim().trim('/')
+                        if (dest.isBlank()) return@withContext ToolResult("Précise le dossier de destination dans le coffre (paramètre destination).")
+                        val brut = a.optString("chemins").ifBlank { a.optString("chemin") }
+                        // Références acceptées : chemin du coffre, jarvis-img:NOM, simple nom de fichier, ou les N dernières images générées.
+                        val sources = brut.split(';', '\n').map { it.trim().trim('"', '\'') }.filter { it.isNotBlank() }.flatMap { r ->
+                            val m = Regex("(?i)^(dernieres?|derni[eè]res?)_images?:(\\d+)$").find(r)
+                            when {
+                                m != null -> o.fichiersDe("JARVIS/Images").take(m.groupValues[2].toInt().coerceIn(1, 100)).map { "JARVIS/Images/$it" }
+                                r.startsWith("jarvis-img:") -> listOf("JARVIS/Images/" + r.removePrefix("jarvis-img:").trim())
+                                o.existe(r) -> listOf(r)
+                                !r.contains('/') && o.existe("JARVIS/Images/$r") -> listOf("JARVIS/Images/$r")
+                                else -> listOf(o.chercherParNom(r.substringAfterLast('/')) ?: r)
+                            }
+                        }.distinct()
+                        if (sources.isEmpty()) return@withContext ToolResult("Aucun élément à déplacer : donne les noms (jarvis-img:…) ou « dernieres_images:N ».")
+                        o.creerDossier(dest)
+                        val ok = mutableListOf<String>(); val ko = mutableListOf<String>()
+                        sources.forEach { src -> runCatching { o.deplacer(src, dest) }.onSuccess { ok += it }.onFailure { ko += "$src : ${it.message}" } }
+                        ToolResult(buildString {
+                            if (ok.isNotEmpty()) append("📦 ${ok.size} élément(s) déplacé(s) dans le coffre › ${dest.replace("/", " › ")} :\n" + ok.joinToString("\n") { "- $it" })
+                            if (ko.isNotEmpty()) append((if (ok.isNotEmpty()) "\n\n" else "") + "❌ Non déplacé(s) :\n" + ko.joinToString("\n") { "- $it" })
+                        }, direct = true)
+                    }
+                    else -> ToolResult("Action inconnue (lister, dossier, deplacer, renommer).")
+                }
+            } catch (e: Exception) { ToolResult("❌ ${e.message ?: e.javaClass.simpleName}") }
         }
         "obsidian_supprimer" -> {
             val chemin = a.optString("chemin")

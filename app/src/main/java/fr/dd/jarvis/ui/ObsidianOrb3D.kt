@@ -73,7 +73,8 @@ fun ObsidianOrb3D(app: JarvisApp, enTete: @Composable () -> Unit = {}) {
     var hubListe by remember { mutableStateOf<String?>(null) }
     val c = etat.constellation
     if (c == null) ChargementEnCours(etat.erreur, enTete)
-    else Orbe3DVue(c, enTete, onNote = { noteOuverte = it }, onHub = { cle -> if (c.hub(cle)?.type == TypeHub.DOSSIER) hubListe = cle })
+    else Orbe3DVue(c, enTete, onNote = { noteOuverte = it }, onHub = { cle -> if (c.hub(cle)?.type != TypeHub.PIECES && c.hub(cle)?.type != TypeHub.TAGS) hubListe = cle },
+        onFichier = { chemin -> app.obsidian.ouvrirFichier(chemin) })
     DialoguesConstellation(app, c, noteOuverte, { noteOuverte = it }, hubListe, { hubListe = it })
 }
 
@@ -139,20 +140,21 @@ private fun projeter(mvp: FloatArray, mv: FloatArray, p: FloatArray, w: Float, h
 @Composable
 internal fun Orbe3DVue(
     c: Constellation, enTete: @Composable () -> Unit, onNote: (String) -> Unit, onHub: (String) -> Unit,
-    avecOpenGl: Boolean = true, tempsFixe: Float? = null
+    avecOpenGl: Boolean = true, tempsFixe: Float? = null, onFichier: (String) -> Unit = {}
 ) {
     // Taille connue dès la composition (et non après le premier dessin) : décor et cadrage prêts tout de suite.
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        Orbe3DContenu(c, enTete, onNote, onHub, avecOpenGl, tempsFixe,
+        Orbe3DContenu(c, enTete, onNote, onHub, onFichier, avecOpenGl, tempsFixe,
             androidx.compose.ui.geometry.Size(constraints.maxWidth.toFloat(), constraints.maxHeight.toFloat()))
     }
 }
 
 @Composable
 private fun Orbe3DContenu(
-    c: Constellation, enTete: @Composable () -> Unit, onNote: (String) -> Unit, onHub: (String) -> Unit,
+    c: Constellation, enTete: @Composable () -> Unit, onNote: (String) -> Unit, onHub: (String) -> Unit, onFichier: (String) -> Unit,
     avecOpenGl: Boolean, tempsFixe: Float?, taille: androidx.compose.ui.geometry.Size
 ) {
+    val parId = remember(c) { c.etiquettes.associateBy { it.id } }
     val camera = remember { Camera3D() }
     val mesureur = rememberTextMeasurer(cacheSize = 200)
     val fontScale = LocalDensity.current.fontScale
@@ -168,7 +170,14 @@ private fun Orbe3DContenu(
     val pos3d = remember(c) {
         val m = HashMap<String, FloatArray>()
         c.hubs.forEach { m["hub:${it.cle}"] = versDome(it.pos, 0.25f) }
-        c.etiquettes.forEach { m[it.id] = versDome(it.pos, 0.12f) }
+        // Les branches (sous-dossiers et leurs fichiers) restent presque à la profondeur de leur hub : sinon le dôme
+        // les fait reculer et se tasser les unes sur les autres en bout de branche.
+        c.etiquettes.forEach { e ->
+            val p = versDome(e.pos, 0.12f)
+            val h = c.hub(e.hub)
+            if (h != null && h.type == TypeHub.DOSSIER) p[2] = max(p[2], versDome(h.pos, 0.12f)[2] - 0.12f)
+            m[e.id] = p
+        }
         m
     }
     // Recul de caméra : toute la constellation tient dans l'écran (portrait) au zoom 1.
@@ -237,7 +246,13 @@ private fun Orbe3DContenu(
                         when {
                             id.startsWith("hub:") -> onHub(id.removePrefix("hub:"))
                             else -> c.etiquettes.firstOrNull { it.id == id }?.let { e ->
-                                if (e.type == TypeEtiquette.NOTE) onNote(e.noteId!!) else if (e.type == TypeEtiquette.PLUS) onHub(e.hub)
+                                when (e.type) {
+                                    TypeEtiquette.NOTE -> onNote(e.noteId!!)
+                                    TypeEtiquette.PLUS -> onHub(e.dossier ?: e.hub)
+                                    TypeEtiquette.DOSSIER -> onHub(e.dossier!!)
+                                    TypeEtiquette.FICHIER -> onFichier(e.chemin!!)
+                                    else -> {}
+                                }
                             }
                         }
                     }
@@ -281,9 +296,17 @@ private fun Orbe3DContenu(
             for (e in c.etiquettes) {
                 if (e.type == TypeEtiquette.TAG) continue
                 val h = c.hub(e.hub) ?: continue
-                val ph = proj("hub:${h.cle}") ?: continue
                 val pe = proj(e.id) ?: continue
                 if (cache(pe)) continue
+                // Fichier d'un sous-dossier : la branche part de l'étiquette du sous-dossier.
+                val par = e.parent?.let { parId[it] }
+                if (par != null) {
+                    val pp = proj(par.id) ?: continue
+                    if (cache(pp)) continue
+                    fleche(pp.ecran, pe.ecran, Neon.lavande, 1.1f * pe.pxParUnite / DP_PAR_UNITE, alphaProfondeur(pe) * 0.75f)
+                    continue
+                }
+                val ph = proj("hub:${h.cle}") ?: continue
                 val rH = h.rayon / DP_PAR_UNITE * ph.pxParUnite
                 val d = pe.ecran - ph.ecran
                 val l = d.getDistance().coerceAtLeast(1f)

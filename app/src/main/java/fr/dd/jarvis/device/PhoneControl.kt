@@ -225,24 +225,28 @@ class PhoneControl(private val ctx: Context) {
         if (!fr.dd.jarvis.service.JarvisNotificationListener.active) {
             return "⚠️ L'accès aux notifications est activé dans Android mais pas encore connecté à JARVIS. Ferme complètement JARVIS (pas juste l'écran — depuis les applications récentes) puis rouvre-la, et redemande « lance la lecture »."
         }
-        // 0) D'abord l'intent STANDARD Android « lecture depuis une recherche vocale » (android.media.action.MEDIA_PLAY_FROM_SEARCH,
-        //    celui qu'utilise « Dis Google, joue… ») : beaucoup plus d'applis l'implémentent que la recherche via MediaSession
-        //    (notamment les lecteurs locaux/constructeur qui n'implémentent jamais playFromSearch), et il envoie directement la
-        //    bonne requête à l'appli au lancement, au lieu de l'ouvrir « à l'aveugle » puis d'espérer qu'elle réagisse ensuite.
-        val viaRechercheVocale = demarrerDepuisRechercheVocale(pkg, requete)
-        // 1) Une session média de cette appli tourne peut-être déjà (appli ouverte récemment) : on la pilote directement, sans rien ouvrir à l'écran.
-        var etat = if (viaRechercheVocale) "aucune" else lancerLecture(pkg, requete, ouvrir = false)
-        // 2) Sinon, il faut que l'appli démarre au moins une fois pour créer sa session — inévitable techniquement (Android n'offre
-        //    aucun moyen de faire jouer un titre dans une appli tierce sans qu'elle tourne). On la ramène ensuite en arrière-plan toute seule.
-        if (etat == "aucune") {
-            if (!viaRechercheVocale) {
-                val launch = ctx.packageManager.getLaunchIntentForPackage(pkg)
-                if (launch == null) return "Impossible de lancer $nom."
+        // Ordre (corrigé) :
+        //  1) l'appli tourne déjà : on demande le titre à SA session média (playFromSearch), sans rien ouvrir ;
+        //  2) sinon (ou si elle ignore la demande) : intent standard « joue depuis une recherche vocale » (celui de
+        //     « Dis Google, joue… », avec le focus « recherche libre ») qui démarre l'appli AVEC la requête ;
+        //  3) si l'appli a seulement repris l'ancien morceau, on renvoie la recherche à sa session.
+        // On ne confirme que si le morceau qui joue correspond à la demande (ou a changé), et on n'appuie JAMAIS sur
+        // « lecture » tant que le titre n'a pas changé : c'est ce qui relançait la musique déjà en cours au lieu de la demandée.
+        val sessionAvant = session(pkg)
+        val titreAvant = sessionAvant?.let { titreDe(it) }
+        var etat = "aucune"
+        if (sessionAvant != null) etat = demanderEtVerifier(sessionAvant, requete, titreAvant)
+        if (etat != "lecture") {
+            val viaRechercheVocale = demarrerDepuisRechercheVocale(pkg, requete)
+            if (!viaRechercheVocale && sessionAvant == null) {
+                val launch = ctx.packageManager.getLaunchIntentForPackage(pkg) ?: return "Impossible de lancer $nom."
                 try { ctx.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (e: Exception) { return "Impossible de lancer $nom : ${e.message}" }
             }
-            // Si on est passé par la recherche vocale standard, la bonne requête a déjà été envoyée à l'appli au lancement :
-            // on se contente alors de vérifier que la lecture a démarré, sans relancer playFromSearch sur la session.
-            etat = lancerLecture(pkg, requete, ouvrir = true, dejaDemande = viaRechercheVocale)
+            val c = if (viaRechercheVocale || sessionAvant == null) attendreSession(pkg, 10) else sessionAvant
+            if (c != null) {
+                if (viaRechercheVocale) etat = verifier(c, requete, titreAvant, 7)
+                if (etat != "lecture") etat = demanderEtVerifier(c, requete, titreDe(c))
+            }
         }
         if (etat == "lecture") {
             // Lecture confirmée : on remet JARVIS (ou l'appli précédente) au premier plan, l'appli de musique reste en arrière-plan.
@@ -281,6 +285,8 @@ class PhoneControl(private val ctx: Context) {
     private fun demarrerDepuisRechercheVocale(pkg: String, requete: String): Boolean {
         val intent = Intent("android.media.action.MEDIA_PLAY_FROM_SEARCH").apply {
             putExtra(android.app.SearchManager.QUERY, requete)
+            // Recherche libre (titre, artiste, album ou style) : sans ce focus certaines applis se contentent de reprendre la lecture.
+            putExtra(android.provider.MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
             setPackage(pkg)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
@@ -289,37 +295,63 @@ class PhoneControl(private val ctx: Context) {
         return try { ctx.startActivity(intent); true } catch (e: Exception) { false }
     }
 
-    /** Cherche la session média de [pkg] et lui demande de lire [requete] ; retourne « lecture » (confirmé), « session » (demandé) ou « aucune ».
-     *  [dejaDemande] : la requête a déjà été transmise à l'appli via l'intent standard de recherche vocale (demarrerDepuisRechercheVocale) —
-     *  on se contente alors de vérifier que la lecture démarre, sans renvoyer playFromSearch (qui serait redondant, voire ignoré en double). */
-    private fun lancerLecture(pkg: String?, requete: String, ouvrir: Boolean, dejaDemande: Boolean = false): String {
+    private fun session(pkg: String): android.media.session.MediaController? {
         val msm = ctx.getSystemService(Context.MEDIA_SESSION_SERVICE) as android.media.session.MediaSessionManager
         val cn = android.content.ComponentName(ctx, fr.dd.jarvis.service.JarvisNotificationListener::class.java)
-        fun ctrl(): android.media.session.MediaController? = try {
-            msm.getActiveSessions(cn).firstOrNull { pkg == null || it.packageName == pkg }
-        } catch (e: SecurityException) { null } catch (e: Exception) { null }
-        fun joue(c: android.media.session.MediaController) = c.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
-        fun titre(c: android.media.session.MediaController) = c.metadata?.getText(android.media.MediaMetadata.METADATA_KEY_TITLE)?.toString()
-        var c: android.media.session.MediaController? = null
-        var t = 0
-        // Si l'appli vient d'être lancée elle met quelques secondes à créer sa session ; si elle tournait déjà, inutile d'attendre longtemps.
-        val essais = if (ouvrir) 10 else 2
-        while (t < essais && c == null) { Thread.sleep(1000); c = ctrl(); t++ }
-        if (c == null) return "aucune"
-        // Important : on lance TOUJOURS la recherche demandée, même si une session est déjà en lecture — sinon JARVIS confirmait
-        // à tort le titre demandé alors que c'était juste le morceau précédent qui continuait (ou reprenait) de jouer.
-        // On retient le titre AVANT la recherche pour vérifier qu'il a bien changé (sinon « ça joue » peut juste être l'ancien titre).
-        val avant = titre(c)
-        Thread.sleep(800)
-        if (!dejaDemande) c.transportControls.playFromSearch(requete, android.os.Bundle())
-        fun confirme() = joue(c) && titre(c) != avant
-        for (i in 0 until 6) { Thread.sleep(1000); if (confirme()) return "lecture" }
-        c.transportControls.play()
-        for (i in 0 until 3) { Thread.sleep(1000); if (confirme()) return "lecture" }
-        mediaKey("play")
-        for (i in 0 until 3) { Thread.sleep(1000); if (confirme()) return "lecture" }
-        // Le titre n'a jamais changé : on ne confirme pas à tort que le titre demandé joue.
+        return try { msm.getActiveSessions(cn).firstOrNull { it.packageName == pkg } } catch (e: Exception) { null }
+    }
+
+    /** Attend (jusqu'à [secondes]) que l'appli [pkg] crée sa session média après son lancement. */
+    private fun attendreSession(pkg: String, secondes: Int): android.media.session.MediaController? {
+        for (i in 0 until secondes) { session(pkg)?.let { return it }; Thread.sleep(1000) }
+        return session(pkg)
+    }
+
+    private fun titreDe(c: android.media.session.MediaController): String? =
+        c.metadata?.getText(android.media.MediaMetadata.METADATA_KEY_TITLE)?.toString()
+
+    private fun joue(c: android.media.session.MediaController) = c.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+
+    private val motsVidesMusique = setOf(
+        "musique", "musiques", "chanson", "chansons", "titre", "titres", "morceau", "playlist", "album", "joue", "jouer", "mets", "mettre",
+        "lance", "lancer", "ecouter", "the", "les", "des", "une", "par", "sur", "dans", "avec", "pour", "moi", "son", "sons", "feat"
+    )
+
+    /** Le morceau en cours correspond-il à la demande ? (mots de la requête retrouvés dans titre / artiste / album) */
+    private fun correspond(c: android.media.session.MediaController, requete: String): Boolean {
+        val m = c.metadata ?: return false
+        fun n(s: String) = java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
+        val meta = n(listOf(android.media.MediaMetadata.METADATA_KEY_TITLE, android.media.MediaMetadata.METADATA_KEY_ARTIST,
+            android.media.MediaMetadata.METADATA_KEY_ALBUM, android.media.MediaMetadata.METADATA_KEY_ALBUM_ARTIST,
+            android.media.MediaMetadata.METADATA_KEY_DISPLAY_TITLE, android.media.MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)
+            .mapNotNull { k -> m.getText(k)?.toString() }.joinToString(" "))
+        val mots = n(requete).split(Regex("[^a-z0-9]+")).filter { it.length >= 3 && it !in motsVidesMusique }.distinct()
+        if (mots.isEmpty() || meta.isBlank()) return false
+        return mots.count { meta.contains(it) } >= maxOf(1, (mots.size + 1) / 2)
+    }
+
+    /**
+     * Attend que la demande soit réellement jouée : le morceau correspond à la requête, ou il a changé depuis [reference]
+     * (titres d'une playlist / d'un style). Si un nouveau morceau est chargé mais en pause, on lance la lecture — mais
+     * jamais quand c'est encore l'ancien morceau.
+     */
+    private fun verifier(c: android.media.session.MediaController, requete: String, reference: String?, secondes: Int): String {
+        var relance = false
+        for (i in 0 until secondes) {
+            Thread.sleep(1000)
+            val change = reference != null && titreDe(c) != null && titreDe(c) != reference
+            val bon = correspond(c, requete) || change
+            if (bon && joue(c)) return "lecture"
+            if (bon && !relance) { relance = true; runCatching { c.transportControls.play() } }
+        }
         return "session"
+    }
+
+    /** Envoie la recherche à la session média de l'appli (playFromSearch) puis vérifie qu'elle est jouée. */
+    private fun demanderEtVerifier(c: android.media.session.MediaController, requete: String, reference: String?): String {
+        if (correspond(c, requete) && joue(c)) return "lecture"
+        runCatching { c.transportControls.playFromSearch(requete, android.os.Bundle()) }
+        return verifier(c, requete, reference, 8)
     }
 
     fun mediaKey(action: String): String {

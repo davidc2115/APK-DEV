@@ -79,15 +79,37 @@ class ChargementConstellation {
     var constellation by mutableStateOf<Constellation?>(null)
     var erreur by mutableStateOf<String?>(null)
     var version by mutableStateOf(0)
+    /** Empreinte du coffre au moment de la dernière construction (0 = inconnue). */
+    var signature = 0L
+    @Volatile var enCours = false
 }
 
+/**
+ * Charge le coffre et construit la constellation, puis SURVEILLE le coffre : dès qu'un dossier, une catégorie ou un
+ * fichier est ajouté, supprimé, renommé ou modifié (dans Obsidian ou par JARVIS), la vue se reconstruit d'elle-même.
+ */
 @Composable
 fun rememberConstellation(app: JarvisApp): ChargementConstellation {
     val etat = remember { ChargementConstellation() }
     LaunchedEffect(etat.version) {
         etat.erreur = null
-        val r = withContext(Dispatchers.IO) { runCatching { ConstellationLayout.construire(app.obsidian.graph()) } }
+        etat.enCours = true
+        val r = withContext(Dispatchers.IO) {
+            runCatching {
+                etat.signature = runCatching { app.obsidian.signature() }.getOrDefault(0L)
+                ConstellationLayout.construire(app.obsidian.graph())
+            }
+        }
+        etat.enCours = false
         r.onSuccess { etat.constellation = it }.onFailure { etat.erreur = it.message ?: it.javaClass.simpleName }
+    }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(5000)
+            if (etat.enCours || etat.signature == 0L) continue
+            val s = withContext(Dispatchers.IO) { runCatching { app.obsidian.signature() }.getOrNull() } ?: continue
+            if (s != etat.signature && !etat.enCours) etat.version++
+        }
     }
     return etat
 }
@@ -139,17 +161,33 @@ fun DialoguesConstellation(
         )
     }
     hubListe?.let { cle ->
-        val notes = c?.notesParHub?.get(cle).orEmpty().sortedBy { it.label.lowercase() }
+        val contenu = c?.dossiers?.get(cle)
+        val titre = when (cle) { "Racine", "" -> "Coffre"; "Autres" -> "Autres dossiers"; else -> cle.substringAfterLast('/') }
+        val parent = if (cle.contains('/')) cle.substringBeforeLast('/') else null
         AlertDialog(
             onDismissRequest = { onHubListe(null) },
             containerColor = Color(0xFF0E0819), titleContentColor = Neon.lavande, textContentColor = Neon.blancViolet,
-            title = { Text("${if (cle == "Racine") "Coffre" else cle} · ${notes.size} note(s)", fontFamily = Neon.serif) },
+            title = { Text("📁 $titre · ${contenu?.total ?: 0} fichier(s)", fontFamily = Neon.serif) },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
-                    notes.forEach { n ->
-                        Text("▸ ${n.label}", fontSize = 13.sp, fontFamily = Neon.serif,
+                    if (cle.contains('/')) Text(cle, color = Neon.violet, fontSize = 11.sp, fontFamily = Neon.serif, modifier = Modifier.padding(bottom = 4.dp))
+                    if (parent != null) Text("◂ ${parent.substringAfterLast('/')}", color = Neon.sousTitre, fontSize = 13.sp, fontFamily = Neon.serif,
+                        modifier = Modifier.fillMaxWidth().clickable { onHubListe(parent) }.padding(vertical = 6.dp))
+                    contenu?.sousDossiers?.forEach { d ->
+                        Text("📁 ${d.substringAfterLast('/')}  (${c.dossiers[d]?.total ?: 0})", fontSize = 13.sp, fontFamily = Neon.serif, color = Neon.lavande,
+                            modifier = Modifier.fillMaxWidth().clickable { onHubListe(d) }.padding(vertical = 6.dp))
+                    }
+                    contenu?.notes?.forEach { n ->
+                        Text("📝 ${n.label}", fontSize = 13.sp, fontFamily = Neon.serif,
                             modifier = Modifier.fillMaxWidth().clickable { onHubListe(null); onNote(n.id) }.padding(vertical = 6.dp))
                     }
+                    contenu?.pieces?.forEach { p ->
+                        val icone = when (p.kind) { "IMAGE" -> "🖼️"; "PDF" -> "📄"; "AUDIO" -> "🎵"; "VIDEO" -> "🎬"; else -> "📎" }
+                        Text("$icone ${p.name}", fontSize = 13.sp, fontFamily = Neon.serif,
+                            modifier = Modifier.fillMaxWidth().clickable { app.obsidian.ouvrirFichier(p.path) }.padding(vertical = 6.dp))
+                    }
+                    if (contenu == null || (contenu.sousDossiers.isEmpty() && contenu.notes.isEmpty() && contenu.pieces.isEmpty()))
+                        Text("Dossier vide.", color = Neon.sousTitre, fontSize = 12.sp)
                 }
             },
             confirmButton = { TextButton({ onHubListe(null) }) { Text("Fermer", color = Neon.violet) } }
@@ -168,7 +206,8 @@ fun GrapheCerveau2D(app: JarvisApp, enTete: @Composable () -> Unit = {}) {
     else ConstellationVue(
         c = c, enTete = enTete,
         onNote = { noteOuverte = it },
-        onHub = { cle -> if (c.hub(cle)?.type == TypeHub.DOSSIER) hubListe = cle },
+        onHub = { cle -> if (c.hub(cle)?.type != TypeHub.PIECES && c.hub(cle)?.type != TypeHub.TAGS) hubListe = cle },
+        onFichier = { chemin -> app.obsidian.ouvrirFichier(chemin) },
         onRecharger = { etat.version++ }
     )
     DialoguesConstellation(app, c, noteOuverte, { noteOuverte = it }, hubListe, { hubListe = it })
@@ -185,6 +224,7 @@ fun ConstellationVue(
     enTete: @Composable () -> Unit = {},
     onNote: (String) -> Unit = {},
     onHub: (String) -> Unit = {},
+    onFichier: (String) -> Unit = {},
     onRecharger: () -> Unit = {},
     animer: Boolean = true
 ) {
@@ -201,8 +241,9 @@ fun ConstellationVue(
     var orphelinsOuvert by remember { mutableStateOf(false) }
     var legendeOuverte by remember { mutableStateOf(false) }
     // Zoom et déplacement de l'utilisateur, relatifs au cadrage automatique (qui fait tenir tout le graphe).
-    var zoomUser by remember(c) { mutableStateOf(1f) }
-    var panUser by remember(c) { mutableStateOf(Offset.Zero) }
+    // Conservés quand le coffre change et que la vue se reconstruit d'elle-même (pas de saut de cadrage).
+    var zoomUser by remember { mutableStateOf(1f) }
+    var panUser by remember { mutableStateOf(Offset.Zero) }
 
     // Horloge continue (secondes) pour le serpent-dragon ; figée à 0 pour les captures hors appareil.
     var temps by remember { mutableStateOf(0f) }
@@ -224,6 +265,7 @@ fun ConstellationVue(
 
     val requete = recherche.trim().lowercase()
     val toutesNotes = remember(c) { c.notesParHub.values.flatten() }
+    val parId = remember(c) { c.etiquettes.associateBy { it.id } }
     val correspondances = remember(c, requete) {
         if (requete.isBlank()) emptyList() else toutesNotes.filter { it.label.lowercase().contains(requete) || it.folder.lowercase().contains(requete) }
     }
@@ -297,7 +339,9 @@ fun ConstellationVue(
                         when {
                             e != null && e.type == TypeEtiquette.NOTE -> { noteActive = e.noteId; onNote(e.noteId!!) }
                             e != null && e.type == TypeEtiquette.TAG -> tagActif = if (tagActif == e.tag) null else e.tag
-                            e != null && e.type == TypeEtiquette.PLUS -> onHub(e.hub)
+                            e != null && e.type == TypeEtiquette.PLUS -> onHub(e.dossier ?: e.hub)
+                            e != null && e.type == TypeEtiquette.DOSSIER -> { hubActif = e.hub; onHub(e.dossier!!) }
+                            e != null && e.type == TypeEtiquette.FICHIER -> onFichier(e.chemin!!)
                             e != null -> hubActif = if (hubActif == e.hub) null else e.hub
                             else -> {
                                 val h = c.hubs.firstOrNull { hb -> val q = ecranT(hb.pos); hypot(tap.x - q.x, tap.y - q.y) < max(hb.rayon, 30f) * kk + 8f * dens }
@@ -343,14 +387,21 @@ fun ConstellationVue(
             // 1. Toile d'énergie cerveau → hubs.
             dessinerToile(centre, rCentre, hubsAnneau.map { ecran(it.pos) to it.rayon * k }, k, pulse)
 
-            // 2. Flèches hub → étiquettes (structure : dossier → notes, pièces jointes → types).
+            // 2. Branches : hub → sous-dossiers et fichiers de la racine, puis sous-dossier → ses fichiers.
             for (e in c.etiquettes) {
                 if (e.type == TypeEtiquette.TAG) continue
                 val h = c.hub(e.hub) ?: continue
                 if (!hubVisible(h)) continue
-                val depart = ConstellationLayout.bordCercle(h.pos, h.rayon * 1.13f, e.pos)
-                val arrivee = ConstellationLayout.bordEtiquette(e.copy(w = e.w + 8f, h = e.h + 8f), h.pos)
-                fleche(ecran(depart), ecran(arrivee), Neon.violet, 1.4f * k, alphaEtiquette(e) * 0.95f)
+                val p = e.parent?.let { parId[it] }
+                if (p != null) {
+                    val depart = ConstellationLayout.bordEtiquette(p.copy(w = p.w + 6f, h = p.h + 6f), e.pos)
+                    val arrivee = ConstellationLayout.bordEtiquette(e.copy(w = e.w + 6f, h = e.h + 6f), p.pos)
+                    fleche(ecran(depart), ecran(arrivee), Neon.lavande, 1.1f * k, alphaEtiquette(e) * 0.8f)
+                } else {
+                    val depart = ConstellationLayout.bordCercle(h.pos, h.rayon * 1.13f, e.pos)
+                    val arrivee = ConstellationLayout.bordEtiquette(e.copy(w = e.w + 8f, h = e.h + 8f), h.pos)
+                    fleche(ecran(depart), ecran(arrivee), Neon.violet, (if (e.type == TypeEtiquette.DOSSIER) 1.8f else 1.4f) * k, alphaEtiquette(e) * 0.95f)
+                }
             }
             // 3. Tags : faisceau cerveau → hub Tags, et traits fins vers chaque pastille.
             val hubTags = c.hub("__tags")

@@ -394,11 +394,12 @@ fun DrawScope.dessinerEtiquette(
     alpha: Float = 1f, surbrillance: Boolean = false, taillePxMin: Float = 0f
 ): Rect {
     val avecIcone = e.type != TypeEtiquette.TAG && e.type != TypeEtiquette.PLUS
-    val px = max(11f * k, taillePxMin)
+    val px = max(11f * k * e.echelle, taillePxMin * e.echelle.coerceAtMost(1f))
+    val dossier = e.type == TypeEtiquette.DOSSIER
     val style = TextStyle(
         color = (if (e.type == TypeEtiquette.PLUS) Neon.sousTitre else Neon.blancViolet).copy(alpha = alpha),
         fontSize = (px / density / fontScale).sp, fontFamily = Neon.serif,
-        fontWeight = if (e.type == TypeEtiquette.TAG) FontWeight.Bold else FontWeight.Normal
+        fontWeight = if (e.type == TypeEtiquette.TAG || dossier) FontWeight.Bold else FontWeight.Normal
     )
     val res = mesureur.measure(e.texte, style, softWrap = false, maxLines = 1)
     val h = max(e.h * k, res.size.height + 6f * k)
@@ -411,6 +412,9 @@ fun DrawScope.dessinerEtiquette(
     drawRoundRect(Neon.fondEtiquette, tl, Size(w, h), coin, alpha = alpha)
     drawRoundRect(bord.copy(alpha = 0.9f * alpha), tl, Size(w, h), coin,
         style = Stroke(max(1.1f * k, 0.9f), pathEffect = if (e.type == TypeEtiquette.PLUS) PathEffect.dashPathEffect(floatArrayOf(4f * k, 3f * k)) else null))
+    // Sous-dossier : second liseré, comme un petit hub (point de départ d'une branche de fichiers).
+    if (dossier) drawRoundRect(Neon.violetVif.copy(alpha = 0.75f * alpha), tl + Offset(2.2f * k, 2.2f * k), Size(w - 4.4f * k, h - 4.4f * k),
+        CornerRadius((h - 4.4f * k) * 0.42f), style = Stroke(max(0.8f * k, 0.7f)))
     if (avecIcone) dessinerIcone(e.icone, Offset(tl.x + h * 0.6f, c.y), h * 0.52f, Neon.violet, alpha)
     drawText(res, topLeft = Offset(tl.x + icone + h * 0.28f, c.y - res.size.height / 2f))
     return Rect(tl, Size(w, h))
