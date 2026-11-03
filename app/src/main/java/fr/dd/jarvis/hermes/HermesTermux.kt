@@ -373,4 +373,3 @@ p "✅ Hermès installé (${'$'}{MODE})."
         }
     }
 }
-}
