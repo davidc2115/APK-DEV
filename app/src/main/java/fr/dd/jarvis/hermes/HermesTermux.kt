@@ -413,7 +413,7 @@ p "✅ Hermès installé (${'$'}{MODE})."
         }
         val inner = "cd /root/.hermes/hermes-agent && " + cli.joinToString(" && ")
         val configCommand = "proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc " + q(inner)
-        val script = prelude(app) + "\\n" + envScript + "\\n" + configCommand + "\\n" + demarrage
+        val script = listOf(prelude(app), envScript, configCommand, demarrage).joinToString(System.lineSeparator())
         return executer(app, script, libelle = "Synchronisation des clés Hermès")
             ?: "🔐 Pools Gemini/Groq synchronisés ; redémarrage Hermès demandé."
     }
