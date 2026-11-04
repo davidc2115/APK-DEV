@@ -361,6 +361,7 @@ class Store(context: Context) {
     val hermesMode = SPref("hermesMode", "auto")
     /** Connexion facultative au serveur officiel Suno MCP (OAuth). */
     val sunoMcpActive = BPref("sunoMcpActive", false)
+    val modeAdulte = BPref("modeAdulte", false)
     /** Modèle Gemini utilisé par Hermès (vide = celui des agents Gemini). */
     val hermesModele = SPref("hermesModele", "")
     /** Jetons locaux (127.0.0.1 uniquement) : API d'Hermès et pont MCP « jarvis ». */
