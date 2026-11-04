@@ -3,6 +3,8 @@ package fr.dd.jarvis.ui
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import android.graphics.BitmapFactory
+import java.io.File
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -99,6 +101,23 @@ private data class InterventionPhotoTarget(
 )
 
 @Composable
+private fun PhotosIntervention(paths: List<String>, label: String) {
+    val context = LocalContext.current
+    if (paths.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(label, color = HudDim, fontSize = 11.sp)
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            paths.forEach { path ->
+                val bitmap = remember(path) {
+                    BitmapFactory.decodeFile(File(context.filesDir, "societe/$path").absolutePath)?.asImageBitmap()
+                }
+                if (bitmap != null) Image(bitmap, contentDescription = label, modifier = Modifier.size(88.dp))
+            }
+        }
+    }
+}
+
+@Composable
 private fun InterventionsTab(app: JarvisApp) {
     var photoInfo by remember { mutableStateOf("") }
     var photoTarget by remember { mutableStateOf<InterventionPhotoTarget?>(null) }
@@ -148,6 +167,8 @@ private fun InterventionsTab(app: JarvisApp) {
                         if (intervention.mesures.isNotBlank()) Text("Mesures : " + intervention.mesures, color = HudText, fontSize = 12.sp)
                         if (intervention.prochaineMaintenance.isNotBlank()) Text("Prochaine maintenance : " + intervention.prochaineMaintenance, color = HudDim, fontSize = 11.sp)
                         Text("Photos : ${intervention.photosAvant.size} avant · ${intervention.photosApres.size} après", color = HudDim, fontSize = 11.sp)
+                        PhotosIntervention(intervention.photosAvant, "Avant")
+                        PhotosIntervention(intervention.photosApres, "Après")
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             Action("📷 Ajouter avant") {
                                 photoTarget = InterventionPhotoTarget(client.id, site.id, intervention.id, true)
