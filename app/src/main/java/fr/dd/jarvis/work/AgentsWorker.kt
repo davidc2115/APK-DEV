@@ -251,9 +251,9 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
         val previous = readSet("agent_phone_health_alerts.txt")
         val fresh = current.filterNot { it in previous }
         if (fresh.isNotEmpty()) {
-            val details = fresh.joinToString("\\n")
+            val details = fresh.joinToString("\n")
             alert(3013, "📱 Surveillance du téléphone", details)
-            journal.append("- 📱 Surveillance du téléphone :\\n" + fresh.joinToString("") { "  - $it\\n" })
+            journal.append("- 📱 Surveillance du téléphone :\n" + fresh.joinToString("") { "  - $it\n" })
         }
         // Une alerte peut réapparaître si le problème a disparu puis revient.
         writeSet("agent_phone_health_alerts.txt", current)
