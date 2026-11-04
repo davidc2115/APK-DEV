@@ -24,6 +24,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     )
 
     private fun loadCandidates() {
+        candidates.clear()
         val raw = runCatching { obsidian.read(FOLDER, "Apprentissage en cours.md") }.getOrNull()
             ?: runCatching { habitsFile.takeIf { it.exists() }?.readText() }.getOrNull()
             ?: return
@@ -114,6 +115,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     fun load() {
         val md = obsidian.read(FOLDER, FILE) ?: local.takeIf { it.exists() }?.readText()
         if (md != null) parse(md)
+        loadCandidates()
         loaded = true
     }
 
