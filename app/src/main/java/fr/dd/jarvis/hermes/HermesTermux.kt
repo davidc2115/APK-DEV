@@ -438,10 +438,150 @@ echo "=== FIN DU DIAGNOSTIC ==="
         val restore = """
 set -eu
 find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | grep -q . || { echo "❌ Aucune sauvegarde Hermès trouvée."; exit 1; }
-ARCHIVE="$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)"
-[ -n "$ARCHIVE" ] || { echo "❌ Aucune archive trouvée."; exit 1; }
-tar -tzf "$ARCHIVE" >/dev/null
-tar -xzf "$ARCHIVE" -C /root
+ARCHIVE="${'
+[ -f /root/.hermes/config.yaml ] || { echo "❌ La configuration restaurée est absente."; exit 1; }
+chmod 600 /root/.hermes/.env 2>/dev/null || true
+echo "✅ Données et configuration restaurées."
+""".trimIndent()
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- bash -lc ${q(restore)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        return executer(app, prelude(app) + "\n" + commande + "\n" + demarrage, libelle = "Restauration Hermès")
+            ?: "🚀 Restauration lancée, puis redémarrage d'Hermès."
+    }
+
+    /** Réinstallation propre : sauvegarde complète, suppression du seul moteur, puis installateur officiel. */
+    fun reinstallerComplet(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val preparation = scriptSauvegarde + "\nrm -rf /root/.hermes/hermes-agent\necho '🧹 Ancien moteur supprimé après sauvegarde.'"
+        val commande = "set -euo pipefail; proot-distro login debian --termux-home -- bash -lc ${q(preparation)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        val script = prelude(app) + "\n" + commande + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Sauvegarde puis réinstallation complète d'Hermès…"
+        return executer(app, script, libelle = "Réinstallation complète Hermès")
+            ?: "🚀 Sauvegarde effectuée puis réinstallation lancée. Suis les étapes dans Jarvis."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)"
+[ -n "${'
+[ -f /root/.hermes/config.yaml ] || { echo "❌ La configuration restaurée est absente."; exit 1; }
+chmod 600 /root/.hermes/.env 2>/dev/null || true
+echo "✅ Données et configuration restaurées."
+""".trimIndent()
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- bash -lc ${q(restore)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        return executer(app, prelude(app) + "\n" + commande + "\n" + demarrage, libelle = "Restauration Hermès")
+            ?: "🚀 Restauration lancée, puis redémarrage d'Hermès."
+    }
+
+    /** Réinstallation propre : sauvegarde complète, suppression du seul moteur, puis installateur officiel. */
+    fun reinstallerComplet(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val preparation = scriptSauvegarde + "\nrm -rf /root/.hermes/hermes-agent\necho '🧹 Ancien moteur supprimé après sauvegarde.'"
+        val commande = "set -euo pipefail; proot-distro login debian --termux-home -- bash -lc ${q(preparation)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        val script = prelude(app) + "\n" + commande + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Sauvegarde puis réinstallation complète d'Hermès…"
+        return executer(app, script, libelle = "Réinstallation complète Hermès")
+            ?: "🚀 Sauvegarde effectuée puis réinstallation lancée. Suis les étapes dans Jarvis."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}ARCHIVE" ] || { echo "❌ Aucune archive trouvée."; exit 1; }
+tar -tzf "${'
+[ -f /root/.hermes/config.yaml ] || { echo "❌ La configuration restaurée est absente."; exit 1; }
+chmod 600 /root/.hermes/.env 2>/dev/null || true
+echo "✅ Données et configuration restaurées."
+""".trimIndent()
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- bash -lc ${q(restore)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        return executer(app, prelude(app) + "\n" + commande + "\n" + demarrage, libelle = "Restauration Hermès")
+            ?: "🚀 Restauration lancée, puis redémarrage d'Hermès."
+    }
+
+    /** Réinstallation propre : sauvegarde complète, suppression du seul moteur, puis installateur officiel. */
+    fun reinstallerComplet(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val preparation = scriptSauvegarde + "\nrm -rf /root/.hermes/hermes-agent\necho '🧹 Ancien moteur supprimé après sauvegarde.'"
+        val commande = "set -euo pipefail; proot-distro login debian --termux-home -- bash -lc ${q(preparation)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        val script = prelude(app) + "\n" + commande + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Sauvegarde puis réinstallation complète d'Hermès…"
+        return executer(app, script, libelle = "Réinstallation complète Hermès")
+            ?: "🚀 Sauvegarde effectuée puis réinstallation lancée. Suis les étapes dans Jarvis."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}ARCHIVE" >/dev/null
+tar -xzf "${'
+[ -f /root/.hermes/config.yaml ] || { echo "❌ La configuration restaurée est absente."; exit 1; }
+chmod 600 /root/.hermes/.env 2>/dev/null || true
+echo "✅ Données et configuration restaurées."
+""".trimIndent()
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- bash -lc ${q(restore)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        return executer(app, prelude(app) + "\n" + commande + "\n" + demarrage, libelle = "Restauration Hermès")
+            ?: "🚀 Restauration lancée, puis redémarrage d'Hermès."
+    }
+
+    /** Réinstallation propre : sauvegarde complète, suppression du seul moteur, puis installateur officiel. */
+    fun reinstallerComplet(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val preparation = scriptSauvegarde + "\nrm -rf /root/.hermes/hermes-agent\necho '🧹 Ancien moteur supprimé après sauvegarde.'"
+        val commande = "set -euo pipefail; proot-distro login debian --termux-home -- bash -lc ${q(preparation)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        val script = prelude(app) + "\n" + commande + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Sauvegarde puis réinstallation complète d'Hermès…"
+        return executer(app, script, libelle = "Réinstallation complète Hermès")
+            ?: "🚀 Sauvegarde effectuée puis réinstallation lancée. Suis les étapes dans Jarvis."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}ARCHIVE" -C /root
 [ -f /root/.hermes/config.yaml ] || { echo "❌ La configuration restaurée est absente."; exit 1; }
 chmod 600 /root/.hermes/.env 2>/dev/null || true
 echo "✅ Données et configuration restaurées."
