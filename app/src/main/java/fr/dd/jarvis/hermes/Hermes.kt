@@ -120,7 +120,7 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
 
     /**
      * Confie la conversation à Hermès. Renvoie sa réponse, ou null s'il est indisponible (l'appelant bascule alors
-     * sur le cerveau Groq). Pendant l'appel, les outils exposés à Hermès sont ceux de [boite] (mêmes confirmations).
+     * par le cerveau de secours Jarvis). Pendant l'appel, les outils exposés à Hermès sont ceux de [boite] (mêmes confirmations).
      */
     suspend fun repondre(app: JarvisApp, history: List<ChatMsg>, boite: ToolBox?, userName: String, onStatus: (String) -> Unit): String? {
         if (!enLigne()) { relancerSiBesoin(app); return null }
@@ -133,7 +133,7 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
         return appeler(app, messages, boite, onStatus)
     }
 
-    /** Délégation d'une tâche précise (outil hermes_deleguer du cerveau Groq). */
+    /** Délégation d'une tâche précise (outil hermes_deleguer du cerveau Jarvis de secours). */
     suspend fun deleguer(app: JarvisApp, tache: String, boite: ToolBox?, userName: String): String? {
         if (!enLigne(force = true)) { relancerSiBesoin(app); return null }
         val messages = JSONArray().put(JSONObject().put("role", "system").put("content", systeme(app, userName)))
