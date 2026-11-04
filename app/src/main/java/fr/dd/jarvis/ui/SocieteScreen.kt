@@ -91,8 +91,32 @@ private fun Action(label: String, onClick: () -> Unit) {
 
 // ---------------------------------------------------------------------- Historique photovoltaïque
 
+private data class InterventionPhotoTarget(
+    val clientId: String,
+    val siteId: String,
+    val interventionId: String,
+    val avant: Boolean
+)
+
 @Composable
 private fun InterventionsTab(app: JarvisApp) {
+    var photoInfo by remember { mutableStateOf("") }
+    var photoTarget by remember { mutableStateOf<InterventionPhotoTarget?>(null) }
+    val photoScope = rememberCoroutineScope()
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        val target = photoTarget
+        if (target != null && uris.isNotEmpty()) {
+            photoScope.launch {
+                photoInfo = "Enregistrement des photos…"
+                photoInfo = withContext(Dispatchers.IO) {
+                    app.societe.ajouterPhotosIntervention(
+                        target.clientId, target.siteId, target.interventionId, target.avant, uris
+                    )
+                }
+            }
+        }
+        photoTarget = null
+    }
     val clients = app.societe.data.clients
     val sites = clients.flatMap { client -> client.sites.map { site -> client to site } }
         .sortedBy { it.first.nom.lowercase() + " " + it.second.nom.lowercase() }
@@ -101,6 +125,7 @@ private fun InterventionsTab(app: JarvisApp) {
             HudPanel(Modifier.fillMaxWidth(), title = "Historique des interventions") {
                 Text("Chaque intervention enregistrée par la voix ou Hermès apparaît ici, avec son diagnostic, les actions, les pièces et les mesures. Les rapports PDF sont conservés dans Obsidian.", color = HudDim, fontSize = 12.sp)
                 Text("☀️ ${sites.size} installation(s) · 🛠️ ${sites.sumOf { it.second.interventions.size }} intervention(s)", color = HudText, fontSize = 13.sp)
+                if (photoInfo.isNotBlank()) Text(photoInfo, color = LocalAccent.current, fontSize = 12.sp)
             }
         }
         if (sites.isEmpty()) {
@@ -122,6 +147,17 @@ private fun InterventionsTab(app: JarvisApp) {
                         if (intervention.pieces.isNotBlank()) Text("Pièces : " + intervention.pieces, color = HudText, fontSize = 12.sp)
                         if (intervention.mesures.isNotBlank()) Text("Mesures : " + intervention.mesures, color = HudText, fontSize = 12.sp)
                         if (intervention.prochaineMaintenance.isNotBlank()) Text("Prochaine maintenance : " + intervention.prochaineMaintenance, color = HudDim, fontSize = 11.sp)
+                        Text("Photos : ${intervention.photosAvant.size} avant · ${intervention.photosApres.size} après", color = HudDim, fontSize = 11.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Action("📷 Ajouter avant") {
+                                photoTarget = InterventionPhotoTarget(client.id, site.id, intervention.id, true)
+                                photoPicker.launch(arrayOf("image/*"))
+                            }
+                            Action("📷 Ajouter après") {
+                                photoTarget = InterventionPhotoTarget(client.id, site.id, intervention.id, false)
+                                photoPicker.launch(arrayOf("image/*"))
+                            }
+                        }
                     }
                 }
             }
