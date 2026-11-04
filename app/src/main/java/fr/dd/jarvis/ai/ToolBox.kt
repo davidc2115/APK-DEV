@@ -296,6 +296,16 @@ class ToolBox(
                 "sujet" to prop("contacts (fiches contact) | briefing (point du matin) | planning | mails | societe | general"),
                 "texte" to prop("La consigne complète, formulée clairement (structure, rubriques, calendrier à utiliser, exemples).")
             ), listOf("sujet", "texte")))
+        put(tool("tache_ajouter", "Crée une tâche personnelle locale à JARVIS, avec échéance et priorité facultatives.", mapOf(
+            "titre" to prop("Intitulé clair de la tâche."),
+            "echeance" to prop("Date d'échéance yyyy-MM-dd, optionnelle."),
+            "notes" to prop("Détails utiles, optionnels."),
+            "priorite" to prop("basse | normale | haute | urgente.")
+        ), listOf("titre")))
+        put(tool("taches_lister", "Affiche les tâches personnelles non terminées, triées par échéance."))
+        put(tool("tache_terminer", "Marque une tâche comme terminée à partir de son identifiant (#id).", mapOf(
+            "id" to prop("Identifiant exact retourné lors de la création ou de la liste.")
+        ), listOf("id")))
         put(tool("memoire_apprendre", "Soumet une préférence candidate à l'apprentissage progressif. À utiliser uniquement après une correction claire ou une observation réellement répétée ; trois preuves distinctes sont requises avant promotion en habitude durable.", mapOf(
             "sujet" to prop("Catégorie courte : préférences, rédaction, planning, musique, travail, projet, etc."),
             "preference" to prop("Règle stable et réutilisable, formulée concrètement."),
@@ -769,6 +779,16 @@ class ToolBox(
                 ToolResult(if (l.isEmpty()) "Aucune notification." else "# 🔔 Notifications\n\n" + l.joinToString("\n") { "- **${it.app}** _(${fmt.format(java.util.Date(it.time))})_ ${it.titre} — ${it.texte.take(200)}" }, direct = true)
             }
         }
+        "tache_ajouter" -> ToolResult(app.tasks.create(a.optString("titre"), a.optString("echeance"), a.optString("notes"), a.optString("priorite", "normale")))
+        "taches_lister" -> ToolResult(app.tasks.list().let { tasks ->
+            if (tasks.isEmpty()) "Aucune tâche personnelle en attente."
+            else tasks.joinToString("\n") { task ->
+                (if (task.priority == "urgente" || task.priority == "haute") "🔴 " else "▫️ ") +
+                    task.title + (if (task.dueDate.isNotBlank()) " — échéance " + task.dueDate else " — sans échéance") +
+                    " (#" + task.id + ")" + (if (task.notes.isNotBlank()) "\n  " + task.notes else "")
+            }
+        }, direct = true)
+        "tache_terminer" -> ToolResult(app.tasks.complete(a.optString("id")))
         "memoire_ajouter" -> ToolResult("✅ Consigne « ${a.optString("sujet")} » enregistrée (" + app.memo.set(a.optString("sujet"), a.optString("texte")) + ").")
         "memoire_apprendre" -> ToolResult(app.memo.apprendre(a.optString("sujet"), a.optString("preference"), a.optString("preuve")))
         "memoire_apprentissages" -> ToolResult(app.memo.apprentissagesEnCours(), direct = true)
@@ -913,12 +933,17 @@ class ToolBox(
                 out.append("PRÉPARATION DE DEMAIN\n")
                 val agenda = getPlanning(JSONObject().put("date", date.toString()).put("days", "1").put("calendar", calendar))
                 out.append(agenda.text)
+                val tasksDue = app.tasks.pendingDue(date)
+                out.append("\n\nTÂCHES À FAIRE (en retard ou échéance au plus tard demain)\n")
+                out.append(if (tasksDue.isEmpty()) "Aucune tâche en retard ou échue demain." else tasksDue.joinToString("\n") { "- " + it.title + (if (it.dueDate.isNotBlank()) " — " + it.dueDate else "") + " (#" + it.id + ")" })
                 val mails = execute("summarize_mails", JSONObject().put("count", "10").put("unread_only", "true"))
                 out.append("\n\nMAILS NON LUS À VÉRIFIER\n").append(mails.text.take(5000))
             }
             "depart_travail" -> {
                 out.append("DÉPART AU TRAVAIL — ").append(date).append("\n")
                 out.append(getPlanning(JSONObject().put("date", date.toString()).put("days", "1").put("calendar", calendar)).text)
+                val dueTasks = app.tasks.pendingDue(date)
+                if (dueTasks.isNotEmpty()) out.append("\n\nTÂCHES À ÉCHÉANCE\n").append(dueTasks.joinToString("\n") { "- " + it.title + " (#" + it.id + ")" })
                 out.append("\n\nTRAJET ET RENDEZ-VOUS RESTANTS\n")
                 out.append(execute("itineraire", JSONObject().put("date", date.toString()).put("depuis", "position").put("restants", "true").put("calendar", calendar)).text)
             }
