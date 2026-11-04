@@ -179,7 +179,7 @@ class Llm(private val store: Store) {
      * Les tests d'inférence utilisent au maximum un jeton lorsque le modèle est configuré.
      */
     suspend fun testerClesApi(fournisseurRaw: String = "tous"): String {
-        val alias = mapOf("all" to "tous", "toutes" to "tous", "google" to "gemini", "hf" to "huggingface", "cloudflare workers ai" to "cloudflare", "z.ai" to "zai")
+        val alias = mapOf("all" to "tous", "tout" to "tous", "toutes" to "tous", "google" to "gemini", "hf" to "huggingface", "hugging face" to "huggingface", "cloudflare workers ai" to "cloudflare", "workers ai" to "cloudflare", "z.ai" to "zai")
         val fournisseur = alias[fournisseurRaw.trim().lowercase()] ?: fournisseurRaw.trim().lowercase().ifBlank { "tous" }
         val connus = setOf("tous", "groq", "gemini", "cloudflare", "zai", "openrouter", "nvidia", "mistral", "huggingface")
         if (fournisseur !in connus) return "Fournisseur inconnu. Choix : tous, Groq, Gemini, Cloudflare, Z.ai, OpenRouter, NVIDIA, Mistral ou Hugging Face."
@@ -198,7 +198,7 @@ class Llm(private val store: Store) {
             } catch (e: Exception) {
                 false to "ERREUR RÉSEAU (${e.javaClass.simpleName})"
             }
-            resultats += resultat.first to "$label — ${resultat.second} (${System.currentTimeMillis() - debut} ms)"
+            resultats.add(resultat.first to "$label — ${resultat.second} (${System.currentTimeMillis() - debut} ms)")
         }
 
         if (fournisseur == "tous" || fournisseur == "groq") {
