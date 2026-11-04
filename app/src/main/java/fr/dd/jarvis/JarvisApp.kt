@@ -79,6 +79,8 @@ class JarvisApp : Application() {
         private set
     lateinit var memo: fr.dd.jarvis.device.Memo
         private set
+    lateinit var tasks: fr.dd.jarvis.data.TaskStore
+        private set
     lateinit var societe: SocieteService
         private set
     /** Téléphone connecté à Android Auto (projection sur l'écran de la voiture). */
@@ -102,6 +104,7 @@ class JarvisApp : Application() {
         phone = PhoneControl(this)
         memo = fr.dd.jarvis.device.Memo(this, obsidian)
         Thread { runCatching { memo.load() } }.start()
+        tasks = fr.dd.jarvis.data.TaskStore(this)
         societe = SocieteService(this, SocieteRepo(this), obsidian)
         societe.data.modeles["planning"]?.let { fr.dd.jarvis.ai.Prompts.planningFormat = it }
         Thread { runCatching { societe.synchroniserAvecCoffre() } }.start()
