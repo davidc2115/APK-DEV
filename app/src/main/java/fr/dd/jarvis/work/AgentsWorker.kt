@@ -152,7 +152,16 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
         val semaine = app.calendar.events(LocalDate.now(), 7).filter { !it.allDay }.sortedBy { it.begin }
 
         // Détecte les chevauchements réels sur les sept prochains jours, sans modifier le calendrier.
-        val conflits = semaine.zipWithNext().filter { (a, b) -> a.id != b.id && b.begin < a.end && a.begin < b.end }
+        val conflits = buildList {
+            for (i in semaine.indices) {
+                val a = semaine[i]
+                for (j in i + 1 until semaine.size) {
+                    val b = semaine[j]
+                    if (b.begin >= a.end) break
+                    if (a.id != b.id && b.begin < a.end && a.begin < b.end) add(a to b)
+                }
+            }
+        }
         val conflictKeys = conflits.map { (a, b) -> listOf("\${a.id}_\${a.begin}", "\${b.id}_\${b.begin}").sorted().joinToString("__") }
         val seenConflicts = readSet("agent_seen_conflicts.txt")
         val nouveauxConflits = conflits.filterIndexed { index, _ -> conflictKeys[index] !in seenConflicts }
