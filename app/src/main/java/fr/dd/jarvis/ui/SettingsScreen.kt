@@ -169,7 +169,7 @@ fun SettingsScreen(app: JarvisApp) {
         }
 
         // ------------------------------------------------------------ Diagnostic du téléphone
-        item { SystemHealthPanel(app, tick) }
+        item { SystemHealthPanel(app, tick) { tick++ } }
 
         // ------------------------------------------------------------ Hermès (Termux)
         item {
@@ -990,7 +990,7 @@ fun SettingsScreen(app: JarvisApp) {
 }
 
 @Composable
-private fun SystemHealthPanel(app: JarvisApp, refresh: Int) {
+private fun SystemHealthPanel(app: JarvisApp, refresh: Int, onRefresh: () -> Unit) {
     val ctx = LocalContext.current
     val battery = remember(refresh) {
         runCatching {
@@ -1051,10 +1051,7 @@ private fun SystemHealthPanel(app: JarvisApp, refresh: Int) {
         val crash = java.io.File(ctx.filesDir, fr.dd.jarvis.JarvisApp.CRASH_FILE).exists()
         AgentStatusRow("Rapport de plantage", crash, if (crash) "à consulter" else "aucun rapport")
         Spacer(Modifier.height(6.dp))
-        HudButton("Actualiser le diagnostic") {
-            // Le parent actualise les valeurs via le compteur de rafraîchissement.
-            ctx.sendBroadcast(android.content.Intent(ctx, fr.dd.jarvis.ui.SystemHealthRefreshReceiver::class.java))
-        }
+        HudButton("Actualiser le diagnostic", onClick = onRefresh)
     }
 }
 
