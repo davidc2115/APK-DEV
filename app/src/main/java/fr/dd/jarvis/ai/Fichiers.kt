@@ -245,6 +245,7 @@ object Fichiers {
             return d.listFiles()?.filter { it.isFile }?.maxByOrNull { it.lastModified() }
         }
         return File(d, n).takeIf { it.exists() }
+            ?: DocumentStore.find(app, n)?.takeIf { it.extension.lowercase() in setOf("mp4", "mov", "mkv", "webm", "avi", "3gp") }
     }
 
     private fun mime(ext: String) = when (ext) {
