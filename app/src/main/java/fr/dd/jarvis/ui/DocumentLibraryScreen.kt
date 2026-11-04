@@ -52,7 +52,7 @@ fun DocumentLibraryScreen(app: JarvisApp, onAsk: (String) -> Unit) {
                 HudPanel(Modifier.fillMaxWidth(), title = file.name) {
                     Text("${(file.length() + 1023) / 1024} Ko · .${file.extension.lowercase()}", color = HudDim, fontSize = 11.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        ActionDoc("Analyser") { onAsk("Analyse le document importé « ${file.name} » : extrais son contenu et résume-le. Signale les limites de lecture.") }
+                        ActionDoc("Analyser") { onAsk("Analyse le fichier importé « ${file.name} ». Utilise document_analyser pour les PDF, images et vidéos ; document_lire pour les documents texte, bureautiques, KML et ZIP. Puis résume les informations utiles.") }
                         ActionDoc("Utiliser") { onAsk("Utilise le document importé « ${file.name} » comme source pour ma demande suivante. Commence par en extraire le contenu.") }
                     }
                 }
