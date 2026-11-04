@@ -57,7 +57,9 @@ android {
                 "/META-INF/{AL2.0,LGPL2.1}",
                 "META-INF/LICENSE*",
                 "META-INF/NOTICE*",
-                "META-INF/DEPENDENCIES"
+                "META-INF/DEPENDENCIES",
+                // Ressource OSGi multi-release sans utilité dans une application Android.
+                "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
             )
             pickFirsts += setOf("META-INF/mailcap", "META-INF/mimetypes.default")
         }
