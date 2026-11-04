@@ -11,7 +11,7 @@ object DocumentStore {
     private const val MAX_IMPORT = 200L * 1024L * 1024L
     fun directory(context: Context) = File(context.filesDir, "documents").apply { mkdirs() }
 
-    fun import(context: Context, uri: Uri): String {
+    fun importFile(context: Context, uri: Uri): String {
         val resolver = context.contentResolver
         val meta = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
             if (c.moveToFirst()) c.getString(0).orEmpty() to if (c.isNull(1)) -1L else c.getLong(1) else "" to -1L
