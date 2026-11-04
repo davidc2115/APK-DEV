@@ -50,13 +50,13 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /**
- * JARVIS sur Android Auto (catégorie « points d'intérêt ») :
+ * JARVIS sur Android Auto (messagerie conversationnelle + commandes vocales) :
  *  - accueil : Parler à JARVIS, planning d'aujourd'hui / de demain, dernière réponse ;
  *  - conversation vocale au MICRO DE LA VOITURE (Android Auto récent) : la phrase est transcrite (Whisper sur Groq),
  *    JARVIS répond à voix haute, puis réécoute ; la conversation se referme après quelques secondes de silence ;
  *  - agenda : rendez-vous du jour, un appui lance la navigation vers l'adresse.
- * Android Auto n'affiche les applications installées hors Play Store que si « Sources inconnues » est coché dans ses
- * paramètres pour les développeurs (Android Auto › Version touchée 10 fois › ⋮ › Paramètres pour les développeurs).
+ * La messagerie basée sur des modèles exige Car API 7 et une distribution Google Play en test interne/fermé.
+ * Le réglage « Sources inconnues » ne déverrouille pas les applications Car App Library sur un véhicule réel.
  */
 class JarvisCarService : CarAppService() {
     override fun createHostValidator(): HostValidator =
