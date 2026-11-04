@@ -72,7 +72,7 @@ object ImageToVideoGen {
             .put("frames_per_second", FPS)
             .put("resolution", "720p")
             .put("aspect_ratio", rapport)
-            .put("enable_prompt_expansion", true)
+            .put("enable_prompt_expansion", false)
             .put("enable_safety_checker", true)
         return executer(MODELE_TEXTE, input, cle(app))
     }
