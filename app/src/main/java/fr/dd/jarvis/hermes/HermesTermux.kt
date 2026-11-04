@@ -363,10 +363,8 @@ if [ -z "${'$'}{MODE}" ]; then
   p "🔎 Vérification de l'environnement Python Hermes…"
   if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin bash -lc 'command -v python3 >/dev/null && python3 --version >/dev/null && hermes --version >/dev/null 2>&1'; then
     p "❌ Runtime Python/CLI Hermès introuvable dans Debian. La configuration et le démarrage sont interrompus."
-    tail -n 15 "${'
-  else
-    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
-    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
+    p "❌ Runtime Python/CLI Hermès introuvable dans Debian. La configuration et le démarrage sont interrompus."
+    tail -n 15 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
     exit 1
   fi
 fi
