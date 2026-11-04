@@ -387,6 +387,394 @@ p "✅ Hermès installé (${'$'}{MODE})."
         return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
             ?: "🚀 Commande envoyée à Hermès."
     }
+
+    // ------------------------------------------------------------------ Sauvegarde et récupération autonome
+
+    /** Exécute un script dans Debian et remonte sa sortie dans la progression Jarvis. */
+    private fun executerDebian(app: JarvisApp, scriptDebian: String, libelle: String): String {
+        PontMcp.demarrer(app)
+        val commande = "proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -lc ${q(scriptDebian)} 2>&1 | while IFS= read -r ligne; do p \\"\\$ligne\\"; done"
+        message = "⏳ $libelle…"
+        return executer(app, prelude(app) + "\n" + commande, libelle = libelle)
+            ?: "🚀 $libelle lancé : suis la progression dans Jarvis."
+    }
+
+    /** Archive privée de l'installation et des données Hermes, sans les caches ni les environnements Python. */
+    private val scriptSauvegarde = """
+set -eu
+H=/root/.hermes
+test -d "${'
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}H" || { echo "❌ Dossier /root/.hermes introuvable."; exit 1; }
+mkdir -p "${'
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}H/backups"
+STAMP="${'
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}(date +%Y%m%d-%H%M%S)"
+OUT="${'
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}H/backups/hermes-${'
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}STAMP.tar.gz"
+tar -czf "${'
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}OUT" --exclude='.hermes/backups' --exclude='.hermes/hermes-agent/.git' \
+  --exclude='.hermes/hermes-agent/venv' --exclude='.hermes/hermes-agent/.venv' \
+  --exclude='.hermes/hermes-agent/__pycache__' -C /root .hermes
+chmod 600 "${'
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}OUT"
+echo "✅ Sauvegarde privée créée : ${'
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}OUT"
+echo "📦 Taille : ${'
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}(du -h "${'
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}OUT" | cut -f1)"
+""".trimIndent()
+
+    fun sauvegarder(app: JarvisApp): String =
+        executerDebian(app, scriptSauvegarde, "Sauvegarde Hermès")
+
+    /** Contrôle les fichiers essentiels sans afficher les clés API ni les jetons. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = """
+set +e
+H=/root/.hermes
+echo "=== DIAGNOSTIC HERMÈS (aucun secret affiché) ==="
+[ -x "${'
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}H/hermes-agent/.hermes/bin/hermes" ] && echo "CLI Hermes : OK" || echo "CLI Hermes : ABSENT"
+[ -x "${'
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}H/hermes-agent/venv/bin/python" ] && echo "Python Hermes : OK" || echo "Python Hermes : ABSENT"
+[ -f "${'
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}H/config.yaml" ] && echo "Configuration : présente" || echo "Configuration : ABSENTE"
+[ -f "${'
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}H/.env" ] && echo "Fichier de clés : présent (contenu masqué)" || echo "Fichier de clés : ABSENT"
+grep -q 'jarvis:' "${'
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}H/config.yaml" 2>/dev/null && echo "Entrée MCP Jarvis : présente" || echo "Entrée MCP Jarvis : absente"
+grep -q '127.0.0.1:38291/mcp' "${'
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}H/config.yaml" 2>/dev/null && echo "URL du pont MCP : OK" || echo "URL du pont MCP : à vérifier"
+curl -fsS -m 3 http://127.0.0.1:${PORT_API}/health >/dev/null 2>&1 && echo "Passerelle API : EN LIGNE" || echo "Passerelle API : hors ligne"
+echo "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        return executerDebian(app, script, "Diagnostic Hermès")
+    }
+
+    /** Restaure la dernière archive vérifiée. */
+    fun restaurerDerniereSauvegarde(app: JarvisApp): String {
+        val script = """
+set -eu
+H=/root/.hermes
+LATEST="${'
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}(find "${'
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}H/backups" -maxdepth 1 -type f -name 'hermes-*.tar.gz' 2>/dev/null | sort | tail -n 1)"
+[ -n "${'
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}LATEST" ] || { echo "❌ Aucune sauvegarde Hermès trouvée."; exit 1; }
+tar -tzf "${'
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}LATEST" >/dev/null
+echo "📦 Archive vérifiée : ${'
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}LATEST"
+tar -xzf "${'
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}LATEST" -C /root
+[ -f /root/.hermes/config.yaml ] || { echo "❌ La configuration restaurée est absente."; exit 1; }
+chmod 600 /root/.hermes/.env 2>/dev/null || true
+echo "✅ Données et configuration restaurées."
+""".trimIndent()
+        return executerDebian(app, script, "Restauration Hermès")
+    }
+
+    /** Réinstallation propre : archive d'abord tout ~/.hermes, puis réinstalle le moteur et la configuration Jarvis. */
+    fun reinstallerComplet(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val nettoyage = "proot-distro login debian --termux-home -- bash -lc ${q("rm -rf /root/.hermes/hermes-agent")}"
+        val script = prelude(app) + "\n" + scriptSauvegarde + "\n" + nettoyage + "\n" +
+            installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Sauvegarde puis réinstallation complète d'Hermès…"
+        return executer(app, script, libelle = "Réinstallation complète Hermès")
+            ?: "🚀 Sauvegarde effectuée puis réinstallation lancée. Suis les étapes dans Jarvis."
+    }
+
     /** Appelé par le pont local à chaque ligne de progression du script. */
     fun surProgression(app: JarvisApp, ligne: String) {
         if (ligne == "pong") return
