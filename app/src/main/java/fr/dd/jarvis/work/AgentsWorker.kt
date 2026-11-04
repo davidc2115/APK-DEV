@@ -127,20 +127,25 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
         if (store.agentLastFact.value == today && !inputData.getBoolean("force", false)) return
         val d = app.societe.data
         val retard = d.docs.filter { it.type == "facture" && it.statut == "a_payer" && it.echeance.isNotBlank() && it.echeance < today }
+        val bientotEchues = d.docs.filter { it.type == "facture" && it.statut == "a_payer" && it.echeance.isNotBlank() && it.echeance >= today && it.echeance <= LocalDate.now().plusDays(3).toString() }
         val devis = d.docs.filter { it.type == "devis" && it.statut == "envoye" && it.date <= LocalDate.now().minusDays(10).toString() }
         store.agentLastFact.set(today)
-        if (retard.isEmpty() && devis.isEmpty()) return
+        if (retard.isEmpty() && bientotEchues.isEmpty() && devis.isEmpty()) return
         val sb = StringBuilder()
         if (retard.isNotEmpty()) {
             sb.append("Factures en retard (${euro(retard.sumOf { d.totaux(it).ttc })}) :\n")
             retard.forEach { sb.append("• ${it.numero} · ${d.client(it.clientId)?.nom.orEmpty()} · ${euro(d.totaux(it).ttc)} · échue le ${dateFr(it.echeance)}\n") }
+        }
+        if (bientotEchues.isNotEmpty()) {
+            sb.append("Factures à échéance dans les 3 jours :\n")
+            bientotEchues.forEach { sb.append("• ${it.numero} · ${d.client(it.clientId)?.nom.orEmpty()} · ${euro(d.totaux(it).ttc)} · échéance le ${dateFr(it.echeance)}\n") }
         }
         if (devis.isNotEmpty()) {
             sb.append("Devis sans réponse depuis plus de 10 jours :\n")
             devis.forEach { sb.append("• ${it.numero} · ${d.client(it.clientId)?.nom.orEmpty()} · ${euro(d.totaux(it).ttc)}\n") }
         }
         alert(2002, "💶 Relances à faire", sb.toString())
-        journal.append("- 💶 ${retard.size} facture(s) en retard, ${devis.size} devis à relancer\n")
+        journal.append("- 💶 ${retard.size} facture(s) en retard, ${bientotEchues.size} échéance(s) proche(s), ${devis.size} devis à relancer\n")
     }
 
     // ---------------------------------------------------------------- planning : heure de départ
@@ -162,31 +167,31 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
                 }
             }
         }
-        val conflictKeys = conflits.map { (a, b) -> listOf("\${a.id}_\${a.begin}", "\${b.id}_\${b.begin}").sorted().joinToString("__") }
+        val conflictKeys = conflits.map { (a, b) -> listOf("${a.id}_${a.begin}", "${b.id}_${b.begin}").sorted().joinToString("__") }
         val seenConflicts = readSet("agent_seen_conflicts.txt")
         val nouveauxConflits = conflits.filterIndexed { index, _ -> conflictKeys[index] !in seenConflicts }
         if (nouveauxConflits.isNotEmpty()) {
             val details = nouveauxConflits.take(8).joinToString("\n") { (a, b) ->
                 val startA = Instant.ofEpochMilli(a.begin).atZone(zone).format(fmt)
                 val startB = Instant.ofEpochMilli(b.begin).atZone(zone).format(fmt)
-                "• \${a.title} ($startA) chevauche \${b.title} ($startB)"
+                "• ${a.title} ($startA) chevauche ${b.title} ($startB)"
             }
             alert(3010, "⚠️ Conflit dans ton planning", details)
-            journal.append("- ⚠️ \${nouveauxConflits.size} conflit(s) d'agenda détecté(s) sur les 7 prochains jours\\n")
+            journal.append("- ⚠️ ${nouveauxConflits.size} conflit(s) d'agenda détecté(s) sur les 7 prochains jours\n")
         }
         writeSet("agent_seen_conflicts.txt", seenConflicts + conflictKeys)
 
         val prochain = semaine.firstOrNull { it.end >= now }
         val synthese = when {
-            conflits.isNotEmpty() -> "⚠️ \${conflits.size} conflit(s) d'agenda à vérifier sur les 7 prochains jours."
-            prochain != null -> "Prochain rendez-vous : \${prochain.title} à \${Instant.ofEpochMilli(prochain.begin).atZone(zone).format(fmt)}."
+            conflits.isNotEmpty() -> "⚠️ ${conflits.size} conflit(s) d'agenda à vérifier sur les 7 prochains jours."
+            prochain != null -> "Prochain rendez-vous : ${prochain.title} à ${Instant.ofEpochMilli(prochain.begin).atZone(zone).format(fmt)}."
             else -> "Aucun rendez-vous à venir dans les 7 prochains jours."
         }
         store.proactiveSummary.set(synthese)
 
         val horizon = now + 150 * 60_000L
         val notified = readSet("agent_notified_events.txt")
-        val evs = app.calendar.events(LocalDate.now(), 1).filter { !it.allDay && it.location.isNotBlank() && it.begin in now..horizon && "\${it.id}_\${it.begin}" !in notified }
+        val evs = app.calendar.events(LocalDate.now(), 1).filter { !it.allDay && it.location.isNotBlank() && it.begin in now..horizon && "${it.id}_${it.begin}" !in notified }
         if (evs.isEmpty()) return
         val origine = Locator.point(app) ?: app.societe.data.societe.let { s -> if (s.lat != null && s.lon != null) Geo.Point(s.lat, s.lon) else null } ?: return
         for (e in evs) {
