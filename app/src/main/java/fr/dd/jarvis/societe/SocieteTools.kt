@@ -434,7 +434,8 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         if (a.hv("contact")) c = c.copy(contact = a.s("contact"))
         if (a.hv("tel")) c = c.copy(tel = a.s("tel"))
         if (a.hv("email")) c = c.copy(email = a.s("email"))
-        if (a.hv("adresse")) c = c.copy(adresse = a.s("adresse"))
+        if (a.hv("adresse") && normaliser(a.s("adresse")) != normaliser(c.adresse))
+            c = c.copy(adresse = a.s("adresse"), distanceKm = null, dureeMin = null, distanceCle = "")
         if (a.hv("depuis")) {
             val dep = parseDepuis(a.s("depuis"))
             if (dep.isNotBlank()) c = c.copy(depuis = dep)
@@ -472,8 +473,16 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         }
         val final: Client = c
         svc.repo.update { it.copy(clients = if (nouveau) it.clients + final else it.clients.map { x -> if (x.id == final.id) final else x }) }
-        val r = d.remiseClient(final)
-        return ok("✅ Client « ${final.nom} » ${if (nouveau) "créé" else "mis à jour"}.$siteTxt\n🎁 Remise applicable aujourd'hui : " + (if (r.pct > 0) "${nombre(r.pct)} % (${r.detail})" else "aucune"))
+        // Calcul automatique de l'adresse principale du client et des installations distinctes.
+        val routeClient = if (final.adresse.isNotBlank() && d.societe.adresse.isNotBlank())
+            runCatching { svc.distance(final, null) }.getOrNull() else null
+        final.sites.filter { it.adresse.isNotBlank() && normaliser(it.adresse) != normaliser(final.adresse) }
+            .forEach { site -> runCatching { svc.distance(final, site) } }
+        val fresh = d.client(final.id) ?: final
+        val r = d.remiseClient(fresh)
+        val distanceTxt = routeClient?.let { "\n🚗 Siège → adresse client : ${nombre(round2(it.km))} km · ${it.minutes.toInt()} min${if (it.estime) " (estimé)" else ""}" }
+            ?: if (final.adresse.isNotBlank() && d.societe.adresse.isNotBlank()) "\n⚠️ Distance non calculée : vérifie les adresses du siège et du client." else ""
+        return ok("✅ Client « ${fresh.nom} » ${if (nouveau) "créé" else "mis à jour"}.$siteTxt$distanceTxt\n🎁 Remise applicable aujourd'hui : " + (if (r.pct > 0) "${nombre(r.pct)} % (${r.detail})" else "aucune"))
     }
 
     private fun clientParNom(nom: String): Pair<Client?, String?> {
@@ -497,8 +506,11 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
     private suspend fun clientFiche(a: JSONObject): ToolResult {
         val (c, e) = clientParNom(a.s("nom"))
         if (c == null) return err(e!!)
-        // met à jour les distances manquantes pour que la fiche soit complète
-        c.sites.forEach { s -> if (s.distanceKm == null && d.societe.adresse.isNotBlank()) runCatching { svc.distance(c, s) } }
+        // Calcule aussi l'adresse principale, même si le client n'a pas encore d'installation.
+        if (d.societe.adresse.isNotBlank()) {
+            if (c.distanceKm == null) runCatching { svc.distance(c, null) }
+            c.sites.forEach { s -> if (s.distanceKm == null) runCatching { svc.distance(c, s) } }
+        }
         val fresh = d.client(c.id) ?: c
         val (md, loc) = svc.exporterClient(fresh)
         return ok("✅ Fiche enregistrée : $loc\n\n---\n\n$md")
