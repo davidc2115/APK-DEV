@@ -1512,8 +1512,10 @@ class ToolBox(
             }
         } else "Mails non configurés."
         val impayes = app.societe.impayees()
+        val tasksDue = app.tasks.pendingDue(LocalDate.now().plusDays(1))
+        val taches = if (tasksDue.isEmpty()) "Aucune tâche en retard ou à échéance demain." else tasksDue.joinToString("\n") { "- " + it.title + (if (it.dueDate.isNotBlank()) " — " + it.dueDate else "") + " (#" + it.id + ")" }
         val user = "Utilisateur : ${store.userName.value.ifBlank { "l'utilisateur" }}\nMaintenant : ${Prompts.now()}\n\n" +
-            "=== AGENDA DU JOUR ===\n$planning\n\n=== AGENDA DE DEMAIN ===\n$planningDemain\n\n=== MAILS NON LUS ===\n$mails\n\n=== FACTURES IMPAYÉES ===\n${impayes.ifBlank { "Aucune." }}"
+            "=== AGENDA DU JOUR ===\n$planning\n\n=== AGENDA DE DEMAIN ===\n$planningDemain\n\n=== TÂCHES PERSONNELLES ===\n$taches\n\n=== MAILS NON LUS ===\n$mails\n\n=== FACTURES IMPAYÉES ===\n${impayes.ifBlank { "Aucune." }}"
         val texte = llm.agent(Prompts.briefing() + app.memo.pour("briefing"), user)
         // Archive chaque point du matin dans son propre dossier du coffre Obsidian (un fichier par jour).
         runCatching { app.obsidian.saveIn("Points du matin", LocalDate.now().toString(), texte) }
