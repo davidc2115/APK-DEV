@@ -424,7 +424,7 @@ class ToolBox(
             val txt = a.optString("texte").trim()
             if (r == null) ToolResult("Expéditeur du SMS introuvable : ${a.optString("destinataire")}.")
             else if (txt.isBlank()) ToolResult("Réponse SMS vide.")
-            else if (!confirm("Confirmer la réponse SMS ?\\n\\nÀ : ${r.first} (${r.second})\\n\\n$txt", true)) ToolResult("Réponse SMS refusée : aucun message envoyé.", direct = true)
+            else if (!confirm("Confirmer la réponse SMS ?\n\nÀ : ${r.first} (${r.second})\n\n$txt", true)) ToolResult("Réponse SMS refusée : aucun message envoyé.", direct = true)
             else ToolResult(fr.dd.jarvis.device.Telephony.envoyer(app, r.second, txt), direct = true)
         }
         "envoyer_sms" -> {
@@ -1332,13 +1332,13 @@ class ToolBox(
             val term = a.optString("recherche")
             val sender = a.optString("expediteur")
             val filtered = recent.filter { (sender.isBlank() || it.from.contains(sender, true) || it.fromAddr.contains(sender, true)) && (term.isBlank() || it.subject.contains(term, true) || it.body.contains(term, true)) }
-            return ToolResult(if (filtered.isEmpty()) "Aucun mail correspondant dans les 500 derniers messages IMAP consultés." else filtered.take(count).joinToString("\\n\\n") { "📧 ${it.from} — ${it.subject}\\nDate : ${it.date}\\n${it.body.ifBlank { it.snippet }}" }, direct = true)
+            return ToolResult(if (filtered.isEmpty()) "Aucun mail correspondant dans les 500 derniers messages IMAP consultés." else filtered.take(count).joinToString("\n\n") { "📧 ${it.from} — ${it.subject}\nDate : ${it.date}\n${it.body.ifBlank { it.snippet }}" }, direct = true)
         }
         return try {
             val items = fr.dd.jarvis.device.GmailApi.rechercher(app, accounts, a.optString("expediteur"), a.optString("recherche"), a.optString("date_debut"), a.optString("date_fin"), count)
             if (items.isEmpty()) ToolResult("Aucun email correspondant.", direct = true)
-            else ToolResult(items.joinToString("\\n\\n") { m ->
-                "📧 **${m.from}** — ${m.subject}\\nCompte : ${m.account}\\nDate : ${m.date?.let { java.text.SimpleDateFormat("EEEE dd MMMM yyyy 'à' HH:mm:ss", java.util.Locale.FRENCH).format(it) } ?: "inconnue"}\\nID : ${m.id}\\nTHREAD : ${m.threadId}\\n\\n${m.body.ifBlank { m.snippet }}"
+            else ToolResult(items.joinToString("\n\n") { m ->
+                "📧 **${m.from}** — ${m.subject}\nCompte : ${m.account}\nDate : ${m.date?.let { java.text.SimpleDateFormat("EEEE dd MMMM yyyy 'à' HH:mm:ss", java.util.Locale.FRENCH).format(it) } ?: "inconnue"}\nID : ${m.id}\nTHREAD : ${m.threadId}\n\n${m.body.ifBlank { m.snippet }}"
             }, direct = true)
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { ToolResult("Recherche Gmail impossible : ${e.message}", direct = true) }
     }
@@ -1351,7 +1351,7 @@ class ToolBox(
         if (store.gmailAccounts.none { it.equals(account, true) }) return ToolResult("Ce compte Gmail n'est pas connecté dans JARVIS.")
         return try {
             val target = fr.dd.jarvis.device.GmailApi.cibleReponse(app, account, messageId)
-            val confirmation = "Confirmer l'envoi de cette réponse dans le fil d'origine ?\\n\\nCompte : $account\\nÀ : ${target.to}\\nObjet : ${target.subject}\\n\\n$body"
+            val confirmation = "Confirmer l'envoi de cette réponse dans le fil d'origine ?\n\nCompte : $account\nÀ : ${target.to}\nObjet : ${target.subject}\n\n$body"
             if (!confirm(confirmation, true)) ToolResult("Réponse non envoyée : validation refusée.", direct = true)
             else {
                 val id = fr.dd.jarvis.device.GmailApi.repondre(app, account, target, body)
