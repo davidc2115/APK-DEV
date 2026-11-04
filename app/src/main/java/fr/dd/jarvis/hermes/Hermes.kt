@@ -124,11 +124,10 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
 
 /**
  * Répartition des demandes (mode « auto ») :
- *  - Hermès, cerveau principal : questions ouvertes, recherche, analyse, rédaction, code, automatisations, tâches
- *    en plusieurs étapes, et tout ce qui n'est pas une commande rapide ;
- *  - Groq (cerveau réflexe de Jarvis, outils filtrés, ~1 s) : commandes du téléphone, Android Auto, agenda, musique,
- *    domotique, société, fichiers Obsidian ;
- *  - Gemini : agents spécialisés à l'intérieur des outils (analyse de la demande, mails, planning, vision, images).
+ *  - Hermès, orchestrateur principal : reçoit toutes les demandes en mode auto, décompose les missions et appelle
+ *    les outils MCP de Jarvis pour les actions téléphone, agenda, mails, domotique, société et fichiers ;
+ *  - Jarvis/Groq : réponses très brèves et mode Android Auto, puis secours automatique si Hermès est indisponible ;
+ *  - Gemini, Groq et Cloudflare : modèles spécialisés et routes de sous-agents, avec les autres fournisseurs Hermes configurés.
  */
 object Routeur {
     enum class Cible { HERMES, JARVIS }
