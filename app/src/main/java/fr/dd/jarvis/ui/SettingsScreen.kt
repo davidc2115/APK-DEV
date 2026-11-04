@@ -151,6 +151,23 @@ fun SettingsScreen(app: JarvisApp) {
             )
         }
 
+        // ------------------------------------------------------------ Centre de contrôle des agents
+        item {
+            HudPanel(Modifier.fillMaxWidth(), title = "Centre de contrôle des agents IA") {
+                Text("État de configuration des moteurs disponibles dans JARVIS. Une clé configurée ne signifie pas que le service est actuellement joignable ou que son quota est disponible : utilise les tests des fournisseurs pour le vérifier.", color = HudDim, fontSize = 11.sp)
+                Spacer(Modifier.height(6.dp))
+                AgentStatusRow("Hermès (orchestrateur Termux)", store.hermesInstalle.value && store.hermesMode.value != "off", if (store.hermesInstalle.value && store.hermesMode.value != "off") "configuré" else "désactivé")
+                AgentStatusRow("Groq · " + store.groqModel.value, store.groqKeys.isNotEmpty(), store.groqKeys.size.toString() + " clé(s)")
+                AgentStatusRow("Gemini · " + store.geminiModel.value, store.geminiKeys.isNotEmpty(), store.geminiKeys.size.toString() + " clé(s)")
+                AgentStatusRow("Cloudflare Workers AI · images/texte", store.cfAccounts.isNotEmpty(), store.cfAccounts.size.toString() + " compte(s)")
+                AgentStatusRow("fal.ai · génération vidéo", store.falApiKey.value.isNotBlank(), if (store.falApiKey.value.isNotBlank()) "clé enregistrée" else "non configuré")
+                AgentStatusRow("Hugging Face · vidéo de secours", store.huggingFaceToken.value.isNotBlank(), if (store.huggingFaceToken.value.isNotBlank()) "jeton enregistré" else "non configuré")
+                val external = store.externalProvidersConfigured()
+                AgentStatusRow("Fournisseurs externes", external.isNotEmpty(), if (external.isEmpty()) "aucun" else external.joinToString(", "))
+                Text("Les clés ne sont jamais affichées ici. Les quotas et erreurs en temps réel restent à connecter à chaque fournisseur ; ce panneau indique uniquement les configurations réellement enregistrées.", color = HudDim, fontSize = 10.sp)
+            }
+        }
+
         // ------------------------------------------------------------ Hermès (Termux)
         item {
             val h = fr.dd.jarvis.hermes.HermesTermux
@@ -966,6 +983,16 @@ fun SettingsScreen(app: JarvisApp) {
                 modifier = Modifier.padding(vertical = 8.dp)
             )
         }
+    }
+}
+
+@Composable
+private fun AgentStatusRow(label: String, configured: Boolean, detail: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(if (configured) "🟢" else "⚪", fontSize = 11.sp)
+        Spacer(Modifier.width(7.dp))
+        Text(label, color = HudText, fontSize = 12.sp, modifier = Modifier.weight(1f))
+        Text(detail, color = HudDim, fontSize = 10.sp)
     }
 }
 
