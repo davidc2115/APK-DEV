@@ -6,6 +6,8 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.work.*
@@ -31,7 +33,8 @@ object AgentsScheduler {
         val wm = WorkManager.getInstance(ctx)
         if (!store.agentsOn.value) { wm.cancelUniqueWork(NAME); return }
         val req = PeriodicWorkRequestBuilder<AgentsWorker>(store.agentMinutes.value.coerceAtLeast(15).toLong(), TimeUnit.MINUTES)
-            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
+            .build()
+        // Les contrôles locaux (batterie, stockage, tâches, factures) doivent aussi tourner hors connexion.
         wm.enqueueUniquePeriodicWork(NAME, ExistingPeriodicWorkPolicy.UPDATE, req)
     }
     private var dernier = HashMap<String, Long>()
@@ -62,6 +65,14 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
     private val journal = StringBuilder()
 
     private fun seenFile(n: String) = File(ctx.filesDir, n)
+    private fun reseauDisponible(): Boolean {
+        val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+        val network = cm.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(network) ?: return false
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    }
+
     private fun readSet(n: String): MutableSet<String> = runCatching { seenFile(n).readLines().toMutableSet() }.getOrDefault(mutableSetOf())
     private fun writeSet(n: String, s: Set<String>) = runCatching { seenFile(n).writeText(s.toList().takeLast(600).joinToString("\n")) }
 
@@ -78,12 +89,21 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
         val only = inputData.getString("only")
         val tri = only == "mails" && store.notifLive.value
         if (!store.agentsOn.value && !tri) return Result.success()
+        val enLigne = reseauDisponible()
         val steps = listOf<Pair<String, suspend () -> Unit>>(
-            "Mails" to { if (tri || (store.agentMails.value && (only == null || only == "mails"))) mails() },
+            "Mails" to {
+                if (tri || (store.agentMails.value && (only == null || only == "mails"))) {
+                    if (enLigne) mails() else journal.append("- ⏸️ Mails : reportés, connexion Internet indisponible.\\n")
+                }
+            },
             "Factures" to { if (store.agentFactures.value && only == null) factures() },
             "Planning" to { if (store.agentPlanning.value && only == null) planning() },
             "Tâches personnelles" to { if (store.agentPlanning.value && only == null) taches() },
-            "Notifications" to { if (store.agentNotifs.value && (only == null || only == "notifs")) notifs() },
+            "Notifications" to {
+                if (store.agentNotifs.value && (only == null || only == "notifs")) {
+                    if (enLigne) notifs() else journal.append("- ⏸️ Analyse des notifications : reportée, connexion Internet indisponible.\\n")
+                }
+            },
             "Surveillance téléphone" to { if (store.agentNotifs.value && only == null) surveillanceTelephone() }
         )
         for ((nom, f) in steps) {
