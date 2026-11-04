@@ -58,14 +58,14 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         if (value.length < 5 || evidence.length < 8) return "Apprentissage ignoré : préférence ou preuve trop courte."
         if (sensitivePattern.containsMatchIn(value) || sensitivePattern.containsMatchIn(evidence))
             return "Apprentissage refusé : les informations sensibles ne sont pas mémorisées automatiquement."
-        val key = "$category|\${value.lowercase()}"
+        val key = "$category|${value.lowercase()}"
         val hash = MessageDigest.getInstance("SHA-256").digest(evidence.lowercase().toByteArray())
             .joinToString("") { "%02x".format(it) }.take(20)
         val proofs = candidates.getOrPut(key) { linkedSetOf() }
-        if (!proofs.add(hash)) return "Cette preuve a déjà été prise en compte (\${proofs.size}/3)."
+        if (!proofs.add(hash)) return "Cette preuve a déjà été prise en compte (${proofs.size}/3)."
         if (proofs.size < 3) {
             persistCandidates()
-            return "Préférence candidate conservée (\${proofs.size}/3 preuves distinctes). Elle ne sera pas appliquée comme habitude avant confirmation par répétition."
+            return "Préférence candidate conservée (${proofs.size}/3 preuves distinctes). Elle ne sera pas appliquée comme habitude avant confirmation par répétition."
         }
         val habitLine = "- $value"
         val current = items["habitudes"].orEmpty()
@@ -83,7 +83,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         ensure()
         if (candidates.isEmpty()) return "Aucune préférence en cours d'apprentissage."
         return candidates.entries.joinToString("\n") { (key, proofs) ->
-            "- \${key.substringAfter('|')} : \${proofs.size}/3 preuves"
+            "- ${key.substringAfter('|')} : ${proofs.size}/3 preuves"
         }
     }
 
