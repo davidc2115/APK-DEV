@@ -336,6 +336,7 @@ class ToolBox(
         put(tool("hermes_deleguer", "Confie à Hermès (agent autonome : recherche web, analyse, rédaction, code, tâches en plusieurs étapes, mémoire long terme) une tâche complexe ou longue. Décris la tâche complète et le résultat attendu.",
             mapOf("tache" to prop("La tâche détaillée, avec tout le contexte utile.")), listOf("tache")))
         put(tool("ma_position", "Donne la position GPS actuelle du téléphone (fix frais, format Google Maps) et l'ADRESSE PRÉCISE correspondante (numéro, rue, code postal, ville). Pour enregistrer cette position sur une fiche client, utilise client_ecrire avec site_gps = « ma position » (et site_adresse = « ma position » pour l'adresse)."))
+        put(tool("phone_health_report", "Produit un diagnostic local en lecture seule du téléphone : batterie, température, stockage, RAM, réseau, Shizuku, accessibilité, notifications, alarmes exactes, optimisation batterie, service vocal et présence d'un rapport de plantage. N'affiche aucune donnée personnelle ni aucun secret.", mapOf("detail" to prop("Optionnel : bref ou complet (défaut complet)."))))
         put(tool("phone_action", "Agit sur le téléphone. Actions : torch_on, torch_off, open_app, open_url, volume, wifi_on, wifi_off, wifi_connect (ouvre le panneau système Wi-Fi pour choisir un réseau ; lis l'écran puis utilise click_text/type_text si nécessaire), bluetooth_on, bluetooth_off, bluetooth_pair (ouvre les réglages Bluetooth pour rechercher et sélectionner un appareil ; lis l'écran puis utilise click_text pour lancer l'appairage), data_on, data_off, brightness, call, back, home, recents, notifications, quick_settings, lock, screenshot, read_screen, click_text, type_text, scroll_down, scroll_up, tap.",
             mapOf(
                 "action" to prop("Nom de l'action."),
@@ -804,6 +805,7 @@ class ToolBox(
         "hermes_deleguer" -> fr.dd.jarvis.hermes.Hermes.deleguer(app, a.optString("tache"), this, app.store.userName.value)
             ?.let { ToolResult(it, direct = true) }
             ?: ToolResult("Hermès est indisponible pour l'instant (non installé ou arrêté). Réponds toi-même au mieux.")
+        "phone_health_report" -> ToolResult(fr.dd.jarvis.device.PhoneHealth.report(app), direct = true)
         "phone_action" -> phoneAction(a)
         "run_shell" -> runShell(a)
         "stockage_telephone" -> {
