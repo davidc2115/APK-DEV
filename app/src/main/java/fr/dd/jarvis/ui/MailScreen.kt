@@ -103,7 +103,7 @@ fun MailScreen(app: JarvisApp) {
             item { HudPanel(Modifier.fillMaxWidth(), title = "Résumé") { MarkdownText(summary) } }
         }
         items(mails) { m ->
-            val mailAccent = if (m.unread) Color(0xFF7B8CFF) else Color(0xFF6E9AAE)
+            val mailAccent = HudIdentityColor(m.from)
             val emphasized = m.unread && mails.firstOrNull { it.unread }?.let { it === m } == true
             HudScheduleCard(
                 Modifier.fillMaxWidth(),
