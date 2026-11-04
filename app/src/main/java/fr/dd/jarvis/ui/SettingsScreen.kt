@@ -128,6 +128,7 @@ fun SettingsScreen(app: JarvisApp) {
             val h = fr.dd.jarvis.hermes.HermesTermux
             var hTick by remember { mutableIntStateOf(0) }
             var hMsg by remember { mutableStateOf("") }
+            var confirmerRestauration by remember { mutableStateOf(false) }
             var enLigne by remember { mutableStateOf(false) }
             val termuxOk = remember(tick, hTick) { h.termuxInstalle(ctx) }
             val permOk = remember(tick, hTick) { h.permissionOk(ctx) }
@@ -164,6 +165,28 @@ fun SettingsScreen(app: JarvisApp) {
                     HudButton("Démarrer", enabled = permOk && !enLigne) { hMsg = h.demarrer(app) }
                     HudButton("Arrêter", enabled = permOk && enLigne) { hMsg = h.arreter(app) }
                     HudButton("Actualiser") { hTick++ }
+                }
+                Spacer(Modifier.height(6.dp))
+                Text("Sauvegarde et récupération — archives locales privées, jamais envoyées sur GitHub.", color = HudDim, fontSize = 11.sp)
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HudButton("Sauvegarder", enabled = termuxOk && permOk) {
+                        fr.dd.jarvis.hermes.PontMcp.progression.clear()
+                        hMsg = h.sauvegarder(app)
+                    }
+                    HudButton("Diagnostiquer", enabled = termuxOk && permOk) {
+                        fr.dd.jarvis.hermes.PontMcp.progression.clear()
+                        hMsg = h.diagnostiquer(app)
+                    }
+                    HudButton(if (confirmerRestauration) "Confirmer restauration" else "Restaurer") {
+                        if (!confirmerRestauration) {
+                            confirmerRestauration = true
+                            hMsg = "⚠️ Retouche « Confirmer restauration » pour restaurer la dernière sauvegarde locale."
+                        } else {
+                            confirmerRestauration = false
+                            fr.dd.jarvis.hermes.PontMcp.progression.clear()
+                            hMsg = h.restaurer(app)
+                        }
+                    }
                 }
                 if (hMsg.isNotBlank()) Text(hMsg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
                 val lignes = fr.dd.jarvis.hermes.PontMcp.progression
