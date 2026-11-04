@@ -392,7 +392,7 @@ p "✅ Hermès installé (${'$'}{MODE})."
         PontMcp.demarrer(app)
         val commande = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD " +
             "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
-            "bash -lc ${q(scriptDebian)} 2>&1 | while IFS= read -r ligne; do p \\\"\\$ligne\\\"; done"
+            "bash -lc ${q(scriptDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
         message = "⏳ $libelle…"
         return executer(app, prelude(app) + "\n" + commande, libelle = libelle)
             ?: "🚀 $libelle lancé : suis la progression dans Jarvis."
@@ -444,7 +444,7 @@ find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' -print0 |
 chmod 600 /root/.hermes/.env 2>/dev/null || true
 echo "✅ Données et configuration restaurées."
 """.trimIndent()
-        val commande = "set -o pipefail; proot-distro login debian --termux-home -- bash -lc ${q(restore)} 2>&1 | while IFS= read -r ligne; do p \\\"\\$ligne\\\"; done"
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- bash -lc ${q(restore)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
         return executer(app, prelude(app) + "\n" + commande + "\n" + demarrage, libelle = "Restauration Hermès")
             ?: "🚀 Restauration lancée, puis redémarrage d'Hermès."
     }
@@ -454,7 +454,7 @@ echo "✅ Données et configuration restaurées."
         PontMcp.demarrer(app)
         app.store.hermesInstalle.set(false)
         val preparation = scriptSauvegarde + "\nrm -rf /root/.hermes/hermes-agent\necho '🧹 Ancien moteur supprimé après sauvegarde.'"
-        val commande = "set -euo pipefail; proot-distro login debian --termux-home -- bash -lc ${q(preparation)} 2>&1 | while IFS= read -r ligne; do p \\\"\\$ligne\\\"; done"
+        val commande = "set -euo pipefail; proot-distro login debian --termux-home -- bash -lc ${q(preparation)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
         val script = prelude(app) + "\n" + commande + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
         message = "⏳ Sauvegarde puis réinstallation complète d'Hermès…"
         return executer(app, script, libelle = "Réinstallation complète Hermès")
