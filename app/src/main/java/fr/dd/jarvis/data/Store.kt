@@ -62,6 +62,38 @@ class Store(context: Context) {
         fun clear() = set("")
     }
 
+    /** Migration des anciennes listes Gemini/Groq vers le stockage chiffré dédié. */
+    init {
+        val secure = secretPrefs
+        if (secure != null) {
+            listOf("geminiKeys", "groqKeys").forEach { key ->
+                val legacy = prefs.getString(key, null)
+                if (!legacy.isNullOrBlank()) {
+                    val current = secure.getString(key, null)
+                    val saved = if (current.isNullOrBlank()) secure.edit().putString(key, legacy).commit() else true
+                    if (saved) prefs.edit().remove(key).commit()
+                }
+            }
+        }
+    }
+
+    val apiKeysSecureAvailable: Boolean get() = secretPrefs != null
+
+    private fun readApiKeyList(key: String): List<String> {
+        val raw = if (secretPrefs != null) secretPrefs.getString(key, "") ?: ""
+                   else prefs.getString(key, "") ?: ""
+        return raw.split("\\n").map { it.trim() }.filter { it.isNotEmpty() }
+    }
+
+    private fun writeApiKeyList(key: String, values: List<String>) {
+        val secure = secretPrefs ?: throw IllegalStateException(
+            "Stockage chiffré Android indisponible : les clés Gemini/Groq ne peuvent pas être modifiées ni synchronisées."
+        )
+        check(secure.edit().putString(key, values.joinToString("\\n")).commit()) {
+            "Échec de l'enregistrement chiffré des clés API."
+        }
+    }
+
     inner class BPref(private val key: String, def: Boolean) {
         var value by mutableStateOf(prefs.getBoolean(key, def))
             private set
@@ -100,8 +132,8 @@ class Store(context: Context) {
     // ---- Cerveau (Groq) et agents (Gemini)
     val groqModel = SPref("groqModel", "llama-3.3-70b-versatile")
     val geminiModel = SPref("geminiModel", "gemini-3.8-flash")
-    val groqKeys: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readList("groqKeys")) }
-    val geminiKeys: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readList("geminiKeys")) }
+    val groqKeys: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readApiKeyList("groqKeys")) }
+    val geminiKeys: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readApiKeyList("geminiKeys")) }
 
     // ---- Serveur personnel : SSH + Home Assistant
     val haUrl = SPref("haUrl", "")
@@ -151,23 +183,30 @@ class Store(context: Context) {
     }
     fun removeCfAccount(i: Int) { if (i in cfAccounts.indices) cfAccounts.removeAt(i); writeList("cfAccounts", cfAccounts) }
 
-    fun addGroqKeys(raw: String) = addKeys(groqKeys, "groqKeys", raw)
-    fun addGeminiKeys(raw: String) = addKeys(geminiKeys, "geminiKeys", raw)
+    fun addGroqKeys(raw: String) = addApiKeys(groqKeys, "groqKeys", raw)
+    fun addGeminiKeys(raw: String) = addApiKeys(geminiKeys, "geminiKeys", raw)
     fun removeGroqKey(i: Int) {
         if (i in groqKeys.indices) groqKeys.removeAt(i)
-        writeList("groqKeys", groqKeys)
+        writeApiKeyList("groqKeys", groqKeys)
     }
 
     fun removeGeminiKey(i: Int) {
         if (i in geminiKeys.indices) geminiKeys.removeAt(i)
-        writeList("geminiKeys", geminiKeys)
+        writeApiKeyList("geminiKeys", geminiKeys)
     }
 
-    private fun addKeys(list: SnapshotStateList<String>, k: String, raw: String) {
+    private fun addApiKeys(list: SnapshotStateList<String>, key: String, raw: String) {
+        val secure = secretPrefs ?: throw IllegalStateException(
+            "Stockage chiffré Android indisponible : active les services de sécurité du téléphone avant d'ajouter des clés."
+        )
         val parts = raw.split(Regex("[\\s,;]+")).map { it.trim() }
             .filter { it.length >= 8 && it !in list }.distinct()
+        if (parts.isEmpty()) return
+        val updated = (list.toList() + parts).distinct()
+        check(secure.edit().putString(key, updated.joinToString("\\n")).commit()) {
+            "Échec de l'enregistrement chiffré des clés API."
+        }
         list.addAll(parts)
-        writeList(k, list)
     }
 
     private fun readList(k: String): List<String> =
