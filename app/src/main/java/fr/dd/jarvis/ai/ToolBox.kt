@@ -910,35 +910,35 @@ class ToolBox(
         val out = StringBuilder()
         when (situation) {
             "preparer_demain" -> {
-                out.append("PRÉPARATION DE DEMAIN\\n")
+                out.append("PRÉPARATION DE DEMAIN\n")
                 val agenda = getPlanning(JSONObject().put("date", date.toString()).put("days", "1").put("calendar", calendar))
                 out.append(agenda.text)
                 val mails = execute("summarize_mails", JSONObject().put("count", "10").put("unread_only", "true"))
-                out.append("\\n\\nMAILS NON LUS À VÉRIFIER\\n").append(mails.text.take(5000))
+                out.append("\n\nMAILS NON LUS À VÉRIFIER\n").append(mails.text.take(5000))
             }
             "depart_travail" -> {
-                out.append("DÉPART AU TRAVAIL — ").append(date).append("\\n")
+                out.append("DÉPART AU TRAVAIL — ").append(date).append("\n")
                 out.append(getPlanning(JSONObject().put("date", date.toString()).put("days", "1").put("calendar", calendar)).text)
-                out.append("\\n\\nTRAJET ET RENDEZ-VOUS RESTANTS\\n")
+                out.append("\n\nTRAJET ET RENDEZ-VOUS RESTANTS\n")
                 out.append(execute("itineraire", JSONObject().put("date", date.toString()).put("depuis", "position").put("restants", "true").put("calendar", calendar)).text)
             }
             "chantier" -> {
-                out.append("CONTEXTE CHANTIER — ").append(date).append("\\n")
+                out.append("CONTEXTE CHANTIER — ").append(date).append("\n")
                 out.append(getPlanning(JSONObject().put("date", date.toString()).put("days", "1").put("calendar", calendar).put("question", "Identifie les rendez-vous de chantier, leurs lieux, horaires et informations utiles.")).text)
                 val client = a.optString("client").trim()
                 if (client.isNotBlank()) {
-                    out.append("\\n\\nFICHE CLIENT\\n")
+                    out.append("\n\nFICHE CLIENT\n")
                     out.append(societe.execute("client_fiche", JSONObject().put("nom", client)).text)
-                } else out.append("\\nAucun client n'a été précisé : identifie le chantier depuis l'agenda et demande confirmation si plusieurs correspondent.")
+                } else out.append("\nAucun client n'a été précisé : identifie le chantier depuis l'agenda et demande confirmation si plusieurs correspondent.")
             }
             "retour" -> {
-                out.append("CONTEXTE DE RETOUR — ").append(date).append("\\n")
+                out.append("CONTEXTE DE RETOUR — ").append(date).append("\n")
                 out.append(getPlanning(JSONObject().put("date", date.toString()).put("days", "1").put("calendar", calendar).put("question", "Quels rendez-vous ou engagements restent aujourd'hui ?")).text)
                 val destination = a.optString("destination").trim()
                 if (destination.isNotBlank()) {
-                    out.append("\\n\\nTRAJET DEPUIS LA POSITION ACTUELLE\\n")
+                    out.append("\n\nTRAJET DEPUIS LA POSITION ACTUELLE\n")
                     out.append(execute("itineraire", JSONObject().put("destination", destination).put("depuis", "position")).text)
-                } else out.append("\\nDestination de retour non renseignée : ne suppose pas l'adresse du domicile et demande-la avant de calculer le trajet.")
+                } else out.append("\nDestination de retour non renseignée : ne suppose pas l'adresse du domicile et demande-la avant de calculer le trajet.")
             }
             else -> return ToolResult("Situation inconnue. Choisis preparer_demain, depart_travail, chantier ou retour.")
         }
