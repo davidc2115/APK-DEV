@@ -193,6 +193,8 @@ class Llm(private val store: Store) {
                 throw e
             } catch (e: ApiException) {
                 false to statutErreurApi(e.code)
+            } catch (e: IllegalArgumentException) {
+                false to "CONFIGURATION INVALIDE"
             } catch (e: Exception) {
                 false to "ERREUR RÉSEAU (${e.javaClass.simpleName})"
             }
@@ -200,7 +202,7 @@ class Llm(private val store: Store) {
         }
 
         if (fournisseur == "tous" || fournisseur == "groq") {
-            store.groqKeys.toList().forEachIndexed { i, key ->
+            for ((i, key) in store.groqKeys.toList().withIndex()) {
                 verifier("Groq #${i + 1} (${mask(key)})") {
                     val modeles = groq.listModels(key)
                     val modele = store.groqModel.value
@@ -215,7 +217,7 @@ class Llm(private val store: Store) {
         }
 
         if (fournisseur == "tous" || fournisseur == "gemini") {
-            store.geminiKeys.toList().forEachIndexed { i, key ->
+            for ((i, key) in store.geminiKeys.toList().withIndex()) {
                 verifier("Gemini #${i + 1} (${mask(key)})") {
                     val modeles = gemini.listModels(key)
                     val modele = store.geminiModel.value
@@ -230,7 +232,7 @@ class Llm(private val store: Store) {
         }
 
         if (fournisseur == "tous" || fournisseur == "cloudflare") {
-            store.cfAccounts.toList().forEachIndexed { i, entry ->
+            for ((i, entry) in store.cfAccounts.toList().withIndex()) {
                 val parts = entry.split(":", limit = 2)
                 if (parts.size == 2 && parts[0].isNotBlank() && parts[1].isNotBlank()) {
                     verifier("Cloudflare #${i + 1} (compte masqué)") {
@@ -248,11 +250,13 @@ class Llm(private val store: Store) {
             "mistral" to "Mistral",
             "huggingface" to "Hugging Face"
         )
-        externes.filter { fournisseur == "tous" || fournisseur == it.first }.forEach { (id, nom) ->
-            val key = store.externalProviderKey(id)
-            if (key.isNotBlank()) verifier("$nom (${mask(key)})") {
-                testerFournisseurCompatible(id, key)
-                "✅ VALIDÉ — clé et accès API acceptés"
+        for ((id, nom) in externes) {
+            if (fournisseur == "tous" || fournisseur == id) {
+                val key = store.externalProviderKey(id)
+                if (key.isNotBlank()) verifier("$nom (${mask(key)})") {
+                    testerFournisseurCompatible(id, key)
+                    "✅ VALIDÉ — clé et accès API acceptés"
+                }
             }
         }
 
@@ -288,14 +292,20 @@ class Llm(private val store: Store) {
         val base = store.externalProviderEndpoint(provider).ifBlank { defaults[provider].orEmpty() }.trimEnd('/')
         require(base.startsWith("https://")) { "Endpoint HTTPS requis" }
         val model = store.externalProviderModel(provider).trim()
+        val endpoint = when {
+            model.isNotBlank() -> "$base/chat/completions"
+            provider == "openrouter" && store.externalProviderEndpoint(provider).isBlank() -> "https://openrouter.ai/api/v1/auth/key"
+            provider == "huggingface" && store.externalProviderEndpoint(provider).isBlank() -> "https://huggingface.co/api/whoami-v2"
+            else -> "$base/models"
+        }
         val request = if (model.isBlank()) {
-            Request.Builder().url("$base/models").header("Authorization", "Bearer $key").get().build()
+            Request.Builder().url(endpoint).header("Authorization", "Bearer $key").get().build()
         } else {
             val body = JSONObject()
                 .put("model", model)
                 .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", "ping")))
                 .put("max_tokens", 1)
-            Request.Builder().url("$base/chat/completions")
+            Request.Builder().url(endpoint)
                 .header("Authorization", "Bearer $key")
                 .post(body.toString().toRequestBody(Http.JSON)).build()
         }
