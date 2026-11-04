@@ -123,11 +123,11 @@ object Telephony {
                 val body = c.getString(1).orEmpty()
                 if (terme.isNotBlank() && !body.contains(terme, true) && !addr.contains(terme, true)) continue
                 val sent = c.getInt(3) == 2
-                out += "• ${if (sent) "Envoyé à" else "Reçu de"} ${nomDe(app, addr) ?: addr} — ${fmt.format(java.util.Date(c.getLong(2)))}\\n$body"
+                out += "• ${if (sent) "Envoyé à" else "Reçu de"} ${nomDe(app, addr) ?: addr} — ${fmt.format(java.util.Date(c.getLong(2)))}\n$body"
             }
         }
         if (out.isEmpty()) return "Aucun SMS ne correspond à ces critères."
-        return "# Recherche SMS (${out.size})\\n\\n" + out.take(count.coerceIn(1, 30)).joinToString("\\n\\n")
+        return "# Recherche SMS (${out.size})\n\n" + out.take(count.coerceIn(1, 30)).joinToString("\n\n")
     }
 
     /** Nom du contact pour un numéro (tolère les espaces, +33, 0…). */
