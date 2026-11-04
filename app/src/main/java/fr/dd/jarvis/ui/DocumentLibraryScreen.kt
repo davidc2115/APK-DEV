@@ -3,6 +3,9 @@ package fr.dd.jarvis.ui
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.weight
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -47,7 +50,16 @@ fun DocumentLibraryScreen(app: JarvisApp, onAsk: (String) -> Unit) {
             if (status.isNotBlank()) Text(status, color = LocalAccent.current, fontSize = 11.sp)
             Text("${files.size} fichier(s) importé(s)", color = HudText, fontSize = 12.sp)
         }
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (files.isEmpty()) {
+                item {
+                    Box(Modifier.fillMaxWidth().padding(top = 28.dp), contentAlignment = Alignment.TopCenter) {
+                        HudPanel(Modifier.fillMaxWidth(0.92f), title = "Aucun document") {
+                            Text("Ta bibliothèque est vide. Utilise « Importer des fichiers » ou le petit + dans une conversation pour joindre un document à JARVIS.", color = HudDim, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
             items(files, key = { it.name }) { file ->
                 HudPanel(Modifier.fillMaxWidth(), title = file.name) {
                     Text("${(file.length() + 1023) / 1024} Ko · .${file.extension.lowercase()}", color = HudDim, fontSize = 11.sp)
