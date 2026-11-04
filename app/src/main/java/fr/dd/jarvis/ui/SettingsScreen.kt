@@ -177,7 +177,7 @@ fun SettingsScreen(app: JarvisApp) {
                         fr.dd.jarvis.hermes.PontMcp.progression.clear()
                         hMsg = h.diagnostiquer(app)
                     }
-                    HudButton(if (confirmerRestauration) "Confirmer restauration" else "Restaurer") {
+                    HudButton(if (confirmerRestauration) "Confirmer restauration" else "Restaurer", enabled = termuxOk && permOk) {
                         if (!confirmerRestauration) {
                             confirmerRestauration = true
                             hMsg = "⚠️ Retouche « Confirmer restauration » pour restaurer la dernière sauvegarde locale."
