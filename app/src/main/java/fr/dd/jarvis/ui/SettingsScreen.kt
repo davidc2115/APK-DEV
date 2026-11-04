@@ -935,7 +935,7 @@ fun SettingsScreen(app: JarvisApp) {
                 Spacer(Modifier.height(6.dp))
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     HudChip("📧 Mails", store.agentMails.value) { store.agentMails.set(!store.agentMails.value) }
-                    HudChip("💶 Factures/devis", store.agentFactures.value) { store.agentFactures.set(!store.agentFactures.value) }
+                    HudChip("💶 Factures + maintenance", store.agentFactures.value) { store.agentFactures.set(!store.agentFactures.value) }
                     HudChip("🚗 Départs RDV", store.agentPlanning.value) { store.agentPlanning.set(!store.agentPlanning.value) }
                     HudChip("🔔 Notifications", store.agentNotifs.value) { store.agentNotifs.set(!store.agentNotifs.value) }
                 }
