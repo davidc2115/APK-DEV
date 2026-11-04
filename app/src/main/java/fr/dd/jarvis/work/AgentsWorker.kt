@@ -13,6 +13,7 @@ import fr.dd.jarvis.JarvisApp
 import fr.dd.jarvis.ai.MailTri
 import fr.dd.jarvis.data.Store
 import fr.dd.jarvis.device.Locator
+import fr.dd.jarvis.device.PhoneHealth
 import fr.dd.jarvis.service.JarvisNotificationListener
 import fr.dd.jarvis.societe.Geo
 import fr.dd.jarvis.societe.core.euro
@@ -82,7 +83,8 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
             "Factures" to { if (store.agentFactures.value && only == null) factures() },
             "Planning" to { if (store.agentPlanning.value && only == null) planning() },
             "Tâches personnelles" to { if (store.agentPlanning.value && only == null) taches() },
-            "Notifications" to { if (store.agentNotifs.value && (only == null || only == "notifs")) notifs() }
+            "Notifications" to { if (store.agentNotifs.value && (only == null || only == "notifs")) notifs() },
+            "Surveillance téléphone" to { if (store.agentNotifs.value && only == null) surveillanceTelephone() }
         )
         for ((nom, f) in steps) {
             try { f() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) { journal.append("- ⚠️ $nom : ${e.message?.take(120)}\n") }
@@ -241,6 +243,20 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
         alert(3012, "📝 Tâches à ne pas oublier", details)
         journal.append("- 📝 " + fresh.size + " tâche(s) personnelle(s) en retard ou à échéance sous 24 h\n")
         writeSet("agent_seen_tasks.txt", seen + fresh.map { it.id + "_" + it.dueDate })
+    }
+
+    // ---------------------------------------------------------------- surveillance locale du téléphone
+    private fun surveillanceTelephone() {
+        val current = PhoneHealth.monitoringAlerts(app).toSet()
+        val previous = readSet("agent_phone_health_alerts.txt")
+        val fresh = current.filterNot { it in previous }
+        if (fresh.isNotEmpty()) {
+            val details = fresh.joinToString("\\n")
+            alert(3013, "📱 Surveillance du téléphone", details)
+            journal.append("- 📱 Surveillance du téléphone :\\n" + fresh.joinToString("") { "  - $it\\n" })
+        }
+        // Une alerte peut réapparaître si le problème a disparu puis revient.
+        writeSet("agent_phone_health_alerts.txt", current)
     }
 
     // ---------------------------------------------------------------- notifications du téléphone
