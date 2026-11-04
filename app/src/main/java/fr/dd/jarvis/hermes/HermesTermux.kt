@@ -190,7 +190,8 @@ p() { echo "${'$'}*"; command -v curl >/dev/null 2>&1 && curl -s -m 4 -X POST -H
             cleApi = s.hermesCle.value, jeton = s.mcpJeton.value,
             gemini = geminiKeys.firstOrNull().orEmpty(), groq = groqKeys.firstOrNull().orEmpty(),
             modele = s.hermesModele.value.ifBlank { s.geminiModel.value }.ifBlank { "gemini-2.5-flash" },
-            modeleGroq = s.groqModel.value.ifBlank { "llama-3.3-70b-versatile" }
+            modeleGroq = s.groqModel.value.ifBlank { "llama-3.3-70b-versatile" },
+            sunoActif = s.sunoMcpActive.value
         )
         val extraEnv = buildString {
             geminiKeys.drop(1).forEachIndexed { index, key -> appendLine("setenv GOOGLE_API_KEY_" + (index + 2) + " " + q(key)) }
@@ -199,7 +200,7 @@ p() { echo "${'$'}*"; command -v curl >/dev/null 2>&1 && curl -s -m 4 -X POST -H
         return base.replace("setenv API_SERVER_MODEL_NAME hermes-agent", "setenv API_SERVER_MODEL_NAME hermes-agent\n" + extraEnv)
     }
 
-    internal fun scriptConfiguration(cleApi: String, jeton: String, gemini: String, groq: String, modele: String, modeleGroq: String, urlMcp: String = PontMcp.url()): String {
+    internal fun scriptConfiguration(cleApi: String, jeton: String, gemini: String, groq: String, modele: String, modeleGroq: String, urlMcp: String = PontMcp.url(), sunoActif: Boolean = false): String {
         val yaml = buildString {
             appendLine("# Géré par Jarvis (fr.dd.jarvis) : régénéré à chaque « Configurer Hermès » depuis l'application.")
             appendLine("# Ancienne configuration éventuelle : config.yaml.avant-jarvis")
@@ -225,6 +226,13 @@ p() { echo "${'$'}*"; command -v curl >/dev/null 2>&1 && curl -s -m 4 -X POST -H
             appendLine("      Authorization: \"Bearer $jeton\"")
             appendLine("    timeout: 180")
             appendLine("    connect_timeout: 20")
+            if (sunoActif) {
+                appendLine("  suno:")
+                appendLine("    url: \\"https://api.suno.com/mcp\\"")
+                appendLine("    auth: oauth")
+                appendLine("    timeout: 180")
+                appendLine("    connect_timeout: 30")
+            }
             appendLine("gateway:")
             appendLine("  api_server:")
             appendLine("    enabled: true")
