@@ -145,10 +145,10 @@
             android:icon="@drawable/ic_launcher">
             <intent-filter>
                 <action android:name="androidx.car.app.CarAppService" />
-                <category android:name="androidx.car.app.category.POI" />
+                <category android:name="androidx.car.app.category.MESSAGING" />
             </intent-filter>
         </service>
-        <meta-data android:name="androidx.car.app.minCarApiLevel" android:value="1" />
+        <meta-data android:name="androidx.car.app.minCarApiLevel" android:value="7" />
         <service
             android:name=".service.JarvisSessionService"
             android:exported="true"

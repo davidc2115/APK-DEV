@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "fr.dd.jarvis"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "fr.dd.jarvis"
@@ -57,7 +57,9 @@ android {
                 "/META-INF/{AL2.0,LGPL2.1}",
                 "META-INF/LICENSE*",
                 "META-INF/NOTICE*",
-                "META-INF/DEPENDENCIES"
+                "META-INF/DEPENDENCIES",
+                // Ressource OSGi multi-release sans utilité dans une application Android.
+                "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
             )
             pickFirsts += setOf("META-INF/mailcap", "META-INF/mimetypes.default")
         }
@@ -69,7 +71,7 @@ dependencies {
     implementation(composeBom)
 
     implementation("androidx.core:core-ktx:1.13.1")
-    implementation("androidx.car.app:app:1.4.0")
+    implementation("androidx.car.app:app:1.7.0")
     implementation("androidx.activity:activity-compose:1.9.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.3")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.3")

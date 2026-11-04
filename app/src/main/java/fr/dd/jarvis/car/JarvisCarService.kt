@@ -2,6 +2,7 @@ package fr.dd.jarvis.car
 
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ApplicationInfo
 import android.media.AudioAttributes
 import android.net.Uri
 import android.os.Handler
@@ -20,6 +21,11 @@ import androidx.car.app.model.MessageTemplate
 import androidx.car.app.model.Row
 import androidx.car.app.model.SearchTemplate
 import androidx.car.app.model.Template
+import androidx.car.app.messaging.model.CarMessage
+import androidx.car.app.messaging.model.ConversationCallback
+import androidx.car.app.messaging.model.ConversationItem
+import androidx.car.app.model.CarText
+import androidx.core.app.Person
 import androidx.car.app.validation.HostValidator
 import androidx.car.app.versioning.CarAppApiLevels
 import androidx.lifecycle.DefaultLifecycleObserver
@@ -44,16 +50,22 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /**
- * JARVIS sur Android Auto (catégorie « points d'intérêt ») :
+ * JARVIS sur Android Auto (messagerie conversationnelle + commandes vocales) :
  *  - accueil : Parler à JARVIS, planning d'aujourd'hui / de demain, dernière réponse ;
  *  - conversation vocale au MICRO DE LA VOITURE (Android Auto récent) : la phrase est transcrite (Whisper sur Groq),
  *    JARVIS répond à voix haute, puis réécoute ; la conversation se referme après quelques secondes de silence ;
  *  - agenda : rendez-vous du jour, un appui lance la navigation vers l'adresse.
- * Android Auto n'affiche les applications installées hors Play Store que si « Sources inconnues » est coché dans ses
- * paramètres pour les développeurs (Android Auto › Version touchée 10 fois › ⋮ › Paramètres pour les développeurs).
+ * La messagerie basée sur des modèles exige Car API 7 et une distribution Google Play en test interne/fermé.
+ * Le réglage « Sources inconnues » ne déverrouille pas les applications Car App Library sur un véhicule réel.
  */
 class JarvisCarService : CarAppService() {
-    override fun createHostValidator(): HostValidator = HostValidator.ALLOW_ALL_HOSTS_VALIDATOR
+    override fun createHostValidator(): HostValidator =
+        if ((applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+            HostValidator.ALLOW_ALL_HOSTS_VALIDATOR
+        } else {
+            HostValidator.Builder(this).addAllowedHosts(androidx.car.app.R.array.hosts_allowlist_sample).build()
+        }
+
     override fun onCreateSession(): Session = JarvisCarSession()
 }
 
@@ -86,9 +98,27 @@ class JarvisCarScreen(ctx: CarContext) : Screen(ctx) {
     }
 
     override fun onGetTemplate(): Template {
+        if (!app.chatLoaded) app.chatCharger()
         val voix = voixVoiture(carContext)
         val liste = ItemList.Builder()
-            .addItem(Row.Builder().setTitle("🎤 Parler à JARVIS")
+        val moi = Person.Builder().setName("Moi").setKey("jarvis_user").build()
+        val jarvis = Person.Builder().setName("JARVIS").setKey("jarvis").setImportant(true).build()
+        val historique = (CarBridge.contexte().ifEmpty { app.chat.toList() }).takeLast(5)
+        val messages = if (historique.isEmpty()) {
+            listOf(CarMessage.Builder().setSender(jarvis).setBody(CarText.create("Je suis prêt. Tu peux me parler ou me dicter une demande."))
+                .setReceivedTimeEpochMillis(System.currentTimeMillis()).setRead(true).build())
+        } else historique.map { m ->
+            CarMessage.Builder().setSender(if (m.fromUser) moi else jarvis).setBody(CarText.create(m.text.take(500)))
+                .setReceivedTimeEpochMillis(m.ts).setRead(true).build()
+        }
+        val callback = object : ConversationCallback {
+            override fun onMarkAsRead() {}
+            override fun onTextReply(text: String) {
+                if (text.isNotBlank()) CarBridge.repondre(carContext, text) { invalidate() }
+            }
+        }
+        liste.addItem(ConversationItem.Builder("jarvis-assistant", CarText.create("JARVIS"), moi, messages, callback).build())
+        liste.addItem(Row.Builder().setTitle("🎤 Parler à JARVIS")
                 .addText(if (voix) "Micro de la voiture : demande, réponse lue, on enchaîne" else "Dictée (voiture à l'arrêt) — ou « Répondre » à la conversation JARVIS")
                 .setOnClickListener {
                     if (voix) ConversationVoiture.ouvrir(carContext, screenManager)

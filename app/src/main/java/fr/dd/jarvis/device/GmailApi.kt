@@ -27,6 +27,9 @@ object GmailApi {
     const val SCOPE = "https://www.googleapis.com/auth/gmail.modify"
     private const val BASE = "https://gmail.googleapis.com/gmail/v1/users/me"
 
+    private fun b64(s: String, flags: Int = android.util.Base64.NO_WRAP): String =
+        android.util.Base64.encodeToString(s.toByteArray(Charsets.UTF_8), flags)
+
     const val CAL_SCOPE = "https://www.googleapis.com/auth/calendar"
 
     private fun request(email: String?) = AuthorizationRequest.builder().setRequestedScopes(listOf(Scope(SCOPE), Scope(CAL_SCOPE))).apply {
@@ -75,7 +78,6 @@ object GmailApi {
         val auth = authorize(ctx, account)
         if (auth.hasResolution()) throw IllegalStateException("Autorisation Gmail à renouveler pour $account : ouvre Réglages › Mails et reconnecte ce compte (le consentement a expiré ou a changé).")
         val token = auth.accessToken ?: throw IllegalStateException("Connexion Gmail expirée pour $account : reconnecte le compte dans Réglages › Mails.")
-        fun b64(s: String, flags: Int = android.util.Base64.NO_WRAP) = android.util.Base64.encodeToString(s.toByteArray(Charsets.UTF_8), flags)
         val raw = if (piecesJointes.isEmpty()) {
             "From: $account\r\n" +
                 "To: $destinataire\r\n" +
