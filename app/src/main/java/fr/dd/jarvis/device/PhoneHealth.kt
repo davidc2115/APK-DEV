@@ -113,4 +113,37 @@ object PhoneHealth {
             append("\n\nRapport en lecture seule : Android ne permet pas à JARVIS de mesurer toutes les applications, ni de garantir qu'un processus tiers restera actif.")
         }
     }
+
+    /** Alertes de surveillance périodique : seuils conservateurs, mesures locales et lecture seule. */
+    fun monitoringAlerts(app: JarvisApp): List<String> {
+        val ctx = app.applicationContext
+        val batteryIntent = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val battery = runCatching {
+            (ctx.getSystemService(Context.BATTERY_SERVICE) as BatteryManager)
+                .getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY).takeIf { it in 0..100 }
+        }.getOrNull()
+        val charging = (batteryIntent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1) in setOf(
+            BatteryManager.BATTERY_STATUS_CHARGING, BatteryManager.BATTERY_STATUS_FULL
+        )
+        val alerts = mutableListOf<String>()
+        if (battery != null && battery <= 15 && !charging) {
+            alerts += "Batterie critique : $battery % et téléphone non branché."
+        }
+        runCatching { StatFs(Environment.getDataDirectory().absolutePath).availableBytes }
+            .getOrNull()?.let { free ->
+                if (free < 1024L * 1024L * 1024L) alerts += "Stockage critique : moins de 1 Go disponible."
+            }
+        val power = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (Build.VERSION.SDK_INT >= 29) {
+            val status = runCatching { power.currentThermalStatus }.getOrDefault(PowerManager.THERMAL_STATUS_NONE)
+            if (status >= PowerManager.THERMAL_STATUS_SEVERE) {
+                alerts += "Surchauffe système : niveau thermique élevé. Réduis les tâches lourdes et laisse refroidir l'appareil."
+            }
+        }
+        val memory = ActivityManager.MemoryInfo()
+        (ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).getMemoryInfo(memory)
+        if (memory.lowMemory) alerts += "Mémoire vive sous pression : Android signale un manque de RAM."
+        return alerts.distinct()
+    }
+
 }
