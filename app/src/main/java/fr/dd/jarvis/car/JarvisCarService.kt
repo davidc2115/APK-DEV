@@ -247,10 +247,14 @@ class ConversationVoiture private constructor(private val ctx: CarContext, priva
         if (fermee) return
         if (texte.isBlank()) { if (++incompris < 3) ecouter() else terminer("Je n'ai pas compris."); return }
         incompris = 0
+        app.chatCharger()
+        if (CarBridge.contexte().isEmpty()) app.chat.toList().takeLast(10).forEach { CarBridge.ajouter(it) }
         val norm = Normalizer.normalize(texte.lowercase(), Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
         if (arret.matches(norm)) { parler("D'accord.") { terminer("Conversation terminée.") }; return }
         montrer(Etat.Reflexion(texte))
-        CarBridge.ajouter(ChatMsg(true, texte))
+        val userMessage = ChatMsg(true, texte)
+        CarBridge.ajouter(userMessage)
+        app.chatAjouter(userMessage)
         val rep = withContext(Dispatchers.IO) {
             try {
                 // En voiture : les actions sensibles (envoi de SMS, appel…) qui exigent une confirmation forcée sont refusées.
@@ -259,7 +263,9 @@ class ConversationVoiture private constructor(private val ctx: CarContext, priva
         }
         if (fermee) return
         val propre = rep.replace(Regex("[#*_`>|]+"), "").replace(Regex("\\s+"), " ").trim().ifBlank { "C'est fait." }
-        CarBridge.ajouter(ChatMsg(false, propre))
+        val assistantMessage = ChatMsg(false, propre)
+        CarBridge.ajouter(assistantMessage)
+        app.chatAjouter(assistantMessage)
         montrer(Etat.Reponse(texte, propre))
         // Réponse lue, puis on réécoute : on enchaîne sans retoucher l'écran ; silence → fin.
         parler(propre.take(1500)) { ecouter() }
@@ -355,13 +361,19 @@ class ReponseTexteScreen(ctx: CarContext, private val question: String) : Screen
             override fun onDestroy(owner: LifecycleOwner) { scope.cancel(); runCatching { tts?.stop(); tts?.shutdown() } }
         })
         scope.launch {
-            CarBridge.ajouter(ChatMsg(true, question))
+            app.chatCharger()
+            if (CarBridge.contexte().isEmpty()) app.chat.toList().takeLast(10).forEach { CarBridge.ajouter(it) }
+            val userMessage = ChatMsg(true, question)
+            CarBridge.ajouter(userMessage)
+            app.chatAjouter(userMessage)
             val rep = withContext(Dispatchers.IO) {
                 try { Brain(app.llm, ToolBox(app) { _, force -> !force }, app) { app.store.userName.value }.reply(CarBridge.contexte()) { } }
                 catch (e: Throwable) { "Désolé, je n'ai pas pu faire ça : ${e.message ?: e.javaClass.simpleName}" }
             }
             val propre = rep.replace(Regex("[#*_`>|]+"), "").replace(Regex("\\s+"), " ").trim().ifBlank { "C'est fait." }
-            CarBridge.ajouter(ChatMsg(false, propre))
+            val assistantMessage = ChatMsg(false, propre)
+            CarBridge.ajouter(assistantMessage)
+            app.chatAjouter(assistantMessage)
             texte = propre
             invalidate()
             runCatching { tts?.speak(propre.take(1500), TextToSpeech.QUEUE_FLUSH, null, "jarvis") }
