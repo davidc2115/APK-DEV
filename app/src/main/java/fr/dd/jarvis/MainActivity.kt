@@ -20,6 +20,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
@@ -237,17 +240,22 @@ private fun Root(app: JarvisApp, vm: ChatViewModel) {
 
         // Barre de navigation HUD
         if (!imeOpen) Row(
-            Modifier.fillMaxWidth().background(accent.copy(alpha = 0.08f)).border(1.dp, accent.copy(alpha = 0.35f)).padding(vertical = 6.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly
+            Modifier.fillMaxWidth().height(64.dp)
+                .background(accent.copy(alpha = 0.08f))
+                .border(1.dp, accent.copy(alpha = 0.35f))
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.Start,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             tabs.forEachIndexed { i, t ->
                 val sel = i == tab
                 Column(
-                    Modifier.clickable { tab = i }.padding(horizontal = 8.dp, vertical = 2.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                    Modifier.width(58.dp).height(56.dp).clickable { tab = i },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
                 ) {
-                    Icon(t.icon, null, tint = if (sel) accent else HudDim, modifier = Modifier.size(24.dp))
-                    Text(t.label.uppercase(), color = if (sel) accent else HudDim, fontSize = 9.sp, letterSpacing = 1.sp, fontFamily = FontFamily.Monospace)
+                    Icon(t.icon, null, tint = if (sel) accent else HudDim, modifier = Modifier.size(22.dp))
+                    Text(t.label.uppercase(), color = if (sel) accent else HudDim, fontSize = 8.sp, letterSpacing = 0.7.sp, fontFamily = FontFamily.Monospace, maxLines = 1)
                 }
             }
         }
