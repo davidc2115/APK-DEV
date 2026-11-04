@@ -208,18 +208,15 @@ object Routeur {
 
     fun choisir(app: JarvisApp, texte: String): Choix {
         val mode = app.store.hermesMode.value
-        if (mode == "off" || !app.store.hermesInstalle.value) return Choix(Cible.JARVIS, "Hermès désactivé")
+        if (mode == "off" || !app.store.hermesInstalle.value) return Choix(Cible.JARVIS, "Hermès désactivé ou non installé")
         val t = texte.trim()
-        if (NOMME.containsMatchIn(t)) return Choix(Cible.HERMES, "Hermès demandé")
-        if (mode != "auto") return Choix(Cible.JARVIS, "Hermès seulement sur demande")
-        if (app.enVoiture) return Choix(Cible.JARVIS, "Android Auto : réponse rapide")
-        if (BREF.matches(t) && app.chat.takeLast(6).any { !it.fromUser }) return Choix(Cible.HERMES, "suite naturelle de la conversation")
-        if (BREF.matches(t)) return Choix(Cible.JARVIS, "réponse courte hors conversation")
-        val complexe = COMPLEXE.containsMatchIn(t)
+        if (mode == "demande" && !NOMME.containsMatchIn(t)) return Choix(Cible.JARVIS, "mode à la demande : Hermès doit être nommé")
         return Choix(Cible.HERMES, when {
-            COMMANDE.containsMatchIn(t) -> "action confiée à Hermès via les outils MCP de Jarvis"
-            complexe -> "tâche complexe"
-            else -> "orchestrateur principal"
+            app.enVoiture -> "Hermès, cerveau principal (mode mains libres)"
+            BREF.matches(t) -> "Hermès, continuité de conversation"
+            COMMANDE.containsMatchIn(t) -> "Hermès orchestre l'action via les outils MCP de Jarvis"
+            COMPLEXE.containsMatchIn(t) -> "Hermès traite ou délègue la tâche selon la compétence requise"
+            else -> "Hermès, cerveau principal de Jarvis"
         })
     }
 }
