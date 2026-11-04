@@ -181,14 +181,14 @@ fun SettingsScreen(app: JarvisApp) {
                         if (!permOk && !fr.dd.jarvis.device.AdbShell.hasKey(ctx)) permLauncher.launch(h.PERMISSION)
                         else scope.launch { hMsg = "⏳ Autorisation…"; hMsg = h.autoriser(app); hTick++ }
                     }
-                    HudButton(if (store.hermesInstalle.value) "3. Réinstaller / mettre à jour Hermès" else "3. Installer Hermès", Modifier.fillMaxWidth(), enabled = termuxOk && permOk, filled = termuxOk && permOk && !store.hermesInstalle.value) {
+                    HudButton(if (store.hermesInstalle.value) "3. Réinstaller / mettre à jour Hermès" else "3. Installer Hermès", Modifier.fillMaxWidth(), enabled = termuxOk && permOk && store.apiKeysSecureAvailable, filled = termuxOk && permOk && store.apiKeysSecureAvailable && !store.hermesInstalle.value) {
                         fr.dd.jarvis.hermes.PontMcp.progression.clear()
                         hMsg = h.installer(app)
                     }
                 }
                 Spacer(Modifier.height(6.dp))
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    HudButton("Configurer", enabled = permOk) { hMsg = h.configurer(app) }
+                    HudButton("Configurer", enabled = permOk && store.apiKeysSecureAvailable) { hMsg = h.configurer(app) }
                     HudButton("Démarrer", enabled = permOk && !enLigne) { hMsg = h.demarrer(app) }
                     HudButton("Arrêter", enabled = permOk && enLigne) { hMsg = h.arreter(app) }
                     HudButton("Actualiser") { hTick++ }
