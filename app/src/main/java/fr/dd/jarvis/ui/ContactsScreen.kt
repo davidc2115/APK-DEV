@@ -95,7 +95,11 @@ fun ContactsScreen(app: JarvisApp) {
         }
         if (working) item { Text("⏳ JARVIS rédige la fiche…", color = LocalAccent.current, fontSize = 13.sp) }
         items(results, key = { it.id }) { c ->
-            HudPanel(Modifier.fillMaxWidth(), onClick = { selected = c }) {
+            HudScheduleCard(
+                Modifier.fillMaxWidth(),
+                accent = HudIdentityColor(c.id.toString()),
+                onClick = { selected = c }
+            ) {
                 Text(c.name, color = HudText, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 if (c.company.isNotBlank()) Text("🏢 ${c.company}", color = HudDim, fontSize = 12.sp)
                 c.phones.firstOrNull()?.let { Text("📞 $it", color = HudDim, fontSize = 12.sp) }
