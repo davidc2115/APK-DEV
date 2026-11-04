@@ -183,6 +183,29 @@ class Store(context: Context) {
     }
     fun removeCfAccount(i: Int) { if (i in cfAccounts.indices) cfAccounts.removeAt(i); writeList("cfAccounts", cfAccounts) }
 
+
+    // Fournisseurs externes configurables depuis la conversation Hermès/Jarvis.
+    // Les secrets restent exclusivement dans EncryptedSharedPreferences.
+    private val externalProviderIds = setOf("zai", "openrouter", "nvidia", "mistral", "huggingface")
+    fun setExternalProvider(providerRaw: String, apiKeyRaw: String, modelRaw: String = "", endpointRaw: String = "") {
+        val provider = providerRaw.trim().lowercase()
+        require(provider in externalProviderIds) { "Fournisseur non pris en charge : $provider" }
+        val apiKey = apiKeyRaw.trim()
+        require(apiKey.length >= 8 && !apiKey.any { it.isWhitespace() }) { "Clé API invalide." }
+        val secure = secretPrefs ?: throw IllegalStateException("Stockage chiffré Android indisponible : clé non enregistrée.")
+        check(secure.edit().putString("external_${provider}_key", apiKey).commit()) { "Échec de l'enregistrement chiffré." }
+        prefs.edit().putString("external_${provider}_model", modelRaw.trim())
+            .putString("external_${provider}_endpoint", endpointRaw.trim()).apply()
+    }
+    fun externalProviderKey(provider: String): String =
+        if (provider in externalProviderIds) secretPrefs?.getString("external_${provider}_key", "").orEmpty() else ""
+    fun externalProviderModel(provider: String): String =
+        if (provider in externalProviderIds) prefs.getString("external_${provider}_model", "").orEmpty() else ""
+    fun externalProviderEndpoint(provider: String): String =
+        if (provider in externalProviderIds) prefs.getString("external_${provider}_endpoint", "").orEmpty() else ""
+    fun externalProvidersConfigured(): List<String> =
+        externalProviderIds.filter { externalProviderKey(it).isNotBlank() }
+
     fun addGroqKeys(raw: String) = addApiKeys(groqKeys, "groqKeys", raw)
     fun addGeminiKeys(raw: String) = addApiKeys(geminiKeys, "geminiKeys", raw)
     fun removeGroqKey(i: Int) {
