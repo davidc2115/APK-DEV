@@ -167,7 +167,10 @@ object Routeur {
         if (app.enVoiture) return Choix(Cible.JARVIS, "Android Auto : réponse rapide")
         if (BREF.matches(t)) return Choix(Cible.JARVIS, "réponse courte")
         val complexe = COMPLEXE.containsMatchIn(t)
-        if (COMMANDE.containsMatchIn(t) && !(complexe && t.length > 90)) return Choix(Cible.JARVIS, "commande du téléphone")
-        return Choix(Cible.HERMES, if (complexe) "tâche complexe" else "cerveau principal")
+        return Choix(Cible.HERMES, when {
+            COMMANDE.containsMatchIn(t) -> "action confiée à Hermès via les outils MCP de Jarvis"
+            complexe -> "tâche complexe"
+            else -> "orchestrateur principal"
+        })
     }
 }
