@@ -57,6 +57,11 @@ object Hermes {
         return """
 Tu es Hermès, le cerveau principal de JARVIS, l'assistant personnel de ${userName.ifBlank { "l'utilisateur" }} sur son smartphone Android. Nous sommes le $maintenant.
 Réponds toujours en français, de façon naturelle et concise : ta réponse est souvent lue à voix haute (évite les tableaux et le Markdown chargé).
+Tu es le chef d'orchestre central de JARVIS : tu ne te limites pas à répondre, tu répartis le travail entre les modèles et agents réellement disponibles, puis tu contrôles et synthétises leurs résultats.
+Pour toute mission complexe, multi-étapes ou nécessitant des avis indépendants, décompose le travail et utilise delegate_task pour lancer plusieurs sous-agents en parallèle. Répartis les missions selon leurs compétences et, si le paramètre « option » est proposé, utilise les routes jarvis-gemini, jarvis-groq, jarvis-cloudflare-* ou les routes configurées disponibles. Si ces options ne sont pas proposées, utilise la délégation native sans paramètre de route.
+Tu peux confier un sous-problème à un sous-agent orchestrateur (role="orchestrator") lorsque plusieurs niveaux de travail sont réellement nécessaires. Limite les délégations inutiles : une commande simple ou urgente doit rester directe. Ne lance jamais plusieurs agents pour répéter exactement la même tâche ; donne à chacun un objectif et un livrable distincts.
+À la fin, compare les résultats, vérifie les contradictions et les faits importants, puis rédige une réponse unique. Les agents ne doivent jamais contourner les confirmations ou les protections de JARVIS pour les actions sensibles.
+Ressources IA de JARVIS : Gemini (analyse et raisonnement, clés en rotation), Groq (agent rapide et secours, clés en rotation), Cloudflare Workers AI (secours conversationnel et modèles configurés), ainsi que tout autre fournisseur/modèle déjà configuré dans Hermes. Le tool jarvis_ai_agent permet de consulter directement le moteur IA interne de JARVIS (Gemini puis Groq) comme deuxième avis. Pour les images, utilise l'outil JARVIS generer_image afin de conserver son moteur, ses réglages et son archivage Obsidian.
 Tu travailles en équipe :
 - toi (Hermès) : raisonnement, tâches en plusieurs étapes, recherche web, rédaction, code et scripts dans Termux, mémoire long terme, compétences et tâches planifiées ;
 - les outils de JARVIS, via le serveur MCP « jarvis » (outils mcp__jarvis__*) : téléphone (appels, SMS, applis, réglages), agenda, mails, contacts, musique, réveils, domotique, coffre Obsidian (obsidian_fichiers, obsidian_lire…), société (clients, devis, factures, paie, KML), localisation précise (ma_position), génération d'images/vidéos. Pour TOUTE action sur le téléphone ou les données de l'utilisateur, utilise ces outils plutôt que des commandes shell ; n'invente jamais leur contenu.
@@ -119,11 +124,10 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
 
 /**
  * Répartition des demandes (mode « auto ») :
- *  - Hermès, cerveau principal : questions ouvertes, recherche, analyse, rédaction, code, automatisations, tâches
- *    en plusieurs étapes, et tout ce qui n'est pas une commande rapide ;
- *  - Groq (cerveau réflexe de Jarvis, outils filtrés, ~1 s) : commandes du téléphone, Android Auto, agenda, musique,
- *    domotique, société, fichiers Obsidian ;
- *  - Gemini : agents spécialisés à l'intérieur des outils (analyse de la demande, mails, planning, vision, images).
+ *  - Hermès, orchestrateur principal : reçoit toutes les demandes en mode auto, décompose les missions et appelle
+ *    les outils MCP de Jarvis pour les actions téléphone, agenda, mails, domotique, société et fichiers ;
+ *  - Jarvis/Groq : réponses très brèves et mode Android Auto, puis secours automatique si Hermès est indisponible ;
+ *  - Gemini, Groq et Cloudflare : modèles spécialisés et routes de sous-agents, avec les autres fournisseurs Hermes configurés.
  */
 object Routeur {
     enum class Cible { HERMES, JARVIS }
@@ -162,7 +166,10 @@ object Routeur {
         if (app.enVoiture) return Choix(Cible.JARVIS, "Android Auto : réponse rapide")
         if (BREF.matches(t)) return Choix(Cible.JARVIS, "réponse courte")
         val complexe = COMPLEXE.containsMatchIn(t)
-        if (COMMANDE.containsMatchIn(t) && !(complexe && t.length > 90)) return Choix(Cible.JARVIS, "commande du téléphone")
-        return Choix(Cible.HERMES, if (complexe) "tâche complexe" else "cerveau principal")
+        return Choix(Cible.HERMES, when {
+            COMMANDE.containsMatchIn(t) -> "action confiée à Hermès via les outils MCP de Jarvis"
+            complexe -> "tâche complexe"
+            else -> "orchestrateur principal"
+        })
     }
 }

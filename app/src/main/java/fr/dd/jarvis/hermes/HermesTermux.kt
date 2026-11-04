@@ -381,9 +381,8 @@ p "✅ Hermès installé (${'$'}{MODE})."
         if (!app.store.apiKeysSecureAvailable) {
             return "⛔ Le stockage chiffré Android est indisponible. Configuration Hermès interrompue pour éviter de supprimer ou de transmettre des clés non protégées."
         }
-        PontMcp.demarrer(app)
-        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
-        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+        if (!termuxInstalle(app) || !permissionOk(app)) return "ℹ️ Termux et son autorisation sont nécessaires pour configurer Hermès."
+        return synchroniserCles(app)
     }
 
     /** Synchronise les secrets et les pools sans réécrire le reste de config.yaml. */
@@ -393,15 +392,23 @@ p "✅ Hermès installé (${'$'}{MODE})."
         if (!termuxInstalle(app) || !permissionOk(app)) return "ℹ️ Clés chiffrées ; synchronisation en attente de Termux et de son autorisation."
         val gemini = s.geminiKeys.toList()
         val groq = s.groqKeys.toList()
+        val cloudflare = s.cfAccounts.toList().mapNotNull { raw ->
+            val id = raw.substringBefore(':').trim()
+            val key = raw.substringAfter(':', "").trim()
+            if (Regex("[0-9a-fA-F]{32}").matches(id) && key.isNotBlank()) id to key else null
+        }
         val model = s.groqModel.value.ifBlank { "llama-3.3-70b-versatile" }
+        val cloudflareModel = s.cfChatModel.value.ifBlank { "@cf/meta/llama-3.3-70b-instruct-fp8-fast" }
         val envScript = buildString {
             appendLine("H=\"${'$'}HOME/.hermes\"; mkdir -p \"${'$'}H/logs\"")
             appendLine("setenv() { touch \"${'$'}H/.env\"; grep -v \"^${'$'}1=\" \"${'$'}H/.env\" > \"${'$'}H/.env.j\" 2>/dev/null || true; echo \"${'$'}1=${'$'}2\" >> \"${'$'}H/.env.j\"; mv \"${'$'}H/.env.j\" \"${'$'}H/.env\"; }")
             appendLine("removeenvfamily() { grep -v -E \"^${'$'}1(_[0-9]+)?=\" \"${'$'}H/.env\" > \"${'$'}H/.env.j\" 2>/dev/null || true; mv \"${'$'}H/.env.j\" \"${'$'}H/.env\"; }")
             appendLine("removeenvfamily GOOGLE_API_KEY")
             appendLine("removeenvfamily GROQ_API_KEY")
+            appendLine("removeenvfamily JARVIS_CF_KEY")
             gemini.forEachIndexed { index, key -> appendLine("setenv " + (if (index == 0) "GOOGLE_API_KEY" else "GOOGLE_API_KEY_" + (index + 1)) + " " + q(key)) }
             groq.forEachIndexed { index, key -> appendLine("setenv " + (if (index == 0) "GROQ_API_KEY" else "GROQ_API_KEY_" + (index + 1)) + " " + q(key)) }
+            cloudflare.forEachIndexed { index, pair -> appendLine("setenv JARVIS_CF_KEY_" + (index + 1) + " " + q(pair.second)) }
             appendLine("chmod 600 \"${'$'}H/.env\"")
         }
         val py = """
@@ -422,7 +429,7 @@ def is_groq(item):
     if not isinstance(item, dict): return False
     provider = str(item.get("provider", ""))
     base_url = str(item.get("base_url", ""))
-    return provider in ("custom:groq", "groq") or (provider == "custom" and "groq.com" in base_url)
+    return provider in ("custom:groq", "groq") or provider.startswith("custom:jarvis_cf_") or (provider == "custom" and "groq.com" in base_url)
 fallbacks = [item for item in fallbacks if not is_groq(item)]
 strategies = data.setdefault("credential_pool_strategies", {})
 if not isinstance(strategies, dict):
@@ -435,7 +442,70 @@ if os.environ.get("JARVIS_HAS_GROQ") == "1":
 else:
     providers.pop("groq", None)
     strategies.pop("groq", None)
+cf_ids = [x for x in os.environ.get("JARVIS_CF_IDS", "").split(",") if len(x) == 32]
+for name in list(providers):
+    if str(name).startswith("jarvis_cf_"):
+        providers.pop(name, None)
+for index, account_id in enumerate(cf_ids, 1):
+    providers[f"jarvis_cf_{index}"] = {"api": f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1", "key_env": f"JARVIS_CF_KEY_{index}"}
+for index in range(1, len(cf_ids) + 1):
+    fallbacks.append({"provider": f"custom:jarvis_cf_{index}", "model": os.environ["JARVIS_CF_MODEL"]})
 data["fallback_providers"] = fallbacks
+
+# Multi-agent orchestration, preserving all unrelated Hermes configuration.
+delegation = data.setdefault("delegation", {})
+if not isinstance(delegation, dict):
+    raise SystemExit("Section delegation invalide ; aucune modification.")
+delegation["max_concurrent_children"] = 3
+delegation["max_spawn_depth"] = 2
+delegation["orchestrator_enabled"] = True
+child_fallbacks = delegation.get("fallback_providers") or []
+if not isinstance(child_fallbacks, list): child_fallbacks = []
+child_fallbacks = [x for x in child_fallbacks if not is_groq(x)]
+if os.environ.get("JARVIS_HAS_GROQ") == "1": child_fallbacks.append({"provider": "custom:groq", "model": os.environ["JARVIS_GROQ_MODEL"]})
+for index in range(1, len(cf_ids) + 1): child_fallbacks.append({"provider": f"custom:jarvis_cf_{index}", "model": os.environ["JARVIS_CF_MODEL"]})
+for item in fallbacks:
+    if isinstance(item, dict):
+        provider, model_name = str(item.get("provider", "")), str(item.get("model", ""))
+        if provider and model_name and not any(isinstance(x, dict) and x.get("provider") == provider and x.get("model") == model_name for x in child_fallbacks):
+            child_fallbacks.append({"provider": provider, "model": model_name})
+if child_fallbacks: delegation["fallback_providers"] = child_fallbacks
+backends = delegation.setdefault("backends", {})
+if not isinstance(backends, dict): backends = {}; delegation["backends"] = backends
+model_map = backends.setdefault("model_map", {})
+if not isinstance(model_map, dict): model_map = {}; backends["model_map"] = model_map
+options = model_map.get("options") or []
+if not isinstance(options, list): options = []
+options = [x for x in options if not (isinstance(x, dict) and str(x.get("name", "")).startswith("jarvis-"))]
+def add_route(name, description, provider, model_name):
+    if provider and model_name: options.append({"name": name, "description": description, "provider": provider, "model": model_name})
+if os.environ.get("JARVIS_HAS_GEMINI") == "1": add_route("jarvis-gemini", "Analyse approfondie et raisonnement via Gemini", "gemini", os.environ["JARVIS_GEMINI_MODEL"])
+if os.environ.get("JARVIS_HAS_GROQ") == "1": add_route("jarvis-groq", "Agent rapide et technique via Groq", "custom:groq", os.environ["JARVIS_GROQ_MODEL"])
+for index in range(1, len(cf_ids) + 1): add_route(f"jarvis-cloudflare-{index}", "Agent de secours Cloudflare Workers AI", f"custom:jarvis_cf_{index}", os.environ["JARVIS_CF_MODEL"])
+known = {(str(x.get("provider", "")), str(x.get("model", ""))) for x in options if isinstance(x, dict)}
+for index, item in enumerate(fallbacks, 1):
+    if isinstance(item, dict):
+        provider, model_name = str(item.get("provider", "")), str(item.get("model", ""))
+        if provider and model_name and (provider, model_name) not in known:
+            add_route(f"jarvis-configured-{index}", f"Fournisseur déjà configuré : {provider}", provider, model_name)
+            known.add((provider, model_name))
+aliases = data.get("model_aliases")
+if isinstance(aliases, dict):
+    for alias, item in aliases.items():
+        if isinstance(item, dict):
+            provider, model_name = str(item.get("provider", "")), str(item.get("model", ""))
+            if provider and model_name and (provider, model_name) not in known:
+                safe = "".join(ch.lower() if ch.isalnum() else "-" for ch in str(alias)).strip("-")[:20] or "modele"
+                add_route(f"jarvis-alias-{safe}", f"Alias Hermes existant : {alias}", provider, model_name)
+                known.add((provider, model_name))
+model_map["options"] = options
+if os.environ.get("JARVIS_HAS_GEMINI") == "1": model_map["default"] = "jarvis-gemini"
+elif os.environ.get("JARVIS_HAS_GROQ") == "1": model_map["default"] = "jarvis-groq"
+elif cf_ids: model_map["default"] = "jarvis-cloudflare-1"
+if os.environ.get("JARVIS_ADVANCED_DELEGATION") == "1" and delegation.get("backend", "default") in ("default", "model_map"):
+    delegation["backend"] = "model_map"
+elif delegation.get("backend") == "model_map":
+    delegation["backend"] = "default"
 backup = p.with_name("config.yaml.before-jarvis-key-sync")
 if not backup.exists(): shutil.copy2(p, backup)
 fd, name = tempfile.mkstemp(prefix="config.yaml.", dir=str(p.parent))
@@ -443,11 +513,14 @@ with os.fdopen(fd, "w") as stream: yaml.safe_dump(data, stream, sort_keys=False,
 os.chmod(name, 0o600)
 os.replace(name, p)
 """.trimIndent()
+        val hasGemini = if (gemini.isNotEmpty()) "1" else "0"
         val hasGroq = if (groq.isNotEmpty()) "1" else "0"
-        val configCommand = "proot-distro login debian --termux-home -- env JARVIS_HAS_GROQ=" + hasGroq + " JARVIS_GROQ_MODEL=" + q(model) + " python3 -c " + q(py) + " || exit 1"
-        val script = listOf(prelude(app), envScript, configCommand, demarrage).joinToString(System.lineSeparator())
-        return executer(app, script, libelle = "Synchronisation des clés Hermès")
-            ?: "🔐 Pools Gemini/Groq synchronisés ; redémarrage Hermès demandé."
+        val cfIds = cloudflare.joinToString(",") { it.first }
+        val pluginCommand = "PLUGIN_OK=0; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes plugins install advanced-delegation --no-deps --no-enable >/dev/null 2>&1 || true; if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes plugins enable advanced-delegation --no-allow-tool-override >/dev/null 2>&1; then PLUGIN_OK=1; fi"
+        val configCommand = "proot-distro login debian --termux-home -- env JARVIS_HAS_GEMINI=" + hasGemini + " JARVIS_HAS_GROQ=" + hasGroq + " JARVIS_GEMINI_MODEL=" + q(app.store.hermesModele.value.ifBlank { app.store.geminiModel.value }.ifBlank { "gemini-2.5-flash" }) + " JARVIS_GROQ_MODEL=" + q(model) + " JARVIS_CF_MODEL=" + q(cloudflareModel) + " JARVIS_CF_IDS=" + q(cfIds) + " JARVIS_ADVANCED_DELEGATION=\"\$PLUGIN_OK\" python3 -c " + q(py) + " || exit 1"
+        val script = listOf(prelude(app), envScript, pluginCommand, configCommand, demarrage).joinToString(System.lineSeparator())
+        return executer(app, script, libelle = "Orchestration multi-agents Hermès")
+            ?: "🧠 Gemini, Groq, Cloudflare et les autres modèles déjà configurés sont raccordés au routage multi-agents ; redémarrage Hermès demandé."
     }
     fun demarrer(app: JarvisApp): String {
         PontMcp.demarrer(app)

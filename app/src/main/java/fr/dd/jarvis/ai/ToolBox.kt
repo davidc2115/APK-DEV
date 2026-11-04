@@ -170,6 +170,11 @@ class ToolBox(
         put(tool("generer_image", "Génère une ou plusieurs images à partir d'une description (Cloudflare). Les images sont affichées dans le chat et enregistrées dans Obsidian. Pour plusieurs images (planche, livre de coloriage, série d'illustrations), mets une description par ligne dans « prompt » : chacune est générée séparément et le nom de fichier de chacune est renvoyé (utile ensuite pour creer_fichier avec format=pdf et le paramètre images).",
             mapOf("prompt" to prop("Description détaillée de l'image, rédigée en anglais (sujet, style, lumière, cadrage). Pour plusieurs images, une description par ligne."),
                 "modele" to prop("Optionnel : « flux » (flux-2-dev, le plus réaliste/précis), « flux-klein » (flux-2-klein, qualité proche mais plus rapide) ou « flux-schnell » (le plus rapide, qualité moindre). Par défaut le modèle choisi dans Réglages › Images.")), listOf("prompt")))
+        put(tool("jarvis_ai_status", "Indique les moteurs IA réellement configurés dans JARVIS (Gemini, Groq, Cloudflare), les modèles actifs et le nombre de clés disponibles. N'affiche jamais les clés ni les secrets."))
+        put(tool("jarvis_ai_agent", "Consulte directement l'agent IA interne de JARVIS : Gemini avec rotation de ses clés, puis Groq en secours. À utiliser pour obtenir un deuxième avis, une analyse spécialisée ou vérifier une conclusion ; cet agent ne pilote pas le téléphone et ne lance aucune action.", mapOf(
+            "system" to prop("Rôle et consignes de l'agent spécialisé."),
+            "prompt" to prop("Question autonome et contexte complet à analyser.")
+        ), listOf("system", "prompt")))
         put(tool("animer_image", "Anime une image déjà générée par JARVIS avec fal.ai / Wan 2.2 (image vers vidéo). Nécessite une clé fal.ai configurée dans Réglages › Vidéo IA. Le MP4 est téléchargé puis enregistré dans JARVIS/Vidéos IA et dans Obsidian. Génération payante selon le tarif fal.ai.",
             mapOf("image" to prop("Nom exact de l’image (jarvis-img:...) ou « derniere » pour la plus récente."), "prompt" to prop("Mouvement souhaité : caméra, sujet, ambiance, gestes (optionnel)."), "duree" to prop("Durée du clip en secondes, 0.5 à 4.5 (défaut 3.5).")), listOf("image")))
         put(tool("generer_video", "Génère une courte vidéo IA (un clip de 2 à 5 s, Wan 2.2) à partir d'une description, avec fal.ai si une clé est configurée (sinon le service gratuit Hugging Face). Pour animer une image existante, passe son nom dans « image ». Pour une vidéo TikTok montée en plusieurs plans, utilise plutôt tiktok_video. Le MP4 est enregistré dans JARVIS/Vidéos IA et Obsidian, et affiché dans le chat.",
@@ -396,6 +401,22 @@ class ToolBox(
         "create_contact_card" -> createCard(a)
         "delete_contact" -> deleteContact(a)
         "meteo" -> ToolResult(fr.dd.jarvis.ai.Meteo.get(app, a.optString("lieu"), a.optString("jours").toIntOrNull() ?: 3))
+        "jarvis_ai_status" -> ToolResult(
+            "Moteurs IA JARVIS : ${llm.keyStatus()}\n" +
+                "Modèles configurés : Gemini ${store.geminiModel.value.ifBlank { "non défini" }} ; " +
+                "Groq ${store.groqModel.value.ifBlank { "non défini" }} ; " +
+                "Cloudflare ${store.cfChatModel.value.ifBlank { "non défini" }}. " +
+                "Les secrets ne sont jamais exposés."
+        )
+        "jarvis_ai_agent" -> {
+            val system = a.optString("system").trim().take(6000)
+            val prompt = a.optString("prompt").trim().take(14000)
+            if (system.isBlank() || prompt.isBlank()) ToolResult("Il faut fournir un rôle et une demande à l'agent IA JARVIS.")
+            else try {
+                ToolResult("🧠 Avis de l'agent IA JARVIS (Gemini puis Groq en secours) :\n" + llm.agent(system, prompt))
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { ToolResult("❌ Agent IA JARVIS indisponible : ${e.message ?: e.javaClass.simpleName}") }
+        }
         "generer_image" -> try {
             val modele = a.optString("modele")
             val prompts = a.optString("prompt").lines().map { it.trim() }.filter { it.isNotBlank() }
