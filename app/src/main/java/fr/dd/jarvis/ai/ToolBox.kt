@@ -149,6 +149,8 @@ class ToolBox(
                 "date_fin" to prop("Date de fin incluse AAAA-MM-JJ (optionnel)."),
                 "count" to prop("Nombre maximal de résultats (1 à 30). Par défaut 10.")
             )))
+        put(tool("repondre_sms", "Répond par SMS à un contact ou au numéro de l'expéditeur. La validation du destinataire et du texte exact est toujours obligatoire.",
+            mapOf("destinataire" to prop("Contact ou numéro de l'expéditeur du SMS."), "texte" to prop("Réponse SMS complète.")), listOf("destinataire", "texte")))
         put(tool("envoyer_sms", "Envoie un SMS à un contact ou un numéro.",
             mapOf("destinataire" to prop("Nom du contact ou numéro."), "texte" to prop("Contenu du SMS.")), listOf("destinataire", "texte")))
         put(tool("appeler_contact", "Appelle un contact (ou un numéro) directement.",
@@ -417,6 +419,14 @@ class ToolBox(
         "lire_sms" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             fr.dd.jarvis.device.Telephony.lire(app, (a.optString("count").toIntOrNull() ?: 10).coerceIn(1, 30), a.optString("contact"), a.optString("non_lus").equals("true", true))
         }, direct = true)
+        "repondre_sms" -> {
+            val r = fr.dd.jarvis.device.Telephony.resolve(app, a.optString("destinataire"))
+            val txt = a.optString("texte").trim()
+            if (r == null) ToolResult("Expéditeur du SMS introuvable : ${a.optString("destinataire")}.")
+            else if (txt.isBlank()) ToolResult("Réponse SMS vide.")
+            else if (!confirm("Confirmer la réponse SMS ?\\n\\nÀ : ${r.first} (${r.second})\\n\\n$txt", true)) ToolResult("Réponse SMS refusée : aucun message envoyé.", direct = true)
+            else ToolResult(fr.dd.jarvis.device.Telephony.envoyer(app, r.second, txt), direct = true)
+        }
         "envoyer_sms" -> {
             val r = fr.dd.jarvis.device.Telephony.resolve(app, a.optString("destinataire"))
             val txt = a.optString("texte")
