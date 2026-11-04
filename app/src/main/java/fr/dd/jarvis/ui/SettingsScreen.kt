@@ -278,21 +278,28 @@ fun SettingsScreen(app: JarvisApp) {
                 when (extTab) {
                     "skills" -> {
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            HudButton("Lister") { runHermesExtension(listOf("skills", "list", "--source", "all")) }
+                            HudButton("Catalogue disponible") { runHermesExtension(listOf("skills", "browse", "--source", "official")) }
+                            HudButton("Skills installés") { runHermesExtension(listOf("skills", "list")) }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             HudButton("Rechercher") { if (extName.isNotBlank()) runHermesExtension(listOf("skills", "search", extName.trim())) }
                             HudButton("Inspecter") { if (extName.isNotBlank()) runHermesExtension(listOf("skills", "inspect", extName.trim())) }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            HudButton("Installer") { if (extName.isNotBlank()) runHermesExtension(listOf("skills", "install", extName.trim(), "--yes"), true) }
+                            HudButton("Installer") { if (extName.isNotBlank()) runHermesExtension(listOf("skills", "install", extName.trim()), true) }
                             HudButton("Mettre à jour") { runHermesExtension(listOf("skills", "update"), true) }
-                            HudButton("Vérifier") { runHermesExtension(if (extName.isBlank()) listOf("skills", "check") else listOf("skills", "check", extName.trim())) }
+                            HudButton("Vérifier") { runHermesExtension(listOf("skills", "check")) }
                         }
-                        HudButton("Désinstaller") { if (extName.isNotBlank()) runHermesExtension(listOf("skills", "uninstall", extName.trim(), "--yes"), true) }
+                        HudButton("Désinstaller") { if (extName.isNotBlank()) runHermesExtension(listOf("skills", "uninstall", extName.trim()), true) }
+                        Text("Le catalogue officiel peut être parcouru, puis recherche aussi dans les registres skills.sh et browse.sh en saisissant un mot-clé. L'installation lance le contrôle de sécurité d'Hermès.", color = HudDim, fontSize = 11.sp)
                     }
                     "plugins" -> {
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            HudButton("Lister") { runHermesExtension(listOf("plugins", "list", "--json")) }
-                            HudButton("Rechercher") { if (extName.isNotBlank()) runHermesExtension(listOf("plugins", "search", "--json", extName.trim())) }
+                            HudButton("Catalogue complet") { runHermesExtension(listOf("plugins", "search", "--json")) }
+                            HudButton("Plugins installés") { runHermesExtension(listOf("plugins", "list")) }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            HudButton("Rechercher") { if (extName.isNotBlank()) runHermesExtension(listOf("plugins", "search", extName.trim(), "--json")) }
                             HudButton("Capacités") { if (extName.isNotBlank()) runHermesExtension(listOf("plugins", "capabilities", extName.trim())) }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -307,10 +314,10 @@ fun SettingsScreen(app: JarvisApp) {
                     }
                     "mcp" -> {
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            HudButton("Serveurs installés") { runHermesExtension(listOf("mcp", "list")) }
-                            HudButton("Catalogue") { runHermesExtension(listOf("mcp", "catalog")) }
-                            HudButton("Tester") { if (extName.isNotBlank()) runHermesExtension(listOf("mcp", "test", extName.trim())) }
+                            HudButton("Catalogue MCP complet") { runHermesExtension(listOf("mcp", "catalog")) }
+                            HudButton("MCP installés") { runHermesExtension(listOf("mcp", "list")) }
                         }
+                        HudButton("Tester le serveur") { if (extName.isNotBlank()) runHermesExtension(listOf("mcp", "test", extName.trim())) }
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             HudButton("Installer catalogue") { if (extName.isNotBlank()) runHermesExtension(listOf("mcp", "install", extName.trim()), true) }
                             HudButton("Configurer") { if (extName.isNotBlank()) runHermesExtension(listOf("mcp", "configure", extName.trim())) }
@@ -320,10 +327,14 @@ fun SettingsScreen(app: JarvisApp) {
                     }
                     else -> {
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            HudButton("Lister") { runHermesExtension(listOf("tools", "list", "--platform", "cli")) }
+                            HudButton("Tous les outils") { runHermesExtension(listOf("hermes-agent", "--list-tools")) }
+                            HudButton("Outils actifs") { runHermesExtension(listOf("tools", "--summary")) }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             HudButton("Activer") { if (extName.isNotBlank()) runHermesExtension(listOf("tools", "enable", extName.trim(), "--platform", "cli"), true) }
                             HudButton("Désactiver") { if (extName.isNotBlank()) runHermesExtension(listOf("tools", "disable", extName.trim(), "--platform", "cli"), true) }
                         }
+                        Text("La liste complète affiche les outils déclarés par le moteur. Les outils réellement utilisables dépendent des plateformes, des autorisations, des clés API et des extensions activées.", color = HudDim, fontSize = 11.sp)
                     }
                 }
                 if (extMsg.isNotBlank()) Text(extMsg, color = HudText, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
