@@ -362,7 +362,7 @@ p "✅ Hermès installé (${'$'}{MODE})."
     fun sauvegarder(app: JarvisApp): String {
         val script = prelude(app) + """
 set -eu
-H="$HOME/.hermes"
+H="${'OME/.hermes"
 [ -d "$H" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
 B="$H/backups"; mkdir -p "$B"; chmod 700 "$B"
 TS="$(date +%Y%m%d-%H%M%S)"
@@ -410,6 +410,1166 @@ tar -tzf "$LATEST" >/dev/null
 p "⏳ Archive vérifiée : $(basename "$LATEST")"
 tar -xzf "$LATEST" -C "$HOME"
 [ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}HOME/.hermes"
+[ -d "${'" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
+B="$H/backups"; mkdir -p "$B"; chmod 700 "$B"
+TS="$(date +%Y%m%d-%H%M%S)"
+OUT="$B/jarvis-hermes-$TS.tar.gz"
+tar -czf "$OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "$HOME" .hermes
+chmod 600 "$OUT"
+p "✅ Sauvegarde privée créée : $(basename "$OUT") ($(du -h "$OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="$HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "$H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "$H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "$H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "$H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "$H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "$H/backups" ] && find "$H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "$f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="$HOME/.hermes"; B="$H/backups"
+[ -d "$B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="$(ls -1t "$B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}H" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
+B="${'/backups"; mkdir -p "$B"; chmod 700 "$B"
+TS="$(date +%Y%m%d-%H%M%S)"
+OUT="$B/jarvis-hermes-$TS.tar.gz"
+tar -czf "$OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "$HOME" .hermes
+chmod 600 "$OUT"
+p "✅ Sauvegarde privée créée : $(basename "$OUT") ($(du -h "$OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="$HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "$H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "$H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "$H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "$H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "$H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "$H/backups" ] && find "$H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "$f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="$HOME/.hermes"; B="$H/backups"
+[ -d "$B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="$(ls -1t "$B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}H/backups"; mkdir -p "${'"; chmod 700 "$B"
+TS="$(date +%Y%m%d-%H%M%S)"
+OUT="$B/jarvis-hermes-$TS.tar.gz"
+tar -czf "$OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "$HOME" .hermes
+chmod 600 "$OUT"
+p "✅ Sauvegarde privée créée : $(basename "$OUT") ($(du -h "$OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="$HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "$H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "$H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "$H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "$H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "$H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "$H/backups" ] && find "$H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "$f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="$HOME/.hermes"; B="$H/backups"
+[ -d "$B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="$(ls -1t "$B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}B"; chmod 700 "${'"
+TS="$(date +%Y%m%d-%H%M%S)"
+OUT="$B/jarvis-hermes-$TS.tar.gz"
+tar -czf "$OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "$HOME" .hermes
+chmod 600 "$OUT"
+p "✅ Sauvegarde privée créée : $(basename "$OUT") ($(du -h "$OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="$HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "$H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "$H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "$H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "$H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "$H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "$H/backups" ] && find "$H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "$f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="$HOME/.hermes"; B="$H/backups"
+[ -d "$B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="$(ls -1t "$B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}B"
+TS="${'date +%Y%m%d-%H%M%S)"
+OUT="$B/jarvis-hermes-$TS.tar.gz"
+tar -czf "$OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "$HOME" .hermes
+chmod 600 "$OUT"
+p "✅ Sauvegarde privée créée : $(basename "$OUT") ($(du -h "$OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="$HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "$H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "$H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "$H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "$H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "$H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "$H/backups" ] && find "$H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "$f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="$HOME/.hermes"; B="$H/backups"
+[ -d "$B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="$(ls -1t "$B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}(date +%Y%m%d-%H%M%S)"
+OUT="${'/jarvis-hermes-$TS.tar.gz"
+tar -czf "$OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "$HOME" .hermes
+chmod 600 "$OUT"
+p "✅ Sauvegarde privée créée : $(basename "$OUT") ($(du -h "$OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="$HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "$H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "$H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "$H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "$H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "$H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "$H/backups" ] && find "$H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "$f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="$HOME/.hermes"; B="$H/backups"
+[ -d "$B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="$(ls -1t "$B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}B/jarvis-hermes-${'S.tar.gz"
+tar -czf "$OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "$HOME" .hermes
+chmod 600 "$OUT"
+p "✅ Sauvegarde privée créée : $(basename "$OUT") ($(du -h "$OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="$HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "$H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "$H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "$H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "$H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "$H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "$H/backups" ] && find "$H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "$f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="$HOME/.hermes"; B="$H/backups"
+[ -d "$B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="$(ls -1t "$B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}TS.tar.gz"
+tar -czf "${'UT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "$HOME" .hermes
+chmod 600 "$OUT"
+p "✅ Sauvegarde privée créée : $(basename "$OUT") ($(du -h "$OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="$HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "$H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "$H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "$H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "$H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "$H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "$H/backups" ] && find "$H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "$f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="$HOME/.hermes"; B="$H/backups"
+[ -d "$B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="$(ls -1t "$B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'OME" .hermes
+chmod 600 "$OUT"
+p "✅ Sauvegarde privée créée : $(basename "$OUT") ($(du -h "$OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="$HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "$H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "$H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "$H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "$H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "$H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "$H/backups" ] && find "$H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "$f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="$HOME/.hermes"; B="$H/backups"
+[ -d "$B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="$(ls -1t "$B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}HOME" .hermes
+chmod 600 "${'UT"
+p "✅ Sauvegarde privée créée : $(basename "$OUT") ($(du -h "$OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="$HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "$H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "$H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "$H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "$H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "$H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "$H/backups" ] && find "$H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "$f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="$HOME/.hermes"; B="$H/backups"
+[ -d "$B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="$(ls -1t "$B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}OUT"
+p "✅ Sauvegarde privée créée : ${'basename "$OUT") ($(du -h "$OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="$HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "$H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "$H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "$H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "$H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "$H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "$H/backups" ] && find "$H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "$f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="$HOME/.hermes"; B="$H/backups"
+[ -d "$B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="$(ls -1t "$B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}(basename "${'UT") ($(du -h "$OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="$HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "$H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "$H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "$H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "$H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "$H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "$H/backups" ] && find "$H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "$f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="$HOME/.hermes"; B="$H/backups"
+[ -d "$B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="$(ls -1t "$B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}OUT") (${'du -h "$OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="$HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "$H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "$H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "$H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "$H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "$H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "$H/backups" ] && find "$H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "$f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="$HOME/.hermes"; B="$H/backups"
+[ -d "$B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="$(ls -1t "$B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}(du -h "${'UT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="$HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "$H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "$H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "$H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "$H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "$H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "$H/backups" ] && find "$H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "$f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="$HOME/.hermes"; B="$H/backups"
+[ -d "$B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="$(ls -1t "$B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="${'OME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "$H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "$H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "$H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "$H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "$H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "$H/backups" ] && find "$H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "$f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="$HOME/.hermes"; B="$H/backups"
+[ -d "$B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="$(ls -1t "$B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "${'" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "$H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "$H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "$H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "$H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "$H/backups" ] && find "$H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "$f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="$HOME/.hermes"; B="$H/backups"
+[ -d "$B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="$(ls -1t "$B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "${'/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "$H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "$H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "$H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "$H/backups" ] && find "$H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "$f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="$HOME/.hermes"; B="$H/backups"
+[ -d "$B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="$(ls -1t "$B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "${'/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "$H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "$H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "$H/backups" ] && find "$H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "$f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="$HOME/.hermes"; B="$H/backups"
+[ -d "$B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="$(ls -1t "$B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "${'/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "$H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "$H/backups" ] && find "$H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "$f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="$HOME/.hermes"; B="$H/backups"
+[ -d "$B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="$(ls -1t "$B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "${'/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "$H/backups" ] && find "$H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "$f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="$HOME/.hermes"; B="$H/backups"
+[ -d "$B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="$(ls -1t "$B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "${'/backups" ] && find "$H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "$f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="$HOME/.hermes"; B="$H/backups"
+[ -d "$B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="$(ls -1t "$B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}H/backups" ] && find "${'/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "$f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="$HOME/.hermes"; B="$H/backups"
+[ -d "$B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="$(ls -1t "$B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "${'"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="$HOME/.hermes"; B="$H/backups"
+[ -d "$B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="$(ls -1t "$B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'OME/.hermes"; B="$H/backups"
+[ -d "$B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="$(ls -1t "$B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}HOME/.hermes"; B="${'/backups"
+[ -d "$B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="$(ls -1t "$B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}H/backups"
+[ -d "${'" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="$(ls -1t "$B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="${'ls -1t "$B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}(ls -1t "${'"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "${'ATEST" ] && [ -f "$LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}LATEST" ] && [ -f "${'ATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "$LATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "${'ATEST" >/dev/null
+p "⏳ Archive vérifiée : $(basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}LATEST" >/dev/null
+p "⏳ Archive vérifiée : ${'basename "$LATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}(basename "${'ATEST")"
+tar -xzf "$LATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}LATEST")"
+tar -xzf "${'ATEST" -C "$HOME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}LATEST" -C "${'OME"
+[ -f "$H/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}HOME"
+[ -f "${'/.env" ] && chmod 600 "$H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}H/.env" ] && chmod 600 "${'/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+}H/.env"
 p "✅ Fichiers restaurés. La passerelle va être redémarrée."
 """.trimIndent() + "\n" + demarrage
         PontMcp.demarrer(app)
