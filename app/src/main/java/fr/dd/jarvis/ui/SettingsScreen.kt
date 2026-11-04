@@ -97,12 +97,20 @@ fun SettingsScreen(app: JarvisApp) {
         // ------------------------------------------------------------ Cerveau Groq
         item { SectionHeader("Intelligence artificielle") }
         item {
+            if (!store.apiKeysSecureAvailable) {
+                Text(
+                    "⚠️ Le stockage chiffré Android est indisponible. Les anciennes clés restent conservées, mais Jarvis bloque leur modification et leur transfert vers Hermès pour éviter une nouvelle sauvegarde en clair.",
+                    color = Color(0xFFFFB74D), fontSize = 12.sp
+                )
+            }
+        }
+        item {
             KeyPanel(
                 title = "Cerveau — clés Groq (rotation automatique)",
                 hint = "Une clé par ligne. À chaque requête JARVIS passe à la clé suivante ; une clé saturée (429) est mise en pause.",
                 keys = store.groqKeys,
-                onAdd = { store.addGroqKeys(it) },
-                onRemove = { store.removeGroqKey(it) },
+                onAdd = { raw -> if (store.apiKeysSecureAvailable) store.addGroqKeys(raw) },
+                onRemove = { index -> if (store.apiKeysSecureAvailable) store.removeGroqKey(index) },
                 onTest = { app.llm.testGroqKeys() },
                 modelLabel = "Modèle Groq", model = store.groqModel.value, onModel = { store.groqModel.set(it) },
                 onListModels = { app.llm.listGroqModels() }
@@ -115,8 +123,8 @@ fun SettingsScreen(app: JarvisApp) {
                 title = "Agents — clés Gemini (rotation automatique)",
                 hint = "Utilisées pour le planning, les mails et les contacts. Sans clé Gemini, les agents utilisent Groq.",
                 keys = store.geminiKeys,
-                onAdd = { store.addGeminiKeys(it) },
-                onRemove = { store.removeGeminiKey(it) },
+                onAdd = { raw -> if (store.apiKeysSecureAvailable) store.addGeminiKeys(raw) },
+                onRemove = { index -> if (store.apiKeysSecureAvailable) store.removeGeminiKey(index) },
                 onTest = { app.llm.testGeminiKeys() },
                 modelLabel = "Modèle Gemini", model = store.geminiModel.value, onModel = { store.geminiModel.set(it) },
                 onListModels = { app.llm.listGeminiModels() }
