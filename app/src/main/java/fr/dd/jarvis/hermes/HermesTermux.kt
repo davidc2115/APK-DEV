@@ -367,6 +367,9 @@ p "✅ Hermès installé (${'$'}{MODE})."
 
     /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
     fun installer(app: JarvisApp): String {
+        if (!app.store.apiKeysSecureAvailable && (app.store.geminiKeys.isNotEmpty() || app.store.groqKeys.isNotEmpty())) {
+            return "⛔ Le stockage chiffré Android est indisponible. Hermès n'a pas été configuré pour éviter de transférer des clés non protégées."
+        }
         PontMcp.demarrer(app)
         app.store.hermesInstalle.set(false)
         val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
@@ -376,6 +379,9 @@ p "✅ Hermès installé (${'$'}{MODE})."
 
     /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
     fun configurer(app: JarvisApp): String {
+        if (!app.store.apiKeysSecureAvailable && (app.store.geminiKeys.isNotEmpty() || app.store.groqKeys.isNotEmpty())) {
+            return "⛔ Le stockage chiffré Android est indisponible. Configuration Hermès interrompue ; aucune clé non protégée ne sera transmise."
+        }
         PontMcp.demarrer(app)
         val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
         return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
