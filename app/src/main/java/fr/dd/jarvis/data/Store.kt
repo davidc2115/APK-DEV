@@ -82,14 +82,14 @@ class Store(context: Context) {
     private fun readApiKeyList(key: String): List<String> {
         val raw = if (secretPrefs != null) secretPrefs.getString(key, "") ?: ""
                    else prefs.getString(key, "") ?: ""
-        return raw.split("\\n").map { it.trim() }.filter { it.isNotEmpty() }
+        return raw.lines().map { it.trim() }.filter { it.isNotEmpty() }
     }
 
     private fun writeApiKeyList(key: String, values: List<String>) {
         val secure = secretPrefs ?: throw IllegalStateException(
             "Stockage chiffré Android indisponible : les clés Gemini/Groq ne peuvent pas être modifiées ni synchronisées."
         )
-        check(secure.edit().putString(key, values.joinToString("\\n")).commit()) {
+        check(secure.edit().putString(key, values.joinToString(System.lineSeparator())).commit()) {
             "Échec de l'enregistrement chiffré des clés API."
         }
     }
@@ -203,7 +203,7 @@ class Store(context: Context) {
             .filter { it.length >= 8 && it !in list }.distinct()
         if (parts.isEmpty()) return
         val updated = (list.toList() + parts).distinct()
-        check(secure.edit().putString(key, updated.joinToString("\\n")).commit()) {
+        check(secure.edit().putString(key, updated.joinToString(System.lineSeparator())).commit()) {
             "Échec de l'enregistrement chiffré des clés API."
         }
         list.addAll(parts)
