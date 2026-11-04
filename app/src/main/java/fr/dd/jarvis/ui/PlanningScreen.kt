@@ -224,6 +224,10 @@ fun PlanningScreen(app: JarvisApp) {
                     }
                     Text("✧", color = LocalAccent.current, fontSize = 28.sp)
                 }
+                if (store.proactiveSummary.value.isNotBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(store.proactiveSummary.value, color = if (store.proactiveSummary.value.startsWith("⚠️")) Color(0xFFFFB45C) else LocalAccent.current, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                }
                 if (!store.agentsOn.value) {
                     Spacer(Modifier.height(8.dp))
                     Text("La veille automatique des agents est désactivée dans les réglages.", color = HudDim, fontSize = 10.sp)
