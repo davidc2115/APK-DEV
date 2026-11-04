@@ -171,6 +171,14 @@ class ToolBox(
             mapOf("prompt" to prop("Description détaillée de l'image, rédigée en anglais (sujet, style, lumière, cadrage). Pour plusieurs images, une description par ligne."),
                 "modele" to prop("Optionnel : « flux » (flux-2-dev, le plus réaliste/précis), « flux-klein » (flux-2-klein, qualité proche mais plus rapide) ou « flux-schnell » (le plus rapide, qualité moindre). Par défaut le modèle choisi dans Réglages › Images.")), listOf("prompt")))
         put(tool("jarvis_ai_status", "Indique les moteurs IA réellement configurés dans JARVIS (Gemini, Groq, Cloudflare), les modèles actifs et le nombre de clés disponibles. N'affiche jamais les clés ni les secrets."))
+        put(tool("configurer_fournisseur_ia", "Enregistre une clé API fournie par l'utilisateur dans la conversation, dans le stockage chiffré de JARVIS, puis configure Hermès et ses routes de délégation. Ne jamais afficher ni répéter la clé. Fournisseurs : zai, openrouter, nvidia, mistral, huggingface. Demande confirmation avant l'enregistrement et la synchronisation.",
+            mapOf("fournisseur" to prop("zai, openrouter, nvidia, mistral ou huggingface."),
+                "cle_api" to prop("Clé API exacte fournie par l'utilisateur. Ne pas la recopier dans la réponse."),
+                "modele" to prop("Identifiant exact du modèle à utiliser, si connu. Optionnel."),
+                "endpoint" to prop("URL OpenAI-compatible personnalisée si nécessaire. Optionnel.")), listOf("fournisseur", "cle_api")))
+        put(tool("gerer_extension_hermes", "Consulte les catalogues ou installe une extension Hermes officielle (plugin ou serveur MCP). Actions : plugin_catalogue, plugin_liste, plugin_installer, plugin_activer, mcp_catalogue, mcp_liste, mcp_installer. Toute installation/activation exige une confirmation utilisateur.",
+            mapOf("action" to prop("plugin_catalogue, plugin_liste, plugin_installer, plugin_activer, mcp_catalogue, mcp_liste ou mcp_installer."),
+                "nom" to prop("Nom exact de l'extension du catalogue.")), listOf("action")))
         put(tool("jarvis_ai_agent", "Consulte directement l'agent IA interne de JARVIS : Gemini avec rotation de ses clés, puis Groq en secours. À utiliser pour obtenir un deuxième avis, une analyse spécialisée ou vérifier une conclusion ; cet agent ne pilote pas le téléphone et ne lance aucune action.", mapOf(
             "system" to prop("Rôle et consignes de l'agent spécialisé."),
             "prompt" to prop("Question autonome et contexte complet à analyser.")
@@ -342,6 +350,29 @@ class ToolBox(
     // ------------------------------------------------------------------ exécution
 
     suspend fun execute(name: String, a: JSONObject): ToolResult { return when (name) {
+        "configurer_fournisseur_ia" -> {
+            val provider = a.optString("fournisseur").trim().lowercase()
+            val key = a.optString("cle_api").trim()
+            val model = a.optString("modele").trim()
+            val endpoint = a.optString("endpoint").trim()
+            val allowed = setOf("zai", "openrouter", "nvidia", "mistral", "huggingface")
+            if (provider !in allowed || key.length < 8 || key.any { it.isWhitespace() }) ToolResult("Fournisseur ou clé API invalide. Clé non enregistrée.")
+            else if (endpoint.isNotBlank() && !(endpoint.startsWith("https://") && endpoint.length < 300)) ToolResult("Endpoint refusé : une URL HTTPS valide est obligatoire.")
+            else if (!confirm("Enregistrer la clé API $provider dans le stockage chiffré de JARVIS et la synchroniser avec Hermès${if (model.isNotBlank()) " (modèle $model)" else ""} ? La clé ne sera pas affichée.", true)) ToolResult("Configuration annulée. Aucune clé enregistrée.")
+            else try {
+                store.setExternalProvider(provider, key, model, endpoint)
+                val sync = fr.dd.jarvis.hermes.HermesTermux.synchroniserCles(app)
+                ToolResult("🔐 Clé $provider enregistrée de façon chiffrée. $sync")
+            } catch (e: Exception) { ToolResult("❌ Enregistrement impossible : ${e.message ?: "erreur inconnue"}.") }
+        }
+        "gerer_extension_hermes" -> {
+            val action = a.optString("action").trim().lowercase()
+            val name = a.optString("nom").trim()
+            val mutating = action.endsWith("_installer") || action.endsWith("_activer")
+            if (mutating && !confirm("Autoriser Hermès à exécuter « $action » pour « $name » dans Termux ?", true))
+                ToolResult("Action annulée.")
+            else ToolResult(fr.dd.jarvis.hermes.HermesTermux.gererExtension(app, action, name))
+        }
         "get_planning" -> getPlanning(a)
         "analyser_planning_clients" -> analyserPlanningClients(a)
         "create_event" -> createEvent(a)
