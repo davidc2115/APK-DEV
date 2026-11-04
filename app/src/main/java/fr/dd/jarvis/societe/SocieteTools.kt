@@ -556,8 +556,11 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             if (prochaine.isNotBlank()) append("\n## Prochaine maintenance\n" + prochaine + "\n")
             if (intervention.notes.isNotBlank()) append("\n## Notes\n" + intervention.notes + "\n")
         }
-        val emplacement = app.obsidian.saveIn("Société/Interventions/" + clientPath + "/" + sitePath, date + " " + intervention.id, md)
-        return ok("✅ Intervention enregistrée pour " + client.nom + " — " + site.nom + ".\n📅 " + date + " · " + categorie + " · " + statut + "\n📁 " + emplacement +
+        val dossier = "Société/Interventions/" + clientPath + "/" + sitePath
+        val nomFichier = date + " " + intervention.id
+        val emplacement = app.obsidian.saveIn(dossier, nomFichier, md)
+        val pdf = app.obsidian.saveBytes(dossier, nomFichier + ".pdf", PdfExporter.toPdf(md), "application/pdf")
+        return ok("✅ Intervention enregistrée pour " + client.nom + " — " + site.nom + ".\n📅 " + date + " · " + categorie + " · " + statut + "\n📁 " + emplacement + "\n📄 " + pdf +
             (if (prochaine.isNotBlank()) "\n🔧 Prochaine maintenance : " + prochaine else "") +
             "\n\nLe suivi est conservé dans la fiche de l'installation et dans Obsidian.")
     }
