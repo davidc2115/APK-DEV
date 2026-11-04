@@ -51,8 +51,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.getValue
 
-val HudShape = CutCornerShape(12.dp)
-val HudShapeSmall = CutCornerShape(8.dp)
+val HudShape = RoundedCornerShape(16.dp)
+val HudShapeSmall = RoundedCornerShape(10.dp)
 
 @Composable
 fun HudBackground(content: @Composable BoxScope.() -> Unit) {
@@ -102,9 +102,14 @@ fun HudPanel(
                 val len = 26.dp.toPx()
                 val sw = 3.dp.toPx()
                 val c = accent.copy(alpha = 0.95f)
-                val cut = 12.dp.toPx()
-                drawLine(c, Offset(cut + 2f, 1.5f), Offset(cut + len, 1.5f), sw)
-                drawLine(c, Offset(size.width - cut - len, size.height - 1.5f), Offset(size.width - cut - 2f, size.height - 1.5f), sw)
+                drawRoundRect(
+                    Brush.verticalGradient(listOf(c, c.copy(alpha = 0.55f))),
+                    topLeft = Offset.Zero,
+                    size = Size(sw, size.height),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(10.dp.toPx())
+                )
+                val cut = 16.dp.toPx()
+                drawLine(c.copy(alpha = 0.45f), Offset(cut + 2f, 1.5f), Offset(cut + len, 1.5f), 1.dp.toPx())
             }
             .padding(12.dp)
     ) {
