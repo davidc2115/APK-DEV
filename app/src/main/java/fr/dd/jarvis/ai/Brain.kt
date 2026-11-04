@@ -6,8 +6,8 @@ import org.json.JSONObject
 data class ChatMsg(val fromUser: Boolean, val text: String, val ts: Long = System.currentTimeMillis())
 
 /**
- * Cerveau principal (Groq) : reçoit la conversation, choisit les outils, les exécute (les agents Gemini
- * travaillent à l'intérieur des outils) puis répond.
+ * Point d'entrée conversationnel de Jarvis : route toute demande vers Hermès en mode auto.
+ * Le moteur Groq de Jarvis n'est utilisé qu'en secours si Hermès est indisponible ou désactivé.
  */
 class Brain(
     private val llm: Llm,
