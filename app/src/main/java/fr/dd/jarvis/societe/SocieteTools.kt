@@ -20,12 +20,12 @@ class SocieteTools(
         val NAMES = setOf(
             "societe_info_set", "societe_info_get", "tarif_set", "tarif_delete", "regles_set", "client_ecrire", "client_fiche", "client_supprimer",
             "document_creer", "document_action", "document_email", "societe_liste", "employe_ecrire", "paie", "reserve_bilan",
-            "presentation_modifier", "distance_deplacement", "clients_exporter_kml", "kml_couleurs_set", "clients_gps"
+            "presentation_modifier", "distance_deplacement", "clients_exporter_kml", "kml_couleurs_set", "clients_gps", "intervention_enregistrer", "interventions_liste"
         )
         private val KEYWORDS = Regex(
             "devis|factur|client|soci[ée]t[ée]|tarif|remise|d[ée]placement|paie|salaire|bulletin|r[ée]serve|dividende|b[ée]n[ée]fice|" +
                 "installation|photovolta|kwc|fiche|pr[ée]sentation|mise en forme|mise en page|si[èe]ge|employ[ée]|prix|onduleur|maintenance|" +
-                "entretien|planning|agenda|pdf|obsidian|distance|itin[ée]raire|km|fid[ée]lit[ée]|kml|google earth|carte des clients|" +
+                "entretien|intervention|panne|diagnostic|pi[èe]ce remplac[ée]e|planning|agenda|pdf|obsidian|distance|itin[ée]raire|km|fid[ée]lit[ée]|kml|google earth|carte des clients|" +
                 "gps|coordonn[ée]es|g[ée]oloc|localis|latitude|longitude|google maps",
             RegexOption.IGNORE_CASE
         )
@@ -41,6 +41,8 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
 - Si l’utilisateur donne des coordonnées GPS pour une installation (copiées de Google Maps « 47.541558, 4.459845 », en degrés-minutes-secondes 47°32'29.6"N 4°27'35.4"E, ou un lien Google Maps), passe-les TELLES QUELLES dans site_gps de client_ecrire (avec site_nom si le client a plusieurs installations) ; pour le siège, dans gps de societe_info_set. Ces coordonnées priment sur l’adresse et ne sont jamais recalculées.
 - Si l’utilisateur est sur place et demande d’enregistrer « ma position », « ma localisation exacte », « ici »… sur une fiche client, appelle client_ecrire avec site_gps = « ma position » ET site_adresse = « ma position » (l’outil relève le GPS du téléphone et l’adresse précise correspondante) ; ne demande pas l’adresse. S’il parle de toutes ses installations (« ses deux installations »), mets site_nom = « toutes ».
 - Pour voir ou améliorer la précision des positions GPS des clients, utilise clients_gps (relocaliser=true pour recalculer avec la Base Adresse Nationale). N’invente jamais de coordonnées.
+- Pour chaque intervention photovoltaïque réellement réalisée, utilise intervention_enregistrer en précisant le client et l’installation. Enregistre séparément le diagnostic, les actions réalisées, les pièces remplacées, les mesures, le statut et la date de prochaine maintenance quand ils sont connus. Ne transforme jamais une hypothèse en panne confirmée et n’invente aucune mesure.
+- Pour consulter le suivi d’une installation, utilise interventions_liste. Si le client possède plusieurs installations, demande laquelle avant d’enregistrer ou d’afficher un historique.
 - Pour un devis ou une facture, identifie le client et l'installation (client_ecrire si le client n'existe pas encore). Si une information indispensable manque (client, prestation), demande-la en une phrase.
 - Le texte renvoyé par les outils société est déjà mis en forme et affiché tel quel : ne le répète pas.
 - Les montants sont toujours en euros, la TVA est gérée par l'application.
@@ -112,6 +114,18 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "site_gps" to prop("Coordonnées GPS exactes de l'installation telles que copiées dans Google Maps (« 47.541558, 4.459845 »), en degrés-minutes-secondes (47°32'29.6\"N 4°27'35.4\"E) ou lien Google Maps. Prioritaires sur l'adresse. « ma position » = position GPS actuelle du téléphone (quand l'utilisateur est sur place).")
         ), listOf("nom")),
         tool("client_fiche", "Affiche la fiche client complète et l'enregistre dans le coffre Obsidian.", mapOf("nom" to prop("Nom du client.")), listOf("nom")),
+        tool("intervention_enregistrer", "Enregistre une intervention photovoltaïque réellement effectuée dans l'historique du site et dans Obsidian.", mapOf(
+            "client" to prop("Nom exact du client."), "installation" to prop("Nom exact de l'installation si plusieurs."),
+            "date" to prop("Date de l'intervention au format yyyy-MM-dd (défaut : aujourd'hui)."),
+            "categorie" to prop("maintenance | panne | diagnostic | nettoyage | remplacement | contrôle | autre."),
+            "description" to prop("Résumé factuel de l'intervention réalisée."), "diagnostic" to prop("Diagnostic constaté ; distinguer clairement constat et hypothèse."),
+            "actions" to prop("Actions et réparations réellement réalisées."), "pieces" to prop("Pièces remplacées, références et quantités."),
+            "mesures" to prop("Mesures réellement relevées avec unités."), "statut" to prop("terminee | a_suivre | en_attente."),
+            "prochaine_maintenance" to prop("Date recommandée yyyy-MM-dd si connue."), "notes" to prop("Informations complémentaires.")
+        ), listOf("client", "description")),
+        tool("interventions_liste", "Consulte l'historique des interventions photovoltaïques d'un client et éventuellement d'une installation.", mapOf(
+            "client" to prop("Nom exact du client."), "installation" to prop("Nom de l'installation si le client en possède plusieurs.")
+        ), listOf("client")),
         tool("client_supprimer", "Supprime définitivement une fiche client de la base Société après confirmation. Refuse la suppression si des devis ou factures sont encore liés afin de préserver l’historique comptable.", mapOf("nom" to prop("Nom exact du client à supprimer.")), listOf("nom")),
         tool("document_creer", "Crée un devis ou une facture (tarifs, remises et déplacement calculés automatiquement), l'enregistre en Markdown et PDF dans Obsidian.", mapOf(
             "type" to prop("devis | facture"), "client" to prop("Nom du client."), "installation" to prop("Nom ou adresse de l'installation (optionnel si une seule)."),
@@ -184,6 +198,8 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         "regles_set" -> reglesSet(a)
         "client_ecrire" -> clientEcrire(a)
         "client_fiche" -> clientFiche(a)
+        "intervention_enregistrer" -> interventionEnregistrer(a)
+        "interventions_liste" -> interventionsListe(a)
         "client_supprimer" -> clientSupprimer(a)
         "document_creer" -> documentCreer(a)
         "document_action" -> documentAction(a)
@@ -502,6 +518,69 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         val fresh = d.client(c.id) ?: c
         val (md, loc) = svc.exporterClient(fresh)
         return ok("✅ Fiche enregistrée : $loc\n\n---\n\n$md")
+    }
+
+    private fun interventionEnregistrer(a: JSONObject): ToolResult {
+        val (client, erreur) = clientParNom(a.s("client"))
+        if (client == null) return err(erreur!!)
+        val site = siteDe(client, a.s("installation"))
+            ?: return err(if (client.sites.isEmpty()) "Aucune installation n'est enregistrée. Enregistre d'abord le site avec client_ecrire." else "Plusieurs installations existent pour " + client.nom + " : " + client.sites.joinToString { it.nom } + ". Précise installation.")
+        val description = a.s("description")
+        if (description.isBlank()) return err("La description de l'intervention est obligatoire.")
+        val date = a.s("date").ifBlank { LocalDate.now().toString() }
+        if (runCatching { LocalDate.parse(date) }.isFailure) return err("Date invalide : utilise yyyy-MM-dd.")
+        val prochaine = a.s("prochaine_maintenance")
+        if (prochaine.isNotBlank() && runCatching { LocalDate.parse(prochaine) }.isFailure) return err("Date de prochaine maintenance invalide : utilise yyyy-MM-dd.")
+        val statut = a.s("statut").ifBlank { "terminee" }.lowercase()
+        if (statut !in setOf("terminee", "a_suivre", "en_attente")) return err("Statut invalide : terminee, a_suivre ou en_attente.")
+        val categorie = a.s("categorie").ifBlank { "maintenance" }
+        val intervention = Intervention(
+            id = svc.newId(), date = date, categorie = categorie, description = description,
+            diagnostic = a.s("diagnostic"), actions = a.s("actions"), pieces = a.s("pieces"),
+            mesures = a.s("mesures"), statut = statut, prochaineMaintenance = prochaine, notes = a.s("notes")
+        )
+        val siteMaj = site.copy(interventions = (site.interventions + intervention).sortedByDescending { it.date })
+        svc.repo.update { data -> data.copy(clients = data.clients.map { c ->
+            if (c.id != client.id) c else c.copy(sites = c.sites.map { s -> if (s.id == site.id) siteMaj else s })
+        }) }
+        val clientPath = client.nom.replace("/", "_").replace("\\", "_")
+        val sitePath = site.nom.replace("/", "_").replace("\\", "_")
+        val md = buildString {
+            append("# Intervention — " + client.nom + " / " + site.nom + "\n\n")
+            append("- Date : " + date + "\n- Catégorie : " + categorie + "\n- Statut : " + statut + "\n")
+            if (intervention.diagnostic.isNotBlank()) append("- Diagnostic : " + intervention.diagnostic + "\n")
+            append("\n## Description\n" + description + "\n")
+            if (intervention.actions.isNotBlank()) append("\n## Actions réalisées\n" + intervention.actions + "\n")
+            if (intervention.pieces.isNotBlank()) append("\n## Pièces remplacées\n" + intervention.pieces + "\n")
+            if (intervention.mesures.isNotBlank()) append("\n## Mesures relevées\n" + intervention.mesures + "\n")
+            if (prochaine.isNotBlank()) append("\n## Prochaine maintenance\n" + prochaine + "\n")
+            if (intervention.notes.isNotBlank()) append("\n## Notes\n" + intervention.notes + "\n")
+        }
+        val emplacement = app.obsidian.saveIn("Société/Interventions/" + clientPath + "/" + sitePath, date + " " + intervention.id, md)
+        return ok("✅ Intervention enregistrée pour " + client.nom + " — " + site.nom + ".\n📅 " + date + " · " + categorie + " · " + statut + "\n📁 " + emplacement +
+            (if (prochaine.isNotBlank()) "\n🔧 Prochaine maintenance : " + prochaine else "") +
+            "\n\nLe suivi est conservé dans la fiche de l'installation et dans Obsidian.")
+    }
+
+    private fun interventionsListe(a: JSONObject): ToolResult {
+        val (client, erreur) = clientParNom(a.s("client"))
+        if (client == null) return err(erreur!!)
+        val site = siteDe(client, a.s("installation"))
+            ?: return err(if (client.sites.isEmpty()) "Aucune installation enregistrée pour " + client.nom + "." else "Précise l'installation : " + client.sites.joinToString { it.nom } + ".")
+        val liste = site.interventions.sortedByDescending { it.date }
+        if (liste.isEmpty()) return ok("Aucune intervention enregistrée pour " + client.nom + " — " + site.nom + ".")
+        return ok("# Historique — " + client.nom + " / " + site.nom + "\n\n" + liste.joinToString("\n\n") { item ->
+            buildString {
+                append("## " + item.date + " · " + item.categorie + " · " + item.statut + "\n")
+                append(item.description)
+                if (item.diagnostic.isNotBlank()) append("\n- Diagnostic : " + item.diagnostic)
+                if (item.actions.isNotBlank()) append("\n- Actions : " + item.actions)
+                if (item.pieces.isNotBlank()) append("\n- Pièces : " + item.pieces)
+                if (item.mesures.isNotBlank()) append("\n- Mesures : " + item.mesures)
+                if (item.prochaineMaintenance.isNotBlank()) append("\n- Prochaine maintenance : " + item.prochaineMaintenance)
+                if (item.notes.isNotBlank()) append("\n- Notes : " + item.notes)
+            }
+        })
     }
 
     private suspend fun documentCreer(a: JSONObject): ToolResult {
