@@ -153,7 +153,8 @@ object PhoneHealth {
             val previousBattery = prefs.getInt("battery", -1)
             val previousFree = prefs.getLong("free_bytes", -1L)
             val freeNow = StatFs(Environment.getDataDirectory().absolutePath).availableBytes
-            if (previousAt > 0L && now - previousAt >= 30L * 60L * 1000L) {
+            val due = previousAt == 0L || now - previousAt >= 30L * 60L * 1000L
+            if (previousAt > 0L && due) {
                 if (battery != null && previousBattery >= 0 && previousBattery - battery >= 20 && !charging) {
                     alerts += "Tendance batterie : baisse de " + (previousBattery - battery) + " points depuis le dernier relevé (au moins 30 min)."
                 }
@@ -162,11 +163,14 @@ object PhoneHealth {
                     alerts += "Tendance stockage : environ " + String.format(Locale.FRANCE, "%.1f", lostGb) + " Go consommés depuis le dernier relevé."
                 }
             }
-            prefs.edit()
-                .putLong("sample_at", now)
-                .putInt("battery", battery ?: -1)
-                .putLong("free_bytes", freeNow)
-                .apply()
+            // Ne pas déplacer la référence lors des passages intermédiaires du worker (ex. toutes les 15 min).
+            if (due) {
+                prefs.edit()
+                    .putLong("sample_at", now)
+                    .putInt("battery", battery ?: -1)
+                    .putLong("free_bytes", freeNow)
+                    .apply()
+            }
         }
         return alerts.distinct()
     }
