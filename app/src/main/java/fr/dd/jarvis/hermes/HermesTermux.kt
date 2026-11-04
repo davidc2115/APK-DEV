@@ -366,7 +366,7 @@ p "✅ Hermès installé (${'$'}{MODE})."
 
     /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
     fun installer(app: JarvisApp): String {
-        if (!app.store.apiKeysSecureAvailable && (app.store.geminiKeys.isNotEmpty() || app.store.groqKeys.isNotEmpty())) {
+        if (!app.store.apiKeysSecureAvailable) {
             return "⛔ Le stockage chiffré Android est indisponible. Hermès n'a pas été configuré pour éviter de transférer des clés non protégées."
         }
         PontMcp.demarrer(app)
