@@ -20,6 +20,11 @@ import androidx.car.app.model.MessageTemplate
 import androidx.car.app.model.Row
 import androidx.car.app.model.SearchTemplate
 import androidx.car.app.model.Template
+import androidx.car.app.messaging.model.CarMessage
+import androidx.car.app.messaging.model.ConversationCallback
+import androidx.car.app.messaging.model.ConversationItem
+import androidx.car.app.model.CarText
+import androidx.core.app.Person
 import androidx.car.app.validation.HostValidator
 import androidx.car.app.versioning.CarAppApiLevels
 import androidx.lifecycle.DefaultLifecycleObserver
@@ -88,8 +93,24 @@ class JarvisCarScreen(ctx: CarContext) : Screen(ctx) {
     override fun onGetTemplate(): Template {
         val voix = voixVoiture(carContext)
         val liste = ItemList.Builder()
-            .addItem(Row.Builder().setTitle("🎤 Parler à JARVIS")
-                .addText(if (voix) "Micro de la voiture : demande, réponse lue, on enchaîne" else "Dictée (voiture à l'arrêt) — ou « Répondre » à la conversation JARVIS")
+        val moi = Person.Builder().setName("Moi").setKey("jarvis_user").build()
+        val jarvis = Person.Builder().setName("JARVIS").setKey("jarvis").setImportant(true).build()
+        val historique = CarBridge.contexte().takeLast(5)
+        val messages = if (historique.isEmpty()) {
+            listOf(CarMessage.Builder().setSender(jarvis).setBody(CarText.create("Je suis prêt. Tu peux me parler ou me dicter une demande."))
+                .setReceivedTimeEpochMillis(System.currentTimeMillis()).setRead(true).build())
+        } else historique.map { m ->
+            CarMessage.Builder().setSender(if (m.fromUser) moi else jarvis).setBody(CarText.create(m.text.take(500)))
+                .setReceivedTimeEpochMillis(m.ts).setRead(true).build()
+        }
+        val callback = object : ConversationCallback {
+            override fun onMarkAsRead() {}
+            override fun onTextReply(text: String) {
+                if (text.isNotBlank()) CarBridge.repondre(carContext, text) { invalidate() }
+            }
+        }
+        liste.addItem(ConversationItem.Builder("jarvis-assistant", CarText.create("JARVIS"), moi, messages, callback).build())
+        liste.addItem(Row.Builder().setTitle("🎤 Parler à JARVIS")                .addText(if (voix) "Micro de la voiture : demande, réponse lue, on enchaîne" else "Dictée (voiture à l'arrêt) — ou « Répondre » à la conversation JARVIS")
                 .setOnClickListener {
                     if (voix) ConversationVoiture.ouvrir(carContext, screenManager)
                     else screenManager.push(JarvisSearchScreen(carContext) { q -> screenManager.push(ReponseTexteScreen(carContext, q)) })
