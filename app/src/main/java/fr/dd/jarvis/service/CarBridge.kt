@@ -15,7 +15,9 @@ import fr.dd.jarvis.ai.ChatMsg
 import fr.dd.jarvis.ai.ToolBox
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Android Auto : JARVIS apparaît comme une conversation de messagerie. Dans la voiture, Android Auto lit ses messages à voix haute
@@ -34,10 +36,13 @@ object CarBridge {
     fun post(ctx: Context, texte: String) {
         val me = Person.Builder().setName("Moi").build()
         val style = NotificationCompat.MessagingStyle(me).setConversationTitle("JARVIS")
-        synchronized(history) { history.takeLast(8) }.forEach { m ->
+        val recent = synchronized(history) { history.takeLast(8) }
+        recent.forEach { m ->
             style.addMessage(m.text.take(500), m.ts, if (m.fromUser) me else jarvis)
         }
-        style.addMessage(texte.take(600), System.currentTimeMillis(), jarvis)
+        if (recent.lastOrNull()?.let { !it.fromUser && it.text == texte } != true) {
+            style.addMessage(texte.take(600), System.currentTimeMillis(), jarvis)
+        }
 
         val flagsMut = PendingIntent.FLAG_UPDATE_CURRENT or (if (android.os.Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
         val flagsImm = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
@@ -56,6 +61,22 @@ object CarBridge {
             .setOnlyAlertOnce(false).setAutoCancel(false).setContentIntent(open)
             .addAction(reply).addAction(read).build()
         runCatching { (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(NOTIF_ID, n) }
+    }
+
+    /** Traite une réponse dictée depuis l’écran Android Auto et actualise la conversation. */
+    fun repondre(ctx: Context, texte: String, apres: (() -> Unit)? = null) {
+        val app = ctx.applicationContext as JarvisApp
+        ajouter(ChatMsg(true, texte))
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            val rep = try {
+                // Les opérations qui exigent une confirmation explicite restent bloquées depuis l’interface voiture.
+                Brain(app.llm, ToolBox(app) { _, force -> !force }, app) { app.store.userName.value }.reply(contexte()) { }
+            } catch (e: Throwable) { "Désolé, je n’ai pas pu faire ça : ${e.message ?: e.javaClass.simpleName}" }
+            val propre = rep.replace(Regex("[#*_`>|]+"), "").replace(Regex("\\s+"), " ").trim().ifBlank { "C’est fait." }
+            ajouter(ChatMsg(false, propre))
+            post(ctx, propre)
+            withContext(Dispatchers.Main) { apres?.invoke() }
+        }
     }
 
     fun ajouter(m: ChatMsg) { synchronized(history) { history.add(m); while (history.size > 20) history.removeAt(0) } }
