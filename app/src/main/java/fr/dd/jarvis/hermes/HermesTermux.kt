@@ -228,7 +228,7 @@ p() { echo "${'$'}*"; command -v curl >/dev/null 2>&1 && curl -s -m 4 -X POST -H
             appendLine("    connect_timeout: 20")
             if (sunoActif) {
                 appendLine("  suno:")
-                appendLine("    url: \\"https://api.suno.com/mcp\\"")
+                appendLine("    url: https://api.suno.com/mcp")
                 appendLine("    auth: oauth")
                 appendLine("    timeout: 180")
                 appendLine("    connect_timeout: 30")
