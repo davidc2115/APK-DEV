@@ -229,6 +229,7 @@ class ToolBox(
             mapOf("quoi" to prop("images, fichiers (documents) ou tous (par défaut)."), "max" to prop("Nombre maximum à lister (par défaut 20).")), listOf()))
         put(tool("documents_lister", "Liste les documents importés dans la bibliothèque privée de JARVIS, avec leurs noms exacts.", mapOf()))
         put(tool("document_lire", "Extrait le texte d'un document importé pour l'analyser, le résumer, le convertir ou réutiliser son contenu. Prend en charge les formats texte, KML/GPX, DOCX, XLSX, PPTX, ODT/ODS et l'inventaire ZIP. Pour les PDF et médias, indique honnêtement les limites de lecture.", mapOf("nom" to prop("Nom exact du fichier affiché dans la bibliothèque documentaire.")), listOf("nom")))
+        put(tool("document_analyser", "Analyse un fichier média importé dans la bibliothèque : image, vidéo ou PDF (rendu des 4 premières pages maximum).", mapOf("nom" to prop("Nom exact du fichier importé."), "question" to prop("Question ou objectif d'analyse.")), listOf("nom")))
         put(tool("analyser_image", "Analyse une image déjà générée par generer_image (ou envoyée par l'utilisateur) : décrit son contenu, répond à une question dessus, lit un texte qu'elle contient, etc.",
             mapOf("image" to prop("Nom de fichier de l'image (vu dans jarvis-img:... ou via fichiers_generes), ou « derniere » pour la dernière générée."),
                 "question" to prop("Ce qu'il faut regarder ou dire sur l'image (optionnel ; par défaut une description détaillée).")), listOf("image")))
@@ -577,6 +578,46 @@ class ToolBox(
         "fichiers_generes" -> ToolResult(fr.dd.jarvis.ai.Fichiers.lister(app, a.optString("quoi"), a.optString("max").toIntOrNull() ?: 20))
         "documents_lister" -> ToolResult(fr.dd.jarvis.ai.DocumentStore.list(app))
         "document_lire" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.ai.DocumentStore.extract(app, a.optString("nom")) }, direct = true)
+        "document_analyser" -> try {
+            val f = fr.dd.jarvis.ai.DocumentStore.find(app, a.optString("nom"))
+                ?: return ToolResult("Document introuvable : ${a.optString("nom")}")
+            val question = a.optString("question").ifBlank { "Décris précisément ce fichier et son contenu, en français." }
+            if (f.length() > 18L * 1024 * 1024) return ToolResult("Fichier trop volumineux pour l'analyse directe (limite 18 Mo).")
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                when (f.extension.lowercase()) {
+                    "pdf" -> {
+                        val fd = android.os.ParcelFileDescriptor.open(f, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+                        val renderer = android.graphics.pdf.PdfRenderer(fd)
+                        try {
+                            val pages = minOf(renderer.pageCount, 4)
+                            val analyses = (0 until pages).map { index ->
+                                val page = renderer.openPage(index)
+                                try {
+                                    val width = 1400
+                                    val height = (width.toFloat() * page.height / page.width).toInt().coerceAtLeast(1)
+                                    val bitmap = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
+                                    page.render(bitmap, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                    val bytes = java.io.ByteArrayOutputStream().use { out -> bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, out); bitmap.recycle(); out.toByteArray() }
+                                    "Page ${index + 1} : " + app.llm.gemini.analyserImage(bytes, "image/jpeg", question)
+                                } finally { page.close() }
+                            }
+                            ToolResult("Analyse PDF de ${f.name} (${renderer.pageCount} page(s), ${pages} analysée(s)) :\n" + analyses.joinToString("\n\n"))
+                        } finally { renderer.close(); fd.close() }
+                    }
+                    "jpg", "jpeg", "png", "webp", "gif", "bmp" -> {
+                        val mime = when (f.extension.lowercase()) { "jpg", "jpeg" -> "image/jpeg"; "webp" -> "image/webp"; "gif" -> "image/gif"; "bmp" -> "image/bmp"; else -> "image/png" }
+                        ToolResult(app.llm.gemini.analyserImage(f.readBytes(), mime, question))
+                    }
+                    "mp4", "mov", "mkv", "webm", "avi", "3gp" -> {
+                        val mime = when (f.extension.lowercase()) { "mov" -> "video/quicktime"; "webm" -> "video/webm"; "mkv" -> "video/x-matroska"; "3gp" -> "video/3gpp"; else -> "video/mp4" }
+                        ToolResult(app.llm.gemini.analyserImage(f.readBytes(), mime, question))
+                    }
+                    else -> ToolResult("Ce format n'est pas un média image/vidéo/PDF pris en charge par cet outil. Utilise document_lire pour extraire le texte.")
+                }
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
+            ToolResult("❌ Analyse du document impossible : ${e.message}")
+        }
         "rechercher_videos_box" -> try {
             ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.ai.Box.rechercherVideos(app, a.optString("recherche"), a.optString("dossier")) }, direct = true)
         } catch (e: Exception) { ToolResult("❌ Recherche sur le disque de la box impossible : ${e.message}", direct = true) }
