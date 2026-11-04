@@ -140,7 +140,7 @@ class JarvisService : Service() {
         wake = (getSystemService(POWER_SERVICE) as PowerManager).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "jarvis:wake").apply { setReferenceCounted(false); acquire() }
         tools = ToolBox(app) { q, _ -> voiceConfirm(q) }
         // Hermès installé : on s'assure que sa passerelle tourne dans Termux (après un redémarrage du téléphone par ex.).
-        if (app.store.hermesInstalle.value && app.store.hermesMode.value != "off") scope.launch {
+        if (app.store.hermesMode.value != "off") scope.launch {
             runCatching { fr.dd.jarvis.hermes.PontMcp.demarrer(app); if (!fr.dd.jarvis.hermes.Hermes.enLigne(force = true)) fr.dd.jarvis.hermes.Hermes.relancerSiBesoin(app) }
         }
         voice = VoiceManager(this).also { v ->
@@ -326,7 +326,7 @@ class JarvisService : Service() {
             // Les demandes vocales suivent la même règle que le chat : Hermès est le cerveau exclusif.
             // Aucun basculement silencieux vers Brain/Groq n'est autorisé dans cette voie vocale.
             val reply = try {
-                if (!app.store.hermesInstalle.value || app.store.hermesMode.value == "off") {
+                if (app.store.hermesMode.value == "off") {
                     "Hermès est désactivé ou non installé. Active Hermès dans les réglages pour utiliser les commandes vocales."
                 } else {
                     fr.dd.jarvis.hermes.Hermes.repondre(
