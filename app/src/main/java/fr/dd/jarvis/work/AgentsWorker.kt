@@ -147,9 +147,37 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
     private suspend fun planning() {
         if (!app.calendar.hasPermission()) return
         val now = System.currentTimeMillis()
+        val zone = ZoneId.systemDefault()
+        val fmt = DateTimeFormatter.ofPattern("HH:mm")
+        val semaine = app.calendar.events(LocalDate.now(), 7).filter { !it.allDay }.sortedBy { it.begin }
+
+        // Détecte les chevauchements réels sur les sept prochains jours, sans modifier le calendrier.
+        val conflits = semaine.zipWithNext().filter { (a, b) -> a.id != b.id && b.begin < a.end && a.begin < b.end }
+        val conflictKeys = conflits.map { (a, b) -> listOf("\${a.id}_\${a.begin}", "\${b.id}_\${b.begin}").sorted().joinToString("__") }
+        val seenConflicts = readSet("agent_seen_conflicts.txt")
+        val nouveauxConflits = conflits.filterIndexed { index, _ -> conflictKeys[index] !in seenConflicts }
+        if (nouveauxConflits.isNotEmpty()) {
+            val details = nouveauxConflits.take(8).joinToString("\n") { (a, b) ->
+                val startA = Instant.ofEpochMilli(a.begin).atZone(zone).format(fmt)
+                val startB = Instant.ofEpochMilli(b.begin).atZone(zone).format(fmt)
+                "• \${a.title} ($startA) chevauche \${b.title} ($startB)"
+            }
+            alert(3010, "⚠️ Conflit dans ton planning", details)
+            journal.append("- ⚠️ \${nouveauxConflits.size} conflit(s) d'agenda détecté(s) sur les 7 prochains jours\\n")
+        }
+        writeSet("agent_seen_conflicts.txt", seenConflicts + conflictKeys)
+
+        val prochain = semaine.firstOrNull { it.end >= now }
+        val synthese = when {
+            conflits.isNotEmpty() -> "⚠️ \${conflits.size} conflit(s) d'agenda à vérifier sur les 7 prochains jours."
+            prochain != null -> "Prochain rendez-vous : \${prochain.title} à \${Instant.ofEpochMilli(prochain.begin).atZone(zone).format(fmt)}."
+            else -> "Aucun rendez-vous à venir dans les 7 prochains jours."
+        }
+        store.proactiveSummary.set(synthese)
+
         val horizon = now + 150 * 60_000L
         val notified = readSet("agent_notified_events.txt")
-        val evs = app.calendar.events(LocalDate.now(), 1).filter { !it.allDay && it.location.isNotBlank() && it.begin in now..horizon && "${it.id}_${it.begin}" !in notified }
+        val evs = app.calendar.events(LocalDate.now(), 1).filter { !it.allDay && it.location.isNotBlank() && it.begin in now..horizon && "\${it.id}_\${it.begin}" !in notified }
         if (evs.isEmpty()) return
         val origine = Locator.point(app) ?: app.societe.data.societe.let { s -> if (s.lat != null && s.lon != null) Geo.Point(s.lat, s.lon) else null } ?: return
         for (e in evs) {
