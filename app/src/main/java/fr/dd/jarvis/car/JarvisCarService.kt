@@ -2,6 +2,7 @@ package fr.dd.jarvis.car
 
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ApplicationInfo
 import android.media.AudioAttributes
 import android.net.Uri
 import android.os.Handler
@@ -58,7 +59,13 @@ import java.util.Locale
  * paramètres pour les développeurs (Android Auto › Version touchée 10 fois › ⋮ › Paramètres pour les développeurs).
  */
 class JarvisCarService : CarAppService() {
-    override fun createHostValidator(): HostValidator = HostValidator.ALLOW_ALL_HOSTS_VALIDATOR
+    override fun createHostValidator(): HostValidator =
+        if ((applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+            HostValidator.ALLOW_ALL_HOSTS_VALIDATOR
+        } else {
+            HostValidator.Builder(this).addAllowedHosts(androidx.car.app.R.array.hosts_allowlist_sample).build()
+        }
+
     override fun onCreateSession(): Session = JarvisCarSession()
 }
 
@@ -91,11 +98,12 @@ class JarvisCarScreen(ctx: CarContext) : Screen(ctx) {
     }
 
     override fun onGetTemplate(): Template {
+        if (!app.chatLoaded) app.chatCharger()
         val voix = voixVoiture(carContext)
         val liste = ItemList.Builder()
         val moi = Person.Builder().setName("Moi").setKey("jarvis_user").build()
         val jarvis = Person.Builder().setName("JARVIS").setKey("jarvis").setImportant(true).build()
-        val historique = CarBridge.contexte().takeLast(5)
+        val historique = (CarBridge.contexte().ifEmpty { app.chat.toList() }).takeLast(5)
         val messages = if (historique.isEmpty()) {
             listOf(CarMessage.Builder().setSender(jarvis).setBody(CarText.create("Je suis prêt. Tu peux me parler ou me dicter une demande."))
                 .setReceivedTimeEpochMillis(System.currentTimeMillis()).setRead(true).build())
