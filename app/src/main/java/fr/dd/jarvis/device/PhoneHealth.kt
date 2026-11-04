@@ -143,6 +143,31 @@ object PhoneHealth {
         val memory = ActivityManager.MemoryInfo()
         (ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).getMemoryInfo(memory)
         if (memory.lowMemory) alerts += "Mémoire vive sous pression : Android signale un manque de RAM."
+
+        // Historique local minimal : uniquement des compteurs techniques, sans données personnelles.
+        // Comparaison espacée pour éviter les faux positifs dus aux variations instantanées.
+        runCatching {
+            val prefs = ctx.getSharedPreferences("phone_health_history", Context.MODE_PRIVATE)
+            val now = System.currentTimeMillis()
+            val previousAt = prefs.getLong("sample_at", 0L)
+            val previousBattery = prefs.getInt("battery", -1)
+            val previousFree = prefs.getLong("free_bytes", -1L)
+            val freeNow = StatFs(Environment.getDataDirectory().absolutePath).availableBytes
+            if (previousAt > 0L && now - previousAt >= 30L * 60L * 1000L) {
+                if (battery != null && previousBattery >= 0 && previousBattery - battery >= 20 && !charging) {
+                    alerts += "Tendance batterie : baisse de " + (previousBattery - battery) + " points depuis le dernier relevé (au moins 30 min)."
+                }
+                if (previousFree >= 0L && previousFree - freeNow >= 1536L * 1024L * 1024L) {
+                    val lostGb = (previousFree - freeNow) / (1024.0 * 1024.0 * 1024.0)
+                    alerts += "Tendance stockage : environ " + String.format(Locale.FRANCE, "%.1f", lostGb) + " Go consommés depuis le dernier relevé."
+                }
+            }
+            prefs.edit()
+                .putLong("sample_at", now)
+                .putInt("battery", battery ?: -1)
+                .putLong("free_bytes", freeNow)
+                .apply()
+        }
         return alerts.distinct()
     }
 
