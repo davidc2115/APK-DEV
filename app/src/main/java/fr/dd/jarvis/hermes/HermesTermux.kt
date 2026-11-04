@@ -184,12 +184,19 @@ p() { echo "${'$'}*"; command -v curl >/dev/null 2>&1 && curl -s -m 4 -X POST -H
         val s = app.store
         if (s.hermesCle.value.isBlank()) s.hermesCle.set(UUID.randomUUID().toString().replace("-", ""))
         if (s.mcpJeton.value.isBlank()) s.mcpJeton.set(UUID.randomUUID().toString().replace("-", ""))
-        return scriptConfiguration(
+        val geminiKeys = if (s.apiKeysSecureAvailable) s.geminiKeys.toList() else emptyList()
+        val groqKeys = if (s.apiKeysSecureAvailable) s.groqKeys.toList() else emptyList()
+        val base = scriptConfiguration(
             cleApi = s.hermesCle.value, jeton = s.mcpJeton.value,
-            gemini = s.geminiKeys.firstOrNull().orEmpty(), groq = s.groqKeys.firstOrNull().orEmpty(),
+            gemini = geminiKeys.firstOrNull().orEmpty(), groq = groqKeys.firstOrNull().orEmpty(),
             modele = s.hermesModele.value.ifBlank { s.geminiModel.value }.ifBlank { "gemini-2.5-flash" },
-            modeleGroq = s.groqModel.value.ifBlank { "openai/gpt-oss-120b" }
+            modeleGroq = s.groqModel.value.ifBlank { "llama-3.3-70b-versatile" }
         )
+        val extraEnv = buildString {
+            geminiKeys.drop(1).forEachIndexed { index, key -> appendLine("setenv GOOGLE_API_KEY_" + (index + 2) + " " + q(key)) }
+            groqKeys.drop(1).forEachIndexed { index, key -> appendLine("setenv GROQ_API_KEY_" + (index + 2) + " " + q(key)) }
+        }
+        return base.replace("setenv API_SERVER_MODEL_NAME hermes-agent", "setenv API_SERVER_MODEL_NAME hermes-agent\n" + extraEnv)
     }
 
     internal fun scriptConfiguration(cleApi: String, jeton: String, gemini: String, groq: String, modele: String, modeleGroq: String, urlMcp: String = PontMcp.url()): String {
