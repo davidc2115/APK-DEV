@@ -406,19 +406,47 @@ p "✅ Hermès installé (${'$'}{MODE})."
             groq.forEachIndexed { index, key -> appendLine("setenv " + (if (index == 0) "GROQ_API_KEY" else "GROQ_API_KEY_" + (index + 1)) + " " + q(key)) }
             appendLine("chmod 600 \"${'$'}H/.env\"")
         }
-        val cli = mutableListOf("./.hermes/bin/hermes config set credential_pool_strategies.gemini round_robin")
-        if (groq.isNotEmpty()) {
-            cli += "./.hermes/bin/hermes config set providers.groq.api https://api.groq.com/openai/v1"
-            cli += "./.hermes/bin/hermes config set providers.groq.key_env GROQ_API_KEY"
-            cli += "./.hermes/bin/hermes config set credential_pool_strategies.groq round_robin"
-            cli += "./.hermes/bin/hermes config set fallback_providers " + q("[{provider: custom:groq, model: " + model + "}]")
-        } else {
-            cli += "./.hermes/bin/hermes config unset providers.groq"
-            cli += "./.hermes/bin/hermes config unset credential_pool_strategies.groq"
-            cli += "./.hermes/bin/hermes config unset fallback_providers"
-        }
-        val inner = "cd /root/.hermes/hermes-agent && " + cli.joinToString(" && ")
-        val configCommand = "proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc " + q(inner)
+        val py = """
+import os, shutil, tempfile
+from pathlib import Path
+import yaml
+p = Path("/root/.hermes/config.yaml")
+if not p.exists():
+    raise SystemExit("Configuration Hermes absente.")
+data = yaml.safe_load(p.read_text()) or {}
+providers = data.setdefault("providers", {})
+if not isinstance(providers, dict):
+    raise SystemExit("Section providers invalide ; aucune modification.")
+fallbacks = data.get("fallback_providers") or []
+if not isinstance(fallbacks, list):
+    raise SystemExit("Section fallback_providers invalide ; aucune modification.")
+def is_groq(item):
+    if not isinstance(item, dict): return False
+    provider = str(item.get("provider", ""))
+    base_url = str(item.get("base_url", ""))
+    return provider in ("custom:groq", "groq") or (provider == "custom" and "groq.com" in base_url)
+fallbacks = [item for item in fallbacks if not is_groq(item)]
+strategies = data.setdefault("credential_pool_strategies", {})
+if not isinstance(strategies, dict):
+    raise SystemExit("Section credential_pool_strategies invalide ; aucune modification.")
+strategies["gemini"] = "round_robin"
+if os.environ.get("JARVIS_HAS_GROQ") == "1":
+    providers["groq"] = {"api": "https://api.groq.com/openai/v1", "key_env": "GROQ_API_KEY"}
+    fallbacks.append({"provider": "custom:groq", "model": os.environ["JARVIS_GROQ_MODEL"]})
+    strategies["groq"] = "round_robin"
+else:
+    providers.pop("groq", None)
+    strategies.pop("groq", None)
+data["fallback_providers"] = fallbacks
+backup = p.with_name("config.yaml.before-jarvis-key-sync")
+if not backup.exists(): shutil.copy2(p, backup)
+fd, name = tempfile.mkstemp(prefix="config.yaml.", dir=str(p.parent))
+with os.fdopen(fd, "w") as stream: yaml.safe_dump(data, stream, sort_keys=False, allow_unicode=True)
+os.chmod(name, 0o600)
+os.replace(name, p)
+""".trimIndent()
+        val hasGroq = if (groq.isNotEmpty()) "1" else "0"
+        val configCommand = "proot-distro login debian --termux-home -- env JARVIS_HAS_GROQ=" + hasGroq + " JARVIS_GROQ_MODEL=" + q(model) + " python3 -c " + q(py) + " || exit 1"
         val script = listOf(prelude(app), envScript, configCommand, demarrage).joinToString(System.lineSeparator())
         return executer(app, script, libelle = "Synchronisation des clés Hermès")
             ?: "🔐 Pools Gemini/Groq synchronisés ; redémarrage Hermès demandé."
