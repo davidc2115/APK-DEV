@@ -63,10 +63,25 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
     var tick by remember { mutableIntStateOf(0) }
     var settingsSection by remember { mutableStateOf("general") }
 
+    val sections = listOf(
+        "general" to "Général",
+        "ai" to "Intelligence IA",
+        "communication" to "Communication",
+        "network" to "Réseau",
+        "phone" to "Téléphone",
+        "automation" to "Automatisation",
+        "files" to "Fichiers"
+    )
+
     Column(Modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            HudChip("Général", selected = settingsSection == "general") { settingsSection = "general" }
-            HudChip("Fichiers", selected = settingsSection == "files") { settingsSection = "files" }
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            sections.forEach { (id, label) ->
+                HudChip(label, selected = settingsSection == id) { settingsSection = id }
+            }
         }
         if (settingsSection == "files") {
             DocumentLibraryScreen(app, onAsk)
@@ -76,6 +91,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
         contentPadding = PaddingValues(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        if (settingsSection == "general") {
         // ------------------------------------------------------------ Apparence
         item { SectionHeader("Général") }
         item {
@@ -103,6 +119,8 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
             }
         }
 
+        }
+        if (settingsSection == "ai") {
         // ------------------------------------------------------------ Cerveau Groq
         item { SectionHeader("Intelligence artificielle") }
         item {
@@ -424,6 +442,8 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 }
             }
         }
+        }
+        if (settingsSection == "communication") {
         // ------------------------------------------------------------ Android Auto
         item {
             val aa = "com.google.android.projection.gearhead"
@@ -528,6 +548,8 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
             CfPanel(store, app)
         }
 
+        }
+        if (settingsSection == "network") {
         // ------------------------------------------------------------ Serveur (SSH + Home Assistant)
         item { SectionHeader("Réseau et serveur") }
         item {
@@ -650,6 +672,8 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
             }
         }
 
+        }
+        if (settingsSection == "phone") {
         // ------------------------------------------------------------ Téléphone
         item { SectionHeader("Téléphone et permissions") }
         item {
@@ -870,6 +894,8 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
             }
         }
 
+        }
+        if (settingsSection == "automation") {
         // ------------------------------------------------------------ Arrière-plan et agents autonomes
         item { SectionHeader("Voix et automatisation") }
         item {
@@ -997,6 +1023,8 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 if (runMsg.isNotBlank()) Text(runMsg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
                 Text("Android impose au moins 15 min entre deux passages et peut les retarder en économie d'énergie : autorise « Batterie sans restriction ».", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
             }
+        }
+
         }
 
         item {
