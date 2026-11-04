@@ -278,7 +278,12 @@ fun PlanningScreen(app: JarvisApp) {
                             if (!e.allDay) Text(Instant.ofEpochMilli(e.end).atZone(ZoneId.systemDefault()).format(hourFmt), color = HudDim, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
                         }
                         Box(Modifier.padding(horizontal = 9.dp).width(3.dp).height(78.dp).clip(CircleShape).background(color.copy(alpha = 0.8f)))
-                        HudPanel(Modifier.weight(1f), accent = color, onClick = { selected = e }) {
+                        HudScheduleCard(
+                            Modifier.weight(1f),
+                            accent = color,
+                            highlighted = nextEvent?.id == e.id && !e.allDay,
+                            onClick = { selected = e }
+                        ) {
                             Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                                 Text(e.title, color = HudText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                                 if (e.location.isNotBlank()) Text("⌖  ${e.location}", color = HudDim, fontSize = 11.sp)
