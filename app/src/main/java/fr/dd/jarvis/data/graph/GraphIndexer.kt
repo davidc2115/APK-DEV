@@ -34,7 +34,8 @@ class GraphIndexer(
             )
         }
 
-        val suggestedRelations = database.graphDao().getSuggestedRelations()
+        val validNodeIds = entities.map { it.id }.toSet()
+        val suggestedRelations = database.graphDao().getSuggestedRelations().filter { it.fromNodeId in validNodeIds && it.toNodeId in validNodeIds }
         val relations = graph.references.map { reference ->
             GraphRelationEntity(
                 fromNodeId = "markdown:${reference.from}",
