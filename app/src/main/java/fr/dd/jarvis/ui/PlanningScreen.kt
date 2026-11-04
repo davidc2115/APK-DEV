@@ -268,7 +268,7 @@ fun PlanningScreen(app: JarvisApp) {
             list.forEach { e ->
                 item(key = "e${e.id}-${e.begin}") {
                     val color = Color(repo.eventColor(e, calMap))
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Stretch) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.width(54.dp).padding(top = 9.dp), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text(if (e.allDay) "JOUR" else Instant.ofEpochMilli(e.begin).atZone(ZoneId.systemDefault()).format(hourFmt), color = color, fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                             if (!e.allDay) Text(Instant.ofEpochMilli(e.end).atZone(ZoneId.systemDefault()).format(hourFmt), color = HudDim, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
