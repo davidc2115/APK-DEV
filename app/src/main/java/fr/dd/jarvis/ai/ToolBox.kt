@@ -1408,6 +1408,10 @@ class ToolBox(
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { planningData(LocalDate.now(), 1, cible) }
                 .ifBlank { "Aucun événement aujourd'hui." }
         } else "Permission agenda non accordée."
+        val planningDemain = if (app.calendar.hasPermission()) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { planningData(LocalDate.now().plusDays(1), 1, cible) }
+                .ifBlank { "Aucun événement prévu demain." }
+        } else "Permission agenda non accordée."
         val mails = if (sansMails) "(non demandés)" else if (store.mailConfigured()) {
             try {
                 val m = app.mail.fetchRecent(15, true)
@@ -1418,7 +1422,7 @@ class ToolBox(
         } else "Mails non configurés."
         val impayes = app.societe.impayees()
         val user = "Utilisateur : ${store.userName.value.ifBlank { "l'utilisateur" }}\nMaintenant : ${Prompts.now()}\n\n" +
-            "=== AGENDA DU JOUR ===\n$planning\n\n=== MAILS NON LUS ===\n$mails\n\n=== FACTURES IMPAYÉES ===\n${impayes.ifBlank { "Aucune." }}"
+            "=== AGENDA DU JOUR ===\n$planning\n\n=== AGENDA DE DEMAIN ===\n$planningDemain\n\n=== MAILS NON LUS ===\n$mails\n\n=== FACTURES IMPAYÉES ===\n${impayes.ifBlank { "Aucune." }}"
         val texte = llm.agent(Prompts.briefing() + app.memo.pour("briefing"), user)
         // Archive chaque point du matin dans son propre dossier du coffre Obsidian (un fichier par jour).
         runCatching { app.obsidian.saveIn("Points du matin", LocalDate.now().toString(), texte) }
