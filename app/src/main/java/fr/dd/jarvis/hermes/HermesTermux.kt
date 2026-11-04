@@ -237,6 +237,10 @@ p() { echo "${'$'}*"; command -v curl >/dev/null 2>&1 && curl -s -m 4 -X POST -H
         return """
 H="${'$'}HOME/.hermes"; mkdir -p "${'$'}H/logs"
 setenv() { touch "${'$'}H/.env"; grep -v "^${'$'}1=" "${'$'}H/.env" > "${'$'}H/.env.j" 2>/dev/null; printf '%s=%s\n' "${'$'}1" "${'$'}2" >> "${'$'}H/.env.j"; mv "${'$'}H/.env.j" "${'$'}H/.env"; }
+removeenvfamily() { grep -v -E "^${1(_[0-9]+)?=" "${H/.env" > "${H/.env.j" 2>/dev/null || true; mv "${H/.env.j" "${H/.env"; }
+removeenvfamily GOOGLE_API_KEY
+removeenvfamily GEMINI_API_KEY
+removeenvfamily GROQ_API_KEY
 setenv API_SERVER_ENABLED true
 setenv API_SERVER_HOST 127.0.0.1
 setenv API_SERVER_PORT $PORT_API
