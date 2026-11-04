@@ -34,6 +34,7 @@ class GraphIndexer(
             )
         }
 
+        val suggestedRelations = database.graphDao().getSuggestedRelations()
         val relations = graph.references.map { reference ->
             GraphRelationEntity(
                 fromNodeId = "markdown:${reference.from}",
@@ -55,7 +56,8 @@ class GraphIndexer(
             database.graphDao().clearRelations()
             database.graphDao().clearNodes()
             if (entities.isNotEmpty()) database.graphDao().insertNodes(entities)
-            if (relations.isNotEmpty()) database.graphDao().insertRelations(relations)
+            val allRelations = (relations + suggestedRelations).distinctBy { listOf(it.fromNodeId, it.toNodeId, it.type, it.origin) }
+            if (allRelations.isNotEmpty()) database.graphDao().insertRelations(allRelations)
         }
 
         GraphIndexReport(
