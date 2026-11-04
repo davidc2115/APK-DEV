@@ -94,7 +94,10 @@ data class Intervention(
     val mesures: String = "",
     val statut: String = "terminee",
     val prochaineMaintenance: String = "",
-    val notes: String = ""
+    val notes: String = "",
+    /** Chemins relatifs dans le stockage privé de l'application ; les originaux ne sont pas exposés publiquement. */
+    val photosAvant: List<String> = emptyList(),
+    val photosApres: List<String> = emptyList()
 )
 
 @Serializable
