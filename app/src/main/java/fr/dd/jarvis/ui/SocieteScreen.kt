@@ -46,7 +46,7 @@ import fr.dd.jarvis.societe.Geo
 import fr.dd.jarvis.societe.core.*
 import java.time.LocalDate
 
-private val SUBS = listOf("Résumé", "Clients", "Devis", "Factures", "Équipe", "Fiches de paie", "Réglages")
+private val SUBS = listOf("Résumé", "Clients", "Interventions", "Devis", "Factures", "Équipe", "Fiches de paie", "Réglages")
 
 @Composable
 fun SocieteScreen(app: JarvisApp) {
@@ -62,10 +62,11 @@ fun SocieteScreen(app: JarvisApp) {
         when (sub) {
             0 -> ResumeTab(app)
             1 -> ClientsTab(app)
-            2 -> DocsTab(app, "devis")
-            3 -> DocsTab(app, "facture")
-            4 -> EquipeTab(app)
-            5 -> FichesPaieTab(app)
+            2 -> InterventionsTab(app)
+            3 -> DocsTab(app, "devis")
+            4 -> DocsTab(app, "facture")
+            5 -> EquipeTab(app)
+            6 -> FichesPaieTab(app)
             else -> ReglagesTab(app)
         }
     }
@@ -86,6 +87,46 @@ private fun Dialogue(titre: String, onClose: () -> Unit, actions: @Composable ()
 @Composable
 private fun Action(label: String, onClick: () -> Unit) {
     TextButton(onClick) { Text(label, color = LocalAccent.current, fontSize = 13.sp) }
+}
+
+// ---------------------------------------------------------------------- Historique photovoltaïque
+
+@Composable
+private fun InterventionsTab(app: JarvisApp) {
+    val clients = app.societe.data.clients
+    val sites = clients.flatMap { client -> client.sites.map { site -> client to site } }
+        .sortedBy { it.first.nom.lowercase() + " " + it.second.nom.lowercase() }
+    LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item {
+            HudPanel(Modifier.fillMaxWidth(), title = "Historique des interventions") {
+                Text("Chaque intervention enregistrée par la voix ou Hermès apparaît ici, avec son diagnostic, les actions, les pièces et les mesures. Les rapports PDF sont conservés dans Obsidian.", color = HudDim, fontSize = 12.sp)
+                Text("☀️ ${sites.size} installation(s) · 🛠️ ${sites.sumOf { it.second.interventions.size }} intervention(s)", color = HudText, fontSize = 13.sp)
+            }
+        }
+        if (sites.isEmpty()) {
+            item { Text("Aucune installation enregistrée. Ajoute d'abord un client et son installation.", color = HudDim, fontSize = 13.sp) }
+        }
+        items(sites) { (client, site) ->
+            HudPanel(Modifier.fillMaxWidth(), title = client.nom + " — " + site.nom) {
+                Text(site.adresse.ifBlank { "Adresse non renseignée" }, color = HudDim, fontSize = 11.sp)
+                Text("${site.kwc} kWc · ${site.onduleur.ifBlank { "Onduleur non renseigné" }}", color = HudText, fontSize = 12.sp)
+                if (site.interventions.isEmpty()) {
+                    Text("Aucune intervention enregistrée.", color = HudDim, fontSize = 12.sp)
+                } else {
+                    site.interventions.sortedByDescending { it.date }.forEach { intervention ->
+                        HudDivider()
+                        Text(intervention.date + " · " + intervention.categorie + " · " + intervention.statut, color = LocalAccent.current, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text(intervention.description, color = HudText, fontSize = 13.sp)
+                        if (intervention.diagnostic.isNotBlank()) Text("Diagnostic : " + intervention.diagnostic, color = HudDim, fontSize = 11.sp)
+                        if (intervention.actions.isNotBlank()) Text("Actions : " + intervention.actions, color = HudText, fontSize = 12.sp)
+                        if (intervention.pieces.isNotBlank()) Text("Pièces : " + intervention.pieces, color = HudText, fontSize = 12.sp)
+                        if (intervention.mesures.isNotBlank()) Text("Mesures : " + intervention.mesures, color = HudText, fontSize = 12.sp)
+                        if (intervention.prochaineMaintenance.isNotBlank()) Text("Prochaine maintenance : " + intervention.prochaineMaintenance, color = HudDim, fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------- Résumé
