@@ -66,6 +66,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
     val sections = listOf(
         "general" to "Général",
         "ai" to "Intelligence IA",
+        "hermes" to "Hermès & extensions",
         "communication" to "Communication",
         "network" to "Réseau",
         "phone" to "Téléphone",
@@ -209,6 +210,8 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
         // ------------------------------------------------------------ Diagnostic du téléphone
         item { SystemHealthPanel(app, tick) { tick++ } }
 
+        }
+        if (settingsSection == "hermes") {
         // ------------------------------------------------------------ Hermès (Termux)
         item {
             val h = fr.dd.jarvis.hermes.HermesTermux
