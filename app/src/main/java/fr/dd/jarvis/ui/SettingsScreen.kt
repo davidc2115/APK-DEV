@@ -168,6 +168,9 @@ fun SettingsScreen(app: JarvisApp) {
             }
         }
 
+        // ------------------------------------------------------------ Diagnostic du téléphone
+        item { SystemHealthPanel(app, tick) }
+
         // ------------------------------------------------------------ Hermès (Termux)
         item {
             val h = fr.dd.jarvis.hermes.HermesTermux
@@ -982,6 +985,75 @@ fun SettingsScreen(app: JarvisApp) {
                 color = HudDim, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
                 modifier = Modifier.padding(vertical = 8.dp)
             )
+        }
+    }
+}
+
+@Composable
+private fun SystemHealthPanel(app: JarvisApp, refresh: Int) {
+    val ctx = LocalContext.current
+    val battery = remember(refresh) {
+        runCatching {
+            val bm = ctx.getSystemService(android.content.Context.BATTERY_SERVICE) as android.os.BatteryManager
+            bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY).coerceIn(0, 100)
+        }.getOrDefault(-1)
+    }
+    val charging = remember(refresh) {
+        val intent = ctx.registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
+        intent?.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1) in setOf(
+            android.os.BatteryManager.BATTERY_STATUS_CHARGING,
+            android.os.BatteryManager.BATTERY_STATUS_FULL
+        )
+    }
+    val freeStorage = remember(refresh) {
+        runCatching {
+            val stat = android.os.StatFs(ctx.filesDir.absolutePath)
+            stat.availableBytes / (1024.0 * 1024.0 * 1024.0)
+        }.getOrDefault(0.0)
+    }
+    val shizukuInstalled = remember(refresh) { fr.dd.jarvis.device.ShizukuShell.installed(ctx) }
+    val shizukuRunning = remember(refresh) { fr.dd.jarvis.device.ShizukuShell.running() }
+    val shizukuReady = remember(refresh) { fr.dd.jarvis.device.ShizukuShell.ready() }
+    val a11ySettings = remember(refresh) { app.phone.accessibilityInSettings() }
+    val a11yActive = remember(refresh) { app.phone.accessibilityEnabled() }
+    val listenerEnabled = remember(refresh) {
+        val raw = android.provider.Settings.Secure.getString(ctx.contentResolver, "enabled_notification_listeners").orEmpty()
+        raw.contains(ctx.packageName)
+    }
+    val notifications = remember(refresh) {
+        android.os.Build.VERSION.SDK_INT < 33 || androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
+    val batteryFree = remember(refresh) {
+        (ctx.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager).isIgnoringBatteryOptimizations(ctx.packageName)
+    }
+    val network = remember(refresh) {
+        val cm = ctx.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        val active = cm.activeNetwork
+        active != null && cm.getNetworkCapabilities(active)?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+    }
+    val exactAlarm = remember(refresh) {
+        android.os.Build.VERSION.SDK_INT < 31 || (ctx.getSystemService(android.content.Context.ALARM_SERVICE) as android.app.AlarmManager).canScheduleExactAlarms()
+    }
+    HudPanel(Modifier.fillMaxWidth(), title = "Centre de surveillance du téléphone") {
+        Text("Lecture des états Android accessibles à JARVIS. Les autorisations sont distinguées de la connexion réelle des services.", color = HudDim, fontSize = 11.sp)
+        Spacer(Modifier.height(5.dp))
+        Text("🔋 Batterie : " + (if (battery >= 0) "$battery %" else "indisponible") + (if (charging) " · en charge" else ""), color = HudText, fontSize = 13.sp)
+        Text("💾 Stockage libre de l'application : " + "%.2f".format(java.util.Locale.FRANCE, freeStorage) + " Go", color = HudText, fontSize = 12.sp)
+        AgentStatusRow("Connexion Internet", network, if (network) "connectée" else "hors ligne")
+        AgentStatusRow("Shizuku installé", shizukuInstalled, if (shizukuInstalled) "détecté" else "absent")
+        AgentStatusRow("Shizuku autorisé et prêt", shizukuReady, if (shizukuReady) "opérationnel" else if (shizukuRunning) "autorisation manquante" else "arrêté")
+        AgentStatusRow("Accessibilité JARVIS", a11yActive, if (a11yActive) "connectée" else if (a11ySettings) "activée dans Android, non connectée" else "désactivée")
+        AgentStatusRow("Accès aux notifications", listenerEnabled, if (listenerEnabled) "autorisé" else "non autorisé")
+        AgentStatusRow("Notifications Android", notifications, if (notifications) "autorisées" else "bloquées")
+        AgentStatusRow("Alarmes exactes", exactAlarm, if (exactAlarm) "autorisées" else "non autorisées")
+        AgentStatusRow("Batterie sans restriction", batteryFree, if (batteryFree) "autorisée" else "restriction active")
+        AgentStatusRow("Écoute vocale JARVIS", fr.dd.jarvis.service.JarvisService.running, if (fr.dd.jarvis.service.JarvisService.running) "service actif" else if (app.store.wakeOn.value) "souhaitée mais arrêtée" else "désactivée")
+        val crash = java.io.File(ctx.filesDir, fr.dd.jarvis.JarvisApp.CRASH_FILE).exists()
+        AgentStatusRow("Rapport de plantage", crash, if (crash) "à consulter" else "aucun rapport")
+        Spacer(Modifier.height(6.dp))
+        HudButton("Actualiser le diagnostic") {
+            // Le parent actualise les valeurs via le compteur de rafraîchissement.
+            ctx.sendBroadcast(android.content.Intent(ctx, fr.dd.jarvis.ui.SystemHealthRefreshReceiver::class.java))
         }
     }
 }
