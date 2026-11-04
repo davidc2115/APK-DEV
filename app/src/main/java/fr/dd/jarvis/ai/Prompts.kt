@@ -113,9 +113,13 @@ Réponds UNIQUEMENT par un objet JSON valide, sans texte autour :
 }
 Règles :
 - Exactement le nombre de plans demandé, qui racontent la vidéo du début à la fin (accroche, développement, chute).
-- Les visuels s'enchaînent avec un style cohérent (même personnage, mêmes couleurs) et varient les cadrages.
+- PRIORITÉ ABSOLUE À LA DEMANDE UTILISATEUR : respecte exactement le sujet, les personnages/objets, le lieu, l'époque, les actions, l'ambiance et les contraintes explicitement demandés.
+- N'ajoute aucun personnage, animal, objet, décor, événement ou changement de genre qui n'est pas demandé ou nécessaire à la continuité. Ne transforme pas le sujet en une autre histoire.
+- Chaque plan doit montrer une étape précise de la même scène/histoire ; conserve l'identité visuelle du sujet principal (apparence, vêtements, couleurs, proportions) d'un plan à l'autre.
+- Les visuels s'enchaînent avec un style cohérent (même personnage, mêmes couleurs) et varient les cadrages uniquement si cela ne change pas la scène.
 - Le texte incrusté complète la voix off (il ne la recopie pas mot pour mot) ; le premier plan porte l'accroche.
 - La durée de la voix off ne doit pas dépasser la durée totale.
+- Si une information manque, choisis l'interprétation la plus simple et la plus proche de la demande ; n'invente pas de rebondissement.
 """.trimIndent()
 
     val CONTACT_CARD = """
