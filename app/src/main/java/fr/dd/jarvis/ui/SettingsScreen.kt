@@ -248,6 +248,11 @@ fun SettingsScreen(app: JarvisApp) {
             var extName by remember { mutableStateOf("") }
             var extMsg by remember { mutableStateOf("") }
             var extConfirm by remember { mutableStateOf("") }
+            var mcpUrl by remember { mutableStateOf("") }
+            var mcpCommand by remember { mutableStateOf("") }
+            var mcpArgs by remember { mutableStateOf("") }
+            var mcpEnv by remember { mutableStateOf("") }
+            var mcpOauth by remember { mutableStateOf(false) }
             fun runHermesExtension(args: List<String>, confirm: Boolean = false) {
                 val key = args.joinToString(" ")
                 if (confirm && extConfirm != key) {
@@ -316,7 +321,23 @@ fun SettingsScreen(app: JarvisApp) {
                             HudButton("Configurer") { if (extName.isNotBlank()) runHermesExtension(listOf("mcp", "configure", extName.trim())) }
                             HudButton("Supprimer") { if (extName.isNotBlank() && !extName.trim().equals("jarvis", ignoreCase = true)) runHermesExtension(listOf("mcp", "remove", extName.trim()), true) }
                         }
-                        Text("Le pont MCP jarvis reliant Hermes à ton téléphone est protégé contre la suppression depuis ce panneau. Pour ajouter un serveur personnalisé, utilise hermes mcp add avec une URL ou une commande.", color = HudDim, fontSize = 11.sp)
+                        Text("Ajouter un MCP personnalisé", color = LocalAccent.current, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        HudTextField(mcpUrl, { mcpUrl = it.trim() }, Modifier.fillMaxWidth(), label = "URL HTTP(S) distante (facultatif)")
+                        HudTextField(mcpCommand, { mcpCommand = it.trim() }, Modifier.fillMaxWidth(), label = "Commande locale stdio (ex. npx ou uvx)")
+                        HudTextField(mcpArgs, { mcpArgs = it }, Modifier.fillMaxWidth(), label = "Arguments stdio — un argument par ligne", singleLine = false)
+                        HudTextField(mcpEnv, { mcpEnv = it }, Modifier.fillMaxWidth(), label = "Variables d'environnement KEY=VALUE — une par ligne", singleLine = false)
+                        HudChip("Authentification OAuth", selected = mcpOauth) { mcpOauth = !mcpOauth }
+                        HudButton("Ajouter le serveur MCP") {
+                            val vars = mcpEnv.lines().map { it.trim() }.filter { it.isNotBlank() }.mapNotNull {
+                                if (!it.contains("=")) null else it.substringBefore("=").trim() to it.substringAfter("=").trim()
+                            }
+                            extConfirm = ""
+                            extMsg = fr.dd.jarvis.hermes.HermesTermux.ajouterMcp(
+                                app, extName.trim(), mcpUrl.trim(), mcpCommand.trim(),
+                                mcpArgs.lines().map { it.trim() }.filter { it.isNotBlank() }, mcpOauth, vars
+                            )
+                        }
+                        Text("Les variables sont enregistrées dans ~/.hermes/.env et référencées depuis config.yaml. Le pont MCP « jarvis » est préservé. Après ajout, utilise Tester puis redémarre Hermès pour charger les outils.", color = HudDim, fontSize = 11.sp)
                     }
                     else -> {
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
