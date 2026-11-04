@@ -464,6 +464,11 @@ if not isinstance(child_fallbacks, list): child_fallbacks = []
 child_fallbacks = [x for x in child_fallbacks if not is_groq(x)]
 if os.environ.get("JARVIS_HAS_GROQ") == "1": child_fallbacks.append({"provider": "custom:groq", "model": os.environ["JARVIS_GROQ_MODEL"]})
 for index in range(1, len(cf_ids) + 1): child_fallbacks.append({"provider": f"custom:jarvis_cf_{index}", "model": os.environ["JARVIS_CF_MODEL"]})
+for item in fallbacks:
+    if isinstance(item, dict):
+        provider, model_name = str(item.get("provider", "")), str(item.get("model", ""))
+        if provider and model_name and not any(isinstance(x, dict) and x.get("provider") == provider and x.get("model") == model_name for x in child_fallbacks):
+            child_fallbacks.append({"provider": provider, "model": model_name})
 if child_fallbacks: delegation["fallback_providers"] = child_fallbacks
 backends = delegation.setdefault("backends", {})
 if not isinstance(backends, dict): backends = {}; delegation["backends"] = backends
@@ -512,7 +517,7 @@ os.replace(name, p)
         val hasGroq = if (groq.isNotEmpty()) "1" else "0"
         val cfIds = cloudflare.joinToString(",") { it.first }
         val pluginCommand = "PLUGIN_OK=0; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes plugins install advanced-delegation --no-deps --no-enable >/dev/null 2>&1 || true; if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes plugins enable advanced-delegation --no-allow-tool-override >/dev/null 2>&1; then PLUGIN_OK=1; fi"
-        val configCommand = "proot-distro login debian --termux-home -- env JARVIS_HAS_GEMINI=" + hasGemini + " JARVIS_HAS_GROQ=" + hasGroq + " JARVIS_GEMINI_MODEL=" + q(app.store.hermesModele.value.ifBlank { app.store.geminiModel.value }.ifBlank { "gemini-2.5-flash" }) + " JARVIS_GROQ_MODEL=" + q(model) + " JARVIS_CF_MODEL=" + q(cloudflareModel) + " JARVIS_CF_IDS=" + q(cfIds) + " JARVIS_ADVANCED_DELEGATION=\"$PLUGIN_OK\" python3 -c " + q(py) + " || exit 1"
+        val configCommand = "proot-distro login debian --termux-home -- env JARVIS_HAS_GEMINI=" + hasGemini + " JARVIS_HAS_GROQ=" + hasGroq + " JARVIS_GEMINI_MODEL=" + q(app.store.hermesModele.value.ifBlank { app.store.geminiModel.value }.ifBlank { "gemini-2.5-flash" }) + " JARVIS_GROQ_MODEL=" + q(model) + " JARVIS_CF_MODEL=" + q(cloudflareModel) + " JARVIS_CF_IDS=" + q(cfIds) + " JARVIS_ADVANCED_DELEGATION=\"\$PLUGIN_OK\" python3 -c " + q(py) + " || exit 1"
         val script = listOf(prelude(app), envScript, pluginCommand, configCommand, demarrage).joinToString(System.lineSeparator())
         return executer(app, script, libelle = "Orchestration multi-agents Hermès")
             ?: "🧠 Gemini, Groq, Cloudflare et les autres modèles déjà configurés sont raccordés au routage multi-agents ; redémarrage Hermès demandé."
