@@ -51,6 +51,9 @@ interface GraphDao {
     """)
     suspend fun getRelationsForNode(nodeId: String): List<GraphRelationEntity>
 
+    @Query("SELECT * FROM graph_relations WHERE origin = 'SUGGESTED'")
+    suspend fun getSuggestedRelations(): List<GraphRelationEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertRelations(relations: List<GraphRelationEntity>)
 
