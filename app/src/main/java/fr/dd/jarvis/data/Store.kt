@@ -80,8 +80,8 @@ class Store(context: Context) {
     val apiKeysSecureAvailable: Boolean get() = secretPrefs != null
 
     private fun readApiKeyList(key: String): List<String> {
-        val raw = if (secretPrefs != null) secretPrefs.getString(key, "") ?: ""
-                   else prefs.getString(key, "") ?: ""
+        val secure = secretPrefs ?: return emptyList()
+        val raw = secure.getString(key, "") ?: ""
         return raw.lines().map { it.trim() }.filter { it.isNotEmpty() }
     }
 
