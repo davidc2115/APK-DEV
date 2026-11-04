@@ -232,6 +232,14 @@ fun SettingsScreen(app: JarvisApp) {
                     }
                 }
                 Spacer(Modifier.height(8.dp))
+                HudChip("Écriture adulte consensuelle", selected = store.modeAdulte.value) {
+                    store.modeAdulte.set(!store.modeAdulte.value)
+                }
+                Text(
+                    "Autorise un ton mature, sensuel et suggestif dans les créations entre adultes consentants. Ne désactive pas les protections du modèle ni celles des services externes.",
+                    color = HudDim, fontSize = 11.sp
+                )
+                Spacer(Modifier.height(8.dp))
                 HudTextField(store.hermesModele.value, { store.hermesModele.set(it.trim()) }, Modifier.fillMaxWidth(),
                     label = "Modèle Gemini d'Hermès (vide = ${store.geminiModel.value.ifBlank { "modèle des agents" }})")
                 Text(
