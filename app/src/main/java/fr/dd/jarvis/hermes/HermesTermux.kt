@@ -378,8 +378,8 @@ p "✅ Hermès installé (${'$'}{MODE})."
 
     /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
     fun configurer(app: JarvisApp): String {
-        if (!app.store.apiKeysSecureAvailable && (app.store.geminiKeys.isNotEmpty() || app.store.groqKeys.isNotEmpty())) {
-            return "⛔ Le stockage chiffré Android est indisponible. Configuration Hermès interrompue ; aucune clé non protégée ne sera transmise."
+        if (!app.store.apiKeysSecureAvailable) {
+            return "⛔ Le stockage chiffré Android est indisponible. Configuration Hermès interrompue pour éviter de supprimer ou de transmettre des clés non protégées."
         }
         PontMcp.demarrer(app)
         val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
