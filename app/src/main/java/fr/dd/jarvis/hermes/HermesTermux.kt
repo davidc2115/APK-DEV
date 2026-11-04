@@ -397,6 +397,16 @@ p "✅ Hermès installé (${'$'}{MODE})."
             val key = raw.substringAfter(':', "").trim()
             if (Regex("[0-9a-fA-F]{32}").matches(id) && key.isNotBlank()) id to key else null
         }
+        val external = listOf(
+            Triple("zai", "JARVIS_ZAI_API_KEY", "https://api.z.ai/api/paas/v4"),
+            Triple("openrouter", "JARVIS_OPENROUTER_API_KEY", "https://openrouter.ai/api/v1"),
+            Triple("nvidia", "JARVIS_NVIDIA_API_KEY", "https://integrate.api.nvidia.com/v1"),
+            Triple("mistral", "JARVIS_MISTRAL_API_KEY", "https://api.mistral.ai/v1"),
+            Triple("huggingface", "JARVIS_HF_TOKEN", "https://router.huggingface.co/v1")
+        ).mapNotNull { (id, env, defaultUrl) ->
+            val key = s.externalProviderKey(id)
+            if (key.isBlank()) null else listOf(id, env, s.externalProviderEndpoint(id).ifBlank { defaultUrl }.trimEnd('/'), s.externalProviderModel(id), key)
+        }
         val model = s.groqModel.value.ifBlank { "llama-3.3-70b-versatile" }
         val cloudflareModel = s.cfChatModel.value.ifBlank { "@cf/meta/llama-3.3-70b-instruct-fp8-fast" }
         val envScript = buildString {
@@ -406,9 +416,18 @@ p "✅ Hermès installé (${'$'}{MODE})."
             appendLine("removeenvfamily GOOGLE_API_KEY")
             appendLine("removeenvfamily GROQ_API_KEY")
             appendLine("removeenvfamily JARVIS_CF_KEY")
+            listOf("JARVIS_ZAI_API_KEY", "JARVIS_OPENROUTER_API_KEY", "JARVIS_NVIDIA_API_KEY", "JARVIS_MISTRAL_API_KEY", "JARVIS_HF_TOKEN").forEach { appendLine("removeenvfamily " + it) }
             gemini.forEachIndexed { index, key -> appendLine("setenv " + (if (index == 0) "GOOGLE_API_KEY" else "GOOGLE_API_KEY_" + (index + 1)) + " " + q(key)) }
             groq.forEachIndexed { index, key -> appendLine("setenv " + (if (index == 0) "GROQ_API_KEY" else "GROQ_API_KEY_" + (index + 1)) + " " + q(key)) }
             cloudflare.forEachIndexed { index, pair -> appendLine("setenv JARVIS_CF_KEY_" + (index + 1) + " " + q(pair.second)) }
+            listOf("ZAI", "OPENROUTER", "NVIDIA", "MISTRAL", "HF").forEach { appendLine("setenv JARVIS_HAS_" + it + " 0") }
+            external.forEach { entry ->
+                val id = entry[0].uppercase()
+                appendLine("setenv " + entry[1] + " " + q(entry[4]))
+                appendLine("setenv JARVIS_HAS_" + id + " 1")
+                appendLine("setenv JARVIS_" + id + "_MODEL " + q(entry[3]))
+                appendLine("setenv JARVIS_" + id + "_ENDPOINT " + q(entry[2]))
+            }
             appendLine("chmod 600 \"${'$'}H/.env\"")
         }
         val py = """
@@ -511,6 +530,24 @@ for provider_name, provider_config in providers.items():
     if provider_model:
         safe_name = "".join(ch.lower() if ch.isalnum() else "-" for ch in str(provider_name)).strip("-")[:20] or "provider"
         add_route(f"jarvis-provider-{safe_name}", f"Endpoint personnalisé Hermes : {provider_name}", f"custom:{provider_name}", str(provider_model))
+# Fournisseurs API ajoutés depuis Jarvis : les secrets restent dans ~/.hermes/.env.
+external_specs = [
+    ("zai", "JARVIS_ZAI_API_KEY", "https://api.z.ai/api/paas/v4"),
+    ("openrouter", "JARVIS_OPENROUTER_API_KEY", "https://openrouter.ai/api/v1"),
+    ("nvidia", "JARVIS_NVIDIA_API_KEY", "https://integrate.api.nvidia.com/v1"),
+    ("mistral", "JARVIS_MISTRAL_API_KEY", "https://api.mistral.ai/v1"),
+    ("huggingface", "JARVIS_HF_TOKEN", "https://router.huggingface.co/v1"),
+]
+for provider_id, key_env, default_api in external_specs:
+    if os.environ.get("JARVIS_HAS_" + provider_id.upper()) == "1":
+        custom_name = "jarvis_" + provider_id
+        api_url = os.environ.get("JARVIS_" + provider_id.upper() + "_ENDPOINT", default_api)
+        providers[custom_name] = {"api": api_url, "key_env": key_env}
+        model_name = os.environ.get("JARVIS_" + provider_id.upper() + "_MODEL", "")
+        if model_name:
+            route = {"provider": "custom:" + custom_name, "model": model_name}
+            if not any(isinstance(x, dict) and x.get("provider") == route["provider"] and x.get("model") == route["model"] for x in fallbacks):
+                fallbacks.append(route)
 known = {(str(x.get("provider", "")), str(x.get("model", ""))) for x in options if isinstance(x, dict)}
 for index, item in enumerate(fallbacks, 1):
     if isinstance(item, dict):
@@ -546,11 +583,40 @@ os.replace(name, p)
         val hasGroq = if (groq.isNotEmpty()) "1" else "0"
         val cfIds = cloudflare.joinToString(",") { it.first }
         val pluginCommand = "PLUGIN_OK=0; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes plugins install advanced-delegation --no-deps --no-enable >/dev/null 2>&1 || true; if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes plugins enable advanced-delegation --no-allow-tool-override >/dev/null 2>&1; then PLUGIN_OK=1; p \"🧠 Routage multi-modèles advanced-delegation activé.\"; else p \"⚠️ Extension avancée indisponible : délégation Hermes native conservée.\"; fi"
-        val configCommand = "proot-distro login debian --termux-home -- env JARVIS_HAS_GEMINI=" + hasGemini + " JARVIS_HAS_GROQ=" + hasGroq + " JARVIS_GEMINI_MODEL=" + q(app.store.hermesModele.value.ifBlank { app.store.geminiModel.value }.ifBlank { "gemini-2.5-flash" }) + " JARVIS_GROQ_MODEL=" + q(model) + " JARVIS_CF_MODEL=" + q(cloudflareModel) + " JARVIS_CF_IDS=" + q(cfIds) + " JARVIS_ADVANCED_DELEGATION=\"\$PLUGIN_OK\" python3 -c " + q(py) + " || exit 1"
+        val extEnv = external.joinToString(" ") { entry ->
+            val id = entry[0].uppercase()
+            "JARVIS_HAS_$id=1 JARVIS_${id}_MODEL=${q(entry[3])} JARVIS_${id}_ENDPOINT=${q(entry[2])}"
+        }
+        val configCommand = "proot-distro login debian --termux-home -- env " + extEnv + " JARVIS_HAS_GEMINI=" + hasGemini + " JARVIS_HAS_GROQ=" + hasGroq + " JARVIS_GEMINI_MODEL=" + q(app.store.hermesModele.value.ifBlank { app.store.geminiModel.value }.ifBlank { "gemini-2.5-flash" }) + " JARVIS_GROQ_MODEL=" + q(model) + " JARVIS_CF_MODEL=" + q(cloudflareModel) + " JARVIS_CF_IDS=" + q(cfIds) + " JARVIS_ADVANCED_DELEGATION=\"\$PLUGIN_OK\" python3 -c " + q(py) + " || exit 1"
         val script = listOf(prelude(app), envScript, pluginCommand, configCommand, demarrage).joinToString(System.lineSeparator())
         return executer(app, script, libelle = "Orchestration multi-agents Hermès")
             ?: "🧠 Gemini, Groq, Cloudflare et les autres modèles déjà configurés sont raccordés au routage multi-agents ; redémarrage Hermès demandé."
     }
+
+    /** Catalogue et installation non interactive des plugins/MCP Hermes. */
+    fun gererExtension(app: JarvisApp, actionRaw: String, nameRaw: String = ""): String {
+        val action = actionRaw.trim().lowercase()
+        val name = nameRaw.trim()
+        val allowed = setOf("plugin_catalogue", "plugin_liste", "plugin_installer", "plugin_activer",
+            "mcp_catalogue", "mcp_liste", "mcp_installer")
+        if (action !in allowed) return "Action d'extension inconnue."
+        if (action.endsWith("_installer") || action.endsWith("_activer")) {
+            if (!Regex("[a-zA-Z0-9][a-zA-Z0-9._/-]{0,100}").matches(name) || name.contains(".."))
+                return "Nom d'extension invalide."
+        }
+        val args = when (action) {
+            "plugin_catalogue" -> listOf("plugins", "catalog")
+            "plugin_liste" -> listOf("plugins", "list")
+            "plugin_installer" -> listOf("plugins", "install", name)
+            "plugin_activer" -> listOf("plugins", "enable", name)
+            "mcp_catalogue" -> listOf("mcp", "catalog")
+            "mcp_liste" -> listOf("mcp", "list")
+            "mcp_installer" -> listOf("mcp", "install", name)
+            else -> return "Action non prise en charge."
+        }
+        return lancerExtension(app, args, "Catalogue / extensions Hermès")
+    }
+
     fun demarrer(app: JarvisApp): String {
         PontMcp.demarrer(app)
         return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
