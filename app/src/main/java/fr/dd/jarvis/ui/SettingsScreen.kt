@@ -97,12 +97,30 @@ fun SettingsScreen(app: JarvisApp) {
         // ------------------------------------------------------------ Cerveau Groq
         item { SectionHeader("Intelligence artificielle") }
         item {
+            if (!store.apiKeysSecureAvailable) {
+                Text(
+                    "⚠️ Le stockage chiffré Android est indisponible. Les anciennes clés restent conservées, mais Jarvis bloque leur modification et leur transfert vers Hermès pour éviter une nouvelle sauvegarde en clair.",
+                    color = Color(0xFFFFB74D), fontSize = 12.sp
+                )
+            }
+        }
+        item {
             KeyPanel(
                 title = "Cerveau — clés Groq (rotation automatique)",
                 hint = "Une clé par ligne. À chaque requête JARVIS passe à la clé suivante ; une clé saturée (429) est mise en pause.",
                 keys = store.groqKeys,
-                onAdd = { store.addGroqKeys(it) },
-                onRemove = { store.removeGroqKey(it) },
+                onAdd = {
+                    if (store.apiKeysSecureAvailable) {
+                        store.addGroqKeys(it)
+                        if (store.hermesInstalle.value) fr.dd.jarvis.hermes.HermesTermux.synchroniserCles(app)
+                    }
+                },
+                onRemove = {
+                    if (store.apiKeysSecureAvailable) {
+                        store.removeGroqKey(it)
+                        if (store.hermesInstalle.value) fr.dd.jarvis.hermes.HermesTermux.synchroniserCles(app)
+                    }
+                },
                 onTest = { app.llm.testGroqKeys() },
                 modelLabel = "Modèle Groq", model = store.groqModel.value, onModel = { store.groqModel.set(it) },
                 onListModels = { app.llm.listGroqModels() }
@@ -115,8 +133,18 @@ fun SettingsScreen(app: JarvisApp) {
                 title = "Agents — clés Gemini (rotation automatique)",
                 hint = "Utilisées pour le planning, les mails et les contacts. Sans clé Gemini, les agents utilisent Groq.",
                 keys = store.geminiKeys,
-                onAdd = { store.addGeminiKeys(it) },
-                onRemove = { store.removeGeminiKey(it) },
+                onAdd = {
+                    if (store.apiKeysSecureAvailable) {
+                        store.addGeminiKeys(it)
+                        if (store.hermesInstalle.value) fr.dd.jarvis.hermes.HermesTermux.synchroniserCles(app)
+                    }
+                },
+                onRemove = {
+                    if (store.apiKeysSecureAvailable) {
+                        store.removeGeminiKey(it)
+                        if (store.hermesInstalle.value) fr.dd.jarvis.hermes.HermesTermux.synchroniserCles(app)
+                    }
+                },
                 onTest = { app.llm.testGeminiKeys() },
                 modelLabel = "Modèle Gemini", model = store.geminiModel.value, onModel = { store.geminiModel.set(it) },
                 onListModels = { app.llm.listGeminiModels() }
@@ -153,17 +181,43 @@ fun SettingsScreen(app: JarvisApp) {
                         if (!permOk && !fr.dd.jarvis.device.AdbShell.hasKey(ctx)) permLauncher.launch(h.PERMISSION)
                         else scope.launch { hMsg = "⏳ Autorisation…"; hMsg = h.autoriser(app); hTick++ }
                     }
-                    HudButton(if (store.hermesInstalle.value) "3. Réinstaller / mettre à jour Hermès" else "3. Installer Hermès", Modifier.fillMaxWidth(), enabled = termuxOk && permOk, filled = termuxOk && permOk && !store.hermesInstalle.value) {
+                    HudButton(if (store.hermesInstalle.value) "3. Réinstaller / mettre à jour Hermès" else "3. Installer Hermès", Modifier.fillMaxWidth(), enabled = termuxOk && permOk && store.apiKeysSecureAvailable, filled = termuxOk && permOk && store.apiKeysSecureAvailable && !store.hermesInstalle.value) {
                         fr.dd.jarvis.hermes.PontMcp.progression.clear()
                         hMsg = h.installer(app)
                     }
                 }
                 Spacer(Modifier.height(6.dp))
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    HudButton("Configurer", enabled = permOk) { hMsg = h.configurer(app) }
+                    HudButton("Configurer", enabled = permOk && store.apiKeysSecureAvailable) { hMsg = h.configurer(app) }
                     HudButton("Démarrer", enabled = permOk && !enLigne) { hMsg = h.demarrer(app) }
                     HudButton("Arrêter", enabled = permOk && enLigne) { hMsg = h.arreter(app) }
                     HudButton("Actualiser") { hTick++ }
+                }
+
+                var recoveryConfirm by remember { mutableStateOf("") }
+                Spacer(Modifier.height(8.dp))
+                Text("Sauvegarde et récupération", color = HudDim, fontSize = 12.sp)
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HudButton("Sauvegarder") { hMsg = h.sauvegarder(app) }
+                    HudButton("Diagnostic") { hMsg = h.diagnostiquer(app) }
+                    HudButton("Restaurer") {
+                        if (recoveryConfirm != "restore") {
+                            recoveryConfirm = "restore"
+                            hMsg = "⚠️ Retouche « Restaurer » pour confirmer la restauration de la dernière sauvegarde."
+                        } else {
+                            recoveryConfirm = ""
+                            hMsg = h.restaurerDerniereSauvegarde(app)
+                        }
+                    }
+                    HudButton("Réinstaller") {
+                        if (recoveryConfirm != "reinstall") {
+                            recoveryConfirm = "reinstall"
+                            hMsg = "⚠️ Cette opération sauvegarde ~/.hermes puis réinstalle le moteur. Retouche « Réinstaller » pour confirmer."
+                        } else {
+                            recoveryConfirm = ""
+                            hMsg = h.reinstallerComplet(app)
+                        }
+                    }
                 }
                 if (hMsg.isNotBlank()) Text(hMsg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
                 val lignes = fr.dd.jarvis.hermes.PontMcp.progression
