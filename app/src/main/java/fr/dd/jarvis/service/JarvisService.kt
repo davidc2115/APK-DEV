@@ -84,7 +84,7 @@ class JarvisService : Service() {
     private var incompris = 0              // phrases non comprises d'affilée pendant une conversation
     private var echangeReel = false        // vrai dès qu'une vraie demande a été traitée pendant cette conversation
     private lateinit var app: JarvisApp
-    private lateinit var brain: Brain
+    private lateinit var tools: ToolBox
 
     private fun norm(s: String) = Normalizer.normalize(s.lowercase(), Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
     private val wakeRegex = Regex("\\b(jarvis|jarvice|jarviss|djarvis|jarvi|jarves|charvis)\\b[ ,.:!?-]*")
@@ -138,8 +138,7 @@ class JarvisService : Service() {
         getSystemService(NotificationManager::class.java).cancel(NOTIF_REPRISE)
         running = true
         wake = (getSystemService(POWER_SERVICE) as PowerManager).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "jarvis:wake").apply { setReferenceCounted(false); acquire() }
-        val tools = ToolBox(app) { q, _ -> voiceConfirm(q) }
-        brain = Brain(app.llm, tools, app) { app.store.userName.value }
+        tools = ToolBox(app) { q, _ -> voiceConfirm(q) }
         // Hermès installé : on s'assure que sa passerelle tourne dans Termux (après un redémarrage du téléphone par ex.).
         if (app.store.hermesInstalle.value && app.store.hermesMode.value != "off") scope.launch {
             runCatching { fr.dd.jarvis.hermes.PontMcp.demarrer(app); if (!fr.dd.jarvis.hermes.Hermes.enLigne(force = true)) fr.dd.jarvis.hermes.Hermes.relancerSiBesoin(app) }
@@ -324,7 +323,22 @@ class JarvisService : Service() {
                 app.chatAjouter(userMessage)
                 if (app.enVoiture) CarBridge.ajouter(userMessage)
             }
-            val reply = try { brain.reply(app.chat.toList().takeLast(10)) { } } catch (e: CancellationException) { throw e } catch (e: Throwable) { "Erreur : ${e.message ?: e.javaClass.simpleName}" }
+            // Les demandes vocales suivent la même règle que le chat : Hermès est le cerveau exclusif.
+            // Aucun basculement silencieux vers Brain/Groq n'est autorisé dans cette voie vocale.
+            val reply = try {
+                if (!app.store.hermesInstalle.value || app.store.hermesMode.value == "off") {
+                    "Hermès est désactivé ou non installé. Active Hermès dans les réglages pour utiliser les commandes vocales."
+                } else {
+                    fr.dd.jarvis.hermes.Hermes.repondre(
+                        app,
+                        app.chat.toList().takeLast(12),
+                        tools,
+                        app.store.userName.value
+                    ) { etat -> withContext(Dispatchers.Main) { majNotification(etat) } }
+                        ?: "Je n'arrive pas à joindre Hermès pour le moment. Je n'ai pas exécuté la demande ; réessaie dans un instant."
+                }
+            } catch (e: CancellationException) { throw e }
+              catch (e: Throwable) { "Erreur Hermès : ${e.message ?: e.javaClass.simpleName}" }
             val assistantMessage = ChatMsg(false, reply)
             withContext(Dispatchers.Main) {
                 app.chatAjouter(assistantMessage)
