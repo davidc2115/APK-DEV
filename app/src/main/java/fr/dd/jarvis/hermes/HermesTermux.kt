@@ -471,6 +471,54 @@ os.replace(name, p)
         return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
             ?: "🚀 Commande envoyée à Hermès."
     }
+    /** Ajoute un MCP HTTP ou stdio depuis Jarvis, sans toucher au pont Jarvis existant. */
+    fun ajouterMcp(
+        app: JarvisApp, nom: String, url: String, commande: String, args: List<String>,
+        oauth: Boolean, variables: List<Pair<String, String>>
+    ): String {
+        val id = nom.trim()
+        if (!id.matches(Regex("[A-Za-z0-9_-]{1,48}"))) return "❌ Nom MCP invalide."
+        if ((url.isBlank()) == (commande.isBlank())) return "❌ Renseigne soit une URL HTTP, soit une commande locale (pas les deux)."
+        if (variables.any { !it.first.matches(Regex("[A-Z_][A-Z0-9_]*")) }) return "❌ Nom de variable invalide : utilise KEY_EN_MAJUSCULES."
+        if (url.isNotBlank() && !url.startsWith("https://") && !url.startsWith("http://")) return "❌ URL MCP invalide."
+        PontMcp.demarrer(app)
+        val script = buildString {
+            appendLine("set -e")
+            appendLine("cd /root/.hermes/hermes-agent")
+            variables.forEach { (k, v) -> appendLine("./.hermes/bin/hermes config set ${q(k)} ${q(v)}") }
+            val add = buildList {
+                add("./.hermes/bin/hermes"); add("mcp"); add("add"); add(id)
+                if (url.isNotBlank()) {
+                    add("--url"); add(url)
+                    if (oauth) { add("--auth"); add("oauth") }
+                } else {
+                    add("--command"); add(commande.trim())
+                    if (args.isNotEmpty()) { add("--args"); addAll(args) }
+                }
+            }.joinToString(" ") { q(it) }
+            appendLine(add)
+            if (variables.isNotEmpty()) {
+                appendLine("python - <<'PY'")
+                appendLine("from pathlib import Path")
+                appendLine("import os, yaml")
+                appendLine("p=Path('/root/.hermes/config.yaml')")
+                appendLine("d=yaml.safe_load(p.read_text()) or {}")
+                appendLine("servers=d.setdefault('mcp_servers', {})")
+                appendLine("if ${q(id)} not in servers: raise SystemExit('Serveur MCP absent après ajout')")
+                appendLine("servers[${q(id)}]['env']={")
+                variables.forEach { (k, _) -> appendLine("${q(k)}: ${q("$" + "{" + k + "}")},") }
+                appendLine("}")
+                appendLine("tmp=p.with_suffix('.yaml.jarvis-tmp')")
+                appendLine("tmp.write_text(yaml.safe_dump(d, sort_keys=False, allow_unicode=True))")
+                appendLine("os.chmod(tmp, 0o600)")
+                appendLine("os.replace(tmp,p)")
+                appendLine("PY")
+            }
+            appendLine("echo 'Serveur MCP ajouté : $id. Lance hermes mcp test $id pour vérifier.'")
+        }
+        return executerDebian(app, script, "Ajout du serveur MCP $id")
+    }
+
     // ------------------------------------------------------------------ Sauvegarde et récupération autonome
     private fun executerDebian(app: JarvisApp, scriptDebian: String, libelle: String): String {
         PontMcp.demarrer(app)
