@@ -207,7 +207,7 @@ object GmailApi {
             val token = auth.accessToken ?: throw IllegalStateException("Jeton Google indisponible pour $account.")
             val parts = mutableListOf<String>()
             if (sender.isNotBlank()) parts += "from:${sender.trim()}"
-            if (term.isNotBlank()) parts += "\"\\${term.trim().replace("\"", "")}\\""
+            if (term.isNotBlank()) parts += "\"${term.trim().replace("\"", "")}\""
             fun datePart(value: String, after: Boolean): String? {
                 val d = runCatching { java.time.LocalDate.parse(value.take(10)) }.getOrNull() ?: return null
                 val target = if (!after) d.plusDays(1) else d
@@ -277,11 +277,11 @@ object GmailApi {
         if (auth.hasResolution()) throw IllegalStateException("Autorisation Gmail à renouveler pour $account.")
         val token = auth.accessToken ?: throw IllegalStateException("Jeton Google indisponible.")
         val raw = buildString {
-            append("From: $account\\r\\nTo: ${target.to}\\r\\nSubject: =?UTF-8?B?${android.util.Base64.encodeToString(target.subject.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)}?=\\r\\n")
-            if (target.messageId.isNotBlank()) append("In-Reply-To: ${target.messageId}\\r\\n")
+            append("From: $account\r\nTo: ${target.to}\r\nSubject: =?UTF-8?B?${android.util.Base64.encodeToString(target.subject.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)}?=\r\n")
+            if (target.messageId.isNotBlank()) append("In-Reply-To: ${target.messageId}\r\n")
             val refs = listOf(target.references, target.messageId).filter { it.isNotBlank() }.joinToString(" ")
-            if (refs.isNotBlank()) append("References: $refs\\r\\n")
-            append("MIME-Version: 1.0\\r\\nContent-Type: text/plain; charset=UTF-8\\r\\nContent-Transfer-Encoding: 8bit\\r\\n\\r\\n")
+            if (refs.isNotBlank()) append("References: $refs\r\n")
+            append("MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")
             append(body)
         }
         val payload = JSONObject().put("raw", b64(raw)).put("threadId", target.threadId)
