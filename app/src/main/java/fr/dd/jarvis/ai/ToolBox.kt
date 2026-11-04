@@ -304,7 +304,7 @@ class ToolBox(
         put(tool("export_kml", "Génère un fichier KML (Google Earth / Google My Maps) avec les points GPS des clients et installations, enregistré dans Obsidian et partageable."))
         put(tool("hermes", "Gère Hermès, l'agent IA installé dans Termux qui sert de cerveau principal : état, installation, configuration (clés, modèle), démarrage, arrêt, mode de répartition.",
             mapOf("action" to prop("etat | installer | configurer | demarrer | arreter | mode"),
-                "mode" to prop("Pour action=mode : auto (Hermès cerveau principal, Groq pour les commandes rapides) | demande (Hermès seulement quand on le nomme) | off.")), listOf("action")))
+                "mode" to prop("Pour action=mode : auto (Hermès reçoit toutes les demandes et choisit lui-même de répondre ou de déléguer aux agents Gemini/Groq/Cloudflare/autres) | demande (Hermès seulement quand on le nomme) | off (Jarvis utilise son moteur interne).")), listOf("action")))
         put(tool("hermes_deleguer", "Confie à Hermès (agent autonome : recherche web, analyse, rédaction, code, tâches en plusieurs étapes, mémoire long terme) une tâche complexe ou longue. Décris la tâche complète et le résultat attendu.",
             mapOf("tache" to prop("La tâche détaillée, avec tout le contexte utile.")), listOf("tache")))
         put(tool("ma_position", "Donne la position GPS actuelle du téléphone (fix frais, format Google Maps) et l'ADRESSE PRÉCISE correspondante (numéro, rue, code postal, ville). Pour enregistrer cette position sur une fiche client, utilise client_ecrire avec site_gps = « ma position » (et site_adresse = « ma position » pour l'adresse)."))
