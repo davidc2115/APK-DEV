@@ -158,7 +158,7 @@ fun SettingsScreen(app: JarvisApp) {
             HudPanel(Modifier.fillMaxWidth(), title = "Centre de contrôle des agents IA") {
                 Text("État de configuration des moteurs disponibles dans JARVIS. Une clé configurée ne signifie pas que le service est actuellement joignable ou que son quota est disponible : utilise les tests des fournisseurs pour le vérifier.", color = HudDim, fontSize = 11.sp)
                 Spacer(Modifier.height(6.dp))
-                AgentStatusRow("Hermès (orchestrateur Termux)", store.hermesInstalle.value && store.hermesMode.value != "off", if (store.hermesInstalle.value && store.hermesMode.value != "off") "configuré" else "désactivé")
+                AgentStatusRow("Hermès (orchestrateur Termux)", store.hermesInstalle.value && store.hermesMode.value != "off", when { store.hermesMode.value == "off" -> "mode désactivé"; store.hermesInstalle.value -> "installé · état réseau ci-dessous"; else -> "installation non confirmée · vérifier Termux" })
                 AgentStatusRow("Groq · " + store.groqModel.value, store.groqKeys.isNotEmpty(), store.groqKeys.size.toString() + " clé(s)")
                 AgentStatusRow("Gemini · " + store.geminiModel.value, store.geminiKeys.isNotEmpty(), store.geminiKeys.size.toString() + " clé(s)")
                 AgentStatusRow("Cloudflare Workers AI · images/texte", store.cfAccounts.isNotEmpty(), store.cfAccounts.size.toString() + " compte(s)")
