@@ -46,7 +46,7 @@ object Hermes {
 
     /** Hermès est hors ligne alors qu'il est installé : on relance sa passerelle (au plus une fois par minute). */
     fun relancerSiBesoin(app: JarvisApp) {
-        if (!app.store.hermesInstalle.value || app.store.hermesMode.value == "off") return
+        if (app.store.hermesMode.value == "off") return
         if (System.currentTimeMillis() - relanceA < 60_000) return
         relanceA = System.currentTimeMillis()
         HermesTermux.demarrer(app)
@@ -218,7 +218,7 @@ object Routeur {
 
     fun choisir(app: JarvisApp, texte: String): Choix {
         val mode = app.store.hermesMode.value
-        if (mode == "off" || !app.store.hermesInstalle.value) return Choix(Cible.JARVIS, "Hermès désactivé ou non installé")
+        if (mode == "off") return Choix(Cible.JARVIS, "Hermès désactivé dans les réglages")
         val t = texte.trim()
         if (mode == "demande" && !NOMME.containsMatchIn(t)) return Choix(Cible.JARVIS, "mode à la demande : Hermès doit être nommé")
         return Choix(Cible.HERMES, when {
