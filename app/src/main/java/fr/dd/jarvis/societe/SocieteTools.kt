@@ -20,12 +20,12 @@ class SocieteTools(
         val NAMES = setOf(
             "societe_info_set", "societe_info_get", "tarif_set", "tarif_delete", "regles_set", "client_ecrire", "client_fiche", "client_supprimer",
             "document_creer", "document_action", "document_email", "societe_liste", "employe_ecrire", "paie", "reserve_bilan",
-            "presentation_modifier", "distance_deplacement", "clients_exporter_kml", "kml_couleurs_set", "clients_gps", "intervention_enregistrer", "interventions_liste"
+            "presentation_modifier", "distance_deplacement", "clients_exporter_kml", "kml_couleurs_set", "clients_gps", "intervention_enregistrer", "interventions_liste", "interventions_synthese"
         )
         private val KEYWORDS = Regex(
             "devis|factur|client|soci[ée]t[ée]|tarif|remise|d[ée]placement|paie|salaire|bulletin|r[ée]serve|dividende|b[ée]n[ée]fice|" +
                 "installation|photovolta|kwc|fiche|pr[ée]sentation|mise en forme|mise en page|si[èe]ge|employ[ée]|prix|onduleur|maintenance|" +
-                "entretien|intervention|panne|diagnostic|pi[èe]ce remplac[ée]e|planning|agenda|pdf|obsidian|distance|itin[ée]raire|km|fid[ée]lit[ée]|kml|google earth|carte des clients|" +
+                "entretien|intervention|historique photovolta[ïi]que|bilan maintenance|panne|diagnostic|pi[èe]ce remplac[ée]e|planning|agenda|pdf|obsidian|distance|itin[ée]raire|km|fid[ée]lit[ée]|kml|google earth|carte des clients|" +
                 "gps|coordonn[ée]es|g[ée]oloc|localis|latitude|longitude|google maps",
             RegexOption.IGNORE_CASE
         )
@@ -127,6 +127,10 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         tool("interventions_liste", "Consulte l'historique des interventions photovoltaïques d'un client et éventuellement d'une installation.", mapOf(
             "client" to prop("Nom exact du client."), "installation" to prop("Nom de l'installation si le client en possède plusieurs.")
         ), listOf("client")),
+        tool("interventions_synthese", "Produit un bilan intelligent de l'historique photovoltaïque : volume, dernières interventions, catégories, actions en attente et prochaines maintenances. N'infère aucune panne ni mesure absente.", mapOf(
+            "client" to prop("Nom du client exact ou partiel ; vide = tous les clients."),
+            "installation" to prop("Nom exact ou partiel de l'installation (optionnel).")
+        )),
         tool("client_supprimer", "Supprime définitivement une fiche client de la base Société après confirmation. Refuse la suppression si des devis ou factures sont encore liés afin de préserver l’historique comptable.", mapOf("nom" to prop("Nom exact du client à supprimer.")), listOf("nom")),
         tool("document_creer", "Crée un devis ou une facture (tarifs, remises et déplacement calculés automatiquement), l'enregistre en Markdown et PDF dans Obsidian.", mapOf(
             "type" to prop("devis | facture"), "client" to prop("Nom du client."), "installation" to prop("Nom ou adresse de l'installation (optionnel si une seule)."),
@@ -201,6 +205,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         "client_fiche" -> clientFiche(a)
         "intervention_enregistrer" -> interventionEnregistrer(a)
         "interventions_liste" -> interventionsListe(a)
+        "interventions_synthese" -> interventionsSynthese(a)
         "client_supprimer" -> clientSupprimer(a)
         "document_creer" -> documentCreer(a)
         "document_action" -> documentAction(a)
@@ -585,6 +590,54 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
                 if (item.notes.isNotBlank()) append("\n- Notes : " + item.notes)
             }
         })
+    }
+
+
+    /** Synthèse factuelle multi-sites : les tendances ne sont signalées que si elles figurent dans les données enregistrées. */
+    private fun interventionsSynthese(a: JSONObject): ToolResult {
+        val clientQuery = a.s("client")
+        val siteQuery = a.s("installation")
+        val clients = d.clients.filter { client ->
+            (clientQuery.isBlank() || client.nom.contains(clientQuery, true)) &&
+                client.sites.any { siteQuery.isBlank() || it.nom.contains(siteQuery, true) }
+        }
+        if (clients.isEmpty()) return ok("Aucun client ou site ne correspond aux critères.")
+        val sites = clients.flatMap { client ->
+            client.sites.filter { siteQuery.isBlank() || it.nom.contains(siteQuery, true) }
+                .map { client to it }
+        }
+        val all = sites.flatMap { (client, site) -> site.interventions.map { Triple(client, site, it) } }
+        if (all.isEmpty()) return ok("Aucune intervention photovoltaïque enregistrée pour les sites sélectionnés.")
+        val today = LocalDate.now()
+        val upcoming = all.filter { (_, _, intervention) ->
+            intervention.prochaineMaintenance.isNotBlank() &&
+                runCatching { !LocalDate.parse(intervention.prochaineMaintenance).isAfter(today.plusDays(30)) }.getOrDefault(false)
+        }.sortedBy { it.third.prochaineMaintenance }
+        val pending = all.filter { it.third.statut.equals("a_suivre", true) || it.third.statut.equals("en_attente", true) }
+        val byCategory = all.groupingBy { it.third.categorie.ifBlank { "non précisée" } }.eachCount()
+        val out = StringBuilder("# Bilan des interventions photovoltaïques\n\n")
+        out.append("- Clients : ${clients.size}\n- Installations : ${sites.size}\n- Interventions enregistrées : ${all.size}\n")
+        out.append("- Dernière intervention : ${all.maxByOrNull { it.third.date }?.let { "${it.third.date} · ${it.first.nom} / ${it.second.nom}" } ?: "inconnue"}\n")
+        out.append("\n## Répartition par catégorie\n")
+        byCategory.entries.sortedByDescending { it.value }.forEach { (category, count) -> out.append("- $category : $count\n") }
+        out.append("\n## Interventions à suivre / en attente\n")
+        if (pending.isEmpty()) out.append("- Aucune intervention avec ce statut.\n")
+        else pending.sortedByDescending { it.third.date }.forEach { (client, site, item) ->
+            out.append("- ${item.date} · ${client.nom} / ${site.nom} · ${item.statut} : ${item.description.take(180)}\n")
+        }
+        out.append("\n## Maintenances à échéance dans les 30 jours ou en retard\n")
+        if (upcoming.isEmpty()) out.append("- Aucune date de prochaine maintenance dans les données sélectionnées.\n")
+        else upcoming.forEach { (client, site, item) ->
+            val date = runCatching { LocalDate.parse(item.prochaineMaintenance) }.getOrNull()
+            val label = if (date != null && date.isBefore(today)) "EN RETARD" else "À VENIR"
+            out.append("- ${item.prochaineMaintenance} · $label · ${client.nom} / ${site.nom}\n")
+        }
+        out.append("\n## Dernières interventions\n")
+        all.sortedByDescending { it.third.date }.take(12).forEach { (client, site, item) ->
+            out.append("- ${item.date} · ${client.nom} / ${site.nom} · ${item.categorie} · ${item.statut} : ${item.description.take(180)}\n")
+        }
+        out.append("\nBilan calculé uniquement à partir des interventions et dates effectivement enregistrées ; aucune mesure ni panne n'est déduite.")
+        return ok(out.toString())
     }
 
     private suspend fun documentCreer(a: JSONObject): ToolResult {
