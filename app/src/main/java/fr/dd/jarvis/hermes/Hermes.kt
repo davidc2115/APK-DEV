@@ -181,7 +181,7 @@ object Routeur {
             "alarme|r[ée]veil|minuteur|chrono|rappel|agenda|calendrier|planning|rendez.vous|rdv|[ée]v[ée]nement|" +
             "allume|[ée]teins|lumi[èe]re|lampe|torche|chauffage|po[êe]le|thermostat|volet|prise|wi-?fi|bluetooth|luminosit[ée]|" +
             "itin[ée]raire|navigation|emm[èe]ne|guide.moi|waze|trajet|" +
-            "ouvre|lance (l.app|l.application)|ferme|capture|photo|" +
+            "ouvre|lance (l.app|l.application)|ferme|capture|photo|[ée]cran|screenshot|lis (moi )?l.[ée]cran|analyse (moi )?l.[ée]cran|" +
             "devis|factur|client|fiche|paie|bulletin|tarif|kml|google earth|" +
             "obsidian|coffre|dossier|fichier|note|" +
             "image|dessin|coloriage|vid[ée]o|tiktok|discord|imprim|scann|" +
