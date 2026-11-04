@@ -330,6 +330,9 @@ fun SettingsScreen(app: JarvisApp) {
                                     if (extMsg.startsWith("⛔") || extMsg.startsWith("ℹ️")) store.sunoMcpActive.set(!active)
                                 }
                             }
+                            HudButton("Autoriser le compte", enabled = store.sunoMcpActive.value) {
+                                runHermesExtension(listOf("mcp", "login", "suno"))
+                            }
                             HudButton("Tester Suno", enabled = store.sunoMcpActive.value) {
                                 runHermesExtension(listOf("mcp", "test", "suno"))
                             }
