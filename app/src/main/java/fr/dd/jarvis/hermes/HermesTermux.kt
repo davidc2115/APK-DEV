@@ -381,6 +381,42 @@ p "✅ Hermès installé (${'$'}{MODE})."
         return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
     }
 
+    /** Synchronise les secrets et les pools sans réécrire le reste de config.yaml. */
+    fun synchroniserCles(app: JarvisApp): String {
+        val s = app.store
+        if (!s.apiKeysSecureAvailable) return "⛔ Stockage chiffré Android indisponible : aucune clé transmise à Hermès."
+        if (!termuxInstalle(app) || !permissionOk(app)) return "ℹ️ Clés chiffrées ; synchronisation en attente de Termux et de son autorisation."
+        val gemini = s.geminiKeys.toList()
+        val groq = s.groqKeys.toList()
+        val model = s.groqModel.value.ifBlank { "llama-3.3-70b-versatile" }
+        val envScript = buildString {
+            appendLine("H=\"${HOME/.hermes\"; mkdir -p \"${H/logs\"")
+            appendLine("setenv() { touch \"${H/.env\"; grep -v \"^${1=\" \"${H/.env\" > \"${H/.env.j\" 2>/dev/null || true; echo \"${1=${2\" >> \"${H/.env.j\"; mv \"${H/.env.j\" \"${H/.env\"; }")
+            appendLine("removeenvfamily() { grep -v -E \"^${1(_[0-9]+)?=\" \"${H/.env\" > \"${H/.env.j\" 2>/dev/null || true; mv \"${H/.env.j\" \"${H/.env\"; }")
+            appendLine("removeenvfamily GOOGLE_API_KEY")
+            appendLine("removeenvfamily GEMINI_API_KEY")
+            appendLine("removeenvfamily GROQ_API_KEY")
+            gemini.forEachIndexed { index, key -> appendLine("setenv " + (if (index == 0) "GOOGLE_API_KEY" else "GOOGLE_API_KEY_" + (index + 1)) + " " + q(key)) }
+            groq.forEachIndexed { index, key -> appendLine("setenv " + (if (index == 0) "GROQ_API_KEY" else "GROQ_API_KEY_" + (index + 1)) + " " + q(key)) }
+            appendLine("chmod 600 \"${H/.env\"")
+        }
+        val cli = mutableListOf("./.hermes/bin/hermes config set credential_pool_strategies.gemini round_robin")
+        if (groq.isNotEmpty()) {
+            cli += "./.hermes/bin/hermes config set providers.groq.api https://api.groq.com/openai/v1"
+            cli += "./.hermes/bin/hermes config set providers.groq.key_env GROQ_API_KEY"
+            cli += "./.hermes/bin/hermes config set credential_pool_strategies.groq round_robin"
+            cli += "./.hermes/bin/hermes config set fallback_providers " + q("[{provider: custom:groq, model: " + model + "}]")
+        } else {
+            cli += "./.hermes/bin/hermes config unset providers.groq"
+            cli += "./.hermes/bin/hermes config unset credential_pool_strategies.groq"
+            cli += "./.hermes/bin/hermes config unset fallback_providers"
+        }
+        val inner = "cd /root/.hermes/hermes-agent && " + cli.joinToString(" && ")
+        val configCommand = "proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc " + q(inner)
+        val script = prelude(app) + "\\n" + envScript + "\\n" + configCommand + "\\n" + demarrage
+        return executer(app, script, libelle = "Synchronisation des clés Hermès")
+            ?: "🔐 Pools Gemini/Groq synchronisés ; redémarrage Hermès demandé."
+    }
     fun demarrer(app: JarvisApp): String {
         PontMcp.demarrer(app)
         return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
