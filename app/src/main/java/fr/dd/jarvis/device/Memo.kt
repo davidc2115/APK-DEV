@@ -2,6 +2,9 @@ package fr.dd.jarvis.device
 
 import android.content.Context
 import java.io.File
+import org.json.JSONArray
+import org.json.JSONObject
+import java.security.MessageDigest
 
 /**
  * Mémoire des consignes de l'utilisateur (présentation des fiches, contenu du point du matin…).
@@ -11,7 +14,78 @@ import java.io.File
 class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     private val local get() = File(ctx.filesDir, "memo.md")
     private val items = linkedMapOf<String, String>()
+    private val habitsFile get() = File(ctx.filesDir, "habits-learning.json")
+    private val candidates = linkedMapOf<String, MutableSet<String>>()
     @Volatile private var loaded = false
+
+    private val sensitivePattern = Regex(
+        "\\b(sant[eé]|m[eé]dical|maladie|diagnostic|m[eé]dicament|banque|bancaire|carte bancaire|mot de passe|password|secret|cl[eé] api|token|religion|politique|orientation sexuelle|sexualit[eé]|syndicat)\\b",
+        RegexOption.IGNORE_CASE
+    )
+
+    private fun loadCandidates() {
+        val raw = runCatching { obsidian.read(FOLDER, "Apprentissage en cours.md") }.getOrNull()
+            ?: runCatching { habitsFile.takeIf { it.exists() }?.readText() }.getOrNull()
+            ?: return
+        runCatching {
+            val json = JSONObject(raw)
+            val keys = json.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                val arr = json.optJSONArray(key) ?: JSONArray()
+                val set = linkedSetOf<String>()
+                for (i in 0 until arr.length()) arr.optString(i).takeIf { it.isNotBlank() }?.let(set::add)
+                candidates[key] = set
+            }
+        }
+    }
+
+    private fun persistCandidates() {
+        val json = JSONObject()
+        candidates.forEach { (key, values) -> json.put(key, JSONArray(values.toList())) }
+        val raw = json.toString(2)
+        runCatching { habitsFile.writeText(raw) }
+        runCatching { obsidian.saveIn(FOLDER, "Apprentissage en cours", raw) }
+    }
+
+    /** Enregistre une préférence candidate après une correction ou observation pertinente. */
+    @Synchronized
+    fun apprendre(sujet: String, preference: String, preuve: String): String {
+        ensure()
+        val category = sujet.trim().lowercase().ifBlank { "preferences" }.take(40)
+        val value = preference.trim().replace(Regex("\\s+"), " ").take(240)
+        val evidence = preuve.trim().replace(Regex("\\s+"), " ").take(300)
+        if (value.length < 5 || evidence.length < 8) return "Apprentissage ignoré : préférence ou preuve trop courte."
+        if (sensitivePattern.containsMatchIn(value) || sensitivePattern.containsMatchIn(evidence))
+            return "Apprentissage refusé : les informations sensibles ne sont pas mémorisées automatiquement."
+        val key = "$category|\${value.lowercase()}"
+        val hash = MessageDigest.getInstance("SHA-256").digest(evidence.lowercase().toByteArray())
+            .joinToString("") { "%02x".format(it) }.take(20)
+        val proofs = candidates.getOrPut(key) { linkedSetOf() }
+        if (!proofs.add(hash)) return "Cette preuve a déjà été prise en compte (\${proofs.size}/3)."
+        if (proofs.size < 3) {
+            persistCandidates()
+            return "Préférence candidate conservée (\${proofs.size}/3 preuves distinctes). Elle ne sera pas appliquée comme habitude avant confirmation par répétition."
+        }
+        val habitLine = "- $value"
+        val current = items["habitudes"].orEmpty()
+        val updated = if (current.lines().any { it.equals(habitLine, true) }) current
+            else listOf(current.trim(), habitLine).filter { it.isNotBlank() }.joinToString("\n")
+        items["habitudes"] = updated
+        candidates.remove(key)
+        persistCandidates()
+        persist()
+        return "Habitude confirmée après trois preuves distinctes et ajoutée à la mémoire durable : $value"
+    }
+
+    @Synchronized
+    fun apprentissagesEnCours(): String {
+        ensure()
+        if (candidates.isEmpty()) return "Aucune préférence en cours d'apprentissage."
+        return candidates.entries.joinToString("\n") { (key, proofs) ->
+            "- \${key.substringAfter('|')} : \${proofs.size}/3 preuves"
+        }
+    }
 
     companion object {
         const val FOLDER = "JARVIS"
