@@ -1,6 +1,13 @@
 package fr.dd.jarvis.ai
 
 import fr.dd.jarvis.data.Store
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Façade des deux fournisseurs :
@@ -162,6 +169,152 @@ class Llm(private val store: Store) {
             val t0 = System.currentTimeMillis(); gemini.ping(k); "✅ OK (${System.currentTimeMillis() - t0} ms)"
         } catch (e: Exception) {
             "❌ " + (e.message ?: "erreur").take(90)
+        }
+    }
+
+
+    /**
+     * Diagnostic des clés IA enregistrées dans JARVIS.
+     * Les secrets ne sont jamais inclus dans les requêtes de sortie ni dans les messages d'erreur.
+     * Les tests d'inférence utilisent au maximum un jeton lorsque le modèle est configuré.
+     */
+    suspend fun testerClesApi(fournisseurRaw: String = "tous"): String {
+        val alias = mapOf("all" to "tous", "toutes" to "tous", "google" to "gemini", "hf" to "huggingface", "cloudflare workers ai" to "cloudflare", "z.ai" to "zai")
+        val fournisseur = alias[fournisseurRaw.trim().lowercase()] ?: fournisseurRaw.trim().lowercase().ifBlank { "tous" }
+        val connus = setOf("tous", "groq", "gemini", "cloudflare", "zai", "openrouter", "nvidia", "mistral", "huggingface")
+        if (fournisseur !in connus) return "Fournisseur inconnu. Choix : tous, Groq, Gemini, Cloudflare, Z.ai, OpenRouter, NVIDIA, Mistral ou Hugging Face."
+
+        val resultats = mutableListOf<Pair<Boolean, String>>()
+        suspend fun verifier(label: String, action: suspend () -> String) {
+            val debut = System.currentTimeMillis()
+            val resultat = try {
+                true to action()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: ApiException) {
+                false to statutErreurApi(e.code)
+            } catch (e: Exception) {
+                false to "ERREUR RÉSEAU (${e.javaClass.simpleName})"
+            }
+            resultats += resultat.first to "$label — ${resultat.second} (${System.currentTimeMillis() - debut} ms)"
+        }
+
+        if (fournisseur == "tous" || fournisseur == "groq") {
+            store.groqKeys.toList().forEachIndexed { i, key ->
+                verifier("Groq #${i + 1} (${mask(key)})") {
+                    val modeles = groq.listModels(key)
+                    val modele = store.groqModel.value
+                    if (modele in modeles) {
+                        groq.ping(key)
+                        "✅ VALIDÉ — clé, modèle « $modele » et appel de test acceptés"
+                    } else {
+                        "⚠️ CLÉ ACCEPTÉE — ${modeles.size} modèles accessibles, mais le modèle configuré « $modele » n'est pas disponible"
+                    }
+                }
+            }
+        }
+
+        if (fournisseur == "tous" || fournisseur == "gemini") {
+            store.geminiKeys.toList().forEachIndexed { i, key ->
+                verifier("Gemini #${i + 1} (${mask(key)})") {
+                    val modeles = gemini.listModels(key)
+                    val modele = store.geminiModel.value
+                    if (modele in modeles) {
+                        gemini.ping(key)
+                        "✅ VALIDÉ — clé, modèle « $modele » et appel de test acceptés"
+                    } else {
+                        "⚠️ CLÉ ACCEPTÉE — ${modeles.size} modèles accessibles, mais le modèle configuré « $modele » n'est pas disponible"
+                    }
+                }
+            }
+        }
+
+        if (fournisseur == "tous" || fournisseur == "cloudflare") {
+            store.cfAccounts.toList().forEachIndexed { i, entry ->
+                val parts = entry.split(":", limit = 2)
+                if (parts.size == 2 && parts[0].isNotBlank() && parts[1].isNotBlank()) {
+                    verifier("Cloudflare #${i + 1} (compte masqué)") {
+                        testerCloudflare(parts[0], parts[1])
+                        "✅ VALIDÉ — accès Workers AI et appel de test acceptés"
+                    }
+                }
+            }
+        }
+
+        val externes = listOf(
+            "zai" to "Z.ai",
+            "openrouter" to "OpenRouter",
+            "nvidia" to "NVIDIA",
+            "mistral" to "Mistral",
+            "huggingface" to "Hugging Face"
+        )
+        externes.filter { fournisseur == "tous" || fournisseur == it.first }.forEach { (id, nom) ->
+            val key = store.externalProviderKey(id)
+            if (key.isNotBlank()) verifier("$nom (${mask(key)})") {
+                testerFournisseurCompatible(id, key)
+                "✅ VALIDÉ — clé et accès API acceptés"
+            }
+        }
+
+        if (resultats.isEmpty()) {
+            return if (fournisseur == "tous") "Aucune clé IA configurée dans les réglages de JARVIS."
+            else "Aucune clé $fournisseur configurée dans les réglages de JARVIS."
+        }
+        val valides = resultats.count { it.first }
+        val echecs = resultats.size - valides
+        return "Diagnostic des clés API terminé : $valides validée(s), $echecs à vérifier.\n" +
+            resultats.joinToString("\n") { it.second } +
+            "\n\nLes clés complètes ne sont jamais affichées. Les appels de test d'inférence sont limités à un jeton lorsque le modèle est configuré."
+    }
+
+    private fun statutErreurApi(code: Int): String = when (code) {
+        401 -> "❌ CLÉ REFUSÉE (HTTP 401)"
+        403 -> "⚠️ ACCÈS REFUSÉ (HTTP 403) — vérifier les permissions du jeton"
+        402 -> "⚠️ FACTURATION OU CRÉDITS INSUFFISANTS (HTTP 402)"
+        429 -> "⏳ QUOTA ÉPUISÉ OU LIMITE DE DÉBIT (HTTP 429)"
+        400, 404 -> "⚠️ REQUÊTE, MODÈLE OU ENDPOINT À VÉRIFIER (HTTP $code) — la clé n'est pas nécessairement invalide"
+        in 500..599 -> "⚠️ FOURNISSEUR MOMENTANÉMENT INDISPONIBLE (HTTP $code)"
+        else -> "❌ REFUS DU FOURNISSEUR (HTTP $code)"
+    }
+
+    private suspend fun testerFournisseurCompatible(provider: String, key: String) = withContext(Dispatchers.IO) {
+        val defaults = mapOf(
+            "zai" to "https://api.z.ai/api/paas/v4",
+            "openrouter" to "https://openrouter.ai/api/v1",
+            "nvidia" to "https://integrate.api.nvidia.com/v1",
+            "mistral" to "https://api.mistral.ai/v1",
+            "huggingface" to "https://router.huggingface.co/v1"
+        )
+        val base = store.externalProviderEndpoint(provider).ifBlank { defaults[provider].orEmpty() }.trimEnd('/')
+        require(base.startsWith("https://")) { "Endpoint HTTPS requis" }
+        val model = store.externalProviderModel(provider).trim()
+        val request = if (model.isBlank()) {
+            Request.Builder().url("$base/models").header("Authorization", "Bearer $key").get().build()
+        } else {
+            val body = JSONObject()
+                .put("model", model)
+                .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", "ping")))
+                .put("max_tokens", 1)
+            Request.Builder().url("$base/chat/completions")
+                .header("Authorization", "Bearer $key")
+                .post(body.toString().toRequestBody(Http.JSON)).build()
+        }
+        Http.fast.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw ApiException(response.code, "HTTP ${response.code}")
+        }
+    }
+
+    private suspend fun testerCloudflare(accountId: String, token: String) = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+            .put("model", store.cfChatModel.value.ifBlank { "@cf/meta/llama-3.3-70b-instruct-fp8-fast" })
+            .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", "ping")))
+            .put("max_tokens", 1)
+        val request = Request.Builder()
+            .url("https://api.cloudflare.com/client/v4/accounts/$accountId/ai/v1/chat/completions")
+            .header("Authorization", "Bearer $token")
+            .post(body.toString().toRequestBody(Http.JSON)).build()
+        Http.fast.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw ApiException(response.code, "HTTP ${response.code}")
         }
     }
 
