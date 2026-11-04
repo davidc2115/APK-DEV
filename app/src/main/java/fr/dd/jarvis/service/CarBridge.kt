@@ -66,8 +66,13 @@ object CarBridge {
     /** Traite une réponse dictée depuis l’écran Android Auto et actualise la conversation. */
     fun repondre(ctx: Context, texte: String, apres: (() -> Unit)? = null) {
         val app = ctx.applicationContext as JarvisApp
-        ajouter(ChatMsg(true, texte))
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            withContext(Dispatchers.Main) {
+                app.chatCharger()
+                if (contexte().isEmpty()) app.chat.toList().takeLast(10).forEach { ajouter(it) }
+                ajouter(ChatMsg(true, texte))
+                app.chatAjouter(ChatMsg(true, texte))
+            }
             val rep = try {
                 // Les opérations qui exigent une confirmation explicite restent bloquées depuis l’interface voiture.
                 Brain(app.llm, ToolBox(app) { _, force -> !force }, app) { app.store.userName.value }.reply(contexte()) { }
@@ -75,7 +80,10 @@ object CarBridge {
             val propre = rep.replace(Regex("[#*_`>|]+"), "").replace(Regex("\\s+"), " ").trim().ifBlank { "C’est fait." }
             ajouter(ChatMsg(false, propre))
             post(ctx, propre)
-            withContext(Dispatchers.Main) { apres?.invoke() }
+            withContext(Dispatchers.Main) {
+                app.chatAjouter(ChatMsg(false, propre))
+                apres?.invoke()
+            }
         }
     }
 
