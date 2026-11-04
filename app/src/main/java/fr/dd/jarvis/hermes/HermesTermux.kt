@@ -280,8 +280,52 @@ APT="apt-get -y -o Dpkg::Options::=--force-confnew -o Dpkg::Options::=--force-co
 H="${'$'}{HOME}/.hermes"; mkdir -p "${'$'}{H}/logs"; LOG="${'$'}{H}/logs/jarvis-install.log"
 p "🚀 Installation / réparation complète d'Hermès lancée (10 à 25 min)."
 termux-wake-lock >/dev/null 2>&1 || true
-# Sauvegarde locale avant toute réparation : les clés, sessions et skills restent sur le téléphone.
-if [ -d "${'# Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
+# Sauvegarde locale avant toute réparation : clés, sessions et skills restent sur le téléphone.
+if [ -d "${'{HOME}/.hermes" ]; then
+  mkdir -p "@D@{HOME}/.hermes/backups"
+  TS="@D@(date +%Y%m%d-%H%M%S)"
+  AUTO_BACKUP="@D@{HOME}/.hermes/backups/jarvis-hermes-auto-@D@{TS}.tar.gz"
+  tar -czf "@D@{AUTO_BACKUP}" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "@D@{HOME}" .hermes 2>> "@D@{HOME}/.hermes/logs/jarvis-install.log" || p "⚠️ Sauvegarde automatique impossible ; les fichiers existants sont conservés."
+  chmod 600 "@D@{AUTO_BACKUP}" 2>/dev/null || true
+fi
+}{HOME}/.hermes" ]; then
+  mkdir -p "${'{HOME}/.hermes/backups"
+  TS="@D@(date +%Y%m%d-%H%M%S)"
+  AUTO_BACKUP="@D@{HOME}/.hermes/backups/jarvis-hermes-auto-@D@{TS}.tar.gz"
+  tar -czf "@D@{AUTO_BACKUP}" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "@D@{HOME}" .hermes 2>> "@D@{HOME}/.hermes/logs/jarvis-install.log" || p "⚠️ Sauvegarde automatique impossible ; les fichiers existants sont conservés."
+  chmod 600 "@D@{AUTO_BACKUP}" 2>/dev/null || true
+fi
+}{HOME}/.hermes/backups"
+  TS="${'(date +%Y%m%d-%H%M%S)"
+  AUTO_BACKUP="@D@{HOME}/.hermes/backups/jarvis-hermes-auto-@D@{TS}.tar.gz"
+  tar -czf "@D@{AUTO_BACKUP}" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "@D@{HOME}" .hermes 2>> "@D@{HOME}/.hermes/logs/jarvis-install.log" || p "⚠️ Sauvegarde automatique impossible ; les fichiers existants sont conservés."
+  chmod 600 "@D@{AUTO_BACKUP}" 2>/dev/null || true
+fi
+}(date +%Y%m%d-%H%M%S)"
+  AUTO_BACKUP="${'{HOME}/.hermes/backups/jarvis-hermes-auto-@D@{TS}.tar.gz"
+  tar -czf "@D@{AUTO_BACKUP}" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "@D@{HOME}" .hermes 2>> "@D@{HOME}/.hermes/logs/jarvis-install.log" || p "⚠️ Sauvegarde automatique impossible ; les fichiers existants sont conservés."
+  chmod 600 "@D@{AUTO_BACKUP}" 2>/dev/null || true
+fi
+}{HOME}/.hermes/backups/jarvis-hermes-auto-${'{TS}.tar.gz"
+  tar -czf "@D@{AUTO_BACKUP}" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "@D@{HOME}" .hermes 2>> "@D@{HOME}/.hermes/logs/jarvis-install.log" || p "⚠️ Sauvegarde automatique impossible ; les fichiers existants sont conservés."
+  chmod 600 "@D@{AUTO_BACKUP}" 2>/dev/null || true
+fi
+}{TS}.tar.gz"
+  tar -czf "${'{AUTO_BACKUP}" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "@D@{HOME}" .hermes 2>> "@D@{HOME}/.hermes/logs/jarvis-install.log" || p "⚠️ Sauvegarde automatique impossible ; les fichiers existants sont conservés."
+  chmod 600 "@D@{AUTO_BACKUP}" 2>/dev/null || true
+fi
+}{AUTO_BACKUP}" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'{HOME}" .hermes 2>> "@D@{HOME}/.hermes/logs/jarvis-install.log" || p "⚠️ Sauvegarde automatique impossible ; les fichiers existants sont conservés."
+  chmod 600 "@D@{AUTO_BACKUP}" 2>/dev/null || true
+fi
+}{HOME}" .hermes 2>> "${'{HOME}/.hermes/logs/jarvis-install.log" || p "⚠️ Sauvegarde automatique impossible ; les fichiers existants sont conservés."
+  chmod 600 "@D@{AUTO_BACKUP}" 2>/dev/null || true
+fi
+}{HOME}/.hermes/logs/jarvis-install.log" || p "⚠️ Sauvegarde automatique impossible ; les fichiers existants sont conservés."
+  chmod 600 "${'{AUTO_BACKUP}" 2>/dev/null || true
+fi
+}{AUTO_BACKUP}" 2>/dev/null || true
+fi
+# Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
 # Ne pas utiliser pkill -f ici : le motif figure dans la commande RUN_COMMAND elle-même et peut tuer ce script parent.
 if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative d'installation supprimée."; fi
 if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; then rm -f "${'$'}{PREFIX}/bin/hermes"; fi
