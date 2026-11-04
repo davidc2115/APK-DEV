@@ -29,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.sp
 import fr.dd.jarvis.JarvisApp
 import fr.dd.jarvis.ai.Prompts
@@ -102,17 +103,32 @@ fun MailScreen(app: JarvisApp) {
             item { HudPanel(Modifier.fillMaxWidth(), title = "Résumé") { MarkdownText(summary) } }
         }
         items(mails) { m ->
-            HudPanel(Modifier.fillMaxWidth()) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(
-                        (if (m.unread) "● " else "") + m.from, color = if (m.unread) LocalAccent.current else HudText,
-                        fontWeight = FontWeight.Bold, fontSize = 13.sp, modifier = Modifier.weight(1f)
-                    )
-                    Text(m.date?.let { fmt.format(it) } ?: "", color = HudDim, fontSize = 11.sp)
+            val mailAccent = if (m.unread) Color(0xFF7B8CFF) else Color(0xFF6E9AAE)
+            val emphasized = m.unread && mails.firstOrNull { it.unread }?.let { it === m } == true
+            HudScheduleCard(
+                Modifier.fillMaxWidth(),
+                accent = mailAccent,
+                highlighted = emphasized
+            ) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        if (m.unread) {
+                            Text("●", color = mailAccent, fontSize = 9.sp)
+                        }
+                        Text(
+                            m.from, color = if (m.unread) HudText else HudDim,
+                            fontWeight = if (m.unread) FontWeight.Bold else FontWeight.Medium,
+                            fontSize = 12.sp, maxLines = 1
+                        )
+                    }
+                    Text(m.date?.let { fmt.format(it) } ?: "", color = HudDim, fontSize = 10.sp)
                 }
-                Text(m.subject, color = HudText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(2.dp))
-                Text(m.snippet.take(160), color = HudDim, fontSize = 12.sp)
+                Spacer(Modifier.height(5.dp))
+                Text(m.subject.ifBlank { "(sans objet)" }, color = HudText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(3.dp))
+                Text(m.snippet.take(180), color = HudDim, fontSize = 12.sp, lineHeight = 17.sp)
+                Spacer(Modifier.height(5.dp))
+                Text(if (m.unread) "NON LU" else "LU", color = mailAccent, fontSize = 9.sp, fontWeight = FontWeight.Bold, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
             }
         }
     }
