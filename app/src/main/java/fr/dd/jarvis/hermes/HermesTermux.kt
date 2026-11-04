@@ -493,7 +493,8 @@ for index in range(1, len(cf_ids) + 1): add_route(f"jarvis-cloudflare-{index}", 
 # Expose aussi le modèle principal actif (y compris Codex/OAuth s’il est déjà connecté).
 if isinstance(model_config, dict):
     main_model = str(model_config.get("default", ""))
-    if main_provider and main_model and main_provider not in ("custom", "openai"):
+    already_routed = any(isinstance(x, dict) and x.get("provider") == main_provider and x.get("model") == main_model for x in options)
+    if main_provider and main_model and main_provider != "custom" and not already_routed:
         add_route("jarvis-main", f"Modèle principal Hermes : {main_provider}", main_provider, main_model)
 # Les endpoints personnalisés existants deviennent des routes s’ils déclarent un modèle par défaut.
 for provider_name, provider_config in providers.items():
