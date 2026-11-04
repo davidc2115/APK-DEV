@@ -1402,9 +1402,9 @@ class ToolBox(
     suspend fun briefing(): String {
         val consignes = app.memo.pour("briefing").lowercase()
         val sansMails = Regex("(sans|pas de|aucun|ni) (les )?(mail|e-mail|courriel)").containsMatchIn(consignes)
+        // « seulement le planning xx » : un agenda nommé dans la consigne est utilisé comme filtre.
+        val cible = if (app.calendar.hasPermission()) app.calendar.calendars().map { app.calendar.displayName(it) }.firstOrNull { consignes.contains(it.lowercase()) } else null
         val planning = if (app.calendar.hasPermission()) {
-            // « seulement le planning xx » : un agenda nommé dans la consigne est utilisé comme filtre
-            val cible = app.calendar.calendars().map { app.calendar.displayName(it) }.firstOrNull { consignes.contains(it.lowercase()) }
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { planningData(LocalDate.now(), 1, cible) }
                 .ifBlank { "Aucun événement aujourd'hui." }
         } else "Permission agenda non accordée."
