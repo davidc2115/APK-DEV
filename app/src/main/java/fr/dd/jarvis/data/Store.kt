@@ -359,6 +359,8 @@ class Store(context: Context) {
     // ---- Hermès (agent Nous Research dans Termux) : cerveau principal quand il est en ligne
     /** auto = Hermès cerveau principal (Groq pour les commandes rapides, Gemini pour les agents) ; demande = seulement si on le nomme ; off. */
     val hermesMode = SPref("hermesMode", "auto")
+    /** Connexion facultative au serveur officiel Suno MCP (OAuth). */
+    val sunoMcpActive = BPref("sunoMcpActive", false)
     /** Modèle Gemini utilisé par Hermès (vide = celui des agents Gemini). */
     val hermesModele = SPref("hermesModele", "")
     /** Jetons locaux (127.0.0.1 uniquement) : API d'Hermès et pont MCP « jarvis ». */
