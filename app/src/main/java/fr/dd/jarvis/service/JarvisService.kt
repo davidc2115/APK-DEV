@@ -198,7 +198,8 @@ class JarvisService : Service() {
             }
             return START_STICKY
         }
-        runCatching { CarBridge.post(this, "Je suis prêt. Réponds pour me parler.") }   // conversation visible dans Android Auto
+        // Le canal de notification JARVIS n'est utile que pendant une projection Android Auto.
+        if (app.enVoiture) runCatching { CarBridge.post(this, "Je suis prêt. Réponds pour me parler.") }
         main.postDelayed({ goIdle() }, 1200)
         return START_STICKY
     }
@@ -318,9 +319,21 @@ class JarvisService : Service() {
         scope.launch {
             val app = application as JarvisApp
             app.chatCharger()
-            withContext(Dispatchers.Main) { app.chatAjouter(ChatMsg(true, cmd)) }
+            val userMessage = ChatMsg(true, cmd)
+            withContext(Dispatchers.Main) {
+                app.chatAjouter(userMessage)
+                if (app.enVoiture) CarBridge.ajouter(userMessage)
+            }
             val reply = try { brain.reply(app.chat.toList().takeLast(10)) { } } catch (e: CancellationException) { throw e } catch (e: Throwable) { "Erreur : ${e.message ?: e.javaClass.simpleName}" }
-            withContext(Dispatchers.Main) { app.chatAjouter(ChatMsg(false, reply)) }
+            val assistantMessage = ChatMsg(false, reply)
+            withContext(Dispatchers.Main) {
+                app.chatAjouter(assistantMessage)
+                if (app.enVoiture) {
+                    CarBridge.ajouter(assistantMessage)
+                    // Rend aussi la réponse disponible dans le canal de messagerie Android Auto.
+                    CarBridge.post(this@JarvisService, reply)
+                }
+            }
             notifier(cmd, reply)
             withContext(Dispatchers.Main) {
                 // La conversation continue : on réécoute après la réponse (ou dès que l'utilisateur la coupe), puis on
