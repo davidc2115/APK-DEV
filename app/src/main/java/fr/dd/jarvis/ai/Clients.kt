@@ -54,7 +54,7 @@ class GroqClient(private val ring: KeyRing, private val model: () -> String) {
     /** Test d'une clé précise (bouton « Tester »). */
     suspend fun ping(key: String) = withContext(Dispatchers.IO) {
         val msgs = JSONArray().put(JSONObject().put("role", "user").put("content", "ping"))
-        call(key, msgs, null, 1)
+        call(key, msgs, null, 1, Http.fast)
     }
 
     /** Modèles de chat disponibles pour cette clé. */
