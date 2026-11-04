@@ -296,6 +296,24 @@ class ToolBox(
                 "sujet" to prop("contacts (fiches contact) | briefing (point du matin) | planning | mails | societe | general"),
                 "texte" to prop("La consigne complète, formulée clairement (structure, rubriques, calendrier à utiliser, exemples).")
             ), listOf("sujet", "texte")))
+        put(tool("memoire_apprendre", "Soumet une préférence candidate à l'apprentissage progressif. À utiliser uniquement après une correction claire ou une observation réellement répétée ; trois preuves distinctes sont requises avant promotion en habitude durable.", mapOf(
+            "sujet" to prop("Catégorie courte : préférences, rédaction, planning, musique, travail, projet, etc."),
+            "preference" to prop("Règle stable et réutilisable, formulée concrètement."),
+            "preuve" to prop("Exemple distinct et factuel de correction ou de choix validé qui soutient cette préférence.")
+        ), listOf("sujet", "preference", "preuve")))
+        put(tool("memoire_apprentissages", "Affiche les préférences en cours d'apprentissage et leur nombre de preuves."))
+        put(tool("graphe_suggere_lien", "Ajoute une relation SUGGESTED entre deux notes Obsidian du graphe. Les deux titres doivent être exacts et uniques ; la relation reste une suggestion non confirmée.", mapOf(
+            "source" to prop("Titre exact de la note source déjà indexée."),
+            "cible" to prop("Titre exact de la note cible déjà indexée."),
+            "type" to prop("RELATED_TO | PROJECT_CONTEXT | SUPPORTS | PREFERENCE_FOR | PART_OF.")
+        ), listOf("source", "cible", "type")))
+        put(tool("routine_contextuelle", "Prépare le contexte réel d'une routine : départ travail, chantier, retour, ou préparation de demain. Consulte l'agenda et, selon le cas, le trajet ou la fiche client. N'exécute aucune action sensible.", mapOf(
+            "situation" to prop("preparer_demain | depart_travail | chantier | retour."),
+            "date" to prop("Date yyyy-MM-dd optionnelle ; défaut aujourd'hui ou demain selon la situation."),
+            "client" to prop("Nom du client du chantier, si connu."),
+            "destination" to prop("Adresse de destination pour le trajet retour ; obligatoire pour calculer un retour vers le domicile."),
+            "calendar" to prop("Nom d'un agenda précis, optionnel.")
+        ), listOf("situation")))
         put(tool("memoire_lire", "Affiche les consignes enregistrées dans la mémoire JARVIS."))
         put(tool("reglage_jarvis", "Consulte ou modifie directement les réglages non sensibles de JARVIS depuis le chat ou la voix. N'utilise jamais cet outil pour les clés API, mots de passe, tokens, adresses serveur ou paramètres de sécurité.",
             mapOf("action" to prop("lire | modifier"), "reglage" to prop("confirmations | analyse_gemini | conversation | reponses_vocales | ecoute_continue | annonces | agents | agents_mails | agents_factures | agents_planning | agents_notifications | notifications_banniere | bips | duree_conversation"), "valeur" to prop("true/false pour les interrupteurs ; nombre de secondes pour duree_conversation.")), listOf("action", "reglage")))
@@ -752,6 +770,10 @@ class ToolBox(
             }
         }
         "memoire_ajouter" -> ToolResult("✅ Consigne « ${a.optString("sujet")} » enregistrée (" + app.memo.set(a.optString("sujet"), a.optString("texte")) + ").")
+        "memoire_apprendre" -> ToolResult(app.memo.apprendre(a.optString("sujet"), a.optString("preference"), a.optString("preuve")))
+        "memoire_apprentissages" -> ToolResult(app.memo.apprentissagesEnCours(), direct = true)
+        "graphe_suggere_lien" -> ToolResult(app.knowledgeRepository.suggestRelation(a.optString("source"), a.optString("cible"), a.optString("type", "RELATED_TO")))
+        "routine_contextuelle" -> routineContextuelle(a)
         "reglage_jarvis" -> reglerJarvis(a)
         "memoire_lire" -> ToolResult(app.memo.all().entries.joinToString("\n\n") { "**${it.key}** : ${it.value}" }.ifBlank { "Aucune consigne enregistrée." }, direct = true)
         "memoire_oublier" -> ToolResult(if (app.memo.remove(a.optString("sujet"))) "Consigne oubliée." else "Aucune consigne pour ce sujet.")
@@ -877,6 +899,50 @@ class ToolBox(
                 (if (e.location.isNotBlank()) " | lieu : ${e.location}" else "") +
                 (if (e.description.isNotBlank()) " | notes : ${fr.dd.jarvis.device.HtmlText.text(e.description).take(400)}" else "")
         }
+    }
+
+    private suspend fun routineContextuelle(a: JSONObject): ToolResult {
+        val situation = a.optString("situation").trim().lowercase()
+        val today = LocalDate.now()
+        val date = a.optString("date").takeIf { it.isNotBlank() }?.let { runCatching { LocalDate.parse(it.take(10)) }.getOrNull() }
+            ?: if (situation == "preparer_demain") today.plusDays(1) else today
+        val calendar = a.optString("calendar")
+        val out = StringBuilder()
+        when (situation) {
+            "preparer_demain" -> {
+                out.append("PRÉPARATION DE DEMAIN\\n")
+                val agenda = getPlanning(JSONObject().put("date", date.toString()).put("days", "1").put("calendar", calendar))
+                out.append(agenda.text)
+                val mails = execute("summarize_mails", JSONObject().put("count", "10").put("unread_only", "true"))
+                out.append("\\n\\nMAILS NON LUS À VÉRIFIER\\n").append(mails.text.take(5000))
+            }
+            "depart_travail" -> {
+                out.append("DÉPART AU TRAVAIL — ").append(date).append("\\n")
+                out.append(getPlanning(JSONObject().put("date", date.toString()).put("days", "1").put("calendar", calendar)).text)
+                out.append("\\n\\nTRAJET ET RENDEZ-VOUS RESTANTS\\n")
+                out.append(execute("itineraire", JSONObject().put("date", date.toString()).put("depuis", "position").put("restants", "true").put("calendar", calendar)).text)
+            }
+            "chantier" -> {
+                out.append("CONTEXTE CHANTIER — ").append(date).append("\\n")
+                out.append(getPlanning(JSONObject().put("date", date.toString()).put("days", "1").put("calendar", calendar).put("question", "Identifie les rendez-vous de chantier, leurs lieux, horaires et informations utiles.")).text)
+                val client = a.optString("client").trim()
+                if (client.isNotBlank()) {
+                    out.append("\\n\\nFICHE CLIENT\\n")
+                    out.append(societe.execute("client_fiche", JSONObject().put("nom", client)).text)
+                } else out.append("\\nAucun client n'a été précisé : identifie le chantier depuis l'agenda et demande confirmation si plusieurs correspondent.")
+            }
+            "retour" -> {
+                out.append("CONTEXTE DE RETOUR — ").append(date).append("\\n")
+                out.append(getPlanning(JSONObject().put("date", date.toString()).put("days", "1").put("calendar", calendar).put("question", "Quels rendez-vous ou engagements restent aujourd'hui ?")).text)
+                val destination = a.optString("destination").trim()
+                if (destination.isNotBlank()) {
+                    out.append("\\n\\nTRAJET DEPUIS LA POSITION ACTUELLE\\n")
+                    out.append(execute("itineraire", JSONObject().put("destination", destination).put("depuis", "position")).text)
+                } else out.append("\\nDestination de retour non renseignée : ne suppose pas l'adresse du domicile et demande-la avant de calculer le trajet.")
+            }
+            else -> return ToolResult("Situation inconnue. Choisis preparer_demain, depart_travail, chantier ou retour.")
+        }
+        return ToolResult(out.toString(), direct = true)
     }
 
     private suspend fun getPlanning(a: JSONObject): ToolResult {
