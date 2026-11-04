@@ -175,8 +175,8 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
  * Répartition des demandes (mode « auto ») :
  *  - Hermès, orchestrateur principal : reçoit toutes les demandes en mode auto, décompose les missions et appelle
  *    les outils MCP de Jarvis pour les actions téléphone, agenda, mails, domotique, société et fichiers ;
- *  - Jarvis/Groq : réponses très brèves et mode Android Auto, puis secours automatique si Hermès est indisponible ;
- *  - Gemini, Groq et Cloudflare : modèles spécialisés et routes de sous-agents, avec les autres fournisseurs Hermes configurés.
+ *  - Hermès : cerveau et point d'entrée unique de toutes les demandes en mode auto, y compris les réponses courtes et Android Auto ;
+ *  - Gemini, Groq, Cloudflare et les autres fournisseurs configurés : moteurs spécialisés/sous-agents choisis par Hermès ; Groq ne reprend la main qu'en secours si Hermès est indisponible.
  */
 object Routeur {
     enum class Cible { HERMES, JARVIS }
