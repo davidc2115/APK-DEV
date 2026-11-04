@@ -22,26 +22,29 @@ class SocieteService(
 
     private fun cle(hq: String, dest: String) = normaliser(hq) + "|" + normaliser(dest)
 
-    /** Distance siège → adresse. Utilise le cache du site si l'adresse du siège et du site n'ont pas changé. */
+    /** Distance routière siège → adresse du client ou de l'une de ses installations. Le cache est invalidé
+     * dès que l'adresse du siège ou de destination change. */
     suspend fun distance(client: Client, site: Site?): Geo.Route? {
         val hq = data.societe
         val dest = site?.adresse?.ifBlank { null } ?: client.adresse
-        if (hq.adresse.isBlank() || (dest.isBlank() && site?.lat == null)) return null
+        if (hq.adresse.isBlank() || dest.isBlank()) return null
         val key = cle(hq.adresse, dest)
         if (site != null && site.distanceKm != null && site.distanceCle == key)
             return Geo.Route(site.distanceKm, site.dureeMin ?: 0.0, false)
+        if (site == null && client.distanceKm != null && client.distanceCle == key)
+            return Geo.Route(client.distanceKm, client.dureeMin ?: 0.0, false)
 
         val origin = localiserSiege()?.point ?: return null
         val to = localiser(client, site)?.point ?: return null
         val route = Geo.route(origin, to) ?: return null
-        if (site != null && !route.estime) {
-            repo.update { d ->
-                d.copy(clients = d.clients.map { c ->
-                    if (c.id != client.id) c else c.copy(sites = c.sites.map { s ->
-                        if (s.id == site.id) s.copy(distanceKm = route.km, dureeMin = route.minutes, distanceCle = key) else s
-                    })
+        repo.update { d ->
+            d.copy(clients = d.clients.map { c ->
+                if (c.id != client.id) c
+                else if (site == null) c.copy(distanceKm = route.km, dureeMin = route.minutes, distanceCle = key)
+                else c.copy(sites = c.sites.map { s ->
+                    if (s.id == site.id) s.copy(distanceKm = route.km, dureeMin = route.minutes, distanceCle = key) else s
                 })
-            }
+            })
         }
         return route
     }
@@ -173,16 +176,15 @@ class SocieteService(
         val warn = mutableListOf<String>()
         val remise = remiseManuelle?.let { Remise(it, "remise exceptionnelle") } ?: d.remiseClient(client, date)
 
-        var km: Double? = null
+        // Calculer et mémoriser la distance même si les frais ne sont pas configurés ou facturés.
+        val route = if (d.societe.adresse.isNotBlank()) runCatching { distance(client, site) }.getOrNull() else null
+        val km = route?.km
+        val kmFacturable = km.takeIf { deplacement != false && Pricing.deplacementConfigure(d.regles) }
         if (deplacement != false && Pricing.deplacementConfigure(d.regles)) {
-            val r = distance(client, site)
-            if (r == null) warn += "Distance introuvable (adresse du siège ou du client manquante/inconnue) : frais de déplacement non ajoutés."
-            else {
-                km = r.km
-                if (r.estime) warn += "Distance estimée à vol d'oiseau (service d'itinéraire indisponible)."
-            }
+            if (route == null) warn += "Distance introuvable (adresse du siège ou du client manquante/inconnue) : frais de déplacement non ajoutés."
+            else if (route.estime) warn += "Distance estimée à vol d'oiseau (service d'itinéraire indisponible)."
         }
-        val (lignes, w) = Pricing.construireLignes(prestations, remise.pct, km, d.regles, d.societe.tvaDefaut, d.societe.franchiseTva)
+        val (lignes, w) = Pricing.construireLignes(prestations, remise.pct, kmFacturable, d.regles, d.societe.tvaDefaut, d.societe.franchiseTva)
         warn += w
         val toutes = lignes + libres.map {
             it.copy(remisePct = remise.pct, tva = if (d.societe.franchiseTva) 0.0 else it.tva)
