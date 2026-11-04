@@ -422,6 +422,9 @@ data = yaml.safe_load(p.read_text()) or {}
 providers = data.setdefault("providers", {})
 if not isinstance(providers, dict):
     raise SystemExit("Section providers invalide ; aucune modification.")
+model_config = data.get("model")
+if isinstance(model_config, dict) and str(model_config.get("provider", "")) == "gemini" and os.environ.get("JARVIS_HAS_GEMINI") == "1":
+    model_config["default"] = os.environ["JARVIS_GEMINI_MODEL"]
 fallbacks = data.get("fallback_providers") or []
 if not isinstance(fallbacks, list):
     raise SystemExit("Section fallback_providers invalide ; aucune modification.")
@@ -516,7 +519,7 @@ os.replace(name, p)
         val hasGemini = if (gemini.isNotEmpty()) "1" else "0"
         val hasGroq = if (groq.isNotEmpty()) "1" else "0"
         val cfIds = cloudflare.joinToString(",") { it.first }
-        val pluginCommand = "PLUGIN_OK=0; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes plugins install advanced-delegation --no-deps --no-enable >/dev/null 2>&1 || true; if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes plugins enable advanced-delegation --no-allow-tool-override >/dev/null 2>&1; then PLUGIN_OK=1; fi"
+        val pluginCommand = "PLUGIN_OK=0; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes plugins install advanced-delegation --no-deps --no-enable >/dev/null 2>&1 || true; if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes plugins enable advanced-delegation --no-allow-tool-override >/dev/null 2>&1; then PLUGIN_OK=1; p "🧠 Routage multi-modèles advanced-delegation activé."; else p "⚠️ Extension avancée indisponible : délégation Hermes native conservée."; fi"
         val configCommand = "proot-distro login debian --termux-home -- env JARVIS_HAS_GEMINI=" + hasGemini + " JARVIS_HAS_GROQ=" + hasGroq + " JARVIS_GEMINI_MODEL=" + q(app.store.hermesModele.value.ifBlank { app.store.geminiModel.value }.ifBlank { "gemini-2.5-flash" }) + " JARVIS_GROQ_MODEL=" + q(model) + " JARVIS_CF_MODEL=" + q(cloudflareModel) + " JARVIS_CF_IDS=" + q(cfIds) + " JARVIS_ADVANCED_DELEGATION=\"\$PLUGIN_OK\" python3 -c " + q(py) + " || exit 1"
         val script = listOf(prelude(app), envScript, pluginCommand, configCommand, demarrage).joinToString(System.lineSeparator())
         return executer(app, script, libelle = "Orchestration multi-agents Hermès")
