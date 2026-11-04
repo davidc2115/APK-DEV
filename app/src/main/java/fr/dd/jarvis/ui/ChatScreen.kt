@@ -27,6 +27,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material3.Icon
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -42,12 +44,18 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import fr.dd.jarvis.JarvisApp
 import fr.dd.jarvis.ai.ChatMsg
+import fr.dd.jarvis.ai.DocumentStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import fr.dd.jarvis.data.Store
 
 @Composable
@@ -56,6 +64,9 @@ fun ChatScreen(vm: ChatViewModel, store: Store, app: JarvisApp) {
     val accent = LocalAccent.current
     val listState = rememberLazyListState()
     var input by remember { mutableStateOf("") }
+    var pendingAttachments by remember { mutableStateOf<List<String>>(emptyList()) }
+    var attachmentStatus by remember { mutableStateOf("") }
+    val attachmentScope = rememberCoroutineScope()
     val count = vm.messages.size + if (vm.busy) 1 else 0
     var showHistory by remember { mutableStateOf(false) }
     var confirmReset by remember { mutableStateOf(false) }
@@ -66,6 +77,37 @@ fun ChatScreen(vm: ChatViewModel, store: Store, app: JarvisApp) {
 
     val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         if (ok) vm.toggleListening() else vm.status = "Permission micro refusée."
+    }
+    val documentPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) attachmentScope.launch {
+            attachmentStatus = "Import des fichiers…"
+            val results = withContext(Dispatchers.IO) {
+                uris.map { uri -> runCatching { DocumentStore.importFile(ctx, uri) }.getOrElse { "❌ ${it.message ?: "Import impossible"}" } }
+            }
+            pendingAttachments = pendingAttachments + results.filterNot { it.startsWith("❌") }
+            attachmentStatus = results.filter { it.startsWith("❌") }.joinToString("\n")
+        }
+    }
+
+    fun sendMessage() {
+        if (vm.busy) return
+        val names = pendingAttachments
+        val body = input.trim()
+        if (body.isBlank() && names.isEmpty()) return
+        val message = buildString {
+            if (body.isNotBlank()) append(body)
+            if (names.isNotEmpty()) {
+                if (isNotEmpty()) append("\n\n")
+                append("Fichiers joints : ")
+                append(names.joinToString(", "))
+                append(". Analyse ces documents et utilise les outils de lecture/analyse de documents disponibles pour répondre à ma demande.")
+                if (body.isBlank()) append(" Fais-en une synthèse claire.")
+            }
+        }
+        vm.send(message)
+        input = ""
+        pendingAttachments = emptyList()
+        attachmentStatus = ""
     }
 
     fun onMic() {
@@ -131,20 +173,43 @@ fun ChatScreen(vm: ChatViewModel, store: Store, app: JarvisApp) {
             )
         }
 
+        if (pendingAttachments.isNotEmpty() || attachmentStatus.isNotBlank()) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    if (pendingAttachments.isNotEmpty()) "📎 ${pendingAttachments.joinToString(", ")}" else attachmentStatus,
+                    color = if (attachmentStatus.startsWith("❌")) Color(0xFFFF6B83) else accent,
+                    fontSize = 10.sp, maxLines = 2, modifier = Modifier.weight(1f)
+                )
+                if (pendingAttachments.isNotEmpty()) {
+                    Text("✕", color = HudDim, fontSize = 14.sp, modifier = Modifier.clickable { pendingAttachments = emptyList() }.padding(4.dp))
+                }
+            }
+        }
         Row(
-            Modifier.fillMaxWidth().padding(12.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
+            Box(
+                Modifier.size(36.dp).background(accent.copy(alpha = 0.12f), CircleShape)
+                    .border(1.dp, accent.copy(alpha = 0.75f), CircleShape)
+                    .clickable(enabled = !vm.busy) { documentPicker.launch(arrayOf("*/*")) },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = "Joindre un fichier", tint = accent, modifier = Modifier.size(21.dp))
+            }
             HudTextField(
                 value = input, onValueChange = { input = it },
                 modifier = Modifier.weight(1f),
                 placeholder = "Écris à JARVIS…", singleLine = false, maxLines = 4
             )
             HudRoundButton(if (vm.listening) Icons.Filled.MicOff else Icons.Filled.Mic, active = vm.listening) { onMic() }
-            HudRoundButton(Icons.AutoMirrored.Filled.Send, enabled = !vm.busy && input.isNotBlank()) {
-                vm.send(input)
-                input = ""
+            HudRoundButton(Icons.AutoMirrored.Filled.Send, enabled = !vm.busy && (input.isNotBlank() || pendingAttachments.isNotEmpty())) {
+                sendMessage()
             }
         }
     }
