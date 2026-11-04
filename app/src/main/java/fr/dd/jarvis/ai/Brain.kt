@@ -35,7 +35,7 @@ class Brain(
             val args = JSONObject(); if (dernier.contains("serveur")) args.put("via", "serveur")
             return try { tools.execute(outilDirect, args).text } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { "❌ ${e.message}" }
         }
-        // Hermès (Termux) est le cerveau principal quand il est installé : commandes rapides → Groq, le reste → Hermès.
+        // Hermès (Termux) est l'orchestrateur principal en mode auto ; les réponses brèves/Android Auto restent rapides et Groq sert de secours si Hermès est indisponible.
         val choix = fr.dd.jarvis.hermes.Routeur.choisir(app, history.lastOrNull { it.fromUser }?.text.orEmpty())
         if (choix.cible == fr.dd.jarvis.hermes.Routeur.Cible.HERMES) {
             val r = fr.dd.jarvis.hermes.Hermes.repondre(app, history, tools, userName(), onStatus)
