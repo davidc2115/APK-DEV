@@ -334,7 +334,7 @@ class JarvisService : Service() {
                         app.chat.toList().takeLast(12),
                         tools,
                         app.store.userName.value
-                    ) { etat -> withContext(Dispatchers.Main) { majNotification(etat) } }
+                    ) { etat -> android.os.Handler(android.os.Looper.getMainLooper()).post { majNotification(etat) } }
                         ?: "Je n'arrive pas à joindre Hermès pour le moment. Je n'ai pas exécuté la demande ; réessaie dans un instant."
                 }
             } catch (e: CancellationException) { throw e }
