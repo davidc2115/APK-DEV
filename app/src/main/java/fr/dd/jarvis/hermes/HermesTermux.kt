@@ -281,7 +281,10 @@ p "⚙️ Configuration écrite : modèle Gemini $modele${if (groq.isNotBlank())
     internal val demarrage = """
 H="${'$'}{HOME}/.hermes"; mkdir -p "${'$'}{H}/logs"
 termux-wake-lock >/dev/null 2>&1 || true
-pkill -f 'hermes gateway' >/dev/null 2>&1; sleep 1
+p '🔄 Préparation du démarrage de la passerelle Hermès…'
+# Le motif entre crochets ne peut pas correspondre au script RUN_COMMAND qui le contient.
+pkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true
+sleep 1
 if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
   CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
 else
@@ -630,7 +633,7 @@ os.replace(name, p)
     }
 
     fun arreter(app: JarvisApp): String =
-        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+        executer(app, prelude(app) + "\npkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
 
     /**
      * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
