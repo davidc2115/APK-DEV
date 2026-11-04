@@ -2,6 +2,7 @@ package fr.dd.jarvis.societe
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import androidx.core.content.FileProvider
 import fr.dd.jarvis.device.ObsidianWriter
 import fr.dd.jarvis.societe.core.*
@@ -293,6 +294,87 @@ class SocieteService(
                 provisions = d.provisions.filter { it.factureNumero !in numeros }
             )
         }
+    }
+
+    // ------------------------------------------------------------------ Photos d'intervention
+
+    /** Copie les photos dans le stockage privé, les rattache à l'intervention et les synchronise dans Obsidian. */
+    fun ajouterPhotosIntervention(
+        clientId: String,
+        siteId: String,
+        interventionId: String,
+        avant: Boolean,
+        uris: List<Uri>
+    ): String {
+        if (uris.isEmpty()) return "Aucune photo sélectionnée."
+        val client = data.client(clientId) ?: return "Client introuvable."
+        val site = client.sites.firstOrNull { it.id == siteId } ?: return "Installation introuvable."
+        val intervention = site.interventions.firstOrNull { it.id == interventionId } ?: return "Intervention introuvable."
+        val dossierLocal = File(ctx.filesDir, "societe/interventions/$interventionId").apply { mkdirs() }
+        val dossierObsidian = "Société/Interventions/" +
+            client.nom.replace(Regex("[\\\\/:*?\"<>|]"), "_") + "/" +
+            site.nom.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+        val existantes = if (avant) intervention.photosAvant else intervention.photosApres
+        val ajoutees = mutableListOf<String>()
+        var totalOctets = 0L
+        uris.take(10).forEach { uri ->
+            runCatching {
+                val mime = ctx.contentResolver.getType(uri) ?: "image/jpeg"
+                if (!mime.startsWith("image/")) return@runCatching
+                val extension = when (mime.lowercase()) {
+                    "image/png" -> "png"
+                    "image/webp" -> "webp"
+                    "image/heic", "image/heif" -> "heic"
+                    else -> "jpg"
+                }
+                val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@runCatching
+                if (bytes.isEmpty() || bytes.size > 15 * 1024 * 1024) return@runCatching
+                totalOctets += bytes.size
+                if (totalOctets > 40L * 1024 * 1024) return@runCatching
+                val numero = existantes.size + ajoutees.size + 1
+                val nom = (if (avant) "avant" else "apres") + "-%02d.%s".format(numero, extension)
+                File(dossierLocal, nom).writeBytes(bytes)
+                val relatif = "interventions/$interventionId/$nom"
+                ajoutees += relatif
+                obsidian.saveBytes(dossierObsidian, "$interventionId-$nom", bytes, mime)
+            }
+        }
+        if (ajoutees.isEmpty()) return "Aucune image exploitable. Formats image uniquement, 15 Mo maximum par photo et 40 Mo par ajout."
+        val maj = intervention.copy(
+            photosAvant = if (avant) intervention.photosAvant + ajoutees else intervention.photosAvant,
+            photosApres = if (avant) intervention.photosApres else intervention.photosApres + ajoutees
+        )
+        repo.update { d -> d.copy(clients = d.clients.map { c ->
+            if (c.id != clientId) c else c.copy(sites = c.sites.map { s ->
+                if (s.id != siteId) s else s.copy(interventions = s.interventions.map { i -> if (i.id == interventionId) maj else i })
+            })
+        }) }
+        val nomFichier = "${intervention.date} $interventionId"
+        val md = buildString {
+            append("# Intervention — ${client.nom} / ${site.nom}\n\n")
+            append("- Date : ${intervention.date}\n- Catégorie : ${intervention.categorie}\n- Statut : ${intervention.statut}\n\n")
+            append("## Description\n${intervention.description}\n")
+            if (intervention.diagnostic.isNotBlank()) append("\n## Diagnostic\n${intervention.diagnostic}\n")
+            if (intervention.actions.isNotBlank()) append("\n## Actions réalisées\n${intervention.actions}\n")
+            if (intervention.pieces.isNotBlank()) append("\n## Pièces remplacées\n${intervention.pieces}\n")
+            if (intervention.mesures.isNotBlank()) append("\n## Mesures relevées\n${intervention.mesures}\n")
+            if (maj.photosAvant.isNotEmpty()) {
+                append("\n## Photos avant intervention\n")
+                maj.photosAvant.forEach { append("![[${interventionId}-${it.substringAfterLast('/')}]]\n") }
+            }
+            if (maj.photosApres.isNotEmpty()) {
+                append("\n## Photos après intervention\n")
+                maj.photosApres.forEach { append("![[${interventionId}-${it.substringAfterLast('/')}]]\n") }
+            }
+            if (intervention.prochaineMaintenance.isNotBlank()) append("\n## Prochaine maintenance\n${intervention.prochaineMaintenance}\n")
+            if (intervention.notes.isNotBlank()) append("\n## Notes\n${intervention.notes}\n")
+        }
+        val emplacement = obsidian.saveIn(dossierObsidian, nomFichier, md)
+        runCatching {
+            val pdfMd = md.replace(Regex("!\\[\\[([^]]+)]]"), "[Photo jointe : $1]")
+            obsidian.saveBytes(dossierObsidian, "$nomFichier.pdf", PdfExporter.toPdf(pdfMd), "application/pdf")
+        }
+        return "${ajoutees.size} photo(s) ${if (avant) "avant" else "après"} ajoutée(s). Note mise à jour : $emplacement"
     }
 
     // ------------------------------------------------------------------ export (Obsidian + PDF)
