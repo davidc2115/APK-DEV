@@ -278,8 +278,4650 @@ exit 1
 export DEBIAN_FRONTEND=noninteractive
 APT="apt-get -y -o Dpkg::Options::=--force-confnew -o Dpkg::Options::=--force-confdef"
 H="${'$'}{HOME}/.hermes"; mkdir -p "${'$'}{H}/logs"; LOG="${'$'}{H}/logs/jarvis-install.log"
-p "🚀 Installation d'Hermès lancée (10 à 25 min, le téléphone reste utilisable)."
+p "🚀 Installation / réparation complète d'Hermès lancée (10 à 25 min)."
 termux-wake-lock >/dev/null 2>&1 || true
+# Sauvegarde locale avant toute réparation : les clés, sessions et skills restent sur le téléphone.
+if [ -d "${'# Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
+# Ne pas utiliser pkill -f ici : le motif figure dans la commande RUN_COMMAND elle-même et peut tuer ce script parent.
+if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative d'installation supprimée."; fi
+if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; then rm -f "${'$'}{PREFIX}/bin/hermes"; fi
+pkg update -y >/dev/null 2>&1 || apt-get update >/dev/null 2>&1
+${'$'}{APT} install curl gnupg util-linux >/dev/null 2>&1 || p "⚠️ Paquets de base : échec partiel."
+case "${'$'}(uname -m)" in aarch64) ;; *) p "⚠️ Architecture ${'$'}(uname -m) : seul aarch64 est pris en charge officiellement.";; esac
+# Forcer Debian sous proot : le compilateur Android/Bionic ne peut pas construire pillow-heif.
+# Dans Debian aarch64/glibc, uv peut récupérer la roue manylinux précompilée.
+MODE=""
+p "ℹ️ Installation dans Debian légère (proot) pour éviter les compilations incompatibles avec Android."
+if [ -z "${'$'}{MODE}" ]; then
+  ${'$'}{APT} install proot-distro >> "${'$'}{LOG}" 2>&1 || { p "❌ Impossible d'installer proot-distro (réseau ?)."; exit 1; }
+  if ! proot-distro login debian -- true >/dev/null 2>&1; then
+    p "🐧 Debian absente ou endommagée : reconstruction de l'environnement (les données Hermes sauvegardées restent dans le dossier partagé)."
+    proot-distro remove debian >> "${'
+  p "📦 Préparation de Debian (git, curl…)…"
+  # Debian doit utiliser exclusivement ses outils glibc : --termux-home peut transmettre des variables
+  # de compilation Termux (CC=aarch64-linux-android-clang) qui contaminent uv/pip dans proot.
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive \
+    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev libwebp-dev python3 python3-venv python3-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
+    || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  p "🔎 Vérification du compilateur Debian (GCC, glibc)…"
+  proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/bin:/bin bash -c 'printf "CC="; command -v cc; cc --version | head -n1; printf "ARCH="; uname -m; printf "LIBC="; ldd --version | head -n1' >> "${'$'}{LOG}" 2>&1
+  p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
+  INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
+  : > "${'$'}{INSTALL_LOG}"
+  p "⏳ Installation des dépendances Hermès démarrée. Variables de compilation Android neutralisées."
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1 \
+     UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python UV_CACHE_DIR=/var/cache/uv \
+     bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /usr/local/share/uv/python /var/cache/uv /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+  INSTALL_PID=$!
+  while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
+    sleep 20
+    if kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; then
+      DERNIERES="$(tail -n 3 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\\x1b\\[[0-9;]*m//g' | cut -c1-115 | tr '\\n' ' ')"
+      p "⏳ Hermès installe ses composants : ${'$'}{DERNIERES:-travail en cours, aucune nouvelle sortie pour le moment}."
+    fi
+  done
+  wait "${'$'}{INSTALL_PID}"
+  INSTALL_RC=$?
+  cat "${'$'}{INSTALL_LOG}" >> "${'$'}{LOG}"
+  if [ "${'$'}{INSTALL_RC}" -ne 0 ]; then
+    p "❌ L’installation d’Hermès a échoué (code ${'$'}{INSTALL_RC}). Dernières lignes :"
+    tail -n 10 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit "${'$'}{INSTALL_RC}"
+  fi
+  p "🔎 Vérification de l'environnement Python Hermes…"
+  if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
+    p "❌ Installation incomplète : /root/.hermes/hermes-agent/venv/bin/python est absent. La configuration et le démarrage sont interrompus."
+    tail -n 15 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit 1
+  fi
+  if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+    MODE=proot
+  else
+    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
+    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
+    exit 1
+  fi
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé (${'$'}{MODE})."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Sauvegarde locale privée de l'environnement Hermes ; aucune donnée n'est envoyée hors du téléphone. */
+    fun sauvegarder(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"
+[ -d "${'$'}H" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
+B="${'$'}H/backups"; mkdir -p "${'$'}B"; chmod 700 "${'$'}B"
+TS="${'$'}(date +%Y%m%d-%H%M%S)"
+OUT="${'$'}B/jarvis-hermes-${'$'}TS.tar.gz"
+tar -czf "${'$'}OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'$'}HOME" .hermes
+chmod 600 "${'$'}OUT"
+p "✅ Sauvegarde privée créée : ${'$'}(basename "${'$'}OUT") (${'$'}(du -h "${'$'}OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="${'$'}HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "${'$'}H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "${'$'}H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "${'$'}H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "${'$'}H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "${'$'}H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "${'$'}H/backups" ] && find "${'$'}H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "${'$'}f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"; B="${'$'}H/backups"
+[ -d "${'$'}B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="${'$'}(ls -1t "${'$'}B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "${'$'}LATEST" ] && [ -f "${'$'}LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "${'$'}LATEST" >/dev/null
+p "⏳ Archive vérifiée : ${'$'}(basename "${'$'}LATEST")"
+tar -xzf "${'$'}LATEST" -C "${'$'}HOME"
+[ -f "${'$'}H/.env" ] && chmod 600 "${'$'}H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}{HOME}/.hermes" ]; then
+  mkdir -p "${'# Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
+# Ne pas utiliser pkill -f ici : le motif figure dans la commande RUN_COMMAND elle-même et peut tuer ce script parent.
+if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative d'installation supprimée."; fi
+if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; then rm -f "${'$'}{PREFIX}/bin/hermes"; fi
+pkg update -y >/dev/null 2>&1 || apt-get update >/dev/null 2>&1
+${'$'}{APT} install curl gnupg util-linux >/dev/null 2>&1 || p "⚠️ Paquets de base : échec partiel."
+case "${'$'}(uname -m)" in aarch64) ;; *) p "⚠️ Architecture ${'$'}(uname -m) : seul aarch64 est pris en charge officiellement.";; esac
+# Forcer Debian sous proot : le compilateur Android/Bionic ne peut pas construire pillow-heif.
+# Dans Debian aarch64/glibc, uv peut récupérer la roue manylinux précompilée.
+MODE=""
+p "ℹ️ Installation dans Debian légère (proot) pour éviter les compilations incompatibles avec Android."
+if [ -z "${'$'}{MODE}" ]; then
+  ${'$'}{APT} install proot-distro >> "${'$'}{LOG}" 2>&1 || { p "❌ Impossible d'installer proot-distro (réseau ?)."; exit 1; }
+  if ! proot-distro login debian -- true >/dev/null 2>&1; then
+    p "🐧 Téléchargement de Debian (≈ 50 Mo)…"
+    proot-distro install debian >> "${'$'}{LOG}" 2>&1 || { p "❌ Installation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  fi
+  p "📦 Préparation de Debian (git, curl…)…"
+  # Debian doit utiliser exclusivement ses outils glibc : --termux-home peut transmettre des variables
+  # de compilation Termux (CC=aarch64-linux-android-clang) qui contaminent uv/pip dans proot.
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive \
+    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev libwebp-dev python3 python3-venv python3-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
+    || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  p "🔎 Vérification du compilateur Debian (GCC, glibc)…"
+  proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/bin:/bin bash -c 'printf "CC="; command -v cc; cc --version | head -n1; printf "ARCH="; uname -m; printf "LIBC="; ldd --version | head -n1' >> "${'$'}{LOG}" 2>&1
+  p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
+  INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
+  : > "${'$'}{INSTALL_LOG}"
+  p "⏳ Installation des dépendances Hermès démarrée. Variables de compilation Android neutralisées."
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1 \
+     UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python UV_CACHE_DIR=/var/cache/uv \
+     bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /usr/local/share/uv/python /var/cache/uv /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+  INSTALL_PID=$!
+  while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
+    sleep 20
+    if kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; then
+      DERNIERES="$(tail -n 3 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\\x1b\\[[0-9;]*m//g' | cut -c1-115 | tr '\\n' ' ')"
+      p "⏳ Hermès installe ses composants : ${'$'}{DERNIERES:-travail en cours, aucune nouvelle sortie pour le moment}."
+    fi
+  done
+  wait "${'$'}{INSTALL_PID}"
+  INSTALL_RC=$?
+  cat "${'$'}{INSTALL_LOG}" >> "${'$'}{LOG}"
+  if [ "${'$'}{INSTALL_RC}" -ne 0 ]; then
+    p "❌ L’installation d’Hermès a échoué (code ${'$'}{INSTALL_RC}). Dernières lignes :"
+    tail -n 10 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit "${'$'}{INSTALL_RC}"
+  fi
+  p "🔎 Vérification de l'environnement Python Hermes…"
+  if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
+    p "❌ Installation incomplète : /root/.hermes/hermes-agent/venv/bin/python est absent. La configuration et le démarrage sont interrompus."
+    tail -n 15 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit 1
+  fi
+  if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+    MODE=proot
+  else
+    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
+    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
+    exit 1
+  fi
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé (${'$'}{MODE})."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Sauvegarde locale privée de l'environnement Hermes ; aucune donnée n'est envoyée hors du téléphone. */
+    fun sauvegarder(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"
+[ -d "${'$'}H" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
+B="${'$'}H/backups"; mkdir -p "${'$'}B"; chmod 700 "${'$'}B"
+TS="${'$'}(date +%Y%m%d-%H%M%S)"
+OUT="${'$'}B/jarvis-hermes-${'$'}TS.tar.gz"
+tar -czf "${'$'}OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'$'}HOME" .hermes
+chmod 600 "${'$'}OUT"
+p "✅ Sauvegarde privée créée : ${'$'}(basename "${'$'}OUT") (${'$'}(du -h "${'$'}OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="${'$'}HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "${'$'}H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "${'$'}H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "${'$'}H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "${'$'}H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "${'$'}H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "${'$'}H/backups" ] && find "${'$'}H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "${'$'}f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"; B="${'$'}H/backups"
+[ -d "${'$'}B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="${'$'}(ls -1t "${'$'}B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "${'$'}LATEST" ] && [ -f "${'$'}LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "${'$'}LATEST" >/dev/null
+p "⏳ Archive vérifiée : ${'$'}(basename "${'$'}LATEST")"
+tar -xzf "${'$'}LATEST" -C "${'$'}HOME"
+[ -f "${'$'}H/.env" ] && chmod 600 "${'$'}H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}{HOME}/.hermes/backups"
+  TS="$(date +%Y%m%d-%H%M%S)"
+  tar -czf "${'# Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
+# Ne pas utiliser pkill -f ici : le motif figure dans la commande RUN_COMMAND elle-même et peut tuer ce script parent.
+if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative d'installation supprimée."; fi
+if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; then rm -f "${'$'}{PREFIX}/bin/hermes"; fi
+pkg update -y >/dev/null 2>&1 || apt-get update >/dev/null 2>&1
+${'$'}{APT} install curl gnupg util-linux >/dev/null 2>&1 || p "⚠️ Paquets de base : échec partiel."
+case "${'$'}(uname -m)" in aarch64) ;; *) p "⚠️ Architecture ${'$'}(uname -m) : seul aarch64 est pris en charge officiellement.";; esac
+# Forcer Debian sous proot : le compilateur Android/Bionic ne peut pas construire pillow-heif.
+# Dans Debian aarch64/glibc, uv peut récupérer la roue manylinux précompilée.
+MODE=""
+p "ℹ️ Installation dans Debian légère (proot) pour éviter les compilations incompatibles avec Android."
+if [ -z "${'$'}{MODE}" ]; then
+  ${'$'}{APT} install proot-distro >> "${'$'}{LOG}" 2>&1 || { p "❌ Impossible d'installer proot-distro (réseau ?)."; exit 1; }
+  if ! proot-distro login debian -- true >/dev/null 2>&1; then
+    p "🐧 Téléchargement de Debian (≈ 50 Mo)…"
+    proot-distro install debian >> "${'$'}{LOG}" 2>&1 || { p "❌ Installation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  fi
+  p "📦 Préparation de Debian (git, curl…)…"
+  # Debian doit utiliser exclusivement ses outils glibc : --termux-home peut transmettre des variables
+  # de compilation Termux (CC=aarch64-linux-android-clang) qui contaminent uv/pip dans proot.
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive \
+    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev libwebp-dev python3 python3-venv python3-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
+    || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  p "🔎 Vérification du compilateur Debian (GCC, glibc)…"
+  proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/bin:/bin bash -c 'printf "CC="; command -v cc; cc --version | head -n1; printf "ARCH="; uname -m; printf "LIBC="; ldd --version | head -n1' >> "${'$'}{LOG}" 2>&1
+  p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
+  INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
+  : > "${'$'}{INSTALL_LOG}"
+  p "⏳ Installation des dépendances Hermès démarrée. Variables de compilation Android neutralisées."
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1 \
+     UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python UV_CACHE_DIR=/var/cache/uv \
+     bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /usr/local/share/uv/python /var/cache/uv /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+  INSTALL_PID=$!
+  while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
+    sleep 20
+    if kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; then
+      DERNIERES="$(tail -n 3 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\\x1b\\[[0-9;]*m//g' | cut -c1-115 | tr '\\n' ' ')"
+      p "⏳ Hermès installe ses composants : ${'$'}{DERNIERES:-travail en cours, aucune nouvelle sortie pour le moment}."
+    fi
+  done
+  wait "${'$'}{INSTALL_PID}"
+  INSTALL_RC=$?
+  cat "${'$'}{INSTALL_LOG}" >> "${'$'}{LOG}"
+  if [ "${'$'}{INSTALL_RC}" -ne 0 ]; then
+    p "❌ L’installation d’Hermès a échoué (code ${'$'}{INSTALL_RC}). Dernières lignes :"
+    tail -n 10 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit "${'$'}{INSTALL_RC}"
+  fi
+  p "🔎 Vérification de l'environnement Python Hermes…"
+  if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
+    p "❌ Installation incomplète : /root/.hermes/hermes-agent/venv/bin/python est absent. La configuration et le démarrage sont interrompus."
+    tail -n 15 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit 1
+  fi
+  if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+    MODE=proot
+  else
+    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
+    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
+    exit 1
+  fi
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé (${'$'}{MODE})."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Sauvegarde locale privée de l'environnement Hermes ; aucune donnée n'est envoyée hors du téléphone. */
+    fun sauvegarder(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"
+[ -d "${'$'}H" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
+B="${'$'}H/backups"; mkdir -p "${'$'}B"; chmod 700 "${'$'}B"
+TS="${'$'}(date +%Y%m%d-%H%M%S)"
+OUT="${'$'}B/jarvis-hermes-${'$'}TS.tar.gz"
+tar -czf "${'$'}OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'$'}HOME" .hermes
+chmod 600 "${'$'}OUT"
+p "✅ Sauvegarde privée créée : ${'$'}(basename "${'$'}OUT") (${'$'}(du -h "${'$'}OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="${'$'}HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "${'$'}H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "${'$'}H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "${'$'}H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "${'$'}H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "${'$'}H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "${'$'}H/backups" ] && find "${'$'}H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "${'$'}f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"; B="${'$'}H/backups"
+[ -d "${'$'}B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="${'$'}(ls -1t "${'$'}B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "${'$'}LATEST" ] && [ -f "${'$'}LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "${'$'}LATEST" >/dev/null
+p "⏳ Archive vérifiée : ${'$'}(basename "${'$'}LATEST")"
+tar -xzf "${'$'}LATEST" -C "${'$'}HOME"
+[ -f "${'$'}H/.env" ] && chmod 600 "${'$'}H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}{HOME}/.hermes/backups/jarvis-hermes-auto-${'# Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
+# Ne pas utiliser pkill -f ici : le motif figure dans la commande RUN_COMMAND elle-même et peut tuer ce script parent.
+if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative d'installation supprimée."; fi
+if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; then rm -f "${'$'}{PREFIX}/bin/hermes"; fi
+pkg update -y >/dev/null 2>&1 || apt-get update >/dev/null 2>&1
+${'$'}{APT} install curl gnupg util-linux >/dev/null 2>&1 || p "⚠️ Paquets de base : échec partiel."
+case "${'$'}(uname -m)" in aarch64) ;; *) p "⚠️ Architecture ${'$'}(uname -m) : seul aarch64 est pris en charge officiellement.";; esac
+# Forcer Debian sous proot : le compilateur Android/Bionic ne peut pas construire pillow-heif.
+# Dans Debian aarch64/glibc, uv peut récupérer la roue manylinux précompilée.
+MODE=""
+p "ℹ️ Installation dans Debian légère (proot) pour éviter les compilations incompatibles avec Android."
+if [ -z "${'$'}{MODE}" ]; then
+  ${'$'}{APT} install proot-distro >> "${'$'}{LOG}" 2>&1 || { p "❌ Impossible d'installer proot-distro (réseau ?)."; exit 1; }
+  if ! proot-distro login debian -- true >/dev/null 2>&1; then
+    p "🐧 Téléchargement de Debian (≈ 50 Mo)…"
+    proot-distro install debian >> "${'$'}{LOG}" 2>&1 || { p "❌ Installation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  fi
+  p "📦 Préparation de Debian (git, curl…)…"
+  # Debian doit utiliser exclusivement ses outils glibc : --termux-home peut transmettre des variables
+  # de compilation Termux (CC=aarch64-linux-android-clang) qui contaminent uv/pip dans proot.
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive \
+    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev libwebp-dev python3 python3-venv python3-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
+    || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  p "🔎 Vérification du compilateur Debian (GCC, glibc)…"
+  proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/bin:/bin bash -c 'printf "CC="; command -v cc; cc --version | head -n1; printf "ARCH="; uname -m; printf "LIBC="; ldd --version | head -n1' >> "${'$'}{LOG}" 2>&1
+  p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
+  INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
+  : > "${'$'}{INSTALL_LOG}"
+  p "⏳ Installation des dépendances Hermès démarrée. Variables de compilation Android neutralisées."
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1 \
+     UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python UV_CACHE_DIR=/var/cache/uv \
+     bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /usr/local/share/uv/python /var/cache/uv /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+  INSTALL_PID=$!
+  while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
+    sleep 20
+    if kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; then
+      DERNIERES="$(tail -n 3 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\\x1b\\[[0-9;]*m//g' | cut -c1-115 | tr '\\n' ' ')"
+      p "⏳ Hermès installe ses composants : ${'$'}{DERNIERES:-travail en cours, aucune nouvelle sortie pour le moment}."
+    fi
+  done
+  wait "${'$'}{INSTALL_PID}"
+  INSTALL_RC=$?
+  cat "${'$'}{INSTALL_LOG}" >> "${'$'}{LOG}"
+  if [ "${'$'}{INSTALL_RC}" -ne 0 ]; then
+    p "❌ L’installation d’Hermès a échoué (code ${'$'}{INSTALL_RC}). Dernières lignes :"
+    tail -n 10 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit "${'$'}{INSTALL_RC}"
+  fi
+  p "🔎 Vérification de l'environnement Python Hermes…"
+  if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
+    p "❌ Installation incomplète : /root/.hermes/hermes-agent/venv/bin/python est absent. La configuration et le démarrage sont interrompus."
+    tail -n 15 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit 1
+  fi
+  if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+    MODE=proot
+  else
+    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
+    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
+    exit 1
+  fi
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé (${'$'}{MODE})."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Sauvegarde locale privée de l'environnement Hermes ; aucune donnée n'est envoyée hors du téléphone. */
+    fun sauvegarder(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"
+[ -d "${'$'}H" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
+B="${'$'}H/backups"; mkdir -p "${'$'}B"; chmod 700 "${'$'}B"
+TS="${'$'}(date +%Y%m%d-%H%M%S)"
+OUT="${'$'}B/jarvis-hermes-${'$'}TS.tar.gz"
+tar -czf "${'$'}OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'$'}HOME" .hermes
+chmod 600 "${'$'}OUT"
+p "✅ Sauvegarde privée créée : ${'$'}(basename "${'$'}OUT") (${'$'}(du -h "${'$'}OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="${'$'}HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "${'$'}H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "${'$'}H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "${'$'}H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "${'$'}H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "${'$'}H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "${'$'}H/backups" ] && find "${'$'}H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "${'$'}f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"; B="${'$'}H/backups"
+[ -d "${'$'}B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="${'$'}(ls -1t "${'$'}B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "${'$'}LATEST" ] && [ -f "${'$'}LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "${'$'}LATEST" >/dev/null
+p "⏳ Archive vérifiée : ${'$'}(basename "${'$'}LATEST")"
+tar -xzf "${'$'}LATEST" -C "${'$'}HOME"
+[ -f "${'$'}H/.env" ] && chmod 600 "${'$'}H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}{TS}.tar.gz" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'# Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
+# Ne pas utiliser pkill -f ici : le motif figure dans la commande RUN_COMMAND elle-même et peut tuer ce script parent.
+if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative d'installation supprimée."; fi
+if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; then rm -f "${'$'}{PREFIX}/bin/hermes"; fi
+pkg update -y >/dev/null 2>&1 || apt-get update >/dev/null 2>&1
+${'$'}{APT} install curl gnupg util-linux >/dev/null 2>&1 || p "⚠️ Paquets de base : échec partiel."
+case "${'$'}(uname -m)" in aarch64) ;; *) p "⚠️ Architecture ${'$'}(uname -m) : seul aarch64 est pris en charge officiellement.";; esac
+# Forcer Debian sous proot : le compilateur Android/Bionic ne peut pas construire pillow-heif.
+# Dans Debian aarch64/glibc, uv peut récupérer la roue manylinux précompilée.
+MODE=""
+p "ℹ️ Installation dans Debian légère (proot) pour éviter les compilations incompatibles avec Android."
+if [ -z "${'$'}{MODE}" ]; then
+  ${'$'}{APT} install proot-distro >> "${'$'}{LOG}" 2>&1 || { p "❌ Impossible d'installer proot-distro (réseau ?)."; exit 1; }
+  if ! proot-distro login debian -- true >/dev/null 2>&1; then
+    p "🐧 Téléchargement de Debian (≈ 50 Mo)…"
+    proot-distro install debian >> "${'$'}{LOG}" 2>&1 || { p "❌ Installation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  fi
+  p "📦 Préparation de Debian (git, curl…)…"
+  # Debian doit utiliser exclusivement ses outils glibc : --termux-home peut transmettre des variables
+  # de compilation Termux (CC=aarch64-linux-android-clang) qui contaminent uv/pip dans proot.
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive \
+    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev libwebp-dev python3 python3-venv python3-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
+    || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  p "🔎 Vérification du compilateur Debian (GCC, glibc)…"
+  proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/bin:/bin bash -c 'printf "CC="; command -v cc; cc --version | head -n1; printf "ARCH="; uname -m; printf "LIBC="; ldd --version | head -n1' >> "${'$'}{LOG}" 2>&1
+  p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
+  INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
+  : > "${'$'}{INSTALL_LOG}"
+  p "⏳ Installation des dépendances Hermès démarrée. Variables de compilation Android neutralisées."
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1 \
+     UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python UV_CACHE_DIR=/var/cache/uv \
+     bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /usr/local/share/uv/python /var/cache/uv /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+  INSTALL_PID=$!
+  while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
+    sleep 20
+    if kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; then
+      DERNIERES="$(tail -n 3 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\\x1b\\[[0-9;]*m//g' | cut -c1-115 | tr '\\n' ' ')"
+      p "⏳ Hermès installe ses composants : ${'$'}{DERNIERES:-travail en cours, aucune nouvelle sortie pour le moment}."
+    fi
+  done
+  wait "${'$'}{INSTALL_PID}"
+  INSTALL_RC=$?
+  cat "${'$'}{INSTALL_LOG}" >> "${'$'}{LOG}"
+  if [ "${'$'}{INSTALL_RC}" -ne 0 ]; then
+    p "❌ L’installation d’Hermès a échoué (code ${'$'}{INSTALL_RC}). Dernières lignes :"
+    tail -n 10 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit "${'$'}{INSTALL_RC}"
+  fi
+  p "🔎 Vérification de l'environnement Python Hermes…"
+  if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
+    p "❌ Installation incomplète : /root/.hermes/hermes-agent/venv/bin/python est absent. La configuration et le démarrage sont interrompus."
+    tail -n 15 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit 1
+  fi
+  if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+    MODE=proot
+  else
+    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
+    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
+    exit 1
+  fi
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé (${'$'}{MODE})."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Sauvegarde locale privée de l'environnement Hermes ; aucune donnée n'est envoyée hors du téléphone. */
+    fun sauvegarder(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"
+[ -d "${'$'}H" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
+B="${'$'}H/backups"; mkdir -p "${'$'}B"; chmod 700 "${'$'}B"
+TS="${'$'}(date +%Y%m%d-%H%M%S)"
+OUT="${'$'}B/jarvis-hermes-${'$'}TS.tar.gz"
+tar -czf "${'$'}OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'$'}HOME" .hermes
+chmod 600 "${'$'}OUT"
+p "✅ Sauvegarde privée créée : ${'$'}(basename "${'$'}OUT") (${'$'}(du -h "${'$'}OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="${'$'}HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "${'$'}H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "${'$'}H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "${'$'}H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "${'$'}H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "${'$'}H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "${'$'}H/backups" ] && find "${'$'}H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "${'$'}f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"; B="${'$'}H/backups"
+[ -d "${'$'}B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="${'$'}(ls -1t "${'$'}B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "${'$'}LATEST" ] && [ -f "${'$'}LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "${'$'}LATEST" >/dev/null
+p "⏳ Archive vérifiée : ${'$'}(basename "${'$'}LATEST")"
+tar -xzf "${'$'}LATEST" -C "${'$'}HOME"
+[ -f "${'$'}H/.env" ] && chmod 600 "${'$'}H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}{HOME}" .hermes 2>> "${'# Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
+# Ne pas utiliser pkill -f ici : le motif figure dans la commande RUN_COMMAND elle-même et peut tuer ce script parent.
+if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative d'installation supprimée."; fi
+if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; then rm -f "${'$'}{PREFIX}/bin/hermes"; fi
+pkg update -y >/dev/null 2>&1 || apt-get update >/dev/null 2>&1
+${'$'}{APT} install curl gnupg util-linux >/dev/null 2>&1 || p "⚠️ Paquets de base : échec partiel."
+case "${'$'}(uname -m)" in aarch64) ;; *) p "⚠️ Architecture ${'$'}(uname -m) : seul aarch64 est pris en charge officiellement.";; esac
+# Forcer Debian sous proot : le compilateur Android/Bionic ne peut pas construire pillow-heif.
+# Dans Debian aarch64/glibc, uv peut récupérer la roue manylinux précompilée.
+MODE=""
+p "ℹ️ Installation dans Debian légère (proot) pour éviter les compilations incompatibles avec Android."
+if [ -z "${'$'}{MODE}" ]; then
+  ${'$'}{APT} install proot-distro >> "${'$'}{LOG}" 2>&1 || { p "❌ Impossible d'installer proot-distro (réseau ?)."; exit 1; }
+  if ! proot-distro login debian -- true >/dev/null 2>&1; then
+    p "🐧 Téléchargement de Debian (≈ 50 Mo)…"
+    proot-distro install debian >> "${'$'}{LOG}" 2>&1 || { p "❌ Installation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  fi
+  p "📦 Préparation de Debian (git, curl…)…"
+  # Debian doit utiliser exclusivement ses outils glibc : --termux-home peut transmettre des variables
+  # de compilation Termux (CC=aarch64-linux-android-clang) qui contaminent uv/pip dans proot.
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive \
+    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev libwebp-dev python3 python3-venv python3-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
+    || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  p "🔎 Vérification du compilateur Debian (GCC, glibc)…"
+  proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/bin:/bin bash -c 'printf "CC="; command -v cc; cc --version | head -n1; printf "ARCH="; uname -m; printf "LIBC="; ldd --version | head -n1' >> "${'$'}{LOG}" 2>&1
+  p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
+  INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
+  : > "${'$'}{INSTALL_LOG}"
+  p "⏳ Installation des dépendances Hermès démarrée. Variables de compilation Android neutralisées."
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1 \
+     UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python UV_CACHE_DIR=/var/cache/uv \
+     bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /usr/local/share/uv/python /var/cache/uv /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+  INSTALL_PID=$!
+  while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
+    sleep 20
+    if kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; then
+      DERNIERES="$(tail -n 3 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\\x1b\\[[0-9;]*m//g' | cut -c1-115 | tr '\\n' ' ')"
+      p "⏳ Hermès installe ses composants : ${'$'}{DERNIERES:-travail en cours, aucune nouvelle sortie pour le moment}."
+    fi
+  done
+  wait "${'$'}{INSTALL_PID}"
+  INSTALL_RC=$?
+  cat "${'$'}{INSTALL_LOG}" >> "${'$'}{LOG}"
+  if [ "${'$'}{INSTALL_RC}" -ne 0 ]; then
+    p "❌ L’installation d’Hermès a échoué (code ${'$'}{INSTALL_RC}). Dernières lignes :"
+    tail -n 10 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit "${'$'}{INSTALL_RC}"
+  fi
+  p "🔎 Vérification de l'environnement Python Hermes…"
+  if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
+    p "❌ Installation incomplète : /root/.hermes/hermes-agent/venv/bin/python est absent. La configuration et le démarrage sont interrompus."
+    tail -n 15 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit 1
+  fi
+  if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+    MODE=proot
+  else
+    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
+    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
+    exit 1
+  fi
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé (${'$'}{MODE})."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Sauvegarde locale privée de l'environnement Hermes ; aucune donnée n'est envoyée hors du téléphone. */
+    fun sauvegarder(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"
+[ -d "${'$'}H" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
+B="${'$'}H/backups"; mkdir -p "${'$'}B"; chmod 700 "${'$'}B"
+TS="${'$'}(date +%Y%m%d-%H%M%S)"
+OUT="${'$'}B/jarvis-hermes-${'$'}TS.tar.gz"
+tar -czf "${'$'}OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'$'}HOME" .hermes
+chmod 600 "${'$'}OUT"
+p "✅ Sauvegarde privée créée : ${'$'}(basename "${'$'}OUT") (${'$'}(du -h "${'$'}OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="${'$'}HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "${'$'}H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "${'$'}H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "${'$'}H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "${'$'}H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "${'$'}H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "${'$'}H/backups" ] && find "${'$'}H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "${'$'}f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"; B="${'$'}H/backups"
+[ -d "${'$'}B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="${'$'}(ls -1t "${'$'}B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "${'$'}LATEST" ] && [ -f "${'$'}LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "${'$'}LATEST" >/dev/null
+p "⏳ Archive vérifiée : ${'$'}(basename "${'$'}LATEST")"
+tar -xzf "${'$'}LATEST" -C "${'$'}HOME"
+[ -f "${'$'}H/.env" ] && chmod 600 "${'$'}H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}{HOME}/.hermes/logs/jarvis-install.log" || p "⚠️ Sauvegarde automatique impossible ; aucune donnée existante n'a été supprimée."
+  chmod 600 "${'# Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
+# Ne pas utiliser pkill -f ici : le motif figure dans la commande RUN_COMMAND elle-même et peut tuer ce script parent.
+if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative d'installation supprimée."; fi
+if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; then rm -f "${'$'}{PREFIX}/bin/hermes"; fi
+pkg update -y >/dev/null 2>&1 || apt-get update >/dev/null 2>&1
+${'$'}{APT} install curl gnupg util-linux >/dev/null 2>&1 || p "⚠️ Paquets de base : échec partiel."
+case "${'$'}(uname -m)" in aarch64) ;; *) p "⚠️ Architecture ${'$'}(uname -m) : seul aarch64 est pris en charge officiellement.";; esac
+# Forcer Debian sous proot : le compilateur Android/Bionic ne peut pas construire pillow-heif.
+# Dans Debian aarch64/glibc, uv peut récupérer la roue manylinux précompilée.
+MODE=""
+p "ℹ️ Installation dans Debian légère (proot) pour éviter les compilations incompatibles avec Android."
+if [ -z "${'$'}{MODE}" ]; then
+  ${'$'}{APT} install proot-distro >> "${'$'}{LOG}" 2>&1 || { p "❌ Impossible d'installer proot-distro (réseau ?)."; exit 1; }
+  if ! proot-distro login debian -- true >/dev/null 2>&1; then
+    p "🐧 Téléchargement de Debian (≈ 50 Mo)…"
+    proot-distro install debian >> "${'$'}{LOG}" 2>&1 || { p "❌ Installation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  fi
+  p "📦 Préparation de Debian (git, curl…)…"
+  # Debian doit utiliser exclusivement ses outils glibc : --termux-home peut transmettre des variables
+  # de compilation Termux (CC=aarch64-linux-android-clang) qui contaminent uv/pip dans proot.
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive \
+    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev libwebp-dev python3 python3-venv python3-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
+    || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  p "🔎 Vérification du compilateur Debian (GCC, glibc)…"
+  proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/bin:/bin bash -c 'printf "CC="; command -v cc; cc --version | head -n1; printf "ARCH="; uname -m; printf "LIBC="; ldd --version | head -n1' >> "${'$'}{LOG}" 2>&1
+  p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
+  INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
+  : > "${'$'}{INSTALL_LOG}"
+  p "⏳ Installation des dépendances Hermès démarrée. Variables de compilation Android neutralisées."
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1 \
+     UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python UV_CACHE_DIR=/var/cache/uv \
+     bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /usr/local/share/uv/python /var/cache/uv /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+  INSTALL_PID=$!
+  while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
+    sleep 20
+    if kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; then
+      DERNIERES="$(tail -n 3 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\\x1b\\[[0-9;]*m//g' | cut -c1-115 | tr '\\n' ' ')"
+      p "⏳ Hermès installe ses composants : ${'$'}{DERNIERES:-travail en cours, aucune nouvelle sortie pour le moment}."
+    fi
+  done
+  wait "${'$'}{INSTALL_PID}"
+  INSTALL_RC=$?
+  cat "${'$'}{INSTALL_LOG}" >> "${'$'}{LOG}"
+  if [ "${'$'}{INSTALL_RC}" -ne 0 ]; then
+    p "❌ L’installation d’Hermès a échoué (code ${'$'}{INSTALL_RC}). Dernières lignes :"
+    tail -n 10 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit "${'$'}{INSTALL_RC}"
+  fi
+  p "🔎 Vérification de l'environnement Python Hermes…"
+  if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
+    p "❌ Installation incomplète : /root/.hermes/hermes-agent/venv/bin/python est absent. La configuration et le démarrage sont interrompus."
+    tail -n 15 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit 1
+  fi
+  if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+    MODE=proot
+  else
+    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
+    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
+    exit 1
+  fi
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé (${'$'}{MODE})."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Sauvegarde locale privée de l'environnement Hermes ; aucune donnée n'est envoyée hors du téléphone. */
+    fun sauvegarder(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"
+[ -d "${'$'}H" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
+B="${'$'}H/backups"; mkdir -p "${'$'}B"; chmod 700 "${'$'}B"
+TS="${'$'}(date +%Y%m%d-%H%M%S)"
+OUT="${'$'}B/jarvis-hermes-${'$'}TS.tar.gz"
+tar -czf "${'$'}OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'$'}HOME" .hermes
+chmod 600 "${'$'}OUT"
+p "✅ Sauvegarde privée créée : ${'$'}(basename "${'$'}OUT") (${'$'}(du -h "${'$'}OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="${'$'}HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "${'$'}H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "${'$'}H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "${'$'}H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "${'$'}H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "${'$'}H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "${'$'}H/backups" ] && find "${'$'}H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "${'$'}f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"; B="${'$'}H/backups"
+[ -d "${'$'}B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="${'$'}(ls -1t "${'$'}B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "${'$'}LATEST" ] && [ -f "${'$'}LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "${'$'}LATEST" >/dev/null
+p "⏳ Archive vérifiée : ${'$'}(basename "${'$'}LATEST")"
+tar -xzf "${'$'}LATEST" -C "${'$'}HOME"
+[ -f "${'$'}H/.env" ] && chmod 600 "${'$'}H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}{HOME}/.hermes/backups/jarvis-hermes-auto-${'# Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
+# Ne pas utiliser pkill -f ici : le motif figure dans la commande RUN_COMMAND elle-même et peut tuer ce script parent.
+if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative d'installation supprimée."; fi
+if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; then rm -f "${'$'}{PREFIX}/bin/hermes"; fi
+pkg update -y >/dev/null 2>&1 || apt-get update >/dev/null 2>&1
+${'$'}{APT} install curl gnupg util-linux >/dev/null 2>&1 || p "⚠️ Paquets de base : échec partiel."
+case "${'$'}(uname -m)" in aarch64) ;; *) p "⚠️ Architecture ${'$'}(uname -m) : seul aarch64 est pris en charge officiellement.";; esac
+# Forcer Debian sous proot : le compilateur Android/Bionic ne peut pas construire pillow-heif.
+# Dans Debian aarch64/glibc, uv peut récupérer la roue manylinux précompilée.
+MODE=""
+p "ℹ️ Installation dans Debian légère (proot) pour éviter les compilations incompatibles avec Android."
+if [ -z "${'$'}{MODE}" ]; then
+  ${'$'}{APT} install proot-distro >> "${'$'}{LOG}" 2>&1 || { p "❌ Impossible d'installer proot-distro (réseau ?)."; exit 1; }
+  if ! proot-distro login debian -- true >/dev/null 2>&1; then
+    p "🐧 Téléchargement de Debian (≈ 50 Mo)…"
+    proot-distro install debian >> "${'$'}{LOG}" 2>&1 || { p "❌ Installation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  fi
+  p "📦 Préparation de Debian (git, curl…)…"
+  # Debian doit utiliser exclusivement ses outils glibc : --termux-home peut transmettre des variables
+  # de compilation Termux (CC=aarch64-linux-android-clang) qui contaminent uv/pip dans proot.
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive \
+    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev libwebp-dev python3 python3-venv python3-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
+    || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  p "🔎 Vérification du compilateur Debian (GCC, glibc)…"
+  proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/bin:/bin bash -c 'printf "CC="; command -v cc; cc --version | head -n1; printf "ARCH="; uname -m; printf "LIBC="; ldd --version | head -n1' >> "${'$'}{LOG}" 2>&1
+  p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
+  INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
+  : > "${'$'}{INSTALL_LOG}"
+  p "⏳ Installation des dépendances Hermès démarrée. Variables de compilation Android neutralisées."
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1 \
+     UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python UV_CACHE_DIR=/var/cache/uv \
+     bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /usr/local/share/uv/python /var/cache/uv /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+  INSTALL_PID=$!
+  while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
+    sleep 20
+    if kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; then
+      DERNIERES="$(tail -n 3 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\\x1b\\[[0-9;]*m//g' | cut -c1-115 | tr '\\n' ' ')"
+      p "⏳ Hermès installe ses composants : ${'$'}{DERNIERES:-travail en cours, aucune nouvelle sortie pour le moment}."
+    fi
+  done
+  wait "${'$'}{INSTALL_PID}"
+  INSTALL_RC=$?
+  cat "${'$'}{INSTALL_LOG}" >> "${'$'}{LOG}"
+  if [ "${'$'}{INSTALL_RC}" -ne 0 ]; then
+    p "❌ L’installation d’Hermès a échoué (code ${'$'}{INSTALL_RC}). Dernières lignes :"
+    tail -n 10 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit "${'$'}{INSTALL_RC}"
+  fi
+  p "🔎 Vérification de l'environnement Python Hermes…"
+  if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
+    p "❌ Installation incomplète : /root/.hermes/hermes-agent/venv/bin/python est absent. La configuration et le démarrage sont interrompus."
+    tail -n 15 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit 1
+  fi
+  if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+    MODE=proot
+  else
+    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
+    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
+    exit 1
+  fi
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé (${'$'}{MODE})."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Sauvegarde locale privée de l'environnement Hermes ; aucune donnée n'est envoyée hors du téléphone. */
+    fun sauvegarder(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"
+[ -d "${'$'}H" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
+B="${'$'}H/backups"; mkdir -p "${'$'}B"; chmod 700 "${'$'}B"
+TS="${'$'}(date +%Y%m%d-%H%M%S)"
+OUT="${'$'}B/jarvis-hermes-${'$'}TS.tar.gz"
+tar -czf "${'$'}OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'$'}HOME" .hermes
+chmod 600 "${'$'}OUT"
+p "✅ Sauvegarde privée créée : ${'$'}(basename "${'$'}OUT") (${'$'}(du -h "${'$'}OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="${'$'}HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "${'$'}H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "${'$'}H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "${'$'}H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "${'$'}H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "${'$'}H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "${'$'}H/backups" ] && find "${'$'}H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "${'$'}f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"; B="${'$'}H/backups"
+[ -d "${'$'}B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="${'$'}(ls -1t "${'$'}B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "${'$'}LATEST" ] && [ -f "${'$'}LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "${'$'}LATEST" >/dev/null
+p "⏳ Archive vérifiée : ${'$'}(basename "${'$'}LATEST")"
+tar -xzf "${'$'}LATEST" -C "${'$'}HOME"
+[ -f "${'$'}H/.env" ] && chmod 600 "${'$'}H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}{TS}.tar.gz" 2>/dev/null || true
+fi
+# Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
+# Ne pas utiliser pkill -f ici : le motif figure dans la commande RUN_COMMAND elle-même et peut tuer ce script parent.
+if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative d'installation supprimée."; fi
+if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; then rm -f "${'$'}{PREFIX}/bin/hermes"; fi
+pkg update -y >/dev/null 2>&1 || apt-get update >/dev/null 2>&1
+${'$'}{APT} install curl gnupg util-linux >/dev/null 2>&1 || p "⚠️ Paquets de base : échec partiel."
+case "${'$'}(uname -m)" in aarch64) ;; *) p "⚠️ Architecture ${'$'}(uname -m) : seul aarch64 est pris en charge officiellement.";; esac
+# Forcer Debian sous proot : le compilateur Android/Bionic ne peut pas construire pillow-heif.
+# Dans Debian aarch64/glibc, uv peut récupérer la roue manylinux précompilée.
+MODE=""
+p "ℹ️ Installation dans Debian légère (proot) pour éviter les compilations incompatibles avec Android."
+if [ -z "${'$'}{MODE}" ]; then
+  ${'$'}{APT} install proot-distro >> "${'$'}{LOG}" 2>&1 || { p "❌ Impossible d'installer proot-distro (réseau ?)."; exit 1; }
+  if ! proot-distro login debian -- true >/dev/null 2>&1; then
+    p "🐧 Téléchargement de Debian (≈ 50 Mo)…"
+    proot-distro install debian >> "${'$'}{LOG}" 2>&1 || { p "❌ Installation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  fi
+  p "📦 Préparation de Debian (git, curl…)…"
+  # Debian doit utiliser exclusivement ses outils glibc : --termux-home peut transmettre des variables
+  # de compilation Termux (CC=aarch64-linux-android-clang) qui contaminent uv/pip dans proot.
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive \
+    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev libwebp-dev python3 python3-venv python3-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
+    || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  p "🔎 Vérification du compilateur Debian (GCC, glibc)…"
+  proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/bin:/bin bash -c 'printf "CC="; command -v cc; cc --version | head -n1; printf "ARCH="; uname -m; printf "LIBC="; ldd --version | head -n1' >> "${'$'}{LOG}" 2>&1
+  p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
+  INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
+  : > "${'$'}{INSTALL_LOG}"
+  p "⏳ Installation des dépendances Hermès démarrée. Variables de compilation Android neutralisées."
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1 \
+     UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python UV_CACHE_DIR=/var/cache/uv \
+     bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /usr/local/share/uv/python /var/cache/uv /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+  INSTALL_PID=$!
+  while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
+    sleep 20
+    if kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; then
+      DERNIERES="$(tail -n 3 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\\x1b\\[[0-9;]*m//g' | cut -c1-115 | tr '\\n' ' ')"
+      p "⏳ Hermès installe ses composants : ${'$'}{DERNIERES:-travail en cours, aucune nouvelle sortie pour le moment}."
+    fi
+  done
+  wait "${'$'}{INSTALL_PID}"
+  INSTALL_RC=$?
+  cat "${'$'}{INSTALL_LOG}" >> "${'$'}{LOG}"
+  if [ "${'$'}{INSTALL_RC}" -ne 0 ]; then
+    p "❌ L’installation d’Hermès a échoué (code ${'$'}{INSTALL_RC}). Dernières lignes :"
+    tail -n 10 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit "${'$'}{INSTALL_RC}"
+  fi
+  p "🔎 Vérification de l'environnement Python Hermes…"
+  if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
+    p "❌ Installation incomplète : /root/.hermes/hermes-agent/venv/bin/python est absent. La configuration et le démarrage sont interrompus."
+    tail -n 15 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit 1
+  fi
+  if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+    MODE=proot
+  else
+    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
+    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
+    exit 1
+  fi
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé (${'$'}{MODE})."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Sauvegarde locale privée de l'environnement Hermes ; aucune donnée n'est envoyée hors du téléphone. */
+    fun sauvegarder(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"
+[ -d "${'$'}H" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
+B="${'$'}H/backups"; mkdir -p "${'$'}B"; chmod 700 "${'$'}B"
+TS="${'$'}(date +%Y%m%d-%H%M%S)"
+OUT="${'$'}B/jarvis-hermes-${'$'}TS.tar.gz"
+tar -czf "${'$'}OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'$'}HOME" .hermes
+chmod 600 "${'$'}OUT"
+p "✅ Sauvegarde privée créée : ${'$'}(basename "${'$'}OUT") (${'$'}(du -h "${'$'}OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="${'$'}HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "${'$'}H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "${'$'}H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "${'$'}H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "${'$'}H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "${'$'}H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "${'$'}H/backups" ] && find "${'$'}H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "${'$'}f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"; B="${'$'}H/backups"
+[ -d "${'$'}B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="${'$'}(ls -1t "${'$'}B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "${'$'}LATEST" ] && [ -f "${'$'}LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "${'$'}LATEST" >/dev/null
+p "⏳ Archive vérifiée : ${'$'}(basename "${'$'}LATEST")"
+tar -xzf "${'$'}LATEST" -C "${'$'}HOME"
+[ -f "${'$'}H/.env" ] && chmod 600 "${'$'}H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}{LOG}" 2>&1 || true
+    proot-distro install debian >> "${'
+  p "📦 Préparation de Debian (git, curl…)…"
+  # Debian doit utiliser exclusivement ses outils glibc : --termux-home peut transmettre des variables
+  # de compilation Termux (CC=aarch64-linux-android-clang) qui contaminent uv/pip dans proot.
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive \
+    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev libwebp-dev python3 python3-venv python3-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
+    || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  p "🔎 Vérification du compilateur Debian (GCC, glibc)…"
+  proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/bin:/bin bash -c 'printf "CC="; command -v cc; cc --version | head -n1; printf "ARCH="; uname -m; printf "LIBC="; ldd --version | head -n1' >> "${'$'}{LOG}" 2>&1
+  p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
+  INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
+  : > "${'$'}{INSTALL_LOG}"
+  p "⏳ Installation des dépendances Hermès démarrée. Variables de compilation Android neutralisées."
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1 \
+     UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python UV_CACHE_DIR=/var/cache/uv \
+     bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /usr/local/share/uv/python /var/cache/uv /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+  INSTALL_PID=$!
+  while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
+    sleep 20
+    if kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; then
+      DERNIERES="$(tail -n 3 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\\x1b\\[[0-9;]*m//g' | cut -c1-115 | tr '\\n' ' ')"
+      p "⏳ Hermès installe ses composants : ${'$'}{DERNIERES:-travail en cours, aucune nouvelle sortie pour le moment}."
+    fi
+  done
+  wait "${'$'}{INSTALL_PID}"
+  INSTALL_RC=$?
+  cat "${'$'}{INSTALL_LOG}" >> "${'$'}{LOG}"
+  if [ "${'$'}{INSTALL_RC}" -ne 0 ]; then
+    p "❌ L’installation d’Hermès a échoué (code ${'$'}{INSTALL_RC}). Dernières lignes :"
+    tail -n 10 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit "${'$'}{INSTALL_RC}"
+  fi
+  p "🔎 Vérification de l'environnement Python Hermes…"
+  if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
+    p "❌ Installation incomplète : /root/.hermes/hermes-agent/venv/bin/python est absent. La configuration et le démarrage sont interrompus."
+    tail -n 15 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit 1
+  fi
+  if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+    MODE=proot
+  else
+    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
+    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
+    exit 1
+  fi
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé (${'$'}{MODE})."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Sauvegarde locale privée de l'environnement Hermes ; aucune donnée n'est envoyée hors du téléphone. */
+    fun sauvegarder(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"
+[ -d "${'$'}H" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
+B="${'$'}H/backups"; mkdir -p "${'$'}B"; chmod 700 "${'$'}B"
+TS="${'$'}(date +%Y%m%d-%H%M%S)"
+OUT="${'$'}B/jarvis-hermes-${'$'}TS.tar.gz"
+tar -czf "${'$'}OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'$'}HOME" .hermes
+chmod 600 "${'$'}OUT"
+p "✅ Sauvegarde privée créée : ${'$'}(basename "${'$'}OUT") (${'$'}(du -h "${'$'}OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="${'$'}HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "${'$'}H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "${'$'}H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "${'$'}H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "${'$'}H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "${'$'}H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "${'$'}H/backups" ] && find "${'$'}H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "${'$'}f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"; B="${'$'}H/backups"
+[ -d "${'$'}B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="${'$'}(ls -1t "${'$'}B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "${'$'}LATEST" ] && [ -f "${'$'}LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "${'$'}LATEST" >/dev/null
+p "⏳ Archive vérifiée : ${'$'}(basename "${'$'}LATEST")"
+tar -xzf "${'$'}LATEST" -C "${'$'}HOME"
+[ -f "${'$'}H/.env" ] && chmod 600 "${'$'}H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}{HOME}/.hermes" ]; then
+  mkdir -p "${'# Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
+# Ne pas utiliser pkill -f ici : le motif figure dans la commande RUN_COMMAND elle-même et peut tuer ce script parent.
+if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative d'installation supprimée."; fi
+if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; then rm -f "${'$'}{PREFIX}/bin/hermes"; fi
+pkg update -y >/dev/null 2>&1 || apt-get update >/dev/null 2>&1
+${'$'}{APT} install curl gnupg util-linux >/dev/null 2>&1 || p "⚠️ Paquets de base : échec partiel."
+case "${'$'}(uname -m)" in aarch64) ;; *) p "⚠️ Architecture ${'$'}(uname -m) : seul aarch64 est pris en charge officiellement.";; esac
+# Forcer Debian sous proot : le compilateur Android/Bionic ne peut pas construire pillow-heif.
+# Dans Debian aarch64/glibc, uv peut récupérer la roue manylinux précompilée.
+MODE=""
+p "ℹ️ Installation dans Debian légère (proot) pour éviter les compilations incompatibles avec Android."
+if [ -z "${'$'}{MODE}" ]; then
+  ${'$'}{APT} install proot-distro >> "${'$'}{LOG}" 2>&1 || { p "❌ Impossible d'installer proot-distro (réseau ?)."; exit 1; }
+  if ! proot-distro login debian -- true >/dev/null 2>&1; then
+    p "🐧 Téléchargement de Debian (≈ 50 Mo)…"
+    proot-distro install debian >> "${'$'}{LOG}" 2>&1 || { p "❌ Installation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  fi
+  p "📦 Préparation de Debian (git, curl…)…"
+  # Debian doit utiliser exclusivement ses outils glibc : --termux-home peut transmettre des variables
+  # de compilation Termux (CC=aarch64-linux-android-clang) qui contaminent uv/pip dans proot.
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive \
+    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev libwebp-dev python3 python3-venv python3-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
+    || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  p "🔎 Vérification du compilateur Debian (GCC, glibc)…"
+  proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/bin:/bin bash -c 'printf "CC="; command -v cc; cc --version | head -n1; printf "ARCH="; uname -m; printf "LIBC="; ldd --version | head -n1' >> "${'$'}{LOG}" 2>&1
+  p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
+  INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
+  : > "${'$'}{INSTALL_LOG}"
+  p "⏳ Installation des dépendances Hermès démarrée. Variables de compilation Android neutralisées."
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1 \
+     UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python UV_CACHE_DIR=/var/cache/uv \
+     bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /usr/local/share/uv/python /var/cache/uv /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+  INSTALL_PID=$!
+  while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
+    sleep 20
+    if kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; then
+      DERNIERES="$(tail -n 3 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\\x1b\\[[0-9;]*m//g' | cut -c1-115 | tr '\\n' ' ')"
+      p "⏳ Hermès installe ses composants : ${'$'}{DERNIERES:-travail en cours, aucune nouvelle sortie pour le moment}."
+    fi
+  done
+  wait "${'$'}{INSTALL_PID}"
+  INSTALL_RC=$?
+  cat "${'$'}{INSTALL_LOG}" >> "${'$'}{LOG}"
+  if [ "${'$'}{INSTALL_RC}" -ne 0 ]; then
+    p "❌ L’installation d’Hermès a échoué (code ${'$'}{INSTALL_RC}). Dernières lignes :"
+    tail -n 10 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit "${'$'}{INSTALL_RC}"
+  fi
+  p "🔎 Vérification de l'environnement Python Hermes…"
+  if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
+    p "❌ Installation incomplète : /root/.hermes/hermes-agent/venv/bin/python est absent. La configuration et le démarrage sont interrompus."
+    tail -n 15 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit 1
+  fi
+  if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+    MODE=proot
+  else
+    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
+    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
+    exit 1
+  fi
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé (${'$'}{MODE})."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Sauvegarde locale privée de l'environnement Hermes ; aucune donnée n'est envoyée hors du téléphone. */
+    fun sauvegarder(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"
+[ -d "${'$'}H" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
+B="${'$'}H/backups"; mkdir -p "${'$'}B"; chmod 700 "${'$'}B"
+TS="${'$'}(date +%Y%m%d-%H%M%S)"
+OUT="${'$'}B/jarvis-hermes-${'$'}TS.tar.gz"
+tar -czf "${'$'}OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'$'}HOME" .hermes
+chmod 600 "${'$'}OUT"
+p "✅ Sauvegarde privée créée : ${'$'}(basename "${'$'}OUT") (${'$'}(du -h "${'$'}OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="${'$'}HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "${'$'}H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "${'$'}H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "${'$'}H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "${'$'}H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "${'$'}H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "${'$'}H/backups" ] && find "${'$'}H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "${'$'}f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"; B="${'$'}H/backups"
+[ -d "${'$'}B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="${'$'}(ls -1t "${'$'}B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "${'$'}LATEST" ] && [ -f "${'$'}LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "${'$'}LATEST" >/dev/null
+p "⏳ Archive vérifiée : ${'$'}(basename "${'$'}LATEST")"
+tar -xzf "${'$'}LATEST" -C "${'$'}HOME"
+[ -f "${'$'}H/.env" ] && chmod 600 "${'$'}H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}{HOME}/.hermes/backups"
+  TS="$(date +%Y%m%d-%H%M%S)"
+  tar -czf "${'# Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
+# Ne pas utiliser pkill -f ici : le motif figure dans la commande RUN_COMMAND elle-même et peut tuer ce script parent.
+if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative d'installation supprimée."; fi
+if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; then rm -f "${'$'}{PREFIX}/bin/hermes"; fi
+pkg update -y >/dev/null 2>&1 || apt-get update >/dev/null 2>&1
+${'$'}{APT} install curl gnupg util-linux >/dev/null 2>&1 || p "⚠️ Paquets de base : échec partiel."
+case "${'$'}(uname -m)" in aarch64) ;; *) p "⚠️ Architecture ${'$'}(uname -m) : seul aarch64 est pris en charge officiellement.";; esac
+# Forcer Debian sous proot : le compilateur Android/Bionic ne peut pas construire pillow-heif.
+# Dans Debian aarch64/glibc, uv peut récupérer la roue manylinux précompilée.
+MODE=""
+p "ℹ️ Installation dans Debian légère (proot) pour éviter les compilations incompatibles avec Android."
+if [ -z "${'$'}{MODE}" ]; then
+  ${'$'}{APT} install proot-distro >> "${'$'}{LOG}" 2>&1 || { p "❌ Impossible d'installer proot-distro (réseau ?)."; exit 1; }
+  if ! proot-distro login debian -- true >/dev/null 2>&1; then
+    p "🐧 Téléchargement de Debian (≈ 50 Mo)…"
+    proot-distro install debian >> "${'$'}{LOG}" 2>&1 || { p "❌ Installation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  fi
+  p "📦 Préparation de Debian (git, curl…)…"
+  # Debian doit utiliser exclusivement ses outils glibc : --termux-home peut transmettre des variables
+  # de compilation Termux (CC=aarch64-linux-android-clang) qui contaminent uv/pip dans proot.
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive \
+    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev libwebp-dev python3 python3-venv python3-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
+    || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  p "🔎 Vérification du compilateur Debian (GCC, glibc)…"
+  proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/bin:/bin bash -c 'printf "CC="; command -v cc; cc --version | head -n1; printf "ARCH="; uname -m; printf "LIBC="; ldd --version | head -n1' >> "${'$'}{LOG}" 2>&1
+  p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
+  INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
+  : > "${'$'}{INSTALL_LOG}"
+  p "⏳ Installation des dépendances Hermès démarrée. Variables de compilation Android neutralisées."
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1 \
+     UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python UV_CACHE_DIR=/var/cache/uv \
+     bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /usr/local/share/uv/python /var/cache/uv /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+  INSTALL_PID=$!
+  while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
+    sleep 20
+    if kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; then
+      DERNIERES="$(tail -n 3 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\\x1b\\[[0-9;]*m//g' | cut -c1-115 | tr '\\n' ' ')"
+      p "⏳ Hermès installe ses composants : ${'$'}{DERNIERES:-travail en cours, aucune nouvelle sortie pour le moment}."
+    fi
+  done
+  wait "${'$'}{INSTALL_PID}"
+  INSTALL_RC=$?
+  cat "${'$'}{INSTALL_LOG}" >> "${'$'}{LOG}"
+  if [ "${'$'}{INSTALL_RC}" -ne 0 ]; then
+    p "❌ L’installation d’Hermès a échoué (code ${'$'}{INSTALL_RC}). Dernières lignes :"
+    tail -n 10 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit "${'$'}{INSTALL_RC}"
+  fi
+  p "🔎 Vérification de l'environnement Python Hermes…"
+  if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
+    p "❌ Installation incomplète : /root/.hermes/hermes-agent/venv/bin/python est absent. La configuration et le démarrage sont interrompus."
+    tail -n 15 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit 1
+  fi
+  if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+    MODE=proot
+  else
+    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
+    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
+    exit 1
+  fi
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé (${'$'}{MODE})."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Sauvegarde locale privée de l'environnement Hermes ; aucune donnée n'est envoyée hors du téléphone. */
+    fun sauvegarder(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"
+[ -d "${'$'}H" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
+B="${'$'}H/backups"; mkdir -p "${'$'}B"; chmod 700 "${'$'}B"
+TS="${'$'}(date +%Y%m%d-%H%M%S)"
+OUT="${'$'}B/jarvis-hermes-${'$'}TS.tar.gz"
+tar -czf "${'$'}OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'$'}HOME" .hermes
+chmod 600 "${'$'}OUT"
+p "✅ Sauvegarde privée créée : ${'$'}(basename "${'$'}OUT") (${'$'}(du -h "${'$'}OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="${'$'}HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "${'$'}H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "${'$'}H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "${'$'}H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "${'$'}H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "${'$'}H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "${'$'}H/backups" ] && find "${'$'}H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "${'$'}f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"; B="${'$'}H/backups"
+[ -d "${'$'}B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="${'$'}(ls -1t "${'$'}B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "${'$'}LATEST" ] && [ -f "${'$'}LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "${'$'}LATEST" >/dev/null
+p "⏳ Archive vérifiée : ${'$'}(basename "${'$'}LATEST")"
+tar -xzf "${'$'}LATEST" -C "${'$'}HOME"
+[ -f "${'$'}H/.env" ] && chmod 600 "${'$'}H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}{HOME}/.hermes/backups/jarvis-hermes-auto-${'# Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
+# Ne pas utiliser pkill -f ici : le motif figure dans la commande RUN_COMMAND elle-même et peut tuer ce script parent.
+if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative d'installation supprimée."; fi
+if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; then rm -f "${'$'}{PREFIX}/bin/hermes"; fi
+pkg update -y >/dev/null 2>&1 || apt-get update >/dev/null 2>&1
+${'$'}{APT} install curl gnupg util-linux >/dev/null 2>&1 || p "⚠️ Paquets de base : échec partiel."
+case "${'$'}(uname -m)" in aarch64) ;; *) p "⚠️ Architecture ${'$'}(uname -m) : seul aarch64 est pris en charge officiellement.";; esac
+# Forcer Debian sous proot : le compilateur Android/Bionic ne peut pas construire pillow-heif.
+# Dans Debian aarch64/glibc, uv peut récupérer la roue manylinux précompilée.
+MODE=""
+p "ℹ️ Installation dans Debian légère (proot) pour éviter les compilations incompatibles avec Android."
+if [ -z "${'$'}{MODE}" ]; then
+  ${'$'}{APT} install proot-distro >> "${'$'}{LOG}" 2>&1 || { p "❌ Impossible d'installer proot-distro (réseau ?)."; exit 1; }
+  if ! proot-distro login debian -- true >/dev/null 2>&1; then
+    p "🐧 Téléchargement de Debian (≈ 50 Mo)…"
+    proot-distro install debian >> "${'$'}{LOG}" 2>&1 || { p "❌ Installation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  fi
+  p "📦 Préparation de Debian (git, curl…)…"
+  # Debian doit utiliser exclusivement ses outils glibc : --termux-home peut transmettre des variables
+  # de compilation Termux (CC=aarch64-linux-android-clang) qui contaminent uv/pip dans proot.
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive \
+    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev libwebp-dev python3 python3-venv python3-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
+    || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  p "🔎 Vérification du compilateur Debian (GCC, glibc)…"
+  proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/bin:/bin bash -c 'printf "CC="; command -v cc; cc --version | head -n1; printf "ARCH="; uname -m; printf "LIBC="; ldd --version | head -n1' >> "${'$'}{LOG}" 2>&1
+  p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
+  INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
+  : > "${'$'}{INSTALL_LOG}"
+  p "⏳ Installation des dépendances Hermès démarrée. Variables de compilation Android neutralisées."
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1 \
+     UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python UV_CACHE_DIR=/var/cache/uv \
+     bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /usr/local/share/uv/python /var/cache/uv /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+  INSTALL_PID=$!
+  while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
+    sleep 20
+    if kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; then
+      DERNIERES="$(tail -n 3 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\\x1b\\[[0-9;]*m//g' | cut -c1-115 | tr '\\n' ' ')"
+      p "⏳ Hermès installe ses composants : ${'$'}{DERNIERES:-travail en cours, aucune nouvelle sortie pour le moment}."
+    fi
+  done
+  wait "${'$'}{INSTALL_PID}"
+  INSTALL_RC=$?
+  cat "${'$'}{INSTALL_LOG}" >> "${'$'}{LOG}"
+  if [ "${'$'}{INSTALL_RC}" -ne 0 ]; then
+    p "❌ L’installation d’Hermès a échoué (code ${'$'}{INSTALL_RC}). Dernières lignes :"
+    tail -n 10 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit "${'$'}{INSTALL_RC}"
+  fi
+  p "🔎 Vérification de l'environnement Python Hermes…"
+  if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
+    p "❌ Installation incomplète : /root/.hermes/hermes-agent/venv/bin/python est absent. La configuration et le démarrage sont interrompus."
+    tail -n 15 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit 1
+  fi
+  if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+    MODE=proot
+  else
+    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
+    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
+    exit 1
+  fi
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé (${'$'}{MODE})."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Sauvegarde locale privée de l'environnement Hermes ; aucune donnée n'est envoyée hors du téléphone. */
+    fun sauvegarder(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"
+[ -d "${'$'}H" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
+B="${'$'}H/backups"; mkdir -p "${'$'}B"; chmod 700 "${'$'}B"
+TS="${'$'}(date +%Y%m%d-%H%M%S)"
+OUT="${'$'}B/jarvis-hermes-${'$'}TS.tar.gz"
+tar -czf "${'$'}OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'$'}HOME" .hermes
+chmod 600 "${'$'}OUT"
+p "✅ Sauvegarde privée créée : ${'$'}(basename "${'$'}OUT") (${'$'}(du -h "${'$'}OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="${'$'}HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "${'$'}H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "${'$'}H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "${'$'}H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "${'$'}H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "${'$'}H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "${'$'}H/backups" ] && find "${'$'}H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "${'$'}f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"; B="${'$'}H/backups"
+[ -d "${'$'}B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="${'$'}(ls -1t "${'$'}B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "${'$'}LATEST" ] && [ -f "${'$'}LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "${'$'}LATEST" >/dev/null
+p "⏳ Archive vérifiée : ${'$'}(basename "${'$'}LATEST")"
+tar -xzf "${'$'}LATEST" -C "${'$'}HOME"
+[ -f "${'$'}H/.env" ] && chmod 600 "${'$'}H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}{TS}.tar.gz" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'# Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
+# Ne pas utiliser pkill -f ici : le motif figure dans la commande RUN_COMMAND elle-même et peut tuer ce script parent.
+if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative d'installation supprimée."; fi
+if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; then rm -f "${'$'}{PREFIX}/bin/hermes"; fi
+pkg update -y >/dev/null 2>&1 || apt-get update >/dev/null 2>&1
+${'$'}{APT} install curl gnupg util-linux >/dev/null 2>&1 || p "⚠️ Paquets de base : échec partiel."
+case "${'$'}(uname -m)" in aarch64) ;; *) p "⚠️ Architecture ${'$'}(uname -m) : seul aarch64 est pris en charge officiellement.";; esac
+# Forcer Debian sous proot : le compilateur Android/Bionic ne peut pas construire pillow-heif.
+# Dans Debian aarch64/glibc, uv peut récupérer la roue manylinux précompilée.
+MODE=""
+p "ℹ️ Installation dans Debian légère (proot) pour éviter les compilations incompatibles avec Android."
+if [ -z "${'$'}{MODE}" ]; then
+  ${'$'}{APT} install proot-distro >> "${'$'}{LOG}" 2>&1 || { p "❌ Impossible d'installer proot-distro (réseau ?)."; exit 1; }
+  if ! proot-distro login debian -- true >/dev/null 2>&1; then
+    p "🐧 Téléchargement de Debian (≈ 50 Mo)…"
+    proot-distro install debian >> "${'$'}{LOG}" 2>&1 || { p "❌ Installation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  fi
+  p "📦 Préparation de Debian (git, curl…)…"
+  # Debian doit utiliser exclusivement ses outils glibc : --termux-home peut transmettre des variables
+  # de compilation Termux (CC=aarch64-linux-android-clang) qui contaminent uv/pip dans proot.
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive \
+    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev libwebp-dev python3 python3-venv python3-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
+    || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  p "🔎 Vérification du compilateur Debian (GCC, glibc)…"
+  proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/bin:/bin bash -c 'printf "CC="; command -v cc; cc --version | head -n1; printf "ARCH="; uname -m; printf "LIBC="; ldd --version | head -n1' >> "${'$'}{LOG}" 2>&1
+  p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
+  INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
+  : > "${'$'}{INSTALL_LOG}"
+  p "⏳ Installation des dépendances Hermès démarrée. Variables de compilation Android neutralisées."
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1 \
+     UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python UV_CACHE_DIR=/var/cache/uv \
+     bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /usr/local/share/uv/python /var/cache/uv /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+  INSTALL_PID=$!
+  while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
+    sleep 20
+    if kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; then
+      DERNIERES="$(tail -n 3 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\\x1b\\[[0-9;]*m//g' | cut -c1-115 | tr '\\n' ' ')"
+      p "⏳ Hermès installe ses composants : ${'$'}{DERNIERES:-travail en cours, aucune nouvelle sortie pour le moment}."
+    fi
+  done
+  wait "${'$'}{INSTALL_PID}"
+  INSTALL_RC=$?
+  cat "${'$'}{INSTALL_LOG}" >> "${'$'}{LOG}"
+  if [ "${'$'}{INSTALL_RC}" -ne 0 ]; then
+    p "❌ L’installation d’Hermès a échoué (code ${'$'}{INSTALL_RC}). Dernières lignes :"
+    tail -n 10 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit "${'$'}{INSTALL_RC}"
+  fi
+  p "🔎 Vérification de l'environnement Python Hermes…"
+  if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
+    p "❌ Installation incomplète : /root/.hermes/hermes-agent/venv/bin/python est absent. La configuration et le démarrage sont interrompus."
+    tail -n 15 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit 1
+  fi
+  if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+    MODE=proot
+  else
+    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
+    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
+    exit 1
+  fi
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé (${'$'}{MODE})."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Sauvegarde locale privée de l'environnement Hermes ; aucune donnée n'est envoyée hors du téléphone. */
+    fun sauvegarder(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"
+[ -d "${'$'}H" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
+B="${'$'}H/backups"; mkdir -p "${'$'}B"; chmod 700 "${'$'}B"
+TS="${'$'}(date +%Y%m%d-%H%M%S)"
+OUT="${'$'}B/jarvis-hermes-${'$'}TS.tar.gz"
+tar -czf "${'$'}OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'$'}HOME" .hermes
+chmod 600 "${'$'}OUT"
+p "✅ Sauvegarde privée créée : ${'$'}(basename "${'$'}OUT") (${'$'}(du -h "${'$'}OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="${'$'}HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "${'$'}H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "${'$'}H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "${'$'}H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "${'$'}H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "${'$'}H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "${'$'}H/backups" ] && find "${'$'}H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "${'$'}f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"; B="${'$'}H/backups"
+[ -d "${'$'}B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="${'$'}(ls -1t "${'$'}B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "${'$'}LATEST" ] && [ -f "${'$'}LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "${'$'}LATEST" >/dev/null
+p "⏳ Archive vérifiée : ${'$'}(basename "${'$'}LATEST")"
+tar -xzf "${'$'}LATEST" -C "${'$'}HOME"
+[ -f "${'$'}H/.env" ] && chmod 600 "${'$'}H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}{HOME}" .hermes 2>> "${'# Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
+# Ne pas utiliser pkill -f ici : le motif figure dans la commande RUN_COMMAND elle-même et peut tuer ce script parent.
+if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative d'installation supprimée."; fi
+if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; then rm -f "${'$'}{PREFIX}/bin/hermes"; fi
+pkg update -y >/dev/null 2>&1 || apt-get update >/dev/null 2>&1
+${'$'}{APT} install curl gnupg util-linux >/dev/null 2>&1 || p "⚠️ Paquets de base : échec partiel."
+case "${'$'}(uname -m)" in aarch64) ;; *) p "⚠️ Architecture ${'$'}(uname -m) : seul aarch64 est pris en charge officiellement.";; esac
+# Forcer Debian sous proot : le compilateur Android/Bionic ne peut pas construire pillow-heif.
+# Dans Debian aarch64/glibc, uv peut récupérer la roue manylinux précompilée.
+MODE=""
+p "ℹ️ Installation dans Debian légère (proot) pour éviter les compilations incompatibles avec Android."
+if [ -z "${'$'}{MODE}" ]; then
+  ${'$'}{APT} install proot-distro >> "${'$'}{LOG}" 2>&1 || { p "❌ Impossible d'installer proot-distro (réseau ?)."; exit 1; }
+  if ! proot-distro login debian -- true >/dev/null 2>&1; then
+    p "🐧 Téléchargement de Debian (≈ 50 Mo)…"
+    proot-distro install debian >> "${'$'}{LOG}" 2>&1 || { p "❌ Installation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  fi
+  p "📦 Préparation de Debian (git, curl…)…"
+  # Debian doit utiliser exclusivement ses outils glibc : --termux-home peut transmettre des variables
+  # de compilation Termux (CC=aarch64-linux-android-clang) qui contaminent uv/pip dans proot.
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive \
+    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev libwebp-dev python3 python3-venv python3-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
+    || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  p "🔎 Vérification du compilateur Debian (GCC, glibc)…"
+  proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/bin:/bin bash -c 'printf "CC="; command -v cc; cc --version | head -n1; printf "ARCH="; uname -m; printf "LIBC="; ldd --version | head -n1' >> "${'$'}{LOG}" 2>&1
+  p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
+  INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
+  : > "${'$'}{INSTALL_LOG}"
+  p "⏳ Installation des dépendances Hermès démarrée. Variables de compilation Android neutralisées."
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1 \
+     UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python UV_CACHE_DIR=/var/cache/uv \
+     bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /usr/local/share/uv/python /var/cache/uv /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+  INSTALL_PID=$!
+  while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
+    sleep 20
+    if kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; then
+      DERNIERES="$(tail -n 3 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\\x1b\\[[0-9;]*m//g' | cut -c1-115 | tr '\\n' ' ')"
+      p "⏳ Hermès installe ses composants : ${'$'}{DERNIERES:-travail en cours, aucune nouvelle sortie pour le moment}."
+    fi
+  done
+  wait "${'$'}{INSTALL_PID}"
+  INSTALL_RC=$?
+  cat "${'$'}{INSTALL_LOG}" >> "${'$'}{LOG}"
+  if [ "${'$'}{INSTALL_RC}" -ne 0 ]; then
+    p "❌ L’installation d’Hermès a échoué (code ${'$'}{INSTALL_RC}). Dernières lignes :"
+    tail -n 10 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit "${'$'}{INSTALL_RC}"
+  fi
+  p "🔎 Vérification de l'environnement Python Hermes…"
+  if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
+    p "❌ Installation incomplète : /root/.hermes/hermes-agent/venv/bin/python est absent. La configuration et le démarrage sont interrompus."
+    tail -n 15 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit 1
+  fi
+  if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+    MODE=proot
+  else
+    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
+    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
+    exit 1
+  fi
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé (${'$'}{MODE})."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Sauvegarde locale privée de l'environnement Hermes ; aucune donnée n'est envoyée hors du téléphone. */
+    fun sauvegarder(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"
+[ -d "${'$'}H" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
+B="${'$'}H/backups"; mkdir -p "${'$'}B"; chmod 700 "${'$'}B"
+TS="${'$'}(date +%Y%m%d-%H%M%S)"
+OUT="${'$'}B/jarvis-hermes-${'$'}TS.tar.gz"
+tar -czf "${'$'}OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'$'}HOME" .hermes
+chmod 600 "${'$'}OUT"
+p "✅ Sauvegarde privée créée : ${'$'}(basename "${'$'}OUT") (${'$'}(du -h "${'$'}OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="${'$'}HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "${'$'}H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "${'$'}H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "${'$'}H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "${'$'}H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "${'$'}H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "${'$'}H/backups" ] && find "${'$'}H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "${'$'}f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"; B="${'$'}H/backups"
+[ -d "${'$'}B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="${'$'}(ls -1t "${'$'}B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "${'$'}LATEST" ] && [ -f "${'$'}LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "${'$'}LATEST" >/dev/null
+p "⏳ Archive vérifiée : ${'$'}(basename "${'$'}LATEST")"
+tar -xzf "${'$'}LATEST" -C "${'$'}HOME"
+[ -f "${'$'}H/.env" ] && chmod 600 "${'$'}H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}{HOME}/.hermes/logs/jarvis-install.log" || p "⚠️ Sauvegarde automatique impossible ; aucune donnée existante n'a été supprimée."
+  chmod 600 "${'# Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
+# Ne pas utiliser pkill -f ici : le motif figure dans la commande RUN_COMMAND elle-même et peut tuer ce script parent.
+if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative d'installation supprimée."; fi
+if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; then rm -f "${'$'}{PREFIX}/bin/hermes"; fi
+pkg update -y >/dev/null 2>&1 || apt-get update >/dev/null 2>&1
+${'$'}{APT} install curl gnupg util-linux >/dev/null 2>&1 || p "⚠️ Paquets de base : échec partiel."
+case "${'$'}(uname -m)" in aarch64) ;; *) p "⚠️ Architecture ${'$'}(uname -m) : seul aarch64 est pris en charge officiellement.";; esac
+# Forcer Debian sous proot : le compilateur Android/Bionic ne peut pas construire pillow-heif.
+# Dans Debian aarch64/glibc, uv peut récupérer la roue manylinux précompilée.
+MODE=""
+p "ℹ️ Installation dans Debian légère (proot) pour éviter les compilations incompatibles avec Android."
+if [ -z "${'$'}{MODE}" ]; then
+  ${'$'}{APT} install proot-distro >> "${'$'}{LOG}" 2>&1 || { p "❌ Impossible d'installer proot-distro (réseau ?)."; exit 1; }
+  if ! proot-distro login debian -- true >/dev/null 2>&1; then
+    p "🐧 Téléchargement de Debian (≈ 50 Mo)…"
+    proot-distro install debian >> "${'$'}{LOG}" 2>&1 || { p "❌ Installation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  fi
+  p "📦 Préparation de Debian (git, curl…)…"
+  # Debian doit utiliser exclusivement ses outils glibc : --termux-home peut transmettre des variables
+  # de compilation Termux (CC=aarch64-linux-android-clang) qui contaminent uv/pip dans proot.
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive \
+    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev libwebp-dev python3 python3-venv python3-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
+    || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  p "🔎 Vérification du compilateur Debian (GCC, glibc)…"
+  proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/bin:/bin bash -c 'printf "CC="; command -v cc; cc --version | head -n1; printf "ARCH="; uname -m; printf "LIBC="; ldd --version | head -n1' >> "${'$'}{LOG}" 2>&1
+  p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
+  INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
+  : > "${'$'}{INSTALL_LOG}"
+  p "⏳ Installation des dépendances Hermès démarrée. Variables de compilation Android neutralisées."
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1 \
+     UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python UV_CACHE_DIR=/var/cache/uv \
+     bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /usr/local/share/uv/python /var/cache/uv /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+  INSTALL_PID=$!
+  while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
+    sleep 20
+    if kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; then
+      DERNIERES="$(tail -n 3 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\\x1b\\[[0-9;]*m//g' | cut -c1-115 | tr '\\n' ' ')"
+      p "⏳ Hermès installe ses composants : ${'$'}{DERNIERES:-travail en cours, aucune nouvelle sortie pour le moment}."
+    fi
+  done
+  wait "${'$'}{INSTALL_PID}"
+  INSTALL_RC=$?
+  cat "${'$'}{INSTALL_LOG}" >> "${'$'}{LOG}"
+  if [ "${'$'}{INSTALL_RC}" -ne 0 ]; then
+    p "❌ L’installation d’Hermès a échoué (code ${'$'}{INSTALL_RC}). Dernières lignes :"
+    tail -n 10 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit "${'$'}{INSTALL_RC}"
+  fi
+  p "🔎 Vérification de l'environnement Python Hermes…"
+  if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
+    p "❌ Installation incomplète : /root/.hermes/hermes-agent/venv/bin/python est absent. La configuration et le démarrage sont interrompus."
+    tail -n 15 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit 1
+  fi
+  if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+    MODE=proot
+  else
+    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
+    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
+    exit 1
+  fi
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé (${'$'}{MODE})."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Sauvegarde locale privée de l'environnement Hermes ; aucune donnée n'est envoyée hors du téléphone. */
+    fun sauvegarder(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"
+[ -d "${'$'}H" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
+B="${'$'}H/backups"; mkdir -p "${'$'}B"; chmod 700 "${'$'}B"
+TS="${'$'}(date +%Y%m%d-%H%M%S)"
+OUT="${'$'}B/jarvis-hermes-${'$'}TS.tar.gz"
+tar -czf "${'$'}OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'$'}HOME" .hermes
+chmod 600 "${'$'}OUT"
+p "✅ Sauvegarde privée créée : ${'$'}(basename "${'$'}OUT") (${'$'}(du -h "${'$'}OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="${'$'}HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "${'$'}H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "${'$'}H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "${'$'}H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "${'$'}H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "${'$'}H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "${'$'}H/backups" ] && find "${'$'}H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "${'$'}f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"; B="${'$'}H/backups"
+[ -d "${'$'}B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="${'$'}(ls -1t "${'$'}B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "${'$'}LATEST" ] && [ -f "${'$'}LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "${'$'}LATEST" >/dev/null
+p "⏳ Archive vérifiée : ${'$'}(basename "${'$'}LATEST")"
+tar -xzf "${'$'}LATEST" -C "${'$'}HOME"
+[ -f "${'$'}H/.env" ] && chmod 600 "${'$'}H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}{HOME}/.hermes/backups/jarvis-hermes-auto-${'# Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
+# Ne pas utiliser pkill -f ici : le motif figure dans la commande RUN_COMMAND elle-même et peut tuer ce script parent.
+if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative d'installation supprimée."; fi
+if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; then rm -f "${'$'}{PREFIX}/bin/hermes"; fi
+pkg update -y >/dev/null 2>&1 || apt-get update >/dev/null 2>&1
+${'$'}{APT} install curl gnupg util-linux >/dev/null 2>&1 || p "⚠️ Paquets de base : échec partiel."
+case "${'$'}(uname -m)" in aarch64) ;; *) p "⚠️ Architecture ${'$'}(uname -m) : seul aarch64 est pris en charge officiellement.";; esac
+# Forcer Debian sous proot : le compilateur Android/Bionic ne peut pas construire pillow-heif.
+# Dans Debian aarch64/glibc, uv peut récupérer la roue manylinux précompilée.
+MODE=""
+p "ℹ️ Installation dans Debian légère (proot) pour éviter les compilations incompatibles avec Android."
+if [ -z "${'$'}{MODE}" ]; then
+  ${'$'}{APT} install proot-distro >> "${'$'}{LOG}" 2>&1 || { p "❌ Impossible d'installer proot-distro (réseau ?)."; exit 1; }
+  if ! proot-distro login debian -- true >/dev/null 2>&1; then
+    p "🐧 Téléchargement de Debian (≈ 50 Mo)…"
+    proot-distro install debian >> "${'$'}{LOG}" 2>&1 || { p "❌ Installation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  fi
+  p "📦 Préparation de Debian (git, curl…)…"
+  # Debian doit utiliser exclusivement ses outils glibc : --termux-home peut transmettre des variables
+  # de compilation Termux (CC=aarch64-linux-android-clang) qui contaminent uv/pip dans proot.
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive \
+    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev libwebp-dev python3 python3-venv python3-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
+    || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  p "🔎 Vérification du compilateur Debian (GCC, glibc)…"
+  proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/bin:/bin bash -c 'printf "CC="; command -v cc; cc --version | head -n1; printf "ARCH="; uname -m; printf "LIBC="; ldd --version | head -n1' >> "${'$'}{LOG}" 2>&1
+  p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
+  INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
+  : > "${'$'}{INSTALL_LOG}"
+  p "⏳ Installation des dépendances Hermès démarrée. Variables de compilation Android neutralisées."
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1 \
+     UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python UV_CACHE_DIR=/var/cache/uv \
+     bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /usr/local/share/uv/python /var/cache/uv /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+  INSTALL_PID=$!
+  while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
+    sleep 20
+    if kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; then
+      DERNIERES="$(tail -n 3 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\\x1b\\[[0-9;]*m//g' | cut -c1-115 | tr '\\n' ' ')"
+      p "⏳ Hermès installe ses composants : ${'$'}{DERNIERES:-travail en cours, aucune nouvelle sortie pour le moment}."
+    fi
+  done
+  wait "${'$'}{INSTALL_PID}"
+  INSTALL_RC=$?
+  cat "${'$'}{INSTALL_LOG}" >> "${'$'}{LOG}"
+  if [ "${'$'}{INSTALL_RC}" -ne 0 ]; then
+    p "❌ L’installation d’Hermès a échoué (code ${'$'}{INSTALL_RC}). Dernières lignes :"
+    tail -n 10 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit "${'$'}{INSTALL_RC}"
+  fi
+  p "🔎 Vérification de l'environnement Python Hermes…"
+  if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
+    p "❌ Installation incomplète : /root/.hermes/hermes-agent/venv/bin/python est absent. La configuration et le démarrage sont interrompus."
+    tail -n 15 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit 1
+  fi
+  if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+    MODE=proot
+  else
+    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
+    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
+    exit 1
+  fi
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé (${'$'}{MODE})."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Sauvegarde locale privée de l'environnement Hermes ; aucune donnée n'est envoyée hors du téléphone. */
+    fun sauvegarder(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"
+[ -d "${'$'}H" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
+B="${'$'}H/backups"; mkdir -p "${'$'}B"; chmod 700 "${'$'}B"
+TS="${'$'}(date +%Y%m%d-%H%M%S)"
+OUT="${'$'}B/jarvis-hermes-${'$'}TS.tar.gz"
+tar -czf "${'$'}OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'$'}HOME" .hermes
+chmod 600 "${'$'}OUT"
+p "✅ Sauvegarde privée créée : ${'$'}(basename "${'$'}OUT") (${'$'}(du -h "${'$'}OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="${'$'}HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "${'$'}H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "${'$'}H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "${'$'}H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "${'$'}H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "${'$'}H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "${'$'}H/backups" ] && find "${'$'}H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "${'$'}f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"; B="${'$'}H/backups"
+[ -d "${'$'}B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="${'$'}(ls -1t "${'$'}B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "${'$'}LATEST" ] && [ -f "${'$'}LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "${'$'}LATEST" >/dev/null
+p "⏳ Archive vérifiée : ${'$'}(basename "${'$'}LATEST")"
+tar -xzf "${'$'}LATEST" -C "${'$'}HOME"
+[ -f "${'$'}H/.env" ] && chmod 600 "${'$'}H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}{TS}.tar.gz" 2>/dev/null || true
+fi
+# Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
+# Ne pas utiliser pkill -f ici : le motif figure dans la commande RUN_COMMAND elle-même et peut tuer ce script parent.
+if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative d'installation supprimée."; fi
+if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; then rm -f "${'$'}{PREFIX}/bin/hermes"; fi
+pkg update -y >/dev/null 2>&1 || apt-get update >/dev/null 2>&1
+${'$'}{APT} install curl gnupg util-linux >/dev/null 2>&1 || p "⚠️ Paquets de base : échec partiel."
+case "${'$'}(uname -m)" in aarch64) ;; *) p "⚠️ Architecture ${'$'}(uname -m) : seul aarch64 est pris en charge officiellement.";; esac
+# Forcer Debian sous proot : le compilateur Android/Bionic ne peut pas construire pillow-heif.
+# Dans Debian aarch64/glibc, uv peut récupérer la roue manylinux précompilée.
+MODE=""
+p "ℹ️ Installation dans Debian légère (proot) pour éviter les compilations incompatibles avec Android."
+if [ -z "${'$'}{MODE}" ]; then
+  ${'$'}{APT} install proot-distro >> "${'$'}{LOG}" 2>&1 || { p "❌ Impossible d'installer proot-distro (réseau ?)."; exit 1; }
+  if ! proot-distro login debian -- true >/dev/null 2>&1; then
+    p "🐧 Téléchargement de Debian (≈ 50 Mo)…"
+    proot-distro install debian >> "${'$'}{LOG}" 2>&1 || { p "❌ Installation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  fi
+  p "📦 Préparation de Debian (git, curl…)…"
+  # Debian doit utiliser exclusivement ses outils glibc : --termux-home peut transmettre des variables
+  # de compilation Termux (CC=aarch64-linux-android-clang) qui contaminent uv/pip dans proot.
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive \
+    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev libwebp-dev python3 python3-venv python3-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
+    || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  p "🔎 Vérification du compilateur Debian (GCC, glibc)…"
+  proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/bin:/bin bash -c 'printf "CC="; command -v cc; cc --version | head -n1; printf "ARCH="; uname -m; printf "LIBC="; ldd --version | head -n1' >> "${'$'}{LOG}" 2>&1
+  p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
+  INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
+  : > "${'$'}{INSTALL_LOG}"
+  p "⏳ Installation des dépendances Hermès démarrée. Variables de compilation Android neutralisées."
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1 \
+     UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python UV_CACHE_DIR=/var/cache/uv \
+     bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /usr/local/share/uv/python /var/cache/uv /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+  INSTALL_PID=$!
+  while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
+    sleep 20
+    if kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; then
+      DERNIERES="$(tail -n 3 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\\x1b\\[[0-9;]*m//g' | cut -c1-115 | tr '\\n' ' ')"
+      p "⏳ Hermès installe ses composants : ${'$'}{DERNIERES:-travail en cours, aucune nouvelle sortie pour le moment}."
+    fi
+  done
+  wait "${'$'}{INSTALL_PID}"
+  INSTALL_RC=$?
+  cat "${'$'}{INSTALL_LOG}" >> "${'$'}{LOG}"
+  if [ "${'$'}{INSTALL_RC}" -ne 0 ]; then
+    p "❌ L’installation d’Hermès a échoué (code ${'$'}{INSTALL_RC}). Dernières lignes :"
+    tail -n 10 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit "${'$'}{INSTALL_RC}"
+  fi
+  p "🔎 Vérification de l'environnement Python Hermes…"
+  if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
+    p "❌ Installation incomplète : /root/.hermes/hermes-agent/venv/bin/python est absent. La configuration et le démarrage sont interrompus."
+    tail -n 15 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit 1
+  fi
+  if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+    MODE=proot
+  else
+    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
+    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
+    exit 1
+  fi
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé (${'$'}{MODE})."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Sauvegarde locale privée de l'environnement Hermes ; aucune donnée n'est envoyée hors du téléphone. */
+    fun sauvegarder(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"
+[ -d "${'$'}H" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
+B="${'$'}H/backups"; mkdir -p "${'$'}B"; chmod 700 "${'$'}B"
+TS="${'$'}(date +%Y%m%d-%H%M%S)"
+OUT="${'$'}B/jarvis-hermes-${'$'}TS.tar.gz"
+tar -czf "${'$'}OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'$'}HOME" .hermes
+chmod 600 "${'$'}OUT"
+p "✅ Sauvegarde privée créée : ${'$'}(basename "${'$'}OUT") (${'$'}(du -h "${'$'}OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="${'$'}HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "${'$'}H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "${'$'}H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "${'$'}H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "${'$'}H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "${'$'}H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "${'$'}H/backups" ] && find "${'$'}H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "${'$'}f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"; B="${'$'}H/backups"
+[ -d "${'$'}B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="${'$'}(ls -1t "${'$'}B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "${'$'}LATEST" ] && [ -f "${'$'}LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "${'$'}LATEST" >/dev/null
+p "⏳ Archive vérifiée : ${'$'}(basename "${'$'}LATEST")"
+tar -xzf "${'$'}LATEST" -C "${'$'}HOME"
+[ -f "${'$'}H/.env" ] && chmod 600 "${'$'}H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}{LOG}" 2>&1 || { p "❌ Réinstallation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  fi
+  p "📦 Préparation de Debian (git, curl…)…"
+  # Debian doit utiliser exclusivement ses outils glibc : --termux-home peut transmettre des variables
+  # de compilation Termux (CC=aarch64-linux-android-clang) qui contaminent uv/pip dans proot.
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive \
+    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev libwebp-dev python3 python3-venv python3-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
+    || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  p "🔎 Vérification du compilateur Debian (GCC, glibc)…"
+  proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/bin:/bin bash -c 'printf "CC="; command -v cc; cc --version | head -n1; printf "ARCH="; uname -m; printf "LIBC="; ldd --version | head -n1' >> "${'$'}{LOG}" 2>&1
+  p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
+  INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
+  : > "${'$'}{INSTALL_LOG}"
+  p "⏳ Installation des dépendances Hermès démarrée. Variables de compilation Android neutralisées."
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1 \
+     UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python UV_CACHE_DIR=/var/cache/uv \
+     bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /usr/local/share/uv/python /var/cache/uv /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+  INSTALL_PID=$!
+  while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
+    sleep 20
+    if kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; then
+      DERNIERES="$(tail -n 3 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\\x1b\\[[0-9;]*m//g' | cut -c1-115 | tr '\\n' ' ')"
+      p "⏳ Hermès installe ses composants : ${'$'}{DERNIERES:-travail en cours, aucune nouvelle sortie pour le moment}."
+    fi
+  done
+  wait "${'$'}{INSTALL_PID}"
+  INSTALL_RC=$?
+  cat "${'$'}{INSTALL_LOG}" >> "${'$'}{LOG}"
+  if [ "${'$'}{INSTALL_RC}" -ne 0 ]; then
+    p "❌ L’installation d’Hermès a échoué (code ${'$'}{INSTALL_RC}). Dernières lignes :"
+    tail -n 10 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit "${'$'}{INSTALL_RC}"
+  fi
+  p "🔎 Vérification de l'environnement Python Hermes…"
+  if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
+    p "❌ Installation incomplète : /root/.hermes/hermes-agent/venv/bin/python est absent. La configuration et le démarrage sont interrompus."
+    tail -n 15 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit 1
+  fi
+  if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+    MODE=proot
+  else
+    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
+    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
+    exit 1
+  fi
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé (${'$'}{MODE})."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Sauvegarde locale privée de l'environnement Hermes ; aucune donnée n'est envoyée hors du téléphone. */
+    fun sauvegarder(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"
+[ -d "${'$'}H" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
+B="${'$'}H/backups"; mkdir -p "${'$'}B"; chmod 700 "${'$'}B"
+TS="${'$'}(date +%Y%m%d-%H%M%S)"
+OUT="${'$'}B/jarvis-hermes-${'$'}TS.tar.gz"
+tar -czf "${'$'}OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'$'}HOME" .hermes
+chmod 600 "${'$'}OUT"
+p "✅ Sauvegarde privée créée : ${'$'}(basename "${'$'}OUT") (${'$'}(du -h "${'$'}OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="${'$'}HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "${'$'}H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "${'$'}H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "${'$'}H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "${'$'}H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "${'$'}H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "${'$'}H/backups" ] && find "${'$'}H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "${'$'}f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"; B="${'$'}H/backups"
+[ -d "${'$'}B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="${'$'}(ls -1t "${'$'}B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "${'$'}LATEST" ] && [ -f "${'$'}LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "${'$'}LATEST" >/dev/null
+p "⏳ Archive vérifiée : ${'$'}(basename "${'$'}LATEST")"
+tar -xzf "${'$'}LATEST" -C "${'$'}HOME"
+[ -f "${'$'}H/.env" ] && chmod 600 "${'$'}H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}{HOME}/.hermes" ]; then
+  mkdir -p "${'# Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
+# Ne pas utiliser pkill -f ici : le motif figure dans la commande RUN_COMMAND elle-même et peut tuer ce script parent.
+if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative d'installation supprimée."; fi
+if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; then rm -f "${'$'}{PREFIX}/bin/hermes"; fi
+pkg update -y >/dev/null 2>&1 || apt-get update >/dev/null 2>&1
+${'$'}{APT} install curl gnupg util-linux >/dev/null 2>&1 || p "⚠️ Paquets de base : échec partiel."
+case "${'$'}(uname -m)" in aarch64) ;; *) p "⚠️ Architecture ${'$'}(uname -m) : seul aarch64 est pris en charge officiellement.";; esac
+# Forcer Debian sous proot : le compilateur Android/Bionic ne peut pas construire pillow-heif.
+# Dans Debian aarch64/glibc, uv peut récupérer la roue manylinux précompilée.
+MODE=""
+p "ℹ️ Installation dans Debian légère (proot) pour éviter les compilations incompatibles avec Android."
+if [ -z "${'$'}{MODE}" ]; then
+  ${'$'}{APT} install proot-distro >> "${'$'}{LOG}" 2>&1 || { p "❌ Impossible d'installer proot-distro (réseau ?)."; exit 1; }
+  if ! proot-distro login debian -- true >/dev/null 2>&1; then
+    p "🐧 Téléchargement de Debian (≈ 50 Mo)…"
+    proot-distro install debian >> "${'$'}{LOG}" 2>&1 || { p "❌ Installation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  fi
+  p "📦 Préparation de Debian (git, curl…)…"
+  # Debian doit utiliser exclusivement ses outils glibc : --termux-home peut transmettre des variables
+  # de compilation Termux (CC=aarch64-linux-android-clang) qui contaminent uv/pip dans proot.
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive \
+    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev libwebp-dev python3 python3-venv python3-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
+    || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  p "🔎 Vérification du compilateur Debian (GCC, glibc)…"
+  proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/bin:/bin bash -c 'printf "CC="; command -v cc; cc --version | head -n1; printf "ARCH="; uname -m; printf "LIBC="; ldd --version | head -n1' >> "${'$'}{LOG}" 2>&1
+  p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
+  INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
+  : > "${'$'}{INSTALL_LOG}"
+  p "⏳ Installation des dépendances Hermès démarrée. Variables de compilation Android neutralisées."
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1 \
+     UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python UV_CACHE_DIR=/var/cache/uv \
+     bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /usr/local/share/uv/python /var/cache/uv /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+  INSTALL_PID=$!
+  while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
+    sleep 20
+    if kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; then
+      DERNIERES="$(tail -n 3 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\\x1b\\[[0-9;]*m//g' | cut -c1-115 | tr '\\n' ' ')"
+      p "⏳ Hermès installe ses composants : ${'$'}{DERNIERES:-travail en cours, aucune nouvelle sortie pour le moment}."
+    fi
+  done
+  wait "${'$'}{INSTALL_PID}"
+  INSTALL_RC=$?
+  cat "${'$'}{INSTALL_LOG}" >> "${'$'}{LOG}"
+  if [ "${'$'}{INSTALL_RC}" -ne 0 ]; then
+    p "❌ L’installation d’Hermès a échoué (code ${'$'}{INSTALL_RC}). Dernières lignes :"
+    tail -n 10 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit "${'$'}{INSTALL_RC}"
+  fi
+  p "🔎 Vérification de l'environnement Python Hermes…"
+  if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
+    p "❌ Installation incomplète : /root/.hermes/hermes-agent/venv/bin/python est absent. La configuration et le démarrage sont interrompus."
+    tail -n 15 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit 1
+  fi
+  if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+    MODE=proot
+  else
+    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
+    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
+    exit 1
+  fi
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé (${'$'}{MODE})."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Sauvegarde locale privée de l'environnement Hermes ; aucune donnée n'est envoyée hors du téléphone. */
+    fun sauvegarder(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"
+[ -d "${'$'}H" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
+B="${'$'}H/backups"; mkdir -p "${'$'}B"; chmod 700 "${'$'}B"
+TS="${'$'}(date +%Y%m%d-%H%M%S)"
+OUT="${'$'}B/jarvis-hermes-${'$'}TS.tar.gz"
+tar -czf "${'$'}OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'$'}HOME" .hermes
+chmod 600 "${'$'}OUT"
+p "✅ Sauvegarde privée créée : ${'$'}(basename "${'$'}OUT") (${'$'}(du -h "${'$'}OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="${'$'}HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "${'$'}H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "${'$'}H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "${'$'}H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "${'$'}H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "${'$'}H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "${'$'}H/backups" ] && find "${'$'}H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "${'$'}f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"; B="${'$'}H/backups"
+[ -d "${'$'}B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="${'$'}(ls -1t "${'$'}B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "${'$'}LATEST" ] && [ -f "${'$'}LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "${'$'}LATEST" >/dev/null
+p "⏳ Archive vérifiée : ${'$'}(basename "${'$'}LATEST")"
+tar -xzf "${'$'}LATEST" -C "${'$'}HOME"
+[ -f "${'$'}H/.env" ] && chmod 600 "${'$'}H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}{HOME}/.hermes/backups"
+  TS="$(date +%Y%m%d-%H%M%S)"
+  tar -czf "${'# Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
+# Ne pas utiliser pkill -f ici : le motif figure dans la commande RUN_COMMAND elle-même et peut tuer ce script parent.
+if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative d'installation supprimée."; fi
+if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; then rm -f "${'$'}{PREFIX}/bin/hermes"; fi
+pkg update -y >/dev/null 2>&1 || apt-get update >/dev/null 2>&1
+${'$'}{APT} install curl gnupg util-linux >/dev/null 2>&1 || p "⚠️ Paquets de base : échec partiel."
+case "${'$'}(uname -m)" in aarch64) ;; *) p "⚠️ Architecture ${'$'}(uname -m) : seul aarch64 est pris en charge officiellement.";; esac
+# Forcer Debian sous proot : le compilateur Android/Bionic ne peut pas construire pillow-heif.
+# Dans Debian aarch64/glibc, uv peut récupérer la roue manylinux précompilée.
+MODE=""
+p "ℹ️ Installation dans Debian légère (proot) pour éviter les compilations incompatibles avec Android."
+if [ -z "${'$'}{MODE}" ]; then
+  ${'$'}{APT} install proot-distro >> "${'$'}{LOG}" 2>&1 || { p "❌ Impossible d'installer proot-distro (réseau ?)."; exit 1; }
+  if ! proot-distro login debian -- true >/dev/null 2>&1; then
+    p "🐧 Téléchargement de Debian (≈ 50 Mo)…"
+    proot-distro install debian >> "${'$'}{LOG}" 2>&1 || { p "❌ Installation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  fi
+  p "📦 Préparation de Debian (git, curl…)…"
+  # Debian doit utiliser exclusivement ses outils glibc : --termux-home peut transmettre des variables
+  # de compilation Termux (CC=aarch64-linux-android-clang) qui contaminent uv/pip dans proot.
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive \
+    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev libwebp-dev python3 python3-venv python3-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
+    || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  p "🔎 Vérification du compilateur Debian (GCC, glibc)…"
+  proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/bin:/bin bash -c 'printf "CC="; command -v cc; cc --version | head -n1; printf "ARCH="; uname -m; printf "LIBC="; ldd --version | head -n1' >> "${'$'}{LOG}" 2>&1
+  p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
+  INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
+  : > "${'$'}{INSTALL_LOG}"
+  p "⏳ Installation des dépendances Hermès démarrée. Variables de compilation Android neutralisées."
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1 \
+     UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python UV_CACHE_DIR=/var/cache/uv \
+     bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /usr/local/share/uv/python /var/cache/uv /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+  INSTALL_PID=$!
+  while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
+    sleep 20
+    if kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; then
+      DERNIERES="$(tail -n 3 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\\x1b\\[[0-9;]*m//g' | cut -c1-115 | tr '\\n' ' ')"
+      p "⏳ Hermès installe ses composants : ${'$'}{DERNIERES:-travail en cours, aucune nouvelle sortie pour le moment}."
+    fi
+  done
+  wait "${'$'}{INSTALL_PID}"
+  INSTALL_RC=$?
+  cat "${'$'}{INSTALL_LOG}" >> "${'$'}{LOG}"
+  if [ "${'$'}{INSTALL_RC}" -ne 0 ]; then
+    p "❌ L’installation d’Hermès a échoué (code ${'$'}{INSTALL_RC}). Dernières lignes :"
+    tail -n 10 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit "${'$'}{INSTALL_RC}"
+  fi
+  p "🔎 Vérification de l'environnement Python Hermes…"
+  if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
+    p "❌ Installation incomplète : /root/.hermes/hermes-agent/venv/bin/python est absent. La configuration et le démarrage sont interrompus."
+    tail -n 15 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit 1
+  fi
+  if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+    MODE=proot
+  else
+    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
+    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
+    exit 1
+  fi
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé (${'$'}{MODE})."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Sauvegarde locale privée de l'environnement Hermes ; aucune donnée n'est envoyée hors du téléphone. */
+    fun sauvegarder(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"
+[ -d "${'$'}H" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
+B="${'$'}H/backups"; mkdir -p "${'$'}B"; chmod 700 "${'$'}B"
+TS="${'$'}(date +%Y%m%d-%H%M%S)"
+OUT="${'$'}B/jarvis-hermes-${'$'}TS.tar.gz"
+tar -czf "${'$'}OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'$'}HOME" .hermes
+chmod 600 "${'$'}OUT"
+p "✅ Sauvegarde privée créée : ${'$'}(basename "${'$'}OUT") (${'$'}(du -h "${'$'}OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="${'$'}HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "${'$'}H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "${'$'}H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "${'$'}H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "${'$'}H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "${'$'}H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "${'$'}H/backups" ] && find "${'$'}H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "${'$'}f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"; B="${'$'}H/backups"
+[ -d "${'$'}B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="${'$'}(ls -1t "${'$'}B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "${'$'}LATEST" ] && [ -f "${'$'}LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "${'$'}LATEST" >/dev/null
+p "⏳ Archive vérifiée : ${'$'}(basename "${'$'}LATEST")"
+tar -xzf "${'$'}LATEST" -C "${'$'}HOME"
+[ -f "${'$'}H/.env" ] && chmod 600 "${'$'}H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}{HOME}/.hermes/backups/jarvis-hermes-auto-${'# Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
+# Ne pas utiliser pkill -f ici : le motif figure dans la commande RUN_COMMAND elle-même et peut tuer ce script parent.
+if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative d'installation supprimée."; fi
+if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; then rm -f "${'$'}{PREFIX}/bin/hermes"; fi
+pkg update -y >/dev/null 2>&1 || apt-get update >/dev/null 2>&1
+${'$'}{APT} install curl gnupg util-linux >/dev/null 2>&1 || p "⚠️ Paquets de base : échec partiel."
+case "${'$'}(uname -m)" in aarch64) ;; *) p "⚠️ Architecture ${'$'}(uname -m) : seul aarch64 est pris en charge officiellement.";; esac
+# Forcer Debian sous proot : le compilateur Android/Bionic ne peut pas construire pillow-heif.
+# Dans Debian aarch64/glibc, uv peut récupérer la roue manylinux précompilée.
+MODE=""
+p "ℹ️ Installation dans Debian légère (proot) pour éviter les compilations incompatibles avec Android."
+if [ -z "${'$'}{MODE}" ]; then
+  ${'$'}{APT} install proot-distro >> "${'$'}{LOG}" 2>&1 || { p "❌ Impossible d'installer proot-distro (réseau ?)."; exit 1; }
+  if ! proot-distro login debian -- true >/dev/null 2>&1; then
+    p "🐧 Téléchargement de Debian (≈ 50 Mo)…"
+    proot-distro install debian >> "${'$'}{LOG}" 2>&1 || { p "❌ Installation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  fi
+  p "📦 Préparation de Debian (git, curl…)…"
+  # Debian doit utiliser exclusivement ses outils glibc : --termux-home peut transmettre des variables
+  # de compilation Termux (CC=aarch64-linux-android-clang) qui contaminent uv/pip dans proot.
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive \
+    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev libwebp-dev python3 python3-venv python3-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
+    || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  p "🔎 Vérification du compilateur Debian (GCC, glibc)…"
+  proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/bin:/bin bash -c 'printf "CC="; command -v cc; cc --version | head -n1; printf "ARCH="; uname -m; printf "LIBC="; ldd --version | head -n1' >> "${'$'}{LOG}" 2>&1
+  p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
+  INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
+  : > "${'$'}{INSTALL_LOG}"
+  p "⏳ Installation des dépendances Hermès démarrée. Variables de compilation Android neutralisées."
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1 \
+     UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python UV_CACHE_DIR=/var/cache/uv \
+     bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /usr/local/share/uv/python /var/cache/uv /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+  INSTALL_PID=$!
+  while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
+    sleep 20
+    if kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; then
+      DERNIERES="$(tail -n 3 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\\x1b\\[[0-9;]*m//g' | cut -c1-115 | tr '\\n' ' ')"
+      p "⏳ Hermès installe ses composants : ${'$'}{DERNIERES:-travail en cours, aucune nouvelle sortie pour le moment}."
+    fi
+  done
+  wait "${'$'}{INSTALL_PID}"
+  INSTALL_RC=$?
+  cat "${'$'}{INSTALL_LOG}" >> "${'$'}{LOG}"
+  if [ "${'$'}{INSTALL_RC}" -ne 0 ]; then
+    p "❌ L’installation d’Hermès a échoué (code ${'$'}{INSTALL_RC}). Dernières lignes :"
+    tail -n 10 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit "${'$'}{INSTALL_RC}"
+  fi
+  p "🔎 Vérification de l'environnement Python Hermes…"
+  if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
+    p "❌ Installation incomplète : /root/.hermes/hermes-agent/venv/bin/python est absent. La configuration et le démarrage sont interrompus."
+    tail -n 15 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit 1
+  fi
+  if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+    MODE=proot
+  else
+    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
+    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
+    exit 1
+  fi
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé (${'$'}{MODE})."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Sauvegarde locale privée de l'environnement Hermes ; aucune donnée n'est envoyée hors du téléphone. */
+    fun sauvegarder(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"
+[ -d "${'$'}H" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
+B="${'$'}H/backups"; mkdir -p "${'$'}B"; chmod 700 "${'$'}B"
+TS="${'$'}(date +%Y%m%d-%H%M%S)"
+OUT="${'$'}B/jarvis-hermes-${'$'}TS.tar.gz"
+tar -czf "${'$'}OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'$'}HOME" .hermes
+chmod 600 "${'$'}OUT"
+p "✅ Sauvegarde privée créée : ${'$'}(basename "${'$'}OUT") (${'$'}(du -h "${'$'}OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="${'$'}HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "${'$'}H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "${'$'}H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "${'$'}H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "${'$'}H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "${'$'}H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "${'$'}H/backups" ] && find "${'$'}H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "${'$'}f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"; B="${'$'}H/backups"
+[ -d "${'$'}B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="${'$'}(ls -1t "${'$'}B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "${'$'}LATEST" ] && [ -f "${'$'}LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "${'$'}LATEST" >/dev/null
+p "⏳ Archive vérifiée : ${'$'}(basename "${'$'}LATEST")"
+tar -xzf "${'$'}LATEST" -C "${'$'}HOME"
+[ -f "${'$'}H/.env" ] && chmod 600 "${'$'}H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}{TS}.tar.gz" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'# Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
+# Ne pas utiliser pkill -f ici : le motif figure dans la commande RUN_COMMAND elle-même et peut tuer ce script parent.
+if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative d'installation supprimée."; fi
+if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; then rm -f "${'$'}{PREFIX}/bin/hermes"; fi
+pkg update -y >/dev/null 2>&1 || apt-get update >/dev/null 2>&1
+${'$'}{APT} install curl gnupg util-linux >/dev/null 2>&1 || p "⚠️ Paquets de base : échec partiel."
+case "${'$'}(uname -m)" in aarch64) ;; *) p "⚠️ Architecture ${'$'}(uname -m) : seul aarch64 est pris en charge officiellement.";; esac
+# Forcer Debian sous proot : le compilateur Android/Bionic ne peut pas construire pillow-heif.
+# Dans Debian aarch64/glibc, uv peut récupérer la roue manylinux précompilée.
+MODE=""
+p "ℹ️ Installation dans Debian légère (proot) pour éviter les compilations incompatibles avec Android."
+if [ -z "${'$'}{MODE}" ]; then
+  ${'$'}{APT} install proot-distro >> "${'$'}{LOG}" 2>&1 || { p "❌ Impossible d'installer proot-distro (réseau ?)."; exit 1; }
+  if ! proot-distro login debian -- true >/dev/null 2>&1; then
+    p "🐧 Téléchargement de Debian (≈ 50 Mo)…"
+    proot-distro install debian >> "${'$'}{LOG}" 2>&1 || { p "❌ Installation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  fi
+  p "📦 Préparation de Debian (git, curl…)…"
+  # Debian doit utiliser exclusivement ses outils glibc : --termux-home peut transmettre des variables
+  # de compilation Termux (CC=aarch64-linux-android-clang) qui contaminent uv/pip dans proot.
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive \
+    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev libwebp-dev python3 python3-venv python3-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
+    || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  p "🔎 Vérification du compilateur Debian (GCC, glibc)…"
+  proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/bin:/bin bash -c 'printf "CC="; command -v cc; cc --version | head -n1; printf "ARCH="; uname -m; printf "LIBC="; ldd --version | head -n1' >> "${'$'}{LOG}" 2>&1
+  p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
+  INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
+  : > "${'$'}{INSTALL_LOG}"
+  p "⏳ Installation des dépendances Hermès démarrée. Variables de compilation Android neutralisées."
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1 \
+     UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python UV_CACHE_DIR=/var/cache/uv \
+     bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /usr/local/share/uv/python /var/cache/uv /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+  INSTALL_PID=$!
+  while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
+    sleep 20
+    if kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; then
+      DERNIERES="$(tail -n 3 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\\x1b\\[[0-9;]*m//g' | cut -c1-115 | tr '\\n' ' ')"
+      p "⏳ Hermès installe ses composants : ${'$'}{DERNIERES:-travail en cours, aucune nouvelle sortie pour le moment}."
+    fi
+  done
+  wait "${'$'}{INSTALL_PID}"
+  INSTALL_RC=$?
+  cat "${'$'}{INSTALL_LOG}" >> "${'$'}{LOG}"
+  if [ "${'$'}{INSTALL_RC}" -ne 0 ]; then
+    p "❌ L’installation d’Hermès a échoué (code ${'$'}{INSTALL_RC}). Dernières lignes :"
+    tail -n 10 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit "${'$'}{INSTALL_RC}"
+  fi
+  p "🔎 Vérification de l'environnement Python Hermes…"
+  if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
+    p "❌ Installation incomplète : /root/.hermes/hermes-agent/venv/bin/python est absent. La configuration et le démarrage sont interrompus."
+    tail -n 15 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit 1
+  fi
+  if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+    MODE=proot
+  else
+    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
+    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
+    exit 1
+  fi
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé (${'$'}{MODE})."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Sauvegarde locale privée de l'environnement Hermes ; aucune donnée n'est envoyée hors du téléphone. */
+    fun sauvegarder(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"
+[ -d "${'$'}H" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
+B="${'$'}H/backups"; mkdir -p "${'$'}B"; chmod 700 "${'$'}B"
+TS="${'$'}(date +%Y%m%d-%H%M%S)"
+OUT="${'$'}B/jarvis-hermes-${'$'}TS.tar.gz"
+tar -czf "${'$'}OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'$'}HOME" .hermes
+chmod 600 "${'$'}OUT"
+p "✅ Sauvegarde privée créée : ${'$'}(basename "${'$'}OUT") (${'$'}(du -h "${'$'}OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="${'$'}HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "${'$'}H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "${'$'}H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "${'$'}H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "${'$'}H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "${'$'}H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "${'$'}H/backups" ] && find "${'$'}H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "${'$'}f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"; B="${'$'}H/backups"
+[ -d "${'$'}B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="${'$'}(ls -1t "${'$'}B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "${'$'}LATEST" ] && [ -f "${'$'}LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "${'$'}LATEST" >/dev/null
+p "⏳ Archive vérifiée : ${'$'}(basename "${'$'}LATEST")"
+tar -xzf "${'$'}LATEST" -C "${'$'}HOME"
+[ -f "${'$'}H/.env" ] && chmod 600 "${'$'}H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}{HOME}" .hermes 2>> "${'# Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
+# Ne pas utiliser pkill -f ici : le motif figure dans la commande RUN_COMMAND elle-même et peut tuer ce script parent.
+if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative d'installation supprimée."; fi
+if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; then rm -f "${'$'}{PREFIX}/bin/hermes"; fi
+pkg update -y >/dev/null 2>&1 || apt-get update >/dev/null 2>&1
+${'$'}{APT} install curl gnupg util-linux >/dev/null 2>&1 || p "⚠️ Paquets de base : échec partiel."
+case "${'$'}(uname -m)" in aarch64) ;; *) p "⚠️ Architecture ${'$'}(uname -m) : seul aarch64 est pris en charge officiellement.";; esac
+# Forcer Debian sous proot : le compilateur Android/Bionic ne peut pas construire pillow-heif.
+# Dans Debian aarch64/glibc, uv peut récupérer la roue manylinux précompilée.
+MODE=""
+p "ℹ️ Installation dans Debian légère (proot) pour éviter les compilations incompatibles avec Android."
+if [ -z "${'$'}{MODE}" ]; then
+  ${'$'}{APT} install proot-distro >> "${'$'}{LOG}" 2>&1 || { p "❌ Impossible d'installer proot-distro (réseau ?)."; exit 1; }
+  if ! proot-distro login debian -- true >/dev/null 2>&1; then
+    p "🐧 Téléchargement de Debian (≈ 50 Mo)…"
+    proot-distro install debian >> "${'$'}{LOG}" 2>&1 || { p "❌ Installation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  fi
+  p "📦 Préparation de Debian (git, curl…)…"
+  # Debian doit utiliser exclusivement ses outils glibc : --termux-home peut transmettre des variables
+  # de compilation Termux (CC=aarch64-linux-android-clang) qui contaminent uv/pip dans proot.
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive \
+    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev libwebp-dev python3 python3-venv python3-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
+    || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  p "🔎 Vérification du compilateur Debian (GCC, glibc)…"
+  proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/bin:/bin bash -c 'printf "CC="; command -v cc; cc --version | head -n1; printf "ARCH="; uname -m; printf "LIBC="; ldd --version | head -n1' >> "${'$'}{LOG}" 2>&1
+  p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
+  INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
+  : > "${'$'}{INSTALL_LOG}"
+  p "⏳ Installation des dépendances Hermès démarrée. Variables de compilation Android neutralisées."
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1 \
+     UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python UV_CACHE_DIR=/var/cache/uv \
+     bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /usr/local/share/uv/python /var/cache/uv /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+  INSTALL_PID=$!
+  while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
+    sleep 20
+    if kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; then
+      DERNIERES="$(tail -n 3 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\\x1b\\[[0-9;]*m//g' | cut -c1-115 | tr '\\n' ' ')"
+      p "⏳ Hermès installe ses composants : ${'$'}{DERNIERES:-travail en cours, aucune nouvelle sortie pour le moment}."
+    fi
+  done
+  wait "${'$'}{INSTALL_PID}"
+  INSTALL_RC=$?
+  cat "${'$'}{INSTALL_LOG}" >> "${'$'}{LOG}"
+  if [ "${'$'}{INSTALL_RC}" -ne 0 ]; then
+    p "❌ L’installation d’Hermès a échoué (code ${'$'}{INSTALL_RC}). Dernières lignes :"
+    tail -n 10 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit "${'$'}{INSTALL_RC}"
+  fi
+  p "🔎 Vérification de l'environnement Python Hermes…"
+  if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
+    p "❌ Installation incomplète : /root/.hermes/hermes-agent/venv/bin/python est absent. La configuration et le démarrage sont interrompus."
+    tail -n 15 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit 1
+  fi
+  if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+    MODE=proot
+  else
+    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
+    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
+    exit 1
+  fi
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé (${'$'}{MODE})."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Sauvegarde locale privée de l'environnement Hermes ; aucune donnée n'est envoyée hors du téléphone. */
+    fun sauvegarder(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"
+[ -d "${'$'}H" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
+B="${'$'}H/backups"; mkdir -p "${'$'}B"; chmod 700 "${'$'}B"
+TS="${'$'}(date +%Y%m%d-%H%M%S)"
+OUT="${'$'}B/jarvis-hermes-${'$'}TS.tar.gz"
+tar -czf "${'$'}OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'$'}HOME" .hermes
+chmod 600 "${'$'}OUT"
+p "✅ Sauvegarde privée créée : ${'$'}(basename "${'$'}OUT") (${'$'}(du -h "${'$'}OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="${'$'}HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "${'$'}H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "${'$'}H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "${'$'}H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "${'$'}H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "${'$'}H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "${'$'}H/backups" ] && find "${'$'}H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "${'$'}f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"; B="${'$'}H/backups"
+[ -d "${'$'}B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="${'$'}(ls -1t "${'$'}B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "${'$'}LATEST" ] && [ -f "${'$'}LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "${'$'}LATEST" >/dev/null
+p "⏳ Archive vérifiée : ${'$'}(basename "${'$'}LATEST")"
+tar -xzf "${'$'}LATEST" -C "${'$'}HOME"
+[ -f "${'$'}H/.env" ] && chmod 600 "${'$'}H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}{HOME}/.hermes/logs/jarvis-install.log" || p "⚠️ Sauvegarde automatique impossible ; aucune donnée existante n'a été supprimée."
+  chmod 600 "${'# Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
+# Ne pas utiliser pkill -f ici : le motif figure dans la commande RUN_COMMAND elle-même et peut tuer ce script parent.
+if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative d'installation supprimée."; fi
+if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; then rm -f "${'$'}{PREFIX}/bin/hermes"; fi
+pkg update -y >/dev/null 2>&1 || apt-get update >/dev/null 2>&1
+${'$'}{APT} install curl gnupg util-linux >/dev/null 2>&1 || p "⚠️ Paquets de base : échec partiel."
+case "${'$'}(uname -m)" in aarch64) ;; *) p "⚠️ Architecture ${'$'}(uname -m) : seul aarch64 est pris en charge officiellement.";; esac
+# Forcer Debian sous proot : le compilateur Android/Bionic ne peut pas construire pillow-heif.
+# Dans Debian aarch64/glibc, uv peut récupérer la roue manylinux précompilée.
+MODE=""
+p "ℹ️ Installation dans Debian légère (proot) pour éviter les compilations incompatibles avec Android."
+if [ -z "${'$'}{MODE}" ]; then
+  ${'$'}{APT} install proot-distro >> "${'$'}{LOG}" 2>&1 || { p "❌ Impossible d'installer proot-distro (réseau ?)."; exit 1; }
+  if ! proot-distro login debian -- true >/dev/null 2>&1; then
+    p "🐧 Téléchargement de Debian (≈ 50 Mo)…"
+    proot-distro install debian >> "${'$'}{LOG}" 2>&1 || { p "❌ Installation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  fi
+  p "📦 Préparation de Debian (git, curl…)…"
+  # Debian doit utiliser exclusivement ses outils glibc : --termux-home peut transmettre des variables
+  # de compilation Termux (CC=aarch64-linux-android-clang) qui contaminent uv/pip dans proot.
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive \
+    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev libwebp-dev python3 python3-venv python3-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
+    || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  p "🔎 Vérification du compilateur Debian (GCC, glibc)…"
+  proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/bin:/bin bash -c 'printf "CC="; command -v cc; cc --version | head -n1; printf "ARCH="; uname -m; printf "LIBC="; ldd --version | head -n1' >> "${'$'}{LOG}" 2>&1
+  p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
+  INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
+  : > "${'$'}{INSTALL_LOG}"
+  p "⏳ Installation des dépendances Hermès démarrée. Variables de compilation Android neutralisées."
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1 \
+     UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python UV_CACHE_DIR=/var/cache/uv \
+     bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /usr/local/share/uv/python /var/cache/uv /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+  INSTALL_PID=$!
+  while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
+    sleep 20
+    if kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; then
+      DERNIERES="$(tail -n 3 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\\x1b\\[[0-9;]*m//g' | cut -c1-115 | tr '\\n' ' ')"
+      p "⏳ Hermès installe ses composants : ${'$'}{DERNIERES:-travail en cours, aucune nouvelle sortie pour le moment}."
+    fi
+  done
+  wait "${'$'}{INSTALL_PID}"
+  INSTALL_RC=$?
+  cat "${'$'}{INSTALL_LOG}" >> "${'$'}{LOG}"
+  if [ "${'$'}{INSTALL_RC}" -ne 0 ]; then
+    p "❌ L’installation d’Hermès a échoué (code ${'$'}{INSTALL_RC}). Dernières lignes :"
+    tail -n 10 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit "${'$'}{INSTALL_RC}"
+  fi
+  p "🔎 Vérification de l'environnement Python Hermes…"
+  if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
+    p "❌ Installation incomplète : /root/.hermes/hermes-agent/venv/bin/python est absent. La configuration et le démarrage sont interrompus."
+    tail -n 15 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit 1
+  fi
+  if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+    MODE=proot
+  else
+    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
+    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
+    exit 1
+  fi
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé (${'$'}{MODE})."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Sauvegarde locale privée de l'environnement Hermes ; aucune donnée n'est envoyée hors du téléphone. */
+    fun sauvegarder(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"
+[ -d "${'$'}H" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
+B="${'$'}H/backups"; mkdir -p "${'$'}B"; chmod 700 "${'$'}B"
+TS="${'$'}(date +%Y%m%d-%H%M%S)"
+OUT="${'$'}B/jarvis-hermes-${'$'}TS.tar.gz"
+tar -czf "${'$'}OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'$'}HOME" .hermes
+chmod 600 "${'$'}OUT"
+p "✅ Sauvegarde privée créée : ${'$'}(basename "${'$'}OUT") (${'$'}(du -h "${'$'}OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="${'$'}HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "${'$'}H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "${'$'}H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "${'$'}H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "${'$'}H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "${'$'}H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "${'$'}H/backups" ] && find "${'$'}H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "${'$'}f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"; B="${'$'}H/backups"
+[ -d "${'$'}B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="${'$'}(ls -1t "${'$'}B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "${'$'}LATEST" ] && [ -f "${'$'}LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "${'$'}LATEST" >/dev/null
+p "⏳ Archive vérifiée : ${'$'}(basename "${'$'}LATEST")"
+tar -xzf "${'$'}LATEST" -C "${'$'}HOME"
+[ -f "${'$'}H/.env" ] && chmod 600 "${'$'}H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}{HOME}/.hermes/backups/jarvis-hermes-auto-${'# Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
+# Ne pas utiliser pkill -f ici : le motif figure dans la commande RUN_COMMAND elle-même et peut tuer ce script parent.
+if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative d'installation supprimée."; fi
+if [ -L "${'$'}{PREFIX}/bin/hermes" ] && ! hermes --version >/dev/null 2>&1; then rm -f "${'$'}{PREFIX}/bin/hermes"; fi
+pkg update -y >/dev/null 2>&1 || apt-get update >/dev/null 2>&1
+${'$'}{APT} install curl gnupg util-linux >/dev/null 2>&1 || p "⚠️ Paquets de base : échec partiel."
+case "${'$'}(uname -m)" in aarch64) ;; *) p "⚠️ Architecture ${'$'}(uname -m) : seul aarch64 est pris en charge officiellement.";; esac
+# Forcer Debian sous proot : le compilateur Android/Bionic ne peut pas construire pillow-heif.
+# Dans Debian aarch64/glibc, uv peut récupérer la roue manylinux précompilée.
+MODE=""
+p "ℹ️ Installation dans Debian légère (proot) pour éviter les compilations incompatibles avec Android."
+if [ -z "${'$'}{MODE}" ]; then
+  ${'$'}{APT} install proot-distro >> "${'$'}{LOG}" 2>&1 || { p "❌ Impossible d'installer proot-distro (réseau ?)."; exit 1; }
+  if ! proot-distro login debian -- true >/dev/null 2>&1; then
+    p "🐧 Téléchargement de Debian (≈ 50 Mo)…"
+    proot-distro install debian >> "${'$'}{LOG}" 2>&1 || { p "❌ Installation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  fi
+  p "📦 Préparation de Debian (git, curl…)…"
+  # Debian doit utiliser exclusivement ses outils glibc : --termux-home peut transmettre des variables
+  # de compilation Termux (CC=aarch64-linux-android-clang) qui contaminent uv/pip dans proot.
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive \
+    bash -c 'apt-get update && apt-get install -y curl git ca-certificates xz-utils tar libatomic1 procps build-essential pkg-config libheif-dev libwebp-dev python3 python3-venv python3-dev' >> /data/data/com.termux/files/home/.hermes/logs/jarvis-install.log 2>&1 \
+    || { p "❌ Préparation de Debian impossible (voir ~/.hermes/logs/jarvis-install.log)."; exit 1; }
+  p "🔎 Vérification du compilateur Debian (GCC, glibc)…"
+  proot-distro login debian --termux-home -- env -i HOME=/root PATH=/usr/bin:/bin bash -c 'printf "CC="; command -v cc; cc --version | head -n1; printf "ARCH="; uname -m; printf "LIBC="; ldd --version | head -n1' >> "${'$'}{LOG}" 2>&1
+  p "⬇️ Installateur officiel d'Hermès (Linux aarch64)… c'est l'étape la plus longue."
+  INSTALL_LOG="${'$'}{H}/logs/hermes-installer.log"
+  : > "${'$'}{INSTALL_LOG}"
+  p "⏳ Installation des dépendances Hermès démarrée. Variables de compilation Android neutralisées."
+  proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash \
+    PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1 \
+     UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python UV_CACHE_DIR=/var/cache/uv \
+     bash -c 'unset CC CXX CPP AR AS LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDSHARED CMAKE_ARGS VIRTUAL_ENV CONDA_PREFIX TERMUX_VERSION PREFIX LD_PRELOAD; set -o pipefail; mkdir -p /usr/local/share/uv/python /var/cache/uv /root/.hermes; curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser --skip-computer-use' > "${'$'}{INSTALL_LOG}" 2>&1 &
+  INSTALL_PID=$!
+  while kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; do
+    sleep 20
+    if kill -0 "${'$'}{INSTALL_PID}" 2>/dev/null; then
+      DERNIERES="$(tail -n 3 "${'$'}{INSTALL_LOG}" 2>/dev/null | sed 's/\\x1b\\[[0-9;]*m//g' | cut -c1-115 | tr '\\n' ' ')"
+      p "⏳ Hermès installe ses composants : ${'$'}{DERNIERES:-travail en cours, aucune nouvelle sortie pour le moment}."
+    fi
+  done
+  wait "${'$'}{INSTALL_PID}"
+  INSTALL_RC=$?
+  cat "${'$'}{INSTALL_LOG}" >> "${'$'}{LOG}"
+  if [ "${'$'}{INSTALL_RC}" -ne 0 ]; then
+    p "❌ L’installation d’Hermès a échoué (code ${'$'}{INSTALL_RC}). Dernières lignes :"
+    tail -n 10 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit "${'$'}{INSTALL_RC}"
+  fi
+  p "🔎 Vérification de l'environnement Python Hermes…"
+  if ! proot-distro login debian --termux-home -- env -i HOME=/root PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin test -x /root/.hermes/hermes-agent/venv/bin/python; then
+    p "❌ Installation incomplète : /root/.hermes/hermes-agent/venv/bin/python est absent. La configuration et le démarrage sont interrompus."
+    tail -n 15 "${'$'}{INSTALL_LOG}" | sed 's/\\x1b\\[[0-9;]*m//g' | while IFS= read -r l; do p "   $(printf '%s' "${'$'}{l}" | cut -c1-120)"; done
+    exit 1
+  fi
+  if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin hermes --version >/dev/null 2>&1; then
+    MODE=proot
+  else
+    p "❌ Hermès n'a pas pu être installé. Dernières lignes :"
+    tail -n 5 "${'$'}{LOG}" | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do p "   ${'$'}(printf '%s' "${'$'}{l}" | cut -c1-110)"; done
+    exit 1
+  fi
+fi
+echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
+p "✅ Hermès installé (${'$'}{MODE})."
+""".trimIndent()
+
+    /** Lance l'installation complète (arrière-plan dans Termux), puis la configuration et le démarrage. */
+    fun installer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val script = prelude(app) + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Installation envoyée à Termux…"
+        return executer(app, script, libelle = "Installation d'Hermès") ?: "🚀 Installation lancée dans Termux : suis la progression ici (5 à 20 min)."
+    }
+
+    /** Sauvegarde locale privée de l'environnement Hermes ; aucune donnée n'est envoyée hors du téléphone. */
+    fun sauvegarder(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"
+[ -d "${'$'}H" ] || { p "❌ Dossier ~/.hermes introuvable."; exit 1; }
+B="${'$'}H/backups"; mkdir -p "${'$'}B"; chmod 700 "${'$'}B"
+TS="${'$'}(date +%Y%m%d-%H%M%S)"
+OUT="${'$'}B/jarvis-hermes-${'$'}TS.tar.gz"
+tar -czf "${'$'}OUT" --exclude='./.hermes/backups' --exclude='*/.git' --exclude='*/venv' --exclude='*/__pycache__' --exclude='*/.cache' -C "${'$'}HOME" .hermes
+chmod 600 "${'$'}OUT"
+p "✅ Sauvegarde privée créée : ${'$'}(basename "${'$'}OUT") (${'$'}(du -h "${'$'}OUT" | cut -f1))."
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Sauvegarde Hermes") ?: "💾 Sauvegarde lancée."
+    }
+
+    /** Diagnostic en lecture seule ; les valeurs secrètes du fichier .env ne sont jamais affichées. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set +e
+H="${'$'}HOME/.hermes"
+p "=== DIAGNOSTIC HERMES ==="
+[ -d "${'$'}H" ] && p "OK : dossier Hermes présent" || p "ERREUR : dossier Hermes absent"
+[ -s "${'$'}H/config.yaml" ] && p "OK : config.yaml présent" || p "ERREUR : config.yaml absent"
+[ -s "${'$'}H/.env" ] && p "OK : .env présent (valeurs masquées)" || p "ERREUR : .env absent"
+if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc 'hermes --version && test -x /root/.hermes/hermes-agent/venv/bin/python'; then
+  p "OK : Hermes et environnement Python accessibles"
+else
+  p "ERREUR : Hermes ou Python inaccessible dans Debian"
+fi
+grep -q 'jarvis:' "${'$'}H/config.yaml" 2>/dev/null && p "OK : entrée MCP Jarvis présente" || p "ERREUR : entrée MCP Jarvis absente"
+grep -q '127.0.0.1:38291/mcp' "${'$'}H/config.yaml" 2>/dev/null && p "OK : adresse du pont Jarvis détectée" || p "ATTENTION : adresse MCP différente ou absente"
+[ -d "${'$'}H/backups" ] && find "${'$'}H/backups" -maxdepth 1 -type f -name 'jarvis-hermes-*.tar.gz' -printf 'SAUVEGARDE : %f\\n' | while IFS= read -r f; do p "${'$'}f"; done
+p "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Diagnostic Hermes") ?: "🔎 Diagnostic lancé."
+    }
+
+    /** Restaure la dernière archive locale validée, en fusionnant les fichiers sans supprimer l'installation courante. */
+    fun restaurer(app: JarvisApp): String {
+        val script = prelude(app) + """
+set -eu
+H="${'$'}HOME/.hermes"; B="${'$'}H/backups"
+[ -d "${'$'}B" ] || { p "❌ Aucune sauvegarde disponible."; exit 1; }
+LATEST="${'$'}(ls -1t "${'$'}B"/jarvis-hermes-*.tar.gz 2>/dev/null | head -n1)"
+[ -n "${'$'}LATEST" ] && [ -f "${'$'}LATEST" ] || { p "❌ Aucune archive Hermes trouvée."; exit 1; }
+tar -tzf "${'$'}LATEST" >/dev/null
+p "⏳ Archive vérifiée : ${'$'}(basename "${'$'}LATEST")"
+tar -xzf "${'$'}LATEST" -C "${'$'}HOME"
+[ -f "${'$'}H/.env" ] && chmod 600 "${'$'}H/.env"
+p "✅ Fichiers restaurés. La passerelle va être redémarrée."
+""".trimIndent() + "\n" + demarrage
+        PontMcp.demarrer(app)
+        return executer(app, script, libelle = "Restauration Hermes") ?: "♻️ Restauration lancée."
+    }
+
+    /** Réécrit la configuration (clés, modèle, pont MCP) puis redémarre Hermès. */
+    fun configurer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + configuration(app) + "\n" + demarrage
+        return executer(app, script, libelle = "Configuration d'Hermès") ?: "⚙️ Configuration envoyée, redémarrage d'Hermès…"
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f 'hermes gateway' >/dev/null 2>&1; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}{TS}.tar.gz" 2>/dev/null || true
+fi
 # Nettoyage d'une ancienne tentative « depuis les sources » dans Termux (compilation vouée à l'échec).
 # Ne pas utiliser pkill -f ici : le motif figure dans la commande RUN_COMMAND elle-même et peut tuer ce script parent.
 if [ -d "${'$'}{HOME}/hermes-agent/.venv" ]; then rm -rf "${'$'}{HOME}/hermes-agent"; p "🧹 Ancienne tentative d'installation supprimée."; fi
