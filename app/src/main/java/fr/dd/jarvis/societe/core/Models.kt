@@ -77,7 +77,24 @@ data class Site(
     val dureeMin: Double? = null,
     val distanceCle: String = "",                    // « adresse siège|adresse site » pour savoir si le cache est valide
     val gpsPrecision: String = "",                   // Geo.Precision : MANUELLE, NUMERO, RUE, LIEU_DIT, COMMUNE ; vide = ancien calcul non vérifié
-    val gpsTrouve: String = ""                       // adresse officielle reconnue (Base Adresse Nationale / OpenStreetMap)
+    val gpsTrouve: String = "",                      // adresse officielle reconnue (Base Adresse Nationale / OpenStreetMap)
+    val interventions: List<Intervention> = emptyList()
+)
+
+/** Historique daté des opérations réellement réalisées sur une installation. */
+@Serializable
+data class Intervention(
+    val id: String,
+    val date: String,
+    val categorie: String = "maintenance",
+    val description: String,
+    val diagnostic: String = "",
+    val actions: String = "",
+    val pieces: String = "",
+    val mesures: String = "",
+    val statut: String = "terminee",
+    val prochaineMaintenance: String = "",
+    val notes: String = ""
 )
 
 @Serializable
