@@ -56,12 +56,21 @@ import kotlinx.coroutines.launch
 import java.time.LocalTime
 
 @Composable
-fun SettingsScreen(app: JarvisApp) {
+fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
     val store = app.store
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var tick by remember { mutableIntStateOf(0) }
+    var settingsSection by remember { mutableStateOf("general") }
 
+    Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HudChip("Général", selected = settingsSection == "general") { settingsSection = "general" }
+            HudChip("Fichiers", selected = settingsSection == "files") { settingsSection = "files" }
+        }
+        if (settingsSection == "files") {
+            DocumentLibraryScreen(app, onAsk)
+        } else {
     LazyColumn(
         Modifier.fillMaxWidth(),
         contentPadding = PaddingValues(12.dp),
@@ -996,6 +1005,8 @@ fun SettingsScreen(app: JarvisApp) {
                 color = HudDim, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
                 modifier = Modifier.padding(vertical = 8.dp)
             )
+        }
+    }
         }
     }
 }
