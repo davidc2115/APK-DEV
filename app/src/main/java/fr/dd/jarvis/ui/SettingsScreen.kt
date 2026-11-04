@@ -313,6 +313,32 @@ fun SettingsScreen(app: JarvisApp) {
                         Text("Le téléchargement laisse le plugin désactivé et n'installe pas ses dépendances. Consulte ses capacités avant activation ; l'autorisation de remplacer les outils intégrés n'est jamais accordée ici.", color = HudDim, fontSize = 11.sp)
                     }
                     "mcp" -> {
+                        Text("Suno — création musicale", color = LocalAccent.current, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 13.sp)
+                        Text(
+                            "Connexion officielle Suno MCP (bêta). Hermès pourra préparer les paroles, transmettre le style musical et créer le morceau dans ton compte Suno. La connexion OAuth demande une autorisation dans le navigateur et utilise les crédits de ton compte.",
+                            color = HudDim, fontSize = 11.sp
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            HudButton(if (store.sunoMcpActive.value) "Déconnecter Suno" else "Connecter Suno", filled = !store.sunoMcpActive.value) {
+                                if (!store.hermesInstalle.value) {
+                                    extMsg = "❌ Installe d'abord Hermès dans le panneau précédent."
+                                } else {
+                                    val active = !store.sunoMcpActive.value
+                                    store.sunoMcpActive.set(active)
+                                    extMsg = fr.dd.jarvis.hermes.HermesTermux.configurer(app)
+                                    if (extMsg.startsWith("⛔") || extMsg.startsWith("ℹ️")) store.sunoMcpActive.set(!active)
+                                }
+                            }
+                            HudButton("Tester Suno", enabled = store.sunoMcpActive.value) {
+                                runHermesExtension(listOf("mcp", "test", "suno"))
+                            }
+                        }
+                        Text(
+                            if (store.sunoMcpActive.value) "Suno est ajouté à la configuration d'Hermès. Termine l'autorisation du compte si le navigateur la demande." else "Connexion désactivée. Aucun crédit Suno n'est utilisé.",
+                            color = HudDim, fontSize = 11.sp
+                        )
+                        Spacer(Modifier.height(8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             HudButton("Catalogue MCP complet") { runHermesExtension(listOf("mcp", "catalog")) }
                             HudButton("MCP installés") { runHermesExtension(listOf("mcp", "list")) }
