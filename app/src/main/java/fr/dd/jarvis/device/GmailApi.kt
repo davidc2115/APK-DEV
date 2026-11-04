@@ -276,7 +276,6 @@ object GmailApi {
         val auth = authorize(ctx, account)
         if (auth.hasResolution()) throw IllegalStateException("Autorisation Gmail à renouveler pour $account.")
         val token = auth.accessToken ?: throw IllegalStateException("Jeton Google indisponible.")
-        fun b64(s: String) = android.util.Base64.encodeToString(s.toByteArray(Charsets.UTF_8), android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING)
         val raw = buildString {
             append("From: $account\\r\\nTo: ${target.to}\\r\\nSubject: =?UTF-8?B?${android.util.Base64.encodeToString(target.subject.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)}?=\\r\\n")
             if (target.messageId.isNotBlank()) append("In-Reply-To: ${target.messageId}\\r\\n")
