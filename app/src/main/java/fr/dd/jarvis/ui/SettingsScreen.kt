@@ -109,8 +109,18 @@ fun SettingsScreen(app: JarvisApp) {
                 title = "Cerveau — clés Groq (rotation automatique)",
                 hint = "Une clé par ligne. À chaque requête JARVIS passe à la clé suivante ; une clé saturée (429) est mise en pause.",
                 keys = store.groqKeys,
-                onAdd = { raw -> if (store.apiKeysSecureAvailable) store.addGroqKeys(raw) },
-                onRemove = { index -> if (store.apiKeysSecureAvailable) store.removeGroqKey(index) },
+                onAdd = {
+                    if (store.apiKeysSecureAvailable) {
+                        store.addGroqKeys(it)
+                        if (store.hermesInstalle.value) fr.dd.jarvis.hermes.HermesTermux.synchroniserCles(app)
+                    }
+                },
+                onRemove = {
+                    if (store.apiKeysSecureAvailable) {
+                        store.removeGroqKey(it)
+                        if (store.hermesInstalle.value) fr.dd.jarvis.hermes.HermesTermux.synchroniserCles(app)
+                    }
+                },
                 onTest = { app.llm.testGroqKeys() },
                 modelLabel = "Modèle Groq", model = store.groqModel.value, onModel = { store.groqModel.set(it) },
                 onListModels = { app.llm.listGroqModels() }
@@ -123,8 +133,18 @@ fun SettingsScreen(app: JarvisApp) {
                 title = "Agents — clés Gemini (rotation automatique)",
                 hint = "Utilisées pour le planning, les mails et les contacts. Sans clé Gemini, les agents utilisent Groq.",
                 keys = store.geminiKeys,
-                onAdd = { raw -> if (store.apiKeysSecureAvailable) store.addGeminiKeys(raw) },
-                onRemove = { index -> if (store.apiKeysSecureAvailable) store.removeGeminiKey(index) },
+                onAdd = {
+                    if (store.apiKeysSecureAvailable) {
+                        store.addGeminiKeys(it)
+                        if (store.hermesInstalle.value) fr.dd.jarvis.hermes.HermesTermux.synchroniserCles(app)
+                    }
+                },
+                onRemove = {
+                    if (store.apiKeysSecureAvailable) {
+                        store.removeGeminiKey(it)
+                        if (store.hermesInstalle.value) fr.dd.jarvis.hermes.HermesTermux.synchroniserCles(app)
+                    }
+                },
                 onTest = { app.llm.testGeminiKeys() },
                 modelLabel = "Modèle Gemini", model = store.geminiModel.value, onModel = { store.geminiModel.set(it) },
                 onListModels = { app.llm.listGeminiModels() }
