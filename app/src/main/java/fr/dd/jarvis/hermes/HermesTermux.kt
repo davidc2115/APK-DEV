@@ -239,7 +239,6 @@ H="${'$'}HOME/.hermes"; mkdir -p "${'$'}H/logs"
 setenv() { touch "${'$'}H/.env"; grep -v "^${'$'}1=" "${'$'}H/.env" > "${'$'}H/.env.j" 2>/dev/null; printf '%s=%s\n' "${'$'}1" "${'$'}2" >> "${'$'}H/.env.j"; mv "${'$'}H/.env.j" "${'$'}H/.env"; }
 removeenvfamily() { grep -v -E "^${'$'}1(_[0-9]+)?=" "${'$'}H/.env" > "${'$'}H/.env.j" 2>/dev/null || true; mv "${'$'}H/.env.j" "${'$'}H/.env"; }
 removeenvfamily GOOGLE_API_KEY
-removeenvfamily GEMINI_API_KEY
 removeenvfamily GROQ_API_KEY
 setenv API_SERVER_ENABLED true
 setenv API_SERVER_HOST 127.0.0.1
@@ -400,7 +399,6 @@ p "✅ Hermès installé (${'$'}{MODE})."
             appendLine("setenv() { touch \"${'$'}H/.env\"; grep -v \"^${'$'}1=\" \"${'$'}H/.env\" > \"${'$'}H/.env.j\" 2>/dev/null || true; echo \"${'$'}1=${'$'}2\" >> \"${'$'}H/.env.j\"; mv \"${'$'}H/.env.j\" \"${'$'}H/.env\"; }")
             appendLine("removeenvfamily() { grep -v -E \"^${'$'}1(_[0-9]+)?=\" \"${'$'}H/.env\" > \"${'$'}H/.env.j\" 2>/dev/null || true; mv \"${'$'}H/.env.j\" \"${'$'}H/.env\"; }")
             appendLine("removeenvfamily GOOGLE_API_KEY")
-            appendLine("removeenvfamily GEMINI_API_KEY")
             appendLine("removeenvfamily GROQ_API_KEY")
             gemini.forEachIndexed { index, key -> appendLine("setenv " + (if (index == 0) "GOOGLE_API_KEY" else "GOOGLE_API_KEY_" + (index + 1)) + " " + q(key)) }
             groq.forEachIndexed { index, key -> appendLine("setenv " + (if (index == 0) "GROQ_API_KEY" else "GROQ_API_KEY_" + (index + 1)) + " " + q(key)) }
