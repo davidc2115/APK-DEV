@@ -186,13 +186,17 @@ class Store(context: Context) {
     fun addGroqKeys(raw: String) = addApiKeys(groqKeys, "groqKeys", raw)
     fun addGeminiKeys(raw: String) = addApiKeys(geminiKeys, "geminiKeys", raw)
     fun removeGroqKey(i: Int) {
-        if (i in groqKeys.indices) groqKeys.removeAt(i)
-        writeApiKeyList("groqKeys", groqKeys)
+        if (i !in groqKeys.indices) return
+        val updated = groqKeys.toList().toMutableList().also { it.removeAt(i) }
+        writeApiKeyList("groqKeys", updated)
+        groqKeys.removeAt(i)
     }
 
     fun removeGeminiKey(i: Int) {
-        if (i in geminiKeys.indices) geminiKeys.removeAt(i)
-        writeApiKeyList("geminiKeys", geminiKeys)
+        if (i !in geminiKeys.indices) return
+        val updated = geminiKeys.toList().toMutableList().also { it.removeAt(i) }
+        writeApiKeyList("geminiKeys", updated)
+        geminiKeys.removeAt(i)
     }
 
     private fun addApiKeys(list: SnapshotStateList<String>, key: String, raw: String) {
