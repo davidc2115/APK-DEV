@@ -81,6 +81,7 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
             "Mails" to { if (tri || (store.agentMails.value && (only == null || only == "mails"))) mails() },
             "Factures" to { if (store.agentFactures.value && only == null) factures() },
             "Planning" to { if (store.agentPlanning.value && only == null) planning() },
+            "Tâches personnelles" to { if (store.agentPlanning.value && only == null) taches() },
             "Notifications" to { if (store.agentNotifs.value && (only == null || only == "notifs")) notifs() }
         )
         for ((nom, f) in steps) {
@@ -221,6 +222,25 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
             journal.append("- 🚗 Départ ${h} pour « ${e.title} » (${Math.round(r.minutes)} min)\n")
             writeSet("agent_notified_events.txt", notified + "${e.id}_${e.begin}")
         }
+    }
+
+    // ---------------------------------------------------------------- tâches personnelles
+    private fun taches() {
+        val due = app.tasks.pendingDue(LocalDate.now().plusDays(1))
+        if (due.isEmpty()) return
+        val seen = readSet("agent_seen_tasks.txt")
+        val fresh = due.filter { (it.id + "_" + it.dueDate) !in seen }
+        if (fresh.isEmpty()) return
+        val today = LocalDate.now().toString()
+        val details = fresh.joinToString("\n") { task ->
+            val late = task.dueDate < today
+            (if (late) "🔴 EN RETARD — " else if (task.dueDate == today) "🟠 AUJOURD'HUI — " else "🟡 DEMAIN — ") +
+                task.title + (if (task.dueDate.isNotBlank()) " (" + dateFr(task.dueDate) + ")" else "") +
+                (if (task.priority == "urgente" || task.priority == "haute") " · priorité " + task.priority else "")
+        }
+        alert(3012, "📝 Tâches à ne pas oublier", details)
+        journal.append("- 📝 " + fresh.size + " tâche(s) personnelle(s) en retard ou à échéance sous 24 h\n")
+        writeSet("agent_seen_tasks.txt", seen + fresh.map { it.id + "_" + it.dueDate })
     }
 
     // ---------------------------------------------------------------- notifications du téléphone
