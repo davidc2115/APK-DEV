@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.CutCornerShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -274,5 +275,64 @@ fun ColorPalette(selected: Int?, onPick: (Int?) -> Unit) {
                     .clickable { onPick(col) }
             )
         }
+    }
+}
+
+
+/** Carte agenda inspirée du style calendrier néon : liseré latéral et ciel étoilé discret. */
+@Composable
+fun HudScheduleCard(
+    modifier: Modifier = Modifier,
+    accent: Color,
+    highlighted: Boolean = false,
+    onClick: (() -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val shape = RoundedCornerShape(20.dp)
+    Column(
+        modifier
+            .clip(shape)
+            .background(
+                Brush.verticalGradient(
+                    listOf(Color(0xFF090D1B), Color(0xFF050815), if (highlighted) Color(0xFF101A43) else Color(0xFF080C19))
+                )
+            )
+            .drawBehind {
+                val stripe = 3.dp.toPx()
+                drawRoundRect(
+                    Brush.verticalGradient(listOf(accent, accent.copy(alpha = 0.68f))),
+                    topLeft = Offset.Zero,
+                    size = Size(stripe, size.height),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(8.dp.toPx())
+                )
+                if (highlighted) {
+                    val glowY = size.height * 0.82f
+                    drawRect(
+                        Brush.radialGradient(
+                            listOf(Color(0xFF416BFF).copy(alpha = 0.28f), Color.Transparent),
+                            center = Offset(size.width * 0.55f, glowY),
+                            radius = size.width * 0.72f
+                        )
+                    )
+                    val stars = listOf(
+                        0.12f to 0.68f, 0.23f to 0.82f, 0.36f to 0.73f, 0.49f to 0.88f,
+                        0.61f to 0.70f, 0.74f to 0.84f, 0.86f to 0.75f, 0.93f to 0.90f,
+                        0.17f to 0.93f, 0.42f to 0.96f, 0.68f to 0.94f, 0.81f to 0.63f
+                    )
+                    stars.forEachIndexed { index, point ->
+                        val radius = if (index % 4 == 0) 1.8f else 1.0f
+                        drawCircle(Color(0xFFB8D8FF).copy(alpha = if (index % 3 == 0) 0.9f else 0.48f), radius, Offset(size.width * point.first, size.height * point.second))
+                    }
+                }
+                drawRoundRect(
+                    Color.White.copy(alpha = 0.20f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(20.dp.toPx()),
+                    style = Stroke(1.dp.toPx())
+                )
+            }
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(start = 15.dp, end = 13.dp, top = 12.dp, bottom = 12.dp)
+    ) {
+        content()
     }
 }
