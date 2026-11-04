@@ -165,6 +165,32 @@ fun SettingsScreen(app: JarvisApp) {
                     HudButton("Arrêter", enabled = permOk && enLigne) { hMsg = h.arreter(app) }
                     HudButton("Actualiser") { hTick++ }
                 }
+
+                var recoveryConfirm by remember { mutableStateOf("") }
+                Spacer(Modifier.height(8.dp))
+                Text("Sauvegarde et récupération", color = HudDim, fontSize = 12.sp)
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HudButton("Sauvegarder") { hMsg = h.sauvegarder(app) }
+                    HudButton("Diagnostic") { hMsg = h.diagnostiquer(app) }
+                    HudButton("Restaurer") {
+                        if (recoveryConfirm != "restore") {
+                            recoveryConfirm = "restore"
+                            hMsg = "⚠️ Retouche « Restaurer » pour confirmer la restauration de la dernière sauvegarde."
+                        } else {
+                            recoveryConfirm = ""
+                            hMsg = h.restaurerDerniereSauvegarde(app)
+                        }
+                    }
+                    HudButton("Réinstaller") {
+                        if (recoveryConfirm != "reinstall") {
+                            recoveryConfirm = "reinstall"
+                            hMsg = "⚠️ Cette opération sauvegarde ~/.hermes puis réinstalle le moteur. Retouche « Réinstaller » pour confirmer."
+                        } else {
+                            recoveryConfirm = ""
+                            hMsg = h.reinstallerComplet(app)
+                        }
+                    }
+                }
                 if (hMsg.isNotBlank()) Text(hMsg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
                 val lignes = fr.dd.jarvis.hermes.PontMcp.progression
                 if (lignes.isNotEmpty()) Column(Modifier.padding(top = 6.dp)) {
