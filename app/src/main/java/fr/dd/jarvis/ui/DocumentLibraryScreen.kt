@@ -31,7 +31,7 @@ fun DocumentLibraryScreen(app: JarvisApp, onAsk: (String) -> Unit) {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) scope.launch {
             status = "Import en cours…"
-            val result = withContext(Dispatchers.IO) { uris.map { uri -> runCatching { DocumentStore.import(context, uri) }.getOrElse { "ERREUR : ${it.message}" } } }
+            val result = withContext(Dispatchers.IO) { uris.map { uri -> runCatching { DocumentStore.importFile(context, uri) }.getOrElse { "ERREUR : ${it.message}" } } }
             status = result.joinToString("\n")
             refresh++
         }
