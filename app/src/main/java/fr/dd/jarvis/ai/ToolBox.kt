@@ -315,6 +315,11 @@ class ToolBox(
             "preuve" to prop("Exemple distinct et factuel de correction ou de choix validé qui soutient cette préférence.")
         ), listOf("sujet", "preference", "preuve")))
         put(tool("memoire_apprentissages", "Affiche les préférences en cours d'apprentissage et leur nombre de preuves."))
+        put(tool("agents_centre", "Centre de contrôle des agents IA : consulte leur état, active/désactive un agent, lance un cycle immédiat ou règle la fréquence. Respecte l'interrupteur général des agents autonomes.", mapOf(
+            "action" to prop("etat | activer | desactiver | lancer | intervalle"),
+            "agent" to prop("global | mails | factures | planning | notifications | surveillance_telephone | rangement_gmail"),
+            "minutes" to prop("Fréquence en minutes : 15, 30 ou 60 (minimum Android : 15).")
+        ), listOf("action")))
         put(tool("graphe_suggere_lien", "Ajoute une relation SUGGESTED entre deux notes Obsidian du graphe. Les deux titres doivent être exacts et uniques ; la relation reste une suggestion non confirmée.", mapOf(
             "source" to prop("Titre exact de la note source déjà indexée."),
             "cible" to prop("Titre exact de la note cible déjà indexée."),
@@ -838,6 +843,7 @@ class ToolBox(
         "memoire_ajouter" -> ToolResult("✅ Consigne « ${a.optString("sujet")} » enregistrée (" + app.memo.set(a.optString("sujet"), a.optString("texte")) + ").")
         "memoire_apprendre" -> ToolResult(app.memo.apprendre(a.optString("sujet"), a.optString("preference"), a.optString("preuve")))
         "memoire_apprentissages" -> ToolResult(app.memo.apprentissagesEnCours(), direct = true)
+        "agents_centre" -> agentsCentre(a)
         "graphe_suggere_lien" -> ToolResult(app.knowledgeRepository.suggestRelation(a.optString("source"), a.optString("cible"), a.optString("type", "RELATED_TO")))
         "routine_contextuelle" -> routineContextuelle(a)
         "reglage_jarvis" -> reglerJarvis(a)
@@ -966,6 +972,67 @@ class ToolBox(
                 (if (e.location.isNotBlank()) " | lieu : ${e.location}" else "") +
                 (if (e.description.isNotBlank()) " | notes : ${fr.dd.jarvis.device.HtmlText.text(e.description).take(400)}" else "")
         }
+    }
+
+
+    private fun agentsCentre(a: JSONObject): ToolResult {
+        val store = app.store
+        val action = a.optString("action").trim().lowercase()
+        val agent = a.optString("agent").trim().lowercase().ifBlank { "global" }
+        val label = when (agent) {
+            "global", "tous" -> "Agents autonomes"
+            "mails", "mail" -> "Agent mails"
+            "factures", "facture" -> "Agent factures et devis"
+            "planning", "agenda" -> "Agent planning et tâches"
+            "notifications", "notification", "surveillance_telephone", "telephone", "téléphone" -> "Agents notifications et surveillance téléphone"
+            "rangement_gmail", "rangement" -> "Agent rangement Gmail"
+            else -> return ToolResult("Agent inconnu. Agents disponibles : global, mails, factures, planning, notifications, surveillance_telephone, rangement_gmail.")
+        }
+        fun enabled(): Boolean = when (agent) {
+            "global", "tous" -> store.agentsOn.value
+            "mails", "mail" -> store.agentMails.value
+            "factures", "facture" -> store.agentFactures.value
+            "planning", "agenda" -> store.agentPlanning.value
+            "notifications", "notification", "surveillance_telephone", "telephone", "téléphone" -> store.agentNotifs.value
+            else -> store.agentRanger.value
+        }
+        if (action == "etat") {
+            val status = listOf(
+                "Général" to store.agentsOn.value,
+                "Mails" to store.agentMails.value,
+                "Factures/devis" to store.agentFactures.value,
+                "Planning/tâches" to store.agentPlanning.value,
+                "Notifications + surveillance téléphone" to store.agentNotifs.value,
+                "Rangement Gmail" to store.agentRanger.value
+            )
+            return ToolResult("# Centre de contrôle des agents IA\n\n" +
+                status.joinToString("\n") { "- ${it.first} : ${if (it.second) "activé" else "désactivé"}" } +
+                "\n\nFréquence : ${store.agentMinutes.value} min\nDernière synthèse proactive : ${store.proactiveSummary.value.ifBlank { "aucune" }}", direct = true)
+        }
+        if (action == "intervalle") {
+            val minutes = a.optString("minutes").toIntOrNull()?.takeIf { it in setOf(15, 30, 60) }
+                ?: return ToolResult("Choisis 15, 30 ou 60 minutes.")
+            store.agentMinutes.set(minutes)
+            fr.dd.jarvis.work.AgentsScheduler.apply(app, store)
+            return ToolResult("✅ Fréquence des agents réglée à $minutes minutes.", direct = true)
+        }
+        if (action == "lancer") {
+            if (!store.agentsOn.value) return ToolResult("Les agents autonomes sont désactivés. Active d'abord l'agent global.")
+            fr.dd.jarvis.work.AgentsScheduler.runNow(app)
+            return ToolResult("✅ Un cycle des agents a été demandé. Android peut le différer selon les contraintes système.", direct = true)
+        }
+        if (action !in setOf("activer", "desactiver", "désactiver")) return ToolResult("Action attendue : etat, activer, desactiver, lancer ou intervalle.")
+        val on = action == "activer"
+        when (agent) {
+            "global", "tous" -> store.agentsOn.set(on)
+            "mails", "mail" -> store.agentMails.set(on)
+            "factures", "facture" -> store.agentFactures.set(on)
+            "planning", "agenda" -> store.agentPlanning.set(on)
+            "notifications", "notification", "surveillance_telephone", "telephone", "téléphone" -> store.agentNotifs.set(on)
+            else -> store.agentRanger.set(on)
+        }
+        fr.dd.jarvis.work.AgentsScheduler.apply(app, store)
+        return ToolResult("✅ $label ${if (on) "activé" else "désactivé"}. ${if (on && !store.agentsOn.value && agent != "global" && agent != "tous") "L'agent est configuré mais le commutateur général reste désactivé." else ""}", direct = true)
     }
 
     private suspend fun routineContextuelle(a: JSONObject): ToolResult {
