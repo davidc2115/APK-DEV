@@ -1331,7 +1331,20 @@ class ToolBox(
             val recent = try { app.mail.fetchRecent(500, false, a.optString("compte"), full = true) } catch (e: Exception) { return ToolResult("Recherche mail impossible : ${e.message}", direct = true) }
             val term = a.optString("recherche")
             val sender = a.optString("expediteur")
-            val filtered = recent.filter { (sender.isBlank() || it.from.contains(sender, true) || it.fromAddr.contains(sender, true)) && (term.isBlank() || it.subject.contains(term, true) || it.body.contains(term, true)) }
+            val zone = java.time.ZoneId.systemDefault()
+            fun borneDate(value: String, fin: Boolean): Long? = runCatching {
+                val d = LocalDate.parse(value.take(10))
+                (if (fin) d.plusDays(1) else d).atStartOfDay(zone).toInstant().toEpochMilli()
+            }.getOrNull()
+            val debut = borneDate(a.optString("date_debut"), false)
+            val fin = borneDate(a.optString("date_fin"), true)
+            val filtered = recent.filter { m ->
+                val time = m.date?.time
+                (sender.isBlank() || m.from.contains(sender, true) || m.fromAddr.contains(sender, true)) &&
+                (term.isBlank() || m.subject.contains(term, true) || m.body.contains(term, true)) &&
+                (debut == null || (time != null && time >= debut)) &&
+                (fin == null || (time != null && time < fin))
+            }
             return ToolResult(if (filtered.isEmpty()) "Aucun mail correspondant dans les 500 derniers messages IMAP consultés." else filtered.take(count).joinToString("\n\n") { "📧 ${it.from} — ${it.subject}\nDate : ${it.date}\n${it.body.ifBlank { it.snippet }}" }, direct = true)
         }
         return try {
