@@ -181,7 +181,10 @@ class VoiceManager(private val ctx: Context) {
                 override fun onPartialResults(partialResults: Bundle?) {
                     if (!actif()) return
                     val t = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
-                    if (t.isNotBlank()) { aParle(); onPartial(t) }
+                    // Un résultat partiel peut être une hallucination sur un bruit ou l'écho du TTS.
+                    // Seul onBeginningOfSpeech (détection vocale du moteur) démarre la fenêtre de parole ;
+                    // le texte partiel reste affiché sans empêcher la fermeture sur silence.
+                    if (t.isNotBlank()) onPartial(t)
                 }
             })
             val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
