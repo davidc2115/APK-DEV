@@ -129,8 +129,16 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
         val retard = d.docs.filter { it.type == "facture" && it.statut == "a_payer" && it.echeance.isNotBlank() && it.echeance < today }
         val bientotEchues = d.docs.filter { it.type == "facture" && it.statut == "a_payer" && it.echeance.isNotBlank() && it.echeance >= today && it.echeance <= LocalDate.now().plusDays(3).toString() }
         val devis = d.docs.filter { it.type == "devis" && it.statut == "envoye" && it.date <= LocalDate.now().minusDays(10).toString() }
+        val maintenance = d.clients.flatMap { client ->
+            client.sites.flatMap { site ->
+                site.interventions.mapNotNull { intervention ->
+                    val date = runCatching { LocalDate.parse(intervention.prochaineMaintenance) }.getOrNull()
+                    if (date != null && !date.isAfter(LocalDate.now().plusDays(14))) Triple(client, site, intervention) else null
+                }
+            }
+        }.sortedBy { it.third.prochaineMaintenance }
         store.agentLastFact.set(today)
-        if (retard.isEmpty() && bientotEchues.isEmpty() && devis.isEmpty()) return
+        if (retard.isEmpty() && bientotEchues.isEmpty() && devis.isEmpty() && maintenance.isEmpty()) return
         val sb = StringBuilder()
         if (retard.isNotEmpty()) {
             sb.append("Factures en retard (${euro(retard.sumOf { d.totaux(it).ttc })}) :\n")
@@ -141,11 +149,19 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
             bientotEchues.forEach { sb.append("• ${it.numero} · ${d.client(it.clientId)?.nom.orEmpty()} · ${euro(d.totaux(it).ttc)} · échéance le ${dateFr(it.echeance)}\n") }
         }
         if (devis.isNotEmpty()) {
-            sb.append("Devis sans réponse depuis plus de 10 jours :\n")
-            devis.forEach { sb.append("• ${it.numero} · ${d.client(it.clientId)?.nom.orEmpty()} · ${euro(d.totaux(it).ttc)}\n") }
+            sb.append("Devis sans réponse depuis plus de 10 jours :\\n")
+            devis.forEach { sb.append("• " + it.numero + " · " + (d.client(it.clientId)?.nom.orEmpty()) + " · " + euro(d.totaux(it).ttc) + "\\n") }
         }
-        alert(2002, "💶 Relances à faire", sb.toString())
-        journal.append("- 💶 ${retard.size} facture(s) en retard, ${bientotEchues.size} échéance(s) proche(s), ${devis.size} devis à relancer\n")
+        if (maintenance.isNotEmpty()) {
+            sb.append("Maintenances photovoltaïques à prévoir (retard ou dans les 14 jours) :\\n")
+            maintenance.forEach { (client, site, intervention) ->
+                val date = intervention.prochaineMaintenance
+                val retardTxt = if (date < today) " — EN RETARD" else ""
+                sb.append("• " + client.nom + " · " + site.nom + " — " + dateFr(date) + retardTxt + "\\n")
+            }
+        }
+        alert(2002, "💶 Suivi entreprise et maintenances", sb.toString())
+        journal.append("- 💶 " + retard.size + " facture(s) en retard, " + bientotEchues.size + " échéance(s) proche(s), " + devis.size + " devis à relancer, " + maintenance.size + " maintenance(s) à prévoir\\n")
     }
 
     // ---------------------------------------------------------------- planning : heure de départ
