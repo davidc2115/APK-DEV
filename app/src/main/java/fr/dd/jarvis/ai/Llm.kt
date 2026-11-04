@@ -204,13 +204,14 @@ class Llm(private val store: Store) {
         if (fournisseur == "tous" || fournisseur == "groq") {
             for ((i, key) in store.groqKeys.toList().withIndex()) {
                 verifier("Groq #${i + 1} (${mask(key)})") {
-                    val modeles = groq.listModels(key)
                     val modele = store.groqModel.value
-                    if (modele in modeles) {
+                    try {
                         groq.ping(key)
                         "✅ VALIDÉ — clé, modèle « $modele » et appel de test acceptés"
-                    } else {
-                        "⚠️ CLÉ ACCEPTÉE — ${modeles.size} modèles accessibles, mais le modèle configuré « $modele » n'est pas disponible"
+                    } catch (e: ApiException) {
+                        if (e.code != 400 && e.code != 404) throw e
+                        val modeles = groq.listModels(key)
+                        "⚠️ CLÉ ACCEPTÉE — ${modeles.size} modèles accessibles, mais le modèle configuré « $modele » est refusé"
                     }
                 }
             }
@@ -219,13 +220,14 @@ class Llm(private val store: Store) {
         if (fournisseur == "tous" || fournisseur == "gemini") {
             for ((i, key) in store.geminiKeys.toList().withIndex()) {
                 verifier("Gemini #${i + 1} (${mask(key)})") {
-                    val modeles = gemini.listModels(key)
                     val modele = store.geminiModel.value
-                    if (modele in modeles) {
+                    try {
                         gemini.ping(key)
                         "✅ VALIDÉ — clé, modèle « $modele » et appel de test acceptés"
-                    } else {
-                        "⚠️ CLÉ ACCEPTÉE — ${modeles.size} modèles accessibles, mais le modèle configuré « $modele » n'est pas disponible"
+                    } catch (e: ApiException) {
+                        if (e.code != 400 && e.code != 404) throw e
+                        val modeles = gemini.listModels(key)
+                        "⚠️ CLÉ ACCEPTÉE — ${modeles.size} modèles accessibles, mais le modèle configuré « $modele » est refusé"
                     }
                 }
             }
