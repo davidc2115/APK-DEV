@@ -96,19 +96,7 @@ class CarReplyReceiver : BroadcastReceiver() {
         if (intent.action == CarBridge.ACTION_READ) return
         val texte = androidx.core.app.RemoteInput.getResultsFromIntent(intent)?.getCharSequence(CarBridge.KEY_TEXT)?.toString()?.trim().orEmpty()
         if (texte.isBlank()) return
-        val app = context.applicationContext as JarvisApp
         val pending = goAsync()
-        CarBridge.ajouter(ChatMsg(true, texte))
-        CoroutineScope(Dispatchers.IO).launch {
-            val rep = try {
-                // En voiture : les actions sensibles (envoi de SMS, appel…) qui demandent une confirmation forcée sont refusées.
-                val brain = Brain(app.llm, ToolBox(app) { _, force -> !force }, app) { app.store.userName.value }
-                brain.reply(CarBridge.contexte()) { }
-            } catch (e: Throwable) { "Désolé, je n'ai pas pu faire ça : ${e.message ?: e.javaClass.simpleName}" }
-            val propre = rep.replace(Regex("[#*_`>|]+"), "").replace(Regex("\\s+"), " ").trim().ifBlank { "C'est fait." }
-            CarBridge.ajouter(ChatMsg(false, propre))
-            CarBridge.post(context, propre)
-            pending.finish()
-        }
+        CarBridge.repondre(context, texte) { pending.finish() }
     }
 }
