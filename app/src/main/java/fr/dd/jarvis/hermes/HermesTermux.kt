@@ -438,7 +438,8 @@ echo "=== FIN DU DIAGNOSTIC ==="
         val restore = """
 set -eu
 find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | grep -q . || { echo "❌ Aucune sauvegarde Hermès trouvée."; exit 1; }
-ARCHIVE="${'
+tar -tzf "$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)" >/dev/null
+tar -xzf "$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)" -C /root
 chmod 600 /root/.hermes/.env 2>/dev/null || true
 echo "✅ Données et configuration restaurées."
 """.trimIndent()
