@@ -436,7 +436,8 @@ def is_groq(item):
 fallbacks = [item for item in fallbacks if not is_groq(item)]
 main_provider = str(model_config.get("provider", "")) if isinstance(model_config, dict) else ""
 if os.environ.get("JARVIS_HAS_GEMINI") == "1" and main_provider != "gemini":
-    fallbacks.append({"provider": "gemini", "model": os.environ["JARVIS_GEMINI_MODEL"]})
+    if not any(isinstance(x, dict) and x.get("provider") == "gemini" and x.get("model") == os.environ["JARVIS_GEMINI_MODEL"] for x in fallbacks):
+        fallbacks.append({"provider": "gemini", "model": os.environ["JARVIS_GEMINI_MODEL"]})
 strategies = data.setdefault("credential_pool_strategies", {})
 if not isinstance(strategies, dict):
     raise SystemExit("Section credential_pool_strategies invalide ; aucune modification.")
@@ -470,7 +471,8 @@ child_fallbacks = delegation.get("fallback_providers") or []
 if not isinstance(child_fallbacks, list): child_fallbacks = []
 child_fallbacks = [x for x in child_fallbacks if not is_groq(x)]
 if os.environ.get("JARVIS_HAS_GROQ") == "1": child_fallbacks.append({"provider": "custom:groq", "model": os.environ["JARVIS_GROQ_MODEL"]})
-if os.environ.get("JARVIS_HAS_GEMINI") == "1": child_fallbacks.append({"provider": "gemini", "model": os.environ["JARVIS_GEMINI_MODEL"]})
+if os.environ.get("JARVIS_HAS_GEMINI") == "1" and not any(isinstance(x, dict) and x.get("provider") == "gemini" and x.get("model") == os.environ["JARVIS_GEMINI_MODEL"] for x in child_fallbacks):
+    child_fallbacks.append({"provider": "gemini", "model": os.environ["JARVIS_GEMINI_MODEL"]})
 for index in range(1, len(cf_ids) + 1): child_fallbacks.append({"provider": f"custom:jarvis_cf_{index}", "model": os.environ["JARVIS_CF_MODEL"]})
 for item in fallbacks:
     if isinstance(item, dict):
@@ -486,7 +488,8 @@ options = model_map.get("options") or []
 if not isinstance(options, list): options = []
 options = [x for x in options if not (isinstance(x, dict) and str(x.get("name", "")).startswith("jarvis-"))]
 def add_route(name, description, provider, model_name):
-    if provider and model_name: options.append({"name": name, "description": description, "provider": provider, "model": model_name})
+    if provider and model_name and not any(isinstance(x, dict) and x.get("provider") == provider and x.get("model") == model_name for x in options):
+        options.append({"name": name, "description": description, "provider": provider, "model": model_name})
 if os.environ.get("JARVIS_HAS_GEMINI") == "1": add_route("jarvis-gemini", "Analyse approfondie et raisonnement via Gemini", "gemini", os.environ["JARVIS_GEMINI_MODEL"])
 if os.environ.get("JARVIS_HAS_GROQ") == "1": add_route("jarvis-groq", "Agent rapide et technique via Groq", "custom:groq", os.environ["JARVIS_GROQ_MODEL"])
 for index in range(1, len(cf_ids) + 1): add_route(f"jarvis-cloudflare-{index}", "Agent de secours Cloudflare Workers AI", f"custom:jarvis_cf_{index}", os.environ["JARVIS_CF_MODEL"])
