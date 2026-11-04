@@ -100,6 +100,36 @@ object Telephony {
         }
     }
 
+
+    /** Recherche SMS sur l'historique local par contact, texte et plage de dates inclusives. */
+    fun rechercher(app: fr.dd.jarvis.JarvisApp, contact: String, terme: String, du: String, au: String, count: Int): String {
+        if (!ok(app, Manifest.permission.READ_SMS)) return "Permission SMS non accordée (Réglages › Contrôle du téléphone)."
+        val numero = if (contact.isBlank()) null else resolve(app, contact)?.second ?: contact
+        val zone = java.time.ZoneId.systemDefault()
+        fun borne(value: String, fin: Boolean): Long? = runCatching {
+            val d = java.time.LocalDate.parse(value.take(10))
+            (if (fin) d.plusDays(1).atStartOfDay(zone).toInstant() else d.atStartOfDay(zone).toInstant()).toEpochMilli()
+        }.getOrNull()
+        val min = borne(du, false); val max = borne(au, true)
+        val clauses = mutableListOf<String>(); val args = mutableListOf<String>()
+        min?.let { clauses += "date >= ?"; args += it.toString() }
+        max?.let { clauses += "date < ?"; args += it.toString() }
+        val out = mutableListOf<String>()
+        val fmt = java.text.SimpleDateFormat("dd/MM/yyyy 'à' HH:mm:ss", java.util.Locale.FRENCH)
+        app.contentResolver.query(Uri.parse("content://sms"), arrayOf("address", "body", "date", "type"), clauses.joinToString(" AND ").ifBlank { null }, args.toTypedArray().takeIf { it.isNotEmpty() }, "date DESC")?.use { c ->
+            while (c.moveToNext() && out.size < 2000) {
+                val addr = c.getString(0).orEmpty()
+                if (numero != null && !addr.filter(Char::isDigit).endsWith(numero.filter(Char::isDigit).takeLast(9))) continue
+                val body = c.getString(1).orEmpty()
+                if (terme.isNotBlank() && !body.contains(terme, true) && !addr.contains(terme, true)) continue
+                val sent = c.getInt(3) == 2
+                out += "• ${if (sent) "Envoyé à" else "Reçu de"} ${nomDe(app, addr) ?: addr} — ${fmt.format(java.util.Date(c.getLong(2)))}\n$body"
+            }
+        }
+        if (out.isEmpty()) return "Aucun SMS ne correspond à ces critères."
+        return "# Recherche SMS (${out.size})\n\n" + out.take(count.coerceIn(1, 30)).joinToString("\n\n")
+    }
+
     /** Nom du contact pour un numéro (tolère les espaces, +33, 0…). */
     private fun nomDe(app: fr.dd.jarvis.JarvisApp, addr: String): String? {
         if (!app.contacts.hasPermission() || addr.none { it.isDigit() }) return null

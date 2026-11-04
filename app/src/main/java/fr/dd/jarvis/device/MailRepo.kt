@@ -24,7 +24,8 @@ data class MailItem(
     val account: String = "",
     val id: String = "",
     val fromAddr: String = "",
-    val body: String = ""
+    val body: String = "",
+    val threadId: String = ""
 )
 
 /** Lecture des mails en IMAP (Gmail : activer l'IMAP et utiliser un « mot de passe d'application »). */

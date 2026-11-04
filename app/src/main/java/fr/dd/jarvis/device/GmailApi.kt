@@ -197,6 +197,98 @@ object GmailApi {
         }
     }
 
+
+    /** Recherche Gmail précise par expéditeur, texte (objet/contenu) et dates inclusives. */
+    suspend fun rechercher(ctx: Context, accounts: List<String>, sender: String, term: String, fromDate: String, toDate: String, count: Int): List<MailItem> {
+        val all = mutableListOf<MailItem>()
+        for (account in accounts) {
+            val auth = authorize(ctx, account)
+            if (auth.hasResolution()) throw IllegalStateException("Autorisation Gmail à renouveler pour $account (Réglages › Mails).")
+            val token = auth.accessToken ?: throw IllegalStateException("Jeton Google indisponible pour $account.")
+            val parts = mutableListOf<String>()
+            if (sender.isNotBlank()) parts += "from:${sender.trim()}"
+            if (term.isNotBlank()) parts += "\"${term.trim().replace("\"", "")}\""
+            fun datePart(value: String, after: Boolean): String? {
+                val d = runCatching { java.time.LocalDate.parse(value.take(10)) }.getOrNull() ?: return null
+                val target = if (!after) d.plusDays(1) else d
+                return (if (after) "after:" else "before:") + target.format(java.time.format.DateTimeFormatter.ofPattern("yyyy/MM/dd"))
+            }
+            datePart(fromDate, true)?.let { parts += it }
+            datePart(toDate, false)?.let { parts += it }
+            val q = java.net.URLEncoder.encode(parts.joinToString(" "), "UTF-8")
+            withContext(Dispatchers.IO) {
+                val ids = mutableListOf<String>()
+                var page: String? = null
+                while (ids.size < count) {
+                    val url = "$BASE/messages?maxResults=${minOf(100, count - ids.size)}&q=$q" + (page?.let { "&pageToken=$it" } ?: "")
+                    val result = get(token, url)
+                    val arr = result.optJSONArray("messages")
+                    for (i in 0 until (arr?.length() ?: 0)) ids += arr!!.getJSONObject(i).getString("id")
+                    page = result.optString("nextPageToken").takeIf { it.isNotBlank() } ?: break
+                }
+                for (id in ids) {
+                    val m = get(token, "$BASE/messages/$id?format=full")
+                    val headers = m.optJSONObject("payload")?.optJSONArray("headers")
+                    fun h(name: String): String = (0 until (headers?.length() ?: 0)).firstNotNullOfOrNull { i ->
+                        headers!!.getJSONObject(i).takeIf { it.optString("name").equals(name, true) }?.optString("value")
+                    }.orEmpty()
+                    val from = h("From")
+                    all += MailItem(
+                        from = Regex("^\\s*\"?([^\"<]+?)\"?\\s*<").find(from)?.groupValues?.get(1)?.ifBlank { null } ?: from.trim('<', '>', ' ').ifBlank { "?" },
+                        subject = h("Subject").ifBlank { "(sans objet)" },
+                        date = m.optString("internalDate").toLongOrNull()?.let { Date(it) },
+                        snippet = m.optString("snippet"),
+                        unread = m.optJSONArray("labelIds")?.toString()?.contains("UNREAD") == true,
+                        account = account,
+                        id = id,
+                        fromAddr = Regex("<([^>]+)>").find(from)?.groupValues?.get(1)?.lowercase() ?: from.trim().lowercase(),
+                        body = texteMail(m.optJSONObject("payload")).take(5000),
+                        threadId = m.optString("threadId")
+                    )
+                }
+            }
+        }
+        return all.sortedByDescending { it.date }.take(count)
+    }
+
+    data class ReplyTarget(val to: String, val subject: String, val threadId: String, val messageId: String, val references: String)
+
+    /** Récupère le destinataire et les en-têtes nécessaires à une vraie réponse dans le fil d'origine. */
+    suspend fun cibleReponse(ctx: Context, account: String, messageId: String): ReplyTarget = withContext(Dispatchers.IO) {
+        val auth = authorize(ctx, account)
+        if (auth.hasResolution()) throw IllegalStateException("Autorisation Gmail à renouveler pour $account.")
+        val token = auth.accessToken ?: throw IllegalStateException("Jeton Google indisponible.")
+        val m = get(token, "$BASE/messages/$messageId?format=full")
+        val headers = m.optJSONObject("payload")?.optJSONArray("headers")
+        fun h(name: String): String = (0 until (headers?.length() ?: 0)).firstNotNullOfOrNull { i ->
+            headers!!.getJSONObject(i).takeIf { it.optString("name").equals(name, true) }?.optString("value")
+        }.orEmpty()
+        val from = h("Reply-To").ifBlank { h("From") }
+        val to = Regex("<([^>]+)>").find(from)?.groupValues?.get(1) ?: from.trim()
+        if (!to.contains("@")) throw IllegalStateException("Adresse de réponse introuvable dans le mail original.")
+        val originalSubject = h("Subject").ifBlank { "(sans objet)" }
+        val subject = if (originalSubject.startsWith("Re:", true)) originalSubject else "Re: $originalSubject"
+        ReplyTarget(to, subject, m.optString("threadId"), h("Message-ID"), h("References"))
+    }
+
+    /** Envoie une réponse rattachée au fil Gmail d'origine. */
+    suspend fun repondre(ctx: Context, account: String, target: ReplyTarget, body: String): String = withContext(Dispatchers.IO) {
+        val auth = authorize(ctx, account)
+        if (auth.hasResolution()) throw IllegalStateException("Autorisation Gmail à renouveler pour $account.")
+        val token = auth.accessToken ?: throw IllegalStateException("Jeton Google indisponible.")
+        val raw = buildString {
+            append("From: $account\r\nTo: ${target.to}\r\nSubject: =?UTF-8?B?${android.util.Base64.encodeToString(target.subject.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)}?=\r\n")
+            if (target.messageId.isNotBlank()) append("In-Reply-To: ${target.messageId}\r\n")
+            val refs = listOf(target.references, target.messageId).filter { it.isNotBlank() }.joinToString(" ")
+            if (refs.isNotBlank()) append("References: $refs\r\n")
+            append("MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")
+            append(body)
+        }
+        val payload = JSONObject().put("raw", b64(raw)).put("threadId", target.threadId)
+        val response = post(token, "$BASE/messages/send", payload)
+        response.optString("id").ifBlank { throw IllegalStateException("Gmail n'a pas confirmé l'envoi de la réponse.") }
+    }
+
     private fun post(token: String, url: String, json: JSONObject): JSONObject {
         val body = appeler { Request.Builder().url(url).header("Authorization", "Bearer $token").post(json.toString().toRequestBody("application/json".toMediaType())).build() }
         return if (body.isBlank()) JSONObject() else JSONObject(body)

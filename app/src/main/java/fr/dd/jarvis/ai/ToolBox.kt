@@ -96,6 +96,21 @@ class ToolBox(
                 "count" to prop("Nombre de mails à analyser (5 à 40). Par défaut 20."),
                 "unread_only" to prop("« true » pour ne lire que les non lus.")
             )))
+        put(tool("rechercher_mails", "Retrouve des emails par expéditeur, contenu/objet et plage de dates. Affiche le contenu complet et l'identifiant du message pour répondre dans le fil d'origine.",
+            mapOf(
+                "compte" to prop("Compte Google précis (optionnel)."),
+                "expediteur" to prop("Adresse ou nom de l'expéditeur (optionnel)."),
+                "recherche" to prop("Mots ou expression à rechercher dans l'objet et le contenu (optionnel)."),
+                "date_debut" to prop("Date de début incluse au format AAAA-MM-JJ (optionnel)."),
+                "date_fin" to prop("Date de fin incluse au format AAAA-MM-JJ (optionnel)."),
+                "count" to prop("Nombre maximal de résultats (1 à 20). Par défaut 5.")
+            )))
+        put(tool("repondre_email", "Répond à un email précis dans son fil Gmail d'origine. Affiche le destinataire, l'objet et le texte, puis exige une validation explicite avant envoi.",
+            mapOf(
+                "compte" to prop("Adresse du compte Gmail."),
+                "message_id" to prop("Identifiant exact fourni par rechercher_mails."),
+                "texte" to prop("Texte complet de la réponse.")
+            ), listOf("compte", "message_id", "texte")))
         put(tool("trier_mails", "Analyse les derniers mails, les classe par catégorie (Urgent, Clients, Factures, Chantiers, Administratif, Notifications, Newsletters, Perso) et peut les ranger dans Gmail (libellés Urgent, Clients…).",
             mapOf(
                 "compte" to prop("Compte mail précis (adresse ou partie), même s'il est désactivé. Vide = comptes actifs seulement."),
@@ -126,6 +141,16 @@ class ToolBox(
                 "contact" to prop("Nom ou numéro pour filtrer (optionnel)."),
                 "non_lus" to prop("« true » pour les non lus seulement.")
             )))
+        put(tool("rechercher_sms", "Recherche les SMS par contact, contenu et dates inclusives. Affiche le texte complet, l'expéditeur et l'heure précise.",
+            mapOf(
+                "contact" to prop("Nom du contact ou numéro (optionnel)."),
+                "recherche" to prop("Mot ou expression du message (optionnel)."),
+                "date_debut" to prop("Date de début incluse AAAA-MM-JJ (optionnel)."),
+                "date_fin" to prop("Date de fin incluse AAAA-MM-JJ (optionnel)."),
+                "count" to prop("Nombre maximal de résultats (1 à 30). Par défaut 10.")
+            )))
+        put(tool("repondre_sms", "Répond par SMS à un contact ou au numéro de l'expéditeur. La validation du destinataire et du texte exact est toujours obligatoire.",
+            mapOf("destinataire" to prop("Contact ou numéro de l'expéditeur du SMS."), "texte" to prop("Réponse SMS complète.")), listOf("destinataire", "texte")))
         put(tool("envoyer_sms", "Envoie un SMS à un contact ou un numéro.",
             mapOf("destinataire" to prop("Nom du contact ou numéro."), "texte" to prop("Contenu du SMS.")), listOf("destinataire", "texte")))
         put(tool("appeler_contact", "Appelle un contact (ou un numéro) directement.",
@@ -380,15 +405,28 @@ class ToolBox(
         "delete_event" -> deleteEvent(a)
         "set_event_color" -> setEventColor(a)
         "set_calendar_color" -> setCalendarColor(a)
+        "rechercher_mails" -> rechercherMails(a)
+        "repondre_email" -> repondreEmail(a)
         "summarize_mails" -> summarizeMails(a)
         "morning_briefing" -> ToolResult(briefing(), direct = true)
         "trier_mails" -> trierMails(a)
         "mail_compte" -> mailCompte(a)
         "mail_envoyer" -> mailEnvoyer(a)
         "marquer_mails_traites" -> marquerTraites(a)
+        "rechercher_sms" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            fr.dd.jarvis.device.Telephony.rechercher(app, a.optString("contact"), a.optString("recherche"), a.optString("date_debut"), a.optString("date_fin"), a.optString("count").toIntOrNull() ?: 10)
+        }, direct = true)
         "lire_sms" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             fr.dd.jarvis.device.Telephony.lire(app, (a.optString("count").toIntOrNull() ?: 10).coerceIn(1, 30), a.optString("contact"), a.optString("non_lus").equals("true", true))
         }, direct = true)
+        "repondre_sms" -> {
+            val r = fr.dd.jarvis.device.Telephony.resolve(app, a.optString("destinataire"))
+            val txt = a.optString("texte").trim()
+            if (r == null) ToolResult("Expéditeur du SMS introuvable : ${a.optString("destinataire")}.")
+            else if (txt.isBlank()) ToolResult("Réponse SMS vide.")
+            else if (!confirm("Confirmer la réponse SMS ?\n\nÀ : ${r.first} (${r.second})\n\n$txt", true)) ToolResult("Réponse SMS refusée : aucun message envoyé.", direct = true)
+            else ToolResult(fr.dd.jarvis.device.Telephony.envoyer(app, r.second, txt), direct = true)
+        }
         "envoyer_sms" -> {
             val r = fr.dd.jarvis.device.Telephony.resolve(app, a.optString("destinataire"))
             val txt = a.optString("texte")
@@ -1281,6 +1319,45 @@ class ToolBox(
             }
         }
         return ToolResult(fr.dd.jarvis.ai.MailTri.presenter(classes, note), direct = true)
+    }
+
+
+    private suspend fun rechercherMails(a: JSONObject): ToolResult {
+        if (!store.mailConfigured()) return ToolResult("Les comptes mail ne sont pas configurés (Réglages › Mails).", direct = true)
+        val count = (a.optString("count").toIntOrNull() ?: 5).coerceIn(1, 20)
+        val q = a.optString("compte").trim().lowercase()
+        val accounts = if (q.isBlank()) store.gmailAccounts.filter { store.mailActive(it) } else store.gmailAccounts.filter { it.lowercase().contains(q) }
+        if (accounts.isEmpty()) {
+            val recent = try { app.mail.fetchRecent(500, false, a.optString("compte"), full = true) } catch (e: Exception) { return ToolResult("Recherche mail impossible : ${e.message}", direct = true) }
+            val term = a.optString("recherche")
+            val sender = a.optString("expediteur")
+            val filtered = recent.filter { (sender.isBlank() || it.from.contains(sender, true) || it.fromAddr.contains(sender, true)) && (term.isBlank() || it.subject.contains(term, true) || it.body.contains(term, true)) }
+            return ToolResult(if (filtered.isEmpty()) "Aucun mail correspondant dans les 500 derniers messages IMAP consultés." else filtered.take(count).joinToString("\n\n") { "📧 ${it.from} — ${it.subject}\nDate : ${it.date}\n${it.body.ifBlank { it.snippet }}" }, direct = true)
+        }
+        return try {
+            val items = fr.dd.jarvis.device.GmailApi.rechercher(app, accounts, a.optString("expediteur"), a.optString("recherche"), a.optString("date_debut"), a.optString("date_fin"), count)
+            if (items.isEmpty()) ToolResult("Aucun email correspondant.", direct = true)
+            else ToolResult(items.joinToString("\n\n") { m ->
+                "📧 **${m.from}** — ${m.subject}\nCompte : ${m.account}\nDate : ${m.date?.let { java.text.SimpleDateFormat("EEEE dd MMMM yyyy 'à' HH:mm:ss", java.util.Locale.FRENCH).format(it) } ?: "inconnue"}\nID : ${m.id}\nTHREAD : ${m.threadId}\n\n${m.body.ifBlank { m.snippet }}"
+            }, direct = true)
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { ToolResult("Recherche Gmail impossible : ${e.message}", direct = true) }
+    }
+
+    private suspend fun repondreEmail(a: JSONObject): ToolResult {
+        val account = a.optString("compte").trim()
+        val messageId = a.optString("message_id").trim()
+        val body = a.optString("texte").trim()
+        if (account.isBlank() || messageId.isBlank() || body.isBlank()) return ToolResult("Il faut le compte, l'identifiant du mail et le texte de la réponse.")
+        if (store.gmailAccounts.none { it.equals(account, true) }) return ToolResult("Ce compte Gmail n'est pas connecté dans JARVIS.")
+        return try {
+            val target = fr.dd.jarvis.device.GmailApi.cibleReponse(app, account, messageId)
+            val confirmation = "Confirmer l'envoi de cette réponse dans le fil d'origine ?\n\nCompte : $account\nÀ : ${target.to}\nObjet : ${target.subject}\n\n$body"
+            if (!confirm(confirmation, true)) ToolResult("Réponse non envoyée : validation refusée.", direct = true)
+            else {
+                val id = fr.dd.jarvis.device.GmailApi.repondre(app, account, target, body)
+                ToolResult("✅ Réponse envoyée dans le fil Gmail d'origine (id $id).", direct = true)
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { ToolResult("❌ Réponse non envoyée : ${e.message}", direct = true) }
     }
 
     private suspend fun summarizeMails(a: JSONObject): ToolResult {
