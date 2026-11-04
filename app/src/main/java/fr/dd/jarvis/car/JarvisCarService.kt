@@ -118,7 +118,8 @@ class JarvisCarScreen(ctx: CarContext) : Screen(ctx) {
             }
         }
         liste.addItem(ConversationItem.Builder("jarvis-assistant", CarText.create("JARVIS"), moi, messages, callback).build())
-        liste.addItem(Row.Builder().setTitle("🎤 Parler à JARVIS")                .addText(if (voix) "Micro de la voiture : demande, réponse lue, on enchaîne" else "Dictée (voiture à l'arrêt) — ou « Répondre » à la conversation JARVIS")
+        liste.addItem(Row.Builder().setTitle("🎤 Parler à JARVIS")
+                .addText(if (voix) "Micro de la voiture : demande, réponse lue, on enchaîne" else "Dictée (voiture à l'arrêt) — ou « Répondre » à la conversation JARVIS")
                 .setOnClickListener {
                     if (voix) ConversationVoiture.ouvrir(carContext, screenManager)
                     else screenManager.push(JarvisSearchScreen(carContext) { q -> screenManager.push(ReponseTexteScreen(carContext, q)) })
