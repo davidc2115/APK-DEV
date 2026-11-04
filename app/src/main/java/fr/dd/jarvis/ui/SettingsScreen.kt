@@ -1016,11 +1016,31 @@ private fun SystemHealthPanel(app: JarvisApp, refresh: Int, onRefresh: () -> Uni
             android.os.BatteryManager.BATTERY_STATUS_FULL
         )
     }
-    val freeStorage = remember(refresh) {
+    val storage = remember(refresh) {
         runCatching {
-            val stat = android.os.StatFs(ctx.filesDir.absolutePath)
-            stat.availableBytes / (1024.0 * 1024.0 * 1024.0)
-        }.getOrDefault(0.0)
+            val stat = android.os.StatFs(android.os.Environment.getDataDirectory().absolutePath)
+            val free = stat.availableBytes / (1024.0 * 1024.0 * 1024.0)
+            val total = stat.totalBytes / (1024.0 * 1024.0 * 1024.0)
+            Triple(free, total, ((stat.totalBytes - stat.availableBytes) * 100 / stat.totalBytes).toInt())
+        }.getOrDefault(Triple(0.0, 0.0, 0))
+    }
+    val ram = remember(refresh) {
+        runCatching {
+            val info = android.app.ActivityManager.MemoryInfo()
+            (ctx.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager).getMemoryInfo(info)
+            Triple(info.availMem / (1024.0 * 1024.0 * 1024.0), info.totalMem / (1024.0 * 1024.0 * 1024.0), info.lowMemory)
+        }.getOrDefault(Triple(0.0, 0.0, false))
+    }
+    val batteryDetails = remember(refresh) {
+        val intent = ctx.registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
+        val temp = intent?.getIntExtra(android.os.BatteryManager.EXTRA_TEMPERATURE, -1)?.takeIf { it >= 0 }?.div(10.0)
+        val health = when (intent?.getIntExtra(android.os.BatteryManager.EXTRA_HEALTH, -1)) {
+            android.os.BatteryManager.BATTERY_HEALTH_GOOD -> "bonne"
+            android.os.BatteryManager.BATTERY_HEALTH_OVERHEAT -> "surchauffe"
+            android.os.BatteryManager.BATTERY_HEALTH_DEAD -> "défectueuse"
+            else -> "non communiquée"
+        }
+        temp to health
     }
     val shizukuInstalled = remember(refresh) { fr.dd.jarvis.device.ShizukuShell.installed(ctx) }
     val shizukuRunning = remember(refresh) { fr.dd.jarvis.device.ShizukuShell.running() }
@@ -1049,7 +1069,9 @@ private fun SystemHealthPanel(app: JarvisApp, refresh: Int, onRefresh: () -> Uni
         Text("Lecture des états Android accessibles à JARVIS. Les autorisations sont distinguées de la connexion réelle des services.", color = HudDim, fontSize = 11.sp)
         Spacer(Modifier.height(5.dp))
         Text("🔋 Batterie : " + (if (battery >= 0) "$battery %" else "indisponible") + (if (charging) " · en charge" else ""), color = HudText, fontSize = 13.sp)
-        Text("💾 Stockage libre de l'application : " + "%.2f".format(java.util.Locale.FRANCE, freeStorage) + " Go", color = HudText, fontSize = 12.sp)
+        Text("🔋 Santé batterie : ${batteryDetails.second}" + (batteryDetails.first?.let { " · ${String.format(java.util.Locale.FRANCE, "%.1f", it)} °C" } ?: ""), color = HudText, fontSize = 12.sp)
+        Text("💾 Stockage interne : ${"%.2f".format(java.util.Locale.FRANCE, storage.first)} Go libres / ${"%.1f".format(java.util.Locale.FRANCE, storage.second)} Go · ${storage.third} % utilisés", color = HudText, fontSize = 12.sp)
+        Text("🧠 RAM : ${"%.2f".format(java.util.Locale.FRANCE, ram.first)} Go libres / ${"%.2f".format(java.util.Locale.FRANCE, ram.second)} Go" + if (ram.third) " · pression mémoire" else "", color = HudText, fontSize = 12.sp)
         AgentStatusRow("Connexion Internet", network, if (network) "connectée" else "hors ligne")
         AgentStatusRow("Shizuku installé", shizukuInstalled, if (shizukuInstalled) "détecté" else "absent")
         AgentStatusRow("Shizuku autorisé et prêt", shizukuReady, if (shizukuReady) "opérationnel" else if (shizukuRunning) "autorisation manquante" else "arrêté")
