@@ -127,96 +127,191 @@ fun PlanningScreen(app: JarvisApp) {
 
     val calMap = cals.associateBy { it.id }
     val grouped = events.groupBy { eventDay(it) }.toSortedMap()
+    val dayEvents = events.filter { eventDay(it) == day }.sortedBy { it.begin }
+    val nextEvent = dayEvents.firstOrNull { !it.allDay && it.end >= System.currentTimeMillis() }
+    val weekStart = day.with(java.time.DayOfWeek.MONDAY)
+    val weekDays = (0..6).map { weekStart.plusDays(it.toLong()) }
+    var showCalendars by remember { mutableStateOf(false) }
+    val activeCalendars = cals.count { it.id !in store.hiddenCals }
 
     LazyColumn(
         Modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
             HudPanel(Modifier.fillMaxWidth()) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    HudRoundButton(Icons.Filled.ChevronLeft) { day = day.minusDays(range.toLong()) }
-                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            day.format(dayTitleFmt).replaceFirstChar { it.uppercase() },
-                            color = HudText, fontWeight = FontWeight.Bold, fontSize = 16.sp
-                        )
-                        if (range > 1) Text("→ ${day.plusDays((range - 1).toLong()).format(dayTitleFmt)}", color = HudDim, fontSize = 12.sp)
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("JARVIS  /  ORGANISATION", color = LocalAccent.current, fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                            Text("Mon planning", color = HudText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                            Text(day.format(DateTimeFormatter.ofPattern("EEEE d MMMM yyyy", Locale.FRENCH)).replaceFirstChar { it.uppercase() }, color = HudDim, fontSize = 13.sp)
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(day.dayOfMonth.toString().padStart(2, '0'), color = LocalAccent.current, fontSize = 34.sp, fontWeight = FontWeight.Light, fontFamily = FontFamily.Monospace)
+                            Text(day.format(DateTimeFormatter.ofPattern("MMMM", Locale.FRENCH)).uppercase(Locale.FRENCH), color = HudDim, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
-                    HudRoundButton(Icons.Filled.ChevronRight) { day = day.plusDays(range.toLong()) }
-                }
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    HudChip("Aujourd'hui") { day = LocalDate.now() }
-                    HudChip("Jour", range == 1) { range = 1 }
-                    HudChip("Semaine", range == 7) { range = 7 }
-                    HudChip("+ RDV") { creating = true }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        weekDays.forEach { d ->
+                            val chosen = d == day
+                            Column(
+                                Modifier.weight(1f).clip(CircleShape).background(if (chosen) LocalAccent.current.copy(alpha = 0.20f) else Color.Transparent)
+                                    .clickable { day = d; range = 1 }.padding(vertical = 9.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Text(d.format(DateTimeFormatter.ofPattern("EE", Locale.FRENCH)).uppercase(Locale.FRENCH), color = if (chosen) LocalAccent.current else HudDim, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                Text(d.dayOfMonth.toString(), color = if (chosen) HudText else HudDim, fontSize = 14.sp, fontWeight = if (chosen) FontWeight.Bold else FontWeight.Normal)
+                                Box(Modifier.size(4.dp).clip(CircleShape).background(if (d == LocalDate.now()) LocalAccent.current else Color.Transparent))
+                            }
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        HudChip("Aujourd'hui") { day = LocalDate.now(); range = 1 }
+                        HudChip("Jour", range == 1) { range = 1 }
+                        HudChip("Semaine", range == 7) { range = 7 }
+                        Spacer(Modifier.weight(1f))
+                        HudRoundButton(Icons.Filled.ChevronLeft) { day = day.minusDays(range.toLong()) }
+                        HudRoundButton(Icons.Filled.ChevronRight) { day = day.plusDays(range.toLong()) }
+                    }
                 }
             }
         }
 
         item {
-            HudPanel(Modifier.fillMaxWidth(), title = "Agendas (touche pour masquer, ✎ pour renommer / colorer)") {
-                if (cals.isEmpty()) Text("Aucun agenda trouvé sur ce téléphone.", color = HudDim, fontSize = 13.sp)
-                cals.forEach { cal ->
-                    val hidden = cal.id in store.hiddenCals
-                    Row(
-                        Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            Modifier.size(16.dp).clip(CircleShape)
-                                .background(Color(repo.calendarColor(cal)).copy(alpha = if (hidden) 0.25f else 1f))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                HudPanel(Modifier.weight(1f)) {
+                    Text("RENDEZ-VOUS", color = HudDim, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    Text(dayEvents.size.toString().padStart(2, '0'), color = HudText, fontSize = 25.sp, fontWeight = FontWeight.Bold)
+                    Text("sur la journée", color = HudDim, fontSize = 10.sp)
+                }
+                HudPanel(Modifier.weight(1f)) {
+                    Text("AGENDAS ACTIFS", color = HudDim, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    Text(activeCalendars.toString().padStart(2, '0'), color = LocalAccent.current, fontSize = 25.sp, fontWeight = FontWeight.Bold)
+                    Text("sources visibles", color = HudDim, fontSize = 10.sp)
+                }
+                HudPanel(Modifier.weight(1f)) {
+                    Text("PROCHAINE ÉTAPE", color = HudDim, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    Text(nextEvent?.let { Instant.ofEpochMilli(it.begin).atZone(ZoneId.systemDefault()).format(hourFmt) } ?: "—", color = HudText, fontSize = 25.sp, fontWeight = FontWeight.Bold)
+                    Text(if (nextEvent == null) "aucun rendez-vous" else "à venir", color = HudDim, fontSize = 10.sp)
+                }
+            }
+        }
+
+        item {
+            HudPanel(Modifier.fillMaxWidth(), accent = LocalAccent.current) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("✦  ASSISTANT PROACTIF", color = LocalAccent.current, fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                        Text(
+                            when {
+                                nextEvent != null -> "Prochain rendez-vous"
+                                dayEvents.isEmpty() -> "Une journée encore libre"
+                                else -> "Votre journée est en cours"
+                            },
+                            color = HudText, fontSize = 16.sp, fontWeight = FontWeight.SemiBold
                         )
-                        Spacer(Modifier.width(10.dp))
-                        Column(
-                            Modifier.weight(1f).clickable { store.toggleCalendar(cal.id) }
-                        ) {
-                            Text(
-                                repo.displayName(cal),
-                                color = if (hidden) HudDim else HudText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold
-                            )
-                            Text(cal.account, color = HudDim, fontSize = 11.sp)
-                        }
-                        Icon(
-                            Icons.Filled.Edit, null, tint = LocalAccent.current,
-                            modifier = Modifier.size(20.dp).clickable { editCal = cal }
+                        Text(
+                            when {
+                                nextEvent != null -> nextEvent.title + (if (nextEvent.location.isNotBlank()) " · ${nextEvent.location}" else "")
+                                dayEvents.isEmpty() -> "Aucun événement enregistré pour cette date. Jarvis pourra t'aider à organiser tes priorités."
+                                else -> "${dayEvents.size} rendez-vous planifié(s). Garde un œil sur les horaires et les lieux."
+                            },
+                            color = HudDim, fontSize = 12.sp
                         )
                     }
+                    Text("✧", color = LocalAccent.current, fontSize = 28.sp)
                 }
+                if (!store.agentsOn.value) {
+                    Spacer(Modifier.height(8.dp))
+                    Text("La veille automatique des agents est désactivée dans les réglages.", color = HudDim, fontSize = 10.sp)
+                } else {
+                    Spacer(Modifier.height(8.dp))
+                    Text("Veille des agents activée · alertes et suivi du planning selon tes réglages.", color = LocalAccent.current, fontSize = 10.sp)
+                }
+            }
+        }
+
+        item {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(if (range == 7) "VUE DE LA SEMAINE" else "FIL DE LA JOURNÉE", color = LocalAccent.current, fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                    Text(if (range == 7) "Tes rendez-vous, dans l'ordre" else "Le déroulé de tes rendez-vous", color = HudText, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                }
+                HudButton("+ Rendez-vous", icon = Icons.Filled.Add) { creating = true }
             }
         }
 
         if (grouped.isEmpty()) {
             item {
                 HudPanel(Modifier.fillMaxWidth()) {
-                    Text("🎉 Aucun événement sur cette période.", color = HudText, fontSize = 14.sp)
+                    Column(Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Text("✧", color = LocalAccent.current, fontSize = 30.sp)
+                        Text("Aucun événement sur cette période", color = HudText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Profite de cet espace libre pour préparer tes priorités.", color = HudDim, fontSize = 12.sp)
+                        HudButton("Créer un rendez-vous", icon = Icons.Filled.Add) { creating = true }
+                    }
                 }
             }
         }
 
         grouped.forEach { (d, list) ->
             item(key = "h$d") {
-                Text(
-                    "📅 " + d.format(dayTitleFmt).replaceFirstChar { it.uppercase() },
-                    color = LocalAccent.current, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 14.sp,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
+                Row(Modifier.fillMaxWidth().padding(top = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(d.format(dayTitleFmt).replaceFirstChar { it.uppercase() }, color = HudText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.weight(1f))
+                    Text("${list.size} ÉVÉNEMENT(S)", color = HudDim, fontSize = 9.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                }
             }
             list.forEach { e ->
                 item(key = "e${e.id}-${e.begin}") {
                     val color = Color(repo.eventColor(e, calMap))
-                    HudPanel(Modifier.fillMaxWidth(), accent = color, onClick = { selected = e }) {
-                        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-                            Box(Modifier.width(5.dp).fillMaxHeight().background(color))
-                            Spacer(Modifier.width(10.dp))
-                            Column {
-                                Text("🕗 " + timeLabel(e), color = color, fontSize = 12.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
-                                Text(e.title, color = HudText, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                                if (e.location.isNotBlank()) Text("📍 ${e.location}", color = HudDim, fontSize = 12.sp)
-                                calMap[e.calId]?.let { Text(repo.displayName(it), color = HudDim, fontSize = 11.sp) }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Stretch) {
+                        Column(Modifier.width(54.dp).padding(top = 9.dp), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(if (e.allDay) "JOUR" else Instant.ofEpochMilli(e.begin).atZone(ZoneId.systemDefault()).format(hourFmt), color = color, fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                            if (!e.allDay) Text(Instant.ofEpochMilli(e.end).atZone(ZoneId.systemDefault()).format(hourFmt), color = HudDim, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                        }
+                        Box(Modifier.padding(horizontal = 9.dp).width(3.dp).height(78.dp).clip(CircleShape).background(color.copy(alpha = 0.8f)))
+                        HudPanel(Modifier.weight(1f), accent = color, onClick = { selected = e }) {
+                            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                Text(e.title, color = HudText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                if (e.location.isNotBlank()) Text("⌖  ${e.location}", color = HudDim, fontSize = 11.sp)
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(timeLabel(e), color = color, fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                    Spacer(Modifier.weight(1f))
+                                    calMap[e.calId]?.let { Text(repo.displayName(it), color = HudDim, fontSize = 9.sp) }
+                                }
                             }
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            HudPanel(Modifier.fillMaxWidth()) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("SOURCES DU PLANNING", color = HudText, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text("$activeCalendars agenda(s) visible(s) · ${cals.size} au total", color = HudDim, fontSize = 10.sp)
+                    }
+                    HudChip(if (showCalendars) "Masquer" else "Afficher") { showCalendars = !showCalendars }
+                }
+                if (showCalendars) {
+                    Spacer(Modifier.height(8.dp))
+                    if (cals.isEmpty()) Text("Aucun agenda trouvé sur ce téléphone.", color = HudDim, fontSize = 12.sp)
+                    cals.forEach { cal ->
+                        val hidden = cal.id in store.hiddenCals
+                        Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(12.dp).clip(CircleShape).background(Color(repo.calendarColor(cal)).copy(alpha = if (hidden) 0.25f else 1f)))
+                            Spacer(Modifier.width(9.dp))
+                            Column(Modifier.weight(1f).clickable { store.toggleCalendar(cal.id); refresh++ }) {
+                                Text(repo.displayName(cal), color = if (hidden) HudDim else HudText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                Text(cal.account, color = HudDim, fontSize = 10.sp)
+                            }
+                            Icon(Icons.Filled.Edit, null, tint = LocalAccent.current, modifier = Modifier.size(19.dp).clickable { editCal = cal })
                         }
                     }
                 }
