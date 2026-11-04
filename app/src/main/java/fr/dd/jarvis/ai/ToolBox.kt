@@ -402,7 +402,7 @@ class ToolBox(
         "delete_contact" -> deleteContact(a)
         "meteo" -> ToolResult(fr.dd.jarvis.ai.Meteo.get(app, a.optString("lieu"), a.optString("jours").toIntOrNull() ?: 3))
         "jarvis_ai_status" -> ToolResult(
-            "Moteurs IA JARVIS : ${llm.keyStatus()}\\n" +
+            "Moteurs IA JARVIS : ${llm.keyStatus()}\n" +
                 "Modèles configurés : Gemini ${store.geminiModel.value.ifBlank { "non défini" }} ; " +
                 "Groq ${store.groqModel.value.ifBlank { "non défini" }} ; " +
                 "Cloudflare ${store.cfChatModel.value.ifBlank { "non défini" }}. " +
@@ -413,7 +413,7 @@ class ToolBox(
             val prompt = a.optString("prompt").trim().take(14000)
             if (system.isBlank() || prompt.isBlank()) ToolResult("Il faut fournir un rôle et une demande à l'agent IA JARVIS.")
             else try {
-                ToolResult("🧠 Avis de l'agent IA JARVIS (Gemini puis Groq en secours) :\\n" + llm.agent(system, prompt))
+                ToolResult("🧠 Avis de l'agent IA JARVIS (Gemini puis Groq en secours) :\n" + llm.agent(system, prompt))
             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (e: Exception) { ToolResult("❌ Agent IA JARVIS indisponible : ${e.message ?: e.javaClass.simpleName}") }
         }
