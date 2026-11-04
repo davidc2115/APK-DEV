@@ -482,6 +482,8 @@ class PhoneControl(private val ctx: Context) {
             "volume" -> volume(value.filter { it.isDigit() }.toIntOrNull() ?: 50)
             "wifi_on" -> toggle("Wi-Fi", true, "wifi_on", listOf("cmd wifi set-wifi-enabled enabled", "svc wifi enable"))
             "wifi_off" -> toggle("Wi-Fi", false, "wifi_on", listOf("cmd wifi set-wifi-enabled disabled", "svc wifi disable"))
+            "wifi_connect" -> start(Settings.ACTION_WIFI_SETTINGS).ifBlank { "Réglages Wi-Fi ouverts. Je peux lire les réseaux affichés et t'aider à sélectionner celui demandé ; Android peut demander une validation système ou le mot de passe." }
+            "bluetooth_pair" -> start(Settings.ACTION_BLUETOOTH_SETTINGS).ifBlank { "Réglages Bluetooth ouverts. Je peux rechercher l'appareil affiché et lancer sa sélection ; Android peut demander un code PIN ou une confirmation d'appairage." }
             "bluetooth_on" -> toggle("Bluetooth", true, "bluetooth_on", listOf("cmd bluetooth_manager enable", "svc bluetooth enable"))
             "bluetooth_off" -> toggle("Bluetooth", false, "bluetooth_on", listOf("cmd bluetooth_manager disable", "svc bluetooth disable"))
             "data_on" -> toggle("Données mobiles", true, "mobile_data", listOf("svc data enable"))
