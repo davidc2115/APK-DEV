@@ -374,6 +374,8 @@ class Store(context: Context) {
     val briefingHour = IPref("briefingHour", 7)
     val briefingMinute = IPref("briefingMinute", 30)
     val lastBriefing = SPref("lastBriefing", "")
+    /** Dernière synthèse calculée par les agents proactifs, affichée dans le planning. */
+    val proactiveSummary = SPref("proactiveSummary", "")
 
     // ---- Agendas : alias, couleurs, visibilité (réglages locaux, n'altèrent pas les agendas du téléphone)
     val calAlias = mutableStateMapOf<Long, String>().also { it.putAll(readMapStr("calAlias")) }
