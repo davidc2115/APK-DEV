@@ -28,7 +28,7 @@ object PhoneHealth {
             (ctx.getSystemService(Context.BATTERY_SERVICE) as BatteryManager)
                 .getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY).takeIf { it in 0..100 }
         }.getOrNull()
-        val charging = batteryIntent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) in setOf(
+        val charging = (batteryIntent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1) in setOf(
             BatteryManager.BATTERY_STATUS_CHARGING, BatteryManager.BATTERY_STATUS_FULL
         )
         val temperature = batteryIntent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1)?.takeIf { it >= 0 }?.div(10.0)
