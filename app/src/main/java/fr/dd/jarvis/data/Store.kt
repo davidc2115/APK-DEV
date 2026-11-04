@@ -357,7 +357,7 @@ class Store(context: Context) {
     val obsidianUri = SPref("obsidianUri", "")
 
     // ---- Hermès (agent Nous Research dans Termux) : cerveau principal quand il est en ligne
-    /** auto = Hermès cerveau principal (Groq pour les commandes rapides, Gemini pour les agents) ; demande = seulement si on le nomme ; off. */
+    /** auto = Hermès cerveau unique pour toutes les demandes ; il choisit ses sous-agents (Gemini, Groq, Cloudflare…) ou répond lui-même. demande = Hermès uniquement si nommé ; off = cerveau Jarvis de secours. */
     val hermesMode = SPref("hermesMode", "auto")
     /** Connexion facultative au serveur officiel Suno MCP (OAuth). */
     val sunoMcpActive = BPref("sunoMcpActive", false)
