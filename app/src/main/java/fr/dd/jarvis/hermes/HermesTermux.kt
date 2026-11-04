@@ -219,6 +219,12 @@ p() { echo "${'$'}*"; command -v curl >/dev/null 2>&1 && curl -s -m 4 -X POST -H
             appendLine("credential_pool_strategies:")
             appendLine("  gemini: round_robin")
             if (groq.isNotBlank()) appendLine("  groq: round_robin")
+            // Active explicitement la mémoire native évolutive d'Hermès.
+            // La mémoire Jarvis/Obsidian reste la référence partagée pour les préférences utilisateur.
+            appendLine("memory:")
+            appendLine("  memory_enabled: true")
+            appendLine("  user_profile_enabled: true")
+            appendLine("  write_approval: false")
             appendLine("mcp_servers:")
             appendLine("  jarvis:")
             appendLine("    url: \"$urlMcp\"")
