@@ -153,6 +153,8 @@ fun SettingsScreen(app: JarvisApp) {
 
         // ------------------------------------------------------------ Centre de contrôle des agents
         item {
+            var agentTest by remember { mutableStateOf("") }
+            var agentTesting by remember { mutableStateOf(false) }
             HudPanel(Modifier.fillMaxWidth(), title = "Centre de contrôle des agents IA") {
                 Text("État de configuration des moteurs disponibles dans JARVIS. Une clé configurée ne signifie pas que le service est actuellement joignable ou que son quota est disponible : utilise les tests des fournisseurs pour le vérifier.", color = HudDim, fontSize = 11.sp)
                 Spacer(Modifier.height(6.dp))
@@ -164,7 +166,16 @@ fun SettingsScreen(app: JarvisApp) {
                 AgentStatusRow("Hugging Face · vidéo de secours", store.huggingFaceToken.value.isNotBlank(), if (store.huggingFaceToken.value.isNotBlank()) "jeton enregistré" else "non configuré")
                 val external = store.externalProvidersConfigured()
                 AgentStatusRow("Fournisseurs externes", external.isNotEmpty(), if (external.isEmpty()) "aucun" else external.joinToString(", "))
-                Text("Les clés ne sont jamais affichées ici. Les quotas et erreurs en temps réel restent à connecter à chaque fournisseur ; ce panneau indique uniquement les configurations réellement enregistrées.", color = HudDim, fontSize = 10.sp)
+                Text("Les clés ne sont jamais affichées ici. Le test ci-dessous vérifie réellement les fournisseurs configurés ; il ne peut toutefois pas garantir un quota disponible durablement.", color = HudDim, fontSize = 10.sp)
+                HudButton(if (agentTesting) "Test des agents en cours…" else "Tester les clés et connexions IA", Modifier.fillMaxWidth(), enabled = !agentTesting, filled = true) {
+                    scope.launch {
+                        agentTesting = true
+                        agentTest = runCatching { app.llm.testerClesApi("tous") }.getOrElse { "Test impossible : " + (it.message ?: it.javaClass.simpleName) }
+                        agentTesting = false
+                    }
+                }
+                if (agentTest.isNotBlank()) Text(agentTest, color = HudText, fontSize = 11.sp)
+
             }
         }
 
