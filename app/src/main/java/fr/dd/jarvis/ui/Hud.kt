@@ -284,6 +284,23 @@ fun ColorPalette(selected: Int?, onPick: (Int?) -> Unit) {
 }
 
 
+/**
+ * Couleur d'identité stable : un même contact ou expéditeur conserve toujours son liseré.
+ * L'adresse entre chevrons est privilégiée pour les expéditeurs au format « Nom <email> ».
+ */
+fun HudIdentityColor(identity: String): Color {
+    val raw = identity.trim()
+    val email = raw.substringAfter('<', "").substringBefore('>').trim()
+    val key = (if (email.isNotBlank()) email else raw).lowercase(java.util.Locale.ROOT)
+    val palette = listOf(
+        Color(0xFF9B6BFF), Color(0xFF36C9D8), Color(0xFFFF8A65),
+        Color(0xFF70C98B), Color(0xFFFFC857), Color(0xFF5D9CFF),
+        Color(0xFFE879B9), Color(0xFFB5A1FF), Color(0xFF58C4A7),
+        Color(0xFFE58B4A)
+    )
+    return palette[Math.floorMod(key.hashCode(), palette.size)]
+}
+
 /** Carte agenda inspirée du style calendrier néon : liseré latéral et ciel étoilé discret. */
 @Composable
 fun HudScheduleCard(
