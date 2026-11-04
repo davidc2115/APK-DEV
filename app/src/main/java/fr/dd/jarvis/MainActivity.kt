@@ -37,7 +37,6 @@ import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.Hub
-import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -64,7 +63,6 @@ import fr.dd.jarvis.ui.ChatScreen
 import fr.dd.jarvis.ui.ChatViewModel
 import fr.dd.jarvis.ui.ContactsScreen
 import fr.dd.jarvis.ui.GraphScreen
-import fr.dd.jarvis.ui.DocumentLibraryScreen
 import fr.dd.jarvis.ui.HudBackground
 import fr.dd.jarvis.ui.HudDim
 import fr.dd.jarvis.ui.HudOrb
@@ -175,7 +173,6 @@ private val tabs = listOf(
     Tab("Contacts", Icons.Filled.Contacts),
     Tab("Société", Icons.Filled.Business),
     Tab("Graphe", Icons.Filled.Hub),
-    Tab("Fichiers", Icons.Filled.FolderOpen),
     Tab("Réglages", Icons.Filled.Settings)
 )
 
@@ -233,8 +230,7 @@ private fun Root(app: JarvisApp, vm: ChatViewModel) {
                 3 -> ContactsScreen(app)
                 4 -> SocieteScreen(app)
                 5 -> GraphScreen(app)
-                6 -> DocumentLibraryScreen(app) { vm.send(it) }
-                else -> SettingsScreen(app)
+                else -> SettingsScreen(app) { vm.send(it) }
             }
         }
 
