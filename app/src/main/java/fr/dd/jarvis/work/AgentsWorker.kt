@@ -31,6 +31,9 @@ object AgentsScheduler {
     private const val NAME = "agents"
     fun apply(ctx: Context, store: Store) {
         val wm = WorkManager.getInstance(ctx)
+        // Le centre de surveillance conserve son historique même lorsque les agents IA sont suspendus.
+        val healthReq = PeriodicWorkRequestBuilder<PhoneHealthWorker>(30, TimeUnit.MINUTES).build()
+        wm.enqueueUniquePeriodicWork("phone_health", ExistingPeriodicWorkPolicy.KEEP, healthReq)
         if (!store.agentsOn.value) { wm.cancelUniqueWork(NAME); return }
         val req = PeriodicWorkRequestBuilder<AgentsWorker>(store.agentMinutes.value.coerceAtLeast(15).toLong(), TimeUnit.MINUTES)
             .build()
@@ -53,6 +56,14 @@ object AgentsScheduler {
     fun runNow(ctx: Context) {
         WorkManager.getInstance(ctx).enqueue(OneTimeWorkRequestBuilder<AgentsWorker>().setInputData(workDataOf("force" to true)).build())
     }
+}
+
+/** Collecte indépendante des agents IA : le graphique du centre de surveillance continue même si les agents sont suspendus. */
+class PhoneHealthWorker(private val ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
+    override suspend fun doWork(): Result = runCatching {
+        PhoneHealth.recordSample(ctx.applicationContext as JarvisApp)
+        Result.success()
+    }.getOrElse { Result.retry() }
 }
 
 /**
