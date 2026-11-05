@@ -477,7 +477,19 @@ search_cfg["enabled"] = "on"
 search_cfg["search_default_limit"] = 8
 search_cfg["max_search_limit"] = 20
 search_cfg["listing"] = "on"
-search_cfg["listing_max_tokens"] = 2000
+search_cfg["listing_max_tokens"] = 4000
+# Le serveur Jarvis doit exposer tous ses outils métier : supprimer d'éventuels filtres include/exclude périmés.
+mcp_servers = data.setdefault("mcp_servers", {})
+if not isinstance(mcp_servers, dict):
+    raise SystemExit("Section mcp_servers invalide ; aucune modification.")
+jarvis_mcp = mcp_servers.setdefault("jarvis", {})
+if not isinstance(jarvis_mcp, dict):
+    raise SystemExit("Configuration MCP Jarvis invalide ; aucune modification.")
+jarvis_mcp["enabled"] = True
+jarvis_tools = jarvis_mcp.get("tools")
+if isinstance(jarvis_tools, dict):
+    jarvis_tools.pop("include", None)
+    jarvis_tools.pop("exclude", None)
 providers = data.setdefault("providers", {})
 if not isinstance(providers, dict):
     raise SystemExit("Section providers invalide ; aucune modification.")
@@ -628,17 +640,23 @@ os.replace(name, p)
             "JARVIS_HAS_$id=1 JARVIS_${id}_MODEL=${q(entry[3])} JARVIS_${id}_ENDPOINT=${q(entry[2])}"
         }
         val configCommand = "proot-distro login debian --termux-home -- env " + extEnv + " JARVIS_HAS_GEMINI=" + hasGemini + " JARVIS_HAS_GROQ=" + hasGroq + " JARVIS_GEMINI_MODEL=" + q(app.store.hermesModele.value.ifBlank { app.store.geminiModel.value }.ifBlank { "gemini-2.5-flash" }) + " JARVIS_GROQ_MODEL=" + q(model) + " JARVIS_CF_MODEL=" + q(cloudflareModel) + " JARVIS_CF_IDS=" + q(cfIds) + " JARVIS_ADVANCED_DELEGATION=\"\$PLUGIN_OK\" python3 -c " + q(py) + " || exit 1"
-        // Met à niveau l'installation existante : activer une option inconnue d'une ancienne version ne suffit pas.
-        val upgradeCommand = "p '🔄 Vérification et mise à niveau d’Hermès pour activer la découverte progressive…'; " +
-            "proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash " +
+        // L'installation Jarvis est une installation source dans Debian : utiliser son exécutable direct.
+        // bash -lc réinitialisait le PATH et pouvait lancer un autre Hermes, d'où l'échec silencieux précédent.
+        // En cas d'échec, arrêter la configuration : ne jamais annoncer une nouvelle version qui n'a pas été installée.
+        val upgradeCommand = "set -o pipefail; p '🔄 Mise à niveau d’Hermès depuis son installation Debian…'; " +
+            "proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root USER=root LOGNAME=root " +
             "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
-            "bash -lc 'hermes update --yes' >> /data/data/com.termux/files/home/.hermes/logs/hermes-update.log 2>&1 " +
-            "&& p '✅ Version Hermès vérifiée/mise à niveau.' || p '⚠️ Mise à niveau Hermès indisponible ; poursuite avec la version installée.'"
-        // Le gateway doit être redémarré APRÈS l'écriture de config.yaml, sinon il garde l'ancien catalogue d'outils en mémoire.
-        val restartCommand = "pkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; sleep 2"
+            "bash -c 'cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && exec ./.hermes/bin/hermes update --yes' " +
+            "2>&1 | while IFS= read -r ligne; do p \"$ligne\"; done; " +
+            "UPDATE_STATUS=$?; if [ \"$UPDATE_STATUS\" -ne 0 ]; then " +
+            "p '❌ Mise à niveau Hermès échouée : consulte les lignes de progression ci-dessus. La configuration est interrompue.'; exit \"$UPDATE_STATUS\"; fi; " +
+            "p '✅ Mise à niveau Hermès terminée.'"
+        // Arrêter la passerelle Debian explicitement, puis la relancer après l'écriture et la vérification de config.yaml.
+        val restartCommand = "proot-distro login debian --termux-home -- pkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; " +
+            "pkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; sleep 3"
         val script = listOf(prelude(app), upgradeCommand, envScript, pluginCommand, configCommand, restartCommand, demarrage).joinToString(System.lineSeparator())
         return executer(app, script, libelle = "Mise à niveau et orchestration multi-agents Hermès")
-            ?: "🧠 Gemini, Groq, Cloudflare et les autres modèles déjà configurés sont raccordés au routage multi-agents ; redémarrage Hermès demandé."
+            ?: "⏳ Configuration Hermès lancée. Attends les messages de progression : mise à niveau et redémarrage doivent être confirmés avant de considérer Hermès opérationnel."
     }
 
     /** Catalogue et installation non interactive des plugins/MCP Hermes. */
