@@ -564,6 +564,17 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         val statut = a.s("statut").ifBlank { "terminee" }.lowercase()
         if (statut !in setOf("terminee", "a_suivre", "en_attente")) return err("Statut invalide : terminee, a_suivre ou en_attente.")
         val categorie = a.s("categorie").ifBlank { "maintenance" }
+        val descriptionNormalisee = description.trim().replace(Regex("\\s+"), " ").lowercase()
+        val doublon = site.interventions.firstOrNull { existante ->
+            existante.date == date &&
+                existante.categorie.trim().equals(categorie.trim(), true) &&
+                existante.description.trim().replace(Regex("\\s+"), " ").lowercase() == descriptionNormalisee &&
+                existante.diagnostic.trim().equals(a.s("diagnostic").trim(), true) &&
+                existante.actions.trim().equals(a.s("actions").trim(), true) &&
+                existante.pieces.trim().equals(a.s("pieces").trim(), true) &&
+                existante.mesures.trim().equals(a.s("mesures").trim(), true)
+        }
+        if (doublon != null) return err("⚠️ Intervention potentiellement en double : la fiche #${doublon.id} du $date (${doublon.categorie}) contient déjà exactement les mêmes éléments pour ${client.nom} — ${site.nom}. Aucune nouvelle fiche créée. Consulte interventions_liste ; modifie ou supprime la fiche existante avec l’outil adapté. Si ce sont deux interventions réellement distinctes, précise leur différence dans la description.")
         val intervention = Intervention(
             id = svc.newId(), date = date, categorie = categorie, description = description,
             diagnostic = a.s("diagnostic"), actions = a.s("actions"), pieces = a.s("pieces"),
