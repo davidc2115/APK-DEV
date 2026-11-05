@@ -643,20 +643,22 @@ os.replace(name, p)
         // L'installation Jarvis est une installation source dans Debian : utiliser son exécutable direct.
         // bash -lc réinitialisait le PATH et pouvait lancer un autre Hermes, d'où l'échec silencieux précédent.
         // En cas d'échec, arrêter la configuration : ne jamais annoncer une nouvelle version qui n'a pas été installée.
-        val upgradeCommand = "set -o pipefail; p '🔄 Mise à niveau d’Hermès avec le propriétaire réel de son installation…'; " +
+        val upgradeCommand = "set -o pipefail; p '🔄 Mise à niveau d’Hermès : vérification du propriétaire du venv…'; " +
             "proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root USER=root LOGNAME=root " +
             "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
-            "bash -c 'set -eu; REPO=/root/.hermes/hermes-agent; test -x \"${'$'}REPO/.hermes/bin/hermes\"; " +
-            "OWNER=$(stat -c %u \"${'$'}REPO\"); GROUP=$(stat -c %g \"${'$'}REPO\"); " +
-            "if [ \"${'$'}OWNER\" = \"$(id -u)\" ]; then cd \"${'$'}REPO\"; exec ./.hermes/bin/hermes update --yes; " +
-            "else command -v setpriv >/dev/null 2>&1 || { echo \"setpriv indisponible : impossible d’utiliser le propriétaire UID ${'$'}OWNER\"; exit 126; }; " +
-            "echo \"Exécution de la mise à niveau sous UID ${'$'}OWNER/GID ${'$'}GROUP (propriétaire de l’installation).\"; " +
-            "exec setpriv --reuid=\"${'$'}OWNER\" --regid=\"${'$'}GROUP\" --clear-groups env HOME=/root USER=jarvis LOGNAME=jarvis " +
+            "bash -c 'set -eu; REPO=/root/.hermes/hermes-agent; test -x \"$REPO/.hermes/bin/hermes\"; " +
+            "META=$(find /root/.hermes/installs -type f -path \"*/venv/lib/python*/site-packages/rpds_py-*.dist-info/METADATA\" -print -quit 2>/dev/null || true); " +
+            "if [ -z \"$META\" ]; then echo \"Métadonnée rpds_py introuvable : aucune mise à niveau lancée.\"; exit 2; fi; " +
+            "OWNER=$(stat -c %u \"$META\"); GROUP=$(stat -c %g \"$META\"); " +
+            "echo \"Fichier venv : $META (UID $OWNER/GID $GROUP).\"; " +
+            "if [ \"$OWNER\" = \"$(id -u)\" ]; then cd \"$REPO\"; exec ./.hermes/bin/hermes update --yes; fi; " +
+            "command -v setpriv >/dev/null 2>&1 || { echo \"setpriv indisponible : mise à niveau annulée sans modifier les droits.\"; exit 126; }; " +
+            "exec setpriv --reuid=\"$OWNER\" --regid=\"$GROUP\" --clear-groups env HOME=/root USER=jarvis LOGNAME=jarvis " +
             "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
-            "bash -c \"cd /root/.hermes/hermes-agent && exec ./.hermes/bin/hermes update --yes\"; fi' " +
-            "2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done; " +
-            "UPDATE_STATUS=\$?; if [ \"\$UPDATE_STATUS\" -ne 0 ]; then " +
-            "p '❌ Mise à niveau Hermès échouée : consulte les lignes de progression ci-dessus. La configuration est interrompue.'; exit \"\$UPDATE_STATUS\"; fi; " +
+            "bash -c \"cd /root/.hermes/hermes-agent && exec ./.hermes/bin/hermes update --yes\"' " +
+            "2>&1 | while IFS= read -r ligne; do p \"\\$ligne\"; done; " +
+            "UPDATE_STATUS=\\$?; if [ \"\\$UPDATE_STATUS\" -ne 0 ]; then " +
+            "p '❌ Mise à niveau Hermès échouée : consulte les lignes de progression ci-dessus. La configuration est interrompue.'; exit \"\\$UPDATE_STATUS\"; fi; " +
             "p '✅ Mise à niveau Hermès terminée.'"
         val restartCommand = "proot-distro login debian --termux-home -- pkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; " +
             "pkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; sleep 3"
