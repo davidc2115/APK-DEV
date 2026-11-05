@@ -233,7 +233,7 @@ object Montage {
 
         val dossierCoffre = if (d.tiktok) "JARVIS/Vidéos TikTok" else "JARVIS/Vidéos"
         val loc = runCatching { app.obsidian.saveBytes(dossierCoffre, nom, sortie.readBytes(), "video/mp4") }.getOrDefault("")
-        if (sb.legende.isNotBlank() || sb.voixOff.isNotBlank()) runCatching {
+        if (sb.analyse.isNotBlank() || sb.legende.isNotBlank() || sb.voixOff.isNotBlank()) runCatching {
             app.obsidian.saveIn(if (d.tiktok) "Scripts TikTok" else "JARVIS/Vidéos", nom.removeSuffix(".mp4"),
                 "# ${sb.titre}\n\n**Durée** : ${d.dureeS} s\n\n## Analyse préalable\n${sb.analyse.ifBlank { "Analyse non disponible ; storyboard construit à partir du brief original." }}\n\n## Plans\n" + sb.plans.joinToString("\n") { "- ${it.texte.ifBlank { "—" }} _(${it.visuel})_" } +
                     (if (sb.voixOff.isNotBlank()) "\n\n## Voix off\n${sb.voixOff}" else "") +
