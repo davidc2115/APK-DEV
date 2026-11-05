@@ -895,7 +895,7 @@ class ToolBox(
         val raw = a.optString("valeur").trim().lowercase()
         val bool = when(raw) { "true", "oui", "on", "active", "activé", "activer" -> true; "false", "non", "off", "désactive", "désactivé", "desactive", "desactivé" -> false; else -> null }
         val s = app.store
-        val labels = mapOf("confirmations" to "confirmation des actions sensibles", "analyse_gemini" to "analyse Gemini", "conversation" to "mode conversation", "reponses_vocales" to "réponses vocales", "ecoute_continue" to "écoute continue", "annonces" to "annonces vocales", "agents" to "agents autonomes", "agents_mails" to "agent mails", "agents_factures" to "agent factures/devis", "agents_planning" to "agent planning", "agents_notifications" to "agent notifications", "notifications_banniere" to "bannières de notification", "bips" to "bips d'écoute")
+        val labels = mapOf("confirmations" to "confirmation des actions sensibles", "analyse_gemini" to "analyse Gemini", "conversation" to "mode conversation", "reponses_vocales" to "réponses vocales", "ecoute_continue" to "écoute continue", "annonces" to "annonces vocales", "agents" to "agents autonomes", "agents_mails" to "agent mails", "agents_factures" to "agent factures/devis", "agents_planning" to "agent planning", "agents_notifications" to "agent notifications", "agents_surveillance_telephone" to "surveillance du téléphone", "agents_rangement_gmail" to "rangement Gmail", "agents_archivage_gmail" to "archivage Gmail", "notifications_banniere" to "bannières de notification", "bips" to "bips d'écoute")
         fun current(): Boolean? = when(key) {
             "confirmations" -> s.confirmSensitive.value
             "analyse_gemini" -> s.analyseGemini.value
@@ -908,6 +908,9 @@ class ToolBox(
             "agents_factures" -> s.agentFactures.value
             "agents_planning" -> s.agentPlanning.value
             "agents_notifications" -> s.agentNotifs.value
+            "agents_surveillance_telephone" -> s.agentPhoneHealth.value
+            "agents_rangement_gmail" -> s.agentRanger.value
+            "agents_archivage_gmail" -> s.agentArchiver.value
             "notifications_banniere" -> s.notifLive.value
             "bips" -> !s.muteBeeps.value
             else -> null
@@ -933,6 +936,9 @@ class ToolBox(
             "agents_factures" -> s.agentFactures.set(bool)
             "agents_planning" -> s.agentPlanning.set(bool)
             "agents_notifications" -> s.agentNotifs.set(bool)
+            "agents_surveillance_telephone" -> s.agentPhoneHealth.set(bool)
+            "agents_rangement_gmail" -> s.agentRanger.set(bool)
+            "agents_archivage_gmail" -> s.agentArchiver.set(bool)
             "notifications_banniere" -> s.notifLive.set(bool)
             "bips" -> s.muteBeeps.set(!bool)
         }
