@@ -117,6 +117,8 @@ fun PlanningScreen(app: JarvisApp) {
     var events by remember { mutableStateOf(emptyList<EventInfo>()) }
     var editCal by remember { mutableStateOf<CalInfo?>(null) }
     var selected by remember { mutableStateOf<EventInfo?>(null) }
+    var conflictCounterpart by remember { mutableStateOf<EventInfo?>(null) }
+    var weekConflicts by remember { mutableStateOf<List<Pair<EventInfo, EventInfo>>>(emptyList()) }
     var creating by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<EventInfo?>(null) }
 
@@ -124,6 +126,17 @@ fun PlanningScreen(app: JarvisApp) {
         withContext(Dispatchers.IO) {
             cals = repo.calendars()
             events = repo.events(day, range)
+            val week = repo.events(LocalDate.now(), 7).filter { !it.allDay }.sortedBy { it.begin }
+            weekConflicts = buildList {
+                for (i in week.indices) {
+                    val first = week[i]
+                    for (j in i + 1 until week.size) {
+                        val second = week[j]
+                        if (second.begin >= first.end) break
+                        if (first.id != second.id && second.begin < first.end && first.begin < second.end) add(first to second)
+                    }
+                }
+            }
         }
     }
 
@@ -228,7 +241,25 @@ fun PlanningScreen(app: JarvisApp) {
                 }
                 if (store.proactiveSummary.value.isNotBlank()) {
                     Spacer(Modifier.height(8.dp))
-                    Text(store.proactiveSummary.value, color = if (store.proactiveSummary.value.startsWith("⚠️")) Color(0xFFFFB45C) else LocalAccent.current, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                    if (store.proactiveSummary.value.contains("conflit", ignoreCase = true)) {
+                        val staleConflictAlert = weekConflicts.isEmpty()
+                        Text(
+                            if (staleConflictAlert) "⚠️ Ancienne alerte de conflit : aucun chevauchement confirmé lors de la vérification actuelle."
+                            else "⚠️ " + weekConflicts.size + " conflit(s) confirmé(s) · Toucher pour ouvrir la fiche",
+                            color = if (staleConflictAlert) HudDim else Color(0xFFFFB45C),
+                            fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                            modifier = if (staleConflictAlert) Modifier else Modifier.clickable {
+                                weekConflicts.firstOrNull()?.let { pair ->
+                                    day = eventDay(pair.first)
+                                    range = 1
+                                    conflictCounterpart = pair.second
+                                    selected = pair.first
+                                }
+                            }
+                        )
+                    } else {
+                        Text(store.proactiveSummary.value, color = LocalAccent.current, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                    }
                 }
                 if (!store.agentsOn.value) {
                     Spacer(Modifier.height(8.dp))
@@ -362,12 +393,19 @@ fun PlanningScreen(app: JarvisApp) {
     // ---- Détail d'un rendez-vous : couleur, suppression
     selected?.let { e ->
         AlertDialog(
-            onDismissRequest = { selected = null },
+            onDismissRequest = { selected = null; conflictCounterpart = null },
             containerColor = Color(0xFF0B1424), titleContentColor = LocalAccent.current, textContentColor = HudText,
             title = { Text(e.title) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("🕗 " + eventDay(e).format(dayTitleFmt) + " · " + timeLabel(e), fontSize = 13.sp)
+                    conflictCounterpart?.let { other ->
+                        Text(
+                            "⚠️ Chevauche aussi : " + other.title + " · " + eventDay(other).format(dayTitleFmt) + " · " + timeLabel(other),
+                            color = Color(0xFFFFB45C), fontSize = 12.sp,
+                            modifier = Modifier.clickable { selected = other; conflictCounterpart = e }
+                        )
+                    }
                     if (e.location.isNotBlank()) {
                         Text(
                             "📍 ${e.location} · Ouvrir l’adresse",
@@ -416,11 +454,12 @@ fun PlanningScreen(app: JarvisApp) {
                     }) { Text("Couleur de l'agenda", color = LocalAccent.current) }
                 }
             },
-            confirmButton = { TextButton({ selected = null }) { Text("Fermer", color = LocalAccent.current) } },
+            confirmButton = { TextButton({ selected = null; conflictCounterpart = null }) { Text("Fermer", color = LocalAccent.current) } },
             dismissButton = {
                 TextButton({
                     repo.delete(e.id)
                     selected = null
+                    conflictCounterpart = null
                     refresh++
                 }) { Text("Supprimer", color = Color(0xFFFF4D6D)) }
             }
