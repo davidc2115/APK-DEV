@@ -476,7 +476,7 @@ if not isinstance(search_cfg, dict):
 search_cfg["enabled"] = "on"
 search_cfg["search_default_limit"] = 8
 search_cfg["max_search_limit"] = 20
-search_cfg["listing"] = "off"
+search_cfg["listing"] = "on"
 search_cfg["listing_max_tokens"] = 2000
 providers = data.setdefault("providers", {})
 if not isinstance(providers, dict):
