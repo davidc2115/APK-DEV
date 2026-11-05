@@ -241,13 +241,21 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
         item {
             var agentTest by remember { mutableStateOf("") }
             var agentTesting by remember { mutableStateOf(false) }
+            var hermesOnline by remember { mutableStateOf(false) }
+            var hermesChecked by remember { mutableStateOf(false) }
+            androidx.compose.runtime.LaunchedEffect(tick) {
+                hermesOnline = runCatching { fr.dd.jarvis.hermes.Hermes.enLigne(force = true) }.getOrDefault(false)
+                hermesChecked = true
+            }
             HudPanel(Modifier.fillMaxWidth(), title = "État des moteurs IA") {
                 Text("État de configuration des moteurs disponibles. Une clé enregistrée ne garantit ni la disponibilité du service ni un quota restant.", color = HudDim, fontSize = 11.sp)
                 Spacer(Modifier.height(6.dp))
-                AgentStatusRow("Hermès · orchestrateur Termux", store.hermesInstalle.value && store.hermesMode.value != "off", when {
+                AgentStatusRow("Hermès · orchestrateur Termux", hermesOnline, when {
                     store.hermesMode.value == "off" -> "mode désactivé"
-                    store.hermesInstalle.value -> "installé · contrôle réseau dans Réglages > Hermès"
-                    else -> "installation non confirmée"
+                    hermesOnline -> "en ligne"
+                    !store.hermesInstalle.value -> "installation non confirmée"
+                    hermesChecked -> "installé · passerelle hors ligne"
+                    else -> "vérification…"
                 })
                 AgentStatusRow("Groq · " + store.groqModel.value, store.groqKeys.isNotEmpty(), "${store.groqKeys.size} clé(s)")
                 AgentStatusRow("Gemini · " + store.geminiModel.value, store.geminiKeys.isNotEmpty(), "${store.geminiKeys.size} clé(s)")
@@ -257,6 +265,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 val external = store.externalProvidersConfigured()
                 AgentStatusRow("Autres fournisseurs", external.isNotEmpty(), external.ifEmpty { listOf("aucun configuré") }.joinToString(", "))
                 Text("Les secrets ne sont jamais affichés dans ce centre.", color = HudDim, fontSize = 10.sp)
+                HudButton("Actualiser les états", Modifier.fillMaxWidth()) { tick++ }
                 HudButton(if (agentTesting) "Test en cours…" else "Tester les clés et connexions IA", Modifier.fillMaxWidth(), enabled = !agentTesting, filled = true) {
                     scope.launch {
                         agentTesting = true
