@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.app.PendingIntent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -157,7 +158,7 @@ object HermesTermux {
     // ------------------------------------------------------------------ Exécution dans Termux
 
     /** Envoie une commande bash à Termux (RUN_COMMAND). Renvoie un message d'erreur, ou null si elle est partie. */
-    fun executer(ctx: Context, script: String, arrierePlan: Boolean = true, libelle: String = "Jarvis"): String? {
+    fun executer(ctx: Context, script: String, arrierePlan: Boolean = true, libelle: String = "Jarvis", retourNatif: Boolean = false): String? {
         if (!termuxInstalle(ctx)) return "Termux n'est pas installé."
         if (!permissionOk(ctx)) return "Permission « Exécuter des commandes dans Termux » non accordée à JARVIS."
         val i = Intent("com.termux.RUN_COMMAND").setClassName(TERMUX, "com.termux.app.RunCommandService")
@@ -167,8 +168,17 @@ object HermesTermux {
             .putExtra("com.termux.RUN_COMMAND_BACKGROUND", arrierePlan)
             .putExtra("com.termux.RUN_COMMAND_SESSION_ACTION", "0")
             .putExtra("com.termux.RUN_COMMAND_COMMAND_LABEL", libelle)
+        if (retourNatif) {
+            val retourIntent = Intent(ctx, HermesRunResultReceiver::class.java)
+                .setAction("fr.dd.jarvis.HERMES_RUN_RESULT")
+            val flags = PendingIntent.FLAG_UPDATE_CURRENT or
+                (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
+            val pending = PendingIntent.getBroadcast(ctx, UUID.randomUUID().hashCode(), retourIntent, flags)
+            i.putExtra("com.termux.RUN_COMMAND_PENDING_INTENT", pending)
+        }
         return try {
-            if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
+            // La documentation Termux utilise startService pour RUN_COMMAND ; Termux gère lui-même le service.
+            ctx.startService(i)
             null
         } catch (e: Throwable) { "Termux a refusé la commande : ${e.message ?: e.javaClass.simpleName}" }
     }
@@ -247,8 +257,7 @@ p() {
             appendLine("memory:")
             appendLine("  memory_enabled: true")
             appendLine("  user_profile_enabled: true")
-            appendLine("  write_approval: false")
-            appendLine("mcp_servers:")
+            appendLine("  write_approval: false")            appendLine("mcp_servers:")
             appendLine("  jarvis:")
             appendLine("    url: \"$urlMcp\"")
             appendLine("    headers:")
@@ -433,6 +442,24 @@ p "✅ Hermès installé (${'$'}{MODE})."
         return synchroniserCles(app)
     }
 
+
+    /** Résultat natif RUN_COMMAND de Termux : distingue un refus du service d'un échec du script. */
+    internal fun recevoirRetourTermux(exitCode: Int, erreurInterne: Int, messageErreur: String, stderr: String) {
+        if (erreurInterne != -1) {
+            message = "❌ Termux a refusé ou interrompu la commande (erreur interne $erreurInterne) : " +
+                messageErreur.ifBlank { "aucun détail fourni par Termux" } +
+                ". Vérifie allow-external-apps et la permission RUN_COMMAND."
+        } else if (exitCode != 0) {
+            val detail = stderr.lineSequence().map { it.trim() }.firstOrNull { it.isNotBlank() }?.take(180).orEmpty()
+            message = "❌ Le script a démarré dans Termux mais s'est arrêté (code $exitCode)." +
+                if (detail.isNotBlank()) " Détail : $detail" else " Consulte les journaux Hermès dans ~/.hermes/logs."
+        } else if (PontMcp.dernierSignal <= dernierSignalAvantCommande) {
+            message = "⚠️ Termux confirme l'exécution (code 0), mais Jarvis n'a reçu aucun POST de progression sur le port ${PontMcp.PORT}. Le service Termux fonctionne ; le pont HTTP doit être vérifié."
+        }
+    }
+
+    @Volatile private var dernierSignalAvantCommande: Long = 0L
+
     /** Synchronise les clés et le routage multi-agents sans écraser les autres réglages Hermes. */
     fun synchroniserCles(app: JarvisApp): String {
         val s = app.store
@@ -497,8 +524,7 @@ p "✅ Hermès installé (${'$'}{MODE})."
             appendLine("removeenvfamily GROQ_API_KEY")
             appendLine("removeenvfamily JARVIS_CF_KEY")
             listOf("JARVIS_ZAI_API_KEY", "JARVIS_OPENROUTER_API_KEY", "JARVIS_NVIDIA_API_KEY", "JARVIS_MISTRAL_API_KEY", "JARVIS_HF_TOKEN").forEach { appendLine("removeenvfamily " + it) }
-            gemini.forEachIndexed { index, key -> appendLine("setenv " + (if (index == 0) "GOOGLE_API_KEY" else "GOOGLE_API_KEY_" + (index + 1)) + " " + q(key)) }
-            groq.forEachIndexed { index, key -> appendLine("setenv " + (if (index == 0) "GROQ_API_KEY" else "GROQ_API_KEY_" + (index + 1)) + " " + q(key)) }
+            gemini.forEachIndexed { index, key -> appendLine("setenv " + (if (index == 0) "GOOGLE_API_KEY" else "GOOGLE_API_KEY_" + (index + 1)) + " " + q(key)) }            groq.forEachIndexed { index, key -> appendLine("setenv " + (if (index == 0) "GROQ_API_KEY" else "GROQ_API_KEY_" + (index + 1)) + " " + q(key)) }
             cloudflare.forEachIndexed { index, pair -> appendLine("setenv JARVIS_CF_KEY_" + (index + 1) + " " + q(pair.second)) }
             listOf("ZAI", "OPENROUTER", "NVIDIA", "MISTRAL", "HF").forEach { appendLine("setenv JARVIS_HAS_" + it + " 0") }
             external.forEach { entry ->
@@ -736,7 +762,8 @@ os.replace(name, p)
         ).joinToString(System.lineSeparator())
         message = "⏳ Script Hermès construit (${script.length} caractères). Transmission à Termux…"
         val signalAvantEnvoi = PontMcp.dernierSignal
-        val erreur = executer(app, script, libelle = "Mise à niveau et orchestration multi-agents Hermès")
+        dernierSignalAvantCommande = signalAvantEnvoi
+        val erreur = executer(app, script, libelle = "Mise à niveau et orchestration multi-agents Hermès", retourNatif = true)
         if (erreur != null) {
             message = "❌ Termux a refusé le lancement : $erreur. Aucune mise à niveau n'a été confirmée."
             return message
@@ -747,8 +774,7 @@ os.replace(name, p)
                 message = "❌ Termux n'a pas confirmé l'exécution du script après 35 secondes. Vérifie l'autorisation « Exécuter des commandes dans Termux », les restrictions d'arrière-plan et le port 38291. Aucun succès n'est déclaré."
             }
         }, 35_000)
-        return "⏳ Commande transmise à Termux ; attente de son accusé de réception réel."
-    }
+        return "⏳ Commande transmise à Termux ; attente de son accusé de réception réel."    }
 
     /** Catalogue et installation non interactive des plugins/MCP Hermes. */
     fun gererExtension(app: JarvisApp, actionRaw: String, nameRaw: String = ""): String {
