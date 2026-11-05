@@ -547,27 +547,32 @@ class ToolBox(
             ToolResult("❌ Image impossible : ${e.message}")
         }
         "generer_video" -> try {
-            val prompt = a.optString("prompt").trim()
+            val brief = a.optString("prompt").trim()
             val duree = a.optString("duree").replace(',', '.').toDoubleOrNull() ?: 5.0
             val nomImage = a.optString("image").trim()
+            val format = a.optString("format").ifBlank { "vertical" }
+            val prompt = fr.dd.jarvis.ai.VideoGen.preparerPrompt(app, brief, duree, format, nomImage.isNotBlank())
             val (video, loc) = when {
                 nomImage.isNotBlank() -> {
                     val image = fr.dd.jarvis.ai.ImageGen.fichier(app, nomImage)
                         ?: return ToolResult("❌ Image introuvable : $nomImage. Utilise fichiers_generes pour retrouver son nom exact.")
                     fr.dd.jarvis.ai.ImageToVideoGen.generate(app, image, prompt, duree)
                 }
-                fr.dd.jarvis.ai.ImageToVideoGen.disponible(app) -> fr.dd.jarvis.ai.ImageToVideoGen.texteVersVideo(app, prompt, duree, a.optString("format").ifBlank { "vertical" })
+                fr.dd.jarvis.ai.ImageToVideoGen.disponible(app) -> fr.dd.jarvis.ai.ImageToVideoGen.texteVersVideo(app, prompt, duree, format)
                 else -> return ToolResult("❌ Aucune clé fal.ai : ajoute-la dans Réglages › Vidéo IA pour générer une vidéo. (Sans clé, tiktok_video utilise le service gratuit Hugging Face, plus lent et limité.)")
             }
-            ToolResult("🎬 Vidéo créée (fal.ai) : ${video.name}\n\n[▶ Lire la vidéo](jarvis-video-ia:${video.name})\n\n📁 Enregistrée dans Jarvis › Vidéos IA" + (if (loc.isNotBlank()) "\n🗂️ Obsidian : $loc" else ""), direct = true)
+            ToolResult("🎬 Vidéo créée après analyse et préparation du prompt (fal.ai) : ${video.name}\\n\\n[▶ Lire la vidéo](jarvis-video-ia:${video.name})\\n\\n📁 Enregistrée dans Jarvis › Vidéos IA" + (if (loc.isNotBlank()) "\\n🗂️ Obsidian : $loc" else ""), direct = true)
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
             ToolResult("❌ Vidéo impossible : ${e.message}")
         }
         "animer_image" -> try {
-            val image = fr.dd.jarvis.ai.ImageGen.fichier(app, a.optString("image"))
-                ?: return ToolResult("❌ Image introuvable : ${a.optString("image")}. Utilise fichiers_generes pour retrouver son nom exact.")
-            val (video, loc) = fr.dd.jarvis.ai.ImageToVideoGen.generate(app, image, a.optString("prompt"), a.optString("duree").toDoubleOrNull() ?: 3.5)
-            ToolResult("🎬 Vidéo créée : ${video.name}\n\n[▶ Lire la vidéo](jarvis-video-ia:${video.name})\n\n📁 Enregistrée dans Jarvis › Vidéos IA" + (if (loc.isNotBlank()) "\n🗂️ Obsidian : $loc" else ""), direct = true)
+            val imageName = a.optString("image")
+            val image = fr.dd.jarvis.ai.ImageGen.fichier(app, imageName)
+                ?: return ToolResult("❌ Image introuvable : $imageName. Utilise fichiers_generes pour retrouver son nom exact.")
+            val duree = a.optString("duree").toDoubleOrNull() ?: 3.5
+            val prompt = fr.dd.jarvis.ai.VideoGen.preparerPrompt(app, a.optString("prompt"), duree, "vertical", true)
+            val (video, loc) = fr.dd.jarvis.ai.ImageToVideoGen.generate(app, image, prompt, duree)
+            ToolResult("🎬 Animation créée après analyse de la demande : ${video.name}\\n\\n[▶ Lire la vidéo](jarvis-video-ia:${video.name})\\n\\n📁 Enregistrée dans Jarvis › Vidéos IA" + (if (loc.isNotBlank()) "\\n🗂️ Obsidian : $loc" else ""), direct = true)
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
             ToolResult("❌ Animation impossible : ${e.message}")
         }
