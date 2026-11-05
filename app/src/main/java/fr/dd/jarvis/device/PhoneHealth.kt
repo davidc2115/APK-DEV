@@ -21,6 +21,115 @@ import java.util.Locale
 
 /** Rapport local, en lecture seule, des ressources et accès Android réellement observables. */
 object PhoneHealth {
+    data class Dashboard(
+        val battery: Int?,
+        val charging: Boolean,
+        val batteryHealth: String,
+        val temperatureC: Double?,
+        val storageFreeGb: Double?,
+        val storageTotalGb: Double?,
+        val storageUsedPct: Int?,
+        val ramFreeGb: Double,
+        val ramTotalGb: Double,
+        val network: String,
+        val thermal: String,
+        val shizukuReady: Boolean,
+        val accessibility: Boolean,
+        val notificationListener: Boolean,
+        val notificationsAllowed: Boolean,
+        val exactAlarmsAllowed: Boolean,
+        val unrestrictedBattery: Boolean,
+        val uptimeMinutes: Long
+    )
+
+    /** Mesures instantanées destinées au tableau de bord visuel, sans contenu personnel. */
+    fun dashboard(app: JarvisApp): Dashboard {
+        val ctx = app.applicationContext
+        val batteryIntent = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val battery = runCatching {
+            (ctx.getSystemService(Context.BATTERY_SERVICE) as BatteryManager)
+                .getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY).takeIf { it in 0..100 }
+        }.getOrNull()
+        val charging = (batteryIntent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1) in setOf(
+            BatteryManager.BATTERY_STATUS_CHARGING, BatteryManager.BATTERY_STATUS_FULL
+        )
+        val temperature = batteryIntent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1)
+            ?.takeIf { it >= 0 }?.div(10.0)
+        val health = when (batteryIntent?.getIntExtra(BatteryManager.EXTRA_HEALTH, -1)) {
+            BatteryManager.BATTERY_HEALTH_GOOD -> "Bonne"
+            BatteryManager.BATTERY_HEALTH_OVERHEAT -> "Surchauffe"
+            BatteryManager.BATTERY_HEALTH_DEAD -> "Défectueuse"
+            BatteryManager.BATTERY_HEALTH_OVER_VOLTAGE -> "Surtension"
+            BatteryManager.BATTERY_HEALTH_COLD -> "Trop froide"
+            else -> "Non communiquée"
+        }
+        val storage = runCatching { StatFs(Environment.getDataDirectory().absolutePath) }.getOrNull()
+        val free = storage?.availableBytes?.div(1024.0 * 1024.0 * 1024.0)
+        val total = storage?.totalBytes?.div(1024.0 * 1024.0 * 1024.0)
+        val used = if (storage != null && storage.totalBytes > 0L)
+            ((storage.totalBytes - storage.availableBytes) * 100 / storage.totalBytes).toInt() else null
+        val memory = ActivityManager.MemoryInfo()
+        (ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).getMemoryInfo(memory)
+        val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val caps = cm.activeNetwork?.let { cm.getNetworkCapabilities(it) }
+        val network = when {
+            caps == null || !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) -> "Hors ligne"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "Données mobiles"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "Ethernet"
+            else -> "Connectée"
+        }
+        val power = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
+        val thermal = if (Build.VERSION.SDK_INT >= 29) runCatching {
+            when (power.currentThermalStatus) {
+                PowerManager.THERMAL_STATUS_NONE -> "Normal"
+                PowerManager.THERMAL_STATUS_LIGHT -> "Léger"
+                PowerManager.THERMAL_STATUS_MODERATE -> "Modéré"
+                PowerManager.THERMAL_STATUS_SEVERE -> "Élevé"
+                PowerManager.THERMAL_STATUS_CRITICAL -> "Critique"
+                PowerManager.THERMAL_STATUS_EMERGENCY -> "Urgence"
+                PowerManager.THERMAL_STATUS_SHUTDOWN -> "Arrêt imminent"
+                else -> "Inconnu"
+            }
+        }.getOrDefault("Indisponible") else "Non exposé"
+        val listener = Settings.Secure.getString(ctx.contentResolver, "enabled_notification_listeners").orEmpty()
+            .split(':').any { it.substringBefore('/').equals(ctx.packageName, true) }
+        val notifications = Build.VERSION.SDK_INT < 33 ||
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        val exact = Build.VERSION.SDK_INT < 31 ||
+            (ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager).canScheduleExactAlarms()
+        return Dashboard(
+            battery, charging, health, temperature, free, total, used,
+            memory.availMem / (1024.0 * 1024.0 * 1024.0),
+            memory.totalMem / (1024.0 * 1024.0 * 1024.0),
+            network, thermal, ShizukuShell.ready(), app.phone.accessibilityEnabled(),
+            listener, notifications, exact, power.isIgnoringBatteryOptimizations(ctx.packageName),
+            android.os.SystemClock.elapsedRealtime() / 60_000L
+        )
+    }
+
+    /** Enregistre un point technique toutes les 30 minutes, indépendamment de l'agent spécialisé. */
+    fun recordSample(app: JarvisApp) {
+        runCatching {
+            val ctx = app.applicationContext
+            val batteryIntent = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            val battery = runCatching {
+                (ctx.getSystemService(Context.BATTERY_SERVICE) as BatteryManager)
+                    .getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY).takeIf { it in 0..100 }
+            }.getOrNull()
+            val free = StatFs(Environment.getDataDirectory().absolutePath).availableBytes
+            val prefs = ctx.getSharedPreferences("phone_health_history", Context.MODE_PRIVATE)
+            val now = System.currentTimeMillis()
+            val previousAt = prefs.getLong("sample_at", 0L)
+            if (previousAt == 0L || now - previousAt >= 30L * 60L * 1000L) {
+                val history = prefs.getString("samples", "").orEmpty().split(';')
+                    .filter { it.count { ch -> ch == ',' } == 2 }.toMutableList()
+                history += "$"+"{now},$"+"{battery ?: -1},$"+"{free}"
+                prefs.edit().putLong("sample_at", now).putInt("battery", battery ?: -1)
+                    .putLong("free_bytes", free).putString("samples", history.takeLast(48).joinToString(";")).apply()
+            }
+        }
+    }
     fun report(app: JarvisApp): String {
         val ctx = app.applicationContext
         val batteryIntent = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
