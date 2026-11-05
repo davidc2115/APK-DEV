@@ -203,7 +203,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 }
                 Text("Active ou suspends les tâches de fond de JARVIS. Chaque agent peut être piloté séparément ; les tâches périodiques respectent les limites d'Android et peuvent être retardées par HyperOS.", color = HudDim, fontSize = 12.sp)
                 Spacer(Modifier.height(8.dp))
-                HudChip(if (store.agentsOn.value) "✅ Tous les agents autonomes sont actifs" else "Agents autonomes suspendus", store.agentsOn.value) {
+                HudChip(if (store.agentsOn.value) "Automatisation générale activée" else "Automatisation générale suspendue", store.agentsOn.value) {
                     store.agentsOn.set(!store.agentsOn.value)
                     fr.dd.jarvis.work.AgentsScheduler.apply(ctx, store)
                 }
@@ -241,7 +241,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     AgentStatusRow("Santé batterie", phone.batteryHealth == "Bonne", phone.batteryHealth + if (phone.charging) " · en charge" else "")
                     AgentStatusRow("Réseau thermique", phone.thermal !in setOf("Élevé", "Critique", "Urgence", "Arrêt imminent"), phone.thermal)
                     Text("Mesures locales en lecture seule. Aucune analyse des messages, photos ou contenus personnels.", color = HudDim, fontSize = 10.sp)
-                    HudButton("Actualiser les mesures", Modifier.fillMaxWidth()) { tick++ }
+                    HudButton("Actualiser les mesures", Modifier.fillMaxWidth()) { fr.dd.jarvis.device.PhoneHealth.recordSample(app); tick++ }
                 }
                 Text("AGENTS SPÉCIALISÉS · VIGNETTES DE CONTRÔLE", color = LocalAccent.current, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 12.sp)
                 Text("Chaque vignette décrit le travail réellement effectué par l'agent. Les interrupteurs prennent effet au prochain cycle.", color = HudDim, fontSize = 11.sp)
