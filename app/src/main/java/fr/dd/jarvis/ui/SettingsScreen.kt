@@ -201,21 +201,52 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     fr.dd.jarvis.work.AgentsScheduler.apply(ctx, store)
                 }
                 Spacer(Modifier.height(8.dp))
-                Text("Agents spécialisés", color = LocalAccent.current, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 13.sp)
-                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    HudChip("📧 Mails", store.agentMails.value) { store.agentMails.set(!store.agentMails.value) }
-                    HudChip("💶 Factures + maintenance", store.agentFactures.value) { store.agentFactures.set(!store.agentFactures.value) }
-                }
-                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    HudChip("🚗 Planning", store.agentPlanning.value) { store.agentPlanning.set(!store.agentPlanning.value) }
-                    HudChip("🔔 Notifications", store.agentNotifs.value) { store.agentNotifs.set(!store.agentNotifs.value) }
-                }
-                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    HudChip("📱 Surveillance téléphone", store.agentPhoneHealth.value) { store.agentPhoneHealth.set(!store.agentPhoneHealth.value) }
-                }
-                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    HudChip("🏷️ Ranger Gmail", store.agentRanger.value) { store.agentRanger.set(!store.agentRanger.value) }
-                    HudChip("📥 Archiver", store.agentArchiver.value) { store.agentArchiver.set(!store.agentArchiver.value) }
+                Text("AGENTS SPÉCIALISÉS · VIGNETTES DE CONTRÔLE", color = LocalAccent.current, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 12.sp)
+                Text("Chaque vignette décrit le travail réellement effectué par l'agent. Les interrupteurs prennent effet au prochain cycle.", color = HudDim, fontSize = 11.sp)
+                Spacer(Modifier.height(8.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                    HudPanel(Modifier.fillMaxWidth(), title = "📧 Agent courrier") {
+                        Text("Surveille les nouveaux mails, les classe par priorité et repère les messages urgents. Peut aussi appliquer les libellés Gmail « Urgent », « Clients »…", color = HudText, fontSize = 12.sp)
+                        Spacer(Modifier.height(6.dp))
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(if (store.agentMails.value) "ACTIF" else "EN PAUSE", color = if (store.agentMails.value) LocalAccent.current else HudDim, fontSize = 10.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                            HudChip(if (store.agentMails.value) "Désactiver" else "Activer", store.agentMails.value) { store.agentMails.set(!store.agentMails.value) }
+                        }
+                        HudDivider()
+                        Text("Options de rangement Gmail", color = HudDim, fontSize = 10.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            HudChip(if (store.agentRanger.value) "🏷️ Tri activé" else "🏷️ Tri désactivé", store.agentRanger.value) { store.agentRanger.set(!store.agentRanger.value) }
+                            HudChip(if (store.agentArchiver.value) "📥 Archivage activé" else "📥 Archivage désactivé", store.agentArchiver.value) { store.agentArchiver.set(!store.agentArchiver.value) }
+                        }
+                    }
+                    HudPanel(Modifier.fillMaxWidth(), title = "💶 Agent entreprise & photovoltaïque") {
+                        Text("Repère les factures en retard ou bientôt échues, les devis sans réponse depuis plus de 10 jours et les maintenances photovoltaïques en retard ou prévues sous 14 jours. Préserve les données réelles des clients et installations.", color = HudText, fontSize = 12.sp)
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(if (store.agentFactures.value) "ACTIF" else "EN PAUSE", color = if (store.agentFactures.value) LocalAccent.current else HudDim, fontSize = 10.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                            HudChip(if (store.agentFactures.value) "Désactiver" else "Activer", store.agentFactures.value) { store.agentFactures.set(!store.agentFactures.value) }
+                        }
+                    }
+                    HudPanel(Modifier.fillMaxWidth(), title = "🚗 Agent planning & tâches") {
+                        Text("Analyse les 7 prochains jours, détecte les chevauchements d'agenda, prépare le prochain rendez-vous et calcule une alerte de départ selon le trajet. Surveille aussi les tâches personnelles en retard ou dues sous 24 h.", color = HudText, fontSize = 12.sp)
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(if (store.agentPlanning.value) "ACTIF" else "EN PAUSE", color = if (store.agentPlanning.value) LocalAccent.current else HudDim, fontSize = 10.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                            HudChip(if (store.agentPlanning.value) "Désactiver" else "Activer", store.agentPlanning.value) { store.agentPlanning.set(!store.agentPlanning.value) }
+                        }
+                    }
+                    HudPanel(Modifier.fillMaxWidth(), title = "🔔 Agent notifications") {
+                        Text("Lit les nouvelles notifications reçues depuis le dernier passage et filtre les éléments qui demandent une attention rapide : clients, devis, factures, paiements, chantiers et rendez-vous. Ignore les contenus sans priorité.", color = HudText, fontSize = 12.sp)
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(if (store.agentNotifs.value) "ACTIF" else "EN PAUSE", color = if (store.agentNotifs.value) LocalAccent.current else HudDim, fontSize = 10.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                            HudChip(if (store.agentNotifs.value) "Désactiver" else "Activer", store.agentNotifs.value) { store.agentNotifs.set(!store.agentNotifs.value) }
+                        }
+                    }
+                    HudPanel(Modifier.fillMaxWidth(), title = "📱 Agent surveillance téléphone") {
+                        Text("Surveille localement l'évolution de la batterie et du stockage. Signale une baisse inhabituelle de batterie ou une diminution rapide de l'espace disponible. N'analyse ni messages, ni photos, ni contenu personnel.", color = HudText, fontSize = 12.sp)
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(if (store.agentPhoneHealth.value) "ACTIF" else "EN PAUSE", color = if (store.agentPhoneHealth.value) LocalAccent.current else HudDim, fontSize = 10.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                            HudChip(if (store.agentPhoneHealth.value) "Désactiver" else "Activer", store.agentPhoneHealth.value) { store.agentPhoneHealth.set(!store.agentPhoneHealth.value) }
+                        }
+                    }
                 }
                 Text("Fréquence des tâches", color = HudDim, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
