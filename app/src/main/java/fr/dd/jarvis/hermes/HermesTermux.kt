@@ -730,7 +730,7 @@ os.replace(name, p)
         val upgradeScript = """
 set -eu
 REPO=/root/.hermes/hermes-agent
-test -x "\${'$'}REPO/.hermes/bin/hermes"
+test -x "${'REPO/.hermes/bin/hermes"
 META=$(find /root/.hermes/installs -type f -path "*/venv/lib/python*/site-packages/rpds_py-*.dist-info/METADATA" -print -quit 2>/dev/null || true)
 if [ -z "\${'$'}META" ]; then
   echo "Métadonnée rpds_py introuvable : aucune mise à niveau lancée."
@@ -762,6 +762,328 @@ exec ./.hermes/bin/hermes update --yes
             "bash -c " + q(upgradeScript) + " 2>&1 | while IFS= read -r ligne; do p \"\${'$'}ligne\"; done; " +
             "UPDATE_STATUS=\${'$'}?; if [ \"\${'$'}UPDATE_STATUS\" -ne 0 ]; then " +
             "p '❌ Mise à niveau Hermès échouée : consulte les lignes de progression ci-dessus. La configuration est interrompue.'; exit \"\${'$'}UPDATE_STATUS\"; fi; " +
+            "p '✅ Mise à niveau Hermès terminée.'"
+}REPO/.hermes/bin/hermes"
+META=$(find /root/.hermes/installs -type f -path "*/venv/lib/python*/site-packages/rpds_py-*.dist-info/METADATA" -print -quit 2>/dev/null || true)
+if [ -z "${'META" ]; then
+  echo "Métadonnée rpds_py introuvable : aucune mise à niveau lancée."
+  exit 2
+fi
+OWNER=$(stat -c %u "\${'$'}META")
+GROUP=$(stat -c %g "\${'$'}META")
+echo "Fichier venv : \${'$'}META (UID \${'$'}OWNER/GID \${'$'}GROUP)."
+if [ "\${'$'}OWNER" = "$(id -u)" ]; then
+  cd "\${'$'}REPO"
+  exec ./.hermes/bin/hermes update --yes
+fi
+echo 'Correction ciblée des propriétaires des seuls fichiers METADATA dist-info concernés (pas de chown récursif).'
+find /root/.hermes/installs -type f -path '*/venv/lib/python*/site-packages/*.dist-info/METADATA' -uid "\${'$'}OWNER" -exec chown 0:0 {} + || {
+  echo 'Échec de la correction ciblée des métadonnées.'
+  exit 126
+}
+OWNER_AFTER=$(stat -c %u "\${'$'}META")
+if [ "\${'$'}OWNER_AFTER" != "$(id -u)" ]; then
+  echo "Propriétaire incorrect après correction : UID \${'$'}OWNER_AFTER, attendu $(id -u). Mise à niveau annulée."
+  exit 126
+fi
+cd "\${'$'}REPO"
+exec ./.hermes/bin/hermes update --yes
+""".trimIndent()
+        val upgradeCommand = "set -o pipefail; p '🔄 Mise à niveau d’Hermès : vérification du propriétaire du venv…'; " +
+            "proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root USER=root LOGNAME=root " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -c " + q(upgradeScript) + " 2>&1 | while IFS= read -r ligne; do p \"\${'$'}ligne\"; done; " +
+            "UPDATE_STATUS=\${'$'}?; if [ \"\${'$'}UPDATE_STATUS\" -ne 0 ]; then " +
+            "p '❌ Mise à niveau Hermès échouée : consulte les lignes de progression ci-dessus. La configuration est interrompue.'; exit \"\${'$'}UPDATE_STATUS\"; fi; " +
+            "p '✅ Mise à niveau Hermès terminée.'"
+}META" ]; then
+  echo "Métadonnée rpds_py introuvable : aucune mise à niveau lancée."
+  exit 2
+fi
+OWNER=$(stat -c %u "${'META")
+GROUP=$(stat -c %g "\${'$'}META")
+echo "Fichier venv : \${'$'}META (UID \${'$'}OWNER/GID \${'$'}GROUP)."
+if [ "\${'$'}OWNER" = "$(id -u)" ]; then
+  cd "\${'$'}REPO"
+  exec ./.hermes/bin/hermes update --yes
+fi
+echo 'Correction ciblée des propriétaires des seuls fichiers METADATA dist-info concernés (pas de chown récursif).'
+find /root/.hermes/installs -type f -path '*/venv/lib/python*/site-packages/*.dist-info/METADATA' -uid "\${'$'}OWNER" -exec chown 0:0 {} + || {
+  echo 'Échec de la correction ciblée des métadonnées.'
+  exit 126
+}
+OWNER_AFTER=$(stat -c %u "\${'$'}META")
+if [ "\${'$'}OWNER_AFTER" != "$(id -u)" ]; then
+  echo "Propriétaire incorrect après correction : UID \${'$'}OWNER_AFTER, attendu $(id -u). Mise à niveau annulée."
+  exit 126
+fi
+cd "\${'$'}REPO"
+exec ./.hermes/bin/hermes update --yes
+""".trimIndent()
+        val upgradeCommand = "set -o pipefail; p '🔄 Mise à niveau d’Hermès : vérification du propriétaire du venv…'; " +
+            "proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root USER=root LOGNAME=root " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -c " + q(upgradeScript) + " 2>&1 | while IFS= read -r ligne; do p \"\${'$'}ligne\"; done; " +
+            "UPDATE_STATUS=\${'$'}?; if [ \"\${'$'}UPDATE_STATUS\" -ne 0 ]; then " +
+            "p '❌ Mise à niveau Hermès échouée : consulte les lignes de progression ci-dessus. La configuration est interrompue.'; exit \"\${'$'}UPDATE_STATUS\"; fi; " +
+            "p '✅ Mise à niveau Hermès terminée.'"
+}META")
+GROUP=$(stat -c %g "${'META")
+echo "Fichier venv : \${'$'}META (UID \${'$'}OWNER/GID \${'$'}GROUP)."
+if [ "\${'$'}OWNER" = "$(id -u)" ]; then
+  cd "\${'$'}REPO"
+  exec ./.hermes/bin/hermes update --yes
+fi
+echo 'Correction ciblée des propriétaires des seuls fichiers METADATA dist-info concernés (pas de chown récursif).'
+find /root/.hermes/installs -type f -path '*/venv/lib/python*/site-packages/*.dist-info/METADATA' -uid "\${'$'}OWNER" -exec chown 0:0 {} + || {
+  echo 'Échec de la correction ciblée des métadonnées.'
+  exit 126
+}
+OWNER_AFTER=$(stat -c %u "\${'$'}META")
+if [ "\${'$'}OWNER_AFTER" != "$(id -u)" ]; then
+  echo "Propriétaire incorrect après correction : UID \${'$'}OWNER_AFTER, attendu $(id -u). Mise à niveau annulée."
+  exit 126
+fi
+cd "\${'$'}REPO"
+exec ./.hermes/bin/hermes update --yes
+""".trimIndent()
+        val upgradeCommand = "set -o pipefail; p '🔄 Mise à niveau d’Hermès : vérification du propriétaire du venv…'; " +
+            "proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root USER=root LOGNAME=root " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -c " + q(upgradeScript) + " 2>&1 | while IFS= read -r ligne; do p \"\${'$'}ligne\"; done; " +
+            "UPDATE_STATUS=\${'$'}?; if [ \"\${'$'}UPDATE_STATUS\" -ne 0 ]; then " +
+            "p '❌ Mise à niveau Hermès échouée : consulte les lignes de progression ci-dessus. La configuration est interrompue.'; exit \"\${'$'}UPDATE_STATUS\"; fi; " +
+            "p '✅ Mise à niveau Hermès terminée.'"
+}META")
+echo "Fichier venv : ${'META (UID \${'$'}OWNER/GID \${'$'}GROUP)."
+if [ "\${'$'}OWNER" = "$(id -u)" ]; then
+  cd "\${'$'}REPO"
+  exec ./.hermes/bin/hermes update --yes
+fi
+echo 'Correction ciblée des propriétaires des seuls fichiers METADATA dist-info concernés (pas de chown récursif).'
+find /root/.hermes/installs -type f -path '*/venv/lib/python*/site-packages/*.dist-info/METADATA' -uid "\${'$'}OWNER" -exec chown 0:0 {} + || {
+  echo 'Échec de la correction ciblée des métadonnées.'
+  exit 126
+}
+OWNER_AFTER=$(stat -c %u "\${'$'}META")
+if [ "\${'$'}OWNER_AFTER" != "$(id -u)" ]; then
+  echo "Propriétaire incorrect après correction : UID \${'$'}OWNER_AFTER, attendu $(id -u). Mise à niveau annulée."
+  exit 126
+fi
+cd "\${'$'}REPO"
+exec ./.hermes/bin/hermes update --yes
+""".trimIndent()
+        val upgradeCommand = "set -o pipefail; p '🔄 Mise à niveau d’Hermès : vérification du propriétaire du venv…'; " +
+            "proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root USER=root LOGNAME=root " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -c " + q(upgradeScript) + " 2>&1 | while IFS= read -r ligne; do p \"\${'$'}ligne\"; done; " +
+            "UPDATE_STATUS=\${'$'}?; if [ \"\${'$'}UPDATE_STATUS\" -ne 0 ]; then " +
+            "p '❌ Mise à niveau Hermès échouée : consulte les lignes de progression ci-dessus. La configuration est interrompue.'; exit \"\${'$'}UPDATE_STATUS\"; fi; " +
+            "p '✅ Mise à niveau Hermès terminée.'"
+}META (UID ${'OWNER/GID \${'$'}GROUP)."
+if [ "\${'$'}OWNER" = "$(id -u)" ]; then
+  cd "\${'$'}REPO"
+  exec ./.hermes/bin/hermes update --yes
+fi
+echo 'Correction ciblée des propriétaires des seuls fichiers METADATA dist-info concernés (pas de chown récursif).'
+find /root/.hermes/installs -type f -path '*/venv/lib/python*/site-packages/*.dist-info/METADATA' -uid "\${'$'}OWNER" -exec chown 0:0 {} + || {
+  echo 'Échec de la correction ciblée des métadonnées.'
+  exit 126
+}
+OWNER_AFTER=$(stat -c %u "\${'$'}META")
+if [ "\${'$'}OWNER_AFTER" != "$(id -u)" ]; then
+  echo "Propriétaire incorrect après correction : UID \${'$'}OWNER_AFTER, attendu $(id -u). Mise à niveau annulée."
+  exit 126
+fi
+cd "\${'$'}REPO"
+exec ./.hermes/bin/hermes update --yes
+""".trimIndent()
+        val upgradeCommand = "set -o pipefail; p '🔄 Mise à niveau d’Hermès : vérification du propriétaire du venv…'; " +
+            "proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root USER=root LOGNAME=root " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -c " + q(upgradeScript) + " 2>&1 | while IFS= read -r ligne; do p \"\${'$'}ligne\"; done; " +
+            "UPDATE_STATUS=\${'$'}?; if [ \"\${'$'}UPDATE_STATUS\" -ne 0 ]; then " +
+            "p '❌ Mise à niveau Hermès échouée : consulte les lignes de progression ci-dessus. La configuration est interrompue.'; exit \"\${'$'}UPDATE_STATUS\"; fi; " +
+            "p '✅ Mise à niveau Hermès terminée.'"
+}OWNER/GID ${'GROUP)."
+if [ "\${'$'}OWNER" = "$(id -u)" ]; then
+  cd "\${'$'}REPO"
+  exec ./.hermes/bin/hermes update --yes
+fi
+echo 'Correction ciblée des propriétaires des seuls fichiers METADATA dist-info concernés (pas de chown récursif).'
+find /root/.hermes/installs -type f -path '*/venv/lib/python*/site-packages/*.dist-info/METADATA' -uid "\${'$'}OWNER" -exec chown 0:0 {} + || {
+  echo 'Échec de la correction ciblée des métadonnées.'
+  exit 126
+}
+OWNER_AFTER=$(stat -c %u "\${'$'}META")
+if [ "\${'$'}OWNER_AFTER" != "$(id -u)" ]; then
+  echo "Propriétaire incorrect après correction : UID \${'$'}OWNER_AFTER, attendu $(id -u). Mise à niveau annulée."
+  exit 126
+fi
+cd "\${'$'}REPO"
+exec ./.hermes/bin/hermes update --yes
+""".trimIndent()
+        val upgradeCommand = "set -o pipefail; p '🔄 Mise à niveau d’Hermès : vérification du propriétaire du venv…'; " +
+            "proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root USER=root LOGNAME=root " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -c " + q(upgradeScript) + " 2>&1 | while IFS= read -r ligne; do p \"\${'$'}ligne\"; done; " +
+            "UPDATE_STATUS=\${'$'}?; if [ \"\${'$'}UPDATE_STATUS\" -ne 0 ]; then " +
+            "p '❌ Mise à niveau Hermès échouée : consulte les lignes de progression ci-dessus. La configuration est interrompue.'; exit \"\${'$'}UPDATE_STATUS\"; fi; " +
+            "p '✅ Mise à niveau Hermès terminée.'"
+}GROUP)."
+if [ "${'OWNER" = "$(id -u)" ]; then
+  cd "\${'$'}REPO"
+  exec ./.hermes/bin/hermes update --yes
+fi
+echo 'Correction ciblée des propriétaires des seuls fichiers METADATA dist-info concernés (pas de chown récursif).'
+find /root/.hermes/installs -type f -path '*/venv/lib/python*/site-packages/*.dist-info/METADATA' -uid "\${'$'}OWNER" -exec chown 0:0 {} + || {
+  echo 'Échec de la correction ciblée des métadonnées.'
+  exit 126
+}
+OWNER_AFTER=$(stat -c %u "\${'$'}META")
+if [ "\${'$'}OWNER_AFTER" != "$(id -u)" ]; then
+  echo "Propriétaire incorrect après correction : UID \${'$'}OWNER_AFTER, attendu $(id -u). Mise à niveau annulée."
+  exit 126
+fi
+cd "\${'$'}REPO"
+exec ./.hermes/bin/hermes update --yes
+""".trimIndent()
+        val upgradeCommand = "set -o pipefail; p '🔄 Mise à niveau d’Hermès : vérification du propriétaire du venv…'; " +
+            "proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root USER=root LOGNAME=root " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -c " + q(upgradeScript) + " 2>&1 | while IFS= read -r ligne; do p \"\${'$'}ligne\"; done; " +
+            "UPDATE_STATUS=\${'$'}?; if [ \"\${'$'}UPDATE_STATUS\" -ne 0 ]; then " +
+            "p '❌ Mise à niveau Hermès échouée : consulte les lignes de progression ci-dessus. La configuration est interrompue.'; exit \"\${'$'}UPDATE_STATUS\"; fi; " +
+            "p '✅ Mise à niveau Hermès terminée.'"
+}OWNER" = "$(id -u)" ]; then
+  cd "${'REPO"
+  exec ./.hermes/bin/hermes update --yes
+fi
+echo 'Correction ciblée des propriétaires des seuls fichiers METADATA dist-info concernés (pas de chown récursif).'
+find /root/.hermes/installs -type f -path '*/venv/lib/python*/site-packages/*.dist-info/METADATA' -uid "\${'$'}OWNER" -exec chown 0:0 {} + || {
+  echo 'Échec de la correction ciblée des métadonnées.'
+  exit 126
+}
+OWNER_AFTER=$(stat -c %u "\${'$'}META")
+if [ "\${'$'}OWNER_AFTER" != "$(id -u)" ]; then
+  echo "Propriétaire incorrect après correction : UID \${'$'}OWNER_AFTER, attendu $(id -u). Mise à niveau annulée."
+  exit 126
+fi
+cd "\${'$'}REPO"
+exec ./.hermes/bin/hermes update --yes
+""".trimIndent()
+        val upgradeCommand = "set -o pipefail; p '🔄 Mise à niveau d’Hermès : vérification du propriétaire du venv…'; " +
+            "proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root USER=root LOGNAME=root " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -c " + q(upgradeScript) + " 2>&1 | while IFS= read -r ligne; do p \"\${'$'}ligne\"; done; " +
+            "UPDATE_STATUS=\${'$'}?; if [ \"\${'$'}UPDATE_STATUS\" -ne 0 ]; then " +
+            "p '❌ Mise à niveau Hermès échouée : consulte les lignes de progression ci-dessus. La configuration est interrompue.'; exit \"\${'$'}UPDATE_STATUS\"; fi; " +
+            "p '✅ Mise à niveau Hermès terminée.'"
+}REPO"
+  exec ./.hermes/bin/hermes update --yes
+fi
+echo 'Correction ciblée des propriétaires des seuls fichiers METADATA dist-info concernés (pas de chown récursif).'
+find /root/.hermes/installs -type f -path '*/venv/lib/python*/site-packages/*.dist-info/METADATA' -uid "${'OWNER" -exec chown 0:0 {} + || {
+  echo 'Échec de la correction ciblée des métadonnées.'
+  exit 126
+}
+OWNER_AFTER=$(stat -c %u "\${'$'}META")
+if [ "\${'$'}OWNER_AFTER" != "$(id -u)" ]; then
+  echo "Propriétaire incorrect après correction : UID \${'$'}OWNER_AFTER, attendu $(id -u). Mise à niveau annulée."
+  exit 126
+fi
+cd "\${'$'}REPO"
+exec ./.hermes/bin/hermes update --yes
+""".trimIndent()
+        val upgradeCommand = "set -o pipefail; p '🔄 Mise à niveau d’Hermès : vérification du propriétaire du venv…'; " +
+            "proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root USER=root LOGNAME=root " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -c " + q(upgradeScript) + " 2>&1 | while IFS= read -r ligne; do p \"\${'$'}ligne\"; done; " +
+            "UPDATE_STATUS=\${'$'}?; if [ \"\${'$'}UPDATE_STATUS\" -ne 0 ]; then " +
+            "p '❌ Mise à niveau Hermès échouée : consulte les lignes de progression ci-dessus. La configuration est interrompue.'; exit \"\${'$'}UPDATE_STATUS\"; fi; " +
+            "p '✅ Mise à niveau Hermès terminée.'"
+}OWNER" -exec chown 0:0 {} + || {
+  echo 'Échec de la correction ciblée des métadonnées.'
+  exit 126
+}
+OWNER_AFTER=$(stat -c %u "${'META")
+if [ "\${'$'}OWNER_AFTER" != "$(id -u)" ]; then
+  echo "Propriétaire incorrect après correction : UID \${'$'}OWNER_AFTER, attendu $(id -u). Mise à niveau annulée."
+  exit 126
+fi
+cd "\${'$'}REPO"
+exec ./.hermes/bin/hermes update --yes
+""".trimIndent()
+        val upgradeCommand = "set -o pipefail; p '🔄 Mise à niveau d’Hermès : vérification du propriétaire du venv…'; " +
+            "proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root USER=root LOGNAME=root " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -c " + q(upgradeScript) + " 2>&1 | while IFS= read -r ligne; do p \"\${'$'}ligne\"; done; " +
+            "UPDATE_STATUS=\${'$'}?; if [ \"\${'$'}UPDATE_STATUS\" -ne 0 ]; then " +
+            "p '❌ Mise à niveau Hermès échouée : consulte les lignes de progression ci-dessus. La configuration est interrompue.'; exit \"\${'$'}UPDATE_STATUS\"; fi; " +
+            "p '✅ Mise à niveau Hermès terminée.'"
+}META")
+if [ "${'OWNER_AFTER" != "$(id -u)" ]; then
+  echo "Propriétaire incorrect après correction : UID \${'$'}OWNER_AFTER, attendu $(id -u). Mise à niveau annulée."
+  exit 126
+fi
+cd "\${'$'}REPO"
+exec ./.hermes/bin/hermes update --yes
+""".trimIndent()
+        val upgradeCommand = "set -o pipefail; p '🔄 Mise à niveau d’Hermès : vérification du propriétaire du venv…'; " +
+            "proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root USER=root LOGNAME=root " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -c " + q(upgradeScript) + " 2>&1 | while IFS= read -r ligne; do p \"\${'$'}ligne\"; done; " +
+            "UPDATE_STATUS=\${'$'}?; if [ \"\${'$'}UPDATE_STATUS\" -ne 0 ]; then " +
+            "p '❌ Mise à niveau Hermès échouée : consulte les lignes de progression ci-dessus. La configuration est interrompue.'; exit \"\${'$'}UPDATE_STATUS\"; fi; " +
+            "p '✅ Mise à niveau Hermès terminée.'"
+}OWNER_AFTER" != "$(id -u)" ]; then
+  echo "Propriétaire incorrect après correction : UID ${'OWNER_AFTER, attendu $(id -u). Mise à niveau annulée."
+  exit 126
+fi
+cd "\${'$'}REPO"
+exec ./.hermes/bin/hermes update --yes
+""".trimIndent()
+        val upgradeCommand = "set -o pipefail; p '🔄 Mise à niveau d’Hermès : vérification du propriétaire du venv…'; " +
+            "proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root USER=root LOGNAME=root " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -c " + q(upgradeScript) + " 2>&1 | while IFS= read -r ligne; do p \"\${'$'}ligne\"; done; " +
+            "UPDATE_STATUS=\${'$'}?; if [ \"\${'$'}UPDATE_STATUS\" -ne 0 ]; then " +
+            "p '❌ Mise à niveau Hermès échouée : consulte les lignes de progression ci-dessus. La configuration est interrompue.'; exit \"\${'$'}UPDATE_STATUS\"; fi; " +
+            "p '✅ Mise à niveau Hermès terminée.'"
+}OWNER_AFTER, attendu $(id -u). Mise à niveau annulée."
+  exit 126
+fi
+cd "${'REPO"
+exec ./.hermes/bin/hermes update --yes
+""".trimIndent()
+        val upgradeCommand = "set -o pipefail; p '🔄 Mise à niveau d’Hermès : vérification du propriétaire du venv…'; " +
+            "proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root USER=root LOGNAME=root " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -c " + q(upgradeScript) + " 2>&1 | while IFS= read -r ligne; do p \"\${'$'}ligne\"; done; " +
+            "UPDATE_STATUS=\${'$'}?; if [ \"\${'$'}UPDATE_STATUS\" -ne 0 ]; then " +
+            "p '❌ Mise à niveau Hermès échouée : consulte les lignes de progression ci-dessus. La configuration est interrompue.'; exit \"\${'$'}UPDATE_STATUS\"; fi; " +
+            "p '✅ Mise à niveau Hermès terminée.'"
+}REPO"
+exec ./.hermes/bin/hermes update --yes
+""".trimIndent()
+        val upgradeCommand = "set -o pipefail; p '🔄 Mise à niveau d’Hermès : vérification du propriétaire du venv…'; " +
+            "proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root USER=root LOGNAME=root " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -c " + q(upgradeScript) + " 2>&1 | while IFS= read -r ligne; do p \"${'ligne\"; done; " +
+            "UPDATE_STATUS=\${'$'}?; if [ \"\${'$'}UPDATE_STATUS\" -ne 0 ]; then " +
+            "p '❌ Mise à niveau Hermès échouée : consulte les lignes de progression ci-dessus. La configuration est interrompue.'; exit \"\${'$'}UPDATE_STATUS\"; fi; " +
+            "p '✅ Mise à niveau Hermès terminée.'"
+}ligne\"; done; " +
+            "UPDATE_STATUS=${'?; if [ \"\${'$'}UPDATE_STATUS\" -ne 0 ]; then " +
+            "p '❌ Mise à niveau Hermès échouée : consulte les lignes de progression ci-dessus. La configuration est interrompue.'; exit \"\${'$'}UPDATE_STATUS\"; fi; " +
+            "p '✅ Mise à niveau Hermès terminée.'"
+}?; if [ \"${'UPDATE_STATUS\" -ne 0 ]; then " +
+            "p '❌ Mise à niveau Hermès échouée : consulte les lignes de progression ci-dessus. La configuration est interrompue.'; exit \"\${'$'}UPDATE_STATUS\"; fi; " +
+            "p '✅ Mise à niveau Hermès terminée.'"
+}UPDATE_STATUS\" -ne 0 ]; then " +
+            "p '❌ Mise à niveau Hermès échouée : consulte les lignes de progression ci-dessus. La configuration est interrompue.'; exit \"${'UPDATE_STATUS\"; fi; " +
+            "p '✅ Mise à niveau Hermès terminée.'"
+}UPDATE_STATUS\"; fi; " +
             "p '✅ Mise à niveau Hermès terminée.'"
         val restartCommand = "proot-distro login debian --termux-home -- pkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; " +
             "pkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; sleep 3"
