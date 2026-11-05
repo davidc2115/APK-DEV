@@ -195,9 +195,9 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 } ?: "Aucun cycle enregistré"
             }
             HudPanel(Modifier.fillMaxWidth(), title = "Agents autonomes") {
-                val enabledAgents = listOf(store.agentMails.value, store.agentFactures.value, store.agentPlanning.value, store.agentNotifs.value, store.agentPhoneHealth.value).count { it }
+                val enabledAgents = listOf(store.agentMails.value, store.agentFactures.value, store.agentPlanning.value, store.agentNotifs.value).count { it }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    DashboardMetric("AGENTS ACTIFS", "$"+"{enabledAgents} / 5")
+                    DashboardMetric("AGENTS ACTIFS", "$"+"{enabledAgents} / 4")
                     DashboardMetric("FRÉQUENCE", "$"+"{store.agentMinutes.value} min")
                     DashboardMetric("ÉTAT GLOBAL", if (store.agentsOn.value) "EN SERVICE" else "EN PAUSE")
                 }
@@ -208,6 +208,41 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     fr.dd.jarvis.work.AgentsScheduler.apply(ctx, store)
                 }
                 Spacer(Modifier.height(8.dp))
+                HudPanel(Modifier.fillMaxWidth(), title = "Centre de surveillance du téléphone") {
+                    val phone = remember(tick) { fr.dd.jarvis.device.PhoneHealth.dashboard(app) }
+                    val samples = remember(tick, store.agentLastRunAt.value) { fr.dd.jarvis.device.PhoneHealth.history(app) }
+                    val batterySeries = samples.mapNotNull { it.battery?.toFloat() }
+                    val storageSeries = samples.map { (it.freeBytes / (1024.0 * 1024.0 * 1024.0)).toFloat() }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        DashboardMetric("BATTERIE", phone.battery?.let { "$"+"{it} %" } ?: "—")
+                        DashboardMetric("STOCKAGE LIBRE", phone.storageFreeGb?.let { String.format(java.util.Locale.FRANCE, "%.1f Go", it) } ?: "—")
+                        DashboardMetric("RAM LIBRE", String.format(java.util.Locale.FRANCE, "%.1f Go", phone.ramFreeGb))
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        DashboardMetric("TEMP. BATTERIE", phone.temperatureC?.let { String.format(java.util.Locale.FRANCE, "%.1f °C", it) } ?: "—")
+                        DashboardMetric("STOCKAGE UTILISÉ", phone.storageUsedPct?.let { "$"+"{it} %" } ?: "—")
+                        DashboardMetric("ÉTAT THERMIQUE", phone.thermal)
+                    }
+                    Text("Évolution de la batterie", color = HudDim, fontSize = 11.sp)
+                    if (batterySeries.size >= 2) TrendLine(batterySeries, Modifier.fillMaxWidth().height(72.dp), Color(0xFF55D6C2))
+                    else Text("Historique en constitution : les relevés sont enregistrés toutes les 30 minutes.", color = HudDim, fontSize = 10.sp)
+                    Text("Évolution du stockage libre", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+                    if (storageSeries.size >= 2) TrendLine(storageSeries, Modifier.fillMaxWidth().height(72.dp), Color(0xFF9B8CFF))
+                    else Text("La courbe apparaîtra après plusieurs relevés.", color = HudDim, fontSize = 10.sp)
+                    HudDivider()
+                    Text("ÉTAT DES SERVICES ET AUTORISATIONS", color = LocalAccent.current, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 11.sp)
+                    AgentStatusRow("Connexion Internet", phone.network != "Hors ligne", phone.network)
+                    AgentStatusRow("Shizuku", phone.shizukuReady, if (phone.shizukuReady) "Autorisé et opérationnel" else "Non prêt")
+                    AgentStatusRow("Accessibilité JARVIS", phone.accessibility, if (phone.accessibility) "Connectée" else "Déconnectée")
+                    AgentStatusRow("Accès aux notifications", phone.notificationListener, if (phone.notificationListener) "Autorisé" else "Non autorisé")
+                    AgentStatusRow("Notifications Android", phone.notificationsAllowed, if (phone.notificationsAllowed) "Autorisées" else "Bloquées")
+                    AgentStatusRow("Alarmes exactes", phone.exactAlarmsAllowed, if (phone.exactAlarmsAllowed) "Autorisées" else "Non autorisées")
+                    AgentStatusRow("Batterie sans restriction", phone.unrestrictedBattery, if (phone.unrestrictedBattery) "Activée" else "Optimisation active")
+                    AgentStatusRow("Santé batterie", phone.batteryHealth == "Bonne", phone.batteryHealth + if (phone.charging) " · en charge" else "")
+                    AgentStatusRow("Réseau thermique", phone.thermal !in setOf("Élevé", "Critique", "Urgence", "Arrêt imminent"), phone.thermal)
+                    Text("Mesures locales en lecture seule. Aucune analyse des messages, photos ou contenus personnels.", color = HudDim, fontSize = 10.sp)
+                    HudButton("Actualiser les mesures", Modifier.fillMaxWidth()) { tick++ }
+                }
                 Text("AGENTS SPÉCIALISÉS · VIGNETTES DE CONTRÔLE", color = LocalAccent.current, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 12.sp)
                 Text("Chaque vignette décrit le travail réellement effectué par l'agent. Les interrupteurs prennent effet au prochain cycle.", color = HudDim, fontSize = 11.sp)
                 Spacer(Modifier.height(8.dp))
@@ -249,27 +284,6 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                             Text(if (store.agentNotifs.value) "ACTIF" else "EN PAUSE", color = if (store.agentNotifs.value) LocalAccent.current else HudDim, fontSize = 10.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
                             HudChip(if (store.agentNotifs.value) "Désactiver" else "Activer", store.agentNotifs.value) { store.agentNotifs.set(!store.agentNotifs.value) }
-                        }
-                    }
-                    HudPanel(Modifier.fillMaxWidth(), title = "📱 Agent surveillance téléphone") {
-                        val phoneSamples = remember(tick, store.agentLastRunAt.value) { fr.dd.jarvis.device.PhoneHealth.history(app) }
-                        val batterySeries = phoneSamples.mapNotNull { it.battery?.toFloat() }
-                        val freeSeries = phoneSamples.map { (it.freeBytes / (1024.0 * 1024.0 * 1024.0)).toFloat() }
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            DashboardMetric("BATTERIE", batterySeries.lastOrNull()?.let { "$"+"{it.toInt()} %" } ?: "—")
-                            DashboardMetric("STOCKAGE LIBRE", freeSeries.lastOrNull()?.let { String.format(java.util.Locale.FRANCE, "%.1f Go", it) } ?: "—")
-                        }
-                        Text("Évolution batterie · relevés locaux", color = HudDim, fontSize = 11.sp)
-                        if (batterySeries.size >= 2) TrendLine(batterySeries, Modifier.fillMaxWidth().height(76.dp), Color(0xFF55D6C2))
-                        else Text("La courbe apparaîtra après deux relevés espacés d'au moins 30 minutes.", color = HudDim, fontSize = 10.sp)
-                        Text("Évolution stockage libre · relevés locaux", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
-                        if (freeSeries.size >= 2) TrendLine(freeSeries, Modifier.fillMaxWidth().height(76.dp), Color(0xFF9B8CFF))
-                        else Text("Historique en cours de constitution.", color = HudDim, fontSize = 10.sp)
-                        Text("Surveille localement l'évolution de la batterie et du stockage. Signale une baisse inhabituelle de batterie ou une diminution rapide de l'espace disponible. N'analyse ni messages, ni photos, ni contenu personnel.", color = HudText, fontSize = 12.sp)
-                        Text("Moteur responsable : surveillance locale JARVIS — aucun agent IA ni envoi de données.", color = LocalAccent.current, fontSize = 11.sp)
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(if (store.agentPhoneHealth.value) "ACTIF" else "EN PAUSE", color = if (store.agentPhoneHealth.value) LocalAccent.current else HudDim, fontSize = 10.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
-                            HudChip(if (store.agentPhoneHealth.value) "Désactiver" else "Activer", store.agentPhoneHealth.value) { store.agentPhoneHealth.set(!store.agentPhoneHealth.value) }
                         }
                     }
                 }
