@@ -19,6 +19,33 @@ class SocieteService(
 
     fun newId() = UUID.randomUUID().toString().take(8)
 
+    /** Supprime une intervention précise et ses pièces jointes, après confirmation demandée par SocieteTools. */
+    fun supprimerIntervention(clientId: String, siteId: String, interventionId: String): String {
+        val client = data.client(clientId) ?: return "Client introuvable."
+        val site = client.sites.firstOrNull { it.id == siteId } ?: return "Installation introuvable."
+        val cible = site.interventions.firstOrNull { it.id == interventionId } ?: return "Intervention introuvable."
+        repo.update { current -> current.copy(clients = current.clients.map { c ->
+            if (c.id != clientId) c else c.copy(sites = c.sites.map { s ->
+                if (s.id != siteId) s else s.copy(interventions = s.interventions.filterNot { it.id == interventionId })
+            })
+        }) }
+        val encorePresente = data.client(clientId)?.sites?.firstOrNull { it.id == siteId }?.interventions?.any { it.id == interventionId } == true
+        if (encorePresente) return "Échec : l’intervention $interventionId est toujours présente dans l’historique."
+        val safe = { value: String -> value.replace(Regex("[\\\\/:*?\"<>|]"), "_") }
+        val dossier = "Société/Interventions/${safe(client.nom)}/${safe(site.nom)}"
+        val base = "${cible.date} ${cible.id}"
+        val rapportSupprime = obsidian.supprimer(dossier, base)
+        val photosSupprimees = (cible.photosAvant + cible.photosApres).count { path ->
+            val nom = path.substringAfterLast('/')
+            obsidian.supprimerFichier(dossier, "${cible.id}-$nom")
+        }
+        val localPhotos = File(ctx.filesDir, "societe/interventions/$interventionId")
+        val localSupprime = !localPhotos.exists() || runCatching { localPhotos.deleteRecursively() }.getOrDefault(false)
+        return "🗑️ Intervention $interventionId supprimée de l’historique de ${client.nom} — ${site.nom}. " +
+            (if (rapportSupprime) "Rapport Obsidian/PDF supprimé. " else "Aucun rapport Obsidian/PDF restant à supprimer ou coffre indisponible. ") +
+            "$photosSupprimees photo(s) associée(s) supprimée(s)." + if (localSupprime) "" else " Certains fichiers locaux n’ont pas pu être effacés."
+    }
+
     /** Modifie une intervention existante et régénère sa note Obsidian ainsi que son PDF, en conservant ses photos. */
     fun modifierIntervention(clientId: String, siteId: String, interventionId: String, maj: Intervention): String {
         val client = data.client(clientId) ?: return "Client introuvable."
