@@ -1015,7 +1015,6 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
             val micLauncher = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { ok ->
                 if (ok) { store.wakeOn.set(true); fr.dd.jarvis.service.JarvisService.start(ctx) }
             }
-            var runMsg by remember { mutableStateOf("") }
             HudPanel(Modifier.fillMaxWidth(), title = "Arrière-plan — écoute et agents autonomes") {
                 Text("Écoute « Jarvis » : dis « Jarvis », attends le petit bip, puis ta demande (« lance un itinéraire vers chez Dupont »), même écran éteint. Utilise le micro en continu (notification permanente, consommation batterie).", color = HudDim, fontSize = 12.sp)
                 Spacer(Modifier.height(6.dp))
