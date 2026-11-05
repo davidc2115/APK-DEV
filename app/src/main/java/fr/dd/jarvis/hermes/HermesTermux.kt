@@ -674,7 +674,7 @@ os.replace(name, p)
             "pkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; sleep 3"
         val script = listOf(
             prelude(app),
-            "curl -fsS -m 4 -X POST -H \"Authorization: Bearer ${'
+            "curl -fsS -m 4 -X POST -H 'Authorization: Bearer ${'$'}J_TOK' --data-binary pong '${'$'}J_URL' >/dev/null || exit 125",
             "p '🚀 Configuration Hermès : suivi des étapes confirmé.'",
             upgradeCommand,
             "p '🔐 Mise à jour des clés et variables des fournisseurs…'",
