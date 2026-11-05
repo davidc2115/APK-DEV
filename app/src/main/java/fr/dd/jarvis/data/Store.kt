@@ -278,7 +278,6 @@ class Store(context: Context) {
     val agentFactures = BPref("agentFactures", true)
     val agentPlanning = BPref("agentPlanning", true)
     val agentNotifs = BPref("agentNotifs", true)
-    val agentPhoneHealth = BPref("agentPhoneHealth", true)
     val agentRanger = BPref("agentRanger", true)
     val notifLive = BPref("notifLive", true)
     val agentMinutes = IPref("agentMinutes", 15)
