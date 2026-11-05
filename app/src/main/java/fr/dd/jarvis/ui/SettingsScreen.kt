@@ -269,14 +269,22 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
             }
         }
         item {
-            val memory = app.memo.all()
-            val learning = app.memo.apprentissagesEnCours()
-            val learningCount = learning.lines().count { it.trimStart().startsWith("- ") }
+            var memoryCount by remember { mutableIntStateOf(0) }
+            var learningCount by remember { mutableIntStateOf(0) }
+            var learningSummary by remember { mutableStateOf("Chargement de la mémoire…") }
+            androidx.compose.runtime.LaunchedEffect(Unit) {
+                val snapshot = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    app.memo.all() to app.memo.apprentissagesEnCours()
+                }
+                memoryCount = snapshot.first.size
+                learningSummary = snapshot.second
+                learningCount = snapshot.second.lines().count { it.trimStart().startsWith("- ") }
+            }
             HudPanel(Modifier.fillMaxWidth(), title = "Mémoire intelligente et habitudes") {
-                Text("Mémoire durable : ${memory.size} rubrique(s) enregistrée(s). Les préférences observées restent candidates jusqu'à trois preuves distinctes ; les données sensibles sont exclues de l'apprentissage automatique.", color = HudDim, fontSize = 11.sp)
-                AgentStatusRow("Consignes durables", memory.isNotEmpty(), "${memory.size} rubrique(s)")
-                AgentStatusRow("Habitudes candidates", learningCount > 0, if (learningCount == 0) "aucune" else "${learningCount} en apprentissage")
-                if (learning.isNotBlank()) Text(learning.take(900), color = HudText, fontSize = 11.sp)
+                Text("Mémoire durable : $memoryCount rubrique(s) enregistrée(s). Les préférences observées restent candidates jusqu'à trois preuves distinctes ; les données sensibles sont exclues de l'apprentissage automatique.", color = HudDim, fontSize = 11.sp)
+                AgentStatusRow("Consignes durables", memoryCount > 0, "$memoryCount rubrique(s)")
+                AgentStatusRow("Habitudes candidates", learningCount > 0, if (learningCount == 0) "aucune" else "$learningCount en apprentissage")
+                if (learningSummary.isNotBlank()) Text(learningSummary.take(900), color = HudText, fontSize = 11.sp)
                 HudButton("Consulter les préférences en apprentissage", Modifier.fillMaxWidth()) {
                     onAsk("Affiche les préférences candidates en cours d'apprentissage et le nombre de preuves distinctes pour chacune.")
                 }
