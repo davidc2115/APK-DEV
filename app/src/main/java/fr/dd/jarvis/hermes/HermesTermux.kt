@@ -651,7 +651,16 @@ os.replace(name, p)
     }
 
     fun arreter(app: JarvisApp): String =
-        executer(app, prelude(app) + "\nif [ -f "${' >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+        executer(app, prelude(app) + """
+PID_FILE="${'$'}{HOME}/.hermes/gateway.pid"
+if [ -f "${'$'}{PID_FILE}" ]; then
+  OLD_PID="${'$'}(cat "${'$'}{PID_FILE}" 2>/dev/null)"
+  case "${'$'}{OLD_PID}" in ''|*[!0-9]*) ;; *) kill "${'$'}{OLD_PID}" >/dev/null 2>&1 || true ;; esac
+  rm -f "${'$'}{PID_FILE}"
+fi
+termux-wake-unlock >/dev/null 2>&1 || true
+p '⏹️ Hermès arrêté.'
+""".trimIndent(), libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
 
     /**
      * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
