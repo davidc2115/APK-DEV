@@ -246,7 +246,9 @@ p() { echo "${'$'}*"; command -v curl >/dev/null 2>&1 && curl -s -m 4 -X POST -H
             // Outils de Jarvis exposés directement au modèle (sinon Hermès les cache derrière tool_search / tool_call).
             appendLine("tools:")
             appendLine("  tool_search:")
-            appendLine("    enabled: \"off\"")
+            appendLine("    enabled: \"on\"")
+            appendLine("    search_default_limit: 8")
+            appendLine("    max_search_limit: 20")
         }
         return """
 H="${'$'}HOME/.hermes"; mkdir -p "${'$'}H/logs"
