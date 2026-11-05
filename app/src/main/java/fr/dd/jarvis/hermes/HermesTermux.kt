@@ -749,7 +749,1323 @@ os.replace(name, p)
         message = "⏳ Commandes de synchronisation prêtes. Assemblage du script final…"
         val script = listOf(
             prelude(app),
-            "curl -fsS -m 4 -X POST -H 'Authorization: Bearer ${'$'}J_TOK' --data-binary pong '${'$'}J_URL' >/dev/null || exit 125",
+            "curl -fsS -m 4 -X POST -H \"Authorization: Bearer ${'
+            "p '🚀 Configuration Hermès : suivi des étapes confirmé.'",
+            upgradeCommand,
+            "p '🔐 Mise à jour des clés et variables des fournisseurs…'",
+            envScript,
+            "p '🧩 Synchronisation des plugins et agents…'",
+            pluginCommand,
+            "p '⚙️ Écriture et validation de la configuration Hermès…'",
+            configCommand,
+            "p '🔄 Redémarrage de la passerelle Hermès…'",
+            restartCommand,
+            demarrage
+        ).joinToString(System.lineSeparator())
+        message = "⏳ Script Hermès construit (${script.length} caractères). Transmission à Termux…"
+        val signalAvantEnvoi = PontMcp.dernierSignal
+        dernierSignalAvantCommande = signalAvantEnvoi
+        val erreur = executer(app, script, libelle = "Mise à niveau et orchestration multi-agents Hermès", retourNatif = true)
+        if (erreur != null) {
+            message = "❌ Termux a refusé le lancement : $erreur. Aucune mise à niveau n'a été confirmée."
+            return message
+        }
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            if (PontMcp.dernierSignal <= signalAvantEnvoi &&
+                !message.startsWith("❌") && !message.startsWith("✅ Hermès est en ligne")) {
+                message = "❌ Termux n'a pas confirmé l'exécution du script après 35 secondes. Vérifie l'autorisation « Exécuter des commandes dans Termux », les restrictions d'arrière-plan et le port 38291. Aucun succès n'est déclaré."
+            }
+        }, 35_000)
+        return "⏳ Commande transmise à Termux ; attente de son accusé de réception réel."
+    }
+
+    /** Catalogue et installation non interactive des plugins/MCP Hermes. */
+    fun gererExtension(app: JarvisApp, actionRaw: String, nameRaw: String = ""): String {
+        val action = actionRaw.trim().lowercase()
+        val name = nameRaw.trim()
+        val allowed = setOf("skill_catalogue", "skill_rechercher", "skill_liste", "skill_inspecter", "skill_installer",
+            "skill_verifier", "skill_mettre_a_jour", "plugin_catalogue", "plugin_liste", "plugin_installer", "plugin_activer",
+            "mcp_catalogue", "mcp_liste", "mcp_installer")
+        if (action !in allowed) return "Action d'extension inconnue."
+        if (action.endsWith("_installer") || action.endsWith("_activer") || action == "skill_inspecter") {
+            if (!Regex("[a-zA-Z0-9][a-zA-Z0-9._/-]{0,100}").matches(name) || name.contains(".."))
+                return "Nom d'extension invalide."
+        }
+        val args = when (action) {
+            "skill_catalogue" -> listOf("skills", "browse")
+            "skill_rechercher" -> listOf("skills", "search", name)
+            "skill_liste" -> listOf("skills", "list")
+            "skill_inspecter" -> listOf("skills", "inspect", name)
+            "skill_installer" -> listOf("skills", "install", name, "--yes")
+            "skill_verifier" -> listOf("skills", "check")
+            "skill_mettre_a_jour" -> listOf("skills", "update")
+            "plugin_catalogue" -> listOf("plugins", "catalog")
+            "plugin_liste" -> listOf("plugins", "list")
+            "plugin_installer" -> listOf("plugins", "install", name, "--no-enable")
+            "plugin_activer" -> listOf("plugins", "enable", name)
+            "mcp_catalogue" -> listOf("mcp", "catalog")
+            "mcp_liste" -> listOf("mcp", "list")
+            "mcp_installer" -> listOf("mcp", "install", name)
+            else -> return "Action non prise en charge."
+        }
+        return lancerExtension(app, args, "Catalogue / extensions Hermès")
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    // ------------------------------------------------------------------ Sauvegarde et récupération autonome
+    private fun executerDebian(app: JarvisApp, scriptDebian: String, libelle: String): String {
+        PontMcp.demarrer(app)
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -lc ${q(scriptDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ $libelle…"
+        return executer(app, prelude(app) + "\n" + commande, libelle = libelle)
+            ?: "🚀 $libelle lancé : suis la progression dans Jarvis."
+    }
+
+    /** Archive privée de ~/.hermes, en excluant caches, dépôts Git et environnements Python recréables. */
+    private val scriptSauvegarde = """
+set -eu
+test -d /root/.hermes || { echo "❌ Dossier Hermes introuvable dans Debian."; exit 1; }
+mkdir -p /root/.hermes/backups
+tar -czf "/root/.hermes/backups/hermes-$(date +%Y%m%d-%H%M%S).tar.gz" \
+  --exclude='.hermes/backups' --exclude='.hermes/hermes-agent/.git' \
+  --exclude='.hermes/hermes-agent/venv' --exclude='.hermes/hermes-agent/.venv' \
+  --exclude='.hermes/hermes-agent/__pycache__' -C /root .hermes
+chmod 600 /root/.hermes/backups/hermes-*.tar.gz
+echo "✅ Sauvegarde privée créée dans /root/.hermes/backups."
+du -h /root/.hermes/backups/hermes-*.tar.gz | tail -n 1
+""".trimIndent()
+
+    fun sauvegarder(app: JarvisApp): String =
+        executerDebian(app, scriptSauvegarde, "Sauvegarde Hermès")
+
+    /** Contrôle les fichiers essentiels sans afficher les clés API ni les jetons. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = """
+set +e
+echo "=== DIAGNOSTIC HERMÈS (aucun secret affiché) ==="
+[ -x /root/.hermes/hermes-agent/.hermes/bin/hermes ] && echo "CLI Hermes : OK" || echo "CLI Hermes : ABSENT"
+if [ -x /root/.hermes/hermes-agent/venv/bin/python ]; then
+  echo "Environnement Python Hermès : venv/ OK"
+elif [ -x /root/.hermes/hermes-agent/.venv/bin/python ]; then
+  echo "Environnement Python Hermès : .venv/ OK"
+elif [ -x /root/.hermes/hermes-agent/.hermes/bin/python ]; then
+  echo "Environnement Python Hermès : .hermes/bin/ OK"
+else
+  echo "Environnement Python dédié : non trouvé"
+fi
+if command -v python3 >/dev/null 2>&1; then
+  echo "Python Debian : $(python3 --version 2>&1)"
+  echo "Interpréteur système : $(command -v python3)"
+else
+  echo "Python Debian : ABSENT"
+fi
+if command -v hermes >/dev/null 2>&1; then
+  echo "CLI Hermès : $(command -v hermes)"
+  hermes --version 2>&1 | head -n 1
+fi
+[ -f /root/.hermes/config.yaml ] && echo "Configuration : présente" || echo "Configuration : ABSENTE"
+[ -f /root/.hermes/.env ] && echo "Fichier de clés : présent (contenu masqué)" || echo "Fichier de clés : ABSENT"
+grep -q 'jarvis:' /root/.hermes/config.yaml 2>/dev/null && echo "Entrée MCP Jarvis : présente" || echo "Entrée MCP Jarvis : absente"
+grep -q '127.0.0.1:38291/mcp' /root/.hermes/config.yaml 2>/dev/null && echo "URL du pont MCP : OK" || echo "URL du pont MCP : à vérifier"
+curl -fsS -m 3 http://127.0.0.1:${PORT_API}/health >/dev/null 2>&1 && echo "Passerelle API : EN LIGNE" || echo "Passerelle API : hors ligne"
+echo "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        return executerDebian(app, script, "Diagnostic Hermès")
+    }
+
+    /** Restaure la dernière archive après vérification, puis relance la passerelle. */
+    fun restaurerDerniereSauvegarde(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val restore = """
+set -eu
+find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | grep -q . || { echo "❌ Aucune sauvegarde Hermès trouvée."; exit 1; }
+tar -tzf "$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)" >/dev/null
+tar -xzf "$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)" -C /root
+chmod 600 /root/.hermes/.env 2>/dev/null || true
+echo "✅ Données et configuration restaurées."
+""".trimIndent()
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- bash -lc ${q(restore)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        return executer(app, prelude(app) + "\n" + commande + "\n" + demarrage, libelle = "Restauration Hermès")
+            ?: "🚀 Restauration lancée, puis redémarrage d'Hermès."
+    }
+
+    /** Réinstallation propre : sauvegarde complète, suppression du seul moteur, puis installateur officiel. */
+    fun reinstallerComplet(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val preparation = scriptSauvegarde + "\nrm -rf /root/.hermes/hermes-agent\necho '🧹 Ancien moteur supprimé après sauvegarde.'"
+        val commande = "set -euo pipefail; proot-distro login debian --termux-home -- bash -lc ${q(preparation)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        val script = prelude(app) + "\n" + commande + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Sauvegarde puis réinstallation complète d'Hermès…"
+        return executer(app, script, libelle = "Réinstallation complète Hermès")
+            ?: "🚀 Sauvegarde effectuée puis réinstallation lancée. Suis les étapes dans Jarvis."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}J_TOK\" --data-binary pong \"${'
+            "p '🚀 Configuration Hermès : suivi des étapes confirmé.'",
+            upgradeCommand,
+            "p '🔐 Mise à jour des clés et variables des fournisseurs…'",
+            envScript,
+            "p '🧩 Synchronisation des plugins et agents…'",
+            pluginCommand,
+            "p '⚙️ Écriture et validation de la configuration Hermès…'",
+            configCommand,
+            "p '🔄 Redémarrage de la passerelle Hermès…'",
+            restartCommand,
+            demarrage
+        ).joinToString(System.lineSeparator())
+        message = "⏳ Script Hermès construit (${script.length} caractères). Transmission à Termux…"
+        val signalAvantEnvoi = PontMcp.dernierSignal
+        dernierSignalAvantCommande = signalAvantEnvoi
+        val erreur = executer(app, script, libelle = "Mise à niveau et orchestration multi-agents Hermès", retourNatif = true)
+        if (erreur != null) {
+            message = "❌ Termux a refusé le lancement : $erreur. Aucune mise à niveau n'a été confirmée."
+            return message
+        }
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            if (PontMcp.dernierSignal <= signalAvantEnvoi &&
+                !message.startsWith("❌") && !message.startsWith("✅ Hermès est en ligne")) {
+                message = "❌ Termux n'a pas confirmé l'exécution du script après 35 secondes. Vérifie l'autorisation « Exécuter des commandes dans Termux », les restrictions d'arrière-plan et le port 38291. Aucun succès n'est déclaré."
+            }
+        }, 35_000)
+        return "⏳ Commande transmise à Termux ; attente de son accusé de réception réel."
+    }
+
+    /** Catalogue et installation non interactive des plugins/MCP Hermes. */
+    fun gererExtension(app: JarvisApp, actionRaw: String, nameRaw: String = ""): String {
+        val action = actionRaw.trim().lowercase()
+        val name = nameRaw.trim()
+        val allowed = setOf("skill_catalogue", "skill_rechercher", "skill_liste", "skill_inspecter", "skill_installer",
+            "skill_verifier", "skill_mettre_a_jour", "plugin_catalogue", "plugin_liste", "plugin_installer", "plugin_activer",
+            "mcp_catalogue", "mcp_liste", "mcp_installer")
+        if (action !in allowed) return "Action d'extension inconnue."
+        if (action.endsWith("_installer") || action.endsWith("_activer") || action == "skill_inspecter") {
+            if (!Regex("[a-zA-Z0-9][a-zA-Z0-9._/-]{0,100}").matches(name) || name.contains(".."))
+                return "Nom d'extension invalide."
+        }
+        val args = when (action) {
+            "skill_catalogue" -> listOf("skills", "browse")
+            "skill_rechercher" -> listOf("skills", "search", name)
+            "skill_liste" -> listOf("skills", "list")
+            "skill_inspecter" -> listOf("skills", "inspect", name)
+            "skill_installer" -> listOf("skills", "install", name, "--yes")
+            "skill_verifier" -> listOf("skills", "check")
+            "skill_mettre_a_jour" -> listOf("skills", "update")
+            "plugin_catalogue" -> listOf("plugins", "catalog")
+            "plugin_liste" -> listOf("plugins", "list")
+            "plugin_installer" -> listOf("plugins", "install", name, "--no-enable")
+            "plugin_activer" -> listOf("plugins", "enable", name)
+            "mcp_catalogue" -> listOf("mcp", "catalog")
+            "mcp_liste" -> listOf("mcp", "list")
+            "mcp_installer" -> listOf("mcp", "install", name)
+            else -> return "Action non prise en charge."
+        }
+        return lancerExtension(app, args, "Catalogue / extensions Hermès")
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    // ------------------------------------------------------------------ Sauvegarde et récupération autonome
+    private fun executerDebian(app: JarvisApp, scriptDebian: String, libelle: String): String {
+        PontMcp.demarrer(app)
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -lc ${q(scriptDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ $libelle…"
+        return executer(app, prelude(app) + "\n" + commande, libelle = libelle)
+            ?: "🚀 $libelle lancé : suis la progression dans Jarvis."
+    }
+
+    /** Archive privée de ~/.hermes, en excluant caches, dépôts Git et environnements Python recréables. */
+    private val scriptSauvegarde = """
+set -eu
+test -d /root/.hermes || { echo "❌ Dossier Hermes introuvable dans Debian."; exit 1; }
+mkdir -p /root/.hermes/backups
+tar -czf "/root/.hermes/backups/hermes-$(date +%Y%m%d-%H%M%S).tar.gz" \
+  --exclude='.hermes/backups' --exclude='.hermes/hermes-agent/.git' \
+  --exclude='.hermes/hermes-agent/venv' --exclude='.hermes/hermes-agent/.venv' \
+  --exclude='.hermes/hermes-agent/__pycache__' -C /root .hermes
+chmod 600 /root/.hermes/backups/hermes-*.tar.gz
+echo "✅ Sauvegarde privée créée dans /root/.hermes/backups."
+du -h /root/.hermes/backups/hermes-*.tar.gz | tail -n 1
+""".trimIndent()
+
+    fun sauvegarder(app: JarvisApp): String =
+        executerDebian(app, scriptSauvegarde, "Sauvegarde Hermès")
+
+    /** Contrôle les fichiers essentiels sans afficher les clés API ni les jetons. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = """
+set +e
+echo "=== DIAGNOSTIC HERMÈS (aucun secret affiché) ==="
+[ -x /root/.hermes/hermes-agent/.hermes/bin/hermes ] && echo "CLI Hermes : OK" || echo "CLI Hermes : ABSENT"
+if [ -x /root/.hermes/hermes-agent/venv/bin/python ]; then
+  echo "Environnement Python Hermès : venv/ OK"
+elif [ -x /root/.hermes/hermes-agent/.venv/bin/python ]; then
+  echo "Environnement Python Hermès : .venv/ OK"
+elif [ -x /root/.hermes/hermes-agent/.hermes/bin/python ]; then
+  echo "Environnement Python Hermès : .hermes/bin/ OK"
+else
+  echo "Environnement Python dédié : non trouvé"
+fi
+if command -v python3 >/dev/null 2>&1; then
+  echo "Python Debian : $(python3 --version 2>&1)"
+  echo "Interpréteur système : $(command -v python3)"
+else
+  echo "Python Debian : ABSENT"
+fi
+if command -v hermes >/dev/null 2>&1; then
+  echo "CLI Hermès : $(command -v hermes)"
+  hermes --version 2>&1 | head -n 1
+fi
+[ -f /root/.hermes/config.yaml ] && echo "Configuration : présente" || echo "Configuration : ABSENTE"
+[ -f /root/.hermes/.env ] && echo "Fichier de clés : présent (contenu masqué)" || echo "Fichier de clés : ABSENT"
+grep -q 'jarvis:' /root/.hermes/config.yaml 2>/dev/null && echo "Entrée MCP Jarvis : présente" || echo "Entrée MCP Jarvis : absente"
+grep -q '127.0.0.1:38291/mcp' /root/.hermes/config.yaml 2>/dev/null && echo "URL du pont MCP : OK" || echo "URL du pont MCP : à vérifier"
+curl -fsS -m 3 http://127.0.0.1:${PORT_API}/health >/dev/null 2>&1 && echo "Passerelle API : EN LIGNE" || echo "Passerelle API : hors ligne"
+echo "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        return executerDebian(app, script, "Diagnostic Hermès")
+    }
+
+    /** Restaure la dernière archive après vérification, puis relance la passerelle. */
+    fun restaurerDerniereSauvegarde(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val restore = """
+set -eu
+find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | grep -q . || { echo "❌ Aucune sauvegarde Hermès trouvée."; exit 1; }
+tar -tzf "$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)" >/dev/null
+tar -xzf "$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)" -C /root
+chmod 600 /root/.hermes/.env 2>/dev/null || true
+echo "✅ Données et configuration restaurées."
+""".trimIndent()
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- bash -lc ${q(restore)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        return executer(app, prelude(app) + "\n" + commande + "\n" + demarrage, libelle = "Restauration Hermès")
+            ?: "🚀 Restauration lancée, puis redémarrage d'Hermès."
+    }
+
+    /** Réinstallation propre : sauvegarde complète, suppression du seul moteur, puis installateur officiel. */
+    fun reinstallerComplet(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val preparation = scriptSauvegarde + "\nrm -rf /root/.hermes/hermes-agent\necho '🧹 Ancien moteur supprimé après sauvegarde.'"
+        val commande = "set -euo pipefail; proot-distro login debian --termux-home -- bash -lc ${q(preparation)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        val script = prelude(app) + "\n" + commande + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Sauvegarde puis réinstallation complète d'Hermès…"
+        return executer(app, script, libelle = "Réinstallation complète Hermès")
+            ?: "🚀 Sauvegarde effectuée puis réinstallation lancée. Suis les étapes dans Jarvis."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}J_URL\" >/dev/null; CURL_RC=${'
+            "p '🚀 Configuration Hermès : suivi des étapes confirmé.'",
+            upgradeCommand,
+            "p '🔐 Mise à jour des clés et variables des fournisseurs…'",
+            envScript,
+            "p '🧩 Synchronisation des plugins et agents…'",
+            pluginCommand,
+            "p '⚙️ Écriture et validation de la configuration Hermès…'",
+            configCommand,
+            "p '🔄 Redémarrage de la passerelle Hermès…'",
+            restartCommand,
+            demarrage
+        ).joinToString(System.lineSeparator())
+        message = "⏳ Script Hermès construit (${script.length} caractères). Transmission à Termux…"
+        val signalAvantEnvoi = PontMcp.dernierSignal
+        dernierSignalAvantCommande = signalAvantEnvoi
+        val erreur = executer(app, script, libelle = "Mise à niveau et orchestration multi-agents Hermès", retourNatif = true)
+        if (erreur != null) {
+            message = "❌ Termux a refusé le lancement : $erreur. Aucune mise à niveau n'a été confirmée."
+            return message
+        }
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            if (PontMcp.dernierSignal <= signalAvantEnvoi &&
+                !message.startsWith("❌") && !message.startsWith("✅ Hermès est en ligne")) {
+                message = "❌ Termux n'a pas confirmé l'exécution du script après 35 secondes. Vérifie l'autorisation « Exécuter des commandes dans Termux », les restrictions d'arrière-plan et le port 38291. Aucun succès n'est déclaré."
+            }
+        }, 35_000)
+        return "⏳ Commande transmise à Termux ; attente de son accusé de réception réel."
+    }
+
+    /** Catalogue et installation non interactive des plugins/MCP Hermes. */
+    fun gererExtension(app: JarvisApp, actionRaw: String, nameRaw: String = ""): String {
+        val action = actionRaw.trim().lowercase()
+        val name = nameRaw.trim()
+        val allowed = setOf("skill_catalogue", "skill_rechercher", "skill_liste", "skill_inspecter", "skill_installer",
+            "skill_verifier", "skill_mettre_a_jour", "plugin_catalogue", "plugin_liste", "plugin_installer", "plugin_activer",
+            "mcp_catalogue", "mcp_liste", "mcp_installer")
+        if (action !in allowed) return "Action d'extension inconnue."
+        if (action.endsWith("_installer") || action.endsWith("_activer") || action == "skill_inspecter") {
+            if (!Regex("[a-zA-Z0-9][a-zA-Z0-9._/-]{0,100}").matches(name) || name.contains(".."))
+                return "Nom d'extension invalide."
+        }
+        val args = when (action) {
+            "skill_catalogue" -> listOf("skills", "browse")
+            "skill_rechercher" -> listOf("skills", "search", name)
+            "skill_liste" -> listOf("skills", "list")
+            "skill_inspecter" -> listOf("skills", "inspect", name)
+            "skill_installer" -> listOf("skills", "install", name, "--yes")
+            "skill_verifier" -> listOf("skills", "check")
+            "skill_mettre_a_jour" -> listOf("skills", "update")
+            "plugin_catalogue" -> listOf("plugins", "catalog")
+            "plugin_liste" -> listOf("plugins", "list")
+            "plugin_installer" -> listOf("plugins", "install", name, "--no-enable")
+            "plugin_activer" -> listOf("plugins", "enable", name)
+            "mcp_catalogue" -> listOf("mcp", "catalog")
+            "mcp_liste" -> listOf("mcp", "list")
+            "mcp_installer" -> listOf("mcp", "install", name)
+            else -> return "Action non prise en charge."
+        }
+        return lancerExtension(app, args, "Catalogue / extensions Hermès")
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    // ------------------------------------------------------------------ Sauvegarde et récupération autonome
+    private fun executerDebian(app: JarvisApp, scriptDebian: String, libelle: String): String {
+        PontMcp.demarrer(app)
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -lc ${q(scriptDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ $libelle…"
+        return executer(app, prelude(app) + "\n" + commande, libelle = libelle)
+            ?: "🚀 $libelle lancé : suis la progression dans Jarvis."
+    }
+
+    /** Archive privée de ~/.hermes, en excluant caches, dépôts Git et environnements Python recréables. */
+    private val scriptSauvegarde = """
+set -eu
+test -d /root/.hermes || { echo "❌ Dossier Hermes introuvable dans Debian."; exit 1; }
+mkdir -p /root/.hermes/backups
+tar -czf "/root/.hermes/backups/hermes-$(date +%Y%m%d-%H%M%S).tar.gz" \
+  --exclude='.hermes/backups' --exclude='.hermes/hermes-agent/.git' \
+  --exclude='.hermes/hermes-agent/venv' --exclude='.hermes/hermes-agent/.venv' \
+  --exclude='.hermes/hermes-agent/__pycache__' -C /root .hermes
+chmod 600 /root/.hermes/backups/hermes-*.tar.gz
+echo "✅ Sauvegarde privée créée dans /root/.hermes/backups."
+du -h /root/.hermes/backups/hermes-*.tar.gz | tail -n 1
+""".trimIndent()
+
+    fun sauvegarder(app: JarvisApp): String =
+        executerDebian(app, scriptSauvegarde, "Sauvegarde Hermès")
+
+    /** Contrôle les fichiers essentiels sans afficher les clés API ni les jetons. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = """
+set +e
+echo "=== DIAGNOSTIC HERMÈS (aucun secret affiché) ==="
+[ -x /root/.hermes/hermes-agent/.hermes/bin/hermes ] && echo "CLI Hermes : OK" || echo "CLI Hermes : ABSENT"
+if [ -x /root/.hermes/hermes-agent/venv/bin/python ]; then
+  echo "Environnement Python Hermès : venv/ OK"
+elif [ -x /root/.hermes/hermes-agent/.venv/bin/python ]; then
+  echo "Environnement Python Hermès : .venv/ OK"
+elif [ -x /root/.hermes/hermes-agent/.hermes/bin/python ]; then
+  echo "Environnement Python Hermès : .hermes/bin/ OK"
+else
+  echo "Environnement Python dédié : non trouvé"
+fi
+if command -v python3 >/dev/null 2>&1; then
+  echo "Python Debian : $(python3 --version 2>&1)"
+  echo "Interpréteur système : $(command -v python3)"
+else
+  echo "Python Debian : ABSENT"
+fi
+if command -v hermes >/dev/null 2>&1; then
+  echo "CLI Hermès : $(command -v hermes)"
+  hermes --version 2>&1 | head -n 1
+fi
+[ -f /root/.hermes/config.yaml ] && echo "Configuration : présente" || echo "Configuration : ABSENTE"
+[ -f /root/.hermes/.env ] && echo "Fichier de clés : présent (contenu masqué)" || echo "Fichier de clés : ABSENT"
+grep -q 'jarvis:' /root/.hermes/config.yaml 2>/dev/null && echo "Entrée MCP Jarvis : présente" || echo "Entrée MCP Jarvis : absente"
+grep -q '127.0.0.1:38291/mcp' /root/.hermes/config.yaml 2>/dev/null && echo "URL du pont MCP : OK" || echo "URL du pont MCP : à vérifier"
+curl -fsS -m 3 http://127.0.0.1:${PORT_API}/health >/dev/null 2>&1 && echo "Passerelle API : EN LIGNE" || echo "Passerelle API : hors ligne"
+echo "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        return executerDebian(app, script, "Diagnostic Hermès")
+    }
+
+    /** Restaure la dernière archive après vérification, puis relance la passerelle. */
+    fun restaurerDerniereSauvegarde(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val restore = """
+set -eu
+find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | grep -q . || { echo "❌ Aucune sauvegarde Hermès trouvée."; exit 1; }
+tar -tzf "$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)" >/dev/null
+tar -xzf "$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)" -C /root
+chmod 600 /root/.hermes/.env 2>/dev/null || true
+echo "✅ Données et configuration restaurées."
+""".trimIndent()
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- bash -lc ${q(restore)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        return executer(app, prelude(app) + "\n" + commande + "\n" + demarrage, libelle = "Restauration Hermès")
+            ?: "🚀 Restauration lancée, puis redémarrage d'Hermès."
+    }
+
+    /** Réinstallation propre : sauvegarde complète, suppression du seul moteur, puis installateur officiel. */
+    fun reinstallerComplet(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val preparation = scriptSauvegarde + "\nrm -rf /root/.hermes/hermes-agent\necho '🧹 Ancien moteur supprimé après sauvegarde.'"
+        val commande = "set -euo pipefail; proot-distro login debian --termux-home -- bash -lc ${q(preparation)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        val script = prelude(app) + "\n" + commande + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Sauvegarde puis réinstallation complète d'Hermès…"
+        return executer(app, script, libelle = "Réinstallation complète Hermès")
+            ?: "🚀 Sauvegarde effectuée puis réinstallation lancée. Suis les étapes dans Jarvis."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}?; if [ \"${'
+            "p '🚀 Configuration Hermès : suivi des étapes confirmé.'",
+            upgradeCommand,
+            "p '🔐 Mise à jour des clés et variables des fournisseurs…'",
+            envScript,
+            "p '🧩 Synchronisation des plugins et agents…'",
+            pluginCommand,
+            "p '⚙️ Écriture et validation de la configuration Hermès…'",
+            configCommand,
+            "p '🔄 Redémarrage de la passerelle Hermès…'",
+            restartCommand,
+            demarrage
+        ).joinToString(System.lineSeparator())
+        message = "⏳ Script Hermès construit (${script.length} caractères). Transmission à Termux…"
+        val signalAvantEnvoi = PontMcp.dernierSignal
+        dernierSignalAvantCommande = signalAvantEnvoi
+        val erreur = executer(app, script, libelle = "Mise à niveau et orchestration multi-agents Hermès", retourNatif = true)
+        if (erreur != null) {
+            message = "❌ Termux a refusé le lancement : $erreur. Aucune mise à niveau n'a été confirmée."
+            return message
+        }
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            if (PontMcp.dernierSignal <= signalAvantEnvoi &&
+                !message.startsWith("❌") && !message.startsWith("✅ Hermès est en ligne")) {
+                message = "❌ Termux n'a pas confirmé l'exécution du script après 35 secondes. Vérifie l'autorisation « Exécuter des commandes dans Termux », les restrictions d'arrière-plan et le port 38291. Aucun succès n'est déclaré."
+            }
+        }, 35_000)
+        return "⏳ Commande transmise à Termux ; attente de son accusé de réception réel."
+    }
+
+    /** Catalogue et installation non interactive des plugins/MCP Hermes. */
+    fun gererExtension(app: JarvisApp, actionRaw: String, nameRaw: String = ""): String {
+        val action = actionRaw.trim().lowercase()
+        val name = nameRaw.trim()
+        val allowed = setOf("skill_catalogue", "skill_rechercher", "skill_liste", "skill_inspecter", "skill_installer",
+            "skill_verifier", "skill_mettre_a_jour", "plugin_catalogue", "plugin_liste", "plugin_installer", "plugin_activer",
+            "mcp_catalogue", "mcp_liste", "mcp_installer")
+        if (action !in allowed) return "Action d'extension inconnue."
+        if (action.endsWith("_installer") || action.endsWith("_activer") || action == "skill_inspecter") {
+            if (!Regex("[a-zA-Z0-9][a-zA-Z0-9._/-]{0,100}").matches(name) || name.contains(".."))
+                return "Nom d'extension invalide."
+        }
+        val args = when (action) {
+            "skill_catalogue" -> listOf("skills", "browse")
+            "skill_rechercher" -> listOf("skills", "search", name)
+            "skill_liste" -> listOf("skills", "list")
+            "skill_inspecter" -> listOf("skills", "inspect", name)
+            "skill_installer" -> listOf("skills", "install", name, "--yes")
+            "skill_verifier" -> listOf("skills", "check")
+            "skill_mettre_a_jour" -> listOf("skills", "update")
+            "plugin_catalogue" -> listOf("plugins", "catalog")
+            "plugin_liste" -> listOf("plugins", "list")
+            "plugin_installer" -> listOf("plugins", "install", name, "--no-enable")
+            "plugin_activer" -> listOf("plugins", "enable", name)
+            "mcp_catalogue" -> listOf("mcp", "catalog")
+            "mcp_liste" -> listOf("mcp", "list")
+            "mcp_installer" -> listOf("mcp", "install", name)
+            else -> return "Action non prise en charge."
+        }
+        return lancerExtension(app, args, "Catalogue / extensions Hermès")
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    // ------------------------------------------------------------------ Sauvegarde et récupération autonome
+    private fun executerDebian(app: JarvisApp, scriptDebian: String, libelle: String): String {
+        PontMcp.demarrer(app)
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -lc ${q(scriptDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ $libelle…"
+        return executer(app, prelude(app) + "\n" + commande, libelle = libelle)
+            ?: "🚀 $libelle lancé : suis la progression dans Jarvis."
+    }
+
+    /** Archive privée de ~/.hermes, en excluant caches, dépôts Git et environnements Python recréables. */
+    private val scriptSauvegarde = """
+set -eu
+test -d /root/.hermes || { echo "❌ Dossier Hermes introuvable dans Debian."; exit 1; }
+mkdir -p /root/.hermes/backups
+tar -czf "/root/.hermes/backups/hermes-$(date +%Y%m%d-%H%M%S).tar.gz" \
+  --exclude='.hermes/backups' --exclude='.hermes/hermes-agent/.git' \
+  --exclude='.hermes/hermes-agent/venv' --exclude='.hermes/hermes-agent/.venv' \
+  --exclude='.hermes/hermes-agent/__pycache__' -C /root .hermes
+chmod 600 /root/.hermes/backups/hermes-*.tar.gz
+echo "✅ Sauvegarde privée créée dans /root/.hermes/backups."
+du -h /root/.hermes/backups/hermes-*.tar.gz | tail -n 1
+""".trimIndent()
+
+    fun sauvegarder(app: JarvisApp): String =
+        executerDebian(app, scriptSauvegarde, "Sauvegarde Hermès")
+
+    /** Contrôle les fichiers essentiels sans afficher les clés API ni les jetons. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = """
+set +e
+echo "=== DIAGNOSTIC HERMÈS (aucun secret affiché) ==="
+[ -x /root/.hermes/hermes-agent/.hermes/bin/hermes ] && echo "CLI Hermes : OK" || echo "CLI Hermes : ABSENT"
+if [ -x /root/.hermes/hermes-agent/venv/bin/python ]; then
+  echo "Environnement Python Hermès : venv/ OK"
+elif [ -x /root/.hermes/hermes-agent/.venv/bin/python ]; then
+  echo "Environnement Python Hermès : .venv/ OK"
+elif [ -x /root/.hermes/hermes-agent/.hermes/bin/python ]; then
+  echo "Environnement Python Hermès : .hermes/bin/ OK"
+else
+  echo "Environnement Python dédié : non trouvé"
+fi
+if command -v python3 >/dev/null 2>&1; then
+  echo "Python Debian : $(python3 --version 2>&1)"
+  echo "Interpréteur système : $(command -v python3)"
+else
+  echo "Python Debian : ABSENT"
+fi
+if command -v hermes >/dev/null 2>&1; then
+  echo "CLI Hermès : $(command -v hermes)"
+  hermes --version 2>&1 | head -n 1
+fi
+[ -f /root/.hermes/config.yaml ] && echo "Configuration : présente" || echo "Configuration : ABSENTE"
+[ -f /root/.hermes/.env ] && echo "Fichier de clés : présent (contenu masqué)" || echo "Fichier de clés : ABSENT"
+grep -q 'jarvis:' /root/.hermes/config.yaml 2>/dev/null && echo "Entrée MCP Jarvis : présente" || echo "Entrée MCP Jarvis : absente"
+grep -q '127.0.0.1:38291/mcp' /root/.hermes/config.yaml 2>/dev/null && echo "URL du pont MCP : OK" || echo "URL du pont MCP : à vérifier"
+curl -fsS -m 3 http://127.0.0.1:${PORT_API}/health >/dev/null 2>&1 && echo "Passerelle API : EN LIGNE" || echo "Passerelle API : hors ligne"
+echo "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        return executerDebian(app, script, "Diagnostic Hermès")
+    }
+
+    /** Restaure la dernière archive après vérification, puis relance la passerelle. */
+    fun restaurerDerniereSauvegarde(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val restore = """
+set -eu
+find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | grep -q . || { echo "❌ Aucune sauvegarde Hermès trouvée."; exit 1; }
+tar -tzf "$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)" >/dev/null
+tar -xzf "$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)" -C /root
+chmod 600 /root/.hermes/.env 2>/dev/null || true
+echo "✅ Données et configuration restaurées."
+""".trimIndent()
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- bash -lc ${q(restore)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        return executer(app, prelude(app) + "\n" + commande + "\n" + demarrage, libelle = "Restauration Hermès")
+            ?: "🚀 Restauration lancée, puis redémarrage d'Hermès."
+    }
+
+    /** Réinstallation propre : sauvegarde complète, suppression du seul moteur, puis installateur officiel. */
+    fun reinstallerComplet(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val preparation = scriptSauvegarde + "\nrm -rf /root/.hermes/hermes-agent\necho '🧹 Ancien moteur supprimé après sauvegarde.'"
+        val commande = "set -euo pipefail; proot-distro login debian --termux-home -- bash -lc ${q(preparation)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        val script = prelude(app) + "\n" + commande + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Sauvegarde puis réinstallation complète d'Hermès…"
+        return executer(app, script, libelle = "Réinstallation complète Hermès")
+            ?: "🚀 Sauvegarde effectuée puis réinstallation lancée. Suis les étapes dans Jarvis."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}CURL_RC\" -ne 0 ]; then echo \"Échec du contrôle du pont Jarvis (curl ${'
+            "p '🚀 Configuration Hermès : suivi des étapes confirmé.'",
+            upgradeCommand,
+            "p '🔐 Mise à jour des clés et variables des fournisseurs…'",
+            envScript,
+            "p '🧩 Synchronisation des plugins et agents…'",
+            pluginCommand,
+            "p '⚙️ Écriture et validation de la configuration Hermès…'",
+            configCommand,
+            "p '🔄 Redémarrage de la passerelle Hermès…'",
+            restartCommand,
+            demarrage
+        ).joinToString(System.lineSeparator())
+        message = "⏳ Script Hermès construit (${script.length} caractères). Transmission à Termux…"
+        val signalAvantEnvoi = PontMcp.dernierSignal
+        dernierSignalAvantCommande = signalAvantEnvoi
+        val erreur = executer(app, script, libelle = "Mise à niveau et orchestration multi-agents Hermès", retourNatif = true)
+        if (erreur != null) {
+            message = "❌ Termux a refusé le lancement : $erreur. Aucune mise à niveau n'a été confirmée."
+            return message
+        }
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            if (PontMcp.dernierSignal <= signalAvantEnvoi &&
+                !message.startsWith("❌") && !message.startsWith("✅ Hermès est en ligne")) {
+                message = "❌ Termux n'a pas confirmé l'exécution du script après 35 secondes. Vérifie l'autorisation « Exécuter des commandes dans Termux », les restrictions d'arrière-plan et le port 38291. Aucun succès n'est déclaré."
+            }
+        }, 35_000)
+        return "⏳ Commande transmise à Termux ; attente de son accusé de réception réel."
+    }
+
+    /** Catalogue et installation non interactive des plugins/MCP Hermes. */
+    fun gererExtension(app: JarvisApp, actionRaw: String, nameRaw: String = ""): String {
+        val action = actionRaw.trim().lowercase()
+        val name = nameRaw.trim()
+        val allowed = setOf("skill_catalogue", "skill_rechercher", "skill_liste", "skill_inspecter", "skill_installer",
+            "skill_verifier", "skill_mettre_a_jour", "plugin_catalogue", "plugin_liste", "plugin_installer", "plugin_activer",
+            "mcp_catalogue", "mcp_liste", "mcp_installer")
+        if (action !in allowed) return "Action d'extension inconnue."
+        if (action.endsWith("_installer") || action.endsWith("_activer") || action == "skill_inspecter") {
+            if (!Regex("[a-zA-Z0-9][a-zA-Z0-9._/-]{0,100}").matches(name) || name.contains(".."))
+                return "Nom d'extension invalide."
+        }
+        val args = when (action) {
+            "skill_catalogue" -> listOf("skills", "browse")
+            "skill_rechercher" -> listOf("skills", "search", name)
+            "skill_liste" -> listOf("skills", "list")
+            "skill_inspecter" -> listOf("skills", "inspect", name)
+            "skill_installer" -> listOf("skills", "install", name, "--yes")
+            "skill_verifier" -> listOf("skills", "check")
+            "skill_mettre_a_jour" -> listOf("skills", "update")
+            "plugin_catalogue" -> listOf("plugins", "catalog")
+            "plugin_liste" -> listOf("plugins", "list")
+            "plugin_installer" -> listOf("plugins", "install", name, "--no-enable")
+            "plugin_activer" -> listOf("plugins", "enable", name)
+            "mcp_catalogue" -> listOf("mcp", "catalog")
+            "mcp_liste" -> listOf("mcp", "list")
+            "mcp_installer" -> listOf("mcp", "install", name)
+            else -> return "Action non prise en charge."
+        }
+        return lancerExtension(app, args, "Catalogue / extensions Hermès")
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    // ------------------------------------------------------------------ Sauvegarde et récupération autonome
+    private fun executerDebian(app: JarvisApp, scriptDebian: String, libelle: String): String {
+        PontMcp.demarrer(app)
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -lc ${q(scriptDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ $libelle…"
+        return executer(app, prelude(app) + "\n" + commande, libelle = libelle)
+            ?: "🚀 $libelle lancé : suis la progression dans Jarvis."
+    }
+
+    /** Archive privée de ~/.hermes, en excluant caches, dépôts Git et environnements Python recréables. */
+    private val scriptSauvegarde = """
+set -eu
+test -d /root/.hermes || { echo "❌ Dossier Hermes introuvable dans Debian."; exit 1; }
+mkdir -p /root/.hermes/backups
+tar -czf "/root/.hermes/backups/hermes-$(date +%Y%m%d-%H%M%S).tar.gz" \
+  --exclude='.hermes/backups' --exclude='.hermes/hermes-agent/.git' \
+  --exclude='.hermes/hermes-agent/venv' --exclude='.hermes/hermes-agent/.venv' \
+  --exclude='.hermes/hermes-agent/__pycache__' -C /root .hermes
+chmod 600 /root/.hermes/backups/hermes-*.tar.gz
+echo "✅ Sauvegarde privée créée dans /root/.hermes/backups."
+du -h /root/.hermes/backups/hermes-*.tar.gz | tail -n 1
+""".trimIndent()
+
+    fun sauvegarder(app: JarvisApp): String =
+        executerDebian(app, scriptSauvegarde, "Sauvegarde Hermès")
+
+    /** Contrôle les fichiers essentiels sans afficher les clés API ni les jetons. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = """
+set +e
+echo "=== DIAGNOSTIC HERMÈS (aucun secret affiché) ==="
+[ -x /root/.hermes/hermes-agent/.hermes/bin/hermes ] && echo "CLI Hermes : OK" || echo "CLI Hermes : ABSENT"
+if [ -x /root/.hermes/hermes-agent/venv/bin/python ]; then
+  echo "Environnement Python Hermès : venv/ OK"
+elif [ -x /root/.hermes/hermes-agent/.venv/bin/python ]; then
+  echo "Environnement Python Hermès : .venv/ OK"
+elif [ -x /root/.hermes/hermes-agent/.hermes/bin/python ]; then
+  echo "Environnement Python Hermès : .hermes/bin/ OK"
+else
+  echo "Environnement Python dédié : non trouvé"
+fi
+if command -v python3 >/dev/null 2>&1; then
+  echo "Python Debian : $(python3 --version 2>&1)"
+  echo "Interpréteur système : $(command -v python3)"
+else
+  echo "Python Debian : ABSENT"
+fi
+if command -v hermes >/dev/null 2>&1; then
+  echo "CLI Hermès : $(command -v hermes)"
+  hermes --version 2>&1 | head -n 1
+fi
+[ -f /root/.hermes/config.yaml ] && echo "Configuration : présente" || echo "Configuration : ABSENTE"
+[ -f /root/.hermes/.env ] && echo "Fichier de clés : présent (contenu masqué)" || echo "Fichier de clés : ABSENT"
+grep -q 'jarvis:' /root/.hermes/config.yaml 2>/dev/null && echo "Entrée MCP Jarvis : présente" || echo "Entrée MCP Jarvis : absente"
+grep -q '127.0.0.1:38291/mcp' /root/.hermes/config.yaml 2>/dev/null && echo "URL du pont MCP : OK" || echo "URL du pont MCP : à vérifier"
+curl -fsS -m 3 http://127.0.0.1:${PORT_API}/health >/dev/null 2>&1 && echo "Passerelle API : EN LIGNE" || echo "Passerelle API : hors ligne"
+echo "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        return executerDebian(app, script, "Diagnostic Hermès")
+    }
+
+    /** Restaure la dernière archive après vérification, puis relance la passerelle. */
+    fun restaurerDerniereSauvegarde(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val restore = """
+set -eu
+find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | grep -q . || { echo "❌ Aucune sauvegarde Hermès trouvée."; exit 1; }
+tar -tzf "$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)" >/dev/null
+tar -xzf "$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)" -C /root
+chmod 600 /root/.hermes/.env 2>/dev/null || true
+echo "✅ Données et configuration restaurées."
+""".trimIndent()
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- bash -lc ${q(restore)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        return executer(app, prelude(app) + "\n" + commande + "\n" + demarrage, libelle = "Restauration Hermès")
+            ?: "🚀 Restauration lancée, puis redémarrage d'Hermès."
+    }
+
+    /** Réinstallation propre : sauvegarde complète, suppression du seul moteur, puis installateur officiel. */
+    fun reinstallerComplet(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val preparation = scriptSauvegarde + "\nrm -rf /root/.hermes/hermes-agent\necho '🧹 Ancien moteur supprimé après sauvegarde.'"
+        val commande = "set -euo pipefail; proot-distro login debian --termux-home -- bash -lc ${q(preparation)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        val script = prelude(app) + "\n" + commande + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Sauvegarde puis réinstallation complète d'Hermès…"
+        return executer(app, script, libelle = "Réinstallation complète Hermès")
+            ?: "🚀 Sauvegarde effectuée puis réinstallation lancée. Suis les étapes dans Jarvis."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}CURL_RC) vers ${'
+            "p '🚀 Configuration Hermès : suivi des étapes confirmé.'",
+            upgradeCommand,
+            "p '🔐 Mise à jour des clés et variables des fournisseurs…'",
+            envScript,
+            "p '🧩 Synchronisation des plugins et agents…'",
+            pluginCommand,
+            "p '⚙️ Écriture et validation de la configuration Hermès…'",
+            configCommand,
+            "p '🔄 Redémarrage de la passerelle Hermès…'",
+            restartCommand,
+            demarrage
+        ).joinToString(System.lineSeparator())
+        message = "⏳ Script Hermès construit (${script.length} caractères). Transmission à Termux…"
+        val signalAvantEnvoi = PontMcp.dernierSignal
+        dernierSignalAvantCommande = signalAvantEnvoi
+        val erreur = executer(app, script, libelle = "Mise à niveau et orchestration multi-agents Hermès", retourNatif = true)
+        if (erreur != null) {
+            message = "❌ Termux a refusé le lancement : $erreur. Aucune mise à niveau n'a été confirmée."
+            return message
+        }
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            if (PontMcp.dernierSignal <= signalAvantEnvoi &&
+                !message.startsWith("❌") && !message.startsWith("✅ Hermès est en ligne")) {
+                message = "❌ Termux n'a pas confirmé l'exécution du script après 35 secondes. Vérifie l'autorisation « Exécuter des commandes dans Termux », les restrictions d'arrière-plan et le port 38291. Aucun succès n'est déclaré."
+            }
+        }, 35_000)
+        return "⏳ Commande transmise à Termux ; attente de son accusé de réception réel."
+    }
+
+    /** Catalogue et installation non interactive des plugins/MCP Hermes. */
+    fun gererExtension(app: JarvisApp, actionRaw: String, nameRaw: String = ""): String {
+        val action = actionRaw.trim().lowercase()
+        val name = nameRaw.trim()
+        val allowed = setOf("skill_catalogue", "skill_rechercher", "skill_liste", "skill_inspecter", "skill_installer",
+            "skill_verifier", "skill_mettre_a_jour", "plugin_catalogue", "plugin_liste", "plugin_installer", "plugin_activer",
+            "mcp_catalogue", "mcp_liste", "mcp_installer")
+        if (action !in allowed) return "Action d'extension inconnue."
+        if (action.endsWith("_installer") || action.endsWith("_activer") || action == "skill_inspecter") {
+            if (!Regex("[a-zA-Z0-9][a-zA-Z0-9._/-]{0,100}").matches(name) || name.contains(".."))
+                return "Nom d'extension invalide."
+        }
+        val args = when (action) {
+            "skill_catalogue" -> listOf("skills", "browse")
+            "skill_rechercher" -> listOf("skills", "search", name)
+            "skill_liste" -> listOf("skills", "list")
+            "skill_inspecter" -> listOf("skills", "inspect", name)
+            "skill_installer" -> listOf("skills", "install", name, "--yes")
+            "skill_verifier" -> listOf("skills", "check")
+            "skill_mettre_a_jour" -> listOf("skills", "update")
+            "plugin_catalogue" -> listOf("plugins", "catalog")
+            "plugin_liste" -> listOf("plugins", "list")
+            "plugin_installer" -> listOf("plugins", "install", name, "--no-enable")
+            "plugin_activer" -> listOf("plugins", "enable", name)
+            "mcp_catalogue" -> listOf("mcp", "catalog")
+            "mcp_liste" -> listOf("mcp", "list")
+            "mcp_installer" -> listOf("mcp", "install", name)
+            else -> return "Action non prise en charge."
+        }
+        return lancerExtension(app, args, "Catalogue / extensions Hermès")
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    // ------------------------------------------------------------------ Sauvegarde et récupération autonome
+    private fun executerDebian(app: JarvisApp, scriptDebian: String, libelle: String): String {
+        PontMcp.demarrer(app)
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -lc ${q(scriptDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ $libelle…"
+        return executer(app, prelude(app) + "\n" + commande, libelle = libelle)
+            ?: "🚀 $libelle lancé : suis la progression dans Jarvis."
+    }
+
+    /** Archive privée de ~/.hermes, en excluant caches, dépôts Git et environnements Python recréables. */
+    private val scriptSauvegarde = """
+set -eu
+test -d /root/.hermes || { echo "❌ Dossier Hermes introuvable dans Debian."; exit 1; }
+mkdir -p /root/.hermes/backups
+tar -czf "/root/.hermes/backups/hermes-$(date +%Y%m%d-%H%M%S).tar.gz" \
+  --exclude='.hermes/backups' --exclude='.hermes/hermes-agent/.git' \
+  --exclude='.hermes/hermes-agent/venv' --exclude='.hermes/hermes-agent/.venv' \
+  --exclude='.hermes/hermes-agent/__pycache__' -C /root .hermes
+chmod 600 /root/.hermes/backups/hermes-*.tar.gz
+echo "✅ Sauvegarde privée créée dans /root/.hermes/backups."
+du -h /root/.hermes/backups/hermes-*.tar.gz | tail -n 1
+""".trimIndent()
+
+    fun sauvegarder(app: JarvisApp): String =
+        executerDebian(app, scriptSauvegarde, "Sauvegarde Hermès")
+
+    /** Contrôle les fichiers essentiels sans afficher les clés API ni les jetons. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = """
+set +e
+echo "=== DIAGNOSTIC HERMÈS (aucun secret affiché) ==="
+[ -x /root/.hermes/hermes-agent/.hermes/bin/hermes ] && echo "CLI Hermes : OK" || echo "CLI Hermes : ABSENT"
+if [ -x /root/.hermes/hermes-agent/venv/bin/python ]; then
+  echo "Environnement Python Hermès : venv/ OK"
+elif [ -x /root/.hermes/hermes-agent/.venv/bin/python ]; then
+  echo "Environnement Python Hermès : .venv/ OK"
+elif [ -x /root/.hermes/hermes-agent/.hermes/bin/python ]; then
+  echo "Environnement Python Hermès : .hermes/bin/ OK"
+else
+  echo "Environnement Python dédié : non trouvé"
+fi
+if command -v python3 >/dev/null 2>&1; then
+  echo "Python Debian : $(python3 --version 2>&1)"
+  echo "Interpréteur système : $(command -v python3)"
+else
+  echo "Python Debian : ABSENT"
+fi
+if command -v hermes >/dev/null 2>&1; then
+  echo "CLI Hermès : $(command -v hermes)"
+  hermes --version 2>&1 | head -n 1
+fi
+[ -f /root/.hermes/config.yaml ] && echo "Configuration : présente" || echo "Configuration : ABSENTE"
+[ -f /root/.hermes/.env ] && echo "Fichier de clés : présent (contenu masqué)" || echo "Fichier de clés : ABSENT"
+grep -q 'jarvis:' /root/.hermes/config.yaml 2>/dev/null && echo "Entrée MCP Jarvis : présente" || echo "Entrée MCP Jarvis : absente"
+grep -q '127.0.0.1:38291/mcp' /root/.hermes/config.yaml 2>/dev/null && echo "URL du pont MCP : OK" || echo "URL du pont MCP : à vérifier"
+curl -fsS -m 3 http://127.0.0.1:${PORT_API}/health >/dev/null 2>&1 && echo "Passerelle API : EN LIGNE" || echo "Passerelle API : hors ligne"
+echo "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        return executerDebian(app, script, "Diagnostic Hermès")
+    }
+
+    /** Restaure la dernière archive après vérification, puis relance la passerelle. */
+    fun restaurerDerniereSauvegarde(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val restore = """
+set -eu
+find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | grep -q . || { echo "❌ Aucune sauvegarde Hermès trouvée."; exit 1; }
+tar -tzf "$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)" >/dev/null
+tar -xzf "$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)" -C /root
+chmod 600 /root/.hermes/.env 2>/dev/null || true
+echo "✅ Données et configuration restaurées."
+""".trimIndent()
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- bash -lc ${q(restore)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        return executer(app, prelude(app) + "\n" + commande + "\n" + demarrage, libelle = "Restauration Hermès")
+            ?: "🚀 Restauration lancée, puis redémarrage d'Hermès."
+    }
+
+    /** Réinstallation propre : sauvegarde complète, suppression du seul moteur, puis installateur officiel. */
+    fun reinstallerComplet(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val preparation = scriptSauvegarde + "\nrm -rf /root/.hermes/hermes-agent\necho '🧹 Ancien moteur supprimé après sauvegarde.'"
+        val commande = "set -euo pipefail; proot-distro login debian --termux-home -- bash -lc ${q(preparation)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        val script = prelude(app) + "\n" + commande + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Sauvegarde puis réinstallation complète d'Hermès…"
+        return executer(app, script, libelle = "Réinstallation complète Hermès")
+            ?: "🚀 Sauvegarde effectuée puis réinstallation lancée. Suis les étapes dans Jarvis."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}J_URL\" >&2; exit \"${'
+            "p '🚀 Configuration Hermès : suivi des étapes confirmé.'",
+            upgradeCommand,
+            "p '🔐 Mise à jour des clés et variables des fournisseurs…'",
+            envScript,
+            "p '🧩 Synchronisation des plugins et agents…'",
+            pluginCommand,
+            "p '⚙️ Écriture et validation de la configuration Hermès…'",
+            configCommand,
+            "p '🔄 Redémarrage de la passerelle Hermès…'",
+            restartCommand,
+            demarrage
+        ).joinToString(System.lineSeparator())
+        message = "⏳ Script Hermès construit (${script.length} caractères). Transmission à Termux…"
+        val signalAvantEnvoi = PontMcp.dernierSignal
+        dernierSignalAvantCommande = signalAvantEnvoi
+        val erreur = executer(app, script, libelle = "Mise à niveau et orchestration multi-agents Hermès", retourNatif = true)
+        if (erreur != null) {
+            message = "❌ Termux a refusé le lancement : $erreur. Aucune mise à niveau n'a été confirmée."
+            return message
+        }
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            if (PontMcp.dernierSignal <= signalAvantEnvoi &&
+                !message.startsWith("❌") && !message.startsWith("✅ Hermès est en ligne")) {
+                message = "❌ Termux n'a pas confirmé l'exécution du script après 35 secondes. Vérifie l'autorisation « Exécuter des commandes dans Termux », les restrictions d'arrière-plan et le port 38291. Aucun succès n'est déclaré."
+            }
+        }, 35_000)
+        return "⏳ Commande transmise à Termux ; attente de son accusé de réception réel."
+    }
+
+    /** Catalogue et installation non interactive des plugins/MCP Hermes. */
+    fun gererExtension(app: JarvisApp, actionRaw: String, nameRaw: String = ""): String {
+        val action = actionRaw.trim().lowercase()
+        val name = nameRaw.trim()
+        val allowed = setOf("skill_catalogue", "skill_rechercher", "skill_liste", "skill_inspecter", "skill_installer",
+            "skill_verifier", "skill_mettre_a_jour", "plugin_catalogue", "plugin_liste", "plugin_installer", "plugin_activer",
+            "mcp_catalogue", "mcp_liste", "mcp_installer")
+        if (action !in allowed) return "Action d'extension inconnue."
+        if (action.endsWith("_installer") || action.endsWith("_activer") || action == "skill_inspecter") {
+            if (!Regex("[a-zA-Z0-9][a-zA-Z0-9._/-]{0,100}").matches(name) || name.contains(".."))
+                return "Nom d'extension invalide."
+        }
+        val args = when (action) {
+            "skill_catalogue" -> listOf("skills", "browse")
+            "skill_rechercher" -> listOf("skills", "search", name)
+            "skill_liste" -> listOf("skills", "list")
+            "skill_inspecter" -> listOf("skills", "inspect", name)
+            "skill_installer" -> listOf("skills", "install", name, "--yes")
+            "skill_verifier" -> listOf("skills", "check")
+            "skill_mettre_a_jour" -> listOf("skills", "update")
+            "plugin_catalogue" -> listOf("plugins", "catalog")
+            "plugin_liste" -> listOf("plugins", "list")
+            "plugin_installer" -> listOf("plugins", "install", name, "--no-enable")
+            "plugin_activer" -> listOf("plugins", "enable", name)
+            "mcp_catalogue" -> listOf("mcp", "catalog")
+            "mcp_liste" -> listOf("mcp", "list")
+            "mcp_installer" -> listOf("mcp", "install", name)
+            else -> return "Action non prise en charge."
+        }
+        return lancerExtension(app, args, "Catalogue / extensions Hermès")
+    }
+
+    fun demarrer(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+    }
+
+    fun arreter(app: JarvisApp): String =
+        executer(app, prelude(app) + "\npkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    // ------------------------------------------------------------------ Sauvegarde et récupération autonome
+    private fun executerDebian(app: JarvisApp, scriptDebian: String, libelle: String): String {
+        PontMcp.demarrer(app)
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -lc ${q(scriptDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ $libelle…"
+        return executer(app, prelude(app) + "\n" + commande, libelle = libelle)
+            ?: "🚀 $libelle lancé : suis la progression dans Jarvis."
+    }
+
+    /** Archive privée de ~/.hermes, en excluant caches, dépôts Git et environnements Python recréables. */
+    private val scriptSauvegarde = """
+set -eu
+test -d /root/.hermes || { echo "❌ Dossier Hermes introuvable dans Debian."; exit 1; }
+mkdir -p /root/.hermes/backups
+tar -czf "/root/.hermes/backups/hermes-$(date +%Y%m%d-%H%M%S).tar.gz" \
+  --exclude='.hermes/backups' --exclude='.hermes/hermes-agent/.git' \
+  --exclude='.hermes/hermes-agent/venv' --exclude='.hermes/hermes-agent/.venv' \
+  --exclude='.hermes/hermes-agent/__pycache__' -C /root .hermes
+chmod 600 /root/.hermes/backups/hermes-*.tar.gz
+echo "✅ Sauvegarde privée créée dans /root/.hermes/backups."
+du -h /root/.hermes/backups/hermes-*.tar.gz | tail -n 1
+""".trimIndent()
+
+    fun sauvegarder(app: JarvisApp): String =
+        executerDebian(app, scriptSauvegarde, "Sauvegarde Hermès")
+
+    /** Contrôle les fichiers essentiels sans afficher les clés API ni les jetons. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = """
+set +e
+echo "=== DIAGNOSTIC HERMÈS (aucun secret affiché) ==="
+[ -x /root/.hermes/hermes-agent/.hermes/bin/hermes ] && echo "CLI Hermes : OK" || echo "CLI Hermes : ABSENT"
+if [ -x /root/.hermes/hermes-agent/venv/bin/python ]; then
+  echo "Environnement Python Hermès : venv/ OK"
+elif [ -x /root/.hermes/hermes-agent/.venv/bin/python ]; then
+  echo "Environnement Python Hermès : .venv/ OK"
+elif [ -x /root/.hermes/hermes-agent/.hermes/bin/python ]; then
+  echo "Environnement Python Hermès : .hermes/bin/ OK"
+else
+  echo "Environnement Python dédié : non trouvé"
+fi
+if command -v python3 >/dev/null 2>&1; then
+  echo "Python Debian : $(python3 --version 2>&1)"
+  echo "Interpréteur système : $(command -v python3)"
+else
+  echo "Python Debian : ABSENT"
+fi
+if command -v hermes >/dev/null 2>&1; then
+  echo "CLI Hermès : $(command -v hermes)"
+  hermes --version 2>&1 | head -n 1
+fi
+[ -f /root/.hermes/config.yaml ] && echo "Configuration : présente" || echo "Configuration : ABSENTE"
+[ -f /root/.hermes/.env ] && echo "Fichier de clés : présent (contenu masqué)" || echo "Fichier de clés : ABSENT"
+grep -q 'jarvis:' /root/.hermes/config.yaml 2>/dev/null && echo "Entrée MCP Jarvis : présente" || echo "Entrée MCP Jarvis : absente"
+grep -q '127.0.0.1:38291/mcp' /root/.hermes/config.yaml 2>/dev/null && echo "URL du pont MCP : OK" || echo "URL du pont MCP : à vérifier"
+curl -fsS -m 3 http://127.0.0.1:${PORT_API}/health >/dev/null 2>&1 && echo "Passerelle API : EN LIGNE" || echo "Passerelle API : hors ligne"
+echo "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        return executerDebian(app, script, "Diagnostic Hermès")
+    }
+
+    /** Restaure la dernière archive après vérification, puis relance la passerelle. */
+    fun restaurerDerniereSauvegarde(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val restore = """
+set -eu
+find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | grep -q . || { echo "❌ Aucune sauvegarde Hermès trouvée."; exit 1; }
+tar -tzf "$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)" >/dev/null
+tar -xzf "$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)" -C /root
+chmod 600 /root/.hermes/.env 2>/dev/null || true
+echo "✅ Données et configuration restaurées."
+""".trimIndent()
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- bash -lc ${q(restore)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        return executer(app, prelude(app) + "\n" + commande + "\n" + demarrage, libelle = "Restauration Hermès")
+            ?: "🚀 Restauration lancée, puis redémarrage d'Hermès."
+    }
+
+    /** Réinstallation propre : sauvegarde complète, suppression du seul moteur, puis installateur officiel. */
+    fun reinstallerComplet(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val preparation = scriptSauvegarde + "\nrm -rf /root/.hermes/hermes-agent\necho '🧹 Ancien moteur supprimé après sauvegarde.'"
+        val commande = "set -euo pipefail; proot-distro login debian --termux-home -- bash -lc ${q(preparation)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        val script = prelude(app) + "\n" + commande + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Sauvegarde puis réinstallation complète d'Hermès…"
+        return executer(app, script, libelle = "Réinstallation complète Hermès")
+            ?: "🚀 Sauvegarde effectuée puis réinstallation lancée. Suis les étapes dans Jarvis."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}}CURL_RC\"; fi",
             "p '🚀 Configuration Hermès : suivi des étapes confirmé.'",
             upgradeCommand,
             "p '🔐 Mise à jour des clés et variables des fournisseurs…'",
