@@ -72,7 +72,11 @@ object PontMcp {
                     val nomOutil = fn.optString("name")
                     if (nomOutil.isBlank() || nomOutil in EXCLUS || nomOutil == "jarvis_rechercher_outils" || nomOutil == "jarvis_appeler_outil") continue
                     val texte = (nomOutil + " " + fn.optString("description")).lowercase()
-                    val score = termes.count { texte.contains(it) }
+                    val demandeSuppressionIntervention =
+                        termes.any { it.contains("intervention") } &&
+                            termes.any { it in setOf("supprimer", "suppression", "effacer", "delete", "remove", "retirer", "enlever", "annuler") }
+                    val score = termes.count { texte.contains(it) } +
+                        if (demandeSuppressionIntervention && nomOutil in setOf("interventions_liste", "intervention_supprimer")) 1000 else 0
                     if (score > 0) candidats += score to fn
                 }
                 val resultat = JSONArray()
