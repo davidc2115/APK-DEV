@@ -86,7 +86,12 @@ class SocieteService(
         }
         val note = obsidian.saveIn(dossier, base, md)
         val pdf = runCatching { obsidian.saveBytes(dossier, "$base.pdf", PdfExporter.toPdf(md), "application/pdf") }.getOrDefault("PDF non régénéré")
-        return "✅ Intervention ${finale.id} mise à jour pour ${client.nom} — ${site.nom}.\n📁 $note\n📄 $pdf"
+        val anciennesVersions = if (ancienne.date != finale.date) obsidian.supprimerAnciennesVersionsIntervention(finale.id, base) else emptyList<String>() to emptyList()
+        return buildString {
+            append("✅ Intervention ${finale.id} mise à jour pour ${client.nom} — ${site.nom}.\n📁 $note\n📄 $pdf")
+            if (anciennesVersions.first.isNotEmpty()) append("\n🧹 Anciennes versions supprimées : " + anciennesVersions.first.joinToString(", "))
+            if (anciennesVersions.second.isNotEmpty()) append("\n⚠️ Anciennes versions non supprimées : " + anciennesVersions.second.joinToString(", "))
+        }
     }
 
 
