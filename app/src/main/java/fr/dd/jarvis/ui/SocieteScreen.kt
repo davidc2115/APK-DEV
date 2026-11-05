@@ -375,7 +375,7 @@ private fun ClientForm(initial: Client?, onClose: () -> Unit, onSave: (Client) -
                     initial?.id ?: java.util.UUID.randomUUID().toString().take(8), nom.trim(), if (pro) "professionnel" else "particulier",
                     contact = contact, tel = tel, email = email, adresse = adresse, sites = newSites,
                     depuis = if (depuis.matches(Regex("\\d{4}"))) "$depuis-01-01" else depuis, notes = notes,
-                    distanceKm = initial?.distanceKm, distanceDureeMin = initial?.distanceDureeMin, distanceCle = initial?.distanceCle
+                    distanceKm = initial?.distanceKm, distanceDureeMin = initial?.distanceDureeMin, distanceCle = initial?.distanceCle ?: ""
                 ))
             }
         }
