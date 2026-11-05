@@ -17,6 +17,9 @@ import androidx.core.content.FileProvider
 import fr.dd.jarvis.JarvisApp
 import fr.dd.jarvis.device.AdbShell
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -42,6 +45,8 @@ object HermesTermux {
     private const val BASH = "/data/data/com.termux/files/usr/bin/bash"
     private const val EMPREINTE = "C572B5FDD1A29CCFA9A912B6840B0848E139156D"
     private const val NOTIF_ID = 8642
+
+    private val configurationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val http = OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(90, TimeUnit.SECONDS).build()
 
@@ -410,8 +415,33 @@ p "✅ Hermès installé (${'$'}{MODE})."
         return synchroniserCles(app)
     }
 
-    /** Synchronise les clés et le routage multi-agents sans écraser les autres réglages Hermes. */
+    /**
+     * Prépare la synchronisation en arrière-plan : la construction du script (plusieurs dizaines de Ko)
+     * ne doit jamais bloquer le thread UI. Le résultat détaillé est publié dans l'état Compose.
+     */
     fun synchroniserCles(app: JarvisApp): String {
+        val s = app.store
+        if (!s.apiKeysSecureAvailable) return "⛔ Stockage chiffré Android indisponible : aucune clé transmise à Hermès."
+        if (!termuxInstalle(app) || !permissionOk(app)) return "ℹ️ Clés chiffrées ; synchronisation en attente de Termux et de son autorisation."
+        message = "⏳ Préparation Hermès en arrière-plan…"
+        configurationScope.launch {
+            try {
+                val resultat = synchroniserClesEnArrierePlan(app)
+                if (resultat.startsWith("❌") || resultat.startsWith("⛔")) {
+                    android.os.Handler(android.os.Looper.getMainLooper()).post { message = resultat }
+                }
+            } catch (e: Throwable) {
+                val detail = e.message ?: e.javaClass.simpleName
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    message = "❌ Préparation Hermès interrompue : $detail. Aucune nouvelle configuration n'a été appliquée."
+                }
+            }
+        }
+        return "⏳ Préparation Hermès lancée en arrière-plan. Les étapes et erreurs apparaîtront ici."
+    }
+
+    /** Corps de synchronisation exécuté exclusivement sur Dispatchers.IO. */
+    private fun synchroniserClesEnArrierePlan(app: JarvisApp): String {
         val s = app.store
         if (!s.apiKeysSecureAvailable) return "⛔ Stockage chiffré Android indisponible : aucune clé transmise à Hermès."
         if (!termuxInstalle(app) || !permissionOk(app)) return "ℹ️ Clés chiffrées ; synchronisation en attente de Termux et de son autorisation."
@@ -687,12 +717,21 @@ os.replace(name, p)
             restartCommand,
             demarrage
         ).joinToString(System.lineSeparator())
+        val signalAvantEnvoi = PontMcp.dernierSignal
         val erreur = executer(app, script, libelle = "Mise à niveau et orchestration multi-agents Hermès")
         if (erreur != null) {
-            message = "❌ Configuration Hermès non lancée : $erreur"
+            message = "❌ Termux a refusé le lancement : $erreur. Aucune mise à niveau n'a été confirmée."
             return message
         }
-        return "⏳ Configuration Hermès envoyée à Termux. Le suivi de progression est actif ; Jarvis ne déclarera Hermès opérationnel qu'après confirmation de l'API locale."
+        // RUN_COMMAND peut accepter le Service Android sans que Bash ait réellement démarré.
+        // L'accusé de réception doit venir du premier POST /progres exécuté par le script.
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            if (PontMcp.dernierSignal <= signalAvantEnvoi &&
+                !message.startsWith("❌") && !message.startsWith("✅ Hermès est en ligne")) {
+                message = "❌ Termux n'a pas confirmé l'exécution du script après 35 secondes. Vérifie l'autorisation « Exécuter des commandes dans Termux », que Termux n'est pas restreint en arrière-plan et que le port local 38291 est joignable. Aucun succès n'est déclaré ; tu peux relancer sans réinstaller Hermès."
+            }
+        }, 35_000)
+        return "⏳ Commande transmise à Termux ; attente de son accusé de réception réel (35 s maximum).";
     }
 
     /** Catalogue et installation non interactive des plugins/MCP Hermes. */
