@@ -4,6 +4,8 @@ import android.Manifest
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -367,10 +369,17 @@ fun PlanningScreen(app: JarvisApp) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("🕗 " + eventDay(e).format(dayTitleFmt) + " · " + timeLabel(e), fontSize = 13.sp)
                     if (e.location.isNotBlank()) {
+                        Text("📍 ${e.location}", color = LocalAccent.current, fontSize = 13.sp)
+                    }
+                    val gps = Regex("""GPS\\s*:\\s*(-?\\d+(?:\\.\\d+)?),\\s*(-?\\d+(?:\\.\\d+)?)""").find(e.description)
+                    if (gps != null) {
+                        val lat = gps.groupValues[1]
+                        val lon = gps.groupValues[2]
                         Text(
-                            "📍 ${e.location}", color = LocalAccent.current, fontSize = 13.sp,
+                            "🎯 Position GPS : $lat, $lon · Ouvrir dans une application de navigation",
+                            color = LocalAccent.current, fontSize = 12.sp,
                             modifier = Modifier.clickable {
-                                openLink(ctx, "https://www.google.com/maps/search/?api=1&query=" + java.net.URLEncoder.encode(e.location, "UTF-8"))
+                                runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:$lat,$lon?q=$lat,$lon"))) }
                             }
                         )
                     }
