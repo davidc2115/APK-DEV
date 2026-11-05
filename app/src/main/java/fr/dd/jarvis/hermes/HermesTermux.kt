@@ -649,7 +649,7 @@ os.replace(name, p)
             "bash -c 'cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && exec ./.hermes/bin/hermes update --yes' " +
             "2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done; " +
             "UPDATE_STATUS=\$?; if [ \"\$UPDATE_STATUS\" -ne 0 ]; then " +
-            "p '❌ Mise à niveau Hermès échouée : consulte les lignes de progression ci-dessus. La configuration est interrompue.'; exit \"\\$UPDATE_STATUS\"; fi; " +
+            "p '❌ Mise à niveau Hermès échouée : consulte les lignes de progression ci-dessus. La configuration est interrompue.'; exit \"\$UPDATE_STATUS\"; fi; " +
             "p '✅ Mise à niveau Hermès terminée.'"
         // Arrêter la passerelle Debian explicitement, puis la relancer après l'écriture et la vérification de config.yaml.
         val restartCommand = "proot-distro login debian --termux-home -- pkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; " +
