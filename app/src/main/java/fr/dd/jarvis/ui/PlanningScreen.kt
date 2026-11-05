@@ -239,16 +239,13 @@ fun PlanningScreen(app: JarvisApp) {
                     }
                     Text("✧", color = LocalAccent.current, fontSize = 28.sp)
                 }
-                if (store.proactiveSummary.value.isNotBlank()) {
+                if (weekConflicts.isNotEmpty() || store.proactiveSummary.value.isNotBlank()) {
                     Spacer(Modifier.height(8.dp))
-                    if (store.proactiveSummary.value.contains("conflit", ignoreCase = true)) {
-                        val staleConflictAlert = weekConflicts.isEmpty()
-                        Text(
-                            if (staleConflictAlert) "⚠️ Ancienne alerte de conflit : aucun chevauchement confirmé lors de la vérification actuelle."
-                            else "⚠️ " + weekConflicts.size + " conflit(s) confirmé(s) · Toucher pour ouvrir la fiche",
-                            color = if (staleConflictAlert) HudDim else Color(0xFFFFB45C),
-                            fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                            modifier = if (staleConflictAlert) Modifier else Modifier.clickable {
+                    when {
+                        weekConflicts.isNotEmpty() -> Text(
+                            "⚠️ " + weekConflicts.size + " conflit(s) confirmé(s) · Toucher pour ouvrir la fiche",
+                            color = Color(0xFFFFB45C), fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.clickable {
                                 weekConflicts.firstOrNull()?.let { pair ->
                                     day = eventDay(pair.first)
                                     range = 1
@@ -257,8 +254,11 @@ fun PlanningScreen(app: JarvisApp) {
                                 }
                             }
                         )
-                    } else {
-                        Text(store.proactiveSummary.value, color = LocalAccent.current, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                        store.proactiveSummary.value.contains("conflit", ignoreCase = true) -> Text(
+                            "⚠️ Ancienne alerte de conflit : aucun chevauchement confirmé lors de la vérification actuelle.",
+                            color = HudDim, fontSize = 11.sp, fontWeight = FontWeight.Medium
+                        )
+                        else -> Text(store.proactiveSummary.value, color = LocalAccent.current, fontSize = 11.sp, fontWeight = FontWeight.Medium)
                     }
                 }
                 if (!store.agentsOn.value) {
