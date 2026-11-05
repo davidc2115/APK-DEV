@@ -435,7 +435,7 @@ class ToolBox(
         "gerer_extension_hermes" -> {
             val action = a.optString("action").trim().lowercase()
             val name = a.optString("nom").trim()
-            val mutating = (action.endsWith("_installer") && !action.startsWith("skill_")) || action.endsWith("_activer") || action == "skill_mettre_a_jour"
+            val mutating = action == "mcp_installer" || action.endsWith("_activer") || action == "skill_mettre_a_jour"
             if (mutating && !confirm("Autoriser Hermès à exécuter « $action » pour « $name » dans Termux ?", true))
                 ToolResult("Action annulée.")
             else ToolResult(fr.dd.jarvis.hermes.HermesTermux.gererExtension(app, action, name))
