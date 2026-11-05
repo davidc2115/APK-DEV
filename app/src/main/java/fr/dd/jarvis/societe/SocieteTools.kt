@@ -620,6 +620,11 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         out.append("- Dernière intervention : ${all.maxByOrNull { it.third.date }?.let { "${it.third.date} · ${it.first.nom} / ${it.second.nom}" } ?: "inconnue"}\n")
         out.append("\n## Répartition par catégorie\n")
         byCategory.entries.sortedByDescending { it.value }.forEach { (category, count) -> out.append("- $category : $count\n") }
+        val byYear = all.groupingBy { it.third.date.take(4).ifBlank { "date inconnue" } }.eachCount()
+        out.append("\n## Activité par année\n")
+        byYear.entries.sortedByDescending { it.key }.forEach { (year, count) ->
+            out.append("- $year : $count intervention(s)\n")
+        }
         out.append("\n## Interventions à suivre / en attente\n")
         if (pending.isEmpty()) out.append("- Aucune intervention avec ce statut.\n")
         else pending.sortedByDescending { it.third.date }.forEach { (client, site, item) ->
@@ -635,6 +640,11 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         out.append("\n## Dernières interventions\n")
         all.sortedByDescending { it.third.date }.take(12).forEach { (client, site, item) ->
             out.append("- ${item.date} · ${client.nom} / ${site.nom} · ${item.categorie} · ${item.statut} : ${item.description.take(180)}\n")
+            if (item.diagnostic.isNotBlank()) out.append("  Diagnostic constaté : ${item.diagnostic.take(220)}\n")
+            if (item.actions.isNotBlank()) out.append("  Actions réalisées : ${item.actions.take(220)}\n")
+            if (item.pieces.isNotBlank()) out.append("  Pièces : ${item.pieces.take(160)}\n")
+            if (item.mesures.isNotBlank()) out.append("  Mesures relevées : ${item.mesures.take(180)}\n")
+            if (item.prochaineMaintenance.isNotBlank()) out.append("  Prochaine maintenance : ${item.prochaineMaintenance}\n")
         }
         out.append("\nBilan calculé uniquement à partir des interventions et dates effectivement enregistrées ; aucune mesure ni panne n'est déduite.")
         return ok(out.toString())
