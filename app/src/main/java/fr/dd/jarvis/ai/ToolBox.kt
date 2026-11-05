@@ -985,7 +985,8 @@ class ToolBox(
             "mails", "mail" -> "Agent mails"
             "factures", "facture" -> "Agent factures et devis"
             "planning", "agenda" -> "Agent planning et tâches"
-            "notifications", "notification", "surveillance_telephone", "telephone", "téléphone" -> "Agents notifications et surveillance téléphone"
+            "notifications", "notification" -> "Agent notifications"
+            "surveillance_telephone", "telephone", "téléphone" -> "Surveillance du téléphone"
             "rangement_gmail", "rangement" -> "Agent rangement Gmail"
             else -> return ToolResult("Agent inconnu. Agents disponibles : global, mails, factures, planning, notifications, surveillance_telephone, rangement_gmail.")
         }
@@ -994,7 +995,8 @@ class ToolBox(
             "mails", "mail" -> store.agentMails.value
             "factures", "facture" -> store.agentFactures.value
             "planning", "agenda" -> store.agentPlanning.value
-            "notifications", "notification", "surveillance_telephone", "telephone", "téléphone" -> store.agentNotifs.value
+            "notifications", "notification" -> store.agentNotifs.value
+            "surveillance_telephone", "telephone", "téléphone" -> store.agentPhoneHealth.value
             else -> store.agentRanger.value
         }
         if (action == "etat") {
@@ -1003,7 +1005,8 @@ class ToolBox(
                 "Mails" to store.agentMails.value,
                 "Factures/devis" to store.agentFactures.value,
                 "Planning/tâches" to store.agentPlanning.value,
-                "Notifications + surveillance téléphone" to store.agentNotifs.value,
+                "Notifications" to store.agentNotifs.value,
+                "Surveillance téléphone" to store.agentPhoneHealth.value,
                 "Rangement Gmail" to store.agentRanger.value
             )
             val lastRun = store.agentLastRunAt.value.toLongOrNull()?.let { millis ->
@@ -1036,7 +1039,8 @@ class ToolBox(
             "mails", "mail" -> store.agentMails.set(on)
             "factures", "facture" -> store.agentFactures.set(on)
             "planning", "agenda" -> store.agentPlanning.set(on)
-            "notifications", "notification", "surveillance_telephone", "telephone", "téléphone" -> store.agentNotifs.set(on)
+            "notifications", "notification" -> store.agentNotifs.set(on)
+            "surveillance_telephone", "telephone", "téléphone" -> store.agentPhoneHealth.set(on)
             else -> store.agentRanger.set(on)
         }
         fr.dd.jarvis.work.AgentsScheduler.apply(app, store)
