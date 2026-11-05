@@ -140,7 +140,27 @@ private fun InterventionsTab(app: JarvisApp) {
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { HudPanel(Modifier.fillMaxWidth(), title = "🛠️ Carnet technique photovoltaïque") {
             Text("Un dossier structuré par installation : constats, réparations, pièces, mesures et photos. Les corrections faites par Hermès sont répercutées ici et dans les rapports.", color = HudDim, fontSize = 12.sp)
-            Text("☀️ " + sites.size + " installation(s)  ·  🛠️ " + sites.sumOf { it.second.interventions.size } + " intervention(s)", color = LocalAccent.current, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            val interventions = sites.flatMap { (client, site) -> site.interventions.map { client to it } }
+            val terminees = interventions.count { it.second.statut == "terminee" }
+            val aSuivre = interventions.count { it.second.statut == "a_suivre" }
+            val enAttente = interventions.count { it.second.statut == "en_attente" }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                HudPanel(Modifier.weight(1f), title = "INSTALLATIONS") {
+                    Text(sites.size.toString(), color = LocalAccent.current, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                }
+                HudPanel(Modifier.weight(1f), title = "INTERVENTIONS") {
+                    Text(interventions.size.toString(), color = HudText, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                HudPanel(Modifier.weight(1f), title = "TERMINÉES") {
+                    Text(terminees.toString(), color = Color(0xFF78D6A0), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                }
+                HudPanel(Modifier.weight(1f), title = "À SUIVRE") {
+                    Text((aSuivre + enAttente).toString(), color = Color(0xFFFFB45C), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            Text("Les modifications effectuées par Hermès actualisent cette liste et les rapports associés.", color = HudDim, fontSize = 11.sp)
             if (photoInfo.isNotBlank()) Text(photoInfo, color = LocalAccent.current, fontSize = 12.sp)
         } }
         if (sites.isEmpty()) item { Text("Aucune installation enregistrée. Ajoute d'abord un client et son installation.", color = HudDim, fontSize = 13.sp) }
@@ -155,7 +175,11 @@ private fun InterventionsTab(app: JarvisApp) {
                 site.interventions.sortedByDescending { it.date }.forEach { item ->
                     HudPanel(Modifier.fillMaxWidth(), title = item.categorie.replaceFirstChar { it.uppercase() } + " · " + dateFr(item.date)) {
                         val statusText = when (item.statut.lowercase()) { "terminee" -> "✓ TERMINÉE"; "a_suivre" -> "◷ À SUIVRE"; "en_attente" -> "Ⅱ EN ATTENTE"; else -> item.statut.uppercase() }
-                        Text(statusText, color = if (item.statut == "terminee") Color(0xFF78D6A0) else Color(0xFFFFB45C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(statusText, color = if (item.statut == "terminee") Color(0xFF78D6A0) else Color(0xFFFFB45C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.weight(1f))
+                            Text("#${item.id}", color = HudDim, fontSize = 9.sp)
+                        }
                         Text(item.description, color = HudText, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                         if (item.diagnostic.isNotBlank()) { HudDivider(); Text("DIAGNOSTIC / CONSTAT", color = LocalAccent.current, fontSize = 10.sp, fontWeight = FontWeight.Bold); Text(item.diagnostic, color = HudText, fontSize = 12.sp) }
                         if (item.actions.isNotBlank()) { HudDivider(); Text("TRAVAUX RÉALISÉS", color = LocalAccent.current, fontSize = 10.sp, fontWeight = FontWeight.Bold); Text(item.actions, color = HudText, fontSize = 12.sp) }
