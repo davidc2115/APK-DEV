@@ -415,6 +415,13 @@ p "✅ Hermès installé (${'$'}{MODE})."
         val s = app.store
         if (!s.apiKeysSecureAvailable) return "⛔ Stockage chiffré Android indisponible : aucune clé transmise à Hermès."
         if (!termuxInstalle(app) || !permissionOk(app)) return "ℹ️ Clés chiffrées ; synchronisation en attente de Termux et de son autorisation."
+        // Le serveur de progression doit être démarré AVANT l'envoi du script Termux.
+        // Après un redémarrage de Jarvis avec hermesInstalle=false, il n'est pas encore lancé :
+        // sans ce pont, Termux exécute la mise à niveau mais tous les POST /progres échouent silencieusement,
+        // laissant l'interface bloquée sur « Configuration Hermès lancée ».
+        PontMcp.demarrer(app)
+        message = "⏳ Connexion au suivi de configuration Hermès…"
+        PontMcp.progression.clear()
         val gemini = s.geminiKeys.toList()
         val groq = s.groqKeys.toList()
         val cloudflare = s.cfAccounts.toList().mapNotNull { raw ->
@@ -662,9 +669,26 @@ os.replace(name, p)
             "p '✅ Mise à niveau Hermès terminée.'"
         val restartCommand = "proot-distro login debian --termux-home -- pkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; " +
             "pkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; sleep 3"
-        val script = listOf(prelude(app), upgradeCommand, envScript, pluginCommand, configCommand, restartCommand, demarrage).joinToString(System.lineSeparator())
-        return executer(app, script, libelle = "Mise à niveau et orchestration multi-agents Hermès")
-            ?: "⏳ Configuration Hermès lancée. Attends les messages de progression : mise à niveau et redémarrage doivent être confirmés avant de considérer Hermès opérationnel."
+        val script = listOf(
+            prelude(app),
+            "p '🚀 Configuration Hermès : démarrage du suivi des étapes…'",
+            upgradeCommand,
+            "p '🔐 Mise à jour des clés et variables des fournisseurs…'",
+            envScript,
+            "p '🧩 Synchronisation des plugins et agents…'",
+            pluginCommand,
+            "p '⚙️ Écriture et validation de la configuration Hermès…'",
+            configCommand,
+            "p '🔄 Redémarrage de la passerelle Hermès…'",
+            restartCommand,
+            demarrage
+        ).joinToString(System.lineSeparator())
+        val erreur = executer(app, script, libelle = "Mise à niveau et orchestration multi-agents Hermès")
+        if (erreur != null) {
+            message = "❌ Configuration Hermès non lancée : $erreur"
+            return message
+        }
+        return "⏳ Configuration Hermès envoyée à Termux. Le suivi de progression est actif ; Jarvis ne déclarera Hermès opérationnel qu'après confirmation de l'API locale."
     }
 
     /** Catalogue et installation non interactive des plugins/MCP Hermes. */
