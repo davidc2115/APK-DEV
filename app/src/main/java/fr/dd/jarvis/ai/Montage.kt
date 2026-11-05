@@ -296,7 +296,6 @@ object Montage {
         }.orEmpty().ifBlank { analyseBrute.take(5000) }
 
         // Ne lance aucune génération si la première étape d’analyse n’a fourni aucun contenu exploitable.
-        if (analyse.isBlank()) return "❌ L’analyse préalable du brief n’a pas abouti. Aucune vidéo n’a été lancée : réessaie afin que je puisse construire un storyboard et des prompts fiables."
 
         // Passe 2 : transformer l'analyse et le brief original en storyboard + prompts par plan.
         val contexte = buildString {
