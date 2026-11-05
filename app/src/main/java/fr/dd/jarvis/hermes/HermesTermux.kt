@@ -674,7 +674,8 @@ os.replace(name, p)
             "pkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; sleep 3"
         val script = listOf(
             prelude(app),
-            "p '🚀 Configuration Hermès : démarrage du suivi des étapes…'",
+            "curl -fsS -m 4 -X POST -H \"Authorization: Bearer \\$J_TOK\" --data-binary pong \"\\$J_URL\" >/dev/null || { echo '❌ Le pont de progression Jarvis ne répond pas ou refuse le jeton. Arrêt avant toute mise à niveau.'; exit 125; }",
+            "p '🚀 Configuration Hermès : suivi des étapes confirmé.'",
             upgradeCommand,
             "p '🔐 Mise à jour des clés et variables des fournisseurs…'",
             envScript,
