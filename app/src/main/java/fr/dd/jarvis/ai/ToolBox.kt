@@ -230,8 +230,8 @@ class ToolBox(
         put(tool("fichiers_generes", "Liste les fichiers déjà créés par JARVIS (images de generer_image, documents de creer_fichier), les plus récents en premier, avec leur nom exact. À utiliser dès que l'utilisateur fait référence à une image ou un fichier déjà généré sans te redonner son nom exact, avant de dire que tu ne le retrouves pas.",
             mapOf("quoi" to prop("images, fichiers (documents) ou tous (par défaut)."), "max" to prop("Nombre maximum à lister (par défaut 20).")), listOf()))
         put(tool("documents_lister", "Liste les documents importés dans la bibliothèque privée de JARVIS, avec leurs noms exacts.", mapOf()))
-        put(tool("document_lire", "Extrait le texte d'un document importé pour l'analyser, le résumer, le convertir ou réutiliser son contenu. Prend en charge les formats texte, KML/GPX, DOCX, XLSX, PPTX, ODT/ODS et l'inventaire ZIP. Pour les PDF et médias, indique honnêtement les limites de lecture.", mapOf("nom" to prop("Nom exact du fichier affiché dans la bibliothèque documentaire.")), listOf("nom")))
-        put(tool("document_analyser", "Analyse un fichier média importé dans la bibliothèque : image, vidéo ou PDF (rendu des 4 premières pages maximum).", mapOf("nom" to prop("Nom exact du fichier importé."), "question" to prop("Question ou objectif d'analyse.")), listOf("nom")))
+        put(tool("document_lire", "Extrait le texte d'un document importé pour l'analyser, le résumer, le convertir ou réutiliser son contenu. Extrait toutes les pages des PDF texte ; pour un PDF scanné, utilise document_analyser afin de lancer l'OCR visuel page par page.", mapOf("nom" to prop("Nom exact du fichier affiché dans la bibliothèque documentaire.")), listOf("nom")))
+        put(tool("document_analyser", "Analyse un média importé. Pour les PDF, extrait le texte de toutes les pages ou effectue l'OCR visuel de chaque page si le document est scanné.", mapOf("nom" to prop("Nom exact du fichier importé."), "question" to prop("Question ou objectif d'analyse.")), listOf("nom")))
         put(tool("analyser_image", "Analyse une image déjà générée par generer_image (ou envoyée par l'utilisateur) : décrit son contenu, répond à une question dessus, lit un texte qu'elle contient, etc.",
             mapOf("image" to prop("Nom de fichier de l'image (vu dans jarvis-img:... ou via fichiers_generes), ou « derniere » pour la dernière générée."),
                 "question" to prop("Ce qu'il faut regarder ou dire sur l'image (optionnel ; par défaut une description détaillée).")), listOf("image")))
@@ -594,23 +594,34 @@ class ToolBox(
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 when (f.extension.lowercase()) {
                     "pdf" -> {
-                        val fd = android.os.ParcelFileDescriptor.open(f, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
-                        val renderer = android.graphics.pdf.PdfRenderer(fd)
-                        try {
-                            val pages = minOf(renderer.pageCount, 4)
-                            val analyses = (0 until pages).map { index ->
-                                val page = renderer.openPage(index)
-                                try {
-                                    val width = 1400
-                                    val height = (width.toFloat() * page.height / page.width).toInt().coerceAtLeast(1)
-                                    val bitmap = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
-                                    page.render(bitmap, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                                    val bytes = java.io.ByteArrayOutputStream().use { out -> bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, out); bitmap.recycle(); out.toByteArray() }
-                                    "Page ${index + 1} : " + app.llm.gemini.analyserImage(bytes, "image/jpeg", question)
-                                } finally { page.close() }
-                            }
-                            ToolResult("Analyse PDF de ${f.name} (${renderer.pageCount} page(s), ${pages} analysée(s)) :\n" + analyses.joinToString("\n\n"))
-                        } finally { renderer.close(); fd.close() }
+                        val extracted = fr.dd.jarvis.ai.DocumentStore.extractPdf(app, f)
+                        if (!extracted.startsWith("PDF_SANS_TEXTE|")) {
+                            ToolResult("Extraction PDF de toutes les pages pour la demande « $question ». Préserve les titres, les noms exacts, les tableaux et les listes ; signale toute limite.\n\n" + extracted)
+                        } else {
+                            val fd = android.os.ParcelFileDescriptor.open(f, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+                            val renderer = android.graphics.pdf.PdfRenderer(fd)
+                            try {
+                                val pageCount = renderer.pageCount
+                                val analyses = ArrayList<String>(pageCount)
+                                for (index in 0 until pageCount) {
+                                    val page = renderer.openPage(index)
+                                    try {
+                                        val width = 1400
+                                        val height = (width.toFloat() * page.height / page.width).toInt().coerceAtLeast(1)
+                                        val bitmap = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
+                                        page.render(bitmap, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                        val bytes = java.io.ByteArrayOutputStream().use { out ->
+                                            bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 88, out)
+                                            bitmap.recycle()
+                                            out.toByteArray()
+                                        }
+                                        val prompt = "DOCUMENT COMPLET — PAGE ${index + 1}/$pageCount. Objectif : $question. Lis tous les éléments visibles, tableaux, noms exacts, catégories, ordre, descriptions, numéros et notes. Ne rien inventer. Réponds en français."
+                                        analyses += "PAGE ${index + 1}/$pageCount : " + app.llm.gemini.analyserImage(bytes, "image/jpeg", prompt)
+                                    } finally { page.close() }
+                                }
+                                ToolResult("OCR visuel de toutes les pages du PDF scanné ${f.name} : ${analyses.size}/$pageCount pages traitées.\n\n" + analyses.joinToString("\n\n"))
+                            } finally { renderer.close(); fd.close() }
+                        }
                     }
                     "jpg", "jpeg", "png", "webp", "gif", "bmp" -> {
                         val mime = when (f.extension.lowercase()) { "jpg", "jpeg" -> "image/jpeg"; "webp" -> "image/webp"; "gif" -> "image/gif"; "bmp" -> "image/bmp"; else -> "image/png" }
