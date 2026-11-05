@@ -327,6 +327,9 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
         }
         item {
             SystemHealthPanel(app, tick) { tick++ }
+            HudButton("Demander un diagnostic technique complet à JARVIS", Modifier.fillMaxWidth()) {
+                onAsk("Lance un diagnostic technique complet du téléphone et explique les alertes, les accès manquants et les limites Android détectées.")
+            }
         }
         }
 
