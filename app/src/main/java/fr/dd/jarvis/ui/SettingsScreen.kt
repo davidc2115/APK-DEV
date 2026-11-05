@@ -269,6 +269,46 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
             }
         }
         item {
+            val memory = app.memo.all()
+            val learning = app.memo.apprentissagesEnCours()
+            val learningCount = learning.lines().count { it.trimStart().startsWith("- ") }
+            HudPanel(Modifier.fillMaxWidth(), title = "Mémoire intelligente et habitudes") {
+                Text("Mémoire durable : ${memory.size} rubrique(s) enregistrée(s). Les préférences observées restent candidates jusqu'à trois preuves distinctes ; les données sensibles sont exclues de l'apprentissage automatique.", color = HudDim, fontSize = 11.sp)
+                AgentStatusRow("Consignes durables", memory.isNotEmpty(), "${memory.size} rubrique(s)")
+                AgentStatusRow("Habitudes candidates", learningCount > 0, if (learningCount == 0) "aucune" else "${learningCount} en apprentissage")
+                if (learning.isNotBlank()) Text(learning.take(900), color = HudText, fontSize = 11.sp)
+                HudButton("Consulter les préférences en apprentissage", Modifier.fillMaxWidth()) {
+                    onAsk("Affiche les préférences candidates en cours d'apprentissage et le nombre de preuves distinctes pour chacune.")
+                }
+                HudButton("Consulter ma mémoire durable", Modifier.fillMaxWidth()) {
+                    onAsk("Affiche les consignes durables enregistrées dans ma mémoire JARVIS.")
+                }
+            }
+        }
+        item {
+            val clients = app.societe.data.clients
+            val siteCount = clients.sumOf { it.sites.size }
+            val interventionCount = clients.sumOf { client -> client.sites.sumOf { it.interventions.size } }
+            HudPanel(Modifier.fillMaxWidth(), title = "Contexte et interventions photovoltaïques") {
+                Text("Données actuellement enregistrées : ${clients.size} client(s), ${siteCount} installation(s), ${interventionCount} intervention(s). Le bilan utilise uniquement les fiches réelles présentes dans JARVIS.", color = HudDim, fontSize = 11.sp)
+                AgentStatusRow("Historique photovoltaïque", interventionCount > 0, "${interventionCount} intervention(s)")
+                HudButton("Ouvrir la synthèse des interventions", Modifier.fillMaxWidth()) {
+                    onAsk("Présente la synthèse complète de l'historique des interventions photovoltaïques, les suivis en attente et les prochaines maintenances.")
+                }
+                HudDivider()
+                Text("Raccourcis contextuels", color = LocalAccent.current, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 13.sp)
+                HudButton("Préparer mon départ au travail", Modifier.fillMaxWidth()) {
+                    onAsk("Prépare mon départ au travail : vérifie mon agenda, l'heure du prochain rendez-vous et le trajet utile.")
+                }
+                HudButton("Préparer ma journée de demain", Modifier.fillMaxWidth()) {
+                    onAsk("Prépare ma journée de demain à partir de mon agenda, de mes tâches et des éléments importants à anticiper.")
+                }
+                HudButton("Préparer le contexte de mon prochain chantier", Modifier.fillMaxWidth()) {
+                    onAsk("Prépare le contexte de mon prochain chantier : identifie le rendez-vous pertinent, le client et l'installation, puis consulte son historique photovoltaïque. Demande une précision si plusieurs chantiers correspondent.")
+                }
+            }
+        }
+        item {
             SystemHealthPanel(app, tick) { tick++ }
         }
         }
