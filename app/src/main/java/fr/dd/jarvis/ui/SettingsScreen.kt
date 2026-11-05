@@ -293,7 +293,11 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 Text("Dernière exécution", color = LocalAccent.current, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 13.sp)
                 AgentStatusRow("Dernier cycle", store.agentLastRunAt.value.isNotBlank(), lastRunLabel)
                 AgentStatusRow("Résultat", store.agentLastRunStatus.value == "Cycle terminé sans erreur", store.agentLastRunStatus.value)
-                Text("Journal détaillé : Obsidian → JARVIS/Journal. Les étapes sans connexion sont reportées et signalées dans le journal.", color = HudDim, fontSize = 11.sp)
+                Text("Historique des 5 derniers cycles", color = LocalAccent.current, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 12.sp)
+                val recentRuns = store.agentRunHistory.value.lines().filter { it.isNotBlank() }.takeLast(5).asReversed()
+                if (recentRuns.isEmpty()) Text("L'historique se remplira au prochain passage des agents.", color = HudDim, fontSize = 11.sp)
+                else recentRuns.forEach { Text("• $it", color = HudText, fontSize = 11.sp) }
+                Text("Journal détaillé : Obsidian → JARVIS/Journal. L'historique local ne conserve que les heures et statuts, pas le contenu des mails ou notifications.", color = HudDim, fontSize = 11.sp)
                 Text("Android impose au moins 15 min entre deux passages et peut les retarder en économie d'énergie : autorise « Batterie sans restriction ».", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
             }
         }
