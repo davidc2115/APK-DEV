@@ -453,7 +453,21 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 }
                 Spacer(Modifier.height(6.dp))
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    HudButton("Configurer", enabled = permOk && store.apiKeysSecureAvailable) { hMsg = h.configurer(app) }
+                    HudButton("Configurer", enabled = permOk && store.apiKeysSecureAvailable) {
+                        scope.launch {
+                            hMsg = "⏳ Préparation de la configuration Hermès…"
+                            try {
+                                val resultat = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    h.configurer(app)
+                                }
+                                hMsg = resultat
+                            } catch (e: Exception) {
+                                hMsg = "❌ Préparation Hermès interrompue : ${e.message ?: e.javaClass.simpleName}"
+                            } finally {
+                                hTick++
+                            }
+                        }
+                    }
                     HudButton("Démarrer", enabled = permOk && !enLigne) { hMsg = h.demarrer(app) }
                     HudButton("Arrêter", enabled = permOk && enLigne) { hMsg = h.arreter(app) }
                     HudButton("Actualiser") { hTick++ }
