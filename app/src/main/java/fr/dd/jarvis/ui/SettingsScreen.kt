@@ -71,6 +71,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
         "network" to "Réseau",
         "phone" to "Téléphone",
         "automation" to "Automatisation",
+        "control" to "Centre de contrôle",
         "files" to "Fichiers"
     )
 
@@ -179,38 +180,104 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
             )
         }
 
-        // ------------------------------------------------------------ Centre de contrôle des agents
+        }
+        if (settingsSection == "control") {
+        item { SectionHeader("Centre de contrôle JARVIS") }
         item {
             var agentTest by remember { mutableStateOf("") }
             var agentTesting by remember { mutableStateOf(false) }
-            HudPanel(Modifier.fillMaxWidth(), title = "Centre de contrôle des agents IA") {
-                Text("État de configuration des moteurs disponibles dans JARVIS. Une clé configurée ne signifie pas que le service est actuellement joignable ou que son quota est disponible : utilise les tests des fournisseurs pour le vérifier.", color = HudDim, fontSize = 11.sp)
-                Spacer(Modifier.height(6.dp))
-                AgentStatusRow("Hermès (orchestrateur Termux)", store.hermesInstalle.value && store.hermesMode.value != "off", when { store.hermesMode.value == "off" -> "mode désactivé"; store.hermesInstalle.value -> "installé · état réseau ci-dessous"; else -> "installation non confirmée · vérifier Termux" })
-                AgentStatusRow("Groq · " + store.groqModel.value, store.groqKeys.isNotEmpty(), store.groqKeys.size.toString() + " clé(s)")
-                AgentStatusRow("Gemini · " + store.geminiModel.value, store.geminiKeys.isNotEmpty(), store.geminiKeys.size.toString() + " clé(s)")
-                AgentStatusRow("Cloudflare Workers AI · images/texte", store.cfAccounts.isNotEmpty(), store.cfAccounts.size.toString() + " compte(s)")
-                AgentStatusRow("fal.ai · génération vidéo", store.falApiKey.value.isNotBlank(), if (store.falApiKey.value.isNotBlank()) "clé enregistrée" else "non configuré")
-                AgentStatusRow("Hugging Face · vidéo de secours", store.huggingFaceToken.value.isNotBlank(), if (store.huggingFaceToken.value.isNotBlank()) "jeton enregistré" else "non configuré")
-                val external = store.externalProvidersConfigured()
-                AgentStatusRow("Fournisseurs externes", external.isNotEmpty(), if (external.isEmpty()) "aucun" else external.joinToString(", "))
-                Text("Les clés ne sont jamais affichées ici. Le test ci-dessous vérifie réellement les fournisseurs configurés ; il ne peut toutefois pas garantir un quota disponible durablement.", color = HudDim, fontSize = 10.sp)
-                HudButton(if (agentTesting) "Test des agents en cours…" else "Tester les clés et connexions IA", Modifier.fillMaxWidth(), enabled = !agentTesting, filled = true) {
-                    scope.launch {
-                        agentTesting = true
-                        agentTest = runCatching { app.llm.testerClesApi("tous") }.getOrElse { "Test impossible : " + (it.message ?: it.javaClass.simpleName) }
-                        agentTesting = false
+            var runMsg by remember { mutableStateOf("") }
+            val lastRunLabel = remember(store.agentLastRunAt.value) {
+                store.agentLastRunAt.value.toLongOrNull()?.let { millis ->
+                    runCatching {
+                        java.time.Instant.ofEpochMilli(millis).atZone(java.time.ZoneId.systemDefault())
+                            .format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy à HH:mm"))
+                    }.getOrNull()
+                } ?: "Aucun cycle enregistré"
+            }
+            item {
+                HudPanel(Modifier.fillMaxWidth(), title = "Agents autonomes") {
+                    Text("Active ou suspends les tâches de fond de JARVIS. Chaque agent peut être piloté séparément ; les tâches périodiques respectent les limites d'Android et peuvent être retardées par HyperOS.", color = HudDim, fontSize = 12.sp)
+                    Spacer(Modifier.height(8.dp))
+                    HudChip(if (store.agentsOn.value) "✅ Tous les agents autonomes sont actifs" else "Agents autonomes suspendus", store.agentsOn.value) {
+                        store.agentsOn.set(!store.agentsOn.value)
+                        fr.dd.jarvis.work.AgentsScheduler.apply(ctx, store)
                     }
+                    Spacer(Modifier.height(8.dp))
+                    Text("Agents spécialisés", color = LocalAccent.current, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 13.sp)
+                    Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        HudChip("📧 Mails", store.agentMails.value) { store.agentMails.set(!store.agentMails.value) }
+                        HudChip("💶 Factures + maintenance", store.agentFactures.value) { store.agentFactures.set(!store.agentFactures.value) }
+                    }
+                    Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        HudChip("🚗 Planning", store.agentPlanning.value) { store.agentPlanning.set(!store.agentPlanning.value) }
+                        HudChip("🔔 Notifications", store.agentNotifs.value) { store.agentNotifs.set(!store.agentNotifs.value) }
+                    }
+                    Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        HudChip("🏷️ Ranger Gmail", store.agentRanger.value) { store.agentRanger.set(!store.agentRanger.value) }
+                        HudChip("📥 Archiver", store.agentArchiver.value) { store.agentArchiver.set(!store.agentArchiver.value) }
+                    }
+                    Text("Fréquence des tâches", color = HudDim, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+                    Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        listOf(15, 30, 60).forEach { minutes ->
+                            HudChip("Toutes les $minutes min", store.agentMinutes.value == minutes) {
+                                store.agentMinutes.set(minutes)
+                                if (store.agentsOn.value) fr.dd.jarvis.work.AgentsScheduler.apply(ctx, store)
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    HudButton("Lancer un cycle maintenant", Modifier.fillMaxWidth(), enabled = store.agentsOn.value, filled = true) {
+                        fr.dd.jarvis.work.AgentsScheduler.runNow(ctx)
+                        runMsg = "Cycle demandé. Le résultat apparaîtra après l'exécution."
+                    }
+                    if (!store.agentsOn.value) Text("Active les agents autonomes pour pouvoir lancer un cycle.", color = HudDim, fontSize = 11.sp)
+                    if (runMsg.isNotBlank()) Text(runMsg, color = HudText, fontSize = 11.sp)
+                    HudDivider()
+                    Text("Dernière exécution", color = LocalAccent.current, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 13.sp)
+                    AgentStatusRow("Dernier cycle", store.agentLastRunAt.value.isNotBlank(), lastRunLabel)
+                    AgentStatusRow("Résultat", store.agentLastRunStatus.value == "Cycle terminé sans erreur", store.agentLastRunStatus.value)
+                    Text("Journal détaillé : Obsidian → JARVIS/Journal. Les étapes sans connexion sont reportées et signalées dans le journal.", color = HudDim, fontSize = 11.sp)
                 }
-                if (agentTest.isNotBlank()) Text(agentTest, color = HudText, fontSize = 11.sp)
-
+            }
+            item {
+                HudPanel(Modifier.fillMaxWidth(), title = "État des moteurs IA") {
+                    Text("État de configuration des moteurs disponibles. Une clé enregistrée ne garantit ni la disponibilité du service ni un quota restant.", color = HudDim, fontSize = 11.sp)
+                    Spacer(Modifier.height(6.dp))
+                    AgentStatusRow("Hermès · orchestrateur Termux", store.hermesInstalle.value && store.hermesMode.value != "off", when {
+                        store.hermesMode.value == "off" -> "mode désactivé"
+                        store.hermesInstalle.value -> "installé · contrôle réseau dans Réglages > Hermès"
+                        else -> "installation non confirmée"
+                    })
+                    AgentStatusRow("Groq · " + store.groqModel.value, store.groqKeys.isNotEmpty(), "${store.groqKeys.size} clé(s)")
+                    AgentStatusRow("Gemini · " + store.geminiModel.value, store.geminiKeys.isNotEmpty(), "${store.geminiKeys.size} clé(s)")
+                    AgentStatusRow("Cloudflare Workers AI", store.cfAccounts.isNotEmpty(), "${store.cfAccounts.size} compte(s)")
+                    AgentStatusRow("fal.ai · vidéo", store.falApiKey.value.isNotBlank(), if (store.falApiKey.value.isNotBlank()) "clé configurée" else "non configuré")
+                    AgentStatusRow("Hugging Face", store.huggingFaceToken.value.isNotBlank(), if (store.huggingFaceToken.value.isNotBlank()) "jeton configuré" else "non configuré")
+                    val external = store.externalProvidersConfigured()
+                    AgentStatusRow("Autres fournisseurs", external.isNotEmpty(), external.ifEmpty { listOf("aucun configuré") }.joinToString(", "))
+                    Text("Les secrets ne sont jamais affichés dans ce centre.", color = HudDim, fontSize = 10.sp)
+                    HudButton(if (agentTesting) "Test en cours…" else "Tester les clés et connexions IA", Modifier.fillMaxWidth(), enabled = !agentTesting, filled = true) {
+                        scope.launch {
+                            agentTesting = true
+                            agentTest = runCatching { app.llm.testerClesApi("tous") }
+                                .getOrElse { "Test impossible : ${it.message ?: it.javaClass.simpleName}" }
+                            agentTesting = false
+                        }
+                    }
+                    if (agentTest.isNotBlank()) Text(agentTest, color = HudText, fontSize = 11.sp)
+                }
+            }
+            item {
+                HudPanel(Modifier.fillMaxWidth(), title = "Surveillance du téléphone") {
+                    Text("Batterie, stockage, mémoire vive, température, état Shizuku et accès Android utiles au fonctionnement autonome.", color = HudDim, fontSize = 11.sp)
+                    Spacer(Modifier.height(6.dp))
+                    SystemHealthPanel(app, tick) { tick++ }
+                }
             }
         }
-
-        // ------------------------------------------------------------ Diagnostic du téléphone
-        item { SystemHealthPanel(app, tick) { tick++ } }
-
         }
+
         if (settingsSection == "hermes") {
         // ------------------------------------------------------------ Hermès (Termux)
         item {
@@ -993,38 +1060,6 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 Spacer(Modifier.height(6.dp))
                 HudChip(if (store.muteBeeps.value) "🔇 Bips coupés pendant l'écoute" else "Bips actifs", store.muteBeeps.value) { store.muteBeeps.set(!store.muteBeeps.value) }
                 Spacer(Modifier.height(10.dp))
-                HudDivider()
-                Spacer(Modifier.height(8.dp))
-                Text("Agents autonomes (travaillent seuls, alertes + journal Obsidian « JARVIS/Journal »)", color = LocalAccent.current, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 13.sp)
-                Text("⚠️ Système séparé des réglages SMS/mail ci-dessus : même bannière et annonces vocales coupées, ces agents envoient LEURS PROPRES notifications (ex. « 🔔 Notifications importantes ») en tournant tout seuls en arrière-plan. Pour tout couper : désactive « Agents actifs » ci-dessous, ou juste la catégorie concernée.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp, bottom = 4.dp))
-                Spacer(Modifier.height(6.dp))
-                HudChip(if (store.agentsOn.value) "✅ Agents actifs" else "Agents désactivés", store.agentsOn.value) {
-                    store.agentsOn.set(!store.agentsOn.value); fr.dd.jarvis.work.AgentsScheduler.apply(ctx, store)
-                }
-                Spacer(Modifier.height(6.dp))
-                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    HudChip("📧 Mails", store.agentMails.value) { store.agentMails.set(!store.agentMails.value) }
-                    HudChip("💶 Factures + maintenance", store.agentFactures.value) { store.agentFactures.set(!store.agentFactures.value) }
-                    HudChip("🚗 Départs RDV", store.agentPlanning.value) { store.agentPlanning.set(!store.agentPlanning.value) }
-                    HudChip("🔔 Notifications", store.agentNotifs.value) { store.agentNotifs.set(!store.agentNotifs.value) }
-                }
-                Spacer(Modifier.height(6.dp))
-                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    HudChip("🏷️ Ranger les mails dans Gmail", store.agentRanger.value) { store.agentRanger.set(!store.agentRanger.value) }
-                    HudChip("📥 Archiver pubs/notifs", store.agentArchiver.value) { store.agentArchiver.set(!store.agentArchiver.value) }
-                }
-                Text("(La bannière Android pour chaque SMS/mail se règle dans « Annonces vocales » ci-dessus, pas ici.)", color = HudDim, fontSize = 10.sp)
-                Spacer(Modifier.height(6.dp))
-                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Toutes les", color = HudDim, fontSize = 12.sp)
-                    listOf(15, 30, 60).forEach { m ->
-                        HudChip("$m min", store.agentMinutes.value == m) { store.agentMinutes.set(m); if (store.agentsOn.value) fr.dd.jarvis.work.AgentsScheduler.apply(ctx, store) }
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-                HudButton("Lancer les agents maintenant") { fr.dd.jarvis.work.AgentsScheduler.runNow(ctx); runMsg = "Agents lancés : alertes et journal dans quelques instants." }
-                if (runMsg.isNotBlank()) Text(runMsg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
-                Text("Android impose au moins 15 min entre deux passages et peut les retarder en économie d'énergie : autorise « Batterie sans restriction ».", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
             }
         }
 
