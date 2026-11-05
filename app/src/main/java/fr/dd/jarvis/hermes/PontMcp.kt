@@ -113,10 +113,12 @@ object PontMcp {
         }
     }
 
-    @Synchronized fun demarrer(a: JarvisApp) {
+    @Synchronized fun demarrer(a: JarvisApp): Boolean {
         if (a.store.mcpJeton.value.isBlank()) a.store.mcpJeton.set(UUID.randomUUID().toString().replace("-", ""))
         if (fournisseur !is FournisseurJarvis) fournisseur = FournisseurJarvis(a)
-        ecouter(PORT)
+        val ok = ecouter(PORT)
+        if (!ok) Log.e(TAG, "Impossible de démarrer le serveur de progression/MCP sur 127.0.0.1:$PORT")
+        return ok && actif()
     }
 
     /** Démarre l'écoute avec un fournisseur donné (tests hors Android). */
