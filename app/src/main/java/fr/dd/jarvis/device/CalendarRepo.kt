@@ -131,6 +131,25 @@ class CalendarRepo(private val ctx: Context, private val store: Store) {
         return out
     }
 
+    /** Lecture ciblée d’un événement, notamment pour préserver sa description lors d’une modification par Hermès. */
+    fun event(eventId: Long): EventInfo? {
+        if (!hasPermission()) return null
+        val projection = arrayOf(
+            CalendarContract.Events._ID, CalendarContract.Events.CALENDAR_ID, CalendarContract.Events.TITLE,
+            CalendarContract.Events.DTSTART, CalendarContract.Events.DTEND, CalendarContract.Events.ALL_DAY,
+            CalendarContract.Events.EVENT_LOCATION, CalendarContract.Events.DESCRIPTION, CalendarContract.Events.EVENT_COLOR
+        )
+        return ctx.contentResolver.query(
+            ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventId), projection, null, null, null
+        )?.use { c ->
+            if (!c.moveToFirst()) null else EventInfo(
+                id = c.getLong(0), calId = c.getLong(1), title = c.getString(2) ?: "(sans titre)",
+                begin = c.getLong(3), end = c.getLong(4), allDay = c.getInt(5) == 1,
+                location = c.getString(6) ?: "", description = c.getString(7) ?: "",
+                eventColor = if (c.isNull(8)) null else c.getInt(8)
+            )
+        }
+    }
     fun create(
         calId: Long, title: String, start: LocalDateTime, end: LocalDateTime,
         location: String = "", description: String = ""
