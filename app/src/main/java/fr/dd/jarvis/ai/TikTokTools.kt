@@ -159,7 +159,7 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
                 val d = Montage.Demande(
                     sujet = sujet.ifBlank { script.take(80) }, script = script,
                     dureeS = a.optString("duree").filter { it.isDigit() }.toIntOrNull() ?: 30,
-                    format = a.optString("format").ifBlank { "vertical" },
+                    format = if (name == "tiktok_video") "vertical" else a.optString("format").ifBlank { "vertical" },
                     nombre = a.optString("nombre").filter { it.isDigit() }.toIntOrNull() ?: 1,
                     musique = a.optString("musique").ifBlank { "auto" },
                     paroles = a.optString("paroles").trim(),
