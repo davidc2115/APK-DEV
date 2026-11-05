@@ -64,7 +64,9 @@ class ToolBox(
                 "end" to prop("Fin, yyyy-MM-dd'T'HH:mm. Par défaut début + 1 h."),
                 "calendar" to prop("Nom de l'agenda (optionnel)."),
                 "location" to prop("Lieu (optionnel)."),
-                "description" to prop("Notes (optionnel).")
+                "description" to prop("Notes (optionnel)."),
+                "client" to prop("Nom exact ou distinctif d’une fiche client Société : ajoute automatiquement son adresse et ses coordonnées GPS si elles sont enregistrées."),
+                "installation" to prop("Nom de l’installation du client si plusieurs ; optionnel.")
             ), listOf("title", "start")))
         put(tool("update_event", "Modifie un rendez-vous existant (identifiant visible dans le planning : #id).",
             mapOf(
