@@ -26,10 +26,20 @@ class SocieteRepo(ctx: Context) {
 
     @Synchronized
     fun update(f: (SocieteData) -> SocieteData) {
-        data = f(data)
+        val nouvelle = f(data)
         val tmp = File(dir, "data.json.tmp")
-        tmp.writeText(jsonSociete.encodeToString(SocieteData.serializer(), data))
+        val contenu = jsonSociete.encodeToString(SocieteData.serializer(), nouvelle)
+        tmp.writeText(contenu)
+        if (!tmp.exists() || tmp.length() == 0L) throw java.io.IOException("Écriture de la base Société impossible.")
         if (file.exists()) runCatching { file.copyTo(File(dir, "data.json.bak"), overwrite = true) }
-        tmp.renameTo(file)
+        // Ne publie le nouvel état observable qu'après avoir garanti sa persistance sur disque.
+        if (!tmp.renameTo(file)) {
+            tmp.copyTo(file, overwrite = true)
+            tmp.delete()
+        }
+        val relu = jsonSociete.decodeFromString(SocieteData.serializer(), file.readText())
+        if (jsonSociete.encodeToString(SocieteData.serializer(), relu) != contenu)
+            throw java.io.IOException("La base Société n'a pas été enregistrée intégralement.")
+        data = relu
     }
 }
