@@ -262,15 +262,15 @@ object Montage {
 
     private suspend fun storyboard(app: JarvisApp, d: Demande, nbPlans: Int, k: Int, n: Int): Storyboard {
         val user = buildString {
-            append("Sujet : ${d.sujet.ifBlank { "(voir script)" }}\\n")
-            if (d.script.isNotBlank()) append("Script fourni (prioritaire) :\\n${d.script}\\n")
-            append("Durée totale : ${d.dureeS} secondes\\nNombre de plans : $nbPlans\\n")
-            append("Format : ${if (d.tiktok) "TikTok vertical 9:16" else d.format}\\n")
-            if (d.paroles.isNotBlank() && d.paroles.lowercase() != "auto") append("Paroles imposées par l'utilisateur :\\n${d.paroles}\\n")
-            else if (d.paroles.lowercase() == "auto") append("L'utilisateur veut une CHANSON avec paroles chantées : écris les paroles.\\n")
-            if (d.musique.isNotBlank() && d.musique.lowercase() !in setOf("auto", "aucune")) append("Musique souhaitée : ${d.musique}\\n")
-            if (d.voixOff.isNotBlank() && d.voixOff.lowercase() !in setOf("auto", "aucune", "oui", "non")) append("Voix off imposée : ${d.voixOff}\\n")
-            if (n > 1) append("C'est la variante $k sur $n : choisis un angle, une accroche et des visuels DIFFÉRENTS des autres variantes.\\n")
+            append("Sujet : ${d.sujet.ifBlank { "(voir script)" }}\n")
+            if (d.script.isNotBlank()) append("Script fourni (prioritaire) :\n${d.script}\n")
+            append("Durée totale : ${d.dureeS} secondes\nNombre de plans : $nbPlans\n")
+            append("Format : ${if (d.tiktok) "TikTok vertical 9:16" else d.format}\n")
+            if (d.paroles.isNotBlank() && d.paroles.lowercase() != "auto") append("Paroles imposées par l'utilisateur :\n${d.paroles}\n")
+            else if (d.paroles.lowercase() == "auto") append("L'utilisateur veut une CHANSON avec paroles chantées : écris les paroles.\n")
+            if (d.musique.isNotBlank() && d.musique.lowercase() !in setOf("auto", "aucune")) append("Musique souhaitée : ${d.musique}\n")
+            if (d.voixOff.isNotBlank() && d.voixOff.lowercase() !in setOf("auto", "aucune", "oui", "non")) append("Voix off imposée : ${d.voixOff}\n")
+            if (n > 1) append("C'est la variante $k sur $n : choisis un angle, une accroche et des visuels DIFFÉRENTS des autres variantes.\n")
         }
 
         // Passe 1 : comprendre le brief, les contraintes, le public et l'intention avant de rédiger les prompts.
@@ -285,13 +285,13 @@ object Montage {
             }.plus(listOf("contraintes", "hypotheses").flatMap { key ->
                 val a = j.optJSONArray(key) ?: return@flatMap emptyList()
                 (0 until a.length()).map { index -> "$key : ${a.optString(index)}" }
-            }).joinToString("\\n")
+            }).joinToString("\n")
         }.orEmpty().ifBlank { analyseBrute.take(5000) }
 
         // Passe 2 : transformer l'analyse et le brief original en storyboard + prompts par plan.
         val contexte = buildString {
             append(user)
-            if (analyse.isNotBlank()) append("\\nANALYSE PRÉALABLE À RESPECTER :\\n$analyse\\n")
+            if (analyse.isNotBlank()) append("\nANALYSE PRÉALABLE À RESPECTER :\n$analyse\n")
         }
         val brut = runCatching { app.llm.agent(Prompts.MONTAGE, contexte) }.getOrDefault("")
         val j = runCatching { JSONObject(brut.substring(brut.indexOf('{'), brut.lastIndexOf('}') + 1)) }.getOrNull()
