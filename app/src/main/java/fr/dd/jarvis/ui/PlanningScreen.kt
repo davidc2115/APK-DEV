@@ -371,7 +371,7 @@ fun PlanningScreen(app: JarvisApp) {
                     if (e.location.isNotBlank()) {
                         Text("📍 ${e.location}", color = LocalAccent.current, fontSize = 13.sp)
                     }
-                    val gps = Regex("""GPS\\s*:\\s*(-?\\d+(?:\\.\\d+)?),\\s*(-?\\d+(?:\\.\\d+)?)""").find(e.description)
+                    val gps = Regex("""GPS\s*:\s*(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)""").find(e.description)
                     if (gps != null) {
                         val lat = gps.groupValues[1]
                         val lon = gps.groupValues[2]
