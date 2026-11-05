@@ -93,7 +93,7 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
         val steps = listOf<Pair<String, suspend () -> Unit>>(
             "Mails" to {
                 if (tri || (store.agentMails.value && (only == null || only == "mails"))) {
-                    if (enLigne) mails() else journal.append("- ⏸️ Mails : reportés, connexion Internet indisponible.\\n")
+                    if (enLigne) mails() else journal.append("- ⏸️ Mails : reportés, connexion Internet indisponible.\n")
                 }
             },
             "Factures" to { if (store.agentFactures.value && only == null) factures() },
@@ -101,7 +101,7 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
             "Tâches personnelles" to { if (store.agentPlanning.value && only == null) taches() },
             "Notifications" to {
                 if (store.agentNotifs.value && (only == null || only == "notifs")) {
-                    if (enLigne) notifs() else journal.append("- ⏸️ Analyse des notifications : reportée, connexion Internet indisponible.\\n")
+                    if (enLigne) notifs() else journal.append("- ⏸️ Analyse des notifications : reportée, connexion Internet indisponible.\n")
                 }
             },
             "Surveillance téléphone" to { if (store.agentNotifs.value && only == null) surveillanceTelephone() }
