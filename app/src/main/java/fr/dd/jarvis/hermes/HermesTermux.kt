@@ -243,13 +243,13 @@ p() { echo "${'$'}*"; command -v curl >/dev/null 2>&1 && curl -s -m 4 -X POST -H
             appendLine("  api_server:")
             appendLine("    enabled: true")
             appendLine("    port: $PORT_API")
-            // Outils de Jarvis exposés directement au modèle (sinon Hermès les cache derrière tool_search / tool_call).
+            // Découverte progressive : les schémas MCP complets restent différés derrière tool_search / tool_describe / tool_call.
             appendLine("tools:")
             appendLine("  tool_search:")
             appendLine("    enabled: \"on\"")
             appendLine("    search_default_limit: 8")
             appendLine("    max_search_limit: 20")
-            appendLine("    listing: off")
+            appendLine("    listing: \"off\"")
             appendLine("    listing_max_tokens: 2000")
         }
         return """
