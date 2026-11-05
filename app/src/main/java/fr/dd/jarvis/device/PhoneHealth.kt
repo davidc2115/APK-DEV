@@ -191,14 +191,32 @@ object PhoneHealth {
             }
             // Ne pas déplacer la référence lors des passages intermédiaires du worker (ex. toutes les 15 min).
             if (due) {
+                val history = prefs.getString("samples", "").orEmpty().split(';')
+                    .filter { it.count { ch -> ch == ',' } == 2 }.toMutableList()
+                history += "$"+"{now},$"+"{battery ?: -1},$"+"{freeNow}"
                 prefs.edit()
                     .putLong("sample_at", now)
                     .putInt("battery", battery ?: -1)
                     .putLong("free_bytes", freeNow)
+                    .putString("samples", history.takeLast(48).joinToString(";"))
                     .apply()
             }
         }
         return alerts.distinct()
     }
+
+    /** Historique local des mesures réellement relevées (jusqu'à 48 points). */
+    fun history(app: JarvisApp): List<Sample> {
+        val raw = app.applicationContext.getSharedPreferences("phone_health_history", Context.MODE_PRIVATE)
+            .getString("samples", "").orEmpty()
+        return raw.split(';').mapNotNull { row ->
+            val p = row.split(',')
+            if (p.size != 3) null else runCatching {
+                Sample(p[0].toLong(), p[1].toInt().takeIf { it in 0..100 }, p[2].toLong())
+            }.getOrNull()
+        }
+    }
+
+    data class Sample(val at: Long, val battery: Int?, val freeBytes: Long)
 
 }
