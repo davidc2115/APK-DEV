@@ -671,14 +671,22 @@ os.replace(name, p)
     fun gererExtension(app: JarvisApp, actionRaw: String, nameRaw: String = ""): String {
         val action = actionRaw.trim().lowercase()
         val name = nameRaw.trim()
-        val allowed = setOf("plugin_catalogue", "plugin_liste", "plugin_installer", "plugin_activer",
+        val allowed = setOf("skill_catalogue", "skill_rechercher", "skill_liste", "skill_inspecter", "skill_installer",
+            "skill_verifier", "skill_mettre_a_jour", "plugin_catalogue", "plugin_liste", "plugin_installer", "plugin_activer",
             "mcp_catalogue", "mcp_liste", "mcp_installer")
         if (action !in allowed) return "Action d'extension inconnue."
-        if (action.endsWith("_installer") || action.endsWith("_activer")) {
+        if (action.endsWith("_installer") || action.endsWith("_activer") || action == "skill_inspecter") {
             if (!Regex("[a-zA-Z0-9][a-zA-Z0-9._/-]{0,100}").matches(name) || name.contains(".."))
                 return "Nom d'extension invalide."
         }
         val args = when (action) {
+            "skill_catalogue" -> listOf("skills", "browse")
+            "skill_rechercher" -> listOf("skills", "search", name)
+            "skill_liste" -> listOf("skills", "list")
+            "skill_inspecter" -> listOf("skills", "inspect", name)
+            "skill_installer" -> listOf("skills", "install", name, "--yes")
+            "skill_verifier" -> listOf("skills", "check")
+            "skill_mettre_a_jour" -> listOf("skills", "update")
             "plugin_catalogue" -> listOf("plugins", "catalog")
             "plugin_liste" -> listOf("plugins", "list")
             "plugin_installer" -> listOf("plugins", "install", name)
