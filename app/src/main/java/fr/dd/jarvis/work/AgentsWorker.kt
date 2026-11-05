@@ -113,8 +113,13 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
                 journal.append("- ⚠️ $nom : ${e.message?.take(120)}\n")
             }
         }
-        store.agentLastRunAt.set(System.currentTimeMillis().toString())
-        store.agentLastRunStatus.set(if (failures == 0) "Cycle terminé sans erreur" else "Cycle partiel : $failures étape(s) en erreur")
+        val finishedAt = System.currentTimeMillis()
+        val status = if (failures == 0) "Cycle terminé sans erreur" else "Cycle partiel : $failures étape(s) en erreur"
+        store.agentLastRunAt.set(finishedAt.toString())
+        store.agentLastRunStatus.set(status)
+        val historyLine = "${java.time.LocalDateTime.ofInstant(Instant.ofEpochMilli(finishedAt), ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"))} · $status"
+        val history = (store.agentRunHistory.value.lines().filter { it.isNotBlank() } + historyLine).takeLast(20)
+        store.agentRunHistory.set(history.joinToString("\n"))
         if (journal.isNotBlank()) {
             runCatching {
                 val now = java.time.LocalDateTime.now()
