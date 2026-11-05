@@ -1434,14 +1434,18 @@ class ToolBox(
             val gpsUrl = position?.point?.let { point ->
                 "https://www.openstreetmap.org/?mlat=${point.lat}&mlon=${point.lon}#map=18/${point.lat}/${point.lon}"
             }.orEmpty()
+            // Google Agenda linkifie plus fiablement les URL HTTPS seules sur leur propre ligne.
+            // On conserve les libellés et les coordonnées en texte, sans URI geo: ni lien Google Maps.
             description = listOf(
                 description,
                 "Client : ${client.nom}",
                 site?.nom?.takeIf { it.isNotBlank() }?.let { "Installation : $it" },
                 "Adresse : $location",
-                "Voir l’adresse (OpenStreetMap) : $addressUrl",
+                "Carte de l’adresse (OpenStreetMap) :",
+                addressUrl,
                 gps.takeIf { it.isNotBlank() }?.let { "Coordonnées GPS : $it" },
-                gpsUrl.takeIf { it.isNotBlank() }?.let { "Ouvrir le point GPS (OpenStreetMap) : $it" }
+                gpsUrl.takeIf { it.isNotBlank() }?.let { "Point GPS (OpenStreetMap) :" },
+                gpsUrl.takeIf { it.isNotBlank() }
             ).filterNotNull().filter { it.isNotBlank() }.joinToString("\n")
         }
         val id = app.calendar.create(cal.id, title, start, end, location, description)
