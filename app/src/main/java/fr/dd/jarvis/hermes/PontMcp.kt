@@ -294,6 +294,23 @@ object PontMcp {
                 .put("requete", JSONObject().put("type", "string").put("description", "Nom ou mots-clés du domaine recherché"))
                 .put("limite", JSONObject().put("type", "integer").put("description", "Nombre maximal de résultats (1 à 20)")))
                 .put("required", JSONArray().put("requete"))))
+        // Alias canoniques toujours exposés : pas de dépendance à tool_search pour ces opérations métier.
+        out.put(JSONObject()
+            .put("name", "interventions_liste")
+            .put("description", "Consulte l’historique des interventions dans la base Société Jarvis. Obligatoire avant toute suppression ; renvoie les ID exacts.")
+            .put("inputSchema", JSONObject().put("type", "object").put("properties", JSONObject()
+                .put("client", JSONObject().put("type", "string").put("description", "Nom du client"))
+                .put("installation", JSONObject().put("type", "string").put("description", "Installation exacte, facultative ; vide pour toutes")))
+                .put("required", JSONArray().put("client"))))
+        out.put(JSONObject()
+            .put("name", "intervention_supprimer")
+            .put("description", "Supprime une intervention précise de la base Société après confirmation explicite. Requiert l’ID exact obtenu avec interventions_liste.")
+            .put("inputSchema", JSONObject().put("type", "object").put("properties", JSONObject()
+                .put("client", JSONObject().put("type", "string").put("description", "Nom du client"))
+                .put("installation", JSONObject().put("type", "string").put("description", "Nom exact de l’installation"))
+                .put("intervention_id", JSONObject().put("type", "string").put("description", "ID exact de l’intervention"))
+                .put("confirmation", JSONObject().put("type", "string").put("description", "Doit être oui après confirmation explicite")))
+                .put("required", JSONArray().put("client").put("installation").put("intervention_id").put("confirmation"))))
         out.put(JSONObject()
             .put("name", "jarvis_interventions_lister")
             .put("description", "Consulte directement l'historique des interventions d'un client dans la base Société de Jarvis. Toujours exposé, sans recherche préalable.")
@@ -317,11 +334,15 @@ object PontMcp {
                 .put("nom_outil", JSONObject().put("type", "string").put("description", "Nom exact de l'outil découvert"))
                 .put("arguments", JSONObject().put("type", "object").put("description", "Arguments de l'outil cible")))
                 .put("required", JSONArray().put("nom_outil"))))
+        val nomsDejaExpose = mutableSetOf<String>()
+        for (i in 0 until out.length()) nomsDejaExpose += out.optJSONObject(i)?.optString("name").orEmpty()
         for (f in fonctions.take(maxOutilsExpose)) {
             val nom = f.optString("name")
+            if (nom in nomsDejaExpose) continue
             val schema = f.optJSONObject("parameters") ?: JSONObject().put("type", "object").put("properties", JSONObject())
             if (!schema.has("type")) schema.put("type", "object")
             out.put(JSONObject().put("name", nom).put("description", f.optString("description")).put("inputSchema", schema))
+            nomsDejaExpose += nom
         }
         return out
     }
