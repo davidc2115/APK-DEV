@@ -140,7 +140,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
      */
     fun supprimerPiecesIntervention(date: String, interventionId: String): Pair<List<String>, List<String>> {
         val base = safe("$date $interventionId", "Fiche")
-        val tous = toutLister(20_000).filter { !it.second }
+        val tous = toutLister(20_000).filter { !it.second }.map { it.first }
         fun sousInterventions(path: String): Boolean =
             path.split('/').dropLast(1).any { normaliseNom(it) == normaliseNom("Interventions") }
         val cibles = tous.filter { path ->
