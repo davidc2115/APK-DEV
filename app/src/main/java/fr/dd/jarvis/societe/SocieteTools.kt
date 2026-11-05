@@ -534,12 +534,13 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
     }
 
     private fun siteDe(c: Client, ref: String): Site? {
-        if (ref.isNotBlank()) {
-            val n = normaliser(ref)
-            c.sites.firstOrNull { normaliser(it.nom) == n || normaliser(it.adresse) == n }?.let { return it }
-            c.sites.firstOrNull { normaliser(it.nom).contains(n) || normaliser(it.adresse).contains(n) }?.let { return it }
-        }
-        return if (c.sites.size == 1) c.sites.first() else null
+        if (ref.isBlank()) return c.sites.singleOrNull()
+        val n = normaliser(ref)
+        val exact = c.sites.filter { normaliser(it.nom) == n || normaliser(it.adresse) == n }
+        if (exact.size == 1) return exact.first()
+        if (exact.size > 1) return null
+        val partiels = c.sites.filter { normaliser(it.nom).contains(n) || normaliser(it.adresse).contains(n) }
+        return partiels.singleOrNull()
     }
 
     private suspend fun clientFiche(a: JSONObject): ToolResult {
