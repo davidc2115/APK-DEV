@@ -369,7 +369,14 @@ fun PlanningScreen(app: JarvisApp) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("🕗 " + eventDay(e).format(dayTitleFmt) + " · " + timeLabel(e), fontSize = 13.sp)
                     if (e.location.isNotBlank()) {
-                        Text("📍 ${e.location}", color = LocalAccent.current, fontSize = 13.sp)
+                        Text(
+                            "📍 ${e.location} · Ouvrir l’adresse",
+                            color = LocalAccent.current, fontSize = 13.sp,
+                            modifier = Modifier.clickable {
+                                val uri = Uri.parse("geo:0,0?q=" + java.net.URLEncoder.encode(e.location, "UTF-8"))
+                                runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
+                            }
+                        )
                     }
                     val gps = Regex("""GPS\s*:\s*(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)""").find(e.description)
                     if (gps != null) {
@@ -383,6 +390,18 @@ fun PlanningScreen(app: JarvisApp) {
                             }
                         )
                     }
+                    val osmAddress = Regex("""Voir l’adresse \\(OpenStreetMap\\) : (https://\\S+)""").find(e.description)?.groupValues?.getOrNull(1)
+                    if (!osmAddress.isNullOrBlank()) Text(
+                        "🌍 Voir l’adresse sur OpenStreetMap",
+                        color = LocalAccent.current, fontSize = 12.sp,
+                        modifier = Modifier.clickable { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(osmAddress))) } }
+                    )
+                    val osmGps = Regex("""Ouvrir le point GPS \\(OpenStreetMap\\) : (https://\\S+)""").find(e.description)?.groupValues?.getOrNull(1)
+                    if (!osmGps.isNullOrBlank()) Text(
+                        "🎯 Ouvrir le point GPS sur OpenStreetMap",
+                        color = LocalAccent.current, fontSize = 12.sp,
+                        modifier = Modifier.clickable { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(osmGps))) } }
+                    )
                     if (e.description.isNotBlank()) Text(e.description.take(600), color = HudDim, fontSize = 12.sp)
                     HudButton("✎ Modifier le rendez-vous") { editing = e; selected = null }
                     Text("Couleur du rendez-vous", color = HudDim, fontSize = 12.sp)
