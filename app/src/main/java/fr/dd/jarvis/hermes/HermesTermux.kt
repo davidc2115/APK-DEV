@@ -179,9 +179,28 @@ object HermesTermux {
     internal fun scriptPrelude(jeton: String, port: Int = PontMcp.PORT) = """
 J_URL=${q("http://127.0.0.1:$port/progres")}; J_TOK=${q(jeton)}
 p() {
-  echo "${'
+  local message="${'$'}*"
+  echo "${'$'}message"
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "JARVIS_PROGRESS_ERROR: curl absent" >&2
+    return 127
+  fi
+  local response code
+  if response=$(curl -fsS --connect-timeout 3 -m 8 -X POST \
+    -H "Authorization: Bearer ${'$'}J_TOK" \
+    --data-binary "${'$'}message" "${'$'}J_URL"); then
+    :
+  else
+    code=${'$'}?
+    echo "JARVIS_PROGRESS_ERROR: échec HTTP/curl (${'$'}code)" >&2
+    return "${'$'}code"
+  fi
+  if [ "${'$'}response" != '{"accepted":true}' ]; then
+    echo "JARVIS_PROGRESS_ERROR: accusé de réception invalide: ${'$'}response" >&2
+    return 1
+  fi
+}
 """.trimIndent()
-
     private fun scriptSignal(app: JarvisApp, texte: String) = prelude(app) + "\np ${q(texte)}\n"
 
     // ------------------------------------------------------------------ 3-5. Installation, configuration, démarrage
