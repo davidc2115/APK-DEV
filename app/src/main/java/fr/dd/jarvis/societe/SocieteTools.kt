@@ -559,6 +559,10 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             ?: return err(if (client.sites.isEmpty()) "Aucune installation n'est enregistrée. Enregistre d'abord le site avec client_ecrire." else "Plusieurs installations existent pour " + client.nom + " : " + client.sites.joinToString { it.nom } + ". Précise installation.")
         val description = a.s("description")
         if (description.isBlank()) return err("La description de l'intervention est obligatoire.")
+        // Barrière anti-fausse fiche : Hermes ne doit jamais enregistrer un simple « test » pour simuler une suppression.
+        if (description.trim().equals("test", true) || description.trim().matches(Regex("(?i)(test|essai) (de )?(suppression|intervention)"))) {
+            return err("Création refusée : une intervention de test ne peut pas être ajoutée à l'historique. Pour supprimer une fiche existante, utilise interventions_liste puis intervention_supprimer avec son ID exact.")
+        }
         val date = a.s("date").ifBlank { LocalDate.now().toString() }
         if (runCatching { LocalDate.parse(date) }.isFailure) return err("Date invalide : utilise yyyy-MM-dd.")
         val prochaine = a.s("prochaine_maintenance")
