@@ -145,9 +145,13 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             path.split('/').dropLast(1).any { normaliseNom(it) == normaliseNom("Interventions") }
         val cibles = tous.filter { path ->
             val nom = path.substringAfterLast('/')
-            val rapport = nom.equals("$base.md", true) || nom.equals("$base.pdf", true)
+            val extension = nom.substringAfterLast('.', "").lowercase()
+            val rapportExact = nom.equals("$base.md", true) || nom.equals("$base.pdf", true)
+            // Un rapport peut avoir conservé une ancienne date après modification de l'intervention.
+            // L'ID stable permet de retrouver aussi ces anciennes versions sans toucher aux autres dossiers.
+            val rapportParId = sousInterventions(path) && nom.contains(interventionId, true) && extension in setOf("md", "pdf")
             val photo = sousInterventions(path) && nom.startsWith("$interventionId-", true)
-            rapport || photo
+            rapportExact || rapportParId || photo
         }.distinct()
         val supprimes = mutableListOf<String>()
         val echecs = mutableListOf<String>()
