@@ -5,7 +5,6 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.app.PendingIntent
-import android.app.PendingIntent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -442,24 +441,6 @@ p "✅ Hermès installé (${'$'}{MODE})."
         if (!termuxInstalle(app) || !permissionOk(app)) return "ℹ️ Termux et son autorisation sont nécessaires pour configurer Hermès."
         return synchroniserCles(app)
     }
-
-
-    /** Résultat natif RUN_COMMAND de Termux : distingue un refus du service d'un échec du script. */
-    internal fun recevoirRetourTermux(exitCode: Int, erreurInterne: Int, messageErreur: String, stderr: String) {
-        if (erreurInterne != -1) {
-            message = "❌ Termux a refusé ou interrompu la commande (erreur interne $erreurInterne) : " +
-                messageErreur.ifBlank { "aucun détail fourni par Termux" } +
-                ". Vérifie allow-external-apps et la permission RUN_COMMAND."
-        } else if (exitCode != 0) {
-            val detail = stderr.lineSequence().map { it.trim() }.firstOrNull { it.isNotBlank() }?.take(180).orEmpty()
-            message = "❌ Le script a démarré dans Termux mais s'est arrêté (code $exitCode)." +
-                if (detail.isNotBlank()) " Détail : $detail" else " Consulte les journaux Hermès dans ~/.hermes/logs."
-        } else if (PontMcp.dernierSignal <= dernierSignalAvantCommande) {
-            message = "⚠️ Termux confirme l'exécution (code 0), mais Jarvis n'a reçu aucun POST de progression sur le port ${PontMcp.PORT}. Le service Termux fonctionne ; le pont HTTP doit être vérifié."
-        }
-    }
-
-    @Volatile private var dernierSignalAvantCommande: Long = 0L
 
 
     /** Résultat natif RUN_COMMAND de Termux : distingue un refus du service d'un échec du script. */
