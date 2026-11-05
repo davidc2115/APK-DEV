@@ -200,7 +200,7 @@ object PontMcp {
         return when (req.optString("method")) {
             "initialize" -> ok(JSONObject()
                 .put("protocolVersion", p.optString("protocolVersion").ifBlank { "2025-06-18" })
-                .put("capabilities", JSONObject().put("tools", JSONObject().put("listChanged", false)))
+                .put("capabilities", JSONObject().put("tools", JSONObject().put("listChanged", true)))
                 .put("serverInfo", JSONObject().put("name", "jarvis").put("version", "1.0"))
                 .put("instructions", "Outils du smartphone Android de l'utilisateur, fournis par l'app Jarvis : appels, SMS, agenda, mails, " +
                     "musique, réveils, domotique, coffre Obsidian, société (clients, devis, factures, paie), localisation, images/vidéos IA, réglages Jarvis. " +
@@ -225,11 +225,21 @@ object PontMcp {
 
     /** Schéma « function » (OpenAI) des outils de Jarvis → outils MCP (name, description, inputSchema). */
     internal fun convertirOutils(tous: JSONArray): JSONArray {
-        val out = JSONArray()
+        val prioritaires = listOf("interventions_liste", "intervention_supprimer", "intervention_modifier", "intervention_enregistrer", "interventions_synthese")
+        val fonctions = mutableListOf<JSONObject>()
         for (i in 0 until tous.length()) {
             val f = tous.getJSONObject(i).optJSONObject("function") ?: continue
             val nom = f.optString("name")
-            if (nom.isBlank() || nom in EXCLUS) continue
+            if (nom.isNotBlank() && nom !in EXCLUS) fonctions += f
+        }
+        // Certains clients MCP plafonnent les outils transmis au modèle : garder les interventions en tête.
+        fonctions.sortBy { f ->
+            val index = prioritaires.indexOf(f.optString("name"))
+            if (index < 0) prioritaires.size else index
+        }
+        val out = JSONArray()
+        for (f in fonctions) {
+            val nom = f.optString("name")
             val schema = f.optJSONObject("parameters") ?: JSONObject().put("type", "object").put("properties", JSONObject())
             if (!schema.has("type")) schema.put("type", "object")
             out.put(JSONObject().put("name", nom).put("description", f.optString("description")).put("inputSchema", schema))
