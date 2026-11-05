@@ -282,8 +282,1383 @@ p "⚙️ Configuration écrite : modèle Gemini $modele${if (groq.isNotBlank())
 H="${'$'}{HOME}/.hermes"; mkdir -p "${'$'}{H}/logs"
 termux-wake-lock >/dev/null 2>&1 || true
 p '🔄 Préparation du démarrage de la passerelle Hermès…'
-# Le motif entre crochets ne peut pas correspondre au script RUN_COMMAND qui le contient.
-pkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true
+# Arrêt ciblé via PID : ne jamais utiliser pkill -f ici, car le script RUN_COMMAND
+# contient lui-même la chaîne « hermes gateway run » et pourrait s'auto-terminer.
+PID_FILE="${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then
+  setsid nohup sh -c "${'
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{H}/gateway.pid"
+if [ -f "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{PID_FILE}" ]; then
+  OLD_PID="${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}(cat "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{PID_FILE}" 2>/dev/null)"
+  case "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}" in ''|*[!0-9]*) ;; *)
+    if [ -r "/proc/${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}/cmdline" ] && tr '\\000' ' ' < "/proc/${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}/cmdline" | grep -q 'hermes gateway run'; then
+      kill "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}" >/dev/null 2>&1 || true
+    fi
+  ;; esac
+  rm -f "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{PID_FILE}"
+fi
+sleep 1
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{CMD}" >> "${'
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{H}/gateway.pid"
+if [ -f "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{PID_FILE}" ]; then
+  OLD_PID="${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}(cat "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{PID_FILE}" 2>/dev/null)"
+  case "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}" in ''|*[!0-9]*) ;; *)
+    if [ -r "/proc/${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}/cmdline" ] && tr '\\000' ' ' < "/proc/${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}/cmdline" | grep -q 'hermes gateway run'; then
+      kill "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}" >/dev/null 2>&1 || true
+    fi
+  ;; esac
+  rm -f "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{PID_FILE}"
+fi
+sleep 1
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else
+  nohup sh -c "${'
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{H}/gateway.pid"
+if [ -f "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{PID_FILE}" ]; then
+  OLD_PID="${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}(cat "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{PID_FILE}" 2>/dev/null)"
+  case "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}" in ''|*[!0-9]*) ;; *)
+    if [ -r "/proc/${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}/cmdline" ] && tr '\\000' ' ' < "/proc/${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}/cmdline" | grep -q 'hermes gateway run'; then
+      kill "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}" >/dev/null 2>&1 || true
+    fi
+  ;; esac
+  rm -f "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{PID_FILE}"
+fi
+sleep 1
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{CMD}" >> "${'
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{H}/gateway.pid"
+if [ -f "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{PID_FILE}" ]; then
+  OLD_PID="${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}(cat "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{PID_FILE}" 2>/dev/null)"
+  case "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}" in ''|*[!0-9]*) ;; *)
+    if [ -r "/proc/${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}/cmdline" ] && tr '\\000' ' ' < "/proc/${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}/cmdline" | grep -q 'hermes gateway run'; then
+      kill "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}" >/dev/null 2>&1 || true
+    fi
+  ;; esac
+  rm -f "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{PID_FILE}"
+fi
+sleep 1
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{H}/logs/gateway.log" 2>&1 < /dev/null &
+fi
+GATEWAY_PID="${'
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{H}/gateway.pid"
+if [ -f "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{PID_FILE}" ]; then
+  OLD_PID="${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}(cat "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{PID_FILE}" 2>/dev/null)"
+  case "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}" in ''|*[!0-9]*) ;; *)
+    if [ -r "/proc/${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}/cmdline" ] && tr '\\000' ' ' < "/proc/${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}/cmdline" | grep -q 'hermes gateway run'; then
+      kill "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}" >/dev/null 2>&1 || true
+    fi
+  ;; esac
+  rm -f "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{PID_FILE}"
+fi
+sleep 1
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}!"
+printf '%s\\n' "${'
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{H}/gateway.pid"
+if [ -f "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{PID_FILE}" ]; then
+  OLD_PID="${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}(cat "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{PID_FILE}" 2>/dev/null)"
+  case "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}" in ''|*[!0-9]*) ;; *)
+    if [ -r "/proc/${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}/cmdline" ] && tr '\\000' ' ' < "/proc/${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}/cmdline" | grep -q 'hermes gateway run'; then
+      kill "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}" >/dev/null 2>&1 || true
+    fi
+  ;; esac
+  rm -f "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{PID_FILE}"
+fi
+sleep 1
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{GATEWAY_PID}" > "${'
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{H}/gateway.pid"
+if [ -f "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{PID_FILE}" ]; then
+  OLD_PID="${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}(cat "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{PID_FILE}" 2>/dev/null)"
+  case "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}" in ''|*[!0-9]*) ;; *)
+    if [ -r "/proc/${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}/cmdline" ] && tr '\\000' ' ' < "/proc/${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}/cmdline" | grep -q 'hermes gateway run'; then
+      kill "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}" >/dev/null 2>&1 || true
+    fi
+  ;; esac
+  rm -f "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{PID_FILE}"
+fi
+sleep 1
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{PID_FILE}"
+p "🚀 Processus de passerelle lancé (PID ${'
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{H}/gateway.pid"
+if [ -f "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{PID_FILE}" ]; then
+  OLD_PID="${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}(cat "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{PID_FILE}" 2>/dev/null)"
+  case "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}" in ''|*[!0-9]*) ;; *)
+    if [ -r "/proc/${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}/cmdline" ] && tr '\\000' ' ' < "/proc/${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}/cmdline" | grep -q 'hermes gateway run'; then
+      kill "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}" >/dev/null 2>&1 || true
+    fi
+  ;; esac
+  rm -f "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{PID_FILE}"
+fi
+sleep 1
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{GATEWAY_PID}), vérification de l'API…"
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{H}/gateway.pid"
+if [ -f "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{PID_FILE}" ]; then
+  OLD_PID="${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}(cat "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{PID_FILE}" 2>/dev/null)"
+  case "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}" in ''|*[!0-9]*) ;; *)
+    if [ -r "/proc/${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}/cmdline" ] && tr '\\000' ' ' < "/proc/${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}/cmdline" | grep -q 'hermes gateway run'; then
+      kill "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{OLD_PID}" >/dev/null 2>&1 || true
+    fi
+  ;; esac
+  rm -f "${'
+if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
+  CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
+else
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null & fi
+for i in ${'$'}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 6 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+exit 1
+}{PID_FILE}"
+fi
 sleep 1
 if [ "${'$'}(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ]; then
   CMD="proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes gateway run"
@@ -633,7 +2008,738 @@ os.replace(name, p)
     }
 
     fun arreter(app: JarvisApp): String =
-        executer(app, prelude(app) + "\npkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+        executer(app, prelude(app) + "\nif [ -f "${' >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    // ------------------------------------------------------------------ Sauvegarde et récupération autonome
+    private fun executerDebian(app: JarvisApp, scriptDebian: String, libelle: String): String {
+        PontMcp.demarrer(app)
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -lc ${q(scriptDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ $libelle…"
+        return executer(app, prelude(app) + "\n" + commande, libelle = libelle)
+            ?: "🚀 $libelle lancé : suis la progression dans Jarvis."
+    }
+
+    /** Archive privée de ~/.hermes, en excluant caches, dépôts Git et environnements Python recréables. */
+    private val scriptSauvegarde = """
+set -eu
+test -d /root/.hermes || { echo "❌ Dossier Hermes introuvable dans Debian."; exit 1; }
+mkdir -p /root/.hermes/backups
+tar -czf "/root/.hermes/backups/hermes-$(date +%Y%m%d-%H%M%S).tar.gz" \
+  --exclude='.hermes/backups' --exclude='.hermes/hermes-agent/.git' \
+  --exclude='.hermes/hermes-agent/venv' --exclude='.hermes/hermes-agent/.venv' \
+  --exclude='.hermes/hermes-agent/__pycache__' -C /root .hermes
+chmod 600 /root/.hermes/backups/hermes-*.tar.gz
+echo "✅ Sauvegarde privée créée dans /root/.hermes/backups."
+du -h /root/.hermes/backups/hermes-*.tar.gz | tail -n 1
+""".trimIndent()
+
+    fun sauvegarder(app: JarvisApp): String =
+        executerDebian(app, scriptSauvegarde, "Sauvegarde Hermès")
+
+    /** Contrôle les fichiers essentiels sans afficher les clés API ni les jetons. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = """
+set +e
+echo "=== DIAGNOSTIC HERMÈS (aucun secret affiché) ==="
+[ -x /root/.hermes/hermes-agent/.hermes/bin/hermes ] && echo "CLI Hermes : OK" || echo "CLI Hermes : ABSENT"
+if [ -x /root/.hermes/hermes-agent/venv/bin/python ]; then
+  echo "Environnement Python Hermès : venv/ OK"
+elif [ -x /root/.hermes/hermes-agent/.venv/bin/python ]; then
+  echo "Environnement Python Hermès : .venv/ OK"
+elif [ -x /root/.hermes/hermes-agent/.hermes/bin/python ]; then
+  echo "Environnement Python Hermès : .hermes/bin/ OK"
+else
+  echo "Environnement Python dédié : non trouvé"
+fi
+if command -v python3 >/dev/null 2>&1; then
+  echo "Python Debian : $(python3 --version 2>&1)"
+  echo "Interpréteur système : $(command -v python3)"
+else
+  echo "Python Debian : ABSENT"
+fi
+if command -v hermes >/dev/null 2>&1; then
+  echo "CLI Hermès : $(command -v hermes)"
+  hermes --version 2>&1 | head -n 1
+fi
+[ -f /root/.hermes/config.yaml ] && echo "Configuration : présente" || echo "Configuration : ABSENTE"
+[ -f /root/.hermes/.env ] && echo "Fichier de clés : présent (contenu masqué)" || echo "Fichier de clés : ABSENT"
+grep -q 'jarvis:' /root/.hermes/config.yaml 2>/dev/null && echo "Entrée MCP Jarvis : présente" || echo "Entrée MCP Jarvis : absente"
+grep -q '127.0.0.1:38291/mcp' /root/.hermes/config.yaml 2>/dev/null && echo "URL du pont MCP : OK" || echo "URL du pont MCP : à vérifier"
+curl -fsS -m 3 http://127.0.0.1:${PORT_API}/health >/dev/null 2>&1 && echo "Passerelle API : EN LIGNE" || echo "Passerelle API : hors ligne"
+echo "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        return executerDebian(app, script, "Diagnostic Hermès")
+    }
+
+    /** Restaure la dernière archive après vérification, puis relance la passerelle. */
+    fun restaurerDerniereSauvegarde(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val restore = """
+set -eu
+find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | grep -q . || { echo "❌ Aucune sauvegarde Hermès trouvée."; exit 1; }
+tar -tzf "$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)" >/dev/null
+tar -xzf "$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)" -C /root
+chmod 600 /root/.hermes/.env 2>/dev/null || true
+echo "✅ Données et configuration restaurées."
+""".trimIndent()
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- bash -lc ${q(restore)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        return executer(app, prelude(app) + "\n" + commande + "\n" + demarrage, libelle = "Restauration Hermès")
+            ?: "🚀 Restauration lancée, puis redémarrage d'Hermès."
+    }
+
+    /** Réinstallation propre : sauvegarde complète, suppression du seul moteur, puis installateur officiel. */
+    fun reinstallerComplet(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val preparation = scriptSauvegarde + "\nrm -rf /root/.hermes/hermes-agent\necho '🧹 Ancien moteur supprimé après sauvegarde.'"
+        val commande = "set -euo pipefail; proot-distro login debian --termux-home -- bash -lc ${q(preparation)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        val script = prelude(app) + "\n" + commande + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Sauvegarde puis réinstallation complète d'Hermès…"
+        return executer(app, script, libelle = "Réinstallation complète Hermès")
+            ?: "🚀 Sauvegarde effectuée puis réinstallation lancée. Suis les étapes dans Jarvis."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}
+}{HOME}/.hermes/gateway.pid" ]; then
+  OLD_PID="${' >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    // ------------------------------------------------------------------ Sauvegarde et récupération autonome
+    private fun executerDebian(app: JarvisApp, scriptDebian: String, libelle: String): String {
+        PontMcp.demarrer(app)
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -lc ${q(scriptDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ $libelle…"
+        return executer(app, prelude(app) + "\n" + commande, libelle = libelle)
+            ?: "🚀 $libelle lancé : suis la progression dans Jarvis."
+    }
+
+    /** Archive privée de ~/.hermes, en excluant caches, dépôts Git et environnements Python recréables. */
+    private val scriptSauvegarde = """
+set -eu
+test -d /root/.hermes || { echo "❌ Dossier Hermes introuvable dans Debian."; exit 1; }
+mkdir -p /root/.hermes/backups
+tar -czf "/root/.hermes/backups/hermes-$(date +%Y%m%d-%H%M%S).tar.gz" \
+  --exclude='.hermes/backups' --exclude='.hermes/hermes-agent/.git' \
+  --exclude='.hermes/hermes-agent/venv' --exclude='.hermes/hermes-agent/.venv' \
+  --exclude='.hermes/hermes-agent/__pycache__' -C /root .hermes
+chmod 600 /root/.hermes/backups/hermes-*.tar.gz
+echo "✅ Sauvegarde privée créée dans /root/.hermes/backups."
+du -h /root/.hermes/backups/hermes-*.tar.gz | tail -n 1
+""".trimIndent()
+
+    fun sauvegarder(app: JarvisApp): String =
+        executerDebian(app, scriptSauvegarde, "Sauvegarde Hermès")
+
+    /** Contrôle les fichiers essentiels sans afficher les clés API ni les jetons. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = """
+set +e
+echo "=== DIAGNOSTIC HERMÈS (aucun secret affiché) ==="
+[ -x /root/.hermes/hermes-agent/.hermes/bin/hermes ] && echo "CLI Hermes : OK" || echo "CLI Hermes : ABSENT"
+if [ -x /root/.hermes/hermes-agent/venv/bin/python ]; then
+  echo "Environnement Python Hermès : venv/ OK"
+elif [ -x /root/.hermes/hermes-agent/.venv/bin/python ]; then
+  echo "Environnement Python Hermès : .venv/ OK"
+elif [ -x /root/.hermes/hermes-agent/.hermes/bin/python ]; then
+  echo "Environnement Python Hermès : .hermes/bin/ OK"
+else
+  echo "Environnement Python dédié : non trouvé"
+fi
+if command -v python3 >/dev/null 2>&1; then
+  echo "Python Debian : $(python3 --version 2>&1)"
+  echo "Interpréteur système : $(command -v python3)"
+else
+  echo "Python Debian : ABSENT"
+fi
+if command -v hermes >/dev/null 2>&1; then
+  echo "CLI Hermès : $(command -v hermes)"
+  hermes --version 2>&1 | head -n 1
+fi
+[ -f /root/.hermes/config.yaml ] && echo "Configuration : présente" || echo "Configuration : ABSENTE"
+[ -f /root/.hermes/.env ] && echo "Fichier de clés : présent (contenu masqué)" || echo "Fichier de clés : ABSENT"
+grep -q 'jarvis:' /root/.hermes/config.yaml 2>/dev/null && echo "Entrée MCP Jarvis : présente" || echo "Entrée MCP Jarvis : absente"
+grep -q '127.0.0.1:38291/mcp' /root/.hermes/config.yaml 2>/dev/null && echo "URL du pont MCP : OK" || echo "URL du pont MCP : à vérifier"
+curl -fsS -m 3 http://127.0.0.1:${PORT_API}/health >/dev/null 2>&1 && echo "Passerelle API : EN LIGNE" || echo "Passerelle API : hors ligne"
+echo "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        return executerDebian(app, script, "Diagnostic Hermès")
+    }
+
+    /** Restaure la dernière archive après vérification, puis relance la passerelle. */
+    fun restaurerDerniereSauvegarde(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val restore = """
+set -eu
+find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | grep -q . || { echo "❌ Aucune sauvegarde Hermès trouvée."; exit 1; }
+tar -tzf "$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)" >/dev/null
+tar -xzf "$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)" -C /root
+chmod 600 /root/.hermes/.env 2>/dev/null || true
+echo "✅ Données et configuration restaurées."
+""".trimIndent()
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- bash -lc ${q(restore)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        return executer(app, prelude(app) + "\n" + commande + "\n" + demarrage, libelle = "Restauration Hermès")
+            ?: "🚀 Restauration lancée, puis redémarrage d'Hermès."
+    }
+
+    /** Réinstallation propre : sauvegarde complète, suppression du seul moteur, puis installateur officiel. */
+    fun reinstallerComplet(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val preparation = scriptSauvegarde + "\nrm -rf /root/.hermes/hermes-agent\necho '🧹 Ancien moteur supprimé après sauvegarde.'"
+        val commande = "set -euo pipefail; proot-distro login debian --termux-home -- bash -lc ${q(preparation)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        val script = prelude(app) + "\n" + commande + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Sauvegarde puis réinstallation complète d'Hermès…"
+        return executer(app, script, libelle = "Réinstallation complète Hermès")
+            ?: "🚀 Sauvegarde effectuée puis réinstallation lancée. Suis les étapes dans Jarvis."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}
+}(cat "${' >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    // ------------------------------------------------------------------ Sauvegarde et récupération autonome
+    private fun executerDebian(app: JarvisApp, scriptDebian: String, libelle: String): String {
+        PontMcp.demarrer(app)
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -lc ${q(scriptDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ $libelle…"
+        return executer(app, prelude(app) + "\n" + commande, libelle = libelle)
+            ?: "🚀 $libelle lancé : suis la progression dans Jarvis."
+    }
+
+    /** Archive privée de ~/.hermes, en excluant caches, dépôts Git et environnements Python recréables. */
+    private val scriptSauvegarde = """
+set -eu
+test -d /root/.hermes || { echo "❌ Dossier Hermes introuvable dans Debian."; exit 1; }
+mkdir -p /root/.hermes/backups
+tar -czf "/root/.hermes/backups/hermes-$(date +%Y%m%d-%H%M%S).tar.gz" \
+  --exclude='.hermes/backups' --exclude='.hermes/hermes-agent/.git' \
+  --exclude='.hermes/hermes-agent/venv' --exclude='.hermes/hermes-agent/.venv' \
+  --exclude='.hermes/hermes-agent/__pycache__' -C /root .hermes
+chmod 600 /root/.hermes/backups/hermes-*.tar.gz
+echo "✅ Sauvegarde privée créée dans /root/.hermes/backups."
+du -h /root/.hermes/backups/hermes-*.tar.gz | tail -n 1
+""".trimIndent()
+
+    fun sauvegarder(app: JarvisApp): String =
+        executerDebian(app, scriptSauvegarde, "Sauvegarde Hermès")
+
+    /** Contrôle les fichiers essentiels sans afficher les clés API ni les jetons. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = """
+set +e
+echo "=== DIAGNOSTIC HERMÈS (aucun secret affiché) ==="
+[ -x /root/.hermes/hermes-agent/.hermes/bin/hermes ] && echo "CLI Hermes : OK" || echo "CLI Hermes : ABSENT"
+if [ -x /root/.hermes/hermes-agent/venv/bin/python ]; then
+  echo "Environnement Python Hermès : venv/ OK"
+elif [ -x /root/.hermes/hermes-agent/.venv/bin/python ]; then
+  echo "Environnement Python Hermès : .venv/ OK"
+elif [ -x /root/.hermes/hermes-agent/.hermes/bin/python ]; then
+  echo "Environnement Python Hermès : .hermes/bin/ OK"
+else
+  echo "Environnement Python dédié : non trouvé"
+fi
+if command -v python3 >/dev/null 2>&1; then
+  echo "Python Debian : $(python3 --version 2>&1)"
+  echo "Interpréteur système : $(command -v python3)"
+else
+  echo "Python Debian : ABSENT"
+fi
+if command -v hermes >/dev/null 2>&1; then
+  echo "CLI Hermès : $(command -v hermes)"
+  hermes --version 2>&1 | head -n 1
+fi
+[ -f /root/.hermes/config.yaml ] && echo "Configuration : présente" || echo "Configuration : ABSENTE"
+[ -f /root/.hermes/.env ] && echo "Fichier de clés : présent (contenu masqué)" || echo "Fichier de clés : ABSENT"
+grep -q 'jarvis:' /root/.hermes/config.yaml 2>/dev/null && echo "Entrée MCP Jarvis : présente" || echo "Entrée MCP Jarvis : absente"
+grep -q '127.0.0.1:38291/mcp' /root/.hermes/config.yaml 2>/dev/null && echo "URL du pont MCP : OK" || echo "URL du pont MCP : à vérifier"
+curl -fsS -m 3 http://127.0.0.1:${PORT_API}/health >/dev/null 2>&1 && echo "Passerelle API : EN LIGNE" || echo "Passerelle API : hors ligne"
+echo "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        return executerDebian(app, script, "Diagnostic Hermès")
+    }
+
+    /** Restaure la dernière archive après vérification, puis relance la passerelle. */
+    fun restaurerDerniereSauvegarde(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val restore = """
+set -eu
+find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | grep -q . || { echo "❌ Aucune sauvegarde Hermès trouvée."; exit 1; }
+tar -tzf "$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)" >/dev/null
+tar -xzf "$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)" -C /root
+chmod 600 /root/.hermes/.env 2>/dev/null || true
+echo "✅ Données et configuration restaurées."
+""".trimIndent()
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- bash -lc ${q(restore)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        return executer(app, prelude(app) + "\n" + commande + "\n" + demarrage, libelle = "Restauration Hermès")
+            ?: "🚀 Restauration lancée, puis redémarrage d'Hermès."
+    }
+
+    /** Réinstallation propre : sauvegarde complète, suppression du seul moteur, puis installateur officiel. */
+    fun reinstallerComplet(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val preparation = scriptSauvegarde + "\nrm -rf /root/.hermes/hermes-agent\necho '🧹 Ancien moteur supprimé après sauvegarde.'"
+        val commande = "set -euo pipefail; proot-distro login debian --termux-home -- bash -lc ${q(preparation)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        val script = prelude(app) + "\n" + commande + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Sauvegarde puis réinstallation complète d'Hermès…"
+        return executer(app, script, libelle = "Réinstallation complète Hermès")
+            ?: "🚀 Sauvegarde effectuée puis réinstallation lancée. Suis les étapes dans Jarvis."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}
+}{HOME}/.hermes/gateway.pid" 2>/dev/null)"
+  case "${' >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    // ------------------------------------------------------------------ Sauvegarde et récupération autonome
+    private fun executerDebian(app: JarvisApp, scriptDebian: String, libelle: String): String {
+        PontMcp.demarrer(app)
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -lc ${q(scriptDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ $libelle…"
+        return executer(app, prelude(app) + "\n" + commande, libelle = libelle)
+            ?: "🚀 $libelle lancé : suis la progression dans Jarvis."
+    }
+
+    /** Archive privée de ~/.hermes, en excluant caches, dépôts Git et environnements Python recréables. */
+    private val scriptSauvegarde = """
+set -eu
+test -d /root/.hermes || { echo "❌ Dossier Hermes introuvable dans Debian."; exit 1; }
+mkdir -p /root/.hermes/backups
+tar -czf "/root/.hermes/backups/hermes-$(date +%Y%m%d-%H%M%S).tar.gz" \
+  --exclude='.hermes/backups' --exclude='.hermes/hermes-agent/.git' \
+  --exclude='.hermes/hermes-agent/venv' --exclude='.hermes/hermes-agent/.venv' \
+  --exclude='.hermes/hermes-agent/__pycache__' -C /root .hermes
+chmod 600 /root/.hermes/backups/hermes-*.tar.gz
+echo "✅ Sauvegarde privée créée dans /root/.hermes/backups."
+du -h /root/.hermes/backups/hermes-*.tar.gz | tail -n 1
+""".trimIndent()
+
+    fun sauvegarder(app: JarvisApp): String =
+        executerDebian(app, scriptSauvegarde, "Sauvegarde Hermès")
+
+    /** Contrôle les fichiers essentiels sans afficher les clés API ni les jetons. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = """
+set +e
+echo "=== DIAGNOSTIC HERMÈS (aucun secret affiché) ==="
+[ -x /root/.hermes/hermes-agent/.hermes/bin/hermes ] && echo "CLI Hermes : OK" || echo "CLI Hermes : ABSENT"
+if [ -x /root/.hermes/hermes-agent/venv/bin/python ]; then
+  echo "Environnement Python Hermès : venv/ OK"
+elif [ -x /root/.hermes/hermes-agent/.venv/bin/python ]; then
+  echo "Environnement Python Hermès : .venv/ OK"
+elif [ -x /root/.hermes/hermes-agent/.hermes/bin/python ]; then
+  echo "Environnement Python Hermès : .hermes/bin/ OK"
+else
+  echo "Environnement Python dédié : non trouvé"
+fi
+if command -v python3 >/dev/null 2>&1; then
+  echo "Python Debian : $(python3 --version 2>&1)"
+  echo "Interpréteur système : $(command -v python3)"
+else
+  echo "Python Debian : ABSENT"
+fi
+if command -v hermes >/dev/null 2>&1; then
+  echo "CLI Hermès : $(command -v hermes)"
+  hermes --version 2>&1 | head -n 1
+fi
+[ -f /root/.hermes/config.yaml ] && echo "Configuration : présente" || echo "Configuration : ABSENTE"
+[ -f /root/.hermes/.env ] && echo "Fichier de clés : présent (contenu masqué)" || echo "Fichier de clés : ABSENT"
+grep -q 'jarvis:' /root/.hermes/config.yaml 2>/dev/null && echo "Entrée MCP Jarvis : présente" || echo "Entrée MCP Jarvis : absente"
+grep -q '127.0.0.1:38291/mcp' /root/.hermes/config.yaml 2>/dev/null && echo "URL du pont MCP : OK" || echo "URL du pont MCP : à vérifier"
+curl -fsS -m 3 http://127.0.0.1:${PORT_API}/health >/dev/null 2>&1 && echo "Passerelle API : EN LIGNE" || echo "Passerelle API : hors ligne"
+echo "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        return executerDebian(app, script, "Diagnostic Hermès")
+    }
+
+    /** Restaure la dernière archive après vérification, puis relance la passerelle. */
+    fun restaurerDerniereSauvegarde(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val restore = """
+set -eu
+find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | grep -q . || { echo "❌ Aucune sauvegarde Hermès trouvée."; exit 1; }
+tar -tzf "$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)" >/dev/null
+tar -xzf "$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)" -C /root
+chmod 600 /root/.hermes/.env 2>/dev/null || true
+echo "✅ Données et configuration restaurées."
+""".trimIndent()
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- bash -lc ${q(restore)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        return executer(app, prelude(app) + "\n" + commande + "\n" + demarrage, libelle = "Restauration Hermès")
+            ?: "🚀 Restauration lancée, puis redémarrage d'Hermès."
+    }
+
+    /** Réinstallation propre : sauvegarde complète, suppression du seul moteur, puis installateur officiel. */
+    fun reinstallerComplet(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val preparation = scriptSauvegarde + "\nrm -rf /root/.hermes/hermes-agent\necho '🧹 Ancien moteur supprimé après sauvegarde.'"
+        val commande = "set -euo pipefail; proot-distro login debian --termux-home -- bash -lc ${q(preparation)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        val script = prelude(app) + "\n" + commande + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Sauvegarde puis réinstallation complète d'Hermès…"
+        return executer(app, script, libelle = "Réinstallation complète Hermès")
+            ?: "🚀 Sauvegarde effectuée puis réinstallation lancée. Suis les étapes dans Jarvis."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}
+}{OLD_PID}" in ''|*[!0-9]*) ;; *) kill "${' >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    // ------------------------------------------------------------------ Sauvegarde et récupération autonome
+    private fun executerDebian(app: JarvisApp, scriptDebian: String, libelle: String): String {
+        PontMcp.demarrer(app)
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -lc ${q(scriptDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ $libelle…"
+        return executer(app, prelude(app) + "\n" + commande, libelle = libelle)
+            ?: "🚀 $libelle lancé : suis la progression dans Jarvis."
+    }
+
+    /** Archive privée de ~/.hermes, en excluant caches, dépôts Git et environnements Python recréables. */
+    private val scriptSauvegarde = """
+set -eu
+test -d /root/.hermes || { echo "❌ Dossier Hermes introuvable dans Debian."; exit 1; }
+mkdir -p /root/.hermes/backups
+tar -czf "/root/.hermes/backups/hermes-$(date +%Y%m%d-%H%M%S).tar.gz" \
+  --exclude='.hermes/backups' --exclude='.hermes/hermes-agent/.git' \
+  --exclude='.hermes/hermes-agent/venv' --exclude='.hermes/hermes-agent/.venv' \
+  --exclude='.hermes/hermes-agent/__pycache__' -C /root .hermes
+chmod 600 /root/.hermes/backups/hermes-*.tar.gz
+echo "✅ Sauvegarde privée créée dans /root/.hermes/backups."
+du -h /root/.hermes/backups/hermes-*.tar.gz | tail -n 1
+""".trimIndent()
+
+    fun sauvegarder(app: JarvisApp): String =
+        executerDebian(app, scriptSauvegarde, "Sauvegarde Hermès")
+
+    /** Contrôle les fichiers essentiels sans afficher les clés API ni les jetons. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = """
+set +e
+echo "=== DIAGNOSTIC HERMÈS (aucun secret affiché) ==="
+[ -x /root/.hermes/hermes-agent/.hermes/bin/hermes ] && echo "CLI Hermes : OK" || echo "CLI Hermes : ABSENT"
+if [ -x /root/.hermes/hermes-agent/venv/bin/python ]; then
+  echo "Environnement Python Hermès : venv/ OK"
+elif [ -x /root/.hermes/hermes-agent/.venv/bin/python ]; then
+  echo "Environnement Python Hermès : .venv/ OK"
+elif [ -x /root/.hermes/hermes-agent/.hermes/bin/python ]; then
+  echo "Environnement Python Hermès : .hermes/bin/ OK"
+else
+  echo "Environnement Python dédié : non trouvé"
+fi
+if command -v python3 >/dev/null 2>&1; then
+  echo "Python Debian : $(python3 --version 2>&1)"
+  echo "Interpréteur système : $(command -v python3)"
+else
+  echo "Python Debian : ABSENT"
+fi
+if command -v hermes >/dev/null 2>&1; then
+  echo "CLI Hermès : $(command -v hermes)"
+  hermes --version 2>&1 | head -n 1
+fi
+[ -f /root/.hermes/config.yaml ] && echo "Configuration : présente" || echo "Configuration : ABSENTE"
+[ -f /root/.hermes/.env ] && echo "Fichier de clés : présent (contenu masqué)" || echo "Fichier de clés : ABSENT"
+grep -q 'jarvis:' /root/.hermes/config.yaml 2>/dev/null && echo "Entrée MCP Jarvis : présente" || echo "Entrée MCP Jarvis : absente"
+grep -q '127.0.0.1:38291/mcp' /root/.hermes/config.yaml 2>/dev/null && echo "URL du pont MCP : OK" || echo "URL du pont MCP : à vérifier"
+curl -fsS -m 3 http://127.0.0.1:${PORT_API}/health >/dev/null 2>&1 && echo "Passerelle API : EN LIGNE" || echo "Passerelle API : hors ligne"
+echo "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        return executerDebian(app, script, "Diagnostic Hermès")
+    }
+
+    /** Restaure la dernière archive après vérification, puis relance la passerelle. */
+    fun restaurerDerniereSauvegarde(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val restore = """
+set -eu
+find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | grep -q . || { echo "❌ Aucune sauvegarde Hermès trouvée."; exit 1; }
+tar -tzf "$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)" >/dev/null
+tar -xzf "$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)" -C /root
+chmod 600 /root/.hermes/.env 2>/dev/null || true
+echo "✅ Données et configuration restaurées."
+""".trimIndent()
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- bash -lc ${q(restore)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        return executer(app, prelude(app) + "\n" + commande + "\n" + demarrage, libelle = "Restauration Hermès")
+            ?: "🚀 Restauration lancée, puis redémarrage d'Hermès."
+    }
+
+    /** Réinstallation propre : sauvegarde complète, suppression du seul moteur, puis installateur officiel. */
+    fun reinstallerComplet(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val preparation = scriptSauvegarde + "\nrm -rf /root/.hermes/hermes-agent\necho '🧹 Ancien moteur supprimé après sauvegarde.'"
+        val commande = "set -euo pipefail; proot-distro login debian --termux-home -- bash -lc ${q(preparation)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        val script = prelude(app) + "\n" + commande + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Sauvegarde puis réinstallation complète d'Hermès…"
+        return executer(app, script, libelle = "Réinstallation complète Hermès")
+            ?: "🚀 Sauvegarde effectuée puis réinstallation lancée. Suis les étapes dans Jarvis."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}
+}{OLD_PID}" >/dev/null 2>&1 || true ;; esac
+  rm -f "${' >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+
+    /**
+     * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
+     * Les arguments sont quotés séparément pour éviter toute interprétation shell des saisies utilisateur.
+     */
+    fun lancerExtension(app: JarvisApp, arguments: List<String>, libelle: String = "Extensions Hermès"): String {
+        if (arguments.isEmpty()) return "❌ Commande Hermès vide."
+        PontMcp.demarrer(app)
+        val cli = arguments.joinToString(" ") { q(it) }
+        val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
+        return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
+            ?: "🚀 Commande envoyée à Hermès."
+    }
+    // ------------------------------------------------------------------ Sauvegarde et récupération autonome
+    private fun executerDebian(app: JarvisApp, scriptDebian: String, libelle: String): String {
+        PontMcp.demarrer(app)
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -lc ${q(scriptDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        message = "⏳ $libelle…"
+        return executer(app, prelude(app) + "\n" + commande, libelle = libelle)
+            ?: "🚀 $libelle lancé : suis la progression dans Jarvis."
+    }
+
+    /** Archive privée de ~/.hermes, en excluant caches, dépôts Git et environnements Python recréables. */
+    private val scriptSauvegarde = """
+set -eu
+test -d /root/.hermes || { echo "❌ Dossier Hermes introuvable dans Debian."; exit 1; }
+mkdir -p /root/.hermes/backups
+tar -czf "/root/.hermes/backups/hermes-$(date +%Y%m%d-%H%M%S).tar.gz" \
+  --exclude='.hermes/backups' --exclude='.hermes/hermes-agent/.git' \
+  --exclude='.hermes/hermes-agent/venv' --exclude='.hermes/hermes-agent/.venv' \
+  --exclude='.hermes/hermes-agent/__pycache__' -C /root .hermes
+chmod 600 /root/.hermes/backups/hermes-*.tar.gz
+echo "✅ Sauvegarde privée créée dans /root/.hermes/backups."
+du -h /root/.hermes/backups/hermes-*.tar.gz | tail -n 1
+""".trimIndent()
+
+    fun sauvegarder(app: JarvisApp): String =
+        executerDebian(app, scriptSauvegarde, "Sauvegarde Hermès")
+
+    /** Contrôle les fichiers essentiels sans afficher les clés API ni les jetons. */
+    fun diagnostiquer(app: JarvisApp): String {
+        val script = """
+set +e
+echo "=== DIAGNOSTIC HERMÈS (aucun secret affiché) ==="
+[ -x /root/.hermes/hermes-agent/.hermes/bin/hermes ] && echo "CLI Hermes : OK" || echo "CLI Hermes : ABSENT"
+if [ -x /root/.hermes/hermes-agent/venv/bin/python ]; then
+  echo "Environnement Python Hermès : venv/ OK"
+elif [ -x /root/.hermes/hermes-agent/.venv/bin/python ]; then
+  echo "Environnement Python Hermès : .venv/ OK"
+elif [ -x /root/.hermes/hermes-agent/.hermes/bin/python ]; then
+  echo "Environnement Python Hermès : .hermes/bin/ OK"
+else
+  echo "Environnement Python dédié : non trouvé"
+fi
+if command -v python3 >/dev/null 2>&1; then
+  echo "Python Debian : $(python3 --version 2>&1)"
+  echo "Interpréteur système : $(command -v python3)"
+else
+  echo "Python Debian : ABSENT"
+fi
+if command -v hermes >/dev/null 2>&1; then
+  echo "CLI Hermès : $(command -v hermes)"
+  hermes --version 2>&1 | head -n 1
+fi
+[ -f /root/.hermes/config.yaml ] && echo "Configuration : présente" || echo "Configuration : ABSENTE"
+[ -f /root/.hermes/.env ] && echo "Fichier de clés : présent (contenu masqué)" || echo "Fichier de clés : ABSENT"
+grep -q 'jarvis:' /root/.hermes/config.yaml 2>/dev/null && echo "Entrée MCP Jarvis : présente" || echo "Entrée MCP Jarvis : absente"
+grep -q '127.0.0.1:38291/mcp' /root/.hermes/config.yaml 2>/dev/null && echo "URL du pont MCP : OK" || echo "URL du pont MCP : à vérifier"
+curl -fsS -m 3 http://127.0.0.1:${PORT_API}/health >/dev/null 2>&1 && echo "Passerelle API : EN LIGNE" || echo "Passerelle API : hors ligne"
+echo "=== FIN DU DIAGNOSTIC ==="
+""".trimIndent()
+        return executerDebian(app, script, "Diagnostic Hermès")
+    }
+
+    /** Restaure la dernière archive après vérification, puis relance la passerelle. */
+    fun restaurerDerniereSauvegarde(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        val restore = """
+set -eu
+find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | grep -q . || { echo "❌ Aucune sauvegarde Hermès trouvée."; exit 1; }
+tar -tzf "$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)" >/dev/null
+tar -xzf "$(find /root/.hermes/backups -maxdepth 1 -type f -name 'hermes-*.tar.gz' | sort | tail -n 1)" -C /root
+chmod 600 /root/.hermes/.env 2>/dev/null || true
+echo "✅ Données et configuration restaurées."
+""".trimIndent()
+        val commande = "set -o pipefail; proot-distro login debian --termux-home -- bash -lc ${q(restore)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        return executer(app, prelude(app) + "\n" + commande + "\n" + demarrage, libelle = "Restauration Hermès")
+            ?: "🚀 Restauration lancée, puis redémarrage d'Hermès."
+    }
+
+    /** Réinstallation propre : sauvegarde complète, suppression du seul moteur, puis installateur officiel. */
+    fun reinstallerComplet(app: JarvisApp): String {
+        PontMcp.demarrer(app)
+        app.store.hermesInstalle.set(false)
+        val preparation = scriptSauvegarde + "\nrm -rf /root/.hermes/hermes-agent\necho '🧹 Ancien moteur supprimé après sauvegarde.'"
+        val commande = "set -euo pipefail; proot-distro login debian --termux-home -- bash -lc ${q(preparation)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        val script = prelude(app) + "\n" + commande + "\n" + installation + "\n" + configuration(app) + "\n" + demarrage
+        message = "⏳ Sauvegarde puis réinstallation complète d'Hermès…"
+        return executer(app, script, libelle = "Réinstallation complète Hermès")
+            ?: "🚀 Sauvegarde effectuée puis réinstallation lancée. Suis les étapes dans Jarvis."
+    }
+    /** Appelé par le pont local à chaque ligne de progression du script. */
+    fun surProgression(app: JarvisApp, ligne: String) {
+        if (ligne == "pong") return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            message = ligne
+            if (ligne.startsWith("✅ Hermès est en ligne")) { app.store.hermesInstalle.set(true); Hermes.marquerEnLigne(true) }
+        }
+        val important = ligne.startsWith("✅ Hermès") || ligne.startsWith("❌") || ligne.startsWith("⛔") || ligne.startsWith("🚀")
+        if (important) runCatching {
+            NotificationManagerCompat.from(app).notify(NOTIF_ID, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Hermès")
+                .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
+        }
+    }
+}
+}{HOME}/.hermes/gateway.pid"
+fi
+termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
 
     /**
      * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
