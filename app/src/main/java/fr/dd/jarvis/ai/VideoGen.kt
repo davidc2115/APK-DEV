@@ -40,6 +40,41 @@ object VideoGen {
 
     fun dossier(app: JarvisApp) = File(app.filesDir, "videos_ia").apply { mkdirs() }
 
+    /**
+     * Analyse le brief avant un clip unique ou l'animation d'une image, puis rédige un prompt vidéo fidèle.
+     * En cas d'échec de l'analyse, aucun appel payant au fournisseur vidéo n'est lancé.
+     */
+    suspend fun preparerPrompt(
+        app: JarvisApp,
+        brief: String,
+        duree: Double,
+        format: String = "vertical",
+        animerImage: Boolean = false
+    ): String {
+        if (brief.isBlank()) throw IllegalStateException("Décris précisément ce que la vidéo doit montrer.")
+        val ratio = ImageToVideoGen.rapport(format)
+        val contexte = buildString {
+            append("Brief original de l'utilisateur :\\n")
+            append(brief.trim())
+            append("\\nDurée du clip : ${duree.coerceIn(0.5, 5.0)} secondes.")
+            append("\\nFormat demandé : $ratio.")
+            append(if (ratio == "9:16") " Portrait vertical 9:16, sujet centré dans la zone sûre." else " Respect strict du ratio demandé.")
+            if (animerImage) append("\\nMode image-vers-vidéo : l'image source existe déjà. Préserve exactement son sujet, son identité, ses vêtements, ses objets, son décor, sa composition et son style ; n'invente pas de nouvel élément.")
+        }
+        val analyseBrute = app.llm.agent(Prompts.MONTAGE_ANALYSE, contexte)
+        val analyse = runCatching {
+            val debut = analyseBrute.indexOf('{')
+            val fin = analyseBrute.lastIndexOf('}')
+            if (debut < 0 || fin <= debut) "" else JSONObject(analyseBrute.substring(debut, fin + 1)).optString("brief_generation")
+        }.getOrDefault("")
+        if (analyse.isBlank()) throw IllegalStateException("L'analyse préalable n'a pas produit de brief réalisateur exploitable. Aucune vidéo n'a été envoyée au fournisseur.")
+        val contextePrompt = contexte + "\\n\\nAnalyse préalable :\\n" + analyse +
+            if (animerImage) "\\n\\nAnime uniquement les mouvements demandés dans l'image source." else ""
+        val prompt = app.llm.agent(Prompts.VIDEO_SINGLE, contextePrompt).trim()
+        if (prompt.length < 20) throw IllegalStateException("Le prompt vidéo préparé est trop court ; aucune génération n'a été lancée.")
+        return prompt.removePrefix("```").removeSuffix("```").trim()
+    }
+
     /** Génère un plan (clip) via le Space Hugging Face ; retourne les octets mp4. Erreur explicite si le token
      *  manque/est refusé, si le quota GPU gratuit du jour est épuisé, ou si le service est indisponible. */
     internal fun genereClip(app: JarvisApp, prompt: String, dureeDemandee: Int, vertical: Boolean): ByteArray {
