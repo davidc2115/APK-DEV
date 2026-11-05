@@ -319,7 +319,7 @@ class ToolBox(
         put(tool("memoire_apprentissages", "Affiche les préférences en cours d'apprentissage et leur nombre de preuves."))
         put(tool("agents_centre", "Centre de contrôle des agents IA : consulte leur état, active/désactive un agent, lance un cycle immédiat ou règle la fréquence. Respecte l'interrupteur général des agents autonomes.", mapOf(
             "action" to prop("etat | historique | activer | desactiver | lancer | intervalle"),
-            "agent" to prop("global | mails | factures | planning | notifications | surveillance_telephone | rangement_gmail | archivage_gmail"),
+            "agent" to prop("global | mails | factures | planning | notifications | rangement_gmail | archivage_gmail"),
             "minutes" to prop("Fréquence en minutes : 15, 30 ou 60 (minimum Android : 15).")
         ), listOf("action")))
         put(tool("graphe_suggere_lien", "Ajoute une relation SUGGESTED entre deux notes Obsidian du graphe. Les deux titres doivent être exacts et uniques ; la relation reste une suggestion non confirmée.", mapOf(
@@ -897,7 +897,7 @@ class ToolBox(
         val raw = a.optString("valeur").trim().lowercase()
         val bool = when(raw) { "true", "oui", "on", "active", "activé", "activer" -> true; "false", "non", "off", "désactive", "désactivé", "desactive", "desactivé" -> false; else -> null }
         val s = app.store
-        val labels = mapOf("confirmations" to "confirmation des actions sensibles", "analyse_gemini" to "analyse Gemini", "conversation" to "mode conversation", "reponses_vocales" to "réponses vocales", "ecoute_continue" to "écoute continue", "annonces" to "annonces vocales", "agents" to "agents autonomes", "agents_mails" to "agent mails", "agents_factures" to "agent factures/devis", "agents_planning" to "agent planning", "agents_notifications" to "agent notifications", "agents_surveillance_telephone" to "surveillance du téléphone", "agents_rangement_gmail" to "rangement Gmail", "agents_archivage_gmail" to "archivage Gmail", "notifications_banniere" to "bannières de notification", "bips" to "bips d'écoute")
+        val labels = mapOf("confirmations" to "confirmation des actions sensibles", "analyse_gemini" to "analyse Gemini", "conversation" to "mode conversation", "reponses_vocales" to "réponses vocales", "ecoute_continue" to "écoute continue", "annonces" to "annonces vocales", "agents" to "agents autonomes", "agents_mails" to "agent mails", "agents_factures" to "agent factures/devis", "agents_planning" to "agent planning", "agents_notifications" to "agent notifications", "agents_rangement_gmail" to "rangement Gmail", "agents_archivage_gmail" to "archivage Gmail", "notifications_banniere" to "bannières de notification", "bips" to "bips d'écoute")
         fun current(): Boolean? = when(key) {
             "confirmations" -> s.confirmSensitive.value
             "analyse_gemini" -> s.analyseGemini.value
@@ -910,7 +910,6 @@ class ToolBox(
             "agents_factures" -> s.agentFactures.value
             "agents_planning" -> s.agentPlanning.value
             "agents_notifications" -> s.agentNotifs.value
-            "agents_surveillance_telephone" -> s.agentPhoneHealth.value
             "agents_rangement_gmail" -> s.agentRanger.value
             "agents_archivage_gmail" -> s.agentArchiver.value
             "notifications_banniere" -> s.notifLive.value
@@ -938,7 +937,6 @@ class ToolBox(
             "agents_factures" -> s.agentFactures.set(bool)
             "agents_planning" -> s.agentPlanning.set(bool)
             "agents_notifications" -> s.agentNotifs.set(bool)
-            "agents_surveillance_telephone" -> s.agentPhoneHealth.set(bool)
             "agents_rangement_gmail" -> s.agentRanger.set(bool)
             "agents_archivage_gmail" -> s.agentArchiver.set(bool)
             "notifications_banniere" -> s.notifLive.set(bool)
@@ -994,10 +992,9 @@ class ToolBox(
             "factures", "facture" -> "Agent factures et devis"
             "planning", "agenda" -> "Agent planning et tâches"
             "notifications", "notification" -> "Agent notifications"
-            "surveillance_telephone", "telephone", "téléphone" -> "Surveillance du téléphone"
             "rangement_gmail", "rangement" -> "Agent rangement Gmail"
             "archivage_gmail", "archivage" -> "Archivage Gmail"
-            else -> return ToolResult("Agent inconnu. Agents disponibles : global, mails, factures, planning, notifications, surveillance_telephone, rangement_gmail.")
+            else -> return ToolResult("Agent inconnu. Agents disponibles : global, mails, factures, planning, notifications, rangement_gmail.")
         }
         fun enabled(): Boolean = when (agent) {
             "global", "tous" -> store.agentsOn.value
@@ -1005,7 +1002,6 @@ class ToolBox(
             "factures", "facture" -> store.agentFactures.value
             "planning", "agenda" -> store.agentPlanning.value
             "notifications", "notification" -> store.agentNotifs.value
-            "surveillance_telephone", "telephone", "téléphone" -> store.agentPhoneHealth.value
             else -> store.agentRanger.value
         }
         if (action == "etat") {
@@ -1015,7 +1011,6 @@ class ToolBox(
                 "Factures/devis" to store.agentFactures.value,
                 "Planning/tâches" to store.agentPlanning.value,
                 "Notifications" to store.agentNotifs.value,
-                "Surveillance téléphone" to store.agentPhoneHealth.value,
                 "Rangement Gmail" to store.agentRanger.value,
                 "Archivage Gmail" to store.agentArchiver.value
             )
@@ -1056,7 +1051,6 @@ class ToolBox(
             "factures", "facture" -> store.agentFactures.set(on)
             "planning", "agenda" -> store.agentPlanning.set(on)
             "notifications", "notification" -> store.agentNotifs.set(on)
-            "surveillance_telephone", "telephone", "téléphone" -> store.agentPhoneHealth.set(on)
             "rangement_gmail", "rangement" -> store.agentRanger.set(on)
             else -> store.agentArchiver.set(on)
         }
