@@ -39,7 +39,7 @@ class SocieteService(
         return buildString {
             append("🗑️ Intervention $interventionId supprimée de l’historique de ${client.nom} — ${site.nom}.")
             if (fichiersSupprimes.isNotEmpty()) append("\n\n📁 Pièces supprimées du coffre :\n" + fichiersSupprimes.joinToString("\n") { "- $it" })
-            if (fichiersRestants.isNotEmpty()) append("\n\n⚠️ Fichiers toujours présents ou non accessibles en écriture :\n" + fichiersRestants.joinToString("\\n") { "- $it" })
+            if (fichiersRestants.isNotEmpty()) append("\n\n⚠️ Fichiers toujours présents ou non accessibles en écriture :\n" + fichiersRestants.joinToString("\n") { "- $it" })
             if (fichiersSupprimes.isEmpty() && fichiersRestants.isEmpty()) append("\nAucun PDF, rapport ou photo portant l'ID de cette intervention n'a été retrouvé dans le coffre.")
             if (!localSupprime) append("\n⚠️ Le dossier privé des photos n'a pas pu être entièrement supprimé.")
             append("\nLa fiche a bien été retirée de la base Société.")
