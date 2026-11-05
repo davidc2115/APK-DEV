@@ -206,12 +206,24 @@ object PontMcp {
         val jeton = f.jeton()
         if (jeton.isBlank() || r.entetes["authorization"] != "Bearer $jeton") return@use repondre(s, 401, """{"error":"unauthorized"}""")
         when {
+            r.chemin.trimEnd('/') == "/health" && r.methode == "GET" -> {
+                repondre(s, 200, JSONObject()
+                    .put("ok", true)
+                    .put("port", PORT)
+                    .put("lastProgressAt", dernierSignal)
+                    .put("progressCount", progression.size).toString())
+            }
             r.chemin.trimEnd('/') == "/progres" && r.methode == "POST" -> {
                 val ligne = r.corps.trim().take(300)
-                if (ligne.isNotEmpty()) { dernierSignal = System.currentTimeMillis(); f.progres(ligne) }
-                repondre(s, 200, "{}")
+                if (ligne.isEmpty()) {
+                    repondre(s, 400, """{"error":"empty_progress"}""")
+                } else {
+                    dernierSignal = System.currentTimeMillis()
+                    f.progres(ligne)
+                    repondre(s, 200, """{"accepted":true}""")
+                }
             }
-            r.methode == "GET" -> repondre(s, 405, "", extra = mapOf("Allow" to "POST, DELETE"))
+            r.methode == "GET" -> repondre(s, 405, "", extra = mapOf("Allow" to "GET, POST, DELETE"))
             r.methode == "DELETE" -> repondre(s, 200, "{}")
             r.methode == "POST" -> {
                 val txt = r.corps.trim()
