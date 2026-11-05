@@ -264,10 +264,34 @@ private fun ClientsTab(app: JarvisApp) {
         if (info.isNotBlank()) item { Text(info, color = LocalAccent.current, fontSize = 12.sp) }
         if (list.isEmpty()) item { Text("Aucun client. Touche + ou demande à JARVIS.", color = HudDim, fontSize = 13.sp) }
         items(list, key = { it.id }) { c ->
+            val hqAdresse = d.societe.adresse
+            val destination = c.adresse.ifBlank { c.sites.firstOrNull { it.adresse.isNotBlank() }?.adresse.orEmpty() }
+            var distanceLabel by remember(c.id, hqAdresse, destination, c.distanceKm, c.distanceCle) {
+                mutableStateOf(
+                    if (c.distanceKm != null && c.distanceCle == normaliser(hqAdresse) + "|" + normaliser(destination))
+                        "🚗 ${nombre(c.distanceKm)} km du siège" +
+                            (c.distanceDureeMin?.takeIf { it > 0 }?.let { " · ${it.toInt()} min" } ?: "")
+                    else if (hqAdresse.isBlank() || destination.isBlank()) "Distance non calculable · adresse du siège ou du client manquante"
+                    else "Calcul de la distance…"
+                )
+            }
+            LaunchedEffect(c.id, hqAdresse, destination, c.distanceKm, c.distanceCle) {
+                if (hqAdresse.isNotBlank() && destination.isNotBlank() &&
+                    (c.distanceKm == null || c.distanceCle != normaliser(hqAdresse) + "|" + normaliser(destination))) {
+                    val route = runCatching { svc.distanceClient(c) }.getOrNull()
+                    distanceLabel = when {
+                        route == null -> "Distance indisponible · vérifier les adresses"
+                        route.estime -> "≈ ${nombre(route.km)} km · estimation"
+                        else -> "🚗 ${nombre(route.km)} km du siège" +
+                            (route.minutes.takeIf { it > 0 }?.let { " · ${it.toInt()} min" } ?: "")
+                    }
+                }
+            }
             HudPanel(Modifier.fillMaxWidth(), onClick = { selected = c }) {
                 Text(c.nom, color = HudText, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 Text("☀️ ${c.sites.size} installation(s) · ${nombre(c.sites.sumOf { it.kwc })} kWc · CA ${euro(d.caClient(c))}", color = HudDim, fontSize = 12.sp)
                 if (c.adresse.isNotBlank()) Text("📍 ${c.adresse}", color = HudDim, fontSize = 12.sp)
+                Text(distanceLabel, color = LocalAccent.current, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -350,7 +374,8 @@ private fun ClientForm(initial: Client?, onClose: () -> Unit, onSave: (Client) -
                 onSave(Client(
                     initial?.id ?: java.util.UUID.randomUUID().toString().take(8), nom.trim(), if (pro) "professionnel" else "particulier",
                     contact = contact, tel = tel, email = email, adresse = adresse, sites = newSites,
-                    depuis = if (depuis.matches(Regex("\\d{4}"))) "$depuis-01-01" else depuis, notes = notes
+                    depuis = if (depuis.matches(Regex("\\d{4}"))) "$depuis-01-01" else depuis, notes = notes,
+                    distanceKm = initial?.distanceKm, distanceDureeMin = initial?.distanceDureeMin, distanceCle = initial?.distanceCle
                 ))
             }
         }
