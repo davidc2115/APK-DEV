@@ -52,14 +52,14 @@ object VideoGen {
         animerImage: Boolean = false
     ): String {
         if (brief.isBlank()) throw IllegalStateException("Décris précisément ce que la vidéo doit montrer.")
-        val ratio = ImageToVideoGen.rapport(format)
+        val ratio = if (animerImage) "auto (ratio de l'image source à préserver)" else ImageToVideoGen.rapport(format)
         val contexte = buildString {
-            append("Brief original de l'utilisateur :\\n")
+            append("Brief original de l'utilisateur :\n")
             append(brief.trim())
-            append("\\nDurée du clip : ${duree.coerceIn(0.5, 5.0)} secondes.")
-            append("\\nFormat demandé : $ratio.")
+            append("\nDurée du clip : ${duree.coerceIn(0.5, 5.0)} secondes.")
+            append("\nFormat demandé : $ratio.")
             append(if (ratio == "9:16") " Portrait vertical 9:16, sujet centré dans la zone sûre." else " Respect strict du ratio demandé.")
-            if (animerImage) append("\\nMode image-vers-vidéo : l'image source existe déjà. Préserve exactement son sujet, son identité, ses vêtements, ses objets, son décor, sa composition et son style ; n'invente pas de nouvel élément.")
+            if (animerImage) append("\nMode image-vers-vidéo : l'image source existe déjà. Préserve exactement son sujet, son identité, ses vêtements, ses objets, son décor, sa composition et son style ; n'invente pas de nouvel élément.")
         }
         val analyseBrute = app.llm.agent(Prompts.MONTAGE_ANALYSE, contexte)
         val analyse = runCatching {
@@ -68,8 +68,8 @@ object VideoGen {
             if (debut < 0 || fin <= debut) "" else JSONObject(analyseBrute.substring(debut, fin + 1)).optString("brief_generation")
         }.getOrDefault("")
         if (analyse.isBlank()) throw IllegalStateException("L'analyse préalable n'a pas produit de brief réalisateur exploitable. Aucune vidéo n'a été envoyée au fournisseur.")
-        val contextePrompt = contexte + "\\n\\nAnalyse préalable :\\n" + analyse +
-            if (animerImage) "\\n\\nAnime uniquement les mouvements demandés dans l'image source." else ""
+        val contextePrompt = contexte + "\n\nAnalyse préalable :\n" + analyse +
+            if (animerImage) "\n\nAnime uniquement les mouvements demandés dans l'image source." else ""
         val prompt = app.llm.agent(Prompts.VIDEO_SINGLE, contextePrompt).trim()
         if (prompt.length < 20) throw IllegalStateException("Le prompt vidéo préparé est trop court ; aucune génération n'a été lancée.")
         return prompt.removePrefix("```").removeSuffix("```").trim()
