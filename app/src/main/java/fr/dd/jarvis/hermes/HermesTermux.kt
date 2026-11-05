@@ -3,8 +3,8 @@ package fr.dd.jarvis.hermes
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.Intent
 import android.app.PendingIntent
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -171,7 +171,7 @@ object HermesTermux {
         if (retourNatif) {
             val retourIntent = Intent(ctx, HermesRunResultReceiver::class.java)
                 .setAction("fr.dd.jarvis.HERMES_RUN_RESULT")
-            val flags = PendingIntent.FLAG_UPDATE_CURRENT or
+            val flags = PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_UPDATE_CURRENT or
                 (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
             val pending = PendingIntent.getBroadcast(ctx, UUID.randomUUID().hashCode(), retourIntent, flags)
             i.putExtra("com.termux.RUN_COMMAND_PENDING_INTENT", pending)
@@ -774,7 +774,8 @@ os.replace(name, p)
                 message = "❌ Termux n'a pas confirmé l'exécution du script après 35 secondes. Vérifie l'autorisation « Exécuter des commandes dans Termux », les restrictions d'arrière-plan et le port 38291. Aucun succès n'est déclaré."
             }
         }, 35_000)
-        return "⏳ Commande transmise à Termux ; attente de son accusé de réception réel."    }
+        return "⏳ Commande transmise à Termux ; attente de son accusé de réception réel."
+    }
 
     /** Catalogue et installation non interactive des plugins/MCP Hermes. */
     fun gererExtension(app: JarvisApp, actionRaw: String, nameRaw: String = ""): String {
