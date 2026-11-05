@@ -390,13 +390,13 @@ fun PlanningScreen(app: JarvisApp) {
                             }
                         )
                     }
-                    val osmAddress = Regex("""Voir l’adresse \\(OpenStreetMap\\) : (https://\\S+)""").find(e.description)?.groupValues?.getOrNull(1)
+                    val osmAddress = Regex("""Voir l’adresse \(OpenStreetMap\) : (https://\S+)""").find(e.description)?.groupValues?.getOrNull(1)
                     if (!osmAddress.isNullOrBlank()) Text(
                         "🌍 Voir l’adresse sur OpenStreetMap",
                         color = LocalAccent.current, fontSize = 12.sp,
                         modifier = Modifier.clickable { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(osmAddress))) } }
                     )
-                    val osmGps = Regex("""Ouvrir le point GPS \\(OpenStreetMap\\) : (https://\\S+)""").find(e.description)?.groupValues?.getOrNull(1)
+                    val osmGps = Regex("""Ouvrir le point GPS \(OpenStreetMap\) : (https://\S+)""").find(e.description)?.groupValues?.getOrNull(1)
                     if (!osmGps.isNullOrBlank()) Text(
                         "🎯 Ouvrir le point GPS sur OpenStreetMap",
                         color = LocalAccent.current, fontSize = 12.sp,
