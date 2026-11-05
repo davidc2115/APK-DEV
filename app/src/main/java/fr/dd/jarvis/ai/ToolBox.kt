@@ -318,7 +318,7 @@ class ToolBox(
         ), listOf("sujet", "preference", "preuve")))
         put(tool("memoire_apprentissages", "Affiche les préférences en cours d'apprentissage et leur nombre de preuves."))
         put(tool("agents_centre", "Centre de contrôle des agents IA : consulte leur état, active/désactive un agent, lance un cycle immédiat ou règle la fréquence. Respecte l'interrupteur général des agents autonomes.", mapOf(
-            "action" to prop("etat | activer | desactiver | lancer | intervalle"),
+            "action" to prop("etat | historique | activer | desactiver | lancer | intervalle"),
             "agent" to prop("global | mails | factures | planning | notifications | surveillance_telephone | rangement_gmail | archivage_gmail"),
             "minutes" to prop("Fréquence en minutes : 15, 30 ou 60 (minimum Android : 15).")
         ), listOf("action")))
@@ -1030,6 +1030,12 @@ class ToolBox(
                 "\nRésultat : ${store.agentLastRunStatus.value}" +
                 "\nDernière synthèse proactive : ${store.proactiveSummary.value.ifBlank { "aucune" }}", direct = true)
         }
+        if (action == "historique") {
+            val history = store.agentRunHistory.value.lines().filter { it.isNotBlank() }.takeLast(20).asReversed()
+            return ToolResult("# Historique des agents autonomes\n\n" +
+                if (history.isEmpty()) "Aucun cycle enregistré pour le moment." else history.joinToString("\n") { "- $it" },
+                direct = true)
+        }
         if (action == "intervalle") {
             val minutes = a.optString("minutes").toIntOrNull()?.takeIf { it in setOf(15, 30, 60) }
                 ?: return ToolResult("Choisis 15, 30 ou 60 minutes.")
@@ -1042,7 +1048,7 @@ class ToolBox(
             fr.dd.jarvis.work.AgentsScheduler.runNow(app)
             return ToolResult("✅ Un cycle des agents a été demandé. Android peut le différer selon les contraintes système.", direct = true)
         }
-        if (action !in setOf("activer", "desactiver", "désactiver")) return ToolResult("Action attendue : etat, activer, desactiver, lancer ou intervalle.")
+        if (action !in setOf("activer", "desactiver", "désactiver")) return ToolResult("Action attendue : etat, historique, activer, desactiver, lancer ou intervalle.")
         val on = action == "activer"
         when (agent) {
             "global", "tous" -> store.agentsOn.set(on)
