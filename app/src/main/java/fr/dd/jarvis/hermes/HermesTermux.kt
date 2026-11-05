@@ -279,7 +279,7 @@ p "⚙️ Configuration écrite : modèle Gemini $modele${if (groq.isNotBlank())
      * par Jarvis vaut donc pour les deux, et 127.0.0.1 est le même réseau que celui de Jarvis.
      */
     internal val demarrage = """
-H="${'{HOME}/.hermes"; mkdir -p "@@{H}/logs"
+H="${'$'}{HOME}/.hermes"; mkdir -p "${'$'}{H}/logs"
 termux-wake-lock >/dev/null 2>&1 || true
 if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then
   p "✅ Hermès est déjà en ligne."
@@ -288,8 +288,8 @@ fi
 p '🔄 Préparation du démarrage de la passerelle Hermès…'
 # Détecter Debian même si le marqueur historique .jarvis-mode est vide.
 HERMES_PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-if [ "$(cat "@@{H}/.jarvis-mode" 2>/dev/null)" = proot ] || proot-distro login debian --termux-home -- env -i HOME=/root PATH="@@{HERMES_PATH}" sh -c 'command -v hermes >/dev/null 2>&1'; then
-  CMD="proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash PATH=@@{HERMES_PATH} DEBIAN_FRONTEND=noninteractive hermes gateway run"
+if [ "$(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ] || proot-distro login debian --termux-home -- env -i HOME=/root PATH="${'$'}{HERMES_PATH}" sh -c 'command -v hermes >/dev/null 2>&1'; then
+  CMD="proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash PATH=${'$'}{HERMES_PATH} DEBIAN_FRONTEND=noninteractive hermes gateway run"
 else
   if ! command -v hermes >/dev/null 2>&1; then
     p "❌ CLI Hermès introuvable dans Termux et Debian. Relance « Installer Hermès » pour réparer l’installation."
@@ -298,17 +298,17 @@ else
   CMD="hermes gateway run"
 fi
 if command -v setsid >/dev/null 2>&1; then
-  setsid nohup sh -c "@@{CMD}" >> "@@{H}/logs/gateway.log" 2>&1 < /dev/null &
+  setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
 else
-  nohup sh -c "@@{CMD}" >> "@@{H}/logs/gateway.log" 2>&1 < /dev/null &
+  nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
 fi
 p "🚀 Passerelle lancée, vérification de l’API locale…"
-for i in @@(seq 1 60); do
+for i in ${'$'}(seq 1 60); do
   if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
   sleep 2
 done
 p "❌ Hermès ne répond pas. Dernières lignes du journal :"
-tail -n 10 "@@{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   @@{l}"; done
+tail -n 10 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
 exit 1
 """.trimIndent()}{HOME}/.hermes"; mkdir -p "${'{H}/logs"
 termux-wake-lock >/dev/null 2>&1 || true
