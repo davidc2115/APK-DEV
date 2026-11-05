@@ -1450,15 +1450,30 @@ class ToolBox(
 
     private suspend fun updateEvent(a: JSONObject): ToolResult {
         val id = a.optString("event_id").trim().removePrefix("#").toLongOrNull() ?: return ToolResult("Identifiant invalide.")
+        val old = app.calendar.event(id) ?: return ToolResult("Événement introuvable ou permission agenda manquante.")
+        val rawAddress = a.optString("location").trim().takeIf { it.isNotBlank() }
+        var gpsLocation: String? = null
+        var newDescription: String? = null
+        if (rawAddress != null) {
+            val position = fr.dd.jarvis.societe.Geo.localiser(rawAddress)
+            val point = position?.takeIf { it.precision.rang >= fr.dd.jarvis.societe.Geo.Precision.LIEU_DIT.rang }?.point
+            gpsLocation = point?.let { fr.dd.jarvis.societe.Geo.lienGoogleMaps(it) } ?: ""
+            val lines = old.description.lines().filterNot { it.trim().startsWith("Adresse :", true) || it.trim().startsWith("Point GPS non trouvé", true) }
+            newDescription = (lines + "Adresse : $rawAddress" + if (point == null) "Point GPS non trouvé avec une précision suffisante : le champ Lieu reste vide." else "")
+                .filter { it.isNotBlank() }.joinToString("\n")
+        }
         val ok = app.calendar.update(
             id,
             a.optString("title").ifBlank { null },
             parseDateTime(a.optString("start")),
             parseDateTime(a.optString("end")),
-            a.optString("location").ifBlank { null },
-            null
+            gpsLocation,
+            newDescription
         )
-        return ToolResult(if (ok) "Événement #$id modifié." else "Rien à modifier ou événement introuvable.")
+        return ToolResult(if (ok) "Événement #$id modifié." + if (rawAddress != null) {
+            if (gpsLocation.isNullOrBlank()) " Adresse conservée dans la description ; aucun point GPS assez précis n’a été trouvé, le champ Lieu est vidé."
+            else " Le champ Lieu contient uniquement le lien GPS cliquable ; l’adresse est dans la description."
+        } else "" else "Rien à modifier ou événement introuvable.")
     }
 
     private fun couleurDemandee(txt: String): Pair<Boolean, Int?> {
