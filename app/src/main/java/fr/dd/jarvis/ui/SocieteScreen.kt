@@ -121,67 +121,83 @@ private fun PhotosIntervention(paths: List<String>, label: String) {
 private fun InterventionsTab(app: JarvisApp) {
     var photoInfo by remember { mutableStateOf("") }
     var photoTarget by remember { mutableStateOf<InterventionPhotoTarget?>(null) }
-    val photoScope = rememberCoroutineScope()
-    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+    var editTarget by remember { mutableStateOf<Triple<Client, Site, Intervention>?>(null) }
+    var date by remember { mutableStateOf("") }; var categorie by remember { mutableStateOf("") }
+    var description by remember { mutableStateOf("") }; var diagnostic by remember { mutableStateOf("") }
+    var actions by remember { mutableStateOf("") }; var pieces by remember { mutableStateOf("") }
+    var mesures by remember { mutableStateOf("") }; var statut by remember { mutableStateOf("") }
+    var prochaine by remember { mutableStateOf("") }; var notes by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         val target = photoTarget
-        if (target != null && uris.isNotEmpty()) {
-            photoScope.launch {
-                photoInfo = "Enregistrement des photos…"
-                photoInfo = withContext(Dispatchers.IO) {
-                    app.societe.ajouterPhotosIntervention(
-                        target.clientId, target.siteId, target.interventionId, target.avant, uris
-                    )
-                }
-            }
+        if (target != null && uris.isNotEmpty()) scope.launch {
+            photoInfo = "Enregistrement des photos…"
+            photoInfo = withContext(Dispatchers.IO) { app.societe.ajouterPhotosIntervention(target.clientId, target.siteId, target.interventionId, target.avant, uris) }
         }
         photoTarget = null
     }
-    val clients = app.societe.data.clients
-    val sites = clients.flatMap { client -> client.sites.map { site -> client to site } }
-        .sortedBy { it.first.nom.lowercase() + " " + it.second.nom.lowercase() }
-    LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item {
-            HudPanel(Modifier.fillMaxWidth(), title = "Historique des interventions") {
-                Text("Chaque intervention enregistrée par la voix ou Hermès apparaît ici, avec son diagnostic, les actions, les pièces et les mesures. Les rapports PDF sont conservés dans Obsidian.", color = HudDim, fontSize = 12.sp)
-                Text("☀️ ${sites.size} installation(s) · 🛠️ ${sites.sumOf { it.second.interventions.size }} intervention(s)", color = HudText, fontSize = 13.sp)
-                if (photoInfo.isNotBlank()) Text(photoInfo, color = LocalAccent.current, fontSize = 12.sp)
-            }
-        }
-        if (sites.isEmpty()) {
-            item { Text("Aucune installation enregistrée. Ajoute d'abord un client et son installation.", color = HudDim, fontSize = 13.sp) }
-        }
-        items(sites) { (client, site) ->
-            HudPanel(Modifier.fillMaxWidth(), title = client.nom + " — " + site.nom) {
+    val sites = app.societe.data.clients.flatMap { client -> client.sites.map { site -> client to site } }.sortedBy { it.first.nom.lowercase() + " " + it.second.nom.lowercase() }
+    LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { HudPanel(Modifier.fillMaxWidth(), title = "🛠️ Carnet technique photovoltaïque") {
+            Text("Un dossier structuré par installation : constats, réparations, pièces, mesures et photos. Les corrections faites par Hermès sont répercutées ici et dans les rapports.", color = HudDim, fontSize = 12.sp)
+            Text("☀️ " + sites.size + " installation(s)  ·  🛠️ " + sites.sumOf { it.second.interventions.size } + " intervention(s)", color = LocalAccent.current, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            if (photoInfo.isNotBlank()) Text(photoInfo, color = LocalAccent.current, fontSize = 12.sp)
+        } }
+        if (sites.isEmpty()) item { Text("Aucune installation enregistrée. Ajoute d'abord un client et son installation.", color = HudDim, fontSize = 13.sp) }
+        items(sites, key = { it.first.id + "_" + it.second.id }) { pair ->
+            val client = pair.first; val site = pair.second
+            HudPanel(Modifier.fillMaxWidth(), title = "☀️ " + client.nom + " · " + site.nom) {
                 Text(site.adresse.ifBlank { "Adresse non renseignée" }, color = HudDim, fontSize = 11.sp)
-                Text("${site.kwc} kWc · ${site.onduleur.ifBlank { "Onduleur non renseigné" }}", color = HudText, fontSize = 12.sp)
-                if (site.interventions.isEmpty()) {
-                    Text("Aucune intervention enregistrée.", color = HudDim, fontSize = 12.sp)
-                } else {
-                    site.interventions.sortedByDescending { it.date }.forEach { intervention ->
-                        HudDivider()
-                        Text(intervention.date + " · " + intervention.categorie + " · " + intervention.statut, color = LocalAccent.current, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        Text(intervention.description, color = HudText, fontSize = 13.sp)
-                        if (intervention.diagnostic.isNotBlank()) Text("Diagnostic : " + intervention.diagnostic, color = HudDim, fontSize = 11.sp)
-                        if (intervention.actions.isNotBlank()) Text("Actions : " + intervention.actions, color = HudText, fontSize = 12.sp)
-                        if (intervention.pieces.isNotBlank()) Text("Pièces : " + intervention.pieces, color = HudText, fontSize = 12.sp)
-                        if (intervention.mesures.isNotBlank()) Text("Mesures : " + intervention.mesures, color = HudText, fontSize = 12.sp)
-                        if (intervention.prochaineMaintenance.isNotBlank()) Text("Prochaine maintenance : " + intervention.prochaineMaintenance, color = HudDim, fontSize = 11.sp)
-                        Text("Photos : ${intervention.photosAvant.size} avant · ${intervention.photosApres.size} après", color = HudDim, fontSize = 11.sp)
-                        PhotosIntervention(intervention.photosAvant, "Avant")
-                        PhotosIntervention(intervention.photosApres, "Après")
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Action("📷 Ajouter avant") {
-                                photoTarget = InterventionPhotoTarget(client.id, site.id, intervention.id, true)
-                                photoPicker.launch(arrayOf("image/*"))
+                Text(site.kwc.toString() + " kWc · " + site.onduleur.ifBlank { "Onduleur non renseigné" }, color = HudText, fontSize = 12.sp)
+                HudDivider()
+                Text("HISTORIQUE · " + site.interventions.size + " fiche(s)", color = LocalAccent.current, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                if (site.interventions.isEmpty()) Text("Aucune intervention enregistrée.", color = HudDim, fontSize = 12.sp)
+                site.interventions.sortedByDescending { it.date }.forEach { item ->
+                    HudPanel(Modifier.fillMaxWidth(), title = item.categorie.replaceFirstChar { it.uppercase() } + " · " + dateFr(item.date)) {
+                        val statusText = when (item.statut.lowercase()) { "terminee" -> "✓ TERMINÉE"; "a_suivre" -> "◷ À SUIVRE"; "en_attente" -> "Ⅱ EN ATTENTE"; else -> item.statut.uppercase() }
+                        Text(statusText, color = if (item.statut == "terminee") Color(0xFF78D6A0) else Color(0xFFFFB45C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text(item.description, color = HudText, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        if (item.diagnostic.isNotBlank()) { HudDivider(); Text("DIAGNOSTIC / CONSTAT", color = LocalAccent.current, fontSize = 10.sp, fontWeight = FontWeight.Bold); Text(item.diagnostic, color = HudText, fontSize = 12.sp) }
+                        if (item.actions.isNotBlank()) { HudDivider(); Text("TRAVAUX RÉALISÉS", color = LocalAccent.current, fontSize = 10.sp, fontWeight = FontWeight.Bold); Text(item.actions, color = HudText, fontSize = 12.sp) }
+                        if (item.pieces.isNotBlank()) { HudDivider(); Text("PIÈCES / RÉFÉRENCES", color = LocalAccent.current, fontSize = 10.sp, fontWeight = FontWeight.Bold); Text(item.pieces, color = HudText, fontSize = 12.sp) }
+                        if (item.mesures.isNotBlank()) { HudDivider(); Text("MESURES RELEVÉES", color = LocalAccent.current, fontSize = 10.sp, fontWeight = FontWeight.Bold); Text(item.mesures, color = HudText, fontSize = 12.sp) }
+                        if (item.prochaineMaintenance.isNotBlank()) Text("PROCHAINE MAINTENANCE · " + dateFr(item.prochaineMaintenance), color = Color(0xFFFFC56E), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        if (item.notes.isNotBlank()) Text("Notes : " + item.notes, color = HudDim, fontSize = 11.sp)
+                        if (item.photosAvant.isNotEmpty() || item.photosApres.isNotEmpty()) { HudDivider(); Text("REPORTAGE PHOTO", color = LocalAccent.current, fontSize = 10.sp, fontWeight = FontWeight.Bold); PhotosIntervention(item.photosAvant, "Avant · " + item.photosAvant.size); PhotosIntervention(item.photosApres, "Après · " + item.photosApres.size) }
+                        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Action("✏️ Modifier") {
+                                editTarget = Triple(client, site, item); date = item.date; categorie = item.categorie
+                                description = item.description; diagnostic = item.diagnostic; actions = item.actions
+                                pieces = item.pieces; mesures = item.mesures; statut = item.statut
+                                prochaine = item.prochaineMaintenance; notes = item.notes
                             }
-                            Action("📷 Ajouter après") {
-                                photoTarget = InterventionPhotoTarget(client.id, site.id, intervention.id, false)
-                                photoPicker.launch(arrayOf("image/*"))
-                            }
+                            Action("📷 Avant") { photoTarget = InterventionPhotoTarget(client.id, site.id, item.id, true); picker.launch(arrayOf("image/*")) }
+                            Action("📷 Après") { photoTarget = InterventionPhotoTarget(client.id, site.id, item.id, false); picker.launch(arrayOf("image/*")) }
                         }
                     }
                 }
             }
+        }
+    }
+    editTarget?.let { target ->
+        Dialogue("Modifier l'intervention · " + target.first.nom, { editTarget = null }, actions = {
+            TextButton(onClick = {
+                val updated = target.third.copy(date = date.trim(), categorie = categorie.trim(), description = description.trim(), diagnostic = diagnostic.trim(), actions = actions.trim(), pieces = pieces.trim(), mesures = mesures.trim(), statut = statut.trim().lowercase(), prochaineMaintenance = prochaine.trim(), notes = notes.trim())
+                scope.launch { photoInfo = withContext(Dispatchers.IO) { app.societe.modifierIntervention(target.first.id, target.second.id, target.third.id, updated) } }
+                editTarget = null
+            }) { Text("Enregistrer", color = LocalAccent.current) }
+        }) {
+            Text(target.second.nom + " · ID " + target.third.id, color = HudDim, fontSize = 10.sp)
+            HudTextField(date, { date = it }, label = "Date (yyyy-MM-dd)")
+            HudTextField(categorie, { categorie = it }, label = "Catégorie")
+            HudTextField(statut, { statut = it }, label = "Statut : terminee, a_suivre, en_attente")
+            HudTextField(description, { description = it }, label = "Résumé", singleLine = false, maxLines = 4)
+            HudTextField(diagnostic, { diagnostic = it }, label = "Diagnostic / constat", singleLine = false, maxLines = 4)
+            HudTextField(actions, { actions = it }, label = "Travaux réalisés", singleLine = false, maxLines = 4)
+            HudTextField(pieces, { pieces = it }, label = "Pièces / références", singleLine = false, maxLines = 3)
+            HudTextField(mesures, { mesures = it }, label = "Mesures et unités", singleLine = false, maxLines = 3)
+            HudTextField(prochaine, { prochaine = it }, label = "Prochaine maintenance (yyyy-MM-dd)")
+            HudTextField(notes, { notes = it }, label = "Notes complémentaires", singleLine = false, maxLines = 3)
         }
     }
 }
