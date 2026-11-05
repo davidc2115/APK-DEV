@@ -88,8 +88,16 @@ object PontMcp {
                 }
                 return JSONObject().put("outils", resultat).toString() to false
             }
-            val cible = if (nomCanonique == "jarvis_appeler_outil") args.optString("nom_outil").removePrefix("mcp_jarvis_") else nomCanonique
-            if (cible == "jarvis_appeler_outil" || cible == "jarvis_rechercher_outils" || cible in EXCLUS || cible.isBlank())
+            // Alias directs de secours : toujours exposés, indépendants de la recherche du catalogue.
+            val aliasIntervention = when (nomCanonique) {
+                "jarvis_interventions_lister" -> "interventions_liste"
+                "jarvis_intervention_supprimer" -> "intervention_supprimer"
+                else -> null
+            }
+            val cible = aliasIntervention ?: if (nomCanonique == "jarvis_appeler_outil") args.optString("nom_outil").removePrefix("mcp_jarvis_") else nomCanonique
+            if (cible == "jarvis_appeler_outil" || cible == "jarvis_rechercher_outils" ||
+                nomCanonique == "jarvis_interventions_lister" || nomCanonique == "jarvis_intervention_supprimer" ||
+                cible in EXCLUS || cible.isBlank())
                 return "Outil cible invalide ou interdit : $cible" to true
             val arguments = if (nomCanonique == "jarvis_appeler_outil") args.optJSONObject("arguments") ?: JSONObject() else args
             val res = runCatching { runBlocking(Dispatchers.IO) { withTimeoutOrNull(170_000) { boite().execute(cible, arguments) } } }
@@ -285,6 +293,22 @@ object PontMcp {
                 .put("requete", JSONObject().put("type", "string").put("description", "Nom ou mots-clés du domaine recherché"))
                 .put("limite", JSONObject().put("type", "integer").put("description", "Nombre maximal de résultats (1 à 20)")))
                 .put("required", JSONArray().put("requete"))))
+        out.put(JSONObject()
+            .put("name", "jarvis_interventions_lister")
+            .put("description", "Consulte directement l'historique des interventions d'un client dans la base Société de Jarvis. Toujours exposé, sans recherche préalable.")
+            .put("inputSchema", JSONObject().put("type", "object").put("properties", JSONObject()
+                .put("client", JSONObject().put("type", "string").put("description", "Nom exact du client"))
+                .put("installation", JSONObject().put("type", "string").put("description", "Installation exacte, facultative ; vide pour toutes")))
+                .put("required", JSONArray().put("client"))))
+        out.put(JSONObject()
+            .put("name", "jarvis_intervention_supprimer")
+            .put("description", "Supprime une intervention précise dans la base Société. Exige l'ID exact renvoyé par jarvis_interventions_lister et confirmation='oui' après accord explicite.")
+            .put("inputSchema", JSONObject().put("type", "object").put("properties", JSONObject()
+                .put("client", JSONObject().put("type", "string").put("description", "Nom exact du client"))
+                .put("installation", JSONObject().put("type", "string").put("description", "Nom exact de l'installation"))
+                .put("intervention_id", JSONObject().put("type", "string").put("description", "Identifiant exact de l'intervention"))
+                .put("confirmation", JSONObject().put("type", "string").put("description", "Oui uniquement après accord explicite")))
+                .put("required", JSONArray().put("client").put("installation").put("intervention_id").put("confirmation"))))
         out.put(JSONObject()
             .put("name", "jarvis_appeler_outil")
             .put("description", "Exécute un outil JARVIS découvert avec jarvis_rechercher_outils. Transmets son nom exact et les arguments conformes à son schéma.")
