@@ -31,19 +31,19 @@ class SocieteService(
         }) }
         val encorePresente = data.client(clientId)?.sites?.firstOrNull { it.id == siteId }?.interventions?.any { it.id == interventionId } == true
         if (encorePresente) return "Échec : l’intervention $interventionId est toujours présente dans l’historique."
-        val safe = { value: String -> value.replace(Regex("[\\\\/:*?\"<>|]"), "_") }
-        val dossier = "Société/Interventions/${safe(client.nom)}/${safe(site.nom)}"
-        val base = "${cible.date} ${cible.id}"
-        val rapportSupprime = obsidian.supprimer(dossier, base)
-        val photosSupprimees = (cible.photosAvant + cible.photosApres).count { path ->
-            val nom = path.substringAfterLast('/')
-            obsidian.supprimerFichier(dossier, "${cible.id}-$nom")
-        }
+        // Retrouve les pièces par l'ID de l'intervention : le chemin peut différer du nom normalisé
+        // (accents, caractères spéciaux, renommage ou déplacement du dossier dans Obsidian).
+        val (fichiersSupprimes, fichiersRestants) = obsidian.supprimerPiecesIntervention(cible.date, cible.id)
         val localPhotos = File(ctx.filesDir, "societe/interventions/$interventionId")
         val localSupprime = !localPhotos.exists() || runCatching { localPhotos.deleteRecursively() }.getOrDefault(false)
-        return "🗑️ Intervention $interventionId supprimée de l’historique de ${client.nom} — ${site.nom}. " +
-            (if (rapportSupprime) "Rapport Obsidian/PDF supprimé. " else "Aucun rapport Obsidian/PDF restant à supprimer ou coffre indisponible. ") +
-            "$photosSupprimees photo(s) associée(s) supprimée(s)." + if (localSupprime) "" else " Certains fichiers locaux n’ont pas pu être effacés."
+        return buildString {
+            append("🗑️ Intervention $interventionId supprimée de l’historique de ${client.nom} — ${site.nom}.")
+            if (fichiersSupprimes.isNotEmpty()) append("\\n\\n📁 Pièces supprimées du coffre :\\n" + fichiersSupprimes.joinToString("\\n") { "- $it" })
+            if (fichiersRestants.isNotEmpty()) append("\\n\\n⚠️ Fichiers toujours présents ou non accessibles en écriture :\\n" + fichiersRestants.joinToString("\\n") { "- $it" })
+            if (fichiersSupprimes.isEmpty() && fichiersRestants.isEmpty()) append("\\nAucun PDF, rapport ou photo portant l'ID de cette intervention n'a été retrouvé dans le coffre.")
+            if (!localSupprime) append("\\n⚠️ Le dossier privé des photos n'a pas pu être entièrement supprimé.")
+            append("\\nLa fiche a bien été retirée de la base Société.")
+        }
     }
 
     /** Modifie une intervention existante et régénère sa note Obsidian ainsi que son PDF, en conservant ses photos. */
