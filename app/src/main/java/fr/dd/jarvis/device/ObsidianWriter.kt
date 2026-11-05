@@ -165,6 +165,31 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         return supprimes to echecs
     }
 
+    /**
+     * Après changement de date, retire uniquement les anciens rapports Markdown/PDF portant l'ID stable.
+     * Le rapport courant (keepBase) et les photos ne sont jamais touchés.
+     */
+    fun supprimerAnciennesVersionsIntervention(interventionId: String, keepBase: String): Pair<List<String>, List<String>> {
+        val tous = toutLister(20_000).filter { !it.second }.map { it.first }
+        val cibles = tous.filter { path ->
+            val nom = path.substringAfterLast('/')
+            val extension = nom.substringAfterLast('.', "").lowercase()
+            val dansInterventions = path.split('/').dropLast(1).any { normaliseNom(it) == normaliseNom("Interventions") }
+            dansInterventions && nom.contains(interventionId, true) && extension in setOf("md", "pdf") &&
+                !nom.equals("$keepBase.$extension", true)
+        }.distinct()
+        val supprimes = mutableListOf<String>()
+        val echecs = mutableListOf<String>()
+        for (path in cibles) {
+            val dossier = path.substringBeforeLast('/', "")
+            val nom = path.substringAfterLast('/')
+            val ok = supprimerFichier(dossier, nom)
+            val encorePresent = toutLister(20_000).any { !it.second && it.first.equals(path, true) }
+            if (ok && !encorePresent) supprimes += path else echecs += path
+        }
+        return supprimes to echecs
+    }
+
     /** Supprime une note par son chemin relatif (ex. « Contacts/Dupont.md »). Vrai si elle a bien disparu. */
     fun supprimerNote(chemin: String): Boolean {
         val p = withMd(chemin)
