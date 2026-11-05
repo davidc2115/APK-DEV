@@ -205,9 +205,9 @@ class ToolBox(
                 "cle_api" to prop("Clé API exacte fournie par l'utilisateur. Ne pas la recopier dans la réponse."),
                 "modele" to prop("Identifiant exact du modèle à utiliser, si connu. Optionnel."),
                 "endpoint" to prop("URL OpenAI-compatible personnalisée si nécessaire. Optionnel.")), listOf("fournisseur", "cle_api")))
-        put(tool("gerer_extension_hermes", "Consulte les catalogues ou installe une extension Hermes officielle (plugin ou serveur MCP). Actions : plugin_catalogue, plugin_liste, plugin_installer, plugin_activer, mcp_catalogue, mcp_liste, mcp_installer. Toute installation/activation exige une confirmation utilisateur.",
-            mapOf("action" to prop("plugin_catalogue, plugin_liste, plugin_installer, plugin_activer, mcp_catalogue, mcp_liste ou mcp_installer."),
-                "nom" to prop("Nom exact de l'extension du catalogue.")), listOf("action")))
+        put(tool("gerer_extension_hermes", "Découvre et gère les Skills, Plugins et serveurs MCP Hermes. Skills : skill_catalogue, skill_rechercher, skill_liste, skill_inspecter, skill_installer, skill_verifier, skill_mettre_a_jour. Plugins : plugin_catalogue, plugin_liste, plugin_installer, plugin_activer. MCP : mcp_catalogue, mcp_liste, mcp_installer. Pour un skill, recherche et inspecte toujours avant installation ; le scan de sécurité intégré reste obligatoire. Les installations/activations de plugins et MCP demandent confirmation.",
+            mapOf("action" to prop("skill_catalogue, skill_rechercher, skill_liste, skill_inspecter, skill_installer, skill_verifier, skill_mettre_a_jour, plugin_catalogue, plugin_liste, plugin_installer, plugin_activer, mcp_catalogue, mcp_liste ou mcp_installer."),
+                "nom" to prop("Mot-clé de recherche, nom de skill ou identifiant exact source/chemin du catalogue.")), listOf("action")))
         put(tool("jarvis_ai_agent", "Consulte directement l'agent IA interne de JARVIS : Gemini avec rotation de ses clés, puis Groq en secours. À utiliser pour obtenir un deuxième avis, une analyse spécialisée ou vérifier une conclusion ; cet agent ne pilote pas le téléphone et ne lance aucune action.", mapOf(
             "system" to prop("Rôle et consignes de l'agent spécialisé."),
             "prompt" to prop("Question autonome et contexte complet à analyser.")
@@ -435,7 +435,7 @@ class ToolBox(
         "gerer_extension_hermes" -> {
             val action = a.optString("action").trim().lowercase()
             val name = a.optString("nom").trim()
-            val mutating = action.endsWith("_installer") || action.endsWith("_activer")
+            val mutating = (action.endsWith("_installer") && !action.startsWith("skill_")) || action.endsWith("_activer") || action == "skill_mettre_a_jour"
             if (mutating && !confirm("Autoriser Hermès à exécuter « $action » pour « $name » dans Termux ?", true))
                 ToolResult("Action annulée.")
             else ToolResult(fr.dd.jarvis.hermes.HermesTermux.gererExtension(app, action, name))
