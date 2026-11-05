@@ -24,6 +24,11 @@ class SocieteService(
         val client = data.client(clientId) ?: return "Client introuvable."
         val site = client.sites.firstOrNull { it.id == siteId } ?: return "Installation introuvable."
         val ancienne = site.interventions.firstOrNull { it.id == interventionId } ?: return "Intervention introuvable."
+        if (runCatching { LocalDate.parse(maj.date) }.isFailure) return "Date invalide : utilise yyyy-MM-dd."
+        if (maj.prochaineMaintenance.isNotBlank() && runCatching { LocalDate.parse(maj.prochaineMaintenance) }.isFailure)
+            return "Date de prochaine maintenance invalide : utilise yyyy-MM-dd."
+        if (maj.statut !in setOf("terminee", "a_suivre", "en_attente")) return "Statut invalide : terminee, a_suivre ou en_attente."
+        if (maj.description.isBlank()) return "Le résumé de l'intervention ne peut pas être vide."
         val finale = maj.copy(id = ancienne.id, photosAvant = ancienne.photosAvant, photosApres = ancienne.photosApres)
         repo.update { current -> current.copy(clients = current.clients.map { c ->
             if (c.id != clientId) c else c.copy(sites = c.sites.map { s ->
