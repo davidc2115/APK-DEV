@@ -279,29 +279,218 @@ p "⚙️ Configuration écrite : modèle Gemini $modele${if (groq.isNotBlank())
      * par Jarvis vaut donc pour les deux, et 127.0.0.1 est le même réseau que celui de Jarvis.
      */
     internal val demarrage = """
-H="${'$'}{HOME}/.hermes"; mkdir -p "${'$'}{H}/logs"
+H="${'{HOME}/.hermes"; mkdir -p "@@{H}/logs"
 termux-wake-lock >/dev/null 2>&1 || true
 if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then
   p "✅ Hermès est déjà en ligne."
   exit 0
 fi
 p '🔄 Préparation du démarrage de la passerelle Hermès…'
-# Les anciennes installations ont parfois un marqueur .jarvis-mode vide (MODE n'était pas renseigné).
-# Détecter aussi directement le CLI dans Debian pour ne jamais lancer "hermes" dans le shell Termux.
+# Détecter Debian même si le marqueur historique .jarvis-mode est vide.
 HERMES_PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-if [ "${'
-if command -v setsid >/dev/null 2>&1; then
-  setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+if [ "$(cat "@@{H}/.jarvis-mode" 2>/dev/null)" = proot ] || proot-distro login debian --termux-home -- env -i HOME=/root PATH="@@{HERMES_PATH}" sh -c 'command -v hermes >/dev/null 2>&1'; then
+  CMD="proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash PATH=@@{HERMES_PATH} DEBIAN_FRONTEND=noninteractive hermes gateway run"
 else
-  nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
+  if ! command -v hermes >/dev/null 2>&1; then
+    p "❌ CLI Hermès introuvable dans Termux et Debian. Relance « Installer Hermès » pour réparer l’installation."
+    exit 127
+  fi
+  CMD="hermes gateway run"
 fi
-p "🚀 Passerelle lancée, vérification de l'API locale…"
-for i in ${'$'}(seq 1 60); do
+if command -v setsid >/dev/null 2>&1; then
+  setsid nohup sh -c "@@{CMD}" >> "@@{H}/logs/gateway.log" 2>&1 < /dev/null &
+else
+  nohup sh -c "@@{CMD}" >> "@@{H}/logs/gateway.log" 2>&1 < /dev/null &
+fi
+p "🚀 Passerelle lancée, vérification de l’API locale…"
+for i in @@(seq 1 60); do
   if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
   sleep 2
 done
 p "❌ Hermès ne répond pas. Dernières lignes du journal :"
-tail -n 10 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
+tail -n 10 "@@{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   @@{l}"; done
+exit 1
+""".trimIndent()}{HOME}/.hermes"; mkdir -p "${'{H}/logs"
+termux-wake-lock >/dev/null 2>&1 || true
+if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then
+  p "✅ Hermès est déjà en ligne."
+  exit 0
+fi
+p '🔄 Préparation du démarrage de la passerelle Hermès…'
+# Détecter Debian même si le marqueur historique .jarvis-mode est vide.
+HERMES_PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+if [ "$(cat "@@{H}/.jarvis-mode" 2>/dev/null)" = proot ] || proot-distro login debian --termux-home -- env -i HOME=/root PATH="@@{HERMES_PATH}" sh -c 'command -v hermes >/dev/null 2>&1'; then
+  CMD="proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash PATH=@@{HERMES_PATH} DEBIAN_FRONTEND=noninteractive hermes gateway run"
+else
+  if ! command -v hermes >/dev/null 2>&1; then
+    p "❌ CLI Hermès introuvable dans Termux et Debian. Relance « Installer Hermès » pour réparer l’installation."
+    exit 127
+  fi
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then
+  setsid nohup sh -c "@@{CMD}" >> "@@{H}/logs/gateway.log" 2>&1 < /dev/null &
+else
+  nohup sh -c "@@{CMD}" >> "@@{H}/logs/gateway.log" 2>&1 < /dev/null &
+fi
+p "🚀 Passerelle lancée, vérification de l’API locale…"
+for i in @@(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 10 "@@{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   @@{l}"; done
+exit 1
+""".trimIndent()}{H}/logs"
+termux-wake-lock >/dev/null 2>&1 || true
+if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then
+  p "✅ Hermès est déjà en ligne."
+  exit 0
+fi
+p '🔄 Préparation du démarrage de la passerelle Hermès…'
+# Détecter Debian même si le marqueur historique .jarvis-mode est vide.
+HERMES_PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+if [ "$(cat "${'{H}/.jarvis-mode" 2>/dev/null)" = proot ] || proot-distro login debian --termux-home -- env -i HOME=/root PATH="@@{HERMES_PATH}" sh -c 'command -v hermes >/dev/null 2>&1'; then
+  CMD="proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash PATH=@@{HERMES_PATH} DEBIAN_FRONTEND=noninteractive hermes gateway run"
+else
+  if ! command -v hermes >/dev/null 2>&1; then
+    p "❌ CLI Hermès introuvable dans Termux et Debian. Relance « Installer Hermès » pour réparer l’installation."
+    exit 127
+  fi
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then
+  setsid nohup sh -c "@@{CMD}" >> "@@{H}/logs/gateway.log" 2>&1 < /dev/null &
+else
+  nohup sh -c "@@{CMD}" >> "@@{H}/logs/gateway.log" 2>&1 < /dev/null &
+fi
+p "🚀 Passerelle lancée, vérification de l’API locale…"
+for i in @@(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 10 "@@{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   @@{l}"; done
+exit 1
+""".trimIndent()}{H}/.jarvis-mode" 2>/dev/null)" = proot ] || proot-distro login debian --termux-home -- env -i HOME=/root PATH="${'{HERMES_PATH}" sh -c 'command -v hermes >/dev/null 2>&1'; then
+  CMD="proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash PATH=@@{HERMES_PATH} DEBIAN_FRONTEND=noninteractive hermes gateway run"
+else
+  if ! command -v hermes >/dev/null 2>&1; then
+    p "❌ CLI Hermès introuvable dans Termux et Debian. Relance « Installer Hermès » pour réparer l’installation."
+    exit 127
+  fi
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then
+  setsid nohup sh -c "@@{CMD}" >> "@@{H}/logs/gateway.log" 2>&1 < /dev/null &
+else
+  nohup sh -c "@@{CMD}" >> "@@{H}/logs/gateway.log" 2>&1 < /dev/null &
+fi
+p "🚀 Passerelle lancée, vérification de l’API locale…"
+for i in @@(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 10 "@@{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   @@{l}"; done
+exit 1
+""".trimIndent()}{HERMES_PATH}" sh -c 'command -v hermes >/dev/null 2>&1'; then
+  CMD="proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash PATH=${'{HERMES_PATH} DEBIAN_FRONTEND=noninteractive hermes gateway run"
+else
+  if ! command -v hermes >/dev/null 2>&1; then
+    p "❌ CLI Hermès introuvable dans Termux et Debian. Relance « Installer Hermès » pour réparer l’installation."
+    exit 127
+  fi
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then
+  setsid nohup sh -c "@@{CMD}" >> "@@{H}/logs/gateway.log" 2>&1 < /dev/null &
+else
+  nohup sh -c "@@{CMD}" >> "@@{H}/logs/gateway.log" 2>&1 < /dev/null &
+fi
+p "🚀 Passerelle lancée, vérification de l’API locale…"
+for i in @@(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 10 "@@{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   @@{l}"; done
+exit 1
+""".trimIndent()}{HERMES_PATH} DEBIAN_FRONTEND=noninteractive hermes gateway run"
+else
+  if ! command -v hermes >/dev/null 2>&1; then
+    p "❌ CLI Hermès introuvable dans Termux et Debian. Relance « Installer Hermès » pour réparer l’installation."
+    exit 127
+  fi
+  CMD="hermes gateway run"
+fi
+if command -v setsid >/dev/null 2>&1; then
+  setsid nohup sh -c "${'{CMD}" >> "@@{H}/logs/gateway.log" 2>&1 < /dev/null &
+else
+  nohup sh -c "@@{CMD}" >> "@@{H}/logs/gateway.log" 2>&1 < /dev/null &
+fi
+p "🚀 Passerelle lancée, vérification de l’API locale…"
+for i in @@(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 10 "@@{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   @@{l}"; done
+exit 1
+""".trimIndent()}{CMD}" >> "${'{H}/logs/gateway.log" 2>&1 < /dev/null &
+else
+  nohup sh -c "@@{CMD}" >> "@@{H}/logs/gateway.log" 2>&1 < /dev/null &
+fi
+p "🚀 Passerelle lancée, vérification de l’API locale…"
+for i in @@(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 10 "@@{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   @@{l}"; done
+exit 1
+""".trimIndent()}{H}/logs/gateway.log" 2>&1 < /dev/null &
+else
+  nohup sh -c "${'{CMD}" >> "@@{H}/logs/gateway.log" 2>&1 < /dev/null &
+fi
+p "🚀 Passerelle lancée, vérification de l’API locale…"
+for i in @@(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 10 "@@{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   @@{l}"; done
+exit 1
+""".trimIndent()}{CMD}" >> "${'{H}/logs/gateway.log" 2>&1 < /dev/null &
+fi
+p "🚀 Passerelle lancée, vérification de l’API locale…"
+for i in @@(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 10 "@@{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   @@{l}"; done
+exit 1
+""".trimIndent()}{H}/logs/gateway.log" 2>&1 < /dev/null &
+fi
+p "🚀 Passerelle lancée, vérification de l’API locale…"
+for i in ${'(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 10 "@@{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   @@{l}"; done
+exit 1
+""".trimIndent()}(seq 1 60); do
+  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
+  sleep 2
+done
+p "❌ Hermès ne répond pas. Dernières lignes du journal :"
+tail -n 10 "${'{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   @@{l}"; done
+exit 1
+""".trimIndent()}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'{l}"; done
+exit 1
+""".trimIndent()}{l}"; done
 exit 1
 """.trimIndent()
 
@@ -325,7 +514,7 @@ ${'$'}{APT} install curl gnupg util-linux >/dev/null 2>&1 || p "⚠️ Paquets d
 case "${'$'}(uname -m)" in aarch64) ;; *) p "⚠️ Architecture ${'$'}(uname -m) : seul aarch64 est pris en charge officiellement.";; esac
 # Forcer Debian sous proot : le compilateur Android/Bionic ne peut pas construire pillow-heif.
 # Dans Debian aarch64/glibc, uv peut récupérer la roue manylinux précompilée.
-MODE="proot"
+MODE=""
 p "ℹ️ Installation dans Debian légère (proot) pour éviter les compilations incompatibles avec Android."
 if [ -z "${'$'}{MODE}" ]; then
   ${'$'}{APT} install proot-distro >> "${'$'}{LOG}" 2>&1 || { p "❌ Impossible d'installer proot-distro (réseau ?)."; exit 1; }
@@ -374,6 +563,7 @@ if [ -z "${'$'}{MODE}" ]; then
     exit 1
   fi
 fi
+MODE="proot"
 echo "${'$'}{MODE}" > "${'$'}{H}/.jarvis-mode"
 p "✅ Hermès installé (${'$'}{MODE})."
 """.trimIndent()
