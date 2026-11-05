@@ -1414,15 +1414,24 @@ class ToolBox(
             val site = if (siteName.isBlank()) client.sites.firstOrNull() else client.sites.firstOrNull { it.nom.equals(siteName, true) || it.nom.contains(siteName, true) }
             if (siteName.isNotBlank() && site == null) return ToolResult("Installation « $siteName » introuvable pour ${client.nom}.")
             if (location.isBlank()) location = site?.adresse?.takeIf { it.isNotBlank() } ?: client.adresse
-            val gps = site?.let { s -> if (s.lat != null && s.lon != null) "${s.lat}, ${s.lon}" else "" }.orEmpty()
-            if (gps.isNotBlank()) {
-                val label = site?.nom?.takeIf { it.isNotBlank() } ?: client.nom
-                val geo = "geo:${gps.substringBefore(",")},${gps.substringAfter(",")}?q=${gps.substringBefore(",")},${gps.substringAfter(",")}(${java.net.URLEncoder.encode(label, "UTF-8")})"
-                description = listOf(description, "Client : ${client.nom}", "Installation : ${site?.nom.orEmpty()}", "GPS : $gps", "Position : $geo").filter { it.isNotBlank() }.joinToString("\n")
-            } else {
-                description = listOf(description, "Client : ${client.nom}", site?.nom?.takeIf { it.isNotBlank() }?.let { "Installation : $it" }).filterNotNull().filter { it.isNotBlank() }.joinToString("\n")
-            }
             if (location.isBlank()) return ToolResult("La fiche de ${client.nom} ne contient pas d’adresse. Ajoute une adresse avant de créer ce rendez-vous.")
+            // Google Agenda ne rend pas les URI geo: ou les coordonnées brutes systématiquement cliquables.
+            // Des URL HTTPS OpenStreetMap explicites sont détectées comme liens par Google Agenda.
+            val position = app.societe.localiser(client, site)
+            val gps = position?.point?.let { "${it.lat}, ${it.lon}" }.orEmpty()
+            val addressUrl = "https://www.openstreetmap.org/search?query=" + java.net.URLEncoder.encode(location, "UTF-8")
+            val gpsUrl = position?.point?.let { point ->
+                "https://www.openstreetmap.org/?mlat=${point.lat}&mlon=${point.lon}#map=18/${point.lat}/${point.lon}"
+            }.orEmpty()
+            description = listOf(
+                description,
+                "Client : ${client.nom}",
+                site?.nom?.takeIf { it.isNotBlank() }?.let { "Installation : $it" },
+                "Adresse : $location",
+                "Voir l’adresse (OpenStreetMap) : $addressUrl",
+                gps.takeIf { it.isNotBlank() }?.let { "Coordonnées GPS : $it" },
+                gpsUrl.takeIf { it.isNotBlank() }?.let { "Ouvrir le point GPS (OpenStreetMap) : $it" }
+            ).filterNotNull().filter { it.isNotBlank() }.joinToString("\n")
         }
         val id = app.calendar.create(cal.id, title, start, end, location, description)
         return if (id != null) ToolResult("Événement « $title » créé le $start dans « ${app.calendar.displayName(cal)} » (#$id).${if (clientName.isNotBlank()) " Fiche client, adresse et GPS ajoutés lorsque disponibles." else ""}")
