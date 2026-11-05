@@ -1401,8 +1401,29 @@ class ToolBox(
         val start = parseDateTime(a.optString("start")) ?: return ToolResult("Date de début invalide.")
         val end = parseDateTime(a.optString("end")) ?: start.plusHours(1)
         val cal = app.calendar.findCalendar(a.optString("calendar"), writableOnly = true) ?: return ToolResult("Aucun agenda modifiable trouvé.")
-        val id = app.calendar.create(cal.id, title, start, end, a.optString("location"), a.optString("description"))
-        return if (id != null) ToolResult("Événement « $title » créé le $start dans « ${app.calendar.displayName(cal)} » (#$id).")
+        var location = a.optString("location").trim()
+        var description = a.optString("description").trim()
+        val clientName = a.optString("client").trim()
+        if (clientName.isNotBlank()) {
+            val matches = app.societe.data.clients.filter { it.nom.equals(clientName, true) || it.nom.contains(clientName, true) }
+            if (matches.size != 1) return ToolResult(if (matches.isEmpty()) "Fiche client introuvable : « $clientName »." else "Plusieurs clients correspondent à « $clientName » : ${matches.joinToString { it.nom }}. Précise lequel.")
+            val client = matches.single()
+            val siteName = a.optString("installation").trim()
+            val site = if (siteName.isBlank()) client.sites.firstOrNull() else client.sites.firstOrNull { it.nom.equals(siteName, true) || it.nom.contains(siteName, true) }
+            if (siteName.isNotBlank() && site == null) return ToolResult("Installation « $siteName » introuvable pour ${client.nom}.")
+            if (location.isBlank()) location = site?.adresse?.takeIf { it.isNotBlank() } ?: client.adresse
+            val gps = site?.let { s -> if (s.lat != null && s.lon != null) "${s.lat}, ${s.lon}" else "" }.orEmpty()
+            if (gps.isNotBlank()) {
+                val label = site?.nom?.takeIf { it.isNotBlank() } ?: client.nom
+                val geo = "geo:${gps.substringBefore(",")},${gps.substringAfter(",")}?q=${gps.substringBefore(",")},${gps.substringAfter(",")}(${java.net.URLEncoder.encode(label, "UTF-8")})"
+                description = listOf(description, "Client : ${client.nom}", "Installation : ${site?.nom.orEmpty()}", "GPS : $gps", "Position : $geo").filter { it.isNotBlank() }.joinToString("\n")
+            } else {
+                description = listOf(description, "Client : ${client.nom}", site?.nom?.takeIf { it.isNotBlank() }?.let { "Installation : $it" }).filterNotNull().filter { it.isNotBlank() }.joinToString("\n")
+            }
+            if (location.isBlank()) return ToolResult("La fiche de ${client.nom} ne contient pas d’adresse. Ajoute une adresse avant de créer ce rendez-vous.")
+        }
+        val id = app.calendar.create(cal.id, title, start, end, location, description)
+        return if (id != null) ToolResult("Événement « $title » créé le $start dans « ${app.calendar.displayName(cal)} » (#$id).${if (clientName.isNotBlank()) " Fiche client, adresse et GPS ajoutés lorsque disponibles." else ""}")
         else ToolResult("Échec de la création.")
     }
 
