@@ -24,13 +24,19 @@ class SocieteService(
         val client = data.client(clientId) ?: return "Client introuvable."
         val site = client.sites.firstOrNull { it.id == siteId } ?: return "Installation introuvable."
         val cible = site.interventions.firstOrNull { it.id == interventionId } ?: return "Intervention introuvable."
-        repo.update { current -> current.copy(clients = current.clients.map { c ->
-            if (c.id != clientId) c else c.copy(sites = c.sites.map { s ->
-                if (s.id != siteId) s else s.copy(interventions = s.interventions.filterNot { it.id == interventionId })
-            })
-        }) }
+        try {
+            repo.update { current -> current.copy(clients = current.clients.map { c ->
+                if (c.id != clientId) c else c.copy(sites = c.sites.map { s ->
+                    if (s.id != siteId) s else s.copy(interventions = s.interventions.filterNot { it.id == interventionId })
+                })
+            }) }
+        } catch (e: Exception) {
+            return "❌ Suppression non confirmée : la base Société n'a pas pu être enregistrée (${e.message ?: e.javaClass.simpleName}). La fiche est conservée ; aucun succès n'est annoncé."
+        }
         val encorePresente = data.client(clientId)?.sites?.firstOrNull { it.id == siteId }?.interventions?.any { it.id == interventionId } == true
         if (encorePresente) return "Échec : l’intervention $interventionId est toujours présente dans l’historique."
+        val relu = repo.data.client(clientId)?.sites?.firstOrNull { it.id == siteId }?.interventions?.none { it.id == interventionId } == true
+        if (!relu) return "❌ La suppression de $interventionId n'a pas été vérifiée dans la base Société ; vérifie l'historique avant toute nouvelle action."
         // Retrouve les pièces par l'ID de l'intervention : le chemin peut différer du nom normalisé
         // (accents, caractères spéciaux, renommage ou déplacement du dossier dans Obsidian).
         val (fichiersSupprimes, fichiersRestants) = obsidian.supprimerPiecesIntervention(cible.date, cible.id)
