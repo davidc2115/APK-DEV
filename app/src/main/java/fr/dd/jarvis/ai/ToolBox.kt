@@ -329,6 +329,7 @@ class ToolBox(
             "situation" to prop("preparer_demain | depart_travail | chantier | retour."),
             "date" to prop("Date yyyy-MM-dd optionnelle ; défaut aujourd'hui ou demain selon la situation."),
             "client" to prop("Nom du client du chantier, si connu."),
+            "installation" to prop("Nom de l'installation photovoltaïque si le client en possède plusieurs (optionnel pour consulter tout son historique)."),
             "destination" to prop("Adresse de destination pour le trajet retour ; obligatoire pour calculer un retour vers le domicile."),
             "calendar" to prop("Nom d'un agenda précis, optionnel.")
         ), listOf("situation")))
@@ -1068,6 +1069,10 @@ class ToolBox(
                 if (client.isNotBlank()) {
                     out.append("\n\nFICHE CLIENT\n")
                     out.append(societe.execute("client_fiche", JSONObject().put("nom", client)).text)
+                    out.append("\n\nHISTORIQUE PHOTOVOLTAÏQUE DU CLIENT\n")
+                    out.append(societe.execute("interventions_synthese", JSONObject()
+                        .put("client", client)
+                        .put("installation", a.optString("installation"))).text)
                 } else out.append("\nAucun client n'a été précisé : identifie le chantier depuis l'agenda et demande confirmation si plusieurs correspondent.")
             }
             "retour" -> {
