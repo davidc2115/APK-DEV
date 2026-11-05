@@ -1771,7 +1771,7 @@ private fun BoxPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.JarvisApp
 
 @Composable
 private fun DashboardMetric(label: String, value: String) {
-    Column(Modifier.weight(1f).background(Color(0x1AFFFFFF), androidx.compose.foundation.shape.RoundedCornerShape(10.dp)).padding(9.dp)) {
+    Column(Modifier.width(104.dp).background(Color(0x1AFFFFFF), androidx.compose.foundation.shape.RoundedCornerShape(10.dp)).padding(9.dp)) {
         Text(label, color = HudDim, fontSize = 9.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
         Text(value, color = HudText, fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
     }
