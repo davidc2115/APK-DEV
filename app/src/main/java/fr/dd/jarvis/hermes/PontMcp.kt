@@ -59,7 +59,9 @@ object PontMcp {
         override fun outils(): JSONArray = convertirOutils(boite().schemaAll())
         override fun appeler(nom: String, args: JSONObject): Pair<String, Boolean> {
             if (nom in EXCLUS) return "Outil indisponible : $nom" to true
-            val res = runCatching { runBlocking(Dispatchers.IO) { withTimeoutOrNull(170_000) { boite().execute(nom, args) } } }
+            // Certains clients Hermes préfixent les noms MCP par mcp_jarvis_. Normalise uniquement ce préfixe historique ; ToolBox valide ensuite le nom réel.
+            val nomCanonique = nom.removePrefix("mcp_jarvis_")
+            val res = runCatching { runBlocking(Dispatchers.IO) { withTimeoutOrNull(170_000) { boite().execute(nomCanonique, args) } } }
             return res.fold(
                 { r -> if (r == null) "⏱️ L'outil $nom a dépassé le délai." to true else r.text to false },
                 { e -> "❌ ${e.message ?: e.javaClass.simpleName}" to true }
