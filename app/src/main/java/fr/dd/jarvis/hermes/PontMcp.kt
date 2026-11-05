@@ -227,20 +227,27 @@ object PontMcp {
 
     /** Schéma « function » (OpenAI) des outils de Jarvis → outils MCP (name, description, inputSchema). */
     internal fun convertirOutils(tous: JSONArray): JSONArray {
-        val prioritaires = listOf("interventions_liste", "intervention_supprimer", "intervention_modifier", "intervention_enregistrer", "interventions_synthese")
+        // Groq accepte au maximum 128 outils par requête. On plafonne Jarvis à 100
+        // pour laisser une marge aux autres serveurs MCP connectés dans Hermès.
+        val prioritaires = listOf(
+            "interventions_liste", "intervention_supprimer", "intervention_modifier",
+            "intervention_enregistrer", "interventions_synthese"
+        )
         val fonctions = mutableListOf<JSONObject>()
+        val nomsDejaVus = mutableSetOf<String>()
         for (i in 0 until tous.length()) {
-            val f = tous.getJSONObject(i).optJSONObject("function") ?: continue
+            val f = tous.optJSONObject(i)?.optJSONObject("function") ?: continue
             val nom = f.optString("name")
-            if (nom.isNotBlank() && nom !in EXCLUS) fonctions += f
+            if (nom.isNotBlank() && nom !in EXCLUS && nomsDejaVus.add(nom)) fonctions += f
         }
-        // Certains clients MCP plafonnent les outils transmis au modèle : garder les interventions en tête.
+        // Les outils métier indispensables restent toujours visibles, puis on complète
+        // avec les autres outils sans dépasser le budget transmis aux modèles.
         fonctions.sortBy { f ->
             val index = prioritaires.indexOf(f.optString("name"))
             if (index < 0) prioritaires.size else index
         }
         val out = JSONArray()
-        for (f in fonctions) {
+        for (f in fonctions.take(maxOutilsExpose)) {
             val nom = f.optString("name")
             val schema = f.optJSONObject("parameters") ?: JSONObject().put("type", "object").put("properties", JSONObject())
             if (!schema.has("type")) schema.put("type", "object")
