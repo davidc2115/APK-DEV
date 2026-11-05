@@ -60,7 +60,12 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         if (sensitivePattern.containsMatchIn(value) || sensitivePattern.containsMatchIn(evidence))
             return "Apprentissage refusé : les informations sensibles ne sont pas mémorisées automatiquement."
         val key = "$category|${value.lowercase()}"
-        val hash = MessageDigest.getInstance("SHA-256").digest(evidence.lowercase().toByteArray())
+        // Une même preuve ne doit pas compter plusieurs fois à cause des accents, de la casse ou de la ponctuation.
+        val preuveNormalisee = java.text.Normalizer.normalize(evidence.lowercase(), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}"), "")
+            .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
+            .trim()
+        val hash = MessageDigest.getInstance("SHA-256").digest(preuveNormalisee.toByteArray())
             .joinToString("") { "%02x".format(it) }.take(20)
         val proofs = candidates.getOrPut(key) { linkedSetOf() }
         if (!proofs.add(hash)) return "Cette preuve a déjà été prise en compte (${proofs.size}/3)."
