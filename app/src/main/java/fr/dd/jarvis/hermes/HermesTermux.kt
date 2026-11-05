@@ -656,9 +656,9 @@ os.replace(name, p)
             "exec setpriv --reuid=\"${'$'}OWNER\" --regid=\"${'$'}GROUP\" --clear-groups env HOME=/root USER=jarvis LOGNAME=jarvis " +
             "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
             "bash -c \"cd /root/.hermes/hermes-agent && exec ./.hermes/bin/hermes update --yes\"' " +
-            "2>&1 | while IFS= read -r ligne; do p \"\\${'$'}ligne\"; done; " +
-            "UPDATE_STATUS=\\${'$'}?; if [ \"\\${'$'}UPDATE_STATUS\" -ne 0 ]; then " +
-            "p '❌ Mise à niveau Hermès échouée : consulte les lignes de progression ci-dessus. La configuration est interrompue.'; exit \"\\${'$'}UPDATE_STATUS\"; fi; " +
+            "2>&1 | while IFS= read -r ligne; do p \"${'$'}ligne\"; done; " +
+            "UPDATE_STATUS=${'$'}?; if [ \"${'$'}UPDATE_STATUS\" -ne 0 ]; then " +
+            "p '❌ Mise à niveau Hermès échouée : consulte les lignes de progression ci-dessus. La configuration est interrompue.'; exit \"${'$'}UPDATE_STATUS\"; fi; " +
             "p '✅ Mise à niveau Hermès terminée.'"
         val restartCommand = "proot-distro login debian --termux-home -- pkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; " +
             "pkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; sleep 3"
