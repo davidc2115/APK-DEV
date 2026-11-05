@@ -142,6 +142,12 @@ object Montage {
         val existants = resoudreSources(app, d.sources, travail)
         val nbPlans = max(2, ceil(d.dureeS / 5.0).toInt())
         val sb = storyboard(app, d, nbPlans, k, n)
+        // L'analyse éditoriale préalable est une étape obligatoire : ne dépense aucun crédit
+        // et ne génère aucun plan si l'agent d'analyse n'a pas produit de résultat exploitable.
+        if (sb.analyse.isBlank()) {
+            travail.deleteRecursively()
+            return "❌ Analyse préalable impossible : aucun plan vidéo n'a été généré. Réessaie lorsque l'agent d'analyse sera disponible."
+        }
 
         // 2. Plans IA pour compléter la durée (en parallèle, 3 à la fois).
         val dureeExistants = existants.sumOf { (f, image) -> if (image) 3500L else dureeMs(f) ?: 0L }
