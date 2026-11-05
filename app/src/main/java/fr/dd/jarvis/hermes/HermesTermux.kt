@@ -732,6 +732,24 @@ os.replace(name, p)
                 message = "❌ Termux n'a pas confirmé l'exécution du script après 35 secondes. Vérifie l'autorisation « Exécuter des commandes dans Termux », que Termux n'est pas restreint en arrière-plan et que le port local 38291 est joignable. Aucun succès n'est déclaré ; tu peux relancer sans réinstaller Hermès."
             }
         }, 35_000)
+        // Surveille aussi les blocages après le premier ACK (mise à niveau, plugins, écriture YAML).
+        configurationScope.launch {
+            var dernierSignalObserve = maxOf(signalAvantEnvoi, PontMcp.dernierSignal)
+            repeat(4) {
+                delay(120_000)
+                if (message.startsWith("❌") || message.startsWith("✅ Hermès est en ligne")) return@launch
+                val signal = PontMcp.dernierSignal
+                if (signal <= dernierSignalObserve) {
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        if (!message.startsWith("❌") && !message.startsWith("✅ Hermès est en ligne")) {
+                            message = "❌ Aucune progression Hermès reçue depuis 2 minutes. Le script peut être bloqué dans Termux ou le pont 38291 ne répond plus. Consulte ~/.hermes/logs/hermes-installer.log et ~/.hermes/logs/gateway.log dans Debian ; relance « Configurer Hermès » sans réinstaller."
+                        }
+                    }
+                    return@launch
+                }
+                dernierSignalObserve = signal
+            }
+        }
         return "⏳ Commande transmise à Termux ; attente de son accusé de réception réel (35 s maximum).";
     }
 
