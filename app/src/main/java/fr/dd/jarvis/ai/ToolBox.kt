@@ -231,7 +231,7 @@ class ToolBox(
             mapOf("quoi" to prop("images, fichiers (documents) ou tous (par défaut)."), "max" to prop("Nombre maximum à lister (par défaut 20).")), listOf()))
         put(tool("documents_lister", "Liste les documents importés dans la bibliothèque privée de JARVIS, avec leurs noms exacts.", mapOf()))
         put(tool("document_lire", "Extrait le texte d'un document importé pour l'analyser, le résumer, le convertir ou réutiliser son contenu. Extrait toutes les pages des PDF texte ; pour un PDF scanné, utilise document_analyser afin de lancer l'OCR visuel page par page.", mapOf("nom" to prop("Nom exact du fichier affiché dans la bibliothèque documentaire.")), listOf("nom")))
-        put(tool("document_analyser", "Analyse un média importé. Pour les PDF, extrait le texte de toutes les pages ou effectue l'OCR visuel de chaque page si le document est scanné.", mapOf("nom" to prop("Nom exact du fichier importé."), "question" to prop("Question ou objectif d'analyse.")), listOf("nom")))
+        put(tool("document_analyser", "Analyse les documents importés : PDF, Word, Excel, PowerPoint, texte, images et vidéos. Pour les documents bureautiques, restitue les titres, tableaux, feuilles et diapositives.", mapOf("nom" to prop("Nom exact du fichier importé."), "question" to prop("Question ou objectif d'analyse.")), listOf("nom")))
         put(tool("analyser_image", "Analyse une image déjà générée par generer_image (ou envoyée par l'utilisateur) : décrit son contenu, répond à une question dessus, lit un texte qu'elle contient, etc.",
             mapOf("image" to prop("Nom de fichier de l'image (vu dans jarvis-img:... ou via fichiers_generes), ou « derniere » pour la dernière générée."),
                 "question" to prop("Ce qu'il faut regarder ou dire sur l'image (optionnel ; par défaut une description détaillée).")), listOf("image")))
@@ -631,7 +631,7 @@ class ToolBox(
                         val mime = when (f.extension.lowercase()) { "mov" -> "video/quicktime"; "webm" -> "video/webm"; "mkv" -> "video/x-matroska"; "3gp" -> "video/3gpp"; else -> "video/mp4" }
                         ToolResult(app.llm.gemini.analyserImage(f.readBytes(), mime, question))
                     }
-                    else -> ToolResult("Ce format n'est pas un média image/vidéo/PDF pris en charge par cet outil. Utilise document_lire pour extraire le texte.")
+                    else -> ToolResult(fr.dd.jarvis.ai.DocumentStore.extract(app, f.name))
                 }
             }
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
