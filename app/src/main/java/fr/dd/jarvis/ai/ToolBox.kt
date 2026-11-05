@@ -63,9 +63,9 @@ class ToolBox(
                 "start" to prop("Début, yyyy-MM-dd'T'HH:mm (heure locale)."),
                 "end" to prop("Fin, yyyy-MM-dd'T'HH:mm. Par défaut début + 1 h."),
                 "calendar" to prop("Nom de l'agenda (optionnel)."),
-                "location" to prop("Lieu (optionnel)."),
+                "location" to prop("Adresse ou coordonnées du lieu (optionnel) : géocode le point. Google Agenda reçoit uniquement un lien GPS cliquable dans le champ Lieu ; l’adresse postale reste dans la description."),
                 "description" to prop("Notes (optionnel)."),
-                "client" to prop("Nom exact ou distinctif d’une fiche client Société : ajoute automatiquement son adresse et ses coordonnées GPS si elles sont enregistrées."),
+                "client" to prop("Nom exact ou distinctif d’une fiche client Société : utilise l’adresse et le GPS de la bonne installation. Le champ Lieu Google Agenda ne doit contenir que le lien GPS cliquable ; l’adresse complète reste dans la description."),
                 "installation" to prop("Nom de l’installation du client si plusieurs ; optionnel.")
             ), listOf("title", "start")))
         put(tool("update_event", "Modifie un rendez-vous existant (identifiant visible dans le planning : #id).",
@@ -1403,9 +1403,13 @@ class ToolBox(
         val start = parseDateTime(a.optString("start")) ?: return ToolResult("Date de début invalide.")
         val end = parseDateTime(a.optString("end")) ?: start.plusHours(1)
         val cal = app.calendar.findCalendar(a.optString("calendar"), writableOnly = true) ?: return ToolResult("Aucun agenda modifiable trouvé.")
-        var location = a.optString("location").trim()
+        var address = a.optString("location").trim()
+        var location = ""
         var description = a.optString("description").trim()
         val clientName = a.optString("client").trim()
+        var clientLabel = ""
+        var siteLabel = ""
+        var position: fr.dd.jarvis.societe.Geo.Localisation? = null
         if (clientName.isNotBlank()) {
             val matches = app.societe.data.clients.filter { it.nom.equals(clientName, true) || it.nom.contains(clientName, true) }
             if (matches.size != 1) return ToolResult(if (matches.isEmpty()) "Fiche client introuvable : « $clientName »." else "Plusieurs clients correspondent à « $clientName » : ${matches.joinToString { it.nom }}. Précise lequel.")
@@ -1418,32 +1422,29 @@ class ToolBox(
                 else -> null
             }
             if (siteName.isNotBlank() && site == null) return ToolResult("Installation « $siteName » introuvable pour ${client.nom}.")
-            if (location.isBlank()) location = site?.adresse?.takeIf { it.isNotBlank() } ?: client.adresse
-            if (location.isBlank()) return ToolResult("La fiche de ${client.nom} ne contient pas d’adresse. Ajoute une adresse avant de créer ce rendez-vous.")
-            // Google Agenda ne rend pas les URI geo: ou les coordonnées brutes systématiquement cliquables.
-            // Des URL HTTPS OpenStreetMap explicites sont détectées comme liens par Google Agenda.
-            val position = app.societe.localiser(client, site)
-            val gps = position?.point?.let { "${it.lat}, ${it.lon}" }.orEmpty()
-            val addressUrl = "https://www.openstreetmap.org/search?query=" + java.net.URLEncoder.encode(location, "UTF-8")
-            val gpsUrl = position?.point?.let { point ->
-                "https://www.openstreetmap.org/?mlat=${point.lat}&mlon=${point.lon}#map=18/${point.lat}/${point.lon}"
-            }.orEmpty()
-            // Google Agenda linkifie plus fiablement les URL HTTPS seules sur leur propre ligne.
-            // On conserve les libellés et les coordonnées en texte, sans URI geo: ni lien Google Maps.
-            description = listOf(
-                description,
-                "Client : ${client.nom}",
-                site?.nom?.takeIf { it.isNotBlank() }?.let { "Installation : $it" },
-                "Adresse : $location",
-                "Carte de l’adresse (OpenStreetMap) :",
-                addressUrl,
-                gps.takeIf { it.isNotBlank() }?.let { "Coordonnées GPS : $it" },
-                gpsUrl.takeIf { it.isNotBlank() }?.let { "Point GPS (OpenStreetMap) :" },
-                gpsUrl.takeIf { it.isNotBlank() }
-            ).filterNotNull().filter { it.isNotBlank() }.joinToString("\n")
+            if (address.isBlank()) address = site?.adresse?.takeIf { it.isNotBlank() } ?: client.adresse
+            if (address.isBlank()) return ToolResult("La fiche de ${client.nom} ne contient pas d’adresse. Ajoute une adresse avant de créer ce rendez-vous.")
+            position = app.societe.localiser(client, site)
+            clientLabel = client.nom
+            siteLabel = site?.nom.orEmpty()
+        } else if (address.isNotBlank()) {
+            position = fr.dd.jarvis.societe.Geo.localiser(address)
         }
+        // Google Agenda : le champ Lieu ne contient que le lien GPS ; l’adresse postale reste dans la description.
+        val point = position?.takeIf { it.precision.rang >= fr.dd.jarvis.societe.Geo.Precision.LIEU_DIT.rang }?.point
+        if (point != null) location = fr.dd.jarvis.societe.Geo.lienGoogleMaps(point)
+        val details = buildList {
+            if (clientLabel.isNotBlank()) add("Client : $clientLabel")
+            if (siteLabel.isNotBlank()) add("Installation : $siteLabel")
+            if (address.isNotBlank()) add("Adresse : $address")
+            if (point == null && address.isNotBlank()) add("Point GPS non trouvé avec une précision suffisante : le champ Lieu est laissé vide.")
+        }
+        description = listOf(description, details.joinToString("\n")).filter { it.isNotBlank() }.joinToString("\n")
         val id = app.calendar.create(cal.id, title, start, end, location, description)
-        return if (id != null) ToolResult("Événement « $title » créé le $start dans « ${app.calendar.displayName(cal)} » (#$id).${if (clientName.isNotBlank()) " Fiche client, adresse et GPS ajoutés lorsque disponibles." else ""}")
+        return if (id != null) ToolResult("Événement « $title » créé le $start dans « ${app.calendar.displayName(cal)} » (#$id)." +
+            if (point != null) " Le champ Lieu contient uniquement le lien GPS cliquable ; l’adresse est dans la description."
+            else if (address.isNotBlank()) " Adresse conservée dans la description ; aucun point GPS assez précis n’a été trouvé, le champ Lieu reste vide."
+            else "")
         else ToolResult("Échec de la création.")
     }
 
