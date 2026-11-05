@@ -58,7 +58,7 @@ object DocumentStore {
     fun extract(context: Context, name: String): String {
         val f = find(context, name) ?: return "Document introuvable : $name"
         val ext = f.extension.lowercase()
-        if (f.length() > 12L * 1024 * 1024) return "Document trop volumineux pour une extraction textuelle directe (limite 12 Mo)."
+        if (f.length() > 12L * 1024 * 1024 && ext != "pdf") return "Document trop volumineux pour une extraction textuelle directe (limite 12 Mo)."
         return when (ext) {
             "txt", "md", "csv", "tsv", "json", "xml", "kml", "gpx", "html", "htm", "rtf", "ics", "vcf", "log" ->
                 f.readText(Charsets.UTF_8).take(100_000)
@@ -81,7 +81,7 @@ object DocumentStore {
             stripper.setStartPage(1)
             stripper.setEndPage(pdf.numberOfPages)
             val raw = stripper.getText(pdf).replace("\u0000", "").trim()
-            if (raw.length < 40) {
+            if (raw.length < maxOf(40, pdf.numberOfPages * 30)) {
                 "PDF_SANS_TEXTE|${pdf.numberOfPages}|${file.name}"
             } else {
                 val complete = raw.length <= maxChars
