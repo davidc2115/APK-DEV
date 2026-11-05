@@ -249,6 +249,8 @@ p() { echo "${'$'}*"; command -v curl >/dev/null 2>&1 && curl -s -m 4 -X POST -H
             appendLine("    enabled: \"on\"")
             appendLine("    search_default_limit: 8")
             appendLine("    max_search_limit: 20")
+            appendLine("    listing: off")
+            appendLine("    listing_max_tokens: 2000")
         }
         return """
 H="${'$'}HOME/.hermes"; mkdir -p "${'$'}H/logs"
@@ -461,6 +463,21 @@ p = Path("/root/.hermes/config.yaml")
 if not p.exists():
     raise SystemExit("Configuration Hermes absente.")
 data = yaml.safe_load(p.read_text()) or {}
+# Force la divulgation progressive à chaque synchronisation : MCP ne doit jamais être envoyé en bloc à Groq.
+tools_cfg = data.setdefault("tools", {})
+if not isinstance(tools_cfg, dict):
+    raise SystemExit("Section tools invalide ; aucune modification.")
+search_cfg = tools_cfg.setdefault("tool_search", {})
+if isinstance(search_cfg, bool):
+    search_cfg = {"enabled": "on"} if search_cfg else {}
+    tools_cfg["tool_search"] = search_cfg
+if not isinstance(search_cfg, dict):
+    raise SystemExit("Section tools.tool_search invalide ; aucune modification.")
+search_cfg["enabled"] = "on"
+search_cfg["search_default_limit"] = 8
+search_cfg["max_search_limit"] = 20
+search_cfg["listing"] = "off"
+search_cfg["listing_max_tokens"] = 2000
 providers = data.setdefault("providers", {})
 if not isinstance(providers, dict):
     raise SystemExit("Section providers invalide ; aucune modification.")
@@ -611,8 +628,16 @@ os.replace(name, p)
             "JARVIS_HAS_$id=1 JARVIS_${id}_MODEL=${q(entry[3])} JARVIS_${id}_ENDPOINT=${q(entry[2])}"
         }
         val configCommand = "proot-distro login debian --termux-home -- env " + extEnv + " JARVIS_HAS_GEMINI=" + hasGemini + " JARVIS_HAS_GROQ=" + hasGroq + " JARVIS_GEMINI_MODEL=" + q(app.store.hermesModele.value.ifBlank { app.store.geminiModel.value }.ifBlank { "gemini-2.5-flash" }) + " JARVIS_GROQ_MODEL=" + q(model) + " JARVIS_CF_MODEL=" + q(cloudflareModel) + " JARVIS_CF_IDS=" + q(cfIds) + " JARVIS_ADVANCED_DELEGATION=\"\$PLUGIN_OK\" python3 -c " + q(py) + " || exit 1"
-        val script = listOf(prelude(app), envScript, pluginCommand, configCommand, demarrage).joinToString(System.lineSeparator())
-        return executer(app, script, libelle = "Orchestration multi-agents Hermès")
+        // Met à niveau l'installation existante : activer une option inconnue d'une ancienne version ne suffit pas.
+        val upgradeCommand = "p '🔄 Vérification et mise à niveau d’Hermès pour activer la découverte progressive…'; " +
+            "proot-distro login debian --termux-home -- env -i HOME=/root USER=root LOGNAME=root SHELL=/bin/bash " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -lc 'hermes update --yes' >> /data/data/com.termux/files/home/.hermes/logs/hermes-update.log 2>&1 " +
+            "&& p '✅ Version Hermès vérifiée/mise à niveau.' || p '⚠️ Mise à niveau Hermès indisponible ; poursuite avec la version installée.'"
+        // Le gateway doit être redémarré APRÈS l'écriture de config.yaml, sinon il garde l'ancien catalogue d'outils en mémoire.
+        val restartCommand = "pkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; sleep 2"
+        val script = listOf(prelude(app), upgradeCommand, envScript, pluginCommand, configCommand, restartCommand, demarrage).joinToString(System.lineSeparator())
+        return executer(app, script, libelle = "Mise à niveau et orchestration multi-agents Hermès")
             ?: "🧠 Gemini, Groq, Cloudflare et les autres modèles déjà configurés sont raccordés au routage multi-agents ; redémarrage Hermès demandé."
     }
 
