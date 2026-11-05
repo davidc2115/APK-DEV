@@ -54,20 +54,25 @@ object DocumentStore {
         }
     }
 
-    /** Extrait du texte pour les formats texte et les conteneurs Office Open XML. */
+    /** Extraction commune avec indicateurs explicites de couverture et de troncature. */
     fun extract(context: Context, name: String): String {
         val f = find(context, name) ?: return "Document introuvable : $name"
         val ext = f.extension.lowercase()
-        if (f.length() > 12L * 1024 * 1024 && ext != "pdf") return "Document trop volumineux pour une extraction textuelle directe (limite 12 Mo)."
+        if (f.length() > MAX_IMPORT) return "Document trop volumineux pour l'analyse intégrée (limite 200 Mo)."
+        val limit = 180_000
         return when (ext) {
-            "txt", "md", "csv", "tsv", "json", "xml", "kml", "gpx", "html", "htm", "rtf", "ics", "vcf", "log" ->
-                f.readText(Charsets.UTF_8).take(100_000)
-            "docx", "xlsx", "pptx", "odt", "ods" -> extractZipText(f)
+            "txt", "md", "csv", "tsv", "json", "xml", "kml", "gpx", "html", "htm", "rtf", "ics", "vcf", "log" -> {
+                val raw = f.readText(Charsets.UTF_8)
+                "DOCUMENT : ${f.name}\nFormat : ${ext.uppercase()}\nCaractères : ${raw.length}\n" +
+                    (if (raw.length <= limit) "Extraction complète.\n\n" else "ATTENTION : extrait limité à $limit caractères sur ${raw.length}.\n\n") +
+                    raw.take(limit)
+            }
+            "docx", "xlsx", "pptx", "odt", "ods" -> extractZipText(f, limit)
             "zip" -> zipListing(f)
-            "pdf" -> extractPdf(context, f)
-            "jpg", "jpeg", "png", "webp", "gif", "bmp", "mp4", "mov", "mkv", "webm", "avi" ->
-                "Fichier média importé : ${f.name} (${f.length()} octets). Utilise l'analyse multimodale pour examiner son contenu."
-            else -> "Format .$ext conservé, mais aucune extraction textuelle intégrée n'est disponible pour ce type."
+            "pdf" -> extractPdf(context, f, limit)
+            "jpg", "jpeg", "png", "webp", "gif", "bmp", "mp4", "mov", "mkv", "webm", "avi", "3gp" ->
+                "MÉDIA : ${f.name} (${f.length()} octets). Utilise document_analyser pour la lecture visuelle ou multimodale."
+            else -> "FORMAT_NON_PRIS_EN_CHARGE|${f.name}|.$ext : le fichier est conservé, mais son contenu ne peut pas être extrait automatiquement."
         }
     }
 
@@ -104,28 +109,85 @@ object DocumentStore {
         if (out.isEmpty()) "Archive vide ou illisible." else "Contenu de ${f.name} :\n" + out.joinToString("\n") { "- $it" }
     }.getOrElse { "Archive ZIP illisible : ${it.message}" }
 
-    private fun extractZipText(f: File): String = runCatching {
-        val out = StringBuilder()
-        ZipInputStream(f.inputStream()).use { z ->
+    /** Extrait les documents bureautiques en conservant les frontières paragraphes, diapositives et feuilles. */
+    private fun extractZipText(f: File, maxChars: Int): String = runCatching {
+        val entries = linkedMapOf<String, String>()
+        ZipInputStream(f.inputStream()).use { zip ->
             while (true) {
-                val e = z.nextEntry ?: break
-                val wanted = when (f.extension.lowercase()) {
-                    "docx" -> e.name == "word/document.xml"
-                    "xlsx" -> e.name.startsWith("xl/worksheets/sheet") && e.name.endsWith(".xml")
-                    "pptx" -> e.name.startsWith("ppt/slides/slide") && e.name.endsWith(".xml")
-                    "odt", "ods" -> e.name == "content.xml"
-                    else -> false
+                val entry = zip.nextEntry ?: break
+                if (!entry.isDirectory && entry.name.endsWith(".xml")) {
+                    val bytes = zip.readBytes()
+                    if (bytes.size <= 8 * 1024 * 1024) entries[entry.name] = bytes.toString(Charsets.UTF_8)
                 }
-                if (wanted) {
-                    val xml = z.readBytes().take(1_500_000).toByteArray().toString(Charsets.UTF_8)
-                    val text = Regex("<(?:\\w+:)?t(?:\\s[^>]*)?>(.*?)</(?:\\w+:)?t>", setOf(RegexOption.DOT_MATCHES_ALL))
-                        .findAll(xml).joinToString(" ") { it.groupValues[1].replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"") }
-                    if (text.isNotBlank()) out.append(text).append("\n")
-                }
-                z.closeEntry()
-                if (out.length > 80_000) break
+                zip.closeEntry()
             }
         }
-        out.toString().takeIf { it.isNotBlank() } ?: "Aucun texte exploitable trouvé dans ce document."
-    }.getOrElse { "Lecture du document impossible : ${it.message}" }
-}
+        fun decode(value: String) = value.replace("&amp;", "&").replace("&lt;", "<")
+            .replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'")
+        fun textNodes(xml: String): String = decode(
+            Regex("<(?:[A-Za-z0-9_]+:)?t(?:\\s[^>]*)?>(.*?)</(?:[A-Za-z0-9_]+:)?t>", setOf(RegexOption.DOT_MATCHES_ALL))
+                .findAll(xml).joinToString("") { it.groupValues[1] }
+        )
+        val out = StringBuilder()
+        when (f.extension.lowercase()) {
+            "docx" -> {
+                val xml = entries["word/document.xml"].orEmpty()
+                Regex("<(?:[A-Za-z0-9_]+:)?p(?:\\s[^>]*)?>(.*?)</(?:[A-Za-z0-9_]+:)?p>", setOf(RegexOption.DOT_MATCHES_ALL))
+                    .findAll(xml).forEach { m ->
+                        val line = textNodes(m.groupValues[1])
+                        if (line.isNotBlank()) out.append(line).append("\\n")
+                    }
+            }
+            "pptx" -> {
+                entries.filterKeys { it.matches(Regex("ppt/slides/slide[0-9]+\\.xml")) }
+                    .toSortedMap(compareBy { it.substringAfter("slide").substringBefore(".").toIntOrNull() ?: 0 })
+                    .forEach { (path, xml) ->
+                        out.append("\\n[ DIAPOSITIVE ").append(path.substringAfter("slide").substringBefore(".")).append(" ]\\n")
+                        Regex("<(?:[A-Za-z0-9_]+:)?p(?:\\s[^>]*)?>(.*?)</(?:[A-Za-z0-9_]+:)?p>", setOf(RegexOption.DOT_MATCHES_ALL))
+                            .findAll(xml).forEach { m ->
+                                val line = textNodes(m.groupValues[1])
+                                if (line.isNotBlank()) out.append(line).append("\\n")
+                            }
+                    }
+            }
+            "xlsx" -> {
+                val shared = Regex("<(?:[A-Za-z0-9_]+:)?si(?:\\s[^>]*)?>(.*?)</(?:[A-Za-z0-9_]+:)?si>", setOf(RegexOption.DOT_MATCHES_ALL))
+                    .findAll(entries["xl/sharedStrings.xml"].orEmpty()).map { textNodes(it.groupValues[1]) }.toList()
+                entries.filterKeys { it.matches(Regex("xl/worksheets/sheet[0-9]+\\.xml")) }
+                    .toSortedMap(compareBy { it.substringAfter("sheet").substringBefore(".").toIntOrNull() ?: 0 })
+                    .forEach { (path, xml) ->
+                        out.append("\\n[ FEUILLE ").append(path.substringAfter("sheet").substringBefore(".")).append(" ]\\n")
+                        Regex("<(?:[A-Za-z0-9_]+:)?row(?:\\s[^>]*)?>(.*?)</(?:[A-Za-z0-9_]+:)?row>", setOf(RegexOption.DOT_MATCHES_ALL))
+                            .findAll(xml).forEach { row ->
+                                val cells = Regex("<(?:[A-Za-z0-9_]+:)?c\\b([^>]*)>(.*?)</(?:[A-Za-z0-9_]+:)?c>", setOf(RegexOption.DOT_MATCHES_ALL))
+                                    .findAll(row.groupValues[1]).map { cell ->
+                                        val attrs = cell.groupValues[1]
+                                        val ref = Regex("\\br=\\"([^\\"]+)\\"").find(attrs)?.groupValues?.get(1).orEmpty()
+                                        val type = Regex("\\bt=\\"([^\\"]+)\\"").find(attrs)?.groupValues?.get(1).orEmpty()
+                                        val value = Regex("<(?:[A-Za-z0-9_]+:)?v(?:\\s[^>]*)?>(.*?)</(?:[A-Za-z0-9_]+:)?v>", setOf(RegexOption.DOT_MATCHES_ALL))
+                                            .find(cell.groupValues[2])?.groupValues?.get(1).orEmpty()
+                                        val display = if (type == "s") shared.getOrNull(value.toIntOrNull() ?: -1).orEmpty() else decode(value)
+                                        "$ref=$display"
+                                    }.toList()
+                                if (cells.isNotEmpty()) out.append(cells.joinToString(" | ")).append("\\n")
+                            }
+                    }
+            }
+            "odt", "ods" -> {
+                val xml = entries["content.xml"].orEmpty()
+                val pattern = if (f.extension.equals("odt", true))
+                    "<(?:text:)?p(?:\\s[^>]*)?>(.*?)</(?:text:)?p>"
+                else "<(?:table:)?table-cell(?:\\s[^>]*)?>(.*?)</(?:table:)?table-cell>"
+                Regex(pattern, setOf(RegexOption.DOT_MATCHES_ALL)).findAll(xml).forEach { m ->
+                    val line = decode(Regex("<[^>]+>").replace(m.groupValues[1], ""))
+                    if (line.isNotBlank()) out.append(line).append(if (f.extension.equals("ods", true)) " | " else "\\n")
+                }
+            }
+        }
+        val raw = out.toString().trim()
+        if (raw.isBlank()) "Aucun texte exploitable trouvé dans ${f.name}."
+        else "DOCUMENT : ${f.name}\\nFormat : ${f.extension.uppercase()}\\nCaractères extraits : ${raw.length}\\n" +
+            (if (raw.length <= maxChars) "Extraction complète des éléments textuels détectés.\\n\\n" else "ATTENTION : sortie limitée à $maxChars caractères sur ${raw.length}.\\n\\n") +
+            raw.take(maxChars)
+    }.getOrElse { "ÉCHEC_EXTRACTION_DOCUMENT|${f.name}|${it.message ?: "erreur inconnue"}" }
+}\n
