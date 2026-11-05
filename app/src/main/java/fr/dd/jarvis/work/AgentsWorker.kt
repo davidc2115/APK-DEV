@@ -106,9 +106,15 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
             },
             "Surveillance téléphone" to { if (store.agentNotifs.value && only == null) surveillanceTelephone() }
         )
+        var failures = 0
         for ((nom, f) in steps) {
-            try { f() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) { journal.append("- ⚠️ $nom : ${e.message?.take(120)}\n") }
+            try { f() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) {
+                failures++
+                journal.append("- ⚠️ $nom : ${e.message?.take(120)}\n")
+            }
         }
+        store.agentLastRunAt.set(System.currentTimeMillis().toString())
+        store.agentLastRunStatus.set(if (failures == 0) "Cycle terminé sans erreur" else "Cycle partiel : $failures étape(s) en erreur")
         if (journal.isNotBlank()) {
             runCatching {
                 val now = java.time.LocalDateTime.now()
