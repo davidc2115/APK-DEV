@@ -486,6 +486,7 @@ p "✅ Hermès installé (${'$'}{MODE})."
             val key = s.externalProviderKey(id)
             if (key.isBlank()) null else listOf(id, env, s.externalProviderEndpoint(id).ifBlank { defaultUrl }.trimEnd('/'), s.externalProviderModel(id), key)
         }
+        message = "⏳ Clés et fournisseurs IA récupérés. Construction des règles multi-agents…"
         val model = s.groqModel.value.ifBlank { "llama-3.3-70b-versatile" }
         val cloudflareModel = s.cfChatModel.value.ifBlank { "@cf/meta/llama-3.3-70b-instruct-fp8-fast" }
         val envScript = buildString {
@@ -685,6 +686,7 @@ with os.fdopen(fd, "w") as stream: yaml.safe_dump(data, stream, sort_keys=False,
 os.chmod(name, 0o600)
 os.replace(name, p)
 """.trimIndent()
+        message = "⏳ Règles multi-agents préparées. Assemblage des commandes de synchronisation…"
         val hasGemini = if (gemini.isNotEmpty()) "1" else "0"
         val hasGroq = if (groq.isNotEmpty()) "1" else "0"
         val cfIds = cloudflare.joinToString(",") { it.first }
@@ -716,6 +718,7 @@ os.replace(name, p)
             "p '✅ Mise à niveau Hermès terminée.'"
         val restartCommand = "proot-distro login debian --termux-home -- pkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; " +
             "pkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; sleep 3"
+        message = "⏳ Commandes de synchronisation prêtes. Assemblage du script final…"
         val script = listOf(
             prelude(app),
             "curl -fsS -m 4 -X POST -H 'Authorization: Bearer ${'$'}J_TOK' --data-binary pong '${'$'}J_URL' >/dev/null || exit 125",
