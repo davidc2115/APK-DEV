@@ -41,7 +41,8 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
 - Si l’utilisateur donne des coordonnées GPS pour une installation (copiées de Google Maps « 47.541558, 4.459845 », en degrés-minutes-secondes 47°32'29.6"N 4°27'35.4"E, ou un lien Google Maps), passe-les TELLES QUELLES dans site_gps de client_ecrire (avec site_nom si le client a plusieurs installations) ; pour le siège, dans gps de societe_info_set. Ces coordonnées priment sur l’adresse et ne sont jamais recalculées.
 - Si l’utilisateur est sur place et demande d’enregistrer « ma position », « ma localisation exacte », « ici »… sur une fiche client, appelle client_ecrire avec site_gps = « ma position » ET site_adresse = « ma position » (l’outil relève le GPS du téléphone et l’adresse précise correspondante) ; ne demande pas l’adresse. S’il parle de toutes ses installations (« ses deux installations »), mets site_nom = « toutes ».
 - Pour voir ou améliorer la précision des positions GPS des clients, utilise clients_gps (relocaliser=true pour recalculer avec la Base Adresse Nationale). N’invente jamais de coordonnées.
-- Pour chaque intervention photovoltaïque réellement réalisée, utilise intervention_enregistrer en précisant le client et l’installation. Enregistre séparément le diagnostic, les actions réalisées, les pièces remplacées, les mesures, le statut et la date de prochaine maintenance quand ils sont connus. Ne transforme jamais une hypothèse en panne confirmée et n’invente aucune mesure.
+- Pour chaque intervention photovoltaïque réellement réalisée ET lorsque l'utilisateur demande explicitement de l'enregistrer, utilise intervention_enregistrer. Ne l'utilise jamais pour répondre à une demande de suppression, correction ou consultation. N'invente jamais une intervention de test, un intitulé « test », ni une intervention de remplacement pour simuler une suppression.
+- Pour supprimer une intervention : appelle d'abord interventions_liste, lis les identifiants affichés (ID), présente la date, la catégorie, le résumé et l'ID de la fiche ciblée, puis demande une confirmation explicite à l'utilisateur. Après son « oui » explicite, appelle intervention_supprimer avec client, installation, intervention_id exact et confirmation="oui". Si l'ID manque, si plusieurs fiches correspondent ou si l'utilisateur n'a pas confirmé, arrête-toi sans rien créer ni supprimer. N'appelle jamais intervention_enregistrer en secours d'une suppression.
 - Les photos avant/après sont ajoutées depuis l'onglet Société > Interventions, avec les boutons « Ajouter avant » et « Ajouter après ». Après avoir enregistré l'intervention, indique à l'utilisateur où joindre les photos si elles sont disponibles ; ne prétends jamais qu'une photo a été enregistrée si l'interface ne l'a pas confirmé. Les images sont conservées dans le stockage privé et comme pièces jointes Obsidian.
 - Pour consulter le suivi d’une installation, utilise interventions_liste. Si le client possède plusieurs installations, demande laquelle avant d’enregistrer ou d’afficher un historique.
 - Pour corriger ou compléter une intervention existante, utilise intervention_modifier avec le client, l’installation et l’identifiant retourné par interventions_liste. Les champs omis restent inchangés ; « effacer » vide explicitement un champ. La fiche Jarvis, la note Obsidian et le PDF sont actualisés ensemble. Ne crée pas une nouvelle intervention pour une simple correction.
@@ -126,12 +127,13 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "mesures" to prop("Mesures réellement relevées avec unités."), "statut" to prop("terminee | a_suivre | en_attente."),
             "prochaine_maintenance" to prop("Date recommandée yyyy-MM-dd si connue."), "notes" to prop("Informations complémentaires.")
         ), listOf("client", "description")),
-        tool("intervention_supprimer", "Supprime une intervention précise en double ou erronée de l'historique Jarvis et nettoie son rapport Obsidian/PDF et ses photos. Exige l'identifiant exact obtenu par interventions_liste et une confirmation explicite.", mapOf(
+        tool("intervention_supprimer", "Supprime une intervention précise de l'historique Jarvis et nettoie son rapport Obsidian/PDF et ses photos. À appeler uniquement après interventions_liste, avec l'ID exact et après un « oui » explicite de l'utilisateur. Ne crée jamais de nouvelle intervention.", mapOf(
             "client" to prop("Nom exact du client."),
             "installation" to prop("Nom exact de l'installation."),
-            "intervention_id" to prop("Identifiant exact de l'intervention à supprimer, obtenu par interventions_liste.")
-        ), listOf("client", "installation", "intervention_id")),
-        tool("interventions_liste", "Consulte l'historique des interventions photovoltaïques d'un client et éventuellement d'une installation.", mapOf(
+            "intervention_id" to prop("Identifiant exact de la fiche à supprimer, affiché par interventions_liste."),
+            "confirmation" to prop("Doit être exactement « oui » uniquement après confirmation explicite de l'utilisateur.")
+        ), listOf("client", "installation", "intervention_id", "confirmation")),
+        tool("interventions_liste", "Consulte l'historique des interventions photovoltaïques d'un client et renvoie l'identifiant exact de chaque fiche.", mapOf(
             "client" to prop("Nom exact du client."), "installation" to prop("Nom de l'installation si le client en possède plusieurs.")
         ), listOf("client")),
         tool("intervention_modifier", "Modifie une intervention existante dans Jarvis et régénère sa note Obsidian et son PDF sans supprimer les photos. Les champs omis restent inchangés ; « effacer » vide explicitement un champ.", mapOf(
@@ -649,8 +651,8 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         val id = a.s("intervention_id")
         val cible = site.interventions.firstOrNull { it.id == id }
             ?: return err("Intervention $id introuvable. Consulte interventions_liste et reprends son identifiant exact.")
-        if (!confirm("Supprimer définitivement l’intervention $id du ${cible.date} (${cible.categorie}) pour ${client.nom} — ${site.nom} ? Son rapport et ses photos associés seront également supprimés lorsque accessibles.", true))
-            return err("Suppression refusée. L’intervention $id est conservée.")
+        val confirmation = a.s("confirmation").trim().lowercase()
+        if (confirmation != "oui") return err("Aucune suppression effectuée. Présente d'abord la fiche #$id (${cible.date}, ${cible.categorie}, ${cible.description.take(120)}) à l'utilisateur et attends son « oui » explicite. Ne crée aucune autre intervention.")
         val resultat = svc.supprimerIntervention(client.id, site.id, id)
         return if (svc.data.client(client.id)?.sites?.firstOrNull { it.id == site.id }?.interventions?.none { it.id == id } == true) ok(resultat) else err(resultat)
     }
@@ -664,7 +666,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         if (liste.isEmpty()) return ok("Aucune intervention enregistrée pour " + client.nom + " — " + site.nom + ".")
         return ok("# Historique — " + client.nom + " / " + site.nom + "\n\n" + liste.joinToString("\n\n") { item ->
             buildString {
-                append("## " + item.date + " · " + item.categorie + " · " + item.statut + "\n")
+                append("## " + item.date + " · " + item.categorie + " · " + item.statut + " · ID #" + item.id + "\n")
                 append(item.description)
                 if (item.diagnostic.isNotBlank()) append("\n- Diagnostic : " + item.diagnostic)
                 if (item.actions.isNotBlank()) append("\n- Actions : " + item.actions)
