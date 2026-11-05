@@ -47,6 +47,35 @@ class SocieteService(
         return route
     }
 
+    /**
+     * Distance routière siège → client. Si l'adresse générale du client manque,
+     * utilise la première adresse de site disponible. Le résultat routier réel est mémorisé.
+     */
+    suspend fun distanceClient(client: Client): Geo.Route? {
+        val hq = data.societe
+        val site = if (client.adresse.isBlank()) client.sites.firstOrNull { it.adresse.isNotBlank() || it.lat != null } else null
+        val destination = site?.adresse?.ifBlank { null } ?: client.adresse
+        if (hq.adresse.isBlank() || (destination.isBlank() && site?.lat == null)) return null
+        val key = cle(hq.adresse, destination)
+        if (client.distanceKm != null && client.distanceCle == key)
+            return Geo.Route(client.distanceKm, client.distanceDureeMin ?: 0.0, false)
+        val origin = localiserSiege()?.point ?: return null
+        val target = localiser(client, site)?.point ?: return null
+        val route = Geo.route(origin, target) ?: return null
+        if (!route.estime) {
+            repo.update { current ->
+                current.copy(clients = current.clients.map { c ->
+                    if (c.id == client.id) c.copy(
+                        distanceKm = route.km,
+                        distanceDureeMin = route.minutes,
+                        distanceCle = key
+                    ) else c
+                })
+            }
+        }
+        return route
+    }
+
     // ------------------------------------------------------------------ géolocalisation (GPS)
 
     /** Position enregistrée d'une installation, avec sa précision ; null si aucune. */
@@ -103,7 +132,10 @@ class SocieteService(
                 societe = d.societe.copy(lat = nouvelle.point.lat, lon = nouvelle.point.lon, gpsPrecision = nouvelle.precision.name),
                 // Le point de départ a bougé : les distances en cache sont à recalculer.
                 clients = if (connue != null && Geo.haversine(connue.point, nouvelle.point) <= 0.03) d.clients
-                else d.clients.map { c -> c.copy(sites = c.sites.map { it.copy(distanceKm = null, dureeMin = null, distanceCle = "") }) }
+                else d.clients.map { c -> c.copy(
+                    distanceKm = null, distanceDureeMin = null, distanceCle = "",
+                    sites = c.sites.map { it.copy(distanceKm = null, dureeMin = null, distanceCle = "") }
+                ) }
             )
         }
         return nouvelle
