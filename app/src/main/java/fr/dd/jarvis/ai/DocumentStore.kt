@@ -162,8 +162,8 @@ object DocumentStore {
                                 val cells = Regex("<(?:[A-Za-z0-9_]+:)?c\\b([^>]*)>(.*?)</(?:[A-Za-z0-9_]+:)?c>", setOf(RegexOption.DOT_MATCHES_ALL))
                                     .findAll(row.groupValues[1]).map { cell ->
                                         val attrs = cell.groupValues[1]
-                                        val ref = Regex("""\\br="([^"]+)"""").find(attrs)?.groupValues?.get(1).orEmpty()
-                                        val type = Regex("""\\bt="([^"]+)"""").find(attrs)?.groupValues?.get(1).orEmpty()
+                                        val ref = Regex("""r="([^"]+)"""").find(attrs)?.groupValues?.get(1).orEmpty()
+                                        val type = Regex("""t="([^"]+)"""").find(attrs)?.groupValues?.get(1).orEmpty()
                                         val value = Regex("<(?:[A-Za-z0-9_]+:)?v(?:\\s[^>]*)?>(.*?)</(?:[A-Za-z0-9_]+:)?v>", setOf(RegexOption.DOT_MATCHES_ALL))
                                             .find(cell.groupValues[2])?.groupValues?.get(1).orEmpty()
                                         val display = if (type == "s") shared.getOrNull(value.toIntOrNull() ?: -1).orEmpty() else decode(value)
