@@ -20,7 +20,7 @@ class SocieteTools(
         val NAMES = setOf(
             "societe_info_set", "societe_info_get", "tarif_set", "tarif_delete", "regles_set", "client_ecrire", "client_fiche", "client_supprimer",
             "document_creer", "document_action", "document_email", "societe_liste", "employe_ecrire", "paie", "reserve_bilan",
-            "presentation_modifier", "distance_deplacement", "clients_exporter_kml", "kml_couleurs_set", "clients_gps", "intervention_enregistrer", "intervention_modifier", "interventions_liste", "interventions_synthese"
+            "presentation_modifier", "distance_deplacement", "clients_exporter_kml", "kml_couleurs_set", "clients_gps", "intervention_enregistrer", "intervention_modifier", "intervention_supprimer", "interventions_liste", "interventions_synthese"
         )
         private val KEYWORDS = Regex(
             "devis|factur|client|soci[ée]t[ée]|tarif|remise|d[ée]placement|paie|salaire|bulletin|r[ée]serve|dividende|b[ée]n[ée]fice|" +
@@ -45,6 +45,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
 - Les photos avant/après sont ajoutées depuis l'onglet Société > Interventions, avec les boutons « Ajouter avant » et « Ajouter après ». Après avoir enregistré l'intervention, indique à l'utilisateur où joindre les photos si elles sont disponibles ; ne prétends jamais qu'une photo a été enregistrée si l'interface ne l'a pas confirmé. Les images sont conservées dans le stockage privé et comme pièces jointes Obsidian.
 - Pour consulter le suivi d’une installation, utilise interventions_liste. Si le client possède plusieurs installations, demande laquelle avant d’enregistrer ou d’afficher un historique.
 - Pour corriger ou compléter une intervention existante, utilise intervention_modifier avec le client, l’installation et l’identifiant retourné par interventions_liste. Les champs omis restent inchangés ; « effacer » vide explicitement un champ. La fiche Jarvis, la note Obsidian et le PDF sont actualisés ensemble. Ne crée pas une nouvelle intervention pour une simple correction.
+- Pour supprimer une intervention en double ou erronée, consulte d’abord interventions_liste, identifie exactement la bonne fiche par son ID et utilise intervention_supprimer. L’outil demande une confirmation explicite avant suppression et retire la fiche de Jarvis, le rapport Obsidian/PDF et les photos associées si elles sont accessibles. Ne supprime jamais une intervention sur la seule base d’une date ou d’un intitulé ambigu.
 - Pour un devis ou une facture, identifie le client et l'installation (client_ecrire si le client n'existe pas encore). Si une information indispensable manque (client, prestation), demande-la en une phrase.
 - Le texte renvoyé par les outils société est déjà mis en forme et affiché tel quel : ne le répète pas.
 - Les montants sont toujours en euros, la TVA est gérée par l'application.
@@ -125,6 +126,11 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "mesures" to prop("Mesures réellement relevées avec unités."), "statut" to prop("terminee | a_suivre | en_attente."),
             "prochaine_maintenance" to prop("Date recommandée yyyy-MM-dd si connue."), "notes" to prop("Informations complémentaires.")
         ), listOf("client", "description")),
+        tool("intervention_supprimer", "Supprime une intervention précise en double ou erronée de l'historique Jarvis et nettoie son rapport Obsidian/PDF et ses photos. Exige l'identifiant exact obtenu par interventions_liste et une confirmation explicite.", mapOf(
+            "client" to prop("Nom exact du client."),
+            "installation" to prop("Nom exact de l'installation."),
+            "intervention_id" to prop("Identifiant exact de l'intervention à supprimer, obtenu par interventions_liste.")
+        ), listOf("client", "installation", "intervention_id")),
         tool("interventions_liste", "Consulte l'historique des interventions photovoltaïques d'un client et éventuellement d'une installation.", mapOf(
             "client" to prop("Nom exact du client."), "installation" to prop("Nom de l'installation si le client en possède plusieurs.")
         ), listOf("client")),
@@ -221,6 +227,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         "client_fiche" -> clientFiche(a)
         "intervention_enregistrer" -> interventionEnregistrer(a)
         "intervention_modifier" -> interventionModifier(a)
+        "intervention_supprimer" -> interventionSupprimer(a)
         "interventions_liste" -> interventionsListe(a)
         "interventions_synthese" -> interventionsSynthese(a)
         "client_supprimer" -> clientSupprimer(a)
@@ -622,6 +629,19 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             notes = valeur("notes", ancienne.notes)
         )
         return ok(svc.modifierIntervention(client.id, site.id, id, maj))
+    }
+
+    private suspend fun interventionSupprimer(a: JSONObject): ToolResult {
+        val (client, erreur) = clientParNom(a.s("client"))
+        if (client == null) return err(erreur!!)
+        val site = siteDe(client, a.s("installation")) ?: return err("Installation introuvable ou ambiguë pour ${client.nom}.")
+        val id = a.s("intervention_id")
+        val cible = site.interventions.firstOrNull { it.id == id }
+            ?: return err("Intervention $id introuvable. Consulte interventions_liste et reprends son identifiant exact.")
+        if (!confirm("Supprimer définitivement l’intervention $id du ${cible.date} (${cible.categorie}) pour ${client.nom} — ${site.nom} ? Son rapport et ses photos associés seront également supprimés lorsque accessibles.", true))
+            return err("Suppression refusée. L’intervention $id est conservée.")
+        val resultat = svc.supprimerIntervention(client.id, site.id, id)
+        return if (svc.data.client(client.id)?.sites?.firstOrNull { it.id == site.id }?.interventions?.none { it.id == id } == true) ok(resultat) else err(resultat)
     }
 
     private fun interventionsListe(a: JSONObject): ToolResult {
