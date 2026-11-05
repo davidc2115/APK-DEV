@@ -208,7 +208,8 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     fr.dd.jarvis.work.AgentsScheduler.apply(ctx, store)
                 }
                 Spacer(Modifier.height(8.dp))
-                HudPanel(Modifier.fillMaxWidth(), title = "Centre de surveillance du téléphone") {
+            }
+            HudPanel(Modifier.fillMaxWidth(), title = "Centre de surveillance du téléphone") {
                     val phone = remember(tick) { fr.dd.jarvis.device.PhoneHealth.dashboard(app) }
                     val samples = remember(tick, store.agentLastRunAt.value) { fr.dd.jarvis.device.PhoneHealth.history(app) }
                     val batterySeries = samples.mapNotNull { it.battery?.toFloat() }
@@ -243,6 +244,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     Text("Mesures locales en lecture seule. Aucune analyse des messages, photos ou contenus personnels.", color = HudDim, fontSize = 10.sp)
                     HudButton("Actualiser les mesures", Modifier.fillMaxWidth()) { fr.dd.jarvis.device.PhoneHealth.recordSample(app); tick++ }
                 }
+            HudPanel(Modifier.fillMaxWidth(), title = "Pilotage des agents") {
                 Text("AGENTS SPÉCIALISÉS · VIGNETTES DE CONTRÔLE", color = LocalAccent.current, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 12.sp)
                 Text("Chaque vignette décrit le travail réellement effectué par l'agent. Les interrupteurs prennent effet au prochain cycle.", color = HudDim, fontSize = 11.sp)
                 Spacer(Modifier.height(8.dp))
