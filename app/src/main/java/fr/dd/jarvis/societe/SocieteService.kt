@@ -31,24 +31,24 @@ class SocieteService(
             })
         }) }
         val safe = { value: String -> value.replace(Regex("[\\\\/:*?\"<>|]"), "_") }
-        val dossier = "Société/Interventions/\${safe(client.nom)}/\${safe(site.nom)}"
-        val base = "\${finale.date} \${finale.id}"
+        val dossier = "Société/Interventions/${safe(client.nom)}/${safe(site.nom)}"
+        val base = "${finale.date} ${finale.id}"
         val md = buildString {
-            append("# Intervention — \${client.nom} / \${site.nom}\\n\\n")
-            append("- Date : \${finale.date}\\n- Catégorie : \${finale.categorie}\\n- Statut : \${finale.statut}\\n\\n")
-            append("## Description\\n\${finale.description}\\n")
-            if (finale.diagnostic.isNotBlank()) append("\\n## Diagnostic\\n\${finale.diagnostic}\\n")
-            if (finale.actions.isNotBlank()) append("\\n## Actions réalisées\\n\${finale.actions}\\n")
-            if (finale.pieces.isNotBlank()) append("\\n## Pièces remplacées\\n\${finale.pieces}\\n")
-            if (finale.mesures.isNotBlank()) append("\\n## Mesures relevées\\n\${finale.mesures}\\n")
-            if (finale.photosAvant.isNotEmpty()) { append("\\n## Photos avant intervention\\n"); finale.photosAvant.forEach { append("![[\${finale.id}-\${it.substringAfterLast('/')}]]\\n") } }
-            if (finale.photosApres.isNotEmpty()) { append("\\n## Photos après intervention\\n"); finale.photosApres.forEach { append("![[\${finale.id}-\${it.substringAfterLast('/')}]]\\n") } }
-            if (finale.prochaineMaintenance.isNotBlank()) append("\\n## Prochaine maintenance\\n\${finale.prochaineMaintenance}\\n")
-            if (finale.notes.isNotBlank()) append("\\n## Notes\\n\${finale.notes}\\n")
+            append("# Intervention — ${client.nom} / ${site.nom}\n\n")
+            append("- Date : ${finale.date}\n- Catégorie : ${finale.categorie}\n- Statut : ${finale.statut}\n\n")
+            append("## Description\n${finale.description}\n")
+            if (finale.diagnostic.isNotBlank()) append("\n## Diagnostic\n${finale.diagnostic}\n")
+            if (finale.actions.isNotBlank()) append("\n## Actions réalisées\n${finale.actions}\n")
+            if (finale.pieces.isNotBlank()) append("\n## Pièces remplacées\n${finale.pieces}\n")
+            if (finale.mesures.isNotBlank()) append("\n## Mesures relevées\n${finale.mesures}\n")
+            if (finale.photosAvant.isNotEmpty()) { append("\n## Photos avant intervention\n"); finale.photosAvant.forEach { append("![[${finale.id}-${it.substringAfterLast('/')}]]\n") } }
+            if (finale.photosApres.isNotEmpty()) { append("\n## Photos après intervention\n"); finale.photosApres.forEach { append("![[${finale.id}-${it.substringAfterLast('/')}]]\n") } }
+            if (finale.prochaineMaintenance.isNotBlank()) append("\n## Prochaine maintenance\n${finale.prochaineMaintenance}\n")
+            if (finale.notes.isNotBlank()) append("\n## Notes\n${finale.notes}\n")
         }
         val note = obsidian.saveIn(dossier, base, md)
         val pdf = runCatching { obsidian.saveBytes(dossier, "$base.pdf", PdfExporter.toPdf(md), "application/pdf") }.getOrDefault("PDF non régénéré")
-        return "✅ Intervention \${finale.id} mise à jour pour \${client.nom} — \${site.nom}.\\n📁 $note\\n📄 $pdf"
+        return "✅ Intervention ${finale.id} mise à jour pour ${client.nom} — ${site.nom}.\n📁 $note\n📄 $pdf"
     }
 
 
