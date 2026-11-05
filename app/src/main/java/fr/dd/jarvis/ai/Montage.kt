@@ -285,7 +285,7 @@ object Montage {
         val analyseJson = runCatching {
             JSONObject(analyseBrute.substring(analyseBrute.indexOf('{'), analyseBrute.lastIndexOf('}') + 1))
         }.getOrNull()
-        val analyse = analyseJson?.let { j ->
+        val analyse = analyseJson?.takeIf { it.optString("brief_generation").isNotBlank() }?.let { j ->
             listOf("intention", "public", "idee_centrale", "angle_narratif", "ton", "structure", "accroche",
                 "continuite", "direction_artistique", "brief_generation").mapNotNull { key ->
                 j.optString(key).takeIf { it.isNotBlank() && it != "null" }?.let { "$key : $it" }
@@ -293,7 +293,7 @@ object Montage {
                 val a = j.optJSONArray(key) ?: return@flatMap emptyList()
                 (0 until a.length()).map { index -> "$key : ${a.optString(index)}" }
             }).joinToString("\n")
-        }.orEmpty().ifBlank { analyseBrute.take(5000) }
+        }.orEmpty()
 
         // Ne lance aucune génération si la première étape d’analyse n’a fourni aucun contenu exploitable.
 
