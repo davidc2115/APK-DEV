@@ -1417,7 +1417,12 @@ class ToolBox(
             if (matches.size != 1) return ToolResult(if (matches.isEmpty()) "Fiche client introuvable : « $clientName »." else "Plusieurs clients correspondent à « $clientName » : ${matches.joinToString { it.nom }}. Précise lequel.")
             val client = matches.single()
             val siteName = a.optString("installation").trim()
-            val site = if (siteName.isBlank()) client.sites.firstOrNull() else client.sites.firstOrNull { it.nom.equals(siteName, true) || it.nom.contains(siteName, true) }
+            val site = when {
+                siteName.isNotBlank() -> client.sites.firstOrNull { it.nom.equals(siteName, true) || it.nom.contains(siteName, true) }
+                client.sites.size == 1 -> client.sites.first()
+                client.sites.size > 1 && client.adresse.isBlank() -> return ToolResult("La fiche de ${client.nom} possède plusieurs installations. Précise le nom de l’installation pour placer le bon point GPS dans l’agenda.")
+                else -> null
+            }
             if (siteName.isNotBlank() && site == null) return ToolResult("Installation « $siteName » introuvable pour ${client.nom}.")
             if (location.isBlank()) location = site?.adresse?.takeIf { it.isNotBlank() } ?: client.adresse
             if (location.isBlank()) return ToolResult("La fiche de ${client.nom} ne contient pas d’adresse. Ajoute une adresse avant de créer ce rendez-vous.")
