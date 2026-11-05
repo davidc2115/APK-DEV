@@ -90,6 +90,8 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
         val tri = only == "mails" && store.notifLive.value
         if (!store.agentsOn.value && !tri) return Result.success()
         val enLigne = reseauDisponible()
+        // Le centre de surveillance collecte ses propres mesures : ce n’est plus un agent spécialisé.
+        PhoneHealth.recordSample(app)
         val steps = listOf<Pair<String, suspend () -> Unit>>(
             "Mails" to {
                 if (tri || (store.agentMails.value && (only == null || only == "mails"))) {
@@ -104,7 +106,6 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
                     if (enLigne) notifs() else journal.append("- ⏸️ Analyse des notifications : reportée, connexion Internet indisponible.\n")
                 }
             },
-            "Surveillance téléphone" to { if (store.agentPhoneHealth.value && only == null) surveillanceTelephone() }
         )
         var failures = 0
         val outcomes = mutableListOf<String>()
@@ -283,20 +284,6 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
         alert(3012, "📝 Tâches à ne pas oublier", details)
         journal.append("- 📝 " + fresh.size + " tâche(s) personnelle(s) en retard ou à échéance sous 24 h\n")
         writeSet("agent_seen_tasks.txt", seen + fresh.map { it.id + "_" + it.dueDate })
-    }
-
-    // ---------------------------------------------------------------- surveillance locale du téléphone
-    private fun surveillanceTelephone() {
-        val current = PhoneHealth.monitoringAlerts(app).toSet()
-        val previous = readSet("agent_phone_health_alerts.txt")
-        val fresh = current.filterNot { it in previous }
-        if (fresh.isNotEmpty()) {
-            val details = fresh.joinToString("\n")
-            alert(3013, "📱 Surveillance du téléphone", details)
-            journal.append("- 📱 Surveillance du téléphone :\n" + fresh.joinToString("") { "  - $it\n" })
-        }
-        // Une alerte peut réapparaître si le problème a disparu puis revient.
-        writeSet("agent_phone_health_alerts.txt", current)
     }
 
     // ---------------------------------------------------------------- notifications du téléphone
