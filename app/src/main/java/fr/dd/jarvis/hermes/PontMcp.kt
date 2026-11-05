@@ -27,7 +27,7 @@ import java.util.concurrent.Executors
 object PontMcp {
     const val PORT = 38291
     private const val TAG = "PontMcp"
-    private const val maxOutilsExpose = 100
+    private const val maxOutilsExpose = 80
     private val pool = Executors.newCachedThreadPool()
     @Volatile private var serveur: ServerSocket? = null
     @Volatile private var fournisseur: Fournisseur? = null
@@ -60,11 +60,37 @@ object PontMcp {
         override fun outils(): JSONArray = convertirOutils(boite().schemaAll())
         override fun appeler(nom: String, args: JSONObject): Pair<String, Boolean> {
             if (nom in EXCLUS) return "Outil indisponible : $nom" to true
-            // Certains clients Hermes préfixent les noms MCP par mcp_jarvis_. Normalise uniquement ce préfixe historique ; ToolBox valide ensuite le nom réel.
+            // Certains clients Hermes préfixent les noms MCP par mcp_jarvis_.
             val nomCanonique = nom.removePrefix("mcp_jarvis_")
-            val res = runCatching { runBlocking(Dispatchers.IO) { withTimeoutOrNull(170_000) { boite().execute(nomCanonique, args) } } }
+            if (nomCanonique == "jarvis_rechercher_outils") {
+                val termes = args.optString("requete").trim().lowercase().split(Regex("\\s+")).filter { it.isNotBlank() }
+                if (termes.isEmpty()) return "Précise le nom ou le domaine de l'outil recherché." to true
+                val tous = boite().schemaAll()
+                val candidats = mutableListOf<Pair<Int, JSONObject>>()
+                for (i in 0 until tous.length()) {
+                    val fn = tous.optJSONObject(i)?.optJSONObject("function") ?: continue
+                    val nomOutil = fn.optString("name")
+                    if (nomOutil.isBlank() || nomOutil in EXCLUS || nomOutil.startsWith("jarvis_")) continue
+                    val texte = (nomOutil + " " + fn.optString("description")).lowercase()
+                    val score = termes.count { texte.contains(it) }
+                    if (score > 0) candidats += score to fn
+                }
+                val resultat = JSONArray()
+                candidats.sortedByDescending { it.first }.take(args.optInt("limite", 12).coerceIn(1, 20)).forEach { (_, fn) ->
+                    resultat.put(JSONObject()
+                        .put("name", fn.optString("name"))
+                        .put("description", fn.optString("description"))
+                        .put("inputSchema", fn.optJSONObject("parameters") ?: JSONObject().put("type", "object").put("properties", JSONObject())))
+                }
+                return JSONObject().put("outils", resultat).toString() to false
+            }
+            val cible = if (nomCanonique == "jarvis_appeler_outil") args.optString("nom_outil").removePrefix("mcp_jarvis_") else nomCanonique
+            if (cible == "jarvis_appeler_outil" || cible == "jarvis_rechercher_outils" || cible in EXCLUS || cible.isBlank())
+                return "Outil cible invalide ou interdit : $cible" to true
+            val arguments = if (nomCanonique == "jarvis_appeler_outil") args.optJSONObject("arguments") ?: JSONObject() else args
+            val res = runCatching { runBlocking(Dispatchers.IO) { withTimeoutOrNull(170_000) { boite().execute(cible, arguments) } } }
             return res.fold(
-                { r -> if (r == null) "⏱️ L'outil $nom a dépassé le délai." to true else r.text to false },
+                { r -> if (r == null) "⏱️ L'outil $cible a dépassé le délai." to true else r.text to false },
                 { e -> "❌ ${e.message ?: e.javaClass.simpleName}" to true }
             )
         }
@@ -248,6 +274,20 @@ object PontMcp {
             if (index < 0) prioritaires.size else index
         }
         val out = JSONArray()
+        out.put(JSONObject()
+            .put("name", "jarvis_rechercher_outils")
+            .put("description", "Recherche dans le catalogue complet des outils JARVIS, y compris ceux non affichés dans la liste courte. À utiliser si un outil métier est absent ou pour trouver une fonction par domaine.")
+            .put("inputSchema", JSONObject().put("type", "object").put("properties", JSONObject()
+                .put("requete", JSONObject().put("type", "string").put("description", "Nom ou mots-clés du domaine recherché"))
+                .put("limite", JSONObject().put("type", "integer").put("description", "Nombre maximal de résultats (1 à 20)")))
+                .put("required", JSONArray().put("requete"))))
+        out.put(JSONObject()
+            .put("name", "jarvis_appeler_outil")
+            .put("description", "Exécute un outil JARVIS découvert avec jarvis_rechercher_outils. Transmets son nom exact et les arguments conformes à son schéma.")
+            .put("inputSchema", JSONObject().put("type", "object").put("properties", JSONObject()
+                .put("nom_outil", JSONObject().put("type", "string").put("description", "Nom exact de l'outil découvert"))
+                .put("arguments", JSONObject().put("type", "object").put("description", "Arguments de l'outil cible")))
+                .put("required", JSONArray().put("nom_outil"))))
         for (f in fonctions.take(maxOutilsExpose)) {
             val nom = f.optString("name")
             val schema = f.optJSONObject("parameters") ?: JSONObject().put("type", "object").put("properties", JSONObject())
