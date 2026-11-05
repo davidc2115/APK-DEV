@@ -1006,9 +1006,16 @@ class ToolBox(
                 "Notifications + surveillance téléphone" to store.agentNotifs.value,
                 "Rangement Gmail" to store.agentRanger.value
             )
+            val lastRun = store.agentLastRunAt.value.toLongOrNull()?.let { millis ->
+                runCatching { LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(millis), ZoneId.systemDefault())
+                    .format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm")) }.getOrNull()
+            } ?: "aucun cycle enregistré"
             return ToolResult("# Centre de contrôle des agents IA\n\n" +
                 status.joinToString("\n") { "- ${it.first} : ${if (it.second) "activé" else "désactivé"}" } +
-                "\n\nFréquence : ${store.agentMinutes.value} min\nDernière synthèse proactive : ${store.proactiveSummary.value.ifBlank { "aucune" }}", direct = true)
+                "\n\nFréquence : ${store.agentMinutes.value} min" +
+                "\nDernier cycle : $lastRun" +
+                "\nRésultat : ${store.agentLastRunStatus.value}" +
+                "\nDernière synthèse proactive : ${store.proactiveSummary.value.ifBlank { "aucune" }}", direct = true)
         }
         if (action == "intervalle") {
             val minutes = a.optString("minutes").toIntOrNull()?.takeIf { it in setOf(15, 30, 60) }
