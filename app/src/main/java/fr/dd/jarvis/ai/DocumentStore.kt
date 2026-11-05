@@ -5,6 +5,9 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import java.io.File
 import java.util.zip.ZipInputStream
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.text.PDFTextStripper
 
 /** Bibliothèque privée des documents importés. Les originaux sont conservés. */
 object DocumentStore {
@@ -61,13 +64,38 @@ object DocumentStore {
                 f.readText(Charsets.UTF_8).take(100_000)
             "docx", "xlsx", "pptx", "odt", "ods" -> extractZipText(f)
             "zip" -> zipListing(f)
-            "pdf" -> "PDF importé : ${f.name}. L'extraction du texte PDF nécessite un moteur PDF dédié ; l'original est conservé."
+            "pdf" -> extractPdf(context, f)
             "jpg", "jpeg", "png", "webp", "gif", "bmp", "mp4", "mov", "mkv", "webm", "avi" ->
                 "Fichier média importé : ${f.name} (${f.length()} octets). Utilise l'analyse multimodale pour examiner son contenu."
             else -> "Format .$ext conservé, mais aucune extraction textuelle intégrée n'est disponible pour ce type."
         }
     }
 
+    /** Extrait toutes les pages d'un PDF texte en conservant l'ordre spatial. */
+    fun extractPdf(context: Context, file: File, maxChars: Int = 180_000): String = runCatching {
+        PDFBoxResourceLoader.init(context.applicationContext)
+        PDDocument.load(file).use { pdf ->
+            val stripper = PDFTextStripper()
+            stripper.setSortByPosition(true)
+            stripper.setAddMoreFormatting(true)
+            stripper.setStartPage(1)
+            stripper.setEndPage(pdf.numberOfPages)
+            val raw = stripper.getText(pdf).replace("\u0000", "").trim()
+            if (raw.length < 40) {
+                "PDF_SANS_TEXTE|${pdf.numberOfPages}|${file.name}"
+            } else {
+                val complete = raw.length <= maxChars
+                buildString {
+                    append("CONTENU PDF EXTRAIT — ").append(file.name)
+                    append("\nPages totales : ").append(pdf.numberOfPages)
+                    append("\nPages parcourues : 1 à ").append(pdf.numberOfPages)
+                    append("\nTexte extrait : ").append(raw.length).append(" caractères")
+                    append(if (complete) "\nExtraction complète." else "\nATTENTION : sortie limitée à $maxChars caractères ; le document source contient davantage de texte.")
+                    append("\n\n").append(raw.take(maxChars))
+                }
+            }
+        }
+    }.getOrElse { "ÉCHEC_EXTRACTION_PDF|${file.name}|${it.message ?: "erreur inconnue"}" }
     private fun zipListing(f: File): String = runCatching {
         val out = mutableListOf<String>()
         ZipInputStream(f.inputStream()).use { z ->
