@@ -111,7 +111,11 @@ data class Client(
     val adresse: String = "",
     val sites: List<Site> = emptyList(),
     val depuis: String = "",                         // yyyy-MM-dd : début de la relation (ancienneté)
-    val notes: String = ""
+    val notes: String = "",
+    /** Distance routière aller depuis le siège, mise en cache par adresse. */
+    val distanceKm: Double? = null,
+    val distanceDureeMin: Double? = null,
+    val distanceCle: String = ""
 )
 
 @Serializable
