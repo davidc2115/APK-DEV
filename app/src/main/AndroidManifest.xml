@@ -99,6 +99,7 @@
                 android:resource="@xml/accessibility_config" />
         </service>
 
+        <receiver android:name=".hermes.HermesRunResultReceiver" android:exported="false" />
         <receiver android:name=".device.AdbPairReceiver" android:exported="false" />
         <receiver android:name=".service.CarReplyReceiver" android:exported="false" />
         <receiver android:name=".device.HorlogeReceiver" android:exported="false">
