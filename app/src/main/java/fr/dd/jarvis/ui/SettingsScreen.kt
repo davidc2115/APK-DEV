@@ -197,8 +197,8 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
             HudPanel(Modifier.fillMaxWidth(), title = "Agents autonomes") {
                 val enabledAgents = listOf(store.agentMails.value, store.agentFactures.value, store.agentPlanning.value, store.agentNotifs.value).count { it }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    DashboardMetric("AGENTS ACTIFS", "$"+"{enabledAgents} / 4")
-                    DashboardMetric("FRÉQUENCE", "$"+"{store.agentMinutes.value} min")
+                    DashboardMetric("AGENTS ACTIFS", "${enabledAgents} / 4")
+                    DashboardMetric("FRÉQUENCE", "${store.agentMinutes.value} min")
                     DashboardMetric("ÉTAT GLOBAL", if (store.agentsOn.value) "EN SERVICE" else "EN PAUSE")
                 }
                 Text("Active ou suspends les tâches de fond de JARVIS. Chaque agent peut être piloté séparément ; les tâches périodiques respectent les limites d'Android et peuvent être retardées par HyperOS.", color = HudDim, fontSize = 12.sp)
@@ -215,13 +215,13 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     val batterySeries = samples.mapNotNull { it.battery?.toFloat() }
                     val storageSeries = samples.map { (it.freeBytes / (1024.0 * 1024.0 * 1024.0)).toFloat() }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        DashboardMetric("BATTERIE", phone.battery?.let { "$"+"{it} %" } ?: "—")
+                        DashboardMetric("BATTERIE", phone.battery?.let { "${it} %" } ?: "—")
                         DashboardMetric("STOCKAGE LIBRE", phone.storageFreeGb?.let { String.format(java.util.Locale.FRANCE, "%.1f Go", it) } ?: "—")
                         DashboardMetric("RAM LIBRE", String.format(java.util.Locale.FRANCE, "%.1f Go", phone.ramFreeGb))
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         DashboardMetric("TEMP. BATTERIE", phone.temperatureC?.let { String.format(java.util.Locale.FRANCE, "%.1f °C", it) } ?: "—")
-                        DashboardMetric("STOCKAGE UTILISÉ", phone.storageUsedPct?.let { "$"+"{it} %" } ?: "—")
+                        DashboardMetric("STOCKAGE UTILISÉ", phone.storageUsedPct?.let { "${it} %" } ?: "—")
                         DashboardMetric("ÉTAT THERMIQUE", phone.thermal)
                     }
                     Text("Évolution de la batterie", color = HudDim, fontSize = 11.sp)
