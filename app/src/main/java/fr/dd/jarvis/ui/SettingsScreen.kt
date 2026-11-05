@@ -211,6 +211,9 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     HudChip("🔔 Notifications", store.agentNotifs.value) { store.agentNotifs.set(!store.agentNotifs.value) }
                 }
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    HudChip("📱 Surveillance téléphone", store.agentPhoneHealth.value) { store.agentPhoneHealth.set(!store.agentPhoneHealth.value) }
+                }
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     HudChip("🏷️ Ranger Gmail", store.agentRanger.value) { store.agentRanger.set(!store.agentRanger.value) }
                     HudChip("📥 Archiver", store.agentArchiver.value) { store.agentArchiver.set(!store.agentArchiver.value) }
                 }
