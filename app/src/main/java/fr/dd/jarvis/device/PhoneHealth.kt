@@ -124,7 +124,7 @@ object PhoneHealth {
             if (previousAt == 0L || now - previousAt >= 30L * 60L * 1000L) {
                 val history = prefs.getString("samples", "").orEmpty().split(';')
                     .filter { it.count { ch -> ch == ',' } == 2 }.toMutableList()
-                history += "$"+"{now},$"+"{battery ?: -1},$"+"{free}"
+                history += "${now},${battery ?: -1},${free}"
                 prefs.edit().putLong("sample_at", now).putInt("battery", battery ?: -1)
                     .putLong("free_bytes", free).putString("samples", history.takeLast(48).joinToString(";")).apply()
             }
