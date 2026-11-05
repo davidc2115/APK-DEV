@@ -10,6 +10,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -194,6 +195,12 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 } ?: "Aucun cycle enregistré"
             }
             HudPanel(Modifier.fillMaxWidth(), title = "Agents autonomes") {
+                val enabledAgents = listOf(store.agentMails.value, store.agentFactures.value, store.agentPlanning.value, store.agentNotifs.value, store.agentPhoneHealth.value).count { it }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    DashboardMetric("AGENTS ACTIFS", "$"+"{enabledAgents} / 5")
+                    DashboardMetric("FRÉQUENCE", "$"+"{store.agentMinutes.value} min")
+                    DashboardMetric("ÉTAT GLOBAL", if (store.agentsOn.value) "EN SERVICE" else "EN PAUSE")
+                }
                 Text("Active ou suspends les tâches de fond de JARVIS. Chaque agent peut être piloté séparément ; les tâches périodiques respectent les limites d'Android et peuvent être retardées par HyperOS.", color = HudDim, fontSize = 12.sp)
                 Spacer(Modifier.height(8.dp))
                 HudChip(if (store.agentsOn.value) "✅ Tous les agents autonomes sont actifs" else "Agents autonomes suspendus", store.agentsOn.value) {
@@ -245,6 +252,19 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                         }
                     }
                     HudPanel(Modifier.fillMaxWidth(), title = "📱 Agent surveillance téléphone") {
+                        val phoneSamples = remember(tick, store.agentLastRunAt.value) { fr.dd.jarvis.device.PhoneHealth.history(app) }
+                        val batterySeries = phoneSamples.mapNotNull { it.battery?.toFloat() }
+                        val freeSeries = phoneSamples.map { (it.freeBytes / (1024.0 * 1024.0 * 1024.0)).toFloat() }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            DashboardMetric("BATTERIE", batterySeries.lastOrNull()?.let { "$"+"{it.toInt()} %" } ?: "—")
+                            DashboardMetric("STOCKAGE LIBRE", freeSeries.lastOrNull()?.let { String.format(java.util.Locale.FRANCE, "%.1f Go", it) } ?: "—")
+                        }
+                        Text("Évolution batterie · relevés locaux", color = HudDim, fontSize = 11.sp)
+                        if (batterySeries.size >= 2) TrendLine(batterySeries, Modifier.fillMaxWidth().height(76.dp), Color(0xFF55D6C2))
+                        else Text("La courbe apparaîtra après deux relevés espacés d'au moins 30 minutes.", color = HudDim, fontSize = 10.sp)
+                        Text("Évolution stockage libre · relevés locaux", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+                        if (freeSeries.size >= 2) TrendLine(freeSeries, Modifier.fillMaxWidth().height(76.dp), Color(0xFF9B8CFF))
+                        else Text("Historique en cours de constitution.", color = HudDim, fontSize = 10.sp)
                         Text("Surveille localement l'évolution de la batterie et du stockage. Signale une baisse inhabituelle de batterie ou une diminution rapide de l'espace disponible. N'analyse ni messages, ni photos, ni contenu personnel.", color = HudText, fontSize = 12.sp)
                         Text("Moteur responsable : surveillance locale JARVIS — aucun agent IA ni envoi de données.", color = LocalAccent.current, fontSize = 11.sp)
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
@@ -1746,5 +1766,40 @@ private fun BoxPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.JarvisApp
             }
         }
         if (msg.isNotBlank()) Text(msg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+    }
+}
+
+@Composable
+private fun DashboardMetric(label: String, value: String) {
+    Column(Modifier.weight(1f).background(Color(0x1AFFFFFF), androidx.compose.foundation.shape.RoundedCornerShape(10.dp)).padding(9.dp)) {
+        Text(label, color = HudDim, fontSize = 9.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+        Text(value, color = HudText, fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun TrendLine(values: List<Float>, modifier: Modifier = Modifier, lineColor: Color = LocalAccent.current) {
+    Canvas(modifier) {
+        if (values.size < 2) return@Canvas
+        val min = values.minOrNull() ?: 0f
+        val max = values.maxOrNull() ?: 1f
+        val range = (max - min).coerceAtLeast(0.5f)
+        val left = 5.dp.toPx()
+        val right = size.width - 5.dp.toPx()
+        val top = 8.dp.toPx()
+        val bottom = size.height - 8.dp.toPx()
+        for (i in 0..3) {
+            val y = top + (bottom - top) * i / 3f
+            drawLine(Color.White.copy(alpha = 0.10f), androidx.compose.ui.geometry.Offset(left, y), androidx.compose.ui.geometry.Offset(right, y), 1.dp.toPx())
+        }
+        val path = androidx.compose.ui.graphics.Path()
+        values.forEachIndexed { i, v ->
+            val x = left + (right - left) * i / (values.size - 1).toFloat()
+            val y = bottom - (v - min) / range * (bottom - top)
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        drawPath(path, lineColor, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.5.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
+        val lastY = bottom - (values.last() - min) / range * (bottom - top)
+        drawCircle(lineColor, 4.dp.toPx(), androidx.compose.ui.geometry.Offset(right, lastY))
     }
 }
