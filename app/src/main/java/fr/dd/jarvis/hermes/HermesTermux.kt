@@ -419,9 +419,12 @@ p "✅ Hermès installé (${'$'}{MODE})."
         // Après un redémarrage de Jarvis avec hermesInstalle=false, il n'est pas encore lancé :
         // sans ce pont, Termux exécute la mise à niveau mais tous les POST /progres échouent silencieusement,
         // laissant l'interface bloquée sur « Configuration Hermès lancée ».
-        PontMcp.demarrer(app)
-        message = "⏳ Connexion au suivi de configuration Hermès…"
         PontMcp.progression.clear()
+        if (!PontMcp.demarrer(app) || !PontMcp.actif()) {
+            message = "❌ Suivi Hermès indisponible : le serveur local de progression n\u0027écoute pas sur 127.0.0.1:${PontMcp.PORT}. Aucun script de mise à niveau n\u0027a été lancé. Ferme puis rouvre Jarvis ; si le problème persiste, vérifie qu\u0027aucun ancien service n\u0027occupe ce port."
+            return message
+        }
+        message = "✅ Pont local de progression actif sur 127.0.0.1:${PontMcp.PORT}. Préparation du script Hermès…"
         val gemini = s.geminiKeys.toList()
         val groq = s.groqKeys.toList()
         val cloudflare = s.cfAccounts.toList().mapNotNull { raw ->
