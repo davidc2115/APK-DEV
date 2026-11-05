@@ -407,11 +407,13 @@ fun PlanningScreen(app: JarvisApp) {
                         )
                     }
                     if (e.location.isNotBlank()) {
+                        val locationIsLink = e.location.startsWith("https://", true) || e.location.startsWith("http://", true)
                         Text(
-                            "📍 ${e.location} · Ouvrir l’adresse",
+                            if (locationIsLink) "📍 Point GPS · Ouvrir la carte" else "📍 ${e.location} · Ouvrir le lieu",
                             color = LocalAccent.current, fontSize = 13.sp,
                             modifier = Modifier.clickable {
-                                val uri = Uri.parse("geo:0,0?q=" + java.net.URLEncoder.encode(e.location, "UTF-8"))
+                                val uri = if (locationIsLink) Uri.parse(e.location)
+                                    else Uri.parse("geo:0,0?q=" + java.net.URLEncoder.encode(e.location, "UTF-8"))
                                 runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
                             }
                         )
