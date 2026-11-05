@@ -133,7 +133,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "intervention_id" to prop("Identifiant exact de la fiche à supprimer, affiché par interventions_liste."),
             "confirmation" to prop("Doit être exactement « oui » uniquement après confirmation explicite de l'utilisateur.")
         ), listOf("client", "installation", "intervention_id", "confirmation")),
-        tool("interventions_liste", "Consulte l'historique des interventions photovoltaïques d'un client et renvoie l'identifiant exact de chaque fiche.", mapOf(
+        tool("interventions_liste", "Consulte l'historique des interventions photovoltaïques et renvoie l'identifiant exact de chaque fiche. Si installation est vide, liste toutes les installations du client avec leurs interventions.", mapOf(
             "client" to prop("Nom exact du client."), "installation" to prop("Nom de l'installation si le client en possède plusieurs.")
         ), listOf("client")),
         tool("intervention_modifier", "Modifie une intervention existante dans Jarvis et régénère sa note Obsidian et son PDF sans supprimer les photos. Les champs omis restent inchangés ; « effacer » vide explicitement un champ.", mapOf(
@@ -665,22 +665,33 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
     private fun interventionsListe(a: JSONObject): ToolResult {
         val (client, erreur) = clientParNom(a.s("client"))
         if (client == null) return err(erreur!!)
-        val site = siteDe(client, a.s("installation"))
-            ?: return err(if (client.sites.isEmpty()) "Aucune installation enregistrée pour " + client.nom + "." else "Précise l'installation : " + client.sites.joinToString { it.nom } + ".")
-        val liste = site.interventions.sortedByDescending { it.date }
-        if (liste.isEmpty()) return ok("Aucune intervention enregistrée pour " + client.nom + " — " + site.nom + ".")
-        return ok("# Historique — " + client.nom + " / " + site.nom + "\n\n" + liste.joinToString("\n\n") { item ->
-            buildString {
-                append("## " + item.date + " · " + item.categorie + " · " + item.statut + " · ID #" + item.id + "\n")
-                append(item.description)
-                if (item.diagnostic.isNotBlank()) append("\n- Diagnostic : " + item.diagnostic)
-                if (item.actions.isNotBlank()) append("\n- Actions : " + item.actions)
-                if (item.pieces.isNotBlank()) append("\n- Pièces : " + item.pieces)
-                if (item.mesures.isNotBlank()) append("\n- Mesures : " + item.mesures)
-                if (item.prochaineMaintenance.isNotBlank()) append("\n- Prochaine maintenance : " + item.prochaineMaintenance)
-                if (item.notes.isNotBlank()) append("\n- Notes : " + item.notes)
-            }
-        })
+        val installation = a.s("installation").trim()
+        val sites = if (installation.isBlank()) client.sites else listOfNotNull(siteDe(client, installation))
+        if (sites.isEmpty()) return err(
+            if (client.sites.isEmpty()) "Aucune installation enregistrée pour " + client.nom + "."
+            else "Installation introuvable ou ambiguë pour " + client.nom + ". Installations disponibles : " + client.sites.joinToString { it.nom } + "."
+        )
+        val avecInterventions = sites.map { site -> site to site.interventions.sortedByDescending { it.date } }
+            .filter { it.second.isNotEmpty() }
+        if (avecInterventions.isEmpty()) return ok(
+            if (installation.isBlank()) "Aucune intervention enregistrée pour les installations de " + client.nom + "."
+            else "Aucune intervention enregistrée pour " + client.nom + " — " + sites.first().nom + "."
+        )
+        return ok("# Historique des interventions — " + client.nom + "\n\n" +
+            avecInterventions.joinToString("\n\n") { (site, liste) ->
+                "## Installation : " + site.nom + "\n\n" + liste.joinToString("\n\n") { item ->
+                    buildString {
+                        append("### " + item.date + " · " + item.categorie + " · " + item.statut + " · ID #" + item.id + "\n")
+                        append(item.description)
+                        if (item.diagnostic.isNotBlank()) append("\n- Diagnostic : " + item.diagnostic)
+                        if (item.actions.isNotBlank()) append("\n- Actions : " + item.actions)
+                        if (item.pieces.isNotBlank()) append("\n- Pièces : " + item.pieces)
+                        if (item.mesures.isNotBlank()) append("\n- Mesures : " + item.mesures)
+                        if (item.prochaineMaintenance.isNotBlank()) append("\n- Prochaine maintenance : " + item.prochaineMaintenance)
+                        if (item.notes.isNotBlank()) append("\n- Notes : " + item.notes)
+                    }
+                }
+            })
     }
 
 
