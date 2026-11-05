@@ -283,6 +283,8 @@ class Store(context: Context) {
     val agentMinutes = IPref("agentMinutes", 15)
     val agentLastFact = SPref("agentLastFact", "")
     val agentLastNotif = SPref("agentLastNotif", "0")
+    val agentLastRunAt = SPref("agentLastRunAt", "")
+    val agentLastRunStatus = SPref("agentLastRunStatus", "Aucun cycle enregistré")
 
     // ---- Discord (bot)
     val discordToken = SPref("discordToken", "")
