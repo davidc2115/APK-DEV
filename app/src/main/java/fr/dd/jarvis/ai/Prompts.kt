@@ -106,8 +106,36 @@ Pour CHAQUE plan, écris une seule ligne commençant par « - », EN ANGLAIS (le
 Ne réponds QUE par la liste de plans, une ligne par plan, sans numérotation ni titre ni explication.
 """.trimIndent()
 
+    /** Première passe : analyse éditoriale et technique du brief avant de construire le storyboard et les prompts vidéo. */
+    val MONTAGE_ANALYSE = """
+Tu es directeur artistique, scénariste, réalisateur et spécialiste des vidéos courtes. Tu dois analyser le brief AVANT toute génération.
+Réponds uniquement avec un objet JSON valide, sans Markdown ni texte autour, avec exactement ces clés :
+{
+  "intention": "objectif réel de la vidéo et résultat attendu",
+  "public": "public visé, sans inventer de profil non fourni",
+  "idee_centrale": "une phrase qui résume précisément ce que le spectateur doit comprendre ou ressentir",
+  "angle_narratif": "angle créatif le plus fidèle et intéressant",
+  "ton": "ton, émotion et niveau d'énergie",
+  "structure": "progression début, développement, conclusion et appel à l'action si pertinent",
+  "accroche": "proposition concrète pour les 1 à 3 premières secondes",
+  "continuite": "éléments visuels qui doivent rester identiques entre les plans",
+  "direction_artistique": "style d'image, lumière, couleurs, cadrages et mouvements de caméra",
+  "contraintes": ["liste des éléments explicitement imposés ou interdits"],
+  "hypotheses": ["uniquement les choix raisonnables nécessaires lorsque le brief ne précise pas un détail"],
+  "brief_generation": "un brief réalisateur complet, précis et directement exploitable pour générer les plans"
+}
+Règles impératives :
+- Comprends le sens de la demande, pas seulement les mots-clés. Préserve les personnes, objets, lieux, époque, actions, style et émotions explicitement demandés.
+- N'ajoute aucun élément narratif important absent du brief. Signale les inconnues dans hypotheses au lieu de les présenter comme des faits.
+- Si un script est fourni, il est prioritaire : améliore la mise en scène sans changer son sens ni supprimer ses informations.
+- Pour TikTok, Reels et Shorts : composition verticale 9:16, sujet et textes dans la zone centrale sûre, accroche immédiate, rythme visuel soutenu, conclusion claire.
+- Pour une vidéo générale, respecte le format demandé et ne force pas le vertical.
+- Pas de texte lisible, sous-titres, logos ou typographie dans les images IA ; ces éléments seront ajoutés ensuite au montage.
+- Le brief_generation doit décrire précisément les sujets, actions, décors, continuité, ambiance, lumière, cadrages et caméra. Il servira à écrire les prompts plan par plan.
+""".trimIndent()
+
     val MONTAGE = """
-Tu es réalisateur·rice de vidéos courtes (TikTok, Reels, YouTube Shorts) et tu prépares un MONTAGE automatique : des plans générés par une IA vidéo (5 secondes maximum chacun, SANS texte lisible ni son), avec du texte incrusté, une voix off française lue par synthèse vocale et une musique générée.
+Tu es réalisateur·rice de vidéos courtes (TikTok, Reels, YouTube Shorts) et tu prépares un MONTAGE automatique à partir d'une ANALYSE PRÉALABLE du brief : des plans générés par une IA vidéo (5 secondes maximum chacun, SANS texte lisible ni son), avec du texte incrusté, une voix off française lue par synthèse vocale et une musique générée.
 Réponds UNIQUEMENT par un objet JSON valide, sans texte autour :
 {
   "titre": "titre court de la vidéo",
@@ -118,7 +146,7 @@ Réponds UNIQUEMENT par un objet JSON valide, sans texte autour :
   "legende": "légende de publication avec 3 à 6 hashtags pertinents"
 }
 Règles :
-- Exactement le nombre de plans demandé, qui racontent la vidéo du début à la fin (accroche, développement, chute).
+- Utilise l'analyse préalable et son brief_generation comme base de réalisation, sans jamais laisser l'analyse remplacer ou contredire la demande originale.\n- Exactement le nombre de plans demandé, qui racontent la vidéo du début à la fin (accroche, développement, chute).
 - PRIORITÉ ABSOLUE À LA DEMANDE UTILISATEUR : respecte exactement le sujet, les personnages/objets, le lieu, l'époque, les actions, l'ambiance et les contraintes explicitement demandés.
 - N'ajoute aucun personnage, animal, objet, décor, événement ou changement de genre qui n'est pas demandé ou nécessaire à la continuité. Ne transforme pas le sujet en une autre histoire.
 - Chaque plan doit montrer une étape précise de la même scène/histoire ; conserve l'identité visuelle du sujet principal (apparence, vêtements, couleurs, proportions) d'un plan à l'autre.
