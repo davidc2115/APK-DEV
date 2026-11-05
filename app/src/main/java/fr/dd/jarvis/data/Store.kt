@@ -286,6 +286,8 @@ class Store(context: Context) {
     val agentLastNotif = SPref("agentLastNotif", "0")
     val agentLastRunAt = SPref("agentLastRunAt", "")
     val agentLastRunStatus = SPref("agentLastRunStatus", "Aucun cycle enregistré")
+    /** Historique local des 20 derniers cycles, limité aux résumés sans contenu de mails ou notifications. */
+    val agentRunHistory = SPref("agentRunHistory", "")
 
     // ---- Discord (bot)
     val discordToken = SPref("discordToken", "")
