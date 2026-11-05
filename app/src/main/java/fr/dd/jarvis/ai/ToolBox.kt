@@ -551,6 +551,10 @@ class ToolBox(
             val duree = a.optString("duree").replace(',', '.').toDoubleOrNull() ?: 5.0
             val nomImage = a.optString("image").trim()
             val format = a.optString("format").ifBlank { "vertical" }
+            if (nomImage.isBlank() && !fr.dd.jarvis.ai.ImageToVideoGen.disponible(app))
+                return ToolResult("❌ Aucune clé fal.ai : ajoute-la dans Réglages › Vidéo IA pour générer une vidéo.")
+            if (nomImage.isNotBlank() && !fr.dd.jarvis.ai.ImageToVideoGen.disponible(app))
+                return ToolResult("❌ L'animation d'image nécessite une clé fal.ai configurée dans Réglages › Vidéo IA.")
             val prompt = fr.dd.jarvis.ai.VideoGen.preparerPrompt(app, brief, duree, format, nomImage.isNotBlank())
             val (video, loc) = when {
                 nomImage.isNotBlank() -> {
