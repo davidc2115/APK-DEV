@@ -646,14 +646,14 @@ os.replace(name, p)
         val upgradeCommand = "set -o pipefail; p '🔄 Mise à niveau d’Hermès : vérification du propriétaire du venv…'; " +
             "proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root USER=root LOGNAME=root " +
             "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
-            "bash -c 'set -eu; REPO=/root/.hermes/hermes-agent; test -x \"$REPO/.hermes/bin/hermes\"; " +
+            "bash -c 'set -eu; REPO=/root/.hermes/hermes-agent; test -x \"${'$'}REPO/.hermes/bin/hermes\"; " +
             "META=$(find /root/.hermes/installs -type f -path \"*/venv/lib/python*/site-packages/rpds_py-*.dist-info/METADATA\" -print -quit 2>/dev/null || true); " +
-            "if [ -z \"$META\" ]; then echo \"Métadonnée rpds_py introuvable : aucune mise à niveau lancée.\"; exit 2; fi; " +
-            "OWNER=$(stat -c %u \"$META\"); GROUP=$(stat -c %g \"$META\"); " +
-            "echo \"Fichier venv : $META (UID $OWNER/GID $GROUP).\"; " +
-            "if [ \"$OWNER\" = \"$(id -u)\" ]; then cd \"$REPO\"; exec ./.hermes/bin/hermes update --yes; fi; " +
+            "if [ -z \"${'$'}META\" ]; then echo \"Métadonnée rpds_py introuvable : aucune mise à niveau lancée.\"; exit 2; fi; " +
+            "OWNER=$(stat -c %u \"${'$'}META\"); GROUP=$(stat -c %g \"${'$'}META\"); " +
+            "echo \"Fichier venv : ${'$'}META (UID ${'$'}OWNER/GID ${'$'}GROUP).\"; " +
+            "if [ \"${'$'}OWNER\" = \"$(id -u)\" ]; then cd \"${'$'}REPO\"; exec ./.hermes/bin/hermes update --yes; fi; " +
             "command -v setpriv >/dev/null 2>&1 || { echo \"setpriv indisponible : mise à niveau annulée sans modifier les droits.\"; exit 126; }; " +
-            "exec setpriv --reuid=\"$OWNER\" --regid=\"$GROUP\" --clear-groups env HOME=/root USER=jarvis LOGNAME=jarvis " +
+            "exec setpriv --reuid=\"${'$'}OWNER\" --regid=\"${'$'}GROUP\" --clear-groups env HOME=/root USER=jarvis LOGNAME=jarvis " +
             "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
             "bash -c \"cd /root/.hermes/hermes-agent && exec ./.hermes/bin/hermes update --yes\"' " +
             "2>&1 | while IFS= read -r ligne; do p \"\\$ligne\"; done; " +
