@@ -13,7 +13,7 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
         val KEYWORDS = Regex("discord|r[ôo]le\\b|r[ôo]les\\b|mod[ée]rateur|mod[ée]ration|serveur discord|salon\\b|salons\\b|cat[ée]gorie discord", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
         val NAMES = setOf(
-            "discord_guildes", "discord_roles", "discord_salons", "discord_role_creer", "discord_role_modifier",
+            "discord_guildes", "discord_roles", "discord_salons", "discord_audit_serveur", "discord_role_creer", "discord_role_modifier",
             "discord_role_supprimer", "discord_role_position", "discord_role_attribuer", "discord_salon_permission"
         )
     }
@@ -33,6 +33,8 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
         tool("discord_roles", "Discord : liste les rôles d'un serveur (nom, couleur, permissions, position).",
             mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si le bot n'est que sur un seul)."))),
         tool("discord_salons", "Discord : liste les salons (textuels, vocaux, catégories) d'un serveur.",
+            mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si un seul)."))),
+        tool("discord_audit_serveur", "AUDIT DISCORD STRICTEMENT EN LECTURE SEULE : récupère l'inventaire complet des salons et catégories avec leurs identifiants, positions, rattachements et sujets. Ne modifie jamais le serveur.",
             mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si un seul)."))),
         tool("discord_role_creer", "Discord : crée un nouveau rôle sur le serveur.",
             mapOf("serveur" to prop("Nom ou ID du serveur (optionnel si un seul)."), "nom" to prop("Nom du rôle."),
@@ -88,12 +90,42 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             val arr = Discord.guildes(app)
             ToolResult("# 💬 Serveurs Discord (${arr.length()})\n" + (0 until arr.length()).joinToString("\n") { i -> "- " + arr.getJSONObject(i).optString("name") }, direct = true)
         }
-        "discord_salons" -> {
+        "discord_salons", "discord_audit_serveur" -> {
             val gid = guilde(a)
             val arr = Discord.salons(app, gid)
-            val types = mapOf(0 to "💬 texte", 2 to "🔊 vocal", 4 to "📁 catégorie", 5 to "📢 annonces", 13 to "🎤 scène", 15 to "📋 forum")
-            ToolResult("# 📋 Salons (${arr.length()})\n" + (0 until arr.length()).sortedBy { arr.getJSONObject(it).optInt("position") }
-                .joinToString("\n") { i -> val c = arr.getJSONObject(i); "- ${types[c.optInt("type")] ?: "?"} ${c.optString("name")}" }, direct = true)
+            val types = mapOf(0 to "texte", 2 to "vocal", 4 to "catégorie", 5 to "annonces", 13 to "scène", 14 to "répertoire", 15 to "forum", 16 to "média")
+            val all = (0 until arr.length()).map { arr.getJSONObject(it) }
+            val categories = all.filter { it.optInt("type") == 4 }.sortedBy { it.optInt("position") }
+            val channels = all.filter { it.optInt("type") != 4 }
+            val categoryNames = categories.associate { it.optString("id") to it.optString("name") }
+            val lines = mutableListOf(
+                "# Inventaire Discord — lecture seule",
+                "Total reçu par l'API : ${all.size} objets ; catégories : ${categories.size} ; salons : ${channels.size}.",
+                "Aucune modification n'a été effectuée."
+            )
+            fun line(channel: JSONObject): String {
+                val kind = types[channel.optInt("type")] ?: "type ${channel.optInt("type")}"
+                val topic = channel.optString("topic").trim().take(140)
+                return "- [$kind] #${channel.optString("name")} · ID ${channel.optString("id")} · position ${channel.optInt("position")}" +
+                    (if (topic.isNotBlank()) " · sujet : $topic" else "")
+            }
+            for (category in categories) {
+                val id = category.optString("id")
+                lines += ""
+                lines += "📁 ${category.optString("name")} · ID $id · position ${category.optInt("position")}"
+                channels.filter { it.optString("parent_id") == id }.sortedBy { it.optInt("position") }.forEach { lines += line(it) }
+            }
+            val uncategorized = channels.filter { it.optString("parent_id").isBlank() || !categoryNames.containsKey(it.optString("parent_id")) }
+                .sortedBy { it.optInt("position") }
+            if (uncategorized.isNotEmpty()) {
+                lines += ""
+                lines += "📂 Sans catégorie / rattachement inconnu"
+                uncategorized.forEach { lines += line(it) }
+            }
+            val byType = all.groupingBy { types[it.optInt("type")] ?: "type ${it.optInt("type")}" }.eachCount().toSortedMap()
+            lines += ""
+            lines += "Contrôle des types : " + byType.entries.joinToString(", ") { "${it.key}=${it.value}" }
+            ToolResult(lines.joinToString("\n"), direct = true)
         }
         "discord_roles" -> {
             val gid = guilde(a)
