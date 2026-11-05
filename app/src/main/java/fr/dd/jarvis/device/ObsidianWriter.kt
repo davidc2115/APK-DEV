@@ -132,6 +132,35 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         return md || pdf
     }
 
+    /**
+     * Supprime les pièces jointes d'une intervention par son identifiant stable, et non par un chemin supposé.
+     * Recherche dans le dossier Interventions même si le nom du client/site a été normalisé ou si le sous-dossier
+     * a été déplacé. Les rapports sont ciblés par le couple date+ID ; les photos par le préfixe ID-.
+     * Retourne les chemins réellement supprimés et ceux qui restent accessibles mais non supprimables.
+     */
+    fun supprimerPiecesIntervention(date: String, interventionId: String): Pair<List<String>, List<String>> {
+        val base = safe("$date $interventionId", "Fiche")
+        val tous = toutLister(20_000).filter { !it.second }
+        fun sousInterventions(path: String): Boolean =
+            path.split('/').dropLast(1).any { normaliseNom(it) == normaliseNom("Interventions") }
+        val cibles = tous.filter { path ->
+            val nom = path.substringAfterLast('/')
+            val rapport = nom.equals("$base.md", true) || nom.equals("$base.pdf", true)
+            val photo = sousInterventions(path) && nom.startsWith("$interventionId-", true)
+            rapport || photo
+        }.distinct()
+        val supprimes = mutableListOf<String>()
+        val echecs = mutableListOf<String>()
+        for (path in cibles) {
+            val dossier = path.substringBeforeLast('/', "")
+            val nom = path.substringAfterLast('/')
+            val ok = supprimerFichier(dossier, nom)
+            val encorePresent = toutLister(20_000).any { !it.second && it.first.equals(path, true) }
+            if (ok && !encorePresent) supprimes += path else echecs += path
+        }
+        return supprimes to echecs
+    }
+
     /** Supprime une note par son chemin relatif (ex. « Contacts/Dupont.md »). Vrai si elle a bien disparu. */
     fun supprimerNote(chemin: String): Boolean {
         val p = withMd(chemin)
