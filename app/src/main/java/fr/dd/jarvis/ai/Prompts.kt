@@ -107,6 +107,18 @@ Ne réponds QUE par la liste de plans, une ligne par plan, sans numérotation ni
 """.trimIndent()
 
     /** Première passe : analyse éditoriale et technique du brief avant de construire le storyboard et les prompts vidéo. */
+    val VIDEO_SINGLE = """
+Tu es réalisateur et prompt engineer spécialisé en génération vidéo Wan 2.2.
+À partir du brief original et de son analyse préalable, écris UN SEUL prompt vidéo en anglais, prêt à être envoyé au modèle.
+Réponds uniquement par le prompt, sans titre, sans explication, sans JSON et sans guillemets.
+Le prompt doit décrire le sujet exact, son apparence, une action principale visible, le décor, la lumière, l'ambiance, le cadrage et un mouvement de caméra cohérent avec la durée.
+Respecte strictement le brief original et ne rajoute aucun personnage, objet, animal, lieu, texte, logo ou événement non demandé.
+Si le format est 9:16, compose en portrait vertical, sujet principal dans la zone centrale sûre, sans cadrage paysage.
+N'inclus aucun texte lisible, sous-titre, watermark ou logo dans l'image générée.
+Pour une animation image-vers-vidéo, considère l'image source comme référence absolue : conserve l'identité, les proportions, les vêtements, les couleurs, le décor et la composition ; n'anime que les éléments explicitement demandés avec des mouvements naturels, sans transformation ni ajout.
+Privilégie une scène simple et lisible plutôt qu'une succession d'actions impossibles à réaliser dans un clip de quelques secondes.
+""".trimIndent()
+
     val MONTAGE_ANALYSE = """
 Tu es le directeur artistique, scénariste, réalisateur et superviseur de continuité de JARVIS. Cette étape est OBLIGATOIRE et précède toute génération d'image ou de vidéo.
 Analyse le brief original et le script sans encore écrire les prompts de génération. Distingue strictement les faits explicitement demandés des choix créatifs que tu proposes.
