@@ -421,7 +421,10 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
             var enLigne by remember { mutableStateOf(false) }
             val termuxOk = remember(tick, hTick) { h.termuxInstalle(ctx) }
             val permOk = remember(tick, hTick) { h.permissionOk(ctx) }
-            androidx.compose.runtime.LaunchedEffect(tick, hTick, h.message) { enLigne = fr.dd.jarvis.hermes.Hermes.enLigne(force = true) }
+            androidx.compose.runtime.LaunchedEffect(tick, hTick, h.message) {
+                if (h.message.isNotBlank()) hMsg = h.message
+                enLigne = fr.dd.jarvis.hermes.Hermes.enLigne(force = true)
+            }
             val permLauncher = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { hTick++ }
             HudPanel(Modifier.fillMaxWidth(), title = "Hermès — cerveau principal (Termux)") {
                 Text(
