@@ -104,7 +104,7 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
                     if (enLigne) notifs() else journal.append("- ⏸️ Analyse des notifications : reportée, connexion Internet indisponible.\n")
                 }
             },
-            "Surveillance téléphone" to { if (store.agentNotifs.value && only == null) surveillanceTelephone() }
+            "Surveillance téléphone" to { if (store.agentPhoneHealth.value && only == null) surveillanceTelephone() }
         )
         var failures = 0
         for ((nom, f) in steps) {
