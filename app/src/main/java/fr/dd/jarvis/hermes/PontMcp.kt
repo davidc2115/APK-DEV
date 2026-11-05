@@ -96,7 +96,6 @@ object PontMcp {
             }
             val cible = aliasIntervention ?: if (nomCanonique == "jarvis_appeler_outil") args.optString("nom_outil").removePrefix("mcp_jarvis_") else nomCanonique
             if (cible == "jarvis_appeler_outil" || cible == "jarvis_rechercher_outils" ||
-                nomCanonique == "jarvis_interventions_lister" || nomCanonique == "jarvis_intervention_supprimer" ||
                 cible in EXCLUS || cible.isBlank())
                 return "Outil cible invalide ou interdit : $cible" to true
             val arguments = if (nomCanonique == "jarvis_appeler_outil") args.optJSONObject("arguments") ?: JSONObject() else args
