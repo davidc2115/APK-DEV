@@ -135,18 +135,18 @@ object DocumentStore {
                 Regex("<(?:[A-Za-z0-9_]+:)?p(?:\\s[^>]*)?>(.*?)</(?:[A-Za-z0-9_]+:)?p>", setOf(RegexOption.DOT_MATCHES_ALL))
                     .findAll(xml).forEach { m ->
                         val line = textNodes(m.groupValues[1])
-                        if (line.isNotBlank()) out.append(line).append("\\n")
+                        if (line.isNotBlank()) out.append(line).append("\n")
                     }
             }
             "pptx" -> {
                 entries.filterKeys { it.matches(Regex("ppt/slides/slide[0-9]+\\.xml")) }
                     .toSortedMap(compareBy { it.substringAfter("slide").substringBefore(".").toIntOrNull() ?: 0 })
                     .forEach { (path, xml) ->
-                        out.append("\\n[ DIAPOSITIVE ").append(path.substringAfter("slide").substringBefore(".")).append(" ]\\n")
+                        out.append("\n[ DIAPOSITIVE ").append(path.substringAfter("slide").substringBefore(".")).append(" ]\n")
                         Regex("<(?:[A-Za-z0-9_]+:)?p(?:\\s[^>]*)?>(.*?)</(?:[A-Za-z0-9_]+:)?p>", setOf(RegexOption.DOT_MATCHES_ALL))
                             .findAll(xml).forEach { m ->
                                 val line = textNodes(m.groupValues[1])
-                                if (line.isNotBlank()) out.append(line).append("\\n")
+                                if (line.isNotBlank()) out.append(line).append("\n")
                             }
                     }
             }
@@ -156,20 +156,20 @@ object DocumentStore {
                 entries.filterKeys { it.matches(Regex("xl/worksheets/sheet[0-9]+\\.xml")) }
                     .toSortedMap(compareBy { it.substringAfter("sheet").substringBefore(".").toIntOrNull() ?: 0 })
                     .forEach { (path, xml) ->
-                        out.append("\\n[ FEUILLE ").append(path.substringAfter("sheet").substringBefore(".")).append(" ]\\n")
+                        out.append("\n[ FEUILLE ").append(path.substringAfter("sheet").substringBefore(".")).append(" ]\n")
                         Regex("<(?:[A-Za-z0-9_]+:)?row(?:\\s[^>]*)?>(.*?)</(?:[A-Za-z0-9_]+:)?row>", setOf(RegexOption.DOT_MATCHES_ALL))
                             .findAll(xml).forEach { row ->
                                 val cells = Regex("<(?:[A-Za-z0-9_]+:)?c\\b([^>]*)>(.*?)</(?:[A-Za-z0-9_]+:)?c>", setOf(RegexOption.DOT_MATCHES_ALL))
                                     .findAll(row.groupValues[1]).map { cell ->
                                         val attrs = cell.groupValues[1]
-                                        val ref = Regex("\\br=\\"([^\\"]+)\\"").find(attrs)?.groupValues?.get(1).orEmpty()
-                                        val type = Regex("\\bt=\\"([^\\"]+)\\"").find(attrs)?.groupValues?.get(1).orEmpty()
+                                        val ref = Regex("""\\br="([^"]+)"""").find(attrs)?.groupValues?.get(1).orEmpty()
+                                        val type = Regex("""\\bt="([^"]+)"""").find(attrs)?.groupValues?.get(1).orEmpty()
                                         val value = Regex("<(?:[A-Za-z0-9_]+:)?v(?:\\s[^>]*)?>(.*?)</(?:[A-Za-z0-9_]+:)?v>", setOf(RegexOption.DOT_MATCHES_ALL))
                                             .find(cell.groupValues[2])?.groupValues?.get(1).orEmpty()
                                         val display = if (type == "s") shared.getOrNull(value.toIntOrNull() ?: -1).orEmpty() else decode(value)
                                         "$ref=$display"
                                     }.toList()
-                                if (cells.isNotEmpty()) out.append(cells.joinToString(" | ")).append("\\n")
+                                if (cells.isNotEmpty()) out.append(cells.joinToString(" | ")).append("\n")
                             }
                     }
             }
@@ -180,14 +180,14 @@ object DocumentStore {
                 else "<(?:table:)?table-cell(?:\\s[^>]*)?>(.*?)</(?:table:)?table-cell>"
                 Regex(pattern, setOf(RegexOption.DOT_MATCHES_ALL)).findAll(xml).forEach { m ->
                     val line = decode(Regex("<[^>]+>").replace(m.groupValues[1], ""))
-                    if (line.isNotBlank()) out.append(line).append(if (f.extension.equals("ods", true)) " | " else "\\n")
+                    if (line.isNotBlank()) out.append(line).append(if (f.extension.equals("ods", true)) " | " else "\n")
                 }
             }
         }
         val raw = out.toString().trim()
         if (raw.isBlank()) "Aucun texte exploitable trouvé dans ${f.name}."
-        else "DOCUMENT : ${f.name}\\nFormat : ${f.extension.uppercase()}\\nCaractères extraits : ${raw.length}\\n" +
-            (if (raw.length <= maxChars) "Extraction complète des éléments textuels détectés.\\n\\n" else "ATTENTION : sortie limitée à $maxChars caractères sur ${raw.length}.\\n\\n") +
+        else "DOCUMENT : ${f.name}\nFormat : ${f.extension.uppercase()}\nCaractères extraits : ${raw.length}\n" +
+            (if (raw.length <= maxChars) "Extraction complète des éléments textuels détectés.\n\n" else "ATTENTION : sortie limitée à $maxChars caractères sur ${raw.length}.\n\n") +
             raw.take(maxChars)
     }.getOrElse { "ÉCHEC_EXTRACTION_DOCUMENT|${f.name}|${it.message ?: "erreur inconnue"}" }
-}\n
+}
