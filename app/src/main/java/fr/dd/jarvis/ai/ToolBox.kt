@@ -317,7 +317,7 @@ class ToolBox(
         put(tool("memoire_apprentissages", "Affiche les préférences en cours d'apprentissage et leur nombre de preuves."))
         put(tool("agents_centre", "Centre de contrôle des agents IA : consulte leur état, active/désactive un agent, lance un cycle immédiat ou règle la fréquence. Respecte l'interrupteur général des agents autonomes.", mapOf(
             "action" to prop("etat | activer | desactiver | lancer | intervalle"),
-            "agent" to prop("global | mails | factures | planning | notifications | surveillance_telephone | rangement_gmail"),
+            "agent" to prop("global | mails | factures | planning | notifications | surveillance_telephone | rangement_gmail | archivage_gmail"),
             "minutes" to prop("Fréquence en minutes : 15, 30 ou 60 (minimum Android : 15).")
         ), listOf("action")))
         put(tool("graphe_suggere_lien", "Ajoute une relation SUGGESTED entre deux notes Obsidian du graphe. Les deux titres doivent être exacts et uniques ; la relation reste une suggestion non confirmée.", mapOf(
@@ -994,6 +994,7 @@ class ToolBox(
             "notifications", "notification" -> "Agent notifications"
             "surveillance_telephone", "telephone", "téléphone" -> "Surveillance du téléphone"
             "rangement_gmail", "rangement" -> "Agent rangement Gmail"
+            "archivage_gmail", "archivage" -> "Archivage Gmail"
             else -> return ToolResult("Agent inconnu. Agents disponibles : global, mails, factures, planning, notifications, surveillance_telephone, rangement_gmail.")
         }
         fun enabled(): Boolean = when (agent) {
@@ -1013,7 +1014,8 @@ class ToolBox(
                 "Planning/tâches" to store.agentPlanning.value,
                 "Notifications" to store.agentNotifs.value,
                 "Surveillance téléphone" to store.agentPhoneHealth.value,
-                "Rangement Gmail" to store.agentRanger.value
+                "Rangement Gmail" to store.agentRanger.value,
+                "Archivage Gmail" to store.agentArchiver.value
             )
             val lastRun = store.agentLastRunAt.value.toLongOrNull()?.let { millis ->
                 runCatching { LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(millis), ZoneId.systemDefault())
@@ -1047,7 +1049,8 @@ class ToolBox(
             "planning", "agenda" -> store.agentPlanning.set(on)
             "notifications", "notification" -> store.agentNotifs.set(on)
             "surveillance_telephone", "telephone", "téléphone" -> store.agentPhoneHealth.set(on)
-            else -> store.agentRanger.set(on)
+            "rangement_gmail", "rangement" -> store.agentRanger.set(on)
+            else -> store.agentArchiver.set(on)
         }
         fr.dd.jarvis.work.AgentsScheduler.apply(app, store)
         return ToolResult("✅ $label ${if (on) "activé" else "désactivé"}. ${if (on && !store.agentsOn.value && agent != "global" && agent != "tous") "L'agent est configuré mais le commutateur général reste désactivé." else ""}", direct = true)
