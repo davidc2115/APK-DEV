@@ -378,7 +378,7 @@ fun PlanningScreen(app: JarvisApp) {
                             }
                         )
                     }
-                    val gps = Regex("""GPS\s*:\s*(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)""").find(e.description)
+                    val gps = Regex("""(?:Coordonnées )?GPS\s*:\s*(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)""").find(e.description)
                     if (gps != null) {
                         val lat = gps.groupValues[1]
                         val lon = gps.groupValues[2]
@@ -402,7 +402,8 @@ fun PlanningScreen(app: JarvisApp) {
                         color = LocalAccent.current, fontSize = 12.sp,
                         modifier = Modifier.clickable { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(osmGps))) } }
                     )
-                    if (e.description.isNotBlank()) Text(e.description.take(600), color = HudDim, fontSize = 12.sp)
+                    val descriptionVisible = e.description.lines().filterNot { it.startsWith("Voir l’adresse (OpenStreetMap) :") || it.startsWith("Ouvrir le point GPS (OpenStreetMap) :") }.joinToString("\n")
+                    if (descriptionVisible.isNotBlank()) Text(descriptionVisible.take(600), color = HudDim, fontSize = 12.sp)
                     HudButton("✎ Modifier le rendez-vous") { editing = e; selected = null }
                     Text("Couleur du rendez-vous", color = HudDim, fontSize = 12.sp)
                     ColorPalette(store.eventColor[e.id] ?: e.eventColor) {
