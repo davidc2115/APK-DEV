@@ -107,9 +107,17 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
             "Surveillance téléphone" to { if (store.agentPhoneHealth.value && only == null) surveillanceTelephone() }
         )
         var failures = 0
+        val outcomes = mutableListOf<String>()
         for ((nom, f) in steps) {
-            try { f() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) {
+            val journalStart = journal.length
+            try {
+                f()
+                outcomes += "$nom : ${if (journal.length > journalStart) "activité" else "RAS"}"
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
                 failures++
+                outcomes += "$nom : erreur"
                 journal.append("- ⚠️ $nom : ${e.message?.take(120)}\n")
             }
         }
@@ -117,7 +125,8 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
         val status = if (failures == 0) "Cycle terminé sans erreur" else "Cycle partiel : $failures étape(s) en erreur"
         store.agentLastRunAt.set(finishedAt.toString())
         store.agentLastRunStatus.set(status)
-        val historyLine = "${java.time.LocalDateTime.ofInstant(Instant.ofEpochMilli(finishedAt), ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"))} · $status"
+        val horodatage = java.time.LocalDateTime.ofInstant(Instant.ofEpochMilli(finishedAt), ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"))
+        val historyLine = "$horodatage · $status · ${outcomes.joinToString(" | ")}"
         val history = (store.agentRunHistory.value.lines().filter { it.isNotBlank() } + historyLine).takeLast(20)
         store.agentRunHistory.set(history.joinToString("\n"))
         if (journal.isNotBlank()) {
