@@ -74,7 +74,7 @@ class ToolBox(
                 "title" to prop("Nouveau titre (optionnel)."),
                 "start" to prop("Nouveau début yyyy-MM-dd'T'HH:mm (optionnel)."),
                 "end" to prop("Nouvelle fin (optionnel)."),
-                "location" to prop("Nouveau lieu (optionnel).")
+                "location" to prop("Nouvelle adresse ou coordonnées (optionnel) : géocode le point ; le champ Lieu Google Agenda reçoit uniquement le lien GPS cliquable et l’adresse reste dans la description.")
             ), listOf("event_id")))
         put(tool("set_event_color", "Change la couleur d'un rendez-vous (synchronisée avec Google Agenda). Identifiant #id visible dans le planning ; sinon cherche par titre.",
             mapOf(
