@@ -129,6 +129,32 @@ object PhoneHealth {
         if (battery != null && battery <= 15 && !charging) {
             alerts += "Batterie critique : $battery % et téléphone non branché."
         }
+
+        // Vérifie aussi les accès indispensables au fonctionnement autonome de JARVIS.
+        // Ces contrôles sont strictement en lecture seule : aucune permission n'est modifiée.
+        val notificationListener = Settings.Secure.getString(
+            ctx.contentResolver, "enabled_notification_listeners"
+        ).orEmpty().split(':').any { component ->
+            component.substringBefore('/').equals(ctx.packageName, ignoreCase = true)
+        }
+        val notificationPermission = Build.VERSION.SDK_INT < 33 ||
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        if (!notificationListener) {
+            alerts += "Accès aux notifications désactivé : JARVIS ne peut plus analyser les notifications reçues."
+        }
+        if (!notificationPermission) {
+            alerts += "Notifications Android refusées : les alertes proactives de JARVIS ne peuvent pas s'afficher."
+        }
+        if (!app.phone.accessibilityEnabled()) {
+            alerts += "Service d'accessibilité déconnecté : les commandes contextuelles et certaines actions téléphone sont limitées."
+        }
+        if (!ShizukuShell.ready()) {
+            alerts += "Shizuku indisponible : les commandes avancées qui en dépendent ne pourront pas être exécutées."
+        }
+        val powerManager = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (!powerManager.isIgnoringBatteryOptimizations(ctx.packageName)) {
+            alerts += "Optimisation batterie active : Android peut retarder ou interrompre certaines tâches en arrière-plan."
+        }
         runCatching { StatFs(Environment.getDataDirectory().absolutePath).availableBytes }
             .getOrNull()?.let { free ->
                 if (free < 1024L * 1024L * 1024L) alerts += "Stockage critique : moins de 1 Go disponible."
