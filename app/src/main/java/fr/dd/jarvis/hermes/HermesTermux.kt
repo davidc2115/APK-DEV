@@ -186,9 +186,7 @@ p() {
     return 127
   fi
   local response code
-  if response=$(curl -fsS --connect-timeout 3 -m 8 -X POST \\
-    -H "Authorization: Bearer ${'$'}J_TOK" \\
-    --data-binary "${'$'}message" "${'$'}J_URL"); then
+  if response=$(curl -fsS --connect-timeout 3 -m 8 -X POST -H "Authorization: Bearer ${'$'}J_TOK" --data-binary "${'$'}message" "${'$'}J_URL"); then
     :
   else
     code=${'$'}?
