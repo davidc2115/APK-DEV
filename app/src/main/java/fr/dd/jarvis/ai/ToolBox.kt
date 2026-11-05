@@ -595,7 +595,7 @@ class ToolBox(
                 when (f.extension.lowercase()) {
                     "pdf" -> {
                         val extracted = fr.dd.jarvis.ai.DocumentStore.extractPdf(app, f)
-                        if (!extracted.startsWith("PDF_SANS_TEXTE|")) {
+                        if (!extracted.startsWith("PDF_SANS_TEXTE|") && !extracted.startsWith("ÉCHEC_EXTRACTION_PDF|")) {
                             ToolResult("Extraction PDF de toutes les pages pour la demande « $question ». Préserve les titres, les noms exacts, les tableaux et les listes ; signale toute limite.\n\n" + extracted)
                         } else {
                             val fd = android.os.ParcelFileDescriptor.open(f, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
