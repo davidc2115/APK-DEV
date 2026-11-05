@@ -70,7 +70,7 @@ object PontMcp {
                 for (i in 0 until tous.length()) {
                     val fn = tous.optJSONObject(i)?.optJSONObject("function") ?: continue
                     val nomOutil = fn.optString("name")
-                    if (nomOutil.isBlank() || nomOutil in EXCLUS || nomOutil.startsWith("jarvis_")) continue
+                    if (nomOutil.isBlank() || nomOutil in EXCLUS || nomOutil == "jarvis_rechercher_outils" || nomOutil == "jarvis_appeler_outil") continue
                     val texte = (nomOutil + " " + fn.optString("description")).lowercase()
                     val score = termes.count { texte.contains(it) }
                     if (score > 0) candidats += score to fn
@@ -254,7 +254,7 @@ object PontMcp {
 
     /** Schéma « function » (OpenAI) des outils de Jarvis → outils MCP (name, description, inputSchema). */
     internal fun convertirOutils(tous: JSONArray): JSONArray {
-        // Groq accepte au maximum 128 outils par requête. On plafonne Jarvis à 100
+        // Groq accepte au maximum 128 outils par requête. On plafonne Jarvis à 80
         // pour laisser une marge aux autres serveurs MCP connectés dans Hermès.
         val prioritaires = listOf(
             "interventions_liste", "intervention_supprimer", "intervention_modifier",
