@@ -87,16 +87,17 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
     private fun readSet(n: String): MutableSet<String> = runCatching { seenFile(n).readLines().toMutableSet() }.getOrDefault(mutableSetOf())
     private fun writeSet(n: String, s: Set<String>) = runCatching { seenFile(n).writeText(s.toList().takeLast(600).joinToString("\n")) }
 
-    private fun alert(id: Int, titre: String, texte: String) {
+    private fun alert(id: Int, titre: String, texte: String): Boolean {
         if (android.os.Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             journal.append("- ⚠️ Alerte « $titre » non publiée : autorisation de notifications Android absente.\n")
-            return
+            return false
         }
         val pi = PendingIntent.getActivity(ctx, id, Intent(ctx, fr.dd.jarvis.MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val n = NotificationCompat.Builder(ctx, JarvisApp.CHANNEL_AGENTS).setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle(titre).setContentText(texte.lineSequence().firstOrNull().orEmpty())
             .setStyle(NotificationCompat.BigTextStyle().bigText(texte.take(3500))).setContentIntent(pi).setAutoCancel(true).build()
         (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(id, n)
+        return true
     }
 
     override suspend fun doWork(): Result {
@@ -186,9 +187,10 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
         val classes = MailTri.classer(app, nouveaux)
         val urgents = classes.filter { it.cat == "Urgent" || it.prio == 1 }
         journal.append("- 📧 ${nouveaux.size} nouveau(x) mail(s) : " + classes.groupBy { it.cat }.entries.joinToString(", ") { "${it.value.size} ${it.key}" } + "\n")
+        var peutMarquerCommeTraite = true
         if (urgents.isNotEmpty()) {
             val txt = urgents.joinToString("\n") { "• ${it.mail.from} — ${it.mail.subject}" + (if (it.action.isNotBlank()) " → ${it.action}" else "") }
-            alert(2001, "📧 ${urgents.size} mail(s) urgent(s)", txt)
+            if (!alert(2001, "📧 ${urgents.size} mail(s) urgent(s)", txt)) peutMarquerCommeTraite = false
             journal.append(urgents.joinToString("") { "  - 🔴 ${it.mail.from} — ${it.mail.subject}\n" })
         }
         if (store.agentRanger.value && store.gmailAccounts.isNotEmpty()) {
@@ -198,7 +200,8 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
                     classes.joinToString("\n") { "• ${it.label} — ${it.mail.from} : ${it.mail.subject}" })
             }.onFailure { throw it } // Remonter l’échec : les mails restent non traités et seront réessayés au prochain cycle.
         }
-        writeSet("agent_seen_mails.txt", seen + nouveaux.map { key(it) })
+        if (peutMarquerCommeTraite) writeSet("agent_seen_mails.txt", seen + nouveaux.map { key(it) })
+        else journal.append("  - ⏳ Mails conservés pour une nouvelle tentative : alerte urgente non délivrée.\n")
     }
 
     // ---------------------------------------------------------------- factures et devis
@@ -219,8 +222,10 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
                 }
             }
         }.sortedBy { it.third.prochaineMaintenance }
-        store.agentLastFact.set(today)
-        if (retard.isEmpty() && bientotEchues.isEmpty() && devis.isEmpty() && maintenance.isEmpty()) return
+        if (retard.isEmpty() && bientotEchues.isEmpty() && devis.isEmpty() && maintenance.isEmpty()) {
+            store.agentLastFact.set(today)
+            return
+        }
         val sb = StringBuilder()
         if (retard.isNotEmpty()) {
             sb.append("Factures en retard (${euro(retard.sumOf { d.totaux(it).ttc })}) :\n")
@@ -242,7 +247,7 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
                 sb.append("• " + client.nom + " · " + site.nom + " — " + dateFr(date) + retardTxt + "\n")
             }
         }
-        alert(2002, "💶 Suivi entreprise et maintenances", sb.toString())
+        if (alert(2002, "💶 Suivi entreprise et maintenances", sb.toString())) store.agentLastFact.set(today)
         journal.append("- 💶 " + retard.size + " facture(s) en retard, " + bientotEchues.size + " échéance(s) proche(s), " + devis.size + " devis à relancer, " + maintenance.size + " maintenance(s) à prévoir\n")
     }
 
@@ -274,10 +279,11 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
                 val startB = Instant.ofEpochMilli(b.begin).atZone(zone).format(fmt)
                 "• ${a.title} ($startA) chevauche ${b.title} ($startB)"
             }
-            alert(3010, "⚠️ Conflit dans ton planning", details)
-            journal.append("- ⚠️ ${nouveauxConflits.size} conflit(s) d'agenda détecté(s) sur les 7 prochains jours\n")
-        }
-        writeSet("agent_seen_conflicts.txt", seenConflicts + conflictKeys)
+            if (alert(3010, "⚠️ Conflit dans ton planning", details)) {
+                writeSet("agent_seen_conflicts.txt", seenConflicts + conflictKeys)
+                journal.append("- ⚠️ ${nouveauxConflits.size} conflit(s) d'agenda détecté(s) sur les 7 prochains jours\n")
+            } else journal.append("- ⏳ Conflits conservés pour une nouvelle alerte : notification non délivrée.\n")
+        } else writeSet("agent_seen_conflicts.txt", seenConflicts + conflictKeys)
 
         val prochain = semaine.firstOrNull { it.end >= now }
         val synthese = when {
@@ -299,9 +305,10 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
             val partir = e.begin - (Math.round(r.minutes) + 10) * 60_000L
             if (partir - now > (store.agentMinutes.value + 10) * 60_000L) continue // pas encore l'heure de prévenir
             val h = Instant.ofEpochMilli(partir).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH:mm"))
-            alert(3000 + (e.id % 900).toInt(), "🚗 Partir à $h", "${e.title}\n📍 $lieu\n${Math.round(r.km)} km · ${Math.round(r.minutes)} min de route (marge 10 min)")
-            journal.append("- 🚗 Départ ${h} pour « ${e.title} » (${Math.round(r.minutes)} min)\n")
-            writeSet("agent_notified_events.txt", notified + "${e.id}_${e.begin}")
+            if (alert(3000 + (e.id % 900).toInt(), "🚗 Partir à $h", "${e.title}\n📍 $lieu\n${Math.round(r.km)} km · ${Math.round(r.minutes)} min de route (marge 10 min)")) {
+                journal.append("- 🚗 Départ ${h} pour « ${e.title} » (${Math.round(r.minutes)} min)\n")
+                writeSet("agent_notified_events.txt", notified + "${e.id}_${e.begin}")
+            }
         }
     }
 
@@ -319,9 +326,10 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
                 task.title + (if (task.dueDate.isNotBlank()) " (" + dateFr(task.dueDate) + ")" else "") +
                 (if (task.priority == "urgente" || task.priority == "haute") " · priorité " + task.priority else "")
         }
-        alert(3012, "📝 Tâches à ne pas oublier", details)
-        journal.append("- 📝 " + fresh.size + " tâche(s) personnelle(s) en retard ou à échéance sous 24 h\n")
-        writeSet("agent_seen_tasks.txt", seen + fresh.map { it.id + "_" + it.dueDate })
+        if (alert(3012, "📝 Tâches à ne pas oublier", details)) {
+            journal.append("- 📝 " + fresh.size + " tâche(s) personnelle(s) en retard ou à échéance sous 24 h\n")
+            writeSet("agent_seen_tasks.txt", seen + fresh.map { it.id + "_" + it.dueDate })
+        } else journal.append("- ⏳ Tâches conservées pour une nouvelle alerte : notification non délivrée.\n")
     }
 
     // ---------------------------------------------------------------- notifications du téléphone
