@@ -8,20 +8,52 @@ import fr.dd.jarvis.societe.core.SocieteData
 import fr.dd.jarvis.societe.core.jsonSociete
 import java.io.File
 
-/** Données de la société, en JSON dans le stockage privé de l'application, observables par Compose. */
+/** Données Société persistées dans le stockage privé et observables par Compose. */
 class SocieteRepo(ctx: Context) {
     private val dir = File(ctx.filesDir, "societe").apply { mkdirs() }
     private val file = File(dir, "data.json")
+    private val backup = File(dir, "data.json.bak")
 
     var data by mutableStateOf(load())
         private set
 
-    private fun load(): SocieteData = try {
-        if (file.exists()) jsonSociete.decodeFromString(SocieteData.serializer(), file.readText()) else SocieteData()
-    } catch (e: Exception) {
-        // fichier illisible : on le garde de côté plutôt que de l'écraser
-        runCatching { file.copyTo(File(dir, "data.corrompu.json"), overwrite = true) }
-        SocieteData()
+    private fun decode(source: File): SocieteData =
+        jsonSociete.decodeFromString(SocieteData.serializer(), source.readText())
+
+    /**
+     * Ne jamais transformer silencieusement une base Société illisible en base vide :
+     * cela faisait disparaître tous les clients de l'onglet alors que leurs fiches Markdown
+     * existaient encore dans Obsidian. On conserve le fichier défectueux et restaure le dernier
+     * instantané JSON valide avant de laisser l'application continuer.
+     */
+    private fun load(): SocieteData {
+        if (file.exists()) {
+            runCatching { return decode(file) }
+            // Le fichier principal est invalide : le mettre de côté sans toucher à la sauvegarde.
+            val damaged = File(dir, "data.corrompu.${System.currentTimeMillis()}.json")
+            runCatching { file.copyTo(damaged, overwrite = false) }
+        }
+
+        if (backup.exists()) {
+            val restored = runCatching { decode(backup) }.getOrNull()
+            if (restored != null) {
+                // Restaurer immédiatement le fichier principal : les prochaines écritures repartiront
+                // d'une base saine et ne recopieront pas le JSON corrompu dans le backup.
+                runCatching {
+                    val tmp = File(dir, "data.json.restore.tmp")
+                    backup.copyTo(tmp, overwrite = true)
+                    if (!tmp.renameTo(file)) {
+                        tmp.copyTo(file, overwrite = true)
+                        tmp.delete()
+                    }
+                    if (decode(file) != restored) throw java.io.IOException("Vérification de restauration impossible.")
+                }
+                return restored
+            }
+        }
+
+        // Aucun fichier exploitable : conserver les fichiers pour diagnostic et démarrer vide.
+        return SocieteData()
     }
 
     @Synchronized
@@ -31,13 +63,17 @@ class SocieteRepo(ctx: Context) {
         val contenu = jsonSociete.encodeToString(SocieteData.serializer(), nouvelle)
         tmp.writeText(contenu)
         if (!tmp.exists() || tmp.length() == 0L) throw java.io.IOException("Écriture de la base Société impossible.")
-        if (file.exists()) runCatching { file.copyTo(File(dir, "data.json.bak"), overwrite = true) }
-        // Ne publie le nouvel état observable qu'après avoir garanti sa persistance sur disque.
+        // La sauvegarde ne remplace jamais un instantané valide par un fichier principal illisible.
+        if (file.exists()) {
+            runCatching { decode(file) }.onSuccess {
+                file.copyTo(backup, overwrite = true)
+            }
+        }
         if (!tmp.renameTo(file)) {
             tmp.copyTo(file, overwrite = true)
             tmp.delete()
         }
-        val relu = jsonSociete.decodeFromString(SocieteData.serializer(), file.readText())
+        val relu = decode(file)
         if (jsonSociete.encodeToString(SocieteData.serializer(), relu) != contenu)
             throw java.io.IOException("La base Société n'a pas été enregistrée intégralement.")
         data = relu
