@@ -294,7 +294,7 @@ object PontMcp {
             "discord_role_creer", "discord_role_modifier", "discord_role_supprimer",
             "discord_role_position", "discord_role_attribuer", "discord_salon_permission", "discord_message_envoyer",
             // Réseau et accès distant : garder les diagnostics, la découverte et les outils SSH visibles pour Hermès.
-            "reseau_infos", "ip_publique", "reseau_scanner", "imprimantes_trouver",
+            "routeur_diagnostiquer", "reseau_infos", "ip_publique", "reseau_scanner", "imprimantes_trouver",
             "appareil_sonder", "appareil_page", "ssh_commande", "ssh_fichier", "ssh_script"
         )
         val fonctions = mutableListOf<JSONObject>()
