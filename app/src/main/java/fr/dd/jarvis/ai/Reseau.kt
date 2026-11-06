@@ -81,7 +81,7 @@ object Reseau {
         val candidate = client.newCall(Request.Builder().url("https://api.ipify.org").header("Accept", "text/plain").build())
             .execute().use { response -> if (!response.isSuccessful) "" else response.body?.string().orEmpty().trim() }
         val adresse = InetAddress.getByName(candidate)
-        if (candidate.matches(Regex("(?:\\\\d{1,3}\\\\.){3}\\\\d{1,3}")) && adresse is Inet4Address &&
+        if (candidate.matches(Regex("(?:\\d{1,3}\\.){3}\\d{1,3}")) && adresse is Inet4Address &&
             !adresse.isAnyLocalAddress && !adresse.isLoopbackAddress && !adresse.isLinkLocalAddress &&
             !adresse.isSiteLocalAddress && !adresse.isMulticastAddress) candidate else ""
     }.getOrDefault("")
