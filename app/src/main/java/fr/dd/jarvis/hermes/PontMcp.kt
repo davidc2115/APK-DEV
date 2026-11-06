@@ -290,7 +290,7 @@ object PontMcp {
             // Discord : exposer en priorité les outils de lecture ET d'administration.
             "discord_guildes", "discord_roles", "discord_salons", "discord_audit_serveur",
             "discord_role_creer", "discord_role_modifier", "discord_role_supprimer",
-            "discord_role_position", "discord_role_attribuer", "discord_salon_permission"
+            "discord_role_position", "discord_role_attribuer", "discord_salon_permission", "discord_message_envoyer"
         )
         val fonctions = mutableListOf<JSONObject>()
         val nomsDejaVus = mutableSetOf<String>()
