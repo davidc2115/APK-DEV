@@ -336,7 +336,7 @@ class VoiceManager(private val ctx: Context) {
         val appel = coupe && duplex && hautParleurSeul() && entrerModeAppel()
         // Sur autoradio/casque Bluetooth, ne pas basculer en mode appel (qui peut détourner le son) :
         // le focus assistant transitoire suffit à demander au lecteur musical de mettre la musique en pause.
-        if (!appel) demanderFocusReponse(attrAssistant)
+        if (!appel && am.mode == AudioManager.MODE_NORMAL) demanderFocusReponse(attrAssistant)
         runCatching { tts?.setAudioAttributes(if (appel) attrAppel else attrAssistant) }
         val fini = AtomicBoolean(false)
         enCours = fini
