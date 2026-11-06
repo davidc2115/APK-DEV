@@ -1,5 +1,8 @@
 package fr.dd.jarvis.ai
 
+import android.content.Context
+import android.net.ConnectivityManager
+
 /**
  * Socle multi-constructeurs pour l'administration des box Internet.
  *
@@ -77,6 +80,32 @@ object BoxInternetAdapters {
         BoxInternetProtocol.UPNP_IGD,
         BoxInternetProtocol.HTTPS_ADMIN
     )
+
+    /**
+     * Lit la passerelle réellement utilisée par Android sur le réseau actif.
+     * Cette étape est passive : elle n'essaie aucun mot de passe et ne modifie
+     * aucun réglage de la box.
+     */
+    fun detecterPasserelle(context: Context): BoxInternetProfile? {
+        val cm = context.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return null
+        val network = cm.activeNetwork ?: return null
+        val gateway = cm.getLinkProperties(network)?.routes
+            ?.firstOrNull { it.isDefaultRoute && it.gateway != null }
+            ?.gateway?.hostAddress
+            ?.substringBefore('%')
+            ?.takeIf { it.isNotBlank() }
+            ?: return null
+        return BoxInternetProfile(
+            vendor = BoxInternetVendor.OTHER,
+            model = "Passerelle réseau détectée",
+            gatewayAddress = gateway,
+            protocols = discoveryProtocols,
+            capabilities = setOf(BoxInternetCapability.DEVICE_DISCOVERY),
+            adapterId = null,
+            pairingRequired = true
+        )
+    }
 
     fun adapterAvailable(profile: BoxInternetProfile): Boolean =
         profile.adapterId?.let(integratedAdapterIds::contains) == true
