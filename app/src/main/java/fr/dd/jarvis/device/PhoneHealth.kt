@@ -235,6 +235,35 @@ object PhoneHealth {
         }
     }
 
+    /** Synthèse de tendance basée uniquement sur les échantillons réellement collectés localement. */
+    fun historyReport(app: JarvisApp): String {
+        val samples = history(app)
+        if (samples.isEmpty()) return "## Historique du téléphone\nAucune mesure historique disponible pour le moment. Les relevés sont collectés automatiquement au maximum toutes les 30 minutes."
+        val first = samples.first()
+        val last = samples.last()
+        val batteries = samples.mapNotNull { it.battery }
+        val batteryRange = if (batteries.isEmpty()) "non disponible" else "${batteries.minOrNull()}–${batteries.maxOrNull()} %"
+        val batteryChange = if (first.battery != null && last.battery != null) {
+            val delta = last.battery - first.battery
+            (if (delta > 0) "+" else "") + "$delta points"
+        } else "non calculable"
+        val storageDelta = (last.freeBytes - first.freeBytes) / (1024.0 * 1024.0 * 1024.0)
+        val storageChange = String.format(Locale.FRANCE, "%+.2f Go", storageDelta)
+        val date = java.text.SimpleDateFormat("dd/MM HH:mm", Locale.FRANCE)
+        return buildString {
+            append("## Historique du téléphone\n")
+            append("- Mesures conservées : ${samples.size}/48 (maximum 24 h environ)\n")
+            append("- Période observée : ${date.format(java.util.Date(first.at))} → ${date.format(java.util.Date(last.at))}\n")
+            append("- Batterie : ${last.battery?.let { "$it %" } ?: "non relevée"} ; plage observée $batteryRange ; évolution $batteryChange\n")
+            append("- Stockage libre : ${String.format(Locale.FRANCE, "%.2f Go", last.freeBytes / (1024.0 * 1024.0 * 1024.0))} ; évolution $storageChange\n")
+            append("\nDerniers relevés :\n")
+            samples.takeLast(8).asReversed().forEach { sample ->
+                append("- ${date.format(java.util.Date(sample.at))} · batterie ${sample.battery?.let { "$it %" } ?: "n/c"} · libre ${String.format(Locale.FRANCE, "%.2f Go", sample.freeBytes / (1024.0 * 1024.0 * 1024.0))}\n")
+            }
+            append("\nCes valeurs sont des instantanés espacés d'au moins 30 minutes, pas une surveillance continue.")
+        }
+    }
+
     data class Sample(val at: Long, val battery: Int?, val freeBytes: Long)
 
 }
