@@ -1074,11 +1074,15 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
             val smsOk2 = remember(t2) { fr.dd.jarvis.device.Telephony.smsGranted(ctx) && fr.dd.jarvis.device.Telephony.callGranted(ctx) }
             val locOk2 = remember(t2) { fr.dd.jarvis.device.Locator.granted(ctx) }
             val ntfOk = remember(t2) { android.os.Build.VERSION.SDK_INT < 33 || g(android.Manifest.permission.POST_NOTIFICATIONS) }
+            val nearbyWifiOk = remember(t2) { android.os.Build.VERSION.SDK_INT < 33 || g(android.Manifest.permission.NEARBY_WIFI_DEVICES) }
+            val localNetworkOk = remember(t2) { android.os.Build.VERSION.SDK_INT < 36 || g("android.permission.ACCESS_LOCAL_NETWORK") }
             var msg by remember { mutableStateOf("") }
             val all = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) { t2++ }
             HudPanel(Modifier.fillMaxWidth(), title = "Autorisations — tout en un") {
                 StatusRow("Notifications", ntfOk); StatusRow("Micro", micOk); StatusRow("Agenda", calOk); StatusRow("Contacts", ctcOk)
                 StatusRow("SMS et appels", smsOk2); StatusRow("Localisation", locOk2)
+                StatusRow("Appareils Wi-Fi à proximité", nearbyWifiOk)
+                if (android.os.Build.VERSION.SDK_INT >= 36) StatusRow("Accès au réseau local (Android 16+)", localNetworkOk)
                 StatusRow("Accès aux notifications (lire / résumer)", notifOn)
                 StatusRow("Batterie sans restriction (arrière-plan)", batt)
                 StatusRow("Affichage par-dessus les autres applis (lancer des applis)", overlay)
