@@ -15,8 +15,13 @@ import android.view.accessibility.AccessibilityNodeInfo
 class JarvisAccessibilityService : AccessibilityService() {
 
     companion object {
-        @Volatile
-        var instance: JarvisAccessibilityService? = null
+        @Volatile var instance: JarvisAccessibilityService? = null
+        private val uiEvents = ArrayDeque<String>()
+        @Volatile private var uiEventSequence: Long = 0L
+        private val uiEventsLock = Any()
+        internal fun recentUiEvents(): Pair<Long, List<String>> = synchronized(uiEventsLock) {
+            uiEventSequence to uiEvents.toList()
+        }
     }
 
     override fun onServiceConnected() {
@@ -34,7 +39,28 @@ class JarvisAccessibilityService : AccessibilityService() {
         super.onDestroy()
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        event ?: return
+        val pkg = event.packageName?.toString()?.take(120).orEmpty()
+        if (pkg.isBlank() || pkg == packageName) return
+        val kind = when (event.eventType) {
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> "fenêtre/application changée"
+            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> "contenu actualisé"
+            AccessibilityEvent.TYPE_VIEW_SCROLLED -> "défilement"
+            AccessibilityEvent.TYPE_VIEW_CLICKED -> "élément cliqué"
+            AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> "champ modifié"
+            AccessibilityEvent.TYPE_WINDOWS_CHANGED -> "fenêtres modifiées"
+            else -> "événement ${event.eventType}"
+        }
+        val cls = event.className?.toString()?.substringAfterLast('.')?.take(80).orEmpty()
+        val stamp = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.ROOT).format(java.util.Date())
+        val line = "$stamp · $pkg · $kind" + if (cls.isNotBlank()) " · $cls" else ""
+        synchronized(uiEventsLock) {
+            uiEventSequence++
+            if (uiEvents.lastOrNull() != line) uiEvents.addLast(line)
+            while (uiEvents.size > 30) uiEvents.removeFirst()
+        }
+    }
 
     override fun onInterrupt() {}
 
@@ -78,7 +104,12 @@ class JarvisAccessibilityService : AccessibilityService() {
             for (i in 0 until n.childCount) walk(n.getChild(i), depth + 1)
         }
         walk(root, 0)
-        return sb.toString().trim().take(10_000)
+        val (sequence, events) = recentUiEvents()
+        sb.append("\\n\\nACTIVITÉ RÉCENTE DU TÉLÉPHONE (événements d'accessibilité, sans contenu privé) :\\n")
+        sb.append("Séquence : ").append(sequence).append(" · ").append(events.size).append(" événement(s) conservé(s)\\n")
+        events.takeLast(20).forEach { sb.append("• ").append(it).append('\\n') }
+        sb.append("NOTE : journal événementiel mis à jour par Android en arrière-plan ; relancer inspect_screen/watch_screen pour lire les derniers changements.\\n")
+        return sb.toString().trim().take(12_000)
     }
 
     private fun collect(n: AccessibilityNodeInfo?, sb: StringBuilder) {
