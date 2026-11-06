@@ -459,8 +459,37 @@ private fun ClientsTab(app: JarvisApp) {
         )
     }
     if (creating) ClientForm(null, onClose = { creating = false }) { c ->
-        svc.repo.update { it.copy(clients = it.clients + c) }
-        creating = false
+        try {
+            // Le formulaire et les agents partagent la même base : repartir du disque avant
+            // d'ajouter pour ne pas écraser une création faite en arrière-plan.
+            val base = svc.repo.refresh()
+            if (base.clients.any { normaliser(it.nom) == normaliser(c.nom) }) {
+                info = "⚠️ Un client nommé « ${c.nom} » existe déjà. Ouvre sa fiche pour la modifier au lieu de créer un doublon."
+            } else {
+                var doublonConcurrent = false
+                svc.repo.update { current ->
+                    if (current.clients.any { normaliser(it.nom) == normaliser(c.nom) }) {
+                        doublonConcurrent = true
+                        current
+                    } else current.copy(clients = current.clients + c)
+                }
+                if (doublonConcurrent) {
+                    info = "⚠️ La fiche « ${c.nom} » vient d'être créée ailleurs. Aucune seconde fiche n'a été ajoutée."
+                } else {
+                    val verifie = svc.repo.refresh().clients.any {
+                        it.id == c.id && normaliser(it.nom) == normaliser(c.nom)
+                    }
+                    if (verifie) {
+                        info = "✅ Fiche de ${c.nom} créée et vérifiée dans la base Société."
+                        creating = false
+                    } else {
+                        info = "❌ L'enregistrement de ${c.nom} n'a pas pu être confirmé après relecture de la base Société. Le formulaire reste ouvert."
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            info = "❌ Impossible d'enregistrer ${c.nom} : ${e.message ?: e.javaClass.simpleName}. Le formulaire reste ouvert."
+        }
     }
     editing?.let { e0 ->
         ClientForm(e0, onClose = { editing = null }) { c ->
