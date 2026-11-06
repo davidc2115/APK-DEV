@@ -113,7 +113,7 @@ object ImageToVideoGen {
     private fun enregistrer(app: JarvisApp, videoBytes: ByteArray, name: String): Pair<File, String> {
         if (videoBytes.isEmpty()) throw ApiException(0, "Le MP4 généré est vide.")
         val file = File(dossier(app), name).apply { writeBytes(videoBytes) }
-        val location = runCatching { app.obsidian.saveBytes("JARVIS/Vidéos IA", name, videoBytes, "video/mp4") }.getOrDefault("")
+        val location = app.obsidian.saveBytes("JARVIS/Vidéos IA", name, videoBytes, "video/mp4")
         return file to location
     }
 
