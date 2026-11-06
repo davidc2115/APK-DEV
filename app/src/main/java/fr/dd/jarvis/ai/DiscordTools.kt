@@ -143,7 +143,7 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             val message = a.optString("message").trim()
             if (message.isBlank()) return ToolResult("Le message à envoyer est vide.")
             if (message.length > 2000) return ToolResult("Le message dépasse la limite Discord de 2 000 caractères.")
-            if (!confirm("Envoyer ce message dans #${salon.optString("name")} sur « $gnom » ?\\n\\n$message", true))
+            if (!confirm("Envoyer ce message dans #${salon.optString("name")} sur « $gnom » ?\n\n$message", true))
                 return ToolResult("Envoi annulé.")
             val sent = Discord.envoyerMessage(app, salon.getString("id"), message)
             ToolResult("✅ Message envoyé dans #${salon.optString("name")} sur « $gnom » (ID ${sent.optString("id")}). Les mentions globales ont été neutralisées.", direct = true)
