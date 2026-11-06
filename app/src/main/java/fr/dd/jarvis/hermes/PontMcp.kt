@@ -258,6 +258,9 @@ object PontMcp {
                 .put("serverInfo", JSONObject().put("name", "jarvis").put("version", "1.0"))
                 .put("instructions", "Outils du smartphone Android de l'utilisateur, fournis par l'app Jarvis : appels, SMS, agenda, mails, " +
                     "musique, réveils, domotique, coffre Obsidian, société (clients, devis, factures, paie), localisation, images/vidéos IA, réglages Jarvis. " +
+                    "SOURCE DE VÉRITÉ CONFIGURATION : les réglages de fournisseurs, modèles, clés et modes de Jarvis sont ceux enregistrés dans l'application Jarvis ; ne modifie pas directement config.yaml ni les variables de Termux pour contourner ces réglages. Utilise les outils de configuration Jarvis et signale toute divergence au lieu de créer une seconde configuration concurrente. " +
+                    "TÉLÉPHONE : pour observer l'application réellement affichée, appelle phone_action avec action=inspect_screen ; tu reçois l'application au premier plan, l'arbre des composants, les libellés, états et coordonnées tactiles. Utilise list_apps, open_app, inspect_screen, puis des actions ciblées et une nouvelle inspection pour vérifier. Les champs mot de passe sont masqués. Ce retour est une représentation d'accessibilité, pas une vidéo ni une image brute de l'écran. " +
+                    "MUSIQUE : pour rechercher ET lancer un titre, utilise musique_rechercher (requete, application facultative) ; cette fonction utilise le contrôleur multi-applications Android et vérifie la session de lecture. Morphe est pris en charge en plus de Spotify, YouTube Music, Deezer, Amazon Music et VLC. Ne réponds pas « introuvable » avant d'avoir consulté les applications installées et tenté l'application musicale appropriée. " +
                     "IMPORTANT pour les interventions photovoltaïques : les noms exacts des outils MCP sont interventions_liste, intervention_supprimer et intervention_modifier (sans préfixe). Ils sont exposés par le pont local Jarvis. " +
                     "Si ces outils ne sont pas visibles, utilise tool_search avec les termes exacts interventions_liste et intervention_supprimer ; ne remplace jamais cette recherche par une recherche de PDF dans Obsidian. " +
                     "Pour supprimer une intervention, utilise obligatoirement interventions_liste pour obtenir son ID, puis intervention_supprimer avec cet ID et confirmation='oui' après accord explicite. " +
@@ -283,6 +286,10 @@ object PontMcp {
         // Groq accepte au maximum 128 outils par requête. On plafonne Jarvis à 80
         // pour laisser une marge aux autres serveurs MCP connectés dans Hermès.
         val prioritaires = listOf(
+            // Capacités téléphone et musique : Hermès doit les voir directement sans dépendre
+            // d'une découverte différée ou d'un catalogue tronqué à 80 outils.
+            "phone_action", "phone_health_report", "musique_rechercher", "musique_etat", "musique_commander",
+            "reglage_jarvis", "hermes",
             // Les outils métier sensibles doivent rester visibles même lorsque le catalogue
             // dépasse le budget transmis au modèle (80 outils).
             "interventions_liste", "intervention_supprimer", "intervention_modifier",
