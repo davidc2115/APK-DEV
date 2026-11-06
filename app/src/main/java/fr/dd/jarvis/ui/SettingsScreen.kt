@@ -796,8 +796,8 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                         gatewayBusy = true
                         gatewayResult = try {
                             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                val gateway = fr.dd.jarvis.ai.BoxInternet.detecterPasserelle(app)
-                                val detected = fr.dd.jarvis.ai.BoxInternet.detecterFabricantUpnp(app)
+                                val gateway = fr.dd.jarvis.ai.BoxInternetAdapters.detecterPasserelle(app)
+                                val detected = fr.dd.jarvis.ai.BoxInternetAdapters.detecterFabricantUpnp(app)
                                 when {
                                     detected != null -> "Box identifiée : ${detected.vendor.label} ${detected.model} · ${detected.gatewayAddress}. Découverte UPnP en lecture seule ; les commandes de configuration dépendent encore de l’adaptateur constructeur."
                                     gateway != null -> "Passerelle détectée : ${gateway.gatewayAddress}. Le fabricant n’a pas répondu à la découverte UPnP ; aucune configuration n’a été modifiée."
