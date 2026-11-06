@@ -49,12 +49,6 @@ import fr.dd.jarvis.societe.Geo
 import fr.dd.jarvis.societe.core.*
 import java.time.LocalDate
 import androidx.compose.ui.platform.LocalView
-import android.view.View
-import java.io.File
-import java.io.FileOutputStream
-import java.util.zip.ZipEntry
-import java.util.zip.ZipOutputStream
-import androidx.core.content.FileProvider
 
 private val SUBS = listOf("Résumé", "Clients", "Interventions", "Devis", "Factures", "Équipe", "Fiches de paie", "Réglages")
 
