@@ -612,14 +612,32 @@ class SocieteService(
 
     /** Exporte les clients en KML : fiches HTML illustrées, styles par catégorie, coordonnées GPS et données indexées. */
     suspend fun exporterKml(recherche: String = ""): String = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        // L'export peut être déclenché par Hermès avec un instantané ancien : relire la base persistée.
+        val clientsSource = repo.refresh().clients
         val manquants = mutableListOf<String>()
         data class KmlPoint(
             val nom: String, val client: String, val type: String, val adresse: String, val description: String,
             val point: Geo.Point, val loc: Geo.Localisation
         )
         val pts = mutableListOf<KmlPoint>()
-        val filtre = normaliser(recherche.trim())
-        for (c in data.clients) {
+        val demandeNormalisee = normaliser(recherche.trim())
+        // Si Hermès transmet toute la longue consigne dans « recherche », ne pas filtrer la carte.
+        val clientsCites = if (demandeNormalisee.isBlank()) emptyList() else clientsSource.filter { client ->
+            val nom = normaliser(client.nom)
+            nom.length >= 3 && demandeNormalisee.contains(nom)
+        }
+        val rechercheCorrespondante = clientsSource.any { client ->
+            val champs = listOf(client.nom, client.contact, client.type, client.tel, client.adresse, client.email) +
+                client.sites.flatMap { listOf(it.nom, it.adresse, it.onduleur, it.notes) }
+            champs.any { champ -> demandeNormalisee.isNotBlank() && normaliser(champ).contains(demandeNormalisee) }
+        }
+        val filtre = when {
+            demandeNormalisee.isBlank() -> ""
+            rechercheCorrespondante -> demandeNormalisee
+            clientsCites.size == 1 -> normaliser(clientsCites.single().nom)
+            else -> ""
+        }
+        for (c in clientsSource) {
             val cibles = if (c.sites.isEmpty()) listOf(null) else c.sites
             for (site in cibles) {
                 val adr = site?.adresse?.ifBlank { null } ?: c.adresse
@@ -713,6 +731,8 @@ class SocieteService(
         buildString {
             append("# 🗺️ Export KML\n\n${pts.size} point(s) GPS enregistrés : $loc\n")
             if (filtre.isNotBlank()) append("🔎 Filtre appliqué : **${esc(recherche)}**\n")
+            else if (demandeNormalisee.isNotBlank()) append("ℹ️ Aucun filtre client/site fiable détecté : export complet de la base Société.\n")
+            append("👥 Clients parcourus : ${clientsSource.size} · Repères GPS exportés : ${pts.size} · Installations sans GPS exploitable : ${manquants.size}\n")
             if (pts.isNotEmpty()) {
                 append("\n🎯 Précision : ")
                 append(Geo.Precision.values().filter { (parPrecision[it] ?: 0) > 0 }.joinToString(" · ") { "${parPrecision[it]} ${it.libelle}" })
