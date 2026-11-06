@@ -732,7 +732,10 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         val confirmation = a.s("confirmation").trim().lowercase()
         if (confirmation != "oui") return err("Aucune suppression effectuée. Présente d'abord la fiche #$id (${cible.date}, ${cible.categorie}, ${cible.description.take(120)}) à l'utilisateur et attends son « oui » explicite. Ne crée aucune autre intervention.")
         val resultat = svc.supprimerIntervention(client.id, site.id, id)
-        return if (svc.data.client(client.id)?.sites?.firstOrNull { it.id == site.id }?.interventions?.none { it.id == id } == true) ok(resultat) else err(resultat)
+        val baseVerifiee = runCatching { svc.repo.refresh() }.getOrNull()
+        return if (baseVerifiee?.client(client.id)?.sites?.firstOrNull { it.id == site.id }?.interventions?.none { it.id == id } == true)
+            ok(resultat + "\nSuppression vérifiée après relecture de la base Société.")
+        else err("Suppression non confirmée après relecture de la base Société : $resultat")
     }
 
     private fun interventionsListe(a: JSONObject): ToolResult {
@@ -772,7 +775,10 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
     private fun interventionsSynthese(a: JSONObject): ToolResult {
         val clientQuery = a.s("client")
         val siteQuery = a.s("installation")
-        val clients = d.clients.filter { client ->
+        val donnees = runCatching { svc.repo.refresh() }.getOrElse {
+            return err("Impossible de relire l'historique Société : ${it.message ?: it.javaClass.simpleName}")
+        }
+        val clients = donnees.clients.filter { client ->
             (clientQuery.isBlank() || client.nom.contains(clientQuery, true)) &&
                 client.sites.any { siteQuery.isBlank() || it.nom.contains(siteQuery, true) }
         }
