@@ -2137,28 +2137,6 @@ echo "✅ Données et configuration restaurées."
                 .setContentText(ligne).setStyle(NotificationCompat.BigTextStyle().bigText(ligne)).setAutoCancel(true).build())
         }
     }
-}}{HERMES_PATH} DEBIAN_FRONTEND=noninteractive hermes gateway run"
-else
-  if ! command -v hermes >/dev/null 2>&1; then
-    p "❌ CLI Hermès introuvable dans Termux et Debian. Relance « Installer Hermès » pour réparer l’installation."
-    exit 127
-  fi
-  CMD="hermes gateway run"
-fi
-if command -v setsid >/dev/null 2>&1; then
-  setsid nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
-else
-  nohup sh -c "${'$'}{CMD}" >> "${'$'}{H}/logs/gateway.log" 2>&1 < /dev/null &
-fi
-p "🚀 Passerelle lancée, vérification de l’API locale…"
-for i in ${'$'}(seq 1 60); do
-  if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then p "✅ Hermès est en ligne."; exit 0; fi
-  sleep 2
-done
-p "❌ Hermès ne répond pas. Dernières lignes du journal :"
-tail -n 10 "${'$'}{H}/logs/gateway.log" 2>/dev/null | while IFS= read -r l; do p "   ${'$'}{l}"; done
-exit 1
-""".trimIndent()
     /**
      * Installation. Le paquet Termux officiel d'Hermès est (pour l'instant) indisponible, et l'installation « pip »
      * directement dans Termux échoue (dépendances sans version Android). Contournement fiable : une Debian légère
