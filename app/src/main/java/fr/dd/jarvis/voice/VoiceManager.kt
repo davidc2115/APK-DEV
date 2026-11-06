@@ -251,6 +251,7 @@ class VoiceManager(private val ctx: Context) {
     private var enCours: AtomicBoolean? = null
     private var appelActif = false
     private var focus: AudioFocusRequest? = null
+    private var focusLegacy = false
 
     private fun micOk() = androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.RECORD_AUDIO) ==
         android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -293,6 +294,11 @@ class VoiceManager(private val ctx: Context) {
         if (Build.VERSION.SDK_INT < 26) return
         runCatching {
             focus?.let { am.abandonAudioFocusRequest(it) }
+            if (focusLegacy) {
+                @Suppress("DEPRECATION")
+                am.abandonAudioFocus(focusListener)
+                focusLegacy = false
+            }
             val demande = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
                 .setAudioAttributes(attrs)
                 .setOnAudioFocusChangeListener(focusListener, main)
@@ -304,7 +310,7 @@ class VoiceManager(private val ctx: Context) {
             if (resultat != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
                 // Repli legacy : utile sur certaines ROM Android modifiées qui refusent la requête moderne.
                 @Suppress("DEPRECATION")
-                am.requestAudioFocus(focusListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                focusLegacy = am.requestAudioFocus(focusListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
             }
         }
     }
@@ -342,6 +348,11 @@ class VoiceManager(private val ctx: Context) {
         }
         // Le focus est aussi utilisé en Bluetooth/A2DP sans passer en mode appel.
         runCatching { focus?.let { am.abandonAudioFocusRequest(it) } }
+        if (focusLegacy) runCatching {
+            @Suppress("DEPRECATION")
+            am.abandonAudioFocus(focusListener)
+        }
+        focusLegacy = false
         focus = null
     }
 
