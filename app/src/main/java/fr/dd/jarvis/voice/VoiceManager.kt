@@ -270,12 +270,25 @@ class VoiceManager(private val ctx: Context) {
     private val attrAppel = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
     private val attrAssistant = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
 
+    /** Demande le focus pendant la réponse : les lecteurs musicaux reçoivent LOSS_TRANSIENT et mettent la musique en pause. */
+    private fun demanderFocusReponse(attrs: AudioAttributes = attrAssistant) {
+        if (Build.VERSION.SDK_INT < 26) return
+        runCatching {
+            focus?.let { am.abandonAudioFocusRequest(it) }
+            focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                .setAudioAttributes(attrs)
+                .setAcceptsDelayedFocusGain(false)
+                .setWillPauseWhenDucked(true)
+                .build()
+            am.requestAudioFocus(focus!!)
+        }
+    }
+
     private fun entrerModeAppel(): Boolean {
         if (appelActif) return true
         return try {
             if (am.mode != AudioManager.MODE_NORMAL) return false          // vrai appel en cours : on n'y touche pas
-            focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK).setAudioAttributes(attrAppel).build()
-                .also { am.requestAudioFocus(it) }
+            demanderFocusReponse(attrAppel)
             am.mode = AudioManager.MODE_IN_COMMUNICATION
             if (Build.VERSION.SDK_INT >= 31) {
                 am.availableCommunicationDevices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }?.let { am.setCommunicationDevice(it) }
@@ -291,15 +304,18 @@ class VoiceManager(private val ctx: Context) {
     }
 
     private fun sortirModeAppel(force: Boolean = false) {
-        if (!appelActif && !force) return
+        val etaitEnModeAppel = appelActif
         appelActif = false
-        runCatching {
-            if (Build.VERSION.SDK_INT >= 31) am.clearCommunicationDevice() else {
-                @Suppress("DEPRECATION")
-                am.isSpeakerphoneOn = false
+        if (etaitEnModeAppel || force) {
+            runCatching {
+                if (Build.VERSION.SDK_INT >= 31) am.clearCommunicationDevice() else {
+                    @Suppress("DEPRECATION")
+                    am.isSpeakerphoneOn = false
+                }
             }
+            runCatching { if (am.mode == AudioManager.MODE_IN_COMMUNICATION) am.mode = AudioManager.MODE_NORMAL }
         }
-        runCatching { if (am.mode == AudioManager.MODE_IN_COMMUNICATION) am.mode = AudioManager.MODE_NORMAL }
+        // Le focus est aussi utilisé en Bluetooth/A2DP sans passer en mode appel.
         runCatching { focus?.let { am.abandonAudioFocusRequest(it) } }
         focus = null
     }
@@ -318,6 +334,9 @@ class VoiceManager(private val ctx: Context) {
         }
         val coupe = bargeIn && micOk()
         val appel = coupe && duplex && hautParleurSeul() && entrerModeAppel()
+        // Sur autoradio/casque Bluetooth, ne pas basculer en mode appel (qui peut détourner le son) :
+        // le focus assistant transitoire suffit à demander au lecteur musical de mettre la musique en pause.
+        if (!appel) demanderFocusReponse(attrAssistant)
         runCatching { tts?.setAudioAttributes(if (appel) attrAppel else attrAssistant) }
         val fini = AtomicBoolean(false)
         enCours = fini
