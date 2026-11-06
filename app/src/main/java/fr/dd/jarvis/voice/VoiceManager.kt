@@ -252,6 +252,7 @@ class VoiceManager(private val ctx: Context) {
     private var appelActif = false
     private var focus: AudioFocusRequest? = null
     private var focusLegacy = false
+    private var mediaPauseeParJarvis = false
 
     private fun micOk() = androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.RECORD_AUDIO) ==
         android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -378,13 +379,22 @@ class VoiceManager(private val ctx: Context) {
             else -> attrAssistant
         }
         if (!appel && am.mode == AudioManager.MODE_NORMAL) demanderFocusReponse(attrsVoix)
+        // Le focus audio est la voie Android standard ; si le lecteur l'ignore, la session média active
+        // reçoit aussi une vraie commande PAUSE. Seule une session encore en lecture sera reprise ensuite.
+        mediaPauseeParJarvis = sortieBluetooth() &&
+            fr.dd.jarvis.service.JarvisNotificationListener.pauseMediaPourVoix(ctx)
         runCatching { tts?.setAudioAttributes(attrsVoix) }
         val fini = AtomicBoolean(false)
         enCours = fini
         fun terminer() {
             if (fini.compareAndSet(false, true)) {
                 barge?.stop(); barge = null
-                main.post { sortirModeAppel(); onDone() }
+                main.post {
+                    sortirModeAppel()
+                    if (mediaPauseeParJarvis) fr.dd.jarvis.service.JarvisNotificationListener.reprendreMediaApresVoix()
+                    mediaPauseeParJarvis = false
+                    onDone()
+                }
             }
         }
         tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
@@ -412,6 +422,8 @@ class VoiceManager(private val ctx: Context) {
         barge?.stop(); barge = null
         tts?.stop()
         sortirModeAppel()
+        if (mediaPauseeParJarvis) fr.dd.jarvis.service.JarvisNotificationListener.reprendreMediaApresVoix()
+        mediaPauseeParJarvis = false
     }
 
     fun release() {
@@ -425,7 +437,11 @@ class VoiceManager(private val ctx: Context) {
         tts?.stop()
         tts?.shutdown()
         tts = null
-        main.post { sortirModeAppel() }
+        main.post {
+            sortirModeAppel()
+            if (mediaPauseeParJarvis) fr.dd.jarvis.service.JarvisNotificationListener.reprendreMediaApresVoix()
+            mediaPauseeParJarvis = false
+        }
     }
 
     private fun cleanForSpeech(t: String): String = t
