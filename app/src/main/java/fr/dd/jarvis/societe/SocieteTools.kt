@@ -403,8 +403,11 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
     private suspend fun clientSupprimer(a: JSONObject): ToolResult {
         val nom = a.s("nom")
         if (nom.isBlank()) return err("Nom du client manquant.")
-        val trouves = d.chercherClients(nom)
-        val exact = trouves.filter { normaliser(it.nom) == normaliser(nom) }
+        // Hermès peut appeler cet outil après une création faite en arrière-plan :
+        // ne jamais chercher dans l'instantané potentiellement périmé du service.
+        val donnees = svc.repo.refresh()
+        val trouves = donnees.chercherClients(nom)
+        val exact = donnees.clients.filter { normaliser(it.nom) == normaliser(nom) }
         val cible = when {
             exact.size == 1 -> exact.first()
             exact.size > 1 -> return err("Plusieurs fiches portent ce nom. Précise un autre identifiant.")
@@ -412,7 +415,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             trouves.size > 1 -> return err("Plusieurs clients correspondent : ${trouves.joinToString { it.nom }}. Précise le nom exact.")
             else -> return err("Aucune fiche client trouvée pour « $nom ».")
         }
-        val documents = d.docs.filter { it.clientId == cible.id }
+        val documents = donnees.docs.filter { it.clientId == cible.id }
         if (documents.isNotEmpty()) {
             val liste = documents.take(8).joinToString(", ") { it.numero }
             return err("La fiche « ${cible.nom} » est liée à ${documents.size} devis/facture(s) ($liste${if (documents.size > 8) "…" else ""}). Je bloque la suppression pour ne pas casser l’historique comptable. Il faut d’abord transférer ou traiter ces documents.")
@@ -420,7 +423,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         if (!confirm("Supprimer définitivement la fiche client « ${cible.nom} » et ses ${cible.sites.size} installation(s) de la base Société ? Cette action est irréversible.", true))
             return err("Suppression refusée. La fiche « ${cible.nom} » est conservée.")
         svc.repo.update { data -> data.copy(clients = data.clients.filterNot { it.id == cible.id }) }
-        val removed = d.clients.none { it.id == cible.id }
+        val removed = svc.repo.refresh().clients.none { it.id == cible.id }
         if (!removed) return err("❌ La fiche « ${cible.nom} » est toujours présente après la tentative de suppression. Aucune confirmation de réussite.")
         // La fiche Markdown exportée est une copie de présentation : la retirer aussi si elle existe.
         val markdownPath = "Société/Clients/${cible.nom}.md"
