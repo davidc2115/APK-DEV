@@ -283,6 +283,11 @@ private fun cleReferenceGeo(adresse: String, lat: Double?, lon: Double?): String
 @Composable
 private fun ClientsTab(app: JarvisApp) {
     val svc = app.societe
+    // Recharge le JSON persistant à chaque ouverture de l'onglet : la liste ne dépend pas
+    // uniquement de l'instantané qui était en mémoire avant l'action de l'agent.
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) { svc.repo.refresh() }
+    }
     val d = svc.data
     var selected by remember { mutableStateOf<Client?>(null) }
     var creating by remember { mutableStateOf(false) }
