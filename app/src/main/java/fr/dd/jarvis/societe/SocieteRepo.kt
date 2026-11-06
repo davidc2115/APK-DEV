@@ -70,7 +70,12 @@ class SocieteRepo(ctx: Context) {
 
     @Synchronized
     fun update(f: (SocieteData) -> SocieteData) {
-        val nouvelle = f(data)
+        // Plusieurs écritures peuvent venir de l'écran Société, d'Hermès ou des agents en parallèle.
+        // Repartir du dernier fichier validé sous le même verrou évite qu'une mise à jour basée sur
+        // un ancien instantané efface les créations ou modifications d'un autre thread.
+        val base = load()
+        data = base
+        val nouvelle = f(base)
         val tmp = File(dir, "data.json.tmp")
         val contenu = jsonSociete.encodeToString(SocieteData.serializer(), nouvelle)
         tmp.writeText(contenu)
