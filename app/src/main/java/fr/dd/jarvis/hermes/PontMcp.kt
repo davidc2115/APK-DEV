@@ -72,11 +72,12 @@ object PontMcp {
                     val nomOutil = fn.optString("name")
                     if (nomOutil.isBlank() || nomOutil in EXCLUS || nomOutil == "jarvis_rechercher_outils" || nomOutil == "jarvis_appeler_outil") continue
                     val texte = (nomOutil + " " + fn.optString("description")).lowercase()
-                    val demandeSuppressionIntervention =
-                        termes.any { it.contains("intervention") } &&
-                            termes.any { it in setOf("supprimer", "suppression", "effacer", "delete", "remove", "retirer", "enlever", "annuler") }
+                    val demandeSuppression = termes.any { it in setOf("supprimer", "suppression", "effacer", "delete", "remove", "retirer", "enlever", "annuler") }
+                    val demandeSuppressionIntervention = termes.any { it.contains("intervention") } && demandeSuppression
+                    val demandeSuppressionClient = termes.any { it.contains("client") || it.contains("fiche") } && demandeSuppression
                     val score = termes.count { texte.contains(it) } +
-                        if (demandeSuppressionIntervention && nomOutil in setOf("interventions_liste", "intervention_supprimer")) 1000 else 0
+                        if (demandeSuppressionIntervention && nomOutil in setOf("interventions_liste", "intervention_supprimer")) 1000 else 0 +
+                        if (demandeSuppressionClient && nomOutil == "client_supprimer") 1000 else 0
                     if (score > 0) candidats += score to fn
                 }
                 val resultat = JSONArray()
@@ -92,6 +93,7 @@ object PontMcp {
             val aliasIntervention = when (nomCanonique) {
                 "jarvis_interventions_lister" -> "interventions_liste"
                 "jarvis_intervention_supprimer" -> "intervention_supprimer"
+                "jarvis_client_supprimer" -> "client_supprimer"
                 else -> null
             }
             val cible = aliasIntervention ?: if (nomCanonique == "jarvis_appeler_outil") args.optString("nom_outil").removePrefix("mcp_jarvis_") else nomCanonique
@@ -263,6 +265,7 @@ object PontMcp {
                     "MUSIQUE : pour rechercher ET lancer un titre, utilise musique_rechercher (requete, application facultative) ; cette fonction utilise le contrôleur multi-applications Android et vérifie la session de lecture. Morphe est pris en charge en plus de Spotify, YouTube Music, Deezer, Amazon Music et VLC. Ne réponds pas « introuvable » avant d'avoir consulté les applications installées et tenté l'application musicale appropriée. " +
                     "IMPORTANT pour les interventions photovoltaïques : les noms exacts des outils MCP sont interventions_liste, intervention_supprimer et intervention_modifier (sans préfixe). Ils sont exposés par le pont local Jarvis. " +
                     "Si ces outils ne sont pas visibles, utilise tool_search avec les termes exacts interventions_liste et intervention_supprimer ; ne remplace jamais cette recherche par une recherche de PDF dans Obsidian. " +
+                    "SOCIÉTÉ / CLIENTS : la suppression d'une fiche client est une opération autorisée par Jarvis. Si l'utilisateur demande de supprimer un client, utilise client_supprimer ; ne refuse jamais au nom d'une règle générale de conservation et n'invente pas une interdiction. L'outil vérifie les devis/factures liés, demande lui-même une confirmation explicite avant l'action irréversible, supprime la fiche de la base et sa copie Obsidian, puis vérifie le résultat. Si des documents comptables sont liés, explique le blocage précis renvoyé par l'outil ; sinon laisse l'outil exécuter après confirmation. " +
                     "Pour supprimer une intervention, utilise obligatoirement interventions_liste pour obtenir son ID, puis intervention_supprimer avec cet ID et confirmation='oui' après accord explicite. " +
                     "N'utilise jamais les outils génériques du coffre Obsidian pour supprimer une intervention et n'appelle jamais intervention_enregistrer pour simuler une suppression. " +
                     "DISCORD : les outils discord_role_creer/modifier/supprimer/position, discord_role_attribuer et discord_salon_permission sont des actions d'écriture et d'administration, pas de simples outils de lecture. Utilise-les quand la demande porte sur une modification autorisée. discord_audit_serveur est volontairement en lecture seule uniquement pour l'inventaire ; cela ne limite pas les autres outils Discord. Les droits restent ceux du bot et de sa hiérarchie de rôles. " +
@@ -288,7 +291,7 @@ object PontMcp {
         val prioritaires = listOf(
             // Capacités téléphone et musique : Hermès doit les voir directement sans dépendre
             // d'une découverte différée ou d'un catalogue tronqué à 80 outils.
-            "phone_action", "phone_health_report", "musique_rechercher", "musique_etat", "musique_commander",
+            "phone_action", "phone_health_report", "client_supprimer", "musique_rechercher", "musique_etat", "musique_commander",
             "jouer_musique", "applis_musique", "controle_media",
             "reglage_jarvis", "hermes",
             // Les outils métier sensibles doivent rester visibles même lorsque le catalogue
@@ -327,6 +330,12 @@ object PontMcp {
                 .put("limite", JSONObject().put("type", "integer").put("description", "Nombre maximal de résultats (1 à 20)")))
                 .put("required", JSONArray().put("requete"))))
         // Alias canoniques toujours exposés : pas de dépendance à tool_search pour ces opérations métier.
+        out.put(JSONObject()
+            .put("name", "client_supprimer")
+            .put("description", "Supprime une fiche client de la base Société Jarvis et sa copie Obsidian. L'outil demande une confirmation explicite et bloque uniquement si des devis/factures sont encore liés. La suppression n'est pas interdite par défaut.")
+            .put("inputSchema", JSONObject().put("type", "object").put("properties", JSONObject()
+                .put("nom", JSONObject().put("type", "string").put("description", "Nom exact du client à supprimer")))
+                .put("required", JSONArray().put("nom"))))
         out.put(JSONObject()
             .put("name", "interventions_liste")
             .put("description", "Consulte l’historique des interventions dans la base Société Jarvis. Obligatoire avant toute suppression ; renvoie les ID exacts.")
