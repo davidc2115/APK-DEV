@@ -304,22 +304,6 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     runMsg = "Cycle demandé. Le résultat apparaîtra après l'exécution."
                 }
                 if (!store.agentsOn.value) Text("Active les agents autonomes pour pouvoir lancer un cycle.", color = HudDim, fontSize = 11.sp)
-                HudButton(if (gatewayBusy) "Détection…" else "Détecter la box du réseau actuel", enabled = !gatewayBusy) {
-                    scope.launch {
-                        gatewayBusy = true
-                        gatewayResult = try {
-                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                fr.dd.jarvis.ai.BoxInternet.detecterPasserelle(app)
-                            }?.let { profile ->
-                                "Passerelle détectée : ${profile.gatewayAddress}. ${fr.dd.jarvis.ai.BoxInternetAdapters.managementStatus(profile)}. La marque et le modèle seront identifiés par les sondes compatibles lors des prochaines étapes."
-                            } ?: "Aucune passerelle active détectée. Vérifie que le téléphone est connecté au réseau de la box."
-                        } catch (e: Exception) { "❌ Détection impossible : ${e.message ?: e.javaClass.simpleName}" }
-                        gatewayBusy = false
-                    }
-                }
-                if (gatewayResult.isNotBlank()) Text(gatewayResult, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
-                Spacer(Modifier.height(8.dp))
-
                 if (runMsg.isNotBlank()) Text(runMsg, color = HudText, fontSize = 11.sp)
                 HudDivider()
                 Text("Dernière exécution", color = LocalAccent.current, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 13.sp)
@@ -807,6 +791,23 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     else "Freebox associée · domaine API : " + store.freeboxApiDomain.value,
                     color = HudDim, fontSize = 12.sp
                 )
+                HudButton(if (gatewayBusy) "Détection…" else "Détecter la box du réseau actuel", enabled = !gatewayBusy) {
+                    scope.launch {
+                        gatewayBusy = true
+                        gatewayResult = try {
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                val cm = app.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+                                val network = cm?.activeNetwork
+                                val properties = network?.let { cm?.getLinkProperties(it) }
+                                properties?.routes?.firstOrNull { it.isDefaultRoute && it.gateway != null }?.gateway?.hostAddress
+                                    ?.substringBefore("%")
+                            }?.let { "Passerelle détectée : $it. La marque et le modèle restent à identifier ; aucun réglage n’a été modifié." }
+                                ?: "Aucune passerelle active détectée. Vérifie que le téléphone est connecté au Wi-Fi ou au réseau de la box."
+                        } catch (e: Exception) { "❌ Détection impossible : ${e.message ?: e.javaClass.simpleName}" }
+                        gatewayBusy = false
+                    }
+                }
+                if (gatewayResult.isNotBlank()) Text(gatewayResult, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
                 Spacer(Modifier.height(8.dp))
                 Text("L'association affiche une demande sur l'écran de la Freebox. Le jeton est enregistré dans le stockage chiffré Android. Jarvis ne peut pas s'accorder lui-même les droits administrateur : ils doivent être autorisés dans Freebox OS.", color = HudDim, fontSize = 11.sp)
                 Spacer(Modifier.height(8.dp))
