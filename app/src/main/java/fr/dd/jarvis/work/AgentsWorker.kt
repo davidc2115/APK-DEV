@@ -88,7 +88,10 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
     private fun writeSet(n: String, s: Set<String>) = runCatching { seenFile(n).writeText(s.toList().takeLast(600).joinToString("\n")) }
 
     private fun alert(id: Int, titre: String, texte: String) {
-        if (android.os.Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
+        if (android.os.Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            journal.append("- ⚠️ Alerte « $titre » non publiée : autorisation de notifications Android absente.\\n")
+            return
+        }
         val pi = PendingIntent.getActivity(ctx, id, Intent(ctx, fr.dd.jarvis.MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val n = NotificationCompat.Builder(ctx, JarvisApp.CHANNEL_AGENTS).setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle(titre).setContentText(texte.lineSequence().firstOrNull().orEmpty())
@@ -122,19 +125,24 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
         val outcomes = mutableListOf<String>()
         for ((nom, f) in steps) {
             val journalStart = journal.length
+            val active = when (nom) {
+                "Mails" -> tri || (store.agentMails.value && (only == null || only == "mails"))
+                "Factures" -> store.agentFactures.value && only == null
+                "Planning", "Tâches personnelles" -> store.agentPlanning.value && only == null
+                "Notifications" -> store.agentNotifs.value && (only == null || only == "notifs")
+                else -> false
+            }
+            val prerequisite = when (nom) {
+                "Mails" -> if (active && !store.mailConfigured()) "configuration mail manquante" else null
+                "Planning" -> if (active && !app.calendar.hasPermission()) "autorisation agenda manquante" else null
+                "Notifications" -> if (active && !PhoneHealth.dashboard(app).notificationListener) "accès aux notifications du téléphone non autorisé" else null
+                else -> null
+            }
             try {
-                f()
-                val active = when (nom) {
-                    "Mails" -> tri || (store.agentMails.value && (only == null || only == "mails"))
-                    "Factures" -> store.agentFactures.value && only == null
-                    "Planning", "Tâches personnelles" -> store.agentPlanning.value && only == null
-                    "Notifications" -> store.agentNotifs.value && (only == null || only == "notifs")
-                    else -> false
-                }
-                val prerequisite = when (nom) {
-                    "Mails" -> if (active && !store.mailConfigured()) "configuration mail manquante" else null
-                    "Planning" -> if (active && !app.calendar.hasPermission()) "autorisation agenda manquante" else null
-                    else -> null
+                when {
+                    !active -> Unit
+                    prerequisite != null -> journal.append("- ⏸️ $nom : bloqué — $prerequisite.\\n")
+                    else -> f()
                 }
                 outcomes += "$nom : " + when {
                     !active -> "non exécuté (agent désactivé ou hors de ce cycle)"
