@@ -727,28 +727,23 @@ os.replace(name, p)
         // L'installation Jarvis est une installation source dans Debian : utiliser son exécutable direct.
         // bash -lc réinitialisait le PATH et pouvait lancer un autre Hermes, d'où l'échec silencieux précédent.
         // En cas d'échec, arrêter la configuration : ne jamais annoncer une nouvelle version qui n'a pas été installée.
+        // L'installation est stockée dans le HOME Termux partagé. PRoot démarre par défaut
+        // avec l'identité virtuelle root (UID 0), alors que les fichiers appartiennent à l'UID
+        // Android de Termux (ex. 10386). Hermes refuse à juste titre de mettre à jour un venv
+        // appartenant à un autre UID. On relance donc Debian avec --user UID:GID, sans chown.
         val upgradeScript = listOf(
             "set -eu",
             "REPO=/root/.hermes/hermes-agent",
             "test -x \"\$REPO/.hermes/bin/hermes\"",
-            "CURRENT_UID=\$(id -u)",
             "test -d /root/.hermes/installs || { echo 'Répertoire des environnements Hermès introuvable.'; exit 2; }",
-            "FOREIGN_META=\$(find /root/.hermes/installs -type f -path '*/venv/lib/python*/site-packages/*.dist-info/METADATA' -print -quit 2>/dev/null || true)",
-            "if [ -n \"\$FOREIGN_META\" ]; then OWNER_UID=\$(stat -c %u \"\$FOREIGN_META\"); OWNER_GID=\$(stat -c %g \"\$FOREIGN_META\"); else OWNER_UID=\$CURRENT_UID; OWNER_GID=\$(id -g); fi",
-            "echo \"Métadonnées Python : UID propriétaire \$OWNER_UID ; UID du processus \$CURRENT_UID.\"",
-            "if [ \"\$OWNER_UID\" != \"\$CURRENT_UID\" ]; then",
-            "  command -v setpriv >/dev/null 2>&1 || { echo 'setpriv absent : impossible d’utiliser le propriétaire réel du venv.'; exit 126; }",
-            "  OTHER_OWNERS=\$(find /root/.hermes/installs -type f -path '*/venv/lib/python*/site-packages/*.dist-info/METADATA' ! -uid \"\$OWNER_UID\" -print -quit 2>/dev/null || true)",
-            "  if [ -n \"\$OTHER_OWNERS\" ]; then echo \"Métadonnées appartenant à plusieurs UID ; mise à niveau annulée sans modification : \$OTHER_OWNERS\"; exit 126; fi",
-            "  echo \"Exécution de la mise à niveau sous l’UID propriétaire \$OWNER_UID (aucun chown sur le stockage Termux).\"",
-            "  cd \"\$REPO\"",
-            "  exec setpriv --reuid=\$OWNER_UID --regid=\$OWNER_GID --clear-groups env HOME=/root USER=jarvis LOGNAME=jarvis PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin ./.hermes/bin/hermes update --yes",
-            "fi",
             "cd \"\$REPO\"",
             "exec ./.hermes/bin/hermes update --yes"
-        ).joinToString("\n")
-        val upgradeCommand = "set -o pipefail; p '🔄 Mise à niveau d’Hermès : vérification du propriétaire du venv…'; " +
-            "proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root USER=root LOGNAME=root " +
+        ).joinToString("\\n")
+        val upgradeCommand = "set -o pipefail; p '🔄 Vérification du propriétaire de l’installation Hermès…'; " +
+            "OWNER_IDS=\$(proot-distro login debian --termux-home -- stat -c '%u:%g' /root/.hermes/hermes-agent/.hermes/bin/hermes 2>/dev/null) || exit 1; " +
+            "case \"\$OWNER_IDS\" in *[!0-9:]*|'') p '❌ Impossible d’identifier le propriétaire de l’installation Hermès.'; exit 126;; esac; " +
+            "p \"🔐 Mise à niveau sous l’identité propriétaire UID:GID \$OWNER_IDS (sans changement de droits)…\"; " +
+            "proot-distro login debian --user \"\$OWNER_IDS\" --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root USER=jarvis LOGNAME=jarvis " +
             "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
             "bash -c " + q(upgradeScript) + " 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done; " +
             "UPDATE_STATUS=\$?; if [ \"\$UPDATE_STATUS\" -ne 0 ]; then " +
