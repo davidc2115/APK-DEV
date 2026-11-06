@@ -163,7 +163,7 @@ CONTENUS ADULTES / NSFW :
 
 Tu travailles en équipe :
 - toi (Hermès) : raisonnement, tâches en plusieurs étapes, recherche web, rédaction, code et scripts dans Termux, mémoire long terme, compétences et tâches planifiées ;
-- les outils de JARVIS, via le serveur MCP « jarvis » (outils mcp__jarvis__*) : téléphone (appels, SMS, applis, réglages), agenda, mails, contacts, musique, réveils, domotique, coffre Obsidian (obsidian_fichiers, obsidian_lire…), société (clients, devis, factures, paie, KML), localisation précise (ma_position), génération d'images/vidéos. Pour TOUTE action sur le téléphone ou les données de l'utilisateur, utilise ces outils plutôt que des commandes shell ; n'invente jamais leur contenu. Pour toute demande de diagnostic, état, santé ou surveillance du téléphone, appelle phone_health_report avant de conclure : il fournit les valeurs réellement accessibles (batterie, température, stockage, RAM, réseau, permissions et services). Distingue toujours les mesures observées des éléments qu'Android ne permet pas de surveiller.
+- Les outils de JARVIS, via le serveur MCP « jarvis » (outils mcp__jarvis__*) : téléphone (appels, SMS, applications, réglages), agenda, mails, contacts, musique, réveils, domotique, coffre Obsidian, société (clients, devis, factures, paie, KML), localisation précise (ma_position), génération d'images/vidéos. Pour piloter une application Android quelconque, utilise phone_action : list_apps pour connaître les applications réellement installées, open_app pour l'ouvrir, read_screen pour lire l'interface, click_text ou click_best_match pour choisir un élément, type_text pour saisir, scroll_down/scroll_up pour défiler, puis read_screen pour vérifier le résultat. Procède par petites étapes et ne prétends jamais qu'une action a réussi sans retour de l'outil. L'accessibilité JARVIS doit être active ; les écrans sécurisés, mots de passe, paiements, validations système et actions sensibles restent protégés et peuvent exiger une intervention/confirmation de l'utilisateur. Pour TOUTE action sur le téléphone ou les données de l'utilisateur, utilise ces outils plutôt que des commandes shell ; n'invente jamais leur contenu. Pour toute demande de diagnostic, état, santé ou surveillance du téléphone, appelle phone_health_report avant de conclure : il fournit les valeurs réellement accessibles (batterie, température, stockage, RAM, réseau, permissions et services). Distingue toujours les mesures observées des éléments qu'Android ne permet pas de surveiller.
 Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume-les au lieu de les recopier en entier.
 """.trim() + app.memo.toutes().let { if (it.isBlank()) "" else "\n\nConsignes mémorisées par JARVIS :$it" } +
             if (app.store.modeAdulte.value) """
@@ -183,9 +183,16 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
     suspend fun repondre(app: JarvisApp, history: List<ChatMsg>, boite: ToolBox?, userName: String, onStatus: (String) -> Unit): String? {
         if (!enLigne()) { relancerSiBesoin(app); return null }
         val messages = JSONArray().put(JSONObject().put("role", "system").put("content", systeme(app, userName)))
-        val recents = history.takeLast(12)
+        // Contexte recent borne pour reduire le temps d'inference ; la memoire durable partagee
+        // JARVIS/Obsidian reste injectee separement dans systeme() et n'est pas tronquee ici.
+        val recents = history.takeLast(8)
         recents.forEachIndexed { i, m ->
-            val cap = if (recents.size - 1 - i < 3) 8000 else 2500
+            val age = recents.size - 1 - i
+            val cap = when {
+                age < 2 -> 5000
+                age < 5 -> 1600
+                else -> 900
+            }
             messages.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(cap)))
         }
         return appeler(app, messages, boite, onStatus)
