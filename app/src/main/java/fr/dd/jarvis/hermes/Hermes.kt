@@ -184,15 +184,16 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
     suspend fun repondre(app: JarvisApp, history: List<ChatMsg>, boite: ToolBox?, userName: String, onStatus: (String) -> Unit): String? {
         if (!enLigne()) { relancerSiBesoin(app); return null }
         val messages = JSONArray().put(JSONObject().put("role", "system").put("content", systeme(app, userName)))
-        // Contexte recent borne pour reduire le temps d'inference ; la memoire durable partagee
-        // JARVIS/Obsidian reste injectee separement dans systeme() et n'est pas tronquee ici.
-        val recents = history.takeLast(8)
+        // Contexte conversationnel compact pour accélérer l'inférence.
+        // Les deux derniers messages restent détaillés ; les échanges plus anciens sont résumés par troncature.
+        // La mémoire durable JARVIS/Obsidian est injectée séparément dans systeme() et n'est jamais réduite ici.
+        val recents = history.takeLast(6)
         recents.forEachIndexed { i, m ->
             val age = recents.size - 1 - i
             val cap = when {
-                age < 2 -> 5000
-                age < 5 -> 1600
-                else -> 900
+                age < 2 -> 4500
+                age < 4 -> 1200
+                else -> 600
             }
             messages.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(cap)))
         }
