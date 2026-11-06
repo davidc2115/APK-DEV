@@ -289,6 +289,7 @@ object PontMcp {
             // Capacités téléphone et musique : Hermès doit les voir directement sans dépendre
             // d'une découverte différée ou d'un catalogue tronqué à 80 outils.
             "phone_action", "phone_health_report", "musique_rechercher", "musique_etat", "musique_commander",
+            "jouer_musique", "applis_musique", "controle_media",
             "reglage_jarvis", "hermes",
             // Les outils métier sensibles doivent rester visibles même lorsque le catalogue
             // dépasse le budget transmis au modèle (80 outils).
