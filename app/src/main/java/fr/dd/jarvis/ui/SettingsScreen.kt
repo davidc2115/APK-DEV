@@ -791,18 +791,19 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     else "Freebox associée · domaine API : " + store.freeboxApiDomain.value,
                     color = HudDim, fontSize = 12.sp
                 )
-                HudButton(if (gatewayBusy) "Détection…" else "Détecter la box du réseau actuel", enabled = !gatewayBusy) {
+                HudButton(if (gatewayBusy) "Détection…" else "Détecter et identifier ma box", enabled = !gatewayBusy) {
                     scope.launch {
                         gatewayBusy = true
                         gatewayResult = try {
                             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                val cm = app.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
-                                val network = cm?.activeNetwork
-                                val properties = network?.let { cm?.getLinkProperties(it) }
-                                properties?.routes?.firstOrNull { it.isDefaultRoute && it.gateway != null }?.gateway?.hostAddress
-                                    ?.substringBefore("%")
-                            }?.let { "Passerelle détectée : $it. La marque et le modèle restent à identifier ; aucun réglage n’a été modifié." }
-                                ?: "Aucune passerelle active détectée. Vérifie que le téléphone est connecté au Wi-Fi ou au réseau de la box."
+                                val gateway = fr.dd.jarvis.ai.BoxInternet.detecterPasserelle(app)
+                                val detected = fr.dd.jarvis.ai.BoxInternet.detecterFabricantUpnp(app)
+                                when {
+                                    detected != null -> "Box identifiée : ${detected.vendor.label} ${detected.model} · ${detected.gatewayAddress}. Découverte UPnP en lecture seule ; les commandes de configuration dépendent encore de l’adaptateur constructeur."
+                                    gateway != null -> "Passerelle détectée : ${gateway.gatewayAddress}. Le fabricant n’a pas répondu à la découverte UPnP ; aucune configuration n’a été modifiée."
+                                    else -> "Aucune box détectée. Vérifie que le téléphone est connecté au réseau local de la box et que l’accès au réseau local est autorisé."
+                                }
+                            }
                         } catch (e: Exception) { "❌ Détection impossible : ${e.message ?: e.javaClass.simpleName}" }
                         gatewayBusy = false
                     }
