@@ -14,7 +14,7 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
         val NAMES = setOf(
             "discord_guildes", "discord_roles", "discord_salons", "discord_audit_serveur", "discord_role_creer", "discord_role_modifier",
-            "discord_role_supprimer", "discord_role_position", "discord_role_attribuer", "discord_salon_permission"
+            "discord_role_supprimer", "discord_role_position", "discord_role_attribuer", "discord_salon_permission", "discord_message_envoyer"
         )
     }
 
@@ -36,6 +36,10 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si un seul)."))),
         tool("discord_audit_serveur", "AUDIT DISCORD STRICTEMENT EN LECTURE SEULE : récupère l'inventaire complet des salons et catégories avec leurs identifiants, positions, rattachements et sujets. Ne modifie jamais le serveur.",
             mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si un seul)."))),
+        tool("discord_message_envoyer", "Discord : envoie un message dans un salon textuel ou d'annonces. Les mentions automatiques (@everyone/@here et rôles) sont désactivées par sécurité.",
+            mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si un seul)."),
+                "salon" to prop("Nom ou ID du salon textuel cible."),
+                "message" to prop("Texte exact à envoyer (2 000 caractères maximum).")), listOf("salon", "message")),
         tool("discord_role_creer", "Discord : crée un nouveau rôle sur le serveur.",
             mapOf("serveur" to prop("Nom ou ID du serveur (optionnel si un seul)."), "nom" to prop("Nom du rôle."),
                 "couleur" to prop("Couleur hexadécimale, ex. #ff5733 (optionnel)."), "permissions" to prop(permDesc),
@@ -126,6 +130,23 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             lines += ""
             lines += "Contrôle des types : " + byType.entries.joinToString(", ") { "${it.key}=${it.value}" }
             ToolResult(lines.joinToString("\n"), direct = true)
+        }
+        "discord_message_envoyer" -> {
+            val g = guildeObj(a)
+            val gid = g.getString("id")
+            val gnom = g.optString("name")
+            val nomSalon = a.optString("salon").trim()
+            val salon = Discord.trouverSalon(app, gid, nomSalon)
+                ?: return ToolResult("Salon « $nomSalon » introuvable sur « $gnom ».")
+            if (salon.optInt("type") !in setOf(0, 5))
+                return ToolResult("Le salon « ${salon.optString("name")} » n'est pas un salon textuel classique ou d'annonces. Les salons vocaux, forums et catégories ne sont pas pris en charge par cet outil.")
+            val message = a.optString("message").trim()
+            if (message.isBlank()) return ToolResult("Le message à envoyer est vide.")
+            if (message.length > 2000) return ToolResult("Le message dépasse la limite Discord de 2 000 caractères.")
+            if (!confirm("Envoyer ce message dans #${salon.optString("name")} sur « $gnom » ?\\n\\n$message", true))
+                return ToolResult("Envoi annulé.")
+            val sent = Discord.envoyerMessage(app, salon.getString("id"), message)
+            ToolResult("✅ Message envoyé dans #${salon.optString("name")} sur « $gnom » (ID ${sent.optString("id")}). Les mentions globales ont été neutralisées.", direct = true)
         }
         "discord_roles" -> {
             val gid = guilde(a)
