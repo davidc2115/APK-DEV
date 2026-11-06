@@ -124,7 +124,18 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
             val journalStart = journal.length
             try {
                 f()
-                outcomes += "$nom : ${if (journal.length > journalStart) "activité" else "RAS"}"
+                val active = when (nom) {
+                    "Mails" -> tri || (store.agentMails.value && (only == null || only == "mails"))
+                    "Factures" -> store.agentFactures.value && only == null
+                    "Planning", "Tâches personnelles" -> store.agentPlanning.value && only == null
+                    "Notifications" -> store.agentNotifs.value && (only == null || only == "notifs")
+                    else -> false
+                }
+                outcomes += "$nom : " + when {
+                    !active -> "non exécuté (agent désactivé ou hors de ce cycle)"
+                    journal.length > journalStart -> "activité / report"
+                    else -> "RAS"
+                }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Throwable) {
