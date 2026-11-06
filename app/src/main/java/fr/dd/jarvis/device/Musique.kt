@@ -19,13 +19,20 @@ object Musique {
     private fun sessions(ctx: Context): List<MediaController> {
         val manager = ctx.getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
         return manager.getActiveSessions(ComponentName(ctx, JarvisNotificationListener::class.java))
-            .filter { it.packageName in cibles }
+            .filter { it.packageName != ctx.packageName && (it.metadata != null || it.playbackState != null) }
+            .sortedByDescending { it.playbackState?.state == PlaybackState.STATE_PLAYING }
     }
+
+    private fun nomApplication(ctx: Context, controller: MediaController): String =
+        runCatching {
+            val info = ctx.packageManager.getApplicationInfo(controller.packageName, 0)
+            ctx.packageManager.getApplicationLabel(info).toString()
+        }.getOrDefault(controller.packageName)
 
     fun etat(ctx: Context): String {
         val all = sessions(ctx)
-        if (all.isEmpty()) return "Aucune session YT Music Morphe active détectée. Vérifie que la musique a été lancée et que l'accès aux notifications de JARVIS est autorisé."
-        return all.joinToString("\n") { c ->
+        if (all.isEmpty()) return "Aucune session musicale Android active détectée. Lance une musique et vérifie l'accès aux notifications de JARVIS."
+        return all.joinToString("\n\n") { c ->
             val m = c.metadata
             val s = c.playbackState
             val titre = m?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty().ifBlank { "Titre inconnu" }
@@ -38,13 +45,13 @@ object Musique {
                 PlaybackState.STATE_NONE, null -> "État indisponible"
                 else -> "Arrêtée / inactive"
             }
-            "YT Music Morphe — $lecture\n🎵 $titre — $artiste" + if (album.isNotBlank()) "\nAlbum : $album" else ""
+            "${nomApplication(ctx, c)} — $lecture\n🎵 $titre — $artiste" + if (album.isNotBlank()) "\nAlbum : $album" else ""
         }
     }
 
     fun commander(ctx: Context, action: String): String {
         val controller = sessions(ctx).firstOrNull()
-            ?: return "Aucune session YT Music Morphe active. Lance d'abord un morceau dans Morph et vérifie l'accès aux notifications de JARVIS."
+            ?: return "Aucune session musicale Android active. Lance d'abord un morceau et vérifie l'accès aux notifications de JARVIS."
         val controls = controller.transportControls
         when (action.lowercase()) {
             "lecture", "play", "reprendre" -> controls.play()
@@ -53,7 +60,7 @@ object Musique {
             "precedent", "précédent", "previous" -> controls.skipToPrevious()
             else -> return "Commande inconnue : $action. Utilise lecture, pause, suivant ou precedent."
         }
-        return "Commande « $action » envoyée à YT Music Morphe. L'état réel sera vérifié à la prochaine lecture de la session."
+        return "Commande « $action » envoyée à ${nomApplication(ctx, controller)}. L'état réel sera vérifié à la prochaine lecture de la session."
     }
 
     suspend fun rechercher(ctx: Context, requete: String): String {
