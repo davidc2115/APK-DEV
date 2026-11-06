@@ -319,15 +319,23 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
         JarvisNotificationListener.recharger(ctx)
         val last = store.agentLastNotif.value.toLongOrNull() ?: 0L
         val now = System.currentTimeMillis()
-        store.agentLastNotif.set(now.toString())
-        if (last == 0L) return
+        if (last == 0L) {
+            store.agentLastNotif.set(now.toString()) // premier passage : établir le point de départ sans retraiter l'ancien historique
+            return
+        }
         val l = JarvisNotificationListener.snapshot().filter { it.time > last }.take(30)
-        if (l.isEmpty()) return
+        if (l.isEmpty()) {
+            store.agentLastNotif.set(now.toString())
+            return
+        }
         val fmt = java.text.SimpleDateFormat("HH:mm", java.util.Locale.FRENCH)
         val rep = app.llm.agent(
             "Tu es l'agent Notifications de JARVIS (artisan, maintenance photovoltaïque). On te donne des notifications du téléphone. Garde uniquement celles qui demandent une attention rapide : clients, devis, factures, paiements, chantiers, rendez-vous, banque, proches. Ignore pubs, réseaux sociaux, jeux. Réponds une ligne par notification retenue au format « application — résumé — action suggérée », ou uniquement RIEN.",
             l.joinToString("\n") { "${fmt.format(java.util.Date(it.time))} | ${it.app} | ${it.titre} | ${it.texte.take(200)}" }
         ).trim()
+        // Ne valider la fenêtre qu'après une analyse réussie : en cas d'erreur réseau/IA,
+        // les notifications restent disponibles au prochain cycle au lieu d'être perdues.
+        store.agentLastNotif.set(now.toString())
         if (rep.isBlank() || rep.uppercase().startsWith("RIEN")) return
         alert(2003, "🔔 Notifications importantes", rep)
         journal.append("- 🔔 Notifications importantes :\n" + rep.lines().joinToString("") { "  - $it\n" })
