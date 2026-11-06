@@ -111,7 +111,7 @@ pGL2GauOGqDFY=
         return when (status) {
             "denied" -> "Demande refusée sur l'écran de la Freebox."
             "timeout" -> "Demande expirée. Relance l'association depuis le Wi-Fi de la Freebox."
-            else -> "Demande envoyée. Valide-la sur l'écran de la Freebox Delta, puis relance l'association si nécessaire."
+            else -> "Demande envoyée. Valide-la sur l'écran de la Freebox Server, puis relance l'association si nécessaire."
         }
     }
 
