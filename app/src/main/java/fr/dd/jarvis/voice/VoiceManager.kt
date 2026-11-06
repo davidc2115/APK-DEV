@@ -269,18 +269,43 @@ class VoiceManager(private val ctx: Context) {
 
     private val attrAppel = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
     private val attrAssistant = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
+    // Une voix envoyée vers A2DP doit utiliser le même usage média que les lecteurs Bluetooth :
+    // USAGE_ASSISTANT peut être routé différemment par certaines politiques audio constructeur.
+    private val attrBluetooth = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
+    private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
+        // Le listener est volontairement présent : Android peut notifier la perte/reprise du focus
+        // et certains constructeurs n'accordent pas correctement une demande sans listener.
+        if (change == AudioManager.AUDIOFOCUS_LOSS && tts?.isSpeaking == true) {
+            main.post { runCatching { tts?.stop() } }
+        }
+    }
+    private fun sortieBluetooth(): Boolean {
+        val types = setOf(
+            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+            AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_BLE_SPEAKER
+        )
+        return (ctx.applicationContext as? fr.dd.jarvis.JarvisApp)?.enVoiture == true ||
+            runCatching { am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { it.type in types } }.getOrDefault(false)
+    }
 
-    /** Demande le focus pendant la réponse : les lecteurs musicaux reçoivent LOSS_TRANSIENT et mettent la musique en pause. */
+    /** Focus exclusif temporaire : demande aux lecteurs actifs de suspendre leur lecture pendant le TTS. */
     private fun demanderFocusReponse(attrs: AudioAttributes = attrAssistant) {
         if (Build.VERSION.SDK_INT < 26) return
         runCatching {
             focus?.let { am.abandonAudioFocusRequest(it) }
-            focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+            val demande = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
                 .setAudioAttributes(attrs)
+                .setOnAudioFocusChangeListener(focusListener, main)
                 .setAcceptsDelayedFocusGain(false)
                 .setWillPauseWhenDucked(true)
                 .build()
-            am.requestAudioFocus(focus!!)
+            focus = demande
+            val resultat = am.requestAudioFocus(demande)
+            if (resultat != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+                // Repli legacy : utile sur certaines ROM Android modifiées qui refusent la requête moderne.
+                @Suppress("DEPRECATION")
+                am.requestAudioFocus(focusListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+            }
         }
     }
 
@@ -334,10 +359,15 @@ class VoiceManager(private val ctx: Context) {
         }
         val coupe = bargeIn && micOk()
         val appel = coupe && duplex && hautParleurSeul() && entrerModeAppel()
-        // Sur autoradio/casque Bluetooth, ne pas basculer en mode appel (qui peut détourner le son) :
-        // le focus assistant transitoire suffit à demander au lecteur musical de mettre la musique en pause.
-        if (!appel && am.mode == AudioManager.MODE_NORMAL) demanderFocusReponse(attrAssistant)
-        runCatching { tts?.setAudioAttributes(if (appel) attrAppel else attrAssistant) }
+        // En Bluetooth/A2DP et Android Auto, utiliser l'usage MEDIA pour garantir le routage vers l'autoradio.
+        // Le focus TRANSIENT_EXCLUSIVE demande au lecteur musical de se mettre en pause pendant la voix.
+        val attrsVoix = when {
+            appel -> attrAppel
+            sortieBluetooth() -> attrBluetooth
+            else -> attrAssistant
+        }
+        if (!appel && am.mode == AudioManager.MODE_NORMAL) demanderFocusReponse(attrsVoix)
+        runCatching { tts?.setAudioAttributes(attrsVoix) }
         val fini = AtomicBoolean(false)
         enCours = fini
         fun terminer() {
