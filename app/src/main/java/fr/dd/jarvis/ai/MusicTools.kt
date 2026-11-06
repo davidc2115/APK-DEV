@@ -24,7 +24,7 @@ class MusicTools(private val app: JarvisApp) {
             .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject().put("action", prop("lecture | pause | suivant | precedent"))).put("required", JSONArray().put("action")))),
         JSONObject().put("type", "function").put("function", JSONObject()
             .put("name", "musique_rechercher")
-            .put("description", "Recherche puis tente de lancer réellement le titre ou l'artiste dans l'application musicale demandée ou configurée (Morphe, Spotify, YouTube Music, Deezer, Amazon Music, VLC…). Vérifie le titre et l'état de lecture. Paramètre application facultatif ; s'il est vide, utilise la préférence musicale Jarvis si elle existe, sinon une application musicale installée.")
+            .put("description", "Recherche puis tente de lancer réellement le titre ou l'artiste dans l'application musicale demandée ou configurée (Morphe, Spotify, YouTube Music, Deezer, Amazon Music, VLC…). Vérifie le titre et l'état de lecture. Paramètre application facultatif ; s'il est vide, utilise la préférence musicale mémorisée dans Jarvis, sinon l'application musicale installée disponible.")
             .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject().put("requete", prop("Titre, artiste ou morceau recherché.")).put("application", prop("Application musicale à utiliser (Morphe, Spotify, YouTube Music, Deezer…). Facultatif."))).put("required", JSONArray().put("requete"))))
     )
     suspend fun execute(name: String, a: JSONObject): ToolResult = try {
@@ -32,7 +32,7 @@ class MusicTools(private val app: JarvisApp) {
             "musique_etat" -> ToolResult(Musique.etat(app), direct = true)
             "musique_commander" -> ToolResult(Musique.commander(app, a.optString("action")), direct = true)
             "musique_rechercher" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                app.phone.perform("music", a.optString("requete") + "|" + a.optString("application"))
+                app.phone.perform("music", a.optString("requete") + "|" + a.optString("application").ifBlank { app.store.appPrefs["musique"].orEmpty() })
             }, direct = true)
             else -> ToolResult("Outil musical inconnu.")
         }
