@@ -155,6 +155,12 @@ class Store(context: Context) {
     val boxPort = SPref("boxPort", "21")
     val boxUser = SPref("boxUser", "")
     val boxPass = SPref("boxPass", "")
+    // ---- Freebox OS : identité API et jeton d’application conservé uniquement chiffré
+    val freeboxApiDomain = SPref("freeboxApiDomain", "")
+    val freeboxHttpsPort = SPref("freeboxHttpsPort", "443")
+    val freeboxUid = SPref("freeboxUid", "")
+    val freeboxTrackId = SPref("freeboxTrackId", "")
+    val freeboxAppToken = SecretPref("freeboxAppToken")
     // ---- Imprimante réseau découverte (IPP), utilisable localement ou via le serveur Debian
     val printerHost = SPref("printerHost", "")
     val printerName = SPref("printerName", "")
