@@ -122,7 +122,7 @@ class ToolBox(
                 "ranger" to prop("« true » pour appliquer les libellés dans Gmail. Un re-tri remplace les anciens libellés de catégorie par les bons."),
                 "archiver" to prop("« true » pour aussi retirer de la boîte de réception les newsletters et notifications (avec ranger).")
             )))
-        put(tool("itineraire", "Itinéraire et temps de route. Sans destination : tournée des rendez-vous (avec lieu) de l'agenda d'un jour, enchaînés depuis la position ou le siège, avec heures de départ. Avec destination : trajet simple.",
+        put(tool("itineraire", "Calcule et présente les distances, temps de route et liens cartographiques. Sans destination : tournée des rendez-vous de l’agenda. Avec destination : calcule un trajet simple sans démarrer le guidage GPS. Pour lancer réellement la navigation GPS vers une adresse, utilise naviguer.",
             mapOf(
                 "destination" to prop("Adresse de destination (trajet simple). Vide pour la tournée de l'agenda."),
                 "depuis" to prop("Départ : « position » (défaut), « siege » ou une adresse."),
@@ -265,7 +265,7 @@ class ToolBox(
         put(tool("jouer_musique", "Lance la lecture d'un titre, artiste ou playlist dans une application de musique du téléphone, en arrière-plan. Si l'application n'est pas précisée et qu'aucune n'est mémorisée et qu'il y en a plusieurs d'installées, l'outil demande laquelle (liste réelle) : repose alors la question à l'utilisateur (et s'il veut « toujours » ou « une seule fois »), puis rappelle l'outil.",
             mapOf("requete" to prop("Titre, artiste ou style à écouter."), "appli" to prop("Nom exact d'une application RENVOYÉE PAR applis_musique ou déjà mémorisée (jamais une application supposée sans l'avoir vérifiée)."), "toujours" to prop("« true » pour toujours utiliser cette application pour la musique."))))
         put(tool("controle_media", "Contrôle la lecture en cours : play, pause, next, previous, stop.", mapOf("action" to prop("play | pause | next | previous | stop")), listOf("action")))
-        put(tool("naviguer", "Lance la navigation GPS vers une adresse et démarre l'itinéraire (Waze, Google Maps ou autre appli). Si l'application n'est pas précisée et qu'aucune n'est mémorisée, l'outil demande laquelle : repose alors la question à l'utilisateur (et s'il veut « toujours » celle-ci ou « une seule fois »), puis rappelle l'outil.",
+        put(tool("naviguer", "OBLIGATOIRE pour toute demande de lancement/démarrage d’un itinéraire GPS vers une adresse ou un lieu : transmet la destination à Waze, Google Maps ou l’application choisie afin de démarrer le guidage, pas seulement d’ouvrir sa page d’accueil. Si l’application n’est pas précisée et qu’aucune n’est mémorisée, demande laquelle (Waze / Google Maps…) et si le choix doit être conservé (« toujours ») ou ponctuel (« une seule fois »), puis rappelle l’outil.",
             mapOf("destination" to prop("Adresse ou lieu."), "mode" to prop("voiture (défaut), marche ou velo"),
                 "appli" to prop("Application : Waze, Google Maps, ou autre (optionnel)."),
                 "toujours" to prop("« true » si l'utilisateur veut toujours utiliser cette application pour ce type de demande ; « false » pour cette fois seulement.")), listOf("destination")))
