@@ -292,6 +292,7 @@ private fun ClientsTab(app: JarvisApp) {
     var selected by remember { mutableStateOf<Client?>(null) }
     var creating by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Client?>(null) }
+    var deleteTarget by remember { mutableStateOf<Client?>(null) }
     var query by remember { mutableStateOf("") }
     var info by remember { mutableStateOf("") }
     val kmlScope = rememberCoroutineScope()
@@ -375,6 +376,7 @@ private fun ClientsTab(app: JarvisApp) {
             Action("Obsidian") { info = "📁 " + svc.exporterClient(c).second; selected = null }
             Action("PDF") { svc.partagerPdf("Fiche ${c.nom}", md) }
             Action("✎ Modifier") { editing = c; selected = null }
+            Action("🗑 Supprimer") { deleteTarget = c; selected = null }
             Action("Diagnostic") { diagnosticConfirm = true }
         }) {
             MarkdownText(md)
@@ -394,6 +396,44 @@ private fun ClientsTab(app: JarvisApp) {
                     }
                 }
             }
+        }
+    }
+    deleteTarget?.let { target ->
+        Dialogue("Supprimer le client · ${target.nom}", { deleteTarget = null }, actions = {
+            Action("Supprimer définitivement") {
+                scope.launch {
+                    info = "⏳ Vérification et suppression de ${target.nom}…"
+                    val resultat = withContext(Dispatchers.IO) {
+                        runCatching {
+                            val current = svc.repo.refresh()
+                            val client = current.client(target.id)
+                                ?: return@runCatching "ℹ️ La fiche « ${target.nom} » est déjà absente de la base Société."
+                            val documents = current.docs.filter { it.clientId == client.id }
+                            if (documents.isNotEmpty()) {
+                                val numeros = documents.take(8).joinToString(", ") { it.numero }
+                                return@runCatching "⛔ Suppression bloquée : ${client.nom} possède ${documents.size} devis/facture(s) liés ($numeros${if (documents.size > 8) "…" else ""}). Traite ou transfère d'abord ces documents pour préserver l'historique comptable."
+                            }
+                            svc.repo.update { data -> data.copy(clients = data.clients.filterNot { it.id == client.id }) }
+                            if (svc.repo.refresh().client(client.id) != null)
+                                return@runCatching "❌ Échec : ${client.nom} est toujours présent dans la base Société. Aucune suppression n'est confirmée."
+                            val path = "Société/Clients/${client.nom}.md"
+                            val notes = app.obsidian.listNotes("Société/Clients")
+                            if (path in notes) {
+                                val deleted = app.obsidian.supprimerNote(path)
+                                val remains = path in app.obsidian.listNotes("Société/Clients")
+                                if (!deleted || remains)
+                                    return@runCatching "⚠️ ${client.nom} a été retiré de la base Jarvis, mais sa fiche Obsidian n'a pas pu être supprimée ($path). Vérifie les droits du coffre."
+                            }
+                            "🗑️ Client « ${client.nom} » et sa fiche Société/Clients supprimés. La disparition de la base interne a été vérifiée."
+                        }.getOrElse { "❌ Suppression impossible : ${it.message ?: it.javaClass.simpleName}" }
+                    }
+                    info = resultat
+                    deleteTarget = null
+                }
+            }
+        }) {
+            Text("Cette action supprimera la fiche client et ses installations de la base Société ainsi que sa copie Markdown dans Obsidian. Les devis et factures liés seront conservés : tant qu'il en existe, Jarvis bloquera la suppression.", color = HudText, fontSize = 13.sp)
+            Text("Cette opération est irréversible.", color = Color(0xFFFF6B75), fontSize = 12.sp, fontWeight = FontWeight.Bold)
         }
     }
     if (diagnosticConfirm && selectedLive != null) {
