@@ -196,7 +196,7 @@ object Reseau {
         val icmpOk = java.util.concurrent.atomic.AtomicInteger(); val tcpOk = java.util.concurrent.atomic.AtomicInteger()
         val trouves = coroutineScope { hosts.map { h -> async { sonder(h, icmpOk, tcpOk) } }.awaitAll() }.filterNotNull()
         val upnp = runCatching { ssdp(ctx) }.getOrDefault(emptyMap())
-        val mdns = runCatching { decouvrir(ctx, listOf("_http._tcp", "_googlecast._tcp", "_airplay._tcp", "_smb._tcp", "_ssh._tcp", "_hap._tcp", "_workstation._tcp", "_ipp._tcp", "_ipps._tcp", "_printer._tcp", "_pdl-datastream._tcp", "_canon-bjnp1._tcp", "_companion-link._tcp", "_spotify-connect._tcp"), 3500) }.getOrDefault(emptyList()).groupBy({ it.host }, { it.nom })
+        val mdns = runCatching { decouvrir(ctx, listOf("_http._tcp", "_googlecast._tcp", "_airplay._tcp", "_smb._tcp", "_ssh._tcp", "_hap._tcp", "_workstation._tcp", "_ipp._tcp", "_ipps._tcp", "_printer._tcp", "_pdl-datastream._tcp", "_canon-bjnp1._tcp", "_companion-link._tcp", "_spotify-connect._tcp", "_fbx-api._tcp"), 3500) }.getOrDefault(emptyList()).groupBy({ it.host }, { it.nom })
         val parIp = trouves.associateBy { it.ip }.toMutableMap()
         for (ip in (upnp.keys + mdns.keys)) if (!parIp.containsKey(ip) && prive(ip)) parIp[ip] = Appareil(ip, nomHote(ip), emptyList(), "", "❔ appareil")
         diag = "Sous-réseau ${hosts.first().substringBeforeLast('.')}.0/$pref (${hosts.size} adresses testées, liées au Wi-Fi ${if (wifiNet != null) "✔" else "✘ (réseau actif par défaut)"}) · réponses ICMP : ${icmpOk.get()} · TCP : ${tcpOk.get()} · UPnP : ${upnp.size} · mDNS : ${mdns.size}"
