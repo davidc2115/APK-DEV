@@ -106,7 +106,7 @@ object ImageGen {
                 val f = File(dossierImages, name)
                 f.writeBytes(bytes)
                 memoriserDescription(dossierImages, name, prompt)
-                val loc = runCatching { app.obsidian.saveBytes("JARVIS/Images", name, bytes, "image/png") }.getOrDefault("")
+                val loc = app.obsidian.saveBytes("JARVIS/Images", name, bytes, "image/png")
                 return@withContext f to loc
             } catch (e: ApiException) {
                 last = e
