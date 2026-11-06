@@ -324,10 +324,17 @@ if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then
   exit 0
 fi
 p '🔄 Préparation du démarrage de la passerelle Hermès…'
-# Détecter Debian même si le marqueur historique .jarvis-mode est vide.
 HERMES_PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 if [ "$(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ] || proot-distro login debian --termux-home -- env -i HOME=/root PATH="${'$'}{HERMES_PATH}" sh -c 'command -v hermes >/dev/null 2>&1'; then
-  OWNER_IDS=${'
+  OWNER_IDS=$(proot-distro login debian --termux-home -- stat -c '%u:%g' /root/.hermes/hermes-agent/.hermes/bin/hermes 2>/dev/null) || {
+    p "❌ Impossible d’identifier le propriétaire de l’installation Hermès."
+    exit 1
+  }
+  case "${'$'}{OWNER_IDS}" in
+    *[!0-9:]*|'') p "❌ Identité propriétaire Hermès invalide."; exit 126 ;;
+  esac
+  CMD="proot-distro login debian --user ${'$'}{OWNER_IDS} --termux-home -- env -i HOME=/root USER=jarvis LOGNAME=jarvis SHELL=/bin/bash PATH=${'$'}{HERMES_PATH} hermes gateway run"
+else
   if ! command -v hermes >/dev/null 2>&1; then
     p "❌ CLI Hermès introuvable dans Termux et Debian. Relance « Installer Hermès » pour réparer l’installation."
     exit 127
