@@ -162,6 +162,15 @@ object Discord {
     fun guildes(app: JarvisApp): JSONArray = reqArr(app, "GET", "/users/@me/guilds")
     fun roles(app: JarvisApp, guildId: String): JSONArray = reqArr(app, "GET", "/guilds/$guildId/roles")
     fun salons(app: JarvisApp, guildId: String): JSONArray = reqArr(app, "GET", "/guilds/$guildId/channels")
+    /** Envoie un message ordinaire dans un salon texte. Les mentions globales sont désactivées par défaut. */
+    fun envoyerMessage(app: JarvisApp, channelId: String, contenu: String): JSONObject {
+        val texte = contenu.trim()
+        require(texte.isNotBlank()) { "Le message Discord est vide." }
+        require(texte.length <= 2000) { "Un message Discord ne peut pas dépasser 2 000 caractères." }
+        val body = JSONObject().put("content", texte)
+            .put("allowed_mentions", JSONObject().put("parse", JSONArray()))
+        return req(app, "POST", "/channels/$channelId/messages", body)
+    }
     fun membre(app: JarvisApp, guildId: String, userId: String): JSONObject = req(app, "GET", "/guilds/$guildId/members/$userId")
     fun chercherMembres(app: JarvisApp, guildId: String, query: String): JSONArray = reqArr(app, "GET", "/guilds/$guildId/members/search?query=${java.net.URLEncoder.encode(query, "UTF-8")}&limit=10")
 
