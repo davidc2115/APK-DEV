@@ -525,7 +525,7 @@ class PhoneControl(private val ctx: Context) {
             "quick_settings" -> a11y(AccessibilityService.GLOBAL_ACTION_QUICK_SETTINGS, "Réglages rapides ouverts.")
             "lock" -> if (Build.VERSION.SDK_INT >= 28) a11y(AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN, "Écran verrouillé.") else "Non supporté."
             "screenshot" -> if (Build.VERSION.SDK_INT >= 28) a11y(AccessibilityService.GLOBAL_ACTION_TAKE_SCREENSHOT, "Capture d'écran prise.") else "Non supporté."
-            "read_screen", "inspect_screen" -> JarvisAccessibilityService.instance?.inspectScreen()?.ifBlank { "(écran vide ou illisible)" } ?: needA11y()
+            "read_screen", "inspect_screen", "watch_screen" -> JarvisAccessibilityService.instance?.inspectScreen()?.ifBlank { "(écran vide ou illisible)" } ?: needA11y()
             "click_text" -> JarvisAccessibilityService.instance?.let { if (it.clickText(value)) "Clic sur « $value »." else "« $value » introuvable à l'écran." } ?: needA11y()
             "click_best_match" -> JarvisAccessibilityService.instance?.clickBestMatch(value) ?: needA11y()
             "type_text" -> JarvisAccessibilityService.instance?.let { if (it.typeText(value)) "Texte saisi." else "Aucun champ de saisie actif." } ?: needA11y()
