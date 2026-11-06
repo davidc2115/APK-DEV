@@ -454,6 +454,9 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
      */
     private suspend fun clientEcrire(entree: JSONObject): ToolResult {
         val a = JSONObject(entree.toString())
+        val baseInitiale = runCatching { svc.repo.refresh() }.getOrElse {
+            return err("❌ Impossible de relire la base Société avant la création ou la modification : ${it.message ?: it.javaClass.simpleName}")
+        }
         var infoPos = ""
         val gpsIci = a.hv("site_gps") && estMaPosition(a.s("site_gps"))
         val adresseIci = a.hv("site_adresse") && estMaPosition(a.s("site_adresse"))
@@ -471,7 +474,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
                     ?: "\n🏠 Aucune adresse postale trouvée à cet endroit : seules les coordonnées GPS sont enregistrées.")
         }
         if (a.hv("site_nom") && estToutes(a.s("site_nom"))) {
-            val c = d.chercherClients(a.s("nom")).let { l -> l.firstOrNull { normaliser(it.nom) == normaliser(a.s("nom")) } ?: l.singleOrNull() }
+            val c = baseInitiale.chercherClients(a.s("nom")).let { l -> l.firstOrNull { normaliser(it.nom) == normaliser(a.s("nom")) } ?: l.singleOrNull() }
             if (c != null && c.sites.isNotEmpty()) {
                 val res = c.sites.map { site ->
                     val un = JSONObject(a.toString()).put("site_nom", site.nom)
