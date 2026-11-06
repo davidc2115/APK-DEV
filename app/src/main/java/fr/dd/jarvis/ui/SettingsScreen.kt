@@ -304,6 +304,22 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     runMsg = "Cycle demandé. Le résultat apparaîtra après l'exécution."
                 }
                 if (!store.agentsOn.value) Text("Active les agents autonomes pour pouvoir lancer un cycle.", color = HudDim, fontSize = 11.sp)
+                HudButton(if (gatewayBusy) "Détection…" else "Détecter la box du réseau actuel", enabled = !gatewayBusy) {
+                    scope.launch {
+                        gatewayBusy = true
+                        gatewayResult = try {
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                fr.dd.jarvis.ai.BoxInternet.detecterPasserelle(app)
+                            }?.let { profile ->
+                                "Passerelle détectée : ${profile.gatewayAddress}. ${fr.dd.jarvis.ai.BoxInternetAdapters.managementStatus(profile)}. La marque et le modèle seront identifiés par les sondes compatibles lors des prochaines étapes."
+                            } ?: "Aucune passerelle active détectée. Vérifie que le téléphone est connecté au réseau de la box."
+                        } catch (e: Exception) { "❌ Détection impossible : ${e.message ?: e.javaClass.simpleName}" }
+                        gatewayBusy = false
+                    }
+                }
+                if (gatewayResult.isNotBlank()) Text(gatewayResult, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+                Spacer(Modifier.height(8.dp))
+
                 if (runMsg.isNotBlank()) Text(runMsg, color = HudText, fontSize = 11.sp)
                 HudDivider()
                 Text("Dernière exécution", color = LocalAccent.current, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 13.sp)
@@ -783,6 +799,8 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
         item {
             var freeboxResult by remember { mutableStateOf("") }
             var freeboxBusy by remember { mutableStateOf(false) }
+            var gatewayResult by remember { mutableStateOf("") }
+            var gatewayBusy by remember { mutableStateOf(false) }
             HudPanel(Modifier.fillMaxWidth(), title = "Box Internet — administration sécurisée") {
                 Text(
                     if (store.freeboxAppToken.value.isBlank()) "Aucune association Freebox. Connecte le téléphone au Wi-Fi de la Freebox avant de demander l'autorisation."
