@@ -780,6 +780,42 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
         item {
             BoxPanel(store, app)
         }
+        item {
+            var freeboxResult by remember { mutableStateOf("") }
+            var freeboxBusy by remember { mutableStateOf(false) }
+            HudPanel(Modifier.fillMaxWidth(), title = "Freebox OS — administration sécurisée") {
+                Text(
+                    if (store.freeboxAppToken.value.isBlank()) "Aucune association Freebox. Connecte le téléphone au Wi-Fi de la Freebox Delta avant de demander l'autorisation."
+                    else "Freebox associée · domaine API : " + store.freeboxApiDomain.value,
+                    color = HudDim, fontSize = 12.sp
+                )
+                Spacer(Modifier.height(8.dp))
+                Text("L'association affiche une demande sur l'écran de la Freebox. Le jeton est enregistré dans le stockage chiffré Android. Jarvis ne peut pas s'accorder lui-même les droits administrateur : ils doivent être autorisés dans Freebox OS.", color = HudDim, fontSize = 11.sp)
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HudButton(if (freeboxBusy) "Connexion…" else if (store.freeboxAppToken.value.isBlank()) "Associer la Freebox" else "Vérifier les autorisations", enabled = !freeboxBusy) {
+                        scope.launch {
+                            freeboxBusy = true
+                            freeboxResult = if (store.freeboxAppToken.value.isBlank()) "Demande d'association en cours. Valide-la sur l'écran de la box…" else "Vérification des droits…"
+                            freeboxResult = try {
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    if (store.freeboxAppToken.value.isBlank()) fr.dd.jarvis.ai.FreeboxOs.associer(app)
+                                    else fr.dd.jarvis.ai.FreeboxOs.verifierAcces(app)
+                                }
+                            } catch (e: Exception) { "❌ " + (e.message ?: e.javaClass.simpleName) }
+                            freeboxBusy = false
+                            tick++
+                        }
+                    }
+                    if (store.freeboxAppToken.value.isNotBlank()) HudButton("Dissocier", enabled = !freeboxBusy) {
+                        fr.dd.jarvis.ai.FreeboxOs.dissocier(app)
+                        freeboxResult = "Association locale supprimée de Jarvis."
+                    }
+                }
+                if (freeboxResult.isNotBlank()) Text(freeboxResult, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+                Text("À savoir : le droit « settings » doit être activé dans Freebox OS › Paramètres de la Freebox › Gestion des accès › Applications pour modifier les réglages réseau. L'accès distant sécurisé sera utilisé après l'association locale.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+            }
+        }
 
         item {
             ImprimantePanel(store, app)
