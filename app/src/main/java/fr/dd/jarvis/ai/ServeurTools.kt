@@ -191,8 +191,9 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
             "appareil_nommer" -> ToolResult(if (Registre.nommer(app, a.optString("ip").trim(), a.optString("nom").trim())) "✅ ${a.optString("ip")} s'appelle maintenant « ${a.optString("nom")} »." else "Appareil inconnu : lance d'abord une analyse du réseau.")
             "ip_publique" -> {
                 val sb = StringBuilder("# 🌍 Adresses IP\n")
-                val tel = Reseau.ippPublique()
+                // Mémoriser le Wi-Fi avant la requête publique pour la lier à la box.
                 val i = Reseau.infos(app)
+                val tel = Reseau.ippPublique()
                 if (tel.isBlank()) sb.append("- Téléphone : IP publique introuvable (pas d'accès Internet ?).\n") else {
                     sb.append("- 📱 Téléphone/box : **$tel**" + (if (i != null && i.wifi) " (réseau Wi-Fi, privée ${i.ip})" else " (données mobiles)") + "\n")
                     if (i != null && i.wifi) Registre.ipPublique(app, tel, "Wi-Fi ${i.ip.substringBeforeLast('.')}.x").takeIf { it.isNotBlank() }?.let { sb.append("- $it\n") }
