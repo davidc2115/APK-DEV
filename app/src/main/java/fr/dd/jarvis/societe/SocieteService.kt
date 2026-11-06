@@ -97,14 +97,20 @@ class SocieteService(
 
     // ------------------------------------------------------------------ distance / déplacement
 
+    private fun referenceGeo(adresse: String, lat: Double?, lon: Double?): String =
+        if (adresse.isNotBlank()) normaliser(adresse)
+        else if (lat != null && lon != null) "gps:${Geo.texteGps(Geo.Point(lat, lon))}" else ""
+
     private fun cle(hq: String, dest: String) = normaliser(hq) + "|" + normaliser(dest)
 
     /** Distance siège → adresse. Utilise le cache du site si l'adresse du siège et du site n'ont pas changé. */
     suspend fun distance(client: Client, site: Site?): Geo.Route? {
         val hq = data.societe
         val dest = site?.adresse?.ifBlank { null } ?: client.adresse
-        if (hq.adresse.isBlank() || (dest.isBlank() && site?.lat == null)) return null
-        val key = cle(hq.adresse, dest)
+        val hqRef = referenceGeo(hq.adresse, hq.lat, hq.lon)
+        val destRef = referenceGeo(dest, site?.lat, site?.lon)
+        if (hqRef.isBlank() || destRef.isBlank()) return null
+        val key = "$hqRef|$destRef"
         if (site != null && site.distanceKm != null && site.distanceCle == key)
             return Geo.Route(site.distanceKm, site.dureeMin ?: 0.0, false)
 
@@ -129,10 +135,12 @@ class SocieteService(
      */
     suspend fun distanceClient(client: Client): Geo.Route? {
         val hq = data.societe
-        val site = if (client.adresse.isBlank()) client.sites.firstOrNull { it.adresse.isNotBlank() || it.lat != null } else null
+        val site = if (client.adresse.isBlank()) client.sites.firstOrNull { it.adresse.isNotBlank() || (it.lat != null && it.lon != null) } else null
         val destination = site?.adresse?.ifBlank { null } ?: client.adresse
-        if (hq.adresse.isBlank() || (destination.isBlank() && site?.lat == null)) return null
-        val key = cle(hq.adresse, destination)
+        val hqRef = referenceGeo(hq.adresse, hq.lat, hq.lon)
+        val destinationRef = referenceGeo(destination, site?.lat, site?.lon)
+        if (hqRef.isBlank() || destinationRef.isBlank()) return null
+        val key = "$hqRef|$destinationRef"
         if (client.distanceKm != null && client.distanceCle == key)
             return Geo.Route(client.distanceKm, client.distanceDureeMin ?: 0.0, false)
         val origin = localiserSiege()?.point ?: return null
@@ -180,16 +188,23 @@ class SocieteService(
     fun enregistrerPosition(clientId: String, siteId: String, loc: Geo.Localisation) {
         repo.update { d ->
             d.copy(clients = d.clients.map { x ->
-                if (x.id != clientId) x else x.copy(sites = x.sites.map { y ->
-                    if (y.id != siteId) y else {
-                        val bouge = y.lat == null || y.lon == null || Geo.haversine(Geo.Point(y.lat, y.lon), loc.point) > 0.03
-                        y.copy(
-                            lat = loc.point.lat, lon = loc.point.lon, gpsPrecision = loc.precision.name, gpsTrouve = loc.trouve,
-                            distanceKm = if (bouge) null else y.distanceKm, dureeMin = if (bouge) null else y.dureeMin,
-                            distanceCle = if (bouge) "" else y.distanceCle
-                        )
-                    }
-                })
+                if (x.id != clientId) x else {
+                    val ancienSite = x.sites.firstOrNull { it.id == siteId }
+                    val bouge = ancienSite == null || ancienSite.lat == null || ancienSite.lon == null ||
+                        Geo.haversine(Geo.Point(ancienSite.lat, ancienSite.lon), loc.point) > 0.03
+                    x.copy(
+                        distanceKm = if (bouge) null else x.distanceKm,
+                        distanceDureeMin = if (bouge) null else x.distanceDureeMin,
+                        distanceCle = if (bouge) "" else x.distanceCle,
+                        sites = x.sites.map { y ->
+                            if (y.id != siteId) y else y.copy(
+                                lat = loc.point.lat, lon = loc.point.lon, gpsPrecision = loc.precision.name, gpsTrouve = loc.trouve,
+                                distanceKm = if (bouge) null else y.distanceKm, dureeMin = if (bouge) null else y.dureeMin,
+                                distanceCle = if (bouge) "" else y.distanceCle
+                            )
+                        }
+                    )
+                }
             })
         }
     }
