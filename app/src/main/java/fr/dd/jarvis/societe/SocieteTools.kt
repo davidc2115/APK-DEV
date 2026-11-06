@@ -449,6 +449,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             // Sur place : le point du téléphone vaut pour l'installation, même si seule l'adresse a été demandée.
             if (gpsIci || !a.hv("site_gps")) a.put("site_gps", Geo.texteGps(p))
             a.put("_gps_source", "position du téléphone sur place (± ${precision.toInt()} m)")
+            a.put("_gps_sur_place", true)
             if (adresseIci) { if (adr != null) a.put("site_adresse", adr.libelle) else a.remove("site_adresse") }
             infoPos = "\n📍 Position du téléphone : ${Geo.texteGps(p)} (± ${precision.toInt()} m)" +
                 (adr?.let { "\n🏠 Adresse à cet endroit : ${it.libelle}" + (it.distance?.takeIf { d -> d > 15 }?.let { d -> " (point d'adresse le plus proche, ~$d m)" } ?: "") }
@@ -483,7 +484,9 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         if (a.hv("contact")) c = c.copy(contact = a.s("contact"))
         if (a.hv("tel")) c = c.copy(tel = a.s("tel"))
         if (a.hv("email")) c = c.copy(email = a.s("email"))
-        if (a.hv("adresse")) c = c.copy(adresse = a.s("adresse"))
+        if (a.hv("adresse") && normaliser(a.s("adresse")) != normaliser(c.adresse)) c = c.copy(
+            adresse = a.s("adresse"), distanceKm = null, distanceDureeMin = null, distanceCle = ""
+        )
         if (a.hv("depuis")) {
             val dep = parseDepuis(a.s("depuis"))
             if (dep.isNotBlank()) c = c.copy(depuis = dep)
@@ -493,20 +496,29 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         val gpsSaisi = if (a.hv("site_gps")) lireGps(a.s("site_gps")) ?: return err("Coordonnées GPS illisibles : « ${a.s("site_gps")} ». $aideGps") else null
         if (a.hv("site_nom") || a.hv("site_adresse") || a.hv("kwc") || a.hv("onduleur") || a.hv("nb_panneaux") || a.hv("mise_en_service") || a.hv("site_notes") || gpsSaisi != null) {
             val ref = a.s("site_nom").ifBlank { a.s("site_adresse") }
+            val gpsSurPlace = a.optBoolean("_gps_sur_place")
+            if (gpsSurPlace && a.s("site_nom").isBlank() && c.sites.size > 1)
+                return err("${c.nom} a plusieurs installations (${c.sites.joinToString { it.nom }}). Pour enregistrer ce point GPS, précise l'installation concernée (site_nom), ou dis « toutes » si tu es sur place pour chacune.")
             if (gpsSaisi != null && ref.isBlank() && c.sites.size > 1)
                 return err("${c.nom} a plusieurs installations (${c.sites.joinToString { it.nom }}). Pour laquelle sont ces coordonnées GPS ? (site_nom, ou « toutes » pour toutes ses installations)")
             val trouve = c.sites.firstOrNull { x -> ref.isNotBlank() && (normaliser(x.nom) == normaliser(ref) || normaliser(x.adresse) == normaliser(ref)) }
-                ?: (if (ref.isBlank() && c.sites.size == 1) c.sites.first() else null)
+                ?: (if (c.sites.size == 1 && (ref.isBlank() || (gpsSurPlace && a.s("site_nom").isBlank()))) c.sites.first() else null)
             val isNew = trouve == null
             var site: Site = trouve ?: Site(svc.newId(), a.s("site_nom").ifBlank { "Installation ${c.sites.size + 1}" }, a.s("site_adresse").ifBlank { c.adresse })
             if (a.hv("site_nom")) site = site.copy(nom = a.s("site_nom"))
             // Nouvelle adresse : l'ancienne position GPS ne vaut plus (elle sera recalculée), sauf coordonnées fournies.
-            if (a.hv("site_adresse") && normaliser(a.s("site_adresse")) != normaliser(site.adresse))
+            var distanceClientAInvalider = false
+            if (a.hv("site_adresse") && normaliser(a.s("site_adresse")) != normaliser(site.adresse)) {
+                distanceClientAInvalider = true
                 site = site.copy(adresse = a.s("site_adresse"), distanceKm = null, distanceCle = "", lat = null, lon = null, gpsPrecision = "", gpsTrouve = "")
-            if (gpsSaisi != null) site = site.copy(
-                lat = gpsSaisi.lat, lon = gpsSaisi.lon, gpsPrecision = Geo.Precision.MANUELLE.name, gpsTrouve = a.s("_gps_source").ifBlank { "coordonnées GPS saisies" },
-                distanceKm = null, dureeMin = null, distanceCle = ""
-            )
+            }
+            if (gpsSaisi != null) {
+                distanceClientAInvalider = true
+                site = site.copy(
+                    lat = gpsSaisi.lat, lon = gpsSaisi.lon, gpsPrecision = Geo.Precision.MANUELLE.name, gpsTrouve = a.s("_gps_source").ifBlank { "coordonnées GPS saisies" },
+                    distanceKm = null, dureeMin = null, distanceCle = ""
+                )
+            }
             val kwc = a.dbl("kwc")
             if (kwc != null) site = site.copy(kwc = kwc)
             if (a.hv("mise_en_service")) site = site.copy(miseEnService = a.s("mise_en_service"))
@@ -516,12 +528,17 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             if (a.hv("site_notes")) site = site.copy(notes = a.s("site_notes"))
             val fin: Site = site
             c = c.copy(sites = if (isNew) c.sites + fin else c.sites.map { if (it.id == fin.id) fin else it })
+            if (distanceClientAInvalider) c = c.copy(distanceKm = null, distanceDureeMin = null, distanceCle = "")
             siteTxt = "\n☀️ Installation : ${fin.nom} — ${nombre(fin.kwc)} kWc — ${fin.adresse}" +
                 (if (gpsSaisi != null) "\n🛰️ GPS : ${Geo.texteGps(gpsSaisi)} (${a.s("_gps_source").ifBlank { "coordonnées saisies" }}, format Google Maps) — ${Geo.texteDms(gpsSaisi)}" else "")
         }
         val final: Client = c
         svc.repo.update { it.copy(clients = if (nouveau) it.clients + final else it.clients.map { x -> if (x.id == final.id) final else x }) }
-        val r = d.remiseClient(final)
+        val relu = svc.data.clients.firstOrNull { it.id == final.id }
+            ?: return err("La fiche « ${final.nom} » n'a pas été retrouvée après l'enregistrement.")
+        if (gpsSaisi != null && relu.sites.none { it.lat == gpsSaisi.lat && it.lon == gpsSaisi.lon })
+            return err("La fiche « ${final.nom} » a été enregistrée, mais le point GPS n'apparaît pas dans les données relues. Je ne confirme pas son ajout.")
+        val r = d.remiseClient(relu)
         return ok("✅ Client « ${final.nom} » ${if (nouveau) "créé" else "mis à jour"}.$siteTxt\n🎁 Remise applicable aujourd'hui : " + (if (r.pct > 0) "${nombre(r.pct)} % (${r.detail})" else "aucune"))
     }
 
