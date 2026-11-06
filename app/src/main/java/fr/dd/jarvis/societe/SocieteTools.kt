@@ -544,9 +544,22 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
                 (if (gpsSaisi != null) "\n🛰️ GPS : ${Geo.texteGps(gpsSaisi)} (${a.s("_gps_source").ifBlank { "coordonnées saisies" }}, format Google Maps) — ${Geo.texteDms(gpsSaisi)}" else "")
         }
         val final: Client = c
-        svc.repo.update { it.copy(clients = if (nouveau) it.clients + final else it.clients.map { x -> if (x.id == final.id) final else x }) }
+        try {
+            svc.repo.update { current ->
+                current.copy(clients = if (nouveau) {
+                    // Protection contre un doublon si deux appels Hermès créent le même client presque simultanément.
+                    if (current.clients.any { normaliser(it.nom) == normaliser(final.nom) }) current.clients
+                    else current.clients + final
+                } else {
+                    current.clients.map { x -> if (x.id == final.id) final else x }
+                })
+            }
+        } catch (e: Exception) {
+            return err("❌ Impossible d'enregistrer « ${final.nom} » dans la base Société : ${e.message ?: e.javaClass.simpleName}. La fiche Markdown ne suffit pas : le client n'est pas confirmé dans l'onglet Clients.")
+        }
         val relu = svc.data.clients.firstOrNull { it.id == final.id }
-            ?: return err("La fiche « ${final.nom} » n'a pas été retrouvée après l'enregistrement.")
+            ?: svc.data.clients.firstOrNull { normaliser(it.nom) == normaliser(final.nom) }
+            ?: return err("❌ La fiche « ${final.nom} » n'a pas été retrouvée après l'enregistrement. Aucun succès n'est annoncé.")
         if (gpsSaisi != null && relu.sites.none { it.lat == gpsSaisi.lat && it.lon == gpsSaisi.lon })
             return err("La fiche « ${final.nom} » a été enregistrée, mais le point GPS n'apparaît pas dans les données relues. Je ne confirme pas son ajout.")
         val r = d.remiseClient(relu)
