@@ -395,12 +395,15 @@ class VoiceManager(private val ctx: Context) {
                 }
             }
             override fun onDone(utteranceId: String?) { terminer() }
+            override fun onStop(utteranceId: String?, interrupted: Boolean) { terminer() }
 
             @Deprecated("Deprecated in Java")
             override fun onError(utteranceId: String?) { terminer() }
             override fun onError(utteranceId: String?, errorCode: Int) { terminer() }
         })
-        tts?.speak(clean.take(3500), TextToSpeech.QUEUE_FLUSH, null, UUID.randomUUID().toString())
+        val lancement = runCatching { tts?.speak(clean.take(3500), TextToSpeech.QUEUE_FLUSH, null, UUID.randomUUID().toString()) ?: TextToSpeech.ERROR }
+            .getOrDefault(TextToSpeech.ERROR)
+        if (lancement == TextToSpeech.ERROR) terminer()
     }
 
     /** Fait taire JARVIS sans rappeler la suite (nouvelle demande, arrêt…). */
