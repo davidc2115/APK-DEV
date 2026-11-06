@@ -196,7 +196,7 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
                 journal.append("  - 🏷️ $it mail(s) rangés (libellés Urgent, Clients…)\n")
                 if (store.notifLive.value) alert(2004, "🏷️ ${classes.size} mail(s) rangé(s) dans Gmail",
                     classes.joinToString("\n") { "• ${it.label} — ${it.mail.from} : ${it.mail.subject}" })
-            }.onFailure { journal.append("  - ⚠️ Rangement Gmail : ${it.message?.take(100)}\n") }
+            }.onFailure { throw it } // Remonter l’échec : les mails restent non traités et seront réessayés au prochain cycle.
         }
         writeSet("agent_seen_mails.txt", seen + nouveaux.map { key(it) })
     }
