@@ -16,22 +16,24 @@ class MusicTools(private val app: JarvisApp) {
     val schema: List<JSONObject> = listOf(
         JSONObject().put("type", "function").put("function", JSONObject()
             .put("name", "musique_etat")
-            .put("description", "Détecte le morceau actuellement joué dans YT Music Morphe (titre, artiste, album et état lecture/pause) via la session multimédia Android. Si aucune session n'est visible, explique que l'accès aux notifications de JARVIS doit être activé.")
+            .put("description", "Détecte les sessions musicales Android actives (Morphe, YouTube Music, Spotify, Deezer, VLC et autres lecteurs compatibles) et affiche l'application, le titre, l'artiste et l'état réel. Si aucune session n'est visible, indique précisément que l'accès aux notifications de JARVIS doit être activé.")
             .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject()).put("required", JSONArray()))),
         JSONObject().put("type", "function").put("function", JSONObject()
             .put("name", "musique_commander")
-            .put("description", "Envoie une commande à la session active YT Music Morphe : lecture, pause, suivant ou precedent. Ne prétends pas que le morceau a démarré avant de relire son état.")
+            .put("description", "Envoie une commande à la session musicale active du téléphone, quelle que soit l'application compatible : lecture, pause, suivant ou precedent. Ne prétends pas que le morceau a démarré avant de relire son état.")
             .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject().put("action", prop("lecture | pause | suivant | precedent"))).put("required", JSONArray().put("action")))),
         JSONObject().put("type", "function").put("function", JSONObject()
             .put("name", "musique_rechercher")
-            .put("description", "Ouvre une recherche de titre ou d'artiste directement dans YT Music Morphe, si l'application accepte le lien de recherche YouTube Music.")
-            .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject().put("requete", prop("Titre, artiste ou morceau recherché."))).put("required", JSONArray().put("requete"))))
+            .put("description", "Recherche puis tente de lancer réellement le titre ou l'artiste dans l'application musicale demandée ou configurée (Morphe, Spotify, YouTube Music, Deezer, Amazon Music, VLC…). Vérifie le titre et l'état de lecture. Paramètre application facultatif ; s'il est vide, utilise la préférence musicale Jarvis si elle existe, sinon une application musicale installée.")
+            .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject().put("requete", prop("Titre, artiste ou morceau recherché.")).put("application", prop("Application musicale à utiliser (Morphe, Spotify, YouTube Music, Deezer…). Facultatif."))).put("required", JSONArray().put("requete"))))
     )
     suspend fun execute(name: String, a: JSONObject): ToolResult = try {
         when (name) {
             "musique_etat" -> ToolResult(Musique.etat(app), direct = true)
             "musique_commander" -> ToolResult(Musique.commander(app, a.optString("action")), direct = true)
-            "musique_rechercher" -> ToolResult(Musique.rechercher(app, a.optString("requete")), direct = true)
+            "musique_rechercher" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                app.phone.perform("music", a.optString("requete") + "|" + a.optString("application"))
+            }, direct = true)
             else -> ToolResult("Outil musical inconnu.")
         }
     } catch (e: SecurityException) {
