@@ -621,22 +621,13 @@ class SocieteService(
         )
         val pts = mutableListOf<KmlPoint>()
         val demandeNormalisee = normaliser(recherche.trim())
-        // Si Hermès transmet toute la longue consigne dans « recherche », ne pas filtrer la carte.
-        val clientsCites = if (demandeNormalisee.isBlank()) emptyList() else clientsSource.filter { client ->
-            val nom = normaliser(client.nom)
-            nom.length >= 3 && demandeNormalisee.contains(nom)
-        }
-        val rechercheCorrespondante = clientsSource.any { client ->
-            val champs = listOf(client.nom, client.contact, client.type, client.tel, client.adresse, client.email) +
-                client.sites.flatMap { listOf(it.nom, it.adresse, it.onduleur, it.notes) }
-            champs.any { champ -> demandeNormalisee.isNotBlank() && normaliser(champ).contains(demandeNormalisee) }
-        }
-        val filtre = when {
-            demandeNormalisee.isBlank() -> ""
-            rechercheCorrespondante -> demandeNormalisee
-            clientsCites.size == 1 -> normaliser(clientsCites.single().nom)
-            else -> ""
-        }
+        // Un filtre n'est accepté que s'il correspond EXACTEMENT à un client, un site ou une adresse.
+        // Toute phrase longue / consigne composite est ignorée pour éviter de tronquer la carte.
+        val filtresConnus = clientsSource.flatMap { client ->
+            listOf(client.nom, client.contact, client.adresse) +
+                client.sites.flatMap { listOf(it.nom, it.adresse) }
+        }.map(::normaliser).filter { it.isNotBlank() }.toSet()
+        val filtre = demandeNormalisee.takeIf { it.isNotBlank() && it in filtresConnus }.orEmpty()
         for (c in clientsSource) {
             val cibles = if (c.sites.isEmpty()) listOf(null) else c.sites
             for (site in cibles) {
