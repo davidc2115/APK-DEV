@@ -190,7 +190,7 @@ object HermesTermux {
 J_URL=${q("http://127.0.0.1:$port/progres")}; J_TOK=${q(jeton)}
 p() {
   local message="${'$'}*"
-  if [ -z "${'$'message}" ]; then return 0; fi
+  if [ -z "${'message" ]; then return 0; fi}message" ]; then return 0; fi
   echo "${'$'}message"
   if ! command -v curl >/dev/null 2>&1; then
     echo "JARVIS_PROGRESS_ERROR: curl absent" >&2
