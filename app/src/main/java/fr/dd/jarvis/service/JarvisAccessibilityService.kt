@@ -107,7 +107,7 @@ class JarvisAccessibilityService : AccessibilityService() {
         val (sequence, events) = recentUiEvents()
         sb.append("\n\nACTIVITÉ RÉCENTE DU TÉLÉPHONE (événements d'accessibilité, sans contenu privé) :\n")
         sb.append("Séquence : ").append(sequence).append(" · ").append(events.size).append(" événement(s) conservé(s)\n")
-        events.takeLast(20).forEach { sb.append("• ").append(it).append('\\n') }
+        events.takeLast(20).forEach { sb.append("• ").append(it).append('\n') }
         sb.append("NOTE : journal événementiel mis à jour par Android en arrière-plan ; relancer inspect_screen/watch_screen pour lire les derniers changements.\n")
         return sb.toString().trim().take(12_000)
     }
