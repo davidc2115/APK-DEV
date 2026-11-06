@@ -1048,9 +1048,17 @@ class ToolBox(
             return ToolResult("# Centre de contrôle des agents IA\n\n" +
                 status.joinToString("\n") { "- ${it.first} : ${if (it.second) "activé" else "désactivé"}" } +
                 "\n\nFréquence : ${store.agentMinutes.value} min" +
-                "\nDernier cycle : $lastRun" +
+                "\nDernier cycle : ${lastRun}" +
                 "\nRésultat : ${store.agentLastRunStatus.value}" +
-                "\nDernière synthèse proactive : ${store.proactiveSummary.value.ifBlank { "aucune" }}", direct = true)
+                "\nDernière synthèse proactive : ${store.proactiveSummary.value.ifBlank { "aucune" }}" +
+                "\n\n## Prérequis réellement observés" +
+                "\n- Connexion réseau : ${fr.dd.jarvis.device.PhoneHealth.dashboard(app).network}" +
+                "\n- Compte mail configuré : ${if (store.mailConfigured()) "oui" else "non"}" +
+                "\n- Accès agenda : ${if (app.calendar.hasPermission()) "autorisé" else "manquant"}" +
+                "\n- Accès aux notifications du téléphone : ${if (fr.dd.jarvis.device.PhoneHealth.dashboard(app).notificationListener) "autorisé" else "manquant"}" +
+                "\n- Notifications Android : ${if (fr.dd.jarvis.device.PhoneHealth.dashboard(app).notificationsAllowed) "autorisées" else "bloquées"}" +
+                "\n- Optimisation batterie ignorée : ${if (fr.dd.jarvis.device.PhoneHealth.dashboard(app).unrestrictedBattery) "oui" else "non (Android peut différer les cycles)"}" +
+                "\n\nUn agent activé mais privé d'un prérequis ne peut pas être considéré comme opérationnel.", direct = true)
         }
         if (action == "historique") {
             val history = store.agentRunHistory.value.lines().filter { it.isNotBlank() }.takeLast(20).asReversed()
