@@ -89,7 +89,7 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
 
     private fun alert(id: Int, titre: String, texte: String) {
         if (android.os.Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            journal.append("- ⚠️ Alerte « $titre » non publiée : autorisation de notifications Android absente.\\n")
+            journal.append("- ⚠️ Alerte « $titre » non publiée : autorisation de notifications Android absente.\n")
             return
         }
         val pi = PendingIntent.getActivity(ctx, id, Intent(ctx, fr.dd.jarvis.MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
@@ -141,7 +141,7 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
             try {
                 when {
                     !active -> Unit
-                    prerequisite != null -> journal.append("- ⏸️ $nom : bloqué — $prerequisite.\\n")
+                    prerequisite != null -> journal.append("- ⏸️ $nom : bloqué — $prerequisite.\n")
                     else -> f()
                 }
                 outcomes += "$nom : " + when {
