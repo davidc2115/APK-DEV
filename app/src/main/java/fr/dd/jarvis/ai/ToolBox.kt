@@ -1045,6 +1045,15 @@ class ToolBox(
                 runCatching { LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(millis), ZoneId.systemDefault())
                     .format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm")) }.getOrNull()
             } ?: "aucun cycle enregistré"
+            val phone = fr.dd.jarvis.device.PhoneHealth.dashboard(app)
+            val prerequisites = listOf(
+                "Connexion réseau" to phone.network,
+                "Compte mail configuré" to if (store.mailConfigured()) "oui" else "non",
+                "Accès agenda" to if (app.calendar.hasPermission()) "autorisé" else "manquant",
+                "Accès aux notifications du téléphone" to if (phone.notificationListener) "autorisé" else "manquant",
+                "Notifications Android" to if (phone.notificationsAllowed) "autorisées" else "bloquées",
+                "Optimisation batterie ignorée" to if (phone.unrestrictedBattery) "oui" else "non (Android peut différer les cycles)"
+            )
             return ToolResult("# Centre de contrôle des agents IA\n\n" +
                 status.joinToString("\n") { "- ${it.first} : ${if (it.second) "activé" else "désactivé"}" } +
                 "\n\nFréquence : ${store.agentMinutes.value} min" +
@@ -1052,12 +1061,7 @@ class ToolBox(
                 "\nRésultat : ${store.agentLastRunStatus.value}" +
                 "\nDernière synthèse proactive : ${store.proactiveSummary.value.ifBlank { "aucune" }}" +
                 "\n\n## Prérequis réellement observés" +
-                "\n- Connexion réseau : ${fr.dd.jarvis.device.PhoneHealth.dashboard(app).network}" +
-                "\n- Compte mail configuré : ${if (store.mailConfigured()) "oui" else "non"}" +
-                "\n- Accès agenda : ${if (app.calendar.hasPermission()) "autorisé" else "manquant"}" +
-                "\n- Accès aux notifications du téléphone : ${if (fr.dd.jarvis.device.PhoneHealth.dashboard(app).notificationListener) "autorisé" else "manquant"}" +
-                "\n- Notifications Android : ${if (fr.dd.jarvis.device.PhoneHealth.dashboard(app).notificationsAllowed) "autorisées" else "bloquées"}" +
-                "\n- Optimisation batterie ignorée : ${if (fr.dd.jarvis.device.PhoneHealth.dashboard(app).unrestrictedBattery) "oui" else "non (Android peut différer les cycles)"}" +
+                prerequisites.joinToString("\n") { "- ${it.first} : ${it.second}" } +
                 "\n\nUn agent activé mais privé d'un prérequis ne peut pas être considéré comme opérationnel.", direct = true)
         }
         if (action == "historique") {
