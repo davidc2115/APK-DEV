@@ -262,7 +262,8 @@ object PontMcp {
                     "Si ces outils ne sont pas visibles, utilise tool_search avec les termes exacts interventions_liste et intervention_supprimer ; ne remplace jamais cette recherche par une recherche de PDF dans Obsidian. " +
                     "Pour supprimer une intervention, utilise obligatoirement interventions_liste pour obtenir son ID, puis intervention_supprimer avec cet ID et confirmation='oui' après accord explicite. " +
                     "N'utilise jamais les outils génériques du coffre Obsidian pour supprimer une intervention et n'appelle jamais intervention_enregistrer pour simuler une suppression. " +
-                    "Les actions sensibles (SMS, appels, suppressions) doivent respecter les confirmations de l'utilisateur."))
+                    "DISCORD : les outils discord_role_creer/modifier/supprimer/position, discord_role_attribuer et discord_salon_permission sont des actions d'écriture et d'administration, pas de simples outils de lecture. Utilise-les quand la demande porte sur une modification autorisée. discord_audit_serveur est volontairement en lecture seule uniquement pour l'inventaire ; cela ne limite pas les autres outils Discord. Les droits restent ceux du bot et de sa hiérarchie de rôles. " +
+                    "Les actions sensibles (SMS, appels, suppressions, administration Discord) doivent respecter les confirmations de l'utilisateur."))
             "ping" -> ok(JSONObject())
             "tools/list" -> ok(JSONObject().put("tools", f.outils()))
             "tools/call" -> {
@@ -282,8 +283,14 @@ object PontMcp {
         // Groq accepte au maximum 128 outils par requête. On plafonne Jarvis à 80
         // pour laisser une marge aux autres serveurs MCP connectés dans Hermès.
         val prioritaires = listOf(
+            // Les outils métier sensibles doivent rester visibles même lorsque le catalogue
+            // dépasse le budget transmis au modèle (80 outils).
             "interventions_liste", "intervention_supprimer", "intervention_modifier",
-            "intervention_enregistrer", "interventions_synthese"
+            "intervention_enregistrer", "interventions_synthese",
+            // Discord : exposer en priorité les outils de lecture ET d'administration.
+            "discord_guildes", "discord_roles", "discord_salons", "discord_audit_serveur",
+            "discord_role_creer", "discord_role_modifier", "discord_role_supprimer",
+            "discord_role_position", "discord_role_attribuer", "discord_salon_permission"
         )
         val fonctions = mutableListOf<JSONObject>()
         val nomsDejaVus = mutableSetOf<String>()
