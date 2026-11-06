@@ -131,8 +131,14 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
                     "Notifications" -> store.agentNotifs.value && (only == null || only == "notifs")
                     else -> false
                 }
+                val prerequisite = when (nom) {
+                    "Mails" -> if (active && !store.mailConfigured()) "configuration mail manquante" else null
+                    "Planning" -> if (active && !app.calendar.hasPermission()) "autorisation agenda manquante" else null
+                    else -> null
+                }
                 outcomes += "$nom : " + when {
                     !active -> "non exécuté (agent désactivé ou hors de ce cycle)"
+                    prerequisite != null -> "bloqué — $prerequisite"
                     journal.length > journalStart -> "activité / report"
                     else -> "RAS"
                 }
