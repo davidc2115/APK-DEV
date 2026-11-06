@@ -205,7 +205,9 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
     private fun factures() {
         val today = LocalDate.now().toString()
         if (store.agentLastFact.value == today && !inputData.getBoolean("force", false)) return
-        val d = app.societe.data
+        // Relire la base persistée : les créations/modifications réalisées depuis un autre écran
+        // ou par Hermès peuvent être plus récentes que l'instantané déjà chargé en mémoire.
+        val d = app.societe.repo.refresh()
         val retard = d.docs.filter { it.type == "facture" && it.statut == "a_payer" && it.echeance.isNotBlank() && it.echeance < today }
         val bientotEchues = d.docs.filter { it.type == "facture" && it.statut == "a_payer" && it.echeance.isNotBlank() && it.echeance >= today && it.echeance <= LocalDate.now().plusDays(3).toString() }
         val devis = d.docs.filter { it.type == "devis" && it.statut == "envoye" && it.date <= LocalDate.now().minusDays(10).toString() }
