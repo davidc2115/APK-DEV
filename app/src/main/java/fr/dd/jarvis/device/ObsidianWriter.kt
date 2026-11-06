@@ -40,23 +40,33 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         val name = safe(fileName, "Fichier")
         val uriStr = store.obsidianUri.value
         if (uriStr.isNotBlank()) {
-            try {
-                val tree = DocumentFile.fromTreeUri(ctx, Uri.parse(uriStr))
-                if (tree != null && tree.canWrite()) {
-                    val dir = subDir(tree, folder)
-                    val target = dir.trouverLoose(name) ?: dir.createFile(mime, name)
-                    if (target != null) {
-                        ctx.contentResolver.openOutputStream(target.uri, "wt")?.use { it.write(bytes) }
-                        return "coffre Obsidian › ${folder.replace("/", " › ")} › $name"
-                    }
-                }
-            } catch (_: Exception) {
-                // repli sur le dossier de l'application
-            }
+            // Un coffre explicitement choisi est la destination demandée : ne jamais écrire
+            // silencieusement dans son dossier parent si un sous-dossier ne peut pas être créé.
+            val tree = DocumentFile.fromTreeUri(ctx, Uri.parse(uriStr))
+                ?: throw java.io.IOException("Le coffre Obsidian sélectionné n'est plus accessible.")
+            if (!tree.canWrite()) throw java.io.IOException("Le coffre Obsidian est en lecture seule ou l'autorisation d'écriture a expiré.")
+            val dir = subDir(tree, folder)
+            if (!dir.isDirectory || !dir.canWrite())
+                throw java.io.IOException("Impossible d'accéder au dossier Obsidian demandé : $folder")
+            val target = dir.trouverLoose(name) ?: dir.createFile(mime, name)
+                ?: throw java.io.IOException("Impossible de créer $name dans Obsidian/$folder.")
+            val written = ctx.contentResolver.openOutputStream(target.uri, "wt")
+                ?: throw java.io.IOException("Android n'a pas ouvert le fichier Obsidian : $name.")
+            written.use { it.write(bytes); it.flush() }
+            val size = runCatching { ctx.contentResolver.openFileDescriptor(target.uri, "r")?.use { it.statSize } ?: -1L }.getOrDefault(-1L)
+            if (size >= 0L && size != bytes.size.toLong())
+                throw java.io.IOException("Écriture Obsidian incomplète pour $name ($size/${bytes.size} octets).")
+            return "coffre Obsidian › ${folder.replace("/", " › ")} › $name"
         }
-        val dir = File(ctx.getExternalFilesDir(null), folder).apply { mkdirs() }
-        File(dir, name).writeBytes(bytes)
-        return "${dir.absolutePath}/$name (choisis ton dossier Obsidian dans les Réglages pour y écrire directement)"
+        val dir = File(ctx.getExternalFilesDir(null), folder).apply {
+            if (!exists() && !mkdirs()) throw java.io.IOException("Impossible de créer le dossier local : $absolutePath")
+            if (!isDirectory || !canWrite()) throw java.io.IOException("Dossier local non accessible en écriture : $absolutePath")
+        }
+        val target = File(dir, name)
+        target.writeBytes(bytes)
+        if (!target.isFile || target.length() != bytes.size.toLong())
+            throw java.io.IOException("Vérification de l'écriture locale échouée : ${target.absolutePath}")
+        return "${target.absolutePath} (coffre Obsidian non configuré)"
     }
 
     fun saveIn(folder: String, baseName: String, markdown: String): String =
