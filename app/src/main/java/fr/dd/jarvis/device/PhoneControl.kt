@@ -84,9 +84,9 @@ class PhoneControl(private val ctx: Context) {
                 .sortedBy { it.second.lowercase(java.util.Locale.ROOT) }
         }.getOrDefault(emptyList())
         if (apps.isEmpty()) return "Aucune application lançable détectée."
-        val shown = apps.take(100).joinToString("\\n") { (pkg, label) -> "• $label ($pkg)" }
-        val extra = if (apps.size > 100) "\\n… et ${apps.size - 100} autre(s)." else ""
-        return "Applications installées et lançables (${apps.size}) :\\n$shown$extra"
+        val shown = apps.take(100).joinToString("\n") { (pkg, label) -> "• $label ($pkg)" }
+        val extra = if (apps.size > 100) "\n… et ${apps.size - 100} autre(s)." else ""
+        return "Applications installées et lançables (${apps.size}) :\n$shown$extra"
     }
 
     private fun installed(pkg: String) = try { ctx.packageManager.getPackageInfo(pkg, 0); true } catch (e: Exception) { false }
