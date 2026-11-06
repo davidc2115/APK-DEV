@@ -767,10 +767,17 @@ class ToolBox(
             val l = app.obsidian.listNotes(a.optString("dossier")); if (l.isEmpty()) "Aucune note." else l.take(120).joinToString("\n") + (if (l.size > 120) "\n… (${l.size} notes)" else "")
         })
         "obsidian_ecrire" -> {
-            val chemin = a.optString("chemin"); val append = a.optString("ajouter").equals("true", true)
-            val existe = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.obsidian.readNote(chemin) != null }
-            if (existe && !append && !confirm("Remplacer le contenu de la note « $chemin » ?", false)) ToolResult("Refusé par l'utilisateur.")
-            else ToolResult("✅ Note enregistrée : " + kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.obsidian.writeNote(chemin, a.optString("contenu"), append) })
+            val chemin = a.optString("chemin")
+            val cheminNormalise = java.text.Normalizer.normalize(chemin, java.text.Normalizer.Form.NFD)
+                .replace(Regex("\\p{M}"), "").replace('\\', '/').trimStart('/').lowercase()
+            if (cheminNormalise.startsWith("societe/clients/") || cheminNormalise == "societe/clients")
+                ToolResult("⛔ Écriture refusée : les fiches du dossier Société/Clients doivent obligatoirement être créées par client_ecrire, qui enregistre d'abord le client dans la base interne affichée par l'application. Aucun fichier n'a été écrit.")
+            else {
+                val append = a.optString("ajouter").equals("true", true)
+                val existe = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.obsidian.readNote(chemin) != null }
+                if (existe && !append && !confirm("Remplacer le contenu de la note « $chemin » ?", false)) ToolResult("Refusé par l'utilisateur.")
+                else ToolResult("✅ Note enregistrée : " + kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.obsidian.writeNote(chemin, a.optString("contenu"), append) })
+            }
         }
         "obsidian_fichiers" -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             try {
