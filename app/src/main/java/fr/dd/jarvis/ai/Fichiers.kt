@@ -1,14 +1,11 @@
 package fr.dd.jarvis.ai
 
-import android.content.ContentValues
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
-import android.os.Build
-import android.provider.MediaStore
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
@@ -20,7 +17,7 @@ import java.io.File
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
-/** Création de fichiers par JARVIS : texte, csv, json, html, vcf, ics, docx, xlsx, pdf, zip… Enregistrés dans l'appli et dans Téléchargements/JARVIS. */
+/** Création de fichiers par JARVIS : texte, csv, json, html, vcf, ics, docx, xlsx, pdf, zip… Copie privée dans l'application et copie durable dans le coffre Obsidian configuré. */
 object Fichiers {
     private data class Bloc(val type: String, val texte: String = "", val lignes: List<List<String>> = emptyList())
 
@@ -294,24 +291,14 @@ object Fichiers {
             else -> contenu.toByteArray()
         }
         val nom = "$base.$ext"
+        // Copie privée pour l’aperçu et le partage depuis le chat ; destination durable dans le coffre choisi.
+        // Ne jamais créer de dossier public dans Téléchargements.
         File(dossier(app), nom).writeBytes(bytes)
-        val dl = runCatching { versTelechargements(app, nom, bytes, mime(ext)) }.getOrDefault(false)
+        val emplacement = app.obsidian.saveBytes("JARVIS/Documents", nom, bytes, mime(ext))
         val ko = (bytes.size + 512) / 1024
         val demandees = a.optString("images").split(Regex("[,\\n]")).map { it.trim() }.filter { it.isNotBlank() }
         val manquantes = if (ext == "pdf" && demandees.isNotEmpty()) demandees.size - images(app, a.optString("images")).size else 0
-        return "[📎 $nom ($ko Ko)](jarvis-file:$nom)" + (if (dl) "\n📁 Aussi enregistré dans Téléchargements › JARVIS." else "") +
+        return "[📎 $nom ($ko Ko)](jarvis-file:$nom)\n📂 Enregistré : $emplacement" +
             (if (manquantes > 0) "\n⚠️ $manquantes image(s) demandée(s) introuvable(s) (vérifie les noms de fichiers générés par generer_image)." else "")
-    }
-
-    private fun versTelechargements(app: JarvisApp, nom: String, bytes: ByteArray, mime: String): Boolean {
-        if (Build.VERSION.SDK_INT < 29) return false
-        val cr = app.contentResolver
-        val v = ContentValues().apply {
-            put(MediaStore.Downloads.DISPLAY_NAME, nom); put(MediaStore.Downloads.MIME_TYPE, mime)
-            put(MediaStore.Downloads.RELATIVE_PATH, "Download/JARVIS")
-        }
-        val uri = cr.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v) ?: return false
-        cr.openOutputStream(uri)?.use { it.write(bytes) } ?: return false
-        return true
     }
 }
