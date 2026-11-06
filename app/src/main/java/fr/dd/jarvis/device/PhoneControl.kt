@@ -74,6 +74,21 @@ class PhoneControl(private val ctx: Context) {
         return m.activityInfo.packageName to m.loadLabel(pm).toString()
     }
 
+    /** Inventaire réel des applications lançables, sans supposer qu'une application connue est installée. */
+    fun installedApps(): String {
+        val pm = ctx.packageManager
+        val apps = runCatching {
+            pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
+                .distinctBy { it.activityInfo.packageName }
+                .map { it.activityInfo.packageName to it.loadLabel(pm).toString().ifBlank { it.activityInfo.packageName } }
+                .sortedBy { it.second.lowercase(java.util.Locale.ROOT) }
+        }.getOrDefault(emptyList())
+        if (apps.isEmpty()) return "Aucune application lançable détectée."
+        val shown = apps.take(100).joinToString("\\n") { (pkg, label) -> "• $label ($pkg)" }
+        val extra = if (apps.size > 100) "\\n… et ${apps.size - 100} autre(s)." else ""
+        return "Applications installées et lançables (${apps.size}) :\\n$shown$extra"
+    }
+
     private fun installed(pkg: String) = try { ctx.packageManager.getPackageInfo(pkg, 0); true } catch (e: Exception) { false }
 
     /** Lance une activité même depuis l'arrière-plan : via ADB (am start) si disponible, sinon par intent classique. */
@@ -478,6 +493,7 @@ class PhoneControl(private val ctx: Context) {
             "torch_on" -> torch(true)
             "torch_off" -> torch(false)
             "open_app" -> openApp(value)
+            "list_apps" -> installedApps()
             "open_url" -> openUrl(value)
             "volume" -> volume(value.filter { it.isDigit() }.toIntOrNull() ?: 50)
             "wifi_on" -> toggle("Wi-Fi", true, "wifi_on", listOf("cmd wifi set-wifi-enabled enabled", "svc wifi enable"))
@@ -509,6 +525,7 @@ class PhoneControl(private val ctx: Context) {
             "screenshot" -> if (Build.VERSION.SDK_INT >= 28) a11y(AccessibilityService.GLOBAL_ACTION_TAKE_SCREENSHOT, "Capture d'écran prise.") else "Non supporté."
             "read_screen" -> JarvisAccessibilityService.instance?.readScreen()?.ifBlank { "(écran vide ou illisible)" } ?: needA11y()
             "click_text" -> JarvisAccessibilityService.instance?.let { if (it.clickText(value)) "Clic sur « $value »." else "« $value » introuvable à l'écran." } ?: needA11y()
+            "click_best_match" -> JarvisAccessibilityService.instance?.clickBestMatch(value) ?: needA11y()
             "type_text" -> JarvisAccessibilityService.instance?.let { if (it.typeText(value)) "Texte saisi." else "Aucun champ de saisie actif." } ?: needA11y()
             "scroll_down" -> JarvisAccessibilityService.instance?.let { if (it.scroll(true)) "Défilement vers le bas." else "Échec." } ?: needA11y()
             "scroll_up" -> JarvisAccessibilityService.instance?.let { if (it.scroll(false)) "Défilement vers le haut." else "Échec." } ?: needA11y()
@@ -525,6 +542,6 @@ class PhoneControl(private val ctx: Context) {
 
     companion object {
         /** Actions qui demandent une confirmation explicite avant exécution. */
-        val SENSITIVE = setOf("call", "click_text", "type_text", "tap", "wifi_off", "bluetooth_off", "data_off", "lock")
+        val SENSITIVE = setOf("call", "click_text", "click_best_match", "type_text", "tap", "wifi_off", "bluetooth_off", "data_off", "lock")
     }
 }
