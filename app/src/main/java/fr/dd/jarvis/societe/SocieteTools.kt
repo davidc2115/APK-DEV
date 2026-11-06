@@ -108,7 +108,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "deplacement_min" to prop("Forfait minimum de déplacement en €."),
             "aller_retour" to prop("« true » si le trajet aller-retour est facturé.")
         )),
-        tool("client_ecrire", "Crée ou met à jour un client, et éventuellement une de ses installations.", mapOf(
+        tool("client_ecrire", "OUTIL OBLIGATOIRE pour toute création/modification de client : enregistre et vérifie la fiche dans la base interne Société → Clients, puis exporte sa copie Markdown dans Société/Clients. Ne jamais remplacer cet appel par une création de fichier Obsidian.", mapOf(
             "nom" to prop("Nom du client."), "type" to prop("particulier | professionnel"), "contact" to prop("Personne à contacter."),
             "tel" to prop("Téléphone."), "email" to prop("Email."), "adresse" to prop("Adresse postale du client."),
             "depuis" to prop("Date de début de la relation yyyy-MM-dd (ou année) pour l'ancienneté/fidélité."),
@@ -485,11 +485,13 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
     }
 
     private suspend fun clientEcrireUn(a: JSONObject): ToolResult {
-        val nom = a.s("nom")
+        val nom = a.s("nom").trim()
+        if (nom.isBlank()) return err("Le nom du client est obligatoire : aucun enregistrement ni fichier n'a été créé.")
         val trouves = d.chercherClients(nom)
-        if (trouves.size > 1 && trouves.none { normaliser(it.nom) == normaliser(nom) })
-            return err("Plusieurs clients correspondent : ${trouves.joinToString { it.nom }}. Préciser le nom.")
-        val existant = trouves.firstOrNull { normaliser(it.nom) == normaliser(nom) } ?: trouves.firstOrNull()
+        val existant = trouves.firstOrNull { normaliser(it.nom) == normaliser(nom) }
+        // Ne jamais transformer une simple correspondance partielle en modification d'un autre client.
+        if (existant == null && trouves.isNotEmpty())
+            return err("Aucun client ne porte exactement le nom « $nom ». J'ai trouvé : ${trouves.joinToString { it.nom }}. Confirme le nom exact avant de créer une nouvelle fiche.")
         val nouveau = existant == null
         var c: Client = existant ?: Client(svc.newId(), nom, depuis = LocalDate.now().toString())
         if (a.hv("type")) c = c.copy(type = if (normaliser(a.s("type")).startsWith("pro")) "professionnel" else "particulier")
@@ -545,26 +547,33 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
                 (if (gpsSaisi != null) "\n🛰️ GPS : ${Geo.texteGps(gpsSaisi)} (${a.s("_gps_source").ifBlank { "coordonnées saisies" }}, format Google Maps) — ${Geo.texteDms(gpsSaisi)}" else "")
         }
         val final: Client = c
+        var idEnregistre = final.id
         try {
             svc.repo.update { current ->
-                current.copy(clients = if (nouveau) {
-                    // Protection contre un doublon si deux appels Hermès créent le même client presque simultanément.
-                    if (current.clients.any { normaliser(it.nom) == normaliser(final.nom) }) current.clients
-                    else current.clients + final
-                } else {
-                    current.clients.map { x -> if (x.id == final.id) final else x }
-                })
+                // Upsert atomique : gère aussi deux créations simultanées du même nom sans perdre la fiche.
+                val index = current.clients.indexOfFirst {
+                    it.id == final.id || normaliser(it.nom) == normaliser(final.nom)
+                }
+                if (index >= 0) {
+                    idEnregistre = current.clients[index].id
+                    current.copy(clients = current.clients.mapIndexed { i, client ->
+                        if (i == index) final.copy(id = idEnregistre) else client
+                    })
+                } else current.copy(clients = current.clients + final)
             }
         } catch (e: Exception) {
-            return err("❌ Impossible d'enregistrer « ${final.nom} » dans la base Société : ${e.message ?: e.javaClass.simpleName}. La fiche Markdown ne suffit pas : le client n'est pas confirmé dans l'onglet Clients.")
+            return err("❌ Impossible d'enregistrer « ${final.nom} » dans la base Société : ${e.message ?: e.javaClass.simpleName}. Aucun fichier de remplacement ne doit être créé.")
         }
-        val relu = svc.data.clients.firstOrNull { it.id == final.id }
-            ?: svc.data.clients.firstOrNull { normaliser(it.nom) == normaliser(final.nom) }
-            ?: return err("❌ La fiche « ${final.nom} » n'a pas été retrouvée après l'enregistrement. Aucun succès n'est annoncé.")
+        val relu = svc.data.clients.firstOrNull {
+            it.id == idEnregistre && normaliser(it.nom) == normaliser(final.nom)
+        } ?: return err("❌ Écriture disque effectuée mais relecture impossible pour « ${final.nom} » (ID $idEnregistre). Le client n'est pas confirmé dans l'onglet Société → Clients.")
         if (gpsSaisi != null && relu.sites.none { it.lat == gpsSaisi.lat && it.lon == gpsSaisi.lon })
             return err("La fiche « ${final.nom} » a été enregistrée, mais le point GPS n'apparaît pas dans les données relues. Je ne confirme pas son ajout.")
         val r = d.remiseClient(relu)
-        return ok("✅ Client « ${final.nom} » ${if (nouveau) "créé" else "mis à jour"}.$siteTxt\n🎁 Remise applicable aujourd'hui : " + (if (r.pct > 0) "${nombre(r.pct)} % (${r.detail})" else "aucune"))
+        val emplacement = runCatching {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { svc.exporterClient(relu).second }
+        }.getOrElse { "⚠️ Client enregistré dans la base, mais export Obsidian impossible : ${it.message ?: it.javaClass.simpleName}" }
+        return ok("✅ Client « ${final.nom} » ${if (nouveau) "créé" else "mis à jour"} dans Société → Clients (ID $idEnregistre).$siteTxt\n📁 Fiche : $emplacement\n🎁 Remise applicable aujourd'hui : " + (if (r.pct > 0) "${nombre(r.pct)} % (${r.detail})" else "aucune"))
     }
 
     private fun clientParNom(nom: String): Pair<Client?, String?> {
