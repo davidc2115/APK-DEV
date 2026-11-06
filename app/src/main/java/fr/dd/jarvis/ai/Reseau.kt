@@ -29,8 +29,13 @@ object Reseau {
     data class Appareil(val ip: String, val nom: String, val ports: List<Int>, val titre: String, val type: String, val info: String = "")
     data class Service(val nom: String, val host: String, val port: Int, val chemin: String, val type: String)
 
+    // Client permissif réservé aux interfaces locales (certificats auto-signés des imprimantes/box).
+    // Ne jamais l'utiliser pour une requête Internet ou pour transmettre des identifiants.
     private val http = OkHttpClient.Builder().connectTimeout(1500, TimeUnit.MILLISECONDS).readTimeout(2500, TimeUnit.MILLISECONDS).followRedirects(true)
         .hostnameVerifier { _, _ -> true }.sslSocketFactory(trustAll().first, trustAll().second).build()
+    // Internet public : validation TLS/nom d'hôte standard OkHttp, sans exception.
+    private val httpPublic = OkHttpClient.Builder().connectTimeout(2500, TimeUnit.MILLISECONDS).readTimeout(3500, TimeUnit.MILLISECONDS)
+        .followRedirects(false).build()
     private val dns = Executors.newCachedThreadPool()
     val clientLax: OkHttpClient get() = http
     fun ouvertTcp(ip: String, port: Int, ms: Int = 1500) = ouvert(ip, port, ms) == 1
@@ -70,8 +75,15 @@ object Reseau {
         return Infos(la.address.hostAddress.orEmpty(), la.prefixLength, gw, caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true)
     }
 
+    /** IP WAN IPv4 vérifiée par HTTPS strict. La socket est liée au Wi-Fi si celui-ci est disponible. */
     fun ippPublique(): String = runCatching {
-        http.newCall(Request.Builder().url("https://api.ipify.org").build()).execute().use { it.body?.string().orEmpty().trim() }
+        val client = wifiNet?.let { runCatching { httpPublic.newBuilder().socketFactory(it.socketFactory).build() }.getOrNull() } ?: httpPublic
+        val candidate = client.newCall(Request.Builder().url("https://api.ipify.org").header("Accept", "text/plain").build())
+            .execute().use { response -> if (!response.isSuccessful) "" else response.body?.string().orEmpty().trim() }
+        val adresse = InetAddress.getByName(candidate)
+        if (candidate.matches(Regex("(?:\\\\d{1,3}\\\\.){3}\\\\d{1,3}")) && adresse is Inet4Address &&
+            !adresse.isAnyLocalAddress && !adresse.isLoopbackAddress && !adresse.isLinkLocalAddress &&
+            !adresse.isSiteLocalAddress && !adresse.isMulticastAddress) candidate else ""
     }.getOrDefault("")
 
     private fun ouvert(ip: String, port: Int, ms: Int = 350): Int {   // 1 = ouvert, 0 = fermé mais l'hôte répond, -1 = pas de réponse
