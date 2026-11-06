@@ -1,6 +1,11 @@
 package fr.dd.jarvis.service
 
 import android.app.Notification
+import android.content.ComponentName
+import android.content.Context
+import android.media.session.MediaController
+import android.media.session.MediaSessionManager
+import android.media.session.PlaybackState
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 
@@ -12,6 +17,34 @@ class JarvisNotificationListener : NotificationListenerService() {
     companion object {
         private val items = ArrayDeque<Item>()
         @Volatile var active = false
+        // Sessions qui jouaient avant la réponse vocale et que Jarvis a explicitement mises en pause.
+        private var sessionsPauseesPourVoix: List<MediaController> = emptyList()
+
+        /**
+         * Demande une vraie pause aux lecteurs actifs lorsque le focus audio seul est ignoré.
+         * L'accès aux sessions est autorisé par le rôle Notification Listener déjà accordé à Jarvis.
+         */
+        @Synchronized fun pauseMediaPourVoix(ctx: Context): Boolean = runCatching {
+            val manager = ctx.getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
+            val composant = ComponentName(ctx, JarvisNotificationListener::class.java)
+            val enLecture = manager.getActiveSessions(composant).filter {
+                it.playbackState?.state == PlaybackState.STATE_PLAYING
+            }
+            sessionsPauseesPourVoix = enLecture
+            enLecture.forEach { runCatching { it.transportControls.pause() } }
+            enLecture.isNotEmpty()
+        }.getOrDefault(false)
+
+        /** Reprend uniquement les sessions que Jarvis avait mises en pause et qui sont toujours en pause. */
+        @Synchronized fun reprendreMediaApresVoix() {
+            val sessions = sessionsPauseesPourVoix
+            sessionsPauseesPourVoix = emptyList()
+            sessions.forEach { controller ->
+                if (runCatching { controller.playbackState?.state == PlaybackState.STATE_PAUSED }.getOrDefault(false)) {
+                    runCatching { controller.transportControls.play() }
+                }
+            }
+        }
 
         @Synchronized fun snapshot(): List<Item> = items.toList()
         @Synchronized private fun add(i: Item) { items.addFirst(i); while (items.size > 300) items.removeLast() }
