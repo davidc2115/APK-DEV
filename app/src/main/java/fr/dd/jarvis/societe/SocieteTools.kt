@@ -119,7 +119,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "onduleur" to prop("Modèle d'onduleur."), "nb_panneaux" to prop("Nombre de panneaux."), "site_notes" to prop("Notes sur l'installation."),
             "site_gps" to prop("Coordonnées GPS exactes de l'installation telles que copiées dans Google Maps (« 47.541558, 4.459845 »), en degrés-minutes-secondes (47°32'29.6\"N 4°27'35.4\"E) ou lien Google Maps. Prioritaires sur l'adresse. « ma position » = position GPS actuelle du téléphone (quand l'utilisateur est sur place).")
         ), listOf("nom")),
-        tool("client_fiche", "Affiche la fiche client complète et l'enregistre dans le coffre Obsidian.", mapOf("nom" to prop("Nom du client.")), listOf("nom")),
+        tool("client_fiche", "Affiche et réexporte la fiche Markdown d'un client DÉJÀ présent dans la base interne Société. Ne crée jamais un client et ne remplace jamais client_ecrire.", mapOf("nom" to prop("Nom du client.")), listOf("nom")),
         tool("intervention_enregistrer", "Enregistre une intervention photovoltaïque réellement effectuée dans l'historique du site et dans Obsidian.", mapOf(
             "client" to prop("Nom exact du client."), "installation" to prop("Nom exact de l'installation si plusieurs."),
             "date" to prop("Date de l'intervention au format yyyy-MM-dd (défaut : aujourd'hui)."),
@@ -932,6 +932,8 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
     }
 
     private fun liste(a: JSONObject): ToolResult {
+        // Cette consultation doit refléter le JSON réellement persisté, pas un ancien instantané mémoire.
+        svc.repo.refresh()
         val f = a.s("filtre")
         return ok(when (normaliser(a.s("quoi"))) {
             "clients", "client" -> {
