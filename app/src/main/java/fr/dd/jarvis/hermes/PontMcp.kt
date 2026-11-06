@@ -76,8 +76,8 @@ object PontMcp {
                     val demandeSuppressionIntervention = termes.any { it.contains("intervention") } && demandeSuppression
                     val demandeSuppressionClient = termes.any { it.contains("client") || it.contains("fiche") } && demandeSuppression
                     val score = termes.count { texte.contains(it) } +
-                        if (demandeSuppressionIntervention && nomOutil in setOf("interventions_liste", "intervention_supprimer")) 1000 else 0 +
-                        if (demandeSuppressionClient && nomOutil == "client_supprimer") 1000 else 0
+                        (if (demandeSuppressionIntervention && nomOutil in setOf("interventions_liste", "intervention_supprimer")) 1000 else 0) +
+                        (if (demandeSuppressionClient && nomOutil == "client_supprimer") 1000 else 0)
                     if (score > 0) candidats += score to fn
                 }
                 val resultat = JSONArray()
