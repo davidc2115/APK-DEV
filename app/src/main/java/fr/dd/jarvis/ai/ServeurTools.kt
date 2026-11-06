@@ -203,7 +203,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                     Regex("publique:\\s*([0-9.]+)").find(r)?.groupValues?.get(1)?.let { ip -> if (ip != tel) Registre.ipPublique(app, ip, "Serveur") }
                 }
                 val der = Registre.derniereIpPublique(app)
-                if (der.isNotBlank()) sb.append("\n✅ Enregistrée : $der. Pour te connecter de l'extérieur : redirige un port de ta box vers l'appareil (ex. 22 vers le serveur) et renseigne cette adresse (ou mieux un nom DDNS) dans Réglages › Serveur › Adresse distante. Si ta box est en CGNAT (IP publique partagée), la redirection est impossible : passe par un VPN (WireGuard/Tailscale).")
+                if (der.isNotBlank()) sb.append("\n✅ Enregistrée : $der. Avant tout accès distant, compare cette IP à l'IPv4 WAN affichée dans l'interface de la box : une WAN en 100.64.0.0/10, 10.0.0.0/8, 172.16.0.0/12 ou 192.168.0.0/16, ou une IP WAN différente, signale du CGNAT ou un double NAT (la redirection IPv4 directe ne fonctionnera pas sans correction opérateur/routeur). Privilégie un VPN privé (WireGuard/Tailscale ou VPN intégré à la Freebox) pour SSH, imprimantes, interfaces d'administration et passerelles MCP. N'expose jamais directement sur Internet l'interface d'une box, une imprimante ou un MCP. Si une redirection ciblée est réellement nécessaire : bail DHCP fixe, seul port/protocole indispensable, pare-feu actif et authentification forte ; pour SSH, clés uniquement, mot de passe désactivé et protection anti-bruteforce. Le DDNS ne remplace ni un VPN ni une IP WAN joignable.")
                 ToolResult(sb.toString(), direct = true)
             }
             "box_disque" -> {
