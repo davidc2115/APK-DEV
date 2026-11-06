@@ -332,6 +332,14 @@ private fun ClientsTab(app: JarvisApp) {
                 Text(c.nom, color = HudText, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 Text("☀️ ${c.sites.size} installation(s) · ${nombre(c.sites.sumOf { it.kwc })} kWc · CA ${euro(d.caClient(c))}", color = HudDim, fontSize = 12.sp)
                 if (c.adresse.isNotBlank()) Text("📍 ${c.adresse}", color = HudDim, fontSize = 12.sp)
+                c.sites.filter { it.lat != null && it.lon != null }.forEach { site ->
+                    val point = Geo.Point(site.lat!!, site.lon!!)
+                    Text(
+                        "🛰️ ${site.nom}: ${Geo.texteGps(point)}" +
+                            " · ${(Geo.precisionDe(site.gpsPrecision) ?: Geo.Precision.INCONNUE).libelle}",
+                        color = LocalAccent.current, fontSize = 11.sp
+                    )
+                }
                 Text(distanceLabel, color = LocalAccent.current, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
         }
@@ -344,7 +352,25 @@ private fun ClientsTab(app: JarvisApp) {
             Action("Obsidian") { info = "📁 " + svc.exporterClient(c).second; selected = null }
             Action("PDF") { svc.partagerPdf("Fiche ${c.nom}", md) }
             Action("✎ Modifier") { editing = c; selected = null }
-        }) { MarkdownText(md) }
+        }) {
+            MarkdownText(md)
+            val sitesGps = c.sites.filter { it.lat != null && it.lon != null }
+            if (sitesGps.isNotEmpty()) {
+                HudDivider()
+                Text("Coordonnées GPS actuelles", color = LocalAccent.current, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                sitesGps.forEach { site ->
+                    val point = Geo.Point(site.lat!!, site.lon!!)
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(site.nom, color = HudText, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                        Text(Geo.texteGps(point), color = LocalAccent.current, fontSize = 12.sp)
+                        Text(
+                            "${(Geo.precisionDe(site.gpsPrecision) ?: Geo.Precision.INCONNUE).libelle} · ${Geo.texteDms(point)}",
+                            color = HudDim, fontSize = 10.sp
+                        )
+                    }
+                }
+            }
+        }
     }
     if (creating) ClientForm(null, onClose = { creating = false }) { c ->
         svc.repo.update { it.copy(clients = it.clients + c) }
