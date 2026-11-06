@@ -207,7 +207,7 @@ object VideoGen {
         }
         val nomFinal = "tiktok_${System.currentTimeMillis()}.mp4"
         val fFinal = if (assemble.name == nomFinal) assemble else File(dossier(app), nomFinal).also { assemble.copyTo(it, overwrite = true) }
-        val loc = runCatching { app.obsidian.saveBytes("JARVIS/Vidéos TikTok", nomFinal, fFinal.readBytes(), "video/mp4") }.getOrDefault("")
+        val loc = app.obsidian.saveBytes("JARVIS/Vidéos TikTok", nomFinal, fFinal.readBytes(), "video/mp4")
         val msg = buildString {
             append("🎬 Vidéo générée (${clips.size}/${listePlans.size} plans réussis" + (if (ImageToVideoGen.disponible(app)) ", fal.ai" else "") + ") : ${fFinal.name}")
             append("\n\n[▶ Lire la vidéo](jarvis-video-ia:${fFinal.name})")
