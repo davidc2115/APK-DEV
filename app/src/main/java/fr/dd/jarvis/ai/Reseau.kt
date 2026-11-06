@@ -263,7 +263,7 @@ object Reseau {
             java.net.DatagramSocket().use { sock ->
                 runCatching { wifiNet?.bindSocket(sock) }
                 sock.soTimeout = 400
-                val msg = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: ssdp:all\r\n\r\n".toByteArray()
+                val msg = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\n\r\n".toByteArray()
                 repeat(2) { runCatching { sock.send(java.net.DatagramPacket(msg, msg.size, InetAddress.getByName("239.255.255.250"), 1900)) } }
                 val fin = System.currentTimeMillis() + ms
                 val buf = ByteArray(2048)
