@@ -490,8 +490,15 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
     private suspend fun clientEcrireUn(a: JSONObject): ToolResult {
         val nom = a.s("nom").trim()
         if (nom.isBlank()) return err("Le nom du client est obligatoire : aucun enregistrement ni fichier n'a été créé.")
-        val trouves = d.chercherClients(nom)
-        val existant = trouves.firstOrNull { normaliser(it.nom) == normaliser(nom) }
+        // Toujours repartir de la base disque : l'agent ou l'écran peut avoir enregistré
+        // un client depuis le dernier chargement de ce module.
+        val donnees = runCatching { svc.repo.refresh() }.getOrElse {
+            return err("❌ Impossible de relire la base Société avant l'enregistrement : ${it.message ?: it.javaClass.simpleName}")
+        }
+        val trouves = donnees.chercherClients(nom)
+        val exacts = donnees.clients.filter { normaliser(it.nom) == normaliser(nom) }
+        if (exacts.size > 1) return err("Plusieurs fiches portent exactement le nom « $nom ». Aucune n'a été modifiée ; corrige les doublons dans Société → Clients.")
+        val existant = exacts.singleOrNull()
         // Ne jamais transformer une simple correspondance partielle en modification d'un autre client.
         if (existant == null && trouves.isNotEmpty())
             return err("Aucun client ne porte exactement le nom « $nom ». J'ai trouvé : ${trouves.joinToString { it.nom }}. Confirme le nom exact avant de créer une nouvelle fiche.")
@@ -567,12 +574,15 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         } catch (e: Exception) {
             return err("❌ Impossible d'enregistrer « ${final.nom} » dans la base Société : ${e.message ?: e.javaClass.simpleName}. Aucun fichier de remplacement ne doit être créé.")
         }
-        val relu = svc.data.clients.firstOrNull {
+        val baseRelue = runCatching { svc.repo.refresh() }.getOrElse {
+            return err("❌ L'enregistrement de « ${final.nom} » a été tenté, mais la base Société n'a pas pu être relue pour confirmer le résultat : ${it.message ?: it.javaClass.simpleName}")
+        }
+        val relu = baseRelue.clients.firstOrNull {
             it.id == idEnregistre && normaliser(it.nom) == normaliser(final.nom)
         } ?: return err("❌ Écriture disque effectuée mais relecture impossible pour « ${final.nom} » (ID $idEnregistre). Le client n'est pas confirmé dans l'onglet Société → Clients.")
         if (gpsSaisi != null && relu.sites.none { it.lat == gpsSaisi.lat && it.lon == gpsSaisi.lon })
             return err("La fiche « ${final.nom} » a été enregistrée, mais le point GPS n'apparaît pas dans les données relues. Je ne confirme pas son ajout.")
-        val r = d.remiseClient(relu)
+        val r = baseRelue.remiseClient(relu)
         val emplacement = runCatching {
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { svc.exporterClient(relu).second }
         }.getOrElse { "⚠️ Client enregistré dans la base, mais export Obsidian impossible : ${it.message ?: it.javaClass.simpleName}" }
@@ -580,7 +590,12 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
     }
 
     private fun clientParNom(nom: String): Pair<Client?, String?> {
-        val l = d.chercherClients(nom)
+        // Les consultations (fiche, interventions, documents) doivent voir les créations
+        // réalisées par un autre écran ou par un agent depuis le dernier instantané.
+        val base = runCatching { svc.repo.refresh() }.getOrElse {
+            return null to "Impossible de relire la base Société : ${it.message ?: it.javaClass.simpleName}"
+        }
+        val l = base.chercherClients(nom)
         return when {
             l.isEmpty() -> null to "Client « $nom » introuvable. Le créer avec client_ecrire."
             l.size > 1 && l.none { normaliser(it.nom) == normaliser(nom) } -> null to "Plusieurs clients correspondent : ${l.joinToString { it.nom }}. Préciser le nom."
