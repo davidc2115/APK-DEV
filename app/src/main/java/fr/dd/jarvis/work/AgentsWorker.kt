@@ -351,11 +351,20 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
             "Tu es l'agent Notifications de JARVIS (artisan, maintenance photovoltaïque). On te donne des notifications du téléphone. Garde uniquement celles qui demandent une attention rapide : clients, devis, factures, paiements, chantiers, rendez-vous, banque, proches. Ignore pubs, réseaux sociaux, jeux. Réponds une ligne par notification retenue au format « application — résumé — action suggérée », ou uniquement RIEN.",
             l.joinToString("\n") { "${fmt.format(java.util.Date(it.time))} | ${it.app} | ${it.titre} | ${it.texte.take(200)}" }
         ).trim()
-        // Ne valider la fenêtre qu'après une analyse réussie : en cas d'erreur réseau/IA,
-        // les notifications restent disponibles au prochain cycle au lieu d'être perdues.
-        store.agentLastNotif.set(now.toString())
-        if (rep.isBlank() || rep.uppercase().startsWith("RIEN")) return
-        alert(2003, "🔔 Notifications importantes", rep)
+        // N'avancer que jusqu'au dernier élément effectivement analysé : si plus de 30
+        // notifications attendent, les suivantes seront traitées au cycle suivant.
+        val analyzedThrough = l.maxOf { it.time }
+        if (rep.isBlank() || rep.uppercase().startsWith("RIEN")) {
+            store.agentLastNotif.set(analyzedThrough.toString())
+            return
+        }
+        // Si Android bloque la publication, conserver le curseur : l'alerte sera retentée
+        // au prochain cycle au lieu d'être silencieusement considérée comme livrée.
+        if (!alert(2003, "🔔 Notifications importantes", rep)) {
+            journal.append("- ⏸️ Notifications importantes analysées mais non publiées ; elles seront retentées.\n")
+            return
+        }
+        store.agentLastNotif.set(analyzedThrough.toString())
         journal.append("- 🔔 Notifications importantes :\n" + rep.lines().joinToString("") { "  - $it\n" })
     }
 }
