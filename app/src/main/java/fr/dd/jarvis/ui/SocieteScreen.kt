@@ -274,6 +274,11 @@ private fun ResumeTab(app: JarvisApp) {
 
 // ---------------------------------------------------------------------- Clients
 
+/** Référence stable pour invalider le cache distance aussi bien avec une adresse qu'avec un point GPS seul. */
+private fun cleReferenceGeo(adresse: String, lat: Double?, lon: Double?): String =
+    if (adresse.isNotBlank()) normaliser(adresse)
+    else if (lat != null && lon != null) "gps:${Geo.texteGps(Geo.Point(lat, lon))}" else ""
+
 @Composable
 private fun ClientsTab(app: JarvisApp) {
     val svc = app.societe
@@ -305,23 +310,30 @@ private fun ClientsTab(app: JarvisApp) {
         if (info.isNotBlank()) item { Text(info, color = LocalAccent.current, fontSize = 12.sp) }
         if (list.isEmpty()) item { Text("Aucun client. Touche + ou demande à JARVIS.", color = HudDim, fontSize = 13.sp) }
         items(list, key = { it.id }) { c ->
-            val hqAdresse = d.societe.adresse
-            val destination = c.adresse.ifBlank { c.sites.firstOrNull { it.adresse.isNotBlank() }?.adresse.orEmpty() }
-            var distanceLabel by remember(c.id, hqAdresse, destination, c.distanceKm, c.distanceCle) {
+            val hq = d.societe
+            val hqAdresse = hq.adresse
+            val sitePourDistance = if (c.adresse.isBlank()) c.sites.firstOrNull {
+                it.adresse.isNotBlank() || (it.lat != null && it.lon != null)
+            } else null
+            val destination = sitePourDistance?.adresse?.ifBlank { null } ?: c.adresse
+            val hqRef = cleReferenceGeo(hqAdresse, hq.lat, hq.lon)
+            val destinationRef = cleReferenceGeo(destination, sitePourDistance?.lat, sitePourDistance?.lon)
+            val distanceKey = "$hqRef|$destinationRef"
+            var distanceLabel by remember(c.id, hqRef, destinationRef, c.distanceKm, c.distanceCle) {
                 mutableStateOf(
-                    if (c.distanceKm != null && c.distanceCle == normaliser(hqAdresse) + "|" + normaliser(destination))
+                    if (c.distanceKm != null && c.distanceCle == distanceKey)
                         "🚗 ${nombre(c.distanceKm)} km du siège" +
                             (c.distanceDureeMin?.takeIf { it > 0 }?.let { " · ${it.toInt()} min" } ?: "")
-                    else if (hqAdresse.isBlank() || destination.isBlank()) "Distance non calculable · adresse du siège ou du client manquante"
+                    else if (hqRef.isBlank() || destinationRef.isBlank()) "Distance non calculable · renseigne l'adresse ou le GPS du siège et du client"
                     else "Calcul de la distance…"
                 )
             }
-            LaunchedEffect(c.id, hqAdresse, destination, c.distanceKm, c.distanceCle) {
-                if (hqAdresse.isNotBlank() && destination.isNotBlank() &&
-                    (c.distanceKm == null || c.distanceCle != normaliser(hqAdresse) + "|" + normaliser(destination))) {
+            LaunchedEffect(c.id, hqRef, destinationRef, c.distanceKm, c.distanceCle) {
+                if (hqRef.isNotBlank() && destinationRef.isNotBlank() &&
+                    (c.distanceKm == null || c.distanceCle != distanceKey)) {
                     val route = runCatching { svc.distanceClient(c) }.getOrNull()
                     distanceLabel = when {
-                        route == null -> "Distance indisponible · vérifier les adresses"
+                        route == null -> "Distance indisponible · vérifier l'adresse ou le positionnement GPS"
                         route.estime -> "≈ ${nombre(route.km)} km · estimation"
                         else -> "🚗 ${nombre(route.km)} km du siège" +
                             (route.minutes.takeIf { it > 0 }?.let { " · ${it.toInt()} min" } ?: "")
