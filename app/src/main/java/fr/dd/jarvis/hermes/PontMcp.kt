@@ -287,6 +287,8 @@ object PontMcp {
             // dépasse le budget transmis au modèle (80 outils).
             "interventions_liste", "intervention_supprimer", "intervention_modifier",
             "intervention_enregistrer", "interventions_synthese",
+            // Gestion des extensions Hermès : garder la découverte des skills/plugins/MCP accessible.
+            "gerer_extension_hermes",
             // Discord : exposer en priorité les outils de lecture ET d'administration.
             "discord_guildes", "discord_roles", "discord_salons", "discord_audit_serveur",
             "discord_role_creer", "discord_role_modifier", "discord_role_supprimer",
