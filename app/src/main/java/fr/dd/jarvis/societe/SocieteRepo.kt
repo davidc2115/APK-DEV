@@ -56,6 +56,18 @@ class SocieteRepo(ctx: Context) {
         return SocieteData()
     }
 
+    /**
+     * Relit le fichier persistant avant les consultations importantes.
+     * Utile lorsque l'écriture a été déclenchée par un agent en arrière-plan :
+     * l'écran ne doit jamais rester sur un instantané chargé avant cette écriture.
+     */
+    @Synchronized
+    fun refresh(): SocieteData {
+        val relu = load()
+        data = relu
+        return relu
+    }
+
     @Synchronized
     fun update(f: (SocieteData) -> SocieteData) {
         val nouvelle = f(data)
