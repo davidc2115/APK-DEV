@@ -25,18 +25,22 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
 
     private fun loadCandidates() {
         candidates.clear()
-        val raw = runCatching { obsidian.read(FOLDER, "Apprentissage en cours.md") }.getOrNull()
-            ?: runCatching { habitsFile.takeIf { it.exists() }?.readText() }.getOrNull()
-            ?: return
-        runCatching {
-            val json = JSONObject(raw)
-            val keys = json.keys()
-            while (keys.hasNext()) {
-                val key = keys.next()
-                val arr = json.optJSONArray(key) ?: JSONArray()
-                val set = linkedSetOf<String>()
-                for (i in 0 until arr.length()) arr.optString(i).takeIf { it.isNotBlank() }?.let(set::add)
-                candidates[key] = set
+        // Obsidian et la copie locale peuvent être momentanément désynchronisés :
+        // fusionner les preuves évite de perdre un apprentissage récent au redémarrage.
+        val sources = listOfNotNull(
+            runCatching { obsidian.read(FOLDER, "Apprentissage en cours.md") }.getOrNull(),
+            runCatching { habitsFile.takeIf { it.exists() }?.readText() }.getOrNull()
+        ).distinct()
+        sources.forEach { raw ->
+            runCatching {
+                val json = JSONObject(raw)
+                val keys = json.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    val arr = json.optJSONArray(key) ?: JSONArray()
+                    val set = candidates.getOrPut(key) { linkedSetOf() }
+                    for (i in 0 until arr.length()) arr.optString(i).takeIf { it.isNotBlank() }?.let(set::add)
+                }
             }
         }
     }
