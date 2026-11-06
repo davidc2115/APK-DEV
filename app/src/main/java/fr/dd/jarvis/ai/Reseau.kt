@@ -28,6 +28,7 @@ object Reseau {
     data class Infos(val ip: String, val prefix: Int, val passerelle: String, val wifi: Boolean)
     data class Appareil(val ip: String, val nom: String, val ports: List<Int>, val titre: String, val type: String, val info: String = "")
     data class Service(val nom: String, val host: String, val port: Int, val chemin: String, val type: String)
+    data class RouteurDiagnostic(val ip: String, val fabricant: String, val modele: String, val services: List<String>)
 
     // Client permissif réservé aux interfaces locales (certificats auto-signés des imprimantes/box).
     // Ne jamais l'utiliser pour une requête Internet ou pour transmettre des identifiants.
@@ -289,6 +290,64 @@ object Reseau {
             }
         }
         res
+    }
+
+    /**
+     * Détection universelle en lecture seule d'une passerelle UPnP IGD.
+     * Ne crée, ne supprime et ne modifie aucune redirection.
+     */
+    suspend fun diagnostiquerRouteur(ctx: Context, ms: Int = 2200): RouteurDiagnostic? = withContext(Dispatchers.IO) {
+        val i = infos(ctx) ?: return@withContext null
+        if (!i.wifi || !prive(i.passerelle)) return@withContext RouteurDiagnostic(i.passerelle, "", "", emptyList())
+        val wm = ctx.applicationContext.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
+        val lock = runCatching { wm.createMulticastLock("jarvis_igd").also { it.acquire() } }.getOrNull()
+        var location = ""
+        try {
+            java.net.DatagramSocket().use { sock ->
+                runCatching { wifiNet?.bindSocket(sock) }
+                sock.soTimeout = 350
+                val msg = "M-SEARCH * HTTP/1.1\\r\\nHOST: 239.255.255.250:1900\\r\\nMAN: \\"ssdp:discover\\"\\r\\nMX: 2\\r\\nST: urn:schemas-upnp-org:device:InternetGatewayDevice:1\\r\\n\\r\\n".toByteArray()
+                sock.send(java.net.DatagramPacket(msg, msg.size, InetAddress.getByName("239.255.255.250"), 1900))
+                val end = System.currentTimeMillis() + ms
+                val buf = ByteArray(4096)
+                while (System.currentTimeMillis() < end && location.isBlank()) {
+                    try {
+                        val packet = java.net.DatagramPacket(buf, buf.size)
+                        sock.receive(packet)
+                        val response = String(packet.data, 0, packet.length)
+                        val loc = Regex("(?im)^location:\\s*(\\S+)").find(response)?.groupValues?.get(1).orEmpty()
+                        if (loc.isNotBlank()) {
+                            val u = java.net.URL(loc)
+                            val resolvesToGateway = runCatching { InetAddress.getAllByName(u.host).any { it.hostAddress == i.passerelle } }.getOrDefault(false)
+                            if ((u.protocol == "http" || u.protocol == "https") && resolvesToGateway) location = loc
+                        }
+                    } catch (_: java.net.SocketTimeoutException) { }
+                }
+            }
+        } catch (_: Exception) {
+        } finally { runCatching { lock?.release() } }
+
+        if (location.isBlank()) return@withContext RouteurDiagnostic(i.passerelle, "", "", emptyList())
+        runCatching {
+            http.newCall(Request.Builder().url(location).header("User-Agent", "JARVIS-UPnP-Discovery").build()).execute().use { r ->
+                if (!r.isSuccessful) return@use RouteurDiagnostic(i.passerelle, "", "", emptyList())
+                val xml = r.body?.string().orEmpty().take(50000)
+                fun tag(source: String, name: String) = Regex("<(?:[\\w.-]+:)?$name>(.*?)</(?:[\\w.-]+:)?$name>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)).find(source)?.groupValues?.get(1)?.trim().orEmpty()
+                val manufacturer = tag(xml, "manufacturer")
+                val model = tag(xml, "modelName")
+                val services = Regex("<(?:[\\w.-]+:)?service>(.*?)</(?:[\\w.-]+:)?service>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+                    .findAll(xml).mapNotNull { match ->
+                        val block = match.groupValues[1]
+                        val type = tag(block, "serviceType")
+                        when {
+                            type.contains("WANIPConnection", true) -> "UPnP IGD · WANIPConnection"
+                            type.contains("WANPPPConnection", true) -> "UPnP IGD · WANPPPConnection"
+                            else -> null
+                        }
+                    }.distinct().toList()
+                RouteurDiagnostic(i.passerelle, manufacturer, model, services)
+            }
+        }.getOrElse { RouteurDiagnostic(i.passerelle, "", "", emptyList()) }
     }
 
     /** Services mDNS (_ipp._tcp, _printer._tcp…) vus sur le réseau pendant [ms] millisecondes. */
