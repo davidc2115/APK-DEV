@@ -211,6 +211,7 @@ class PhoneControl(private val ctx: Context) {
         if (requete.isBlank()) return "Que veux-tu écouter ?"
         val known = mapOf(
             "spotify" to "com.spotify.music", "youtube music" to "com.google.android.apps.youtube.music", "ytmusic" to "com.google.android.apps.youtube.music",
+            "morphe" to "app.morphe.android.apps.youtube.music", "youtube music morphe" to "app.morphe.android.apps.youtube.music",
             "deezer" to "deezer.android.app", "amazon music" to "com.amazon.mp3", "apple music" to "com.apple.android.music", "vlc" to "org.videolan.vlc"
         )
         val a = appli.trim().lowercase()
@@ -399,6 +400,7 @@ class PhoneControl(private val ctx: Context) {
         }
         // Filet de sécurité pour les applis connues qui ne déclarent pas ce service sur certains téléphones.
         mapOf("Spotify" to "com.spotify.music", "YouTube Music" to "com.google.android.apps.youtube.music",
+            "YouTube Music Morphe" to "app.morphe.android.apps.youtube.music",
             "Deezer" to "deezer.android.app", "Amazon Music" to "com.amazon.mp3", "Apple Music" to "com.apple.android.music", "VLC" to "org.videolan.vlc")
             .forEach { (label, pkg) -> if (installed(pkg) && out.values.none { it == pkg }) out[label] = pkg }
         return out
