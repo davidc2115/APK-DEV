@@ -132,7 +132,7 @@ private fun InterventionsTab(app: JarvisApp) {
     val scope = rememberCoroutineScope()
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         val target = photoTarget
-        if (target != null && uris.isNotEmpty()) scope.launch {
+        if (target != null && uris.isNotEmpty()) kmlScope.launch {
             photoInfo = "Enregistrement des photos…"
             photoInfo = withContext(Dispatchers.IO) { app.societe.ajouterPhotosIntervention(target.clientId, target.siteId, target.interventionId, target.avant, uris) }
         }
@@ -209,7 +209,7 @@ private fun InterventionsTab(app: JarvisApp) {
         Dialogue("Modifier l'intervention · " + target.first.nom, { editTarget = null }, actions = {
             TextButton(onClick = {
                 val updated = target.third.copy(date = date.trim(), categorie = categorie.trim(), description = description.trim(), diagnostic = diagnostic.trim(), actions = actions.trim(), pieces = pieces.trim(), mesures = mesures.trim(), statut = statut.trim().lowercase(), prochaineMaintenance = prochaine.trim(), notes = notes.trim())
-                scope.launch { photoInfo = withContext(Dispatchers.IO) { app.societe.modifierIntervention(target.first.id, target.second.id, target.third.id, updated) } }
+                kmlScope.launch { photoInfo = withContext(Dispatchers.IO) { app.societe.modifierIntervention(target.first.id, target.second.id, target.third.id, updated) } }
                 editTarget = null
             }) { Text("Enregistrer", color = LocalAccent.current) }
         }) {
@@ -401,7 +401,7 @@ private fun ClientsTab(app: JarvisApp) {
     deleteTarget?.let { target ->
         Dialogue("Supprimer le client · ${target.nom}", { deleteTarget = null }, actions = {
             Action("Supprimer définitivement") {
-                scope.launch {
+                kmlScope.launch {
                     info = "⏳ Vérification et suppression de ${target.nom}…"
                     val resultat = withContext(Dispatchers.IO) {
                         runCatching {
@@ -660,7 +660,7 @@ private fun DocsTab(app: JarvisApp, type: String) {
         }
     }
     if (creating) DocCreator(app, type, onClose = { creating = false }) { client, site, lignes, deplacement, notes ->
-        scope.launch {
+        kmlScope.launch {
             info = "⏳ Création…"
             val r = runCatching { svc.creerDocument(type, client, site, emptyList(), lignes, deplacement, null, notes) }
             info = r.fold(
