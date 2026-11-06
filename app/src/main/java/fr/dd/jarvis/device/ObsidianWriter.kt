@@ -18,7 +18,15 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     private fun subDir(root: DocumentFile, path: String): DocumentFile {
         var cur = root
         for (part in path.split('/').filter { it.isNotBlank() }) {
-            cur = cur.trouverLoose(part)?.takeIf { it.isDirectory } ?: cur.createDirectory(part) ?: return cur
+            val existing = cur.trouverLoose(part)
+            if (existing != null) {
+                if (!existing.isDirectory)
+                    throw java.io.IOException("Un fichier nommé « $part » empêche la création du dossier « $path ».")
+                cur = existing
+            } else {
+                cur = cur.createDirectory(part)
+                    ?: throw java.io.IOException("Android a refusé la création du sous-dossier « $part » dans « $path ».")
+            }
         }
         return cur
     }
