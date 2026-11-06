@@ -357,7 +357,10 @@ private fun ClientsTab(app: JarvisApp) {
         }
     }
 
-    selected?.let { c0 ->
+    // Hermès peut mettre à jour le GPS pendant que le dialogue client reste ouvert.
+    // Reprendre à chaque recomposition la fiche fraîche du dépôt, pas l'ancien instantané sélectionné.
+    val selectedLive = selected?.let { chosen -> d.client(chosen.id) ?: chosen }
+    selectedLive?.let { c0 ->
         val c = d.client(c0.id) ?: c0
         val md = Rendu.rendreClient(d, c)
         Dialogue(c.nom, { selected = null }, actions = {
