@@ -310,7 +310,18 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         a.dbl("reserve_pct")?.let { s = s.copy(reservePct = it.coerceIn(0.0, 100.0)) }
         a.dbl("part_dirigeant_pct")?.let { s = s.copy(partDirigeantPct = it.coerceIn(0.0, 100.0)) }
         if (s == before) return err("Aucune information reconnue à enregistrer.")
-        svc.repo.update { it.copy(societe = s) }
+        val siegeDeplace = before.adresse != s.adresse || before.lat != s.lat || before.lon != s.lon
+        svc.repo.update { current ->
+            current.copy(
+                societe = s,
+                clients = if (!siegeDeplace) current.clients else current.clients.map { client ->
+                    client.copy(
+                        distanceKm = null, distanceDureeMin = null, distanceCle = "",
+                        sites = client.sites.map { site -> site.copy(distanceKm = null, dureeMin = null, distanceCle = "") }
+                    )
+                }
+            )
+        }
         return ok("✅ Informations société enregistrées.\n\n" + resume())
     }
 
