@@ -48,6 +48,13 @@ import fr.dd.jarvis.ai.Prompts
 import fr.dd.jarvis.societe.Geo
 import fr.dd.jarvis.societe.core.*
 import java.time.LocalDate
+import androidx.compose.ui.platform.LocalView
+import android.view.View
+import java.io.File
+import java.io.FileOutputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
+import androidx.core.content.FileProvider
 
 private val SUBS = listOf("Résumé", "Clients", "Interventions", "Devis", "Factures", "Équipe", "Fiches de paie", "Réglages")
 
@@ -289,6 +296,8 @@ private fun ClientsTab(app: JarvisApp) {
     var query by remember { mutableStateOf("") }
     var info by remember { mutableStateOf("") }
     val kmlScope = rememberCoroutineScope()
+    val view = LocalView.current
+    var diagnosticConfirm by remember { mutableStateOf(false) }
     val list = d.clients.filter { client -> query.isBlank() || normaliser(listOf(client.nom, client.contact, client.type, client.tel, client.email, client.adresse, client.sites.joinToString(" ") { site -> "${site.nom} ${site.adresse} ${site.onduleur}" }).joinToString(" ")).contains(normaliser(query)) }.sortedBy { normaliser(it.nom) }
 
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -367,6 +376,7 @@ private fun ClientsTab(app: JarvisApp) {
             Action("Obsidian") { info = "📁 " + svc.exporterClient(c).second; selected = null }
             Action("PDF") { svc.partagerPdf("Fiche ${c.nom}", md) }
             Action("✎ Modifier") { editing = c; selected = null }
+            Action("Diagnostic") { diagnosticConfirm = true }
         }) {
             MarkdownText(md)
             val sitesGps = c.sites.filter { it.lat != null && it.lon != null }
@@ -386,6 +396,28 @@ private fun ClientsTab(app: JarvisApp) {
                 }
             }
         }
+    }
+    if (diagnosticConfirm && selectedLive != null) {
+        AlertDialog(
+            onDismissRequest = { diagnosticConfirm = false },
+            title = { Text("Partager un diagnostic client ?") },
+            text = {
+                Text(
+                    "Le fichier contiendra une capture de l'écran Jarvis et les données techniques de la fiche ${selectedLive.nom} : adresses, coordonnées GPS, précision, distances et état du siège. Rien n'est envoyé automatiquement. Android te laissera choisir l'application à laquelle le partager."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    diagnosticConfirm = false
+                    val client = selectedLive
+                    view.post { runCatching { partagerDiagnosticClient(view.context, view, app, client) }
+                        .onFailure { android.widget.Toast.makeText(view.context, "Diagnostic impossible : ${it.message}", android.widget.Toast.LENGTH_LONG).show() } }
+                }) { Text("Créer et partager") }
+            },
+            dismissButton = {
+                TextButton(onClick = { diagnosticConfirm = false }) { Text("Annuler") }
+            }
+        )
     }
     if (creating) ClientForm(null, onClose = { creating = false }) { c ->
         svc.repo.update { it.copy(clients = it.clients + c) }
@@ -1147,4 +1179,96 @@ private fun ReglagesTab(app: JarvisApp) {
             if (s.tarifsSaisisTtc && !s.franchiseTva) Text("Les prix ci-dessus sont compris comme TTC et seront enregistrés en HT.", color = HudDim, fontSize = 11.sp)
         }
     }
+}
+
+
+/**
+ * Produit un paquet de diagnostic explicite pour une fiche client : capture de l'écran
+ * Jarvis + état réellement persisté dans la base Société. Le partage Android reste manuel.
+ */
+private fun partagerDiagnosticClient(
+    context: android.content.Context,
+    view: android.view.View,
+    app: JarvisApp,
+    clientSelectionne: Client
+) {
+    val client = app.societe.data.client(clientSelectionne.id) ?: clientSelectionne
+    val data = app.societe.data
+    val siege = data.societe
+    val version = runCatching {
+        context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "inconnue"
+    }.getOrDefault("inconnue")
+    val horodatage = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.ROOT)
+        .format(java.util.Date())
+    val dossier = java.io.File(context.cacheDir, "share").apply { mkdirs() }
+    val image = java.io.File(dossier, "jarvis-client-$horodatage.png")
+    val bitmap = android.graphics.Bitmap.createBitmap(
+        view.width.coerceAtLeast(1), view.height.coerceAtLeast(1), android.graphics.Bitmap.Config.ARGB_8888
+    )
+    view.draw(android.graphics.Canvas(bitmap))
+    java.io.FileOutputStream(image).use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+    bitmap.recycle()
+
+    val rapport = buildString {
+        appendLine("DIAGNOSTIC JARVIS — FICHE CLIENT")
+        appendLine("Date : \${java.time.Instant.now()}")
+        appendLine("Version : $version")
+        appendLine("Android : \${android.os.Build.VERSION.RELEASE} (API \${android.os.Build.VERSION.SDK_INT})")
+        appendLine("Appareil : \${android.os.Build.MANUFACTURER} \${android.os.Build.MODEL}")
+        appendLine()
+        appendLine("SIÈGE")
+        appendLine("Adresse : \${siege.adresse}")
+        appendLine("GPS : \${if (siege.lat != null && siege.lon != null) "\${siege.lat}, \${siege.lon}" else "absent"}")
+        appendLine("Précision GPS : \${siege.gpsPrecision}")
+        appendLine()
+        appendLine("CLIENT")
+        appendLine("Nom : \${client.nom}")
+        appendLine("ID : \${client.id}")
+        appendLine("Adresse client : \${client.adresse}")
+        appendLine("Distance client enregistrée : \${client.distanceKm ?: "absente"} km")
+        appendLine("Durée enregistrée : \${client.distanceDureeMin ?: "absente"} min")
+        appendLine("Clé distance : \${client.distanceCle}")
+        appendLine("Nombre d'installations : \${client.sites.size}")
+        client.sites.forEachIndexed { index, site ->
+            appendLine()
+            appendLine("INSTALLATION \${index + 1}")
+            appendLine("Nom : \${site.nom}")
+            appendLine("ID : \${site.id}")
+            appendLine("Adresse : \${site.adresse}")
+            appendLine("GPS : \${if (site.lat != null && site.lon != null) "\${site.lat}, \${site.lon}" else "absent"}")
+            appendLine("Précision GPS : \${site.gpsPrecision}")
+            appendLine("Source / adresse reconnue : \${site.gpsTrouve}")
+            appendLine("Distance enregistrée : \${site.distanceKm ?: "absente"} km")
+            appendLine("Durée enregistrée : \${site.dureeMin ?: "absente"} min")
+            appendLine("Clé distance : \${site.distanceCle}")
+        }
+        val crash = java.io.File(context.filesDir, JarvisApp.CRASH_FILE)
+        if (crash.isFile) {
+            appendLine()
+            appendLine("DERNIER PLANTAGE (extrait)")
+            appendLine(crash.readText().takeLast(6000))
+        }
+        appendLine()
+        appendLine("Capture écran incluse : capture_ecran.png")
+        appendLine("Aucun message, email, contact ou autre fiche client n'est inclus.")
+    }
+    val archive = java.io.File(dossier, "jarvis-diagnostic-client-$horodatage.zip")
+    java.util.zip.ZipOutputStream(java.io.FileOutputStream(archive)).use { zip ->
+        zip.putNextEntry(java.util.zip.ZipEntry("diagnostic.txt"))
+        zip.write(rapport.toByteArray(Charsets.UTF_8))
+        zip.closeEntry()
+        zip.putNextEntry(java.util.zip.ZipEntry("capture_ecran.png"))
+        image.inputStream().use { it.copyTo(zip) }
+        zip.closeEntry()
+    }
+    val uri = androidx.core.content.FileProvider.getUriForFile(
+        context, "\${context.packageName}.files", archive
+    )
+    val partage = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = "application/zip"
+        putExtra(android.content.Intent.EXTRA_STREAM, uri)
+        putExtra(android.content.Intent.EXTRA_SUBJECT, "Diagnostic JARVIS — \${client.nom}")
+        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    context.startActivity(android.content.Intent.createChooser(partage, "Partager le diagnostic JARVIS"))
 }
