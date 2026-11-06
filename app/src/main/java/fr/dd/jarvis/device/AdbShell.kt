@@ -128,6 +128,9 @@ object AdbShell {
         val cmds = buildList {
             add("appops set $pkg ACCESS_RESTRICTED_SETTINGS allow")
             perms.forEach { add("pm grant $pkg android.permission.$it") }
+            // Permissions Android récentes pour la découverte et l'accès aux appareils du LAN.
+            if (Build.VERSION.SDK_INT >= 33) add("pm grant $pkg android.permission.NEARBY_WIFI_DEVICES")
+            if (Build.VERSION.SDK_INT >= 36) add("pm grant $pkg android.permission.ACCESS_LOCAL_NETWORK")
             listOf("SYSTEM_ALERT_WINDOW", "REQUEST_INSTALL_PACKAGES", "RUN_IN_BACKGROUND", "RUN_ANY_IN_BACKGROUND", "WAKE_LOCK").forEach { add("appops set $pkg $it allow") }
             add("dumpsys deviceidle whitelist +$pkg")
             add("cmd notification allow_listener $listener")
