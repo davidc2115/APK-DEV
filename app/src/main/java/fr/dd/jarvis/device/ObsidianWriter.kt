@@ -146,7 +146,10 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         val cibles = tous.filter { path ->
             val nom = path.substringAfterLast('/')
             val extension = nom.substringAfterLast('.', "").lowercase()
-            val rapportExact = nom.equals("$base.md", true) || nom.equals("$base.pdf", true)
+            // Même le nom exact doit être recherché dans le dossier Interventions :
+            // une pièce jointe homonyme d'un autre dossier ne doit jamais être supprimée.
+            val rapportExact = sousInterventions(path) &&
+                (nom.equals("$base.md", true) || nom.equals("$base.pdf", true))
             // Un rapport peut avoir conservé une ancienne date après modification de l'intervention.
             // L'ID stable permet de retrouver aussi ces anciennes versions sans toucher aux autres dossiers.
             val rapportParId = sousInterventions(path) && nom.contains(interventionId, true) && extension in setOf("md", "pdf")
