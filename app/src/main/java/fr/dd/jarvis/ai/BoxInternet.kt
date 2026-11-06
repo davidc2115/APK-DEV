@@ -130,11 +130,11 @@ object BoxInternetAdapters {
             lock?.setReferenceCounted(false)
             lock?.acquire()
             val request = (
-                "M-SEARCH * HTTP/1.1\\r\\n" +
-                "HOST: 239.255.255.250:1900\\r\\n" +
-                "MAN: \\"ssdp:discover\\"\\r\\n" +
-                "MX: 1\\r\\n" +
-                "ST: ssdp:all\\r\\n\\r\\n"
+                "M-SEARCH * HTTP/1.1\r\n" +
+                "HOST: 239.255.255.250:1900\r\n" +
+                "MAN: \"ssdp:discover\"\r\n" +
+                "MX: 1\r\n" +
+                "ST: ssdp:all\r\n\r\n"
             ).toByteArray(Charsets.US_ASCII)
             var location: String? = null
             DatagramSocket().use { socket ->
