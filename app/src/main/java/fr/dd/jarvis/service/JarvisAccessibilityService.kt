@@ -40,16 +40,50 @@ class JarvisAccessibilityService : AccessibilityService() {
 
     fun global(action: Int): Boolean = performGlobalAction(action)
 
-    fun readScreen(): String {
-        val root = rootInActiveWindow ?: return ""
+    /**
+     * Expose une représentation structurée de l'écran réellement affiché :
+     * application, composants, libellés, états et coordonnées. Ce n'est pas une capture vidéo
+     * ni un flux de pixels ; les champs marqués mot de passe sont volontairement masqués.
+     */
+    fun readScreen(): String = inspectScreen()
+
+    fun inspectScreen(): String {
+        val root = rootInActiveWindow ?: return "Écran inaccessible : aucune fenêtre active exposée par Android."
         val sb = StringBuilder()
-        collect(root, sb)
-        return sb.toString().trim().take(5000)
+        val pkg = root.packageName?.toString().orEmpty()
+        sb.append("APPLICATION AU PREMIER PLAN : ").append(pkg.ifBlank { "inconnue" }).append('\n')
+        sb.append("ARBRE D'INTERFACE ACCESSIBILITÉ (coordonnées en pixels écran) :\n")
+        fun walk(n: AccessibilityNodeInfo?, depth: Int) {
+            if (n == null || sb.length > 9500) return
+            val rect = android.graphics.Rect()
+            n.getBoundsInScreen(rect)
+            val raw = when {
+                n.isPassword -> "[contenu masqué : champ protégé]"
+                else -> (n.text?.toString() ?: n.contentDescription?.toString()).orEmpty()
+            }
+            val cls = n.className?.toString()?.substringAfterLast('.') ?: "View"
+            if (raw.isNotBlank() || n.isClickable || n.isEditable || n.isScrollable) {
+                sb.append("  ".repeat(depth.coerceAtMost(12)))
+                    .append("• ").append(cls)
+                if (raw.isNotBlank()) sb.append(" : ").append(raw.replace('\n', ' ').take(180))
+                sb.append(" [").append(rect.left).append(',').append(rect.top).append("–")
+                    .append(rect.right).append(',').append(rect.bottom).append(']')
+                if (n.isClickable) sb.append(" cliquable")
+                if (n.isEditable) sb.append(" saisie")
+                if (n.isScrollable) sb.append(" défilable")
+                if (!n.isEnabled) sb.append(" désactivé")
+                if (n.isSelected) sb.append(" sélectionné")
+                sb.append('\n')
+            }
+            for (i in 0 until n.childCount) walk(n.getChild(i), depth + 1)
+        }
+        walk(root, 0)
+        return sb.toString().trim().take(10_000)
     }
 
     private fun collect(n: AccessibilityNodeInfo?, sb: StringBuilder) {
         if (n == null || sb.length > 5000) return
-        val t = n.text?.toString() ?: n.contentDescription?.toString()
+        val t = if (n.isPassword) "[contenu masqué]" else (n.text?.toString() ?: n.contentDescription?.toString())
         if (!t.isNullOrBlank()) {
             sb.append(t.take(140))
             if (n.isClickable) sb.append("  [cliquable]")
