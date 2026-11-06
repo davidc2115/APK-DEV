@@ -14,7 +14,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
     companion object {
         val KEYWORDS = Regex("home ?assistant|domotique|\\bha\\b|ssh|serveur|server|yaml|docker|lumi[èe]re|volet|thermostat|automatisation|automation|sc[èe]ne\\b|configuration\\.yaml|debian|raspberry|esphome|zigbee|mqtt|capteur|\\bprise\\b|interrupteur|box|livebox|freebox|bbox|disque|nas|\\bftp\\b|\\bsmb\\b|r[ée]seau|wifi|wi-fi|imprim|scann|\\bip\\b|adresse ip|github|\\bgit\\b|canon|epson|brother|\\bhp\\b|appareils?\\b|script|\\bcode\\b|ping|port|volume|\\bson\\b|t[ée]l[ée]\\b|t[ée]l[ée]vision|\\btv\\b|chauffage|climatisation|temp[ée]rature|consigne|po[êe]le|poil|degr[ée]s|granul[ée]s|pellet|chaudi[èe]re|radiateur|thermique|climate|media_player|lecteur multim[ée]dia|luminosit[ée]|store\\b|persienne|\\ballume\\b|allumer|[ée]teins?\\b|[ée]teindre", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
-        val NAMES = setOf("ha_entites", "ha_etat", "ha_service", "ha_config", "ha_dashboard", "ssh_commande", "ssh_fichier", "serveur_diagnostic", "serveur_scan_ports", "reseau_infos", "reseau_scanner", "appareil_sonder", "appareil_page", "imprimantes_trouver", "imprimer", "ssh_script", "github", "appareils_liste", "appareil_nommer", "ip_publique", "box_disque")
+        val NAMES = setOf("ha_entites", "ha_etat", "ha_service", "ha_config", "ha_dashboard", "ssh_commande", "ssh_fichier", "serveur_diagnostic", "serveur_scan_ports", "routeur_diagnostiquer", "reseau_infos", "reseau_scanner", "appareil_sonder", "appareil_page", "imprimantes_trouver", "imprimer", "ssh_script", "github", "appareils_liste", "appareil_nommer", "ip_publique", "box_disque")
     }
 
     private fun prop(d: String) = JSONObject().put("type", "string").put("description", d)
@@ -56,6 +56,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
             mapOf("action" to prop("fichier | liste | commits | release | depot | recherche | ecrire | copier"), "depot" to prop("owner/repo (ex. home-assistant/core), ou mots de la recherche."), "chemin" to prop("Chemin du fichier ou dossier (chemin SOURCE pour « copier »)."), "ref" to prop("Branche, tag ou commit à lire (optionnel)."),
                 "contenu" to prop("ecrire : contenu complet du fichier à écrire."), "message" to prop("ecrire/copier : message de commit (optionnel)."), "branche" to prop("ecrire/copier : branche de destination (optionnel, défaut : branche par défaut du dépôt)."),
                 "vers_depot" to prop("copier : dépôt de destination (optionnel, défaut : même dépôt que « depot »)."), "vers_chemin" to prop("copier : chemin de destination.")), listOf("action", "depot")),
+        tool("routeur_diagnostiquer", "Box Internet : identifie la passerelle, recherche son fabricant/modèle et détecte en lecture seule la prise en charge UPnP IGD (WANIPConnection/WANPPPConnection). N’effectue aucune modification et ne crée aucune redirection. À utiliser avant toute opération d’accès distant.", emptyMap()),
         tool("reseau_infos", "Réseau : adresse IP privée du téléphone, passerelle (box), adresse IP publique ; avec le serveur SSH configuré, ses adresses IP privée(s) et publique.",
             mapOf("serveur" to prop("« oui » pour inclure aussi les adresses du serveur Debian."))),
         tool("reseau_scanner", "Réseau : analyse complète du réseau Wi-Fi local (appareils connectés, adresses IP, noms, ports ouverts, type : imprimante, caméra, TV, serveur, NAS, Home Assistant…), enregistre tous les appareils et l'IP publique pour la connexion à distance. Réseau local uniquement. via=serveur analyse le réseau du serveur Debian (avec adresses MAC), utile à distance.", mapOf("via" to prop("local (défaut, Wi-Fi du téléphone) ou serveur (réseau du serveur Debian)."))),
@@ -219,6 +220,23 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                     return ToolResult(app.phone.lireVideoDistante(url, Box.mimeVideo(chemin)))
                 }
                 ToolResult(Box.action(app, act, a.optString("chemin"), a.optString("fichier")), direct = act == "telecharger")
+            }
+            "routeur_diagnostiquer" -> {
+                val r = Reseau.diagnostiquerRouteur(app)
+                    ?: return ToolResult("Impossible de détecter la passerelle : connecte le téléphone au Wi-Fi du routeur.")
+                val sb = StringBuilder("# 📡 Diagnostic de la box — lecture seule\n")
+                sb.append("- Passerelle : **\${r.ip}**\n")
+                if (r.fabricant.isNotBlank()) sb.append("- Fabricant : \${r.fabricant}\n")
+                if (r.modele.isNotBlank()) sb.append("- Modèle : \${r.modele}\n")
+                if (r.services.isNotEmpty()) {
+                    sb.append("- Contrôle NAT standard : **UPnP IGD détecté**\n")
+                    r.services.forEach { sb.append("  - \${it}\n") }
+                    sb.append("\nJarvis a identifié une interface standard potentiellement exploitable pour lire l’état NAT et, si tu le demandes, préparer une règle ciblée. Aucune règle n’a été créée.")
+                } else {
+                    sb.append("- Contrôle NAT standard : UPnP IGD non détecté (cela ne prouve pas qu’il est absent).\n")
+                    sb.append("\nLa box peut proposer une API constructeur (Freebox OS, Bbox, Livebox, etc.), TR-064, PCP/NAT-PMP ou une interface web propriétaire. Il faudra identifier le modèle et ses capacités avant de choisir un adaptateur. Aucune connexion d’administration ni modification n’a été tentée.")
+                }
+                ToolResult(sb.toString(), direct = true)
             }
             "reseau_infos" -> {
                 val i = Reseau.infos(app)
