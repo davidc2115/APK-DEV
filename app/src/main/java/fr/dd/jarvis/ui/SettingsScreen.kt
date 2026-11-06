@@ -783,9 +783,9 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
         item {
             var freeboxResult by remember { mutableStateOf("") }
             var freeboxBusy by remember { mutableStateOf(false) }
-            HudPanel(Modifier.fillMaxWidth(), title = "Freebox OS — administration sécurisée") {
+            HudPanel(Modifier.fillMaxWidth(), title = "Box Internet — administration sécurisée") {
                 Text(
-                    if (store.freeboxAppToken.value.isBlank()) "Aucune association Freebox. Connecte le téléphone au Wi-Fi de la Freebox Delta avant de demander l'autorisation."
+                    if (store.freeboxAppToken.value.isBlank()) "Aucune association Freebox. Connecte le téléphone au Wi-Fi de la Freebox avant de demander l'autorisation."
                     else "Freebox associée · domaine API : " + store.freeboxApiDomain.value,
                     color = HudDim, fontSize = 12.sp
                 )
