@@ -568,9 +568,7 @@ object Routeur {
         // Mode auto = Hermès cerveau principal. Jarvis garde uniquement les réflexes instantanés
         // interceptés avant ce routeur (alarme, volume du téléphone, lancement d'application).
         // Pour toute autre demande, Hermès utilise ses skills/MCP puis délègue au besoin au pont Jarvis.
-        if (mode == "tout" || mode == "auto") return if (commandeSimple(t) && competenceHermes == null)
-            Choix(Cible.JARVIS, "réflexe Android simple : exécution immédiate")
-        else Choix(Cible.HERMES, "Hermès prioritaire : il orchestre et délègue aux outils Jarvis")
+        if (mode == "tout" || mode == "auto") return Choix(Cible.HERMES, "Hermès prioritaire : il orchestre et délègue aux outils Jarvis")
         // Mode « demande » : Hermès seulement pour les demandes explicites ou les tâches complexes.
         if (mode == "demande") return when {
             ORCHESTRATION.containsMatchIn(t) || multiEtapes(t) -> Choix(Cible.HERMES, "automatisme / plusieurs étapes : Hermès orchestre")
