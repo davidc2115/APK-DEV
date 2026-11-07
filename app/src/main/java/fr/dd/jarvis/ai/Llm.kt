@@ -81,7 +81,7 @@ class Llm(private val store: Store) {
         // Groq, puis Cloudflare, ont échoué (quotas, panne, pas d'internet) : Ollama du serveur de la maison en tout dernier
         // recours, avec la requête compactée à sa mesure. S'il échoue aussi, on remonte l'erreur d'origine (plus parlante).
         secoursOllama(e) { app ->
-            val (msgs, outils) = fr.dd.jarvis.hermes.RelaisGroq.reduire(messages, if (forceText) null else tools, 0)
+            val (msgs, outils) = fr.dd.jarvis.hermes.RelaisGroq.reduire(messages, if (forceText) null else tools, Ollama.NIVEAU)
             Ollama.chat(app, msgs, outils)
         }
     }

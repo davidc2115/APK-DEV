@@ -19,7 +19,12 @@ import java.util.concurrent.TimeUnit
 object Ollama {
     const val PORT = 11434
     /** Contexte demandé à Ollama : assez pour un prompt compacté + outils, raisonnable pour un petit serveur. */
-    private const val CONTEXTE = 8192
+    private const val CONTEXTE = 6144
+    /**
+     * Compactage des requêtes envoyées à Ollama (palier du relais Groq) : ~4 000 jetons et les 9 outils les plus utiles.
+     * Un petit serveur (vieux PC, 2 Go de RAM, petit modèle) traite ainsi la demande en un temps raisonnable.
+     */
+    internal const val NIVEAU = 2
 
     @Volatile internal var app: JarvisApp? = null
 
@@ -158,7 +163,7 @@ object Ollama {
         var derniere: Exception? = null
         for (essai in 0..1) {
             val b = base(app, force = essai > 0) ?: throw IllegalStateException("Ollama $etat")
-            val modele = modele(app, b) ?: throw IllegalStateException("Aucun modèle de conversation dans Ollama (sur le serveur : ollama pull qwen2.5:7b).")
+            val modele = modele(app, b) ?: throw IllegalStateException("Aucun modèle de conversation dans Ollama (sur le serveur : ollama pull qwen2.5:1.5b).")
             try {
                 return appel(b, modele, messages, tools, maxTokens)
             } catch (e: java.io.IOException) {
@@ -192,7 +197,7 @@ object Ollama {
     /** Relais pour Hermès (http://127.0.0.1:<pont>/ollama/v1) : requête OpenAI compactée → Ollama → réponse OpenAI. */
     fun relais(app: JarvisApp, corps: JSONObject): Pair<Int, String> {
         if (!configure(app)) return 503 to fr.dd.jarvis.hermes.RelaisGroq.erreurJson("Ollama n'est pas configuré dans Jarvis.", "not_configured")
-        val (msgs, outils) = fr.dd.jarvis.hermes.RelaisGroq.reduire(corps.optJSONArray("messages") ?: JSONArray(), corps.optJSONArray("tools"), 0)
+        val (msgs, outils) = fr.dd.jarvis.hermes.RelaisGroq.reduire(corps.optJSONArray("messages") ?: JSONArray(), corps.optJSONArray("tools"), NIVEAU)
         val sortie = corps.optInt("max_tokens", corps.optInt("max_completion_tokens", 1200)).coerceIn(256, 1500)
         return try {
             val m = chat(app, msgs, outils, sortie)
@@ -213,7 +218,7 @@ object Ollama {
         if (!app.store.ollamaActif.value) return "Ollama : désactivé."
         val b = base(app, force = true) ?: return "❌ Ollama : $etat."
         val noms = modeles(app, b)
-        val m = modele(app, b) ?: return "⚠️ Ollama $etat, mais aucun modèle de conversation installé (sur le serveur : ollama pull qwen2.5:7b)."
+        val m = modele(app, b) ?: return "⚠️ Ollama $etat, mais aucun modèle de conversation installé (sur le serveur : ollama pull qwen2.5:1.5b)."
         val debut = System.currentTimeMillis()
         val rep = runCatching { generer(app, "Réponds en un mot.", "Dis bonjour.") }
         val s = (System.currentTimeMillis() - debut) / 1000
