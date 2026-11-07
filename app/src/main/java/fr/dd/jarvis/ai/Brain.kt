@@ -16,7 +16,33 @@ class Brain(
     private val app: fr.dd.jarvis.JarvisApp,
     private val userName: () -> String
 ) {
+    /** Chemin suivi par une réponse (pour décider si Hermès doit reprendre la main). */
+    private class Suivi { var cerveauJarvis = false; var hermesEssaye = false }
+
+    /**
+     * Jarvis d'abord : réflexes, puis Hermès seulement pour ce qui le demande clairement, sinon le cerveau rapide de
+     * Jarvis. Si Jarvis n'aboutit pas (pas d'outil, rien trouvé, information manquante, erreur), Hermès reprend
+     * AUTOMATIQUEMENT la demande — avec sa mémoire, ses notes, skills et outils — sans que l'utilisateur ait à le nommer.
+     */
     suspend fun reply(history: List<ChatMsg>, pourHermes: Boolean = false, onStatus: (String) -> Unit): String {
+        val suivi = Suivi()
+        val r = try { repondre(history, pourHermes, onStatus, suivi) }
+        catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) {
+            if (!suivi.cerveauJarvis || !escaladePossible(pourHermes, suivi)) throw e
+            "❌ ${e.message ?: e.javaClass.simpleName}"
+        }
+        if (!suivi.cerveauJarvis || !escaladePossible(pourHermes, suivi) || !fr.dd.jarvis.hermes.Routeur.jarvisABesoinDHermes(r)) return r
+        onStatus("🪽 Jarvis demande l'aide d'Hermès…")
+        val h = fr.dd.jarvis.hermes.Hermes.repondre(app, history, tools, userName(), onStatus, tentativeJarvis = r) ?: return r
+        fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.HERMES
+        return h
+    }
+
+    private fun escaladePossible(pourHermes: Boolean, suivi: Suivi) = !pourHermes && !suivi.hermesEssaye &&
+        app.store.hermesMode.value in setOf("auto", "tout") && !fr.dd.jarvis.hermes.Hermes.degrade()
+
+    private suspend fun repondre(history: List<ChatMsg>, pourHermes: Boolean, onStatus: (String) -> Unit, suivi: Suivi): String {
         val recent = history.takeLast(4).filter { it.fromUser }.joinToString(" ") { it.text }
         val societeOn = fr.dd.jarvis.societe.SocieteTools.concerned(recent)
         val planningClientsSync = Regex("(planning|agenda).{0,100}(fiche|client)|(fiche|client).{0,100}(planning|agenda)", RegexOption.IGNORE_CASE).containsMatchIn(recent) &&
@@ -50,6 +76,7 @@ class Brain(
             val precedent = history.dropLastWhile { it.fromUser }.lastOrNull()?.text
             val choix = fr.dd.jarvis.hermes.Routeur.choisir(app, texteUser, precedent)
             if (choix.cible == fr.dd.jarvis.hermes.Routeur.Cible.HERMES) {
+                suivi.hermesEssaye = true
                 val r = fr.dd.jarvis.hermes.Hermes.repondre(app, history, tools, userName(), onStatus)
                 if (r != null) return r
                 fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS
@@ -61,6 +88,7 @@ class Brain(
             val args = JSONObject(); if (dernier.contains("serveur")) args.put("via", "serveur")
             return try { tools.execute(outilDirect, args).text } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { "❌ ${e.message}" }
         }
+        suivi.cerveauJarvis = true
         onStatus("🧠 Analyse de la demande…")
         val all = tools.schemaAll()
         val plan = try { Analyseur.analyser(app, history, all) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { null }

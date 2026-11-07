@@ -194,7 +194,7 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
      * Confie la conversation à Hermès. Renvoie sa réponse, ou null s'il est indisponible (l'appelant bascule alors
      * par le cerveau de secours Jarvis). Pendant l'appel, les outils exposés à Hermès sont ceux de [boite] (mêmes confirmations).
      */
-    suspend fun repondre(app: JarvisApp, history: List<ChatMsg>, boite: ToolBox?, userName: String, onStatus: (String) -> Unit): String? {
+    suspend fun repondre(app: JarvisApp, history: List<ChatMsg>, boite: ToolBox?, userName: String, onStatus: (String) -> Unit, tentativeJarvis: String? = null): String? {
         if (!enLigne()) { relancerSiBesoin(app); return null }
         val messages = JSONArray().put(JSONObject().put("role", "system").put("content", systeme(app, userName)))
         // Contexte conversationnel compact pour accélérer l'inférence.
@@ -210,6 +210,10 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
             }
             messages.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(cap)))
         }
+        if (!tentativeJarvis.isNullOrBlank()) messages.put(JSONObject().put("role", "system").put("content",
+            "Jarvis (l'agent rapide du téléphone) a d'abord traité cette demande sans aboutir. Sa réponse : « ${tentativeJarvis.take(1500)} ». " +
+                "Reprends la demande avec ta mémoire, tes notes, tes skills et tous tes outils (y compris ceux de Jarvis via MCP) ; " +
+                "ne répète pas ce qui a échoué de la même façon et ne redemande pas à l'utilisateur une information que tu as déjà (identifiants, adresses, réglages)."))
         return appeler(app, messages, boite, onStatus)
     }
 
@@ -286,7 +290,10 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
  *  - mode « auto » : Hermès reçoit les tâches complexes, en plusieurs étapes, récurrentes ou multi-agents (même si elles
  *    touchent au téléphone), la recherche web, la rédaction, l'analyse, le code et les questions ouvertes ; Jarvis répond
  *    directement aux commandes simples du téléphone (une action, un fichier, la Freebox…), plus vite et sans détour ;
- *  - mode « tout » (par défaut) : Hermès reçoit tout ce qui demande réflexion, mémoire ou orchestration. Pour la
+ *  - mode « auto » (par défaut, « Jarvis d'abord ») : Jarvis répond à tout, sauf automatismes, demandes en plusieurs
+ *    étapes, serveur/SSH et recherche sur internet confiés directement à Hermès ; si Jarvis n'aboutit pas, Hermès reprend
+ *    automatiquement la demande (Brain.reply) — jamais besoin de dire « Hermès » ;
+ *  - mode « tout » : Hermès reçoit tout ce qui demande réflexion, mémoire ou orchestration. Pour la
  *    rapidité, les RÉFLEXES de Jarvis (lampe, volume, Wi-Fi, lecture… sans modèle ; position, recherche de fichiers,
  *    Freebox, vidéo) et les COMMANDES SIMPLES du téléphone (une action, sans réflexion) sont exécutés directement par
  *    Jarvis ; ces échanges restent dans l'historique transmis à Hermès, et la mémoire est partagée ;
@@ -344,6 +351,29 @@ object Routeur {
         RegexOption.IGNORE_CASE
     )
 
+    private val ECHEC_JARVIS = Regex(
+        "je n.ai pas (acc[eè]s|les outils|d.outil|la possibilit[ée]|de moyen|cette information|les informations|r[ée]ussi|pu |trouv[ée])|" +
+            "je ne (peux|pourrai|suis) pas (en mesure|capable|acc[ée]der|me connecter|le faire|faire)|je ne peux pas|impossible de|je ne trouve (pas|aucun)|" +
+            "aucun (r[ée]sultat|outil|fichier|dossier|acc[eè]s)|je ne sais pas|n.est pas (configur|disponible|accessible)|indisponible|" +
+            "bute sur cette demande|but[ée] sur cette demande|" +
+            "pas r[ée]ussi [àa] terminer|erreur du service ia|^❌",
+        RegexOption.IGNORE_CASE
+    )
+    /** Jarvis redemande des accès (serveur, connexion, identifiants) qu'Hermès a souvent déjà dans ses notes. */
+    private val DEMANDE_ACCES = Regex(
+        "((peux|pourrais).tu me (fournir|donner|pr[ée]ciser|communiquer)|j.ai besoin d|indique.moi).{0,80}(adresse|nom d.utilisateur|mot de passe|identifiants|\\bip\\b|port|cl[ée] ssh|ces [ée]l[ée]ments)",
+        RegexOption.IGNORE_CASE
+    )
+    private val CONTEXTE_ACCES = Regex("ssh|serveur|server|connexion|connecter|identifiant|mot de passe|tailscale|vpn|pont|docker|debian", RegexOption.IGNORE_CASE)
+
+    /** Problèmes qu'Hermès ne réglerait pas mieux (permission Android, réglage à activer par l'utilisateur). */
+    private val ECHEC_LOCAL = Regex("accessibilit[ée]|acc[eè]s aux notifications|autorisation|permission|R[ée]glages Android|refus[ée] par l.utilisateur|annul[ée]", RegexOption.IGNORE_CASE)
+
+    /** La réponse de Jarvis montre qu'il n'a pas abouti et qu'Hermès (mémoire, notes, skills, outils) peut mieux faire. */
+    fun jarvisABesoinDHermes(reponse: String): Boolean =
+        reponse.isNotBlank() && !ECHEC_LOCAL.containsMatchIn(reponse.take(1500)) &&
+            (ECHEC_JARVIS.containsMatchIn(reponse.take(1500)) || (DEMANDE_ACCES.containsMatchIn(reponse.take(1500)) && CONTEXTE_ACCES.containsMatchIn(reponse.take(1500))))
+
     /** Commande simple du téléphone (une action, sans réflexion) : Jarvis l'exécute directement, sans attendre Hermès. */
     fun commandeSimple(texte: String): Boolean {
         val t = texte.trim()
@@ -376,7 +406,6 @@ object Routeur {
     internal fun decider(mode: String, enVoiture: Boolean, sature: Boolean, texte: String, precedent: String?): Choix {
         if (mode == "off") return Choix(Cible.JARVIS, "Hermès désactivé dans les réglages")
         val t = texte.trim()
-        if (mode == "demande" && !NOMME.containsMatchIn(t)) return Choix(Cible.JARVIS, "mode à la demande : Hermès doit être nommé")
         if (sature && !NOMME.containsMatchIn(t)) return Choix(Cible.JARVIS, "Hermès momentanément saturé : Jarvis répond directement")
         if (NOMME.containsMatchIn(t)) return Choix(Cible.HERMES, "Hermès demandé")
         if (enVoiture) return Choix(Cible.JARVIS, "Android Auto : Jarvis, réponse rapide")
@@ -386,6 +415,14 @@ object Routeur {
         if (BREF.matches(t) || reponseCourte) return Choix(derniere, if (derniere == Cible.HERMES) "suite de la conversation avec Hermès" else "suite de la conversation avec Jarvis")
         if (mode == "tout") return if (commandeSimple(t)) Choix(Cible.JARVIS, "commande simple : Jarvis l'exécute tout de suite")
             else Choix(Cible.HERMES, "Hermès pour tout : il confie les actions du téléphone à Jarvis")
+        // Jarvis d'abord (défaut) : Hermès directement seulement pour ce que Jarvis ne sait pas faire seul ;
+        // pour tout le reste Jarvis répond, et passe la main à Hermès s'il n'aboutit pas (Brain.reply).
+        if (mode == "auto" || mode == "demande") return when {
+            ORCHESTRATION.containsMatchIn(t) || multiEtapes(t) -> Choix(Cible.HERMES, "automatisme / plusieurs étapes : Hermès orchestre")
+            SERVEUR.containsMatchIn(t) -> Choix(Cible.HERMES, "serveur / SSH : Hermès (notes, skills, terminal)")
+            WEB.containsMatchIn(t) -> Choix(Cible.HERMES, "recherche sur internet : Hermès")
+            else -> Choix(Cible.JARVIS, "Jarvis d'abord (Hermès s'il n'aboutit pas)")
+        }
         // Hermès orchestre : automatismes, récurrence, surveillance, sous-agents, plusieurs étapes — même sur des données du téléphone.
         if (ORCHESTRATION.containsMatchIn(t) || multiEtapes(t)) return Choix(Cible.HERMES, "tâche complexe : Hermès orchestre (Gemini, Groq, Jarvis)")
         // Commandes simples du téléphone : exécution directe par Jarvis (Freebox, recherche de fichiers/dossiers…).

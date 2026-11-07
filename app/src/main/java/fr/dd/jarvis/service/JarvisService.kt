@@ -330,22 +330,13 @@ class JarvisService : Service() {
                 app.chatAjouter(userMessage)
                 if (app.enVoiture) CarBridge.ajouter(userMessage)
             }
-            // Les demandes vocales suivent la même règle que le chat : Hermès est le cerveau exclusif.
-            // Aucun basculement silencieux vers Brain/Groq n'est autorisé dans cette voie vocale.
+            // Les demandes vocales suivent la même règle que le chat : Jarvis d'abord (réflexes instantanés, commandes du
+            // téléphone), et Hermès automatiquement quand il le faut (automatismes, serveur, échec de Jarvis…).
             val reply = try {
-                if (app.store.hermesMode.value == "off") {
-                    "Hermès est désactivé ou non installé. Active Hermès dans les réglages pour utiliser les commandes vocales."
-                } else {
-                    fr.dd.jarvis.hermes.Hermes.repondre(
-                        app,
-                        app.chat.toList().takeLast(12),
-                        tools,
-                        app.store.userName.value
-                    ) { etat -> android.os.Handler(android.os.Looper.getMainLooper()).post { majNotification(etat) } }
-                        ?: "Je n'arrive pas à joindre Hermès pour le moment. Je n'ai pas exécuté la demande ; réessaie dans un instant."
-                }
+                fr.dd.jarvis.ai.Brain(app.llm, tools, app) { app.store.userName.value }
+                    .reply(app.chat.toList().takeLast(16)) { etat -> android.os.Handler(android.os.Looper.getMainLooper()).post { majNotification(etat) } }
             } catch (e: CancellationException) { throw e }
-              catch (e: Throwable) { "Erreur Hermès : ${e.message ?: e.javaClass.simpleName}" }
+              catch (e: Throwable) { "⚠️ ${e.message ?: e.javaClass.simpleName}" }
             val assistantMessage = ChatMsg(false, reply)
             withContext(Dispatchers.Main) {
                 app.chatAjouter(assistantMessage)

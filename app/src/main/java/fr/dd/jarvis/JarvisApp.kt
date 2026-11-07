@@ -95,6 +95,10 @@ class JarvisApp : Application() {
             if (store.hermesMode.value == "auto") store.hermesMode.set("tout")
             store.hermesModeMigre.set(true)
         }
+        if (!store.hermesModeMigre3.value) {
+            if (store.hermesMode.value in setOf("tout", "demande")) store.hermesMode.set("auto")
+            store.hermesModeMigre.set(true); store.hermesModeMigre2.set(true); store.hermesModeMigre3.set(true)
+        }
         if (!store.hermesModeMigre2.value) {
             if (store.hermesMode.value == "demande") store.hermesMode.set("tout")
             store.hermesModeMigre2.set(true)

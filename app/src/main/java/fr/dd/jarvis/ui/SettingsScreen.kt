@@ -506,7 +506,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 Spacer(Modifier.height(8.dp))
                 Text("Répartition des demandes", color = HudDim, fontSize = 12.sp)
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("tout" to "Hermès pour tout", "auto" to "Hermès pour le complexe", "demande" to "Si je dis « Hermès »", "off" to "Désactivé").forEach { (id, nom) ->
+                    listOf("auto" to "Jarvis d'abord, Hermès si besoin", "tout" to "Hermès pour tout", "off" to "Jarvis seul").forEach { (id, nom) ->
                         HudChip(nom, selected = store.hermesMode.value == id) { store.hermesMode.set(id) }
                     }
                 }
@@ -517,12 +517,11 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                             "Pour rester rapide, les commandes simples du téléphone (lampe torche, volume, Wi-Fi, musique, appel, SMS, rendez-vous…), " +
                             "la position, la recherche d'un fichier, la Freebox et le lancement d'une vidéo sont exécutés directement par Jarvis ; " +
                             "Hermès voit ces échanges dans l'historique et partage la même mémoire."
-                        "demande" -> "Jarvis répond seul ; Hermès n'intervient que si ta phrase commence par « Hermès »."
                         "off" -> "Hermès n'est jamais utilisé : Jarvis répond seul."
-                        else -> "Hermès pour le complexe : tâches en plusieurs étapes, automatismes (« tous les matins… », « surveille… »), serveur et SSH, " +
-                            "sous-agents Gemini/Groq, recherche web, rédaction, analyse, code. Il confie les actions du téléphone à l'agent Jarvis. " +
-                            "Les commandes simples (un fichier, la musique, un SMS, la Freebox…) sont exécutées directement par Jarvis, plus vite. " +
-                            "Commence ta phrase par « Hermès » pour le forcer."
+                        else -> "Recommandé. Tu parles toujours à Jarvis, qui répond vite. S'il n'aboutit pas (pas d'outil, rien trouvé, " +
+                            "information qu'il n'a pas, erreur), il passe automatiquement la main à Hermès, avec sa mémoire, ses notes, skills et sous-agents. " +
+                            "Les automatismes, les demandes en plusieurs étapes, le serveur/SSH et la recherche sur internet vont directement à Hermès. " +
+                            "Jamais besoin de dire « Hermès »."
                     },
                     color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp)
                 )
