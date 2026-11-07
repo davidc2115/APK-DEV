@@ -46,6 +46,8 @@ object PontMcp {
 
     /** Outils de la conversation en cours (avec SES confirmations) ; sinon une boîte d'outils autonome. */
     @Volatile var boiteActive: ToolBox? = null
+    /** Ligne d'état de la conversation en cours (« Hermès → Jarvis : … »), posée par Hermes.appeler. */
+    @Volatile var statutActif: ((String) -> Unit)? = null
 
     /** Outils jamais exposés à Hermès (gestion d'Hermès lui-même → pas de boucle). */
     private val EXCLUS = setOf("hermes", "hermes_deleguer")
@@ -102,6 +104,9 @@ object PontMcp {
                 }
                 return JSONObject().put("outils", resultat).toString() to false
             }
+            // Hermès les voit sous les noms mcp_jarvis_agent et mcp_jarvis_notifier.
+            if (nomCanonique == "agent" || nomCanonique == "jarvis_agent") return agentJarvis(args)
+            if (nomCanonique == "notifier" || nomCanonique == "jarvis_notifier") return notifier(args)
             // Alias directs de secours : toujours exposés, indépendants de la recherche du catalogue.
             val aliasIntervention = when (nomCanonique) {
                 "jarvis_interventions_lister" -> "interventions_liste"
@@ -120,6 +125,52 @@ object PontMcp {
                 { e -> "❌ ${e.message ?: e.javaClass.simpleName}" to true }
             )
         }
+        /** Hermès confie une mission à Jarvis : son cerveau complet (raccourcis fiables + outils natifs) l'exécute. */
+        private fun agentJarvis(args: JSONObject): Pair<String, Boolean> {
+            val demande = args.optString("demande").ifBlank { args.optString("consigne") }.trim()
+            if (demande.isBlank()) return "Donne la consigne complète à exécuter dans « demande »." to true
+            val contexte = args.optString("contexte").trim()
+            statutActif?.invoke("🪽 Hermès → 🤖 Jarvis : " + demande.take(70))
+            val texte = if (contexte.isBlank()) demande else "$demande\n\n(Contexte fourni par Hermès : ${contexte.take(3000)})"
+            val res = runCatching {
+                runBlocking(Dispatchers.IO) {
+                    withTimeoutOrNull(170_000) {
+                        fr.dd.jarvis.ai.Brain(app.llm, boite(), app) { app.store.userName.value }
+                            .reply(listOf(fr.dd.jarvis.ai.ChatMsg(true, texte)), pourHermes = true) { s -> statutActif?.invoke("🤖 Jarvis : $s") }
+                    }
+                }
+            }
+            statutActif?.invoke("🪽 Hermès reprend…")
+            return res.fold(
+                { r -> if (r == null) "⏱️ Jarvis n'a pas terminé à temps : découpe la mission en étapes plus courtes." to true else r to false },
+                { e -> "❌ Jarvis : ${e.message ?: e.javaClass.simpleName}" to true }
+            )
+        }
+
+        /** Message d'Hermès à l'utilisateur (fin d'automatisme, tâche longue) : notification + conversation Jarvis. */
+        private fun notifier(args: JSONObject): Pair<String, Boolean> {
+            val message = args.optString("message").trim()
+            if (message.isBlank()) return "Le champ « message » est vide." to true
+            val titre = args.optString("titre").trim().ifBlank { "Hermès" }
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                app.chatAjouter(fr.dd.jarvis.ai.ChatMsg(false, "🪽 **$titre**\n\n$message"))
+            }
+            val ok = runCatching {
+                val ctx = app.applicationContext
+                if (android.os.Build.VERSION.SDK_INT >= 33 && androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) return@runCatching false
+                val pi = android.app.PendingIntent.getActivity(ctx, 7320, android.content.Intent(ctx, fr.dd.jarvis.MainActivity::class.java),
+                    android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT)
+                val plain = message.replace(Regex("[#*_`>|]+"), "").trim()
+                val n = androidx.core.app.NotificationCompat.Builder(ctx, JarvisApp.CHANNEL_AGENTS).setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .setContentTitle("🪽 " + titre.take(60)).setContentText(plain.lineSequence().firstOrNull().orEmpty().take(120))
+                    .setStyle(androidx.core.app.NotificationCompat.BigTextStyle().bigText(plain.take(3500))).setContentIntent(pi).setAutoCancel(true).build()
+                (ctx.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager)
+                    .notify(7320 + (System.currentTimeMillis() % 500).toInt(), n)
+                true
+            }.getOrDefault(false)
+            return (if (ok) "✅ Message envoyé à l'utilisateur (notification + conversation Jarvis)." else "✅ Message ajouté à la conversation Jarvis (notifications non autorisées).") to false
+        }
+
         override fun progres(ligne: String) {
             if (ligne != "pong") android.os.Handler(android.os.Looper.getMainLooper()).post {
                 progression.add(ligne); while (progression.size > 40) progression.removeAt(0)
@@ -368,6 +419,21 @@ object PontMcp {
             if (index < 0) prioritaires.size else index
         }
         val out = JSONArray()
+        // L'équipe d'Hermès : l'agent téléphone (Jarvis) et le canal vers l'utilisateur. Toujours en tête de liste.
+        out.put(JSONObject()
+            .put("name", "agent")
+            .put("description", "AGENT TÉLÉPHONE JARVIS — à privilégier pour toute action ou recherche sur le téléphone et les données de l'utilisateur : fichiers et dossiers (coffre Obsidian + stockage), clients/devis/factures/interventions, agenda, mails, SMS, appels, contacts, musique, Freebox, domotique, position GPS, images, vidéos, réglages. Donne une consigne complète et autonome en français (une étape ou un petit enchaînement) ; Jarvis l'exécute avec ses outils natifs et renvoie le résultat réel. Ne cherche jamais ces données dans ton propre système de fichiers.")
+            .put("inputSchema", JSONObject().put("type", "object").put("properties", JSONObject()
+                .put("demande", JSONObject().put("type", "string").put("description", "Consigne à exécuter, formulée comme l'utilisateur la dirait à Jarvis (ex. « trouve le dossier coloriage pompier », « ajoute un rendez-vous demain 9h chez Martin »)"))
+                .put("contexte", JSONObject().put("type", "string").put("description", "Informations utiles déjà connues (facultatif)")))
+                .put("required", JSONArray().put("demande"))))
+        out.put(JSONObject()
+            .put("name", "notifier")
+            .put("description", "Envoie un message à l'utilisateur sur son téléphone (notification + conversation Jarvis). OBLIGATOIRE à la fin de chaque automatisme (cronjob) et de chaque tâche longue pour lui livrer le résultat.")
+            .put("inputSchema", JSONObject().put("type", "object").put("properties", JSONObject()
+                .put("titre", JSONObject().put("type", "string").put("description", "Titre court (ex. « Briefing du matin »)"))
+                .put("message", JSONObject().put("type", "string").put("description", "Contenu à livrer, concis et lisible")))
+                .put("required", JSONArray().put("message"))))
         out.put(JSONObject()
             .put("name", "jarvis_rechercher_outils")
             .put("description", "Recherche dans le catalogue complet des outils JARVIS, y compris ceux non affichés dans la liste courte. À utiliser si un outil métier est absent ou pour trouver une fonction par domaine.")

@@ -326,6 +326,7 @@ setenv API_SERVER_KEY ${q(cleApi)}
 setenv API_SERVER_MODEL_NAME hermes-agent
 ${if (gemini.isNotBlank()) "setenv GOOGLE_API_KEY ${q(gemini)}" else "p '⚠️ Aucune clé Gemini dans Jarvis : ajoute-en une (Réglages › Agents Gemini) puis « Configurer Hermès ».'"}
 ${if (groq.isNotBlank()) "setenv JARVIS_GROQ_RELAIS ${q(jeton)}" else ""}
+setenv HERMES_TIMEZONE ${q(java.util.TimeZone.getDefault().id)}
 chmod 600 "${'$'}H/.env"
 # Version de schéma de la configuration installée : conservée, sinon Hermès croit à une vieille config et la migre.
 CV=${'$'}(grep -m1 '^_config_version:' "${'$'}H/config.yaml" 2>/dev/null || grep -m1 '^_config_version:' "${'$'}H/config.yaml.avant-jarvis" 2>/dev/null)
@@ -557,6 +558,8 @@ p "✅ Hermès installé (${'$'}{MODE})."
             gemini.forEachIndexed { index, key -> appendLine("setenv " + (if (index == 0) "GOOGLE_API_KEY" else "GOOGLE_API_KEY_" + (index + 1)) + " " + q(key)) }
             // Clés Groq : restent chiffrées dans Jarvis ; Hermès passe par le relais local avec le jeton du pont.
             if (groq.isNotEmpty()) appendLine("setenv JARVIS_GROQ_RELAIS " + q(s.mcpJeton.value))
+            // Fuseau du téléphone : les automatismes (cronjob) d'Hermès se déclenchent à l'heure locale, pas en UTC.
+            appendLine("setenv HERMES_TIMEZONE " + q(java.util.TimeZone.getDefault().id))
             cloudflare.forEachIndexed { index, pair -> appendLine("setenv JARVIS_CF_KEY_" + (index + 1) + " " + q(pair.second)) }
             listOf("ZAI", "OPENROUTER", "NVIDIA", "MISTRAL", "HF").forEach { appendLine("setenv JARVIS_HAS_" + it + " 0") }
             external.forEach { entry ->

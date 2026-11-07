@@ -24,8 +24,9 @@ import java.util.concurrent.TimeUnit
 object Hermes {
     private val JSON = "application/json".toMediaType()
     private val rapide = OkHttpClient.Builder().connectTimeout(1500, TimeUnit.MILLISECONDS).readTimeout(2500, TimeUnit.MILLISECONDS).build()
-    private val lent = OkHttpClient.Builder().connectTimeout(3, TimeUnit.SECONDS).readTimeout(300, TimeUnit.SECONDS)
-        .callTimeout(330, TimeUnit.SECONDS).build()
+    // Tâches orchestrées (sous-agents, plusieurs missions Jarvis) : jusqu'à 10 minutes.
+    private val lent = OkHttpClient.Builder().connectTimeout(3, TimeUnit.SECONDS).readTimeout(600, TimeUnit.SECONDS)
+        .callTimeout(630, TimeUnit.SECONDS).build()
 
     @Volatile private var enLigneCache = false
     @Volatile private var verifieA = 0L
@@ -65,6 +66,11 @@ Pour ces routines, appelle d'abord l'outil routine_contextuelle avec la situatio
 Après le contexte, décide des actions utiles avec les outils JARVIS existants. Une routine ne doit pas déclencher d'envoi, suppression, appel ou modification sensible sans les confirmations habituelles.
 Ne fabrique jamais de tâche, de mail, de trajet ou de conflit ; signale clairement les permissions ou données manquantes. Distingue toujours les suggestions des actions réellement exécutées.
 Tu es Hermès, le cerveau principal de JARVIS, l'assistant personnel de ${userName.ifBlank { "l'utilisateur" }} sur son smartphone Android. Nous sommes le $maintenant.
+TON ÉQUIPE — tu es le cerveau ; tu planifies, tu répartis, tu contrôles et tu synthétises :
+1) mcp_jarvis_agent = l'agent téléphone (s'il n'est pas dans ta liste visible, appelle-le directement avec tool_call : calls=[{"name":"mcp_jarvis_agent","arguments":{"demande":"…"}}]). Confie-lui, en consigne française complète et autonome, toute action ou recherche sur le téléphone et les données de l'utilisateur : fichiers et dossiers (coffre Obsidian + stockage), clients/devis/factures/interventions, agenda, mails, SMS, appels, contacts, musique, Freebox, domotique, position, images, vidéos, réglages. Il maîtrise ces outils mieux que toi et renvoie le résultat réel : préfère-le aux outils bas niveau ; pour une tâche en plusieurs étapes, un appel par étape, en réutilisant les résultats. Si une information manque, demande-la à l'utilisateur plutôt que d'inventer.
+2) delegate_task = tes sous-agents, pour le travail parallèle ou lourd (recherche, comparaison, rédaction, analyse, code). Routes configurées : jarvis-gemini (analyse approfondie, rédaction, raisonnement long) et jarvis-groq (rapide, technique). Donne à chacun un objectif autonome avec tout le contexte utile ; ils peuvent aussi appeler mcp_jarvis_agent.
+3) cronjob = les automatismes (« tous les matins… », « chaque lundi… », « surveille… et préviens-moi »). Crée le job avec deliver="local" et un prompt autonome qui récupère les données nécessaires (mcp_jarvis_agent pour le téléphone, web pour l'extérieur) et se termine TOUJOURS par mcp_jarvis_notifier (titre + message) pour livrer le résultat à l'utilisateur. Confirme ensuite le nom, la fréquence, l'heure et ce qui sera envoyé. Pour lister, modifier, mettre en pause ou supprimer un automatisme, utilise cronjob.
+4) mcp_jarvis_notifier = livrer un message sur le téléphone (notification + conversation Jarvis) : fin d'automatisme ou de tâche longue.
 Réponds toujours en français, de façon naturelle et concise : ta réponse est souvent lue à voix haute (évite les tableaux et le Markdown chargé).
 Tu es le chef d'orchestre central de JARVIS : tu ne te limites pas à répondre, tu répartis le travail entre les modèles et agents réellement disponibles, puis tu contrôles et synthétises leurs résultats.
 FREEBOX : JARVIS est associé à la Freebox de l’utilisateur avec les droits accordés dans Freebox OS ; l’outil Jarvis « freebox » (MCP) liste ET modifie redirections de ports, serveur VPN (WireGuard/OpenVPN, utilisateurs, fichier de configuration), Wi-Fi, DMZ, IP réservées, et redémarre la box. Pour toute demande sur la Freebox, appelle cet outil ; ne réponds JAMAIS que la configuration est impossible, fermée ou manuelle (une ancienne réponse ou un souvenir disant le contraire est obsolète). TES FICHIERS NE SONT PAS CEUX DE L’UTILISATEUR : tu tournes dans une Debian (proot) dont le disque n’est pas le stockage du téléphone ni le coffre Obsidian ; n’utilise jamais search_files, find, ls, terminal ou read_file pour chercher, lister, lire ou déplacer les fichiers/dossiers/images/notes de l’utilisateur — uniquement les outils Jarvis (stockage_telephone, obsidian_fichiers, obsidian_lire…). FICHIERS : pour retrouver un fichier OU un dossier (même créé ou renommé à la main par l’utilisateur), appelle stockage_telephone action=chercher (coffre Obsidian + stockage du téléphone) avant de conclure qu’il n’existe pas. Les outils JARVIS arrivent via MCP avec divulgation progressive. Pour rester sous la limite Groq de 128 outils, le pont expose une liste courte (80 outils métier prioritaires) et deux outils de découverte : jarvis_rechercher_outils puis jarvis_appeler_outil. Utilise aussi tool_search, tool_describe et tool_call quand disponibles. Si l'outil recherché n'est pas dans la liste, cherche-le dans le catalogue complet avec jarvis_rechercher_outils, lis son schéma, puis exécute-le avec jarvis_appeler_outil en respectant exactement ses paramètres et les confirmations requises. Ne demande pas à l'utilisateur de créer une nouvelle session comme solution définitive. Si Groq renvoie encore une erreur de limite, n'envoie pas une liste complète : bascule sur Gemini si disponible et conserve la découverte progressive. GPS CLIENT / INSTALLATION — PRIORITÉ ABSOLUE : lorsqu'un utilisateur fournit une ou plusieurs coordonnées GPS à ajouter à un client (ex. « Clairotte 3 » et « Clairotte »), traite chaque couple installation/coordonnées comme une modification de la base métier Société, jamais comme une modification de fichier. Appelle directement les outils MCP JARVIS « societe_liste » puis « client_ecrire » ; ils sont exposés en tête de liste par le pont local. Commence par societe_liste avec quoi="clients" et filtre=nom du client, puis utilise le nom exact du client et le nom exact de chaque installation dans client_ecrire (un appel par installation si nécessaire), avec site_gps contenant strictement les coordonnées fournies. Ne lance jamais obsidian_fichiers, obsidian_ecrire, document_lire, document_modifier, patch, edit_file, write_file, shell, SSH, ADB ou un outil de mutation de fichiers pour cette opération ; la copie Obsidian est générée automatiquement par client_ecrire après mise à jour de la base. N'écris aucune note récapitulative de remplacement. Si l'outil MCP n'est pas disponible, actualise/découvre le catalogue Jarvis et réessaie ; si l'appel échoue, rapporte exactement l'erreur et n'annonce aucun succès. Après chaque écriture, vérifie la relecture de la base et la présence de chaque point GPS avant de confirmer. Pour les interventions, les outils Jarvis dédiés existent et sont exposés par le pont MCP local : « interventions_liste », « intervention_supprimer » et « intervention_modifier ». Ils ne sont PAS des outils de suppression de client. N'utilise JAMAIS « client_supprimer » ou « mcp_jarvis_client_supprimer » pour une intervention. Ne propose JAMAIS de supprimer la fiche client, même comme alternative, pour répondre à une demande de suppression d'intervention : c'est une action différente, destructive et non autorisée par cette demande. Si l'outil dédié reste introuvable après recherche exacte, indique que la suppression d'intervention est temporairement indisponible et laisse intégralement la fiche client et son historique inchangés. Si l'interface de découverte affiche un préfixe technique, cherche aussi « mcp_jarvis_interventions_liste » et « mcp_jarvis_intervention_supprimer », puis vérifie les descriptions et paramètres ; le nom canonique côté Jarvis reste « interventions_liste » / « intervention_supprimer ». Avant de conclure qu'un outil manque, actualise la liste des outils MCP du serveur jarvis local et vérifie la présence des cinq outils Société. Si la recherche ne renvoie pas ces outils, vérifie la disponibilité du serveur MCP jarvis et signale une erreur de connexion : ne remplace jamais cette recherche par les outils génériques Obsidian ou fichiers. Pour supprimer : appelle d'abord la liste, utilise uniquement l'ID exact renvoyé, présente la fiche à l'utilisateur et attends son « oui » explicite ; seulement après, appelle la suppression avec confirmation="oui". INTERDICTION ABSOLUE d'appeler intervention_enregistrer pour satisfaire une demande de suppression, même si la suppression échoue ou si un outil est introuvable. Ne crée jamais de fiche « test » ou de remplacement. En cas d'échec, explique-le et laisse l'historique inchangé.
@@ -233,7 +239,9 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
     private suspend fun appeler(app: JarvisApp, messages: JSONArray, boite: ToolBox?, onStatus: (String) -> Unit): String? {
         PontMcp.demarrer(app)
         val precedente = PontMcp.boiteActive
+        val statutPrecedent = PontMcp.statutActif
         if (boite != null) PontMcp.boiteActive = boite
+        PontMcp.statutActif = onStatus
         onStatus("🪽 Hermès réfléchit…")
         return try {
             withContext(Dispatchers.IO) {
@@ -263,19 +271,20 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
             marquerEnLigne(false); relancerSiBesoin(app); null
         } finally {
             PontMcp.boiteActive = precedente
+            PontMcp.statutActif = statutPrecedent
         }
     }
 }
 
 /**
- * Répartition des demandes (mode « auto ») :
- *  - Jarvis (Groq/Gemini + ses outils natifs) : tout ce qui touche au téléphone et aux données de l'utilisateur (fichiers et
- *    dossiers, coffre Obsidian, clients/interventions, agenda, musique, SMS, appels, Freebox, domotique, images, vidéos…),
- *    les réponses courtes et Android Auto ;
- *  - Hermès : recherche sur internet, rédaction, analyse, code, planification, automatisations, questions ouvertes, et tout
- *    message qui le nomme (« Hermès, … ») ; il garde l'accès aux outils de Jarvis via le pont MCP ;
- *  - une réponse brève (« oui », « ok », « non »…) va au cerveau qui a traité le message précédent, pour ne pas casser
- *    une confirmation en cours.
+ * Répartition des demandes. Hermès est le cerveau : il orchestre, planifie, crée les automatismes (cronjob) et répartit le
+ * travail entre ses sous-agents (delegate_task → routes Gemini et Groq) et l'agent téléphone Jarvis (outil MCP jarvis_agent).
+ *  - mode « auto » : Hermès reçoit les tâches complexes, en plusieurs étapes, récurrentes ou multi-agents (même si elles
+ *    touchent au téléphone), la recherche web, la rédaction, l'analyse, le code et les questions ouvertes ; Jarvis répond
+ *    directement aux commandes simples du téléphone (une action, un fichier, la Freebox…), plus vite et sans détour ;
+ *  - mode « tout » : Hermès reçoit tout et confie lui-même les actions du téléphone à Jarvis ;
+ *  - Android Auto : Jarvis (réponse rapide) ; « Hermès, … » force Hermès ; une réponse brève ou la réponse à une question
+ *    va au cerveau qui l'a posée (confirmation, choix d'installation…).
  */
 object Routeur {
     enum class Cible { HERMES, JARVIS }
@@ -294,7 +303,8 @@ object Routeur {
             "image|dessin|coloriage|vid[ée]o|tiktok|discord|imprim|scann|" +
             "m[ée]t[ée]o|quelle heure|batterie|ma position|ma localisation|o[uù] suis.je|" +
             "mails?|courriels?|bo[iî]te de r[ée]ception|contacts?|r[ée]glage|" +
-            "freebox|vpn|routeur|serveur|ssh|home ?assistant|domotique|interventions?|chantiers?|installations?|position|gps)",
+            "freebox|vpn|routeur|serveur|ssh|home ?assistant|domotique|interventions?|chantiers?|installations?|position|gps|" +
+            "permissions?|autorisations?|notifications?|acc[eè]s [àa]|batterie|stockage|t[ée]l[ée]charg|galerie|cam[ée]ra)",
         RegexOption.IGNORE_CASE
     )
     private val COMPLEXE = Regex(
@@ -306,33 +316,52 @@ object Routeur {
     )
     private val FREEBOX = Regex("freebox|\\bvpn\\b|wireguard|openvpn|redirection(s)? de ports?|ouvr\\w* (le|un|les) ports?|\\bdmz\\b", RegexOption.IGNORE_CASE)
     private val FICHIERS = Regex("(trouv|cherch|localis|o[uù] (est|sont|se trouv)).{0,40}\\b(dossiers?|fichiers?|images?|photos?|documents?|pdf|vid[ée]os?)\\b", RegexOption.IGNORE_CASE)
+    /** Tâches à orchestrer : récurrence, automatisme, surveillance, sous-agents, plusieurs étapes. */
+    private val ORCHESTRATION = Regex(
+        "automati|routine|tous les (jours|matins|soirs|midis|lundis|mardis|mercredis|jeudis|vendredis|samedis|dimanches|week.?ends?|mois|ans|\\d+)|" +
+            "toutes les (\\d+|heures|semaines|minutes|nuits)|chaque (jour|matin|soir|nuit|semaine|mois|ann[ée]e|heure|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|fois)|" +
+            "d[èe]s que (je|j.|tu|il|elle|un|une|le|la|les|quelqu)|quand (je re[çc]ois|tu re[çc]ois|il y a|un (mail|sms|message))|" +
+            "surveille|tiens.moi (au courant|inform)|pr[ée]viens.moi (si|quand|d[èe]s|lorsque)|" +
+            "t[âa]ches? (planifi|r[ée]currente|complexe|longue)|sous.agents?|multi.?agents?|plusieurs agents|tes agents|(agents?|mod[eè]les?) (groq|gemini)|" +
+            "en parall[èe]le|plusieurs [ée]tapes|workflow|orchestr|\\bmissions?\\b",
+        RegexOption.IGNORE_CASE
+    )
+    private val MULTI = Regex("\\b(puis|ensuite|et enfin|et apr[èe]s|apr[èe]s [çc]a|apr[èe]s cela)\\b", RegexOption.IGNORE_CASE)
+    private val WEB = Regex("sur internet|sur le web|en ligne|actualit[ée]s?|recherche approfondie|derni[èe]res nouvelles", RegexOption.IGNORE_CASE)
+
+    /** Demande en plusieurs étapes enchaînées (« trouve… puis envoie… »). */
+    fun multiEtapes(texte: String) = MULTI.containsMatchIn(texte) && texte.trim().split(Regex("\\s+")).size >= 5
+
     private val BREF = Regex("^(merci|ok|okay|d.accord|super|parfait|salut|bonjour|bonsoir|coucou|oui|non|stop|annule|c.est bon)[ !.,]*\\S{0,12}$", RegexOption.IGNORE_CASE)
 
     /** Cerveau qui a traité la dernière demande (pour les réponses brèves de suite de conversation). */
     @Volatile var derniere: Cible = Cible.JARVIS
 
-    fun choisir(app: JarvisApp, texte: String): Choix = choisirSansMemoire(app, texte).also { derniere = it.cible }
+    fun choisir(app: JarvisApp, texte: String, precedent: String? = null): Choix = choisirSansMemoire(app, texte, precedent).also { derniere = it.cible }
 
-    private fun choisirSansMemoire(app: JarvisApp, texte: String): Choix {
-        val mode = app.store.hermesMode.value
+    private fun choisirSansMemoire(app: JarvisApp, texte: String, precedent: String?): Choix =
+        decider(app.store.hermesMode.value, app.enVoiture, Hermes.degrade(), texte, precedent)
+
+    /** Décision pure (testable) : mode des réglages, Android Auto, Hermès saturé, demande, message précédent de l'assistant. */
+    internal fun decider(mode: String, enVoiture: Boolean, sature: Boolean, texte: String, precedent: String?): Choix {
         if (mode == "off") return Choix(Cible.JARVIS, "Hermès désactivé dans les réglages")
         val t = texte.trim()
         if (mode == "demande" && !NOMME.containsMatchIn(t)) return Choix(Cible.JARVIS, "mode à la demande : Hermès doit être nommé")
-        if (Hermes.degrade() && !NOMME.containsMatchIn(t)) return Choix(Cible.JARVIS, "Hermès momentanément saturé : Jarvis répond directement")
-        // Freebox : outil dédié côté Jarvis, toujours proposé au cerveau rapide (évite qu'Hermès se fie à un vieux souvenir).
-        if (!NOMME.containsMatchIn(t) && FREEBOX.containsMatchIn(t)) return Choix(Cible.JARVIS, "Freebox : outil Jarvis dédié")
-        // Recherche de fichiers/dossiers : outils Jarvis (coffre + téléphone) plutôt que le système de fichiers de Debian.
-        if (!NOMME.containsMatchIn(t) && FICHIERS.containsMatchIn(t)) return Choix(Cible.JARVIS, "recherche de fichiers : outils Jarvis")
-        // Répartition selon ce que chacun fait le mieux (constat à l'usage : Jarvis comprend et exécute les demandes sur le
-        // téléphone et les données bien mieux qu'Hermès, qui n'en voit les outils qu'au travers du pont MCP) :
-        //  - Jarvis : commandes et données du téléphone (fichiers/dossiers, coffre, clients, agenda, musique, SMS, appels,
-        //    domotique, Freebox, images, vidéos…), réponses courtes, Android Auto ;
-        //  - Hermès : recherche, rédaction, analyse, code, planification, automatisations, questions ouvertes.
+        if (sature && !NOMME.containsMatchIn(t)) return Choix(Cible.JARVIS, "Hermès momentanément saturé : Jarvis répond directement")
+        if (NOMME.containsMatchIn(t)) return Choix(Cible.HERMES, "Hermès demandé")
+        if (enVoiture) return Choix(Cible.JARVIS, "Android Auto : Jarvis, réponse rapide")
+        // Suite de conversation : « oui », « toutes », « Clairotte 3 »… en réponse à une question → au cerveau qui l'a posée.
+        val reponseCourte = t.split(Regex("\\s+")).size <= 4 && !t.endsWith("?") && precedent != null && precedent.takeLast(250).contains("?") &&
+            !ORCHESTRATION.containsMatchIn(t) && !FREEBOX.containsMatchIn(t) && !FICHIERS.containsMatchIn(t) && !WEB.containsMatchIn(t)
+        if (BREF.matches(t) || reponseCourte) return Choix(derniere, if (derniere == Cible.HERMES) "suite de la conversation avec Hermès" else "suite de la conversation avec Jarvis")
+        if (mode == "tout") return Choix(Cible.HERMES, "Hermès pour tout : il confie les actions du téléphone à Jarvis")
+        // Hermès orchestre : automatismes, récurrence, surveillance, sous-agents, plusieurs étapes — même sur des données du téléphone.
+        if (ORCHESTRATION.containsMatchIn(t) || multiEtapes(t)) return Choix(Cible.HERMES, "tâche complexe : Hermès orchestre (Gemini, Groq, Jarvis)")
+        // Commandes simples du téléphone : exécution directe par Jarvis (Freebox, recherche de fichiers/dossiers…).
+        if (FREEBOX.containsMatchIn(t)) return Choix(Cible.JARVIS, "Freebox : outil Jarvis dédié")
+        if (FICHIERS.containsMatchIn(t)) return Choix(Cible.JARVIS, "recherche de fichiers : outils Jarvis")
         return when {
-            NOMME.containsMatchIn(t) -> Choix(Cible.HERMES, "Hermès demandé")
-            app.enVoiture -> Choix(Cible.JARVIS, "Android Auto : Jarvis, réponse rapide")
-            BREF.matches(t) -> if (derniere == Cible.HERMES) Choix(Cible.HERMES, "suite de la conversation avec Hermès") else Choix(Cible.JARVIS, "réponse courte : Jarvis")
-            Regex("sur internet|sur le web|en ligne|actualit[ée]s?|recherche approfondie", RegexOption.IGNORE_CASE).containsMatchIn(t) -> Choix(Cible.HERMES, "recherche web : Hermès")
+            WEB.containsMatchIn(t) -> Choix(Cible.HERMES, "recherche web : Hermès")
             COMPLEXE.containsMatchIn(t) && !COMMANDE.containsMatchIn(t) -> Choix(Cible.HERMES, "tâche complexe : Hermès")
             COMMANDE.containsMatchIn(t) -> Choix(Cible.JARVIS, "commande du téléphone : Jarvis et ses outils")
             else -> Choix(Cible.HERMES, "question ouverte : Hermès")

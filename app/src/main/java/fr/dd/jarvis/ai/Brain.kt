@@ -6,8 +6,9 @@ import org.json.JSONObject
 data class ChatMsg(val fromUser: Boolean, val text: String, val ts: Long = System.currentTimeMillis())
 
 /**
- * Point d'entrée conversationnel de Jarvis : route toute demande vers Hermès en mode auto.
- * Le moteur Groq de Jarvis n'est utilisé qu'en secours si Hermès est indisponible ou désactivé.
+ * Point d'entrée conversationnel de Jarvis. Le routeur choisit entre Hermès (cerveau : tâches complexes, automatismes,
+ * sous-agents Groq/Gemini) et Jarvis (exécution rapide sur le téléphone). Quand Hermès confie une action à Jarvis
+ * (outil MCP jarvis_agent), [reply] tourne avec pourHermes = true : pas de renvoi vers Hermès, pas de boucle.
  */
 class Brain(
     private val llm: Llm,
@@ -15,7 +16,7 @@ class Brain(
     private val app: fr.dd.jarvis.JarvisApp,
     private val userName: () -> String
 ) {
-    suspend fun reply(history: List<ChatMsg>, onStatus: (String) -> Unit): String {
+    suspend fun reply(history: List<ChatMsg>, pourHermes: Boolean = false, onStatus: (String) -> Unit): String {
         val recent = history.takeLast(4).filter { it.fromUser }.joinToString(" ") { it.text }
         val societeOn = fr.dd.jarvis.societe.SocieteTools.concerned(recent)
         val planningClientsSync = Regex("(planning|agenda).{0,100}(fiche|client)|(fiche|client).{0,100}(planning|agenda)", RegexOption.IGNORE_CASE).containsMatchIn(recent) &&
@@ -28,25 +29,29 @@ class Brain(
             Regex("(scan|analys|d[ée]tect|list|cherch|affich).{0,25}(r[ée]seau|wi-?fi|appareils)|appareils connect").containsMatchIn(dernier) -> "reseau_scanner"
             else -> null
         }
-        // Traitements directs de Jarvis : la suite de la conversation (« oui », « ok »…) lui revient.
-        fun parJarvis(r: String) = r.also { fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS }
-        positionDirecte(dernier, history, onStatus)?.let { return parJarvis(it) }
-        rangementDirect(history, onStatus)?.let { return parJarvis(it) }
-        rechercheDirecte(history.lastOrNull { it.fromUser }?.text.orEmpty(), onStatus)?.let { return parJarvis(it) }
-        freeboxDirect(history.lastOrNull { it.fromUser }?.text.orEmpty(), onStatus)?.let { return parJarvis(it) }
+        val texteUser = history.lastOrNull { it.fromUser }?.text.orEmpty()
+        // Hermès, cerveau principal : tâches complexes, automatismes, sous-agents… Il reçoit la demande AVANT les
+        // traitements directs (qui ne savent faire qu'une étape) ; s'il est indisponible, Jarvis reprend la main.
+        if (!pourHermes) {
+            val precedent = history.dropLastWhile { it.fromUser }.lastOrNull()?.text
+            val choix = fr.dd.jarvis.hermes.Routeur.choisir(app, texteUser, precedent)
+            if (choix.cible == fr.dd.jarvis.hermes.Routeur.Cible.HERMES) {
+                val r = fr.dd.jarvis.hermes.Hermes.repondre(app, history, tools, userName(), onStatus)
+                if (r != null) return r
+                fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS
+                onStatus("Hermès indisponible : Jarvis prend le relais…")
+            }
+        }
+        // Demande en plusieurs étapes (« trouve… puis envoie… ») : pas de raccourci qui n'exécuterait que la première.
+        val multi = fr.dd.jarvis.hermes.Routeur.multiEtapes(texteUser)
+        positionDirecte(dernier, history, onStatus)?.let { return it }
+        rangementDirect(history, onStatus)?.let { return it }
+        if (!multi) rechercheDirecte(texteUser, onStatus)?.let { return it }
+        if (!multi) freeboxDirect(texteUser, onStatus)?.let { return it }
         if (outilDirect != null) {
-            fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS
             onStatus("⚙️ $outilDirect…")
             val args = JSONObject(); if (dernier.contains("serveur")) args.put("via", "serveur")
             return try { tools.execute(outilDirect, args).text } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { "❌ ${e.message}" }
-        }
-        // Répartition auto : Jarvis pour le téléphone et les données, Hermès pour la recherche, la rédaction, l'analyse et les tâches longues ; Groq/Gemini en secours si Hermès est indisponible.
-        val choix = fr.dd.jarvis.hermes.Routeur.choisir(app, history.lastOrNull { it.fromUser }?.text.orEmpty())
-        if (choix.cible == fr.dd.jarvis.hermes.Routeur.Cible.HERMES) {
-            val r = fr.dd.jarvis.hermes.Hermes.repondre(app, history, tools, userName(), onStatus)
-            if (r != null) return r
-            fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS
-            onStatus("Hermès indisponible : Groq prend le relais…")
         }
         onStatus("🧠 Analyse de la demande…")
         val all = tools.schemaAll()
@@ -68,8 +73,15 @@ class Brain(
             for (i in 0 until all.length()) if (all.getJSONObject(i).getJSONObject("function").getString("name") in keep) schema.put(all.get(i))
             if (plan.outils.any { it in fr.dd.jarvis.societe.SocieteTools.NAMES }) societeNeeded = true
         } else schema = tools.schemaFor(recent)
+        val schemaFinal = if (!pourHermes) schema else JSONArray().also { f ->
+            for (i in 0 until schema.length()) {
+                val nom = schema.optJSONObject(i)?.optJSONObject("function")?.optString("name")
+                if (nom !in setOf("hermes", "hermes_deleguer", "tache_arriere_plan")) f.put(schema.get(i))
+            }
+        }
         val messages = JSONArray()
         messages.put(JSONObject().put("role", "system").put("content",
+            (if (pourHermes) "Tu es l'agent téléphone de JARVIS, missionné par Hermès (le cerveau) : exécute la consigne avec tes outils, puis rends un compte rendu factuel et complet (résultats réels, chemins, identifiants, erreurs exactes), sans poser de question sauf si une information indispensable manque.\n\n" else "") +
             Prompts.brain(userName()) + app.memo.toutes() + (if (societeNeeded) "\n\n" + fr.dd.jarvis.societe.SocieteTools.PROMPT else "") +
                 (if (plan != null && plan.note.isNotBlank()) "\n\nAnalyse préalable de la demande (Gemini) — suis ce plan, avec les outils fournis : ${plan.note}" else "")))
         // Réduction de tokens sans perte de précision : seuls les derniers échanges (où un détail précis — liste de fichiers,
@@ -85,7 +97,7 @@ class Brain(
 
         repeat(6) {
             val msg = try {
-                llm.groqChat(messages, schema)
+                llm.groqChat(messages, schemaFinal)
             } catch (e: ApiException) {
                 // Llama/GPT-OSS génère parfois un appel d'outil mal formé : on réessaie en interdisant explicitement un
                 // nouvel appel d'outil ce tour-ci (tool_choice=none), mais SANS retirer les définitions d'outils du
@@ -97,7 +109,7 @@ class Brain(
                     try {
                         val m2 = JSONArray(); for (k in 0 until messages.length()) m2.put(messages.get(k))
                         m2.put(JSONObject().put("role", "system").put("content", "L'appel d'outil a échoué pour ce tour. N'invente AUCUNE donnée (appareils, imprimantes, mails, événements, fichiers) : dis simplement que l'action n'a pas pu être lancée et demande de réessayer."))
-                        llm.groqChat(m2, schema, forceText = true)
+                        llm.groqChat(m2, schemaFinal, forceText = true)
                     } catch (e2: kotlinx.coroutines.CancellationException) { throw e2 } catch (e2: Exception) {
                         return "Désolé, j'ai buté sur cette demande (le modèle n'a pas réussi à formuler l'appel d'outil correctement). Peux-tu reformuler ou réessayer ?"
                     }
@@ -123,7 +135,8 @@ class Brain(
                 }
                 onStatus("⚙️ $name…")
                 val res = try {
-                    tools.execute(name, args)
+                    if (pourHermes && name in setOf("hermes", "hermes_deleguer", "tache_arriere_plan")) ToolResult("Outil indisponible pour un agent missionné par Hermès.")
+                    else tools.execute(name, args)
                 } catch (e: ApiException) {
                     ToolResult("Erreur du service IA : ${e.message}")
                 } catch (e: Exception) {
