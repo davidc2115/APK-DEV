@@ -277,7 +277,9 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         val generales = setOf("general", "preferences", "preference", "habitudes", "profil", "style", "identite", "ton", "langue")
         val toujours = items.filterKeys { fr.dd.jarvis.societe.core.normaliser(it) in generales }
         val autres = items.keys - toujours.keys
-        return "\n\nMémoire de l'utilisateur (consignes durables, à appliquer) :\n" +
+        val partagee = items["memoire partagee"].orEmpty()
+        return "\n\nMémoire unique JARVIS (source canonique, consignes durables à appliquer) :\n" +
+            (if (partagee.isNotBlank()) "[connaissances et profil synchronisés] " + partagee.take(1600) + "\n" else "") +
             toujours.entries.joinToString("\n") { "- [${it.key}] ${it.value.take(500)}" }.take(1800) +
             (if (autres.isNotEmpty()) "\nAutres rubriques mémorisées (celles utiles à cette demande sont dans les notes ci-dessus ; détails avec memoire_lire) : ${autres.joinToString(", ")}" else "")
     }
