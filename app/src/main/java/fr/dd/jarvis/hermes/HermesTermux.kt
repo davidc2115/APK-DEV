@@ -241,7 +241,7 @@ arreter_passerelles_hermes() {
     // ------------------------------------------------------------------ 3-5. Installation, configuration, démarrage
 
     /** Version du hook de mémoire partagée : à augmenter quand memoire_handler.py change (réinstallation automatique). */
-    const val VERSION_HOOK_MEMOIRE = 4
+    const val VERSION_HOOK_MEMOIRE = 5
 
     /**
      * Installe (ou met à jour) le hook « jarvis-memoire » d'Hermès : au démarrage de la passerelle, il lance un fil qui
@@ -280,7 +280,11 @@ p '🧠 Mémoire partagée Jarvis ↔ Hermès installée.'
         // de 15 s à 60 s × 5 en cas de panne (c'était le « Jarvis réfléchit… » interminable) : Jarvis prend le relais.
         val rapidite = "debian_utilisateur_jarvis; hermes_debian hermes config set agent.reasoning_effort low --force >/dev/null 2>&1; " +
             "hermes_debian hermes config set agent.api_max_retries 1 --force >/dev/null 2>&1; " +
-            "hermes_debian hermes config set agent.auto_recovery_cycles 0 --force >/dev/null 2>&1 && p '⚡ Hermès : réflexion allégée, bascule immédiate en cas de panne.' || true"
+            "hermes_debian hermes config set agent.auto_recovery_cycles 0 --force >/dev/null 2>&1; " +
+            // Version 5 : plus de relecture automatique après chaque réponse (≈30 000 jetons sur le même quota, qui faisait
+            // attendre la demande suivante) ni d'appel d'IA pour titrer chaque conversation.
+            "hermes_debian hermes config set auxiliary.background_review.enabled false --force >/dev/null 2>&1; " +
+            "hermes_debian hermes config set auxiliary.title_generation.model_upgrade_enabled false --force >/dev/null 2>&1 && p '⚡ Hermès : réglages de rapidité appliqués.' || true"
         val script = prelude(app) + "\n" + scriptHookMemoire(app) + "\n" + rapidite + "\narreter_passerelles_hermes; sleep 1\n" + demarrage
         return executer(app, script, libelle = "Mémoire partagée Jarvis ↔ Hermès")
     }
@@ -332,6 +336,11 @@ p '🧠 Mémoire partagée Jarvis ↔ Hermès installée.'
             appendLine("  reasoning_effort: low")
             appendLine("  api_max_retries: 1")
             appendLine("  auto_recovery_cycles: 0")
+            appendLine("auxiliary:")
+            appendLine("  background_review:")
+            appendLine("    enabled: false")
+            appendLine("  title_generation:")
+            appendLine("    model_upgrade_enabled: false")
             appendLine("memory:")
             appendLine("  memory_enabled: true")
             appendLine("  user_profile_enabled: true")
@@ -706,6 +715,12 @@ agent_cfg = data.setdefault("agent", {})
 if isinstance(agent_cfg, dict):
     agent_cfg["api_max_retries"] = 1
     agent_cfg["auto_recovery_cycles"] = 0
+aux_cfg = data.setdefault("auxiliary", {})
+if isinstance(aux_cfg, dict):
+    br = aux_cfg.setdefault("background_review", {})
+    if isinstance(br, dict): br["enabled"] = False
+    tg = aux_cfg.setdefault("title_generation", {})
+    if isinstance(tg, dict): tg["model_upgrade_enabled"] = False
 if isinstance(agent_cfg, dict) and str(agent_cfg.get("reasoning_effort") or "").strip().lower() in ("", "medium"):
     agent_cfg["reasoning_effort"] = "low"
 # Multi-agent orchestration, preserving all unrelated Hermes configuration.

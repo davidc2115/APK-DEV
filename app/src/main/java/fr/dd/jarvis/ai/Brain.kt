@@ -33,7 +33,7 @@ class Brain(
             "❌ ${e.message ?: e.javaClass.simpleName}"
         }
         if (!suivi.cerveauJarvis || !escaladePossible(pourHermes, suivi) || !fr.dd.jarvis.hermes.Routeur.jarvisABesoinDHermes(r)) return r
-        onStatus("🧠 Jarvis approfondit…")
+        onStatus("🧠 Hermès prend le relais…")
         val h = fr.dd.jarvis.hermes.Hermes.repondre(app, history, tools, userName(), onStatus, tentativeJarvis = r) ?: return r
         fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.HERMES
         return h

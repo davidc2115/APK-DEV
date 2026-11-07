@@ -327,15 +327,15 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
         val precedente = PontMcp.boiteActive
         val statutPrecedent = PontMcp.statutActif
         val attendu = AtomicBoolean(true) // l'utilisateur attend encore la réponse à l'écran
-        val dernierStatut = AtomicReference("🧠 Jarvis réfléchit…")
+        val dernierStatut = AtomicReference("🧠 Hermès réfléchit…")
         val notif = 7400 + (numeroFond.incrementAndGet() % 40) * 2
         val statut: (String) -> Unit = { st ->
             dernierStatut.set(st)
-            if (attendu.get()) onStatus(st) else SuiviTaches.enCours(app, notif, "Jarvis termine en arrière-plan", "${demande.take(80)}\n$st")
+            if (attendu.get()) onStatus(st) else SuiviTaches.enCours(app, notif, "Hermès termine en arrière-plan", "${demande.take(80)}\n$st")
         }
         if (boite != null) PontMcp.boiteActive = boite
         PontMcp.statutActif = statut
-        statut("🧠 Jarvis réfléchit…")
+        statut("🧠 Hermès réfléchit…")
         val appel = AtomicReference<okhttp3.Call?>(null)
         val travail = fond.async {
             try { executer(app, messages, appel) } finally {
@@ -358,12 +358,12 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
             if (travail.isCompleted) return travail.await()
             // Trop long : la demande continue en arrière-plan, l'utilisateur récupère la main.
             attendu.set(false)
-            SuiviTaches.enCours(app, notif, "Jarvis termine en arrière-plan", "${demande.take(80)}\n${dernierStatut.get()}")
+            SuiviTaches.enCours(app, notif, "Hermès termine en arrière-plan", "${demande.take(80)}\n${dernierStatut.get()}")
             fond.launch {
                 val r = runCatching { travail.await() }.getOrNull()
                 val texte = r ?: "⚠️ Je n'ai pas réussi à terminer « ${demande.take(80).ifBlank { "ta demande" }} » (moteur approfondi indisponible ou délai dépassé). Redemande-la si besoin."
                 withContext(Dispatchers.Main) { app.chatAjouter(ChatMsg(false, texte)) }
-                SuiviTaches.termine(app, notif, if (r != null) "Jarvis a terminé" else "Jarvis n'a pas pu terminer", texte)
+                SuiviTaches.termine(app, notif, if (r != null) "Hermès a terminé" else "Hermès n'a pas pu terminer", texte)
             }
             return MESSAGE_ARRIERE_PLAN
         } catch (e: CancellationException) {
@@ -373,6 +373,31 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
         } finally {
             minuteur.cancel()
         }
+    }
+
+    /** Temps de réponse d'Hermès à une question triviale, comparé à l'IA appelée directement (diagnostic de lenteur). */
+    suspend fun mesurerVitesse(app: JarvisApp): String = withContext(Dispatchers.IO) {
+        if (!enLigne(force = true)) return@withContext "❌ Hermès est hors ligne : touche « Démarrer Hermès »."
+        val corps = JSONObject().put("model", "hermes-agent").put("stream", false)
+            .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", "Réponds uniquement : OK")))
+        val req = Request.Builder().url("http://127.0.0.1:${HermesTermux.PORT_API}/v1/chat/completions")
+            .header("Authorization", "Bearer ${app.store.hermesCle.value}").header("X-Hermes-Session-Key", "jarvis-vitesse")
+            .post(corps.toString().toRequestBody(JSON)).build()
+        val t0 = System.currentTimeMillis()
+        val h = runCatching { lent.newCall(req).execute().use { r -> if (r.isSuccessful) "ok" else "erreur ${r.code}" } }.getOrElse { "erreur ${it.message}" }
+        val dh = (System.currentTimeMillis() - t0) / 100 / 10.0
+        val t1 = System.currentTimeMillis()
+        val d = runCatching { app.llm.agent("Réponds en un mot.", "Dis OK"); "ok" }.getOrElse { "erreur" }
+        val dd = (System.currentTimeMillis() - t1) / 100 / 10.0
+        val surcout = ((dh - dd) * 10).toInt() / 10.0
+        "⏱️ Hermès : $dh s ($h) · IA directe : $dd s ($d)" +
+            (if (h == "ok" && d == "ok") " → Hermès lui-même ajoute ≈ $surcout s par échange." else "") +
+            when {
+                h != "ok" -> "\nHermès a répondu par une erreur : touche « Configurer Hermès »."
+                dh > 20 -> "\nC'est très lent : quotas Gemini probablement atteints (Hermès attend puis bascule) ou téléphone en économie d'énergie. Ajoute des clés Gemini ou retire l'optimisation de batterie de Termux."
+                dh > 8 -> "\nUne demande avec un outil compte 2 à 3 échanges de ce type."
+                else -> "\nVitesse correcte."
+            }
     }
 
     private fun executer(app: JarvisApp, messages: JSONArray, appel: AtomicReference<okhttp3.Call?>): String? {

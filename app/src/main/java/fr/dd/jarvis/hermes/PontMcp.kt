@@ -157,7 +157,7 @@ object PontMcp {
                     }
                 }
             }
-            statutActif?.invoke("🧠 Jarvis réfléchit…")
+            statutActif?.invoke("🧠 Hermès réfléchit…")
             return res.fold(
                 { r -> if (r == null) "⏱️ Jarvis n'a pas terminé à temps : découpe la mission en étapes plus courtes." to true else r to false },
                 { e -> "❌ Jarvis : ${e.message ?: e.javaClass.simpleName}" to true }
