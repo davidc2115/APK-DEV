@@ -105,7 +105,7 @@ object ImageGen {
                 val dossierImages = File(app.filesDir, "images").apply { mkdirs() }
                 val f = File(dossierImages, name)
                 f.writeBytes(bytes)
-                memoriserDescription(dossierImages, name, prompt)
+                memoriserDescription(dossierImages, name, prompt, bytes)
                 val loc = app.obsidian.saveBytes("JARVIS/Images", name, bytes, "image/png")
                 return@withContext f to loc
             } catch (e: ApiException) {
@@ -118,12 +118,15 @@ object ImageGen {
 
     /** Garde la description (prompt) de chaque image générée, pour la retrouver plus tard par son sujet. */
     @Synchronized
-    private fun memoriserDescription(dossier: File, nom: String, prompt: String) {
+    private fun memoriserDescription(dossier: File, nom: String, prompt: String, bytes: ByteArray) {
         runCatching {
             // À côté du dossier des images (et non dedans) : il ne doit jamais passer pour une image.
             val f = File(dossier.parentFile, "images_descriptions.json")
             val j = if (f.isFile) JSONObject(f.readText()) else JSONObject()
             j.put(nom, prompt.take(300))
+            // Identifiant fondé sur le contenu : la description survit à un renommage ou déplacement dans Obsidian.
+            val hash = java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+            j.put("sha256:$hash", prompt.take(300))
             f.writeText(j.toString())
         }
     }
