@@ -49,20 +49,33 @@ object Serveur {
         }
         val st = app.store
         val jsch = JSch()
-        if (st.sshKey.value.isNotBlank()) jsch.addIdentity("jarvis", st.sshKey.value.trim().replace("\r", "").plus("\n").toByteArray(), null, st.sshPass.value.takeIf { it.isNotBlank() }?.toByteArray())
+        if (st.sshKey.value.isNotBlank()) {
+            jsch.addIdentity("jarvis", st.sshKey.value.trim().replace("\r", "").plus("\n").toByteArray(), null,
+                st.sshPass.value.takeIf { it.isNotBlank() }?.toByteArray())
+        }
         val s = jsch.getSession(st.sshUser.value.trim(), st.sshHost.value.trim(), st.sshPort.value.toIntOrNull() ?: 22)
-        if (st.sshKey.value.isBlank()) s.setPassword(st.sshPass.value)
+        // Si une ancienne clé privée est encore renseignée, ne pas empêcher le repli sur le mot de passe.
+        // JSch n'essaie l'authentification password que si le mot de passe est explicitement fourni à la session.
+        if (st.sshPass.value.isNotBlank()) s.setPassword(st.sshPass.value)
         s.setConfig("StrictHostKeyChecking", "no")
-        s.setConfig("PreferredAuthentications", if (st.sshKey.value.isNotBlank()) "publickey,password,keyboard-interactive" else "password,keyboard-interactive,publickey")
+        s.setConfig("PreferredAuthentications", when {
+            st.sshKey.value.isNotBlank() && st.sshPass.value.isNotBlank() -> "publickey,password,keyboard-interactive"
+            st.sshKey.value.isNotBlank() -> "publickey"
+            else -> "password,keyboard-interactive,publickey"
+        })
         try { s.connect(if (st.sshHostDistant.value.isNotBlank()) 6000 else 15000) }
         catch (e: Exception) {
             // Hors du réseau local : repli sur l'adresse distante (IP publique ou nom DDNS, port redirigé sur la box).
             if (st.sshHostDistant.value.isBlank()) throw e
             runCatching { s.disconnect() }
             val s2 = jsch.getSession(st.sshUser.value.trim(), st.sshHostDistant.value.trim(), st.sshPortDistant.value.toIntOrNull() ?: (st.sshPort.value.toIntOrNull() ?: 22))
-            if (st.sshKey.value.isBlank()) s2.setPassword(st.sshPass.value)
+            if (st.sshPass.value.isNotBlank()) s2.setPassword(st.sshPass.value)
             s2.setConfig("StrictHostKeyChecking", "no")
-            s2.setConfig("PreferredAuthentications", if (st.sshKey.value.isNotBlank()) "publickey,password,keyboard-interactive" else "password,keyboard-interactive,publickey")
+            s2.setConfig("PreferredAuthentications", when {
+                st.sshKey.value.isNotBlank() && st.sshPass.value.isNotBlank() -> "publickey,password,keyboard-interactive"
+                st.sshKey.value.isNotBlank() -> "publickey"
+                else -> "password,keyboard-interactive,publickey"
+            })
             s2.connect(15000)
             return s2.also { sess ->
                 val fp2 = sess.hostKey.getFingerPrint(jsch)
