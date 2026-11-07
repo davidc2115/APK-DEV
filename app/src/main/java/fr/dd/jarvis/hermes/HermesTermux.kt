@@ -744,7 +744,7 @@ os.replace(name, p)
             "test -d /root/.hermes/installs || { echo 'Répertoire des environnements Hermès introuvable.'; exit 2; }",
             "cd \"\$REPO\"",
             "exec ./.hermes/bin/hermes update --yes"
-        ).joinToString("\\n")
+        ).joinToString("\n")
         val upgradeCommand = "set -o pipefail; p '🔄 Vérification du propriétaire de l’installation Hermès…'; " +
             "OWNER_IDS=\$(proot-distro login debian --termux-home -- stat -c '%u:%g' /root/.hermes/hermes-agent/.hermes/bin/hermes 2>/dev/null) || exit 1; " +
             "case \"\$OWNER_IDS\" in *[!0-9:]*|'') p '❌ Impossible d’identifier le propriétaire de l’installation Hermès.'; exit 126;; esac; " +
