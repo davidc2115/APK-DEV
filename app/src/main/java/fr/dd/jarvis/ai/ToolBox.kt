@@ -235,6 +235,22 @@ class ToolBox(
         put(tool("analyser_image", "Analyse une image déjà générée par generer_image (ou envoyée par l'utilisateur) : décrit son contenu, répond à une question dessus, lit un texte qu'elle contient, etc.",
             mapOf("image" to prop("Nom de fichier de l'image (vu dans jarvis-img:... ou via fichiers_generes), ou « derniere » pour la dernière générée."),
                 "question" to prop("Ce qu'il faut regarder ou dire sur l'image (optionnel ; par défaut une description détaillée).")), listOf("image")))
+        put(tool("box_disque", "Accède directement au disque dur ou au partage SMB/FTP de la box Internet. Actions : partages, lister, lire, telecharger, envoyer, dossier, deplacer, renommer, supprimer. Utilise cet outil si l'API Freebox OS n'est pas disponible ou si la box n'est pas une Freebox. Toute écriture ou suppression distante demande confirmation.", mapOf(
+            "action" to prop("partages | lister | lire | telecharger | envoyer | dossier | deplacer | renommer | supprimer"),
+            "chemin" to prop("Chemin du dossier/fichier sur le partage, relatif à la racine."),
+            "fichier" to prop("Nom du fichier source local pour envoyer, ou destination pour déplacer/renommer.")
+        ), listOf("action")))
+        put(tool("freebox", "Pilote la Freebox via son API Freebox OS associée. Actions : etat, appareils, fichiers, telechargements, redirections, vpn, vpn_utilisateurs, wifi, appels, droits, ajouter_redirection, supprimer_redirection, dmz, ajouter_bail, redemarrer. Les modifications sensibles sont confirmées. Pour le disque, utilise fichiers ; si le droit explorer manque, utilise box_disque en SMB/FTP.", mapOf(
+            "action" to prop("Action Freebox OS."),
+            "chemin" to prop("Chemin du dossier sur le disque (facultatif)."),
+            "serveur" to prop("openvpn_routed | ipsec | pptp | wireguard (facultatif)."),
+            "port" to prop("Port local/externe selon l'action."),
+            "port_externe" to prop("Port externe pour une redirection."),
+            "protocole" to prop("tcp | udp."),
+            "appareil" to prop("Nom ou IP de l'appareil cible."),
+            "ip" to prop("Adresse IP cible."),
+            "id" to prop("Identifiant de règle ou d'utilisateur.")
+        ), listOf("action")))
         put(tool("rechercher_videos_box", "Recherche des films sur le disque dur USB branché à la box (partages SMB/FTP). Retourne les chemins exacts ; ne lance pas la lecture.", mapOf("recherche" to prop("Titre ou fragment du nom du film (optionnel pour lister les vidéos)."), "dossier" to prop("Dossier de départ sur le partage (optionnel)."))))
         put(tool("lire_video_box", "Lit un film stocké sur le disque dur branché à la box : ouvre le sélecteur Android avec les lecteurs vidéo compatibles installés, sans télécharger le film entier.", mapOf("chemin" to prop("Chemin exact du film retourné par rechercher_videos_box, sans smb://.")), listOf("chemin")))
         put(tool("analyser_video", "Analyse une vidéo que l'utilisateur a partagée à JARVIS (bouton « Partager » de n'importe quelle appli, ex. TikTok, vers JARVIS) : avis sur l'accroche, le rythme/montage, la qualité, ce qui plaît ou non, et suggestions concrètes pour améliorer l'engagement (vues, likes, abonnés). Ne fonctionne que sur une vidéo déjà reçue par JARVIS, jamais sur un simple lien.",
@@ -758,6 +774,34 @@ class ToolBox(
             if (ap.lowercase() in setOf("aucune", "aucun", "rien", "demander", "")) { app.store.setAppPref(t, null); ToolResult("Plus d'application par défaut pour « $t » : je te demanderai à chaque fois.") }
             else { app.store.setAppPref(t, ap); ToolResult("✅ $ap sera toujours utilisée pour « $t ».") }
         }
+        "freebox" -> try {
+            ToolResult(fr.dd.jarvis.ai.FreeboxOs.gerer(app, a.optString("action"), a, confirm), direct = true)
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+          catch (e: Exception) { ToolResult("❌ Freebox : \${e.message ?: e.javaClass.simpleName}", direct = true) }
+        "box_disque" -> try {
+            val action = a.optString("action").trim().lowercase()
+            val chemin = a.optString("chemin").trim()
+            val fichier = a.optString("fichier").trim()
+            if (action in setOf("supprimer", "envoyer", "deplacer", "renommer") &&
+                !confirm("Confirmer l'action « $action » sur le partage de la box ?\n\nChemin : $chemin\nFichier/destination : $fichier", true))
+                ToolResult("Action annulée : aucun fichier distant n'a été modifié.")
+            else ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                fr.dd.jarvis.ai.Box.action(app, action, chemin, fichier)
+            }, direct = true)
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+          catch (e: Exception) { ToolResult("❌ Accès au disque de la box impossible : \${e.message ?: e.javaClass.simpleName}", direct = true) }
+        "rechercher_videos_box" -> try {
+            ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                fr.dd.jarvis.ai.Box.rechercherVideos(app, a.optString("recherche"), a.optString("dossier"))
+            }, direct = true)
+        } catch (e: Exception) { ToolResult("❌ Recherche sur le disque de la box impossible : \${e.message}", direct = true) }
+        "lire_video_box" -> try {
+            val chemin = a.optString("chemin").trim().trimStart('/')
+            if (chemin.isBlank()) ToolResult("Chemin du film manquant.")
+            else ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                fr.dd.jarvis.device.MediaServeur.ouvrir(app, chemin)
+            }, direct = true)
+        } catch (e: Exception) { ToolResult("❌ Impossible d'ouvrir ce film : \${e.message}", direct = true) }
         "obsidian_chercher" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             val r = app.obsidian.searchNotes(a.optString("requete"))
             if (r.isEmpty()) "Aucune note ne contient « ${a.optString("requete")} »." else r.joinToString("\n") { "- ${it.first}" + (if (it.second.isNotBlank()) " : …${it.second}…" else "") }
