@@ -183,12 +183,25 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         val texte = brut.take(20_000)
         if (texte == hermes()) return false
         hermesCache = texte
+        // Archive de migration : les anciennes données Hermès sont conservées, mais ne sont plus injectées
+        // comme une seconde mémoire dans les prompts.
         runCatching { hermesLocal.writeText(texte) }
         val (notes, profil) = entreesHermes(texte)
-        val md = "# Mémoire d'Hermès\n\n_Synchronisée automatiquement depuis Hermès (Termux). Pour corriger une information, demande-le à Jarvis ou à Hermès._\n\n" +
-            "## Notes d'Hermès\n" + notes.joinToString("\n") { "- " + it.replace("\n", " ") }.ifBlank { "_(vide)_" } +
-            "\n\n## Profil de l'utilisateur (vu par Hermès)\n" + profil.joinToString("\n") { "- " + it.replace("\n", " ") }.ifBlank { "_(vide)_" } + "\n"
-        runCatching { obsidian.saveIn(FOLDER, "Mémoire Hermès", md) }
+        val contenuCanonique = buildString {
+            if (notes.isNotEmpty()) {
+                append("Connaissances importées :\\n")
+                append(notes.joinToString("\\n") { "- " + it.replace("\\n", " ").trim() })
+            }
+            if (profil.isNotEmpty()) {
+                if (isNotEmpty()) append("\\n\\n")
+                append("Profil utilisateur importé :\\n")
+                append(profil.joinToString("\\n") { "- " + it.replace("\\n", " ").trim() })
+            }
+        }.take(5000).trim()
+        if (contenuCanonique.isNotBlank() && items["memoire partagee"] != contenuCanonique) {
+            items["memoire partagee"] = contenuCanonique
+            persist()
+        }
         return true
     }
 
@@ -197,15 +210,8 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     /** Toutes les entrées de la mémoire d'Hermès (notes puis profil). */
     fun entreesHermesListe(): List<String> = entreesHermes(hermes()).let { (n, p) -> n + p }
 
-    /** Section « mémoire d'Hermès » pour le cerveau de Jarvis : en entier si elle est courte, sinon le profil seul. */
-    fun hermesPourPrompt(): String {
-        val (notes, profil) = entreesHermes(hermes())
-        if (notes.isEmpty() && profil.isEmpty()) return ""
-        val tout = (notes + profil).joinToString("\n") { "- " + it.replace("\n", " ").take(500) }
-        return if (tout.length <= 1500) "\n\nMémoire partagée avec Hermès (notes et préférences qu'il a retenues, à appliquer aussi) :\n$tout"
-        else "\n\nProfil de l'utilisateur retenu par Hermès :\n" + profil.joinToString("\n") { "- " + it.replace("\n", " ").take(300) }.take(1200) +
-            "\n(${notes.size} notes d'Hermès : celles utiles à cette demande sont dans les notes ci-dessus.)"
-    }
+    /** Les anciennes notes Hermès sont désormais importées dans Memo.items, source canonique unique. */
+    fun hermesPourPrompt(): String = ""
 
     // ------------------------------------------------------------------ capacités propres à Hermès
 
