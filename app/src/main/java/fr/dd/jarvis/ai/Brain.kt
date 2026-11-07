@@ -28,20 +28,24 @@ class Brain(
             Regex("(scan|analys|d[ée]tect|list|cherch|affich).{0,25}(r[ée]seau|wi-?fi|appareils)|appareils connect").containsMatchIn(dernier) -> "reseau_scanner"
             else -> null
         }
-        positionDirecte(dernier, history, onStatus)?.let { return it }
-        rangementDirect(history, onStatus)?.let { return it }
-        rechercheDirecte(history.lastOrNull { it.fromUser }?.text.orEmpty(), onStatus)?.let { return it }
-        freeboxDirect(history.lastOrNull { it.fromUser }?.text.orEmpty(), onStatus)?.let { return it }
+        // Traitements directs de Jarvis : la suite de la conversation (« oui », « ok »…) lui revient.
+        fun parJarvis(r: String) = r.also { fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS }
+        positionDirecte(dernier, history, onStatus)?.let { return parJarvis(it) }
+        rangementDirect(history, onStatus)?.let { return parJarvis(it) }
+        rechercheDirecte(history.lastOrNull { it.fromUser }?.text.orEmpty(), onStatus)?.let { return parJarvis(it) }
+        freeboxDirect(history.lastOrNull { it.fromUser }?.text.orEmpty(), onStatus)?.let { return parJarvis(it) }
         if (outilDirect != null) {
+            fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS
             onStatus("⚙️ $outilDirect…")
             val args = JSONObject(); if (dernier.contains("serveur")) args.put("via", "serveur")
             return try { tools.execute(outilDirect, args).text } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { "❌ ${e.message}" }
         }
-        // Hermès (Termux) est l'orchestrateur principal en mode auto ; les réponses brèves/Android Auto restent rapides et Groq sert de secours si Hermès est indisponible.
+        // Répartition auto : Jarvis pour le téléphone et les données, Hermès pour la recherche, la rédaction, l'analyse et les tâches longues ; Groq/Gemini en secours si Hermès est indisponible.
         val choix = fr.dd.jarvis.hermes.Routeur.choisir(app, history.lastOrNull { it.fromUser }?.text.orEmpty())
         if (choix.cible == fr.dd.jarvis.hermes.Routeur.Cible.HERMES) {
             val r = fr.dd.jarvis.hermes.Hermes.repondre(app, history, tools, userName(), onStatus)
             if (r != null) return r
+            fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS
             onStatus("Hermès indisponible : Groq prend le relais…")
         }
         onStatus("🧠 Analyse de la demande…")

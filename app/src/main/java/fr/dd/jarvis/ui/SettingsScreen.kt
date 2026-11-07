@@ -506,10 +506,16 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 Spacer(Modifier.height(8.dp))
                 Text("Répartition des demandes", color = HudDim, fontSize = 12.sp)
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("auto" to "Hermès principal", "demande" to "Si je dis « Hermès »", "off" to "Désactivé").forEach { (id, nom) ->
+                    listOf("auto" to "Répartition auto", "demande" to "Si je dis « Hermès »", "off" to "Désactivé").forEach { (id, nom) ->
                         HudChip(nom, selected = store.hermesMode.value == id) { store.hermesMode.set(id) }
                     }
                 }
+                Text(
+                    "Auto : Jarvis exécute tout ce qui touche au téléphone et à tes données (fichiers et dossiers, coffre, clients, agenda, " +
+                        "musique, SMS, Freebox, domotique…) ; Hermès prend la recherche sur internet, la rédaction, l'analyse, le code et les tâches longues. " +
+                        "Commence ta phrase par « Hermès » pour le forcer.",
+                    color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp)
+                )
                 Spacer(Modifier.height(8.dp))
                 HudChip("Écriture adulte consensuelle", selected = store.modeAdulte.value) {
                     store.modeAdulte.set(!store.modeAdulte.value)
