@@ -96,6 +96,7 @@ class Brain(
         }
         suivi.cerveauJarvis = true
         onStatus("🧠 Analyse de la demande…")
+        val notesUtiles = runCatching { fr.dd.jarvis.device.NotesPertinentes.pour(app, texteUser) }.getOrDefault("")
         val all = tools.schemaAll()
         val plan = try { Analyseur.analyser(app, history, all) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { null }
         // Pour une consigne de chauffage, le planificateur ne doit jamais retirer les outils nécessaires :
@@ -105,7 +106,10 @@ class Brain(
         val schema: JSONArray
         var societeNeeded = societeOn || planningClientsSync
         if (plan != null && plan.outils.isNotEmpty()) {
-            val indispensables = if (pilotageChauffage) listOf("obsidian_chercher", "obsidian_lire", "ha_entites", "ha_etat", "ha_service") else emptyList()
+            // Domotique (chauffage, télé, lumières, volets…) : toujours de quoi relire les notes, trouver l'entité ET agir.
+            val domotique = pilotageChauffage || (Regex("t[ée]l[ée]|\\btv\\b|t[ée]l[ée]vis|volume|lumi[èe]re|lampe|volet|store|prise|home ?assistant|domotique|enceinte", RegexOption.IGNORE_CASE).containsMatchIn(recent) &&
+                ACTION_DOMOTIQUE.containsMatchIn(recent))
+            val indispensables = if (domotique) listOf("obsidian_chercher", "obsidian_lire", "ha_entites", "ha_etat", "ha_service") else emptyList()
             val reglageDirect = Regex("r[eé]glage|param[eè]tre|mode conversation|[eé]coute continue|annonce vocale|r[eé]ponse vocale|confirmation|agent autonome|bips|analyse gemini|gemini|agents? autonomes?|notifications banni[eè]re", RegexOption.IGNORE_CASE).containsMatchIn(recent)
             val keep = (plan.outils + indispensables + (if (reglageDirect) listOf("reglage_jarvis") else emptyList()) + (if (planningClientsSync) listOf("analyser_planning_clients") else emptyList()) + listOf("memoire_ajouter", "memoire_apprendre", "memoire_apprentissages", "memoire_lire", "memoire_oublier") + (if (societeOn || planningClientsSync) fr.dd.jarvis.societe.SocieteTools.NAMES else emptySet<String>()) +
                 (if (fr.dd.jarvis.hermes.Hermes.enLigneConnu()) listOf("hermes_deleguer") else emptyList()) +
@@ -132,8 +136,11 @@ class Brain(
         val messages = JSONArray()
         messages.put(JSONObject().put("role", "system").put("content",
             (if (pourHermes) "Tu es l'agent téléphone de JARVIS, missionné par Hermès (le cerveau) : exécute la consigne avec tes outils, puis rends un compte rendu factuel et complet (résultats réels, chemins, identifiants, erreurs exactes), sans poser de question sauf si une information indispensable manque.\n\n" else "") +
-            Prompts.brain(userName()) + app.memo.toutes() + app.memo.hermesPourPrompt() + app.memo.capacitesPourPrompt() + (if (societeNeeded) "\n\n" + fr.dd.jarvis.societe.SocieteTools.PROMPT else "") +
-                (if (plan != null && plan.note.isNotBlank()) "\n\nAnalyse préalable de la demande (Gemini) — suis ce plan, avec les outils fournis : ${plan.note}" else "")))
+            // Partie stable d'abord (mise en cache par le fournisseur), puis le contexte propre à la demande.
+            Prompts.brain(userName(), avecDate = false) + (if (societeNeeded) "\n\n" + fr.dd.jarvis.societe.SocieteTools.PROMPT else "") +
+                app.memo.pourPrompt() + app.memo.hermesPourPrompt() + app.memo.capacitesPourPrompt() + notesUtiles +
+                (if (plan != null && plan.note.isNotBlank()) "\n\nAnalyse préalable de la demande (Gemini) — suis ce plan, avec les outils fournis : ${plan.note}" else "") +
+                "\n\nDate et heure actuelles : ${Prompts.now()}."))
         // Réduction de tokens sans perte de précision : seuls les derniers échanges (où un détail précis — liste de fichiers,
         // de SMS, de permissions… — a des chances d'être encore repris par la demande en cours) gardent le plafond large de
         // 12000 caractères ; les tours plus anciens (qui ne servent plus qu'à garder le fil de la conversation) sont ramenés
@@ -195,7 +202,10 @@ class Brain(
                 messages.put(
                     JSONObject().put("role", "tool").put("tool_call_id", c.getString("id")).put("content", res.text.take(12000))
                 )
-                if (res.direct) direct.append(res.text).append("\n\n")
+                // Un résultat « direct » (liste d'entités…) n'est rendu tel quel que si l'utilisateur voulait cette liste : s'il
+                // demandait une action (« baisse le son de la télé »), le modèle s'en sert pour agir ; s'il est vide, pour réessayer.
+                if (res.direct && !(name == "ha_entites" && (res.text.startsWith("Aucune") || ACTION_DOMOTIQUE.containsMatchIn(texteUser))))
+                    direct.append(res.text).append("\n\n")
             }
             if (direct.isNotEmpty()) return direct.toString().trim()
             onStatus("Réflexion…")
@@ -402,6 +412,10 @@ class Brain(
     }
 
     companion object {
+        /** Demande d'ACTION domotique (et non de simple liste) : le modèle doit agir après avoir trouvé l'entité. */
+        internal val ACTION_DOMOTIQUE = Regex(
+            "\\b(baisse|monte|augmente|diminue|coupe|r[ée]gle|mets?|allume|[ée]teins|ouvre|ferme|lance|arr[êe]te|active|d[ée]sactive|passe|change|mute|pause|reprends)\\b",
+            RegexOption.IGNORE_CASE)
         /** Demande Freebox reconnue sans modèle : (action, arguments) pour l'outil freebox, ou null. */
         internal fun intentionFreebox(texte: String): Pair<String, JSONObject>? {
             val n = fr.dd.jarvis.societe.core.normaliser(texte)
@@ -466,6 +480,8 @@ class Brain(
         internal fun actionImmediate(texte: String): Triple<String, String, String>? {
             val n = fr.dd.jarvis.societe.core.normaliser(texte)
             if (n.isBlank() || n.split(' ').size > 12 || Regex("\\b(et|puis|ensuite|si|quand|tous les|chaque)\\b").containsMatchIn(n)) return null
+            // Le son, la lecture ou la lumière d'un AUTRE appareil (« baisse le son de la télé ») : jamais le téléphone.
+            if (Regex("\\b(tele|tv|television|televiseur|enceintes?|sonos|chaine|ampli|barre de son|home ?assistant|chromecast|player|ordinateur|pc|autoradio|salon|chambre|cuisine|bureau|garage)\\b").containsMatchIn(n)) return null
             val allume = Regex("\\b(allume[rsz]?|active[rsz]?|mets?|ouvre|demarre|lance)\\b")
             val eteins = Regex("\\b(eteins|eteint|eteindre|coupe[rsz]?|desactive[rsz]?|ferme[rsz]?|arrete[rsz]?|stoppe[rsz]?)\\b")
             val nombre = Regex("\\b(\\d{1,3}) ?(%|pour ?cent|pourcent)?").find(n)?.groupValues?.get(1)?.toIntOrNull()?.coerceIn(0, 100)

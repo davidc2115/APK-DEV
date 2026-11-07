@@ -194,12 +194,17 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
 
     fun hermes(): String = hermesCache ?: runCatching { hermesLocal.takeIf { it.exists() }?.readText() }.getOrNull().orEmpty().also { hermesCache = it }
 
-    /** Section « mémoire d'Hermès » pour le cerveau de Jarvis. */
+    /** Toutes les entrées de la mémoire d'Hermès (notes puis profil). */
+    fun entreesHermesListe(): List<String> = entreesHermes(hermes()).let { (n, p) -> n + p }
+
+    /** Section « mémoire d'Hermès » pour le cerveau de Jarvis : en entier si elle est courte, sinon le profil seul. */
     fun hermesPourPrompt(): String {
         val (notes, profil) = entreesHermes(hermes())
         if (notes.isEmpty() && profil.isEmpty()) return ""
-        return ("\n\nMémoire partagée avec Hermès (notes et préférences qu'il a retenues, à appliquer aussi) :\n" +
-            (notes + profil).joinToString("\n") { "- " + it.replace("\n", " ").take(500) }).take(3500)
+        val tout = (notes + profil).joinToString("\n") { "- " + it.replace("\n", " ").take(500) }
+        return if (tout.length <= 1500) "\n\nMémoire partagée avec Hermès (notes et préférences qu'il a retenues, à appliquer aussi) :\n$tout"
+        else "\n\nProfil de l'utilisateur retenu par Hermès :\n" + profil.joinToString("\n") { "- " + it.replace("\n", " ").take(300) }.take(1200) +
+            "\n(${notes.size} notes d'Hermès : celles utiles à cette demande sont dans les notes ci-dessus.)"
     }
 
     // ------------------------------------------------------------------ capacités propres à Hermès
@@ -233,11 +238,11 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         if (skills.isEmpty() && mcp.isEmpty() && plugins.isEmpty() && auto.isEmpty()) return ""
         return ("\n\nCe que ton moteur approfondi (Hermès) sait faire EN PLUS de tes outils — pour toute demande qui en relève, utilise hermes_deleguer " +
             "(il a les notes, procédures et accès correspondants) :\n" +
-            skills.joinToString("\n") { "- compétence « ${it.first} » : ${it.second.take(200)}" } +
+            skills.joinToString("\n") { "- compétence « ${it.first} » : ${it.second.take(110)}" } +
             (if (mcp.isNotEmpty()) "\n- connecteurs MCP : ${mcp.joinToString()}" else "") +
             (if (plugins.isNotEmpty()) "\n- plugins : ${plugins.joinToString()}" else "") +
             (if (auto.isNotEmpty()) "\n- automatismes en place : " + auto.joinToString("; ") { "${it.optString("nom")} (${it.optString("quand")}${if (it.optBoolean("actif", true)) "" else ", en pause"})" } +
-                " — pour les lister, modifier ou supprimer, délègue à Hermès." else "")).take(4000)
+                " — pour les lister, modifier ou supprimer, délègue à Hermès." else "")).take(1800)
     }
 
     /** Mémoire de Jarvis telle qu'Hermès la recopie dans son SOUL.md (bloc géré, chargé à chaque session). */
@@ -249,6 +254,25 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         return identite + "## Mémoire partagée avec JARVIS\n" +
             "Consignes durables de l'utilisateur enregistrées par JARVIS (synchronisées automatiquement ; pour les modifier, utilise mcp_jarvis_memoire_ajouter ou mcp_jarvis_memoire_oublier) :\n" +
             items.entries.joinToString("\n") { "- [${it.key}] ${it.value.replace("\n", " ").take(600)}" }.take(6000)
+    }
+
+    /**
+     * Mémoire pour un prompt, en peu de jetons : tout si elle est courte ; sinon les rubriques générales (préférences,
+     * habitudes, profil…) en entier et les autres par leur seul nom — les rubriques utiles à la demande arrivent
+     * déjà, en entier, dans le bloc « notes utiles » (NotesPertinentes).
+     */
+    @Synchronized
+    fun pourPrompt(): String {
+        ensure()
+        if (items.isEmpty()) return ""
+        val complet = toutes()
+        if (complet.length <= 1800) return complet
+        val generales = setOf("general", "preferences", "preference", "habitudes", "profil", "style", "identite", "ton", "langue")
+        val toujours = items.filterKeys { fr.dd.jarvis.societe.core.normaliser(it) in generales }
+        val autres = items.keys - toujours.keys
+        return "\n\nMémoire de l'utilisateur (consignes durables, à appliquer) :\n" +
+            toujours.entries.joinToString("\n") { "- [${it.key}] ${it.value.take(500)}" }.take(1800) +
+            (if (autres.isNotEmpty()) "\nAutres rubriques mémorisées (celles utiles à cette demande sont dans les notes ci-dessus ; détails avec memoire_lire) : ${autres.joinToString(", ")}" else "")
     }
 
     @Synchronized
