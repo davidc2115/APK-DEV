@@ -39,6 +39,12 @@ object PontMcp {
         /** Exécute l'outil : (texte, erreur ?). */
         fun appeler(nom: String, args: JSONObject): Pair<String, Boolean>
         fun progres(ligne: String)
+        /** Mémoire d'Hermès reçue depuis son hook de synchronisation. */
+        fun memoireHermes(texte: String) {}
+        /** Mémoire canonique Jarvis à recopier dans le SOUL d'Hermès. */
+        fun memoireJarvis(): String = ""
+        /** Skills, MCP et plugins découverts par Hermès. */
+        fun capacitesHermes(json: String) {}
     }
 
     /** Outils de la conversation en cours (avec SES confirmations) ; sinon une boîte d'outils autonome. */
@@ -57,6 +63,9 @@ object PontMcp {
         private val defaut by lazy { ToolBox(app) { _, force -> !force } }
         private fun boite() = boiteActive ?: defaut
         override fun jeton() = app.store.mcpJeton.value
+        override fun memoireHermes(texte: String) { runCatching { app.memo.majHermes(texte) } }
+        override fun memoireJarvis(): String = runCatching { app.memo.pourHermes() }.getOrDefault("")
+        override fun capacitesHermes(json: String) { runCatching { app.memo.majCapacitesHermes(json) } }
         override fun outils(): JSONArray = convertirOutils(boite().schemaAll())
         override fun appeler(nom: String, args: JSONObject): Pair<String, Boolean> {
             if (nom in EXCLUS) return "Outil indisponible : $nom" to true
@@ -233,6 +242,17 @@ object PontMcp {
                     repondre(s, 200, """{"accepted":true}""")
                 }
             }
+            // Synchronisation bidirectionnelle : Jarvis/Obsidian reste la mémoire canonique.
+            r.chemin.trimEnd('/') == "/memoire/hermes" && r.methode == "POST" -> {
+                f.memoireHermes(r.corps)
+                repondre(s, 200, """{"ok":true}""")
+            }
+            r.chemin.trimEnd('/') == "/memoire/jarvis" && r.methode == "GET" ->
+                repondre(s, 200, f.memoireJarvis(), type = "text/plain")
+            r.chemin.trimEnd('/') == "/memoire/hermes-capacites" && r.methode == "POST" -> {
+                f.capacitesHermes(r.corps)
+                repondre(s, 200, """{"ok":true}""")
+            }
             r.methode == "GET" -> repondre(s, 405, "", extra = mapOf("Allow" to "GET, POST, DELETE"))
             r.methode == "DELETE" -> repondre(s, 200, "{}")
             r.methode == "POST" -> {
@@ -271,6 +291,8 @@ object PontMcp {
                     "SOURCE DE VÉRITÉ CONFIGURATION : les réglages de fournisseurs, modèles, clés et modes de Jarvis sont ceux enregistrés dans l'application Jarvis ; ne modifie pas directement config.yaml ni les variables de Termux pour contourner ces réglages. Utilise les outils de configuration Jarvis et signale toute divergence au lieu de créer une seconde configuration concurrente. " +
                     "COFFRE OBSIDIAN — DESTINATION OBLIGATOIRE : le dossier sélectionné dans Réglages › Obsidian est la racine unique de tous les fichiers et dossiers que l’utilisateur demande de créer/ranger dans son coffre. Utilise obsidian_fichiers, obsidian_ecrire ou creer_fichier selon le besoin. Les documents générés vont dans JARVIS/Documents, les images dans JARVIS/Images, les vidéos IA dans JARVIS/Vidéos IA et les vidéos TikTok dans JARVIS/Vidéos TikTok ; les notes/fiches restent dans leurs dossiers métier dédiés. N’utilise jamais stockage_telephone, un chemin /storage/emulated/0, Download/Téléchargements, ni un shell/ADB/Shizuku pour créer un dossier ou fichier qui appartient au coffre. Ne crée pas un deuxième dossier Jarvis à côté du coffre. Si le coffre est inaccessible ou en lecture seule, arrête l’écriture et rapporte l’erreur exacte ; ne bascule pas silencieusement vers Téléchargements ou un autre emplacement. Une copie privée temporaire de l’application pour l’aperçu/partage n’est pas une destination de classement. " +
                     "TÉLÉPHONE : Jarvis est le contrôleur Android et Hermès le cerveau principal. Pour observer ce qui se passe, appelle phone_action action=watch_screen : tu reçois l'écran accessible et le journal des changements d'applications/fenêtres/interactions détectés en arrière-plan. Appelle inspect_screen/watch_screen avant une action, exécute une action ciblée, puis réinspecte pour vérifier son résultat. Utilise list_apps si nécessaire et open_app pour naviguer. Le journal événementiel est actualisé par Android en temps réel lorsque le service d'accessibilité est actif ; Hermès le consulte à la demande (ce n'est pas un flux vidéo continu). Les champs mot de passe sont masqués et aucun texte saisi n'est conservé dans le journal. L'arbre d'accessibilité n'est pas une capture d'écran : pour voir les pixels, il faudra une capture MediaProjection avec autorisation Android et un modèle multimodal compatible. " +
+                    "AUCUNE PERMISSION HERMÈS SÉPARÉE : Hermès utilise les mêmes outils et permissions Android que Jarvis via ce pont. N'affirme jamais manquer de droits sans appeler l'outil concerné ; rapporte son erreur exacte. Les permissions Android, l'accessibilité et les confirmations système restent les seules limites réelles. " +
+                    "FREEBOX : utilise l'outil freebox (action=droits pour vérifier les droits réels, etat/appareils pour lire l'état, fichiers pour le disque). Si l'API renvoie insufficient_rights, indique le droit exact manquant. Pour le disque, si explorer est refusé ou indisponible, essaie box_disque via SMB/FTP avec les paramètres de Réglages › Box ; ne confonds pas les droits Freebox avec les permissions Android. Toute modification réseau sensible doit passer par la confirmation de Jarvis. " +
                     "SOCIÉTÉ / CLIENTS / INTERVENTIONS : les données métier ne sont PAS stockées dans GitHub, Termux ni dans un fichier que l’utilisateur doit t’indiquer. La base de vérité est la base Société locale de l’application Jarvis (stockage privé, fichier societe/data.json avec sauvegarde data.json.bak) ; Obsidian/Société/Clients et Société/Interventions contient des copies/rapports complémentaires. Si l’utilisateur demande la liste, la recherche ou l’historique des clients, appelle immédiatement societe_liste avec quoi=clients (et filtre si demandé). Pour un historique d’intervention, identifie d’abord le client puis appelle interventions_liste. Ne dis jamais qu’il n’existe aucune fiche sans avoir interrogé l’outil et rapporté exactement son résultat. Ne demande jamais à l’utilisateur où se trouvent les données : Jarvis connaît et expose déjà cette base. Si l’outil échoue, rapporte l’erreur réelle sans conclure que la base est vide. N’utilise pas une recherche Obsidian comme substitut à la base Société. " +
                     "RÈGLE GPS PRIORITAIRE : si la demande mentionne un point/coordonnées GPS et un client, une fiche client ou une installation (ex. « ajouter des points GPS à Clairotte »), tu DOIS agir dans la base Société avec les outils societe_liste puis client_ecrire. Ces deux outils sont exposés directement dans MCP. Ne réponds jamais que tu n’as pas accès aux fiches, ne demande jamais de les importer dans la bibliothèque, n’utilise jamais document_lire et ne propose jamais de créer une note de remplacement. Appelle réellement les outils avant de répondre. " +
                     "GPS D’INSTALLATION : opération exclusivement métier et locale à la base Société Jarvis. N’utilise JAMAIS ssh_commande, ssh_fichier, ssh_script, run_shell, Termux, ADB, Shizuku, stockage_telephone, obsidian_fichiers ni un chemin système pour ajouter/modifier ces coordonnées ; le serveur Debian et SSH n’ont aucun rôle dans cette opération. Même si ces outils sont visibles, ignore-les pour toute demande GPS/client/installation. Ne cherche JAMAIS un fichier Markdown, un contact Android ou un chemin Obsidian. Interroge d’abord societe_liste (quoi=clients, filtre sur le nom fourni) pour retrouver le nom exact du client dans la base Société ; si nécessaire, appelle client_fiche pour vérifier le nom exact de l’installation. Ensuite appelle obligatoirement client_ecrire avec nom=nom exact du client, site_nom=nom exact de l’installation et site_gps=coordonnées originales fournies, sans les reformater ni les recalculer. Ne modifie pas l’adresse ni les autres champs. N’annonce la réussite que si client_ecrire confirme l’enregistrement et la relecture du GPS. Si le client ou l’installation reste ambigu, demande uniquement la précision manquante. " +
@@ -306,6 +328,9 @@ object PontMcp {
             "phone_action", "phone_health_report", "client_supprimer", "societe_liste", "client_fiche", "client_ecrire", "clients_gps", "musique_rechercher", "musique_etat", "musique_commander",
             "jouer_musique", "applis_musique", "controle_media",
             "reglage_jarvis", "hermes",
+            "obsidian_fichiers", "obsidian_chercher", "obsidian_lire", "obsidian_lister", "obsidian_ecrire",
+            "memoire_ajouter", "memoire_lire", "memoire_oublier", "memoire_apprendre",
+            "freebox", "box_disque", "rechercher_videos_box", "lire_video_box",
             // Les outils métier sensibles doivent rester visibles même lorsque le catalogue
             // dépasse le budget transmis au modèle (80 outils).
             "interventions_liste", "intervention_supprimer", "intervention_modifier",
