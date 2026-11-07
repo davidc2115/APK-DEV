@@ -1314,6 +1314,24 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     }
                 }
                 Text("État : $etatVoix", color = HudText, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                var diagVoix by remember { mutableStateOf("") }
+                if (store.voixNaturelle.value) HudButton(if (diagVoix == "…") "Diagnostic…" else "Diagnostiquer la voix naturelle", Modifier.fillMaxWidth().padding(top = 4.dp), enabled = diagVoix != "…") {
+                    diagVoix = "…"
+                    scope.launch {
+                        diagVoix = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { fr.dd.jarvis.voice.VoixNaturelle.diagnostic(app) }.getOrElse { "❌ ${it.message}" } }
+                        if (diagVoix.contains("✅")) fr.dd.jarvis.voice.VoixNaturelle.reactiver()
+                        etatVoix = fr.dd.jarvis.voice.VoixNaturelle.etat(app)
+                    }
+                }
+                if (diagVoix.isNotBlank() && diagVoix != "…") Text(diagVoix, color = HudText, fontSize = 11.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(top = 4.dp))
+                // Voix Android de repli : moteur Google et meilleure voix française, ou celle choisie ici.
+                var voixAndroid by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+                androidx.compose.runtime.LaunchedEffect(Unit) { voixAndroid = runCatching { fr.dd.jarvis.voice.VoixAndroid.liste(ctx) }.getOrDefault(emptyList()) }
+                Text("Voix Android (repli)" + (if (!fr.dd.jarvis.voice.VoixAndroid.googleInstalle(ctx)) " — installe « Speech Services by Google » pour des voix plus naturelles" else ""), color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+                if (voixAndroid.isNotEmpty()) Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    HudChip("Automatique (la meilleure)", store.voixAndroid.value.isBlank()) { store.voixAndroid.set("") }
+                    voixAndroid.forEach { (nom, libelle) -> HudChip(libelle, store.voixAndroid.value == nom) { store.voixAndroid.set(nom) } }
+                }
                 Text("La voix naturelle utilise tes clés Gemini (synthèse vocale) ; si elle n'est pas disponible (quota, réseau), la voix Android prend le relais automatiquement. Dans tous les cas, JARVIS commence à parler dès la première phrase de la réponse.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
                 Spacer(Modifier.height(6.dp))
                 HudChip(if (store.muteBeeps.value) "🔇 Bips coupés pendant l'écoute" else "Bips actifs", store.muteBeeps.value) { store.muteBeeps.set(!store.muteBeeps.value) }

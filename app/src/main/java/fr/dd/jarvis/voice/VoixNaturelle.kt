@@ -61,7 +61,7 @@ object VoixNaturelle {
             for (i in cles.indices) {
                 val k = cles[(cle + i) % cles.size]
                 try {
-                    val a = if (m.startsWith("gemini-2.5")) ancienne(k, m, texte, voix) else interactions(k, m, texte, voix)
+                    val a = essayer(k, m, texte, voix)
                     modeleQuiMarche = m; cle = (cle + i) % cles.size
                     return a
                 } catch (e: Echec) {
@@ -79,6 +79,30 @@ object VoixNaturelle {
         }
         if (quota) pause(15 * 60_000, "quota Gemini atteint") else pause(30 * 60_000, dernier.take(80).ifBlank { "synthèse refusée" })
         return null
+    }
+
+    /** Un modèle par ses deux API : Interactions (modèles récents), puis generateContent (anciens modèles, ou si refusé). */
+    private fun essayer(k: String, m: String, texte: String, voix: String): Audio {
+        if (m.startsWith("gemini-2.5")) return ancienne(k, m, texte, voix)
+        return try { interactions(k, m, texte, voix) } catch (e: Echec) {
+            if (e.code in setOf(400, 404, 501)) ancienne(k, m, texte, voix) else throw e
+        }
+    }
+
+    /** Essai de chaque modèle avec la première clé : résultat lisible (pour comprendre pourquoi la voix ne passe pas). */
+    fun diagnostic(app: JarvisApp): String {
+        val k = app.store.geminiKeys.firstOrNull { it.isNotBlank() } ?: return "Aucune clé Gemini dans les réglages."
+        val voix = app.store.voixNom.value.ifBlank { "Charon" }
+        return MODELES.joinToString("\n") { m ->
+            val debut = System.currentTimeMillis()
+            try {
+                val a = essayer(k, m, "Bonjour, je suis JARVIS.", voix)
+                modeleQuiMarche = modeleQuiMarche ?: m
+                "✅ $m : ${a.pcm.size / (2 * a.frequence.coerceAtLeast(1))} s d'audio en ${System.currentTimeMillis() - debut} ms"
+            } catch (e: Echec) {
+                "❌ $m : " + when (e.code) { 429 -> "quota atteint (429)"; 404 -> "modèle introuvable (404)"; 403 -> "refusé pour cette clé (403)"; else -> "HTTP ${e.code}" } + " — ${e.message.orEmpty().take(120)}"
+            } catch (e: Exception) { "❌ $m : ${e.message ?: e.javaClass.simpleName}" }
+        }
     }
 
     private fun pause(ms: Long, pourquoi: String) { indisponibleJusqua = System.currentTimeMillis() + ms; raison = pourquoi }

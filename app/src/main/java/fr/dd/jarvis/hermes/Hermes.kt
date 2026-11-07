@@ -306,13 +306,19 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
             "authentication failed|invalid api key",
         RegexOption.IGNORE_CASE
     )
-    private const val DEGRADE_MS = 10 * 60_000L
+    private const val DEGRADE_MS = 3 * 60_000L
     @Volatile private var degradeJusqua = 0L
     @Volatile var derniereRaison = ""
         private set
 
     /** Hermès vient de signaler une panne de modèle : le routeur laisse Jarvis répondre quelques minutes. */
     fun degrade() = System.currentTimeMillis() < degradeJusqua
+
+    /** Redonne la main à Hermès tout de suite (tuile « Hermès » touchée, réglages). */
+    fun reprendre() { degradeJusqua = 0L }
+
+    /** Minutes restantes de saturation (0 si Hermès est disponible). */
+    fun minutesSaturation(): Int = ((degradeJusqua - System.currentTimeMillis()).coerceAtLeast(0) / 60_000L).toInt() + if (degrade()) 1 else 0
 
     private fun estPanne(texte: String) = texte.length < 1200 && PANNE.containsMatchIn(texte)
 
@@ -473,7 +479,7 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
                     // Message d'erreur d'Hermès (ex. « conversation has grown too large… ») : jamais affiché tel quel.
                     degradeJusqua = System.currentTimeMillis() + DEGRADE_MS
                     derniereRaison = contenu.lineSequence().first().take(160)
-                    HermesTermux.message = "⚠️ Hermès saturé (${derniereRaison}) : Jarvis répond directement pendant 10 min. Touche « Configurer » pour retirer Groq d'Hermès."
+                    HermesTermux.message = "⚠️ Hermès saturé (${derniereRaison}) : Jarvis répond directement pendant 3 min."
                     null
                 } else contenu?.let { signer(it) }
             }

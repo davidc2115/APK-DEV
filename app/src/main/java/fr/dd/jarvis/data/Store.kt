@@ -270,6 +270,8 @@ class Store(context: Context) {
     /** Voix naturelle (synthèse Gemini) au lieu de la voix Android ; repli automatique sur la voix Android. */
     val voixNaturelle = BPref("voixNaturelle", true)
     val voixNom = SPref("voixNom", "Charon")
+    /** Voix Android choisie (nom de la voix du moteur Google) ; vide = la meilleure voix française disponible. */
+    val voixAndroid = SPref("voixAndroid", "")
     val conversationMode = BPref("conversationMode", false)
 
     // ---- Sécurité

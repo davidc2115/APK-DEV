@@ -40,6 +40,11 @@
         <intent>
             <action android:name="android.speech.RecognitionService" />
         </intent>
+        <!-- Moteurs de synthèse vocale (voix Google plus naturelles que celles du constructeur). -->
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+        <package android:name="com.google.android.tts" />
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <category android:name="android.intent.category.DEFAULT" />

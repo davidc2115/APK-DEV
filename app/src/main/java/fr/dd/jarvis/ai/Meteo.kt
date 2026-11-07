@@ -29,6 +29,27 @@ object Meteo {
         95 -> "⛈️" to "Orage"; 96, 99 -> "⛈️" to "Orage avec grêle"; else -> "🌡️" to "—"
     }
 
+    /** Prévisions horaires d'un jour en un point (température, pluie, nuages, rayonnement solaire) ; null si hors portée. */
+    fun horaire(lat: Double, lon: Double, date: java.time.LocalDate): JSONObject? {
+        if (date.isBefore(java.time.LocalDate.now()) || date.isAfter(java.time.LocalDate.now().plusDays(15))) return null
+        return get("https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&timezone=auto&start_date=$date&end_date=$date" +
+            "&hourly=temperature_2m,precipitation_probability,cloud_cover,shortwave_radiation,weather_code")?.let { runCatching { JSONObject(it).getJSONObject("hourly") }.getOrNull() }
+    }
+
+    /** Ligne météo d'une heure donnée, avec l'ensoleillement utile au photovoltaïque. */
+    fun ligneHeure(h: JSONObject, heure: Int): String? = runCatching {
+        val i = heure.coerceIn(0, h.getJSONArray("time").length() - 1)
+        val (ic, txt) = wmo(h.getJSONArray("weather_code").getInt(i))
+        val ray = h.getJSONArray("shortwave_radiation").optDouble(i).let { if (it.isNaN()) 0 else Math.round(it).toInt() }
+        val pluie = h.getJSONArray("precipitation_probability").optInt(i)
+        val nuages = h.getJSONArray("cloud_cover").optInt(i)
+        "$ic $txt · ${Math.round(h.getJSONArray("temperature_2m").getDouble(i))}°C · ☀️ $ray W/m² · ☁️ $nuages % · 🌧️ $pluie %" +
+            when { pluie >= 60 -> "\n⚠ Pluie probable : prévois la protection du matériel (et pas de nettoyage de panneaux)."
+                ray >= 450 -> "\n✔ Bon ensoleillement : idéal pour mesurer la production."
+                ray in 1..149 -> "\n⚠ Faible ensoleillement : mesures de production peu représentatives."
+                else -> "" }
+    }.getOrNull()
+
     /** Météo actuelle à la position du téléphone (ou du siège) : (icône, « 14°C », description) — pour le centre de commande. */
     suspend fun actuel(app: JarvisApp): Triple<String, String, String>? = withContext(Dispatchers.IO) {
         val hq = app.societe.data.societe

@@ -52,7 +52,7 @@ enum class EtatTuile { OK, ALERTE, INACTIF, CHARGEMENT }
 data class Tuile(val icone: String, val titre: String, val valeur: String, val detail: String = "", val etat: EtatTuile = EtatTuile.OK)
 
 /** Une tuile du centre de commande et ce qu'un toucher déclenche. */
-data class TuileAction(val tuile: Tuile, val onglet: Int? = null, val demande: String? = null)
+data class TuileAction(val tuile: Tuile, val onglet: Int? = null, val demande: String? = null, val action: (() -> Unit)? = null)
 
 /**
  * Centre de commande (onglet Accueil) : la tête du dragon, l'heure, un bouton pour parler, et des tuiles en direct —
@@ -60,7 +60,8 @@ data class TuileAction(val tuile: Tuile, val onglet: Int? = null, val demande: S
  * question à Jarvis. Les données se rafraîchissent seules (chacune à son rythme, sans bloquer les autres).
  */
 @Composable
-fun CentreCommande(app: JarvisApp, vm: ChatViewModel, onOnglet: (Int) -> Unit, onDemander: (String) -> Unit) {
+fun CentreCommande(app: JarvisApp, vm: ChatViewModel, onOnglet: (Int) -> Unit, onDemander: (String) -> Unit,
+                   onRegarder: () -> Unit = {}, onCompteRendu: () -> Unit = {}) {
     val agenda by rafraichi(app, 120_000, Tuile("📅", "Agenda", "…", etat = EtatTuile.CHARGEMENT)) { tuileAgenda(app) }
     val meteo by rafraichi(app, 900_000, Tuile("🌤️", "Météo", "…", etat = EtatTuile.CHARGEMENT)) { tuileMeteo(app) }
     val maison by rafraichi(app, 120_000, Tuile("🏠", "Maison", "…", etat = EtatTuile.CHARGEMENT)) { tuileMaison(app) }
@@ -76,7 +77,7 @@ fun CentreCommande(app: JarvisApp, vm: ChatViewModel, onOnglet: (Int) -> Unit, o
         TuileAction(maison, demande = "Fais-moi le point sur la maison (Home Assistant)."),
         TuileAction(box, demande = "Fais-moi le point sur la Freebox et son disque."),
         TuileAction(serveur, demande = "Fais un diagnostic rapide du serveur."),
-        TuileAction(hermes, demande = "Quels sont mes automatismes en place ?"),
+        TuileAction(hermes, demande = "Quels sont mes automatismes en place ?", action = if (fr.dd.jarvis.hermes.Hermes.degrade()) ({ fr.dd.jarvis.hermes.Hermes.reprendre() }) else null),
         TuileAction(mails, onglet = 3),
         TuileAction(tel, demande = "Fais le point sur la santé du téléphone."),
     )
@@ -87,8 +88,8 @@ fun CentreCommande(app: JarvisApp, vm: ChatViewModel, onOnglet: (Int) -> Unit, o
         statut = when { vm.listening -> "À l'écoute…"; vm.busy -> vm.status.ifBlank { "Je réfléchis…" }; else -> "" },
         enDirect = vm.enDirect, dernier = dernier, tuiles = tuiles,
         onParler = { vm.toggleListening() }, onEcrire = { onOnglet(1) },
-        onTuile = { t -> t.onglet?.let(onOnglet) ?: t.demande?.let(onDemander) },
-        onRaccourci = onDemander,
+        onTuile = { t -> t.action?.invoke() ?: t.onglet?.let(onOnglet) ?: t.demande?.let(onDemander) },
+        onRaccourci = onDemander, onRegarder = onRegarder, onCompteRendu = onCompteRendu,
     )
 }
 
@@ -107,6 +108,7 @@ private val RACCOURCIS = listOf(
     "☀️ Prépare ma journée" to "Prépare ma journée : rendez-vous, météo, trajets, mails importants et tâches.",
     "🏠 Point maison" to "Fais-moi le point sur la maison.",
     "✉️ Mails importants" to "Quels sont mes mails importants non lus ?",
+    "🧭 Ma tournée" to "Prépare ma tournée optimisée d'aujourd'hui (ordre des clients, trajets, météo et ensoleillement sur place).",
     "👷 Mes clients" to "Où en sont mes clients et mes prochaines interventions ?",
     "🌙 Bilan du jour" to "Fais-moi le bilan de ma journée et prépare demain.",
 )
@@ -115,7 +117,7 @@ private val RACCOURCIS = listOf(
 fun CentreCommandeVue(
     nom: String, ecoute: Boolean, occupe: Boolean, parle: Boolean, statut: String, enDirect: String, dernier: String,
     tuiles: List<TuileAction>, onParler: () -> Unit, onEcrire: () -> Unit, onTuile: (TuileAction) -> Unit, onRaccourci: (String) -> Unit,
-    heure: String? = null,
+    heure: String? = null, onRegarder: () -> Unit = {}, onCompteRendu: () -> Unit = {},
 ) {
     val accent = LocalAccent.current
     val maintenant by produceState(heure ?: horloge()) { if (heure == null) while (true) { value = horloge(); delay(15_000) } }
@@ -134,6 +136,12 @@ fun CentreCommandeVue(
                     HudButton("Écrire", onClick = onEcrire)
                 }
             }
+        }
+        // --- Terrain : caméra et compte-rendu d'intervention
+        Spacer(Modifier.height(10.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            HudButton("📷 Regarder", Modifier.weight(1f), onClick = onRegarder)
+            HudButton("📝 Compte-rendu", Modifier.weight(1f), onClick = onCompteRendu)
         }
         // --- Ce que Jarvis fait / vient de dire
         val ligne = when {
@@ -257,7 +265,8 @@ private suspend fun tuileHermes(app: JarvisApp): Tuile {
     val sature = fr.dd.jarvis.hermes.Hermes.degrade()
     return when {
         !enLigne -> Tuile("🪽", "Hermès", "🔴 Hors ligne", "Jarvis répond à sa place", EtatTuile.ALERTE)
-        sature -> Tuile("🪽", "Hermès", "🟠 Saturé", "quota de l'IA : quelques minutes", EtatTuile.ALERTE)
+        sature -> Tuile("🪽", "Hermès", "🟠 Saturé ${fr.dd.jarvis.hermes.Hermes.minutesSaturation()} min",
+            fr.dd.jarvis.hermes.Hermes.derniereRaison.take(90).ifBlank { "quota de l'IA" } + "\nTouche pour réessayer tout de suite", EtatTuile.ALERTE)
         else -> Tuile("🪽", "Hermès", "🟢 En ligne", mode + " · voix " + if (fr.dd.jarvis.voice.VoixNaturelle.active(app)) "naturelle" else "Android")
     }
 }

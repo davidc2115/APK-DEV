@@ -198,6 +198,9 @@ private fun Root(app: JarvisApp, vm: ChatViewModel) {
         }
     }
     var tab by rememberSaveable { mutableStateOf(0) }
+    // Écrans de terrain ouverts par-dessus l'onglet en cours (caméra, compte-rendu d'intervention).
+    var terrain by rememberSaveable { mutableStateOf("") }
+    androidx.activity.compose.BackHandler(enabled = terrain.isNotEmpty()) { terrain = "" }
 
     // Dernier plantage (affiché au lancement suivant, sans ADB)
     var crash by remember {
@@ -227,8 +230,12 @@ private fun Root(app: JarvisApp, vm: ChatViewModel) {
         }
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            when (tab) {
-                0 -> fr.dd.jarvis.ui.CentreCommande(app, vm, onOnglet = { tab = it }, onDemander = { vm.send(it); tab = 1 })
+            val demander: (String) -> Unit = { vm.send(it); terrain = ""; tab = 1 }
+            if (terrain == "regarder") fr.dd.jarvis.ui.RegarderEcran(app, onFermer = { terrain = "" }, onDemander = demander)
+            else if (terrain == "compte_rendu") fr.dd.jarvis.ui.CompteRenduEcran(app, onFermer = { terrain = "" }, onDemander = demander)
+            else when (tab) {
+                0 -> fr.dd.jarvis.ui.CentreCommande(app, vm, onOnglet = { tab = it }, onDemander = demander,
+                    onRegarder = { terrain = "regarder" }, onCompteRendu = { terrain = "compte_rendu" })
                 1 -> ChatScreen(vm, app.store, app)
                 2 -> PlanningScreen(app)
                 3 -> MailScreen(app)
@@ -251,7 +258,7 @@ private fun Root(app: JarvisApp, vm: ChatViewModel) {
             tabs.forEachIndexed { i, t ->
                 val sel = i == tab
                 Column(
-                    Modifier.width(58.dp).height(56.dp).clickable { tab = i },
+                    Modifier.width(58.dp).height(56.dp).clickable { tab = i; terrain = "" },
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {

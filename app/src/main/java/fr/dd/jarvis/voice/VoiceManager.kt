@@ -68,9 +68,11 @@ class VoiceManager(private val ctx: Context) {
     private val unmuteLater = Runnable { setMuted(false) }
 
     init {
-        tts = TextToSpeech(ctx) { status ->
+        // Moteur de Google (voix bien plus naturelles) plutôt que celui du constructeur (Xiaomi…), s'il est installé.
+        val listener = TextToSpeech.OnInitListener { status ->
             if (status == TextToSpeech.SUCCESS) {
                 tts?.language = Locale.FRANCE
+                VoixAndroid.appliquer(ctx, tts)
                 ttsReady = true
                 // Un seul écouteur : chaque phrase dite par la voix Android débloque la parole qui l'attend.
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
@@ -83,6 +85,7 @@ class VoiceManager(private val ctx: Context) {
                 })
             }
         }
+        tts = if (VoixAndroid.googleInstalle(ctx)) TextToSpeech(ctx, listener, VoixAndroid.MOTEUR_GOOGLE) else TextToSpeech(ctx, listener)
     }
     private val finsAndroid = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.CountDownLatch>()
     private val debutsAndroid = java.util.concurrent.ConcurrentHashMap<String, () -> Unit>()
@@ -545,6 +548,9 @@ class VoiceManager(private val ctx: Context) {
             // Hors session : focus + vraie commande PAUSE pour les lecteurs qui ignorent le focus, reprise après la réponse.
             mediaPauseeParJarvis = !sessionActive && externe && fr.dd.jarvis.service.JarvisNotificationListener.pauseMediaPourVoix(ctx)
             runCatching { tts?.setAudioAttributes(attrsVoix) }
+            // Voix Android changée dans les réglages : appliquée sans redémarrer.
+            val choix = (ctx.applicationContext as? fr.dd.jarvis.JarvisApp)?.store?.voixAndroid?.value.orEmpty()
+            if (choix.isNotBlank() && runCatching { tts?.voice?.name }.getOrNull() != choix) VoixAndroid.appliquer(ctx, tts)
         }
 
         /** La voix sort vraiment : l'écoute de coupure démarre (ses 400 premières ms servent à mesurer l'écho). */

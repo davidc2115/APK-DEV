@@ -122,6 +122,14 @@ class ToolBox(
                 "ranger" to prop("« true » pour appliquer les libellés dans Gmail. Un re-tri remplace les anciens libellés de catégorie par les bons."),
                 "archiver" to prop("« true » pour aussi retirer de la boîte de réception les newsletters et notifications (avec ranger).")
             )))
+        put(tool("tournee_optimisee", "Tournée OPTIMISÉE d'une liste de clients à visiter (sans horaires imposés) : ordre le plus court, trajets, heures d'arrivée, météo et ensoleillement sur chaque installation (utile pour les mesures de production), lien Google Maps de toute la tournée. Pour des rendez-vous déjà fixés dans l'agenda, utilise itineraire.",
+            mapOf(
+                "clients" to prop("Clients (ou adresses) à visiter, séparés par des virgules ou « ; »."),
+                "date" to prop("Date de la tournée yyyy-MM-dd (défaut : aujourd'hui)."),
+                "heure" to prop("Heure de départ (ex. 8h30 ; défaut : maintenant aujourd'hui, 8h00 un autre jour)."),
+                "duree" to prop("Minutes passées chez chaque client (défaut 60)."),
+                "depuis" to prop("Départ : « position » (défaut), « siege » ou une adresse."),
+                "retour" to prop("oui (défaut) pour revenir au point de départ, non sinon.")), listOf("clients")))
         put(tool("itineraire", "Calcule et présente les distances, temps de route et liens cartographiques. Sans destination : tournée des rendez-vous de l’agenda. Avec destination : calcule un trajet simple sans démarrer le guidage GPS. Pour lancer réellement la navigation GPS vers une adresse, utilise naviguer.",
             mapOf(
                 "destination" to prop("Adresse de destination (trajet simple). Vide pour la tournée de l'agenda."),
@@ -490,6 +498,17 @@ class ToolBox(
                 if (fr.dd.jarvis.device.Telephony.callGranted(app)) fr.dd.jarvis.device.Telephony.appeler(app, r.second)
                 else app.phone.perform("call", r.second)
             )
+        }
+        "tournee_optimisee" -> {
+            val liste = a.optString("clients").split(Regex("\\s*[,;\\n]\\s*")).filter { it.isNotBlank() }
+            if (liste.isEmpty()) return ToolResult("Indique les clients à visiter (paramètre clients). Pour les rendez-vous de l'agenda, utilise itineraire.")
+            val txt = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                fr.dd.jarvis.societe.Trajet.optimisee(app, liste,
+                    a.optString("date").takeIf { it.isNotBlank() }?.let { runCatching { LocalDate.parse(it.take(10)) }.getOrNull() } ?: LocalDate.now(),
+                    a.optString("depuis"), a.optString("heure"), a.optString("duree").filter { it.isDigit() }.toIntOrNull()?.coerceIn(5, 480) ?: 60,
+                    !a.optString("retour").trim().lowercase().let { it == "non" || it == "false" || it == "0" })
+            }
+            ToolResult(txt, direct = true)
         }
         "itineraire" -> {
             val dest = a.optString("destination").trim()
