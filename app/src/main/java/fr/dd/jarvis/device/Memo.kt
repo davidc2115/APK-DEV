@@ -190,13 +190,13 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         val (notes, profil) = entreesHermes(texte)
         val contenuCanonique = buildString {
             if (notes.isNotEmpty()) {
-                append("Connaissances importées :\\n")
-                append(notes.joinToString("\\n") { "- " + it.replace("\\n", " ").trim() })
+                append("Connaissances importées :\n")
+                append(notes.joinToString("\n") { "- " + it.replace("\n", " ").trim() })
             }
             if (profil.isNotEmpty()) {
-                if (isNotEmpty()) append("\\n\\n")
-                append("Profil utilisateur importé :\\n")
-                append(profil.joinToString("\\n") { "- " + it.replace("\\n", " ").trim() })
+                if (isNotEmpty()) append("\n\n")
+                append("Profil utilisateur importé :\n")
+                append(profil.joinToString("\n") { "- " + it.replace("\n", " ").trim() })
             }
         }.take(5000).trim()
         if (contenuCanonique.isNotBlank() && items["memoire partagee"] != contenuCanonique) {
