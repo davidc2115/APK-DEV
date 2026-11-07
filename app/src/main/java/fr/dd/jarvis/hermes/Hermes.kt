@@ -211,6 +211,25 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
         return appeler(app, messages, boite) {}
     }
 
+    /** Hermès répond mais signale une panne de fournisseur : Jarvis reprend la main pendant [DEGRADE_MS]. */
+    private val PANNE = Regex(
+        "grown too large|couldn.t shrink|start a new session with /new|try /compress|request too large|" +
+            "context (length|window) (exceeded|is too)|maximum context length|rate.?limit(ed| reached| exceeded)|too many requests|" +
+            "(error|code|status|http)\\W{0,3}(429|413|503)\\b|exceeded your current quota|quota (exceeded|d[ée]pass[ée])|tokens per minute|" +
+            "api call failed|all providers failed|provider (error|failed)|no response from (the )?model|model (is )?(currently )?overloaded|" +
+            "authentication failed|invalid api key",
+        RegexOption.IGNORE_CASE
+    )
+    private const val DEGRADE_MS = 10 * 60_000L
+    @Volatile private var degradeJusqua = 0L
+    @Volatile var derniereRaison = ""
+        private set
+
+    /** Hermès vient de signaler une panne de modèle : le routeur laisse Jarvis répondre quelques minutes. */
+    fun degrade() = System.currentTimeMillis() < degradeJusqua
+
+    private fun estPanne(texte: String) = texte.length < 1200 && PANNE.containsMatchIn(texte)
+
     private suspend fun appeler(app: JarvisApp, messages: JSONArray, boite: ToolBox?, onStatus: (String) -> Unit): String? {
         PontMcp.demarrer(app)
         val precedente = PontMcp.boiteActive
@@ -229,8 +248,15 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
                         if (r.code == 401) HermesTermux.message = "⚠️ Hermès refuse la clé de Jarvis : touche « Configurer Hermès »."
                         return@withContext null
                     }
-                    JSONObject(txt).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
+                    val contenu = JSONObject(txt).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
                         ?.optString("content").orEmpty().trim().ifBlank { null }
+                    if (contenu != null && estPanne(contenu)) {
+                        // Message d'erreur d'Hermès (ex. « conversation has grown too large… ») : jamais affiché tel quel.
+                        degradeJusqua = System.currentTimeMillis() + DEGRADE_MS
+                        derniereRaison = contenu.lineSequence().first().take(160)
+                        HermesTermux.message = "⚠️ Hermès saturé (${derniereRaison}) : Jarvis répond directement pendant 10 min. Touche « Configurer » pour retirer Groq d'Hermès."
+                        null
+                    } else contenu
                 }
             }
         } catch (e: CancellationException) { throw e } catch (e: Exception) {
@@ -281,6 +307,7 @@ object Routeur {
         if (mode == "off") return Choix(Cible.JARVIS, "Hermès désactivé dans les réglages")
         val t = texte.trim()
         if (mode == "demande" && !NOMME.containsMatchIn(t)) return Choix(Cible.JARVIS, "mode à la demande : Hermès doit être nommé")
+        if (Hermes.degrade() && !NOMME.containsMatchIn(t)) return Choix(Cible.JARVIS, "Hermès momentanément saturé : Jarvis répond directement")
         return Choix(Cible.HERMES, when {
             app.enVoiture -> "Hermès, cerveau principal (mode mains libres)"
             BREF.matches(t) -> "Hermès, continuité de conversation"

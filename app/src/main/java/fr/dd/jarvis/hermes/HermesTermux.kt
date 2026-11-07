@@ -605,6 +605,8 @@ def is_groq(item):
     base_url = str(item.get("base_url", ""))
     return provider in ("custom:groq", "groq") or provider.startswith("custom:jarvis_cf_") or (provider == "custom" and "groq.com" in base_url)
 fallbacks = [item for item in fallbacks if not is_groq(item)]
+if isinstance(model_config, dict) and is_groq(model_config) and os.environ.get("JARVIS_HAS_GEMINI") == "1":
+    model_config.clear(); model_config.update({"provider": "gemini", "default": os.environ["JARVIS_GEMINI_MODEL"]})
 main_provider = str(model_config.get("provider", "")) if isinstance(model_config, dict) else ""
 if os.environ.get("JARVIS_HAS_GEMINI") == "1" and main_provider != "gemini":
     if not any(isinstance(x, dict) and x.get("provider") == "gemini" and x.get("model") == os.environ["JARVIS_GEMINI_MODEL"] for x in fallbacks):
@@ -733,7 +735,10 @@ os.replace(name, p)
 """.trimIndent()
         message = "⏳ Règles multi-agents préparées. Assemblage des commandes de synchronisation…"
         val hasGemini = if (gemini.isNotEmpty()) "1" else "0"
-        val hasGroq = if (groq.isNotEmpty()) "1" else "0"
+        // Groq (offre gratuite : ~8 000 jetons/minute) ne peut pas porter un tour d'agent Hermès (consignes + outils MCP
+        // ≫ 8 000 jetons) : erreur « conversation has grown too large… /new ». Groq reste le cerveau RAPIDE de Jarvis
+        // (outils filtrés) et son secours ; côté Hermès, on ne le garde que s'il n'existe ni Gemini ni Cloudflare.
+        val hasGroq = if (groq.isNotEmpty() && gemini.isEmpty() && cloudflare.isEmpty()) "1" else "0"
         val cfIds = cloudflare.joinToString(",") { it.first }
         val pluginCommand = "PLUGIN_OK=0; debian_utilisateur_jarvis; hermes_debian hermes plugins install advanced-delegation --no-deps --no-enable >/dev/null 2>&1 || true; if hermes_debian hermes plugins enable advanced-delegation --no-allow-tool-override >/dev/null 2>&1; then PLUGIN_OK=1; p \"🧠 Routage multi-modèles advanced-delegation activé.\"; else p \"⚠️ Extension avancée indisponible : délégation Hermes native conservée.\"; fi"
         val extEnv = external.joinToString(" ") { entry ->
@@ -756,7 +761,9 @@ os.replace(name, p)
             "cd \"\$REPO\"",
             "exec ./.hermes/bin/hermes update --yes"
         ).joinToString("\n")
-        val upgradeCommand = "p '🔄 Mise à niveau d’Hermès (sous l’identité réelle de Termux, UID ${'$'}(id -u))…'; debian_utilisateur_jarvis; " +
+        // Arrêter d'abord les passerelles : sinon « hermes update » attend jusqu'à ~30 min la fin des échanges en cours.
+        val upgradeCommand = "pkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; sleep 2; " +
+            "p '🔄 Mise à niveau d’Hermès (sous l’identité réelle de Termux, UID ${'$'}(id -u))…'; debian_utilisateur_jarvis; " +
             "if hermes_debian bash -c " + q(upgradeScript) + " 2>&1 | while IFS= read -r ligne; do p \"${'$'}ligne\" || true; done; [ \"${'$'}{PIPESTATUS[0]}\" -eq 0 ]; then " +
             "p '✅ Hermès est à jour.'; else " +
             "p '⚠️ Mise à niveau d’Hermès impossible pour le moment : la configuration continue avec la version installée.'; fi"
