@@ -68,15 +68,15 @@ object Hermes {
             "Écoute vocale : " + if (s.wakeOn.value) "activée" else "désactivée",
             "Analyse Gemini : " + if (s.analyseGemini.value) "activée" else "désactivée",
             "Confirmations sensibles : " + if (s.confirmSensitive.value) "activées" else "désactivées ; les validations système Android restent obligatoires",
-            "Modèles configurés : Gemini \${s.geminiModel.value}, Groq \${s.groqModel.value}, moteur Hermès \${s.hermesModele.value.ifBlank { s.geminiModel.value }}",
+            "Modèles configurés : Gemini ${s.geminiModel.value}, Groq ${s.groqModel.value}, moteur Hermès ${s.hermesModele.value.ifBlank { s.geminiModel.value }}",
             "Fournisseurs configurés (noms uniquement, aucun secret) : " + fournisseurs.joinToString().ifBlank { "aucun détecté" },
             "Freebox : " + if (s.freeboxAppToken.value.isNotBlank()) "association enregistrée ; vérifier les droits réels avec freebox(action=droits)" else "non associée dans Jarvis",
-            "Disque box SMB/FTP : " + (if (s.boxHost.value.isNotBlank()) "hôte personnalisé enregistré" else "passerelle locale automatique") + " ; protocole \${s.boxProto.value} ; identifiants " + if (s.boxUser.value.isNotBlank()) "configurés" else "invité/non renseignés",
+            "Disque box SMB/FTP : " + (if (s.boxHost.value.isNotBlank()) "hôte personnalisé enregistré" else "passerelle locale automatique") + " ; protocole ${s.boxProto.value} ; identifiants " + if (s.boxUser.value.isNotBlank()) "configurés" else "invité/non renseignés",
             "Home Assistant : " + if (s.haUrl.value.isNotBlank() && s.haToken.value.isNotBlank()) "configuré" else "non configuré ou incomplet",
             "SSH : " + if (s.sshHost.value.isNotBlank() && s.sshUser.value.isNotBlank()) "configuré" else "non configuré ou incomplet",
             "Coffre Obsidian : " + if (s.obsidianUri.value.isNotBlank()) "coffre sélectionné dans les réglages ; utiliser ce coffre unique" else "aucun coffre sélectionné",
             "Pont MCP Jarvis : " + if (s.mcpJeton.value.isNotBlank()) "jeton configuré ; Jarvis démarre le pont local à la demande" else "jeton non configuré",
-            "Réglages conversation : délai \${s.convSeconds.value}s, silence \${s.silenceSec.value}s, bips " + if (s.muteBeeps.value) "coupés" else "actifs"
+            "Réglages conversation : délai ${s.convSeconds.value}s, silence ${s.silenceSec.value}s, bips " + if (s.muteBeeps.value) "coupés" else "actifs"
         )
         return "\n\nCONFIGURATION ACTUELLE DE L'APPLICATION JARVIS (source de vérité de ce tour ; aucun secret, token ou mot de passe n'est exposé) :\n" +
             lignes.joinToString("\n") { "- $it" } +
