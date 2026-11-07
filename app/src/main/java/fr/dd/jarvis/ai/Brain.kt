@@ -6,8 +6,8 @@ import org.json.JSONObject
 data class ChatMsg(val fromUser: Boolean, val text: String, val ts: Long = System.currentTimeMillis())
 
 /**
- * Point d'entrée conversationnel de Jarvis. Le routeur choisit entre Hermès (cerveau : tâches complexes, automatismes,
- * sous-agents Groq/Gemini) et Jarvis (exécution rapide sur le téléphone). Quand Hermès confie une action à Jarvis
+ * Point d'entrée conversationnel de Jarvis. Hermès est le cerveau principal ; Jarvis conserve les réflexes Android
+ * instantanés et expose ses outils à Hermès via MCP. Quand Hermès confie une action à Jarvis
  * (outil MCP jarvis_agent), [reply] tourne avec pourHermes = true : pas de renvoi vers Hermès, pas de boucle.
  */
 class Brain(
@@ -40,7 +40,7 @@ class Brain(
     }
 
     private fun escaladePossible(pourHermes: Boolean, suivi: Suivi) = !pourHermes && !suivi.hermesEssaye &&
-        app.store.hermesMode.value in setOf("auto", "tout") && !fr.dd.jarvis.hermes.Hermes.degrade()
+        app.store.hermesMode.value != "off" && !fr.dd.jarvis.hermes.Hermes.degrade()
 
     private suspend fun repondre(history: List<ChatMsg>, pourHermes: Boolean, onStatus: (String) -> Unit, suivi: Suivi): String {
         val recent = history.takeLast(4).filter { it.fromUser }.joinToString(" ") { it.text }
@@ -60,13 +60,14 @@ class Brain(
         // (Hermès les voit ensuite dans l'historique). Jamais pour une demande à orchestrer, en plusieurs étapes, ou
         // adressée nommément à Hermès.
         val multi = fr.dd.jarvis.hermes.Routeur.multiEtapes(texteUser)
-        val reflexes = pourHermes || !fr.dd.jarvis.hermes.Routeur.pourHermesSeul(texteUser)
+        // En mode Hermès prioritaire, seul le réflexe Android pur reste local. Les recherches, fichiers,
+        // Freebox, vidéo et procédures passent directement par Hermès, qui dispose du pont MCP Jarvis.
+        val reflexes = pourHermes || app.store.hermesMode.value == "off"
         fun reflexe(r: String) = r.also { if (!pourHermes) fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS }
-        // Une procédure qu'Hermès a apprise (skill ajouté) passe avant les raccourcis de Jarvis sur le même sujet.
-        val competence = if (pourHermes || app.store.hermesMode.value == "off") null
+        val competence = if (pourHermes || app.store.hermesMode.value != "demande") null
             else runCatching { fr.dd.jarvis.hermes.Routeur.competence(texteUser, app.memo.skillsHermes()) }.getOrNull()
+        if (!pourHermes && !multi) commandeImmediate(texteUser, onStatus)?.let { return reflexe(it) }
         if (reflexes) {
-            if (!multi) commandeImmediate(texteUser, onStatus)?.let { return reflexe(it) }
             positionDirecte(dernier, history, onStatus)?.let { return reflexe(it) }
             if (competence == null) {
                 rangementDirect(history, onStatus)?.let { return reflexe(it) }
@@ -103,16 +104,18 @@ class Brain(
         // il faut pouvoir retrouver les correspondances dans Obsidian, vérifier les entités HA puis agir.
         val pilotageChauffage = Regex("po[eê]les?|poils?|pellets?|granul[eé]s?|chauffage|thermostats?|climate\\.|temp[eé]rature|consigne|degr[eé]s?", RegexOption.IGNORE_CASE).containsMatchIn(recent) &&
             Regex("r[eé]gl|mettre|passer|fixer|monter|baisser|augment|dimin|r[eé]gler|allum|[eé]teind|commande|sur \\d", RegexOption.IGNORE_CASE).containsMatchIn(recent)
+        // La sélection des outils matériels ne dépend jamais du résultat du planificateur IA.
+        val domotique = pilotageChauffage || (Regex("t[ée]l[ée]|\\btv\\b|t[ée]l[ée]vis|volume|son|ampli|barre de son|chromecast|player|lumi[èe]re|lampe|volet|store|prise|home ?assistant|domotique|enceinte", RegexOption.IGNORE_CASE).containsMatchIn(recent) &&
+            ACTION_DOMOTIQUE.containsMatchIn(recent))
+        val accesBox = Regex("freebox|\\bbox\\b|disque dur|disque usb|stockage de la box|partage smb|partage ftp|nas", RegexOption.IGNORE_CASE).containsMatchIn(recent)
         val schema: JSONArray
         var societeNeeded = societeOn || planningClientsSync
         if (plan != null && plan.outils.isNotEmpty()) {
-            // Domotique (chauffage, télé, lumières, volets…) : toujours de quoi relire les notes, trouver l'entité ET agir.
-            val domotique = pilotageChauffage || (Regex("t[ée]l[ée]|\\btv\\b|t[ée]l[ée]vis|volume|lumi[èe]re|lampe|volet|store|prise|home ?assistant|domotique|enceinte", RegexOption.IGNORE_CASE).containsMatchIn(recent) &&
-                ACTION_DOMOTIQUE.containsMatchIn(recent))
-            val indispensables = if (domotique) listOf("obsidian_chercher", "obsidian_lire", "ha_entites", "ha_etat", "ha_service") else emptyList()
+            // Domotique : garder les moyens de découverte et d'action même si l'analyseur a oublié un outil.
+            val indispensables = if (domotique) listOf("obsidian_chercher", "obsidian_lire", "ha_entites", "ha_etat", "ha_service", "phone_action") else emptyList()
             val reglageDirect = Regex("r[eé]glage|param[eè]tre|mode conversation|[eé]coute continue|annonce vocale|r[eé]ponse vocale|confirmation|agent autonome|bips|analyse gemini|gemini|agents? autonomes?|notifications banni[eè]re", RegexOption.IGNORE_CASE).containsMatchIn(recent)
             val keep = (plan.outils + indispensables + (if (reglageDirect) listOf("reglage_jarvis") else emptyList()) + (if (planningClientsSync) listOf("analyser_planning_clients") else emptyList()) + listOf("memoire_ajouter", "memoire_apprendre", "memoire_apprentissages", "memoire_lire", "memoire_oublier") + (if (societeOn || planningClientsSync) fr.dd.jarvis.societe.SocieteTools.NAMES else emptySet<String>()) +
-                (if (fr.dd.jarvis.hermes.Hermes.enLigneConnu()) listOf("hermes_deleguer") else emptyList()) +
+                (if (app.store.hermesMode.value != "off") listOf("hermes_deleguer") else emptyList()) +
                 (if (Regex("herm[eè]s|termux", RegexOption.IGNORE_CASE).containsMatchIn(recent)) listOf("hermes") else emptyList()) +
                 (if (Regex("freebox|\\bbox\\b|vpn|wireguard|openvpn|redirection|ouvr\\w* (le|un|les) ports?|\\bdmz\\b|bail dhcp", RegexOption.IGNORE_CASE).containsMatchIn(recent)) listOf("freebox") else emptyList()) +
                 (if (TikTokTools.concerned(recent)) listOf("video_montage", "tiktok_video", "generer_video") else emptyList()) +
@@ -123,6 +126,20 @@ class Brain(
             for (i in 0 until all.length()) if (all.getJSONObject(i).getJSONObject("function").getString("name") in keep) schema.put(all.get(i))
             if (plan.outils.any { it in fr.dd.jarvis.societe.SocieteTools.NAMES }) societeNeeded = true
         } else schema = tools.schemaFor(recent)
+        // Les outils partagés restent accessibles même si schemaFor ou l'analyseur les a oubliés.
+        val outilsPartages = buildSet {
+            if (domotique) addAll(listOf("obsidian_chercher", "obsidian_lire", "ha_entites", "ha_etat", "ha_service", "phone_action", "hermes_deleguer"))
+            if (accesBox) addAll(listOf("freebox", "box_disque", "rechercher_videos_box", "lire_video_box", "routeur_diagnostiquer", "reseau_infos", "reseau_scanner", "ssh_fichier", "hermes_deleguer"))
+            if (app.store.hermesMode.value != "off") add("hermes_deleguer")
+        }
+        if (outilsPartages.isNotEmpty()) {
+            val deja = (0 until schema.length()).mapNotNull { schema.optJSONObject(it)?.optJSONObject("function")?.optString("name") }.toMutableSet()
+            for (i in 0 until all.length()) {
+                val outil = all.optJSONObject(i) ?: continue
+                val nom = outil.optJSONObject("function")?.optString("name") ?: continue
+                if (nom in outilsPartages && deja.add(nom)) schema.put(outil)
+            }
+        }
         // Outils retirés : ceux qui renverraient vers Hermès (quand c'est Hermès qui demande), et le SSH pour une demande
         // Home Assistant ordinaire — elle passe par l'API (ha_*) ; si l'API échoue, l'approfondissement prend le relais.
         val retires = (if (pourHermes) setOf("hermes", "hermes_deleguer", "tache_arriere_plan") else emptySet()) +
@@ -137,7 +154,11 @@ class Brain(
         messages.put(JSONObject().put("role", "system").put("content",
             (if (pourHermes) "Tu es l'agent téléphone de JARVIS, missionné par Hermès (le cerveau) : exécute la consigne avec tes outils, puis rends un compte rendu factuel et complet (résultats réels, chemins, identifiants, erreurs exactes), sans poser de question sauf si une information indispensable manque.\n\n" else "") +
             // Partie stable d'abord (mise en cache par le fournisseur), puis le contexte propre à la demande.
-            Prompts.brain(userName(), avecDate = false) + (if (societeNeeded) "\n\n" + fr.dd.jarvis.societe.SocieteTools.PROMPT else "") +
+            Prompts.brain(userName(), avecDate = false) +
+                (if (domotique) "\\n\\nPILOTAGE DOMOTIQUE : identifie l'équipement exact. Pour une télévision, un ampli ou une enceinte, n'utilise jamais phone_action volume (cela modifierait le téléphone). Cherche l'entité et l'état Home Assistant ; si ces outils ne sont pas dans le catalogue Jarvis, délègue à Hermès avec hermes_deleguer pour qu'il utilise ses MCP/plugins/skills. Une commande directe au téléviseur ou au lecteur n'est permise que si un outil correspondant existe réellement. Après l'action, relis l'état. Si aucune intégration ne permet l'action, indique précisément ce qui manque." else "") +
+                (if (accesBox) "\\n\\nACCÈS À LA BOX : pour une Freebox associée, essaie freebox(action=fichiers) ; si le droit explorer manque ou si l'API échoue, bascule vers box_disque via SMB/FTP. Pour une autre box, utilise le partage SMB/FTP configuré. Pour les films, utilise rechercher_videos_box puis lire_video_box avec le chemin exact. Distingue refus de permission, partage désactivé, identifiants refusés et hôte injoignable." else "") +
+                (if (!pourHermes && app.store.hermesMode.value != "off") "\\n\\nAGENT UNIQUE : tu peux déléguer à Hermès les compétences, serveurs MCP et plugins qu'il possède ; Hermès peut appeler les outils natifs Jarvis via le pont MCP. Combine les capacités et restitue une seule réponse cohérente." else "") +
+                (if (societeNeeded) "\n\n" + fr.dd.jarvis.societe.SocieteTools.PROMPT else "") +
                 app.memo.pourPrompt() + app.memo.hermesPourPrompt() + app.memo.capacitesPourPrompt() + notesUtiles +
                 (if (plan != null && plan.note.isNotBlank()) "\n\nAnalyse préalable de la demande (Gemini) — suis ce plan, avec les outils fournis : ${plan.note}" else "") +
                 "\n\nDate et heure actuelles : ${Prompts.now()}."))
@@ -146,9 +167,16 @@ class Brain(
         // 12000 caractères ; les tours plus anciens (qui ne servent plus qu'à garder le fil de la conversation) sont ramenés
         // à 4000 caractères — largement assez pour une trentaine de lignes (noms de fichiers, SMS, etc.) sans repayer en
         // entier, à chaque nouveau tour, le texte complet d'une réponse déjà ancienne et déjà traitée.
-        val recentHistory = history.takeLast(16)
+        // Historique utile uniquement : mémoire durable et notes sont déjà injectées séparément.
+        // Réduire le nombre de tours évite de renvoyer les mêmes longues réponses à chaque appel Groq.
+        val recentHistory = history.takeLast(10)
         recentHistory.forEachIndexed { idx, m ->
-            val cap = if (recentHistory.size - 1 - idx < 3) 12000 else 4000
+            val age = recentHistory.size - 1 - idx
+            val cap = when {
+                age < 2 -> 7000
+                age < 4 -> 3000
+                else -> 1400
+            }
             messages.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(cap)))
         }
 

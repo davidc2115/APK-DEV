@@ -19,7 +19,7 @@ import org.json.JSONObject
 object RelaisGroq {
     /** Budget d'entrée visé (jetons estimés) pour tenir sous ~8 000 jetons/min avec la réponse. */
     private val PALIERS = listOf(
-        Palier(budget = 6200, systeme = 9000, outils = 28, desc = 170, descParam = 70, historique = 10, texte = 900, resultat = 2500),
+        Palier(budget = 5500, systeme = 7500, outils = 24, desc = 150, descParam = 60, historique = 8, texte = 750, resultat = 2000),
         Palier(budget = 5200, systeme = 5500, outils = 16, desc = 110, descParam = 45, historique = 6, texte = 500, resultat = 1400),
         Palier(budget = 4200, systeme = 3200, outils = 9, desc = 80, descParam = 0, historique = 4, texte = 300, resultat = 800),
         Palier(budget = 3000, systeme = 1800, outils = 5, desc = 60, descParam = 0, historique = 2, texte = 200, resultat = 500)

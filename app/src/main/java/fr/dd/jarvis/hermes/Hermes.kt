@@ -552,7 +552,7 @@ object Routeur {
 
     private fun choisirSansMemoire(app: JarvisApp, texte: String, precedent: String?): Choix =
         decider(app.store.hermesMode.value, app.enVoiture, Hermes.degrade(), texte, precedent,
-            competenceHermes = runCatching { competence(texte, app.memo.skillsHermes()) }.getOrNull())
+            competenceHermes = if (app.store.hermesMode.value == "demande") runCatching { competence(texte, app.memo.skillsHermes()) }.getOrNull() else null)
 
     /** Décision pure (testable) : mode des réglages, Android Auto, Hermès saturé, demande, message précédent de l'assistant. */
     internal fun decider(mode: String, enVoiture: Boolean, sature: Boolean, texte: String, precedent: String?, competenceHermes: String? = null): Choix {
@@ -565,19 +565,19 @@ object Routeur {
         val reponseCourte = t.split(Regex("\\s+")).size <= 4 && !t.endsWith("?") && precedent != null && precedent.takeLast(250).contains("?") &&
             !ORCHESTRATION.containsMatchIn(t) && !FREEBOX.containsMatchIn(t) && !FICHIERS.containsMatchIn(t) && !WEB.containsMatchIn(t)
         if (BREF.matches(t) || reponseCourte) return Choix(derniere, if (derniere == Cible.HERMES) "suite de la conversation avec Hermès" else "suite de la conversation avec Jarvis")
-        if (mode == "tout") return if (commandeSimple(t) && competenceHermes == null) Choix(Cible.JARVIS, "commande simple : Jarvis l'exécute tout de suite")
-            else Choix(Cible.HERMES, "Hermès pour tout : il confie les actions du téléphone à Jarvis")
-        // Jarvis d'abord (défaut) : Hermès directement seulement pour ce que Jarvis ne sait pas faire seul ;
-        // pour tout le reste Jarvis répond, et passe la main à Hermès s'il n'aboutit pas (Brain.reply).
-        if (mode == "auto" || mode == "demande") return when {
+        // Mode auto = Hermès cerveau principal. Jarvis garde uniquement les réflexes instantanés
+        // interceptés avant ce routeur (alarme, volume du téléphone, lancement d'application).
+        // Pour toute autre demande, Hermès utilise ses skills/MCP puis délègue au besoin au pont Jarvis.
+        if (mode == "tout" || mode == "auto") return Choix(Cible.HERMES, "Hermès prioritaire : il orchestre et délègue aux outils Jarvis")
+        // Mode « demande » : Hermès seulement pour les demandes explicites ou les tâches complexes.
+        if (mode == "demande") return when {
             ORCHESTRATION.containsMatchIn(t) || multiEtapes(t) -> Choix(Cible.HERMES, "automatisme / plusieurs étapes : Hermès orchestre")
             homeAssistantApi(t) -> Choix(Cible.JARVIS, "Home Assistant : API (pas de SSH)")
             HA.containsMatchIn(t) -> Choix(Cible.HERMES, "Home Assistant côté serveur (maintenance, panne) : moteur approfondi")
-            // Ce qu'Hermès faisait seul (skills ajoutés : procédures, ponts, accès…) reste chez lui.
             competenceHermes != null -> Choix(Cible.HERMES, "compétence d'Hermès « $competenceHermes »")
             SERVEUR.containsMatchIn(t) -> Choix(Cible.HERMES, "serveur / SSH : Hermès (notes, skills, terminal)")
             WEB.containsMatchIn(t) -> Choix(Cible.HERMES, "recherche sur internet : Hermès")
-            else -> Choix(Cible.JARVIS, "Jarvis d'abord (Hermès s'il n'aboutit pas)")
+            else -> Choix(Cible.JARVIS, "Jarvis : réponse rapide")
         }
         // Hermès orchestre : automatismes, récurrence, surveillance, sous-agents, plusieurs étapes — même sur des données du téléphone.
         if (ORCHESTRATION.containsMatchIn(t) || multiEtapes(t)) return Choix(Cible.HERMES, "tâche complexe : Hermès orchestre (Gemini, Groq, Jarvis)")

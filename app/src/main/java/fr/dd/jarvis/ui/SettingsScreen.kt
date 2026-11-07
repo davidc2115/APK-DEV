@@ -507,22 +507,15 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 Spacer(Modifier.height(8.dp))
                 Text("Répartition des demandes", color = HudDim, fontSize = 12.sp)
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("auto" to "Automatique (rapide + approfondi)", "tout" to "Toujours approfondi", "off" to "Rapide uniquement").forEach { (id, nom) ->
+                    listOf("auto" to "Hermès prioritaire (rapide + approfondi)", "tout" to "Toujours approfondi", "off" to "Jarvis uniquement").forEach { (id, nom) ->
                         HudChip(nom, selected = store.hermesMode.value == id) { store.hermesMode.set(id) }
                     }
                 }
                 Text(
                     when (store.hermesMode.value) {
-                        "tout" -> "Toutes les demandes passent par le moteur approfondi (Hermès) : mémoire longue, notes, skills et plugins, " +
-                            "confie les actions du téléphone à l'agent Jarvis, le travail lourd à ses sous-agents Gemini et Groq, et crée tes automatismes. " +
-                            "Pour rester rapide, les commandes simples du téléphone (lampe torche, volume, Wi-Fi, musique, appel, SMS, rendez-vous…), " +
-                            "la position, la recherche d'un fichier, la Freebox et le lancement d'une vidéo sont exécutés directement par Jarvis ; " +
-                            "Hermès voit ces échanges dans l'historique et partage la même mémoire."
+                        "tout" -> "Toutes les demandes passent directement par Hermès : mémoire longue, notes, skills, plugins et MCP. Il utilise les outils Jarvis pour les actions du téléphone et ses sous-agents pour les tâches lourdes. Seuls les réflexes Android instantanés sont exécutés directement par Jarvis."
                         "off" -> "Jarvis répond uniquement avec sa partie rapide ; le moteur approfondi (Hermès) n'est pas utilisé."
-                        else -> "Recommandé. Jarvis et Hermès ne forment qu'un seul assistant : une voix, une conversation, une mémoire. " +
-                            "Jarvis répond tout de suite avec sa partie rapide ; si ce n'est pas suffisant (pas d'outil, rien trouvé, information manquante, erreur), " +
-                            "il approfondit automatiquement avec son moteur Hermès (notes, skills, sous-agents). Automatismes, demandes en plusieurs étapes, " +
-                            "serveur/SSH et recherche sur internet passent directement par le moteur approfondi. Jamais besoin de dire « Hermès »."
+                        else -> "Recommandé. Hermès reçoit directement les demandes et orchestre les outils Jarvis, ses notes, skills, MCP et sous-agents. Seuls les réflexes Android instantanés (ex. alarme, volume du téléphone) sont exécutés directement par Jarvis. Une seule voix, une conversation et une mémoire."
                     },
                     color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp)
                 )
@@ -862,7 +855,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
         }
 
         item {
-            PollinationsPanel(store)
+            PollinationsPanel(app)
         }
 
         // ------------------------------------------------------------ Mails
@@ -1716,8 +1709,12 @@ private fun TikTokPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvis
 }
 
 @Composable
-private fun PollinationsPanel(store: fr.dd.jarvis.data.Store) {
+private fun PollinationsPanel(app: JarvisApp) {
+    val store = app.store
     val ctx = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var falTestBusy by remember { mutableStateOf(false) }
+    var falTestMessage by remember { mutableStateOf("") }
     HudPanel(Modifier.fillMaxWidth(), title = "Vidéo IA — fal.ai / Wan 2.2") {
         Text(
             "Anime une image de ton coffre avec Wan 2.2. Jarvis envoie l'image directement à fal.ai, suit la file de génération puis télécharge le MP4. Aucun Worker Cloudflare ni serveur personnel n'est nécessaire.",
@@ -1727,18 +1724,30 @@ private fun PollinationsPanel(store: fr.dd.jarvis.data.Store) {
         if (store.falApiKey.available) {
             HudTextField(
                 store.falApiKey.value,
-                { value -> runCatching { store.falApiKey.set(value.trim()) } },
+                { value ->
+                    runCatching { store.falApiKey.set(value.trim()) }
+                        .onFailure { falTestMessage = "❌ Enregistrement impossible : ${it.message ?: it.javaClass.simpleName}" }
+                },
                 Modifier.fillMaxWidth(),
                 label = "Clé API fal.ai",
                 password = true
             )
             Spacer(Modifier.height(8.dp))
             Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                HudButton(if (falTestBusy) "Test…" else "Tester la clé fal.ai", enabled = !falTestBusy && store.falApiKey.value.isNotBlank()) {
+                    scope.launch {
+                        falTestBusy = true
+                        falTestMessage = "Vérification de l'authentification fal.ai…"
+                        falTestMessage = fr.dd.jarvis.ai.ImageToVideoGen.testerCle(app)
+                        falTestBusy = false
+                    }
+                }
                 HudButton("Créer / gérer ma clé API") {
                     ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://fal.ai/dashboard/keys")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
                 }
                 HudButton("Effacer la clé") { store.falApiKey.clear() }
             }
+            if (falTestMessage.isNotBlank()) Text(falTestMessage, color = HudText, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
         } else {
             Text(
                 "⚠️ Le stockage chiffré Android est indisponible sur cet appareil. Jarvis refuse d'enregistrer la clé en clair.",

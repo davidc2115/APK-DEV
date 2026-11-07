@@ -40,10 +40,45 @@ object ImageToVideoGen {
     fun disponible(app: JarvisApp) = app.store.falApiKey.available && app.store.falApiKey.value.isNotBlank()
 
     private fun cle(app: JarvisApp): String {
-        val key = app.store.falApiKey.value.trim()
+        val brut = app.store.falApiKey.value.trim()
         if (!app.store.falApiKey.available) throw IllegalStateException("Le stockage chiffré Android est indisponible : la clé fal.ai ne peut pas être enregistrée de façon sûre.")
-        if (key.isBlank()) throw IllegalStateException("Ajoute ta clé fal.ai dans Réglages › Vidéo IA.")
+        if (brut.isBlank()) throw IllegalStateException("Ajoute ta clé fal.ai dans Réglages › Vidéo IA.")
+        // Certains utilisateurs collent la valeur complète de l'exemple de documentation (« Key xxx »).
+        // Le préfixe est ajouté par Jarvis : le conserver dans la valeur provoquerait « Key Key xxx » et un 401.
+        val key = brut.replace(Regex("(?i)^key\\s+"), "").trim()
+        if (key.isBlank() || key.any { it.isWhitespace() }) throw IllegalStateException("Format de clé fal.ai invalide : colle uniquement la clé API, avec ou sans le préfixe « Key ».")
         return key
+    }
+
+    /**
+     * Vérifie l'authentification sans lancer de génération et donc sans consommer de crédits.
+     * fal renvoie NOT_FOUND pour l'identifiant fictif si la clé est authentifiée ; 401/403 indiquent
+     * respectivement une clé rejetée ou un accès interdit.
+     */
+    suspend fun testerCle(app: JarvisApp): String = withContext(Dispatchers.IO) {
+        val key = runCatching { cle(app) }.getOrElse { return@withContext "❌ ${it.message}" }
+        val modele = MODELE_TEXTE.split('/').take(2).joinToString("/")
+        val url = "$baseFal/$modele/requests/00000000-0000-4000-8000-000000000000/status"
+        try {
+            val req = Request.Builder().url(url).header("Authorization", "Key $key").get().build()
+            http.newCall(req).execute().use { response ->
+                val raw = response.body?.string().orEmpty()
+                val status = runCatching { JSONObject(raw).optString("status") }.getOrDefault("")
+                when {
+                    response.code == 401 -> "❌ fal.ai refuse cette clé (401). Vérifie qu'elle provient de fal.ai, qu'elle n'a pas été révoquée et qu'elle est copiée sans espace."
+                    response.code == 403 -> "❌ Clé reconnue mais accès interdit par fal.ai (403). Vérifie les restrictions du compte ou de la clé."
+                    response.code == 402 -> "⚠️ Clé authentifiée, mais fal.ai signale un problème de crédit ou de facturation (402)."
+                    response.code == 404 && (status.equals("NOT_FOUND", true) || raw.contains("not found", true)) ->
+                        "OK — clé fal.ai authentifiée. Test sans génération, sans consommation de crédits. Le solde et les droits de génération ne sont pas débités/vérifiés par ce test."
+                    response.isSuccessful && status.equals("NOT_FOUND", true) ->
+                        "OK — clé fal.ai authentifiée. Test sans génération, sans consommation de crédits."
+                    response.code == 404 -> "⚠️ Authentification possiblement valide, mais endpoint de vérification inattendu (404) : ${raw.take(180)}"
+                    else -> "⚠️ Test fal.ai non concluant (HTTP ${response.code}) : ${raw.take(220)}"
+                }
+            }
+        } catch (e: Exception) {
+            "❌ Impossible de joindre fal.ai : ${e.message ?: e.javaClass.simpleName}"
+        }
     }
 
     /** Nombre d'images pour [secondes] à 24 i/s, dans les limites du modèle (17 à 121 → jusqu'à 5 s). */
@@ -181,6 +216,11 @@ object ImageToVideoGen {
             }
             if (status != null) {
                 lastStatus = status.optString("status", lastStatus)
+                // fal signale aussi les échecs avec status=COMPLETED et les champs error/error_type.
+                // Ne pas traiter ce statut comme un succès si le runner a en réalité échoué.
+                if (lastStatus == "COMPLETED" && status.optString("error").isNotBlank()) {
+                    throw ApiException(500, "fal.ai a échoué (${status.optString("error_type").ifBlank { "erreur du modèle" }}) : ${status.optString("error").take(350)}")
+                }
                 when (lastStatus) {
                     "COMPLETED" -> break
                     "FAILED", "CANCELLED", "ERROR" -> throw ApiException(500, "fal.ai a échoué : ${status.optString("error", "génération refusée")}")
@@ -227,8 +267,9 @@ object ImageToVideoGen {
                         ?.ifBlank { null } ?: j.optString("detail").ifBlank { j.optString("error") }
                 }.getOrDefault(raw).ifBlank { raw }
                 val message = when (response.code) {
-                    401, 403 -> "Clé fal.ai refusée : vérifie-la dans Réglages › Vidéo IA."
-                    402 -> "Crédit fal.ai insuffisant. Consulte ton solde avant de relancer."
+                    401 -> "Clé fal.ai invalide, révoquée ou mal copiée (HTTP 401). Utilise le bouton « Tester la clé fal.ai » dans Réglages › Vidéo IA."
+                    403 -> "fal.ai refuse l'accès à cette ressource (HTTP 403) : vérifie les restrictions et les droits de ton compte/clé. Détail : ${detail.take(180)}"
+                    402 -> "Crédit ou facturation fal.ai insuffisant (HTTP 402). Consulte ton solde avant de relancer."
                     422 -> "Paramètres, texte ou image refusés par fal.ai : ${detail.take(250)}"
                     429 -> "Limite de requêtes fal.ai atteinte. Attends un peu avant de réessayer."
                     else -> "fal.ai (${response.code}) : ${detail.take(300)}"

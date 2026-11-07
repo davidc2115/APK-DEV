@@ -418,7 +418,8 @@ object PontMcp {
             "discord_role_position", "discord_role_attribuer", "discord_salon_permission", "discord_message_envoyer",
             // Réseau et accès distant : garder les diagnostics, la découverte et les outils SSH visibles pour Hermès.
             // Freebox (redirections, VPN, Wi-Fi…) et recherche globale de fichiers/dossiers : toujours visibles.
-            "freebox", "stockage_telephone", "obsidian_fichiers",
+            "freebox", "box_disque", "rechercher_videos_box", "lire_video_box", "stockage_telephone", "obsidian_fichiers",
+            "ha_entites", "ha_etat", "ha_service",
             "routeur_diagnostiquer", "reseau_infos", "ip_publique", "reseau_scanner", "imprimantes_trouver",
             "appareil_sonder", "appareil_page", "ssh_commande", "ssh_fichier", "ssh_script"
         )
