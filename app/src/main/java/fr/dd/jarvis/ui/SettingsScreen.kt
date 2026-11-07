@@ -862,7 +862,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
         }
 
         item {
-            PollinationsPanel(store)
+            PollinationsPanel(app)
         }
 
         // ------------------------------------------------------------ Mails
@@ -1716,8 +1716,12 @@ private fun TikTokPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvis
 }
 
 @Composable
-private fun PollinationsPanel(store: fr.dd.jarvis.data.Store) {
+private fun PollinationsPanel(app: JarvisApp) {
+    val store = app.store
     val ctx = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var falTestBusy by remember { mutableStateOf(false) }
+    var falTestMessage by remember { mutableStateOf("") }
     HudPanel(Modifier.fillMaxWidth(), title = "Vidéo IA — fal.ai / Wan 2.2") {
         Text(
             "Anime une image de ton coffre avec Wan 2.2. Jarvis envoie l'image directement à fal.ai, suit la file de génération puis télécharge le MP4. Aucun Worker Cloudflare ni serveur personnel n'est nécessaire.",
@@ -1727,18 +1731,30 @@ private fun PollinationsPanel(store: fr.dd.jarvis.data.Store) {
         if (store.falApiKey.available) {
             HudTextField(
                 store.falApiKey.value,
-                { value -> runCatching { store.falApiKey.set(value.trim()) } },
+                { value ->
+                    runCatching { store.falApiKey.set(value.trim()) }
+                        .onFailure { falTestMessage = "❌ Enregistrement impossible : ${it.message ?: it.javaClass.simpleName}" }
+                },
                 Modifier.fillMaxWidth(),
                 label = "Clé API fal.ai",
                 password = true
             )
             Spacer(Modifier.height(8.dp))
             Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                HudButton(if (falTestBusy) "Test…" else "Tester la clé fal.ai", enabled = !falTestBusy && store.falApiKey.value.isNotBlank()) {
+                    scope.launch {
+                        falTestBusy = true
+                        falTestMessage = "Vérification de l'authentification fal.ai…"
+                        falTestMessage = fr.dd.jarvis.ai.ImageToVideoGen.testerCle(app)
+                        falTestBusy = false
+                    }
+                }
                 HudButton("Créer / gérer ma clé API") {
                     ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://fal.ai/dashboard/keys")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
                 }
                 HudButton("Effacer la clé") { store.falApiKey.clear() }
             }
+            if (falTestMessage.isNotBlank()) Text(falTestMessage, color = HudText, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
         } else {
             Text(
                 "⚠️ Le stockage chiffré Android est indisponible sur cet appareil. Jarvis refuse d'enregistrer la clé en clair.",
