@@ -90,6 +90,24 @@ object Serveur {
         return s
     }
 
+    @Volatile private var tunnelOllama: Pair<Session, Int>? = null
+
+    /**
+     * Tunnel SSH persistant vers un port du serveur LUI-MÊME (Ollama n'écoute souvent que sur 127.0.0.1) ; renvoie le port
+     * local (127.0.0.1) à utiliser. Réutilisé tant que la session SSH reste ouverte.
+     */
+    @Synchronized
+    fun tunnelOllama(app: JarvisApp, portDistant: Int): Int {
+        tunnelOllama?.let { (s, p) -> if (s.isConnected) return p; runCatching { s.disconnect() } }
+        val s = try { ouvrir(app) } catch (e: Exception) {
+            throw IllegalStateException(expliquer(e, app.store.sshHost.value, app.store.sshPort.value.toIntOrNull() ?: 22), e)
+        }
+        runCatching { s.setServerAliveInterval(30_000) }
+        val p = s.setPortForwardingL("127.0.0.1", 0, "127.0.0.1", portDistant)
+        tunnelOllama = s to p
+        return p
+    }
+
     private fun <T> session(app: JarvisApp, cible: Cible? = null, f: (Session) -> T): T {
         val hote = cible?.hote ?: app.store.sshHost.value; val port = cible?.port ?: (app.store.sshPort.value.toIntOrNull() ?: 22)
         try {

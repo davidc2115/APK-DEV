@@ -42,6 +42,9 @@ object PontMcp {
         /** Relais Groq compact pour Hermès : (code HTTP, corps JSON chat.completion). */
         fun groq(corps: JSONObject): Pair<Int, String> = 404 to """{"error":{"message":"relais indisponible"}}"""
         fun groqModeles(): String = """{"object":"list","data":[]}"""
+        /** Relais Ollama (serveur de la maison) pour Hermès : (code HTTP, corps JSON chat.completion). */
+        fun ollama(corps: JSONObject): Pair<Int, String> = 404 to """{"error":{"message":"relais indisponible"}}"""
+        fun ollamaModeles(): String = """{"object":"list","data":[]}"""
         /** Mémoire d'Hermès reçue (MEMORY.md + USER.md). */
         fun memoireHermes(texte: String) {}
         /** Mémoire de Jarvis à recopier dans Hermès. */
@@ -67,6 +70,8 @@ object PontMcp {
     private class FournisseurJarvis(val app: JarvisApp) : Fournisseur {
         override fun groq(corps: JSONObject) = RelaisGroq.repondre(app, corps)
         override fun groqModeles() = RelaisGroq.modeles(app)
+        override fun ollama(corps: JSONObject) = fr.dd.jarvis.ai.Ollama.relais(app, corps)
+        override fun ollamaModeles() = fr.dd.jarvis.ai.Ollama.modelesJson(app)
         override fun memoireHermes(texte: String) { runCatching { app.memo.majHermes(texte) } }
         override fun memoireJarvis(): String = runCatching { app.memo.pourHermes() }.getOrDefault("")
         override fun capacitesHermes(json: String) { runCatching { app.memo.majCapacitesHermes(json) } }
@@ -318,6 +323,13 @@ object PontMcp {
             r.chemin.trimEnd('/') == "/groq/v1/chat/completions" && r.methode == "POST" -> {
                 val corps = runCatching { JSONObject(r.corps) }.getOrElse { return@use repondre(s, 400, """{"error":{"message":"JSON invalide"}}""") }
                 val (code, rep) = f.groq(corps)
+                if (code == 200 && corps.optBoolean("stream", false)) repondre(s, 200, enFlux(JSONObject(rep)), type = "text/event-stream")
+                else repondre(s, code, rep)
+            }
+            r.chemin.trimEnd('/') == "/ollama/v1/models" && r.methode == "GET" -> repondre(s, 200, f.ollamaModeles())
+            r.chemin.trimEnd('/') == "/ollama/v1/chat/completions" && r.methode == "POST" -> {
+                val corps = runCatching { JSONObject(r.corps) }.getOrElse { return@use repondre(s, 400, """{"error":{"message":"JSON invalide"}}""") }
+                val (code, rep) = f.ollama(corps)
                 if (code == 200 && corps.optBoolean("stream", false)) repondre(s, 200, enFlux(JSONObject(rep)), type = "text/event-stream")
                 else repondre(s, code, rep)
             }

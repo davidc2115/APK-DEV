@@ -602,6 +602,8 @@ p "✅ Hermès installé (${'$'}{MODE})."
             gemini.forEachIndexed { index, key -> appendLine("setenv " + (if (index == 0) "GOOGLE_API_KEY" else "GOOGLE_API_KEY_" + (index + 1)) + " " + q(key)) }
             // Clés Groq : restent chiffrées dans Jarvis ; Hermès passe par le relais local avec le jeton du pont.
             if (groq.isNotEmpty()) appendLine("setenv JARVIS_GROQ_RELAIS " + q(s.mcpJeton.value))
+            // Ollama du serveur de la maison : Hermès passe aussi par le relais de Jarvis (tunnel SSH et compactage compris).
+            if (fr.dd.jarvis.ai.Ollama.configure(app)) appendLine("setenv JARVIS_OLLAMA_RELAIS " + q(s.mcpJeton.value))
             // Fuseau du téléphone : les automatismes (cronjob) d'Hermès se déclenchent à l'heure locale, pas en UTC.
             appendLine("setenv HERMES_TIMEZONE " + q(java.util.TimeZone.getDefault().id))
             cloudflare.forEachIndexed { index, pair -> appendLine("setenv JARVIS_CF_KEY_" + (index + 1) + " " + q(pair.second)) }
@@ -766,6 +768,14 @@ for provider_id, key_env, default_api in external_specs:
             route = {"provider": "custom:" + custom_name, "model": model_name}
             if not any(isinstance(x, dict) and x.get("provider") == route["provider"] and x.get("model") == route["model"] for x in fallbacks):
                 fallbacks.append(route)
+# Ollama du serveur de la maison (via le relais de Jarvis) : tout dernier secours et sous-agent local « jarvis-ollama ».
+fallbacks[:] = [x for x in fallbacks if not (isinstance(x, dict) and x.get("provider") == "custom:jarvis_ollama")]
+if os.environ.get("JARVIS_HAS_OLLAMA") == "1":
+    providers["jarvis_ollama"] = {"api": os.environ["JARVIS_OLLAMA_RELAIS_URL"], "key_env": "JARVIS_OLLAMA_RELAIS"}
+    fallbacks.append({"provider": "custom:jarvis_ollama", "model": os.environ.get("JARVIS_OLLAMA_MODEL") or "auto"})
+    add_route("jarvis-ollama", "IA locale Ollama du serveur de la maison (secours hors ligne, plus lente : tâches simples)", "custom:jarvis_ollama", os.environ.get("JARVIS_OLLAMA_MODEL") or "auto")
+else:
+    providers.pop("jarvis_ollama", None)
 known = {(str(x.get("provider", "")), str(x.get("model", ""))) for x in options if isinstance(x, dict)}
 for index, item in enumerate(fallbacks, 1):
     if isinstance(item, dict):
@@ -809,7 +819,7 @@ os.replace(name, p)
             val id = entry[0].uppercase()
             "JARVIS_HAS_$id=1 JARVIS_${id}_MODEL=${q(entry[3])} JARVIS_${id}_ENDPOINT=${q(entry[2])}"
         }
-        val configCommand = "proot-distro login debian --termux-home -- env " + extEnv + " JARVIS_HAS_GEMINI=" + hasGemini + " JARVIS_HAS_GROQ=" + hasGroq + " JARVIS_GROQ_RELAIS_URL=" + q("http://127.0.0.1:${PontMcp.PORT}/groq/v1") + " JARVIS_GEMINI_MODEL=" + q(app.store.hermesModele.value.ifBlank { app.store.geminiModel.value }.ifBlank { "gemini-2.5-flash" }) + " JARVIS_GROQ_MODEL=" + q(model) + " JARVIS_CF_MODEL=" + q(cloudflareModel) + " JARVIS_CF_IDS=" + q(cfIds) + " JARVIS_ADVANCED_DELEGATION=\"\$PLUGIN_OK\" python3 -c " + q(py) + " || exit 1"
+        val configCommand = "proot-distro login debian --termux-home -- env " + extEnv + " JARVIS_HAS_GEMINI=" + hasGemini + " JARVIS_HAS_GROQ=" + hasGroq + " JARVIS_GROQ_RELAIS_URL=" + q("http://127.0.0.1:${PontMcp.PORT}/groq/v1") + " JARVIS_GEMINI_MODEL=" + q(app.store.hermesModele.value.ifBlank { app.store.geminiModel.value }.ifBlank { "gemini-2.5-flash" }) + " JARVIS_GROQ_MODEL=" + q(model) + " JARVIS_CF_MODEL=" + q(cloudflareModel) + " JARVIS_CF_IDS=" + q(cfIds) + " JARVIS_HAS_OLLAMA=" + (if (fr.dd.jarvis.ai.Ollama.configure(app)) "1" else "0") + " JARVIS_OLLAMA_RELAIS_URL=" + q("http://127.0.0.1:${PontMcp.PORT}/ollama/v1") + " JARVIS_OLLAMA_MODEL=" + q(s.ollamaModele.value.ifBlank { "auto" }) + " JARVIS_ADVANCED_DELEGATION=\"\$PLUGIN_OK\" python3 -c " + q(py) + " || exit 1"
         // L'installation Jarvis est une installation source dans Debian : utiliser son exécutable direct.
         // bash -lc réinitialisait le PATH et pouvait lancer un autre Hermes, d'où l'échec silencieux précédent.
         // En cas d'échec, arrêter la configuration : ne jamais annoncer une nouvelle version qui n'a pas été installée.

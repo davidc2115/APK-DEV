@@ -62,7 +62,8 @@ class Llm(private val store: Store) {
             }
         }
         lastError = errors.joinToString(" | ").ifBlank { "aucune clé configurée" }
-        throw IllegalStateException(lastError)
+        // Dernier recours : Ollama du serveur de la maison.
+        return secoursOllama(IllegalStateException(lastError)) { app -> Ollama.generer(app, system, user).ifBlank { throw IllegalStateException("réponse vide") } }
     }
 
     private suspend fun plainGroq(system: String, user: String): String = try {
@@ -75,6 +76,25 @@ class Llm(private val store: Store) {
      *  [forceText] = interdit explicitement un appel d'outil ce tour-ci (reprise après un échec), en gardant les outils
      *  visibles pour le modèle plutôt que de les retirer (ce qui provoquait une erreur Groq, cf. Clients.kt). */
     suspend fun groqChat(messages: org.json.JSONArray, tools: org.json.JSONArray?, forceText: Boolean = false): org.json.JSONObject = try {
+        groqChatEnLigne(messages, tools, forceText)
+    } catch (e: CancellationException) { throw e } catch (e: Exception) {
+        // Groq, puis Cloudflare, ont échoué (quotas, panne, pas d'internet) : Ollama du serveur de la maison en tout dernier
+        // recours, avec la requête compactée à sa mesure. S'il échoue aussi, on remonte l'erreur d'origine (plus parlante).
+        secoursOllama(e) { app ->
+            val (msgs, outils) = fr.dd.jarvis.hermes.RelaisGroq.reduire(messages, if (forceText) null else tools, 0)
+            Ollama.chat(app, msgs, outils)
+        }
+    }
+
+    /** Exécute [f] sur Ollama s'il est configuré ; sinon (ou en cas d'échec) relance [origine]. */
+    private suspend fun <T> secoursOllama(origine: Exception, f: (fr.dd.jarvis.JarvisApp) -> T): T {
+        val app = Ollama.app
+        if (app == null || !Ollama.configure(app)) throw origine
+        return try { withContext(Dispatchers.IO) { f(app) } }
+        catch (e: CancellationException) { throw e } catch (e: Exception) { throw origine }
+    }
+
+    private suspend fun groqChatEnLigne(messages: org.json.JSONArray, tools: org.json.JSONArray?, forceText: Boolean): org.json.JSONObject = try {
         groq.chat(messages, tools, 1800, forceText)
     } catch (e: ApiException) {
         when {
@@ -181,8 +201,8 @@ class Llm(private val store: Store) {
     suspend fun testerClesApi(fournisseurRaw: String = "tous"): String {
         val alias = mapOf("all" to "tous", "tout" to "tous", "toutes" to "tous", "google" to "gemini", "hf" to "huggingface", "hugging face" to "huggingface", "cloudflare workers ai" to "cloudflare", "workers ai" to "cloudflare", "z.ai" to "zai")
         val fournisseur = alias[fournisseurRaw.trim().lowercase()] ?: fournisseurRaw.trim().lowercase().ifBlank { "tous" }
-        val connus = setOf("tous", "groq", "gemini", "cloudflare", "zai", "openrouter", "nvidia", "mistral", "huggingface")
-        if (fournisseur !in connus) return "Fournisseur inconnu. Choix : tous, Groq, Gemini, Cloudflare, Z.ai, OpenRouter, NVIDIA, Mistral ou Hugging Face."
+        val connus = setOf("tous", "groq", "gemini", "cloudflare", "zai", "openrouter", "nvidia", "mistral", "huggingface", "ollama")
+        if (fournisseur !in connus) return "Fournisseur inconnu. Choix : tous, Groq, Gemini, Cloudflare, Z.ai, OpenRouter, NVIDIA, Mistral, Hugging Face ou Ollama."
 
         val resultats = mutableListOf<Pair<Boolean, String>>()
         suspend fun verifier(label: String, action: suspend () -> String) {
@@ -260,6 +280,14 @@ class Llm(private val store: Store) {
                     "✅ VALIDÉ — clé et accès API acceptés"
                 }
             }
+        }
+
+        // Ollama du serveur de la maison (secours local) : testé s'il est activé et qu'une adresse est connue.
+        val app = Ollama.app
+        if ((fournisseur == "tous" || fournisseur == "ollama") && app != null && Ollama.configure(app)) {
+            val debut = System.currentTimeMillis()
+            val t = withContext(Dispatchers.IO) { runCatching { Ollama.tester(app) }.getOrElse { "❌ Ollama : ${it.message}" } }
+            resultats.add(t.startsWith("✅") to "$t (${System.currentTimeMillis() - debut} ms)")
         }
 
         if (resultats.isEmpty()) {

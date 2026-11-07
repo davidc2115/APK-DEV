@@ -62,9 +62,19 @@ object RelaisGroq {
         return (if (code in 400..599) code else 502) to erreur(derniere?.message ?: "Groq indisponible.", if (code == 429) "rate_limit_exceeded" else "upstream_error")
     }
 
+    /** Même compactage que pour Groq (palier [niveau]) : historique, consignes (début + fin), outils utiles. */
+    internal fun reduire(messages: JSONArray, outils: JSONArray?, niveau: Int): Pair<JSONArray, JSONArray?> =
+        PALIERS[niveau.coerceIn(0, PALIERS.lastIndex)].let { p -> compacter(messages, p) to reduireOutils(outils, messages, p) }
+
+    internal fun erreurJson(msg: String, code: String) = erreur(msg, code)
+
+    /** Réponse chat.completion (format OpenAI) à partir d'un message assistant. */
+    internal fun completionDe(m: JSONObject, modele: String, entree: Int): String =
+        JSONObject(completion(null, m, entree)).put("model", modele).toString()
+
     private fun erreur(msg: String, code: String) = JSONObject().put("error", JSONObject().put("message", msg).put("type", "invalid_request_error").put("code", code)).toString()
 
-    private fun completion(app: JarvisApp, m: JSONObject, entree: Int): String {
+    private fun completion(app: JarvisApp?, m: JSONObject, entree: Int): String {
         val msg = JSONObject().put("role", "assistant")
         val appels = m.optJSONArray("tool_calls")
         if (m.has("content") && !m.isNull("content")) msg.put("content", m.optString("content")) else msg.put("content", JSONObject.NULL)
@@ -72,7 +82,7 @@ object RelaisGroq {
         val fin = if (appels != null && appels.length() > 0) "tool_calls" else "stop"
         val sortie = jetons(msg.toString())
         return JSONObject().put("id", "chatcmpl-jarvis-" + System.nanoTime()).put("object", "chat.completion")
-            .put("created", System.currentTimeMillis() / 1000).put("model", modele(app))
+            .put("created", System.currentTimeMillis() / 1000).put("model", app?.let { modele(it) } ?: "jarvis")
             .put("choices", JSONArray().put(JSONObject().put("index", 0).put("message", msg).put("finish_reason", fin)))
             .put("usage", JSONObject().put("prompt_tokens", entree).put("completion_tokens", sortie).put("total_tokens", entree + sortie)).toString()
     }

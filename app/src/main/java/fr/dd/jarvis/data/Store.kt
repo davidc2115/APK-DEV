@@ -170,6 +170,10 @@ class Store(context: Context) {
     val cfModel = SPref("cfModel", "@cf/black-forest-labs/flux-1-schnell")
     /** Modèle de conversation Cloudflare, utilisé uniquement en dernier recours quand toutes les clés Groq sont épuisées (mêmes comptes que les images). */
     val cfChatModel = SPref("cfChatModel", "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
+    /** Ollama du serveur de la maison : IA locale de secours et sous-agent d'Hermès (adresse vide = serveur SSH:11434). */
+    val ollamaActif = BPref("ollamaActif", true)
+    val ollamaUrl = SPref("ollamaUrl", "")
+    val ollamaModele = SPref("ollamaModele", "")
     val cfAccounts: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readList("cfAccounts")) }
     /** Ajoute un compte (ID + clé API). Retourne un message d'erreur, ou null si c'est bon. */
     fun addCfAccount(idRaw: String, keyRaw: String): String? {
