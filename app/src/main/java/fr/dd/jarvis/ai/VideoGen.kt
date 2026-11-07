@@ -185,6 +185,12 @@ object VideoGen {
     suspend fun genererVideo(
         app: JarvisApp, sujet: String, script: String, dureePlan: Int, vertical: Boolean
     ): Pair<File?, String> = withContext(Dispatchers.IO) {
+        // Une clé présente mais invalide ferait échouer tous les plans TikTok l'un après l'autre.
+        // Pré-vérifier une seule fois avant l'analyse et avant toute soumission payante.
+        if (ImageToVideoGen.disponible(app)) {
+            val testFal = ImageToVideoGen.testerCle(app)
+            if (!testFal.startsWith("OK")) return@withContext null to testFal
+        }
         if (!ImageToVideoGen.disponible(app) && app.store.huggingFaceToken.value.isBlank())
             return@withContext null to "❌ Aucun service vidéo configuré : ajoute ta clé fal.ai (ou un token Hugging Face gratuit, sans carte bancaire, sur huggingface.co/settings/tokens) dans Réglages › Vidéo IA."
         val listePlans = plans(app, sujet, script)
