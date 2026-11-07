@@ -60,13 +60,14 @@ class Brain(
         // (Hermès les voit ensuite dans l'historique). Jamais pour une demande à orchestrer, en plusieurs étapes, ou
         // adressée nommément à Hermès.
         val multi = fr.dd.jarvis.hermes.Routeur.multiEtapes(texteUser)
-        val reflexes = pourHermes || !fr.dd.jarvis.hermes.Routeur.pourHermesSeul(texteUser)
+        // En mode Hermès prioritaire, seul le réflexe Android pur reste local. Les recherches, fichiers,
+        // Freebox, vidéo et procédures passent directement par Hermès, qui dispose du pont MCP Jarvis.
+        val reflexes = pourHermes || app.store.hermesMode.value == "off"
         fun reflexe(r: String) = r.also { if (!pourHermes) fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS }
-        // Une procédure qu'Hermès a apprise (skill ajouté) passe avant les raccourcis de Jarvis sur le même sujet.
-        val competence = if (pourHermes || app.store.hermesMode.value == "off") null
+        val competence = if (pourHermes || app.store.hermesMode.value != "demande") null
             else runCatching { fr.dd.jarvis.hermes.Routeur.competence(texteUser, app.memo.skillsHermes()) }.getOrNull()
+        if (!pourHermes && !multi) commandeImmediate(texteUser, onStatus)?.let { return reflexe(it) }
         if (reflexes) {
-            if (!multi) commandeImmediate(texteUser, onStatus)?.let { return reflexe(it) }
             positionDirecte(dernier, history, onStatus)?.let { return reflexe(it) }
             if (competence == null) {
                 rangementDirect(history, onStatus)?.let { return reflexe(it) }
