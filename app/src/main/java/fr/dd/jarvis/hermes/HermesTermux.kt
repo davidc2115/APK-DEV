@@ -244,7 +244,7 @@ hermes_debian() {
         )
         val extraEnv = buildString {
             geminiKeys.drop(1).forEachIndexed { index, key -> appendLine("setenv GOOGLE_API_KEY_" + (index + 2) + " " + q(key)) }
-            groqKeys.drop(1).forEachIndexed { index, key -> appendLine("setenv GROQ_API_KEY_" + (index + 2) + " " + q(key)) }
+            // Clés Groq : jamais copiées dans Termux, la rotation est faite par le relais de Jarvis.
         }
         return base.replace("setenv API_SERVER_MODEL_NAME hermes-agent", "setenv API_SERVER_MODEL_NAME hermes-agent\n" + extraEnv)
     }
@@ -259,15 +259,16 @@ hermes_debian() {
             if (groq.isNotBlank()) {
                 appendLine("providers:")
                 appendLine("  groq:")
-                appendLine("    api: https://api.groq.com/openai/v1")
-                appendLine("    key_env: GROQ_API_KEY")
+                // Groq via le relais compact de Jarvis (127.0.0.1) : requêtes ramenées sous la limite jetons/minute.
+                appendLine("    api: http://127.0.0.1:${PontMcp.PORT}/groq/v1")
+                appendLine("    key_env: JARVIS_GROQ_RELAIS")
                 appendLine("fallback_providers:")
                 appendLine("  - provider: custom:groq")
                 appendLine("    model: \"$modeleGroq\"")
             }
             appendLine("credential_pool_strategies:")
             appendLine("  gemini: round_robin")
-            if (groq.isNotBlank()) appendLine("  groq: round_robin")
+            // (une seule « clé » côté Hermès : la rotation des clés Groq est faite par le relais de Jarvis)
             // Active explicitement la mémoire native évolutive d'Hermès.
             // La mémoire Jarvis/Obsidian reste la référence partagée pour les préférences utilisateur.
             appendLine("memory:")
@@ -313,7 +314,7 @@ setenv API_SERVER_PORT $PORT_API
 setenv API_SERVER_KEY ${q(cleApi)}
 setenv API_SERVER_MODEL_NAME hermes-agent
 ${if (gemini.isNotBlank()) "setenv GOOGLE_API_KEY ${q(gemini)}" else "p '⚠️ Aucune clé Gemini dans Jarvis : ajoute-en une (Réglages › Agents Gemini) puis « Configurer Hermès ».'"}
-${if (groq.isNotBlank()) "setenv GROQ_API_KEY ${q(groq)}" else ""}
+${if (groq.isNotBlank()) "setenv JARVIS_GROQ_RELAIS ${q(jeton)}" else ""}
 chmod 600 "${'$'}H/.env"
 # Version de schéma de la configuration installée : conservée, sinon Hermès croit à une vieille config et la migre.
 CV=${'$'}(grep -m1 '^_config_version:' "${'$'}H/config.yaml" 2>/dev/null || grep -m1 '^_config_version:' "${'$'}H/config.yaml.avant-jarvis" 2>/dev/null)
@@ -543,7 +544,8 @@ p "✅ Hermès installé (${'$'}{MODE})."
             appendLine("removeenvfamily JARVIS_CF_KEY")
             listOf("JARVIS_ZAI_API_KEY", "JARVIS_OPENROUTER_API_KEY", "JARVIS_NVIDIA_API_KEY", "JARVIS_MISTRAL_API_KEY", "JARVIS_HF_TOKEN").forEach { appendLine("removeenvfamily " + it) }
             gemini.forEachIndexed { index, key -> appendLine("setenv " + (if (index == 0) "GOOGLE_API_KEY" else "GOOGLE_API_KEY_" + (index + 1)) + " " + q(key)) }
-            groq.forEachIndexed { index, key -> appendLine("setenv " + (if (index == 0) "GROQ_API_KEY" else "GROQ_API_KEY_" + (index + 1)) + " " + q(key)) }
+            // Clés Groq : restent chiffrées dans Jarvis ; Hermès passe par le relais local avec le jeton du pont.
+            if (groq.isNotEmpty()) appendLine("setenv JARVIS_GROQ_RELAIS " + q(s.mcpJeton.value))
             cloudflare.forEachIndexed { index, pair -> appendLine("setenv JARVIS_CF_KEY_" + (index + 1) + " " + q(pair.second)) }
             listOf("ZAI", "OPENROUTER", "NVIDIA", "MISTRAL", "HF").forEach { appendLine("setenv JARVIS_HAS_" + it + " 0") }
             external.forEach { entry ->
@@ -617,9 +619,9 @@ if not isinstance(strategies, dict):
 if os.environ.get("JARVIS_HAS_GEMINI") == "1": strategies["gemini"] = "round_robin"
 else: strategies.pop("gemini", None)
 if os.environ.get("JARVIS_HAS_GROQ") == "1":
-    providers["groq"] = {"api": "https://api.groq.com/openai/v1", "key_env": "GROQ_API_KEY"}
+    providers["groq"] = {"api": os.environ["JARVIS_GROQ_RELAIS_URL"], "key_env": "JARVIS_GROQ_RELAIS"}
     fallbacks.append({"provider": "custom:groq", "model": os.environ["JARVIS_GROQ_MODEL"]})
-    strategies["groq"] = "round_robin"
+    strategies.pop("groq", None)
 else:
     providers.pop("groq", None)
     strategies.pop("groq", None)
@@ -735,17 +737,17 @@ os.replace(name, p)
 """.trimIndent()
         message = "⏳ Règles multi-agents préparées. Assemblage des commandes de synchronisation…"
         val hasGemini = if (gemini.isNotEmpty()) "1" else "0"
-        // Groq (offre gratuite : ~8 000 jetons/minute) ne peut pas porter un tour d'agent Hermès (consignes + outils MCP
-        // ≫ 8 000 jetons) : erreur « conversation has grown too large… /new ». Groq reste le cerveau RAPIDE de Jarvis
-        // (outils filtrés) et son secours ; côté Hermès, on ne le garde que s'il n'existe ni Gemini ni Cloudflare.
-        val hasGroq = if (groq.isNotEmpty() && gemini.isEmpty() && cloudflare.isEmpty()) "1" else "0"
+        // Groq (offre gratuite : ~8 000 jetons/minute) ne peut pas porter un tour d'agent Hermès brut : Hermès l'appelle
+        // donc via le RELAIS de Jarvis (127.0.0.1:${'$'}{PontMcp.PORT}/groq/v1) qui compacte chaque requête sous la limite et fait
+        // tourner les clés Groq de Jarvis (jamais copiées dans Termux). Gemini reste le modèle principal d'Hermès.
+        val hasGroq = if (groq.isNotEmpty()) "1" else "0"
         val cfIds = cloudflare.joinToString(",") { it.first }
         val pluginCommand = "PLUGIN_OK=0; debian_utilisateur_jarvis; hermes_debian hermes plugins install advanced-delegation --no-deps --no-enable >/dev/null 2>&1 || true; if hermes_debian hermes plugins enable advanced-delegation --no-allow-tool-override >/dev/null 2>&1; then PLUGIN_OK=1; p \"🧠 Routage multi-modèles advanced-delegation activé.\"; else p \"⚠️ Extension avancée indisponible : délégation Hermes native conservée.\"; fi"
         val extEnv = external.joinToString(" ") { entry ->
             val id = entry[0].uppercase()
             "JARVIS_HAS_$id=1 JARVIS_${id}_MODEL=${q(entry[3])} JARVIS_${id}_ENDPOINT=${q(entry[2])}"
         }
-        val configCommand = "proot-distro login debian --termux-home -- env " + extEnv + " JARVIS_HAS_GEMINI=" + hasGemini + " JARVIS_HAS_GROQ=" + hasGroq + " JARVIS_GEMINI_MODEL=" + q(app.store.hermesModele.value.ifBlank { app.store.geminiModel.value }.ifBlank { "gemini-2.5-flash" }) + " JARVIS_GROQ_MODEL=" + q(model) + " JARVIS_CF_MODEL=" + q(cloudflareModel) + " JARVIS_CF_IDS=" + q(cfIds) + " JARVIS_ADVANCED_DELEGATION=\"\$PLUGIN_OK\" python3 -c " + q(py) + " || exit 1"
+        val configCommand = "proot-distro login debian --termux-home -- env " + extEnv + " JARVIS_HAS_GEMINI=" + hasGemini + " JARVIS_HAS_GROQ=" + hasGroq + " JARVIS_GROQ_RELAIS_URL=" + q("http://127.0.0.1:${PontMcp.PORT}/groq/v1") + " JARVIS_GEMINI_MODEL=" + q(app.store.hermesModele.value.ifBlank { app.store.geminiModel.value }.ifBlank { "gemini-2.5-flash" }) + " JARVIS_GROQ_MODEL=" + q(model) + " JARVIS_CF_MODEL=" + q(cloudflareModel) + " JARVIS_CF_IDS=" + q(cfIds) + " JARVIS_ADVANCED_DELEGATION=\"\$PLUGIN_OK\" python3 -c " + q(py) + " || exit 1"
         // L'installation Jarvis est une installation source dans Debian : utiliser son exécutable direct.
         // bash -lc réinitialisait le PATH et pouvait lancer un autre Hermes, d'où l'échec silencieux précédent.
         // En cas d'échec, arrêter la configuration : ne jamais annoncer une nouvelle version qui n'a pas été installée.

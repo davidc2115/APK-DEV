@@ -895,9 +895,15 @@ class ToolBox(
             if (act == "chercher" || act == "rechercher") return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 val q = a.optString("chemin").ifBlank { a.optString("requete") }
                 if (q.isBlank()) return@withContext ToolResult("Indique le nom ou quelques mots du fichier à retrouver.")
-                val coffre = runCatching { o.chercherFichiers(q, dossiers = false, limite = 250) }.getOrDefault(emptyList())
+                // Fichiers ET dossiers (« trouve le dossier coloriage pompier »), dans le coffre puis dans le reste du stockage.
+                val coffre = runCatching { o.chercherFichiers(q, dossiers = true, limite = 250) }.getOrDefault(emptyList())
+                    .sortedBy { c -> c.substringAfterLast('/').contains('.') }
                 val telephone = runCatching { fr.dd.jarvis.ai.Stockage.action("chercher", q, "") }.getOrElse { "Stockage partagé : " + (it.message ?: "erreur") }
-                val lignes = (coffre.map { "📦 Coffre Obsidian › $it" } + telephone.lines().filter { it.startsWith("📄 ") }).distinct()
+                // Le coffre est souvent DANS le stockage du téléphone : on n'affiche pas deux fois les mêmes éléments.
+                val physique = runCatching { o.cheminPhysiqueCoffre() }.getOrNull()?.trim('/')
+                val lignesTel = telephone.lines().filter { it.startsWith("📄 ") || it.startsWith("📁 ") }
+                    .filter { l -> physique.isNullOrBlank() || coffre.isEmpty() || !l.substringAfter("/").startsWith("$physique/") }
+                val lignes = (coffre.map { c -> (if (c.substringAfterLast('/').contains('.')) "📦 Coffre Obsidian › " else "📁 Coffre Obsidian › ") + c } + lignesTel).distinct()
                 val erreurAcces = telephone.takeIf { it.startsWith("Stockage partagé :") }?.let { "⚠️ $it" }
                 val contenu = (lignes + listOfNotNull(erreurAcces)).take(250)
                 ToolResult(if (contenu.isEmpty()) "Aucun résultat pour « $q » dans le stockage accessible et le coffre Obsidian." else "🔎 Recherche globale : « $q »\n" + contenu.joinToString("\n"), direct = true)

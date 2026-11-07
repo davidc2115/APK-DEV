@@ -39,6 +39,9 @@ object PontMcp {
         /** Exécute l'outil : (texte, erreur ?). */
         fun appeler(nom: String, args: JSONObject): Pair<String, Boolean>
         fun progres(ligne: String)
+        /** Relais Groq compact pour Hermès : (code HTTP, corps JSON chat.completion). */
+        fun groq(corps: JSONObject): Pair<Int, String> = 404 to """{"error":{"message":"relais indisponible"}}"""
+        fun groqModeles(): String = """{"object":"list","data":[]}"""
     }
 
     /** Outils de la conversation en cours (avec SES confirmations) ; sinon une boîte d'outils autonome. */
@@ -54,6 +57,8 @@ object PontMcp {
     fun url() = "http://127.0.0.1:$PORT/mcp"
 
     private class FournisseurJarvis(val app: JarvisApp) : Fournisseur {
+        override fun groq(corps: JSONObject) = RelaisGroq.repondre(app, corps)
+        override fun groqModeles() = RelaisGroq.modeles(app)
         private val defaut by lazy { ToolBox(app) { _, force -> !force } }
         private fun boite() = boiteActive ?: defaut
         override fun jeton() = app.store.mcpJeton.value
@@ -200,9 +205,29 @@ object PontMcp {
         return Requete(methode, chemin, h, corps)
     }
 
+    /** Réponse chat.completion → flux SSE équivalent (un bloc de contenu / d'appels d'outils, puis la fin). */
+    internal fun enFlux(c: JSONObject): String {
+        val choix = c.optJSONArray("choices")?.optJSONObject(0) ?: JSONObject()
+        val msg = choix.optJSONObject("message") ?: JSONObject()
+        fun bloc(delta: JSONObject, fin: Any?) = "data: " + JSONObject().put("id", c.optString("id")).put("object", "chat.completion.chunk")
+            .put("created", c.optLong("created")).put("model", c.optString("model"))
+            .put("choices", JSONArray().put(JSONObject().put("index", 0).put("delta", delta).put("finish_reason", fin ?: JSONObject.NULL))) + "\n\n"
+        val delta = JSONObject()
+        if (msg.has("content") && !msg.isNull("content")) delta.put("content", msg.optString("content"))
+        msg.optJSONArray("tool_calls")?.let { a ->
+            val avecIndex = JSONArray()
+            for (i in 0 until a.length()) avecIndex.put(JSONObject(a.getJSONObject(i).toString()).put("index", i))
+            delta.put("tool_calls", avecIndex)
+        }
+        val fin = "data: " + JSONObject().put("id", c.optString("id")).put("object", "chat.completion.chunk").put("created", c.optLong("created"))
+            .put("model", c.optString("model")).put("choices", JSONArray().put(JSONObject().put("index", 0).put("delta", JSONObject()).put("finish_reason", choix.optString("finish_reason", "stop"))))
+            .put("usage", c.optJSONObject("usage") ?: JSONObject()) + "\n\n"
+        return bloc(JSONObject().put("role", "assistant"), null) + bloc(delta, null) + fin + "data: [DONE]\n\n"
+    }
+
     private fun repondre(s: Socket, code: Int, corps: String = "", type: String = "application/json", extra: Map<String, String> = emptyMap()) {
         val b = corps.toByteArray(Charsets.UTF_8)
-        val statut = when (code) { 200 -> "OK"; 202 -> "Accepted"; 401 -> "Unauthorized"; 404 -> "Not Found"; 405 -> "Method Not Allowed"; else -> "Error" }
+        val statut = when (code) { 200 -> "OK"; 202 -> "Accepted"; 400 -> "Bad Request"; 401 -> "Unauthorized"; 404 -> "Not Found"; 405 -> "Method Not Allowed"; 413 -> "Payload Too Large"; 429 -> "Too Many Requests"; 503 -> "Service Unavailable"; else -> "Error" }
         val h = StringBuilder("HTTP/1.1 $code $statut\r\nContent-Type: $type; charset=utf-8\r\nContent-Length: ${b.size}\r\nConnection: close\r\n")
         extra.forEach { (k, v) -> h.append("$k: $v\r\n") }
         h.append("\r\n")
@@ -232,6 +257,13 @@ object PontMcp {
                     f.progres(ligne)
                     repondre(s, 200, """{"accepted":true}""")
                 }
+            }
+            r.chemin.trimEnd('/') == "/groq/v1/models" && r.methode == "GET" -> repondre(s, 200, f.groqModeles())
+            r.chemin.trimEnd('/') == "/groq/v1/chat/completions" && r.methode == "POST" -> {
+                val corps = runCatching { JSONObject(r.corps) }.getOrElse { return@use repondre(s, 400, """{"error":{"message":"JSON invalide"}}""") }
+                val (code, rep) = f.groq(corps)
+                if (code == 200 && corps.optBoolean("stream", false)) repondre(s, 200, enFlux(JSONObject(rep)), type = "text/event-stream")
+                else repondre(s, code, rep)
             }
             r.methode == "GET" -> repondre(s, 405, "", extra = mapOf("Allow" to "GET, POST, DELETE"))
             r.methode == "DELETE" -> repondre(s, 200, "{}")
@@ -317,6 +349,8 @@ object PontMcp {
             "discord_role_creer", "discord_role_modifier", "discord_role_supprimer",
             "discord_role_position", "discord_role_attribuer", "discord_salon_permission", "discord_message_envoyer",
             // Réseau et accès distant : garder les diagnostics, la découverte et les outils SSH visibles pour Hermès.
+            // Freebox (redirections, VPN, Wi-Fi…) et recherche globale de fichiers/dossiers : toujours visibles.
+            "freebox", "stockage_telephone", "obsidian_fichiers",
             "routeur_diagnostiquer", "reseau_infos", "ip_publique", "reseau_scanner", "imprimantes_trouver",
             "appareil_sonder", "appareil_page", "ssh_commande", "ssh_fichier", "ssh_script"
         )

@@ -975,6 +975,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
     private companion object {
         val MOTS_VIDES = setOf("le", "la", "les", "un", "une", "des", "du", "de", "d", "l", "et", "ou", "a", "au", "aux", "en", "dans", "leur", "nom",
-            "fichier", "fichiers", "image", "images", "the", "of", "and")
+            "fichier", "fichiers", "image", "images", "dossier", "dossiers", "sous", "mon", "ma", "mes", "nomme", "nommes", "nommee", "appele", "appelee",
+            "intitule", "the", "of", "and")
     }
 }
