@@ -507,7 +507,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 Spacer(Modifier.height(8.dp))
                 Text("Répartition des demandes", color = HudDim, fontSize = 12.sp)
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("auto" to "Automatique (rapide + approfondi)", "tout" to "Toujours approfondi", "off" to "Rapide uniquement").forEach { (id, nom) ->
+                    listOf("auto" to "Hermès prioritaire (rapide + approfondi)", "tout" to "Toujours approfondi", "off" to "Jarvis uniquement").forEach { (id, nom) ->
                         HudChip(nom, selected = store.hermesMode.value == id) { store.hermesMode.set(id) }
                     }
                 }
@@ -519,10 +519,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                             "la position, la recherche d'un fichier, la Freebox et le lancement d'une vidéo sont exécutés directement par Jarvis ; " +
                             "Hermès voit ces échanges dans l'historique et partage la même mémoire."
                         "off" -> "Jarvis répond uniquement avec sa partie rapide ; le moteur approfondi (Hermès) n'est pas utilisé."
-                        else -> "Recommandé. Jarvis et Hermès ne forment qu'un seul assistant : une voix, une conversation, une mémoire. " +
-                            "Jarvis répond tout de suite avec sa partie rapide ; si ce n'est pas suffisant (pas d'outil, rien trouvé, information manquante, erreur), " +
-                            "il approfondit automatiquement avec son moteur Hermès (notes, skills, sous-agents). Automatismes, demandes en plusieurs étapes, " +
-                            "serveur/SSH et recherche sur internet passent directement par le moteur approfondi. Jamais besoin de dire « Hermès »."
+                        else -> "Recommandé. Hermès reçoit directement les demandes et orchestre les outils Jarvis, ses notes, skills, MCP et sous-agents. Seuls les réflexes Android instantanés (ex. alarme, volume du téléphone) sont exécutés directement par Jarvis. Une seule voix, une conversation et une mémoire."
                     },
                     color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp)
                 )
