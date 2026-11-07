@@ -898,7 +898,7 @@ class ToolBox(
                 val coffre = runCatching { o.chercherFichiers(q, dossiers = false, limite = 250) }.getOrDefault(emptyList())
                 val telephone = runCatching { fr.dd.jarvis.ai.Stockage.action("chercher", q, "") }.getOrElse { "Stockage partagé : " + (it.message ?: "erreur") }
                 val lignes = (coffre.map { "📦 Coffre Obsidian › $it" } + telephone.lines().filter { it.startsWith("📄 ") }).distinct()
-                ToolResult(if (lignes.isEmpty()) "Aucun résultat pour « $q » dans le stockage accessible et le coffre Obsidian. Vérifie l’autorisation « Tous les fichiers » et l’accès au coffre." else "🔎 Recherche globale : « $q »\\n" + lignes.take(250).joinToString("\\n"), direct = true)
+                ToolResult(if (lignes.isEmpty()) "Aucun résultat pour « $q » dans le stockage accessible et le coffre Obsidian. Vérifie l’autorisation « Tous les fichiers » et l’accès au coffre." else "🔎 Recherche globale : « $q »\n" + lignes.take(250).joinToString("\n"), direct = true)
             }
             // Un chemin qui pointe DANS le coffre Obsidian (ex. « Documents/Obsidian jarvis/JARVIS/Images ») est traité dans le coffre.
             val dansCoffre = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { o.estDansCoffre(a.optString("chemin")) }.getOrDefault(false) }
