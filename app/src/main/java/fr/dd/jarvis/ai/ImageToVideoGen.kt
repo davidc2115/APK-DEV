@@ -64,7 +64,7 @@ object ImageToVideoGen {
         }
 
     /** Octets MP4 d'un clip texte → vidéo (utilisé aussi pour les plans des vidéos TikTok). */
-    fun clipTexte(app: JarvisApp, prompt: String, secondes: Double, rapport: String, suivi: ((String) -> Unit)? = null, limiteMs: Long = 12 * 60_000L): ByteArray {
+    fun clipTexte(app: JarvisApp, prompt: String, secondes: Double, rapport: String, suivi: ((String) -> Unit)? = null, limiteMs: Long = 12 * 60_000L, limiteFileMs: Long = limiteMs): ByteArray {
         if (prompt.isBlank()) throw IllegalStateException("Décris la vidéo à générer.")
         val input = JSONObject()
             .put("prompt", prompt)
@@ -74,7 +74,7 @@ object ImageToVideoGen {
             .put("aspect_ratio", rapport)
             .put("enable_prompt_expansion", false)
             .put("enable_safety_checker", true)
-        return executer(MODELE_TEXTE, input, cle(app), suivi = suivi, limiteMs = limiteMs)
+        return executer(MODELE_TEXTE, input, cle(app), suivi = suivi, limiteMs = limiteMs, limiteFileMs = limiteFileMs)
     }
 
     /** Anime une image (image → vidéo). */
@@ -134,7 +134,7 @@ object ImageToVideoGen {
         }
     }
 
-    private fun urlVideo(result: JSONObject) = result.optJSONObject("video")?.optString("url").orEmpty()
+    internal fun urlVideo(result: JSONObject) = result.optJSONObject("video")?.optString("url").orEmpty()
         .ifBlank { result.optJSONArray("videos")?.optJSONObject(0)?.optString("url").orEmpty() }
 
     private fun urlAudio(result: JSONObject) = result.optJSONObject("audio")?.optString("url").orEmpty()
@@ -146,10 +146,13 @@ object ImageToVideoGen {
      * cours »), puis téléchargement. Au-delà de [limiteMs], la demande est annulée chez fal.ai et une erreur 408 levée
      * (message « file d'attente » si elle n'a jamais démarré).
      */
-    private fun executer(modele: String, input: JSONObject, key: String, extraire: (JSONObject) -> String = ::urlVideo,
-                         suivi: ((String) -> Unit)? = null, limiteMs: Long = 12 * 60_000L): ByteArray {
+    /** Adresse de la file fal.ai (remplaçable pour les tests). */
+    internal var baseFal = "https://queue.fal.run"
+
+    internal fun executer(modele: String, input: JSONObject, key: String, extraire: (JSONObject) -> String = ::urlVideo,
+                         suivi: ((String) -> Unit)? = null, limiteMs: Long = 12 * 60_000L, limiteFileMs: Long = limiteMs): ByteArray {
         val accepted = executeJson(
-            Request.Builder().url("https://queue.fal.run/$modele")
+            Request.Builder().url("$baseFal/$modele")
                 .header("Authorization", "Key $key")
                 .post(input.toString().toRequestBody("application/json".toMediaType()))
                 .build()
@@ -157,13 +160,17 @@ object ImageToVideoGen {
         val requestId = accepted.optString("request_id")
         // Les URL de suivi renvoyées par fal sont la référence (elles omettent le sous-chemin du modèle) ; repli calculé sinon.
         val appli = modele.split('/').take(2).joinToString("/")
-        val statusUrl = accepted.optString("status_url").ifBlank { if (requestId.isBlank()) "" else "https://queue.fal.run/$appli/requests/$requestId/status" }
-        val responseUrl = accepted.optString("response_url").ifBlank { if (requestId.isBlank()) "" else "https://queue.fal.run/$appli/requests/$requestId" }
+        val statusUrl = accepted.optString("status_url").ifBlank { if (requestId.isBlank()) "" else "$baseFal/$appli/requests/$requestId/status" }
+        val responseUrl = accepted.optString("response_url").ifBlank { if (requestId.isBlank()) "" else "$baseFal/$appli/requests/$requestId" }
         if (statusUrl.isBlank() || responseUrl.isBlank()) throw ApiException(0, "Réponse fal.ai incomplète : URL de suivi absente.")
 
         var lastStatus = "IN_QUEUE"
         val debut = System.currentTimeMillis()
-        while (true) {
+        var debutGeneration = 0L
+        fun annulerChezFal() = runCatching {
+            http.newCall(Request.Builder().url("$responseUrl/cancel").header("Authorization", "Key $key").put(ByteArray(0).toRequestBody(null)).build()).execute().close()
+        }
+        try { while (true) {
             Thread.sleep(if (System.currentTimeMillis() - debut < 60_000) 3000 else 6000)
             val status = runCatching {
                 executeJson(Request.Builder().url(statusUrl).header("Authorization", "Key $key").get().build())
@@ -178,20 +185,28 @@ object ImageToVideoGen {
                     "COMPLETED" -> break
                     "FAILED", "CANCELLED", "ERROR" -> throw ApiException(500, "fal.ai a échoué : ${status.optString("error", "génération refusée")}")
                     "IN_QUEUE" -> suivi?.invoke("file d'attente" + status.optInt("queue_position", -1).let { if (it >= 0) " (position ${it + 1})" else "" })
-                    "IN_PROGRESS" -> suivi?.invoke("en cours")
+                    "IN_PROGRESS" -> { if (debutGeneration == 0L) debutGeneration = System.currentTimeMillis(); suivi?.invoke("en cours") }
                 }
             }
-            if (System.currentTimeMillis() - debut > limiteMs) {
-                runCatching { http.newCall(Request.Builder().url("$responseUrl/cancel").header("Authorization", "Key $key").put(ByteArray(0).toRequestBody(null)).build()).execute().close() }
-                throw ApiException(408, if (lastStatus == "IN_QUEUE") "fal.ai n'a pas démarré la génération (resté en file d'attente ${limiteMs / 60_000} min) — file saturée ou crédit épuisé."
-                    else "La génération prend trop de temps (dernier état : $lastStatus). Réessaie plus tard.")
+            val maintenant = System.currentTimeMillis()
+            if (debutGeneration == 0L && maintenant - debut > limiteFileMs) {
+                annulerChezFal()
+                throw ApiException(408, "fal.ai n'a pas démarré la génération (resté en file d'attente ${limiteFileMs / 60_000} min) — file saturée ou crédit épuisé.")
             }
+            if (debutGeneration > 0L && maintenant - debutGeneration > limiteMs) {
+                annulerChezFal()
+                throw ApiException(408, "La génération d'un plan a dépassé ${limiteMs / 60_000} min chez fal.ai : plan abandonné.")
+            }
+        } } catch (e: Throwable) {
+            // Abandon (délai, annulation par l'utilisateur, erreur) : la demande est aussi annulée chez fal.ai.
+            if (lastStatus != "COMPLETED") annulerChezFal()
+            throw e
         }
 
         // Le résultat (ou l'erreur détaillée si la génération a échoué) se lit sur response_url.
         val result = executeJson(Request.Builder().url(responseUrl).header("Authorization", "Key $key").get().build())
         val videoUrl = extraire(result)
-        if (!videoUrl.startsWith("https://") && !videoUrl.startsWith("data:")) {
+        if (!videoUrl.startsWith("https://") && !videoUrl.startsWith("data:") && !videoUrl.startsWith("http://127.0.0.1")) {
             val detail = result.optString("detail").ifBlank { result.toString().take(200) }
             throw ApiException(0, "fal.ai n'a pas renvoyé de fichier : $detail")
         }

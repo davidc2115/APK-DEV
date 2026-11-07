@@ -46,6 +46,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
@@ -96,6 +97,27 @@ object Montage {
 
     fun dossier(app: JarvisApp) = VideoGen.dossier(app)
 
+    /** Un seul montage à la fois (fal.ai limite les générations simultanées) ; les suivants attendent leur tour. */
+    private val unParUn = kotlinx.coroutines.sync.Mutex()
+    private val enAttente = java.util.concurrent.atomic.AtomicInteger(0)
+    private val montageEnCours = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val travaux = java.util.concurrent.CopyOnWriteArrayList<kotlinx.coroutines.Job>()
+    /** Demande d'arrêt : vérifiée à chaque étape et pendant le suivi fal.ai. */
+    private val annule = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** Arrête le montage en cours et ceux en attente (les générations fal.ai en cours sont annulées). */
+    fun annuler(app: JarvisApp): String {
+        val n = travaux.count { it.isActive }
+        if (n == 0) return "Aucun montage vidéo en cours."
+        annule.set(true)
+        travaux.forEach { it.cancel() }
+        travaux.clear(); enAttente.set(0)
+        notifier(app, "⏹️ Montage annulé.", enCours = false)
+        return "⏹️ Montage vidéo annulé" + (if (n > 1) " ($n montages)" else "") + "."
+    }
+
+    private fun verifierAnnulation() { if (annule.get()) throw kotlinx.coroutines.CancellationException("montage annulé") }
+
     /** Lance le(s) montage(s) en arrière-plan ; le résultat arrive dans le chat. Renvoie le message immédiat. */
     fun lancer(app: JarvisApp, d: Demande): String {
         val sansIa = !ImageToVideoGen.disponible(app) && app.store.huggingFaceToken.value.isBlank()
@@ -103,8 +125,15 @@ object Montage {
             return "❌ Pour créer des plans vidéo, ajoute ta clé fal.ai dans Réglages › Vidéo IA — ou donne-moi des vidéos/images existantes à monter (paramètre sources)."
         val duree = d.dureeS.coerceIn(5, 180)
         val n = d.nombre.coerceIn(1, 5)
-        notifier(app, "✍️ Préparation du scénario…", enCours = true)
-        scope.launch {
+        // Position dans la file : montages en attente + celui en cours.
+        val position = enAttente.getAndIncrement() + (if (montageEnCours.get()) 1 else 0) + 1
+        if (position == 1) notifier(app, "✍️ Préparation du scénario…", enCours = true)
+        val job = scope.launch {
+          unParUn.withLock {
+           montageEnCours.set(true)
+           try {
+            annule.set(false)
+            enAttente.updateAndGet { (it - 1).coerceAtLeast(0) }
             for (k in 1..n) {
                 val prefixe = if (n > 1) "Vidéo $k/$n : " else ""
                 val msg = try {
@@ -115,9 +144,15 @@ object Montage {
                 withContext(Dispatchers.Main) { app.chatAjouter(ChatMsg(false, msg)) }
                 notifier(app, prefixe + msg.lineSequence().first().take(120), enCours = false)
             }
+           } finally { montageEnCours.set(false) }
+          }
         }
+        travaux.removeAll { !it.isActive }
+        travaux += job
         val plans = ceil(duree / 5.0).toInt()
         val agent = if (app.store.geminiKeys.isNotEmpty()) "l'agent Gemini" else "l'agent IA"
+        if (position > 1) return "⏳ Un montage vidéo est déjà en cours : celui-ci (${if (n > 1) "$n vidéos" else "1 vidéo"} de $duree s) démarrera juste après " +
+            "(position $position dans la file). Les vidéos sont générées l'une après l'autre pour ne pas saturer fal.ai. Dis « annule la vidéo » pour tout arrêter."
         return "🎬 Montage lancé : ${if (n > 1) "$n vidéos" else "1 vidéo"} de $duree s" +
             (if (!sansIa) " (≈ $plans plans IA par vidéo)" else "") + ".\n" +
             "✍️ D'abord $agent analyse ta demande et écrit le scénario, puis un prompt précis pour chaque plan (mêmes personnages, décor et style d'un plan à l'autre) ; " +
@@ -168,41 +203,58 @@ object Montage {
             val debutPlans = System.currentTimeMillis()
             var derniereMaj = 0L
             val fileBloquee = java.util.concurrent.atomic.AtomicBoolean(false)
+            var dernierEchec = ""
             fun resume(force: Boolean = false) {
                 val t = System.currentTimeMillis()
                 if (!force && t - derniereMaj < 1000) return
                 derniereMaj = t
                 val v = etats.values
                 val ecoule = (t - debutPlans) / 1000
+                val actuel = etats.entries.firstOrNull { it.value == "en cours" || it.value.startsWith("file") }
                 progres("🎥 Plans IA : ${v.count { it == "ok" }}/$nb terminés" +
-                    v.count { it == "en cours" }.let { if (it > 0) " · $it en génération" else "" } +
-                    v.count { it.startsWith("file") }.let { if (it > 0) " · $it en file d'attente" else "" } +
+                    (actuel?.let { " · plan ${it.key + 1} " + (if (it.value == "en cours") "en génération" else "en file d'attente fal.ai") } ?: "") +
                     v.count { it == "échec" }.let { if (it > 0) " · $it échec(s)" else "" } +
-                    " · ${ecoule / 60} min ${"%02d".format(ecoule % 60)}")
+                    " · ${ecoule / 60} min ${"%02d".format(ecoule % 60)}" +
+                    (if (dernierEchec.isNotBlank()) "\nDernier échec : ${dernierEchec.take(140)}" else ""))
             }
-            val sem = Semaphore(3)
+            // Un plan à la fois : fal.ai limite les générations simultanées par compte, les autres restaient en file.
+            val sem = Semaphore(1)
+            // Minuteur : la notification avance même quand fal.ai ne répond rien de nouveau.
+            val minuteur = scope.launch { while (true) { kotlinx.coroutines.delay(5000); resume(force = true) } }
             coroutineScopeAsync(plans.mapIndexed { i, p ->
                 suspend {
                     sem.withPermit {
-                        val r = runCatching {
+                        fun essai() = runCatching {
+                            verifierAnnulation()
                             if (fileBloquee.get()) throw IllegalStateException("annulé : la file fal.ai ne démarre pas")
-                            etats[i] = "file"; resume()
+                            etats[i] = "file"; resume(force = true)
                             val bytes = if (ImageToVideoGen.disponible(app)) ImageToVideoGen.clipTexte(app, p.visuel, dureeClip, if (vertical) "9:16" else "16:9",
-                                suivi = { e -> etats[i] = if (e.startsWith("file")) "file" else "en cours"; resume() }, limiteMs = 8 * 60_000L)
+                                suivi = { e -> verifierAnnulation(); etats[i] = if (e.startsWith("file")) "file" else "en cours"; resume() },
+                                limiteMs = 6 * 60_000L, limiteFileMs = 10 * 60_000L)
                             else VideoGen.genereClip(app, p.visuel, dureeClip.toInt(), vertical)
                             File(travail, "plan_$i.mp4").apply { writeBytes(bytes) }
                         }
+                        var r = essai()
+                        // Erreur passagère (réseau, 5xx, génération trop longue) : un nouvel essai ; pas pour la file bloquée ou un refus.
+                        val passagere = r.exceptionOrNull()?.let { e ->
+                            e !is kotlinx.coroutines.CancellationException && !e.message.orEmpty().contains("file d'attente") && !annule.get() &&
+                                (e !is ApiException || e.code >= 500 || e.code == 408 || e.code == 0)
+                        } == true
+                        if (passagere) r = essai()
+                        r.exceptionOrNull()?.let { if (it is kotlinx.coroutines.CancellationException) { minuteur.cancel(); throw it } }
                         r.onFailure {
-                            echecs += "plan ${i + 1} : ${it.message?.take(160)}"
-                            // Une demande jamais démarrée en 8 min : inutile d'empiler les suivantes.
+                            dernierEchec = "plan ${i + 1} : ${it.message?.take(160)}"
+                            echecs += dernierEchec
+                            // Une demande jamais démarrée : inutile d'empiler les suivantes.
                             if (it.message.orEmpty().contains("file d'attente")) fileBloquee.set(true)
                         }
                         etats[i] = if (r.isSuccess) "ok" else "échec"; resume(force = true)
                         r.getOrNull()?.let { Triple(i, it, p.texte) }
                     }
                 }
-            }).filterNotNull().sortedBy { it.first }
+            }).filterNotNull().sortedBy { it.first }.also { minuteur.cancel() }
         } else emptyList()
+        verifierAnnulation()
 
         // 3. Timeline exacte : existants puis plans IA, en boucle si besoin, dernier morceau rogné pour tomber juste.
         val briques = existants.mapIndexed { i, (f, image) -> Triple(f, image, sb.plans.getOrNull(i)?.texte.orEmpty()) } +

@@ -313,6 +313,7 @@ class Brain(
         val users = history.filter { it.fromUser }.takeLast(3)
         val dernier = users.lastOrNull()?.text ?: return null
         val n = fr.dd.jarvis.societe.core.normaliser(dernier)
+        if (Regex("\\b(annule[rsz]?|arrete[rsz]?|stoppe[rsz]?|interromp\\w*)\\b.*\\b(videos?|montages?|tiktoks?|clips?)\\b").containsMatchIn(n)) return Montage.annuler(app)
         val mot = Regex("\\b(videos?|clips?|montages?|tiktoks?|tik tok|reels?|shorts?|court metrage|film anime)\\b")
         val verbe = Regex("\\b(cree[rsz]?|creation|fais|faire|fait|genere[rsz]?|generation|realise[rsz]?|monte[rsz]?|produi[st]|produire|prepare[rsz]?|refais|refaire|recommence|transforme|rallonge)\\b")
         val duree = Regex("\\b\\d+ ?(s|sec|secondes?|min|minutes?)\\b")
