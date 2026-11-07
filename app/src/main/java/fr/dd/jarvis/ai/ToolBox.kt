@@ -777,7 +777,7 @@ class ToolBox(
         "freebox" -> try {
             ToolResult(fr.dd.jarvis.ai.FreeboxOs.gerer(app, a.optString("action"), a, confirm), direct = true)
         } catch (e: kotlinx.coroutines.CancellationException) { throw e }
-          catch (e: Exception) { ToolResult("❌ Freebox : \${e.message ?: e.javaClass.simpleName}", direct = true) }
+          catch (e: Exception) { ToolResult("❌ Freebox : ${e.message ?: e.javaClass.simpleName}", direct = true) }
         "box_disque" -> try {
             val action = a.optString("action").trim().lowercase()
             val chemin = a.optString("chemin").trim()
@@ -789,19 +789,19 @@ class ToolBox(
                 fr.dd.jarvis.ai.Box.action(app, action, chemin, fichier)
             }, direct = true)
         } catch (e: kotlinx.coroutines.CancellationException) { throw e }
-          catch (e: Exception) { ToolResult("❌ Accès au disque de la box impossible : \${e.message ?: e.javaClass.simpleName}", direct = true) }
+          catch (e: Exception) { ToolResult("❌ Accès au disque de la box impossible : ${e.message ?: e.javaClass.simpleName}", direct = true) }
         "rechercher_videos_box" -> try {
             ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 fr.dd.jarvis.ai.Box.rechercherVideos(app, a.optString("recherche"), a.optString("dossier"))
             }, direct = true)
-        } catch (e: Exception) { ToolResult("❌ Recherche sur le disque de la box impossible : \${e.message}", direct = true) }
+        } catch (e: Exception) { ToolResult("❌ Recherche sur le disque de la box impossible : ${e.message}", direct = true) }
         "lire_video_box" -> try {
             val chemin = a.optString("chemin").trim().trimStart('/')
             if (chemin.isBlank()) ToolResult("Chemin du film manquant.")
             else ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                 fr.dd.jarvis.device.MediaServeur.ouvrir(app, chemin)
             }, direct = true)
-        } catch (e: Exception) { ToolResult("❌ Impossible d'ouvrir ce film : \${e.message}", direct = true) }
+        } catch (e: Exception) { ToolResult("❌ Impossible d'ouvrir ce film : ${e.message}", direct = true) }
         "obsidian_chercher" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             val r = app.obsidian.searchNotes(a.optString("requete"))
             if (r.isEmpty()) "Aucune note ne contient « ${a.optString("requete")} »." else r.joinToString("\n") { "- ${it.first}" + (if (it.second.isNotBlank()) " : …${it.second}…" else "") }
