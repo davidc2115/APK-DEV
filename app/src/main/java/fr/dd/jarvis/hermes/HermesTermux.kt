@@ -212,7 +212,7 @@ p() {
     private fun scriptSignal(app: JarvisApp, texte: String) = prelude(app) + "\np ${q(texte)}\n"
     // ------------------------------------------------------------------ Mémoire unique JARVIS ↔ Hermès
 
-    /** Installe dans Termux le hook qui synchronise l'ancienne mémoire Hermès avec la mémoire canonique Jarvis/Obsidian. */
+    /** Installe ou actualise le hook de mémoire unique sans écraser les autres variables de l'environnement Hermès. */
     internal fun scriptHookMemoire(app: JarvisApp): String {
         val py = runCatching { app.assets.open("hermes/memoire_handler.py").use { it.readBytes() } }.getOrNull()
             ?: return "p '⚠️ Hook de mémoire partagée introuvable dans Jarvis.'"
