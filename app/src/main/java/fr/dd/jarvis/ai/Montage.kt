@@ -143,7 +143,7 @@ object Montage {
         progres("✍️ Écriture du scénario…")
         val existants = resoudreSources(app, d.sources, travail)
         val nbPlans = max(2, ceil(d.dureeS / 5.0).toInt())
-        val sb = storyboard(app, d, nbPlans, k, n)
+        val sb = storyboard(app, d, nbPlans, k, n, progres)
         // L'analyse éditoriale préalable est une étape obligatoire : ne dépense aucun crédit
         // et ne génère aucun plan si l'agent d'analyse n'a pas produit de résultat exploitable.
         if (sb.analyse.isBlank()) {
@@ -162,18 +162,42 @@ object Montage {
             // Les plans IA prennent la suite des médias existants dans le scénario (texte et visuel).
             val decalage = existants.size
             val plans = List(nb) { i -> sb.plans[(decalage + i) % sb.plans.size].let { p -> if (decalage + i >= sb.plans.size) p.copy(visuel = p.visuel + ", different camera angle") else p } }
-            var faits = 0
+            progres("✅ Scénario prêt : « ${sb.titre.take(50)} » — génération de $nb plans…")
+            // Suivi par plan (file d'attente / en cours / terminé), résumé dans la notification au plus une fois par seconde.
+            val etats = java.util.concurrent.ConcurrentHashMap<Int, String>()
+            val debutPlans = System.currentTimeMillis()
+            var derniereMaj = 0L
+            val fileBloquee = java.util.concurrent.atomic.AtomicBoolean(false)
+            fun resume(force: Boolean = false) {
+                val t = System.currentTimeMillis()
+                if (!force && t - derniereMaj < 1000) return
+                derniereMaj = t
+                val v = etats.values
+                val ecoule = (t - debutPlans) / 1000
+                progres("🎥 Plans IA : ${v.count { it == "ok" }}/$nb terminés" +
+                    v.count { it == "en cours" }.let { if (it > 0) " · $it en génération" else "" } +
+                    v.count { it.startsWith("file") }.let { if (it > 0) " · $it en file d'attente" else "" } +
+                    v.count { it == "échec" }.let { if (it > 0) " · $it échec(s)" else "" } +
+                    " · ${ecoule / 60} min ${"%02d".format(ecoule % 60)}")
+            }
             val sem = Semaphore(3)
             coroutineScopeAsync(plans.mapIndexed { i, p ->
                 suspend {
                     sem.withPermit {
                         val r = runCatching {
-                            val bytes = if (ImageToVideoGen.disponible(app)) ImageToVideoGen.clipTexte(app, p.visuel, dureeClip, if (vertical) "9:16" else "16:9")
+                            if (fileBloquee.get()) throw IllegalStateException("annulé : la file fal.ai ne démarre pas")
+                            etats[i] = "file"; resume()
+                            val bytes = if (ImageToVideoGen.disponible(app)) ImageToVideoGen.clipTexte(app, p.visuel, dureeClip, if (vertical) "9:16" else "16:9",
+                                suivi = { e -> etats[i] = if (e.startsWith("file")) "file" else "en cours"; resume() }, limiteMs = 8 * 60_000L)
                             else VideoGen.genereClip(app, p.visuel, dureeClip.toInt(), vertical)
                             File(travail, "plan_$i.mp4").apply { writeBytes(bytes) }
                         }
-                        synchronized(this@Montage) { faits++; progres("🎥 Plans IA : $faits/$nb") }
-                        r.onFailure { echecs += "plan ${i + 1} : ${it.message?.take(120)}" }
+                        r.onFailure {
+                            echecs += "plan ${i + 1} : ${it.message?.take(160)}"
+                            // Une demande jamais démarrée en 8 min : inutile d'empiler les suivantes.
+                            if (it.message.orEmpty().contains("file d'attente")) fileBloquee.set(true)
+                        }
+                        etats[i] = if (r.isSuccess) "ok" else "échec"; resume(force = true)
                         r.getOrNull()?.let { Triple(i, it, p.texte) }
                     }
                 }
@@ -212,7 +236,8 @@ object Montage {
                     runCatching {
                         val desc = if (d.musique.isBlank() || d.musique.lowercase() == "auto") sb.musique else d.musique
                         val paroles = if (avecParoles) sb.paroles.takeIf { it.isNotBlank() && it.lowercase() != "auto" }.orEmpty() else ""
-                        val (octets, ext) = ImageToVideoGen.musique(app, desc, d.dureeS + 2.0, paroles)
+                        val etiquette = if (avecParoles) "🎤 Chanson avec paroles" else "🎵 Musique"
+                        val (octets, ext) = ImageToVideoGen.musique(app, desc, d.dureeS + 2.0, paroles, suivi = { e -> progres("$etiquette : $e…") })
                         File(travail, "musique.$ext").apply { writeBytes(octets) }
                     }.onFailure { echecs += "musique : ${it.message?.take(120)}" }.getOrNull()
                 } else null
@@ -270,7 +295,7 @@ object Montage {
 
     // ------------------------------------------------------------------ scénario
 
-    private suspend fun storyboard(app: JarvisApp, d: Demande, nbPlans: Int, k: Int, n: Int): Storyboard {
+    private suspend fun storyboard(app: JarvisApp, d: Demande, nbPlans: Int, k: Int, n: Int, progres: (String) -> Unit = {}): Storyboard {
         val user = buildString {
             append("Sujet : ${d.sujet.ifBlank { "(voir script)" }}\n")
             if (d.script.isNotBlank()) append("Script fourni (prioritaire) :\n${d.script}\n")
@@ -284,6 +309,7 @@ object Montage {
         }
 
         // Passe 1 : comprendre le brief, les contraintes, le public et l'intention avant de rédiger les prompts.
+        progres("🧠 Analyse de ta demande…")
         val analyseBrute = runCatching { app.llm.agent(Prompts.MONTAGE_ANALYSE, user) }.getOrDefault("")
         val analyseJson = runCatching {
             JSONObject(analyseBrute.substring(analyseBrute.indexOf('{'), analyseBrute.lastIndexOf('}') + 1))
@@ -301,6 +327,7 @@ object Montage {
         // Ne lance aucune génération si la première étape d’analyse n’a fourni aucun contenu exploitable.
 
         // Passe 2 : transformer l'analyse et le brief original en storyboard + prompts par plan.
+        progres("✍️ Scénario et prompts des $nbPlans plans…")
         val contexte = buildString {
             append(user)
             if (analyse.isNotBlank()) append("\nANALYSE PRÉALABLE À RESPECTER :\n$analyse\n")

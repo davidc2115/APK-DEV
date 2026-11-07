@@ -64,7 +64,7 @@ object ImageToVideoGen {
         }
 
     /** Octets MP4 d'un clip texte → vidéo (utilisé aussi pour les plans des vidéos TikTok). */
-    fun clipTexte(app: JarvisApp, prompt: String, secondes: Double, rapport: String): ByteArray {
+    fun clipTexte(app: JarvisApp, prompt: String, secondes: Double, rapport: String, suivi: ((String) -> Unit)? = null, limiteMs: Long = 12 * 60_000L): ByteArray {
         if (prompt.isBlank()) throw IllegalStateException("Décris la vidéo à générer.")
         val input = JSONObject()
             .put("prompt", prompt)
@@ -74,7 +74,7 @@ object ImageToVideoGen {
             .put("aspect_ratio", rapport)
             .put("enable_prompt_expansion", false)
             .put("enable_safety_checker", true)
-        return executer(MODELE_TEXTE, input, cle(app))
+        return executer(MODELE_TEXTE, input, cle(app), suivi = suivi, limiteMs = limiteMs)
     }
 
     /** Anime une image (image → vidéo). */
@@ -121,16 +121,16 @@ object ImageToVideoGen {
      * Musique générée par fal.ai : instrumentale (Stable Audio 3, jusqu'à 380 s) ou chanson avec PAROLES chantées
      * (MiniMax Music 3) quand [paroles] est fourni. Renvoie (octets, extension).
      */
-    fun musique(app: JarvisApp, description: String, secondes: Double, paroles: String = ""): Pair<ByteArray, String> {
+    fun musique(app: JarvisApp, description: String, secondes: Double, paroles: String = "", suivi: ((String) -> Unit)? = null): Pair<ByteArray, String> {
         val key = cle(app)
         return if (paroles.isNotBlank()) {
             val input = JSONObject().put("prompt", description.ifBlank { "catchy modern pop song" })
                 .put("lyrics", paroles).put("duration", secondes.coerceIn(10.0, 300.0))
-            executer("minimax/music-3", input, key, ::urlAudio) to "wav"
+            executer("minimax/music-3", input, key, ::urlAudio, suivi = suivi, limiteMs = 6 * 60_000L) to "wav"
         } else {
             val input = JSONObject().put("prompt", description.ifBlank { "upbeat modern background music, no vocals" })
                 .put("duration", secondes.coerceIn(5.0, 380.0)).put("output_format", "mp3")
-            executer("fal-ai/stable-audio-3/medium/text-to-audio", input, key, ::urlAudio) to "mp3"
+            executer("fal-ai/stable-audio-3/medium/text-to-audio", input, key, ::urlAudio, suivi = suivi, limiteMs = 6 * 60_000L) to "mp3"
         }
     }
 
@@ -141,8 +141,13 @@ object ImageToVideoGen {
         .ifBlank { result.optJSONObject("audio_file")?.optString("url").orEmpty() }
         .ifBlank { result.optJSONArray("audios")?.optJSONObject(0)?.optString("url").orEmpty() }
 
-    /** Soumet [input] à la file fal.ai de [modele], attend la fin, renvoie les octets du fichier produit (vidéo par défaut). */
-    private fun executer(modele: String, input: JSONObject, key: String, extraire: (JSONObject) -> String = ::urlVideo): ByteArray {
+    /**
+     * File d'attente fal.ai : envoi, suivi (état transmis à [suivi] : « file d'attente, position N », « génération en
+     * cours »), puis téléchargement. Au-delà de [limiteMs], la demande est annulée chez fal.ai et une erreur 408 levée
+     * (message « file d'attente » si elle n'a jamais démarré).
+     */
+    private fun executer(modele: String, input: JSONObject, key: String, extraire: (JSONObject) -> String = ::urlVideo,
+                         suivi: ((String) -> Unit)? = null, limiteMs: Long = 12 * 60_000L): ByteArray {
         val accepted = executeJson(
             Request.Builder().url("https://queue.fal.run/$modele")
                 .header("Authorization", "Key $key")
@@ -172,9 +177,15 @@ object ImageToVideoGen {
                 when (lastStatus) {
                     "COMPLETED" -> break
                     "FAILED", "CANCELLED", "ERROR" -> throw ApiException(500, "fal.ai a échoué : ${status.optString("error", "génération refusée")}")
+                    "IN_QUEUE" -> suivi?.invoke("file d'attente" + status.optInt("queue_position", -1).let { if (it >= 0) " (position ${it + 1})" else "" })
+                    "IN_PROGRESS" -> suivi?.invoke("en cours")
                 }
             }
-            if (System.currentTimeMillis() - debut > 12 * 60_000) throw ApiException(408, "La génération prend trop de temps (dernier état : $lastStatus). Réessaie plus tard.")
+            if (System.currentTimeMillis() - debut > limiteMs) {
+                runCatching { http.newCall(Request.Builder().url("$responseUrl/cancel").header("Authorization", "Key $key").put(ByteArray(0).toRequestBody(null)).build()).execute().close() }
+                throw ApiException(408, if (lastStatus == "IN_QUEUE") "fal.ai n'a pas démarré la génération (resté en file d'attente ${limiteMs / 60_000} min) — file saturée ou crédit épuisé."
+                    else "La génération prend trop de temps (dernier état : $lastStatus). Réessaie plus tard.")
+            }
         }
 
         // Le résultat (ou l'erreur détaillée si la génération a échoué) se lit sur response_url.
