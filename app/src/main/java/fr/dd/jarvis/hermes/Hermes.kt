@@ -552,7 +552,7 @@ object Routeur {
 
     private fun choisirSansMemoire(app: JarvisApp, texte: String, precedent: String?): Choix =
         decider(app.store.hermesMode.value, app.enVoiture, Hermes.degrade(), texte, precedent,
-            competenceHermes = runCatching { competence(texte, app.memo.skillsHermes()) }.getOrNull())
+            competenceHermes = if (app.store.hermesMode.value == "demande") runCatching { competence(texte, app.memo.skillsHermes()) }.getOrNull() else null)
 
     /** Décision pure (testable) : mode des réglages, Android Auto, Hermès saturé, demande, message précédent de l'assistant. */
     internal fun decider(mode: String, enVoiture: Boolean, sature: Boolean, texte: String, precedent: String?, competenceHermes: String? = null): Choix {
