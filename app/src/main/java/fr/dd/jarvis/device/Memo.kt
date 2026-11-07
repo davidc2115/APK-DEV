@@ -183,6 +183,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         val texte = brut.take(20_000)
         if (texte == hermes()) return false
         hermesCache = texte
+        ensure()
         // Archive de migration : les anciennes données Hermès sont conservées, mais ne sont plus injectées
         // comme une seconde mémoire dans les prompts.
         runCatching { hermesLocal.writeText(texte) }
