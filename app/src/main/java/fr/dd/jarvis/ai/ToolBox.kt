@@ -897,7 +897,8 @@ class ToolBox(
         "graphe_suggere_lien" -> ToolResult(app.knowledgeRepository.suggestRelation(a.optString("source"), a.optString("cible"), a.optString("type", "RELATED_TO")))
         "routine_contextuelle" -> routineContextuelle(a)
         "reglage_jarvis" -> reglerJarvis(a)
-        "memoire_lire" -> ToolResult(app.memo.all().entries.joinToString("\n\n") { "**${it.key}** : ${it.value}" }.ifBlank { "Aucune consigne enregistrée." }, direct = true)
+        "memoire_lire" -> ToolResult(app.memo.all().entries.joinToString("\n\n") { "**${it.key}** : ${it.value}" }.ifBlank { "Aucune consigne enregistrée." } +
+            app.memo.hermesPourPrompt().let { if (it.isBlank()) "" else "\n\n---\n**Mémoire d'Hermès (synchronisée)**" + it.substringAfter(":") }, direct = true)
         "memoire_oublier" -> ToolResult(if (app.memo.remove(a.optString("sujet"))) "Consigne oubliée." else "Aucune consigne pour ce sujet.")
         "factures_impayees" -> ToolResult(app.societe.impayees().ifBlank { "✅ Aucune facture impayée." }, direct = true)
         "export_kml" -> ToolResult(app.societe.exporterKml(), direct = true)

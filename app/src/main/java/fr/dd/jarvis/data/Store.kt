@@ -371,6 +371,10 @@ class Store(context: Context) {
     val hermesMode = SPref("hermesMode", "tout")
     /** Migration unique : l'ancien mode « auto » devient « Hermès pour tout » (nouveau défaut, avec réflexes). */
     val hermesModeMigre = BPref("hermesModeMigreTout", false)
+    /** Seconde migration : « Si je dis Hermès » devient aussi « Hermès pour tout » (Hermès consulté sans le nommer). */
+    val hermesModeMigre2 = BPref("hermesModeMigreTout2", false)
+    /** Version du hook de mémoire partagée installée dans Hermès (0 = jamais). */
+    val hookMemoireVersion = SPref("hookMemoireVersion", "0")
     /** Connexion facultative au serveur officiel Suno MCP (OAuth). */
     val sunoMcpActive = BPref("sunoMcpActive", false)
     val modeAdulte = BPref("modeAdulte", false)

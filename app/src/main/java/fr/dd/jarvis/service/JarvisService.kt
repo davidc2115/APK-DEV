@@ -141,7 +141,14 @@ class JarvisService : Service() {
         tools = ToolBox(app) { q, _ -> voiceConfirm(q) }
         // Hermès installé : on s'assure que sa passerelle tourne dans Termux (après un redémarrage du téléphone par ex.).
         if (app.store.hermesMode.value != "off") scope.launch {
-            runCatching { fr.dd.jarvis.hermes.PontMcp.demarrer(app); if (!fr.dd.jarvis.hermes.Hermes.enLigne(force = true)) fr.dd.jarvis.hermes.Hermes.relancerSiBesoin(app) }
+            runCatching {
+                fr.dd.jarvis.hermes.PontMcp.demarrer(app)
+                val hook = fr.dd.jarvis.hermes.HermesTermux.VERSION_HOOK_MEMOIRE.toString()
+                // Mémoire partagée : installée une fois (puis à chaque nouvelle version du hook), passerelle relancée.
+                if (app.store.hermesInstalle.value && app.store.hookMemoireVersion.value != hook) {
+                    if (fr.dd.jarvis.hermes.HermesTermux.installerMemoirePartagee(app) == null) app.store.hookMemoireVersion.set(hook)
+                } else if (!fr.dd.jarvis.hermes.Hermes.enLigne(force = true)) fr.dd.jarvis.hermes.Hermes.relancerSiBesoin(app)
+            }
         }
         voice = VoiceManager(this).also { v ->
             v.muteBeeps = app.store.muteBeeps.value

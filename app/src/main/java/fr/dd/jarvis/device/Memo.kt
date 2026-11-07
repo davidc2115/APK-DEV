@@ -165,6 +165,52 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
             sel.entries.joinToString("\n") { "- [${it.key}] ${it.value}" }
     }
 
+    // ------------------------------------------------------------------ mémoire partagée avec Hermès
+
+    private val hermesLocal get() = File(ctx.filesDir, "memoire-hermes.md")
+    @Volatile private var hermesCache: String? = null
+
+    /** Entrées de la mémoire d'Hermès (notes d'Hermès, profil utilisateur) à partir de ses fichiers MEMORY.md / USER.md. */
+    private fun entreesHermes(brut: String): Pair<List<String>, List<String>> {
+        fun bloc(nom: String) = brut.substringAfter("### $nom", "").substringBefore("\n### ").split(Regex("\\n§\\n|^§\\n|\\n§$"))
+            .map { it.trim() }.filter { it.isNotBlank() && it != "§" }
+        return bloc("MEMORY.md") to bloc("USER.md")
+    }
+
+    /** Reçoit la mémoire d'Hermès (synchronisation automatique) ; renvoie vrai si elle a changé. */
+    @Synchronized
+    fun majHermes(brut: String): Boolean {
+        val texte = brut.take(20_000)
+        if (texte == hermes()) return false
+        hermesCache = texte
+        runCatching { hermesLocal.writeText(texte) }
+        val (notes, profil) = entreesHermes(texte)
+        val md = "# Mémoire d'Hermès\n\n_Synchronisée automatiquement depuis Hermès (Termux). Pour corriger une information, demande-le à Jarvis ou à Hermès._\n\n" +
+            "## Notes d'Hermès\n" + notes.joinToString("\n") { "- " + it.replace("\n", " ") }.ifBlank { "_(vide)_" } +
+            "\n\n## Profil de l'utilisateur (vu par Hermès)\n" + profil.joinToString("\n") { "- " + it.replace("\n", " ") }.ifBlank { "_(vide)_" } + "\n"
+        runCatching { obsidian.saveIn(FOLDER, "Mémoire Hermès", md) }
+        return true
+    }
+
+    fun hermes(): String = hermesCache ?: runCatching { hermesLocal.takeIf { it.exists() }?.readText() }.getOrNull().orEmpty().also { hermesCache = it }
+
+    /** Section « mémoire d'Hermès » pour le cerveau de Jarvis. */
+    fun hermesPourPrompt(): String {
+        val (notes, profil) = entreesHermes(hermes())
+        if (notes.isEmpty() && profil.isEmpty()) return ""
+        return ("\n\nMémoire partagée avec Hermès (notes et préférences qu'il a retenues, à appliquer aussi) :\n" +
+            (notes + profil).joinToString("\n") { "- " + it.replace("\n", " ").take(500) }).take(3500)
+    }
+
+    /** Mémoire de Jarvis telle qu'Hermès la recopie dans son SOUL.md (bloc géré, chargé à chaque session). */
+    fun pourHermes(): String {
+        ensure()
+        if (items.isEmpty()) return ""
+        return "## Mémoire partagée avec JARVIS\n" +
+            "Consignes durables de l'utilisateur enregistrées par JARVIS (synchronisées automatiquement ; pour les modifier, utilise mcp_jarvis_memoire_ajouter ou mcp_jarvis_memoire_oublier) :\n" +
+            items.entries.joinToString("\n") { "- [${it.key}] ${it.value.replace("\n", " ").take(600)}" }.take(6000)
+    }
+
     @Synchronized
     fun toutes(): String {
         ensure()

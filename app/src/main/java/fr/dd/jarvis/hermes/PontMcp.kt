@@ -42,6 +42,10 @@ object PontMcp {
         /** Relais Groq compact pour Hermès : (code HTTP, corps JSON chat.completion). */
         fun groq(corps: JSONObject): Pair<Int, String> = 404 to """{"error":{"message":"relais indisponible"}}"""
         fun groqModeles(): String = """{"object":"list","data":[]}"""
+        /** Mémoire d'Hermès reçue (MEMORY.md + USER.md). */
+        fun memoireHermes(texte: String) {}
+        /** Mémoire de Jarvis à recopier dans Hermès. */
+        fun memoireJarvis(): String = ""
     }
 
     /** Outils de la conversation en cours (avec SES confirmations) ; sinon une boîte d'outils autonome. */
@@ -61,6 +65,8 @@ object PontMcp {
     private class FournisseurJarvis(val app: JarvisApp) : Fournisseur {
         override fun groq(corps: JSONObject) = RelaisGroq.repondre(app, corps)
         override fun groqModeles() = RelaisGroq.modeles(app)
+        override fun memoireHermes(texte: String) { runCatching { app.memo.majHermes(texte) } }
+        override fun memoireJarvis(): String = runCatching { app.memo.pourHermes() }.getOrDefault("")
         private val defaut by lazy { ToolBox(app) { _, force -> !force } }
         private fun boite() = boiteActive ?: defaut
         override fun jeton() = app.store.mcpJeton.value
@@ -309,6 +315,9 @@ object PontMcp {
                     repondre(s, 200, """{"accepted":true}""")
                 }
             }
+            // Mémoire partagée : le hook « jarvis-memoire » d'Hermès envoie la sienne et recopie celle de Jarvis.
+            r.chemin.trimEnd('/') == "/memoire/hermes" && r.methode == "POST" -> { f.memoireHermes(r.corps); repondre(s, 200, """{"ok":true}""") }
+            r.chemin.trimEnd('/') == "/memoire/jarvis" && r.methode == "GET" -> repondre(s, 200, f.memoireJarvis(), type = "text/plain")
             r.chemin.trimEnd('/') == "/groq/v1/models" && r.methode == "GET" -> repondre(s, 200, f.groqModeles())
             r.chemin.trimEnd('/') == "/groq/v1/chat/completions" && r.methode == "POST" -> {
                 val corps = runCatching { JSONObject(r.corps) }.getOrElse { return@use repondre(s, 400, """{"error":{"message":"JSON invalide"}}""") }

@@ -240,6 +240,45 @@ arreter_passerelles_hermes() {
 
     // ------------------------------------------------------------------ 3-5. Installation, configuration, démarrage
 
+    /** Version du hook de mémoire partagée : à augmenter quand memoire_handler.py change (réinstallation automatique). */
+    const val VERSION_HOOK_MEMOIRE = 1
+
+    /**
+     * Installe (ou met à jour) le hook « jarvis-memoire » d'Hermès : au démarrage de la passerelle, il lance un fil qui
+     * synchronise les deux mémoires toutes les 30 s via le pont (POST /memoire/hermes, GET /memoire/jarvis).
+     * Script autonome (Termux) : n'a besoin que de « p » (prélude).
+     */
+    internal fun scriptHookMemoire(app: JarvisApp): String {
+        val py = runCatching { app.assets.open("hermes/memoire_handler.py").use { it.readBytes() } }.getOrNull() ?: return "p '⚠️ Hook de mémoire partagée introuvable dans Jarvis.'"
+        return scriptHookMemoireDe(py, app.store.mcpJeton.value)
+    }
+
+    internal fun scriptHookMemoireDe(py: ByteArray, jeton: String): String {
+        val b64 = java.util.Base64.getEncoder().encodeToString(py)
+        return """
+JH="${'$'}HOME/.hermes"; JD="${'$'}JH/hooks/jarvis-memoire"; mkdir -p "${'$'}JD" "${'$'}JH/memories"
+printf '%s' '$b64' | base64 -d > "${'$'}JD/handler.py.tmp" && mv "${'$'}JD/handler.py.tmp" "${'$'}JD/handler.py"
+printf 'name: jarvis-memoire
+description: Memoire partagee Jarvis et Hermes (synchronisation automatique)
+events:
+  - gateway:startup
+' > "${'$'}JD/HOOK.yaml"
+touch "${'$'}JH/.env"; grep -v -E '^JARVIS_PONT_(URL|JETON)=' "${'$'}JH/.env" > "${'$'}JH/.env.j" 2>/dev/null || true
+printf 'JARVIS_PONT_URL=%s
+JARVIS_PONT_JETON=%s
+' 'http://127.0.0.1:${PontMcp.PORT}' ${q(jeton)} >> "${'$'}JH/.env.j"; mv "${'$'}JH/.env.j" "${'$'}JH/.env"; chmod 600 "${'$'}JH/.env"
+p '🧠 Mémoire partagée Jarvis ↔ Hermès installée.'
+""".trim()
+    }
+
+    /** Installe le hook de mémoire partagée puis redémarre la passerelle (une seule fois par version du hook). */
+    fun installerMemoirePartagee(app: JarvisApp): String? {
+        if (!app.store.hermesInstalle.value) return null
+        PontMcp.demarrer(app)
+        val script = prelude(app) + "\n" + scriptHookMemoire(app) + "\narreter_passerelles_hermes; sleep 1\n" + demarrage
+        return executer(app, script, libelle = "Mémoire partagée Jarvis ↔ Hermès")
+    }
+
     private fun configuration(app: JarvisApp): String {
         val s = app.store
         if (s.hermesCle.value.isBlank()) s.hermesCle.set(UUID.randomUUID().toString().replace("-", ""))
@@ -257,7 +296,7 @@ arreter_passerelles_hermes() {
             geminiKeys.drop(1).forEachIndexed { index, key -> appendLine("setenv GOOGLE_API_KEY_" + (index + 2) + " " + q(key)) }
             // Clés Groq : jamais copiées dans Termux, la rotation est faite par le relais de Jarvis.
         }
-        return base.replace("setenv API_SERVER_MODEL_NAME hermes-agent", "setenv API_SERVER_MODEL_NAME hermes-agent\n" + extraEnv)
+        return base.replace("setenv API_SERVER_MODEL_NAME hermes-agent", "setenv API_SERVER_MODEL_NAME hermes-agent\n" + extraEnv) + "\n" + scriptHookMemoire(app)
     }
 
     internal fun scriptConfiguration(cleApi: String, jeton: String, gemini: String, groq: String, modele: String, modeleGroq: String, urlMcp: String = PontMcp.url(), sunoActif: Boolean = false): String {
@@ -792,6 +831,7 @@ os.replace(name, p)
             upgradeCommand,
             "p '🔐 Mise à jour des clés et variables des fournisseurs…'",
             envScript,
+            scriptHookMemoire(app),
             "p '🧩 Synchronisation des plugins et agents…'",
             pluginCommand,
             "p '⚙️ Écriture et validation de la configuration Hermès…'",
@@ -851,7 +891,7 @@ os.replace(name, p)
 
     fun demarrer(app: JarvisApp): String {
         PontMcp.demarrer(app)
-        return executer(app, prelude(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
+        return executer(app, prelude(app) + "\n" + scriptHookMemoire(app) + "\n" + demarrage, libelle = "Démarrage d'Hermès") ?: "▶️ Démarrage d'Hermès…"
     }
 
     fun arreter(app: JarvisApp): String =

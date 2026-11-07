@@ -95,6 +95,10 @@ class JarvisApp : Application() {
             if (store.hermesMode.value == "auto") store.hermesMode.set("tout")
             store.hermesModeMigre.set(true)
         }
+        if (!store.hermesModeMigre2.value) {
+            if (store.hermesMode.value == "demande") store.hermesMode.set("tout")
+            store.hermesModeMigre2.set(true)
+        }
         llm = Llm(store)
         calendar = CalendarRepo(this, store)
         mail = MailRepo(this, store)
