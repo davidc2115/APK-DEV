@@ -745,10 +745,14 @@ os.replace(name, p)
             "cd \"\$REPO\"",
             "exec ./.hermes/bin/hermes update --yes"
         ).joinToString("\n")
-        val upgradeCommand = "set -o pipefail; p '🔄 Vérification du propriétaire de l’installation Hermès…'; " +
-            "OWNER_IDS=\$(proot-distro login debian --termux-home -- stat -c '%u:%g' /root/.hermes/hermes-agent/.hermes/bin/hermes 2>/dev/null) || exit 1; " +
-            "case \"\$OWNER_IDS\" in *[!0-9:]*|'') p '❌ Impossible d’identifier le propriétaire de l’installation Hermès.'; exit 126;; esac; " +
-            "p \"🔐 Mise à niveau sous l’identité propriétaire UID:GID \$OWNER_IDS (sans changement de droits)…\"; " +
+        val upgradeCommand = "set -o pipefail; p '🔄 Vérification du propriétaire des environnements Hermès…'; " +
+            // Le binaire peut appartenir à root alors que les venvs gérés par Hermes appartiennent à l'UID Termux.
+            // Hermes valide les fichiers de installs/*/venv : détecter leur propriétaire réel, pas celui du lanceur.
+            "OWNER_IDS=\$(proot-distro login debian --termux-home -- sh -c 'find /root/.hermes/installs -type f -path \"*/venv/lib/python*/site-packages/*\" -printf \"%U:%G\\n\" | sort -u' 2>/dev/null) || exit 1; " +
+            "OWNER_COUNT=\$(printf '%s\\n' \"\$OWNER_IDS\" | sed '/^$/d' | wc -l | tr -d ' '); " +
+            "if [ \"\$OWNER_COUNT\" -ne 1 ]; then p \"❌ Propriétaire des environnements Hermès ambigu (\$OWNER_COUNT identités). Aucune modification effectuée.\"; exit 126; fi; " +
+            "case \"\$OWNER_IDS\" in *[!0-9:]*|'') p '❌ Identité propriétaire des environnements Hermès invalide.'; exit 126;; esac; " +
+            "p \"🔐 Mise à niveau sous l’identité réelle des environnements UID:GID \$OWNER_IDS (sans changement de droits)…\"; " +
             "proot-distro login debian --user \"\$OWNER_IDS\" --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root USER=jarvis LOGNAME=jarvis " +
             "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
             "bash -c " + q(upgradeScript) + " 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done; " +
