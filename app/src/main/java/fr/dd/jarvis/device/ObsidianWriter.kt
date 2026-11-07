@@ -530,7 +530,9 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         val candidats = tout.asSequence().filter { (p, estDossier) -> (dossiers || !estDossier) && (dansDossier == null || p.startsWith("$dansDossier/")) }
         fun parMots() = candidats.filter { (p, _) ->
             val nom = p.substringAfterLast('/')
-            val texte = (motsCles(nom.substringBeforeLast('.')) + (descriptions[nom]?.let { motsCles(it) } ?: emptyList())).joinToString(" ")
+            val ext = nom.substringAfterLast('.', "").lowercase()
+            val description = if (ext in setOf("png", "jpg", "jpeg", "webp", "gif", "heic", "bmp")) descriptionImage(p, descriptions) else null
+            val texte = (motsCles(nom.substringBeforeLast('.')) + (description?.let { motsCles(it) } ?: emptyList())).joinToString(" ")
             mots.isNotEmpty() && mots.all { texte.contains(it) }
         }.map { it.first }.take(limite).toList()
         if (re == null) return parMots()
@@ -604,11 +606,40 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         }.getOrNull()
     }
 
-    /** Description (prompt) de chaque image générée par JARVIS, par nom de fichier. */
+    /** Descriptions des images générées, indexées aussi par empreinte SHA-256 pour survivre aux renommages. */
     private fun descriptionsImages(): Map<String, String> = runCatching {
         val f = File(ctx.filesDir, "images_descriptions.json")
-        if (!f.isFile) emptyMap() else org.json.JSONObject(f.readText()).let { j -> j.keys().asSequence().associateWith { j.optString(it) } }
+        if (!f.isFile) return@runCatching emptyMap()
+        val j = org.json.JSONObject(f.readText())
+        val out = linkedMapOf<String, String>()
+        j.keys().forEach { key -> out[key] = j.optString(key) }
+        val dossier = File(ctx.filesDir, "images")
+        dossier.listFiles()?.filter { it.isFile }?.forEach { image ->
+            val prompt = out[image.name] ?: return@forEach
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            image.inputStream().buffered().use { input ->
+                val buffer = ByteArray(32768)
+                while (true) { val n = input.read(buffer); if (n < 0) break; digest.update(buffer, 0, n) }
+            }
+            val hash = digest.digest().joinToString("") { "%02x".format(it) }
+            out["sha256:$hash"] = prompt
+        }
+        out
     }.getOrDefault(emptyMap())
+
+    /** Description d’une image du coffre : son nom, puis son empreinte de contenu. */
+    private fun descriptionImage(chemin: String, descriptions: Map<String, String>): String? {
+        descriptions[chemin.substringAfterLast('/')]?.let { return it }
+        if (descriptions.keys.none { it.startsWith("sha256:") }) return null
+        val bytes = runCatching {
+            racineFichier()?.let { root ->
+                val f = fichierSur(root, chemin)
+                if (f.isFile) f.inputStream().buffered().use { it.readBytes() } else null
+            } ?: trouver(chemin)?.takeIf { it.isFile }?.let { doc -> ctx.contentResolver.openInputStream(doc.uri)?.use { it.readBytes() } }
+        }.getOrNull() ?: return null
+        val hash = java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+        return descriptions["sha256:$hash"]
+    }
 
     /** Fichiers d'un dossier du coffre (noms seuls), du plus récent au plus ancien quand les noms sont datés. */
     fun fichiersDe(dossier: String): List<String> {
