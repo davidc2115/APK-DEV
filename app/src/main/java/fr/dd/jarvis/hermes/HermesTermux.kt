@@ -190,6 +190,8 @@ object HermesTermux {
 J_URL=${q("http://127.0.0.1:$port/progres")}; J_TOK=${q(jeton)}
 p() {
   local message="${'$'}*"
+  # Ligne vide (sortie d'un programme) : rien à transmettre — le pont refuserait un message vide (HTTP 400).
+  case "${'$'}{message//[[:space:]]/}" in '') return 0 ;; esac
   echo "${'$'}message"
   if ! command -v curl >/dev/null 2>&1; then
     echo "JARVIS_PROGRESS_ERROR: curl absent" >&2
@@ -207,6 +209,20 @@ p() {
     echo "JARVIS_PROGRESS_ERROR: accusé de réception invalide: ${'$'}response" >&2
     return 1
   fi
+}
+HERMES_PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# Debian (proot) tourne par défaut en « root » virtuel (UID 0) alors que les fichiers d'Hermès, dans le HOME
+# Termux partagé, appartiennent à l'UID Android de Termux : Hermès refuse alors de se mettre à jour.
+# On déclare dans Debian un utilisateur « jarvis » portant EXACTEMENT l'UID/GID de Termux (HOME = /root), puis on
+# lance Hermès sous cet utilisateur avec le HOME Termux monté sur /root : propriétaire et processus coïncident,
+# sans aucun chown. Fonctionne avec l'ancienne (shell) et la nouvelle (Python) version de proot-distro.
+debian_utilisateur_jarvis() {
+  proot-distro login debian -- sh -c 'U="${'$'}1"; G="${'$'}2"; grep -q "^jarvis:x:${'$'}U:${'$'}G:" /etc/passwd && exit 0
+    sed -i "/^jarvis:/d" /etc/passwd /etc/group 2>/dev/null; sed -i "/^jarvis:/d" /etc/shadow 2>/dev/null
+    echo "jarvis:x:${'$'}G:" >> /etc/group; echo "jarvis:x:${'$'}U:${'$'}G:Jarvis:/root:/bin/bash" >> /etc/passwd' sh "${'$'}(id -u)" "${'$'}(id -g)" >/dev/null 2>&1
+}
+hermes_debian() {
+  proot-distro login debian --user jarvis --bind "${'$'}HOME:/root" -- env -i HOME=/root USER=jarvis LOGNAME=jarvis SHELL=/bin/bash LANG=C.UTF-8 PATH="${'$'}HERMES_PATH" "${'$'}@"
 }
 """.trimIndent()
     private fun scriptSignal(app: JarvisApp, texte: String) = prelude(app) + "\np ${q(texte)}\n"
@@ -325,14 +341,9 @@ fi
 p '🔄 Préparation du démarrage de la passerelle Hermès…'
 HERMES_PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 if [ "$(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ] || proot-distro login debian --termux-home -- env -i HOME=/root PATH="${'$'}{HERMES_PATH}" sh -c 'command -v hermes >/dev/null 2>&1'; then
-  OWNER_IDS=$(proot-distro login debian --termux-home -- stat -c '%u:%g' /root/.hermes/hermes-agent/.hermes/bin/hermes 2>/dev/null) || {
-    p "❌ Impossible d’identifier le propriétaire de l’installation Hermès."
-    exit 1
-  }
-  case "${'$'}{OWNER_IDS}" in
-    *[!0-9:]*|'') p "❌ Identité propriétaire Hermès invalide."; exit 126 ;;
-  esac
-  CMD="proot-distro login debian --user ${'$'}{OWNER_IDS} --termux-home -- env -i HOME=/root USER=jarvis LOGNAME=jarvis SHELL=/bin/bash PATH=${'$'}{HERMES_PATH} hermes gateway run"
+  # Passerelle lancée sous l'utilisateur Debian « jarvis » = UID réel de Termux (propriétaire des fichiers d'Hermès).
+  debian_utilisateur_jarvis
+  CMD="proot-distro login debian --user jarvis --bind ${'$'}{HOME}:/root -- env -i HOME=/root USER=jarvis LOGNAME=jarvis SHELL=/bin/bash LANG=C.UTF-8 PATH=${'$'}{HERMES_PATH} hermes gateway run"
 else
   if ! command -v hermes >/dev/null 2>&1; then
     p "❌ CLI Hermès introuvable dans Termux et Debian. Relance « Installer Hermès » pour réparer l’installation."
@@ -724,7 +735,7 @@ os.replace(name, p)
         val hasGemini = if (gemini.isNotEmpty()) "1" else "0"
         val hasGroq = if (groq.isNotEmpty()) "1" else "0"
         val cfIds = cloudflare.joinToString(",") { it.first }
-        val pluginCommand = "PLUGIN_OK=0; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes plugins install advanced-delegation --no-deps --no-enable >/dev/null 2>&1 || true; if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes plugins enable advanced-delegation --no-allow-tool-override >/dev/null 2>&1; then PLUGIN_OK=1; p \"🧠 Routage multi-modèles advanced-delegation activé.\"; else p \"⚠️ Extension avancée indisponible : délégation Hermes native conservée.\"; fi"
+        val pluginCommand = "PLUGIN_OK=0; debian_utilisateur_jarvis; hermes_debian hermes plugins install advanced-delegation --no-deps --no-enable >/dev/null 2>&1 || true; if hermes_debian hermes plugins enable advanced-delegation --no-allow-tool-override >/dev/null 2>&1; then PLUGIN_OK=1; p \"🧠 Routage multi-modèles advanced-delegation activé.\"; else p \"⚠️ Extension avancée indisponible : délégation Hermes native conservée.\"; fi"
         val extEnv = external.joinToString(" ") { entry ->
             val id = entry[0].uppercase()
             "JARVIS_HAS_$id=1 JARVIS_${id}_MODEL=${q(entry[3])} JARVIS_${id}_ENDPOINT=${q(entry[2])}"
@@ -745,20 +756,10 @@ os.replace(name, p)
             "cd \"\$REPO\"",
             "exec ./.hermes/bin/hermes update --yes"
         ).joinToString("\n")
-        val upgradeCommand = "set -o pipefail; p '🔄 Vérification du propriétaire des environnements Hermès…'; " +
-            // Le binaire peut appartenir à root alors que les venvs gérés par Hermes appartiennent à l'UID Termux.
-            // Hermes valide les fichiers de installs/*/venv : détecter leur propriétaire réel, pas celui du lanceur.
-            "OWNER_IDS=\$(proot-distro login debian --termux-home -- sh -c 'find /root/.hermes/installs -type f -path \"*/venv/lib/python*/site-packages/*\" -printf \"%U:%G\\n\" | sort -u' 2>/dev/null) || exit 1; " +
-            "OWNER_COUNT=\$(printf '%s\\n' \"\$OWNER_IDS\" | sed '/^$/d' | wc -l | tr -d ' '); " +
-            "if [ \"\$OWNER_COUNT\" -ne 1 ]; then p \"❌ Propriétaire des environnements Hermès ambigu (\$OWNER_COUNT identités). Aucune modification effectuée.\"; exit 126; fi; " +
-            "case \"\$OWNER_IDS\" in *[!0-9:]*|'') p '❌ Identité propriétaire des environnements Hermès invalide.'; exit 126;; esac; " +
-            "p \"🔐 Mise à niveau sous l’identité réelle des environnements UID:GID \$OWNER_IDS (sans changement de droits)…\"; " +
-            "proot-distro login debian --user \"\$OWNER_IDS\" --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root USER=jarvis LOGNAME=jarvis " +
-            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
-            "bash -c " + q(upgradeScript) + " 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done; " +
-            "UPDATE_STATUS=\$?; if [ \"\$UPDATE_STATUS\" -ne 0 ]; then " +
-            "p '❌ Mise à niveau Hermès échouée : consulte les lignes de progression ci-dessus. La configuration est interrompue.'; exit \"\$UPDATE_STATUS\"; fi; " +
-            "p '✅ Mise à niveau Hermès terminée.'"
+        val upgradeCommand = "p '🔄 Mise à niveau d’Hermès (sous l’identité réelle de Termux, UID ${'$'}(id -u))…'; debian_utilisateur_jarvis; " +
+            "if hermes_debian bash -c " + q(upgradeScript) + " 2>&1 | while IFS= read -r ligne; do p \"${'$'}ligne\" || true; done; [ \"${'$'}{PIPESTATUS[0]}\" -eq 0 ]; then " +
+            "p '✅ Hermès est à jour.'; else " +
+            "p '⚠️ Mise à niveau d’Hermès impossible pour le moment : la configuration continue avec la version installée.'; fi"
         val restartCommand = "proot-distro login debian --termux-home -- pkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; " +
             "pkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; sleep 3"
         message = "⏳ Commandes de synchronisation prêtes. Assemblage du script final…"
@@ -843,7 +844,8 @@ os.replace(name, p)
         PontMcp.demarrer(app)
         val cli = arguments.joinToString(" ") { q(it) }
         val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
-        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
+        // Sous l'utilisateur « jarvis » (UID réel de Termux) : Hermès accepte de modifier ses environnements.
+        val commandeTermux = "set -o pipefail; debian_utilisateur_jarvis; hermes_debian bash -c ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\" || true; done"
         message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
         return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
             ?: "🚀 Commande envoyée à Hermès."

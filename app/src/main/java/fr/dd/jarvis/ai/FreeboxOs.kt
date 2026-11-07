@@ -141,4 +141,280 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
         app.store.freeboxUid.set("")
         app.store.freeboxTrackId.set("")
     }
+
+    // ================================================================== gestion de la Freebox (droits accordés dans Freebox OS)
+
+    @Volatile private var versionApi = 0
+
+    /** Version majeure de l'API annoncée par la box (les routes v4 restent valides ; plus récent si disponible). */
+    private fun version(app: JarvisApp): Int {
+        if (versionApi > 0) return versionApi
+        versionApi = runCatching {
+            val domain = app.store.freeboxApiDomain.value.trim()
+            val port = app.store.freeboxHttpsPort.value.toIntOrNull() ?: 443
+            val c = URL("https://$domain:$port/api_version").openConnection() as HttpsURLConnection
+            c.sslSocketFactory = socketFactory(); c.connectTimeout = 6000; c.readTimeout = 6000
+            try { JSONObject(c.inputStream.bufferedReader().use { it.readText() }).optString("api_version").substringBefore('.').toInt() } finally { c.disconnect() }
+        }.getOrDefault(4).coerceIn(4, 15)
+        return versionApi
+    }
+
+    private class Reponse(val code: Int, val type: String, val nom: String, val octets: ByteArray)
+
+    /** Requête authentifiée sur la version d'API annoncée ; renvoie le JSON (« result » éventuel) ou des octets bruts. */
+    private fun requete(app: JarvisApp, path: String, session: String, method: String = "GET", body: JSONObject? = null): Reponse {
+        val domain = app.store.freeboxApiDomain.value.trim()
+        val port = app.store.freeboxHttpsPort.value.toIntOrNull() ?: 443
+        val c = URL("https://$domain:$port/api/v${version(app)}/" + path.trimStart('/')).openConnection() as HttpsURLConnection
+        c.sslSocketFactory = socketFactory(); c.connectTimeout = 8000; c.readTimeout = 20000
+        c.requestMethod = method
+        c.setRequestProperty("X-Fbx-App-Auth", session)
+        if (body != null) {
+            c.doOutput = true
+            c.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            c.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+        }
+        try {
+            val flux = if (c.responseCode in 200..299) c.inputStream else c.errorStream
+            val octets = flux?.use { it.readBytes() } ?: ByteArray(0)
+            val nom = c.getHeaderField("Content-Disposition")?.substringAfter("filename=", "")?.trim('"', ' ', ';').orEmpty()
+            return Reponse(c.responseCode, c.contentType.orEmpty(), nom, octets)
+        } finally { c.disconnect() }
+    }
+
+    private fun json(app: JarvisApp, path: String, session: String, method: String = "GET", body: JSONObject? = null): Any? {
+        val r = requete(app, path, session, method, body)
+        val j = runCatching { JSONObject(String(r.octets, Charsets.UTF_8)) }.getOrElse { throw IllegalStateException("Réponse inattendue de la Freebox (HTTP ${r.code}).") }
+        if (!j.optBoolean("success", false)) {
+            val code = j.optString("error_code"); val msg = j.optString("msg")
+            throw IllegalStateException(when (code) {
+                "insufficient_rights" -> "la Freebox refuse : droit « ${j.optString("missing_right").ifBlank { "settings" }} » non accordé à JARVIS (Freebox OS › Paramètres › Gestion des accès › Applications › JARVIS)."
+                "auth_required", "invalid_session" -> "session Freebox expirée, réessaie."
+                else -> msg.ifBlank { code.ifBlank { "erreur HTTP ${r.code}" } }
+            })
+        }
+        return j.opt("result")
+    }
+
+    private fun <T> avecSession(app: JarvisApp, bloc: (String) -> T): T {
+        val token = app.store.freeboxAppToken.value
+        require(token.isNotBlank()) { "JARVIS n'est pas encore associé à la Freebox (Réglages › Box › Associer)." }
+        val challenge = call(app, "login/").getJSONObject("result").getString("challenge")
+        val mac = Mac.getInstance("HmacSHA1")
+        mac.init(SecretKeySpec(token.toByteArray(Charsets.UTF_8), "HmacSHA1"))
+        val password = mac.doFinal(challenge.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+        val session = call(app, "login/session/", "POST", JSONObject().put("app_id", APP_ID).put("app_version", "1.0").put("password", password))
+            .getJSONObject("result").getString("session_token")
+        try { return bloc(session) } finally { runCatching { call(app, "login/logout/", "POST", JSONObject(), session) } }
+    }
+
+    private fun liste(v: Any?): List<JSONObject> = (v as? org.json.JSONArray)?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }.orEmpty()
+    private fun debit(octetsParS: Long) = when { octetsParS >= 1_000_000 -> "%.1f Mo/s".format(octetsParS / 1e6); octetsParS >= 1000 -> "${octetsParS / 1000} Ko/s"; else -> "$octetsParS o/s" }
+    private fun bande(bits: Long) = if (bits >= 1_000_000_000) "%.1f Gb/s".format(bits / 1e9) else "${bits / 1_000_000} Mb/s"
+
+    private fun hotes(app: JarvisApp, s: String): List<JSONObject> = liste(json(app, "lan/browser/pub/", s))
+    private fun ipv4(h: JSONObject): String = liste(h.optJSONArray("l3connectivities")).filter { it.optString("af") == "ipv4" }
+        .sortedByDescending { it.optBoolean("active") }.firstOrNull()?.optString("addr").orEmpty()
+
+    /** Adresse IP d'un appareil du réseau à partir de son nom (tel qu'affiché par la Freebox). */
+    private fun ipDe(app: JarvisApp, s: String, nomOuIp: String): String {
+        val v = nomOuIp.trim()
+        if (Regex("^\\d{1,3}(\\.\\d{1,3}){3}$").matches(v)) return v
+        val n = v.lowercase()
+        val h = hotes(app, s).filter { it.optString("primary_name").lowercase().contains(n) && ipv4(it).isNotBlank() }
+        return when (h.size) {
+            0 -> throw IllegalArgumentException("aucun appareil « $v » sur le réseau de la Freebox.")
+            1 -> ipv4(h[0])
+            else -> h.firstOrNull { it.optBoolean("active") }?.let { ipv4(it) } ?: throw IllegalArgumentException("plusieurs appareils « $v » : ${h.joinToString { it.optString("primary_name") + " " + ipv4(it) }}.")
+        }
+    }
+
+    private fun serveurVpn(app: JarvisApp, s: String, demande: String): String {
+        val noms = liste(json(app, "vpn/", s)).map { it.optString("name") }.filter { it.isNotBlank() }
+        val d = demande.trim().lowercase().replace(" ", "_")
+        return noms.firstOrNull { it == d } ?: noms.firstOrNull { d.isNotBlank() && it.contains(d) }
+            ?: noms.firstOrNull { it.contains("wireguard") } ?: noms.firstOrNull { it == "openvpn_routed" } ?: noms.firstOrNull()
+            ?: throw IllegalStateException("aucun serveur VPN proposé par cette Freebox.")
+    }
+
+    private fun motDePasse(): String {
+        val r = java.security.SecureRandom(); val c = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
+        return (1..16).map { c[r.nextInt(c.length)] }.joinToString("")
+    }
+
+    /**
+     * Pilotage de la Freebox : état, appareils, redirections de ports, VPN (serveur, utilisateurs, fichier de
+     * configuration), Wi-Fi, DMZ, baux DHCP, journal d'appels, redémarrage. Les modifications sont confirmées.
+     */
+    suspend fun gerer(app: JarvisApp, actionBrute: String, a: JSONObject, confirm: suspend (String, Boolean) -> Boolean): String {
+        val action = actionBrute.trim().lowercase().replace(' ', '_').replace('-', '_')
+        if (app.store.freeboxAppToken.value.isBlank()) return "JARVIS n'est pas encore associé à la Freebox : Réglages › Box › Associer la Freebox (à valider sur l'écran de la box)."
+        // Confirmation AVANT d'ouvrir la session (pas de session ouverte pendant que l'utilisateur réfléchit).
+        val question = when (action) {
+            "ajouter_redirection" -> "Freebox : ouvrir le port ${a.optString("port_externe").ifBlank { a.optString("port") }} (${a.optString("protocole").ifBlank { "tcp" }}) vers ${a.optString("appareil").ifBlank { a.optString("ip") }}:${a.optString("port")} ?"
+            "supprimer_redirection" -> "Freebox : supprimer la redirection ${a.optString("id").ifBlank { "du port " + a.optString("port") }} ?"
+            "activer_redirection", "desactiver_redirection" -> "Freebox : ${if (action.startsWith("activer")) "activer" else "désactiver"} la redirection ${a.optString("id")} ?"
+            "activer_vpn", "desactiver_vpn" -> "Freebox : ${if (action.startsWith("activer")) "activer" else "désactiver"} le serveur VPN ${a.optString("serveur").ifBlank { "(WireGuard par défaut)" }} ?"
+            "ajouter_vpn_utilisateur" -> "Freebox : créer l'utilisateur VPN « ${a.optString("login")} » ?"
+            "supprimer_vpn_utilisateur" -> "Freebox : supprimer l'utilisateur VPN « ${a.optString("login")} » ?"
+            "config_vpn" -> "Freebox : générer le fichier de configuration VPN de « ${a.optString("login")} » ? (l'ancien fichier de cet utilisateur ne fonctionnera plus)"
+            "wifi_activer", "wifi_desactiver" -> "Freebox : ${if (action == "wifi_activer") "activer" else "COUPER"} le Wi-Fi de la box ?" + (if (action == "wifi_desactiver") " Les appareils en Wi-Fi (dont peut-être ce téléphone) seront déconnectés." else "")
+            "dmz" -> if (a.optString("ip").isNotBlank() || a.optString("appareil").isNotBlank() || a.optString("etat").isNotBlank()) "Freebox : modifier la DMZ (${a.optString("etat").ifBlank { "activer" }} ${a.optString("appareil").ifBlank { a.optString("ip") }}) ?" else null
+            "ajouter_bail" -> "Freebox : réserver l'adresse ${a.optString("ip")} pour ${a.optString("mac")} ?"
+            "redemarrer" -> "Freebox : REDÉMARRER la box ? Internet, TV et téléphone seront coupés quelques minutes."
+            else -> null
+        }
+        if (question != null && !confirm(question, true)) return "Annulé : rien n'a été modifié sur la Freebox."
+        return try { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { avecSession(app) { s -> executer(app, s, action, a) } } }
+        catch (e: Exception) { "❌ Freebox : ${e.message ?: e.javaClass.simpleName}" }
+    }
+
+    private fun executer(app: JarvisApp, s: String, action: String, a: JSONObject): String = when (action) {
+        "etat", "statut", "" -> {
+            val sys = json(app, "system/", s) as? JSONObject ?: JSONObject()
+            val cx = json(app, "connection/", s) as? JSONObject ?: JSONObject()
+            buildString {
+                append("📶 Freebox ${sys.optJSONObject("model_info")?.optString("pretty_name").orEmpty().ifBlank { sys.optString("board_name") }} — firmware ${sys.optString("firmware_version")}")
+                sys.optString("uptime").takeIf { it.isNotBlank() }?.let { append(", allumée depuis $it") }
+                append("\n🌐 Connexion : ${cx.optString("state")} (${cx.optString("media")}) · IP publique ${cx.optString("ipv4")}" + (cx.optString("ipv6").takeIf { it.isNotBlank() }?.let { " / $it" } ?: ""))
+                append("\n⬇️ ${debit(cx.optLong("rate_down"))} sur ${bande(cx.optLong("bandwidth_down"))} · ⬆️ ${debit(cx.optLong("rate_up"))} sur ${bande(cx.optLong("bandwidth_up"))}")
+            }
+        }
+        "appareils" -> {
+            val h = hotes(app, s).sortedWith(compareByDescending<JSONObject> { it.optBoolean("active") }.thenBy { it.optString("primary_name").lowercase() })
+            val actifs = h.count { it.optBoolean("active") }
+            "🖧 $actifs appareil(s) connecté(s) sur ${h.size} connus :\n" + h.take(60).joinToString("\n") {
+                (if (it.optBoolean("active")) "🟢 " else "⚪ ") + it.optString("primary_name").ifBlank { "(sans nom)" } +
+                    ipv4(it).let { ip -> if (ip.isNotBlank()) " — $ip" else "" } + it.optString("vendor_name").let { v -> if (v.isNotBlank()) " · $v" else "" }
+            }
+        }
+        "redirections" -> {
+            val r = liste(json(app, "fw/redir/", s))
+            if (r.isEmpty()) "Aucune redirection de port sur la Freebox."
+            else "🔀 Redirections de ports :\n" + r.joinToString("\n") {
+                (if (it.optBoolean("enabled")) "🟢" else "⚪") + " #${it.optInt("id")} ${it.optString("ip_proto").uppercase()} " +
+                    (if (it.optInt("wan_port_start") == it.optInt("wan_port_end")) "${it.optInt("wan_port_start")}" else "${it.optInt("wan_port_start")}-${it.optInt("wan_port_end")}") +
+                    " → ${it.optString("lan_ip")}:${it.optInt("lan_port")}" + it.optString("hostname").let { h -> if (h.isNotBlank()) " ($h)" else "" } +
+                    it.optString("comment").let { c -> if (c.isNotBlank()) " — $c" else "" } +
+                    it.optString("src_ip").let { ip -> if (ip.isNotBlank() && ip != "0.0.0.0") " · source $ip uniquement" else "" }
+            }
+        }
+        "ajouter_redirection" -> {
+            val ip = ipDe(app, s, a.optString("appareil").ifBlank { a.optString("ip") })
+            val portLan = a.optString("port").filter { it.isDigit() }.toIntOrNull() ?: throw IllegalArgumentException("précise le port de l'appareil (port).")
+            val debut = a.optString("port_externe").filter { it.isDigit() }.toIntOrNull() ?: portLan
+            val fin = a.optString("port_externe_fin").filter { it.isDigit() }.toIntOrNull() ?: debut
+            val protos = when (a.optString("protocole").lowercase()) { "udp" -> listOf("udp"); "les deux", "both", "tcp+udp", "tcp/udp", "tous" -> listOf("tcp", "udp"); else -> listOf("tcp") }
+            protos.joinToString("\n") { proto ->
+                val r = json(app, "fw/redir/", s, "POST", JSONObject().put("enabled", true).put("comment", a.optString("commentaire").ifBlank { "JARVIS" })
+                    .put("lan_port", portLan).put("wan_port_start", debut).put("wan_port_end", fin).put("lan_ip", ip).put("ip_proto", proto)
+                    .put("src_ip", a.optString("source").ifBlank { "0.0.0.0" })) as? JSONObject
+                "✅ Redirection #${r?.optInt("id")} : ${proto.uppercase()} $debut${if (fin != debut) "-$fin" else ""} → $ip:$portLan"
+            }
+        }
+        "supprimer_redirection", "activer_redirection", "desactiver_redirection" -> {
+            val id = a.optString("id").filter { it.isDigit() }.toIntOrNull() ?: run {
+                val port = a.optString("port").filter { it.isDigit() }.toIntOrNull() ?: throw IllegalArgumentException("précise l'identifiant (#) ou le port de la redirection.")
+                liste(json(app, "fw/redir/", s)).filter { it.optInt("wan_port_start") == port || it.optInt("lan_port") == port }
+                    .singleOrNull()?.optInt("id") ?: throw IllegalArgumentException("aucune (ou plusieurs) redirection(s) sur le port $port : précise son identifiant.")
+            }
+            if (action.startsWith("supprimer")) { json(app, "fw/redir/$id", s, "DELETE"); "🗑️ Redirection #$id supprimée." }
+            else { json(app, "fw/redir/$id", s, "PUT", JSONObject().put("enabled", action.startsWith("activer"))); "✅ Redirection #$id ${if (action.startsWith("activer")) "activée" else "désactivée"}." }
+        }
+        "vpn" -> {
+            val serveurs = liste(json(app, "vpn/", s))
+            if (serveurs.isEmpty()) "Aucun serveur VPN proposé par cette Freebox."
+            else "🔐 Serveurs VPN de la Freebox :\n" + serveurs.joinToString("\n") { v ->
+                val nom = v.optString("name")
+                val conf = runCatching { json(app, "vpn/$nom/config/", s) as? JSONObject }.getOrNull()
+                (if (conf?.optBoolean("enabled") == true) "🟢 " else "⚪ ") + nom + " (" + v.optString("type") + ") — " + v.optString("state") +
+                    (conf?.optInt("port")?.takeIf { it > 0 }?.let { " · port $it" } ?: "") + " · ${v.optInt("connection_count")} connexion(s)"
+            } + "\n\nUtilisateurs : demande « vpn_utilisateurs ». Pour te connecter : crée un utilisateur puis génère son fichier (config_vpn)."
+        }
+        "activer_vpn", "desactiver_vpn" -> {
+            val nom = serveurVpn(app, s, a.optString("serveur"))
+            json(app, "vpn/$nom/config/", s, "PUT", JSONObject().put("enabled", action == "activer_vpn"))
+            Thread.sleep(1500)
+            val etat = liste(json(app, "vpn/", s)).firstOrNull { it.optString("name") == nom }?.optString("state").orEmpty()
+            "✅ Serveur VPN $nom ${if (action == "activer_vpn") "activé" else "désactivé"}" + (if (etat.isNotBlank()) " (état : $etat)" else "") + "." +
+                (if (action == "activer_vpn" && liste(json(app, "vpn/user/", s)).isEmpty()) "\nAucun utilisateur VPN : crée-en un (ajouter_vpn_utilisateur) puis génère son fichier de connexion (config_vpn)." else "")
+        }
+        "vpn_utilisateurs" -> {
+            val u = liste(json(app, "vpn/user/", s))
+            if (u.isEmpty()) "Aucun utilisateur VPN." else "👤 Utilisateurs VPN : " + u.joinToString { it.optString("login") + (it.optString("ip_reservation").let { ip -> if (ip.isNotBlank()) " ($ip)" else "" }) }
+        }
+        "ajouter_vpn_utilisateur" -> {
+            val login = a.optString("login").trim().ifBlank { throw IllegalArgumentException("précise l'identifiant (login) de l'utilisateur VPN.") }
+            val mdp = a.optString("mot_de_passe").trim().ifBlank { motDePasse() }
+            require(mdp.length in 8..32) { "le mot de passe VPN doit faire 8 à 32 caractères." }
+            json(app, "vpn/user/", s, "POST", JSONObject().put("login", login).put("password", mdp).put("ip_reservation", a.optString("ip")))
+            "✅ Utilisateur VPN « $login » créé. Mot de passe : $mdp (note-le, il ne sera plus affiché).\nGénère ensuite son fichier de connexion : config_vpn."
+        }
+        "supprimer_vpn_utilisateur" -> {
+            val login = a.optString("login").trim().ifBlank { throw IllegalArgumentException("précise le login.") }
+            json(app, "vpn/user/$login", s, "DELETE"); "🗑️ Utilisateur VPN « $login » supprimé."
+        }
+        "config_vpn" -> {
+            val nom = serveurVpn(app, s, a.optString("serveur"))
+            val login = a.optString("login").trim().ifBlank { liste(json(app, "vpn/user/", s)).singleOrNull()?.optString("login") ?: throw IllegalArgumentException("précise le login de l'utilisateur VPN.") }
+            val r = requete(app, "vpn/download_config/$nom/$login", s)
+            val texte = String(r.octets, Charsets.UTF_8)
+            if (r.code !in 200..299 || texte.trimStart().startsWith("{")) {
+                val j = runCatching { JSONObject(texte) }.getOrNull()
+                throw IllegalStateException(j?.optString("msg")?.ifBlank { null } ?: "téléchargement refusé (HTTP ${r.code}).")
+            }
+            val ext = if (nom.contains("wireguard")) "conf" else if (nom.contains("openvpn")) "ovpn" else "txt"
+            val fichier = r.nom.ifBlank { "freebox_${nom}_$login.$ext" }.replace(Regex("[^A-Za-z0-9._-]"), "_")
+            java.io.File(Fichiers.dossier(app), fichier).writeBytes(r.octets)
+            "🔑 Fichier VPN prêt (serveur $nom, utilisateur $login) :\n[📎 $fichier](jarvis-file:$fichier)\n" +
+                (if (ext == "conf") "Importe-le dans l'appli WireGuard (« + » › Importer depuis un fichier)." else "Importe-le dans OpenVPN Connect.") +
+                "\n⚠️ Il contient la clé de connexion : ne le partage pas."
+        }
+        "wifi" -> {
+            val conf = json(app, "wifi/config/", s) as? JSONObject ?: JSONObject()
+            val bss = runCatching { liste(json(app, "wifi/bss/", s)) }.getOrDefault(emptyList())
+            "📡 Wi-Fi de la box : ${if (conf.optBoolean("enabled")) "activé" else "désactivé"}" +
+                bss.mapNotNull { b -> b.optJSONObject("config")?.let { c -> "\n- ${c.optString("ssid")} : ${if (c.optBoolean("enabled")) "actif" else "inactif"}" + (b.optJSONObject("status")?.optString("state")?.let { st -> " ($st)" } ?: "") } }.distinct().joinToString("")
+        }
+        "wifi_activer", "wifi_desactiver" -> {
+            json(app, "wifi/config/", s, "PUT", JSONObject().put("enabled", action == "wifi_activer"))
+            "✅ Wi-Fi de la box ${if (action == "wifi_activer") "activé" else "coupé"}."
+        }
+        "dmz" -> {
+            val cible = a.optString("appareil").ifBlank { a.optString("ip") }
+            val etat = a.optString("etat").lowercase()
+            if (cible.isBlank() && etat.isBlank()) {
+                val d = json(app, "fw/dmz/", s) as? JSONObject ?: JSONObject()
+                "DMZ : " + if (d.optBoolean("enabled")) "activée vers ${d.optString("ip")}" else "désactivée"
+            } else {
+                val activer = !etat.startsWith("d") && etat != "off" && etat != "non"
+                val corps = JSONObject().put("enabled", activer)
+                if (activer) corps.put("ip", ipDe(app, s, cible))
+                json(app, "fw/dmz/", s, "PUT", corps)
+                if (activer) "✅ DMZ activée vers ${corps.optString("ip")} (tous les ports entrants non redirigés y arrivent)." else "✅ DMZ désactivée."
+            }
+        }
+        "baux_dhcp" -> {
+            val b = liste(json(app, "dhcp/static_lease/", s))
+            if (b.isEmpty()) "Aucune adresse IP réservée (bail DHCP statique)." else "📌 IP réservées :\n" + b.joinToString("\n") { "- ${it.optString("ip")} ← ${it.optString("mac")}" + it.optString("comment").let { c -> if (c.isNotBlank()) " ($c)" else "" } + it.optString("hostname").let { h -> if (h.isNotBlank()) " · $h" else "" } }
+        }
+        "ajouter_bail" -> {
+            val mac = a.optString("mac").trim().ifBlank { throw IllegalArgumentException("précise l'adresse MAC.") }
+            val ip = a.optString("ip").trim().ifBlank { throw IllegalArgumentException("précise l'adresse IP à réserver.") }
+            json(app, "dhcp/static_lease/", s, "POST", JSONObject().put("mac", mac).put("ip", ip).put("comment", a.optString("commentaire")))
+            "✅ L'adresse $ip est désormais réservée à $mac."
+        }
+        "appels" -> {
+            val l = liste(json(app, "call/log/", s)).take(a.optString("nombre").toIntOrNull() ?: 15)
+            if (l.isEmpty()) "Aucun appel dans le journal de la Freebox."
+            else "📞 Derniers appels (ligne fixe) :\n" + l.joinToString("\n") {
+                val type = when (it.optString("type")) { "missed" -> "❌ manqué"; "accepted" -> "✅ reçu"; "outgoing" -> "📤 émis"; else -> it.optString("type") }
+                val date = java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.FRENCH).format(java.util.Date(it.optLong("datetime") * 1000))
+                "$date $type — ${it.optString("name").ifBlank { it.optString("number") }}" + (it.optInt("duration").takeIf { d -> d > 0 }?.let { d -> " (${d / 60} min ${d % 60} s)" } ?: "")
+            }
+        }
+        "redemarrer" -> { json(app, "system/reboot/", s, "POST", JSONObject()); "🔄 Redémarrage de la Freebox lancé (2 à 5 minutes)." }
+        "droits" -> verifierAcces(app)
+        else -> "Action Freebox inconnue : $action. Actions : etat, appareils, redirections, ajouter_redirection, supprimer_redirection, activer_redirection, desactiver_redirection, vpn, activer_vpn, desactiver_vpn, vpn_utilisateurs, ajouter_vpn_utilisateur, supprimer_vpn_utilisateur, config_vpn, wifi, wifi_activer, wifi_desactiver, dmz, baux_dhcp, ajouter_bail, appels, redemarrer, droits."
+    }
 }
