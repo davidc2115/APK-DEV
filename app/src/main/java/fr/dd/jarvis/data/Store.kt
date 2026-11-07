@@ -368,7 +368,9 @@ class Store(context: Context) {
 
     // ---- Hermès (agent Nous Research dans Termux) : cerveau principal quand il est en ligne
     /** auto = Hermès cerveau unique pour toutes les demandes ; il choisit ses sous-agents (Gemini, Groq, Cloudflare…) ou répond lui-même. demande = Hermès uniquement si nommé ; off = cerveau Jarvis de secours. */
-    val hermesMode = SPref("hermesMode", "auto")
+    val hermesMode = SPref("hermesMode", "tout")
+    /** Migration unique : l'ancien mode « auto » devient « Hermès pour tout » (nouveau défaut, avec réflexes). */
+    val hermesModeMigre = BPref("hermesModeMigreTout", false)
     /** Connexion facultative au serveur officiel Suno MCP (OAuth). */
     val sunoMcpActive = BPref("sunoMcpActive", false)
     val modeAdulte = BPref("modeAdulte", false)

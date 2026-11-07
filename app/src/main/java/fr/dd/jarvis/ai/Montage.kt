@@ -116,9 +116,11 @@ object Montage {
             }
         }
         val plans = ceil(duree / 5.0).toInt()
+        val agent = if (app.store.geminiKeys.isNotEmpty()) "l'agent Gemini" else "l'agent IA"
         return "🎬 Montage lancé : ${if (n > 1) "$n vidéos" else "1 vidéo"} de $duree s" +
-            (if (!sansIa) " (≈ $plans plans IA par vidéo)" else "") +
-            ". Ça prend quelques minutes : je t'envoie le résultat ici dès qu'il est prêt (suivi dans la notification)."
+            (if (!sansIa) " (≈ $plans plans IA par vidéo)" else "") + ".\n" +
+            "✍️ D'abord $agent analyse ta demande et écrit le scénario, puis un prompt précis pour chaque plan (mêmes personnages, décor et style d'un plan à l'autre) ; " +
+            "ensuite les plans sont générés et montés à la durée exacte. Ça prend quelques minutes : je t'envoie le résultat ici (suivi dans la notification)."
     }
 
     private fun notifier(app: JarvisApp, texte: String, enCours: Boolean) = runCatching {
@@ -255,6 +257,7 @@ object Montage {
             if (pistes.isNotEmpty()) append(" · " + pistes.joinToString(", "))
             append("\n\n[▶ Lire la vidéo](jarvis-video-ia:$nom)")
             if (loc.isNotBlank()) append("\n📁 $loc")
+            if (sb.analyse.isNotBlank()) append("\n✍️ Scénario et prompts des plans enregistrés dans la note « ${nom.removeSuffix(".mp4")} » du coffre.")
             if (sb.legende.isNotBlank()) append("\n\n📝 Légende : ${sb.legende}")
             if (abandons.isNotBlank()) append("\n⚠️ Montage fait $abandons (effet refusé par le téléphone).")
             if (echecs.isNotEmpty()) append("\n⚠️ " + echecs.joinToString("\n⚠️ "))

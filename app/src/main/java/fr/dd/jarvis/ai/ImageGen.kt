@@ -136,7 +136,7 @@ object ImageGen {
         val dossier = File(app.filesDir, "images")
         val n = nom.trim().removePrefix("jarvis-img:").trim()
         if (n.isBlank() || n.lowercase() in setOf("derniere", "dernière", "dernier", "last", "recente", "récente")) {
-            return dossier.listFiles()?.filter { it.isFile }?.maxByOrNull { it.lastModified() }
+            return dossier.listFiles()?.filter { it.isFile && !it.name.startsWith("ecran_") }?.maxByOrNull { it.lastModified() }
         }
         return File(dossier, n).takeIf { it.exists() }
     }

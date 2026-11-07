@@ -182,6 +182,37 @@ class GeminiClient(private val ring: KeyRing, private val model: () -> String) {
         return sb.toString().trim().ifBlank { throw IllegalStateException("réponse vide") }
     }
 
+    /** Vision rapide (pilotage de l'écran) : consigne système + image, réflexion minimale, réponse JSON. */
+    suspend fun visionJson(system: String, bytes: ByteArray, mimeType: String, question: String): String =
+        ring.run { key -> withContext(Dispatchers.IO) { callVision(key, system, bytes, mimeType, question, true) } }
+
+    private fun callVision(key: String, system: String, bytes: ByteArray, mimeType: String, question: String, thinkingOff: Boolean): String {
+        val gen = JSONObject().put("temperature", 0.2).put("maxOutputTokens", 2048).put("responseMimeType", "application/json")
+        if (thinkingOff) {
+            val m = model()
+            when {
+                m.contains("2.5") -> gen.put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
+                m.contains("gemini-3") -> gen.put("thinkingConfig", JSONObject().put("thinkingLevel", "minimal"))
+            }
+        }
+        val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+        val body = JSONObject().put("contents", JSONArray().put(
+            JSONObject().put("role", "user").put("parts", JSONArray()
+                .put(JSONObject().put("inline_data", JSONObject().put("mime_type", mimeType).put("data", b64)))
+                .put(JSONObject().put("text", question)))
+        )).put("generationConfig", gen)
+        if (system.isNotBlank()) body.put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
+        val req = Request.Builder().url("https://generativelanguage.googleapis.com/v1beta/models/${model()}:generateContent")
+            .header("x-goog-api-key", key).post(body.toString().toRequestBody(Http.JSON)).build()
+        val (code, text) = Http.client.newCall(req).execute().use { it.code to it.body?.string().orEmpty() }
+        if (code == 400 && thinkingOff && text.contains("think", ignoreCase = true)) return callVision(key, system, bytes, mimeType, question, false)
+        if (code !in 200..299) throw ApiException(code, "Gemini $code : ${text.take(300)}")
+        val parts = JSONObject(text).optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
+        val sb = StringBuilder()
+        if (parts != null) for (i in 0 until parts.length()) sb.append(parts.getJSONObject(i).optString("text", ""))
+        return sb.toString().trim().ifBlank { throw IllegalStateException("réponse vide") }
+    }
+
     suspend fun ping(key: String) = withContext(Dispatchers.IO) { call(key, "", "ping", 8) }
 
     /** Modèles « generateContent » disponibles pour cette clé. */

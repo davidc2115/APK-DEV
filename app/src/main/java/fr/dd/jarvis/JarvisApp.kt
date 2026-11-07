@@ -91,6 +91,10 @@ class JarvisApp : Application() {
         super.onCreate()
         installCrashReporter()
         store = Store(this)
+        if (!store.hermesModeMigre.value) {
+            if (store.hermesMode.value == "auto") store.hermesMode.set("tout")
+            store.hermesModeMigre.set(true)
+        }
         llm = Llm(store)
         calendar = CalendarRepo(this, store)
         mail = MailRepo(this, store)

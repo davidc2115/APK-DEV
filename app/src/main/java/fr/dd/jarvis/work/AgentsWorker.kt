@@ -102,8 +102,8 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
 
     override suspend fun doWork(): Result {
         val only = inputData.getString("only")
-        val tri = only == "mails" && store.notifLive.value
-        if (!store.agentsOn.value && !tri) return Result.success()
+        val tri = false // plus de tri déclenché par les bannières Jarvis (supprimées) : seuls les agents activés tournent
+        if (!store.agentsOn.value) return Result.success()
         val enLigne = reseauDisponible()
         // Le centre de surveillance collecte ses propres mesures : ce n’est plus un agent spécialisé.
         PhoneHealth.recordSample(app)
@@ -196,8 +196,7 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
         if (store.agentRanger.value && store.gmailAccounts.isNotEmpty()) {
             runCatching { MailTri.ranger(app, classes, store.agentArchiver.value) }.onSuccess {
                 journal.append("  - 🏷️ $it mail(s) rangés (libellés Urgent, Clients…)\n")
-                if (store.notifLive.value) alert(2004, "🏷️ ${classes.size} mail(s) rangé(s) dans Gmail",
-                    classes.joinToString("\n") { "• ${it.label} — ${it.mail.from} : ${it.mail.subject}" })
+                // (pas de notification Jarvis par mail rangé : le détail reste dans le journal)
             }.onFailure { throw it } // Remonter l’échec : les mails restent non traités et seront réessayés au prochain cycle.
         }
         if (peutMarquerCommeTraite) writeSet("agent_seen_mails.txt", seen + nouveaux.map { key(it) })

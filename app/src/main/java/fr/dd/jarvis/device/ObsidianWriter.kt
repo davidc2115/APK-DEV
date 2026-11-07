@@ -373,8 +373,18 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     }
 
     /** Clé de comparaison tolérante : sans accents, majuscules, espaces doubles, « _ » / « - », ni pluriel en s/x. */
-    private fun cleNom(s: String): String = normaliseNom(s.replace('_', ' ').replace('-', ' ')).replace(Regex("\\s+"), " ").let {
-        if (it.length > 3 && (it.endsWith("s") || it.endsWith("x"))) it.dropLast(1) else it
+    private fun cleNom(s: String): String = normaliseNom(s.replace('_', ' ').replace('-', ' ')).replace(Regex("\\s+"), " ")
+        .split(' ').joinToString(" ") { m -> if (m.length > 3 && (m.endsWith("s") || m.endsWith("x"))) m.dropLast(1) else m }
+
+    /** Fichiers (chemins réels, récursivement) contenus sous [dossier] dans [tout] (= toutLister()). */
+    fun fichiersSous(dossier: String, tout: List<Pair<String, Boolean>> = toutLister()): List<String> =
+        tout.filter { !it.second && it.first.startsWith("$dossier/") }.map { it.first }
+
+    /** Autres dossiers du coffre portant le même nom que [dossier] (majuscules, accents, pluriel tolérés), avec leur nombre de fichiers. */
+    fun homonymes(dossier: String, tout: List<Pair<String, Boolean>> = toutLister()): List<Pair<String, Int>> {
+        val voulu = cleNom(dossier.substringAfterLast('/'))
+        return tout.filter { it.second && it.first != dossier && cleNom(it.first.substringAfterLast('/')) == voulu }
+            .map { it.first to fichiersSous(it.first, tout).size }
     }
 
     /** Noms des éléments directs d'un dossier du coffre (chemin réel), avec « est un dossier ». Null si introuvable. */
@@ -722,11 +732,23 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         val c = resoudre(chemin) ?: return "Dossier introuvable dans le coffre : ${chemin.trim().trim('/').ifBlank { "racine" }}" +
             proches(chemin).let { if (it.isEmpty()) "" else "\nDossiers proches : " + it.joinToString(", ") }
         val entrees = enfants(c) ?: return "« $c » n'est pas un dossier."
-        if (entrees.isEmpty()) return "📂 coffre › ${c.replace("/", " › ").ifBlank { "racine" }} : (vide)"
+        val tout by lazy { toutLister() }
+        if (entrees.none { !it.second }) {
+            // Aucun fichier directement dedans : fichiers dans ses sous-dossiers, ou un AUTRE dossier du même nom ailleurs ?
+            val dessous = if (entrees.isEmpty()) emptyList() else fichiersSous(c, tout)
+            val autres = homonymes(c, tout).filter { it.second > 0 }.sortedByDescending { it.second }
+            if (dessous.isEmpty() && autres.isNotEmpty()) {
+                val (meilleur, nb) = autres.first()
+                return "📂 coffre › ${c.replace("/", " › ").ifBlank { "racine" }} : vide.\n" +
+                    "➡️ Mais un autre dossier du même nom contient des fichiers : " + autres.joinToString(", ") { "« ${it.first} » (${it.second} fichier(s))" } + "\n\n" +
+                    "📂 coffre › ${meilleur.replace("/", " › ")} ($nb fichier(s))\n" + fichiersSous(meilleur, tout).sorted().take(200).joinToString("\n") { "📄 " + it.removePrefix("$meilleur/") }
+            }
+            if (entrees.isEmpty()) return "📂 coffre › ${c.replace("/", " › ").ifBlank { "racine" }} : (vide)"
+        }
         val descriptions = descriptionsImages()
         val tri = entrees.sortedWith(compareBy({ !it.second }, { it.first.lowercase() }))
         return "📂 coffre › ${c.replace("/", " › ").ifBlank { "racine" }}\n" + tri.take(300).joinToString("\n") { (n, dir) ->
-            if (dir) "📁 $n" else "📄 $n" + (descriptions[n]?.let { " — « ${it.take(80)} »" } ?: "")
+            if (dir) "📁 $n (${fichiersSous(if (c.isEmpty()) n else "$c/$n", tout).size} fichier(s))" else "📄 $n" + (descriptions[n]?.let { " — « ${it.take(80)} »" } ?: "")
         } + (if (tri.size > 300) "\n… (${tri.size} éléments)" else "")
     }
 

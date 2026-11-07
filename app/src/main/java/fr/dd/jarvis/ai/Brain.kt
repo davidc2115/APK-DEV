@@ -30,8 +30,21 @@ class Brain(
             else -> null
         }
         val texteUser = history.lastOrNull { it.fromUser }?.text.orEmpty()
-        // Hermès, cerveau principal : tâches complexes, automatismes, sous-agents… Il reçoit la demande AVANT les
-        // traitements directs (qui ne savent faire qu'une étape) ; s'il est indisponible, Jarvis reprend la main.
+        // RÉFLEXES : demandes simples et sans ambiguïté traitées instantanément et de façon fiable, avant tout modèle
+        // (Hermès les voit ensuite dans l'historique). Jamais pour une demande à orchestrer, en plusieurs étapes, ou
+        // adressée nommément à Hermès.
+        val multi = fr.dd.jarvis.hermes.Routeur.multiEtapes(texteUser)
+        val reflexes = pourHermes || !fr.dd.jarvis.hermes.Routeur.pourHermesSeul(texteUser)
+        fun reflexe(r: String) = r.also { if (!pourHermes) fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS }
+        if (reflexes) {
+            positionDirecte(dernier, history, onStatus)?.let { return reflexe(it) }
+            rangementDirect(history, onStatus)?.let { return reflexe(it) }
+            if (!multi) rechercheDirecte(texteUser, onStatus)?.let { return reflexe(it) }
+            if (!multi) freeboxDirect(texteUser, onStatus)?.let { return reflexe(it) }
+            if (!multi) videoDirecte(history, onStatus)?.let { return reflexe(it) }
+        }
+        // Hermès, cerveau principal (mode « tout » : toutes les autres demandes ; mode « auto » : les tâches complexes).
+        // S'il est indisponible, Jarvis reprend la main avec ses outils.
         if (!pourHermes) {
             val precedent = history.dropLastWhile { it.fromUser }.lastOrNull()?.text
             val choix = fr.dd.jarvis.hermes.Routeur.choisir(app, texteUser, precedent)
@@ -42,12 +55,6 @@ class Brain(
                 onStatus("Hermès indisponible : Jarvis prend le relais…")
             }
         }
-        // Demande en plusieurs étapes (« trouve… puis envoie… ») : pas de raccourci qui n'exécuterait que la première.
-        val multi = fr.dd.jarvis.hermes.Routeur.multiEtapes(texteUser)
-        positionDirecte(dernier, history, onStatus)?.let { return it }
-        rangementDirect(history, onStatus)?.let { return it }
-        if (!multi) rechercheDirecte(texteUser, onStatus)?.let { return it }
-        if (!multi) freeboxDirect(texteUser, onStatus)?.let { return it }
         if (outilDirect != null) {
             onStatus("⚙️ $outilDirect…")
             val args = JSONObject(); if (dernier.contains("serveur")) args.put("via", "serveur")
@@ -68,7 +75,11 @@ class Brain(
             val keep = (plan.outils + indispensables + (if (reglageDirect) listOf("reglage_jarvis") else emptyList()) + (if (planningClientsSync) listOf("analyser_planning_clients") else emptyList()) + listOf("memoire_ajouter", "memoire_apprendre", "memoire_apprentissages", "memoire_lire", "memoire_oublier") + (if (societeOn || planningClientsSync) fr.dd.jarvis.societe.SocieteTools.NAMES else emptySet<String>()) +
                 (if (fr.dd.jarvis.hermes.Hermes.enLigneConnu()) listOf("hermes_deleguer") else emptyList()) +
                 (if (Regex("herm[eè]s|termux", RegexOption.IGNORE_CASE).containsMatchIn(recent)) listOf("hermes") else emptyList()) +
-                (if (Regex("freebox|\\bbox\\b|vpn|wireguard|openvpn|redirection|ouvr\\w* (le|un|les) ports?|\\bdmz\\b|bail dhcp", RegexOption.IGNORE_CASE).containsMatchIn(recent)) listOf("freebox") else emptyList())).toSet()
+                (if (Regex("freebox|\\bbox\\b|vpn|wireguard|openvpn|redirection|ouvr\\w* (le|un|les) ports?|\\bdmz\\b|bail dhcp", RegexOption.IGNORE_CASE).containsMatchIn(recent)) listOf("freebox") else emptyList()) +
+                (if (TikTokTools.concerned(recent)) listOf("video_montage", "tiktok_video", "generer_video") else emptyList()) +
+                (if (ServeurTools.concerned(recent)) ServeurTools.NAMES.toList() else emptyList()) +
+                (if (Regex("[ée]cran|appli|clique|appuie|tape sur|pilote|contr[ôo]le|v[ée]rifie|ouvre|lance|musique|joue|navigue|remplis|coche", RegexOption.IGNORE_CASE).containsMatchIn(recent))
+                    listOf("voir_ecran", "piloter_telephone", "phone_action") else emptyList())).toSet()
             schema = JSONArray()
             for (i in 0 until all.length()) if (all.getJSONObject(i).getJSONObject("function").getString("name") in keep) schema.put(all.get(i))
             if (plan.outils.any { it in fr.dd.jarvis.societe.SocieteTools.NAMES }) societeNeeded = true
@@ -238,7 +249,7 @@ class Brain(
      */
     private suspend fun rechercheDirecte(texte: String, onStatus: (String) -> Unit): String? {
         val n = fr.dd.jarvis.societe.core.normaliser(texte)
-        val verbe = Regex("\\b(trouve[rsz]?|retrouve[rsz]?|cherche[rsz]?|recherche[rsz]?|localise[rsz]?|ou est|ou sont|ou se trouvent?|existe t il|il existe|as tu|tu as)\\b")
+        val verbe = Regex("\\b(trouve[rsz]?|retrouve[rsz]?|cherche[rsz]?|recherche[rsz]?|localise[rsz]?|ou est|ou sont|ou se trouvent?|existe t il|il existe|as tu|tu as|montre[sz]?|affiche[sz]?|liste[sz]?|contenu|qu y a t il|que contient)\\b")
         val objet = Regex("\\b(dossiers?|sous dossiers?|fichiers?|images?|photos?|documents?|pdf|videos?|notes?)\\b")
         if (!verbe.containsMatchIn(n) || !objet.containsMatchIn(n)) return null
         // Ce n'est pas une recherche de fichier : imprimante, réseau, internet, client, agenda…
@@ -252,6 +263,53 @@ class Brain(
         onStatus("🔎 Recherche de « $q » dans le coffre et le téléphone…")
         val r = runCatching { tools.execute("stockage_telephone", JSONObject().put("action", "chercher").put("chemin", q)).text }.getOrNull() ?: return null
         return if (r.startsWith("Aucun résultat")) null else r
+    }
+
+    /**
+     * « Crée une vidéo de 40 s sur… », « fais 3 TikToks… », « refais-la en 1 minute » : toute création de vidéo passe par
+     * le montage (Montage) — scénario et prompts précis écrits d'abord par l'agent Gemini, puis plans générés et montés à
+     * la durée exacte. Aucun modèle ne peut répondre « seulement 5 secondes ».
+     */
+    private suspend fun videoDirecte(history: List<ChatMsg>, onStatus: (String) -> Unit): String? {
+        val users = history.filter { it.fromUser }.takeLast(3)
+        val dernier = users.lastOrNull()?.text ?: return null
+        val n = fr.dd.jarvis.societe.core.normaliser(dernier)
+        val mot = Regex("\\b(videos?|clips?|montages?|tiktoks?|tik tok|reels?|shorts?|court metrage|film anime)\\b")
+        val verbe = Regex("\\b(cree[rsz]?|creation|fais|faire|fait|genere[rsz]?|generation|realise[rsz]?|monte[rsz]?|produi[st]|produire|prepare[rsz]?|refais|refaire|recommence|transforme|rallonge)\\b")
+        val duree = Regex("\\b\\d+ ?(s|sec|secondes?|min|minutes?)\\b")
+        val direct = mot.containsMatchIn(n) && verbe.containsMatchIn(n)
+        val suite = !direct && users.dropLast(1).any { mot.containsMatchIn(fr.dd.jarvis.societe.core.normaliser(it.text)) } &&
+            (duree.containsMatchIn(n) || Regex("\\b(refais|refaire|recommence|rallonge|plus longue?|une autre)\\b").containsMatchIn(n))
+        if (!direct && !suite) return null
+        // Ni analyse, ni lecture, ni recherche, ni simple script : le cerveau garde la main.
+        if (Regex("\\b(analyse|regarde|lis|lire|cherche|trouve|statistiques?|stats|vues|abonnes|script seul|juste le script)\\b").containsMatchIn(n)) return null
+        onStatus("🎬 Préparation de la vidéo…")
+        val contexte = history.takeLast(6).joinToString("\n") { (if (it.fromUser) "Utilisateur : " else "Jarvis : ") + it.text.take(600) }
+        val sys = """Tu analyses une demande de CRÉATION DE VIDÉO pour le moteur de montage de JARVIS. Réponds UNIQUEMENT par un objet JSON :
+{"creer": true ou false, "sujet": "ce que la vidéo doit montrer/raconter, fidèle et complet (personnages, lieu, actions, ambiance, style)", "script": "script ou texte fourni par l'utilisateur, sinon vide", "duree": secondes (entier), "nombre": nombre de vidéos (entier), "format": "vertical|horizontal|carre", "tiktok": true ou false, "musique": "auto|aucune|style demandé", "paroles": "vide, auto (chanson demandée) ou paroles fournies", "voix_off": "auto|aucune|texte exact à dire", "textes": true ou false, "sources": "médias existants à utiliser séparés par ; (liens jarvis-img:/jarvis-video-ia:, chemins ou dossiers du coffre cités), sinon vide", "garder_son": true ou false}
+- creer=false si la DERNIÈRE demande n'est pas de produire maintenant une vidéo (question, analyse, publication, lecture d'un film, script seul…).
+- Tiens compte des messages précédents : « refais-la en 40 secondes » reprend le sujet de la vidéo précédente avec la nouvelle durée.
+- duree : la durée demandée (1 min 30 = 90). Si aucune durée n'est donnée : 30 pour TikTok/Reels/Shorts, 20 sinon.
+- tiktok=true pour TikTok/Reels/Shorts (format vertical). format horizontal seulement si demandé (paysage, 16:9, YouTube…).
+- musique « aucune », voix_off « aucune », textes false seulement si l'utilisateur le demande (« sans musique », « sans voix », « sans texte »)."""
+        val brut = try { app.llm.agent(sys, contexte) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { return null }
+        val j = runCatching { JSONObject(brut.substring(brut.indexOf('{'), brut.lastIndexOf('}') + 1)) }.getOrNull() ?: return null
+        if (!j.optBoolean("creer")) return null
+        val sujet = j.optString("sujet").trim().ifBlank { dernier }
+        val format = j.optString("format").trim().lowercase().ifBlank { "vertical" }
+        val d = Montage.Demande(
+            sujet = sujet, script = j.optString("script").trim(),
+            dureeS = j.optInt("duree", 0).takeIf { it > 0 } ?: 20,
+            format = format, nombre = j.optInt("nombre", 1).coerceAtLeast(1),
+            musique = j.optString("musique").trim().ifBlank { "auto" },
+            paroles = j.optString("paroles").trim(),
+            voixOff = j.optString("voix_off").trim().ifBlank { "auto" },
+            textes = j.optBoolean("textes", true),
+            sources = j.optString("sources").trim(),
+            garderSon = j.optBoolean("garder_son", false),
+            tiktok = j.optBoolean("tiktok", false) && !format.startsWith("hori")
+        )
+        return Montage.lancer(app, d)
     }
 
     /** Demandes Freebox courantes exécutées directement par l'outil (pas de modèle qui répondrait « impossible »). */

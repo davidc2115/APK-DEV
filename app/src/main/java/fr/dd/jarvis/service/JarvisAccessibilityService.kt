@@ -66,6 +66,45 @@ class JarvisAccessibilityService : AccessibilityService() {
 
     fun global(action: Int): Boolean = performGlobalAction(action)
 
+    private val executeurCapture = java.util.concurrent.Executors.newSingleThreadExecutor()
+    @Volatile private var derniereCapture = 0L
+
+    /**
+     * Capture réelle de l'écran (pixels) par l'API d'accessibilité (Android 11+), en bloquant au plus [delaiMs].
+     * À appeler hors du fil principal. Renvoie null si Android refuse (écran protégé, capacité non accordée…).
+     */
+    fun capture(delaiMs: Long = 5000): android.graphics.Bitmap? {
+        if (android.os.Build.VERSION.SDK_INT < 30) return null
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) return null
+        // Android limite la cadence des captures : au moins ~1 s entre deux.
+        val attente = 1050 - (System.currentTimeMillis() - derniereCapture)
+        if (attente > 0) Thread.sleep(attente)
+        val fini = java.util.concurrent.CountDownLatch(1)
+        var image: android.graphics.Bitmap? = null
+        runCatching {
+            takeScreenshot(android.view.Display.DEFAULT_DISPLAY, executeurCapture, object : TakeScreenshotCallback {
+                override fun onSuccess(r: ScreenshotResult) {
+                    runCatching {
+                        val hb = r.hardwareBuffer
+                        image = android.graphics.Bitmap.wrapHardwareBuffer(hb, r.colorSpace)?.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+                        hb.close()
+                    }
+                    fini.countDown()
+                }
+                override fun onFailure(code: Int) { fini.countDown() }
+            })
+        }.onFailure { fini.countDown() }
+        fini.await(delaiMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+        derniereCapture = System.currentTimeMillis()
+        return image
+    }
+
+    /** Appui long (maintien) à une position de l'écran. */
+    fun appuiLong(x: Float, y: Float): Boolean {
+        val path = Path().apply { moveTo(x, y) }
+        return dispatchGesture(GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 750)).build(), null, null)
+    }
+
     /**
      * Expose une représentation structurée de l'écran réellement affiché :
      * application, composants, libellés, états et coordonnées. Ce n'est pas une capture vidéo

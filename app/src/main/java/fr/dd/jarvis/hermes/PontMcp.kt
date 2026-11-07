@@ -386,7 +386,7 @@ object PontMcp {
         val prioritaires = listOf(
             // Capacités téléphone et musique : Hermès doit les voir directement sans dépendre
             // d'une découverte différée ou d'un catalogue tronqué à 80 outils.
-            "phone_action", "phone_health_report", "client_supprimer", "societe_liste", "client_fiche", "client_ecrire", "clients_gps", "musique_rechercher", "musique_etat", "musique_commander",
+            "phone_action", "piloter_telephone", "voir_ecran", "phone_health_report", "client_supprimer", "societe_liste", "client_fiche", "client_ecrire", "clients_gps", "musique_rechercher", "musique_etat", "musique_commander",
             "jouer_musique", "applis_musique", "controle_media",
             "reglage_jarvis", "hermes",
             // Les outils métier sensibles doivent rester visibles même lorsque le catalogue

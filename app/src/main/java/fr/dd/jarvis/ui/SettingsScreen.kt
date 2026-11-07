@@ -506,17 +506,19 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 Spacer(Modifier.height(8.dp))
                 Text("Répartition des demandes", color = HudDim, fontSize = 12.sp)
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("auto" to "Hermès cerveau + réflexes Jarvis", "tout" to "Hermès pour tout", "demande" to "Si je dis « Hermès »", "off" to "Désactivé").forEach { (id, nom) ->
+                    listOf("tout" to "Hermès pour tout", "auto" to "Hermès pour le complexe", "demande" to "Si je dis « Hermès »", "off" to "Désactivé").forEach { (id, nom) ->
                         HudChip(nom, selected = store.hermesMode.value == id) { store.hermesMode.set(id) }
                     }
                 }
                 Text(
                     when (store.hermesMode.value) {
-                        "tout" -> "Hermès reçoit toutes les demandes. Il confie les actions du téléphone à l'agent Jarvis, le travail lourd à ses sous-agents " +
-                            "Gemini et Groq, et crée tes automatismes. Plus complet, mais plus lent pour les commandes simples."
+                        "tout" -> "Recommandé. Hermès est le cerveau de toutes tes demandes : il garde la mémoire longue, ses notes, skills et plugins, " +
+                            "confie les actions du téléphone à l'agent Jarvis, le travail lourd à ses sous-agents Gemini et Groq, et crée tes automatismes. " +
+                            "Les demandes simples et sans ambiguïté (position, retrouver un fichier ou un dossier, Freebox, lancer une vidéo) reçoivent " +
+                            "une réponse instantanée des réflexes de Jarvis, qu'Hermès voit ensuite dans l'historique."
                         "demande" -> "Jarvis répond seul ; Hermès n'intervient que si ta phrase commence par « Hermès »."
                         "off" -> "Hermès n'est jamais utilisé : Jarvis répond seul."
-                        else -> "Hermès est le cerveau : tâches complexes ou en plusieurs étapes, automatismes (« tous les matins… », « surveille… »), " +
+                        else -> "Hermès pour le complexe : tâches en plusieurs étapes, automatismes (« tous les matins… », « surveille… »), serveur et SSH, " +
                             "sous-agents Gemini/Groq, recherche web, rédaction, analyse, code. Il confie les actions du téléphone à l'agent Jarvis. " +
                             "Les commandes simples (un fichier, la musique, un SMS, la Freebox…) sont exécutées directement par Jarvis, plus vite. " +
                             "Commence ta phrase par « Hermès » pour le forcer."
@@ -726,11 +728,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 Spacer(Modifier.height(10.dp))
                 HudDivider()
                 Spacer(Modifier.height(8.dp))
-                Text("Bannière Android (notification visible dans la barre, en plus de l'annonce vocale ci-dessus)", color = HudText, fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
-                Spacer(Modifier.height(4.dp))
-                Text("Indépendant des agents en arrière-plan (qui continuent de tourner pareil) : ne coupe que l'affichage d'une notification JARVIS pour chaque SMS/mail reçu.", color = HudDim, fontSize = 11.sp)
-                Spacer(Modifier.height(6.dp))
-                HudChip(if (store.notifLive.value) "✅ Bannière affichée" else "🔕 Bannière coupée", store.notifLive.value) { store.notifLive.set(!store.notifLive.value) }
+                Text("Jarvis n'affiche plus ses propres notifications pour les SMS, mails et appels : celles d'Android suffisent. Il continue de les lire pour te les résumer, les annoncer à voix haute (réglage ci-dessus) et alimenter ses agents.", color = HudDim, fontSize = 11.sp)
                 Spacer(Modifier.height(10.dp))
                 HudDivider()
                 fr.dd.jarvis.device.Annonces.CATEGORIES.forEach { (cat, label) ->

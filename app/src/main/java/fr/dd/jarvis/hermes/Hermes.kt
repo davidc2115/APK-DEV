@@ -70,6 +70,9 @@ TON ÉQUIPE — tu es le cerveau ; tu planifies, tu répartis, tu contrôles et 
 1) mcp_jarvis_agent = l'agent téléphone (s'il n'est pas dans ta liste visible, appelle-le directement avec tool_call : calls=[{"name":"mcp_jarvis_agent","arguments":{"demande":"…"}}]). Confie-lui, en consigne française complète et autonome, toute action ou recherche sur le téléphone et les données de l'utilisateur : fichiers et dossiers (coffre Obsidian + stockage), clients/devis/factures/interventions, agenda, mails, SMS, appels, contacts, musique, Freebox, domotique, position, images, vidéos, réglages. Il maîtrise ces outils mieux que toi et renvoie le résultat réel : préfère-le aux outils bas niveau ; pour une tâche en plusieurs étapes, un appel par étape, en réutilisant les résultats. Si une information manque, demande-la à l'utilisateur plutôt que d'inventer.
 2) delegate_task = tes sous-agents, pour le travail parallèle ou lourd (recherche, comparaison, rédaction, analyse, code). Routes configurées : jarvis-gemini (analyse approfondie, rédaction, raisonnement long) et jarvis-groq (rapide, technique). Donne à chacun un objectif autonome avec tout le contexte utile ; ils peuvent aussi appeler mcp_jarvis_agent.
 3) cronjob = les automatismes (« tous les matins… », « chaque lundi… », « surveille… et préviens-moi »). Crée le job avec deliver="local" et un prompt autonome qui récupère les données nécessaires (mcp_jarvis_agent pour le téléphone, web pour l'extérieur) et se termine TOUJOURS par mcp_jarvis_notifier (titre + message) pour livrer le résultat à l'utilisateur. Confirme ensuite le nom, la fréquence, l'heure et ce qui sera envoyé. Pour lister, modifier, mettre en pause ou supprimer un automatisme, utilise cronjob.
+RÉFLEXES DE JARVIS : certaines demandes simples (position, recherche de fichiers, Freebox, lancement d'une vidéo…) ont pu être traitées instantanément par Jarvis juste avant toi : leurs réponses figurent dans l'historique (messages « assistant »). Elles sont fiables : appuie-toi dessus, ne les refais pas et ne les contredis pas sans vérifier.
+SERVEUR / SSH : le serveur de l'utilisateur est DÉJÀ configuré dans Jarvis (adresse, utilisateur, clé ou mot de passe) : utilise mcp_jarvis_ssh_commande / mcp_jarvis_ssh_fichier / mcp_jarvis_serveur_diagnostic, ainsi que tes propres notes, skills et ponts déjà mis en place ; ne redemande jamais les identifiants à l'utilisateur.
+CONTRÔLE DE L'ÉCRAN : mcp_jarvis_voir_ecran regarde l'écran (capture analysée) et mcp_jarvis_piloter_telephone agit dans n'importe quelle application en vérifiant visuellement chaque geste ; utilise-les (ou mcp_jarvis_agent) quand une action n'a pas d'outil dédié ou pour vérifier qu'elle a abouti.
 4) mcp_jarvis_notifier = livrer un message sur le téléphone (notification + conversation Jarvis) : fin d'automatisme ou de tâche longue.
 Réponds toujours en français, de façon naturelle et concise : ta réponse est souvent lue à voix haute (évite les tableaux et le Markdown chargé).
 Tu es le chef d'orchestre central de JARVIS : tu ne te limites pas à répondre, tu répartis le travail entre les modèles et agents réellement disponibles, puis tu contrôles et synthétises leurs résultats.
@@ -282,7 +285,9 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
  *  - mode « auto » : Hermès reçoit les tâches complexes, en plusieurs étapes, récurrentes ou multi-agents (même si elles
  *    touchent au téléphone), la recherche web, la rédaction, l'analyse, le code et les questions ouvertes ; Jarvis répond
  *    directement aux commandes simples du téléphone (une action, un fichier, la Freebox…), plus vite et sans détour ;
- *  - mode « tout » : Hermès reçoit tout et confie lui-même les actions du téléphone à Jarvis ;
+ *  - mode « tout » (par défaut) : Hermès reçoit tout et confie lui-même les actions du téléphone à Jarvis. Avant lui,
+ *    les RÉFLEXES de Jarvis (position, recherche de fichiers/dossiers, Freebox, lancement de vidéo…) répondent
+ *    instantanément aux demandes simples et sans ambiguïté ; leur réponse reste dans l'historique transmis à Hermès ;
  *  - Android Auto : Jarvis (réponse rapide) ; « Hermès, … » force Hermès ; une réponse brève ou la réponse à une question
  *    va au cerveau qui l'a posée (confirmation, choix d'installation…).
  */
@@ -303,8 +308,9 @@ object Routeur {
             "image|dessin|coloriage|vid[ée]o|tiktok|discord|imprim|scann|" +
             "m[ée]t[ée]o|quelle heure|batterie|ma position|ma localisation|o[uù] suis.je|" +
             "mails?|courriels?|bo[iî]te de r[ée]ception|contacts?|r[ée]glage|" +
-            "freebox|vpn|routeur|serveur|ssh|home ?assistant|domotique|interventions?|chantiers?|installations?|position|gps|" +
-            "permissions?|autorisations?|notifications?|acc[eè]s [àa]|batterie|stockage|t[ée]l[ée]charg|galerie|cam[ée]ra)",
+            "freebox|vpn|domotique|interventions?|chantiers?|installations?|position|gps|" +
+            "permissions?|autorisations?|notifications?|acc[eè]s [àa]|batterie|stockage|t[ée]l[ée]charg|galerie|cam[ée]ra|" +
+            "clique|appuie|tape sur|pilote|prends? (le contr[ôo]le|la main)|regarde (mon |l.)[ée]cran|[ée]cran)",
         RegexOption.IGNORE_CASE
     )
     private val COMPLEXE = Regex(
@@ -326,11 +332,16 @@ object Routeur {
             "en parall[èe]le|plusieurs [ée]tapes|workflow|orchestr|\\bmissions?\\b",
         RegexOption.IGNORE_CASE
     )
+    /** Serveur, SSH, Docker, Debian, configuration Home Assistant : Hermès (ses notes, skills et son terminal) + outils SSH de Jarvis. */
+    private val SERVEUR = Regex("\\bssh\\b|serveur|\\bservers?\\b|docker|debian|raspberry|conteneur|container|systemctl|configuration\\.yaml|home ?assistant.{0,30}(config|yaml|install|mise [àa] jour|log)|bot discord|ollama|\\bvps\\b|\\bping\\b|traceroute|\\bponts?\\b|tunnel|tailscale", RegexOption.IGNORE_CASE)
     private val MULTI = Regex("\\b(puis|ensuite|et enfin|et apr[èe]s|apr[èe]s [çc]a|apr[èe]s cela)\\b", RegexOption.IGNORE_CASE)
     private val WEB = Regex("sur internet|sur le web|en ligne|actualit[ée]s?|recherche approfondie|derni[èe]res nouvelles", RegexOption.IGNORE_CASE)
 
     /** Demande en plusieurs étapes enchaînées (« trouve… puis envoie… »). */
     fun multiEtapes(texte: String) = MULTI.containsMatchIn(texte) && texte.trim().split(Regex("\\s+")).size >= 5
+
+    /** Demande à orchestrer (récurrence, automatisme, surveillance, sous-agents) ou adressée nommément à Hermès. */
+    fun pourHermesSeul(texte: String) = ORCHESTRATION.containsMatchIn(texte) || NOMME.containsMatchIn(texte) || multiEtapes(texte)
 
     private val BREF = Regex("^(merci|ok|okay|d.accord|super|parfait|salut|bonjour|bonsoir|coucou|oui|non|stop|annule|c.est bon)[ !.,]*\\S{0,12}$", RegexOption.IGNORE_CASE)
 
@@ -358,6 +369,7 @@ object Routeur {
         // Hermès orchestre : automatismes, récurrence, surveillance, sous-agents, plusieurs étapes — même sur des données du téléphone.
         if (ORCHESTRATION.containsMatchIn(t) || multiEtapes(t)) return Choix(Cible.HERMES, "tâche complexe : Hermès orchestre (Gemini, Groq, Jarvis)")
         // Commandes simples du téléphone : exécution directe par Jarvis (Freebox, recherche de fichiers/dossiers…).
+        if (SERVEUR.containsMatchIn(t)) return Choix(Cible.HERMES, "serveur / SSH : Hermès (notes, skills, terminal) avec les outils SSH de Jarvis")
         if (FREEBOX.containsMatchIn(t)) return Choix(Cible.JARVIS, "Freebox : outil Jarvis dédié")
         if (FICHIERS.containsMatchIn(t)) return Choix(Cible.JARVIS, "recherche de fichiers : outils Jarvis")
         return when {
