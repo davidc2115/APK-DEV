@@ -92,10 +92,13 @@ object PontMcp {
                     if (demandeGpsInstallation && (nomOutil.startsWith("ssh_") || nomOutil == "run_shell" || nomOutil.contains("shell", ignoreCase = true))) continue
                     val demandeSuppression = termes.any { it in setOf("supprimer", "suppression", "effacer", "delete", "remove", "retirer", "enlever", "annuler") }
                     val demandeSuppressionIntervention = termes.any { it.contains("intervention") } && demandeSuppression
-                    val demandeSuppressionClient = termes.any { it.contains("client") || it.contains("fiche") } && demandeSuppression
+                    val demandeSuppressionInstallation = termes.any { it.contains("installation") || it == "site" || it == "centrale" || it == "toiture" } && demandeSuppression
+                    val demandeSuppressionClient = termes.any { it.contains("client") || it.contains("fiche") } && demandeSuppression && !demandeSuppressionInstallation
+                    if (demandeSuppressionInstallation && nomOutil == "client_supprimer") continue
                     val score = termes.count { texte.contains(it) } +
                         (if (demandeSuppressionIntervention && nomOutil in setOf("interventions_liste", "intervention_supprimer")) 1000 else 0) +
                         (if (demandeSuppressionClient && nomOutil == "client_supprimer") 1000 else 0) +
+                        (if (demandeSuppressionInstallation && nomOutil == "installation_supprimer") 1500 else 0) +
                         (if (demandeGpsInstallation && nomOutil == "client_ecrire") 1200 else 0) +
                         (if (demandeGpsInstallation && nomOutil == "societe_liste") 900 else 0) +
                         (if (demandeGpsInstallation && nomOutil == "clients_gps") 400 else 0)
@@ -400,7 +403,7 @@ object PontMcp {
             "reglage_jarvis", "hermes",
             // Les outils métier sensibles doivent rester visibles même lorsque le catalogue
             // dépasse le budget transmis au modèle (80 outils).
-            "interventions_liste", "intervention_supprimer", "intervention_modifier",
+            "interventions_liste", "intervention_supprimer", "intervention_modifier", "installation_supprimer",
             "intervention_enregistrer", "interventions_synthese",
             // Gestion des extensions Hermès : garder la découverte des skills/plugins/MCP accessible.
             "gerer_extension_hermes",

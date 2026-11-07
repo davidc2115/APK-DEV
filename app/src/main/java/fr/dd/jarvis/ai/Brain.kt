@@ -69,6 +69,7 @@ class Brain(
             if (!multi) rechercheDirecte(texteUser, onStatus)?.let { return reflexe(it) }
             if (!multi) freeboxDirect(texteUser, onStatus)?.let { return reflexe(it) }
             if (!multi) videoDirecte(history, onStatus)?.let { return reflexe(it) }
+            if (!multi) installationDirecte(texteUser, onStatus)?.let { return reflexe(it) }
         }
         // Hermès, cerveau principal (mode « tout » : toutes les autres demandes ; mode « auto » : les tâches complexes).
         // S'il est indisponible, Jarvis reprend la main avec ses outils.
@@ -371,6 +372,18 @@ class Brain(
         return r
     }
 
+    /** « Supprime l'installation Clairotte 3 (de Martin) » : outil dédié, jamais la suppression de toute la fiche client. */
+    private suspend fun installationDirecte(texte: String, onStatus: (String) -> Unit): String? {
+        val n = fr.dd.jarvis.societe.core.normaliser(texte)
+        if (!Regex("\\b(supprim\\w*|effac\\w*|retir\\w*|enleve\\w*|enlever)\\b").containsMatchIn(n)) return null
+        if (!Regex("\\b(installations?|sites?|centrales?|toitures?)\\b").containsMatchIn(n)) return null
+        if (Regex("\\binterventions?\\b").containsMatchIn(n)) return null
+        val clients = app.societe.data.clients
+        val (client, site) = cibleInstallation(n, clients.map { c -> c.nom to c.sites.map { it.nom } }) ?: return null
+        onStatus("🗑️ Installation « $site »…")
+        return tools.execute("installation_supprimer", JSONObject().put("client", client).put("installation", site)).text
+    }
+
     private fun siteNomme(c: fr.dd.jarvis.societe.core.Client, n: String): String? =
         c.sites.filter { it.nom.isNotBlank() && n.contains(fr.dd.jarvis.societe.core.normaliser(it.nom)) }.maxByOrNull { it.nom.length }?.nom
 
@@ -426,6 +439,20 @@ class Brain(
             if (serveur.isNotBlank()) args.put("serveur", serveur) else if (n.contains("wireguard")) args.put("serveur", "wireguard")
             args.put("action", action)
             return action to args
+        }
+
+        /**
+         * (client, installation) désignés dans [n] (texte normalisé) parmi [clients] (nom → noms d'installations) :
+         * l'installation doit être nommée ; le client aussi s'il y a plusieurs installations du même nom. Null si ambigu.
+         */
+        internal fun cibleInstallation(n: String, clients: List<Pair<String, List<String>>>): Pair<String, String>? {
+            fun dans(nom: String) = nom.isNotBlank() && Regex("\\b" + Regex.escape(fr.dd.jarvis.societe.core.normaliser(nom)) + "\\b").containsMatchIn(n)
+            val candidats = clients.flatMap { (c, sites) -> sites.filter { dans(it) }.map { c to it } }
+                // « Clairotte 3 » nommé : ne pas garder aussi « Clairotte » (nom contenu dans un autre nommé)
+                .let { l -> l.filter { (_, s) -> l.none { (_, autre) -> autre != s && autre.length > s.length && fr.dd.jarvis.societe.core.normaliser(autre).contains(fr.dd.jarvis.societe.core.normaliser(s)) } } }
+            if (candidats.size == 1) return candidats.first()
+            val avecClient = candidats.filter { (c, _) -> dans(c) }
+            return avecClient.singleOrNull()
         }
 
         /** Commande immédiate reconnue sans modèle : (outil, action, valeur), ou null. */
