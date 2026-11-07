@@ -355,9 +355,9 @@ class ToolBox(
             ), listOf("action")))
         put(tool("run_shell", "Exécute une commande shell sur le téléphone via adb/Shizuku (réservé aux besoins que phone_action ne couvre pas).",
             mapOf("command" to prop("Commande shell.")), listOf("command")))
-        put(tool("stockage_telephone", "Accède au stockage du téléphone (Téléchargements, Films, Musique, DCIM, etc., en dehors du dossier privé de JARVIS ET du coffre Obsidian — pour tout ce qui concerne le coffre ou les images générées, utilise obsidian_fichiers) : liste un dossier, lit un fichier texte, renomme, déplace, supprime, crée un dossier. Pratique pour réorganiser une bibliothèque de fichiers (ex. noms de films compatibles Plex).",
+        put(tool("stockage_telephone", "Accède au stockage partagé du téléphone ET recherche aussi dans le coffre Obsidian : recherche récursive en direct dans tous les dossiers accessibles (y compris images générées, renommées ou déplacées), liste, lit, renomme, déplace, supprime, crée un dossier. Utilise chercher dès que l’utilisateur demande de retrouver un fichier ou une image ; ne te limite jamais au dossier courant.",
             mapOf(
-                "action" to prop("lister | lire | renommer | deplacer | supprimer | dossier"),
+                "action" to prop("chercher | lister | lire | renommer | deplacer | supprimer | dossier. chercher = recherche récursive sur tout le stockage partagé accessible et le coffre Obsidian."),
                 "chemin" to prop("Chemin relatif à la racine du stockage (ex. « Movies/film.avi », vide = racine)."),
                 "destination" to prop("renommer/deplacer uniquement : le nouveau chemin complet (ex. « Movies/Dirty Dancing (1987).avi »).")
             ), listOf("action")))
@@ -892,6 +892,14 @@ class ToolBox(
         "stockage_telephone" -> {
             val act = a.optString("action").lowercase()
             val o = app.obsidian
+            if (act == "chercher" || act == "rechercher") return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val q = a.optString("chemin").ifBlank { a.optString("requete") }
+                if (q.isBlank()) return@withContext ToolResult("Indique le nom ou quelques mots du fichier à retrouver.")
+                val coffre = runCatching { o.chercherFichiers(q, dossiers = false, limite = 250) }.getOrDefault(emptyList())
+                val telephone = runCatching { fr.dd.jarvis.ai.Stockage.action("chercher", q, "") }.getOrElse { "Stockage partagé : " + (it.message ?: "erreur") }
+                val lignes = (coffre.map { "📦 Coffre Obsidian › $it" } + telephone.lines().filter { it.startsWith("📄 ") }).distinct()
+                ToolResult(if (lignes.isEmpty()) "Aucun résultat pour « $q » dans le stockage accessible et le coffre Obsidian. Vérifie l’autorisation « Tous les fichiers » et l’accès au coffre." else "🔎 Recherche globale : « $q »\\n" + lignes.take(250).joinToString("\\n"), direct = true)
+            }
             // Un chemin qui pointe DANS le coffre Obsidian (ex. « Documents/Obsidian jarvis/JARVIS/Images ») est traité dans le coffre.
             val dansCoffre = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { o.estDansCoffre(a.optString("chemin")) }.getOrDefault(false) }
             if (dansCoffre && act != "supprimer" && act != "lire") return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
