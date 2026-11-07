@@ -113,10 +113,14 @@ class Brain(
             for (i in 0 until all.length()) if (all.getJSONObject(i).getJSONObject("function").getString("name") in keep) schema.put(all.get(i))
             if (plan.outils.any { it in fr.dd.jarvis.societe.SocieteTools.NAMES }) societeNeeded = true
         } else schema = tools.schemaFor(recent)
-        val schemaFinal = if (!pourHermes) schema else JSONArray().also { f ->
+        // Outils retirés : ceux qui renverraient vers Hermès (quand c'est Hermès qui demande), et le SSH pour une demande
+        // Home Assistant ordinaire — elle passe par l'API (ha_*) ; si l'API échoue, l'approfondissement prend le relais.
+        val retires = (if (pourHermes) setOf("hermes", "hermes_deleguer", "tache_arriere_plan") else emptySet()) +
+            (if (fr.dd.jarvis.hermes.Routeur.homeAssistantApi(texteUser)) setOf("ssh_commande", "ssh_fichier", "ssh_script", "serveur_diagnostic") else emptySet())
+        val schemaFinal = if (retires.isEmpty()) schema else JSONArray().also { f ->
             for (i in 0 until schema.length()) {
                 val nom = schema.optJSONObject(i)?.optJSONObject("function")?.optString("name")
-                if (nom !in setOf("hermes", "hermes_deleguer", "tache_arriere_plan")) f.put(schema.get(i))
+                if (nom !in retires) f.put(schema.get(i))
             }
         }
         val messages = JSONArray()
@@ -175,7 +179,7 @@ class Brain(
                 }
                 onStatus("⚙️ $name…")
                 val res = try {
-                    if (pourHermes && name in setOf("hermes", "hermes_deleguer", "tache_arriere_plan")) ToolResult("Outil indisponible pour un agent missionné par Hermès.")
+                    if (name in retires) ToolResult(if (name.startsWith("ssh") || name == "serveur_diagnostic") "Pour Home Assistant, utilise l'API (ha_entites, ha_etat, ha_service, ha_config, ha_dashboard), pas le SSH." else "Outil indisponible ici.")
                     else tools.execute(name, args)
                 } catch (e: ApiException) {
                     ToolResult("Erreur du service IA : ${e.message}")
@@ -356,35 +360,15 @@ class Brain(
 
     /** Demandes Freebox courantes exécutées directement par l'outil (pas de modèle qui répondrait « impossible »). */
     private suspend fun freeboxDirect(texte: String, onStatus: (String) -> Unit): String? {
-        val n = fr.dd.jarvis.societe.core.normaliser(texte)
-        val box = Regex("\\b(freebox|box)\\b").containsMatchIn(n)
-        val vpn = Regex("\\b(vpn|wireguard|openvpn)\\b").containsMatchIn(n)
-        if (!box && !vpn && !Regex("redirections? de ports?|ouvr\\w* (le|un|les) ports?").containsMatchIn(n)) return null
-        val active = Regex("\\b(active|activer|activez|allume|demarre|lance|mets en route|ouvre)\\b").containsMatchIn(n)
-        val coupe = Regex("\\b(desactive|desactiver|coupe|couper|arrete|eteins|stoppe)\\b").containsMatchIn(n)
-        val serveur = when { n.contains("openvpn") -> "openvpn_routed"; n.contains("ipsec") -> "ipsec"; n.contains("pptp") -> "pptp"; else -> "" }
-        val args = JSONObject()
-        val action = when {
-            Regex("redemarre|reboot").containsMatchIn(n) && box -> "redemarrer"
-            Regex("redirections?|ports? ouverts?|nat\\b").containsMatchIn(n) && Regex("liste|lister|quelles?|affiche|montre|voir|donne|y a t il|ai je").containsMatchIn(n) -> "redirections"
-            vpn && Regex("utilisateurs?|comptes?|acces").containsMatchIn(n) && Regex("liste|quels?|affiche|montre|voir").containsMatchIn(n) -> "vpn_utilisateurs"
-            vpn && coupe -> "desactiver_vpn"
-            vpn && active -> "activer_vpn"
-            vpn -> "vpn"
-            Regex("appareils?|connectes?|peripheriques?").containsMatchIn(n) && box -> "appareils"
-            Regex("\\bwi ?fi\\b").containsMatchIn(n) && box && coupe -> "wifi_desactiver"
-            Regex("\\bwi ?fi\\b").containsMatchIn(n) && box && active -> "wifi_activer"
-            Regex("\\bwi ?fi\\b").containsMatchIn(n) && box -> "wifi"
-            Regex("journal|appels? (recus|manques|emis)|qui (m a|a) appele").containsMatchIn(n) && box -> "appels"
-            Regex("\\bdmz\\b").containsMatchIn(n) -> return null // paramètres à préciser : le cerveau s'en charge avec l'outil
-            box && Regex("etat|statut|debit|connexion|ip publique|fonctionne|marche").containsMatchIn(n) -> "etat"
-            box && Regex("droits?|autorisations?|permissions?").containsMatchIn(n) -> "droits"
-            else -> return null // ajout de redirection, création d'utilisateur VPN… : paramètres → cerveau + outil freebox
-        }
-        if (serveur.isNotBlank()) args.put("serveur", serveur) else if (n.contains("wireguard")) args.put("serveur", "wireguard")
-        args.put("action", action)
+        val (action, args) = intentionFreebox(texte) ?: return null
         onStatus("📶 Freebox : $action…")
-        return runCatching { tools.execute("freebox", args).text }.getOrElse { "❌ Freebox : ${it.message}" }
+        val r = runCatching { tools.execute("freebox", args).text }.getOrElse { "❌ Freebox : ${it.message}" }
+        // Disque : si l'API Freebox refuse (droit « explorer » non accordé…), essai par le partage réseau (SMB/FTP).
+        if (action == "fichiers" && r.startsWith("❌")) {
+            val partage = runCatching { tools.execute("box_disque", JSONObject().put("action", if (args.optString("chemin").isBlank()) "partages" else "lister").put("chemin", args.optString("chemin"))).text }.getOrNull()
+            if (partage != null && partage.startsWith("📂")) return partage
+        }
+        return r
     }
 
     private fun siteNomme(c: fr.dd.jarvis.societe.core.Client, n: String): String? =
@@ -398,6 +382,52 @@ class Brain(
     }
 
     companion object {
+        /** Demande Freebox reconnue sans modèle : (action, arguments) pour l'outil freebox, ou null. */
+        internal fun intentionFreebox(texte: String): Pair<String, JSONObject>? {
+            val n = fr.dd.jarvis.societe.core.normaliser(texte)
+            val box = Regex("\\b(freebox|box)\\b").containsMatchIn(n)
+            val vpn = Regex("\\b(vpn|wireguard|openvpn)\\b").containsMatchIn(n)
+            if (!box && !vpn && !Regex("redirections? de ports?|ouvr\\w* (le|un|les) ports?").containsMatchIn(n)) return null
+            val active = Regex("\\b(active|activer|activez|allume|demarre|lance|mets en route|ouvre)\\b").containsMatchIn(n)
+            val coupe = Regex("\\b(desactive|desactiver|coupe|couper|arrete|eteins|stoppe)\\b").containsMatchIn(n)
+            val serveur = when { n.contains("openvpn") -> "openvpn_routed"; n.contains("ipsec") -> "ipsec"; n.contains("pptp") -> "pptp"; else -> "" }
+            val args = JSONObject()
+            // Disque dur de la box : « se connecter au disque », « dossier téléchargements », « mes films sur la box »…
+            val disque = box && Regex("\\b(disques?|dd|hdd|nas|stockage|fichiers?|dossiers?|telechargements?|films?|series?|videos?|musiques?|photos?)\\b").containsMatchIn(n)
+            val action = when {
+                Regex("redemarre|reboot").containsMatchIn(n) && box -> "redemarrer"
+                box && Regex("telechargements? en cours|en cours de telechargement|gestionnaire de telechargement|file de telechargement|torrents?").containsMatchIn(n) -> "telechargements"
+                disque -> {
+                    val dossier = Regex("\\bdossiers? (?:nommes? |appeles? |de |des |du |d )?([a-z0-9][a-z0-9 _-]{1,40}?)(?= et | sur | de la | dans | du disque|$)").find(n)?.groupValues?.get(1)?.trim()
+                    val chemin = when {
+                        dossier != null && dossier !in setOf("la box", "ma box", "la freebox", "ma freebox") -> dossier
+                        n.contains("telechargement") -> "Téléchargements"
+                        Regex("\\bfilms?\\b").containsMatchIn(n) -> "Vidéos"
+                        else -> ""
+                    }
+                    if (chemin.isNotBlank()) args.put("chemin", chemin)
+                    "fichiers"
+                }
+                Regex("redirections?|ports? ouverts?|nat\\b").containsMatchIn(n) && Regex("liste|lister|quelles?|affiche|montre|voir|donne|y a t il|ai je").containsMatchIn(n) -> "redirections"
+                vpn && Regex("utilisateurs?|comptes?|acces").containsMatchIn(n) && Regex("liste|quels?|affiche|montre|voir").containsMatchIn(n) -> "vpn_utilisateurs"
+                vpn && coupe -> "desactiver_vpn"
+                vpn && active -> "activer_vpn"
+                vpn -> "vpn"
+                Regex("\\b(appareils?|connectes|peripheriques?)\\b|qui est connecte|sont connectes").containsMatchIn(n) && box -> "appareils"
+                Regex("\\bwi ?fi\\b").containsMatchIn(n) && box && coupe -> "wifi_desactiver"
+                Regex("\\bwi ?fi\\b").containsMatchIn(n) && box && active -> "wifi_activer"
+                Regex("\\bwi ?fi\\b").containsMatchIn(n) && box -> "wifi"
+                Regex("journal|appels? (recus|manques|emis)|qui (m a|a) appele").containsMatchIn(n) && box -> "appels"
+                Regex("\\bdmz\\b").containsMatchIn(n) -> return null // paramètres à préciser : le cerveau s'en charge avec l'outil
+                box && Regex("etat|statut|debit|connexion|ip publique|fonctionne|marche").containsMatchIn(n) -> "etat"
+                box && Regex("droits?|autorisations?|permissions?").containsMatchIn(n) -> "droits"
+                else -> return null // ajout de redirection, création d'utilisateur VPN… : paramètres → cerveau + outil freebox
+            }
+            if (serveur.isNotBlank()) args.put("serveur", serveur) else if (n.contains("wireguard")) args.put("serveur", "wireguard")
+            args.put("action", action)
+            return action to args
+        }
+
         /** Commande immédiate reconnue sans modèle : (outil, action, valeur), ou null. */
         internal fun actionImmediate(texte: String): Triple<String, String, String>? {
             val n = fr.dd.jarvis.societe.core.normaliser(texte)

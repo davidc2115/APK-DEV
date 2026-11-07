@@ -73,6 +73,8 @@ TES MOYENS — tu planifies, tu répartis, tu contrôles et tu synthétises :
 3) cronjob = les automatismes (« tous les matins… », « chaque lundi… », « surveille… et préviens-moi »). Crée le job avec deliver="local" et un prompt autonome qui récupère les données nécessaires (mcp_jarvis_agent pour le téléphone, web pour l'extérieur) et se termine TOUJOURS par mcp_jarvis_notifier (titre + message) pour livrer le résultat à l'utilisateur. Confirme ensuite le nom, la fréquence, l'heure et ce qui sera envoyé. Pour lister, modifier, mettre en pause ou supprimer un automatisme, utilise cronjob.
 MÉMOIRE UNIQUE : ton outil memory (MEMORY.md / USER.md) et les consignes durables ci-dessous (bloc « Mémoire partagée avec JARVIS » de ton SOUL.md) sont UNE seule mémoire, synchronisée automatiquement. Enregistre chaque information une seule fois, avec ton outil memory ; pour corriger ou oublier une consigne durable, utilise mcp_jarvis_memoire_ajouter / mcp_jarvis_memoire_oublier.
 RÉPONSES RAPIDES DÉJÀ DONNÉES : certaines demandes simples (position, recherche de fichiers, Freebox, lancement d'une vidéo, commandes du téléphone…) ont été traitées instantanément par ta partie rapide : leurs réponses figurent dans l'historique (messages « assistant »). Ce sont TES réponses : appuie-toi dessus, ne les refais pas et ne les contredis pas sans vérifier.
+HOME ASSISTANT : pour consulter ou piloter Home Assistant (états, lumières, chauffage, scènes, automatisations, tableaux de bord, configuration YAML), utilise UNIQUEMENT les outils API mcp_jarvis_ha_entites / ha_etat / ha_service / ha_config / ha_dashboard. N'utilise le SSH ou Docker pour Home Assistant que si l'utilisateur le demande explicitement (conteneur, logs, mise à jour, redémarrage du serveur) ou si l'API ne répond pas — dans ce cas, dis-le avant de passer par le serveur.
+FREEBOX — DISQUE ET APPAREILS : « le disque (dur) de la box », un dossier (Téléchargements, Vidéos…) ou des fichiers sur la box = action fichiers de l'outil freebox (paramètre chemin) ; « les appareils connectés » = action appareils. Ne confonds jamais les deux.
 SERVEUR / SSH : le serveur de l'utilisateur est DÉJÀ configuré dans Jarvis (adresse, utilisateur, clé ou mot de passe) : utilise mcp_jarvis_ssh_commande / mcp_jarvis_ssh_fichier / mcp_jarvis_serveur_diagnostic, ainsi que tes propres notes, skills et ponts déjà mis en place ; ne redemande jamais les identifiants à l'utilisateur.
 CONTRÔLE DE L'ÉCRAN : mcp_jarvis_voir_ecran regarde l'écran (capture analysée) et mcp_jarvis_piloter_telephone agit dans n'importe quelle application en vérifiant visuellement chaque geste ; utilise-les (ou mcp_jarvis_agent) quand une action n'a pas d'outil dédié ou pour vérifier qu'elle a abouti.
 4) mcp_jarvis_notifier = livrer un message sur le téléphone (notification + conversation Jarvis) : fin d'automatisme ou de tâche longue.
@@ -350,6 +352,17 @@ object Routeur {
             "en parall[èe]le|plusieurs [ée]tapes|workflow|orchestr|\\bmissions?\\b",
         RegexOption.IGNORE_CASE
     )
+    /** Home Assistant ordinaire (états, appareils, scènes, automatisations, tableaux de bord) : API, jamais SSH. */
+    private val HA = Regex("home ?assistant|\\bha\\b|domotique", RegexOption.IGNORE_CASE)
+    private val HA_MAINTENANCE = Regex(
+        "\\bssh\\b|docker|conteneur|container|portainer|supervisor|serveur|redemarr|red[ée]marr|reboot|mise [àa] jour|\\bupdate\\b|install|" +
+            "sauvegarde|backup|\\blogs?\\b|journal syst|ne (r[ée]pond|marche|fonctionne|d[ée]marre) (plus|pas)|en panne|plant[ée]",
+        RegexOption.IGNORE_CASE
+    )
+
+    /** Demande Home Assistant à traiter par l'API (outils ha_*), sans passer par le serveur SSH. */
+    fun homeAssistantApi(texte: String) = HA.containsMatchIn(texte) && !HA_MAINTENANCE.containsMatchIn(texte)
+
     /** Serveur, SSH, Docker, Debian, configuration Home Assistant : Hermès (ses notes, skills et son terminal) + outils SSH de Jarvis. */
     private val SERVEUR = Regex("\\bssh\\b|serveur|\\bservers?\\b|docker|debian|raspberry|conteneur|container|systemctl|configuration\\.yaml|home ?assistant.{0,30}(config|yaml|install|mise [àa] jour|log)|bot discord|ollama|\\bvps\\b|\\bping\\b|traceroute|\\bponts?\\b|tunnel|tailscale", RegexOption.IGNORE_CASE)
     /** Ce qui demande de la réflexion (recherche, rédaction, analyse, conseil…) : jamais une simple commande. */
@@ -428,6 +441,8 @@ object Routeur {
         // pour tout le reste Jarvis répond, et passe la main à Hermès s'il n'aboutit pas (Brain.reply).
         if (mode == "auto" || mode == "demande") return when {
             ORCHESTRATION.containsMatchIn(t) || multiEtapes(t) -> Choix(Cible.HERMES, "automatisme / plusieurs étapes : Hermès orchestre")
+            homeAssistantApi(t) -> Choix(Cible.JARVIS, "Home Assistant : API (pas de SSH)")
+            HA.containsMatchIn(t) -> Choix(Cible.HERMES, "Home Assistant côté serveur (maintenance, panne) : moteur approfondi")
             SERVEUR.containsMatchIn(t) -> Choix(Cible.HERMES, "serveur / SSH : Hermès (notes, skills, terminal)")
             WEB.containsMatchIn(t) -> Choix(Cible.HERMES, "recherche sur internet : Hermès")
             else -> Choix(Cible.JARVIS, "Jarvis d'abord (Hermès s'il n'aboutit pas)")

@@ -269,7 +269,76 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
         catch (e: Exception) { "❌ Freebox : ${e.message ?: e.javaClass.simpleName}" }
     }
 
+    // ------------------------------------------------------------------ disque dur de la box (droit « explorer »)
+
+    private fun b64(chemin: String) = android.util.Base64.encodeToString(chemin.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+    internal fun cle(t: String) = java.text.Normalizer.normalize(t.lowercase(), java.text.Normalizer.Form.NFD)
+        .replace(Regex("\\p{M}+"), "").replace(Regex("[^a-z0-9]+"), " ").trim().removeSuffix("s")
+
+    private fun ls(app: JarvisApp, s: String, chemin: String): List<JSONObject> =
+        liste(json(app, "fs/ls/${b64(chemin)}?onlyFolder=0&countSubFolder=1&removeHidden=1", s)).filter { it.optString("name") !in setOf(".", "..") }
+
+    /**
+     * Retrouve un dossier du disque de la box à partir d'un nom approximatif (« téléchargement », « films/séries »,
+     * « /Disque dur/Téléchargements ») : chaque morceau est comparé sans accents, majuscules ni pluriel.
+     */
+    private fun resoudre(app: JarvisApp, s: String, demande: String): String? = resoudreAvec({ c -> ls(app, s, c) }, demande)
+
+    internal fun resoudreAvec(ls: (String) -> List<JSONObject>, demande: String): String? {
+        val morceaux = demande.trim().trim('/').split('/').map { it.trim() }.filter { it.isNotBlank() }
+        if (morceaux.isEmpty()) return "/"
+        val disques = ls("/").filter { it.optString("type") == "dir" }.map { it.optString("name") }
+        fun suivre(depart: String, reste: List<String>): String? {
+            var courant = depart
+            for (m in reste) {
+                val enfants = runCatching { ls(courant) }.getOrNull() ?: return null
+                val voulu = cle(m)
+                val trouve = enfants.firstOrNull { it.optString("type") == "dir" && cle(it.optString("name")) == voulu }
+                    ?: enfants.firstOrNull { it.optString("type") == "dir" && cle(it.optString("name")).let { n -> n.startsWith(voulu) || voulu.startsWith(n) } }
+                    ?: return null
+                courant = courant.trimEnd('/') + "/" + trouve.optString("name")
+            }
+            return courant
+        }
+        val premier = disques.firstOrNull { cle(it) == cle(morceaux.first()) }
+        if (premier != null) return suivre("/$premier", morceaux.drop(1))
+        for (d in disques) suivre("/$d", morceaux)?.let { return it }
+        return null
+    }
+
+    private fun taille(o: Long) = when { o >= 1L shl 30 -> "%.1f Go".format(o / 1073741824.0); o >= 1L shl 20 -> "%.1f Mo".format(o / 1048576.0); o >= 1024 -> "${o / 1024} Ko"; else -> "$o o" }
+
+    private fun fichiers(app: JarvisApp, s: String, demande: String): String {
+        val chemin = resoudre(app, s, demande)
+            ?: return "📂 Aucun dossier « $demande » sur le disque de la Freebox. Disques : " +
+                ls(app, s, "/").joinToString(", ") { it.optString("name") }.ifBlank { "aucun disque détecté (disque branché et allumé ?)" }
+        val l = ls(app, s, chemin).sortedWith(compareBy<JSONObject> { it.optString("type") != "dir" }.thenBy { it.optString("name").lowercase() })
+        val titre = if (chemin == "/") "💽 Disques de la Freebox" else "📂 Freebox › ${chemin.trim('/').replace("/", " › ")}"
+        if (l.isEmpty()) return "$titre : dossier vide (aucun fichier)."
+        val nbFichiers = l.count { it.optString("type") != "dir" }
+        val nbDossiers = l.size - nbFichiers
+        val date = java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.FRENCH)
+        return "$titre — $nbFichiers fichier(s), $nbDossiers dossier(s)\n" + l.take(150).joinToString("\n") {
+            if (it.optString("type") == "dir") "📁 ${it.optString("name")}" + it.optInt("foldercount", -1).let { f -> if (f > 0) " ($f dossiers)" else "" } +
+                it.optInt("filecount", -1).let { f -> if (f >= 0) " · $f fichier(s)" else "" }
+            else "📄 ${it.optString("name")} — ${taille(it.optLong("size"))}" + it.optLong("modification").let { m -> if (m > 0) " — ${date.format(java.util.Date(m * 1000))}" else "" }
+        } + (if (l.size > 150) "\n… (${l.size} éléments)" else "")
+    }
+
+    private fun telechargements(app: JarvisApp, s: String): String {
+        val l = liste(json(app, "downloads/", s))
+        if (l.isEmpty()) return "⬇️ Aucun téléchargement dans le gestionnaire de la Freebox."
+        val etats = mapOf("downloading" to "en cours", "done" to "terminé", "seeding" to "terminé (partage)", "stopped" to "en pause", "queued" to "en attente",
+            "error" to "erreur", "checking" to "vérification", "extracting" to "extraction", "repairing" to "réparation", "retry" to "nouvel essai")
+        return "⬇️ Téléchargements de la Freebox (${l.size}) :\n" + l.take(60).joinToString("\n") {
+            "• ${it.optString("name")} — ${etats[it.optString("status")] ?: it.optString("status")} (${it.optInt("rx_pct") / 100} %, ${taille(it.optLong("size"))})" +
+                it.optLong("rx_rate").let { r -> if (r > 0) " ⬇️ ${debit(r)}" else "" }
+        }
+    }
+
     private fun executer(app: JarvisApp, s: String, action: String, a: JSONObject): String = when (action) {
+        "fichiers", "disque", "lister_fichiers", "explorer", "dossier" -> fichiers(app, s, a.optString("chemin").ifBlank { a.optString("dossier") })
+        "telechargements", "telechargements_en_cours", "downloads" -> telechargements(app, s)
         "etat", "statut", "" -> {
             val sys = json(app, "system/", s) as? JSONObject ?: JSONObject()
             val cx = json(app, "connection/", s) as? JSONObject ?: JSONObject()
