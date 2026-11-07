@@ -448,6 +448,9 @@ class Brain(
             val serveur = when { n.contains("openvpn") -> "openvpn_routed"; n.contains("ipsec") -> "ipsec"; n.contains("pptp") -> "pptp"; else -> "" }
             val args = JSONObject()
             // Disque dur de la box : « se connecter au disque », « dossier téléchargements », « mes films sur la box »…
+            // Une MODIFICATION de fichiers (renommer, déplacer, supprimer, copier, envoyer, créer…) n'est jamais un simple
+            // listage : elle part au cerveau, qui utilise les actions de fichiers de l'outil freebox.
+            if (box && Regex("\\b(renomm\\w*|deplac\\w*|bouge\\w*|supprim\\w*|efface\\w*|copi\\w*|envoi\\w*|envoy\\w*|transfer\\w*|ajout\\w*|cree\\w*|creer|range\\w*|classe\\w*|mets?|recupere\\w*|telecharge (le|la|ce|cette|mon|ma)|organis\\w*)\\b").containsMatchIn(n)) return null
             val disque = box && Regex("\\b(disques?|dd|hdd|nas|stockage|fichiers?|dossiers?|telechargements?|films?|series?|videos?|musiques?|photos?)\\b").containsMatchIn(n)
             val action = when {
                 Regex("redemarre|reboot").containsMatchIn(n) && box -> "redemarrer"

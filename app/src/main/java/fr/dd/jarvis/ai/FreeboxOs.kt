@@ -33,14 +33,16 @@ gl2I70LeVNGEXZsAThUkqj5Rg9bV8xw3aSMCMQCDjB5CgsLH8EdZmiksdBRRKM2r
 vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
 -----END CERTIFICATE-----"""
 
-    private fun socketFactory(): javax.net.ssl.SSLSocketFactory {
+    private fun confiance(): X509TrustManager {
         val cf = CertificateFactory.getInstance("X.509")
         val ks = KeyStore.getInstance(KeyStore.getDefaultType()).apply { load(null, null) }
         ks.setCertificateEntry("freebox_ecc_root", cf.generateCertificate(rootPem.byteInputStream()))
         val tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm()).apply { init(ks) }
-        val trust = tmf.trustManagers.filterIsInstance<X509TrustManager>().first()
-        return SSLContext.getInstance("TLS").apply { init(null, arrayOf(trust), null) }.socketFactory
+        return tmf.trustManagers.filterIsInstance<X509TrustManager>().first()
     }
+
+    private fun socketFactory(): javax.net.ssl.SSLSocketFactory =
+        SSLContext.getInstance("TLS").apply { init(null, arrayOf(confiance()), null) }.socketFactory
 
     private fun discover(app: JarvisApp) {
         val c = URL("http://mafreebox.freebox.fr/api_version").openConnection() as HttpURLConnection
@@ -188,13 +190,23 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
         if (!j.optBoolean("success", false)) {
             val code = j.optString("error_code"); val msg = j.optString("msg")
             throw IllegalStateException(when (code) {
-                "insufficient_rights" -> "la Freebox refuse : droit « ${j.optString("missing_right").ifBlank { "settings" }} » non accordé à JARVIS (Freebox OS › Paramètres › Gestion des accès › Applications › JARVIS)."
+                "insufficient_rights" -> j.optString("missing_right").ifBlank { "settings" }.let { d ->
+                    "la Freebox refuse : le droit « ${DROITS[d] ?: d} » n'est pas accordé à JARVIS. Active-le dans Freebox OS › Paramètres de la Freebox › Gestion des accès › Applications › JARVIS, puis réessaie."
+                }
                 "auth_required", "invalid_session" -> "session Freebox expirée, réessaie."
                 else -> msg.ifBlank { code.ifBlank { "erreur HTTP ${r.code}" } }
             })
         }
         return j.opt("result")
     }
+
+    /** Libellés des droits tels qu'ils apparaissent dans Freebox OS (Gestion des accès › Applications). */
+    private val DROITS = mapOf(
+        "explorer" to "Accès au gestionnaire de fichiers", "settings" to "Modification des réglages de la Freebox",
+        "downloader" to "Accès au gestionnaire de téléchargements", "contacts" to "Accès à la base de contacts de la Freebox",
+        "calls" to "Accès au journal d'appels", "parental" to "Accès au contrôle parental", "pvr" to "Programmation des enregistrements",
+        "camera" to "Accès aux caméras", "home" to "Gestion de l'alarme et maison connectée", "vm" to "Contrôle des VM",
+    )
 
     private fun <T> avecSession(app: JarvisApp, bloc: (String) -> T): T {
         val token = app.store.freeboxAppToken.value
@@ -262,9 +274,21 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
             "dmz" -> if (a.optString("ip").isNotBlank() || a.optString("appareil").isNotBlank() || a.optString("etat").isNotBlank()) "Freebox : modifier la DMZ (${a.optString("etat").ifBlank { "activer" }} ${a.optString("appareil").ifBlank { a.optString("ip") }}) ?" else null
             "ajouter_bail" -> "Freebox : réserver l'adresse ${a.optString("ip")} pour ${a.optString("mac")} ?"
             "redemarrer" -> "Freebox : REDÉMARRER la box ? Internet, TV et téléphone seront coupés quelques minutes."
+            "deplacer", "deplacer_fichier", "copier", "copier_fichier", "envoyer_fichier", "envoyer", "ajouter_fichier", "televerser" ->
+                if (a.optBoolean("remplacer", false)) "Freebox : REMPLACER les fichiers du même nom déjà présents dans « ${a.optString("destination").ifBlank { a.optString("chemin") }} » ?" else null
             else -> null
         }
         if (question != null && !confirm(question, true)) return "Annulé : rien n'a été modifié sur la Freebox."
+        if (action in ACTIONS_SUPPRESSION) return try {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val cibles = avecSession(app) { s -> trouverElements(app, s, a.optString("chemin").ifBlank { a.optString("fichier") }, volumes(app, s)) }
+                if (cibles.isEmpty()) return@withContext "❌ Freebox : rien ne correspond à « ${a.optString("chemin")} » sur le disque de la box."
+                if (cibles.size > 25) return@withContext "⚠️ ${cibles.size} éléments correspondent : précise le chemin (je ne supprime pas plus de 25 éléments à la fois)."
+                val liste = cibles.joinToString("\n") { (if (it.dossier) "📁 " else "📄 ") + lisible(it.chemin) }
+                if (!confirm("Freebox : SUPPRIMER définitivement du disque de la box ?\n$liste", true)) return@withContext "Annulé : rien n'a été supprimé."
+                avecSession(app) { s -> tache(app, s, json(app, "fs/rm/", s, "POST", JSONObject().put("files", org.json.JSONArray(cibles.map { it.path64 }))), "Supprimé : ${cibles.joinToString(", ") { it.nom }}") }
+            }
+        } catch (e: Exception) { "❌ Freebox : ${e.message ?: e.javaClass.simpleName}" }
         return try { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { avecSession(app) { s -> executer(app, s, action, a) } } }
         catch (e: Exception) { "❌ Freebox : ${e.message ?: e.javaClass.simpleName}" }
     }
@@ -304,7 +328,7 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
     private fun resoudre(app: JarvisApp, s: String, demande: String, volumes: List<Volume>): String? =
         resoudreAvec({ c -> ls(app, s, c) }, demande, volumes.filter { it.etat == "mounted" }.map { it.chemin })
 
-    internal fun resoudreAvec(ls: (String) -> List<JSONObject>, demande: String, racinesConnues: List<String> = emptyList()): String? {
+    internal fun resoudreAvec(ls: (String) -> List<JSONObject>, demande: String, racinesConnues: List<String> = emptyList(), exact: Boolean = false): String? {
         val morceaux = demande.trim().trim('/').split('/').map { it.trim() }.filter { it.isNotBlank() }
         if (morceaux.isEmpty()) return "/"
         // Racines de l'explorateur, complétées par les disques montés connus de l'API stockage (USB compris).
@@ -316,7 +340,7 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
                 val enfants = runCatching { ls(courant) }.getOrNull() ?: return null
                 val voulu = cle(m)
                 val trouve = enfants.firstOrNull { it.optString("type") == "dir" && cle(it.optString("name")) == voulu }
-                    ?: enfants.firstOrNull { it.optString("type") == "dir" && cle(it.optString("name")).let { n -> n.startsWith(voulu) || voulu.startsWith(n) } }
+                    ?: (if (exact) null else enfants.firstOrNull { it.optString("type") == "dir" && cle(it.optString("name")).let { n -> n.startsWith(voulu) || voulu.startsWith(n) } })
                     ?: return null
                 courant = courant.trimEnd('/') + "/" + trouve.optString("name")
             }
@@ -378,8 +402,330 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
         }
     }
 
+    // ------------------------------------------------------------------ gestion des fichiers du disque de la box
+    // (renommer, déplacer, copier, supprimer, créer un dossier, envoyer depuis le téléphone, récupérer sur le téléphone)
+    // Tout passe par l'association Freebox OS (droit « Accès au gestionnaire de fichiers ») : aucun partage SMB/FTP requis.
+
+    private val ACTIONS_SUPPRESSION = setOf("supprimer_fichier", "supprimer_fichiers", "supprimer_dossier", "effacer_fichier")
+
+    /** Fichier ou dossier du disque : chemin lisible + chemin encodé EXACT renvoyé par la box (réutilisé tel quel). */
+    internal data class Element(val chemin: String, val path64: String, val nom: String, val dossier: Boolean, val taille: Long)
+
+    private fun b64brut(chemin: String) = java.util.Base64.getEncoder().encodeToString(chemin.toByteArray(Charsets.UTF_8))
+
+    private fun element(o: JSONObject, parent: String): Element {
+        val nom = o.optString("name")
+        val chemin = deB64(o.optString("path")).ifBlank { parent.trimEnd('/') + "/" + nom }
+        return Element(chemin, o.optString("path").ifBlank { b64brut(chemin) }, nom, o.optString("type") == "dir", o.optLong("size"))
+    }
+
+    private fun lisible(chemin: String) = "Freebox › " + chemin.trim('/').replace("/", " › ")
+
+    /**
+     * Noms d'un dossier qui correspondent à [voulu] : nom exact (sans accents ni majuscules), sans l'extension, puis
+     * début du nom, puis contenu ; « *.mkv », « film* »… acceptés (jokers).
+     */
+    internal fun choisirNoms(noms: List<String>, voulu: String): List<String> {
+        val v = voulu.trim()
+        if (v.isBlank()) return emptyList()
+        if (v.contains('*') || v.contains('?')) {
+            val r = Regex(v.split('*').joinToString(".*") { p -> p.split('?').joinToString(".") { Regex.escape(it) } }, RegexOption.IGNORE_CASE)
+            return noms.filter { r.matches(it) }
+        }
+        val c = cle(v)
+        if (c.isBlank()) return emptyList()
+        noms.filter { cle(it) == c }.takeIf { it.isNotEmpty() }?.let { return it }
+        noms.filter { cle(it.substringBeforeLast('.')) == c }.takeIf { it.isNotEmpty() }?.let { return it }
+        if (c.length < 3) return emptyList()
+        noms.filter { cle(it).startsWith(c) }.takeIf { it.isNotEmpty() }?.let { return it }
+        return noms.filter { cle(it).contains(c) }
+    }
+
+    /** Racines de recherche : disques montés (USB compris), sinon les dossiers de premier niveau de l'explorateur. */
+    private fun racines(app: JarvisApp, s: String, vols: List<Volume>): List<String> =
+        vols.filter { it.etat == "mounted" && it.chemin.isNotBlank() }.map { it.chemin }
+            .ifEmpty { ls(app, s, "/").filter { it.optString("type") == "dir" }.map { "/" + it.optString("name") } }
+
+    /** Fichiers ou dossiers désignés par [demande] : « Téléchargements/film.mkv », un joker (« *.mkv » dans un dossier) ou un simple nom. */
+    private fun trouverElements(app: JarvisApp, s: String, demande: String, vols: List<Volume>): List<Element> {
+        val d = demande.trim().trim('/')
+        require(d.isNotBlank()) { "précise le fichier ou le dossier (paramètre chemin)." }
+        val parent = d.substringBeforeLast('/', "")
+        val nom = d.substringAfterLast('/')
+        if (parent.isNotBlank()) {
+            val p = resoudre(app, s, parent, vols)
+            if (p != null) {
+                val enfants = ls(app, s, p)
+                val noms = choisirNoms(enfants.map { it.optString("name") }, nom).toSet()
+                return enfants.filter { it.optString("name") in noms }.map { element(it, p) }
+            }
+            // Le dossier parent n'existe pas tel quel : peut-être un dossier entier (« Vidéos/Films »).
+            resoudre(app, s, d, vols)?.let { c -> return listOf(Element(c, b64brut(c), c.substringAfterLast('/'), true, 0)) }
+            return emptyList()
+        }
+        return chercher(app, s, nom, vols)
+    }
+
+    /** Recherche par nom dans tout le disque (5 niveaux, 200 dossiers lus au plus) : correspondances exactes d'abord. */
+    private fun chercher(app: JarvisApp, s: String, nom: String, vols: List<Volume>, max: Int = 15): List<Element> {
+        val exacts = mutableListOf<Element>(); val partiels = mutableListOf<Element>()
+        val file = ArrayDeque(racines(app, s, vols).map { it to 0 })
+        val c = cle(nom); val joker = nom.contains('*') || nom.contains('?')
+        var lus = 0
+        while (file.isNotEmpty() && lus < 200 && exacts.size < max) {
+            val (dossier, prof) = file.removeFirst(); lus++
+            val enfants = runCatching { ls(app, s, dossier) }.getOrDefault(emptyList())
+            val retenus = choisirNoms(enfants.map { it.optString("name") }, nom).toSet()
+            for (o in enfants) {
+                val n = o.optString("name")
+                if (n in retenus) {
+                    if (joker || cle(n) == c || cle(n.substringBeforeLast('.')) == c) exacts += element(o, dossier) else partiels += element(o, dossier)
+                }
+                if (o.optString("type") == "dir" && prof < 5) file.addLast(dossier.trimEnd('/') + "/" + n to prof + 1)
+            }
+        }
+        return (exacts.ifEmpty { partiels }).distinctBy { it.path64 }.take(max)
+    }
+
+    /** Un seul élément, sinon une explication (aucun / plusieurs candidats). */
+    private fun unSeul(l: List<Element>, demande: String): Element = when (l.size) {
+        1 -> l[0]
+        0 -> throw IllegalArgumentException("rien ne correspond à « $demande » sur le disque de la box (essaie chercher_fichier, ou donne le chemin, ex. « Téléchargements/nom du fichier »).")
+        else -> throw IllegalArgumentException("plusieurs éléments correspondent à « $demande » — lequel ?\n" + l.take(10).joinToString("\n") { "• " + lisible(it.chemin) })
+    }
+
+    /** Dossier de destination (créé s'il manque, avec ses parents, quand [creer]). */
+    private fun dossierCible(app: JarvisApp, s: String, demande: String, vols: List<Volume>, creer: Boolean): String {
+        val morceaux = demande.trim().trim('/').split('/').map { it.trim() }.filter { it.isNotBlank() }
+        require(morceaux.isNotEmpty()) { "précise le dossier de destination (paramètre destination)." }
+        // Plus long début de chemin qui existe déjà (noms exacts, sans accents ni majuscules).
+        var i = morceaux.size; var base: String? = null
+        while (i > 0) { base = resoudreAvec({ c -> ls(app, s, c) }, morceaux.take(i).joinToString("/"), vols.filter { it.etat == "mounted" }.map { it.chemin }, exact = true); if (base != null) break; i-- }
+        if (i == morceaux.size) return base!!
+        if (!creer) throw IllegalArgumentException("le dossier « ${demande.trim('/')} » n'existe pas sur le disque de la box.")
+        var courant = base ?: racines(app, s, vols).firstOrNull() ?: throw IllegalStateException("aucun disque monté sur la Freebox.")
+        for (m in morceaux.drop(i)) {
+            json(app, "fs/mkdir/", s, "POST", JSONObject().put("parent", b64brut(courant)).put("dirname", m))
+            courant = courant.trimEnd('/') + "/" + m
+        }
+        return courant
+    }
+
+    /** Suit une tâche de la box (déplacement, copie, suppression) jusqu'à la fin (90 s au plus). */
+    private fun tache(app: JarvisApp, s: String, r: Any?, libelle: String): String {
+        val t = r as? JSONObject ?: return "✅ $libelle"
+        val id = t.optInt("id", -1)
+        if (id < 0) return "✅ $libelle"
+        var dernier = t; var etat = t.optString("state")
+        val fin = System.currentTimeMillis() + 90_000
+        while (etat in setOf("queued", "running", "paused", "") && System.currentTimeMillis() < fin) {
+            Thread.sleep(700)
+            dernier = runCatching { json(app, "fs/tasks/$id", s) as? JSONObject }.getOrNull() ?: break
+            etat = dernier.optString("state")
+        }
+        return when (etat) {
+            "done" -> { runCatching { json(app, "fs/tasks/$id", s, "DELETE") }; "✅ $libelle" }
+            "failed" -> "❌ $libelle : échec (" + when (val e = dernier.optString("error")) {
+                "file_not_found" -> "fichier introuvable"; "dest_is_not_dir" -> "la destination n'est pas un dossier"
+                "file_exists", "dest_exists" -> "un élément du même nom existe déjà"; "access_denied" -> "accès refusé"
+                "out_of_space", "disk_full" -> "disque plein"; else -> e.ifBlank { "erreur inconnue" }
+            } + ")."
+            else -> "⏳ $libelle : la Freebox termine en arrière-plan (gros fichiers) — redemande la liste du dossier dans un moment pour vérifier."
+        }
+    }
+
+    private fun renommer(app: JarvisApp, s: String, e: Element, nouveau: String): String {
+        val n = nouveau.trim().trim('/')
+        require(n.isNotBlank() && !n.contains('/')) { "précise le nouveau nom (sans dossier)." }
+        if (n == e.nom) return "ℹ️ « ${e.nom} » porte déjà ce nom."
+        json(app, "fs/rename/", s, "POST", JSONObject().put("src", e.path64).put("dst", n))
+        return "✅ Renommé : ${e.nom} → $n (${lisible(e.chemin.substringBeforeLast('/'))})"
+    }
+
+    private fun deplacerOuCopier(app: JarvisApp, s: String, l: List<Element>, dest: String, copier: Boolean, remplacer: Boolean): String {
+        require(l.isNotEmpty()) { "rien à ${if (copier) "copier" else "déplacer"}." }
+        val corps = JSONObject().put("files", org.json.JSONArray(l.map { it.path64 })).put("dst", b64brut(dest)).put("mode", if (remplacer) "overwrite" else "both")
+        val r = json(app, if (copier) "fs/cp/" else "fs/mv/", s, "POST", corps)
+        return tache(app, s, r, (if (copier) "Copié" else "Déplacé") + " vers ${lisible(dest)} : " + l.joinToString(", ") { it.nom } +
+            if (!remplacer) "" else " (fichiers existants remplacés)")
+    }
+
+    /** box_disque « renommer/deplacer » : chemin actuel → nouveau chemin complet (dossier créé si besoin, puis nouveau nom). */
+    private fun versNouveauChemin(app: JarvisApp, s: String, source: String, nouveau: String, vols: List<Volume>): String {
+        val e = unSeul(trouverElements(app, s, source, vols), source)
+        val n = nouveau.trim().trim('/')
+        require(n.isNotBlank()) { "précise le nouveau nom ou chemin." }
+        if (!n.contains('/')) return renommer(app, s, e, n)
+        val dest = dossierCible(app, s, n.substringBeforeLast('/'), vols, creer = true)
+        val nom = n.substringAfterLast('/')
+        val parentActuel = e.chemin.substringBeforeLast('/')
+        if (dest.trimEnd('/') == parentActuel.trimEnd('/')) return renommer(app, s, e, nom)
+        val r = deplacerOuCopier(app, s, listOf(e), dest, copier = false, remplacer = false)
+        if (!r.startsWith("✅") || nom == e.nom) return r
+        val deplace = Element(dest.trimEnd('/') + "/" + e.nom, b64brut(dest.trimEnd('/') + "/" + e.nom), e.nom, e.dossier, e.taille)
+        return r + "\n" + runCatching { renommer(app, s, deplace, nom) }.getOrElse { "⚠️ Déplacé, mais renommage impossible : ${it.message}" }
+    }
+
+    /** Fichier du téléphone : chemin absolu, relatif au stockage, ou fichier créé par Jarvis (exports, images, vidéos). */
+    private fun fichierLocal(app: JarvisApp, nom: String): java.io.File? {
+        val n = nom.trim()
+        if (n.isBlank()) return null
+        java.io.File(n).takeIf { it.isAbsolute && it.isFile }?.let { return it }
+        val stockage = android.os.Environment.getExternalStorageDirectory()
+        return listOf(stockage, java.io.File(stockage, "Download"), java.io.File(stockage, "Documents"), java.io.File(stockage, "DCIM/Camera"), java.io.File(stockage, "Pictures"),
+            Fichiers.dossier(app), java.io.File(app.filesDir, "images"), Fichiers.dossierVideos(app))
+            .map { java.io.File(it, n.trimStart('/')) }.firstOrNull { it.isFile }
+            ?: listOf(Fichiers.dossier(app), java.io.File(app.filesDir, "images"), Fichiers.dossierVideos(app))
+                .firstNotNullOfOrNull { d -> d.listFiles()?.firstOrNull { it.isFile && it.name.equals(n.substringAfterLast('/'), true) } }
+    }
+
+    /**
+     * Envoi d'un fichier du téléphone sur le disque de la box : API WebSocket de Freebox OS (l'ancien envoi HTTP n'est
+     * plus accepté). Le contenu part par blocs de 256 Ko ; [ecraser] = remplacer un fichier du même nom.
+     */
+    private fun televerser(app: JarvisApp, s: String, f: java.io.File, dossier: String, nom: String, ecraser: Boolean): String {
+        val domain = app.store.freeboxApiDomain.value.trim()
+        val port = app.store.freeboxHttpsPort.value.toIntOrNull() ?: 443
+        val client = okhttp3.OkHttpClient.Builder().sslSocketFactory(socketFactory(), confiance())
+            .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS).readTimeout(0, java.util.concurrent.TimeUnit.SECONDS)
+            .pingInterval(20, java.util.concurrent.TimeUnit.SECONDS).build()
+        val req = okhttp3.Request.Builder().url("https://$domain:$port/api/v${version(app)}/ws/upload").header("X-Fbx-App-Auth", s).build()
+        val id = (System.currentTimeMillis() % 1_000_000).toInt()
+        val demarre = java.util.concurrent.CountDownLatch(1)
+        val termine = java.util.concurrent.CountDownLatch(1)
+        val erreur = java.util.concurrent.atomic.AtomicReference<String?>(null)
+        val pret = java.util.concurrent.atomic.AtomicBoolean(false)
+        val finalise = java.util.concurrent.atomic.AtomicBoolean(false)
+        val ws = client.newWebSocket(req, object : okhttp3.WebSocketListener() {
+            override fun onOpen(webSocket: okhttp3.WebSocket, response: okhttp3.Response) {
+                webSocket.send(JSONObject().put("action", "upload_start").put("request_id", id).put("size", f.length())
+                    .put("dirname", b64brut(dossier)).put("filename", nom).put("force", if (ecraser) "overwrite" else "missing").toString())
+            }
+            override fun onMessage(webSocket: okhttp3.WebSocket, text: String) {
+                val j = runCatching { JSONObject(text) }.getOrNull() ?: return
+                if (!j.optBoolean("success", true)) {
+                    erreur.compareAndSet(null, when (val c = j.optString("error_code")) {
+                        "destination_conflict" -> "un fichier « $nom » existe déjà dans ce dossier (dis « remplace-le » pour l'écraser)"
+                        "access_denied" -> "écriture refusée dans ce dossier"
+                        "insufficient_rights" -> "droit « ${DROITS["explorer"]} » non accordé à JARVIS dans Freebox OS"
+                        else -> j.optString("msg").ifBlank { c.ifBlank { "envoi refusé" } }
+                    })
+                    demarre.countDown(); termine.countDown(); return
+                }
+                val action = j.optString("action")
+                if (!pret.get() && (action == "upload_start" || action.isBlank())) { pret.set(true); demarre.countDown() }
+                val res = j.optJSONObject("result")
+                if (finalise.get() && (action == "upload_finalize" || j.optBoolean("complete") || res?.optBoolean("complete") == true)) termine.countDown()
+            }
+            override fun onFailure(webSocket: okhttp3.WebSocket, t: Throwable, response: okhttp3.Response?) {
+                erreur.compareAndSet(null, "connexion interrompue (${t.message ?: t.javaClass.simpleName})"); demarre.countDown(); termine.countDown()
+            }
+            override fun onClosed(webSocket: okhttp3.WebSocket, code: Int, reason: String) { demarre.countDown(); termine.countDown() }
+        })
+        try {
+            if (!demarre.await(20, java.util.concurrent.TimeUnit.SECONDS) || erreur.get() != null || !pret.get())
+                throw IllegalStateException(erreur.get() ?: "la Freebox n'a pas accepté l'envoi (pas de réponse).")
+            f.inputStream().use { ins ->
+                val buf = ByteArray(256 * 1024)
+                while (true) {
+                    val n = ins.read(buf); if (n <= 0) break
+                    while (ws.queueSize() > 4L * 1024 * 1024) { erreur.get()?.let { throw IllegalStateException(it) }; Thread.sleep(40) }
+                    if (!ws.send(okio.ByteString.of(*buf.copyOf(n)))) throw IllegalStateException(erreur.get() ?: "envoi interrompu.")
+                }
+            }
+            while (ws.queueSize() > 0) { erreur.get()?.let { throw IllegalStateException(it) }; Thread.sleep(50) }
+            finalise.set(true)
+            ws.send(JSONObject().put("action", "upload_finalize").put("request_id", id).toString())
+            termine.await(30, java.util.concurrent.TimeUnit.SECONDS)
+            erreur.get()?.let { throw IllegalStateException(it) }
+        } finally { runCatching { ws.close(1000, null) } }
+        // Vérification : le fichier est bien là, à la bonne taille.
+        val present = runCatching { ls(app, s, dossier) }.getOrDefault(emptyList()).firstOrNull { it.optString("name") == nom }
+        return if (present != null && present.optLong("size") == f.length()) "✅ Envoyé sur la box : ${lisible("$dossier/$nom")} (${taille(f.length())})."
+            else if (present != null) "⚠️ ${lisible("$dossier/$nom")} est sur la box mais sa taille diffère (${taille(present.optLong("size"))} au lieu de ${taille(f.length())}) : renvoie-le."
+            else "⚠️ Envoi terminé sans confirmation de la Freebox : vérifie le dossier ${lisible(dossier)}."
+    }
+
+    /** Copie un fichier de la box sur le téléphone (fichiers de Jarvis), en flux (500 Mo au plus). */
+    private fun recuperer(app: JarvisApp, s: String, e: Element): String {
+        require(!e.dossier) { "« ${e.nom} » est un dossier : précise un fichier." }
+        if (e.taille > 500L * 1024 * 1024) throw IllegalArgumentException("fichier trop gros pour le téléphone (${taille(e.taille)}, 500 Mo au plus).")
+        val domain = app.store.freeboxApiDomain.value.trim()
+        val port = app.store.freeboxHttpsPort.value.toIntOrNull() ?: 443
+        val c = URL("https://$domain:$port/api/v${version(app)}/dl/" + java.net.URLEncoder.encode(e.path64, "UTF-8")).openConnection() as HttpsURLConnection
+        c.sslSocketFactory = socketFactory(); c.connectTimeout = 8000; c.readTimeout = 60000
+        c.setRequestProperty("X-Fbx-App-Auth", s)
+        val nom = e.nom.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+        val dest = java.io.File(Fichiers.dossier(app), nom)
+        try {
+            if (c.responseCode !in 200..299) throw IllegalStateException("la Freebox refuse le téléchargement (HTTP ${c.responseCode}).")
+            c.inputStream.use { i -> dest.outputStream().use { o -> i.copyTo(o) } }
+        } finally { c.disconnect() }
+        return "[📎 $nom (${taille(dest.length())})](jarvis-file:$nom)\n✅ Copié depuis ${lisible(e.chemin.substringBeforeLast('/'))}."
+    }
+
+    private fun lireTexte(app: JarvisApp, s: String, e: Element): String {
+        require(!e.dossier) { "« ${e.nom} » est un dossier." }
+        if (e.taille > 300_000) return "Fichier trop gros pour être lu ici (${taille(e.taille)}) : demande-moi de le récupérer sur le téléphone."
+        val r = requete(app, "dl/" + java.net.URLEncoder.encode(e.path64, "UTF-8"), s)
+        if (r.code !in 200..299) throw IllegalStateException("lecture refusée (HTTP ${r.code}).")
+        val t = String(r.octets, Charsets.UTF_8)
+        return if (t.count { it == '\uFFFD' } > 5) "Fichier binaire (${taille(e.taille)}) : demande-moi de le récupérer sur le téléphone." else "📄 ${lisible(e.chemin)}\n```\n" + t.take(8000) + "\n```"
+    }
+
+    /** Actions de box_disque quand la Freebox est associée : tout passe par Freebox OS (plus de SMB/FTP à configurer). */
+    suspend fun gererDisque(app: JarvisApp, action: String, chemin: String, fichier: String, confirm: suspend (String, Boolean) -> Boolean): String {
+        val a = JSONObject().put("chemin", chemin)
+        return when (action.lowercase()) {
+            "partages", "lister" -> gerer(app, "fichiers", JSONObject().put("chemin", if (action.lowercase() == "partages") "" else chemin), confirm)
+            "lire" -> gerer(app, "lire_fichier", a, confirm)
+            "telecharger" -> gerer(app, "recuperer_fichier", a, confirm)
+            "envoyer" -> gerer(app, "envoyer_fichier", JSONObject().put("fichier", fichier).put("destination", chemin), confirm)
+            "supprimer" -> gerer(app, "supprimer_fichier", a, confirm)
+            "dossier" -> gerer(app, "creer_dossier", a, confirm)
+            "renommer", "deplacer" -> gerer(app, "renommer_ou_deplacer", a.put("nouveau_chemin", fichier), confirm)
+            else -> "Action inconnue (partages, lister, lire, telecharger, envoyer, supprimer, dossier, renommer, deplacer)."
+        }
+    }
+
     private fun executer(app: JarvisApp, s: String, action: String, a: JSONObject): String = when (action) {
         "fichiers", "disque", "lister_fichiers", "explorer", "dossier" -> fichiers(app, s, a.optString("chemin").ifBlank { a.optString("dossier") })
+        "chercher_fichier", "chercher", "rechercher_fichier", "trouver_fichier" -> {
+            val q = a.optString("nom").ifBlank { a.optString("chemin") }
+            val l = chercher(app, s, q.trim().trim('/').substringAfterLast('/'), volumes(app, s), max = 25)
+            if (l.isEmpty()) "🔎 Rien ne correspond à « $q » sur le disque de la box."
+            else "🔎 ${l.size} résultat(s) pour « $q » :\n" + l.joinToString("\n") { (if (it.dossier) "📁 " else "📄 ") + it.chemin + (if (!it.dossier) " — ${taille(it.taille)}" else "") }
+        }
+        "renommer", "renommer_fichier" -> {
+            val vols = volumes(app, s)
+            renommer(app, s, unSeul(trouverElements(app, s, a.optString("chemin"), vols), a.optString("chemin")), a.optString("nouveau_nom").ifBlank { a.optString("nom") })
+        }
+        "renommer_ou_deplacer" -> versNouveauChemin(app, s, a.optString("chemin"), a.optString("nouveau_chemin"), volumes(app, s))
+        "deplacer", "deplacer_fichier", "copier", "copier_fichier" -> {
+            val vols = volumes(app, s)
+            val sources = a.optString("chemin").split(Regex("\\s*[;\\n]\\s*")).filter { it.isNotBlank() }.flatMap { trouverElements(app, s, it, vols).ifEmpty { throw IllegalArgumentException("rien ne correspond à « $it » sur le disque de la box.") } }.distinctBy { it.path64 }
+            require(sources.size <= 200) { "${sources.size} éléments : précise la sélection (200 au plus)." }
+            val dest = dossierCible(app, s, a.optString("destination").ifBlank { a.optString("dossier") }, vols, creer = true)
+            deplacerOuCopier(app, s, sources, dest, copier = action.startsWith("copier"), remplacer = a.optBoolean("remplacer", false))
+        }
+        "creer_dossier", "nouveau_dossier", "mkdir" -> {
+            val c = a.optString("chemin").ifBlank { a.optString("dossier") }
+            "📁 Dossier prêt : " + lisible(dossierCible(app, s, c, volumes(app, s), creer = true))
+        }
+        "envoyer_fichier", "envoyer", "ajouter_fichier", "televerser" -> {
+            val f = fichierLocal(app, a.optString("fichier"))
+                ?: throw IllegalArgumentException("fichier « ${a.optString("fichier")} » introuvable sur le téléphone (donne son chemin complet, ex. /storage/emulated/0/Download/photo.jpg).")
+            val dest = dossierCible(app, s, a.optString("destination").ifBlank { a.optString("chemin").ifBlank { "Téléchargements" } }, volumes(app, s), creer = true)
+            televerser(app, s, f, dest, a.optString("nouveau_nom").ifBlank { f.name }, ecraser = a.optBoolean("remplacer", false))
+        }
+        "recuperer_fichier", "recuperer", "telecharger_fichier" -> {
+            val vols = volumes(app, s)
+            recuperer(app, s, unSeul(trouverElements(app, s, a.optString("chemin"), vols), a.optString("chemin")))
+        }
+        "lire_fichier" -> {
+            val vols = volumes(app, s)
+            lireTexte(app, s, unSeul(trouverElements(app, s, a.optString("chemin"), vols), a.optString("chemin")))
+        }
         "disques", "stockage" -> volumes(app, s).let { v -> if (v.isEmpty()) "💽 La Freebox ne signale aucun disque (branché, alimenté et visible dans Freebox OS ?)." else "💽 Disques de la Freebox :\n" + v.joinToString("\n") { "• " + libelleVolume(it) + (if (it.chemin.isNotBlank()) " → ${it.chemin}" else "") } }
         "telechargements", "telechargements_en_cours", "downloads" -> telechargements(app, s)
         "etat", "statut", "" -> {
