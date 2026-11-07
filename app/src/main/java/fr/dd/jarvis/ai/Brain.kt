@@ -37,6 +37,7 @@ class Brain(
         val reflexes = pourHermes || !fr.dd.jarvis.hermes.Routeur.pourHermesSeul(texteUser)
         fun reflexe(r: String) = r.also { if (!pourHermes) fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS }
         if (reflexes) {
+            if (!multi) commandeImmediate(texteUser, onStatus)?.let { return reflexe(it) }
             positionDirecte(dernier, history, onStatus)?.let { return reflexe(it) }
             rangementDirect(history, onStatus)?.let { return reflexe(it) }
             if (!multi) rechercheDirecte(texteUser, onStatus)?.let { return reflexe(it) }
@@ -312,6 +313,19 @@ class Brain(
         return Montage.lancer(app, d)
     }
 
+    /**
+     * Commandes du téléphone les plus courantes, exécutées immédiatement SANS modèle (une fraction de seconde) :
+     * lampe torche, volume et luminosité chiffrés, Wi-Fi, Bluetooth, lecture/pause/suivant/précédent, verrouillage,
+     * capture d'écran. Les confirmations habituelles (Wi-Fi coupé, verrouillage…) restent demandées par l'outil.
+     */
+    private suspend fun commandeImmediate(texte: String, onStatus: (String) -> Unit): String? {
+        val (outil, action, valeur) = actionImmediate(texte) ?: return null
+        val args = if (outil == "controle_media") JSONObject().put("action", action) else JSONObject().put("action", action).put("value", valeur)
+        val r = tools.execute(outil, args).text
+        onStatus("⚡ Commande exécutée")
+        return r
+    }
+
     /** Demandes Freebox courantes exécutées directement par l'outil (pas de modèle qui répondrait « impossible »). */
     private suspend fun freeboxDirect(texte: String, onStatus: (String) -> Unit): String? {
         val n = fr.dd.jarvis.societe.core.normaliser(texte)
@@ -356,6 +370,38 @@ class Brain(
     }
 
     companion object {
+        /** Commande immédiate reconnue sans modèle : (outil, action, valeur), ou null. */
+        internal fun actionImmediate(texte: String): Triple<String, String, String>? {
+            val n = fr.dd.jarvis.societe.core.normaliser(texte)
+            if (n.isBlank() || n.split(' ').size > 12 || Regex("\\b(et|puis|ensuite|si|quand|tous les|chaque)\\b").containsMatchIn(n)) return null
+            val allume = Regex("\\b(allume[rsz]?|active[rsz]?|mets?|ouvre|demarre|lance)\\b")
+            val eteins = Regex("\\b(eteins|eteint|eteindre|coupe[rsz]?|desactive[rsz]?|ferme[rsz]?|arrete[rsz]?|stoppe[rsz]?)\\b")
+            val nombre = Regex("\\b(\\d{1,3}) ?(%|pour ?cent|pourcent)?").find(n)?.groupValues?.get(1)?.toIntOrNull()?.coerceIn(0, 100)
+            fun phone(action: String, valeur: String = "") = Triple("phone_action", action, valeur)
+            fun media(action: String) = Triple("controle_media", action, "")
+            val torche = Regex("\\b(torche|lampe de poche|lampe du telephone|flash)\\b").containsMatchIn(n)
+            val wifi = Regex("\\bwi ?fi\\b").containsMatchIn(n) && !Regex("freebox|box|reseau|mot de passe|connecte").containsMatchIn(n)
+            val bt = Regex("\\bbluetooth\\b").containsMatchIn(n) && !Regex("apparei|connecte|associe").containsMatchIn(n)
+            return when {
+                torche && eteins.containsMatchIn(n) -> phone("torch_off")
+                torche && allume.containsMatchIn(n) -> phone("torch_on")
+                Regex("\\b(volume|son)\\b").containsMatchIn(n) && nombre != null && !Regex("\\b(alarme|reveil|sonnerie)\\b").containsMatchIn(n) -> phone("volume", nombre.toString())
+                Regex("\\bcoupe (le son|le volume)\\b|\\bmode muet\\b").containsMatchIn(n) -> phone("volume", "0")
+                Regex("\\bluminosite\\b").containsMatchIn(n) && nombre != null -> phone("brightness", nombre.toString())
+                wifi && eteins.containsMatchIn(n) -> phone("wifi_off")
+                wifi && allume.containsMatchIn(n) -> phone("wifi_on")
+                bt && eteins.containsMatchIn(n) -> phone("bluetooth_off")
+                bt && allume.containsMatchIn(n) -> phone("bluetooth_on")
+                Regex("^(mets? (la musique |la lecture )?en pause|pause( la musique| la lecture)?|stop(pe)? la musique|arrete la musique|coupe la musique)$").containsMatchIn(n) -> media("pause")
+                Regex("^(reprends|relance|remets) (la musique|la lecture|le son)$|^(lecture|play)$").containsMatchIn(n) -> media("play")
+                Regex("^((chanson|morceau|titre|piste) suivante?|suivant|passe (a la suivante|au suivant|la chanson))$").containsMatchIn(n) -> media("next")
+                Regex("^((chanson|morceau|titre|piste) precedente?|precedent|reviens (a la precedente|au precedent))$").containsMatchIn(n) -> media("previous")
+                Regex("^verrouille (le telephone|l ecran|mon telephone)$").containsMatchIn(n) -> phone("lock")
+                Regex("^(fais|prends) une capture d ecran$").containsMatchIn(n) -> phone("screenshot")
+                else -> null
+            }
+        }
+
         /** Client dont on attend l'installation concernée par « ma position » (id, horodatage). */
         @Volatile private var attentePosition: Pair<String, Long>? = null
     }

@@ -286,9 +286,10 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
  *  - mode « auto » : Hermès reçoit les tâches complexes, en plusieurs étapes, récurrentes ou multi-agents (même si elles
  *    touchent au téléphone), la recherche web, la rédaction, l'analyse, le code et les questions ouvertes ; Jarvis répond
  *    directement aux commandes simples du téléphone (une action, un fichier, la Freebox…), plus vite et sans détour ;
- *  - mode « tout » (par défaut) : Hermès reçoit tout et confie lui-même les actions du téléphone à Jarvis. Avant lui,
- *    les RÉFLEXES de Jarvis (position, recherche de fichiers/dossiers, Freebox, lancement de vidéo…) répondent
- *    instantanément aux demandes simples et sans ambiguïté ; leur réponse reste dans l'historique transmis à Hermès ;
+ *  - mode « tout » (par défaut) : Hermès reçoit tout ce qui demande réflexion, mémoire ou orchestration. Pour la
+ *    rapidité, les RÉFLEXES de Jarvis (lampe, volume, Wi-Fi, lecture… sans modèle ; position, recherche de fichiers,
+ *    Freebox, vidéo) et les COMMANDES SIMPLES du téléphone (une action, sans réflexion) sont exécutés directement par
+ *    Jarvis ; ces échanges restent dans l'historique transmis à Hermès, et la mémoire est partagée ;
  *  - Android Auto : Jarvis (réponse rapide) ; « Hermès, … » force Hermès ; une réponse brève ou la réponse à une question
  *    va au cerveau qui l'a posée (confirmation, choix d'installation…).
  */
@@ -335,6 +336,23 @@ object Routeur {
     )
     /** Serveur, SSH, Docker, Debian, configuration Home Assistant : Hermès (ses notes, skills et son terminal) + outils SSH de Jarvis. */
     private val SERVEUR = Regex("\\bssh\\b|serveur|\\bservers?\\b|docker|debian|raspberry|conteneur|container|systemctl|configuration\\.yaml|home ?assistant.{0,30}(config|yaml|install|mise [àa] jour|log)|bot discord|ollama|\\bvps\\b|\\bping\\b|traceroute|\\bponts?\\b|tunnel|tailscale", RegexOption.IGNORE_CASE)
+    /** Ce qui demande de la réflexion (recherche, rédaction, analyse, conseil…) : jamais une simple commande. */
+    private val REFLEXION = Regex(
+        "recherch|compar|analys|expliqu|pourquoi|comment (faire|fonctionne|marche)|r[ée]dige|[ée]cris (un|une|moi)|r[ée]sum|synth[èe]se|" +
+            "rapport|article|\\bcode\\b|script|programme|python|bash|planifie|plan d.action|strat[ée]gie|[ée]tapes|projet|apprends|conseil|" +
+            "id[ée]es?|propose|optimise|calcul|traduis|po[eè]me|https?://|qu.en penses|que penses",
+        RegexOption.IGNORE_CASE
+    )
+
+    /** Commande simple du téléphone (une action, sans réflexion) : Jarvis l'exécute directement, sans attendre Hermès. */
+    fun commandeSimple(texte: String): Boolean {
+        val t = texte.trim()
+        return COMMANDE.containsMatchIn(t) && !REFLEXION.containsMatchIn(t) && !ORCHESTRATION.containsMatchIn(t) && !multiEtapes(t) &&
+            !SERVEUR.containsMatchIn(t) && !WEB.containsMatchIn(t) && !NOMME.containsMatchIn(t) && t.split(Regex("\\s+")).size <= 16 &&
+            // Une recherche que les réflexes n'ont pas résolue mérite Hermès (mémoire, notes, autres sources).
+            !FICHIERS.containsMatchIn(t) && !Regex("cherch|trouv|o[uù] (est|sont)", RegexOption.IGNORE_CASE).containsMatchIn(t)
+    }
+
     private val MULTI = Regex("\\b(puis|ensuite|et enfin|et apr[èe]s|apr[èe]s [çc]a|apr[èe]s cela)\\b", RegexOption.IGNORE_CASE)
     private val WEB = Regex("sur internet|sur le web|en ligne|actualit[ée]s?|recherche approfondie|derni[èe]res nouvelles", RegexOption.IGNORE_CASE)
 
@@ -366,7 +384,8 @@ object Routeur {
         val reponseCourte = t.split(Regex("\\s+")).size <= 4 && !t.endsWith("?") && precedent != null && precedent.takeLast(250).contains("?") &&
             !ORCHESTRATION.containsMatchIn(t) && !FREEBOX.containsMatchIn(t) && !FICHIERS.containsMatchIn(t) && !WEB.containsMatchIn(t)
         if (BREF.matches(t) || reponseCourte) return Choix(derniere, if (derniere == Cible.HERMES) "suite de la conversation avec Hermès" else "suite de la conversation avec Jarvis")
-        if (mode == "tout") return Choix(Cible.HERMES, "Hermès pour tout : il confie les actions du téléphone à Jarvis")
+        if (mode == "tout") return if (commandeSimple(t)) Choix(Cible.JARVIS, "commande simple : Jarvis l'exécute tout de suite")
+            else Choix(Cible.HERMES, "Hermès pour tout : il confie les actions du téléphone à Jarvis")
         // Hermès orchestre : automatismes, récurrence, surveillance, sous-agents, plusieurs étapes — même sur des données du téléphone.
         if (ORCHESTRATION.containsMatchIn(t) || multiEtapes(t)) return Choix(Cible.HERMES, "tâche complexe : Hermès orchestre (Gemini, Groq, Jarvis)")
         // Commandes simples du téléphone : exécution directe par Jarvis (Freebox, recherche de fichiers/dossiers…).

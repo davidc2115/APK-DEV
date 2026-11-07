@@ -514,8 +514,9 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     when (store.hermesMode.value) {
                         "tout" -> "Recommandé. Hermès est le cerveau de toutes tes demandes : il garde la mémoire longue, ses notes, skills et plugins, " +
                             "confie les actions du téléphone à l'agent Jarvis, le travail lourd à ses sous-agents Gemini et Groq, et crée tes automatismes. " +
-                            "Les demandes simples et sans ambiguïté (position, retrouver un fichier ou un dossier, Freebox, lancer une vidéo) reçoivent " +
-                            "une réponse instantanée des réflexes de Jarvis, qu'Hermès voit ensuite dans l'historique."
+                            "Pour rester rapide, les commandes simples du téléphone (lampe torche, volume, Wi-Fi, musique, appel, SMS, rendez-vous…), " +
+                            "la position, la recherche d'un fichier, la Freebox et le lancement d'une vidéo sont exécutés directement par Jarvis ; " +
+                            "Hermès voit ces échanges dans l'historique et partage la même mémoire."
                         "demande" -> "Jarvis répond seul ; Hermès n'intervient que si ta phrase commence par « Hermès »."
                         "off" -> "Hermès n'est jamais utilisé : Jarvis répond seul."
                         else -> "Hermès pour le complexe : tâches en plusieurs étapes, automatismes (« tous les matins… », « surveille… »), serveur et SSH, " +

@@ -241,7 +241,7 @@ arreter_passerelles_hermes() {
     // ------------------------------------------------------------------ 3-5. Installation, configuration, démarrage
 
     /** Version du hook de mémoire partagée : à augmenter quand memoire_handler.py change (réinstallation automatique). */
-    const val VERSION_HOOK_MEMOIRE = 1
+    const val VERSION_HOOK_MEMOIRE = 2
 
     /**
      * Installe (ou met à jour) le hook « jarvis-memoire » d'Hermès : au démarrage de la passerelle, il lance un fil qui
@@ -271,11 +271,13 @@ p '🧠 Mémoire partagée Jarvis ↔ Hermès installée.'
 """.trim()
     }
 
-    /** Installe le hook de mémoire partagée puis redémarre la passerelle (une seule fois par version du hook). */
+    /** Installe le hook de mémoire partagée (+ réglages de rapidité) puis redémarre la passerelle (une fois par version). */
     fun installerMemoirePartagee(app: JarvisApp): String? {
         if (!app.store.hermesInstalle.value) return null
         PontMcp.demarrer(app)
-        val script = prelude(app) + "\n" + scriptHookMemoire(app) + "\narreter_passerelles_hermes; sleep 1\n" + demarrage
+        // Version 2 : réflexion « low » pour qu'Hermès réponde plus vite (lue par Hermès dans agent.reasoning_effort).
+        val rapidite = "debian_utilisateur_jarvis; hermes_debian hermes config set agent.reasoning_effort low --force >/dev/null 2>&1 && p '⚡ Hermès : réflexion allégée pour des réponses plus rapides.' || true"
+        val script = prelude(app) + "\n" + scriptHookMemoire(app) + "\n" + rapidite + "\narreter_passerelles_hermes; sleep 1\n" + demarrage
         return executer(app, script, libelle = "Mémoire partagée Jarvis ↔ Hermès")
     }
 
@@ -321,6 +323,9 @@ p '🧠 Mémoire partagée Jarvis ↔ Hermès installée.'
             // (une seule « clé » côté Hermès : la rotation des clés Groq est faite par le relais de Jarvis)
             // Active explicitement la mémoire native évolutive d'Hermès.
             // La mémoire Jarvis/Obsidian reste la référence partagée pour les préférences utilisateur.
+            // Réflexion « low » : Hermès répond nettement plus vite (modifiable dans config.yaml).
+            appendLine("agent:")
+            appendLine("  reasoning_effort: low")
             appendLine("memory:")
             appendLine("  memory_enabled: true")
             appendLine("  user_profile_enabled: true")
@@ -688,6 +693,10 @@ for index in range(1, len(cf_ids) + 1):
     fallbacks.append({"provider": f"custom:jarvis_cf_{index}", "model": os.environ["JARVIS_CF_MODEL"]})
 data["fallback_providers"] = fallbacks
 
+# Rapidité : réflexion « low » (Gemini répond bien plus vite) sauf si l'utilisateur a choisi un autre niveau.
+agent_cfg = data.setdefault("agent", {})
+if isinstance(agent_cfg, dict) and str(agent_cfg.get("reasoning_effort") or "").strip().lower() in ("", "medium"):
+    agent_cfg["reasoning_effort"] = "low"
 # Multi-agent orchestration, preserving all unrelated Hermes configuration.
 delegation = data.setdefault("delegation", {})
 if not isinstance(delegation, dict):
