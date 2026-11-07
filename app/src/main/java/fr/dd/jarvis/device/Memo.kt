@@ -202,6 +202,44 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
             (notes + profil).joinToString("\n") { "- " + it.replace("\n", " ").take(500) }).take(3500)
     }
 
+    // ------------------------------------------------------------------ capacités propres à Hermès
+
+    private val capacitesLocal get() = File(ctx.filesDir, "capacites-hermes.json")
+    @Volatile private var capacitesCache: org.json.JSONObject? = null
+
+    @Synchronized
+    fun majCapacitesHermes(json: String) {
+        val j = runCatching { org.json.JSONObject(json) }.getOrNull() ?: return
+        capacitesCache = j
+        runCatching { capacitesLocal.writeText(json.take(60_000)) }
+    }
+
+    private fun capacites(): org.json.JSONObject = capacitesCache
+        ?: runCatching { org.json.JSONObject(capacitesLocal.readText()) }.getOrNull()?.also { capacitesCache = it }
+        ?: org.json.JSONObject()
+
+    /** Skills ajoutés à Hermès (nom → description). */
+    fun skillsHermes(): List<Pair<String, String>> = capacites().optJSONArray("skills")?.let { a ->
+        (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { it.optString("nom") to it.optString("description") }.filter { it.first.isNotBlank() }
+    }.orEmpty()
+
+    /** Ce qu'Hermès sait faire en plus, pour le cerveau rapide (qui lui délègue ces demandes). */
+    fun capacitesPourPrompt(): String {
+        val c = capacites()
+        val skills = skillsHermes()
+        val mcp = c.optJSONArray("mcp")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
+        val plugins = c.optJSONArray("plugins")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
+        val auto = c.optJSONArray("automatismes")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }.orEmpty()
+        if (skills.isEmpty() && mcp.isEmpty() && plugins.isEmpty() && auto.isEmpty()) return ""
+        return ("\n\nCe que ton moteur approfondi (Hermès) sait faire EN PLUS de tes outils — pour toute demande qui en relève, utilise hermes_deleguer " +
+            "(il a les notes, procédures et accès correspondants) :\n" +
+            skills.joinToString("\n") { "- compétence « ${it.first} » : ${it.second.take(200)}" } +
+            (if (mcp.isNotEmpty()) "\n- connecteurs MCP : ${mcp.joinToString()}" else "") +
+            (if (plugins.isNotEmpty()) "\n- plugins : ${plugins.joinToString()}" else "") +
+            (if (auto.isNotEmpty()) "\n- automatismes en place : " + auto.joinToString("; ") { "${it.optString("nom")} (${it.optString("quand")}${if (it.optBoolean("actif", true)) "" else ", en pause"})" } +
+                " — pour les lister, modifier ou supprimer, délègue à Hermès." else "")).take(4000)
+    }
+
     /** Mémoire de Jarvis telle qu'Hermès la recopie dans son SOUL.md (bloc géré, chargé à chaque session). */
     fun pourHermes(): String {
         ensure()

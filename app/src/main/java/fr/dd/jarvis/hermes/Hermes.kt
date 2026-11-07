@@ -353,6 +353,25 @@ object Routeur {
             "en parall[èe]le|plusieurs [ée]tapes|workflow|orchestr|\\bmissions?\\b",
         RegexOption.IGNORE_CASE
     )
+    private val MOTS_VIDES = setOf("utilise", "utiliser", "permet", "depuis", "toutes", "votre", "leurs", "entre", "selon", "chaque", "quand",
+        "cette", "celui", "donne", "faire", "apres", "avant", "toujours", "jamais", "notre", "autre", "autres", "comme", "aussi", "simple", "plusieurs")
+
+    /**
+     * Compétence ajoutée à Hermès qui correspond à la demande (nom cité, ou plusieurs mots distinctifs de son nom et de
+     * sa description), ou null. Les mots du nom comptent double.
+     */
+    fun competence(texte: String, skills: List<Pair<String, String>>): String? {
+        val n = fr.dd.jarvis.societe.core.normaliser(texte)
+        fun present(m: String) = Regex("\\b" + Regex.escape(m)).containsMatchIn(n)
+        return skills.map { (nom, desc) ->
+            val nomN = fr.dd.jarvis.societe.core.normaliser(nom.replace('-', ' ').replace('_', ' '))
+            if (nomN.length >= 6 && n.contains(nomN)) return nom
+            val motsNom = nomN.split(' ').filter { it.length >= 3 }.toSet()
+            val motsDesc = fr.dd.jarvis.societe.core.normaliser(desc).split(' ').filter { it.length >= 5 && it !in MOTS_VIDES }.toSet() - motsNom
+            nom to (2 * motsNom.count { present(it) } + motsDesc.count { present(it) })
+        }.filter { it.second >= 3 }.maxByOrNull { it.second }?.first
+    }
+
     /** Home Assistant ordinaire (états, appareils, scènes, automatisations, tableaux de bord) : API, jamais SSH. */
     private val HA = Regex("home ?assistant|\\bha\\b|domotique", RegexOption.IGNORE_CASE)
     private val HA_MAINTENANCE = Regex(
@@ -423,10 +442,11 @@ object Routeur {
     fun choisir(app: JarvisApp, texte: String, precedent: String? = null): Choix = choisirSansMemoire(app, texte, precedent).also { derniere = it.cible }
 
     private fun choisirSansMemoire(app: JarvisApp, texte: String, precedent: String?): Choix =
-        decider(app.store.hermesMode.value, app.enVoiture, Hermes.degrade(), texte, precedent)
+        decider(app.store.hermesMode.value, app.enVoiture, Hermes.degrade(), texte, precedent,
+            competenceHermes = runCatching { competence(texte, app.memo.skillsHermes()) }.getOrNull())
 
     /** Décision pure (testable) : mode des réglages, Android Auto, Hermès saturé, demande, message précédent de l'assistant. */
-    internal fun decider(mode: String, enVoiture: Boolean, sature: Boolean, texte: String, precedent: String?): Choix {
+    internal fun decider(mode: String, enVoiture: Boolean, sature: Boolean, texte: String, precedent: String?, competenceHermes: String? = null): Choix {
         if (mode == "off") return Choix(Cible.JARVIS, "Hermès désactivé dans les réglages")
         val t = texte.trim()
         if (sature && !NOMME.containsMatchIn(t)) return Choix(Cible.JARVIS, "Hermès momentanément saturé : Jarvis répond directement")
@@ -436,7 +456,7 @@ object Routeur {
         val reponseCourte = t.split(Regex("\\s+")).size <= 4 && !t.endsWith("?") && precedent != null && precedent.takeLast(250).contains("?") &&
             !ORCHESTRATION.containsMatchIn(t) && !FREEBOX.containsMatchIn(t) && !FICHIERS.containsMatchIn(t) && !WEB.containsMatchIn(t)
         if (BREF.matches(t) || reponseCourte) return Choix(derniere, if (derniere == Cible.HERMES) "suite de la conversation avec Hermès" else "suite de la conversation avec Jarvis")
-        if (mode == "tout") return if (commandeSimple(t)) Choix(Cible.JARVIS, "commande simple : Jarvis l'exécute tout de suite")
+        if (mode == "tout") return if (commandeSimple(t) && competenceHermes == null) Choix(Cible.JARVIS, "commande simple : Jarvis l'exécute tout de suite")
             else Choix(Cible.HERMES, "Hermès pour tout : il confie les actions du téléphone à Jarvis")
         // Jarvis d'abord (défaut) : Hermès directement seulement pour ce que Jarvis ne sait pas faire seul ;
         // pour tout le reste Jarvis répond, et passe la main à Hermès s'il n'aboutit pas (Brain.reply).
@@ -444,6 +464,8 @@ object Routeur {
             ORCHESTRATION.containsMatchIn(t) || multiEtapes(t) -> Choix(Cible.HERMES, "automatisme / plusieurs étapes : Hermès orchestre")
             homeAssistantApi(t) -> Choix(Cible.JARVIS, "Home Assistant : API (pas de SSH)")
             HA.containsMatchIn(t) -> Choix(Cible.HERMES, "Home Assistant côté serveur (maintenance, panne) : moteur approfondi")
+            // Ce qu'Hermès faisait seul (skills ajoutés : procédures, ponts, accès…) reste chez lui.
+            competenceHermes != null -> Choix(Cible.HERMES, "compétence d'Hermès « $competenceHermes »")
             SERVEUR.containsMatchIn(t) -> Choix(Cible.HERMES, "serveur / SSH : Hermès (notes, skills, terminal)")
             WEB.containsMatchIn(t) -> Choix(Cible.HERMES, "recherche sur internet : Hermès")
             else -> Choix(Cible.JARVIS, "Jarvis d'abord (Hermès s'il n'aboutit pas)")

@@ -271,7 +271,26 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
 
     // ------------------------------------------------------------------ disque dur de la box (droit « explorer »)
 
-    private fun b64(chemin: String) = android.util.Base64.encodeToString(chemin.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+    /** Chemin en base64 pour l'URL (« / » et « + » du base64 échappés, sinon ils couperaient l'adresse). */
+    private fun b64(chemin: String) = java.util.Base64.getEncoder().encodeToString(chemin.toByteArray(Charsets.UTF_8))
+        .replace("+", "%2B").replace("/", "%2F")
+    private fun deB64(v: String) = runCatching { String(java.util.Base64.getDecoder().decode(v), Charsets.UTF_8) }.getOrDefault("")
+
+    /** Disque vu par la Freebox (interne, USB, SATA…) : partition montée → chemin dans l'explorateur. */
+    private data class Volume(val chemin: String, val libelle: String, val type: String, val etat: String, val total: Long, val libre: Long)
+
+    /** Tous les disques et partitions connus de la Freebox (API stockage), montés ou non. */
+    private fun volumes(app: JarvisApp, s: String): List<Volume> = runCatching {
+        liste(json(app, "storage/disk/", s)).flatMap { d ->
+            val type = d.optString("type").ifBlank { d.optString("connector") }
+            val parts = liste(d.optJSONArray("partitions"))
+            if (parts.isEmpty()) listOf(Volume("", d.optString("model").ifBlank { "Disque" }, type, d.optString("state"), d.optLong("total_bytes"), 0))
+            else parts.map { p ->
+                val chemin = deB64(p.optString("path")).ifBlank { p.optString("label").takeIf { it.isNotBlank() }?.let { "/$it" }.orEmpty() }
+                Volume(chemin, p.optString("label").ifBlank { d.optString("model").ifBlank { "Disque" } }, type, p.optString("state"), p.optLong("total_bytes"), p.optLong("free_bytes"))
+            }
+        }
+    }.getOrDefault(emptyList())
     internal fun cle(t: String) = java.text.Normalizer.normalize(t.lowercase(), java.text.Normalizer.Form.NFD)
         .replace(Regex("\\p{M}+"), "").replace(Regex("[^a-z0-9]+"), " ").trim().removeSuffix("s")
 
@@ -282,12 +301,15 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
      * Retrouve un dossier du disque de la box à partir d'un nom approximatif (« téléchargement », « films/séries »,
      * « /Disque dur/Téléchargements ») : chaque morceau est comparé sans accents, majuscules ni pluriel.
      */
-    private fun resoudre(app: JarvisApp, s: String, demande: String): String? = resoudreAvec({ c -> ls(app, s, c) }, demande)
+    private fun resoudre(app: JarvisApp, s: String, demande: String, volumes: List<Volume>): String? =
+        resoudreAvec({ c -> ls(app, s, c) }, demande, volumes.filter { it.etat == "mounted" }.map { it.chemin })
 
-    internal fun resoudreAvec(ls: (String) -> List<JSONObject>, demande: String): String? {
+    internal fun resoudreAvec(ls: (String) -> List<JSONObject>, demande: String, racinesConnues: List<String> = emptyList()): String? {
         val morceaux = demande.trim().trim('/').split('/').map { it.trim() }.filter { it.isNotBlank() }
         if (morceaux.isEmpty()) return "/"
-        val disques = ls("/").filter { it.optString("type") == "dir" }.map { it.optString("name") }
+        // Racines de l'explorateur, complétées par les disques montés connus de l'API stockage (USB compris).
+        val disques = (runCatching { ls("/") }.getOrDefault(emptyList()).filter { it.optString("type") == "dir" }.map { it.optString("name") } +
+            racinesConnues.map { it.trim('/') }.filter { it.isNotBlank() && !it.contains('/') }).distinct()
         fun suivre(depart: String, reste: List<String>): String? {
             var courant = depart
             for (m in reste) {
@@ -308,21 +330,41 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
 
     private fun taille(o: Long) = when { o >= 1L shl 30 -> "%.1f Go".format(o / 1073741824.0); o >= 1L shl 20 -> "%.1f Mo".format(o / 1048576.0); o >= 1024 -> "${o / 1024} Ko"; else -> "$o o" }
 
-    private fun fichiers(app: JarvisApp, s: String, demande: String): String {
-        val chemin = resoudre(app, s, demande)
-            ?: return "📂 Aucun dossier « $demande » sur le disque de la Freebox. Disques : " +
-                ls(app, s, "/").joinToString(", ") { it.optString("name") }.ifBlank { "aucun disque détecté (disque branché et allumé ?)" }
-        val l = ls(app, s, chemin).sortedWith(compareBy<JSONObject> { it.optString("type") != "dir" }.thenBy { it.optString("name").lowercase() })
-        val titre = if (chemin == "/") "💽 Disques de la Freebox" else "📂 Freebox › ${chemin.trim('/').replace("/", " › ")}"
-        if (l.isEmpty()) return "$titre : dossier vide (aucun fichier)."
-        val nbFichiers = l.count { it.optString("type") != "dir" }
-        val nbDossiers = l.size - nbFichiers
+    private fun libelleVolume(v: Volume) = "${when (v.type.lowercase()) { "usb" -> "🔌 USB"; "internal" -> "💽 interne"; "sata", "esata" -> "💽 SATA"; else -> "💽 ${v.type}" }} « ${v.libelle} »" +
+        (if (v.total > 0) " — ${taille(v.total)}" + (if (v.libre > 0) ", ${taille(v.libre)} libres" else "") else "") +
+        when (v.etat) { "mounted" -> ""; "umounted", "unmounted" -> " — ⚠️ non monté"; "error" -> " — ⚠️ en erreur"; "checking" -> " — vérification en cours"; else -> if (v.etat.isBlank()) "" else " — ${v.etat}" }
+
+    private fun lignes(l: List<JSONObject>): String {
         val date = java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.FRENCH)
-        return "$titre — $nbFichiers fichier(s), $nbDossiers dossier(s)\n" + l.take(150).joinToString("\n") {
-            if (it.optString("type") == "dir") "📁 ${it.optString("name")}" + it.optInt("foldercount", -1).let { f -> if (f > 0) " ($f dossiers)" else "" } +
-                it.optInt("filecount", -1).let { f -> if (f >= 0) " · $f fichier(s)" else "" }
+        return l.sortedWith(compareBy<JSONObject> { it.optString("type") != "dir" }.thenBy { it.optString("name").lowercase() }).take(150).joinToString("\n") {
+            if (it.optString("type") == "dir") "📁 ${it.optString("name")}" + it.optInt("filecount", -1).let { f -> if (f >= 0) " · $f élément(s)" else "" }
             else "📄 ${it.optString("name")} — ${taille(it.optLong("size"))}" + it.optLong("modification").let { m -> if (m > 0) " — ${date.format(java.util.Date(m * 1000))}" else "" }
         } + (if (l.size > 150) "\n… (${l.size} éléments)" else "")
+    }
+
+    private fun fichiers(app: JarvisApp, s: String, demande: String): String {
+        val entete = "🔐 Freebox OS (association JARVIS)\n"
+        val vols = volumes(app, s)
+        val montes = vols.filter { it.etat == "mounted" && it.chemin.isNotBlank() }
+        val bilanDisques = if (vols.isEmpty()) "" else "Disques vus par la Freebox :\n" + vols.joinToString("\n") { "• " + libelleVolume(it) + (if (it.chemin.isNotBlank()) " → ${it.chemin}" else "") } + "\n\n"
+        if (demande.isBlank()) {
+            // Vue d'ensemble : chaque disque monté et son premier niveau.
+            if (vols.isEmpty() && runCatching { ls(app, s, "/") }.getOrDefault(emptyList()).isEmpty())
+                return entete + "💽 La Freebox ne signale aucun disque. Vérifie que le disque USB est branché et alimenté, puis qu'il apparaît dans Freebox OS › Explorateur de fichiers (ou Paramètres › Disques)."
+            val racines = if (montes.isNotEmpty()) montes.map { it.chemin } else ls(app, s, "/").filter { it.optString("type") == "dir" }.map { "/" + it.optString("name") }
+            return entete + bilanDisques + racines.joinToString("\n\n") { r ->
+                val l = runCatching { ls(app, s, r) }.getOrElse { e -> return@joinToString "📂 $r : ❌ ${e.message}" }
+                "📂 Freebox › ${r.trim('/').replace("/", " › ")} — ${l.count { it.optString("type") != "dir" }} fichier(s), ${l.count { it.optString("type") == "dir" }} dossier(s)\n" +
+                    (if (l.isEmpty()) "(vide)" else lignes(l))
+            }
+        }
+        val chemin = resoudre(app, s, demande, vols)
+            ?: return entete + bilanDisques + "📂 Aucun dossier « $demande » trouvé sur ${if (montes.size > 1) "les disques" else "le disque"} de la Freebox." +
+                (if (vols.isEmpty()) " La Freebox ne signale aucun disque monté : vérifie le branchement du disque USB." else " Demande-moi « liste le disque de la box » pour voir les dossiers disponibles.")
+        val l = ls(app, s, chemin)
+        val titre = "📂 Freebox › ${chemin.trim('/').replace("/", " › ")}"
+        if (l.isEmpty()) return entete + "$titre : dossier vide (aucun fichier)."
+        return entete + "$titre — ${l.count { it.optString("type") != "dir" }} fichier(s), ${l.count { it.optString("type") == "dir" }} dossier(s)\n" + lignes(l)
     }
 
     private fun telechargements(app: JarvisApp, s: String): String {
@@ -338,6 +380,7 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
 
     private fun executer(app: JarvisApp, s: String, action: String, a: JSONObject): String = when (action) {
         "fichiers", "disque", "lister_fichiers", "explorer", "dossier" -> fichiers(app, s, a.optString("chemin").ifBlank { a.optString("dossier") })
+        "disques", "stockage" -> volumes(app, s).let { v -> if (v.isEmpty()) "💽 La Freebox ne signale aucun disque (branché, alimenté et visible dans Freebox OS ?)." else "💽 Disques de la Freebox :\n" + v.joinToString("\n") { "• " + libelleVolume(it) + (if (it.chemin.isNotBlank()) " → ${it.chemin}" else "") } }
         "telechargements", "telechargements_en_cours", "downloads" -> telechargements(app, s)
         "etat", "statut", "" -> {
             val sys = json(app, "system/", s) as? JSONObject ?: JSONObject()

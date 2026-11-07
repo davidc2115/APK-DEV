@@ -2,11 +2,13 @@
 
 Un fil de fond, tant que la passerelle tourne :
   - envoie à Jarvis la mémoire d'Hermès (memories/MEMORY.md et USER.md) dès qu'elle change ;
+  - envoie à Jarvis ce qu'Hermès sait faire en plus (skills ajoutés, serveurs MCP, plugins, automatismes) ;
   - récupère la mémoire de Jarvis et la recopie dans un bloc géré de SOUL.md, chargé par Hermès à chaque session
     (y compris les tâches planifiées et les sous-agents).
 Aucune erreur ne remonte : si Jarvis est fermé, on réessaie au tour suivant.
 """
 import hashlib
+import json
 import os
 import re
 import threading
@@ -77,6 +79,58 @@ def ecrire_soul(soul: Path, bloc: str) -> bool:
     return True
 
 
+def _frontmatter(texte: str) -> dict:
+    """name / description d'un SKILL.md (frontmatter YAML simple, sans dépendance)."""
+    m = re.match(r"^---\s*\n(.*?)\n---", texte, flags=re.S)
+    out = {}
+    if m:
+        for ligne in m.group(1).splitlines():
+            if ":" in ligne and not ligne.startswith((" ", "\t")):
+                k, v = ligne.split(":", 1)
+                out[k.strip()] = v.strip().strip("'\"")
+    return out
+
+
+def capacites(home: Path) -> dict:
+    """Ce qu'Hermès sait faire EN PLUS de Jarvis : skills ajoutés/créés (hors skills fournis d'origine),
+    serveurs MCP et plugins configurés, automatismes (cron)."""
+    skills = []
+    racine = home / "skills"
+    fournis = set()
+    try:
+        for ligne in (racine / ".bundled_manifest").read_text(encoding="utf-8").splitlines():
+            if ":" in ligne:
+                fournis.add(ligne.split(":", 1)[0].strip())
+    except OSError:
+        pass
+    if racine.is_dir():
+        for f in sorted(racine.rglob("SKILL.md")):
+            if any(p.startswith(".") for p in f.relative_to(racine).parts[:-1]):
+                continue
+            nom = f.parent.name
+            if nom in fournis:
+                continue
+            fm = _frontmatter(_lire(f))
+            skills.append({"nom": fm.get("name") or nom, "description": (fm.get("description") or "")[:300]})
+    mcp = []
+    cfg = _lire(home / "config.yaml")
+    bloc = re.search(r"^mcp_servers:\s*\n((?:[ \t]+.*\n?)*)", cfg, flags=re.M)
+    if bloc:
+        mcp = [m.group(1) for m in re.finditer(r"^  ([A-Za-z0-9_.-]+):\s*$", bloc.group(1), flags=re.M) if m.group(1) != "jarvis"]
+    plugins = sorted(p.name for p in (home / "plugins").iterdir() if p.is_dir() and not p.name.startswith(".")) if (home / "plugins").is_dir() else []
+    taches = []
+    try:
+        brut = json.loads(_lire(home / "cron" / "jobs.json") or "[]")
+        jobs = brut.get("jobs", []) if isinstance(brut, dict) else brut
+        for j in jobs if isinstance(jobs, list) else []:
+            if isinstance(j, dict):
+                taches.append({"nom": str(j.get("name") or j.get("id") or ""), "quand": str(j.get("schedule_display") or j.get("schedule") or ""),
+                               "actif": bool(j.get("enabled", True))})
+    except Exception:
+        pass
+    return {"skills": skills[:80], "mcp": mcp[:20], "plugins": plugins[:30], "automatismes": taches[:40]}
+
+
 def synchroniser(home: Path, etat: dict) -> None:
     url, jeton = _pont(home)
     if not url or not jeton:
@@ -88,6 +142,11 @@ def synchroniser(home: Path, etat: dict) -> None:
         code, _ = _appel("POST", url + "/memoire/hermes", jeton, texte)
         if code == 200:
             etat["envoi"] = empreinte
+    cap = json.dumps(capacites(home), ensure_ascii=False, sort_keys=True)
+    if cap != etat.get("capacites"):
+        code, _ = _appel("POST", url + "/memoire/hermes-capacites", jeton, cap)
+        if code == 200:
+            etat["capacites"] = cap
     code, bloc = _appel("GET", url + "/memoire/jarvis", jeton)
     if code == 200 and bloc != etat.get("jarvis"):
         ecrire_soul(home / "SOUL.md", bloc)

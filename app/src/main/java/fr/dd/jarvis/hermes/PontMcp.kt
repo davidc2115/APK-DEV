@@ -46,6 +46,8 @@ object PontMcp {
         fun memoireHermes(texte: String) {}
         /** Mémoire de Jarvis à recopier dans Hermès. */
         fun memoireJarvis(): String = ""
+        /** Capacités propres à Hermès (skills ajoutés, MCP, plugins, automatismes), JSON. */
+        fun capacitesHermes(json: String) {}
     }
 
     /** Outils de la conversation en cours (avec SES confirmations) ; sinon une boîte d'outils autonome. */
@@ -67,6 +69,7 @@ object PontMcp {
         override fun groqModeles() = RelaisGroq.modeles(app)
         override fun memoireHermes(texte: String) { runCatching { app.memo.majHermes(texte) } }
         override fun memoireJarvis(): String = runCatching { app.memo.pourHermes() }.getOrDefault("")
+        override fun capacitesHermes(json: String) { runCatching { app.memo.majCapacitesHermes(json) } }
         private val defaut by lazy { ToolBox(app) { _, force -> !force } }
         private fun boite() = boiteActive ?: defaut
         override fun jeton() = app.store.mcpJeton.value
@@ -310,6 +313,7 @@ object PontMcp {
             // Mémoire partagée : le hook « jarvis-memoire » d'Hermès envoie la sienne et recopie celle de Jarvis.
             r.chemin.trimEnd('/') == "/memoire/hermes" && r.methode == "POST" -> { f.memoireHermes(r.corps); repondre(s, 200, """{"ok":true}""") }
             r.chemin.trimEnd('/') == "/memoire/jarvis" && r.methode == "GET" -> repondre(s, 200, f.memoireJarvis(), type = "text/plain")
+            r.chemin.trimEnd('/') == "/memoire/hermes-capacites" && r.methode == "POST" -> { f.capacitesHermes(r.corps); repondre(s, 200, """{"ok":true}""") }
             r.chemin.trimEnd('/') == "/groq/v1/models" && r.methode == "GET" -> repondre(s, 200, f.groqModeles())
             r.chemin.trimEnd('/') == "/groq/v1/chat/completions" && r.methode == "POST" -> {
                 val corps = runCatching { JSONObject(r.corps) }.getOrElse { return@use repondre(s, 400, """{"error":{"message":"JSON invalide"}}""") }

@@ -62,14 +62,19 @@ class Brain(
         val multi = fr.dd.jarvis.hermes.Routeur.multiEtapes(texteUser)
         val reflexes = pourHermes || !fr.dd.jarvis.hermes.Routeur.pourHermesSeul(texteUser)
         fun reflexe(r: String) = r.also { if (!pourHermes) fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS }
+        // Une procédure qu'Hermès a apprise (skill ajouté) passe avant les raccourcis de Jarvis sur le même sujet.
+        val competence = if (pourHermes || app.store.hermesMode.value == "off") null
+            else runCatching { fr.dd.jarvis.hermes.Routeur.competence(texteUser, app.memo.skillsHermes()) }.getOrNull()
         if (reflexes) {
             if (!multi) commandeImmediate(texteUser, onStatus)?.let { return reflexe(it) }
             positionDirecte(dernier, history, onStatus)?.let { return reflexe(it) }
-            rangementDirect(history, onStatus)?.let { return reflexe(it) }
-            if (!multi) rechercheDirecte(texteUser, onStatus)?.let { return reflexe(it) }
-            if (!multi) freeboxDirect(texteUser, onStatus)?.let { return reflexe(it) }
-            if (!multi) videoDirecte(history, onStatus)?.let { return reflexe(it) }
-            if (!multi) installationDirecte(texteUser, onStatus)?.let { return reflexe(it) }
+            if (competence == null) {
+                rangementDirect(history, onStatus)?.let { return reflexe(it) }
+                if (!multi) rechercheDirecte(texteUser, onStatus)?.let { return reflexe(it) }
+                if (!multi) freeboxDirect(texteUser, onStatus)?.let { return reflexe(it) }
+                if (!multi) videoDirecte(history, onStatus)?.let { return reflexe(it) }
+                if (!multi) installationDirecte(texteUser, onStatus)?.let { return reflexe(it) }
+            }
         }
         // Hermès, cerveau principal (mode « tout » : toutes les autres demandes ; mode « auto » : les tâches complexes).
         // S'il est indisponible, Jarvis reprend la main avec ses outils.
@@ -127,7 +132,7 @@ class Brain(
         val messages = JSONArray()
         messages.put(JSONObject().put("role", "system").put("content",
             (if (pourHermes) "Tu es l'agent téléphone de JARVIS, missionné par Hermès (le cerveau) : exécute la consigne avec tes outils, puis rends un compte rendu factuel et complet (résultats réels, chemins, identifiants, erreurs exactes), sans poser de question sauf si une information indispensable manque.\n\n" else "") +
-            Prompts.brain(userName()) + app.memo.toutes() + app.memo.hermesPourPrompt() + (if (societeNeeded) "\n\n" + fr.dd.jarvis.societe.SocieteTools.PROMPT else "") +
+            Prompts.brain(userName()) + app.memo.toutes() + app.memo.hermesPourPrompt() + app.memo.capacitesPourPrompt() + (if (societeNeeded) "\n\n" + fr.dd.jarvis.societe.SocieteTools.PROMPT else "") +
                 (if (plan != null && plan.note.isNotBlank()) "\n\nAnalyse préalable de la demande (Gemini) — suis ce plan, avec les outils fournis : ${plan.note}" else "")))
         // Réduction de tokens sans perte de précision : seuls les derniers échanges (où un détail précis — liste de fichiers,
         // de SMS, de permissions… — a des chances d'être encore repris par la demande en cours) gardent le plafond large de
@@ -367,7 +372,8 @@ class Brain(
         // Disque : si l'API Freebox refuse (droit « explorer » non accordé…), essai par le partage réseau (SMB/FTP).
         if (action == "fichiers" && r.startsWith("❌")) {
             val partage = runCatching { tools.execute("box_disque", JSONObject().put("action", if (args.optString("chemin").isBlank()) "partages" else "lister").put("chemin", args.optString("chemin"))).text }.getOrNull()
-            if (partage != null && partage.startsWith("📂")) return partage
+            if (partage != null && partage.startsWith("📂") && Regex("^\\s*(📁|📄|\\S+/|d |- )", RegexOption.MULTILINE).containsMatchIn(partage.substringAfter('\n', "")))
+                return "$r\n\nℹ️ Contenu lu par le partage réseau de la box (Réglages › Box) :\n$partage"
         }
         return r
     }
