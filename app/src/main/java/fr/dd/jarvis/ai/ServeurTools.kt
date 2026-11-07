@@ -69,7 +69,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
             mapOf("ip" to prop("Adresse de l'imprimante (IP privée ou publique/nom d'hôte si accessible)."), "fichier" to prop("Nom d'un fichier créé par JARVIS (optionnel)."), "texte" to prop("Texte (Markdown) à imprimer (optionnel)."),
                 "titre" to prop("Titre du travail."), "copies" to prop("Nombre de copies (défaut 1)."), "via" to prop("local (défaut) ou serveur.")), listOf("ip")),
         tool("appareils_liste", "Réseau : liste les appareils enregistrés lors des analyses (IP, nom, type, ports, dernière vue) et les IP publiques vues.", emptyMap()),
-        tool("appareil_nommer", "Réseau : donne un nom personnalisé à un appareil enregistré (ex. « Imprimante bureau », « NAS »).", mapOf("ip" to prop("Adresse IP de l'appareil."), "nom" to prop("Nom à lui donner.")), listOf("ip", "nom")),
+        tool("appareil_nommer", "Mémoire réseau : attribue un nom humain à une adresse IP (ex. « Imprimante Canon bureau », « Freebox », « NAS Debian »). Le nom est conservé lors des prochains scans ; si le scan connaît l'adresse MAC, Jarvis rattache automatiquement le même appareil à sa nouvelle IP DHCP et conserve l'ancien IP dans l'historique. Peut aussi créer une fiche d'identification avant le prochain scan.", mapOf("ip" to prop("Adresse IPv4 privée actuelle de l'appareil."), "nom" to prop("Nom clair à mémoriser pour cet appareil.")), listOf("ip", "nom")),
         tool("ip_publique", "Réseau : détecte l'adresse IP publique actuelle (téléphone et, si SSH configuré, serveur) et l'enregistre pour une connexion à distance ; signale si elle a changé.", emptyMap()),
         tool("box_disque", "Box internet : accède au disque dur USB branché sur la box (SMB ou FTP, selon Réglages › Box) : liste les partages et dossiers, lit un fichier texte, le télécharge dans l'appli, y envoie un fichier créé par JARVIS, crée un dossier, supprime, renomme ou déplace un fichier/dossier (utile pour réorganiser une bibliothèque de films/séries pour Plex, par exemple), ou lance directement la lecture d'une vidéo dans le lecteur vidéo du téléphone (aucune app spécifique requise, pas de téléchargement).",
             mapOf("action" to prop("partages | lister | lire | telecharger | envoyer | supprimer | dossier | renommer | deplacer | lire_telephone"), "chemin" to prop("Chemin sur la box : partage/dossier/fichier (ex. « Disque dur/Photos/2026 »). Pour renommer/deplacer : le chemin ACTUEL (source)."), "fichier" to prop("envoyer : nom du fichier créé par JARVIS à copier sur la box. renommer/deplacer : le NOUVEAU chemin complet sur la box (ex. « Disque dur/Films/Dirty Dancing (1987).avi »).")), listOf("action")),
@@ -189,7 +189,12 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 } else ToolResult(github(a))
             }
             "appareils_liste" -> ToolResult(Registre.liste(app), direct = true)
-            "appareil_nommer" -> ToolResult(if (Registre.nommer(app, a.optString("ip").trim(), a.optString("nom").trim())) "✅ ${a.optString("ip")} s'appelle maintenant « ${a.optString("nom")} »." else "Appareil inconnu : lance d'abord une analyse du réseau.")
+            "appareil_nommer" -> {
+                val ip = a.optString("ip").trim()
+                val nom = a.optString("nom").trim()
+                if (Registre.nommer(app, ip, nom)) ToolResult("✅ Adresse **$ip** mémorisée sous le nom « $nom ». Jarvis réutilisera ce nom dans sa liste réseau. Si l'appareil est identifié par MAC lors d'un scan depuis le serveur, le nom suivra aussi ses changements d'adresse DHCP.", direct = true)
+                else ToolResult("❌ Adresse IP privée ou nom invalide. Indique une IPv4 locale et un nom non vide.")
+            }
             "ip_publique" -> {
                 val sb = StringBuilder("# 🌍 Adresses IP\n")
                 // Mémoriser le Wi-Fi avant la requête publique pour la lier à la box.
@@ -254,14 +259,15 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                     ssh()
                     val l = Serveur.scanReseau(app)
                     val neufs = Registre.appareils(app, l, "Réseau du serveur")
-                    return ToolResult("# 📡 Réseau du serveur — ${l.size} appareil(s)\n\n| IP | MAC | Type | Ports |\n|---|---|---|---|\n" + l.joinToString("\n") { "| ${it.ip} | ${it.info.removePrefix("MAC ")} | ${it.type} | ${it.ports.joinToString(",")} |" } + "\n\n💾 $neufs nouvel(s) appareil(s) enregistré(s).", direct = true)
+                    val alias = Registre.alias(app)
+                    return ToolResult("# 📡 Réseau du serveur — ${l.size} appareil(s)\n\n| IP | Nom mémorisé | MAC | Type | Ports |\n|---|---|---|---|---|\n" + l.joinToString("\n") { "| ${it.ip} | ${alias[it.ip].orEmpty().ifBlank { "—" }} | ${it.info.removePrefix("MAC ")} | ${it.type} | ${it.ports.joinToString(",")} |" } + "\n\n💾 $neufs nouvel(s) appareil(s) enregistré(s).", direct = true)
                 }
                 val i = Reseau.infos(app) ?: return ToolResult("Pas de réseau.")
                 if (!i.wifi) return ToolResult("Le téléphone n'est pas connecté au Wi-Fi : je ne peux pas analyser le réseau local.")
                 val liste = Reseau.scanner(app)
                 val imps = Reseau.decouvrir(app, listOf("_ipp._tcp", "_printer._tcp"), 3500)
-                val alias = Registre.alias(app)
                 val neufs = Registre.appareils(app, liste, "Wi-Fi ${i.ip.substringBeforeLast('.')}.x")
+                val alias = Registre.alias(app)
                 val pub = Reseau.ippPublique()
                 val chg = if (pub.isNotBlank()) Registre.ipPublique(app, pub, "Wi-Fi ${i.ip.substringBeforeLast('.')}.x") else ""
                 val sb = StringBuilder("# 📡 Réseau ${i.ip}/${i.prefix} — ${liste.size} appareil(s)\n\n| IP | Nom | Type | Ports | Page web |\n|---|---|---|---|---|\n")
