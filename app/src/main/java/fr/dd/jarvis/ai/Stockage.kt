@@ -43,12 +43,13 @@ object Stockage {
         val mots = q.split(Regex("\\s+")).filter { it.length >= 2 }
         val root = racine().canonicalFile
         val trouves = mutableListOf<File>()
-        root.walkTopDown().onEnter { dir -> dir == root || !(dir.parentFile?.name == "Android" && dir.name in setOf("data", "obb")) }.forEach { f ->
-            if (f.isFile) {
-                val nom = java.text.Normalizer.normalize(f.nameWithoutExtension.lowercase(), java.text.Normalizer.Form.NFD)
-                    .replace(Regex("\\p{M}+"), "").replace(Regex("[^a-z0-9]+"), " ")
-                if (mots.all { nom.contains(it) }) { trouves += f; if (trouves.size >= limite) return@forEach }
-            }
+        val parcours = root.walkTopDown().onEnter { dir -> dir == root || !(dir.parentFile?.name == "Android" && dir.name in setOf("data", "obb")) }.iterator()
+        while (parcours.hasNext() && trouves.size < limite) {
+            val f = parcours.next()
+            if (!f.isFile) continue
+            val nom = java.text.Normalizer.normalize(f.name.lowercase(), java.text.Normalizer.Form.NFD)
+                .replace(Regex("\\p{M}+"), "").replace(Regex("[^a-z0-9]+"), " ")
+            if (mots.all { nom.contains(it) }) trouves += f
         }
         if (trouves.isEmpty()) return "Aucun fichier trouvé pour « $query » dans le stockage partagé accessible du téléphone."
         return "🔎 ${trouves.size} résultat(s) pour « $query » :\n" + trouves.joinToString("\n") { f ->
