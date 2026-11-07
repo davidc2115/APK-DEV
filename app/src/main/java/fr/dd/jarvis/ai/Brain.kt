@@ -6,8 +6,8 @@ import org.json.JSONObject
 data class ChatMsg(val fromUser: Boolean, val text: String, val ts: Long = System.currentTimeMillis())
 
 /**
- * Point d'entrée conversationnel de Jarvis. Le routeur choisit entre Hermès (cerveau : tâches complexes, automatismes,
- * sous-agents Groq/Gemini) et Jarvis (exécution rapide sur le téléphone). Quand Hermès confie une action à Jarvis
+ * Point d'entrée conversationnel de Jarvis. Hermès est le cerveau principal ; Jarvis conserve les réflexes Android
+ * instantanés et expose ses outils à Hermès via MCP. Quand Hermès confie une action à Jarvis
  * (outil MCP jarvis_agent), [reply] tourne avec pourHermes = true : pas de renvoi vers Hermès, pas de boucle.
  */
 class Brain(
