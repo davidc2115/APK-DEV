@@ -2,4 +2,6 @@
 <resources>
     <string name="app_name">JARVIS</string>
     <string name="a11y_description">Permet à JARVIS de lire l\'écran et d\'effectuer des gestes (appuyer, défiler, retour, accueil) à ta demande.</string>
+    <string name="widget_description">Tête du dragon, prochain rendez-vous et bouton pour parler à JARVIS.</string>
+    <string name="tuile_parler">Parler à JARVIS</string>
 </resources>

@@ -253,7 +253,8 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
      * Confie la conversation à Hermès. Renvoie sa réponse, ou null s'il est indisponible (l'appelant bascule alors
      * par le cerveau de secours Jarvis). Pendant l'appel, les outils exposés à Hermès sont ceux de [boite] (mêmes confirmations).
      */
-    suspend fun repondre(app: JarvisApp, history: List<ChatMsg>, boite: ToolBox?, userName: String, onStatus: (String) -> Unit, tentativeJarvis: String? = null): String? {
+    suspend fun repondre(app: JarvisApp, history: List<ChatMsg>, boite: ToolBox?, userName: String, onStatus: (String) -> Unit, tentativeJarvis: String? = null,
+                         onTexte: ((String) -> Unit)? = null): String? {
         if (!enLigne()) { relancerSiBesoin(app); return null }
         val derniere = history.lastOrNull { it.fromUser }?.text.orEmpty()
         val sujet = history.filter { it.fromUser }.takeLast(3).joinToString(" ") { it.text.take(600) }
@@ -277,7 +278,7 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
             "Ta partie rapide a d'abord essayé de traiter cette demande sans aboutir (l'utilisateur n'a PAS vu cette tentative). Brouillon : « ${tentativeJarvis.take(1500)} ». " +
                 "Reprends la demande avec ta mémoire, tes notes, tes skills et tous tes outils ; ne répète pas ce qui a échoué de la même façon, " +
                 "ne redemande pas une information que tu as déjà (identifiants, adresses, réglages) et réponds directement, sans évoquer cette première tentative."))
-        return appeler(app, messages, boite, onStatus, derniere)
+        return appeler(app, messages, boite, onStatus, derniere, onTexte = onTexte)
     }
 
     /** Délégation d'une tâche précise (outil hermes_deleguer du cerveau Jarvis de secours). */
@@ -325,7 +326,8 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
 
     internal const val MESSAGE_ARRIERE_PLAN = "⏳ C'est plus long que prévu : je continue en arrière-plan. Le résultat arrivera ici (et en notification) dès qu'il sera prêt — tu peux me demander autre chose en attendant."
 
-    private suspend fun appeler(app: JarvisApp, messages: JSONArray, boite: ToolBox?, onStatus: (String) -> Unit, demande: String = "", attenteMs: Long = attenteMaxMs): String? {
+    private suspend fun appeler(app: JarvisApp, messages: JSONArray, boite: ToolBox?, onStatus: (String) -> Unit, demande: String = "", attenteMs: Long = attenteMaxMs,
+                                onTexte: ((String) -> Unit)? = null): String? {
         PontMcp.demarrer(app)
         val precedente = PontMcp.boiteActive
         val statutPrecedent = PontMcp.statutActif
@@ -340,8 +342,11 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
         PontMcp.statutActif = statut
         statut("🪽 Hermès réfléchit…")
         val appel = AtomicReference<okhttp3.Call?>(null)
+        // Réponse en flux : chaque morceau de texte part tout de suite (affichage et voix) tant que l'utilisateur attend.
+        val ecrit = AtomicBoolean(false)
+        val texte: ((String) -> Unit)? = onTexte?.let { f -> { d: String -> ecrit.set(true); if (attendu.get()) f(d) } }
         val travail = fond.async {
-            try { executer(app, messages, appel) } finally {
+            try { executer(app, messages, appel, texte, statut) } finally {
                 // Le pont n'est rendu que s'il est encore le nôtre (une autre demande a pu le prendre entre-temps).
                 if (boite != null && PontMcp.boiteActive === boite) PontMcp.boiteActive = precedente
                 if (PontMcp.statutActif === statut) PontMcp.statutActif = statutPrecedent
@@ -358,6 +363,8 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
         }
         try {
             withTimeoutOrNull(attenteMs) { travail.join() }
+            // Hermès a commencé à répondre : on le laisse finir sa phrase au lieu de passer en arrière-plan.
+            if (!travail.isCompleted && ecrit.get()) travail.join()
             if (travail.isCompleted) return travail.await()
             // Trop long : la demande continue en arrière-plan, l'utilisateur récupère la main.
             attendu.set(false)
@@ -403,8 +410,44 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
             }
     }
 
-    private fun executer(app: JarvisApp, messages: JSONArray, appel: AtomicReference<okhttp3.Call?>): String? {
-        val corps = JSONObject().put("model", "hermes-agent").put("messages", messages).put("stream", false)
+    /**
+     * Lecture du flux SSE d'Hermès : morceaux de réponse (« data: {choices[0].delta.content} ») et événements d'outils
+     * (« event: hermes.tool.progress »). Le texte écrit AVANT un outil (« je regarde… ») est dit au fil de l'eau ; la
+     * réponse retenue est celle écrite après le dernier outil.
+     */
+    internal class LecteurFlux(private val onTexte: (String) -> Unit, private val onOutil: (String) -> Unit) {
+        private val tout = StringBuilder()
+        private var apresOutil = StringBuilder()
+        private var evenement = ""
+        fun ligne(l: String) {
+            when {
+                l.startsWith("event:") -> evenement = l.removePrefix("event:").trim()
+                l.startsWith("data:") -> {
+                    val d = l.removePrefix("data:").trim()
+                    val ev = evenement; evenement = ""
+                    if (d == "[DONE]") return
+                    val j = runCatching { JSONObject(d) }.getOrNull() ?: return
+                    if (ev == "hermes.tool.progress") {
+                        if (j.optString("status") == "running") {
+                            onOutil("${j.optString("emoji").ifBlank { "⚙️" }} ${j.optString("label").ifBlank { j.optString("tool") }}".take(80))
+                            apresOutil = StringBuilder()
+                        }
+                    } else if (ev.isBlank()) {
+                        val delta = j.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("delta") ?: return
+                        if (!delta.has("content") || delta.isNull("content")) return
+                        val t = delta.optString("content")
+                        if (t.isNotEmpty()) { tout.append(t); apresOutil.append(t); onTexte(t) }
+                    }
+                }
+                l.isBlank() -> evenement = ""
+            }
+        }
+        fun reponse(): String = apresOutil.toString().trim().ifBlank { tout.toString().trim() }
+    }
+
+    private fun executer(app: JarvisApp, messages: JSONArray, appel: AtomicReference<okhttp3.Call?>,
+                         onTexte: ((String) -> Unit)? = null, statut: (String) -> Unit = {}): String? {
+        val corps = JSONObject().put("model", "hermes-agent").put("messages", messages).put("stream", onTexte != null)
         val req = Request.Builder().url("http://127.0.0.1:${HermesTermux.PORT_API}/v1/chat/completions")
             .header("Authorization", "Bearer ${app.store.hermesCle.value}")
             .header("X-Hermes-Session-Key", "jarvis")
@@ -412,13 +455,20 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
         val call = lent.newCall(req).also { appel.set(it) }
         return try {
             call.execute().use { r ->
-                val txt = r.body?.string().orEmpty()
                 if (!r.isSuccessful) {
                     if (r.code == 401) HermesTermux.message = "⚠️ Hermès refuse la clé de Jarvis : touche « Configurer Hermès »."
                     return null
                 }
-                val contenu = JSONObject(txt).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
-                    ?.optString("content").orEmpty().trim().ifBlank { null }
+                val contenu = if (onTexte != null && r.body?.contentType()?.subtype == "event-stream") {
+                    val lecteur = LecteurFlux(onTexte) { outil -> statut("🪽 $outil") }
+                    val src = r.body!!.source()
+                    while (true) { val l = src.readUtf8Line() ?: break; lecteur.ligne(l) }
+                    lecteur.reponse().ifBlank { null }
+                } else {
+                    val txt = r.body?.string().orEmpty()
+                    JSONObject(txt).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
+                        ?.optString("content").orEmpty().trim().ifBlank { null }
+                }
                 if (contenu != null && estPanne(contenu)) {
                     // Message d'erreur d'Hermès (ex. « conversation has grown too large… ») : jamais affiché tel quel.
                     degradeJusqua = System.currentTimeMillis() + DEGRADE_MS

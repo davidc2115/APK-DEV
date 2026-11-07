@@ -24,9 +24,9 @@ class Brain(
      * Jarvis. Si Jarvis n'aboutit pas (pas d'outil, rien trouvé, information manquante, erreur), Hermès reprend
      * AUTOMATIQUEMENT la demande — avec sa mémoire, ses notes, skills et outils — sans que l'utilisateur ait à le nommer.
      */
-    suspend fun reply(history: List<ChatMsg>, pourHermes: Boolean = false, onStatus: (String) -> Unit): String {
+    suspend fun reply(history: List<ChatMsg>, pourHermes: Boolean = false, onTexte: ((String) -> Unit)? = null, onStatus: (String) -> Unit): String {
         val suivi = Suivi()
-        val r = try { repondre(history, pourHermes, onStatus, suivi) }
+        val r = try { repondre(history, pourHermes, onStatus, suivi, onTexte) }
         catch (e: kotlinx.coroutines.CancellationException) { throw e }
         catch (e: Exception) {
             if (!suivi.cerveauJarvis || !escaladePossible(pourHermes, suivi)) throw e
@@ -40,7 +40,7 @@ class Brain(
         } + " : réponse directe de Jarvis."
         if (!suivi.cerveauJarvis || !escaladePossible(pourHermes, suivi) || !fr.dd.jarvis.hermes.Routeur.jarvisABesoinDHermes(r)) return r
         onStatus("🪽 Hermès prend le relais…")
-        val h = fr.dd.jarvis.hermes.Hermes.repondre(app, history, tools, userName(), onStatus, tentativeJarvis = r) ?: return r
+        val h = fr.dd.jarvis.hermes.Hermes.repondre(app, history, tools, userName(), onStatus, tentativeJarvis = r, onTexte = onTexte) ?: return r
         fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.HERMES
         return h
     }
@@ -48,7 +48,7 @@ class Brain(
     private fun escaladePossible(pourHermes: Boolean, suivi: Suivi) = !pourHermes && !suivi.hermesEssaye &&
         app.store.hermesMode.value in setOf("auto", "tout") && !fr.dd.jarvis.hermes.Hermes.degrade()
 
-    private suspend fun repondre(history: List<ChatMsg>, pourHermes: Boolean, onStatus: (String) -> Unit, suivi: Suivi): String {
+    private suspend fun repondre(history: List<ChatMsg>, pourHermes: Boolean, onStatus: (String) -> Unit, suivi: Suivi, onTexte: ((String) -> Unit)? = null): String {
         val recent = history.takeLast(4).filter { it.fromUser }.joinToString(" ") { it.text }
         val societeOn = fr.dd.jarvis.societe.SocieteTools.concerned(recent)
         val planningClientsSync = Regex("(planning|agenda).{0,100}(fiche|client)|(fiche|client).{0,100}(planning|agenda)", RegexOption.IGNORE_CASE).containsMatchIn(recent) &&
@@ -95,7 +95,7 @@ class Brain(
             if (choix.cible == fr.dd.jarvis.hermes.Routeur.Cible.JARVIS && app.store.hermesMode.value == "tout" && fr.dd.jarvis.hermes.Hermes.degrade()) suivi.hermesIndisponible = true
             if (choix.cible == fr.dd.jarvis.hermes.Routeur.Cible.HERMES) {
                 suivi.hermesEssaye = true
-                val r = fr.dd.jarvis.hermes.Hermes.repondre(app, history, tools, userName(), onStatus)
+                val r = fr.dd.jarvis.hermes.Hermes.repondre(app, history, tools, userName(), onStatus, onTexte = onTexte)
                 if (r != null) return r
                 fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS
                 suivi.hermesIndisponible = true

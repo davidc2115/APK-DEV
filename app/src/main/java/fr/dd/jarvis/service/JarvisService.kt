@@ -335,10 +335,13 @@ class JarvisService : Service() {
             }
             // Les demandes vocales suivent la même règle que le chat : Jarvis d'abord (réflexes instantanés, commandes du
             // téléphone), et Hermès automatiquement quand il le faut (automatismes, serveur, échec de Jarvis…).
+            // Voix progressive : Jarvis commence à parler dès la première phrase écrite par Hermès.
+            var relancer = true
+            val flux = withContext(Dispatchers.Main) { voice?.parole(700) { busy = false; if (relancer) ecouter() else goIdle() } }
             val reply = try {
                 fr.dd.jarvis.ai.Brain(app.llm, tools, app) { app.store.userName.value }
-                    .reply(app.chat.toList().takeLast(16)) { etat -> android.os.Handler(android.os.Looper.getMainLooper()).post { majNotification(etat) } }
-            } catch (e: CancellationException) { throw e }
+                    .reply(app.chat.toList().takeLast(16), onTexte = { d -> flux?.ajouter(d) }) { etat -> android.os.Handler(android.os.Looper.getMainLooper()).post { majNotification(etat) } }
+            } catch (e: CancellationException) { flux?.arreter(sansSuite = true); throw e }
               catch (e: Throwable) { "⚠️ ${e.message ?: e.javaClass.simpleName}" }
             val assistantMessage = ChatMsg(false, reply)
             withContext(Dispatchers.Main) {
@@ -355,8 +358,8 @@ class JarvisService : Service() {
                 // referme après quelques secondes de silence.
                 // Autoradio / Bluetooth : on ne rouvre le micro que si Jarvis pose une question — sinon il entendrait la
                 // radio ou la suite de sa propre réponse ; il suffit de redire « Jarvis » pour une nouvelle demande.
-                val relancer = awake && (voice?.sortieExterne() != true || reply.trimEnd().endsWith("?"))
-                voice?.speak(reply.take(700)) { busy = false; if (relancer) ecouter() else goIdle() } ?: run { busy = false }
+                relancer = awake && (voice?.sortieExterne() != true || reply.trimEnd().endsWith("?"))
+                flux?.finir(reply) ?: run { busy = false }
             }
         }
     }

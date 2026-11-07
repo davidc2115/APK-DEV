@@ -673,6 +673,17 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
         return if (t.count { it == '\uFFFD' } > 5) "Fichier binaire (${taille(e.taille)}) : demande-moi de le récupérer sur le téléphone." else "📄 ${lisible(e.chemin)}\n```\n" + t.take(8000) + "\n```"
     }
 
+    /** Résumé d'une ligne pour le centre de commande : connexion, débit descendant, place libre sur le disque. */
+    fun resume(app: JarvisApp): String? {
+        if (app.store.freeboxAppToken.value.isBlank()) return null
+        return avecSession(app) { s ->
+            val cx = json(app, "connection/", s) as? JSONObject ?: JSONObject()
+            val disque = volumes(app, s).filter { it.etat == "mounted" && it.total > 0 }.maxByOrNull { it.total }
+            (if (cx.optString("state") == "up") "🟢 En ligne" else "🔴 ${cx.optString("state").ifBlank { "hors ligne" }}") +
+                " · ⬇️ ${debit(cx.optLong("rate_down"))}" + (disque?.let { " · 💽 ${taille(it.libre)} libres" } ?: "")
+        }
+    }
+
     /** Actions de box_disque quand la Freebox est associée : tout passe par Freebox OS (plus de SMB/FTP à configurer). */
     suspend fun gererDisque(app: JarvisApp, action: String, chemin: String, fichier: String, confirm: suspend (String, Boolean) -> Boolean): String {
         val a = JSONObject().put("chemin", chemin)

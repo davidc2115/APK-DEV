@@ -33,6 +33,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     var partial by mutableStateOf("")
     /** Jarvis est en train de parler (animation de la tête du dragon). */
     var parle by mutableStateOf(false)
+    /** Réponse en cours d'écriture (flux d'Hermès), affichée et dite au fil de l'eau. */
+    var enDirect by mutableStateOf("")
         private set
     var pendingConfirm by mutableStateOf<String?>(null)
         private set
@@ -134,31 +136,43 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         messages.add(ChatMsg(true, t))
         busy = true
         status = "Réflexion…"
+        enDirect = ""
+        val conv = store.conversationMode.value || (fromVoice && voiceSession)
+        val parler = (store.speakReplies.value || (fromVoice && voiceSession)) && (fromVoice || conv)
+        voice.bargeIn = store.coupeParole.value
+        voice.duplex = store.duplex.value
+        // Réponse parlée (que l'on peut couper en parlant) qui démarre dès la première phrase écrite par Hermès, puis
+        // réécoute ; fin automatique après quelques secondes de silence. Autoradio / Bluetooth : réécoute seulement si
+        // Jarvis pose une question (sinon il entendrait la radio).
+        var finale = ""
+        val flux = if (!parler) null else voice.parole {
+            parle = false
+            val externe = voice.sortieExterne() && !finale.trimEnd().endsWith("?")
+            if (conv && (voiceSession || store.conversationMode.value)) { if (externe) voiceSession = false else ecouter() }
+        }
+        val principal = android.os.Handler(android.os.Looper.getMainLooper())
         viewModelScope.launch {
             val reply = try {
-                brain.reply(messages.toList()) { s -> status = s }
+                brain.reply(messages.toList(), onTexte = { d ->
+                    flux?.ajouter(d)
+                    principal.post { enDirect += d; if (flux != null) parle = true }
+                }) { s -> status = s }
             } catch (e: kotlinx.coroutines.CancellationException) {
+                flux?.arreter(sansSuite = true)
                 throw e
             } catch (e: Throwable) {
                 "⚠️ ${e.message ?: e.javaClass.simpleName}"
             }
+            finale = reply
+            enDirect = ""
             messages.add(ChatMsg(false, reply))
             busy = false
             status = ""
             persist()
-            val conv = store.conversationMode.value || (fromVoice && voiceSession)
             if (conv) incompris = 0
-            voice.bargeIn = store.coupeParole.value
-            voice.duplex = store.duplex.value
-            if ((store.speakReplies.value || (fromVoice && voiceSession)) && (fromVoice || conv)) {
-                // Réponse parlée (que l'on peut couper en parlant), puis réécoute ; fin automatique après quelques secondes de silence.
-                // Autoradio / Bluetooth : réécoute seulement si Jarvis pose une question (sinon il entendrait la radio).
-                val externe = voice.sortieExterne() && !reply.trimEnd().endsWith("?")
+            if (flux != null) {
                 parle = true
-                voice.speak(reply) {
-                    parle = false
-                    if (conv && (voiceSession || store.conversationMode.value)) { if (externe) voiceSession = false else ecouter() }
-                }
+                flux.finir(reply)
             } else if (conv && fromVoice) {
                 ecouter()
             }

@@ -72,9 +72,20 @@ class VoiceManager(private val ctx: Context) {
             if (status == TextToSpeech.SUCCESS) {
                 tts?.language = Locale.FRANCE
                 ttsReady = true
+                // Un seul écouteur : chaque phrase dite par la voix Android débloque la parole qui l'attend.
+                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) { utteranceId?.let { debutsAndroid[it]?.invoke() } }
+                    override fun onDone(utteranceId: String?) { utteranceId?.let { finsAndroid.remove(it)?.countDown() } }
+                    override fun onStop(utteranceId: String?, interrupted: Boolean) { utteranceId?.let { finsAndroid.remove(it)?.countDown() } }
+                    @Deprecated("Deprecated in Java")
+                    override fun onError(utteranceId: String?) { utteranceId?.let { finsAndroid.remove(it)?.countDown() } }
+                    override fun onError(utteranceId: String?, errorCode: Int) { utteranceId?.let { finsAndroid.remove(it)?.countDown() } }
+                })
             }
         }
     }
+    private val finsAndroid = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.CountDownLatch>()
+    private val debutsAndroid = java.util.concurrent.ConcurrentHashMap<String, () -> Unit>()
 
     // ============================================================================================ écoute
 
@@ -259,7 +270,7 @@ class VoiceManager(private val ctx: Context) {
     // ============================================================================================ voix de JARVIS
 
     private var barge: BargeIn? = null
-    private var enCours: AtomicBoolean? = null
+    @Volatile private var paroleEnCours: Parole? = null
     private var appelActif = false
     private var focus: AudioFocusRequest? = null
     private var focusLegacy = false
@@ -346,9 +357,7 @@ class VoiceManager(private val ctx: Context) {
     private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
         // Le listener est volontairement présent : Android peut notifier la perte/reprise du focus
         // et certains constructeurs n'accordent pas correctement une demande sans listener.
-        if (change == AudioManager.AUDIOFOCUS_LOSS && tts?.isSpeaking == true) {
-            main.post { runCatching { tts?.stop() } }
-        }
+        if (change == AudioManager.AUDIOFOCUS_LOSS) main.post { paroleEnCours?.arreter(sansSuite = false) }
     }
     private fun sortieBluetooth(): Boolean {
         val types = setOf(
@@ -431,75 +440,232 @@ class VoiceManager(private val ctx: Context) {
      * [onDone] est appelé (l'appelant relance alors l'écoute : la demande est captée).
      */
     fun speak(text: String, onDone: () -> Unit = {}) {
+        parole(onDone = onDone).apply { ajouter(text); finir() }
+    }
+
+    /**
+     * Réponse parlée PROGRESSIVE : le texte est ajouté au fil de l'eau ([Parole.ajouter], par exemple pendant qu'Hermès
+     * écrit) et Jarvis commence à parler dès la première phrase complète ; [Parole.finir] donne le texte final.
+     * Voix naturelle (Gemini) si disponible — la phrase suivante est préparée pendant que la précédente est dite —,
+     * sinon voix Android, phrase par phrase.
+     */
+    fun parole(limite: Int = 3500, onDone: () -> Unit = {}): Parole {
         main.removeCallbacks(unmuteLater); setMuted(false)
-        enCours?.set(true); barge?.stop(); barge = null
-        val clean = cleanForSpeech(text)
-        if (!ttsReady || clean.isBlank()) {
-            main.post(onDone)
-            return
+        paroleEnCours?.arreter(sansSuite = true)
+        return Parole(limite, onDone).also { paroleEnCours = it; it.demarrer() }
+    }
+
+    inner class Parole internal constructor(private val limite: Int, private val onDone: () -> Unit) {
+        private val fini = AtomicBoolean(false)
+        private val file = java.util.concurrent.LinkedBlockingDeque<String>()
+        private val tampon = StringBuilder()
+        private val recu = StringBuilder()
+        @Volatile private var ferme = false
+        @Volatile private var unMorceau = false
+        @Volatile private var occupe = false
+        @Volatile private var prepare = false
+        @Volatile private var total = 0
+        private var coupe = false
+        private var externe = false
+        private var attrsVoix: AudioAttributes = attrAssistant
+        @Volatile private var piste: AudioTrack? = null
+        private var formatPiste = 0 to 0
+        private val dits = StringBuilder()
+
+        /** Ajoute du texte (morceau de réponse en cours d'écriture). */
+        fun ajouter(texte: String) {
+            if (fini.get() || ferme || texte.isEmpty()) return
+            synchronized(tampon) { recu.append(texte); tampon.append(texte); extraire(attendreBloc = occupe, toutDire = false) }
         }
-        // Sur l'autoradio / un casque Bluetooth, le micro entend la voix de Jarvis sans annulation d'écho : la « coupure
-        // en reprenant la parole » se déclencherait sur sa propre voix. Elle reste active sur le téléphone seul.
-        val externe = sortieBluetooth()
-        val coupe = bargeIn && micOk() && !externe
-        derniereVoix = clean; finVoix = System.currentTimeMillis() + 60_000
-        val appel = coupe && duplex && hautParleurSeul() && entrerModeAppel()
-        // En Bluetooth/A2DP et Android Auto, utiliser l'usage MEDIA pour garantir le routage vers l'autoradio.
-        // Le focus TRANSIENT_EXCLUSIVE demande au lecteur musical de se mettre en pause pendant la voix.
-        val attrsVoix = when {
-            appel -> attrAppel
-            sortieBluetooth() -> attrBluetooth
-            else -> attrAssistant
+
+        /**
+         * Fin du texte. [texteFinal] = réponse complète (si elle diffère de ce qui a été reçu : repli, message
+         * d'arrière-plan… on dit ce qui manque, ou la réponse entière si rien n'a été reçu).
+         */
+        fun finir(texteFinal: String? = null) {
+            if (fini.get()) return
+            synchronized(tampon) {
+                if (texteFinal != null) {
+                    val r = norm(recu.toString()); val f = norm(texteFinal)
+                    when {
+                        r.isBlank() -> tampon.append(texteFinal)
+                        r.contains(f) -> {}                                             // déjà tout reçu (et dit)
+                        f.startsWith(r) -> tampon.append(texteFinal.trimStart().removePrefix("🪽").trimStart().drop(recu.toString().trimStart().removePrefix("🪽").trimStart().length))
+                        else -> tampon.append("\n").append(texteFinal)
+                    }
+                }
+                extraire(attendreBloc = false, toutDire = true)
+                ferme = true
+            }
         }
-        if (!appel && am.mode == AudioManager.MODE_NORMAL && !sessionActive) demanderFocusReponse(attrsVoix)
-        // Hors session : focus + vraie commande PAUSE pour les lecteurs qui ignorent le focus, reprise après la phrase.
-        // En session, la musique est déjà en pause pour toute la conversation (sessionDebut) : on n'y touche pas.
-        mediaPauseeParJarvis = !sessionActive && externe &&
-            fr.dd.jarvis.service.JarvisNotificationListener.pauseMediaPourVoix(ctx)
-        runCatching { tts?.setAudioAttributes(attrsVoix) }
-        val fini = AtomicBoolean(false)
-        enCours = fini
-        fun terminer() {
-            if (fini.compareAndSet(false, true)) {
-                barge?.stop(); barge = null
-                finVoix = System.currentTimeMillis()
+
+        private fun norm(t: String) = t.trim().removePrefix("🪽").trim()
+
+        /** Découpe le texte reçu en morceaux à dire (première phrase seule, puis blocs). Appelé sous verrou [tampon]. */
+        private fun extraire(attendreBloc: Boolean, toutDire: Boolean) {
+            val (morceaux, reste) = VoixNaturelle.decouper(tampon.toString(), unMorceau, toutDire, attendreBloc)
+            tampon.setLength(0); tampon.append(reste)
+            for (m in morceaux) {
+                val c = cleanForSpeech(m)
+                if (c.isBlank() || total > limite) continue
+                total += c.length; unMorceau = true
+                file.offer(c)
+            }
+        }
+
+        internal fun demarrer() { Thread({ boucle() }, "jarvis-voix").start() }
+
+        /** Arrête la voix ; [sansSuite] = sans appeler la suite (nouvelle demande, arrêt demandé). */
+        fun arreter(sansSuite: Boolean) {
+            if (!fini.compareAndSet(false, true)) return
+            barge?.stop(); barge = null
+            runCatching { piste?.pause(); piste?.flush() }
+            runCatching { tts?.stop() }
+            if (sansSuite) {
                 main.post {
                     sortirModeAppel()
                     if (mediaPauseeParJarvis) fr.dd.jarvis.service.JarvisNotificationListener.reprendreMediaApresVoix()
                     mediaPauseeParJarvis = false
-                    // Bluetooth / autoradio : le son sort avec du retard (tampon A2DP + traitement de l'autoradio) ; on
-                    // attend que la fin de la phrase soit vraiment jouée avant de rouvrir le micro.
-                    if (externe) main.postDelayed({ finVoix = System.currentTimeMillis(); onDone() }, 1000) else onDone()
                 }
+            } else terminerApres()
+        }
+
+        /** Préparation audio au premier morceau (focus, mode appel pour l'annulation d'écho, pause de la musique). */
+        private fun preparer() {
+            if (prepare) return
+            prepare = true
+            // Sur l'autoradio / un casque Bluetooth, le micro entend la voix de Jarvis sans annulation d'écho : la « coupure
+            // en reprenant la parole » se déclencherait sur sa propre voix. Elle reste active sur le téléphone seul.
+            externe = sortieBluetooth()
+            coupe = bargeIn && micOk() && !externe
+            val appel = coupe && duplex && hautParleurSeul() && entrerModeAppel()
+            // En Bluetooth/A2DP et Android Auto, l'usage MEDIA garantit le routage vers l'autoradio.
+            attrsVoix = when { appel -> attrAppel; externe -> attrBluetooth; else -> attrAssistant }
+            if (!appel && am.mode == AudioManager.MODE_NORMAL && !sessionActive) demanderFocusReponse(attrsVoix)
+            // Hors session : focus + vraie commande PAUSE pour les lecteurs qui ignorent le focus, reprise après la réponse.
+            mediaPauseeParJarvis = !sessionActive && externe && fr.dd.jarvis.service.JarvisNotificationListener.pauseMediaPourVoix(ctx)
+            runCatching { tts?.setAudioAttributes(attrsVoix) }
+        }
+
+        /** La voix sort vraiment : l'écoute de coupure démarre (ses 400 premières ms servent à mesurer l'écho). */
+        private fun voixLancee() {
+            if (coupe) main.post {
+                if (!fini.get() && barge == null) barge = BargeIn { main.post { if (!fini.get()) arreter(sansSuite = false) } }.also { it.start() }
             }
         }
-        tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            // L'écoute de coupure démarre quand la voix sort vraiment (ses 400 premières ms servent à mesurer l'écho).
-            override fun onStart(utteranceId: String?) {
-                if (coupe) main.post {
-                    if (!fini.get() && barge == null) barge = BargeIn { main.post { if (!fini.get()) { tts?.stop(); terminer() } } }.also { it.start() }
-                }
-            }
-            override fun onDone(utteranceId: String?) { terminer() }
-            override fun onStop(utteranceId: String?, interrupted: Boolean) { terminer() }
 
-            @Deprecated("Deprecated in Java")
-            override fun onError(utteranceId: String?) { terminer() }
-            override fun onError(utteranceId: String?, errorCode: Int) { terminer() }
-        })
-        val lancement = runCatching { tts?.speak(clean.take(3500), TextToSpeech.QUEUE_FLUSH, null, UUID.randomUUID().toString()) ?: TextToSpeech.ERROR }
-            .getOrDefault(TextToSpeech.ERROR)
-        if (lancement == TextToSpeech.ERROR) terminer()
+        private fun boucle() {
+            val app = ctx.applicationContext as? fr.dd.jarvis.JarvisApp
+            val prepa = java.util.concurrent.Executors.newSingleThreadExecutor()
+            var suivant: Pair<String, java.util.concurrent.Future<VoixNaturelle.Audio?>>? = null
+            try {
+                while (!fini.get()) {
+                    // Voix libre : les phrases complètes déjà reçues partent sans attendre un bloc plus long.
+                    if (file.isEmpty()) synchronized(tampon) { extraire(attendreBloc = false, toutDire = false) }
+                    val morceau = file.poll(200, java.util.concurrent.TimeUnit.MILLISECONDS)
+                    if (morceau == null) {
+                        if (ferme && file.isEmpty()) break
+                        continue
+                    }
+                    occupe = true
+                    var audio: VoixNaturelle.Audio? = null
+                    if (app != null && VoixNaturelle.active(app)) {
+                        audio = suivant?.takeIf { it.first == morceau }?.let { runCatching { it.second.get(25, java.util.concurrent.TimeUnit.SECONDS) }.getOrNull() }
+                            ?: VoixNaturelle.synthese(app, morceau)
+                        suivant = null
+                        // Le morceau suivant se prépare pendant que celui-ci est dit.
+                        file.peekFirst()?.let { n -> if (VoixNaturelle.active(app)) suivant = n to prepa.submit<VoixNaturelle.Audio?> { VoixNaturelle.synthese(app, n) } }
+                    }
+                    if (fini.get()) break
+                    preparer()
+                    dits.append(morceau).append(' ')
+                    derniereVoix = dits.toString(); finVoix = System.currentTimeMillis() + 60_000
+                    if (audio != null) jouer(audio) else direAndroid(morceau)
+                    occupe = false
+                }
+                if (!fini.get()) vider()
+            } catch (_: Throwable) {
+            } finally {
+                prepa.shutdownNow()
+                runCatching { piste?.release() }; piste = null
+                if (fini.compareAndSet(false, true)) terminerApres()
+            }
+        }
+
+        private fun jouer(a: VoixNaturelle.Audio) {
+            val canal = if (a.canaux == 2) AudioFormat.CHANNEL_OUT_STEREO else AudioFormat.CHANNEL_OUT_MONO
+            if (piste == null || formatPiste != a.frequence to a.canaux) {
+                vider()
+                val min = AudioTrack.getMinBufferSize(a.frequence, canal, AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(4096)
+                piste = AudioTrack.Builder().setAudioAttributes(attrsVoix)
+                    .setAudioFormat(AudioFormat.Builder().setSampleRate(a.frequence).setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(canal).build())
+                    .setTransferMode(AudioTrack.MODE_STREAM).setBufferSizeInBytes(min * 4).build()
+                formatPiste = a.frequence to a.canaux
+                ecrits = 0L
+                piste?.play()
+                voixLancee()
+            }
+            val t = piste ?: return
+            var off = 0
+            while (off < a.pcm.size && !fini.get()) {
+                val n = t.write(a.pcm, off, minOf(8192, a.pcm.size - off))
+                if (n <= 0) break
+                off += n
+            }
+            ecrits += a.pcm.size / (2L * a.canaux)
+        }
+        private var ecrits = 0L
+
+        /**
+         * Attend que tout ce qui a été écrit soit réellement joué, puis libère la piste. Un peu de silence est ajouté :
+         * une piste en flux ne démarre qu'une fois son tampon rempli (une phrase très courte resterait muette).
+         */
+        private fun vider() {
+            val t = piste ?: return
+            val freq = formatPiste.first.coerceAtLeast(8000)
+            runCatching { t.write(ByteArray((t.bufferSizeInFrames * 2 * formatPiste.second).coerceIn(2048, 192_000)), 0, (t.bufferSizeInFrames * 2 * formatPiste.second).coerceIn(2048, 192_000)) }
+            val limite = System.currentTimeMillis() + (ecrits * 1000 / freq) + 2500
+            while (!fini.get() && (t.playbackHeadPosition.toLong() and 0xFFFFFFFFL) < ecrits && System.currentTimeMillis() < limite) Thread.sleep(25)
+            runCatching { t.pause(); t.flush(); t.release() }
+            piste = null; ecrits = 0L; formatPiste = 0 to 0
+        }
+
+        private fun direAndroid(morceau: String) {
+            vider()
+            val t = tts ?: return
+            if (!ttsReady) return
+            val id = UUID.randomUUID().toString()
+            val latch = java.util.concurrent.CountDownLatch(1)
+            finsAndroid[id] = latch
+            var premier = true
+            debutsAndroid[id] = { if (premier) { premier = false; voixLancee() } }
+            val ok = runCatching { t.speak(morceau, TextToSpeech.QUEUE_ADD, null, id) }.getOrDefault(TextToSpeech.ERROR)
+            if (ok == TextToSpeech.ERROR) { finsAndroid.remove(id); debutsAndroid.remove(id); return }
+            latch.await(15_000L + morceau.length * 120L, java.util.concurrent.TimeUnit.MILLISECONDS)
+            debutsAndroid.remove(id)
+        }
+
+        private fun terminerApres() {
+            barge?.stop(); barge = null
+            finVoix = System.currentTimeMillis()
+            main.post {
+                if (paroleEnCours === this) paroleEnCours = null
+                sortirModeAppel()
+                if (mediaPauseeParJarvis) fr.dd.jarvis.service.JarvisNotificationListener.reprendreMediaApresVoix()
+                mediaPauseeParJarvis = false
+                // Bluetooth / autoradio : le son sort avec du retard (tampon A2DP + traitement de l'autoradio) ; on
+                // attend que la fin de la phrase soit vraiment jouée avant de rouvrir le micro.
+                if (externe) main.postDelayed({ finVoix = System.currentTimeMillis(); onDone() }, 1000) else onDone()
+            }
+        }
     }
 
     /** Fait taire JARVIS sans rappeler la suite (nouvelle demande, arrêt…). */
     fun stopSpeaking() {
-        enCours?.set(true)
+        paroleEnCours?.arreter(sansSuite = true)
+        paroleEnCours = null
         barge?.stop(); barge = null
         tts?.stop()
-        sortirModeAppel()
-        if (mediaPauseeParJarvis) fr.dd.jarvis.service.JarvisNotificationListener.reprendreMediaApresVoix()
-        mediaPauseeParJarvis = false
     }
 
     fun release() {
@@ -510,7 +676,8 @@ class VoiceManager(private val ctx: Context) {
             recognizer?.destroy()
             recognizer = null
         }
-        enCours?.set(true); barge?.stop(); barge = null
+        paroleEnCours?.arreter(sansSuite = true); paroleEnCours = null
+        barge?.stop(); barge = null
         tts?.stop()
         tts?.shutdown()
         tts = null

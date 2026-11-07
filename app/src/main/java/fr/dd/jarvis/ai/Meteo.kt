@@ -29,6 +29,20 @@ object Meteo {
         95 -> "⛈️" to "Orage"; 96, 99 -> "⛈️" to "Orage avec grêle"; else -> "🌡️" to "—"
     }
 
+    /** Météo actuelle à la position du téléphone (ou du siège) : (icône, « 14°C », description) — pour le centre de commande. */
+    suspend fun actuel(app: JarvisApp): Triple<String, String, String>? = withContext(Dispatchers.IO) {
+        val hq = app.societe.data.societe
+        val pt = Locator.point(app) ?: if (hq.lat != null && hq.lon != null) Geo.Point(hq.lat, hq.lon) else return@withContext null
+        val body = get("https://api.open-meteo.com/v1/forecast?latitude=${pt.lat}&longitude=${pt.lon}&timezone=auto&forecast_days=1" +
+            "&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min") ?: return@withContext null
+        runCatching {
+            val j = JSONObject(body); val cur = j.getJSONObject("current"); val d = j.getJSONObject("daily")
+            val (ic, txt) = wmo(cur.getInt("weather_code"))
+            Triple(ic, "${Math.round(cur.getDouble("temperature_2m"))}°C",
+                "$txt · ${Math.round(d.getJSONArray("temperature_2m_min").getDouble(0))}° / ${Math.round(d.getJSONArray("temperature_2m_max").getDouble(0))}°")
+        }.getOrNull()
+    }
+
     suspend fun get(app: JarvisApp, lieu: String, jours: Int): String = withContext(Dispatchers.IO) {
         var nom = lieu.trim()
         val p: Geo.Point? = when {

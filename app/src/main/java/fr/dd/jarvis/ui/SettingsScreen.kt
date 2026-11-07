@@ -1289,6 +1289,32 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     }
                 }
                 Text("Couper la parole : si tu reparles pendant que JARVIS répond, il se tait et t'écoute. Mode duplex (haut-parleur du téléphone seulement) : sa voix passe en mode « appel » le temps de la réponse, pour que l'annulation d'écho du téléphone ne confonde pas sa voix avec la tienne — la coupure est bien plus fiable. Le volume suit alors celui des appels ; désactive-le si la voix te semble trop faible.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                Spacer(Modifier.height(10.dp))
+                // ---- Voix naturelle (synthèse Gemini) et réponse parlée dès la première phrase
+                Text("Voix de JARVIS", color = HudText, fontSize = 13.sp)
+                var etatVoix by remember { mutableStateOf(fr.dd.jarvis.voice.VoixNaturelle.etat(app)) }
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    HudChip("🎙️ Voix naturelle (Gemini)", store.voixNaturelle.value) {
+                        store.voixNaturelle.set(true); fr.dd.jarvis.voice.VoixNaturelle.reactiver(); etatVoix = fr.dd.jarvis.voice.VoixNaturelle.etat(app)
+                    }
+                    HudChip("🤖 Voix Android", !store.voixNaturelle.value) { store.voixNaturelle.set(false); etatVoix = fr.dd.jarvis.voice.VoixNaturelle.etat(app) }
+                }
+                if (store.voixNaturelle.value) Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    fr.dd.jarvis.voice.VoixNaturelle.VOIX.forEach { (nom, style) ->
+                        HudChip("$nom · $style", store.voixNom.value == nom) { store.voixNom.set(nom) }
+                    }
+                }
+                var essaiVoix by remember { mutableStateOf(false) }
+                HudButton(if (essaiVoix) "Écoute…" else "▶ Écouter la voix", Modifier.fillMaxWidth().padding(top = 6.dp), enabled = !essaiVoix) {
+                    essaiVoix = true
+                    fr.dd.jarvis.voice.VoixNaturelle.reactiver()
+                    val v = fr.dd.jarvis.voice.VoiceManager(ctx)
+                    v.speak("Bonjour ${store.userName.value.ifBlank { "" }}. Je suis JARVIS. Je commence à te répondre dès la première phrase, pendant que je continue à réfléchir.") {
+                        v.release(); essaiVoix = false; etatVoix = fr.dd.jarvis.voice.VoixNaturelle.etat(app)
+                    }
+                }
+                Text("État : $etatVoix", color = HudText, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                Text("La voix naturelle utilise tes clés Gemini (synthèse vocale) ; si elle n'est pas disponible (quota, réseau), la voix Android prend le relais automatiquement. Dans tous les cas, JARVIS commence à parler dès la première phrase de la réponse.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
                 Spacer(Modifier.height(6.dp))
                 HudChip(if (store.muteBeeps.value) "🔇 Bips coupés pendant l'écoute" else "Bips actifs", store.muteBeeps.value) { store.muteBeeps.set(!store.muteBeeps.value) }
                 Spacer(Modifier.height(10.dp))

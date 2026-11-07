@@ -267,6 +267,9 @@ class Store(context: Context) {
 
     // ---- Voix
     val speakReplies = BPref("speakReplies", true)
+    /** Voix naturelle (synthèse Gemini) au lieu de la voix Android ; repli automatique sur la voix Android. */
+    val voixNaturelle = BPref("voixNaturelle", true)
+    val voixNom = SPref("voixNom", "Charon")
     val conversationMode = BPref("conversationMode", false)
 
     // ---- Sécurité

@@ -72,7 +72,7 @@ fun ChatScreen(vm: ChatViewModel, store: Store, app: JarvisApp) {
     var showHistory by remember { mutableStateOf(false) }
     var confirmReset by remember { mutableStateOf(false) }
 
-    LaunchedEffect(count) {
+    LaunchedEffect(count, vm.enDirect.length / 120) {
         if (count > 0) listState.animateScrollToItem(count - 1)
     }
 
@@ -143,8 +143,10 @@ fun ChatScreen(vm: ChatViewModel, store: Store, app: JarvisApp) {
                     items(vm.messages) { m -> Bubble(m) }
                     if (vm.busy) {
                         item {
-                            HudPanel(Modifier.fillMaxWidth(0.7f), title = "JARVIS") {
-                                Text(vm.status.ifBlank { "Réflexion…" }, color = HudDim, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+                            // Réponse en cours d'écriture : affichée au fil de l'eau (et dite en même temps), statut dessous.
+                            HudPanel(Modifier.fillMaxWidth(if (vm.enDirect.isBlank()) 0.7f else 0.92f), title = "JARVIS") {
+                                if (vm.enDirect.isNotBlank()) Text(vm.enDirect.trim() + " ▍", color = HudText, fontSize = 15.sp)
+                                Text(vm.status.ifBlank { "Réflexion…" }, color = HudDim, fontFamily = FontFamily.Monospace, fontSize = if (vm.enDirect.isBlank()) 13.sp else 11.sp)
                             }
                         }
                     }
@@ -308,6 +310,7 @@ private fun VoiceOrbOverlay(vm: ChatViewModel, app: JarvisApp, accent: Color, on
         ) {
             val label = when {
                 vm.partial.isNotBlank() -> vm.partial
+                vm.busy && vm.enDirect.isNotBlank() -> vm.enDirect.trim().takeLast(220)
                 vm.busy -> vm.status.ifBlank { "Je réfléchis…" }
                 vm.listening -> "Je t'écoute…"
                 else -> vm.status.ifBlank { "En conversation…" }

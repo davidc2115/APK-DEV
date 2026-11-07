@@ -34,6 +34,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.Hub
@@ -149,6 +150,8 @@ class MainActivity : ComponentActivity() {
         handleListen(intent)
         handleSharedVideo(intent)
         handleTikTokCallback(intent)
+        // Widget « dragon » à jour (prochain rendez-vous) à chaque ouverture.
+        Thread { runCatching { fr.dd.jarvis.widget.DragonWidget.majTous(applicationContext) } }.start()
         setContent {
             HudTheme(accentById(app.store.accent.value).color, app.store.tileAlpha.value) {
                 HudBackground { Root(app, vm) }
@@ -167,6 +170,7 @@ private fun MainActivity.handleListen(i: android.content.Intent?) {
 private data class Tab(val label: String, val icon: ImageVector)
 
 private val tabs = listOf(
+    Tab("Accueil", Icons.Filled.Dashboard),
     Tab("Chat", Icons.Filled.Forum),
     Tab("Agenda", Icons.Filled.CalendarMonth),
     Tab("Mails", Icons.Filled.Email),
@@ -204,7 +208,7 @@ private fun Root(app: JarvisApp, vm: ChatViewModel) {
     // Clavier ouvert : l'en-tête et la barre d'onglets se masquent pour laisser toute la place à la conversation.
     val imeOpen = androidx.compose.foundation.layout.WindowInsets.Companion.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
     Column(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
-        if (!(imeOpen && tab == 0)) Row(
+        if (!(imeOpen && tab == 1)) Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -224,12 +228,13 @@ private fun Root(app: JarvisApp, vm: ChatViewModel) {
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (tab) {
-                0 -> ChatScreen(vm, app.store, app)
-                1 -> PlanningScreen(app)
-                2 -> MailScreen(app)
-                3 -> ContactsScreen(app)
-                4 -> SocieteScreen(app)
-                5 -> GraphScreen(app)
+                0 -> fr.dd.jarvis.ui.CentreCommande(app, vm, onOnglet = { tab = it }, onDemander = { vm.send(it); tab = 1 })
+                1 -> ChatScreen(vm, app.store, app)
+                2 -> PlanningScreen(app)
+                3 -> MailScreen(app)
+                4 -> ContactsScreen(app)
+                5 -> SocieteScreen(app)
+                6 -> GraphScreen(app)
                 else -> SettingsScreen(app) { vm.send(it) }
             }
         }
