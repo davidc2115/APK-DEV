@@ -31,6 +31,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     var listening by mutableStateOf(false)
         private set
     var partial by mutableStateOf("")
+    /** Jarvis est en train de parler (animation de la tête du dragon). */
+    var parle by mutableStateOf(false)
         private set
     var pendingConfirm by mutableStateOf<String?>(null)
         private set
@@ -87,8 +89,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Micro touché : passe automatiquement en conversation (réponse parlée puis réécoute) jusqu'à ce qu'on le retouche ou qu'on dise « merci / c'est tout ».
      *  Exposé en état Compose pour afficher l'orbe plein écran pendant toute la session (écoute, réflexion, réponse parlée). */
-    var voiceSession by mutableStateOf(false)
-        private set
+    private var voiceSessionEtat by mutableStateOf(false)
+    var voiceSession: Boolean
+        get() = voiceSessionEtat
+        private set(v) {
+            if (v == voiceSessionEtat) return
+            voiceSessionEtat = v
+            // Musique en pause pour toute la conversation, reprise à la fin (et plus à chaque phrase).
+            if (v) voice.sessionDebut() else voice.sessionFin()
+        }
     /** Phrases non comprises d'affilée pendant la conversation vocale. */
     private var incompris = 0
     private fun silenceMs() = store.silenceSec.value.coerceIn(3, 30) * 1000L
@@ -143,7 +152,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             voice.duplex = store.duplex.value
             if ((store.speakReplies.value || (fromVoice && voiceSession)) && (fromVoice || conv)) {
                 // Réponse parlée (que l'on peut couper en parlant), puis réécoute ; fin automatique après quelques secondes de silence.
-                voice.speak(reply) { if (conv && (voiceSession || store.conversationMode.value)) ecouter() }
+                // Autoradio / Bluetooth : réécoute seulement si Jarvis pose une question (sinon il entendrait la radio).
+                val externe = voice.sortieExterne() && !reply.trimEnd().endsWith("?")
+                parle = true
+                voice.speak(reply) {
+                    parle = false
+                    if (conv && (voiceSession || store.conversationMode.value)) { if (externe) voiceSession = false else ecouter() }
+                }
             } else if (conv && fromVoice) {
                 ecouter()
             }

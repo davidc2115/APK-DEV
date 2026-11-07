@@ -221,6 +221,7 @@ class JarvisService : Service() {
     private fun goIdle() {
         awake = false
         incompris = 0
+        voice?.sessionFin()
         voice?.stopListening()
         val v = vosk
         if (v != null) {
@@ -298,6 +299,7 @@ class JarvisService : Service() {
         dernierReveil = maintenant
         vosk?.stop()
         awake = true; echangeReel = false; incompris = 0
+        voice?.sessionDebut()
         voice?.stopSpeaking()
         voice?.carillon(montant = true) { if (awake && !busy) ecouter(maxOf(silenceMs(), 6000L)) }
     }
@@ -315,6 +317,7 @@ class JarvisService : Service() {
         if (!awake && m == null) { listen(); return }   // repli sans détecteur : on ignore tout ce qui ne commence pas par Jarvis
         val cmd = (if (m != null && m.range.first <= 2) t.substring(m.range.last + 1) else text).trim()
         awake = true
+        voice?.sessionDebut()
         if (cmd.isBlank()) { voice?.carillon(montant = true) { ecouter(maxOf(silenceMs(), 6000L)) }; return }
         if (stopRegex.matches(norm(cmd))) { awake = false; voice?.speak("D'accord.") { goIdle() }; return }
         process(cmd)
@@ -350,7 +353,10 @@ class JarvisService : Service() {
             withContext(Dispatchers.Main) {
                 // La conversation continue : on réécoute après la réponse (ou dès que l'utilisateur la coupe), puis on
                 // referme après quelques secondes de silence.
-                voice?.speak(reply.take(700)) { busy = false; if (awake) ecouter() else goIdle() } ?: run { busy = false }
+                // Autoradio / Bluetooth : on ne rouvre le micro que si Jarvis pose une question — sinon il entendrait la
+                // radio ou la suite de sa propre réponse ; il suffit de redire « Jarvis » pour une nouvelle demande.
+                val relancer = awake && (voice?.sortieExterne() != true || reply.trimEnd().endsWith("?"))
+                voice?.speak(reply.take(700)) { busy = false; if (relancer) ecouter() else goIdle() } ?: run { busy = false }
             }
         }
     }

@@ -136,7 +136,7 @@ object PontMcp {
             val demande = args.optString("demande").ifBlank { args.optString("consigne") }.trim()
             if (demande.isBlank()) return "Donne la consigne complète à exécuter dans « demande »." to true
             val contexte = args.optString("contexte").trim()
-            statutActif?.invoke("🪽 Hermès → 🤖 Jarvis : " + demande.take(70))
+            statutActif?.invoke("📱 " + demande.take(70))
             val texte = if (contexte.isBlank()) demande else "$demande\n\n(Contexte fourni par Hermès : ${contexte.take(3000)})"
             val res = runCatching {
                 runBlocking(Dispatchers.IO) {
@@ -146,7 +146,7 @@ object PontMcp {
                     }
                 }
             }
-            statutActif?.invoke("🪽 Hermès reprend…")
+            statutActif?.invoke("🧠 Jarvis réfléchit…")
             return res.fold(
                 { r -> if (r == null) "⏱️ Jarvis n'a pas terminé à temps : découpe la mission en étapes plus courtes." to true else r to false },
                 { e -> "❌ Jarvis : ${e.message ?: e.javaClass.simpleName}" to true }
@@ -157,9 +157,9 @@ object PontMcp {
         private fun notifier(args: JSONObject): Pair<String, Boolean> {
             val message = args.optString("message").trim()
             if (message.isBlank()) return "Le champ « message » est vide." to true
-            val titre = args.optString("titre").trim().ifBlank { "Hermès" }
+            val titre = args.optString("titre").trim().ifBlank { "JARVIS" }
             android.os.Handler(android.os.Looper.getMainLooper()).post {
-                app.chatAjouter(fr.dd.jarvis.ai.ChatMsg(false, "🪽 **$titre**\n\n$message"))
+                app.chatAjouter(fr.dd.jarvis.ai.ChatMsg(false, "🔔 **$titre**\n\n$message"))
             }
             val ok = runCatching {
                 val ctx = app.applicationContext
@@ -168,7 +168,7 @@ object PontMcp {
                     android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT)
                 val plain = message.replace(Regex("[#*_`>|]+"), "").trim()
                 val n = androidx.core.app.NotificationCompat.Builder(ctx, JarvisApp.CHANNEL_AGENTS).setSmallIcon(android.R.drawable.ic_dialog_info)
-                    .setContentTitle("🪽 " + titre.take(60)).setContentText(plain.lineSequence().firstOrNull().orEmpty().take(120))
+                    .setContentTitle(titre.take(60)).setContentText(plain.lineSequence().firstOrNull().orEmpty().take(120))
                     .setStyle(androidx.core.app.NotificationCompat.BigTextStyle().bigText(plain.take(3500))).setContentIntent(pi).setAutoCancel(true).build()
                 (ctx.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager)
                     .notify(7320 + (System.currentTimeMillis() % 500).toInt(), n)

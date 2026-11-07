@@ -205,8 +205,10 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     /** Mémoire de Jarvis telle qu'Hermès la recopie dans son SOUL.md (bloc géré, chargé à chaque session). */
     fun pourHermes(): String {
         ensure()
-        if (items.isEmpty()) return ""
-        return "## Mémoire partagée avec JARVIS\n" +
+        val identite = "## Identité\nDans cette installation, tu ES JARVIS, l'assistant personnel de l'utilisateur sur son téléphone : " +
+            "réponds toujours en tant que JARVIS (jamais « Hermès », qui n'est que le nom de ton moteur), avec une seule mémoire et une seule conversation.\n\n"
+        if (items.isEmpty()) return identite.trim()
+        return identite + "## Mémoire partagée avec JARVIS\n" +
             "Consignes durables de l'utilisateur enregistrées par JARVIS (synchronisées automatiquement ; pour les modifier, utilise mcp_jarvis_memoire_ajouter ou mcp_jarvis_memoire_oublier) :\n" +
             items.entries.joinToString("\n") { "- [${it.key}] ${it.value.replace("\n", " ").take(600)}" }.take(6000)
     }

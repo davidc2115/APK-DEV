@@ -506,22 +506,22 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 Spacer(Modifier.height(8.dp))
                 Text("Répartition des demandes", color = HudDim, fontSize = 12.sp)
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("auto" to "Jarvis d'abord, Hermès si besoin", "tout" to "Hermès pour tout", "off" to "Jarvis seul").forEach { (id, nom) ->
+                    listOf("auto" to "Automatique (rapide + approfondi)", "tout" to "Toujours approfondi", "off" to "Rapide uniquement").forEach { (id, nom) ->
                         HudChip(nom, selected = store.hermesMode.value == id) { store.hermesMode.set(id) }
                     }
                 }
                 Text(
                     when (store.hermesMode.value) {
-                        "tout" -> "Recommandé. Hermès est le cerveau de toutes tes demandes : il garde la mémoire longue, ses notes, skills et plugins, " +
+                        "tout" -> "Toutes les demandes passent par le moteur approfondi (Hermès) : mémoire longue, notes, skills et plugins, " +
                             "confie les actions du téléphone à l'agent Jarvis, le travail lourd à ses sous-agents Gemini et Groq, et crée tes automatismes. " +
                             "Pour rester rapide, les commandes simples du téléphone (lampe torche, volume, Wi-Fi, musique, appel, SMS, rendez-vous…), " +
                             "la position, la recherche d'un fichier, la Freebox et le lancement d'une vidéo sont exécutés directement par Jarvis ; " +
                             "Hermès voit ces échanges dans l'historique et partage la même mémoire."
-                        "off" -> "Hermès n'est jamais utilisé : Jarvis répond seul."
-                        else -> "Recommandé. Tu parles toujours à Jarvis, qui répond vite. S'il n'aboutit pas (pas d'outil, rien trouvé, " +
-                            "information qu'il n'a pas, erreur), il passe automatiquement la main à Hermès, avec sa mémoire, ses notes, skills et sous-agents. " +
-                            "Les automatismes, les demandes en plusieurs étapes, le serveur/SSH et la recherche sur internet vont directement à Hermès. " +
-                            "Jamais besoin de dire « Hermès »."
+                        "off" -> "Jarvis répond uniquement avec sa partie rapide ; le moteur approfondi (Hermès) n'est pas utilisé."
+                        else -> "Recommandé. Jarvis et Hermès ne forment qu'un seul assistant : une voix, une conversation, une mémoire. " +
+                            "Jarvis répond tout de suite avec sa partie rapide ; si ce n'est pas suffisant (pas d'outil, rien trouvé, information manquante, erreur), " +
+                            "il approfondit automatiquement avec son moteur Hermès (notes, skills, sous-agents). Automatismes, demandes en plusieurs étapes, " +
+                            "serveur/SSH et recherche sur internet passent directement par le moteur approfondi. Jamais besoin de dire « Hermès »."
                     },
                     color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp)
                 )

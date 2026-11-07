@@ -33,7 +33,7 @@ class Brain(
             "❌ ${e.message ?: e.javaClass.simpleName}"
         }
         if (!suivi.cerveauJarvis || !escaladePossible(pourHermes, suivi) || !fr.dd.jarvis.hermes.Routeur.jarvisABesoinDHermes(r)) return r
-        onStatus("🪽 Jarvis demande l'aide d'Hermès…")
+        onStatus("🧠 Jarvis approfondit…")
         val h = fr.dd.jarvis.hermes.Hermes.repondre(app, history, tools, userName(), onStatus, tentativeJarvis = r) ?: return r
         fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.HERMES
         return h
@@ -80,7 +80,7 @@ class Brain(
                 val r = fr.dd.jarvis.hermes.Hermes.repondre(app, history, tools, userName(), onStatus)
                 if (r != null) return r
                 fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS
-                onStatus("Hermès indisponible : Jarvis prend le relais…")
+                onStatus("🧠 Réponse rapide…")
             }
         }
         if (outilDirect != null) {
