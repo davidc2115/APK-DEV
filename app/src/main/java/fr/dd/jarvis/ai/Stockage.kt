@@ -35,9 +35,31 @@ object Stockage {
         } + if (l.size > 200) "\n… (${l.size} éléments)" else ""
     }
 
+    /** Recherche récursive live dans le stockage partagé visible par Android. */
+    private fun chercher(query: String, limite: Int = 250): String {
+        val q = java.text.Normalizer.normalize(query.lowercase(), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}+"), "").replace(Regex("[^a-z0-9]+"), " ").trim()
+        if (q.isBlank()) return "Indique le nom ou quelques mots du fichier à rechercher."
+        val mots = q.split(Regex("\\s+")).filter { it.length >= 2 }
+        val root = racine().canonicalFile
+        val trouves = mutableListOf<File>()
+        root.walkTopDown().onEnter { dir -> dir == root || !(dir.parentFile?.name == "Android" && dir.name in setOf("data", "obb")) }.forEach { f ->
+            if (f.isFile) {
+                val nom = java.text.Normalizer.normalize(f.nameWithoutExtension.lowercase(), java.text.Normalizer.Form.NFD)
+                    .replace(Regex("\\p{M}+"), "").replace(Regex("[^a-z0-9]+"), " ")
+                if (mots.all { nom.contains(it) }) { trouves += f; if (trouves.size >= limite) return@forEach }
+            }
+        }
+        if (trouves.isEmpty()) return "Aucun fichier trouvé pour « $query » dans le stockage partagé accessible du téléphone."
+        return "🔎 ${trouves.size} résultat(s) pour « $query » :\\n" + trouves.joinToString("\\n") { f ->
+            "📄 /${f.relativeTo(root).path} · ${fmt(f.length())} · ${dateFmt.format(java.util.Date(f.lastModified()))}"
+        } + if (trouves.size >= limite) "\\n… résultats limités à $limite." else ""
+    }
+
     /** Actions : lister | lire | renommer | deplacer | supprimer | dossier. */
     fun action(action: String, chemin: String, destination: String): String {
         if (!autorise()) throw IllegalStateException("Accès « Tous les fichiers » non autorisé (Réglages › Téléphone et permissions).")
+        if (action.equals("chercher", true)) return chercher(chemin)
         val f = fichier(chemin)
         return when (action.lowercase()) {
             "lister" -> "📂 /${f.toRelativeString(racine())}\n" + lister(if (chemin.isBlank()) racine() else f)
