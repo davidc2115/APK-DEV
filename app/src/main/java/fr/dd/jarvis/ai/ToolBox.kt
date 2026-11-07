@@ -214,9 +214,9 @@ class ToolBox(
         ), listOf("system", "prompt")))
         put(tool("animer_image", "Anime une image déjà générée par JARVIS avec fal.ai / Wan 2.2 (image vers vidéo). Nécessite une clé fal.ai configurée dans Réglages › Vidéo IA. Le MP4 est téléchargé puis enregistré dans JARVIS/Vidéos IA et dans Obsidian. Génération payante selon le tarif fal.ai.",
             mapOf("image" to prop("Nom exact de l’image (jarvis-img:...) ou « derniere » pour la plus récente."), "prompt" to prop("Mouvement souhaité : caméra, sujet, ambiance, gestes (optionnel)."), "duree" to prop("Durée du clip en secondes, 0.5 à 4.5 (défaut 3.5).")), listOf("image")))
-        put(tool("generer_video", "Génère une vidéo IA à partir d'une description, de N'IMPORTE QUELLE DURÉE : jusqu'à 5 s c'est un clip unique ; au-delà (10 s, 40 s, 2 min…) le montage de plusieurs plans se fait automatiquement (scénario et prompts précis écrits d'abord par l'agent Gemini). Ne réponds JAMAIS qu'une durée longue est impossible. Nécessite une clé fal.ai configurée dans Réglages › Vidéo IA. Pour animer une image existante, passe son nom dans « image » ou utilise animer_image. Pour une histoire en plusieurs plans, un TikTok/Reel/Short ou un montage avec durée totale, voix off ou musique, utilise tiktok_video (ou video_montage pour un montage général) : ces outils peuvent utiliser Hugging Face si son jeton est configuré. Le MP4 est enregistré dans JARVIS/Vidéos IA et Obsidian, et affiché dans le chat.",
+        put(tool("generer_video", "Génère un clip IA unique de 2 à 5 s à partir d'une description avec fal.ai / Wan 2.2 ; nécessite une clé fal.ai configurée dans Réglages › Vidéo IA. Cet outil ne réalise pas un montage long et ne bascule pas vers Hugging Face sans clé. Pour animer une image existante, passe son nom dans « image » ou utilise animer_image. Pour une histoire en plusieurs plans, un TikTok/Reel/Short ou un montage avec durée totale, voix off ou musique, utilise tiktok_video (ou video_montage pour un montage général) : ces outils peuvent utiliser Hugging Face si son jeton est configuré. Le MP4 est enregistré dans JARVIS/Vidéos IA et Obsidian, et affiché dans le chat.",
             mapOf("prompt" to prop("Description détaillée de la scène, rédigée en anglais (sujet, action, caméra, lumière, style)."),
-                "duree" to prop("Durée totale en secondes demandée par l'utilisateur (défaut 5 ; plus de 5 = montage automatique de plusieurs plans)."), "format" to prop("vertical (défaut), horizontal ou carre."),
+                "duree" to prop("Durée en secondes, 2 à 5 (défaut 5)."), "format" to prop("vertical (défaut), horizontal ou carre."),
                 "image" to prop("Optionnel : image à animer (jarvis-img:... ou « derniere »).")), listOf("prompt")))
         put(tool("agenda_afficher", "Affiche ou masque durablement un agenda entier (« ne plus afficher le planning de Thomas », « réaffiche-le »). Un agenda masqué disparaît du planning, de l'itinéraire, du point du jour et de l'écran Agenda tant qu'on ne le réaffiche pas.",
             mapOf("agenda" to prop("Nom (ou partie du nom) de l'agenda."), "afficher" to prop("true pour réafficher, false pour masquer.")), listOf("agenda", "afficher")))
@@ -235,6 +235,22 @@ class ToolBox(
         put(tool("analyser_image", "Analyse une image déjà générée par generer_image (ou envoyée par l'utilisateur) : décrit son contenu, répond à une question dessus, lit un texte qu'elle contient, etc.",
             mapOf("image" to prop("Nom de fichier de l'image (vu dans jarvis-img:... ou via fichiers_generes), ou « derniere » pour la dernière générée."),
                 "question" to prop("Ce qu'il faut regarder ou dire sur l'image (optionnel ; par défaut une description détaillée).")), listOf("image")))
+        put(tool("box_disque", "Accède directement au disque dur ou au partage SMB/FTP de la box Internet. Actions : partages, lister, lire, telecharger, envoyer, dossier, deplacer, renommer, supprimer. Utilise cet outil si l'API Freebox OS n'est pas disponible ou si la box n'est pas une Freebox. Toute écriture ou suppression distante demande confirmation.", mapOf(
+            "action" to prop("partages | lister | lire | telecharger | envoyer | dossier | deplacer | renommer | supprimer"),
+            "chemin" to prop("Chemin du dossier/fichier sur le partage, relatif à la racine."),
+            "fichier" to prop("Nom du fichier source local pour envoyer, ou destination pour déplacer/renommer.")
+        ), listOf("action")))
+        put(tool("freebox", "Pilote la Freebox via son API Freebox OS associée. Actions : etat, appareils, fichiers, telechargements, redirections, vpn, vpn_utilisateurs, wifi, appels, droits, ajouter_redirection, supprimer_redirection, dmz, ajouter_bail, redemarrer. Les modifications sensibles sont confirmées. Pour le disque, utilise fichiers ; si le droit explorer manque, utilise box_disque en SMB/FTP.", mapOf(
+            "action" to prop("Action Freebox OS."),
+            "chemin" to prop("Chemin du dossier sur le disque (facultatif)."),
+            "serveur" to prop("openvpn_routed | ipsec | pptp | wireguard (facultatif)."),
+            "port" to prop("Port local/externe selon l'action."),
+            "port_externe" to prop("Port externe pour une redirection."),
+            "protocole" to prop("tcp | udp."),
+            "appareil" to prop("Nom ou IP de l'appareil cible."),
+            "ip" to prop("Adresse IP cible."),
+            "id" to prop("Identifiant de règle ou d'utilisateur.")
+        ), listOf("action")))
         put(tool("rechercher_videos_box", "Recherche des films sur le disque dur USB branché à la box (partages SMB/FTP). Retourne les chemins exacts ; ne lance pas la lecture.", mapOf("recherche" to prop("Titre ou fragment du nom du film (optionnel pour lister les vidéos)."), "dossier" to prop("Dossier de départ sur le partage (optionnel)."))))
         put(tool("lire_video_box", "Lit un film stocké sur le disque dur branché à la box : ouvre le sélecteur Android avec les lecteurs vidéo compatibles installés, sans télécharger le film entier.", mapOf("chemin" to prop("Chemin exact du film retourné par rechercher_videos_box, sans smb://.")), listOf("chemin")))
         put(tool("analyser_video", "Analyse une vidéo que l'utilisateur a partagée à JARVIS (bouton « Partager » de n'importe quelle appli, ex. TikTok, vers JARVIS) : avis sur l'accroche, le rythme/montage, la qualité, ce qui plaît ou non, et suggestions concrètes pour améliorer l'engagement (vues, likes, abonnés). Ne fonctionne que sur une vidéo déjà reçue par JARVIS, jamais sur un simple lien.",
@@ -344,7 +360,7 @@ class ToolBox(
         put(tool("hermes", "Gère Hermès, l'agent IA installé dans Termux qui sert de cerveau principal : état, installation, configuration (clés, modèle), démarrage, arrêt, mode de répartition.",
             mapOf("action" to prop("etat | installer | configurer | demarrer | arreter | mode"),
                 "mode" to prop("Pour action=mode : auto (Hermès reçoit toutes les demandes et choisit lui-même de répondre ou de déléguer aux agents Gemini/Groq/Cloudflare/autres) | demande (Hermès seulement quand on le nomme) | off (Jarvis utilise son moteur interne).")), listOf("action")))
-        put(tool("hermes_deleguer", "Confie à Hermès (agent autonome : recherche web, analyse, rédaction, code, tâches en plusieurs étapes, automatismes, serveur/SSH, ses notes, skills, plugins et sa mémoire long terme) une tâche que tes outils ne couvrent pas, ou une information que tu n'as pas (identifiants, réglages, historique). À utiliser plutôt que de répondre « je ne peux pas » ou de redemander une information à l'utilisateur. Décris la tâche complète et le résultat attendu.",
+        put(tool("hermes_deleguer", "Confie à Hermès (agent autonome : recherche web, analyse, rédaction, code, tâches en plusieurs étapes, mémoire long terme) une tâche complexe ou longue. Décris la tâche complète et le résultat attendu.",
             mapOf("tache" to prop("La tâche détaillée, avec tout le contexte utile.")), listOf("tache")))
         put(tool("ma_position", "Donne la position GPS actuelle du téléphone (fix frais, format Google Maps) et l'ADRESSE PRÉCISE correspondante (numéro, rue, code postal, ville). Pour enregistrer cette position sur une fiche client, utilise client_ecrire avec site_gps = « ma position » (et site_adresse = « ma position » pour l'adresse)."))
         put(tool("phone_health_report", "Produit un diagnostic local en lecture seule du téléphone : batterie, température, stockage, RAM, réseau, Shizuku, accessibilité, notifications, alarmes exactes, optimisation batterie, service vocal et présence d'un rapport de plantage. N'affiche aucune donnée personnelle ni aucun secret.", mapOf("detail" to prop("Optionnel : bref, complet (défaut) ou historique des mesures locales."))))
@@ -353,16 +369,11 @@ class ToolBox(
                 "action" to prop("Nom de l'action."),
                 "value" to prop("Paramètre : nom d'app, URL, pourcentage, numéro, texte à cliquer ou à saisir, ou « x,y » pour tap.")
             ), listOf("action")))
-        put(tool("voir_ecran", "REGARDE l'écran du téléphone (capture réelle analysée par la vision Gemini) : ce qui est affiché, l'application ouverte, l'état (lecture en cours, erreur, formulaire…) et réponse à une question précise. La capture est jointe dans la conversation.",
-            mapOf("question" to prop("Ce qu'il faut vérifier ou décrire (optionnel).")), emptyList()))
-        put(tool("piloter_telephone", "CONTRÔLE COMPLET du téléphone : Jarvis voit l'écran et agit dans N'IMPORTE QUELLE application comme une personne (ouvrir l'appli, chercher, appuyer sur les boutons, saisir du texte, faire défiler, fermer les pop-ups…), en vérifiant visuellement après chaque geste, jusqu'à atteindre l'objectif ; capture finale jointe. À utiliser quand une action n'a pas d'outil dédié, ou pour terminer/vérifier une action qui n'a pas abouti. Les envois, paiements, suppressions et appels non demandés explicitement sont soumis à confirmation.",
-            mapOf("objectif" to prop("Ce qu'il faut obtenir à l'écran, précis et complet (ex. « dans Spotify, lance l'album Discovery de Daft Punk et vérifie que la lecture a démarré »)."),
-                "application" to prop("Application à ouvrir d'abord (optionnel).")), listOf("objectif")))
         put(tool("run_shell", "Exécute une commande shell sur le téléphone via adb/Shizuku (réservé aux besoins que phone_action ne couvre pas).",
             mapOf("command" to prop("Commande shell.")), listOf("command")))
-        put(tool("stockage_telephone", "Accède au stockage partagé du téléphone ET recherche aussi dans le coffre Obsidian : recherche récursive en direct dans tous les dossiers accessibles (y compris images générées, renommées ou déplacées), liste, lit, renomme, déplace, supprime, crée un dossier. Utilise chercher dès que l’utilisateur demande de retrouver un fichier ou une image ; ne te limite jamais au dossier courant.",
+        put(tool("stockage_telephone", "Accède au stockage du téléphone (Téléchargements, Films, Musique, DCIM, etc., en dehors du dossier privé de JARVIS ET du coffre Obsidian — pour tout ce qui concerne le coffre ou les images générées, utilise obsidian_fichiers) : liste un dossier, lit un fichier texte, renomme, déplace, supprime, crée un dossier. Pratique pour réorganiser une bibliothèque de fichiers (ex. noms de films compatibles Plex).",
             mapOf(
-                "action" to prop("chercher | lister | lire | renommer | deplacer | supprimer | dossier. chercher = recherche récursive sur tout le stockage partagé accessible et le coffre Obsidian."),
+                "action" to prop("lister | lire | renommer | deplacer | supprimer | dossier"),
                 "chemin" to prop("Chemin relatif à la racine du stockage (ex. « Movies/film.avi », vide = racine)."),
                 "destination" to prop("renommer/deplacer uniquement : le nouveau chemin complet (ex. « Movies/Dirty Dancing (1987).avi »).")
             ), listOf("action")))
@@ -553,13 +564,9 @@ class ToolBox(
         }
         "generer_video" -> try {
             val brief = a.optString("prompt").trim()
-            val duree = a.optString("duree").replace(',', '.').filter { it.isDigit() || it == '.' }.toDoubleOrNull() ?: 5.0
+            val duree = a.optString("duree").replace(',', '.').toDoubleOrNull() ?: 5.0
             val nomImage = a.optString("image").trim()
             val format = a.optString("format").ifBlank { "vertical" }
-            // Plus de 5 s : jamais refusé — montage de plusieurs plans (scénario + prompts par l'agent Gemini).
-            if (duree > 5.5 && nomImage.isBlank()) return ToolResult(fr.dd.jarvis.ai.Montage.lancer(app, fr.dd.jarvis.ai.Montage.Demande(
-                sujet = brief, dureeS = duree.toInt(), format = format,
-                tiktok = Regex("tiktok|reel|short", RegexOption.IGNORE_CASE).containsMatchIn(brief))), direct = true)
             if (nomImage.isBlank() && !fr.dd.jarvis.ai.ImageToVideoGen.disponible(app))
                 return ToolResult("❌ Aucune clé fal.ai : ajoute-la dans Réglages › Vidéo IA pour générer une vidéo.")
             if (nomImage.isNotBlank() && !fr.dd.jarvis.ai.ImageToVideoGen.disponible(app))
@@ -715,8 +722,7 @@ class ToolBox(
             else {
                 val d = a.optString("demande").trim()
                 if (d.isBlank()) ToolResult("Demande vide.")
-                else { fr.dd.jarvis.work.TacheWorker.lancer(app, d); ToolResult("🛠️ Tâche lancée en arrière-plan : « ${d.take(120)} ». Sa progression s'affiche dans une notification et le résultat arrivera ici et en notification (même si l'app est fermée)." +
-                (fr.dd.jarvis.work.SuiviTaches.bloquees(app)?.let { "\n$it" } ?: "")) }
+                else { fr.dd.jarvis.work.TacheWorker.lancer(app, d); ToolResult("🛠️ Tâche lancée en arrière-plan : « ${d.take(120)} ». Tu recevras une notification à la fin (même si l'app est fermée).") }
             }
         }
         "alarme_creer" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.device.Horloge.creerAlarme(app, a.optString("heure"), a.optString("libelle"), a.optString("jours")) }, direct = true)
@@ -741,18 +747,7 @@ class ToolBox(
                 // Mémorise le PAQUET exact (pas le texte dicté) : la prochaine fois, la résolution est sans ambiguïté.
                 val pkgChoisi = dispo[appli] ?: appli
                 if (toujours && appli.isNotBlank()) app.store.setAppPref("musique", pkgChoisi)
-                val requete = a.optString("requete")
-                val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.playMusic(requete, pkgChoisi) }
-                // Lecture non confirmée : Jarvis prend l'écran, termine dans l'appli (recherche, bon résultat, lecture) et vérifie.
-                if (requete.isNotBlank() && !r.contains("est en cours de lecture") && fr.dd.jarvis.device.PiloteEcran.disponible(app) &&
-                    !r.contains("n'est pas installée") && !r.contains("Accès aux notifications")) {
-                    val nom = app.phone.musicApps().entries.firstOrNull { it.value == pkgChoisi || it.key == pkgChoisi }?.key ?: pkgChoisi
-                    val pilote = fr.dd.jarvis.device.PiloteEcran.piloter(app,
-                        "Dans l'application $nom, lance la lecture de « $requete » : ouvre l'application si elle n'est pas affichée, utilise la recherche si besoin, appuie sur le résultat qui correspond le mieux puis sur lecture. Termine quand la lecture a visiblement démarré (bouton pause, bon titre).",
-                        confirmer = { q -> confirm(q, true) },
-                        verifier = { app.phone.lectureEnCours(pkgChoisi)?.let { t -> "🎵 Lecture confirmée par le lecteur : $t" } })
-                    ToolResult("$r\n\n👁️ Je termine moi-même dans l'application :\n$pilote", direct = true)
-                } else ToolResult(r, direct = true)
+                ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.playMusic(a.optString("requete"), pkgChoisi) }, direct = true)
             }
         }
         "controle_media" -> ToolResult(app.phone.mediaKey(a.optString("action")))
@@ -779,6 +774,34 @@ class ToolBox(
             if (ap.lowercase() in setOf("aucune", "aucun", "rien", "demander", "")) { app.store.setAppPref(t, null); ToolResult("Plus d'application par défaut pour « $t » : je te demanderai à chaque fois.") }
             else { app.store.setAppPref(t, ap); ToolResult("✅ $ap sera toujours utilisée pour « $t ».") }
         }
+        "freebox" -> try {
+            ToolResult(fr.dd.jarvis.ai.FreeboxOs.gerer(app, a.optString("action"), a, confirm), direct = true)
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+          catch (e: Exception) { ToolResult("❌ Freebox : ${e.message ?: e.javaClass.simpleName}", direct = true) }
+        "box_disque" -> try {
+            val action = a.optString("action").trim().lowercase()
+            val chemin = a.optString("chemin").trim()
+            val fichier = a.optString("fichier").trim()
+            if (action in setOf("supprimer", "envoyer", "deplacer", "renommer") &&
+                !confirm("Confirmer l'action « $action » sur le partage de la box ?\n\nChemin : $chemin\nFichier/destination : $fichier", true))
+                ToolResult("Action annulée : aucun fichier distant n'a été modifié.")
+            else ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                fr.dd.jarvis.ai.Box.action(app, action, chemin, fichier)
+            }, direct = true)
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+          catch (e: Exception) { ToolResult("❌ Accès au disque de la box impossible : ${e.message ?: e.javaClass.simpleName}", direct = true) }
+        "rechercher_videos_box" -> try {
+            ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                fr.dd.jarvis.ai.Box.rechercherVideos(app, a.optString("recherche"), a.optString("dossier"))
+            }, direct = true)
+        } catch (e: Exception) { ToolResult("❌ Recherche sur le disque de la box impossible : ${e.message}", direct = true) }
+        "lire_video_box" -> try {
+            val chemin = a.optString("chemin").trim().trimStart('/')
+            if (chemin.isBlank()) ToolResult("Chemin du film manquant.")
+            else ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                fr.dd.jarvis.device.MediaServeur.ouvrir(app, chemin)
+            }, direct = true)
+        } catch (e: Exception) { ToolResult("❌ Impossible d'ouvrir ce film : ${e.message}", direct = true) }
         "obsidian_chercher" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             val r = app.obsidian.searchNotes(a.optString("requete"))
             if (r.isEmpty()) "Aucune note ne contient « ${a.optString("requete")} »." else r.joinToString("\n") { "- ${it.first}" + (if (it.second.isNotBlank()) " : …${it.second}…" else "") }
@@ -898,8 +921,7 @@ class ToolBox(
         "graphe_suggere_lien" -> ToolResult(app.knowledgeRepository.suggestRelation(a.optString("source"), a.optString("cible"), a.optString("type", "RELATED_TO")))
         "routine_contextuelle" -> routineContextuelle(a)
         "reglage_jarvis" -> reglerJarvis(a)
-        "memoire_lire" -> ToolResult(app.memo.all().entries.joinToString("\n\n") { "**${it.key}** : ${it.value}" }.ifBlank { "Aucune consigne enregistrée." } +
-            app.memo.hermesPourPrompt().let { if (it.isBlank()) "" else "\n\n---\n**Mémoire d'Hermès (synchronisée)**" + it.substringAfter(":") }, direct = true)
+        "memoire_lire" -> ToolResult(app.memo.all().entries.joinToString("\n\n") { "**${it.key}** : ${it.value}" }.ifBlank { "Aucune consigne enregistrée." }, direct = true)
         "memoire_oublier" -> ToolResult(if (app.memo.remove(a.optString("sujet"))) "Consigne oubliée." else "Aucune consigne pour ce sujet.")
         "factures_impayees" -> ToolResult(app.societe.impayees().ifBlank { "✅ Aucune facture impayée." }, direct = true)
         "export_kml" -> ToolResult(app.societe.exporterKml(), direct = true)
@@ -910,48 +932,10 @@ class ToolBox(
             ?: ToolResult("Hermès est indisponible pour l'instant (non installé ou arrêté). Réponds toi-même au mieux.")
         "phone_health_report" -> ToolResult(if (a.optString("detail").equals("historique", true)) fr.dd.jarvis.device.PhoneHealth.historyReport(app) else fr.dd.jarvis.device.PhoneHealth.report(app), direct = true)
         "phone_action" -> phoneAction(a)
-        "voir_ecran" -> ToolResult(fr.dd.jarvis.device.PiloteEcran.voir(app, a.optString("question")), direct = true)
-        "piloter_telephone" -> {
-            val objectif = a.optString("objectif").trim()
-            if (objectif.isBlank()) ToolResult("Précise l'objectif à atteindre sur le téléphone.")
-            else if (!confirm("Je prends la main sur l'écran pour : « ${objectif.take(160)} ». Continuer ?", false)) ToolResult("Pilotage annulé.")
-            else {
-                val appli = a.optString("application").trim()
-                if (appli.isNotBlank()) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.openApp(appli) }.also { kotlinx.coroutines.delay(2500) }
-                ToolResult(fr.dd.jarvis.device.PiloteEcran.piloter(app, objectif + (if (appli.isNotBlank()) " (application : $appli, déjà ouverte)" else ""),
-                    confirmer = { q -> confirm(q, true) }), direct = true)
-            }
-        }
         "run_shell" -> runShell(a)
         "stockage_telephone" -> {
             val act = a.optString("action").lowercase()
             val o = app.obsidian
-            if (act == "chercher" || act == "rechercher") return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                val q = a.optString("chemin").ifBlank { a.optString("requete") }
-                if (q.isBlank()) return@withContext ToolResult("Indique le nom ou quelques mots du fichier à retrouver.")
-                // Fichiers ET dossiers (« trouve le dossier coloriage pompier »), dans le coffre puis dans le reste du stockage.
-                val coffre = runCatching { o.chercherFichiers(q, dossiers = true, limite = 250) }.getOrDefault(emptyList())
-                    .sortedBy { c -> c.substringAfterLast('/').contains('.') }
-                val telephone = runCatching { fr.dd.jarvis.ai.Stockage.action("chercher", q, "") }.getOrElse { "Stockage partagé : " + (it.message ?: "erreur") }
-                // Le coffre est souvent DANS le stockage du téléphone : on n'affiche pas deux fois les mêmes éléments.
-                val physique = runCatching { o.cheminPhysiqueCoffre() }.getOrNull()?.trim('/')
-                val lignesTel = telephone.lines().filter { it.startsWith("📄 ") || it.startsWith("📁 ") }
-                    .filter { l -> physique.isNullOrBlank() || coffre.isEmpty() || !l.substringAfter("/").startsWith("$physique/") }
-                // Dossiers du coffre : nombre de fichiers, et leur contenu quand il y en a peu (le bon dossier saute aux yeux,
-                // même si un dossier homonyme vide existe ailleurs).
-                val tout = if (coffre.any { !it.substringAfterLast('/').contains('.') }) runCatching { o.toutLister() }.getOrDefault(emptyList()) else emptyList()
-                val dossiersCoffre = coffre.filter { c -> tout.any { it.second && it.first == c } }
-                val lignes = (coffre.map { c ->
-                    if (c in dossiersCoffre) "📁 Coffre Obsidian › $c — ${o.fichiersSous(c, tout).size} fichier(s)"
-                    else (if (c.substringAfterLast('/').contains('.')) "📦 Coffre Obsidian › " else "📁 Coffre Obsidian › ") + c
-                } + lignesTel).distinct()
-                val details = if (dossiersCoffre.size in 1..3) dossiersCoffre.map { d -> d to o.fichiersSous(d, tout) }.filter { it.second.isNotEmpty() }
-                    .map { (d, f) -> "\n📂 Contenu de « $d » :\n" + f.sorted().take(60).joinToString("\n") { "   📄 " + it.removePrefix("$d/") } + (if (f.size > 60) "\n   … (${f.size} fichiers)" else "") }
-                    else emptyList()
-                val erreurAcces = telephone.takeIf { it.startsWith("Stockage partagé :") }?.let { "⚠️ $it" }
-                val contenu = (lignes + listOfNotNull(erreurAcces)).take(250) + details
-                ToolResult(if (contenu.isEmpty()) "Aucun résultat pour « $q » dans le stockage accessible et le coffre Obsidian." else "🔎 Recherche globale : « $q »\n" + contenu.joinToString("\n"), direct = true)
-            }
             // Un chemin qui pointe DANS le coffre Obsidian (ex. « Documents/Obsidian jarvis/JARVIS/Images ») est traité dans le coffre.
             val dansCoffre = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { o.estDansCoffre(a.optString("chemin")) }.getOrDefault(false) }
             if (dansCoffre && act != "supprimer" && act != "lire") return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {

@@ -373,18 +373,8 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     }
 
     /** Clé de comparaison tolérante : sans accents, majuscules, espaces doubles, « _ » / « - », ni pluriel en s/x. */
-    private fun cleNom(s: String): String = normaliseNom(s.replace('_', ' ').replace('-', ' ')).replace(Regex("\\s+"), " ")
-        .split(' ').joinToString(" ") { m -> if (m.length > 3 && (m.endsWith("s") || m.endsWith("x"))) m.dropLast(1) else m }
-
-    /** Fichiers (chemins réels, récursivement) contenus sous [dossier] dans [tout] (= toutLister()). */
-    fun fichiersSous(dossier: String, tout: List<Pair<String, Boolean>> = toutLister()): List<String> =
-        tout.filter { !it.second && it.first.startsWith("$dossier/") }.map { it.first }
-
-    /** Autres dossiers du coffre portant le même nom que [dossier] (majuscules, accents, pluriel tolérés), avec leur nombre de fichiers. */
-    fun homonymes(dossier: String, tout: List<Pair<String, Boolean>> = toutLister()): List<Pair<String, Int>> {
-        val voulu = cleNom(dossier.substringAfterLast('/'))
-        return tout.filter { it.second && it.first != dossier && cleNom(it.first.substringAfterLast('/')) == voulu }
-            .map { it.first to fichiersSous(it.first, tout).size }
+    private fun cleNom(s: String): String = normaliseNom(s.replace('_', ' ').replace('-', ' ')).replace(Regex("\\s+"), " ").let {
+        if (it.length > 3 && (it.endsWith("s") || it.endsWith("x"))) it.dropLast(1) else it
     }
 
     /** Noms des éléments directs d'un dossier du coffre (chemin réel), avec « est un dossier ». Null si introuvable. */
@@ -540,9 +530,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         val candidats = tout.asSequence().filter { (p, estDossier) -> (dossiers || !estDossier) && (dansDossier == null || p.startsWith("$dansDossier/")) }
         fun parMots() = candidats.filter { (p, _) ->
             val nom = p.substringAfterLast('/')
-            val ext = nom.substringAfterLast('.', "").lowercase()
-            val description = if (ext in setOf("png", "jpg", "jpeg", "webp", "gif", "heic", "bmp")) descriptionImage(p, descriptions) else null
-            val texte = (motsCles(nom.substringBeforeLast('.')) + (description?.let { motsCles(it) } ?: emptyList())).joinToString(" ")
+            val texte = (motsCles(nom.substringBeforeLast('.')) + (descriptions[nom]?.let { motsCles(it) } ?: emptyList())).joinToString(" ")
             mots.isNotEmpty() && mots.all { texte.contains(it) }
         }.map { it.first }.take(limite).toList()
         if (re == null) return parMots()
@@ -616,40 +604,11 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         }.getOrNull()
     }
 
-    /** Descriptions des images générées, indexées aussi par empreinte SHA-256 pour survivre aux renommages. */
+    /** Description (prompt) de chaque image générée par JARVIS, par nom de fichier. */
     private fun descriptionsImages(): Map<String, String> = runCatching {
         val f = File(ctx.filesDir, "images_descriptions.json")
-        if (!f.isFile) return@runCatching emptyMap()
-        val j = org.json.JSONObject(f.readText())
-        val out = linkedMapOf<String, String>()
-        j.keys().forEach { key -> out[key] = j.optString(key) }
-        val dossier = File(ctx.filesDir, "images")
-        dossier.listFiles()?.filter { it.isFile }?.forEach { image ->
-            val prompt = out[image.name] ?: return@forEach
-            val digest = java.security.MessageDigest.getInstance("SHA-256")
-            image.inputStream().buffered().use { input ->
-                val buffer = ByteArray(32768)
-                while (true) { val n = input.read(buffer); if (n < 0) break; digest.update(buffer, 0, n) }
-            }
-            val hash = digest.digest().joinToString("") { "%02x".format(it) }
-            out["sha256:$hash"] = prompt
-        }
-        out
+        if (!f.isFile) emptyMap() else org.json.JSONObject(f.readText()).let { j -> j.keys().asSequence().associateWith { j.optString(it) } }
     }.getOrDefault(emptyMap())
-
-    /** Description d’une image du coffre : son nom, puis son empreinte de contenu. */
-    private fun descriptionImage(chemin: String, descriptions: Map<String, String>): String? {
-        descriptions[chemin.substringAfterLast('/')]?.let { return it }
-        if (descriptions.keys.none { it.startsWith("sha256:") }) return null
-        val bytes = runCatching {
-            racineFichier()?.let { root ->
-                val f = fichierSur(root, chemin)
-                if (f.isFile) f.inputStream().buffered().use { it.readBytes() } else null
-            } ?: trouver(chemin)?.takeIf { it.isFile }?.let { doc -> ctx.contentResolver.openInputStream(doc.uri)?.use { it.readBytes() } }
-        }.getOrNull() ?: return null
-        val hash = java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
-        return descriptions["sha256:$hash"]
-    }
 
     /** Fichiers d'un dossier du coffre (noms seuls), du plus récent au plus ancien quand les noms sont datés. */
     fun fichiersDe(dossier: String): List<String> {
@@ -732,23 +691,11 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         val c = resoudre(chemin) ?: return "Dossier introuvable dans le coffre : ${chemin.trim().trim('/').ifBlank { "racine" }}" +
             proches(chemin).let { if (it.isEmpty()) "" else "\nDossiers proches : " + it.joinToString(", ") }
         val entrees = enfants(c) ?: return "« $c » n'est pas un dossier."
-        val tout by lazy { toutLister() }
-        if (entrees.none { !it.second }) {
-            // Aucun fichier directement dedans : fichiers dans ses sous-dossiers, ou un AUTRE dossier du même nom ailleurs ?
-            val dessous = if (entrees.isEmpty()) emptyList() else fichiersSous(c, tout)
-            val autres = homonymes(c, tout).filter { it.second > 0 }.sortedByDescending { it.second }
-            if (dessous.isEmpty() && autres.isNotEmpty()) {
-                val (meilleur, nb) = autres.first()
-                return "📂 coffre › ${c.replace("/", " › ").ifBlank { "racine" }} : vide.\n" +
-                    "➡️ Mais un autre dossier du même nom contient des fichiers : " + autres.joinToString(", ") { "« ${it.first} » (${it.second} fichier(s))" } + "\n\n" +
-                    "📂 coffre › ${meilleur.replace("/", " › ")} ($nb fichier(s))\n" + fichiersSous(meilleur, tout).sorted().take(200).joinToString("\n") { "📄 " + it.removePrefix("$meilleur/") }
-            }
-            if (entrees.isEmpty()) return "📂 coffre › ${c.replace("/", " › ").ifBlank { "racine" }} : (vide)"
-        }
+        if (entrees.isEmpty()) return "📂 coffre › ${c.replace("/", " › ").ifBlank { "racine" }} : (vide)"
         val descriptions = descriptionsImages()
         val tri = entrees.sortedWith(compareBy({ !it.second }, { it.first.lowercase() }))
         return "📂 coffre › ${c.replace("/", " › ").ifBlank { "racine" }}\n" + tri.take(300).joinToString("\n") { (n, dir) ->
-            if (dir) "📁 $n (${fichiersSous(if (c.isEmpty()) n else "$c/$n", tout).size} fichier(s))" else "📄 $n" + (descriptions[n]?.let { " — « ${it.take(80)} »" } ?: "")
+            if (dir) "📁 $n" else "📄 $n" + (descriptions[n]?.let { " — « ${it.take(80)} »" } ?: "")
         } + (if (tri.size > 300) "\n… (${tri.size} éléments)" else "")
     }
 
@@ -997,7 +944,6 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
     private companion object {
         val MOTS_VIDES = setOf("le", "la", "les", "un", "une", "des", "du", "de", "d", "l", "et", "ou", "a", "au", "aux", "en", "dans", "leur", "nom",
-            "fichier", "fichiers", "image", "images", "dossier", "dossiers", "sous", "mon", "ma", "mes", "nomme", "nommes", "nommee", "appele", "appelee",
-            "intitule", "the", "of", "and")
+            "fichier", "fichiers", "image", "images", "the", "of", "and")
     }
 }

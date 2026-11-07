@@ -16,10 +16,7 @@ import androidx.core.app.NotificationCompat
 import fr.dd.jarvis.JarvisApp
 import fr.dd.jarvis.device.Telephony
 
-/**
- * Filtrage d'appels : laisse passer tous les appels sans rien afficher (pas d'incrustation ni de notification Jarvis,
- * l'écran d'appel Android suffit). Les fonctions d'affichage restent disponibles mais ne sont plus appelées.
- */
+/** Identification des appels entrants à partir des fiches Jarvis, des clients et du coffre Obsidian. */
 class JarvisCallScreeningService : CallScreeningService() {
     override fun onScreenCall(callDetails: Call.Details) {
         val number = callDetails.handle?.schemeSpecificPart.orEmpty()
@@ -29,8 +26,12 @@ class JarvisCallScreeningService : CallScreeningService() {
                 .setDisallowCall(false).setRejectCall(false)
                 .setSkipCallLog(false).setSkipNotification(false).build())
         }
-        // Plus d'incrustation ni de notification Jarvis pendant un appel : l'écran d'appel d'Android suffit.
-        // (L'appelant reste identifiable à la demande : « qui m'a appelé ? » lit le journal des notifications.)
+        if (number.isBlank()) return
+        Thread {
+            val app = applicationContext as? JarvisApp ?: return@Thread
+            val name = runCatching { Telephony.identifierAppel(app, number) }.getOrNull()
+            if (!name.isNullOrBlank()) Handler(Looper.getMainLooper()).post { afficherIdentite(number, name) }
+        }.start()
     }
 
     private fun afficherIdentite(number: String, name: String) {

@@ -190,8 +190,6 @@ object HermesTermux {
 J_URL=${q("http://127.0.0.1:$port/progres")}; J_TOK=${q(jeton)}
 p() {
   local message="${'$'}*"
-  # Ligne vide (sortie d'un programme) : rien à transmettre — le pont refuserait un message vide (HTTP 400).
-  case "${'$'}{message//[[:space:]]/}" in '') return 0 ;; esac
   echo "${'$'}message"
   if ! command -v curl >/dev/null 2>&1; then
     echo "JARVIS_PROGRESS_ERROR: curl absent" >&2
@@ -210,76 +208,35 @@ p() {
     return 1
   fi
 }
-HERMES_PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-# Debian (proot) tourne par défaut en « root » virtuel (UID 0) alors que les fichiers d'Hermès, dans le HOME
-# Termux partagé, appartiennent à l'UID Android de Termux : Hermès refuse alors de se mettre à jour.
-# On déclare dans Debian un utilisateur « jarvis » portant EXACTEMENT l'UID/GID de Termux (HOME = /root), puis on
-# lance Hermès sous cet utilisateur avec le HOME Termux monté sur /root : propriétaire et processus coïncident,
-# sans aucun chown. Fonctionne avec l'ancienne (shell) et la nouvelle (Python) version de proot-distro.
-debian_utilisateur_jarvis() {
-  proot-distro login debian -- sh -c 'U="${'$'}1"; G="${'$'}2"; grep -q "^jarvis:x:${'$'}U:${'$'}G:" /etc/passwd && exit 0
-    sed -i "/^jarvis:/d" /etc/passwd /etc/group 2>/dev/null; sed -i "/^jarvis:/d" /etc/shadow 2>/dev/null
-    echo "jarvis:x:${'$'}G:" >> /etc/group; echo "jarvis:x:${'$'}U:${'$'}G:Jarvis:/root:/bin/bash" >> /etc/passwd' sh "${'$'}(id -u)" "${'$'}(id -g)" >/dev/null 2>&1
-}
-hermes_debian() {
-  proot-distro login debian --user jarvis --bind "${'$'}HOME:/root" -- env -i HOME=/root USER=jarvis LOGNAME=jarvis SHELL=/bin/bash LANG=C.UTF-8 PATH="${'$'}HERMES_PATH" "${'$'}@"
-}
-# Arrête les passerelles Hermès SANS se tuer soi-même : la commande RUN_COMMAND de ce script contient le texte
-# « hermes gateway run », donc un « pkill -f » le tuerait (code 143). On écarte ce script et tout script Jarvis (J_URL=).
-arreter_passerelles_hermes() {
-  for pid in ${'$'}(pgrep -f 'hermes gateway run' 2>/dev/null); do
-    [ "${'$'}pid" = "${'$'}${'$'}" ] && continue
-    [ "${'$'}pid" = "${'$'}PPID" ] && continue
-    { tr '\0' ' ' < "/proc/${'$'}pid/cmdline"; } 2>/dev/null | grep -q 'J_URL=' && continue
-    kill "${'$'}pid" 2>/dev/null
-  done
-  sleep 2
-}
 """.trimIndent()
     private fun scriptSignal(app: JarvisApp, texte: String) = prelude(app) + "\np ${q(texte)}\n"
+    // ------------------------------------------------------------------ Mémoire unique JARVIS ↔ Hermès
 
-    // ------------------------------------------------------------------ 3-5. Installation, configuration, démarrage
-
-    /** Version du hook de mémoire partagée : à augmenter quand memoire_handler.py change (réinstallation automatique). */
-    const val VERSION_HOOK_MEMOIRE = 3
-
-    /**
-     * Installe (ou met à jour) le hook « jarvis-memoire » d'Hermès : au démarrage de la passerelle, il lance un fil qui
-     * synchronise les deux mémoires toutes les 30 s via le pont (POST /memoire/hermes, GET /memoire/jarvis).
-     * Script autonome (Termux) : n'a besoin que de « p » (prélude).
-     */
+    /** Installe ou actualise le hook de mémoire unique sans écraser les autres variables de l'environnement Hermès. */
     internal fun scriptHookMemoire(app: JarvisApp): String {
-        val py = runCatching { app.assets.open("hermes/memoire_handler.py").use { it.readBytes() } }.getOrNull() ?: return "p '⚠️ Hook de mémoire partagée introuvable dans Jarvis.'"
-        return scriptHookMemoireDe(py, app.store.mcpJeton.value)
-    }
-
-    internal fun scriptHookMemoireDe(py: ByteArray, jeton: String): String {
+        val py = runCatching { app.assets.open("hermes/memoire_handler.py").use { it.readBytes() } }.getOrNull()
+            ?: return "p '⚠️ Hook de mémoire partagée introuvable dans Jarvis.'"
         val b64 = java.util.Base64.getEncoder().encodeToString(py)
+        val jeton = app.store.mcpJeton.value
         return """
 JH="${'$'}HOME/.hermes"; JD="${'$'}JH/hooks/jarvis-memoire"; mkdir -p "${'$'}JD" "${'$'}JH/memories"
 printf '%s' '$b64' | base64 -d > "${'$'}JD/handler.py.tmp" && mv "${'$'}JD/handler.py.tmp" "${'$'}JD/handler.py"
 printf 'name: jarvis-memoire
-description: Memoire partagee Jarvis et Hermes (synchronisation automatique)
+description: Memoire unique JARVIS (synchronisation bidirectionnelle)
 events:
   - gateway:startup
 ' > "${'$'}JD/HOOK.yaml"
 touch "${'$'}JH/.env"; grep -v -E '^JARVIS_PONT_(URL|JETON)=' "${'$'}JH/.env" > "${'$'}JH/.env.j" 2>/dev/null || true
 printf 'JARVIS_PONT_URL=%s
 JARVIS_PONT_JETON=%s
-' 'http://127.0.0.1:${PontMcp.PORT}' ${q(jeton)} >> "${'$'}JH/.env.j"; mv "${'$'}JH/.env.j" "${'$'}JH/.env"; chmod 600 "${'$'}JH/.env"
-p '🧠 Mémoire partagée Jarvis ↔ Hermès installée.'
+' 'http://127.0.0.1:${PontMcp.PORT}' ${q(jeton)} >> "${'$'}JH/.env.j"
+mv "${'$'}JH/.env.j" "${'$'}JH/.env"; chmod 600 "${'$'}JH/.env"
+p '🧠 Hook de mémoire unique JARVIS ↔ Hermès installé.'
 """.trim()
     }
 
-    /** Installe le hook de mémoire partagée (+ réglages de rapidité) puis redémarre la passerelle (une fois par version). */
-    fun installerMemoirePartagee(app: JarvisApp): String? {
-        if (!app.store.hermesInstalle.value) return null
-        PontMcp.demarrer(app)
-        // Version 2 : réflexion « low » pour qu'Hermès réponde plus vite (lue par Hermès dans agent.reasoning_effort).
-        val rapidite = "debian_utilisateur_jarvis; hermes_debian hermes config set agent.reasoning_effort low --force >/dev/null 2>&1 && p '⚡ Hermès : réflexion allégée pour des réponses plus rapides.' || true"
-        val script = prelude(app) + "\n" + scriptHookMemoire(app) + "\n" + rapidite + "\narreter_passerelles_hermes; sleep 1\n" + demarrage
-        return executer(app, script, libelle = "Mémoire partagée Jarvis ↔ Hermès")
-    }
+
+    // ------------------------------------------------------------------ 3-5. Installation, configuration, démarrage
 
     private fun configuration(app: JarvisApp): String {
         val s = app.store
@@ -296,7 +253,7 @@ p '🧠 Mémoire partagée Jarvis ↔ Hermès installée.'
         )
         val extraEnv = buildString {
             geminiKeys.drop(1).forEachIndexed { index, key -> appendLine("setenv GOOGLE_API_KEY_" + (index + 2) + " " + q(key)) }
-            // Clés Groq : jamais copiées dans Termux, la rotation est faite par le relais de Jarvis.
+            groqKeys.drop(1).forEachIndexed { index, key -> appendLine("setenv GROQ_API_KEY_" + (index + 2) + " " + q(key)) }
         }
         return base.replace("setenv API_SERVER_MODEL_NAME hermes-agent", "setenv API_SERVER_MODEL_NAME hermes-agent\n" + extraEnv) + "\n" + scriptHookMemoire(app)
     }
@@ -311,21 +268,17 @@ p '🧠 Mémoire partagée Jarvis ↔ Hermès installée.'
             if (groq.isNotBlank()) {
                 appendLine("providers:")
                 appendLine("  groq:")
-                // Groq via le relais compact de Jarvis (127.0.0.1) : requêtes ramenées sous la limite jetons/minute.
-                appendLine("    api: http://127.0.0.1:${PontMcp.PORT}/groq/v1")
-                appendLine("    key_env: JARVIS_GROQ_RELAIS")
+                appendLine("    api: https://api.groq.com/openai/v1")
+                appendLine("    key_env: GROQ_API_KEY")
                 appendLine("fallback_providers:")
                 appendLine("  - provider: custom:groq")
                 appendLine("    model: \"$modeleGroq\"")
             }
             appendLine("credential_pool_strategies:")
             appendLine("  gemini: round_robin")
-            // (une seule « clé » côté Hermès : la rotation des clés Groq est faite par le relais de Jarvis)
+            if (groq.isNotBlank()) appendLine("  groq: round_robin")
             // Active explicitement la mémoire native évolutive d'Hermès.
             // La mémoire Jarvis/Obsidian reste la référence partagée pour les préférences utilisateur.
-            // Réflexion « low » : Hermès répond nettement plus vite (modifiable dans config.yaml).
-            appendLine("agent:")
-            appendLine("  reasoning_effort: low")
             appendLine("memory:")
             appendLine("  memory_enabled: true")
             appendLine("  user_profile_enabled: true")
@@ -369,8 +322,7 @@ setenv API_SERVER_PORT $PORT_API
 setenv API_SERVER_KEY ${q(cleApi)}
 setenv API_SERVER_MODEL_NAME hermes-agent
 ${if (gemini.isNotBlank()) "setenv GOOGLE_API_KEY ${q(gemini)}" else "p '⚠️ Aucune clé Gemini dans Jarvis : ajoute-en une (Réglages › Agents Gemini) puis « Configurer Hermès ».'"}
-${if (groq.isNotBlank()) "setenv JARVIS_GROQ_RELAIS ${q(jeton)}" else ""}
-setenv HERMES_TIMEZONE ${q(java.util.TimeZone.getDefault().id)}
+${if (groq.isNotBlank()) "setenv GROQ_API_KEY ${q(groq)}" else ""}
 chmod 600 "${'$'}H/.env"
 # Version de schéma de la configuration installée : conservée, sinon Hermès croit à une vieille config et la migre.
 CV=${'$'}(grep -m1 '^_config_version:' "${'$'}H/config.yaml" 2>/dev/null || grep -m1 '^_config_version:' "${'$'}H/config.yaml.avant-jarvis" 2>/dev/null)
@@ -398,9 +350,14 @@ fi
 p '🔄 Préparation du démarrage de la passerelle Hermès…'
 HERMES_PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 if [ "$(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ] || proot-distro login debian --termux-home -- env -i HOME=/root PATH="${'$'}{HERMES_PATH}" sh -c 'command -v hermes >/dev/null 2>&1'; then
-  # Passerelle lancée sous l'utilisateur Debian « jarvis » = UID réel de Termux (propriétaire des fichiers d'Hermès).
-  debian_utilisateur_jarvis
-  CMD="proot-distro login debian --user jarvis --bind ${'$'}{HOME}:/root -- env -i HOME=/root USER=jarvis LOGNAME=jarvis SHELL=/bin/bash LANG=C.UTF-8 PATH=${'$'}{HERMES_PATH} hermes gateway run"
+  OWNER_IDS=$(proot-distro login debian --termux-home -- stat -c '%u:%g' /root/.hermes/hermes-agent/.hermes/bin/hermes 2>/dev/null) || {
+    p "❌ Impossible d’identifier le propriétaire de l’installation Hermès."
+    exit 1
+  }
+  case "${'$'}{OWNER_IDS}" in
+    *[!0-9:]*|'') p "❌ Identité propriétaire Hermès invalide."; exit 126 ;;
+  esac
+  CMD="proot-distro login debian --user ${'$'}{OWNER_IDS} --termux-home -- env -i HOME=/root USER=jarvis LOGNAME=jarvis SHELL=/bin/bash PATH=${'$'}{HERMES_PATH} hermes gateway run"
 else
   if ! command -v hermes >/dev/null 2>&1; then
     p "❌ CLI Hermès introuvable dans Termux et Debian. Relance « Installer Hermès » pour réparer l’installation."
@@ -600,12 +557,7 @@ p "✅ Hermès installé (${'$'}{MODE})."
             appendLine("removeenvfamily JARVIS_CF_KEY")
             listOf("JARVIS_ZAI_API_KEY", "JARVIS_OPENROUTER_API_KEY", "JARVIS_NVIDIA_API_KEY", "JARVIS_MISTRAL_API_KEY", "JARVIS_HF_TOKEN").forEach { appendLine("removeenvfamily " + it) }
             gemini.forEachIndexed { index, key -> appendLine("setenv " + (if (index == 0) "GOOGLE_API_KEY" else "GOOGLE_API_KEY_" + (index + 1)) + " " + q(key)) }
-            // Clés Groq : restent chiffrées dans Jarvis ; Hermès passe par le relais local avec le jeton du pont.
-            if (groq.isNotEmpty()) appendLine("setenv JARVIS_GROQ_RELAIS " + q(s.mcpJeton.value))
-            // Ollama du serveur de la maison : Hermès passe aussi par le relais de Jarvis (tunnel SSH et compactage compris).
-            if (fr.dd.jarvis.ai.Ollama.configure(app)) appendLine("setenv JARVIS_OLLAMA_RELAIS " + q(s.mcpJeton.value))
-            // Fuseau du téléphone : les automatismes (cronjob) d'Hermès se déclenchent à l'heure locale, pas en UTC.
-            appendLine("setenv HERMES_TIMEZONE " + q(java.util.TimeZone.getDefault().id))
+            groq.forEachIndexed { index, key -> appendLine("setenv " + (if (index == 0) "GROQ_API_KEY" else "GROQ_API_KEY_" + (index + 1)) + " " + q(key)) }
             cloudflare.forEachIndexed { index, pair -> appendLine("setenv JARVIS_CF_KEY_" + (index + 1) + " " + q(pair.second)) }
             listOf("ZAI", "OPENROUTER", "NVIDIA", "MISTRAL", "HF").forEach { appendLine("setenv JARVIS_HAS_" + it + " 0") }
             external.forEach { entry ->
@@ -667,8 +619,6 @@ def is_groq(item):
     base_url = str(item.get("base_url", ""))
     return provider in ("custom:groq", "groq") or provider.startswith("custom:jarvis_cf_") or (provider == "custom" and "groq.com" in base_url)
 fallbacks = [item for item in fallbacks if not is_groq(item)]
-if isinstance(model_config, dict) and is_groq(model_config) and os.environ.get("JARVIS_HAS_GEMINI") == "1":
-    model_config.clear(); model_config.update({"provider": "gemini", "default": os.environ["JARVIS_GEMINI_MODEL"]})
 main_provider = str(model_config.get("provider", "")) if isinstance(model_config, dict) else ""
 if os.environ.get("JARVIS_HAS_GEMINI") == "1" and main_provider != "gemini":
     if not any(isinstance(x, dict) and x.get("provider") == "gemini" and x.get("model") == os.environ["JARVIS_GEMINI_MODEL"] for x in fallbacks):
@@ -679,9 +629,9 @@ if not isinstance(strategies, dict):
 if os.environ.get("JARVIS_HAS_GEMINI") == "1": strategies["gemini"] = "round_robin"
 else: strategies.pop("gemini", None)
 if os.environ.get("JARVIS_HAS_GROQ") == "1":
-    providers["groq"] = {"api": os.environ["JARVIS_GROQ_RELAIS_URL"], "key_env": "JARVIS_GROQ_RELAIS"}
+    providers["groq"] = {"api": "https://api.groq.com/openai/v1", "key_env": "GROQ_API_KEY"}
     fallbacks.append({"provider": "custom:groq", "model": os.environ["JARVIS_GROQ_MODEL"]})
-    strategies.pop("groq", None)
+    strategies["groq"] = "round_robin"
 else:
     providers.pop("groq", None)
     strategies.pop("groq", None)
@@ -695,10 +645,6 @@ for index in range(1, len(cf_ids) + 1):
     fallbacks.append({"provider": f"custom:jarvis_cf_{index}", "model": os.environ["JARVIS_CF_MODEL"]})
 data["fallback_providers"] = fallbacks
 
-# Rapidité : réflexion « low » (Gemini répond bien plus vite) sauf si l'utilisateur a choisi un autre niveau.
-agent_cfg = data.setdefault("agent", {})
-if isinstance(agent_cfg, dict) and str(agent_cfg.get("reasoning_effort") or "").strip().lower() in ("", "medium"):
-    agent_cfg["reasoning_effort"] = "low"
 # Multi-agent orchestration, preserving all unrelated Hermes configuration.
 delegation = data.setdefault("delegation", {})
 if not isinstance(delegation, dict):
@@ -768,14 +714,6 @@ for provider_id, key_env, default_api in external_specs:
             route = {"provider": "custom:" + custom_name, "model": model_name}
             if not any(isinstance(x, dict) and x.get("provider") == route["provider"] and x.get("model") == route["model"] for x in fallbacks):
                 fallbacks.append(route)
-# Ollama du serveur de la maison (via le relais de Jarvis) : tout dernier secours et sous-agent local « jarvis-ollama ».
-fallbacks[:] = [x for x in fallbacks if not (isinstance(x, dict) and x.get("provider") == "custom:jarvis_ollama")]
-if os.environ.get("JARVIS_HAS_OLLAMA") == "1":
-    providers["jarvis_ollama"] = {"api": os.environ["JARVIS_OLLAMA_RELAIS_URL"], "key_env": "JARVIS_OLLAMA_RELAIS"}
-    fallbacks.append({"provider": "custom:jarvis_ollama", "model": os.environ.get("JARVIS_OLLAMA_MODEL") or "auto"})
-    add_route("jarvis-ollama", "IA locale Ollama du serveur de la maison (secours hors ligne, plus lente : tâches simples)", "custom:jarvis_ollama", os.environ.get("JARVIS_OLLAMA_MODEL") or "auto")
-else:
-    providers.pop("jarvis_ollama", None)
 known = {(str(x.get("provider", "")), str(x.get("model", ""))) for x in options if isinstance(x, dict)}
 for index, item in enumerate(fallbacks, 1):
     if isinstance(item, dict):
@@ -809,17 +747,14 @@ os.replace(name, p)
 """.trimIndent()
         message = "⏳ Règles multi-agents préparées. Assemblage des commandes de synchronisation…"
         val hasGemini = if (gemini.isNotEmpty()) "1" else "0"
-        // Groq (offre gratuite : ~8 000 jetons/minute) ne peut pas porter un tour d'agent Hermès brut : Hermès l'appelle
-        // donc via le RELAIS de Jarvis (127.0.0.1:${'$'}{PontMcp.PORT}/groq/v1) qui compacte chaque requête sous la limite et fait
-        // tourner les clés Groq de Jarvis (jamais copiées dans Termux). Gemini reste le modèle principal d'Hermès.
         val hasGroq = if (groq.isNotEmpty()) "1" else "0"
         val cfIds = cloudflare.joinToString(",") { it.first }
-        val pluginCommand = "PLUGIN_OK=0; debian_utilisateur_jarvis; hermes_debian hermes plugins install advanced-delegation --no-deps --no-enable >/dev/null 2>&1 || true; if hermes_debian hermes plugins enable advanced-delegation --no-allow-tool-override >/dev/null 2>&1; then PLUGIN_OK=1; p \"🧠 Routage multi-modèles advanced-delegation activé.\"; else p \"⚠️ Extension avancée indisponible : délégation Hermes native conservée.\"; fi"
+        val pluginCommand = "PLUGIN_OK=0; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes plugins install advanced-delegation --no-deps --no-enable >/dev/null 2>&1 || true; if proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin hermes plugins enable advanced-delegation --no-allow-tool-override >/dev/null 2>&1; then PLUGIN_OK=1; p \"🧠 Routage multi-modèles advanced-delegation activé.\"; else p \"⚠️ Extension avancée indisponible : délégation Hermes native conservée.\"; fi"
         val extEnv = external.joinToString(" ") { entry ->
             val id = entry[0].uppercase()
             "JARVIS_HAS_$id=1 JARVIS_${id}_MODEL=${q(entry[3])} JARVIS_${id}_ENDPOINT=${q(entry[2])}"
         }
-        val configCommand = "proot-distro login debian --termux-home -- env " + extEnv + " JARVIS_HAS_GEMINI=" + hasGemini + " JARVIS_HAS_GROQ=" + hasGroq + " JARVIS_GROQ_RELAIS_URL=" + q("http://127.0.0.1:${PontMcp.PORT}/groq/v1") + " JARVIS_GEMINI_MODEL=" + q(app.store.hermesModele.value.ifBlank { app.store.geminiModel.value }.ifBlank { "gemini-2.5-flash" }) + " JARVIS_GROQ_MODEL=" + q(model) + " JARVIS_CF_MODEL=" + q(cloudflareModel) + " JARVIS_CF_IDS=" + q(cfIds) + " JARVIS_HAS_OLLAMA=" + (if (fr.dd.jarvis.ai.Ollama.configure(app)) "1" else "0") + " JARVIS_OLLAMA_RELAIS_URL=" + q("http://127.0.0.1:${PontMcp.PORT}/ollama/v1") + " JARVIS_OLLAMA_MODEL=" + q(s.ollamaModele.value.ifBlank { "auto" }) + " JARVIS_ADVANCED_DELEGATION=\"\$PLUGIN_OK\" python3 -c " + q(py) + " || exit 1"
+        val configCommand = "proot-distro login debian --termux-home -- env " + extEnv + " JARVIS_HAS_GEMINI=" + hasGemini + " JARVIS_HAS_GROQ=" + hasGroq + " JARVIS_GEMINI_MODEL=" + q(app.store.hermesModele.value.ifBlank { app.store.geminiModel.value }.ifBlank { "gemini-2.5-flash" }) + " JARVIS_GROQ_MODEL=" + q(model) + " JARVIS_CF_MODEL=" + q(cloudflareModel) + " JARVIS_CF_IDS=" + q(cfIds) + " JARVIS_ADVANCED_DELEGATION=\"\$PLUGIN_OK\" python3 -c " + q(py) + " || exit 1"
         // L'installation Jarvis est une installation source dans Debian : utiliser son exécutable direct.
         // bash -lc réinitialisait le PATH et pouvait lancer un autre Hermes, d'où l'échec silencieux précédent.
         // En cas d'échec, arrêter la configuration : ne jamais annoncer une nouvelle version qui n'a pas été installée.
@@ -835,13 +770,22 @@ os.replace(name, p)
             "cd \"\$REPO\"",
             "exec ./.hermes/bin/hermes update --yes"
         ).joinToString("\n")
-        // Arrêter d'abord les passerelles : sinon « hermes update » attend jusqu'à ~30 min la fin des échanges en cours.
-        val upgradeCommand = "arreter_passerelles_hermes; " +
-            "p '🔄 Mise à niveau d’Hermès (sous l’identité réelle de Termux, UID ${'$'}(id -u))…'; debian_utilisateur_jarvis; " +
-            "if hermes_debian bash -c " + q(upgradeScript) + " 2>&1 | while IFS= read -r ligne; do p \"${'$'}ligne\" || true; done; [ \"${'$'}{PIPESTATUS[0]}\" -eq 0 ]; then " +
-            "p '✅ Hermès est à jour.'; else " +
-            "p '⚠️ Mise à niveau d’Hermès impossible pour le moment : la configuration continue avec la version installée.'; fi"
-        val restartCommand = "arreter_passerelles_hermes; sleep 1"
+        val upgradeCommand = "set -o pipefail; p '🔄 Vérification du propriétaire des environnements Hermès…'; " +
+            // Le binaire peut appartenir à root alors que les venvs gérés par Hermes appartiennent à l'UID Termux.
+            // Hermes valide les fichiers de installs/*/venv : détecter leur propriétaire réel, pas celui du lanceur.
+            "OWNER_IDS=\$(proot-distro login debian --termux-home -- sh -c 'find /root/.hermes/installs -type f -path \"*/venv/lib/python*/site-packages/*\" -printf \"%U:%G\\n\" | sort -u' 2>/dev/null) || exit 1; " +
+            "OWNER_COUNT=\$(printf '%s\\n' \"\$OWNER_IDS\" | sed '/^$/d' | wc -l | tr -d ' '); " +
+            "if [ \"\$OWNER_COUNT\" -ne 1 ]; then p \"❌ Propriétaire des environnements Hermès ambigu (\$OWNER_COUNT identités). Aucune modification effectuée.\"; exit 126; fi; " +
+            "case \"\$OWNER_IDS\" in *[!0-9:]*|'') p '❌ Identité propriétaire des environnements Hermès invalide.'; exit 126;; esac; " +
+            "p \"🔐 Mise à niveau sous l’identité réelle des environnements UID:GID \$OWNER_IDS (sans changement de droits)…\"; " +
+            "proot-distro login debian --user \"\$OWNER_IDS\" --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD HOME=/root USER=jarvis LOGNAME=jarvis " +
+            "PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "bash -c " + q(upgradeScript) + " 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done; " +
+            "UPDATE_STATUS=\$?; if [ \"\$UPDATE_STATUS\" -ne 0 ]; then " +
+            "p '❌ Mise à niveau Hermès échouée : consulte les lignes de progression ci-dessus. La configuration est interrompue.'; exit \"\$UPDATE_STATUS\"; fi; " +
+            "p '✅ Mise à niveau Hermès terminée.'"
+        val restartCommand = "proot-distro login debian --termux-home -- pkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; " +
+            "pkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; sleep 3"
         message = "⏳ Commandes de synchronisation prêtes. Assemblage du script final…"
         val script = listOf(
             prelude(app),
@@ -850,7 +794,6 @@ os.replace(name, p)
             upgradeCommand,
             "p '🔐 Mise à jour des clés et variables des fournisseurs…'",
             envScript,
-            scriptHookMemoire(app),
             "p '🧩 Synchronisation des plugins et agents…'",
             pluginCommand,
             "p '⚙️ Écriture et validation de la configuration Hermès…'",
@@ -914,7 +857,7 @@ os.replace(name, p)
     }
 
     fun arreter(app: JarvisApp): String =
-        executer(app, prelude(app) + "\narreter_passerelles_hermes; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+        executer(app, prelude(app) + "\npkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
 
     /**
      * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.
@@ -925,8 +868,7 @@ os.replace(name, p)
         PontMcp.demarrer(app)
         val cli = arguments.joinToString(" ") { q(it) }
         val commandeDebian = "cd /root/.hermes/hermes-agent && test -x ./.hermes/bin/hermes && ./.hermes/bin/hermes $cli"
-        // Sous l'utilisateur « jarvis » (UID réel de Termux) : Hermès accepte de modifier ses environnements.
-        val commandeTermux = "set -o pipefail; debian_utilisateur_jarvis; hermes_debian bash -c ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\" || true; done"
+        val commandeTermux = "set -o pipefail; proot-distro login debian --termux-home -- env -u TERMUX_VERSION -u PREFIX -u LD_PRELOAD PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -lc ${q(commandeDebian)} 2>&1 | while IFS= read -r ligne; do p \"\$ligne\"; done"
         message = "⏳ Commande Hermès : ${arguments.take(3).joinToString(" ")}"
         return executer(app, prelude(app) + "\n" + commandeTermux, libelle = libelle)
             ?: "🚀 Commande envoyée à Hermès."

@@ -265,21 +265,9 @@ class PhoneControl(private val ctx: Context) {
             }
         }
         if (etat == "lecture") {
-            // Visuel : si l'appli de musique est à l'écran, capture du lecteur jointe à la réponse.
-            val visuel = runCatching {
-                val svc = fr.dd.jarvis.service.JarvisAccessibilityService.instance
-                if (svc?.rootInActiveWindow?.packageName?.toString() == pkg) {
-                    Thread.sleep(1200)
-                    svc.capture()?.let { b -> PiloteEcran.enregistrer(ctx.applicationContext as fr.dd.jarvis.JarvisApp, b, "musique") }
-                } else null
-            }.getOrNull()
-            val titre = session(pkg)?.let { titreDe(it) }
-            val confirmation = "🎵 « $requete » est en cours de lecture dans $nom (en arrière-plan)." +
-                (if (!titre.isNullOrBlank()) "\nTitre affiché par le lecteur : $titre" else "") +
-                (if (visuel != null) "\n\n![Lecteur](jarvis-img:$visuel)" else "")
             // Lecture confirmée : on remet JARVIS (ou l'appli précédente) au premier plan, l'appli de musique reste en arrière-plan.
             if (fr.dd.jarvis.service.JarvisAccessibilityService.instance != null) runCatching { fr.dd.jarvis.service.JarvisAccessibilityService.instance?.global(AccessibilityService.GLOBAL_ACTION_HOME) }
-            return confirmation
+            return "🎵 « $requete » est en cours de lecture dans $nom (en arrière-plan)."
         }
         // Beaucoup d'applis tierces (YouTube Music, Spotify, Deezer…) n'implémentent pas vraiment playFromSearch() : la session existe
         // mais ignore la recherche demandée. Plutôt que de laisser l'ancien titre tourner sans rien faire, on ouvre directement l'écran
@@ -322,12 +310,6 @@ class PhoneControl(private val ctx: Context) {
         if (!gere) return false
         return try { ctx.startActivity(intent); true } catch (e: Exception) { false }
     }
-
-    /** Titre en cours de lecture dans [pkg] (paquet ou nom d'appli), ou null si rien ne joue. */
-    fun lectureEnCours(pkg: String): String? = runCatching {
-        val p = if (installed(pkg)) pkg else findPackage(pkg)?.first ?: pkg
-        session(p)?.takeIf { joue(it) }?.let { titreDe(it) ?: "lecture en cours" }
-    }.getOrNull()
 
     private fun session(pkg: String): android.media.session.MediaController? {
         val msm = ctx.getSystemService(Context.MEDIA_SESSION_SERVICE) as android.media.session.MediaSessionManager

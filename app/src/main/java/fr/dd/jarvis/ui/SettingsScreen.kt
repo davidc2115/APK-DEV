@@ -339,7 +339,6 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 AgentStatusRow("Groq · " + store.groqModel.value, store.groqKeys.isNotEmpty(), "${store.groqKeys.size} clé(s)")
                 AgentStatusRow("Gemini · " + store.geminiModel.value, store.geminiKeys.isNotEmpty(), "${store.geminiKeys.size} clé(s)")
                 AgentStatusRow("Cloudflare Workers AI", store.cfAccounts.isNotEmpty(), "${store.cfAccounts.size} compte(s)")
-                AgentStatusRow("Ollama · serveur de la maison (secours)", fr.dd.jarvis.ai.Ollama.configure(app), if (fr.dd.jarvis.ai.Ollama.configure(app)) fr.dd.jarvis.ai.Ollama.etat else "désactivé ou sans adresse")
                 AgentStatusRow("fal.ai · vidéo", store.falApiKey.value.isNotBlank(), if (store.falApiKey.value.isNotBlank()) "clé configurée" else "non configuré")
                 AgentStatusRow("Hugging Face", store.huggingFaceToken.value.isNotBlank(), if (store.huggingFaceToken.value.isNotBlank()) "jeton configuré" else "non configuré")
                 val external = store.externalProvidersConfigured()
@@ -507,25 +506,10 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 Spacer(Modifier.height(8.dp))
                 Text("Répartition des demandes", color = HudDim, fontSize = 12.sp)
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("auto" to "Automatique (rapide + approfondi)", "tout" to "Toujours approfondi", "off" to "Rapide uniquement").forEach { (id, nom) ->
+                    listOf("auto" to "Hermès principal", "demande" to "Si je dis « Hermès »", "off" to "Désactivé").forEach { (id, nom) ->
                         HudChip(nom, selected = store.hermesMode.value == id) { store.hermesMode.set(id) }
                     }
                 }
-                Text(
-                    when (store.hermesMode.value) {
-                        "tout" -> "Toutes les demandes passent par le moteur approfondi (Hermès) : mémoire longue, notes, skills et plugins, " +
-                            "confie les actions du téléphone à l'agent Jarvis, le travail lourd à ses sous-agents Gemini et Groq, et crée tes automatismes. " +
-                            "Pour rester rapide, les commandes simples du téléphone (lampe torche, volume, Wi-Fi, musique, appel, SMS, rendez-vous…), " +
-                            "la position, la recherche d'un fichier, la Freebox et le lancement d'une vidéo sont exécutés directement par Jarvis ; " +
-                            "Hermès voit ces échanges dans l'historique et partage la même mémoire."
-                        "off" -> "Jarvis répond uniquement avec sa partie rapide ; le moteur approfondi (Hermès) n'est pas utilisé."
-                        else -> "Recommandé. Jarvis et Hermès ne forment qu'un seul assistant : une voix, une conversation, une mémoire. " +
-                            "Jarvis répond tout de suite avec sa partie rapide ; si ce n'est pas suffisant (pas d'outil, rien trouvé, information manquante, erreur), " +
-                            "il approfondit automatiquement avec son moteur Hermès (notes, skills, sous-agents). Automatismes, demandes en plusieurs étapes, " +
-                            "serveur/SSH et recherche sur internet passent directement par le moteur approfondi. Jamais besoin de dire « Hermès »."
-                    },
-                    color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp)
-                )
                 Spacer(Modifier.height(8.dp))
                 HudChip("Écriture adulte consensuelle", selected = store.modeAdulte.value) {
                     store.modeAdulte.set(!store.modeAdulte.value)
@@ -729,7 +713,11 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 Spacer(Modifier.height(10.dp))
                 HudDivider()
                 Spacer(Modifier.height(8.dp))
-                Text("Jarvis n'affiche plus ses propres notifications pour les SMS, mails et appels : celles d'Android suffisent. Il continue de les lire pour te les résumer, les annoncer à voix haute (réglage ci-dessus) et alimenter ses agents.", color = HudDim, fontSize = 11.sp)
+                Text("Bannière Android (notification visible dans la barre, en plus de l'annonce vocale ci-dessus)", color = HudText, fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                Spacer(Modifier.height(4.dp))
+                Text("Indépendant des agents en arrière-plan (qui continuent de tourner pareil) : ne coupe que l'affichage d'une notification JARVIS pour chaque SMS/mail reçu.", color = HudDim, fontSize = 11.sp)
+                Spacer(Modifier.height(6.dp))
+                HudChip(if (store.notifLive.value) "✅ Bannière affichée" else "🔕 Bannière coupée", store.notifLive.value) { store.notifLive.set(!store.notifLive.value) }
                 Spacer(Modifier.height(10.dp))
                 HudDivider()
                 fr.dd.jarvis.device.Annonces.CATEGORIES.forEach { (cat, label) ->
@@ -1583,23 +1571,6 @@ private fun ServeurPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvi
         HudTextField(store.sshPortDistant.value, { store.sshPortDistant.set(it.filter { c -> c.isDigit() }) }, Modifier.fillMaxWidth(), label = "Port distant (redirigé par la box, défaut = port SSH)")
         Spacer(Modifier.height(6.dp))
         HudTextField(store.ghToken.value, { store.ghToken.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Jeton GitHub (optionnel : dépôts privés, plus de requêtes)", password = true)
-        Spacer(Modifier.height(10.dp))
-        Text("Ollama — IA locale de secours (serveur de la maison)", color = HudText, fontSize = 13.sp)
-        Text("Utilisée quand Groq, Gemini et Cloudflare ne répondent plus (quotas, pas d'internet) et proposée à Hermès comme sous-agent « jarvis-ollama ». Adresse vide = le serveur SSH ci-dessus, port 11434 ; si Ollama n'écoute que sur le serveur lui-même, Jarvis passe par un tunnel SSH.", color = HudDim, fontSize = 11.sp)
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { store.ollamaActif.set(!store.ollamaActif.value) }) {
-            Text((if (store.ollamaActif.value) "✅ " else "⬜ ") + "Utiliser Ollama en secours", color = HudText, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
-        }
-        HudTextField(store.ollamaUrl.value, { store.ollamaUrl.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Adresse d'Ollama (vide = serveur SSH:11434, ex. 192.168.1.30:11434)")
-        Spacer(Modifier.height(6.dp))
-        HudTextField(store.ollamaModele.value, { store.ollamaModele.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Modèle (vide = choix automatique, ex. qwen2.5:1.5b)")
-        Spacer(Modifier.height(6.dp))
-        HudButton(if (busy) "Test…" else "Tester Ollama", Modifier.fillMaxWidth(), enabled = !busy && fr.dd.jarvis.ai.Ollama.configure(app)) {
-            scope.launch {
-                busy = true
-                msg = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { fr.dd.jarvis.ai.Ollama.tester(app) }.getOrElse { "❌ Ollama : ${it.message}" } }
-                busy = false
-            }
-        }
         Spacer(Modifier.height(8.dp))
         Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             HudButton(if (busy) "Test…" else "Tester HA", enabled = !busy && fr.dd.jarvis.ai.Serveur.haConfigure(app)) {

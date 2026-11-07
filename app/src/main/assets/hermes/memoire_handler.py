@@ -18,7 +18,7 @@ from pathlib import Path
 
 DEBUT = "<!-- JARVIS-MEMOIRE-DEBUT -->"
 FIN = "<!-- JARVIS-MEMOIRE-FIN -->"
-IDENTITE = "You are Hermes Agent, built by Nous Research."
+ANCIENNE_IDENTITE = "You are Hermes Agent, built by Nous Research."\nIDENTITE = "You are JARVIS, the single personal assistant. Hermes is only the technical agent runtime, never a separate assistant."
 _lance = False
 
 
@@ -68,6 +68,7 @@ def ecrire_soul(soul: Path, bloc: str) -> bool:
     """Remplace le bloc géré de SOUL.md (créé si besoin) ; renvoie True si le fichier a changé."""
     ancien = _lire(soul)
     base = re.sub(re.escape(DEBUT) + r".*?" + re.escape(FIN), "", ancien, flags=re.S).rstrip()
+    base = base.replace(ANCIENNE_IDENTITE, IDENTITE)
     if not base:
         base = IDENTITE
     nouveau = base + ("\n\n" + DEBUT + "\n" + bloc.strip() + "\n" + FIN + "\n" if bloc.strip() else "\n")
