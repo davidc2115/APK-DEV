@@ -51,9 +51,9 @@ object Stockage {
             }
         }
         if (trouves.isEmpty()) return "Aucun fichier trouvé pour « $query » dans le stockage partagé accessible du téléphone."
-        return "🔎 ${trouves.size} résultat(s) pour « $query » :\\n" + trouves.joinToString("\\n") { f ->
+        return "🔎 ${trouves.size} résultat(s) pour « $query » :\n" + trouves.joinToString("\n") { f ->
             "📄 /${f.relativeTo(root).path} · ${fmt(f.length())} · ${dateFmt.format(java.util.Date(f.lastModified()))}"
-        } + if (trouves.size >= limite) "\\n… résultats limités à $limite." else ""
+        } + if (trouves.size >= limite) "\n… résultats limités à $limite." else ""
     }
 
     /** Actions : lister | lire | renommer | deplacer | supprimer | dossier. */
