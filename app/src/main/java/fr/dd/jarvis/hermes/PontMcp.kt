@@ -39,24 +39,10 @@ object PontMcp {
         /** Exécute l'outil : (texte, erreur ?). */
         fun appeler(nom: String, args: JSONObject): Pair<String, Boolean>
         fun progres(ligne: String)
-        /** Relais Groq compact pour Hermès : (code HTTP, corps JSON chat.completion). */
-        fun groq(corps: JSONObject): Pair<Int, String> = 404 to """{"error":{"message":"relais indisponible"}}"""
-        fun groqModeles(): String = """{"object":"list","data":[]}"""
-        /** Relais Ollama (serveur de la maison) pour Hermès : (code HTTP, corps JSON chat.completion). */
-        fun ollama(corps: JSONObject): Pair<Int, String> = 404 to """{"error":{"message":"relais indisponible"}}"""
-        fun ollamaModeles(): String = """{"object":"list","data":[]}"""
-        /** Mémoire d'Hermès reçue (MEMORY.md + USER.md). */
-        fun memoireHermes(texte: String) {}
-        /** Mémoire de Jarvis à recopier dans Hermès. */
-        fun memoireJarvis(): String = ""
-        /** Capacités propres à Hermès (skills ajoutés, MCP, plugins, automatismes), JSON. */
-        fun capacitesHermes(json: String) {}
     }
 
     /** Outils de la conversation en cours (avec SES confirmations) ; sinon une boîte d'outils autonome. */
     @Volatile var boiteActive: ToolBox? = null
-    /** Ligne d'état de la conversation en cours (« Hermès → Jarvis : … »), posée par Hermes.appeler. */
-    @Volatile var statutActif: ((String) -> Unit)? = null
 
     /** Outils jamais exposés à Hermès (gestion d'Hermès lui-même → pas de boucle). */
     private val EXCLUS = setOf("hermes", "hermes_deleguer")
@@ -68,13 +54,6 @@ object PontMcp {
     fun url() = "http://127.0.0.1:$PORT/mcp"
 
     private class FournisseurJarvis(val app: JarvisApp) : Fournisseur {
-        override fun groq(corps: JSONObject) = RelaisGroq.repondre(app, corps)
-        override fun groqModeles() = RelaisGroq.modeles(app)
-        override fun ollama(corps: JSONObject) = fr.dd.jarvis.ai.Ollama.relais(app, corps)
-        override fun ollamaModeles() = fr.dd.jarvis.ai.Ollama.modelesJson(app)
-        override fun memoireHermes(texte: String) { runCatching { app.memo.majHermes(texte) } }
-        override fun memoireJarvis(): String = runCatching { app.memo.pourHermes() }.getOrDefault("")
-        override fun capacitesHermes(json: String) { runCatching { app.memo.majCapacitesHermes(json) } }
         private val defaut by lazy { ToolBox(app) { _, force -> !force } }
         private fun boite() = boiteActive ?: defaut
         override fun jeton() = app.store.mcpJeton.value
@@ -100,13 +79,10 @@ object PontMcp {
                     if (demandeGpsInstallation && (nomOutil.startsWith("ssh_") || nomOutil == "run_shell" || nomOutil.contains("shell", ignoreCase = true))) continue
                     val demandeSuppression = termes.any { it in setOf("supprimer", "suppression", "effacer", "delete", "remove", "retirer", "enlever", "annuler") }
                     val demandeSuppressionIntervention = termes.any { it.contains("intervention") } && demandeSuppression
-                    val demandeSuppressionInstallation = termes.any { it.contains("installation") || it == "site" || it == "centrale" || it == "toiture" } && demandeSuppression
-                    val demandeSuppressionClient = termes.any { it.contains("client") || it.contains("fiche") } && demandeSuppression && !demandeSuppressionInstallation
-                    if (demandeSuppressionInstallation && nomOutil == "client_supprimer") continue
+                    val demandeSuppressionClient = termes.any { it.contains("client") || it.contains("fiche") } && demandeSuppression
                     val score = termes.count { texte.contains(it) } +
                         (if (demandeSuppressionIntervention && nomOutil in setOf("interventions_liste", "intervention_supprimer")) 1000 else 0) +
                         (if (demandeSuppressionClient && nomOutil == "client_supprimer") 1000 else 0) +
-                        (if (demandeSuppressionInstallation && nomOutil == "installation_supprimer") 1500 else 0) +
                         (if (demandeGpsInstallation && nomOutil == "client_ecrire") 1200 else 0) +
                         (if (demandeGpsInstallation && nomOutil == "societe_liste") 900 else 0) +
                         (if (demandeGpsInstallation && nomOutil == "clients_gps") 400 else 0)
@@ -121,9 +97,6 @@ object PontMcp {
                 }
                 return JSONObject().put("outils", resultat).toString() to false
             }
-            // Hermès les voit sous les noms mcp_jarvis_agent et mcp_jarvis_notifier.
-            if (nomCanonique == "agent" || nomCanonique == "jarvis_agent") return agentJarvis(args)
-            if (nomCanonique == "notifier" || nomCanonique == "jarvis_notifier") return notifier(args)
             // Alias directs de secours : toujours exposés, indépendants de la recherche du catalogue.
             val aliasIntervention = when (nomCanonique) {
                 "jarvis_interventions_lister" -> "interventions_liste"
@@ -142,41 +115,6 @@ object PontMcp {
                 { e -> "❌ ${e.message ?: e.javaClass.simpleName}" to true }
             )
         }
-        /** Hermès confie une mission à Jarvis : son cerveau complet (raccourcis fiables + outils natifs) l'exécute. */
-        private fun agentJarvis(args: JSONObject): Pair<String, Boolean> {
-            val demande = args.optString("demande").ifBlank { args.optString("consigne") }.trim()
-            if (demande.isBlank()) return "Donne la consigne complète à exécuter dans « demande »." to true
-            val contexte = args.optString("contexte").trim()
-            statutActif?.invoke("📱 " + demande.take(70))
-            val texte = if (contexte.isBlank()) demande else "$demande\n\n(Contexte fourni par Hermès : ${contexte.take(3000)})"
-            val res = runCatching {
-                runBlocking(Dispatchers.IO) {
-                    withTimeoutOrNull(170_000) {
-                        fr.dd.jarvis.ai.Brain(app.llm, boite(), app) { app.store.userName.value }
-                            .reply(listOf(fr.dd.jarvis.ai.ChatMsg(true, texte)), pourHermes = true) { s -> statutActif?.invoke("🤖 Jarvis : $s") }
-                    }
-                }
-            }
-            statutActif?.invoke("🧠 Jarvis réfléchit…")
-            return res.fold(
-                { r -> if (r == null) "⏱️ Jarvis n'a pas terminé à temps : découpe la mission en étapes plus courtes." to true else r to false },
-                { e -> "❌ Jarvis : ${e.message ?: e.javaClass.simpleName}" to true }
-            )
-        }
-
-        /** Message d'Hermès à l'utilisateur (fin d'automatisme, tâche longue) : notification + conversation Jarvis. */
-        private fun notifier(args: JSONObject): Pair<String, Boolean> {
-            val message = args.optString("message").trim()
-            if (message.isBlank()) return "Le champ « message » est vide." to true
-            val titre = args.optString("titre").trim().ifBlank { "JARVIS" }
-            android.os.Handler(android.os.Looper.getMainLooper()).post {
-                app.chatAjouter(fr.dd.jarvis.ai.ChatMsg(false, "🔔 **$titre**\n\n$message"))
-            }
-            val ok = fr.dd.jarvis.work.SuiviTaches.bloquees(app) == null
-            fr.dd.jarvis.work.SuiviTaches.termine(app, 7320 + (System.currentTimeMillis() % 200).toInt() * 2, titre.take(60), message)
-            return (if (ok) "✅ Message envoyé à l'utilisateur (notification + conversation Jarvis)." else "✅ Message ajouté à la conversation Jarvis (notifications non autorisées).") to false
-        }
-
         override fun progres(ligne: String) {
             if (ligne != "pong") android.os.Handler(android.os.Looper.getMainLooper()).post {
                 progression.add(ligne); while (progression.size > 40) progression.removeAt(0)
@@ -262,29 +200,9 @@ object PontMcp {
         return Requete(methode, chemin, h, corps)
     }
 
-    /** Réponse chat.completion → flux SSE équivalent (un bloc de contenu / d'appels d'outils, puis la fin). */
-    internal fun enFlux(c: JSONObject): String {
-        val choix = c.optJSONArray("choices")?.optJSONObject(0) ?: JSONObject()
-        val msg = choix.optJSONObject("message") ?: JSONObject()
-        fun bloc(delta: JSONObject, fin: Any?) = "data: " + JSONObject().put("id", c.optString("id")).put("object", "chat.completion.chunk")
-            .put("created", c.optLong("created")).put("model", c.optString("model"))
-            .put("choices", JSONArray().put(JSONObject().put("index", 0).put("delta", delta).put("finish_reason", fin ?: JSONObject.NULL))) + "\n\n"
-        val delta = JSONObject()
-        if (msg.has("content") && !msg.isNull("content")) delta.put("content", msg.optString("content"))
-        msg.optJSONArray("tool_calls")?.let { a ->
-            val avecIndex = JSONArray()
-            for (i in 0 until a.length()) avecIndex.put(JSONObject(a.getJSONObject(i).toString()).put("index", i))
-            delta.put("tool_calls", avecIndex)
-        }
-        val fin = "data: " + JSONObject().put("id", c.optString("id")).put("object", "chat.completion.chunk").put("created", c.optLong("created"))
-            .put("model", c.optString("model")).put("choices", JSONArray().put(JSONObject().put("index", 0).put("delta", JSONObject()).put("finish_reason", choix.optString("finish_reason", "stop"))))
-            .put("usage", c.optJSONObject("usage") ?: JSONObject()) + "\n\n"
-        return bloc(JSONObject().put("role", "assistant"), null) + bloc(delta, null) + fin + "data: [DONE]\n\n"
-    }
-
     private fun repondre(s: Socket, code: Int, corps: String = "", type: String = "application/json", extra: Map<String, String> = emptyMap()) {
         val b = corps.toByteArray(Charsets.UTF_8)
-        val statut = when (code) { 200 -> "OK"; 202 -> "Accepted"; 400 -> "Bad Request"; 401 -> "Unauthorized"; 404 -> "Not Found"; 405 -> "Method Not Allowed"; 413 -> "Payload Too Large"; 429 -> "Too Many Requests"; 503 -> "Service Unavailable"; else -> "Error" }
+        val statut = when (code) { 200 -> "OK"; 202 -> "Accepted"; 401 -> "Unauthorized"; 404 -> "Not Found"; 405 -> "Method Not Allowed"; else -> "Error" }
         val h = StringBuilder("HTTP/1.1 $code $statut\r\nContent-Type: $type; charset=utf-8\r\nContent-Length: ${b.size}\r\nConnection: close\r\n")
         extra.forEach { (k, v) -> h.append("$k: $v\r\n") }
         h.append("\r\n")
@@ -314,24 +232,6 @@ object PontMcp {
                     f.progres(ligne)
                     repondre(s, 200, """{"accepted":true}""")
                 }
-            }
-            // Mémoire partagée : le hook « jarvis-memoire » d'Hermès envoie la sienne et recopie celle de Jarvis.
-            r.chemin.trimEnd('/') == "/memoire/hermes" && r.methode == "POST" -> { f.memoireHermes(r.corps); repondre(s, 200, """{"ok":true}""") }
-            r.chemin.trimEnd('/') == "/memoire/jarvis" && r.methode == "GET" -> repondre(s, 200, f.memoireJarvis(), type = "text/plain")
-            r.chemin.trimEnd('/') == "/memoire/hermes-capacites" && r.methode == "POST" -> { f.capacitesHermes(r.corps); repondre(s, 200, """{"ok":true}""") }
-            r.chemin.trimEnd('/') == "/groq/v1/models" && r.methode == "GET" -> repondre(s, 200, f.groqModeles())
-            r.chemin.trimEnd('/') == "/groq/v1/chat/completions" && r.methode == "POST" -> {
-                val corps = runCatching { JSONObject(r.corps) }.getOrElse { return@use repondre(s, 400, """{"error":{"message":"JSON invalide"}}""") }
-                val (code, rep) = f.groq(corps)
-                if (code == 200 && corps.optBoolean("stream", false)) repondre(s, 200, enFlux(JSONObject(rep)), type = "text/event-stream")
-                else repondre(s, code, rep)
-            }
-            r.chemin.trimEnd('/') == "/ollama/v1/models" && r.methode == "GET" -> repondre(s, 200, f.ollamaModeles())
-            r.chemin.trimEnd('/') == "/ollama/v1/chat/completions" && r.methode == "POST" -> {
-                val corps = runCatching { JSONObject(r.corps) }.getOrElse { return@use repondre(s, 400, """{"error":{"message":"JSON invalide"}}""") }
-                val (code, rep) = f.ollama(corps)
-                if (code == 200 && corps.optBoolean("stream", false)) repondre(s, 200, enFlux(JSONObject(rep)), type = "text/event-stream")
-                else repondre(s, code, rep)
             }
             r.methode == "GET" -> repondre(s, 405, "", extra = mapOf("Allow" to "GET, POST, DELETE"))
             r.methode == "DELETE" -> repondre(s, 200, "{}")
@@ -403,12 +303,12 @@ object PontMcp {
         val prioritaires = listOf(
             // Capacités téléphone et musique : Hermès doit les voir directement sans dépendre
             // d'une découverte différée ou d'un catalogue tronqué à 80 outils.
-            "phone_action", "piloter_telephone", "voir_ecran", "phone_health_report", "client_supprimer", "societe_liste", "client_fiche", "client_ecrire", "clients_gps", "musique_rechercher", "musique_etat", "musique_commander",
+            "phone_action", "phone_health_report", "client_supprimer", "societe_liste", "client_fiche", "client_ecrire", "clients_gps", "musique_rechercher", "musique_etat", "musique_commander",
             "jouer_musique", "applis_musique", "controle_media",
             "reglage_jarvis", "hermes",
             // Les outils métier sensibles doivent rester visibles même lorsque le catalogue
             // dépasse le budget transmis au modèle (80 outils).
-            "interventions_liste", "intervention_supprimer", "intervention_modifier", "installation_supprimer",
+            "interventions_liste", "intervention_supprimer", "intervention_modifier",
             "intervention_enregistrer", "interventions_synthese",
             // Gestion des extensions Hermès : garder la découverte des skills/plugins/MCP accessible.
             "gerer_extension_hermes",
@@ -417,8 +317,6 @@ object PontMcp {
             "discord_role_creer", "discord_role_modifier", "discord_role_supprimer",
             "discord_role_position", "discord_role_attribuer", "discord_salon_permission", "discord_message_envoyer",
             // Réseau et accès distant : garder les diagnostics, la découverte et les outils SSH visibles pour Hermès.
-            // Freebox (redirections, VPN, Wi-Fi…) et recherche globale de fichiers/dossiers : toujours visibles.
-            "freebox", "stockage_telephone", "obsidian_fichiers",
             "routeur_diagnostiquer", "reseau_infos", "ip_publique", "reseau_scanner", "imprimantes_trouver",
             "appareil_sonder", "appareil_page", "ssh_commande", "ssh_fichier", "ssh_script"
         )
@@ -436,21 +334,6 @@ object PontMcp {
             if (index < 0) prioritaires.size else index
         }
         val out = JSONArray()
-        // L'équipe d'Hermès : l'agent téléphone (Jarvis) et le canal vers l'utilisateur. Toujours en tête de liste.
-        out.put(JSONObject()
-            .put("name", "agent")
-            .put("description", "AGENT TÉLÉPHONE JARVIS — à privilégier pour toute action ou recherche sur le téléphone et les données de l'utilisateur : fichiers et dossiers (coffre Obsidian + stockage), clients/devis/factures/interventions, agenda, mails, SMS, appels, contacts, musique, Freebox, domotique, position GPS, images, vidéos, réglages. Donne une consigne complète et autonome en français (une étape ou un petit enchaînement) ; Jarvis l'exécute avec ses outils natifs et renvoie le résultat réel. Ne cherche jamais ces données dans ton propre système de fichiers.")
-            .put("inputSchema", JSONObject().put("type", "object").put("properties", JSONObject()
-                .put("demande", JSONObject().put("type", "string").put("description", "Consigne à exécuter, formulée comme l'utilisateur la dirait à Jarvis (ex. « trouve le dossier coloriage pompier », « ajoute un rendez-vous demain 9h chez Martin »)"))
-                .put("contexte", JSONObject().put("type", "string").put("description", "Informations utiles déjà connues (facultatif)")))
-                .put("required", JSONArray().put("demande"))))
-        out.put(JSONObject()
-            .put("name", "notifier")
-            .put("description", "Envoie un message à l'utilisateur sur son téléphone (notification + conversation Jarvis). OBLIGATOIRE à la fin de chaque automatisme (cronjob) et de chaque tâche longue pour lui livrer le résultat.")
-            .put("inputSchema", JSONObject().put("type", "object").put("properties", JSONObject()
-                .put("titre", JSONObject().put("type", "string").put("description", "Titre court (ex. « Briefing du matin »)"))
-                .put("message", JSONObject().put("type", "string").put("description", "Contenu à livrer, concis et lisible")))
-                .put("required", JSONArray().put("message"))))
         out.put(JSONObject()
             .put("name", "jarvis_rechercher_outils")
             .put("description", "Recherche dans le catalogue complet des outils JARVIS, y compris ceux non affichés dans la liste courte. À utiliser si un outil métier est absent ou pour trouver une fonction par domaine.")

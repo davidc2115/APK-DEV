@@ -141,14 +141,7 @@ class JarvisService : Service() {
         tools = ToolBox(app) { q, _ -> voiceConfirm(q) }
         // Hermès installé : on s'assure que sa passerelle tourne dans Termux (après un redémarrage du téléphone par ex.).
         if (app.store.hermesMode.value != "off") scope.launch {
-            runCatching {
-                fr.dd.jarvis.hermes.PontMcp.demarrer(app)
-                val hook = fr.dd.jarvis.hermes.HermesTermux.VERSION_HOOK_MEMOIRE.toString()
-                // Mémoire partagée : installée une fois (puis à chaque nouvelle version du hook), passerelle relancée.
-                if (app.store.hermesInstalle.value && app.store.hookMemoireVersion.value != hook) {
-                    if (fr.dd.jarvis.hermes.HermesTermux.installerMemoirePartagee(app) == null) app.store.hookMemoireVersion.set(hook)
-                } else if (!fr.dd.jarvis.hermes.Hermes.enLigne(force = true)) fr.dd.jarvis.hermes.Hermes.relancerSiBesoin(app)
-            }
+            runCatching { fr.dd.jarvis.hermes.PontMcp.demarrer(app); if (!fr.dd.jarvis.hermes.Hermes.enLigne(force = true)) fr.dd.jarvis.hermes.Hermes.relancerSiBesoin(app) }
         }
         voice = VoiceManager(this).also { v ->
             v.muteBeeps = app.store.muteBeeps.value
@@ -221,7 +214,6 @@ class JarvisService : Service() {
     private fun goIdle() {
         awake = false
         incompris = 0
-        voice?.sessionFin()
         voice?.stopListening()
         val v = vosk
         if (v != null) {
@@ -299,7 +291,6 @@ class JarvisService : Service() {
         dernierReveil = maintenant
         vosk?.stop()
         awake = true; echangeReel = false; incompris = 0
-        voice?.sessionDebut()
         voice?.stopSpeaking()
         voice?.carillon(montant = true) { if (awake && !busy) ecouter(maxOf(silenceMs(), 6000L)) }
     }
@@ -317,7 +308,6 @@ class JarvisService : Service() {
         if (!awake && m == null) { listen(); return }   // repli sans détecteur : on ignore tout ce qui ne commence pas par Jarvis
         val cmd = (if (m != null && m.range.first <= 2) t.substring(m.range.last + 1) else text).trim()
         awake = true
-        voice?.sessionDebut()
         if (cmd.isBlank()) { voice?.carillon(montant = true) { ecouter(maxOf(silenceMs(), 6000L)) }; return }
         if (stopRegex.matches(norm(cmd))) { awake = false; voice?.speak("D'accord.") { goIdle() }; return }
         process(cmd)
@@ -333,13 +323,22 @@ class JarvisService : Service() {
                 app.chatAjouter(userMessage)
                 if (app.enVoiture) CarBridge.ajouter(userMessage)
             }
-            // Les demandes vocales suivent la même règle que le chat : Jarvis d'abord (réflexes instantanés, commandes du
-            // téléphone), et Hermès automatiquement quand il le faut (automatismes, serveur, échec de Jarvis…).
+            // Les demandes vocales suivent la même règle que le chat : Hermès est le cerveau exclusif.
+            // Aucun basculement silencieux vers Brain/Groq n'est autorisé dans cette voie vocale.
             val reply = try {
-                fr.dd.jarvis.ai.Brain(app.llm, tools, app) { app.store.userName.value }
-                    .reply(app.chat.toList().takeLast(16)) { etat -> android.os.Handler(android.os.Looper.getMainLooper()).post { majNotification(etat) } }
+                if (app.store.hermesMode.value == "off") {
+                    "Hermès est désactivé ou non installé. Active Hermès dans les réglages pour utiliser les commandes vocales."
+                } else {
+                    fr.dd.jarvis.hermes.Hermes.repondre(
+                        app,
+                        app.chat.toList().takeLast(12),
+                        tools,
+                        app.store.userName.value
+                    ) { etat -> android.os.Handler(android.os.Looper.getMainLooper()).post { majNotification(etat) } }
+                        ?: "Je n'arrive pas à joindre Hermès pour le moment. Je n'ai pas exécuté la demande ; réessaie dans un instant."
+                }
             } catch (e: CancellationException) { throw e }
-              catch (e: Throwable) { "⚠️ ${e.message ?: e.javaClass.simpleName}" }
+              catch (e: Throwable) { "Erreur Hermès : ${e.message ?: e.javaClass.simpleName}" }
             val assistantMessage = ChatMsg(false, reply)
             withContext(Dispatchers.Main) {
                 app.chatAjouter(assistantMessage)
@@ -353,10 +352,7 @@ class JarvisService : Service() {
             withContext(Dispatchers.Main) {
                 // La conversation continue : on réécoute après la réponse (ou dès que l'utilisateur la coupe), puis on
                 // referme après quelques secondes de silence.
-                // Autoradio / Bluetooth : on ne rouvre le micro que si Jarvis pose une question — sinon il entendrait la
-                // radio ou la suite de sa propre réponse ; il suffit de redire « Jarvis » pour une nouvelle demande.
-                val relancer = awake && (voice?.sortieExterne() != true || reply.trimEnd().endsWith("?"))
-                voice?.speak(reply.take(700)) { busy = false; if (relancer) ecouter() else goIdle() } ?: run { busy = false }
+                voice?.speak(reply.take(700)) { busy = false; if (awake) ecouter() else goIdle() } ?: run { busy = false }
             }
         }
     }

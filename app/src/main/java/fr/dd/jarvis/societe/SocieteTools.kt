@@ -20,8 +20,7 @@ class SocieteTools(
         val NAMES = setOf(
             "societe_info_set", "societe_info_get", "tarif_set", "tarif_delete", "regles_set", "client_ecrire", "client_fiche", "client_supprimer",
             "document_creer", "document_action", "document_email", "societe_liste", "employe_ecrire", "paie", "reserve_bilan",
-            "presentation_modifier", "distance_deplacement", "clients_exporter_kml", "kml_couleurs_set", "clients_gps", "intervention_enregistrer", "intervention_modifier", "intervention_supprimer", "interventions_liste", "interventions_synthese",
-            "installation_supprimer"
+            "presentation_modifier", "distance_deplacement", "clients_exporter_kml", "kml_couleurs_set", "clients_gps", "intervention_enregistrer", "intervention_modifier", "intervention_supprimer", "interventions_liste", "interventions_synthese"
         )
         private val KEYWORDS = Regex(
             "devis|factur|client|soci[ée]t[ée]|tarif|remise|d[ée]placement|paie|salaire|bulletin|r[ée]serve|dividende|b[ée]n[ée]fice|" +
@@ -159,11 +158,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "client" to prop("Nom du client exact ou partiel ; vide = tous les clients."),
             "installation" to prop("Nom exact ou partiel de l'installation (optionnel).")
         )),
-        tool("installation_supprimer", "Supprime UNE installation (site photovoltaïque) d'un client, avec son historique d'interventions et leurs rapports, en CONSERVANT la fiche client et ses autres installations. C'est l'outil à utiliser pour « supprime l'installation X (du client Y) » — jamais client_supprimer. Confirmation demandée.", mapOf(
-            "client" to prop("Nom du client."),
-            "installation" to prop("Nom (ou adresse) de l'installation à supprimer.")
-        ), listOf("client", "installation")),
-        tool("client_supprimer", "Supprime définitivement TOUTE une fiche client (pour retirer une seule installation, utilise installation_supprimer) de la base Société après confirmation. Refuse la suppression si des devis ou factures sont encore liés afin de préserver l’historique comptable.", mapOf("nom" to prop("Nom exact du client à supprimer.")), listOf("nom")),
+        tool("client_supprimer", "Supprime définitivement une fiche client de la base Société après confirmation. Refuse la suppression si des devis ou factures sont encore liés afin de préserver l’historique comptable.", mapOf("nom" to prop("Nom exact du client à supprimer.")), listOf("nom")),
         tool("document_creer", "Crée un devis ou une facture (tarifs, remises et déplacement calculés automatiquement), l'enregistre en Markdown et PDF dans Obsidian.", mapOf(
             "type" to prop("devis | facture"), "client" to prop("Nom du client."), "installation" to prop("Nom ou adresse de l'installation (optionnel si une seule)."),
             "prestations" to prop("Prestations du catalogue de tarifs : « Maintenance annuelle; Contrôle onduleur:2 » (nom[:quantité], séparées par « ; »)."),
@@ -241,7 +236,6 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         "interventions_liste" -> interventionsListe(a)
         "interventions_synthese" -> interventionsSynthese(a)
         "client_supprimer" -> clientSupprimer(a)
-        "installation_supprimer" -> installationSupprimer(a)
         "document_creer" -> documentCreer(a)
         "document_action" -> documentAction(a)
         "document_email" -> documentEmail(a)
@@ -405,40 +399,6 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         s.matches(Regex("\\d{4}")) -> "$s-01-01"
         s.isBlank() -> ""
         else -> try { LocalDate.parse(s.take(10)).toString() } catch (e: Exception) { "" }
-    }
-
-    /** Retire une installation d'un client (et son historique), la fiche client et les autres installations restent. */
-    private suspend fun installationSupprimer(a: JSONObject): ToolResult {
-        val (client, erreur) = clientParNom(a.s("client").ifBlank { a.s("nom") })
-        if (client == null) return err(erreur!!)
-        val ref = a.s("installation").ifBlank { a.s("site_nom") }.trim()
-        if (client.sites.isEmpty()) return err("${client.nom} n'a aucune installation enregistrée.")
-        val site = (if (ref.isBlank()) null else siteDe(client, ref))
-            ?: return err("Installation « $ref » introuvable ou ambiguë pour ${client.nom}. Installations : " +
-                client.sites.joinToString { it.nom.ifBlank { it.adresse.ifBlank { it.id } } } + ".")
-        val nomSite = site.nom.ifBlank { site.adresse.ifBlank { site.id } }
-        val documents = svc.repo.refresh().docs.filter { it.clientId == client.id && it.siteId == site.id }
-        val question = "Supprimer l'installation « $nomSite »" + (if (site.adresse.isNotBlank() && site.adresse != nomSite) " (${site.adresse})" else "") +
-            " du client « ${client.nom} » ?" +
-            (if (site.interventions.isNotEmpty()) " Ses ${site.interventions.size} intervention(s) et leurs rapports seront aussi supprimés." else "") +
-            (if (documents.isNotEmpty()) " ${documents.size} devis/facture(s) la mentionnent : ils sont conservés." else "") +
-            " La fiche client et ses autres installations sont conservées."
-        if (!confirm(question, true)) return err("Suppression annulée : l'installation « $nomSite » est conservée.")
-        // Historique de l'installation : rapports Obsidian/PDF et photos nettoyés par la suppression de chaque intervention.
-        val nettoyage = site.interventions.map { runCatching { svc.supprimerIntervention(client.id, site.id, it.id) }.getOrDefault("") }
-        try {
-            svc.repo.update { data -> data.copy(clients = data.clients.map { c -> if (c.id != client.id) c else c.copy(sites = c.sites.filterNot { it.id == site.id }) }) }
-        } catch (e: Exception) {
-            return err("❌ L'installation « $nomSite » n'a pas pu être supprimée : ${e.message ?: e.javaClass.simpleName}. Rien n'est annoncé comme supprimé.")
-        }
-        val relu = svc.repo.refresh().client(client.id)
-        if (relu == null || relu.sites.any { it.id == site.id }) return err("❌ L'installation « $nomSite » est toujours présente après la tentative de suppression.")
-        val fiche = runCatching { svc.exporterClient(relu).second }.getOrNull()
-        runCatching { svc.exporterKml() }
-        val restantes = relu.sites.joinToString { it.nom.ifBlank { it.adresse } }.ifBlank { "aucune" }
-        return ok("🗑️ Installation « $nomSite » supprimée de la fiche ${client.nom}" +
-            (if (site.interventions.isNotEmpty()) " (${site.interventions.size} intervention(s) et leurs rapports supprimés${if (nettoyage.any { it.startsWith("❌") || it.startsWith("Échec") }) ", certains fichiers restent à vérifier" else ""})" else "") +
-            ".\nInstallations restantes : $restantes." + (fiche?.let { "\nFiche mise à jour : $it" } ?: ""))
     }
 
     private suspend fun clientSupprimer(a: JSONObject): ToolResult {

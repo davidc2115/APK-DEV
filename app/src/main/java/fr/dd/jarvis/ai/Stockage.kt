@@ -35,37 +35,9 @@ object Stockage {
         } + if (l.size > 200) "\n… (${l.size} éléments)" else ""
     }
 
-    /** Recherche récursive live dans le stockage partagé visible par Android. */
-    private fun chercher(query: String, limite: Int = 250): String {
-        val q = java.text.Normalizer.normalize(query.lowercase(), java.text.Normalizer.Form.NFD)
-            .replace(Regex("\\p{M}+"), "").replace(Regex("[^a-z0-9]+"), " ").trim()
-        if (q.isBlank()) return "Indique le nom ou quelques mots du fichier à rechercher."
-        // « le dossier coloriage pompier » → on cherche « coloriage pompier » (les mots « dossier », « fichier »… ne font pas partie du nom).
-        val vides = setOf("le", "la", "les", "un", "une", "des", "du", "de", "mon", "ma", "mes", "dossier", "dossiers", "sous", "fichier", "fichiers",
-            "nomme", "nommes", "nommee", "appele", "appelee", "intitule", "qui", "sappelle", "dans", "telephone")
-        val mots = q.split(Regex("\\s+")).filter { it.length >= 2 && it !in vides }.ifEmpty { q.split(Regex("\\s+")).filter { it.length >= 2 } }
-        val root = racine().canonicalFile
-        val trouves = mutableListOf<File>()
-        val parcours = root.walkTopDown().onEnter { dir -> dir == root || !(dir.parentFile?.name == "Android" && dir.name in setOf("data", "obb")) }.iterator()
-        while (parcours.hasNext() && trouves.size < limite) {
-            val f = parcours.next()
-            if (f == root) continue
-            val nom = java.text.Normalizer.normalize(f.name.lowercase(), java.text.Normalizer.Form.NFD)
-                .replace(Regex("\\p{M}+"), "").replace(Regex("[^a-z0-9]+"), " ")
-            if (mots.all { nom.contains(it) }) trouves += f
-        }
-        if (trouves.isEmpty()) return "Aucun fichier ni dossier trouvé pour « $query » dans le stockage partagé accessible du téléphone."
-        // Dossiers d'abord (une demande « trouve le dossier X » doit le voir en tête), puis fichiers.
-        return "🔎 ${trouves.size} résultat(s) pour « $query » :\n" + trouves.sortedBy { !it.isDirectory }.joinToString("\n") { f ->
-            if (f.isDirectory) "📁 /${f.relativeTo(root).path}/ · dossier (${f.list()?.size ?: 0} éléments) · ${dateFmt.format(java.util.Date(f.lastModified()))}"
-            else "📄 /${f.relativeTo(root).path} · ${fmt(f.length())} · ${dateFmt.format(java.util.Date(f.lastModified()))}"
-        } + if (trouves.size >= limite) "\n… résultats limités à $limite." else ""
-    }
-
     /** Actions : lister | lire | renommer | deplacer | supprimer | dossier. */
     fun action(action: String, chemin: String, destination: String): String {
         if (!autorise()) throw IllegalStateException("Accès « Tous les fichiers » non autorisé (Réglages › Téléphone et permissions).")
-        if (action.equals("chercher", true)) return chercher(chemin)
         val f = fichier(chemin)
         return when (action.lowercase()) {
             "lister" -> "📂 /${f.toRelativeString(racine())}\n" + lister(if (chemin.isBlank()) racine() else f)

@@ -126,7 +126,7 @@ fun ChatScreen(vm: ChatViewModel, store: Store, app: JarvisApp) {
             } else {
                 if (vm.messages.isEmpty() && !vm.busy) {
                     Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        TeteDragonAnimee(Modifier.size(110.dp))
+                        HudOrb(Modifier.size(96.dp))
                         Text(
                             "Écris ou parle à JARVIS.\nPlanning, mails, contacts, téléphone…",
                             color = HudDim, fontSize = 14.sp, fontFamily = FontFamily.Monospace,
@@ -295,12 +295,6 @@ fun ChatScreen(vm: ChatViewModel, store: Store, app: JarvisApp) {
 private fun VoiceOrbOverlay(vm: ChatViewModel, app: JarvisApp, accent: Color, onStop: () -> Unit) {
     Box(Modifier.fillMaxSize().clickable { onStop() }) {
         GraphBackdrop(app, Modifier.fillMaxSize(), active = vm.listening || vm.busy)
-        // La tête du dragon remplace l'orbe : elle s'anime quand Jarvis écoute, réfléchit ou parle.
-        Box(Modifier.fillMaxSize().background(Color(0x99000000)))
-        TeteDragonAnimee(
-            Modifier.align(Alignment.Center).size(260.dp),
-            active = vm.listening || vm.busy, parle = vm.parle
-        )
         Column(
             Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 36.dp),
             horizontalAlignment = Alignment.CenterHorizontally,

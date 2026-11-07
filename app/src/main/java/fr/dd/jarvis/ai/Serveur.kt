@@ -90,24 +90,6 @@ object Serveur {
         return s
     }
 
-    @Volatile private var tunnelOllama: Pair<Session, Int>? = null
-
-    /**
-     * Tunnel SSH persistant vers un port du serveur LUI-MÊME (Ollama n'écoute souvent que sur 127.0.0.1) ; renvoie le port
-     * local (127.0.0.1) à utiliser. Réutilisé tant que la session SSH reste ouverte.
-     */
-    @Synchronized
-    fun tunnelOllama(app: JarvisApp, portDistant: Int): Int {
-        tunnelOllama?.let { (s, p) -> if (s.isConnected) return p; runCatching { s.disconnect() } }
-        val s = try { ouvrir(app) } catch (e: Exception) {
-            throw IllegalStateException(expliquer(e, app.store.sshHost.value, app.store.sshPort.value.toIntOrNull() ?: 22), e)
-        }
-        runCatching { s.setServerAliveInterval(30_000) }
-        val p = s.setPortForwardingL("127.0.0.1", 0, "127.0.0.1", portDistant)
-        tunnelOllama = s to p
-        return p
-    }
-
     private fun <T> session(app: JarvisApp, cible: Cible? = null, f: (Session) -> T): T {
         val hote = cible?.hote ?: app.store.sshHost.value; val port = cible?.port ?: (app.store.sshPort.value.toIntOrNull() ?: 22)
         try {
@@ -289,60 +271,14 @@ object Serveur {
         }
     }
 
-    /** Même appareil sous plusieurs noms (« télé » ↔ tv ↔ media_player…), et le domaine Home Assistant qu'il évoque. */
-    private val SYNONYMES_HA: List<Pair<Set<String>, String?>> = listOf(
-        setOf("tele", "tv", "television", "televiseur", "telly", "bravia", "freebox player", "chromecast", "android tv", "media player") to "media_player",
-        setOf("enceinte", "speaker", "sonos", "google home", "nest", "echo", "alexa", "barre de son", "soundbar") to "media_player",
-        setOf("lumiere", "lumieres", "lampe", "lampes", "eclairage", "ampoule", "spot", "light", "plafonnier", "led") to "light",
-        setOf("chauffage", "radiateur", "thermostat", "clim", "climatisation", "poele", "pac", "climate") to "climate",
-        setOf("volet", "volets", "store", "stores", "rideau", "cover") to "cover",
-        setOf("prise", "prises", "plug", "interrupteur", "switch") to "switch",
-        setOf("temperature", "humidite", "capteur", "sensor") to "sensor",
-        setOf("portail", "garage", "porte") to null,
-        setOf("volume", "son") to "media_player",
-    )
-
-    /**
-     * Filtre tolérant des entités Home Assistant : sans accents ni casse, « _ » = espace, par mots (avec synonymes),
-     * les plus pertinentes d'abord. [entites] = (entity_id, friendly_name). Renvoie les index retenus.
-     */
-    internal fun filtrerEntites(entites: List<Pair<String, String>>, recherche: String, domaine: String): List<Int> {
-        val d = domaine.trim().lowercase().removeSuffix(".")
-        fun norm(x: String) = fr.dd.jarvis.societe.core.normaliser(x.replace('_', ' ').replace('.', ' '))
-        val q = norm(recherche)
-        val candidats = entites.indices.filter { d.isBlank() || entites[it].first.lowercase().startsWith("$d.") }
-        if (q.isBlank()) return candidats.sortedBy { entites[it].first }
-        val textes = candidats.associateWith { " " + norm(entites[it].first + " " + entites[it].second) + " " }
-        // 1. La recherche telle quelle.
-        candidats.filter { textes.getValue(it).contains(q) }.takeIf { it.isNotEmpty() }?.let { l -> return l.sortedBy { entites[it].first } }
-        // 2. Mot à mot, avec synonymes ; score = nombre de mots de la recherche retrouvés.
-        val vides = setOf("le", "la", "les", "de", "du", "des", "mon", "ma", "mes", "un", "une", "et", "a", "au", "aux", "en", "sur", "dans")
-        val mots = q.split(' ').filter { it.length >= 2 && it !in vides }
-        if (mots.isEmpty()) return emptyList()
-        val groupes = mots.map { m -> setOf(m) + SYNONYMES_HA.filter { (g, _) -> m in g }.flatMap { it.first } }
-        val domaines = mots.flatMap { m -> SYNONYMES_HA.filter { (g, _) -> m in g }.mapNotNull { it.second } }.toSet()
-        return candidats.map { i ->
-            val t = textes.getValue(i)
-            val dom = entites[i].first.substringBefore('.')
-            i to (groupes.count { g -> g.any { t.contains(" $it") } } * 2 + (if (dom in domaines) 1 else 0))
-        }.filter { it.second >= 2 || (it.second == 1 && domaines.size == 1 && mots.size == 1) }
-            .sortedWith(compareByDescending<Pair<Int, Int>> { it.second }.thenBy { entites[it.first].first }).map { it.first }
-    }
-
     fun haEntites(app: JarvisApp, recherche: String, domaine: String, decalage: Int = 0, limite: Int = 100): String {
         val arr = JSONArray(ha(app, "GET", "/api/states"))
-        val toutes = (0 until arr.length()).map { arr.getJSONObject(it) }
-        val paires = toutes.map { it.getString("entity_id") to it.optJSONObject("attributes")?.optString("friendly_name").orEmpty() }
-        val l = filtrerEntites(paires, recherche, domaine).map { toutes[it] }
-        if (l.isEmpty()) {
-            // Jamais un simple « aucune entité » : on donne de quoi réessayer (domaines présents, appareils multimédia…).
-            val parDomaine = paires.groupingBy { it.first.substringBefore('.') }.eachCount().entries.sortedByDescending { it.value }
-            val medias = paires.filter { it.first.startsWith("media_player.") }.take(15)
-            return "Aucune entité ne correspond à « ${recherche.ifBlank { domaine }} » (${arr.length()} entités au total). " +
-                "Domaines présents : " + parDomaine.take(14).joinToString(", ") { "${it.key} (${it.value})" } + "." +
-                (if (medias.isNotEmpty()) "\nAppareils multimédia (télé, enceintes) : " + medias.joinToString(" ; ") { "`${it.first}` ${it.second}" } else "") +
-                "\nRéessaie avec un autre mot (nom de la pièce, marque, tv…) ou un domaine, et regarde les notes de l'utilisateur (memoire_lire / obsidian_chercher)."
-        }
+        val q = recherche.trim().lowercase(); val d = domaine.trim().lowercase()
+        val l = (0 until arr.length()).map { arr.getJSONObject(it) }.filter { o ->
+            val id = o.getString("entity_id")
+            (d.isBlank() || id.startsWith("$d.")) && (q.isBlank() || id.lowercase().contains(q) || o.optJSONObject("attributes")?.optString("friendly_name").orEmpty().lowercase().contains(q))
+        }.sortedBy { it.optString("entity_id") }
+        if (l.isEmpty()) return "Aucune entité trouvée (${arr.length()} au total dans Home Assistant)."
         val debut = decalage.coerceIn(0, l.size)
         val taille = limite.coerceIn(1, 250)
         val page = l.drop(debut).take(taille)

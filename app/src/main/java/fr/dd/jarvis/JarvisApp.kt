@@ -91,19 +91,6 @@ class JarvisApp : Application() {
         super.onCreate()
         installCrashReporter()
         store = Store(this)
-        if (!store.hermesModeMigre.value) {
-            if (store.hermesMode.value == "auto") store.hermesMode.set("tout")
-            store.hermesModeMigre.set(true)
-        }
-        if (!store.hermesModeMigre3.value) {
-            if (store.hermesMode.value in setOf("tout", "demande")) store.hermesMode.set("auto")
-            store.hermesModeMigre.set(true); store.hermesModeMigre2.set(true); store.hermesModeMigre3.set(true)
-        }
-        if (!store.hermesModeMigre2.value) {
-            if (store.hermesMode.value == "demande") store.hermesMode.set("tout")
-            store.hermesModeMigre2.set(true)
-        }
-        fr.dd.jarvis.ai.Ollama.app = this
         llm = Llm(store)
         calendar = CalendarRepo(this, store)
         mail = MailRepo(this, store)
@@ -153,7 +140,6 @@ class JarvisApp : Application() {
             nm.createNotificationChannel(NotificationChannel(CHANNEL_CAR, "Android Auto (conversation JARVIS)", NotificationManager.IMPORTANCE_HIGH))
             nm.createNotificationChannel(NotificationChannel(CHANNEL_MSG, "SMS et mails (JARVIS en direct)", NotificationManager.IMPORTANCE_HIGH))
             nm.createNotificationChannel(NotificationChannel(CHANNEL_WAKE, "Écoute « Jarvis »", NotificationManager.IMPORTANCE_LOW))
-            runCatching { fr.dd.jarvis.work.SuiviTaches.canaux(this) }
         }
     }
 
