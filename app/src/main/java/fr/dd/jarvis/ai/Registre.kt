@@ -82,7 +82,8 @@ object Registre {
         if (!Reseau.prive(adresse) || alias.isBlank()) return false
         val o = lire(app)
         val m = o.optJSONObject("appareils") ?: JSONObject()
-        val e = m.optJSONObject(adresse) ?: JSONObject().put("ip", adresse).put("premier", System.currentTimeMillis())
+        val now = System.currentTimeMillis()
+        val e = m.optJSONObject(adresse) ?: JSONObject().put("ip", adresse).put("premier", now).put("type", "❔ à identifier")
         e.put("alias", alias).put("ip", adresse)
         m.put(adresse, e); o.put("appareils", m); ecrire(app, o)
         return true
