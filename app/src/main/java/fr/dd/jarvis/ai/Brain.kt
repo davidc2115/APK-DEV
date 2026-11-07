@@ -40,7 +40,7 @@ class Brain(
     }
 
     private fun escaladePossible(pourHermes: Boolean, suivi: Suivi) = !pourHermes && !suivi.hermesEssaye &&
-        app.store.hermesMode.value in setOf("auto", "tout") && !fr.dd.jarvis.hermes.Hermes.degrade()
+        app.store.hermesMode.value != "off" && !fr.dd.jarvis.hermes.Hermes.degrade()
 
     private suspend fun repondre(history: List<ChatMsg>, pourHermes: Boolean, onStatus: (String) -> Unit, suivi: Suivi): String {
         val recent = history.takeLast(4).filter { it.fromUser }.joinToString(" ") { it.text }
@@ -114,7 +114,7 @@ class Brain(
             val indispensables = if (domotique) listOf("obsidian_chercher", "obsidian_lire", "ha_entites", "ha_etat", "ha_service", "phone_action") else emptyList()
             val reglageDirect = Regex("r[eé]glage|param[eè]tre|mode conversation|[eé]coute continue|annonce vocale|r[eé]ponse vocale|confirmation|agent autonome|bips|analyse gemini|gemini|agents? autonomes?|notifications banni[eè]re", RegexOption.IGNORE_CASE).containsMatchIn(recent)
             val keep = (plan.outils + indispensables + (if (reglageDirect) listOf("reglage_jarvis") else emptyList()) + (if (planningClientsSync) listOf("analyser_planning_clients") else emptyList()) + listOf("memoire_ajouter", "memoire_apprendre", "memoire_apprentissages", "memoire_lire", "memoire_oublier") + (if (societeOn || planningClientsSync) fr.dd.jarvis.societe.SocieteTools.NAMES else emptySet<String>()) +
-                (if (app.store.hermesMode.value in setOf("auto", "tout")) listOf("hermes_deleguer") else emptyList()) +
+                (if (app.store.hermesMode.value != "off") listOf("hermes_deleguer") else emptyList()) +
                 (if (Regex("herm[eè]s|termux", RegexOption.IGNORE_CASE).containsMatchIn(recent)) listOf("hermes") else emptyList()) +
                 (if (Regex("freebox|\\bbox\\b|vpn|wireguard|openvpn|redirection|ouvr\\w* (le|un|les) ports?|\\bdmz\\b|bail dhcp", RegexOption.IGNORE_CASE).containsMatchIn(recent)) listOf("freebox") else emptyList()) +
                 (if (TikTokTools.concerned(recent)) listOf("video_montage", "tiktok_video", "generer_video") else emptyList()) +
@@ -129,7 +129,7 @@ class Brain(
         val outilsPartages = buildSet {
             if (domotique) addAll(listOf("obsidian_chercher", "obsidian_lire", "ha_entites", "ha_etat", "ha_service", "phone_action", "hermes_deleguer"))
             if (accesBox) addAll(listOf("freebox", "box_disque", "rechercher_videos_box", "lire_video_box", "routeur_diagnostiquer", "reseau_infos", "reseau_scanner", "ssh_fichier", "hermes_deleguer"))
-            if (app.store.hermesMode.value in setOf("auto", "tout")) add("hermes_deleguer")
+            if (app.store.hermesMode.value != "off") add("hermes_deleguer")
         }
         if (outilsPartages.isNotEmpty()) {
             val deja = (0 until schema.length()).mapNotNull { schema.optJSONObject(it)?.optJSONObject("function")?.optString("name") }.toMutableSet()
@@ -156,7 +156,7 @@ class Brain(
             Prompts.brain(userName(), avecDate = false) +
                 (if (domotique) "\\n\\nPILOTAGE DOMOTIQUE : identifie l'équipement exact. Pour une télévision, un ampli ou une enceinte, n'utilise jamais phone_action volume (cela modifierait le téléphone). Cherche l'entité et l'état Home Assistant ; si ces outils ne sont pas dans le catalogue Jarvis, délègue à Hermès avec hermes_deleguer pour qu'il utilise ses MCP/plugins/skills. Une commande directe au téléviseur ou au lecteur n'est permise que si un outil correspondant existe réellement. Après l'action, relis l'état. Si aucune intégration ne permet l'action, indique précisément ce qui manque." else "") +
                 (if (accesBox) "\\n\\nACCÈS À LA BOX : pour une Freebox associée, essaie freebox(action=fichiers) ; si le droit explorer manque ou si l'API échoue, bascule vers box_disque via SMB/FTP. Pour une autre box, utilise le partage SMB/FTP configuré. Pour les films, utilise rechercher_videos_box puis lire_video_box avec le chemin exact. Distingue refus de permission, partage désactivé, identifiants refusés et hôte injoignable." else "") +
-                (if (!pourHermes && app.store.hermesMode.value in setOf("auto", "tout")) "\\n\\nAGENT UNIQUE : tu peux déléguer à Hermès les compétences, serveurs MCP et plugins qu'il possède ; Hermès peut appeler les outils natifs Jarvis via le pont MCP. Combine les capacités et restitue une seule réponse cohérente." else "") +
+                (if (!pourHermes && app.store.hermesMode.value != "off") "\\n\\nAGENT UNIQUE : tu peux déléguer à Hermès les compétences, serveurs MCP et plugins qu'il possède ; Hermès peut appeler les outils natifs Jarvis via le pont MCP. Combine les capacités et restitue une seule réponse cohérente." else "") +
                 (if (societeNeeded) "\n\n" + fr.dd.jarvis.societe.SocieteTools.PROMPT else "") +
                 app.memo.pourPrompt() + app.memo.hermesPourPrompt() + app.memo.capacitesPourPrompt() + notesUtiles +
                 (if (plan != null && plan.note.isNotBlank()) "\n\nAnalyse préalable de la demande (Gemini) — suis ce plan, avec les outils fournis : ${plan.note}" else "") +
