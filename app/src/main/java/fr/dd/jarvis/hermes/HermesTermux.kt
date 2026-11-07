@@ -189,7 +189,11 @@ object HermesTermux {
     internal fun scriptPrelude(jeton: String, port: Int = PontMcp.PORT) = """
 J_URL=${q("http://127.0.0.1:$port/progres")}; J_TOK=${q(jeton)}
 p() {
-  local message="${'
+  local message="${'$'}*"
+  # Les sorties de commandes contiennent parfois des lignes vides ; /progres les refuse (HTTP 400).
+  [ -z "${'$'}message" ] && return 0
+  echo "${'$'}message"
+  if ! command -v curl >/dev/null 2>&1; then
     echo "JARVIS_PROGRESS_ERROR: curl absent" >&2
     return 127
   fi
