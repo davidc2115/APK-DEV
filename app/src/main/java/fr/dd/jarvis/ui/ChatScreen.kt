@@ -287,14 +287,16 @@ fun ChatScreen(vm: ChatViewModel, store: Store, app: JarvisApp) {
     }
 }
 
-/** Plein écran pendant une session de conversation vocale (déclenchée par le micro) : le graphe Obsidian en
- *  fond (à la place du micro/orbe), qui s'éclaircit légèrement pendant l'écoute/la réflexion, avec le statut
- *  en direct (écoute / transcription / réflexion / réponse). Un tap n'importe où arrête la session.
- *  Purement visuel ici (pas de tap sur un nœud ni de zoom/pan) : le graphe interactif reste dans l'onglet Graphe. */
+/** Plein écran pendant une session vocale : graphe Obsidian en arrière-plan et tête du serpent-dragon animée. */
 @Composable
 private fun VoiceOrbOverlay(vm: ChatViewModel, app: JarvisApp, accent: Color, onStop: () -> Unit) {
     Box(Modifier.fillMaxSize().clickable { onStop() }) {
         GraphBackdrop(app, Modifier.fillMaxSize(), active = vm.listening || vm.busy)
+        Box(Modifier.fillMaxSize().background(Color(0x99000000)))
+        TeteDragonAnimee(
+            Modifier.align(Alignment.Center).size(260.dp),
+            active = vm.listening || vm.busy, parle = vm.parle
+        )
         Column(
             Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 36.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -304,6 +306,7 @@ private fun VoiceOrbOverlay(vm: ChatViewModel, app: JarvisApp, accent: Color, on
                 vm.partial.isNotBlank() -> vm.partial
                 vm.busy -> vm.status.ifBlank { "Je réfléchis…" }
                 vm.listening -> "Je t'écoute…"
+                vm.parle -> "JARVIS parle…"
                 else -> vm.status.ifBlank { "En conversation…" }
             }
             Text(
