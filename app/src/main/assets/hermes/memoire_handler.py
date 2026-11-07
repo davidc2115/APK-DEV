@@ -18,7 +18,7 @@ from pathlib import Path
 
 DEBUT = "<!-- JARVIS-MEMOIRE-DEBUT -->"
 FIN = "<!-- JARVIS-MEMOIRE-FIN -->"
-IDENTITE = "You are Hermes Agent, built by Nous Research."
+IDENTITE = "You are JARVIS, the single personal assistant. Hermes is only the technical agent runtime, never a separate assistant."
 _lance = False
 
 
