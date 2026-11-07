@@ -98,18 +98,19 @@ class Brain(
         onStatus("🧠 Analyse de la demande…")
         val notesUtiles = runCatching { fr.dd.jarvis.device.NotesPertinentes.pour(app, texteUser) }.getOrDefault("")
         val all = tools.schemaAll()
-        val plan = try { Analyseur.analyser(app, history, all) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { null }
+        val sansAnalyse = pourHermes || fr.dd.jarvis.hermes.Routeur.commandeSimple(texteUser)
+        val plan = if (sansAnalyse) null else try { Analyseur.analyser(app, history, all) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { null }
         // Pour une consigne de chauffage, le planificateur ne doit jamais retirer les outils nécessaires :
         // il faut pouvoir retrouver les correspondances dans Obsidian, vérifier les entités HA puis agir.
         val pilotageChauffage = Regex("po[eê]les?|poils?|pellets?|granul[eé]s?|chauffage|thermostats?|climate\\.|temp[eé]rature|consigne|degr[eé]s?", RegexOption.IGNORE_CASE).containsMatchIn(recent) &&
             Regex("r[eé]gl|mettre|passer|fixer|monter|baisser|augment|dimin|r[eé]gler|allum|[eé]teind|commande|sur \\d", RegexOption.IGNORE_CASE).containsMatchIn(recent)
-        val schema: JSONArray
+        var schema: JSONArray
         var societeNeeded = societeOn || planningClientsSync
+        // Domotique (chauffage, télé, lumières, volets…) : toujours de quoi relire les notes, trouver l'entité ET agir.
+        val domotique = pilotageChauffage || (Regex("t[ée]l[ée]|\\btv\\b|t[ée]l[ée]vis|volume|lumi[èe]re|lampe|volet|store|prise|home ?assistant|domotique|enceinte", RegexOption.IGNORE_CASE).containsMatchIn(recent) &&
+            ACTION_DOMOTIQUE.containsMatchIn(recent))
+        val indispensables = if (domotique) listOf("obsidian_chercher", "obsidian_lire", "ha_entites", "ha_etat", "ha_service") else emptyList()
         if (plan != null && plan.outils.isNotEmpty()) {
-            // Domotique (chauffage, télé, lumières, volets…) : toujours de quoi relire les notes, trouver l'entité ET agir.
-            val domotique = pilotageChauffage || (Regex("t[ée]l[ée]|\\btv\\b|t[ée]l[ée]vis|volume|lumi[èe]re|lampe|volet|store|prise|home ?assistant|domotique|enceinte", RegexOption.IGNORE_CASE).containsMatchIn(recent) &&
-                ACTION_DOMOTIQUE.containsMatchIn(recent))
-            val indispensables = if (domotique) listOf("obsidian_chercher", "obsidian_lire", "ha_entites", "ha_etat", "ha_service") else emptyList()
             val reglageDirect = Regex("r[eé]glage|param[eè]tre|mode conversation|[eé]coute continue|annonce vocale|r[eé]ponse vocale|confirmation|agent autonome|bips|analyse gemini|gemini|agents? autonomes?|notifications banni[eè]re", RegexOption.IGNORE_CASE).containsMatchIn(recent)
             val keep = (plan.outils + indispensables + (if (reglageDirect) listOf("reglage_jarvis") else emptyList()) + (if (planningClientsSync) listOf("analyser_planning_clients") else emptyList()) + listOf("memoire_ajouter", "memoire_apprendre", "memoire_apprentissages", "memoire_lire", "memoire_oublier") + (if (societeOn || planningClientsSync) fr.dd.jarvis.societe.SocieteTools.NAMES else emptySet<String>()) +
                 (if (fr.dd.jarvis.hermes.Hermes.enLigneConnu()) listOf("hermes_deleguer") else emptyList()) +
@@ -122,7 +123,14 @@ class Brain(
             schema = JSONArray()
             for (i in 0 until all.length()) if (all.getJSONObject(i).getJSONObject("function").getString("name") in keep) schema.put(all.get(i))
             if (plan.outils.any { it in fr.dd.jarvis.societe.SocieteTools.NAMES }) societeNeeded = true
-        } else schema = tools.schemaFor(recent)
+        } else {
+            schema = tools.schemaFor(recent)
+            val presents = (0 until schema.length()).mapNotNull { schema.optJSONObject(it)?.optJSONObject("function")?.optString("name") }.toSet()
+            val manquants = indispensables.filter { it !in presents }.toSet()
+            if (manquants.isNotEmpty()) schema = JSONArray(schema.toString()).also { s ->
+                for (i in 0 until all.length()) if (all.getJSONObject(i).getJSONObject("function").getString("name") in manquants) s.put(all.get(i))
+            }
+        }
         // Outils retirés : ceux qui renverraient vers Hermès (quand c'est Hermès qui demande), et le SSH pour une demande
         // Home Assistant ordinaire — elle passe par l'API (ha_*) ; si l'API échoue, l'approfondissement prend le relais.
         val retires = (if (pourHermes) setOf("hermes", "hermes_deleguer", "tache_arriere_plan") else emptySet()) +

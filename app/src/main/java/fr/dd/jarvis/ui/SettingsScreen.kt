@@ -507,7 +507,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 Spacer(Modifier.height(8.dp))
                 Text("Répartition des demandes", color = HudDim, fontSize = 12.sp)
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("auto" to "Automatique (rapide + approfondi)", "tout" to "Toujours approfondi", "off" to "Rapide uniquement").forEach { (id, nom) ->
+                    listOf("tout" to "Hermès pour tout (recommandé)", "auto" to "Jarvis d'abord", "off" to "Jarvis seul").forEach { (id, nom) ->
                         HudChip(nom, selected = store.hermesMode.value == id) { store.hermesMode.set(id) }
                     }
                 }

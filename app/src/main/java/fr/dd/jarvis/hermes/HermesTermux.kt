@@ -241,7 +241,7 @@ arreter_passerelles_hermes() {
     // ------------------------------------------------------------------ 3-5. Installation, configuration, démarrage
 
     /** Version du hook de mémoire partagée : à augmenter quand memoire_handler.py change (réinstallation automatique). */
-    const val VERSION_HOOK_MEMOIRE = 3
+    const val VERSION_HOOK_MEMOIRE = 4
 
     /**
      * Installe (ou met à jour) le hook « jarvis-memoire » d'Hermès : au démarrage de la passerelle, il lance un fil qui
@@ -276,7 +276,11 @@ p '🧠 Mémoire partagée Jarvis ↔ Hermès installée.'
         if (!app.store.hermesInstalle.value) return null
         PontMcp.demarrer(app)
         // Version 2 : réflexion « low » pour qu'Hermès réponde plus vite (lue par Hermès dans agent.reasoning_effort).
-        val rapidite = "debian_utilisateur_jarvis; hermes_debian hermes config set agent.reasoning_effort low --force >/dev/null 2>&1 && p '⚡ Hermès : réflexion allégée pour des réponses plus rapides.' || true"
+        // Version 4 : un seul réessai par fournisseur puis bascule immédiate sur le suivant, et plus d'attente automatique
+        // de 15 s à 60 s × 5 en cas de panne (c'était le « Jarvis réfléchit… » interminable) : Jarvis prend le relais.
+        val rapidite = "debian_utilisateur_jarvis; hermes_debian hermes config set agent.reasoning_effort low --force >/dev/null 2>&1; " +
+            "hermes_debian hermes config set agent.api_max_retries 1 --force >/dev/null 2>&1; " +
+            "hermes_debian hermes config set agent.auto_recovery_cycles 0 --force >/dev/null 2>&1 && p '⚡ Hermès : réflexion allégée, bascule immédiate en cas de panne.' || true"
         val script = prelude(app) + "\n" + scriptHookMemoire(app) + "\n" + rapidite + "\narreter_passerelles_hermes; sleep 1\n" + demarrage
         return executer(app, script, libelle = "Mémoire partagée Jarvis ↔ Hermès")
     }
@@ -326,6 +330,8 @@ p '🧠 Mémoire partagée Jarvis ↔ Hermès installée.'
             // Réflexion « low » : Hermès répond nettement plus vite (modifiable dans config.yaml).
             appendLine("agent:")
             appendLine("  reasoning_effort: low")
+            appendLine("  api_max_retries: 1")
+            appendLine("  auto_recovery_cycles: 0")
             appendLine("memory:")
             appendLine("  memory_enabled: true")
             appendLine("  user_profile_enabled: true")
@@ -697,6 +703,9 @@ data["fallback_providers"] = fallbacks
 
 # Rapidité : réflexion « low » (Gemini répond bien plus vite) sauf si l'utilisateur a choisi un autre niveau.
 agent_cfg = data.setdefault("agent", {})
+if isinstance(agent_cfg, dict):
+    agent_cfg["api_max_retries"] = 1
+    agent_cfg["auto_recovery_cycles"] = 0
 if isinstance(agent_cfg, dict) and str(agent_cfg.get("reasoning_effort") or "").strip().lower() in ("", "medium"):
     agent_cfg["reasoning_effort"] = "low"
 # Multi-agent orchestration, preserving all unrelated Hermes configuration.

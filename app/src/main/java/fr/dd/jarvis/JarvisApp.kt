@@ -103,6 +103,10 @@ class JarvisApp : Application() {
             if (store.hermesMode.value == "demande") store.hermesMode.set("tout")
             store.hermesModeMigre2.set(true)
         }
+        if (!store.hermesModeMigre4.value) {
+            if (store.hermesMode.value in setOf("auto", "demande")) store.hermesMode.set("tout")
+            store.hermesModeMigre4.set(true)
+        }
         fr.dd.jarvis.ai.Ollama.app = this
         llm = Llm(store)
         calendar = CalendarRepo(this, store)
