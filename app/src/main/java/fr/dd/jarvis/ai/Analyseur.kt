@@ -1,6 +1,8 @@
 package fr.dd.jarvis.ai
 
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import org.json.JSONArray
 
 /**
@@ -17,8 +19,23 @@ Réponds UNIQUEMENT avec un objet JSON, sans texte autour :
 Si aucune action n'est nécessaire (simple conversation) : {"outils":[],"plan":""}.
 Si la demande consiste à analyser le planning/l’agenda pour compléter ou mettre à jour les fiches clients à partir des rendez-vous, choisis obligatoirement analyser_planning_clients (pas get_planning seul). Cet outil sait traiter plusieurs clients dans un même rendez-vous.\nChoisis uniquement des noms présents dans la liste."""
 
+    /**
+     * L'analyse préalable coûte un appel complet. Elle n'est utile que pour les demandes réellement orchestrées ;
+     * les questions, commandes directes et actions simples ne doivent pas payer un second appel IA.
+     */
+    private val DEMANDE_COMPLEXE = Regex(
+        "\\b(analyse|analyser|compare|comparatif|planifie|planifier|organise|synchronise|synchroniser|" +
+            "plusieurs|toutes les|chaque|ensemble|workflow|plusieurs etapes|en plusieurs etapes|" +
+            "d'abord.{0,50}(puis|ensuite)|puis.{0,50}(ensuite|apres)|recherche approfondie|audit|diagnostic complet|" +
+            "mets? a jour.{0,80}(a partir|selon|depuis)|a partir de.{0,80}(tous|plusieurs))\\b",
+        RegexOption.IGNORE_CASE
+    )
+
     suspend fun analyser(app: fr.dd.jarvis.JarvisApp, historique: List<ChatMsg>, tousOutils: JSONArray): Plan? {
-        if (!app.store.analyseGemini.value || app.store.geminiKeys.isEmpty()) return null
+        if (!app.store.analyseGemini.value) return null
+        val dernier = historique.lastOrNull { it.fromUser }?.text.orEmpty()
+        if (!DEMANDE_COMPLEXE.containsMatchIn(fr.dd.jarvis.societe.core.normaliser(dernier))) return null
+        if (tousOutils.length() < 4) return null
         val noms = mutableMapOf<String, String>()
         for (i in 0 until tousOutils.length()) {
             val f = tousOutils.getJSONObject(i).getJSONObject("function")
@@ -26,7 +43,14 @@ Si la demande consiste à analyser le planning/l’agenda pour compléter ou met
         }
         val conv = historique.takeLast(6).joinToString("\n") { (if (it.fromUser) "Utilisateur : " else "JARVIS : ") + it.text.take(400) }
         val user = "Date : ${Prompts.now()}\n\nOUTILS :\n" + noms.entries.joinToString("\n") { "- ${it.key} : ${it.value}" } + "\n\nCONVERSATION :\n$conv"
-        val rep = withTimeoutOrNull(9_000) {
+        // Agent local gratuit (Ollama) en premier si déjà configuré : aucun jeton Groq/Gemini consommé.
+        // En cas d'absence/échec, on revient au fournisseur configuré par l'utilisateur.
+        val local = if (fr.dd.jarvis.ai.Ollama.configure(app)) withTimeoutOrNull(7_000) {
+            try { withContext(Dispatchers.IO) { Ollama.generer(app, SYSTEM, user) } }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (_: Exception) { null }
+        } else null
+        val rep = local?.takeIf { it.isNotBlank() } ?: withTimeoutOrNull(6_000) {
             try { app.llm.agent(SYSTEM, user) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { null }
         } ?: return null
         val json = rep.substringAfter('{', "").let { if (it.isEmpty()) return null else "{$it" }.substringBeforeLast('}').let { "$it}" }
