@@ -293,6 +293,10 @@ fun CompteRenduEcran(app: JarvisApp, onFermer: () -> Unit, onDemander: (String) 
     var message by remember { mutableStateOf("") }
     var occupe by remember { mutableStateOf(false) }
     var fini by remember { mutableStateOf<Pair<String, String>?>(null) } // (date, description)
+    // Ouvert sur place (mode chantier) : l'installation la plus proche est déjà choisie.
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        if (installation == null) installation = withContext(Dispatchers.IO) { runCatching { Vision.sitesProches(app).firstOrNull { (it.km ?: 99.0) < 0.25 } }.getOrNull() }
+    }
 
     val photoAvant = appareilPhoto("avant") { avant.add(it) }
     val photoApres = appareilPhoto("apres") { apres.add(it) }
@@ -358,6 +362,50 @@ fun CompteRenduEcran(app: JarvisApp, onFermer: () -> Unit, onDemander: (String) 
                 }
                 HudButton("✉️ Envoyer le rapport") {
                     onDemander("Envoie par mail à ${s.client.nom} le rapport de l'intervention du ${f.first} sur l'installation ${s.site.nom} (PDF), avec un message court et professionnel.")
+                }
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+// ======================================================================================= 6. Santé de Jarvis
+
+/** Tableau de santé : chaque système, son état, et quoi faire avant que ça casse. */
+@Composable
+fun SanteEcran(app: JarvisApp, onFermer: () -> Unit, onDemander: (String) -> Unit) {
+    val scope = rememberCoroutineScope()
+    var liste by remember { mutableStateOf<List<fr.dd.jarvis.device.Sante.Indicateur>?>(null) }
+    var tour by remember { mutableStateOf(0) }
+    androidx.compose.runtime.LaunchedEffect(tour) { liste = null; liste = fr.dd.jarvis.device.Sante.mesurer(app) }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(14.dp)) {
+        EnteteEcran("🩺 SANTÉ", onFermer)
+        val l = liste
+        if (l == null) Text("Vérification en cours…", color = HudDim, fontSize = 13.sp)
+        else {
+            Text(fr.dd.jarvis.device.Sante.resume(l), color = HudText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(10.dp))
+            l.sortedBy { when (it.niveau) { fr.dd.jarvis.device.Sante.Niveau.PANNE -> 0; fr.dd.jarvis.device.Sante.Niveau.ATTENTION -> 1; fr.dd.jarvis.device.Sante.Niveau.OK -> 2; else -> 3 } }.forEach { i ->
+                val couleur = when (i.niveau) {
+                    fr.dd.jarvis.device.Sante.Niveau.OK -> Color(0xFF4CE0A0); fr.dd.jarvis.device.Sante.Niveau.ATTENTION -> Color(0xFFFFB74D)
+                    fr.dd.jarvis.device.Sante.Niveau.PANNE -> Color(0xFFFF5370); else -> HudDim
+                }
+                HudPanel(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(i.icone, fontSize = 16.sp)
+                        Text(i.nom, color = HudText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 8.dp).weight(1f))
+                        Box(Modifier.size(10.dp).clip(RoundedCornerShape(5.dp)).background(couleur))
+                    }
+                    Text(i.detail, color = HudDim, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                    if (i.conseil.isNotBlank()) Text("→ ${i.conseil}", color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+                    if (i.cle == "hermes" && fr.dd.jarvis.hermes.Hermes.degrade()) HudChip("Réessayer Hermès maintenant") { fr.dd.jarvis.hermes.Hermes.reprendre(); tour++ }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                HudButton("↻ Actualiser") { tour++ }
+                HudButton("🪽 Demander à Jarvis") {
+                    onDemander("Voici l'état de mes systèmes : " + l.filter { it.niveau != fr.dd.jarvis.device.Sante.Niveau.INACTIF }.joinToString(" ; ") { "${it.nom} : ${it.detail}" } +
+                        ". Que faut-il corriger en priorité ?")
                 }
             }
         }

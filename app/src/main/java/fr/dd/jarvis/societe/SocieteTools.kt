@@ -705,23 +705,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         svc.repo.update { data -> data.copy(clients = data.clients.map { c ->
             if (c.id != client.id) c else c.copy(sites = c.sites.map { s -> if (s.id == site.id) siteMaj else s })
         }) }
-        val clientPath = client.nom.replace("/", "_").replace("\\", "_")
-        val sitePath = site.nom.replace("/", "_").replace("\\", "_")
-        val md = buildString {
-            append("# Intervention — " + client.nom + " / " + site.nom + "\n\n")
-            append("- Date : " + date + "\n- Catégorie : " + categorie + "\n- Statut : " + statut + "\n")
-            if (intervention.diagnostic.isNotBlank()) append("- Diagnostic : " + intervention.diagnostic + "\n")
-            append("\n## Description\n" + description + "\n")
-            if (intervention.actions.isNotBlank()) append("\n## Actions réalisées\n" + intervention.actions + "\n")
-            if (intervention.pieces.isNotBlank()) append("\n## Pièces remplacées\n" + intervention.pieces + "\n")
-            if (intervention.mesures.isNotBlank()) append("\n## Mesures relevées\n" + intervention.mesures + "\n")
-            if (prochaine.isNotBlank()) append("\n## Prochaine maintenance\n" + prochaine + "\n")
-            if (intervention.notes.isNotBlank()) append("\n## Notes\n" + intervention.notes + "\n")
-        }
-        val dossier = "Société/Interventions/" + clientPath + "/" + sitePath
-        val nomFichier = date + " " + intervention.id
-        val emplacement = app.obsidian.saveIn(dossier, nomFichier, md)
-        val pdf = app.obsidian.saveBytes(dossier, nomFichier + ".pdf", PdfExporter.toPdf(md), "application/pdf")
+        val (emplacement, pdf) = svc.ecrireRapport(client, site, intervention)
         return ok("✅ Intervention enregistrée pour " + client.nom + " — " + site.nom + ".\n📅 " + date + " · " + categorie + " · " + statut + "\n📁 " + emplacement + "\n📄 " + pdf +
             (if (prochaine.isNotBlank()) "\n🔧 Prochaine maintenance : " + prochaine else "") +
             "\n\nLe suivi est conservé dans la fiche de l'installation et dans Obsidian.")

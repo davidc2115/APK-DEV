@@ -19,6 +19,10 @@ class Llm(private val store: Store) {
     private val groqRing = KeyRing { store.groqKeys.toList() }
     private val geminiRing = KeyRing { store.geminiKeys.toList() }
     val groq = GroqClient(groqRing) { store.groqModel.value }
+
+    /** (clés, en pause, refus de quota dans la dernière heure) — tableau de santé. */
+    fun etatGemini() = Triple(geminiRing.count(), geminiRing.pausedCount(), geminiRing.quotasDerniereHeure())
+    fun etatGroq() = Triple(groqRing.count(), groqRing.pausedCount(), groqRing.quotasDerniereHeure())
     val gemini = GeminiClient(geminiRing) { store.geminiModel.value }
     /** Dernier recours du cerveau principal (appel d'outils), seulement si TOUTES les clés Groq sont épuisées. */
     val cloudflare = CloudflareChatClient({ store.cfAccounts.toList() }) { store.cfChatModel.value }

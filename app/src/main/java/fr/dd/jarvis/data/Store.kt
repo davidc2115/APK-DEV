@@ -272,6 +272,19 @@ class Store(context: Context) {
     val voixNom = SPref("voixNom", "Charon")
     /** Voix Android choisie (nom de la voix du moteur Google) ; vide = la meilleure voix française disponible. */
     val voixAndroid = SPref("voixAndroid", "")
+    val rapportsPhotosV2 = BPref("rapportsPhotosV2", false)
+    /** Modes automatiques (voiture, chantier, nuit, maison) et mode forcé (redevient automatique au bout de 4 h). */
+    val modesAuto = BPref("modesAuto", true)
+    val modeForce = SPref("modeForce", "")
+    val modeForceJusqua = SPref("modeForceJusqua", "0")
+    val nuitDebut = SPref("nuitDebut", "22")
+    val nuitFin = SPref("nuitFin", "7")
+    /** Dernière installation où une arrivée a été signalée (« idClient|idSite|date »). */
+    val dernierChantier = SPref("dernierChantier", "")
+    /** Empreinte (ou code) demandée avant les actions sensibles. */
+    val biometrie = BPref("biometrie", true)
+    /** Alertes de santé déjà signalées (clé → horodatage), pour ne pas répéter. */
+    val santeAlertes = SPref("santeAlertes", "")
     val conversationMode = BPref("conversationMode", false)
 
     // ---- Sécurité

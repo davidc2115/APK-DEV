@@ -43,7 +43,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val voice = VoiceManager(application)
 
     private val tools = ToolBox(app) { question, force ->
-        if (!force && !store.confirmSensitive.value) true else askConfirm(question)
+        if (!force && !store.confirmSensitive.value) true
+        else askConfirm(question) && (!store.biometrie.value || !fr.dd.jarvis.device.Securite.sensible(question) ||
+            fr.dd.jarvis.device.Securite.authentifier(app, "Confirmer l'action", question))
     }
     private val brain = Brain(app.llm, tools, app) { store.userName.value }
 

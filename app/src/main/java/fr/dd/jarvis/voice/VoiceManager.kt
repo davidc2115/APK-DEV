@@ -471,6 +471,7 @@ class VoiceManager(private val ctx: Context) {
         private var coupe = false
         private var externe = false
         private var attrsVoix: AudioAttributes = attrAssistant
+        private var volume = 1f
         @Volatile private var piste: AudioTrack? = null
         private var formatPiste = 0 to 0
         private val dits = StringBuilder()
@@ -548,6 +549,7 @@ class VoiceManager(private val ctx: Context) {
             // Hors session : focus + vraie commande PAUSE pour les lecteurs qui ignorent le focus, reprise après la réponse.
             mediaPauseeParJarvis = !sessionActive && externe && fr.dd.jarvis.service.JarvisNotificationListener.pauseMediaPourVoix(ctx)
             runCatching { tts?.setAudioAttributes(attrsVoix) }
+            volume = (ctx.applicationContext as? fr.dd.jarvis.JarvisApp)?.let { runCatching { fr.dd.jarvis.device.Contexte.volumeVoix(it) }.getOrDefault(1f) } ?: 1f
             // Voix Android changée dans les réglages : appliquée sans redémarrer.
             val choix = (ctx.applicationContext as? fr.dd.jarvis.JarvisApp)?.store?.voixAndroid?.value.orEmpty()
             if (choix.isNotBlank() && runCatching { tts?.voice?.name }.getOrNull() != choix) VoixAndroid.appliquer(ctx, tts)
@@ -608,6 +610,7 @@ class VoiceManager(private val ctx: Context) {
                     .setTransferMode(AudioTrack.MODE_STREAM).setBufferSizeInBytes(min * 4).build()
                 formatPiste = a.frequence to a.canaux
                 ecrits = 0L
+                runCatching { piste?.setVolume(volume) }
                 piste?.play()
                 voixLancee()
             }
@@ -645,7 +648,8 @@ class VoiceManager(private val ctx: Context) {
             finsAndroid[id] = latch
             var premier = true
             debutsAndroid[id] = { if (premier) { premier = false; voixLancee() } }
-            val ok = runCatching { t.speak(morceau, TextToSpeech.QUEUE_ADD, null, id) }.getOrDefault(TextToSpeech.ERROR)
+            val params = if (volume < 1f) Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, volume) } else null
+            val ok = runCatching { t.speak(morceau, TextToSpeech.QUEUE_ADD, params, id) }.getOrDefault(TextToSpeech.ERROR)
             if (ok == TextToSpeech.ERROR) { finsAndroid.remove(id); debutsAndroid.remove(id); return }
             latch.await(15_000L + morceau.length * 120L, java.util.concurrent.TimeUnit.MILLISECONDS)
             debutsAndroid.remove(id)

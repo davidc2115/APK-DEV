@@ -45,7 +45,6 @@ Réponds uniquement par ce JSON :
             (if (site.onduleur.isNotBlank()) ", onduleur ${site.onduleur}" else "") + ". Catégorie choisie : $categorie. Date : $date.\n\nDictée du technicien :\n$dictee"
         val brut = withTimeoutOrNull(45_000) { runCatching { app.llm.agent(SYSTEME, contexte) }.getOrNull() }
         val args = champs(brut, dictee, categorie).put("client", client.nom).put("installation", site.nom).put("date", date)
-        if (signature != null) args.put("notes", (args.optString("notes") + "\nSignature du client recueillie sur place.").trim())
         val res = ToolBox(app) { _, _ -> true }.execute("intervention_enregistrer", args)
         if (!res.text.startsWith("✅")) return Resultat(res.text, null, null)
 
@@ -56,12 +55,9 @@ Réponds uniquement par ce JSON :
         val pieces = StringBuilder()
         if (inter != null) withContext(Dispatchers.IO) {
             if (avant.isNotEmpty()) pieces.append("\n📷 " + svc.ajouterPhotosIntervention(clientId, siteId, inter.id, true, avant))
-            val sig = signature?.let { b ->
-                val f = java.io.File(java.io.File(app.cacheDir, "share").apply { mkdirs() }, "signature_client_${inter.id}.png").apply { writeBytes(b) }
-                androidx.core.content.FileProvider.getUriForFile(app, app.packageName + ".files", f)
-            }
-            val tous = apres + listOfNotNull(sig)
-            if (tous.isNotEmpty()) pieces.append("\n📷 " + svc.ajouterPhotosIntervention(clientId, siteId, inter.id, false, tous))
+            if (apres.isNotEmpty()) pieces.append("\n📷 " + svc.ajouterPhotosIntervention(clientId, siteId, inter.id, false, apres))
+            // La signature a sa propre section, en fin de rapport (pas mêlée aux photos).
+            if (signature != null) pieces.append("\n" + svc.ajouterSignature(clientId, siteId, inter.id, signature))
         }
         return Resultat(res.text + pieces, date, description)
     }

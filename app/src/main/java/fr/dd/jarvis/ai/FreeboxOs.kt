@@ -673,6 +673,16 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
         return if (t.count { it == '\uFFFD' } > 5) "Fichier binaire (${taille(e.taille)}) : demande-moi de le récupérer sur le téléphone." else "📄 ${lisible(e.chemin)}\n```\n" + t.take(8000) + "\n```"
     }
 
+    /** État pour le tableau de santé : (connexion active, octets libres, octets au total) du plus grand disque monté. */
+    fun etat(app: JarvisApp): Triple<Boolean, Long, Long>? {
+        if (app.store.freeboxAppToken.value.isBlank()) return null
+        return avecSession(app) { s ->
+            val cx = json(app, "connection/", s) as? JSONObject ?: JSONObject()
+            val d = volumes(app, s).filter { it.etat == "mounted" && it.total > 0 }.maxByOrNull { it.total }
+            Triple(cx.optString("state") == "up", d?.libre ?: -1L, d?.total ?: -1L)
+        }
+    }
+
     /** Résumé d'une ligne pour le centre de commande : connexion, débit descendant, place libre sur le disque. */
     fun resume(app: JarvisApp): String? {
         if (app.store.freeboxAppToken.value.isBlank()) return null

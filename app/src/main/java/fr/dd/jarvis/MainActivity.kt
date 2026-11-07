@@ -82,6 +82,8 @@ import java.io.File
 class MainActivity : ComponentActivity() {
 
     private val vm: ChatViewModel by viewModels()
+    /** Écran de terrain demandé par une notification (compte-rendu, regarder, santé). */
+    val terrainDemande = androidx.compose.runtime.mutableStateOf("")
 
     fun demarrerEcoute() { if (!vm.listening && !vm.busy) vm.toggleListening() }
 
@@ -91,6 +93,7 @@ class MainActivity : ComponentActivity() {
         handleListen(intent)
         handleSharedVideo(intent)
         handleTikTokCallback(intent)
+        intent.getStringExtra("terrain")?.takeIf { it.isNotBlank() }?.let { terrainDemande.value = it; intent.removeExtra("terrain") }
     }
 
     /** Retour de la connexion OAuth TikTok (via la page relais GitHub Pages → fr.dd.jarvis://tiktok-callback?...). */
@@ -150,11 +153,12 @@ class MainActivity : ComponentActivity() {
         handleListen(intent)
         handleSharedVideo(intent)
         handleTikTokCallback(intent)
+        intent?.getStringExtra("terrain")?.takeIf { it.isNotBlank() }?.let { terrainDemande.value = it; intent.removeExtra("terrain") }
         // Widget « dragon » à jour (prochain rendez-vous) à chaque ouverture.
         Thread { runCatching { fr.dd.jarvis.widget.DragonWidget.majTous(applicationContext) } }.start()
         setContent {
             HudTheme(accentById(app.store.accent.value).color, app.store.tileAlpha.value) {
-                HudBackground { Root(app, vm) }
+                HudBackground { Root(app, vm, terrainDemande) }
             }
         }
     }
@@ -181,7 +185,7 @@ private val tabs = listOf(
 )
 
 @Composable
-private fun Root(app: JarvisApp, vm: ChatViewModel) {
+private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.compose.runtime.MutableState<String>) {
     val ctx = LocalContext.current
     val accent = LocalAccent.current
     // Android 13+ bloque toutes les notifications tant que l'autorisation runtime
@@ -201,6 +205,9 @@ private fun Root(app: JarvisApp, vm: ChatViewModel) {
     // Écrans de terrain ouverts par-dessus l'onglet en cours (caméra, compte-rendu d'intervention).
     var terrain by rememberSaveable { mutableStateOf("") }
     androidx.activity.compose.BackHandler(enabled = terrain.isNotEmpty()) { terrain = "" }
+    LaunchedEffect(terrainDemande.value) {
+        if (terrainDemande.value.isNotBlank()) { terrain = terrainDemande.value; tab = 0; terrainDemande.value = "" }
+    }
 
     // Dernier plantage (affiché au lancement suivant, sans ADB)
     var crash by remember {
@@ -233,9 +240,10 @@ private fun Root(app: JarvisApp, vm: ChatViewModel) {
             val demander: (String) -> Unit = { vm.send(it); terrain = ""; tab = 1 }
             if (terrain == "regarder") fr.dd.jarvis.ui.RegarderEcran(app, onFermer = { terrain = "" }, onDemander = demander)
             else if (terrain == "compte_rendu") fr.dd.jarvis.ui.CompteRenduEcran(app, onFermer = { terrain = "" }, onDemander = demander)
+            else if (terrain == "sante") fr.dd.jarvis.ui.SanteEcran(app, onFermer = { terrain = "" }, onDemander = demander)
             else when (tab) {
                 0 -> fr.dd.jarvis.ui.CentreCommande(app, vm, onOnglet = { tab = it }, onDemander = demander,
-                    onRegarder = { terrain = "regarder" }, onCompteRendu = { terrain = "compte_rendu" })
+                    onRegarder = { terrain = "regarder" }, onCompteRendu = { terrain = "compte_rendu" }, onSante = { terrain = "sante" })
                 1 -> ChatScreen(vm, app.store, app)
                 2 -> PlanningScreen(app)
                 3 -> MailScreen(app)

@@ -358,6 +358,25 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
             }
         }
         item {
+            HudPanel(Modifier.fillMaxWidth(), title = "Modes automatiques et sécurité") {
+                Text("JARVIS adapte ses réponses, sa voix et ses notifications : 🚗 voiture (Android Auto), 👷 chantier (à moins de 250 m d'une installation cliente), 🌙 nuit, 🏠 maison (au siège).", color = HudDim, fontSize = 11.sp)
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { store.modesAuto.set(!store.modesAuto.value) }) {
+                    Text((if (store.modesAuto.value) "✅ " else "⬜ ") + "Modes automatiques", color = HudText, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
+                }
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Nuit de", color = HudDim, fontSize = 12.sp)
+                    listOf("21", "22", "23").forEach { h -> HudChip("${h}h", store.nuitDebut.value == h) { store.nuitDebut.set(h) } }
+                    Text("à", color = HudDim, fontSize = 12.sp)
+                    listOf("6", "7", "8").forEach { h -> HudChip("${h}h", store.nuitFin.value == h) { store.nuitFin.set(h) } }
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { store.biometrie.set(!store.biometrie.value) }) {
+                    Text((if (store.biometrie.value) "✅ " else "⬜ ") + "🔒 Empreinte (ou code) avant les actions sensibles", color = HudText, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
+                }
+                Text("Suppressions, envois de mails et SMS, paiements, redémarrages : après ton « oui », JARVIS demande ton empreinte. À la voix, ces actions ne passent que si le téléphone est déverrouillé.", color = HudDim, fontSize = 11.sp)
+            }
+        }
+        item {
             var memoryCount by remember { mutableIntStateOf(0) }
             var learningCount by remember { mutableIntStateOf(0) }
             var learningSummary by remember { mutableStateOf("Chargement de la mémoire…") }

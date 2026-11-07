@@ -138,7 +138,13 @@ class JarvisService : Service() {
         getSystemService(NotificationManager::class.java).cancel(NOTIF_REPRISE)
         running = true
         wake = (getSystemService(POWER_SERVICE) as PowerManager).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "jarvis:wake").apply { setReferenceCounted(false); acquire() }
-        tools = ToolBox(app) { q, _ -> voiceConfirm(q) }
+        tools = ToolBox(app) { q, _ ->
+            // Action sensible à la voix : seulement téléphone déverrouillé (personne d'autre ne peut la déclencher).
+            if (app.store.biometrie.value && fr.dd.jarvis.device.Securite.sensible(q) && fr.dd.jarvis.device.Securite.verrouille(this)) {
+                withContext(Dispatchers.Main) { voice?.speak("C'est une action sensible : déverrouille d'abord le téléphone, puis redemande-la.") {} }
+                false
+            } else voiceConfirm(q)
+        }
         // Hermès installé : on s'assure que sa passerelle tourne dans Termux (après un redémarrage du téléphone par ex.).
         if (app.store.hermesMode.value != "off") scope.launch {
             runCatching {

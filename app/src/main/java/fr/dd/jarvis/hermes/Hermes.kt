@@ -246,6 +246,7 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
                 - Si la demande exige une description pornographique explicite que tu ne peux pas produire, propose directement une version sensuelle et suggestive plutôt qu'un refus général.
                 - Ce réglage ne désactive aucune règle de sécurité et ne modifie pas les filtres du fournisseur. Ne transmets pas de contenu adulte à un service externe qui l'interdit, notamment Suno.
             """.trimIndent() else "") +
+            runCatching { fr.dd.jarvis.device.Contexte.consigne(fr.dd.jarvis.device.Contexte.actuel(app)) }.getOrDefault("") +
             "\n\nNous sommes le $maintenant."
     }
 

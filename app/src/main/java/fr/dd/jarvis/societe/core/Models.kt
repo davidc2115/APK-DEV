@@ -97,7 +97,9 @@ data class Intervention(
     val notes: String = "",
     /** Chemins relatifs dans le stockage privé de l'application ; les originaux ne sont pas exposés publiquement. */
     val photosAvant: List<String> = emptyList(),
-    val photosApres: List<String> = emptyList()
+    val photosApres: List<String> = emptyList(),
+    /** Signature du client (chemin relatif dans le stockage privé), vide si non recueillie. */
+    val signature: String = ""
 )
 
 @Serializable

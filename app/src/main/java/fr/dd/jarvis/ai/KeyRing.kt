@@ -29,6 +29,15 @@ class KeyRing(private val keys: () -> List<String>) {
 
     fun count(): Int = keys().count { it.isNotBlank() }
 
+    /** Refus pour quota (429) récents : horodatages, pour le tableau de santé. */
+    private val quotas = java.util.concurrent.ConcurrentLinkedDeque<Long>()
+
+    fun quotasDerniereHeure(): Int {
+        val limite = System.currentTimeMillis() - 3_600_000L
+        while (quotas.peekFirst()?.let { it < limite } == true) quotas.pollFirst()
+        return quotas.size
+    }
+
     fun pausedCount(): Int {
         val now = System.currentTimeMillis()
         return keys().count { (cooldown[it] ?: 0L) > now }
@@ -49,6 +58,7 @@ class KeyRing(private val keys: () -> List<String>) {
                 return result
             } catch (e: ApiException) {
                 last = e
+                if (e.code == 429) quotas.addLast(System.currentTimeMillis())
                 val pause = when {
                     e.code == 429 -> 60_000L
                     e.code >= 500 -> 15_000L

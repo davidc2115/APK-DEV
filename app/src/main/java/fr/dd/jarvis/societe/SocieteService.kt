@@ -62,30 +62,14 @@ class SocieteService(
             return "Date de prochaine maintenance invalide : utilise yyyy-MM-dd."
         if (maj.statut !in setOf("terminee", "a_suivre", "en_attente")) return "Statut invalide : terminee, a_suivre ou en_attente."
         if (maj.description.isBlank()) return "Le résumé de l'intervention ne peut pas être vide."
-        val finale = maj.copy(id = ancienne.id, photosAvant = ancienne.photosAvant, photosApres = ancienne.photosApres)
+        val finale = maj.copy(id = ancienne.id, photosAvant = ancienne.photosAvant, photosApres = ancienne.photosApres, signature = ancienne.signature)
         repo.update { current -> current.copy(clients = current.clients.map { c ->
             if (c.id != clientId) c else c.copy(sites = c.sites.map { s ->
                 if (s.id != siteId) s else s.copy(interventions = s.interventions.map { i -> if (i.id == interventionId) finale else i }.sortedByDescending { it.date })
             })
         }) }
-        val safe = { value: String -> value.replace(Regex("[\\\\/:*?\"<>|]"), "_") }
-        val dossier = "Société/Interventions/${safe(client.nom)}/${safe(site.nom)}"
         val base = "${finale.date} ${finale.id}"
-        val md = buildString {
-            append("# Intervention — ${client.nom} / ${site.nom}\n\n")
-            append("- Date : ${finale.date}\n- Catégorie : ${finale.categorie}\n- Statut : ${finale.statut}\n\n")
-            append("## Description\n${finale.description}\n")
-            if (finale.diagnostic.isNotBlank()) append("\n## Diagnostic\n${finale.diagnostic}\n")
-            if (finale.actions.isNotBlank()) append("\n## Actions réalisées\n${finale.actions}\n")
-            if (finale.pieces.isNotBlank()) append("\n## Pièces remplacées\n${finale.pieces}\n")
-            if (finale.mesures.isNotBlank()) append("\n## Mesures relevées\n${finale.mesures}\n")
-            if (finale.photosAvant.isNotEmpty()) { append("\n## Photos avant intervention\n"); finale.photosAvant.forEach { append("![[${finale.id}-${it.substringAfterLast('/')}]]\n") } }
-            if (finale.photosApres.isNotEmpty()) { append("\n## Photos après intervention\n"); finale.photosApres.forEach { append("![[${finale.id}-${it.substringAfterLast('/')}]]\n") } }
-            if (finale.prochaineMaintenance.isNotBlank()) append("\n## Prochaine maintenance\n${finale.prochaineMaintenance}\n")
-            if (finale.notes.isNotBlank()) append("\n## Notes\n${finale.notes}\n")
-        }
-        val note = obsidian.saveIn(dossier, base, md)
-        val pdf = runCatching { obsidian.saveBytes(dossier, "$base.pdf", PdfExporter.toPdf(md), "application/pdf") }.getOrDefault("PDF non régénéré")
+        val (note, pdf) = ecrireRapport(client, site, finale)
         val anciennesVersions = if (ancienne.date != finale.date) obsidian.supprimerAnciennesVersionsIntervention(finale.id, base) else emptyList<String>() to emptyList()
         return buildString {
             append("✅ Intervention ${finale.id} mise à jour pour ${client.nom} — ${site.nom}.\n📁 $note\n📄 $pdf")
@@ -422,6 +406,72 @@ class SocieteService(
     // ------------------------------------------------------------------ Photos d'intervention
 
     /** Copie les photos dans le stockage privé, les rattache à l'intervention et les synchronise dans Obsidian. */
+    private fun dossierIntervention(client: Client, site: Site) = "Société/Interventions/" +
+        client.nom.replace(Regex("[\\\\/:*?\"<>|]"), "_") + "/" + site.nom.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+
+    /** Rapport d'intervention (Markdown Obsidian : photos et signature intégrées par « ![[…]] »). */
+    fun markdownIntervention(client: Client, site: Site, i: Intervention): String = buildString {
+        append("# Intervention — ${client.nom} / ${site.nom}\n\n")
+        append("- Date : ${i.date}\n- Catégorie : ${i.categorie}\n- Statut : ${i.statut}\n")
+        if (site.adresse.isNotBlank()) append("- Adresse : ${site.adresse}\n")
+        if (site.onduleur.isNotBlank()) append("- Onduleur : ${site.onduleur}\n")
+        append("\n## Description\n${i.description}\n")
+        if (i.diagnostic.isNotBlank()) append("\n## Diagnostic\n${i.diagnostic}\n")
+        if (i.actions.isNotBlank()) append("\n## Actions réalisées\n${i.actions}\n")
+        if (i.pieces.isNotBlank()) append("\n## Pièces remplacées\n${i.pieces}\n")
+        if (i.mesures.isNotBlank()) append("\n## Mesures relevées\n${i.mesures}\n")
+        if (i.photosAvant.isNotEmpty()) { append("\n## Photos avant intervention\n"); i.photosAvant.forEach { append("![[${i.id}-${it.substringAfterLast('/')}]]\n") } }
+        if (i.photosApres.isNotEmpty()) { append("\n## Photos après intervention\n"); i.photosApres.forEach { append("![[${i.id}-${it.substringAfterLast('/')}]]\n") } }
+        if (i.prochaineMaintenance.isNotBlank()) append("\n## Prochaine maintenance\n${i.prochaineMaintenance}\n")
+        if (i.notes.isNotBlank()) append("\n## Notes\n${i.notes}\n")
+        if (i.signature.isNotBlank()) append("\n## Signature du client\n![[${i.id}-${i.signature.substringAfterLast('/')}]]\n")
+    }
+
+    /** Image d'un rapport (« idIntervention-nom ») depuis le stockage privé, réduite pour le PDF. */
+    private fun imageRapport(nom: String): android.graphics.Bitmap? {
+        val id = nom.substringBefore('-'); val fichier = nom.substringAfter('-')
+        val f = File(ctx.filesDir, "societe/interventions/$id/$fichier").takeIf { it.isFile } ?: return null
+        val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeFile(f.path, o)
+        var ech = 1
+        while (o.outWidth / (ech * 2) >= 1200 || o.outHeight / (ech * 2) >= 1200) ech *= 2
+        return android.graphics.BitmapFactory.decodeFile(f.path, android.graphics.BitmapFactory.Options().apply { inSampleSize = ech })
+    }
+
+    /** Écrit la note Obsidian et le PDF (avec les photos et la signature dedans) ; renvoie (note, pdf). */
+    fun ecrireRapport(client: Client, site: Site, i: Intervention): Pair<String, String> {
+        val dossier = dossierIntervention(client, site)
+        val base = "${i.date} ${i.id}"
+        val md = markdownIntervention(client, site, i)
+        val note = obsidian.saveIn(dossier, base, md)
+        val pdf = runCatching { obsidian.saveBytes(dossier, "$base.pdf", PdfExporter.toPdf(md, Logo.bitmap(ctx)) { imageRapport(it) }, "application/pdf") }
+            .getOrElse { "PDF non généré (${it.message})" }
+        return note to pdf
+    }
+
+    /** Signature du client (PNG) jointe à l'intervention, rapport régénéré. */
+    fun ajouterSignature(clientId: String, siteId: String, interventionId: String, png: ByteArray): String {
+        val client = data.client(clientId) ?: return "Client introuvable."
+        val site = client.sites.firstOrNull { it.id == siteId } ?: return "Installation introuvable."
+        val inter = site.interventions.firstOrNull { it.id == interventionId } ?: return "Intervention introuvable."
+        File(ctx.filesDir, "societe/interventions/$interventionId").apply { mkdirs() }.let { File(it, "signature.png").writeBytes(png) }
+        runCatching { obsidian.saveBytes(dossierIntervention(client, site), "$interventionId-signature.png", png, "image/png") }
+        val maj = inter.copy(signature = "interventions/$interventionId/signature.png")
+        repo.update { d -> d.copy(clients = d.clients.map { c -> if (c.id != clientId) c else c.copy(sites = c.sites.map { s ->
+            if (s.id != siteId) s else s.copy(interventions = s.interventions.map { if (it.id == interventionId) maj else it })
+        }) }) }
+        val (_, pdf) = ecrireRapport(client, site, maj)
+        return "✍️ Signature du client ajoutée au rapport ($pdf)."
+    }
+
+    /** Une fois : régénère les rapports des interventions qui ont des photos (elles n'étaient pas dans les PDF). */
+    fun regenererRapportsAvecPhotos(): Int {
+        var n = 0
+        data.clients.forEach { c -> c.sites.forEach { s -> s.interventions.filter { it.photosAvant.isNotEmpty() || it.photosApres.isNotEmpty() || it.signature.isNotBlank() }
+            .forEach { i -> runCatching { ecrireRapport(c, s, i); n++ } } } }
+        return n
+    }
+
     fun ajouterPhotosIntervention(
         clientId: String,
         siteId: String,
@@ -472,31 +522,7 @@ class SocieteService(
                 if (s.id != siteId) s else s.copy(interventions = s.interventions.map { i -> if (i.id == interventionId) maj else i })
             })
         }) }
-        val nomFichier = "${intervention.date} $interventionId"
-        val md = buildString {
-            append("# Intervention — ${client.nom} / ${site.nom}\n\n")
-            append("- Date : ${intervention.date}\n- Catégorie : ${intervention.categorie}\n- Statut : ${intervention.statut}\n\n")
-            append("## Description\n${intervention.description}\n")
-            if (intervention.diagnostic.isNotBlank()) append("\n## Diagnostic\n${intervention.diagnostic}\n")
-            if (intervention.actions.isNotBlank()) append("\n## Actions réalisées\n${intervention.actions}\n")
-            if (intervention.pieces.isNotBlank()) append("\n## Pièces remplacées\n${intervention.pieces}\n")
-            if (intervention.mesures.isNotBlank()) append("\n## Mesures relevées\n${intervention.mesures}\n")
-            if (maj.photosAvant.isNotEmpty()) {
-                append("\n## Photos avant intervention\n")
-                maj.photosAvant.forEach { append("![[${interventionId}-${it.substringAfterLast('/')}]]\n") }
-            }
-            if (maj.photosApres.isNotEmpty()) {
-                append("\n## Photos après intervention\n")
-                maj.photosApres.forEach { append("![[${interventionId}-${it.substringAfterLast('/')}]]\n") }
-            }
-            if (intervention.prochaineMaintenance.isNotBlank()) append("\n## Prochaine maintenance\n${intervention.prochaineMaintenance}\n")
-            if (intervention.notes.isNotBlank()) append("\n## Notes\n${intervention.notes}\n")
-        }
-        val emplacement = obsidian.saveIn(dossierObsidian, nomFichier, md)
-        runCatching {
-            val pdfMd = md.replace(Regex("!\\[\\[([^]]+)]]"), "[Photo jointe : $1]")
-            obsidian.saveBytes(dossierObsidian, "$nomFichier.pdf", PdfExporter.toPdf(pdfMd), "application/pdf")
-        }
+        val (emplacement, _) = ecrireRapport(client, site, maj)
         return "${ajoutees.size} photo(s) ${if (avant) "avant" else "après"} ajoutée(s). Note mise à jour : $emplacement"
     }
 

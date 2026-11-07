@@ -61,7 +61,7 @@ data class TuileAction(val tuile: Tuile, val onglet: Int? = null, val demande: S
  */
 @Composable
 fun CentreCommande(app: JarvisApp, vm: ChatViewModel, onOnglet: (Int) -> Unit, onDemander: (String) -> Unit,
-                   onRegarder: () -> Unit = {}, onCompteRendu: () -> Unit = {}) {
+                   onRegarder: () -> Unit = {}, onCompteRendu: () -> Unit = {}, onSante: () -> Unit = {}) {
     val agenda by rafraichi(app, 120_000, Tuile("📅", "Agenda", "…", etat = EtatTuile.CHARGEMENT)) { tuileAgenda(app) }
     val meteo by rafraichi(app, 900_000, Tuile("🌤️", "Météo", "…", etat = EtatTuile.CHARGEMENT)) { tuileMeteo(app) }
     val maison by rafraichi(app, 120_000, Tuile("🏠", "Maison", "…", etat = EtatTuile.CHARGEMENT)) { tuileMaison(app) }
@@ -82,7 +82,16 @@ fun CentreCommande(app: JarvisApp, vm: ChatViewModel, onOnglet: (Int) -> Unit, o
         TuileAction(tel, demande = "Fais le point sur la santé du téléphone."),
     )
     val dernier = vm.messages.lastOrNull { !it.fromUser }?.text.orEmpty()
+    var rafraichirMode by remember { mutableStateOf(0) }
+    val sante by produceState<List<fr.dd.jarvis.device.Sante.Indicateur>?>(null, app) {
+        while (true) { value = runCatching { fr.dd.jarvis.device.Sante.mesurer(app) }.getOrNull() ?: value; delay(300_000) }
+    }
+    val contexte by produceState(fr.dd.jarvis.device.Contexte.Etat(fr.dd.jarvis.device.Contexte.Mode.NORMAL), rafraichirMode) {
+        while (true) { value = withContext(Dispatchers.IO) { runCatching { fr.dd.jarvis.device.Contexte.actuel(app) }.getOrDefault(value) }; delay(60_000) }
+    }
     CentreCommandeVue(
+        mode = "${contexte.mode.icone} Mode ${contexte.mode.libelle.lowercase()}" + (if (contexte.detail.isNotBlank()) " · ${contexte.detail}" else "") + (if (contexte.force) " (manuel)" else ""),
+        onMode = { m -> fr.dd.jarvis.device.Contexte.forcer(app, m); rafraichirMode++ },
         nom = app.store.userName.value,
         ecoute = vm.listening, occupe = vm.busy, parle = vm.parle,
         statut = when { vm.listening -> "À l'écoute…"; vm.busy -> vm.status.ifBlank { "Je réfléchis…" }; else -> "" },
@@ -90,6 +99,7 @@ fun CentreCommande(app: JarvisApp, vm: ChatViewModel, onOnglet: (Int) -> Unit, o
         onParler = { vm.toggleListening() }, onEcrire = { onOnglet(1) },
         onTuile = { t -> t.action?.invoke() ?: t.onglet?.let(onOnglet) ?: t.demande?.let(onDemander) },
         onRaccourci = onDemander, onRegarder = onRegarder, onCompteRendu = onCompteRendu,
+        sante = sante?.let { fr.dd.jarvis.device.Sante.resume(it) } ?: "🩺 Vérification de la santé de Jarvis…", onSante = onSante,
     )
 }
 
@@ -115,9 +125,11 @@ private val RACCOURCIS = listOf(
 
 @Composable
 fun CentreCommandeVue(
+    mode: String = "", onMode: (fr.dd.jarvis.device.Contexte.Mode?) -> Unit = {},
     nom: String, ecoute: Boolean, occupe: Boolean, parle: Boolean, statut: String, enDirect: String, dernier: String,
     tuiles: List<TuileAction>, onParler: () -> Unit, onEcrire: () -> Unit, onTuile: (TuileAction) -> Unit, onRaccourci: (String) -> Unit,
     heure: String? = null, onRegarder: () -> Unit = {}, onCompteRendu: () -> Unit = {},
+    sante: String = "", onSante: () -> Unit = {},
 ) {
     val accent = LocalAccent.current
     val maintenant by produceState(heure ?: horloge()) { if (heure == null) while (true) { value = horloge(); delay(15_000) } }
@@ -130,6 +142,13 @@ fun CentreCommandeVue(
             Column(Modifier.padding(start = 14.dp).weight(1f)) {
                 Text(salutation() + (if (nom.isNotBlank()) " $nom" else ""), color = HudText, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 Text(maintenant, color = accent, fontSize = 13.sp, fontFamily = FontFamily.Monospace, letterSpacing = 1.sp)
+                var choixMode by remember { mutableStateOf(false) }
+                if (mode.isNotBlank()) Text(mode, color = HudDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp).clickable { choixMode = !choixMode })
+                if (choixMode) Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    HudChip("🔄 Auto") { onMode(null); choixMode = false }
+                    fr.dd.jarvis.device.Contexte.Mode.values().forEach { m -> HudChip("${m.icone} ${m.libelle}") { onMode(m); choixMode = false } }
+                }
                 Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     BoutonParler(ecoute, onParler)
@@ -153,6 +172,14 @@ fun CentreCommandeVue(
             Spacer(Modifier.height(10.dp))
             HudPanel(Modifier.fillMaxWidth(), title = if (statut.isNotBlank() || enDirect.isNotBlank()) "En direct" else "Dernière réponse", onClick = onEcrire) {
                 Text(ligne, color = HudText, fontSize = 13.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        // --- Santé de Jarvis (alerte avant la panne)
+        if (sante.isNotBlank()) {
+            Spacer(Modifier.height(10.dp))
+            val alerte = sante.startsWith("⚠")
+            HudPanel(Modifier.fillMaxWidth(), title = "🩺 Santé", accent = if (alerte) Color(0xFFFFB74D) else LocalAccent.current, onClick = onSante) {
+                Text(sante, color = HudText, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
         // --- Tuiles en direct, deux par ligne

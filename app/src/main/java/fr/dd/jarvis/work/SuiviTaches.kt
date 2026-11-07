@@ -77,12 +77,14 @@ object SuiviTaches {
         if (!peut(ctx)) return
         canaux(ctx)
         val plain = texte.replace(Regex("!\\[[^]]*]\\([^)]*\\)"), "").replace(Regex("[#*_`>|]+"), "").trim()
+        val discret = (ctx.applicationContext as? fr.dd.jarvis.JarvisApp)?.let { runCatching { fr.dd.jarvis.device.Contexte.notificationsDiscretes(it) }.getOrDefault(false) } == true
         runCatching {
-            NotificationManagerCompat.from(ctx).notify(id + 1, NotificationCompat.Builder(ctx, CANAL_RESULTATS)
+            NotificationManagerCompat.from(ctx).notify(id + 1, NotificationCompat.Builder(ctx, if (discret) CANAL_EN_COURS else CANAL_RESULTATS)
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setContentTitle(titre).setContentText(plain.lineSequence().firstOrNull().orEmpty().take(120))
                 .setStyle(NotificationCompat.BigTextStyle().bigText(plain.take(3500)))
-                .setCategory(NotificationCompat.CATEGORY_STATUS).setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_STATUS).setPriority(if (discret) NotificationCompat.PRIORITY_LOW else NotificationCompat.PRIORITY_HIGH)
+                .setSilent(discret)
                 .setAutoCancel(true).setContentIntent(ouvrir(ctx, id + 1)).build())
         }
     }

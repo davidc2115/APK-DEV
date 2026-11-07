@@ -42,8 +42,18 @@ object PdfExporter {
         data class Titre(val niveau: Int, val texte: String) : Bloc()
         data class Texte(val texte: String, val puce: Boolean) : Bloc()
         data class Tableau(val lignes: List<List<String>>, val droite: List<Boolean>) : Bloc()
+        /** Images consécutives (« ![[nom]] » ou « ![texte](nom) ») : disposées en grille dans le PDF. */
+        data class Images(val noms: List<String>) : Bloc()
         object Trait : Bloc()
         object Vide : Bloc()
+    }
+
+    /** Nom de l'image d'une ligne « ![[nom]] » / « ![texte](nom) », sinon null. */
+    internal fun image(ligne: String): String? {
+        val l = ligne.trim()
+        Regex("^!\\[\\[([^\\]|]+)(\\|[^\\]]*)?]]$").find(l)?.let { return it.groupValues[1].trim() }
+        Regex("^!\\[[^\\]]*]\\(([^)]+)\\)$").find(l)?.let { return it.groupValues[1].trim() }
+        return null
     }
 
     private fun parser(markdown: String): List<Bloc> {
@@ -68,6 +78,12 @@ object PdfExporter {
                     out += Bloc.Tableau(data, droite)
                     continue
                 }
+                image(l) != null -> {
+                    val noms = mutableListOf<String>()
+                    while (i < lignes.size && image(lignes[i]) != null) { noms += image(lignes[i])!!; i++ }
+                    out += Bloc.Images(noms)
+                    continue
+                }
                 l.trim() == "---" || l.trim() == "***" -> out += Bloc.Trait
                 l.startsWith("#") -> {
                     val n = l.takeWhile { it == '#' }.length
@@ -84,7 +100,7 @@ object PdfExporter {
 
     /** [logo] : dessiné en haute qualité (bitmap d'origine, filtré, jamais agrandi au-delà de sa résolution réelle) en
      *  haut de la première page, au-dessus du contenu — qui démarre ensuite en dessous, sans jamais le chevaucher. */
-    fun toPdf(markdown: String, logo: Bitmap? = null): ByteArray {
+    fun toPdf(markdown: String, logo: Bitmap? = null, images: (String) -> Bitmap? = { null }): ByteArray {
         val doc = PdfDocument()
         var pageNum = 1
         var page = doc.startPage(PdfDocument.PageInfo.Builder(W, H, pageNum).create())
@@ -146,6 +162,34 @@ object PdfExporter {
                     if (y + lay.height > H - M) nouvellePage()
                     canvas.save(); canvas.translate(M + (if (b.puce) 10f else 0f), y); lay.draw(canvas); canvas.restore()
                     y += lay.height + 2f
+                }
+                is Bloc.Images -> {
+                    // Grille de 2 images par ligne (une seule, plus grande, si elle est seule ; signature : petite).
+                    val pp = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+                    val cadre = Paint().apply { color = Color.rgb(200, 205, 212); style = Paint.Style.STROKE; strokeWidth = 0.7f }
+                    val parLigne = if (b.noms.size == 1) 1 else 2
+                    b.noms.chunked(parLigne).forEach { rang ->
+                        val bmps = rang.map { it to runCatching { images(it) }.getOrNull() }
+                        val signature = rang.size == 1 && rang[0].contains("signature", true)
+                        val cell = if (signature) 200f else (largeur - (parLigne - 1) * 10f) / parLigne
+                        val hMax = if (signature) 90f else if (parLigne == 1) 300f else 210f
+                        val tailles = bmps.map { (_, bm) -> if (bm == null || bm.width <= 0) cell to 14f else minOf(cell / bm.width, hMax / bm.height).let { r -> bm.width * r to bm.height * r } }
+                        val h = tailles.maxOf { it.second }
+                        if (y + h + 8 > H - M) nouvellePage()
+                        var x = M
+                        bmps.forEachIndexed { k, (nom, bm) ->
+                            val (w, hh) = tailles[k]
+                            if (bm != null) {
+                                val r = RectF(x, y, x + w, y + hh)
+                                canvas.drawBitmap(bm, null, r, pp); canvas.drawRect(r, cadre)
+                            } else {
+                                val lay = layout("[Photo : ${nettoyer(nom)}]", paint(9.5f), cell.toInt())
+                                canvas.save(); canvas.translate(x, y); lay.draw(canvas); canvas.restore()
+                            }
+                            x += cell + 10f
+                        }
+                        y += h + 8f
+                    }
                 }
                 is Bloc.Tableau -> {
                     val nCols = b.lignes.maxOfOrNull { it.size } ?: 0

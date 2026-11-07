@@ -123,6 +123,12 @@ class JarvisApp : Application() {
         Thread { runCatching { memo.load() } }.start()
         tasks = fr.dd.jarvis.data.TaskStore(this)
         societe = SocieteService(this, SocieteRepo(this), obsidian)
+        fr.dd.jarvis.work.VeilleWorker.planifier(this)
+        // Une fois : les rapports d'intervention existants sont régénérés avec leurs photos dans le PDF.
+        if (!store.rapportsPhotosV2.value) Thread {
+            runCatching { societe.regenererRapportsAvecPhotos() }
+            store.rapportsPhotosV2.set(true)
+        }.start()
         societe.data.modeles["planning"]?.let { fr.dd.jarvis.ai.Prompts.planningFormat = it }
         Thread { runCatching { societe.synchroniserAvecCoffre() } }.start()
         createChannel()
