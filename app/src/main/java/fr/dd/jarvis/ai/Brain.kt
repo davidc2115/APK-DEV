@@ -30,6 +30,8 @@ class Brain(
         }
         positionDirecte(dernier, history, onStatus)?.let { return it }
         rangementDirect(history, onStatus)?.let { return it }
+        rechercheDirecte(history.lastOrNull { it.fromUser }?.text.orEmpty(), onStatus)?.let { return it }
+        freeboxDirect(history.lastOrNull { it.fromUser }?.text.orEmpty(), onStatus)?.let { return it }
         if (outilDirect != null) {
             onStatus("⚙️ $outilDirect…")
             val args = JSONObject(); if (dernier.contains("serveur")) args.put("via", "serveur")
@@ -210,6 +212,62 @@ class Brain(
         return tools.execute("obsidian_fichiers", JSONObject().put("action", "trier").put("motif", motif).put("destination", dest)
             .put("types", j.optString("types").ifBlank { "tous" }).put("chemin", j.optString("source"))
             .put("sous_dossier", j.optBoolean("sous_dossier", true).toString())).text
+    }
+
+    /**
+     * « Trouve-moi le dossier coloriage pompier », « où est le fichier facture Martin ? », « cherche les images de
+     * dragon » : recherche RÉELLE dans le coffre Obsidian ET le stockage du téléphone (fichiers et dossiers), sans
+     * passer par un modèle qui pourrait conclure trop vite que rien n'existe. Rien trouvé → le cerveau reprend la main.
+     */
+    private suspend fun rechercheDirecte(texte: String, onStatus: (String) -> Unit): String? {
+        val n = fr.dd.jarvis.societe.core.normaliser(texte)
+        val verbe = Regex("\\b(trouve[rsz]?|retrouve[rsz]?|cherche[rsz]?|recherche[rsz]?|localise[rsz]?|ou est|ou sont|ou se trouvent?|existe t il|il existe|as tu|tu as)\\b")
+        val objet = Regex("\\b(dossiers?|sous dossiers?|fichiers?|images?|photos?|documents?|pdf|videos?|notes?)\\b")
+        if (!verbe.containsMatchIn(n) || !objet.containsMatchIn(n)) return null
+        // Ce n'est pas une recherche de fichier : imprimante, réseau, internet, client, agenda…
+        if (Regex("\\b(imprimante|reseau|internet|web|google|client|agenda|rendez vous|mail|sms|contact)\\b").containsMatchIn(n)) return null
+        val m = objet.find(n) ?: return null
+        var q = n.substring(m.range.last + 1)
+        q = q.replace(Regex("^\\s*(nomme|nommes|nommee|nommees|appele|appeles|appelee|appelees|intitule|qui s appelle|qui sappelle|qui contient|qui contiennent|qui comporte|qui comportent|contenant|comportant|avec|de|des|du|sur|la|le|les|l)\\b"), "")
+        q = q.replace(Regex("\\b(dans|sur|de) (mon|le|ma|mes|mon) (telephone|smartphone|coffre( obsidian)?|obsidian|stockage|portable)\\b.*$"), "")
+            .replace(Regex("\\b(stp|s il te plait|merci|svp|dans leur nom|dans le nom|en ce moment)\\b"), "").trim()
+        if (q.length < 2 || q.split(' ').size > 8) return null
+        onStatus("🔎 Recherche de « $q » dans le coffre et le téléphone…")
+        val r = runCatching { tools.execute("stockage_telephone", JSONObject().put("action", "chercher").put("chemin", q)).text }.getOrNull() ?: return null
+        return if (r.startsWith("Aucun résultat")) null else r
+    }
+
+    /** Demandes Freebox courantes exécutées directement par l'outil (pas de modèle qui répondrait « impossible »). */
+    private suspend fun freeboxDirect(texte: String, onStatus: (String) -> Unit): String? {
+        val n = fr.dd.jarvis.societe.core.normaliser(texte)
+        val box = Regex("\\b(freebox|box)\\b").containsMatchIn(n)
+        val vpn = Regex("\\b(vpn|wireguard|openvpn)\\b").containsMatchIn(n)
+        if (!box && !vpn && !Regex("redirections? de ports?|ouvr\\w* (le|un|les) ports?").containsMatchIn(n)) return null
+        val active = Regex("\\b(active|activer|activez|allume|demarre|lance|mets en route|ouvre)\\b").containsMatchIn(n)
+        val coupe = Regex("\\b(desactive|desactiver|coupe|couper|arrete|eteins|stoppe)\\b").containsMatchIn(n)
+        val serveur = when { n.contains("openvpn") -> "openvpn_routed"; n.contains("ipsec") -> "ipsec"; n.contains("pptp") -> "pptp"; else -> "" }
+        val args = JSONObject()
+        val action = when {
+            Regex("redemarre|reboot").containsMatchIn(n) && box -> "redemarrer"
+            Regex("redirections?|ports? ouverts?|nat\\b").containsMatchIn(n) && Regex("liste|lister|quelles?|affiche|montre|voir|donne|y a t il|ai je").containsMatchIn(n) -> "redirections"
+            vpn && Regex("utilisateurs?|comptes?|acces").containsMatchIn(n) && Regex("liste|quels?|affiche|montre|voir").containsMatchIn(n) -> "vpn_utilisateurs"
+            vpn && coupe -> "desactiver_vpn"
+            vpn && active -> "activer_vpn"
+            vpn -> "vpn"
+            Regex("appareils?|connectes?|peripheriques?").containsMatchIn(n) && box -> "appareils"
+            Regex("\\bwi ?fi\\b").containsMatchIn(n) && box && coupe -> "wifi_desactiver"
+            Regex("\\bwi ?fi\\b").containsMatchIn(n) && box && active -> "wifi_activer"
+            Regex("\\bwi ?fi\\b").containsMatchIn(n) && box -> "wifi"
+            Regex("journal|appels? (recus|manques|emis)|qui (m a|a) appele").containsMatchIn(n) && box -> "appels"
+            Regex("\\bdmz\\b").containsMatchIn(n) -> return null // paramètres à préciser : le cerveau s'en charge avec l'outil
+            box && Regex("etat|statut|debit|connexion|ip publique|fonctionne|marche").containsMatchIn(n) -> "etat"
+            box && Regex("droits?|autorisations?|permissions?").containsMatchIn(n) -> "droits"
+            else -> return null // ajout de redirection, création d'utilisateur VPN… : paramètres → cerveau + outil freebox
+        }
+        if (serveur.isNotBlank()) args.put("serveur", serveur) else if (n.contains("wireguard")) args.put("serveur", "wireguard")
+        args.put("action", action)
+        onStatus("📶 Freebox : $action…")
+        return runCatching { tools.execute("freebox", args).text }.getOrElse { "❌ Freebox : ${it.message}" }
     }
 
     private fun siteNomme(c: fr.dd.jarvis.societe.core.Client, n: String): String? =

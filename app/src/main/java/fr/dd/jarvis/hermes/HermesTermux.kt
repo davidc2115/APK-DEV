@@ -224,6 +224,17 @@ debian_utilisateur_jarvis() {
 hermes_debian() {
   proot-distro login debian --user jarvis --bind "${'$'}HOME:/root" -- env -i HOME=/root USER=jarvis LOGNAME=jarvis SHELL=/bin/bash LANG=C.UTF-8 PATH="${'$'}HERMES_PATH" "${'$'}@"
 }
+# Arrête les passerelles Hermès SANS se tuer soi-même : la commande RUN_COMMAND de ce script contient le texte
+# « hermes gateway run », donc un « pkill -f » le tuerait (code 143). On écarte ce script et tout script Jarvis (J_URL=).
+arreter_passerelles_hermes() {
+  for pid in ${'$'}(pgrep -f 'hermes gateway run' 2>/dev/null); do
+    [ "${'$'}pid" = "${'$'}${'$'}" ] && continue
+    [ "${'$'}pid" = "${'$'}PPID" ] && continue
+    { tr '\0' ' ' < "/proc/${'$'}pid/cmdline"; } 2>/dev/null | grep -q 'J_URL=' && continue
+    kill "${'$'}pid" 2>/dev/null
+  done
+  sleep 2
+}
 """.trimIndent()
     private fun scriptSignal(app: JarvisApp, texte: String) = prelude(app) + "\np ${q(texte)}\n"
 
@@ -764,13 +775,12 @@ os.replace(name, p)
             "exec ./.hermes/bin/hermes update --yes"
         ).joinToString("\n")
         // Arrêter d'abord les passerelles : sinon « hermes update » attend jusqu'à ~30 min la fin des échanges en cours.
-        val upgradeCommand = "pkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; sleep 2; " +
+        val upgradeCommand = "arreter_passerelles_hermes; " +
             "p '🔄 Mise à niveau d’Hermès (sous l’identité réelle de Termux, UID ${'$'}(id -u))…'; debian_utilisateur_jarvis; " +
             "if hermes_debian bash -c " + q(upgradeScript) + " 2>&1 | while IFS= read -r ligne; do p \"${'$'}ligne\" || true; done; [ \"${'$'}{PIPESTATUS[0]}\" -eq 0 ]; then " +
             "p '✅ Hermès est à jour.'; else " +
             "p '⚠️ Mise à niveau d’Hermès impossible pour le moment : la configuration continue avec la version installée.'; fi"
-        val restartCommand = "proot-distro login debian --termux-home -- pkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; " +
-            "pkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; sleep 3"
+        val restartCommand = "arreter_passerelles_hermes; sleep 1"
         message = "⏳ Commandes de synchronisation prêtes. Assemblage du script final…"
         val script = listOf(
             prelude(app),
@@ -842,7 +852,7 @@ os.replace(name, p)
     }
 
     fun arreter(app: JarvisApp): String =
-        executer(app, prelude(app) + "\npkill -f '[h]ermes gateway run' >/dev/null 2>&1 || true; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
+        executer(app, prelude(app) + "\narreter_passerelles_hermes; termux-wake-unlock >/dev/null 2>&1; p '⏹️ Hermès arrêté.'", libelle = "Arrêt d'Hermès") ?: "⏹️ Arrêt d'Hermès…"
 
     /**
      * Exécute une commande CLI Hermes dans Debian sans toucher à l'installation ni à config.yaml.

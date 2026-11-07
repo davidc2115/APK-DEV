@@ -301,6 +301,7 @@ object Routeur {
         RegexOption.IGNORE_CASE
     )
     private val FREEBOX = Regex("freebox|\\bvpn\\b|wireguard|openvpn|redirection(s)? de ports?|ouvr\\w* (le|un|les) ports?|\\bdmz\\b", RegexOption.IGNORE_CASE)
+    private val FICHIERS = Regex("(trouv|cherch|localis|o[uù] (est|sont|se trouv)).{0,40}\\b(dossiers?|fichiers?|images?|photos?|documents?|pdf|vid[ée]os?)\\b", RegexOption.IGNORE_CASE)
     private val BREF = Regex("^(merci|ok|okay|d.accord|super|parfait|salut|bonjour|bonsoir|coucou|oui|non|stop|annule|c.est bon)[ !.,]*\\S{0,12}$", RegexOption.IGNORE_CASE)
 
     fun choisir(app: JarvisApp, texte: String): Choix {
@@ -311,6 +312,8 @@ object Routeur {
         if (Hermes.degrade() && !NOMME.containsMatchIn(t)) return Choix(Cible.JARVIS, "Hermès momentanément saturé : Jarvis répond directement")
         // Freebox : outil dédié côté Jarvis, toujours proposé au cerveau rapide (évite qu'Hermès se fie à un vieux souvenir).
         if (!NOMME.containsMatchIn(t) && FREEBOX.containsMatchIn(t)) return Choix(Cible.JARVIS, "Freebox : outil Jarvis dédié")
+        // Recherche de fichiers/dossiers : outils Jarvis (coffre + téléphone) plutôt que le système de fichiers de Debian.
+        if (!NOMME.containsMatchIn(t) && FICHIERS.containsMatchIn(t)) return Choix(Cible.JARVIS, "recherche de fichiers : outils Jarvis")
         return Choix(Cible.HERMES, when {
             app.enVoiture -> "Hermès, cerveau principal (mode mains libres)"
             BREF.matches(t) -> "Hermès, continuité de conversation"
