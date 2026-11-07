@@ -187,7 +187,7 @@ GÉNÉRATION MUSICALE AVEC SUNO :
         val maintenant = LocalDateTime.now().format(DateTimeFormatter.ofPattern("EEEE d MMMM yyyy, HH:mm", Locale.FRENCH))
         fun si(r: Regex, bloc: String) = if (demande.isBlank() || r.containsMatchIn(demande)) "\n\n" + bloc else ""
         val socle = """
-IDENTITÉ — UN SEUL ASSISTANT : tu ES JARVIS, l'assistant personnel de ${userName.ifBlank { "l'utilisateur" }}. « Hermès » n'est que le nom technique de ton moteur d'agent : ne te présente jamais comme Hermès, ne parle jamais de Jarvis et d'Hermès comme de deux assistants, ne dis jamais « Jarvis m'a transmis », « je vais demander à Jarvis » ni « Hermès pense que ». Tu as UNE conversation (l'historique ci-dessous, y compris les réponses déjà données par ta partie rapide, que tu assumes comme les tiennes), UNE mémoire et TOUS les outils (ceux du téléphone via MCP et ceux de ton moteur). Ne contredis pas une réponse précédente sans l'avoir vérifiée ; si elle était fausse, corrige-la simplement à la première personne.
+IDENTITÉ : tu es Hermès, le cerveau principal de JARVIS, l'assistant personnel de ${userName.ifBlank { "l'utilisateur" }} sur son smartphone. C'est toi qui réponds à toutes ses demandes ; Jarvis est ta partie « téléphone » (ses outils, ses réflexes instantanés). Tu as UNE conversation (l'historique ci-dessous, y compris les réponses déjà données par ta partie rapide, que tu assumes comme les tiennes), UNE mémoire et TOUS les outils (ceux du téléphone via MCP et ceux de ton moteur). Ne contredis pas une réponse précédente sans l'avoir vérifiée ; si elle était fausse, corrige-la simplement à la première personne.
 Tu tournes sur le smartphone Android de ${userName.ifBlank { "l'utilisateur" }}.
 TES MOYENS — tu planifies, tu répartis, tu contrôles et tu synthétises :
 1) RAPIDITÉ D'ABORD : pour UNE action ou UNE lecture simple, appelle directement l'outil mcp_jarvis_… qui la fait (ha_service, ha_entites, sms, appel, agenda, lampe, volume, freebox, fichiers…), via tool_call si besoin : un seul appel, puis ta réponse. Ne passe par mcp_jarvis_agent que pour une mission téléphone en plusieurs étapes ou quand tu ne sais pas quel outil utiliser (il relance un cerveau complet : plus lent).
@@ -289,6 +289,9 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
     }
 
     /** Une seule voix : retire une éventuelle signature « Hermès : » / « 🪽 Hermès » en tête de réponse. */
+    /** Réponse d'Hermès marquée 🪽 (sans doubler une signature « Hermès : » qu'il aurait mise lui-même). */
+    internal fun signer(texte: String): String = "🪽 " + uneSeuleVoix(texte).trimStart()
+
     internal fun uneSeuleVoix(texte: String): String =
         texte.replaceFirst(Regex("^\\s*(🪽\\s*)?(\\*\\*)?herm[eè]s(\\*\\*)?\\s*[:：—-]\\s*", RegexOption.IGNORE_CASE), "")
             .replaceFirst(Regex("^\\s*(ici |c.est )?herm[eè]s[,.!]\\s+", RegexOption.IGNORE_CASE), "")
@@ -327,7 +330,7 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
         val precedente = PontMcp.boiteActive
         val statutPrecedent = PontMcp.statutActif
         val attendu = AtomicBoolean(true) // l'utilisateur attend encore la réponse à l'écran
-        val dernierStatut = AtomicReference("🧠 Hermès réfléchit…")
+        val dernierStatut = AtomicReference("🪽 Hermès réfléchit…")
         val notif = 7400 + (numeroFond.incrementAndGet() % 40) * 2
         val statut: (String) -> Unit = { st ->
             dernierStatut.set(st)
@@ -335,7 +338,7 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
         }
         if (boite != null) PontMcp.boiteActive = boite
         PontMcp.statutActif = statut
-        statut("🧠 Hermès réfléchit…")
+        statut("🪽 Hermès réfléchit…")
         val appel = AtomicReference<okhttp3.Call?>(null)
         val travail = fond.async {
             try { executer(app, messages, appel) } finally {
@@ -422,7 +425,7 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
                     derniereRaison = contenu.lineSequence().first().take(160)
                     HermesTermux.message = "⚠️ Hermès saturé (${derniereRaison}) : Jarvis répond directement pendant 10 min. Touche « Configurer » pour retirer Groq d'Hermès."
                     null
-                } else contenu?.let { uneSeuleVoix(it) }
+                } else contenu?.let { signer(it) }
             }
         } catch (e: Exception) {
             if (!call.isCanceled()) { marquerEnLigne(false); relancerSiBesoin(app) }
@@ -587,12 +590,13 @@ object Routeur {
         if (sature && !NOMME.containsMatchIn(t)) return Choix(Cible.JARVIS, "Hermès momentanément saturé : Jarvis répond directement")
         if (NOMME.containsMatchIn(t)) return Choix(Cible.HERMES, "Hermès demandé")
         if (enVoiture) return Choix(Cible.JARVIS, "Android Auto : Jarvis, réponse rapide")
+        // « Hermès pour tout » : TOUTES les demandes vont à Hermès (y compris « oui », « merci »… : il a l'historique).
+        // Seules les commandes instantanées du téléphone (lampe, volume, Wi-Fi…) sont exécutées avant, sans aucune IA.
+        if (mode == "tout") return Choix(Cible.HERMES, "Hermès pour tout")
         // Suite de conversation : « oui », « toutes », « Clairotte 3 »… en réponse à une question → au cerveau qui l'a posée.
         val reponseCourte = t.split(Regex("\\s+")).size <= 4 && !t.endsWith("?") && precedent != null && precedent.takeLast(250).contains("?") &&
             !ORCHESTRATION.containsMatchIn(t) && !FREEBOX.containsMatchIn(t) && !FICHIERS.containsMatchIn(t) && !WEB.containsMatchIn(t)
         if (BREF.matches(t) || reponseCourte) return Choix(derniere, if (derniere == Cible.HERMES) "suite de la conversation avec Hermès" else "suite de la conversation avec Jarvis")
-        if (mode == "tout") return if (commandeSimple(t) && competenceHermes == null) Choix(Cible.JARVIS, "commande simple : Jarvis l'exécute tout de suite")
-            else Choix(Cible.HERMES, "Hermès pour tout : il confie les actions du téléphone à Jarvis")
         // Jarvis d'abord (défaut) : Hermès directement seulement pour ce que Jarvis ne sait pas faire seul ;
         // pour tout le reste Jarvis répond, et passe la main à Hermès s'il n'aboutit pas (Brain.reply).
         if (mode == "auto" || mode == "demande") return when {

@@ -17,7 +17,7 @@ class Brain(
     private val userName: () -> String
 ) {
     /** Chemin suivi par une réponse (pour décider si Hermès doit reprendre la main). */
-    private class Suivi { var cerveauJarvis = false; var hermesEssaye = false }
+    private class Suivi { var cerveauJarvis = false; var hermesEssaye = false; var hermesIndisponible = false }
 
     /**
      * Jarvis d'abord : réflexes, puis Hermès seulement pour ce qui le demande clairement, sinon le cerveau rapide de
@@ -32,8 +32,14 @@ class Brain(
             if (!suivi.cerveauJarvis || !escaladePossible(pourHermes, suivi)) throw e
             "❌ ${e.message ?: e.javaClass.simpleName}"
         }
+        // Hermès devait répondre mais n'a pas pu : on le dit, pour ne jamais faire passer Jarvis pour Hermès.
+        if (suivi.hermesIndisponible) return r + "\n\n⚠️ " + when {
+            fr.dd.jarvis.hermes.Hermes.degrade() -> "Hermès est saturé (quota de l'IA) pour quelques minutes"
+            !fr.dd.jarvis.hermes.Hermes.enLigneConnu() -> "Hermès est hors ligne (il redémarre peut-être)"
+            else -> "Hermès n'a pas répondu"
+        } + " : réponse directe de Jarvis."
         if (!suivi.cerveauJarvis || !escaladePossible(pourHermes, suivi) || !fr.dd.jarvis.hermes.Routeur.jarvisABesoinDHermes(r)) return r
-        onStatus("🧠 Hermès prend le relais…")
+        onStatus("🪽 Hermès prend le relais…")
         val h = fr.dd.jarvis.hermes.Hermes.repondre(app, history, tools, userName(), onStatus, tentativeJarvis = r) ?: return r
         fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.HERMES
         return h
@@ -65,8 +71,13 @@ class Brain(
         // Une procédure qu'Hermès a apprise (skill ajouté) passe avant les raccourcis de Jarvis sur le même sujet.
         val competence = if (pourHermes || app.store.hermesMode.value == "off") null
             else runCatching { fr.dd.jarvis.hermes.Routeur.competence(texteUser, app.memo.skillsHermes()) }.getOrNull()
+        // Mode « Hermès pour tout » : seules les commandes instantanées du téléphone (sans IA) passent avant Hermès ;
+        // tout le reste (fichiers, Freebox, vidéos, position, installations…) est traité par Hermès avec les outils de Jarvis.
+        val toutHermes = !pourHermes && app.store.hermesMode.value == "tout" && !app.enVoiture && !fr.dd.jarvis.hermes.Hermes.degrade()
         if (reflexes) {
             if (!multi) commandeImmediate(texteUser, onStatus)?.let { return reflexe(it) }
+        }
+        if (reflexes && !toutHermes) {
             positionDirecte(dernier, history, onStatus)?.let { return reflexe(it) }
             if (competence == null) {
                 rangementDirect(history, onStatus)?.let { return reflexe(it) }
@@ -81,12 +92,14 @@ class Brain(
         if (!pourHermes) {
             val precedent = history.dropLastWhile { it.fromUser }.lastOrNull()?.text
             val choix = fr.dd.jarvis.hermes.Routeur.choisir(app, texteUser, precedent)
+            if (choix.cible == fr.dd.jarvis.hermes.Routeur.Cible.JARVIS && app.store.hermesMode.value == "tout" && fr.dd.jarvis.hermes.Hermes.degrade()) suivi.hermesIndisponible = true
             if (choix.cible == fr.dd.jarvis.hermes.Routeur.Cible.HERMES) {
                 suivi.hermesEssaye = true
                 val r = fr.dd.jarvis.hermes.Hermes.repondre(app, history, tools, userName(), onStatus)
                 if (r != null) return r
                 fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS
-                onStatus("🧠 Réponse rapide…")
+                suivi.hermesIndisponible = true
+                onStatus("⚠️ Hermès indisponible : Jarvis répond…")
             }
         }
         if (outilDirect != null) {

@@ -524,11 +524,10 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 }
                 Text(
                     when (store.hermesMode.value) {
-                        "tout" -> "Toutes les demandes passent par le moteur approfondi (Hermès) : mémoire longue, notes, skills et plugins, " +
+                        "tout" -> "Toutes les demandes passent par Hermès (réponses marquées 🪽) : mémoire longue, notes, skills et plugins, " +
                             "confie les actions du téléphone à l'agent Jarvis, le travail lourd à ses sous-agents Gemini et Groq, et crée tes automatismes. " +
-                            "Pour rester rapide, les commandes simples du téléphone (lampe torche, volume, Wi-Fi, musique, appel, SMS, rendez-vous…), " +
-                            "la position, la recherche d'un fichier, la Freebox et le lancement d'une vidéo sont exécutés directement par Jarvis ; " +
-                            "Hermès voit ces échanges dans l'historique et partage la même mémoire."
+                            "Seules les commandes instantanées du téléphone (lampe torche, volume, Wi-Fi, Bluetooth, lecture/pause) sont exécutées directement, sans IA. " +
+                            "Si Hermès est hors ligne, Jarvis répond à sa place et le signale (⚠️)."
                         "off" -> "Jarvis répond uniquement avec sa partie rapide ; le moteur approfondi (Hermès) n'est pas utilisé."
                         else -> "Jarvis et Hermès ne forment qu'un seul assistant : une voix, une conversation, une mémoire. " +
                             "Jarvis répond tout de suite avec sa partie rapide ; si ce n'est pas suffisant (pas d'outil, rien trouvé, information manquante, erreur), " +

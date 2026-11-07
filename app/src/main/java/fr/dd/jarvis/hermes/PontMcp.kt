@@ -147,7 +147,7 @@ object PontMcp {
             val demande = args.optString("demande").ifBlank { args.optString("consigne") }.trim()
             if (demande.isBlank()) return "Donne la consigne complète à exécuter dans « demande »." to true
             val contexte = args.optString("contexte").trim()
-            statutActif?.invoke("📱 " + demande.take(70))
+            statutActif?.invoke("🪽 Hermès → 🤖 Jarvis : " + demande.take(70))
             val texte = if (contexte.isBlank()) demande else "$demande\n\n(Contexte fourni par Hermès : ${contexte.take(3000)})"
             val res = runCatching {
                 runBlocking(Dispatchers.IO) {
@@ -157,7 +157,7 @@ object PontMcp {
                     }
                 }
             }
-            statutActif?.invoke("🧠 Hermès réfléchit…")
+            statutActif?.invoke("🪽 Hermès reprend…")
             return res.fold(
                 { r -> if (r == null) "⏱️ Jarvis n'a pas terminé à temps : découpe la mission en étapes plus courtes." to true else r to false },
                 { e -> "❌ Jarvis : ${e.message ?: e.javaClass.simpleName}" to true }
