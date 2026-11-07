@@ -103,6 +103,7 @@ object Montage {
             return "❌ Pour créer des plans vidéo, ajoute ta clé fal.ai dans Réglages › Vidéo IA — ou donne-moi des vidéos/images existantes à monter (paramètre sources)."
         val duree = d.dureeS.coerceIn(5, 180)
         val n = d.nombre.coerceIn(1, 5)
+        notifier(app, "✍️ Préparation du scénario…", enCours = true)
         scope.launch {
             for (k in 1..n) {
                 val prefixe = if (n > 1) "Vidéo $k/$n : " else ""
@@ -120,14 +121,13 @@ object Montage {
         return "🎬 Montage lancé : ${if (n > 1) "$n vidéos" else "1 vidéo"} de $duree s" +
             (if (!sansIa) " (≈ $plans plans IA par vidéo)" else "") + ".\n" +
             "✍️ D'abord $agent analyse ta demande et écrit le scénario, puis un prompt précis pour chaque plan (mêmes personnages, décor et style d'un plan à l'autre) ; " +
-            "ensuite les plans sont générés et montés à la durée exacte. Ça prend quelques minutes : je t'envoie le résultat ici (suivi dans la notification)."
+            "ensuite les plans sont générés et montés à la durée exacte. Ça prend quelques minutes : je t'envoie le résultat ici (suivi dans la notification)." +
+            (fr.dd.jarvis.work.SuiviTaches.bloquees(app)?.let { "\n$it" } ?: "")
     }
 
-    private fun notifier(app: JarvisApp, texte: String, enCours: Boolean) = runCatching {
-        NotificationManagerCompat.from(app).notify(NOTIF, NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS)
-            .setSmallIcon(android.R.drawable.ic_media_play).setContentTitle(if (enCours) "Montage vidéo en cours" else "Montage vidéo")
-            .setContentText(texte).setStyle(NotificationCompat.BigTextStyle().bigText(texte))
-            .setOngoing(enCours).setOnlyAlertOnce(enCours).setProgress(0, 0, enCours).setAutoCancel(!enCours).build())
+    private fun notifier(app: JarvisApp, texte: String, enCours: Boolean) {
+        if (enCours) fr.dd.jarvis.work.SuiviTaches.enCours(app, NOTIF, "🎬 Montage vidéo en cours", texte)
+        else fr.dd.jarvis.work.SuiviTaches.termine(app, NOTIF, "🎬 Montage vidéo terminé", texte)
     }
 
     // ------------------------------------------------------------------ un montage complet

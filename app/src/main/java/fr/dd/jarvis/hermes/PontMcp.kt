@@ -164,19 +164,8 @@ object PontMcp {
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 app.chatAjouter(fr.dd.jarvis.ai.ChatMsg(false, "🔔 **$titre**\n\n$message"))
             }
-            val ok = runCatching {
-                val ctx = app.applicationContext
-                if (android.os.Build.VERSION.SDK_INT >= 33 && androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) return@runCatching false
-                val pi = android.app.PendingIntent.getActivity(ctx, 7320, android.content.Intent(ctx, fr.dd.jarvis.MainActivity::class.java),
-                    android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT)
-                val plain = message.replace(Regex("[#*_`>|]+"), "").trim()
-                val n = androidx.core.app.NotificationCompat.Builder(ctx, JarvisApp.CHANNEL_AGENTS).setSmallIcon(android.R.drawable.ic_dialog_info)
-                    .setContentTitle(titre.take(60)).setContentText(plain.lineSequence().firstOrNull().orEmpty().take(120))
-                    .setStyle(androidx.core.app.NotificationCompat.BigTextStyle().bigText(plain.take(3500))).setContentIntent(pi).setAutoCancel(true).build()
-                (ctx.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager)
-                    .notify(7320 + (System.currentTimeMillis() % 500).toInt(), n)
-                true
-            }.getOrDefault(false)
+            val ok = fr.dd.jarvis.work.SuiviTaches.bloquees(app) == null
+            fr.dd.jarvis.work.SuiviTaches.termine(app, 7320 + (System.currentTimeMillis() % 200).toInt() * 2, titre.take(60), message)
             return (if (ok) "✅ Message envoyé à l'utilisateur (notification + conversation Jarvis)." else "✅ Message ajouté à la conversation Jarvis (notifications non autorisées).") to false
         }
 

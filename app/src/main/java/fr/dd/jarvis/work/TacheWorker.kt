@@ -35,20 +35,23 @@ class TacheWorker(private val ctx: Context, params: WorkerParameters) : Coroutin
         val demande = inputData.getString("demande").orEmpty()
         if (demande.isBlank()) return Result.success()
         enCours = true
+        val id = 4400 + (System.currentTimeMillis() % 50).toInt() * 2
+        val titre = "⏳ Tâche en cours : " + demande.take(60)
+        SuiviTaches.enCours(ctx, id, titre, "Démarrage…")
+        var derniere = 0L
         val rep = try {
             // Confirmations « normales » acceptées (la demande vient de l'utilisateur) ; les confirmations forcées (SMS, appels, suppressions) sont refusées.
             Brain(app.llm, ToolBox(app) { _, force -> !force }, app) { app.store.userName.value }
-                .reply(listOf(ChatMsg(true, demande))) { }
+                .reply(listOf(ChatMsg(true, demande))) { etape ->
+                    // Progression visible dans la notification (au plus une mise à jour par seconde).
+                    val t = System.currentTimeMillis()
+                    if (t - derniere > 1000) { derniere = t; SuiviTaches.enCours(ctx, id, titre, etape.take(200)) }
+                }
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) { "❌ ${e.message ?: e.javaClass.simpleName}" }
         finally { enCours = false }
-        if (android.os.Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
-            val pi = PendingIntent.getActivity(ctx, 31, Intent(ctx, fr.dd.jarvis.MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-            val plain = rep.replace(Regex("[#*_`>|]+"), "").trim()
-            val n = NotificationCompat.Builder(ctx, JarvisApp.CHANNEL_AGENTS).setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setContentTitle("✅ Tâche terminée : " + demande.take(50)).setContentText(plain.lineSequence().firstOrNull().orEmpty().take(120))
-                .setStyle(NotificationCompat.BigTextStyle().bigText(plain.take(3500))).setContentIntent(pi).setAutoCancel(true).build()
-            (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(4400 + (System.currentTimeMillis() % 100).toInt(), n)
-        }
+        SuiviTaches.termine(ctx, id, (if (rep.startsWith("❌")) "⚠️ Tâche échouée : " else "✅ Tâche terminée : ") + demande.take(50), rep)
+        // Le résultat arrive aussi dans la conversation.
+        runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { app.chatAjouter(ChatMsg(false, "✅ **Tâche terminée** : ${demande.take(80)}\n\n$rep")) } }
         runCatching { app.obsidian.writeNote("JARVIS/Journal/${java.time.LocalDate.now()}.md", "## Tâche arrière-plan\n- Demande : $demande\n- Résultat : ${rep.take(600)}\n", true) }
         return Result.success()
     }
