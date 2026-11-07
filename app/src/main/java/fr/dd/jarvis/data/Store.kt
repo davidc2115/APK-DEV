@@ -170,10 +170,6 @@ class Store(context: Context) {
     val cfModel = SPref("cfModel", "@cf/black-forest-labs/flux-1-schnell")
     /** Modèle de conversation Cloudflare, utilisé uniquement en dernier recours quand toutes les clés Groq sont épuisées (mêmes comptes que les images). */
     val cfChatModel = SPref("cfChatModel", "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
-    /** Ollama du serveur de la maison : IA locale de secours et sous-agent d'Hermès (adresse vide = serveur SSH:11434). */
-    val ollamaActif = BPref("ollamaActif", true)
-    val ollamaUrl = SPref("ollamaUrl", "")
-    val ollamaModele = SPref("ollamaModele", "")
     val cfAccounts: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readList("cfAccounts")) }
     /** Ajoute un compte (ID + clé API). Retourne un message d'erreur, ou null si c'est bon. */
     fun addCfAccount(idRaw: String, keyRaw: String): String? {
@@ -373,14 +369,6 @@ class Store(context: Context) {
     // ---- Hermès (agent Nous Research dans Termux) : cerveau principal quand il est en ligne
     /** auto = Hermès cerveau unique pour toutes les demandes ; il choisit ses sous-agents (Gemini, Groq, Cloudflare…) ou répond lui-même. demande = Hermès uniquement si nommé ; off = cerveau Jarvis de secours. */
     val hermesMode = SPref("hermesMode", "auto")
-    /** Migration 3 : « Jarvis d'abord, Hermès si besoin » devient le défaut (demande de l'utilisateur). */
-    val hermesModeMigre3 = BPref("hermesModeJarvisDabord", false)
-    /** Migration unique : l'ancien mode « auto » devient « Hermès pour tout » (nouveau défaut, avec réflexes). */
-    val hermesModeMigre = BPref("hermesModeMigreTout", false)
-    /** Seconde migration : « Si je dis Hermès » devient aussi « Hermès pour tout » (Hermès consulté sans le nommer). */
-    val hermesModeMigre2 = BPref("hermesModeMigreTout2", false)
-    /** Version du hook de mémoire partagée installée dans Hermès (0 = jamais). */
-    val hookMemoireVersion = SPref("hookMemoireVersion", "0")
     /** Connexion facultative au serveur officiel Suno MCP (OAuth). */
     val sunoMcpActive = BPref("sunoMcpActive", false)
     val modeAdulte = BPref("modeAdulte", false)

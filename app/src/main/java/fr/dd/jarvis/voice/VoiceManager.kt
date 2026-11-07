@@ -170,17 +170,6 @@ class VoiceManager(private val ctx: Context) {
 
                 override fun onResults(results: Bundle?) {
                     if (!actif()) return
-                    val entendu = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
-                    if (entendu.isNotBlank() && estEcho(entendu)) {
-                        // Jarvis s'est réentendu (voix renvoyée par l'autoradio) : on ignore et on continue d'écouter.
-                        main.removeCallbacks(finFenetre)
-                        if (fenetreFin > 0 && System.currentTimeMillis() < fenetreFin - 400) { onPartial(""); demarrer(0); return }
-                        fenetreFin = 0
-                        main.postDelayed(unmuteLater, 900)
-                        onListening(false)
-                        onFail("")
-                        return
-                    }
                     fenetreFin = 0
                     main.removeCallbacks(finFenetre)
                     main.postDelayed(unmuteLater, 900)
@@ -195,7 +184,7 @@ class VoiceManager(private val ctx: Context) {
                     // Un résultat partiel peut être une hallucination sur un bruit ou l'écho du TTS.
                     // Seul onBeginningOfSpeech (détection vocale du moteur) démarre la fenêtre de parole ;
                     // le texte partiel reste affiché sans empêcher la fermeture sur silence.
-                    if (t.isNotBlank() && !estEcho(t)) onPartial(t)
+                    if (t.isNotBlank()) onPartial(t)
                 }
             })
             val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -264,64 +253,6 @@ class VoiceManager(private val ctx: Context) {
     private var focus: AudioFocusRequest? = null
     private var focusLegacy = false
     private var mediaPauseeParJarvis = false
-
-    // ------------------------------------------------------------------ session de conversation
-
-    /** Conversation vocale en cours : la musique reste en pause d'un bout à l'autre (plus de coupure/reprise à chaque phrase). */
-    @Volatile var sessionActive = false
-        private set
-    private var focusSession: AudioFocusRequest? = null
-    private var mediaPauseeSession = false
-    private val focusSessionListener = AudioManager.OnAudioFocusChangeListener { change ->
-        // Quelqu'un reprend la main durablement (appel, lecture relancée à la main) : on ne relancera rien nous-mêmes.
-        if (change == AudioManager.AUDIOFOCUS_LOSS) mediaPauseeSession = false
-    }
-
-    /** Début de conversation (mot « Jarvis », micro touché) : met la musique en pause une seule fois pour toute la session. */
-    fun sessionDebut() = main.post {
-        if (sessionActive) return@post
-        sessionActive = true
-        if (Build.VERSION.SDK_INT >= 26) runCatching {
-            val demande = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
-                .setAudioAttributes(if (sortieBluetooth()) attrBluetooth else attrAssistant)
-                .setOnAudioFocusChangeListener(focusSessionListener, main)
-                .setAcceptsDelayedFocusGain(false).setWillPauseWhenDucked(true).build()
-            focusSession = demande
-            am.requestAudioFocus(demande)
-        }
-        // Certains lecteurs (et autoradios) ignorent le focus : vraie commande PAUSE, reprise ciblée en fin de session.
-        mediaPauseeSession = fr.dd.jarvis.service.JarvisNotificationListener.pauseMediaPourVoix(ctx)
-    }
-
-    /** Fin de conversation : rend le focus et relance la musique que Jarvis avait mise en pause (après un court délai). */
-    fun sessionFin() = main.post {
-        if (!sessionActive) return@post
-        sessionActive = false
-        runCatching { focusSession?.let { am.abandonAudioFocusRequest(it) } }
-        focusSession = null
-        if (mediaPauseeSession) {
-            mediaPauseeSession = false
-            // Laisse le micro et la voix se libérer, sinon la musique repart puis se recoupe.
-            main.postDelayed({ if (!sessionActive) fr.dd.jarvis.service.JarvisNotificationListener.reprendreMediaApresVoix() }, 700)
-        }
-    }
-
-    /** Vrai si le son sort vers un appareil externe sans annulation d'écho fiable (Bluetooth, autoradio, Android Auto). */
-    fun sortieExterne(): Boolean = sortieBluetooth()
-
-    // ------------------------------------------------------------------ anti-écho (voix de Jarvis réentendue)
-
-    @Volatile private var derniereVoix = ""
-    @Volatile private var finVoix = 0L
-
-    private fun mots(t: String) = java.text.Normalizer.normalize(t.lowercase(), java.text.Normalizer.Form.NFD)
-        .replace(Regex("\\p{M}+"), "").replace(Regex("[^a-z0-9 ]"), " ").split(' ').filter { it.length >= 2 }
-
-    /** Le texte reconnu reprend la réponse que Jarvis vient de dire (écho de l'autoradio / du haut-parleur). */
-    internal fun estEcho(entendu: String): Boolean {
-        if (derniereVoix.isBlank() || System.currentTimeMillis() - finVoix > 20_000) return false
-        return estEchoDe(entendu, derniereVoix)
-    }
 
     private fun micOk() = androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.RECORD_AUDIO) ==
         android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -438,11 +369,7 @@ class VoiceManager(private val ctx: Context) {
             main.post(onDone)
             return
         }
-        // Sur l'autoradio / un casque Bluetooth, le micro entend la voix de Jarvis sans annulation d'écho : la « coupure
-        // en reprenant la parole » se déclencherait sur sa propre voix. Elle reste active sur le téléphone seul.
-        val externe = sortieBluetooth()
-        val coupe = bargeIn && micOk() && !externe
-        derniereVoix = clean; finVoix = System.currentTimeMillis() + 60_000
+        val coupe = bargeIn && micOk()
         val appel = coupe && duplex && hautParleurSeul() && entrerModeAppel()
         // En Bluetooth/A2DP et Android Auto, utiliser l'usage MEDIA pour garantir le routage vers l'autoradio.
         // Le focus TRANSIENT_EXCLUSIVE demande au lecteur musical de se mettre en pause pendant la voix.
@@ -451,10 +378,10 @@ class VoiceManager(private val ctx: Context) {
             sortieBluetooth() -> attrBluetooth
             else -> attrAssistant
         }
-        if (!appel && am.mode == AudioManager.MODE_NORMAL && !sessionActive) demanderFocusReponse(attrsVoix)
-        // Hors session : focus + vraie commande PAUSE pour les lecteurs qui ignorent le focus, reprise après la phrase.
-        // En session, la musique est déjà en pause pour toute la conversation (sessionDebut) : on n'y touche pas.
-        mediaPauseeParJarvis = !sessionActive && externe &&
+        if (!appel && am.mode == AudioManager.MODE_NORMAL) demanderFocusReponse(attrsVoix)
+        // Le focus audio est la voie Android standard ; si le lecteur l'ignore, la session média active
+        // reçoit aussi une vraie commande PAUSE. Seule une session encore en lecture sera reprise ensuite.
+        mediaPauseeParJarvis = sortieBluetooth() &&
             fr.dd.jarvis.service.JarvisNotificationListener.pauseMediaPourVoix(ctx)
         runCatching { tts?.setAudioAttributes(attrsVoix) }
         val fini = AtomicBoolean(false)
@@ -462,14 +389,11 @@ class VoiceManager(private val ctx: Context) {
         fun terminer() {
             if (fini.compareAndSet(false, true)) {
                 barge?.stop(); barge = null
-                finVoix = System.currentTimeMillis()
                 main.post {
                     sortirModeAppel()
                     if (mediaPauseeParJarvis) fr.dd.jarvis.service.JarvisNotificationListener.reprendreMediaApresVoix()
                     mediaPauseeParJarvis = false
-                    // Bluetooth / autoradio : le son sort avec du retard (tampon A2DP + traitement de l'autoradio) ; on
-                    // attend que la fin de la phrase soit vraiment jouée avant de rouvrir le micro.
-                    if (externe) main.postDelayed({ finVoix = System.currentTimeMillis(); onDone() }, 1000) else onDone()
+                    onDone()
                 }
             }
         }
@@ -503,7 +427,6 @@ class VoiceManager(private val ctx: Context) {
     }
 
     fun release() {
-        sessionFin()
         main.post { main.removeCallbacks(unmuteLater); main.removeCallbacks(finFenetre); setMuted(false) }
         main.post {
             jeton++
@@ -531,19 +454,4 @@ class VoiceManager(private val ctx: Context) {
         .replace(Regex("(?m)^\\s*-{3,}\\s*$"), ". ")
         .replace(Regex("\\s+"), " ")
         .trim()
-}
-
-/**
- * Vrai si [entendu] n'est qu'un morceau de [voix] (ce que Jarvis vient de dire) : au moins 3 mots dont 60 % figurent
- * dans la réponse, ou un fragment (≥ 6 lettres) contenu tel quel dans la réponse.
- */
-internal fun estEchoDe(entendu: String, voix: String): Boolean {
-    fun norm(t: String) = java.text.Normalizer.normalize(t.lowercase(), java.text.Normalizer.Form.NFD)
-        .replace(Regex("\\p{M}+"), "").replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
-    val e = norm(entendu); val v = norm(voix)
-    if (e.isBlank() || v.isBlank()) return false
-    val motsE = e.split(' ').filter { it.length >= 2 }
-    val motsV = v.split(' ').filter { it.length >= 2 }.toSet()
-    if (motsE.size >= 3) return motsE.count { it in motsV } >= kotlin.math.ceil(motsE.size * 0.6)
-    return e.length >= 6 && v.contains(e)
 }

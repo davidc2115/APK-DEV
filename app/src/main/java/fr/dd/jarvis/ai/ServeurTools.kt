@@ -12,9 +12,9 @@ import org.json.JSONObject
 class ServeurTools(private val app: JarvisApp, private val confirm: suspend (String, Boolean) -> Boolean) {
 
     companion object {
-        val KEYWORDS = Regex("home ?assistant|domotique|\\bha\\b|ssh|serveur|server|yaml|docker|lumi[èe]re|volet|thermostat|automatisation|automation|sc[èe]ne\\b|configuration\\.yaml|debian|raspberry|esphome|zigbee|mqtt|capteur|\\bprise\\b|interrupteur|box|livebox|freebox|bbox|vpn|wireguard|openvpn|redirection|\\bnat\\b|dmz|dhcp|disque|nas|\\bftp\\b|\\bsmb\\b|r[ée]seau|wifi|wi-fi|imprim|scann|\\bip\\b|adresse ip|github|\\bgit\\b|canon|epson|brother|\\bhp\\b|appareils?\\b|script|\\bcode\\b|ping|port|volume|\\bson\\b|t[ée]l[ée]\\b|t[ée]l[ée]vision|\\btv\\b|chauffage|climatisation|temp[ée]rature|consigne|po[êe]le|poil|degr[ée]s|granul[ée]s|pellet|chaudi[èe]re|radiateur|thermique|climate|media_player|lecteur multim[ée]dia|luminosit[ée]|store\\b|persienne|\\ballume\\b|allumer|[ée]teins?\\b|[ée]teindre", RegexOption.IGNORE_CASE)
+        val KEYWORDS = Regex("home ?assistant|domotique|\\bha\\b|ssh|serveur|server|yaml|docker|lumi[èe]re|volet|thermostat|automatisation|automation|sc[èe]ne\\b|configuration\\.yaml|debian|raspberry|esphome|zigbee|mqtt|capteur|\\bprise\\b|interrupteur|box|livebox|freebox|bbox|disque|nas|\\bftp\\b|\\bsmb\\b|r[ée]seau|wifi|wi-fi|imprim|scann|\\bip\\b|adresse ip|github|\\bgit\\b|canon|epson|brother|\\bhp\\b|appareils?\\b|script|\\bcode\\b|ping|port|volume|\\bson\\b|t[ée]l[ée]\\b|t[ée]l[ée]vision|\\btv\\b|chauffage|climatisation|temp[ée]rature|consigne|po[êe]le|poil|degr[ée]s|granul[ée]s|pellet|chaudi[èe]re|radiateur|thermique|climate|media_player|lecteur multim[ée]dia|luminosit[ée]|store\\b|persienne|\\ballume\\b|allumer|[ée]teins?\\b|[ée]teindre", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
-        val NAMES = setOf("ha_entites", "ha_etat", "ha_service", "ha_config", "ha_dashboard", "ssh_commande", "ssh_fichier", "serveur_diagnostic", "serveur_scan_ports", "routeur_diagnostiquer", "reseau_infos", "reseau_scanner", "appareil_sonder", "appareil_page", "imprimantes_trouver", "imprimer", "ssh_script", "github", "appareils_liste", "appareil_nommer", "ip_publique", "box_disque", "freebox")
+        val NAMES = setOf("ha_entites", "ha_etat", "ha_service", "ha_config", "ha_dashboard", "ssh_commande", "ssh_fichier", "serveur_diagnostic", "serveur_scan_ports", "routeur_diagnostiquer", "reseau_infos", "reseau_scanner", "appareil_sonder", "appareil_page", "imprimantes_trouver", "imprimer", "ssh_script", "github", "appareils_liste", "appareil_nommer", "ip_publique", "box_disque")
     }
 
     private fun prop(d: String) = JSONObject().put("type", "string").put("description", d)
@@ -44,7 +44,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 "section" to prop("Index de la section (0 par défaut) dans une vue Sections."),
                 "carte" to prop("JSON d'une carte Lovelace à ajouter, ex. {\"type\":\"tile\",\"entity\":\"light.salon\"}."),
                 "vue_json" to prop("JSON complet de la nouvelle vue à ajouter.")), listOf("action")),
-        tool("ssh_commande", "Serveur SSH : exécute une commande shell sur le serveur (Debian) et retourne la sortie. Contrôle complet : docker, systemctl, apt, logs, réseau… Les commandes destructrices demandent une confirmation. PAS pour consulter ou piloter Home Assistant (utilise les outils ha_*), seulement pour la maintenance du serveur demandée explicitement.",
+        tool("ssh_commande", "Serveur SSH : exécute une commande shell sur le serveur (Debian) et retourne la sortie. Contrôle complet : docker, systemctl, apt, logs, réseau… Les commandes destructrices demandent une confirmation.",
             mapOf("commande" to prop("Commande shell."), "delai" to prop("Délai maximal en secondes (défaut 60)."),
                 "hote" to prop("Autre machine à joindre en SSH (IP/nom) au lieu du serveur des Réglages (optionnel)."), "utilisateur" to prop("Utilisateur de cette autre machine."),
                 "mot_de_passe" to prop("Mot de passe de cette autre machine."), "port" to prop("Port SSH (défaut 22)."), "via_serveur" to prop("« oui » : joindre cette machine DU RÉSEAU LOCAL à travers le serveur Debian (connexion à distance).")), listOf("commande")),
@@ -69,26 +69,8 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
             mapOf("ip" to prop("Adresse de l'imprimante (IP privée ou publique/nom d'hôte si accessible)."), "fichier" to prop("Nom d'un fichier créé par JARVIS (optionnel)."), "texte" to prop("Texte (Markdown) à imprimer (optionnel)."),
                 "titre" to prop("Titre du travail."), "copies" to prop("Nombre de copies (défaut 1)."), "via" to prop("local (défaut) ou serveur.")), listOf("ip")),
         tool("appareils_liste", "Réseau : liste les appareils enregistrés lors des analyses (IP, nom, type, ports, dernière vue) et les IP publiques vues.", emptyMap()),
-        tool("appareil_nommer", "Mémoire réseau : attribue un nom humain à une adresse IP (ex. « Imprimante Canon bureau », « Freebox », « NAS Debian »). Le nom est conservé lors des prochains scans ; si le scan connaît l'adresse MAC, Jarvis rattache automatiquement le même appareil à sa nouvelle IP DHCP et conserve l'ancien IP dans l'historique. Peut aussi créer une fiche d'identification avant le prochain scan.", mapOf("ip" to prop("Adresse IPv4 privée actuelle de l'appareil."), "nom" to prop("Nom clair à mémoriser pour cet appareil.")), listOf("ip", "nom")),
+        tool("appareil_nommer", "Réseau : donne un nom personnalisé à un appareil enregistré (ex. « Imprimante bureau », « NAS »).", mapOf("ip" to prop("Adresse IP de l'appareil."), "nom" to prop("Nom à lui donner.")), listOf("ip", "nom")),
         tool("ip_publique", "Réseau : détecte l'adresse IP publique actuelle (téléphone et, si SSH configuré, serveur) et l'enregistre pour une connexion à distance ; signale si elle a changé.", emptyMap()),
-        tool("freebox", "Freebox : PILOTAGE COMPLET de la Freebox via Freebox OS, avec les droits accordés à JARVIS dans Freebox OS (Gestion des accès › Applications). Lire : fichiers (contenu du DISQUE DUR de la box : paramètre chemin, ex. « Téléchargements » ou « Vidéos/Films » ; vide = liste des disques), telechargements (gestionnaire de téléchargements de la box), etat (connexion, débits, IP publique), appareils (appareils connectés au réseau — PAS le disque), redirections (ports), vpn (serveurs VPN et état), vpn_utilisateurs, wifi, dmz, baux_dhcp (IP réservées), appels (journal de la ligne fixe), droits. Modifier (confirmation demandée) : ajouter_redirection, supprimer_redirection, activer_redirection, desactiver_redirection, activer_vpn, desactiver_vpn, ajouter_vpn_utilisateur, supprimer_vpn_utilisateur, config_vpn (génère le fichier WireGuard/OpenVPN à importer), wifi_activer, wifi_desactiver, dmz (etat=activer + appareil/ip, ou etat=desactiver), ajouter_bail, redemarrer. Utilise CET outil pour toute demande sur la Freebox : ne réponds jamais que tu ne peux pas la configurer.",
-            mapOf("action" to prop("Une des actions listées (ex. fichiers, telechargements, redirections, ajouter_redirection, vpn, activer_vpn, config_vpn)."),
-                "chemin" to prop("Pour fichiers : dossier du disque de la box, nom approximatif accepté (ex. Téléchargements, Vidéos/Films)."),
-                "appareil" to prop("Nom d'un appareil du réseau (tel que la Freebox le connaît) — alternative à ip."),
-                "ip" to prop("Adresse IP locale cible (redirection, DMZ, bail DHCP, réservation VPN)."),
-                "port" to prop("Port de l'appareil (redirection), ou port d'une redirection à supprimer."),
-                "port_externe" to prop("Port public ouvert sur internet (défaut : même que port)."),
-                "port_externe_fin" to prop("Fin de plage de ports publics (optionnel)."),
-                "protocole" to prop("tcp (défaut), udp ou les deux."),
-                "commentaire" to prop("Commentaire de la règle (optionnel)."),
-                "source" to prop("IP source autorisée (défaut 0.0.0.0 = tout internet)."),
-                "id" to prop("Identifiant (#) d'une redirection."),
-                "serveur" to prop("Serveur VPN : wireguard (défaut s'il existe), openvpn_routed, openvpn_bridge, ipsec, pptp."),
-                "login" to prop("Identifiant d'un utilisateur VPN."),
-                "mot_de_passe" to prop("Mot de passe VPN (8 à 32 caractères ; généré si absent)."),
-                "mac" to prop("Adresse MAC (bail DHCP)."),
-                "etat" to prop("dmz : activer ou desactiver."),
-                "nombre" to prop("appels : nombre d'appels à afficher (défaut 15).")), listOf("action")),
         tool("box_disque", "Box internet : accède au disque dur USB branché sur la box (SMB ou FTP, selon Réglages › Box) : liste les partages et dossiers, lit un fichier texte, le télécharge dans l'appli, y envoie un fichier créé par JARVIS, crée un dossier, supprime, renomme ou déplace un fichier/dossier (utile pour réorganiser une bibliothèque de films/séries pour Plex, par exemple), ou lance directement la lecture d'une vidéo dans le lecteur vidéo du téléphone (aucune app spécifique requise, pas de téléchargement).",
             mapOf("action" to prop("partages | lister | lire | telecharger | envoyer | supprimer | dossier | renommer | deplacer | lire_telephone"), "chemin" to prop("Chemin sur la box : partage/dossier/fichier (ex. « Disque dur/Photos/2026 »). Pour renommer/deplacer : le chemin ACTUEL (source)."), "fichier" to prop("envoyer : nom du fichier créé par JARVIS à copier sur la box. renommer/deplacer : le NOUVEAU chemin complet sur la box (ex. « Disque dur/Films/Dirty Dancing (1987).avi »).")), listOf("action")),
         tool("serveur_diagnostic", "Diagnostic rapide du serveur : charge, mémoire, disque, conteneurs Docker et derniers logs de Home Assistant.", emptyMap()),
@@ -207,12 +189,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 } else ToolResult(github(a))
             }
             "appareils_liste" -> ToolResult(Registre.liste(app), direct = true)
-            "appareil_nommer" -> {
-                val ip = a.optString("ip").trim()
-                val nom = a.optString("nom").trim()
-                if (Registre.nommer(app, ip, nom)) ToolResult("✅ Adresse **$ip** mémorisée sous le nom « $nom ». Jarvis réutilisera ce nom dans sa liste réseau. Si l'appareil est identifié par MAC lors d'un scan depuis le serveur, le nom suivra aussi ses changements d'adresse DHCP.", direct = true)
-                else ToolResult("❌ Adresse IP privée ou nom invalide. Indique une IPv4 locale et un nom non vide.")
-            }
+            "appareil_nommer" -> ToolResult(if (Registre.nommer(app, a.optString("ip").trim(), a.optString("nom").trim())) "✅ ${a.optString("ip")} s'appelle maintenant « ${a.optString("nom")} »." else "Appareil inconnu : lance d'abord une analyse du réseau.")
             "ip_publique" -> {
                 val sb = StringBuilder("# 🌍 Adresses IP\n")
                 // Mémoriser le Wi-Fi avant la requête publique pour la lier à la box.
@@ -231,7 +208,6 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 if (der.isNotBlank()) sb.append("\n✅ Enregistrée : $der. Avant tout accès distant, compare cette IP à l'IPv4 WAN affichée dans l'interface de la box : une WAN en 100.64.0.0/10, 10.0.0.0/8, 172.16.0.0/12 ou 192.168.0.0/16, ou une IP WAN différente, signale du CGNAT ou un double NAT (la redirection IPv4 directe ne fonctionnera pas sans correction opérateur/routeur). Privilégie un VPN privé (WireGuard/Tailscale ou VPN intégré à la Freebox) pour SSH, imprimantes, interfaces d'administration et passerelles MCP. N'expose jamais directement sur Internet l'interface d'une box, une imprimante ou un MCP. Si une redirection ciblée est réellement nécessaire : bail DHCP fixe, seul port/protocole indispensable, pare-feu actif et authentification forte ; pour SSH, clés uniquement, mot de passe désactivé et protection anti-bruteforce. Le DDNS ne remplace ni un VPN ni une IP WAN joignable.")
                 ToolResult(sb.toString(), direct = true)
             }
-            "freebox" -> ToolResult(FreeboxOs.gerer(app, a.optString("action"), a, confirm))
             "box_disque" -> {
                 val act = a.optString("action").lowercase()
                 if (act in setOf("supprimer", "envoyer") && !confirm("Box : $act « ${a.optString("chemin").ifBlank { a.optString("fichier") }} » ?", true)) return ToolResult("Refusé par l'utilisateur.")
@@ -278,15 +254,14 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                     ssh()
                     val l = Serveur.scanReseau(app)
                     val neufs = Registre.appareils(app, l, "Réseau du serveur")
-                    val alias = Registre.alias(app)
-                    return ToolResult("# 📡 Réseau du serveur — ${l.size} appareil(s)\n\n| IP | Nom mémorisé | MAC | Type | Ports |\n|---|---|---|---|---|\n" + l.joinToString("\n") { "| ${it.ip} | ${alias[it.ip].orEmpty().ifBlank { "—" }} | ${it.info.removePrefix("MAC ")} | ${it.type} | ${it.ports.joinToString(",")} |" } + "\n\n💾 $neufs nouvel(s) appareil(s) enregistré(s).", direct = true)
+                    return ToolResult("# 📡 Réseau du serveur — ${l.size} appareil(s)\n\n| IP | MAC | Type | Ports |\n|---|---|---|---|\n" + l.joinToString("\n") { "| ${it.ip} | ${it.info.removePrefix("MAC ")} | ${it.type} | ${it.ports.joinToString(",")} |" } + "\n\n💾 $neufs nouvel(s) appareil(s) enregistré(s).", direct = true)
                 }
                 val i = Reseau.infos(app) ?: return ToolResult("Pas de réseau.")
                 if (!i.wifi) return ToolResult("Le téléphone n'est pas connecté au Wi-Fi : je ne peux pas analyser le réseau local.")
                 val liste = Reseau.scanner(app)
                 val imps = Reseau.decouvrir(app, listOf("_ipp._tcp", "_printer._tcp"), 3500)
-                val neufs = Registre.appareils(app, liste, "Wi-Fi ${i.ip.substringBeforeLast('.')}.x")
                 val alias = Registre.alias(app)
+                val neufs = Registre.appareils(app, liste, "Wi-Fi ${i.ip.substringBeforeLast('.')}.x")
                 val pub = Reseau.ippPublique()
                 val chg = if (pub.isNotBlank()) Registre.ipPublique(app, pub, "Wi-Fi ${i.ip.substringBeforeLast('.')}.x") else ""
                 val sb = StringBuilder("# 📡 Réseau ${i.ip}/${i.prefix} — ${liste.size} appareil(s)\n\n| IP | Nom | Type | Ports | Page web |\n|---|---|---|---|---|\n")
