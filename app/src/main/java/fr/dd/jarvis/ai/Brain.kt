@@ -103,16 +103,18 @@ class Brain(
         // il faut pouvoir retrouver les correspondances dans Obsidian, vérifier les entités HA puis agir.
         val pilotageChauffage = Regex("po[eê]les?|poils?|pellets?|granul[eé]s?|chauffage|thermostats?|climate\\.|temp[eé]rature|consigne|degr[eé]s?", RegexOption.IGNORE_CASE).containsMatchIn(recent) &&
             Regex("r[eé]gl|mettre|passer|fixer|monter|baisser|augment|dimin|r[eé]gler|allum|[eé]teind|commande|sur \\d", RegexOption.IGNORE_CASE).containsMatchIn(recent)
+        // La sélection des outils matériels ne dépend jamais du résultat du planificateur IA.
+        val domotique = pilotageChauffage || (Regex("t[ée]l[ée]|\\btv\\b|t[ée]l[ée]vis|volume|son|ampli|barre de son|chromecast|player|lumi[èe]re|lampe|volet|store|prise|home ?assistant|domotique|enceinte", RegexOption.IGNORE_CASE).containsMatchIn(recent) &&
+            ACTION_DOMOTIQUE.containsMatchIn(recent))
+        val accesBox = Regex("freebox|\\bbox\\b|disque dur|disque usb|stockage de la box|partage smb|partage ftp|nas", RegexOption.IGNORE_CASE).containsMatchIn(recent)
         val schema: JSONArray
         var societeNeeded = societeOn || planningClientsSync
         if (plan != null && plan.outils.isNotEmpty()) {
-            // Domotique (chauffage, télé, lumières, volets…) : toujours de quoi relire les notes, trouver l'entité ET agir.
-            val domotique = pilotageChauffage || (Regex("t[ée]l[ée]|\\btv\\b|t[ée]l[ée]vis|volume|lumi[èe]re|lampe|volet|store|prise|home ?assistant|domotique|enceinte", RegexOption.IGNORE_CASE).containsMatchIn(recent) &&
-                ACTION_DOMOTIQUE.containsMatchIn(recent))
-            val indispensables = if (domotique) listOf("obsidian_chercher", "obsidian_lire", "ha_entites", "ha_etat", "ha_service") else emptyList()
+            // Domotique : garder les moyens de découverte et d'action même si l'analyseur a oublié un outil.
+            val indispensables = if (domotique) listOf("obsidian_chercher", "obsidian_lire", "ha_entites", "ha_etat", "ha_service", "phone_action") else emptyList()
             val reglageDirect = Regex("r[eé]glage|param[eè]tre|mode conversation|[eé]coute continue|annonce vocale|r[eé]ponse vocale|confirmation|agent autonome|bips|analyse gemini|gemini|agents? autonomes?|notifications banni[eè]re", RegexOption.IGNORE_CASE).containsMatchIn(recent)
             val keep = (plan.outils + indispensables + (if (reglageDirect) listOf("reglage_jarvis") else emptyList()) + (if (planningClientsSync) listOf("analyser_planning_clients") else emptyList()) + listOf("memoire_ajouter", "memoire_apprendre", "memoire_apprentissages", "memoire_lire", "memoire_oublier") + (if (societeOn || planningClientsSync) fr.dd.jarvis.societe.SocieteTools.NAMES else emptySet<String>()) +
-                (if (fr.dd.jarvis.hermes.Hermes.enLigneConnu()) listOf("hermes_deleguer") else emptyList()) +
+                (if (app.store.hermesMode.value in setOf("auto", "tout")) listOf("hermes_deleguer") else emptyList()) +
                 (if (Regex("herm[eè]s|termux", RegexOption.IGNORE_CASE).containsMatchIn(recent)) listOf("hermes") else emptyList()) +
                 (if (Regex("freebox|\\bbox\\b|vpn|wireguard|openvpn|redirection|ouvr\\w* (le|un|les) ports?|\\bdmz\\b|bail dhcp", RegexOption.IGNORE_CASE).containsMatchIn(recent)) listOf("freebox") else emptyList()) +
                 (if (TikTokTools.concerned(recent)) listOf("video_montage", "tiktok_video", "generer_video") else emptyList()) +
@@ -123,6 +125,20 @@ class Brain(
             for (i in 0 until all.length()) if (all.getJSONObject(i).getJSONObject("function").getString("name") in keep) schema.put(all.get(i))
             if (plan.outils.any { it in fr.dd.jarvis.societe.SocieteTools.NAMES }) societeNeeded = true
         } else schema = tools.schemaFor(recent)
+        // Les outils partagés restent accessibles même si schemaFor ou l'analyseur les a oubliés.
+        val outilsPartages = buildSet {
+            if (domotique) addAll(listOf("obsidian_chercher", "obsidian_lire", "ha_entites", "ha_etat", "ha_service", "phone_action", "hermes_deleguer"))
+            if (accesBox) addAll(listOf("freebox", "box_disque", "rechercher_videos_box", "lire_video_box", "routeur_diagnostiquer", "reseau_infos", "reseau_scanner", "ssh_fichier", "hermes_deleguer"))
+            if (app.store.hermesMode.value in setOf("auto", "tout")) add("hermes_deleguer")
+        }
+        if (outilsPartages.isNotEmpty()) {
+            val deja = (0 until schema.length()).mapNotNull { schema.optJSONObject(it)?.optJSONObject("function")?.optString("name") }.toMutableSet()
+            for (i in 0 until all.length()) {
+                val outil = all.optJSONObject(i) ?: continue
+                val nom = outil.optJSONObject("function")?.optString("name") ?: continue
+                if (nom in outilsPartages && deja.add(nom)) schema.put(outil)
+            }
+        }
         // Outils retirés : ceux qui renverraient vers Hermès (quand c'est Hermès qui demande), et le SSH pour une demande
         // Home Assistant ordinaire — elle passe par l'API (ha_*) ; si l'API échoue, l'approfondissement prend le relais.
         val retires = (if (pourHermes) setOf("hermes", "hermes_deleguer", "tache_arriere_plan") else emptySet()) +
