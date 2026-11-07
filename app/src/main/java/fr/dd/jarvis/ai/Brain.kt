@@ -146,9 +146,16 @@ class Brain(
         // 12000 caractères ; les tours plus anciens (qui ne servent plus qu'à garder le fil de la conversation) sont ramenés
         // à 4000 caractères — largement assez pour une trentaine de lignes (noms de fichiers, SMS, etc.) sans repayer en
         // entier, à chaque nouveau tour, le texte complet d'une réponse déjà ancienne et déjà traitée.
-        val recentHistory = history.takeLast(16)
+        // Historique utile uniquement : mémoire durable et notes sont déjà injectées séparément.
+        // Réduire le nombre de tours évite de renvoyer les mêmes longues réponses à chaque appel Groq.
+        val recentHistory = history.takeLast(10)
         recentHistory.forEachIndexed { idx, m ->
-            val cap = if (recentHistory.size - 1 - idx < 3) 12000 else 4000
+            val age = recentHistory.size - 1 - idx
+            val cap = when {
+                age < 2 -> 7000
+                age < 4 -> 3000
+                else -> 1400
+            }
             messages.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(cap)))
         }
 
