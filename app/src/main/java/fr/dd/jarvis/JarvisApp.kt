@@ -139,7 +139,11 @@ class JarvisApp : Application() {
         fr.dd.jarvis.work.ReseauScheduler.apply(this, store)
         runCatching {
             androidx.car.app.connection.CarConnection(this).type.observeForever { t ->
+                val avant = enVoiture
                 enVoiture = t == androidx.car.app.connection.CarConnection.CONNECTION_TYPE_PROJECTION
+                // Montée en voiture : accueil de JARVIS (prochain rendez-vous, météo) dans Android Auto.
+                if (enVoiture && !avant) graphScope.launch { runCatching { fr.dd.jarvis.car.AccueilVoiture.annoncer(this@JarvisApp) } }
+                if (!enVoiture && avant) fr.dd.jarvis.car.VoixVoiture.liberer()
             }
         }
         // Connexion à un Wi-Fi : analyse automatique du réseau (appareils + IP publique).

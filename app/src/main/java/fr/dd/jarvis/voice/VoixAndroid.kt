@@ -23,14 +23,46 @@ object VoixAndroid {
         voix.sortedWith(compareByDescending<Triple<String, Int, Boolean>> { pays(it.first) == "FR" }
             .thenByDescending { it.second }.thenByDescending { it.third }).firstOrNull()?.first
 
+    /** Genre d'une voix Android d'après son nom (moteur Google : fra/frc/vlf femmes, frb/frd hommes ; Samsung : f/m). */
+    internal fun genre(nom: String): String? {
+        val n = nom.lowercase()
+        return when {
+            Regex("x-fr[bd]\\b|x-fr[bd]-").containsMatchIn(n) -> "homme"
+            Regex("x-(fr[ac]|vlf)\\b|x-(fr[ac]|vlf)-").containsMatchIn(n) -> "femme"
+            Regex("smtm\\d").containsMatchIn(n) || (n.contains("male") && !n.contains("female")) -> "homme"
+            Regex("smtf\\d").containsMatchIn(n) || n.contains("female") -> "femme"
+            else -> null
+        }
+    }
+
+    private val appliques = java.util.WeakHashMap<TextToSpeech, String>()
+
+    private fun signature(ctx: Context): String {
+        val app = ctx.applicationContext as? fr.dd.jarvis.JarvisApp ?: return ""
+        return app.store.voixAndroid.value + "|" + VoixNaturelle.personnage(app).let { it.id + it.voix }
+    }
+
+    /** Réapplique la voix seulement si le choix (voix Android ou personnage) a changé depuis la dernière fois. */
+    fun appliquerSiChange(ctx: Context, t: TextToSpeech?) {
+        t ?: return
+        if (synchronized(appliques) { appliques[t] } != signature(ctx)) appliquer(ctx, t)
+    }
+
     fun appliquer(ctx: Context, t: TextToSpeech?) {
         t ?: return
-        val choix = (ctx.applicationContext as? fr.dd.jarvis.JarvisApp)?.store?.voixAndroid?.value.orEmpty()
+        val app = ctx.applicationContext as? fr.dd.jarvis.JarvisApp
+        val choix = app?.store?.voixAndroid?.value.orEmpty()
+        val p = app?.let { runCatching { VoixNaturelle.personnage(it) }.getOrNull() }
         val fr = francaises(t)
+        // Sans voix imposée : la meilleure voix du même genre que le personnage (s'il y en a une), sinon la meilleure.
+        val candidates = p?.let { pp -> fr.filter { genre(it.name) == pp.genre }.ifEmpty { fr } } ?: fr
         val v = fr.firstOrNull { it.name == choix }
-            ?: meilleure(fr.map { Triple(it.name, it.quality, it.isNetworkConnectionRequired) }) { n -> fr.first { it.name == n }.locale.country }
-                ?.let { n -> fr.first { it.name == n } }
+            ?: meilleure(candidates.map { Triple(it.name, it.quality, it.isNetworkConnectionRequired) }) { n -> candidates.first { it.name == n }.locale.country }
+                ?.let { n -> candidates.first { it.name == n } }
         if (v != null) runCatching { t.voice = v }
+        // Hauteur et débit du personnage (plus grave et plus lent pour une voix âgée, plus vif pour une voix jeune).
+        runCatching { t.setPitch(p?.hauteur ?: 1f); t.setSpeechRate(p?.debit ?: 1f) }
+        synchronized(appliques) { appliques[t] = signature(ctx) }
     }
 
     /** Voix françaises proposées dans les réglages : (nom technique, libellé). */
@@ -43,7 +75,7 @@ object VoixAndroid {
             if (withTimeoutOrNull(5000) { pret.await() } != true) emptyList()
             else francaises(t).sortedWith(compareByDescending<Voice> { it.locale.country == "FR" }.thenByDescending { it.quality }.thenByDescending { it.isNetworkConnectionRequired })
                 .mapIndexed { i, v ->
-                    v.name to "Voix ${i + 1} · ${v.locale.country}" + (if (v.isNetworkConnectionRequired) " · réseau" else " · hors ligne") +
+                    v.name to "Voix ${i + 1}" + (genre(v.name)?.let { " · $it" } ?: "") + " · ${v.locale.country}" + (if (v.isNetworkConnectionRequired) " · réseau" else " · hors ligne") +
                         when { v.quality >= Voice.QUALITY_VERY_HIGH -> " · très naturelle"; v.quality >= Voice.QUALITY_HIGH -> " · naturelle"; else -> "" }
                 }.take(16)
         } finally { runCatching { t?.shutdown() } }

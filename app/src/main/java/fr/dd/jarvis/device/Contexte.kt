@@ -47,6 +47,17 @@ object Contexte {
         return decider(app.enVoiture, java.time.LocalTime.now().hour, s.nuitDebut.value.toIntOrNull() ?: 22, s.nuitFin.value.toIntOrNull() ?: 7, proche, kmMaison)
     }
 
+    /** Nuit en ce moment (mode forcé ou plage horaire), sans localisation : assez léger pour être appelé à chaque phrase. */
+    fun nuitMaintenant(app: JarvisApp): Boolean {
+        val s = app.store
+        if (s.modeForce.value.isNotBlank() && System.currentTimeMillis() < (s.modeForceJusqua.value.toLongOrNull() ?: 0L)) return s.modeForce.value == Mode.NUIT.name
+        if (!s.modesAuto.value) return false
+        val h = java.time.LocalTime.now().hour
+        val d = s.nuitDebut.value.toIntOrNull() ?: 22
+        val f = s.nuitFin.value.toIntOrNull() ?: 7
+        return if (d > f) h >= d || h < f else h in d until f
+    }
+
     /** Consigne ajoutée aux deux cerveaux (vide en mode normal). */
     fun consigne(e: Etat): String = when (e.mode) {
         Mode.VOITURE -> "\n\nMODE VOITURE (l'utilisateur conduit) : réponds en 1 ou 2 phrases courtes, sans liste, tableau ni lien ; rien à lire à l'écran ; demande confirmation à l'oral avant toute action."

@@ -551,8 +551,8 @@ class VoiceManager(private val ctx: Context) {
             runCatching { tts?.setAudioAttributes(attrsVoix) }
             volume = (ctx.applicationContext as? fr.dd.jarvis.JarvisApp)?.let { runCatching { fr.dd.jarvis.device.Contexte.volumeVoix(it) }.getOrDefault(1f) } ?: 1f
             // Voix Android changée dans les réglages : appliquée sans redémarrer.
-            val choix = (ctx.applicationContext as? fr.dd.jarvis.JarvisApp)?.store?.voixAndroid?.value.orEmpty()
-            if (choix.isNotBlank() && runCatching { tts?.voice?.name }.getOrNull() != choix) VoixAndroid.appliquer(ctx, tts)
+            // (et personnage de voix : genre, hauteur et débit de la voix Android de repli)
+            VoixAndroid.appliquerSiChange(ctx, tts)
         }
 
         /** La voix sort vraiment : l'écoute de coupure démarre (ses 400 premières ms servent à mesurer l'écho). */
@@ -642,6 +642,9 @@ class VoiceManager(private val ctx: Context) {
         private fun direAndroid(morceau: String) {
             vider()
             val t = tts ?: return
+            // Voix Android tout juste créée (voiture, première phrase) : on lui laisse le temps de s'initialiser.
+            val attente = System.currentTimeMillis() + 3000
+            while (!ttsReady && !fini.get() && System.currentTimeMillis() < attente) Thread.sleep(50)
             if (!ttsReady) return
             val id = UUID.randomUUID().toString()
             val latch = java.util.concurrent.CountDownLatch(1)

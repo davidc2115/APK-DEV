@@ -717,15 +717,25 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
             HudPanel(Modifier.fillMaxWidth(), title = "Android Auto") {
                 StatusRow("Android Auto installé sur le téléphone", aaInstalle)
                 StatusRow("Connecté à la voiture en ce moment", app.enVoiture)
+                val source = remember(tick) { fr.dd.jarvis.car.VisibiliteAuto.libelleSource(ctx) }
+                val play = remember(tick) { fr.dd.jarvis.car.VisibiliteAuto.commePlayStore(ctx) }
+                StatusRow("Installé « depuis le Play Store » (exigé par Android Auto) — source : $source", play)
                 Text(
-                    "JARVIS n'est pas installé depuis le Play Store : Android Auto le cache tant que « Sources inconnues » n'est pas activé (à faire une seule fois) :\n" +
-                        "1) Touche « Ouvrir Android Auto » ci-dessous, descends tout en bas et touche 10 fois « Version » (accepte le mode développeur).\n" +
-                        "2) Menu ⋮ en haut à droite › « Paramètres pour les développeurs » › coche « Sources inconnues ».\n" +
-                        "3) Reviens dans Android Auto › « Personnaliser le lanceur » (ou « Écran ») et coche JARVIS.\n" +
-                        "4) Débranche puis rebranche le téléphone (ou redémarre Android Auto) : JARVIS apparaît dans la liste des applis de la voiture.\n" +
-                        "CarPlay est réservé aux iPhone : une appli Android ne peut pas y apparaître.",
+                    "Pour voir JARVIS dans la voiture :\n" +
+                        "1) Android Auto récent n'affiche une appli « voiture » que si elle vient du Play Store : touche « Rendre JARVIS visible » ci-dessous (JARVIS se réinstalle avec cette marque grâce à Shizuku ou à l'ADB intégré ; tes données sont conservées ; JARVIS se ferme quelques secondes, l'écoute « Jarvis » repart toute seule, rouvre l'appli ensuite).\n" +
+                        "2) Dans Android Auto (bouton « Ouvrir Android Auto ») : touche 10 fois « Version » tout en bas, puis menu ⋮ › « Paramètres pour les développeurs » › coche « Sources inconnues ».\n" +
+                        "3) Android Auto › « Personnaliser le lanceur » : coche JARVIS. Débranche puis rebranche le téléphone.\n" +
+                        "Après chaque mise à jour installée à la main, une notification te propose de refaire l'étape 1 en un geste.",
                     color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(vertical = 6.dp)
                 )
+                var autoMsg by remember { mutableStateOf("") }
+                HudButton(if (autoMsg == "…") "Réinstallation…" else if (play) "✅ Visible — refaire la réinstallation" else "🚗 Rendre JARVIS visible dans Android Auto",
+                    Modifier.fillMaxWidth(), enabled = autoMsg != "…", filled = !play) {
+                    if (!fr.dd.jarvis.car.VisibiliteAuto.possible(ctx)) autoMsg = "❌ Il faut d'abord Shizuku démarré (ou l'ADB intégré appairé) : Réglages › Téléphone › Shizuku."
+                    else { autoMsg = "…"; scope.launch { autoMsg = fr.dd.jarvis.car.VisibiliteAuto.reinstaller(ctx); tick++ } }
+                }
+                if (autoMsg.isNotBlank() && autoMsg != "…") Text(autoMsg, color = HudText, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                Spacer(Modifier.height(6.dp))
                 HudButton("Ouvrir Android Auto", Modifier.fillMaxWidth(), enabled = aaInstalle, filled = true) {
                     val pm = ctx.packageManager
                     val reglages = runCatching {
@@ -737,6 +747,16 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     runCatching { ctx.startActivity((reglages ?: Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$aa"))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
                         .onFailure { ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$aa")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 }
+                Spacer(Modifier.height(10.dp))
+                Text("Dans la voiture", color = HudText, fontSize = 13.sp)
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    HudChip(if (store.voitureAccueil.value) "👋 Accueil à la connexion : oui" else "Accueil à la connexion : non", store.voitureAccueil.value) { store.voitureAccueil.set(!store.voitureAccueil.value) }
+                    HudChip(if (store.voitureAccueilVocal.value) "🔊 Accueil dit à voix haute" else "Accueil en message seulement", store.voitureAccueilVocal.value) { store.voitureAccueilVocal.set(!store.voitureAccueilVocal.value) }
+                }
+                Text("En montant en voiture, JARVIS t'envoie un message : prochain rendez-vous, nombre de rendez-vous restants, météo. Dans la voiture, il parle avec la voix choisie (Réglages › Voix), plus articulée.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                HudTextField(store.raccourcisVoiture.value.ifBlank { fr.dd.jarvis.car.RaccourcisVoiture.DEFAUT.joinToString("\n") }, { store.raccourcisVoiture.set(it) },
+                    Modifier.fillMaxWidth().padding(top = 6.dp), label = "⚡ Raccourcis de la voiture (une demande par ligne)", singleLine = false, maxLines = 8)
+                Text("Ex. « Ouvre le portail », « Allume le chauffage de la maison », « Appelle Thomas », « Lance ma playlist »… Un appui dans la voiture et JARVIS s'en occupe.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
             }
         }
 
@@ -1318,17 +1338,34 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     }
                     HudChip("🤖 Voix Android", !store.voixNaturelle.value) { store.voixNaturelle.set(false); etatVoix = fr.dd.jarvis.voice.VoixNaturelle.etat(app) }
                 }
-                if (store.voixNaturelle.value) Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    fr.dd.jarvis.voice.VoixNaturelle.VOIX.forEach { (nom, style) ->
-                        HudChip("$nom · $style", store.voixNom.value == nom) { store.voixNom.set(nom) }
+                // Personnages de voix : homme, femme, jeune, âgé, IA… (voix Gemini + description ; voix Android du même genre en repli)
+                val vn = fr.dd.jarvis.voice.VoixNaturelle
+                val perso = vn.personnage(app)
+                Text("Personnage : ${perso.libelle}", color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+                vn.PERSONNAGES.groupBy { it.groupe }.forEach { (groupe, liste) ->
+                    Text(groupe, color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                    Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        liste.forEach { p -> HudChip(p.libelle, perso.id == p.id) { store.voixPersonnage.set(p.id) } }
                     }
                 }
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    HudChip("🎛️ Sur mesure", perso.id == vn.SUR_MESURE) { store.voixPersonnage.set(vn.SUR_MESURE) }
+                }
+                if (perso.id == vn.SUR_MESURE) {
+                    Text("Voix de base (30 voix Gemini)", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                    Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        vn.CATALOGUE.forEach { (nom, d) -> HudChip("$nom · ${d.first}, ${d.second}", perso.voix == nom) { store.voixNom.set(nom) } }
+                    }
+                    HudTextField(store.voixStyle.value, { store.voixStyle.set(it) }, Modifier.fillMaxWidth().padding(top = 4.dp),
+                        label = "Décris la voix (âge, ton, accent, débit…)", placeholder = "ex. homme de 60 ans, léger accent du Sud, jovial", singleLine = false, maxLines = 3)
+                }
+                Text("Tu peux aussi le demander : « Jarvis, prends une voix de femme âgée ». Le ton, le débit et l'accent suivent bien la description ; l'âge est rendu de façon plus approximative. La nuit, la voix se fait plus douce ; en voiture, plus articulée.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
                 var essaiVoix by remember { mutableStateOf(false) }
-                HudButton(if (essaiVoix) "Écoute…" else "▶ Écouter la voix", Modifier.fillMaxWidth().padding(top = 6.dp), enabled = !essaiVoix) {
+                HudButton(if (essaiVoix) "Écoute…" else "▶ Écouter ${perso.libelle}", Modifier.fillMaxWidth().padding(top = 6.dp), enabled = !essaiVoix) {
                     essaiVoix = true
                     fr.dd.jarvis.voice.VoixNaturelle.reactiver()
                     val v = fr.dd.jarvis.voice.VoiceManager(ctx)
-                    v.speak("Bonjour ${store.userName.value.ifBlank { "" }}. Je suis JARVIS. Je commence à te répondre dès la première phrase, pendant que je continue à réfléchir.") {
+                    v.speak("Bonjour ${store.userName.value.ifBlank { "" }}. Voici ma voix « ${perso.nom} ». Je commence à te répondre dès la première phrase, pendant que je continue à réfléchir.") {
                         v.release(); essaiVoix = false; etatVoix = fr.dd.jarvis.voice.VoixNaturelle.etat(app)
                     }
                 }

@@ -270,6 +270,18 @@ class Store(context: Context) {
     /** Voix naturelle (synthèse Gemini) au lieu de la voix Android ; repli automatique sur la voix Android. */
     val voixNaturelle = BPref("voixNaturelle", true)
     val voixNom = SPref("voixNom", "Charon")
+    /** Personnage de voix (homme, femme, jeune, âgé, IA…) ; « perso » = voix Gemini [voixNom] + description [voixStyle]. */
+    val voixPersonnage = SPref("voixPersonnage", "")
+    // ---- Android Auto
+    /** Raccourcis de la voiture (une demande par ligne) ; vide = raccourcis par défaut. */
+    val raccourcisVoiture = SPref("raccourcisVoiture", "")
+    /** Message d'accueil de JARVIS à la connexion à la voiture (et annonce vocale si [voitureAccueilVocal]). */
+    val voitureAccueil = BPref("voitureAccueil", true)
+    val voitureAccueilVocal = BPref("voitureAccueilVocal", false)
+    /** L'utilisateur a rendu JARVIS visible dans Android Auto (réinstallation « Play Store ») : on le lui repropose après chaque mise à jour. */
+    val autoVisibilite = BPref("autoVisibilite", false)
+    val autoReinstallTs = SPref("autoReinstallTs", "0")
+    val voixStyle = SPref("voixStyle", "")
     /** Voix Android choisie (nom de la voix du moteur Google) ; vide = la meilleure voix française disponible. */
     val voixAndroid = SPref("voixAndroid", "")
     val rapportsPhotosV2 = BPref("rapportsPhotosV2", false)

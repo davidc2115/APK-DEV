@@ -21,11 +21,6 @@ import androidx.car.app.model.MessageTemplate
 import androidx.car.app.model.Row
 import androidx.car.app.model.SearchTemplate
 import androidx.car.app.model.Template
-import androidx.car.app.messaging.model.CarMessage
-import androidx.car.app.messaging.model.ConversationCallback
-import androidx.car.app.messaging.model.ConversationItem
-import androidx.car.app.model.CarText
-import androidx.core.app.Person
 import androidx.car.app.validation.HostValidator
 import androidx.car.app.versioning.CarAppApiLevels
 import androidx.lifecycle.DefaultLifecycleObserver
@@ -50,13 +45,14 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /**
- * JARVIS sur Android Auto (messagerie conversationnelle + commandes vocales) :
- *  - accueil : Parler à JARVIS, planning d'aujourd'hui / de demain, dernière réponse ;
+ * JARVIS sur Android Auto :
+ *  - accueil : Parler à JARVIS, raccourcis (demandes toutes faites), planning d'aujourd'hui / de demain, dernière réponse ;
  *  - conversation vocale au MICRO DE LA VOITURE (Android Auto récent) : la phrase est transcrite (Whisper sur Groq),
- *    JARVIS répond à voix haute, puis réécoute ; la conversation se referme après quelques secondes de silence ;
- *  - agenda : rendez-vous du jour, un appui lance la navigation vers l'adresse.
- * La messagerie basée sur des modèles exige Car API 7 et une distribution Google Play en test interne/fermé.
- * Le réglage « Sources inconnues » ne déverrouille pas les applications Car App Library sur un véhicule réel.
+ *    JARVIS répond avec SA voix (personnage choisi, voix naturelle), puis réécoute ; fin après quelques secondes de silence ;
+ *  - agenda : un rendez-vous → y aller (navigation), appeler le client, en parler à JARVIS ;
+ *  - conversation « messagerie » (notifications) : Android Auto lit les messages de JARVIS et permet d'y répondre.
+ * Modèles utilisés : liste et message uniquement (acceptés par toutes les catégories d'applis voiture).
+ * Visibilité : Android Auto exige une appli « installée depuis le Play Store » → Réglages › Communication › Android Auto.
  */
 class JarvisCarService : CarAppService() {
     override fun createHostValidator(): HostValidator =
@@ -88,6 +84,13 @@ private fun voixVoiture(ctx: CarContext) = ctx.carAppApiLevel >= CarAppApiLevels
 class JarvisCarScreen(ctx: CarContext) : Screen(ctx) {
     private val app = ctx.applicationContext as JarvisApp
 
+    init {
+        VoixVoiture.preparer(ctx)
+        lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onDestroy(owner: LifecycleOwner) { VoixVoiture.taire() }
+        })
+    }
+
     private fun resume(jour: LocalDate): String {
         if (!app.calendar.hasPermission()) return "Autorise l'agenda dans JARVIS sur le téléphone"
         val evts = runCatching { app.calendar.events(jour, 1) }.getOrDefault(emptyList()).sortedBy { it.begin }
@@ -101,37 +104,38 @@ class JarvisCarScreen(ctx: CarContext) : Screen(ctx) {
         if (!app.chatLoaded) app.chatCharger()
         val voix = voixVoiture(carContext)
         val liste = ItemList.Builder()
-        val moi = Person.Builder().setName("Moi").setKey("jarvis_user").build()
-        val jarvis = Person.Builder().setName("JARVIS").setKey("jarvis").setImportant(true).build()
-        val historique = (CarBridge.contexte().ifEmpty { app.chat.toList() }).takeLast(5)
-        val messages = if (historique.isEmpty()) {
-            listOf(CarMessage.Builder().setSender(jarvis).setBody(CarText.create("Je suis prêt. Tu peux me parler ou me dicter une demande."))
-                .setReceivedTimeEpochMillis(System.currentTimeMillis()).setRead(true).build())
-        } else historique.map { m ->
-            CarMessage.Builder().setSender(if (m.fromUser) moi else jarvis).setBody(CarText.create(m.text.take(500)))
-                .setReceivedTimeEpochMillis(m.ts).setRead(true).build()
-        }
-        val callback = object : ConversationCallback {
-            override fun onMarkAsRead() {}
-            override fun onTextReply(text: String) {
-                if (text.isNotBlank()) CarBridge.repondre(carContext, text) { invalidate() }
-            }
-        }
-        liste.addItem(ConversationItem.Builder("jarvis-assistant", CarText.create("JARVIS"), moi, messages, callback).build())
         liste.addItem(Row.Builder().setTitle("🎤 Parler à JARVIS")
-                .addText(if (voix) "Micro de la voiture : demande, réponse lue, on enchaîne" else "Dictée (voiture à l'arrêt) — ou « Répondre » à la conversation JARVIS")
+                .addText(if (voix) "Je t'écoute au micro de la voiture, je réponds, on enchaîne" else "Dictée (voiture à l'arrêt) — ou « Répondre » au message de JARVIS")
                 .setOnClickListener {
                     if (voix) ConversationVoiture.ouvrir(carContext, screenManager)
                     else screenManager.push(JarvisSearchScreen(carContext) { q -> screenManager.push(ReponseTexteScreen(carContext, q)) })
                 }.build())
+            .addItem(Row.Builder().setTitle("⚡ Raccourcis").addText(RaccourcisVoiture.liste(app).take(2).joinToString(" · ").take(90))
+                .setOnClickListener { screenManager.push(RaccourcisVoitureScreen(carContext)) }.build())
             .addItem(Row.Builder().setTitle("📅 Aujourd'hui").addText(resume(LocalDate.now()))
                 .setOnClickListener { screenManager.push(AgendaVoitureScreen(carContext, LocalDate.now(), "Aujourd'hui")) }.build())
             .addItem(Row.Builder().setTitle("📅 Demain").addText(resume(LocalDate.now().plusDays(1)))
                 .setOnClickListener { screenManager.push(AgendaVoitureScreen(carContext, LocalDate.now().plusDays(1), "Demain")) }.build())
-        CarBridge.contexte().lastOrNull { !it.fromUser }?.let { m ->
-            liste.addItem(Row.Builder().setTitle("💬 Dernière réponse").addText(m.text.replace(Regex("\\s+"), " ").take(120)).build())
+        val derniere = (CarBridge.contexte().ifEmpty { app.chat.toList() }).lastOrNull { !it.fromUser }
+        derniere?.let { m ->
+            val propre = m.text.replace(Regex("[#*_`>|]+"), "").replace(Regex("\\s+"), " ").trim()
+            liste.addItem(Row.Builder().setTitle("🔊 Dernière réponse").addText(propre.take(120))
+                .setOnClickListener { VoixVoiture.parler(carContext, propre.take(1500)) }.build())
         }
-        return ListTemplate.Builder().setTitle("JARVIS").setHeaderAction(Action.APP_ICON).setSingleList(liste.build()).build()
+        return ListTemplate.Builder().setTitle("JARVIS · ${fr.dd.jarvis.voice.VoixNaturelle.personnage(app).icone}")
+            .setHeaderAction(Action.APP_ICON).setSingleList(liste.build()).build()
+    }
+}
+
+/** Raccourcis : une demande toute faite, un appui → JARVIS la traite et répond à voix haute. */
+class RaccourcisVoitureScreen(ctx: CarContext) : Screen(ctx) {
+    private val app = ctx.applicationContext as JarvisApp
+    override fun onGetTemplate(): Template {
+        val b = ItemList.Builder()
+        RaccourcisVoiture.liste(app).take(limiteListe(carContext)).forEach { q ->
+            b.addItem(Row.Builder().setTitle(q.take(70)).setOnClickListener { screenManager.push(ReponseTexteScreen(carContext, q)) }.build())
+        }
+        return ListTemplate.Builder().setTitle("⚡ Raccourcis").setHeaderAction(Action.BACK).setSingleList(b.build()).build()
     }
 }
 
@@ -139,10 +143,6 @@ class JarvisCarScreen(ctx: CarContext) : Screen(ctx) {
 
 class AgendaVoitureScreen(ctx: CarContext, private val jour: LocalDate, private val titre: String) : Screen(ctx) {
     private val app = ctx.applicationContext as JarvisApp
-
-    private fun naviguer(lieu: String) {
-        runCatching { carContext.startCarApp(Intent(CarContext.ACTION_NAVIGATE).setData(Uri.parse("geo:0,0?q=" + Uri.encode(lieu)))) }
-    }
 
     override fun onGetTemplate(): Template {
         val b = ItemList.Builder()
@@ -153,14 +153,41 @@ class AgendaVoitureScreen(ctx: CarContext, private val jour: LocalDate, private 
             evts.take(limiteListe(carContext)).forEach { e ->
                 val quand = if (e.allDay) "Journée" else "${hm(e.begin)}–${hm(e.end)}"
                 val r = Row.Builder().setTitle("$quand · ${e.title.ifBlank { "(sans titre)" }}")
-                if (e.location.isNotBlank()) {
-                    r.addText("📍 ${e.location.take(80)} — toucher pour y aller")
-                    r.setOnClickListener { naviguer(e.location) }
-                }
+                if (e.location.isNotBlank()) r.addText("📍 ${e.location.take(80)}")
+                r.setOnClickListener { screenManager.push(EvenementVoitureScreen(carContext, e)) }
                 b.addItem(r.build())
             }
         }
         return ListTemplate.Builder().setTitle(titre).setHeaderAction(Action.BACK).setSingleList(b.build()).build()
+    }
+}
+
+/** Un rendez-vous : y aller, appeler le client (fiche Société ou numéro dans l'événement), en parler à JARVIS. */
+class EvenementVoitureScreen(ctx: CarContext, private val e: fr.dd.jarvis.device.EventInfo) : Screen(ctx) {
+    private val app = ctx.applicationContext as JarvisApp
+
+    private fun telephone(): Pair<String, String>? {
+        Regex("(?:\\+33\\s?|0)[1-9](?:[\\s.-]?\\d{2}){4}").find(e.description + " " + e.location)?.let { return "le contact" to it.value.replace(Regex("[\\s.-]"), "") }
+        val data = runCatching { app.societe.data }.getOrNull() ?: return null
+        val c = (data.chercherClients(e.title).firstOrNull() ?: e.location.takeIf { it.isNotBlank() }?.let { data.chercherClients(it).firstOrNull() })
+        return c?.takeIf { it.tel.isNotBlank() }?.let { it.nom to it.tel.replace(Regex("[\\s.-]"), "") }
+    }
+
+    override fun onGetTemplate(): Template {
+        val b = ItemList.Builder()
+        val quand = if (e.allDay) "Journée" else "${hm(e.begin)}–${hm(e.end)}"
+        if (e.location.isNotBlank()) b.addItem(Row.Builder().setTitle("🧭 Y aller").addText(e.location.take(90))
+            .setOnClickListener { runCatching { carContext.startCarApp(Intent(CarContext.ACTION_NAVIGATE).setData(Uri.parse("geo:0,0?q=" + Uri.encode(e.location)))) } }.build())
+        telephone()?.let { (nom, tel) ->
+            b.addItem(Row.Builder().setTitle("📞 Appeler $nom").addText(tel)
+                .setOnClickListener { runCatching { carContext.startCarApp(Intent(Intent.ACTION_DIAL).setData(Uri.parse("tel:$tel"))) } }.build())
+        }
+        b.addItem(Row.Builder().setTitle("🎤 Infos utiles par JARVIS").addText("Client, dernière intervention, trajet, météo")
+            .setOnClickListener {
+                screenManager.push(ReponseTexteScreen(carContext, "En 3 phrases courtes, donne-moi les infos utiles pour mon rendez-vous « ${e.title} » à $quand" +
+                    (if (e.location.isNotBlank()) " (${e.location})" else "") + " : client, dernière intervention, temps de trajet."))
+            }.build())
+        return ListTemplate.Builder().setTitle("$quand · ${e.title.ifBlank { "(sans titre)" }}".take(60)).setHeaderAction(Action.BACK).setSingleList(b.build()).build()
     }
 }
 
@@ -194,21 +221,9 @@ class ConversationVoiture private constructor(private val ctx: CarContext, priva
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var micro: MicroVoiture? = null
     private var tache: Job? = null
-    private var tts: TextToSpeech? = null
-    private var ttsPret = false
     private var fermee = false
     private var incompris = 0
     private val arret = Regex("^(merci|c'est tout|c est tout|stop|arrete|termine|fin|au revoir|laisse tomber|ca suffit)\\b.*")
-
-    init {
-        tts = TextToSpeech(ctx) { st ->
-            if (st == TextToSpeech.SUCCESS) {
-                tts?.language = Locale.FRANCE
-                runCatching { tts?.setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()) }
-                ttsPret = true
-            }
-        }
-    }
 
     private fun silenceMs() = app.store.silenceSec.value.coerceIn(4, 30) * 1000L
 
@@ -222,7 +237,7 @@ class ConversationVoiture private constructor(private val ctx: CarContext, priva
     /** Écoute une phrase au micro de la voiture, la transcrit et la traite. */
     fun ecouter(premiere: Boolean = false) {
         if (fermee) return
-        tts?.stop()
+        VoixVoiture.taire()
         micro?.arreter(); tache?.cancel()
         montrer(Etat.Ecoute)
         tache = scope.launch {
@@ -271,21 +286,13 @@ class ConversationVoiture private constructor(private val ctx: CarContext, priva
         parler(propre.take(1500)) { ecouter() }
     }
 
+    /** JARVIS parle avec SA voix (personnage choisi, voix naturelle Gemini ou voix Android du même genre). */
     private fun parler(texte: String, puis: () -> Unit) {
-        val t = tts
-        if (!ttsPret || t == null) { main.post(puis); return }
-        val id = "jarvis-" + System.nanoTime()
-        t.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String?) {}
-            override fun onDone(utteranceId: String?) { if (utteranceId == id) main.post { if (!fermee) puis() } }
-            @Deprecated("Deprecated in Java")
-            override fun onError(utteranceId: String?) { if (utteranceId == id) main.post { if (!fermee) puis() } }
-        })
-        t.speak(texte, TextToSpeech.QUEUE_FLUSH, null, id)
+        VoixVoiture.parler(ctx, texte) { if (!fermee) puis() }
     }
 
     /** Coupe JARVIS et réécoute tout de suite (bouton « Répondre »). */
-    fun repondre() { tts?.stop(); ecouter() }
+    fun repondre() { VoixVoiture.taire(); ecouter() }
 
     private fun terminer(texte: String) {
         micro?.arreter()
@@ -297,7 +304,7 @@ class ConversationVoiture private constructor(private val ctx: CarContext, priva
         fermee = true
         micro?.arreter(); tache?.cancel()
         scope.cancel()
-        runCatching { tts?.stop(); tts?.shutdown() }
+        VoixVoiture.taire()
         if (courante === this) courante = null
     }
 
@@ -353,12 +360,10 @@ class ReponseTexteScreen(ctx: CarContext, private val question: String) : Screen
     private val app = ctx.applicationContext as JarvisApp
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var texte: String? = null
-    private var tts: TextToSpeech? = null
 
     init {
-        tts = TextToSpeech(ctx) { st -> if (st == TextToSpeech.SUCCESS) tts?.language = Locale.FRANCE }
         lifecycle.addObserver(object : DefaultLifecycleObserver {
-            override fun onDestroy(owner: LifecycleOwner) { scope.cancel(); runCatching { tts?.stop(); tts?.shutdown() } }
+            override fun onDestroy(owner: LifecycleOwner) { scope.cancel(); VoixVoiture.taire() }
         })
         scope.launch {
             app.chatCharger()
@@ -376,13 +381,19 @@ class ReponseTexteScreen(ctx: CarContext, private val question: String) : Screen
             app.chatAjouter(assistantMessage)
             texte = propre
             invalidate()
-            runCatching { tts?.speak(propre.take(1500), TextToSpeech.QUEUE_FLUSH, null, "jarvis") }
+            VoixVoiture.parler(carContext, propre.take(1500))
         }
     }
 
     override fun onGetTemplate(): Template {
         val t = texte
         return if (t == null) MessageTemplate.Builder("« ${question.take(160)} »").setTitle("JARVIS").setHeaderAction(Action.BACK).setLoading(true).build()
-        else MessageTemplate.Builder(t.take(450)).setTitle("JARVIS").setHeaderAction(Action.BACK).build()
+        else MessageTemplate.Builder(t.take(450)).setTitle("JARVIS").setHeaderAction(Action.BACK)
+            .addAction(Action.Builder().setTitle("🔊 Relire").setOnClickListener { VoixVoiture.parler(carContext, t.take(1500)) }.build())
+            .addAction(Action.Builder().setTitle("🎤 Parler").setOnClickListener {
+                VoixVoiture.taire()
+                if (voixVoiture(carContext)) ConversationVoiture.ouvrir(carContext, screenManager)
+                else screenManager.push(JarvisSearchScreen(carContext) { q -> screenManager.push(ReponseTexteScreen(carContext, q)) })
+            }.build()).build()
     }
 }

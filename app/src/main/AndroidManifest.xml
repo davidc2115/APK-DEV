@@ -152,10 +152,14 @@
             android:icon="@drawable/ic_launcher">
             <intent-filter>
                 <action android:name="androidx.car.app.CarAppService" />
+                <!-- Plusieurs catégories dans le MÊME filtre : Android Auto liste l'appli si l'une d'elles est acceptée. -->
                 <category android:name="androidx.car.app.category.MESSAGING" />
+                <category android:name="androidx.car.app.category.IOT" />
+                <category android:name="androidx.car.app.category.POI" />
             </intent-filter>
         </service>
-        <meta-data android:name="androidx.car.app.minCarApiLevel" android:value="7" />
+        <meta-data android:name="androidx.car.app.minCarApiLevel" android:value="3" />
+        <receiver android:name=".car.VisibiliteReceiver" android:exported="false" />
         <service
             android:name=".service.JarvisSessionService"
             android:exported="true"

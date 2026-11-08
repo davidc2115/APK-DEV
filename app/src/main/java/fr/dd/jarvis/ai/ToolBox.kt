@@ -122,6 +122,9 @@ class ToolBox(
                 "ranger" to prop("« true » pour appliquer les libellés dans Gmail. Un re-tri remplace les anciens libellés de catégorie par les bons."),
                 "archiver" to prop("« true » pour aussi retirer de la boîte de réception les newsletters et notifications (avec ranger).")
             )))
+        put(tool("changer_voix", "Change la voix de JARVIS (personnage) : homme, femme, jeune, âgé(e), grave, douce, IA/robot, narrateur, animatrice radio, murmure, Jarvis (par défaut), ou un nom de voix Gemini (Kore, Puck…). Sans précision : liste les voix.",
+            mapOf("voix" to prop("Description de la voix voulue, ex. « femme âgée », « jeune homme », « robot », « par défaut ». Vide = lister."),
+                "description" to prop("Facultatif : description libre (âge, ton, accent) pour une voix sur mesure, ex. « homme de 60 ans avec un accent du Sud »."))))
         put(tool("tournee_optimisee", "Tournée OPTIMISÉE d'une liste de clients à visiter (sans horaires imposés) : ordre le plus court, trajets, heures d'arrivée, météo et ensoleillement sur chaque installation (utile pour les mesures de production), lien Google Maps de toute la tournée. Pour des rendez-vous déjà fixés dans l'agenda, utilise itineraire.",
             mapOf(
                 "clients" to prop("Clients (ou adresses) à visiter, séparés par des virgules ou « ; »."),
@@ -469,6 +472,7 @@ class ToolBox(
         "mail_compte" -> mailCompte(a)
         "mail_envoyer" -> mailEnvoyer(a)
         "marquer_mails_traites" -> marquerTraites(a)
+        "changer_voix" -> changerVoix(a)
         "rechercher_sms" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             fr.dd.jarvis.device.Telephony.rechercher(app, a.optString("contact"), a.optString("recherche"), a.optString("date_debut"), a.optString("date_fin"), a.optString("count").toIntOrNull() ?: 10)
         }, direct = true)
@@ -1712,6 +1716,27 @@ class ToolBox(
             val detail = listOfNotNull(if (traite) "lus + libellé Traité" else null, if (archiver) "archivés" else null)
             ToolResult("✅ $n mail(s) marqués comme $quoi" + (if (detail.isEmpty()) "" else " (" + detail.joinToString(", ") + ")") + ".\n$tri")
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { ToolResult("❌ ${e.message}\n$tri") }
+    }
+
+    private fun changerVoix(a: JSONObject): ToolResult {
+        val vn = fr.dd.jarvis.voice.VoixNaturelle
+        val demande = a.optString("voix").trim()
+        val description = a.optString("description").trim()
+        val liste = vn.PERSONNAGES.groupBy { it.groupe }.entries.joinToString("\n") { (g, l) -> "$g : " + l.joinToString(", ") { it.libelle } }
+        if (demande.isBlank() && description.isBlank())
+            return ToolResult("🎙️ Voix actuelle : ${vn.personnage(app).libelle}\n\n$liste\n\nOu une voix sur mesure décrite librement (âge, ton, accent).", direct = true)
+        val p = vn.trouver("$demande $description".trim())
+        if (description.isNotBlank()) {
+            // Voix sur mesure : la description libre guide l'interprétation, sur la voix Gemini la plus proche.
+            val base = p?.voix ?: vn.trouver(description)?.voix ?: vn.personnage(app).voix
+            store.voixNom.set(base); store.voixStyle.set(description); store.voixPersonnage.set(vn.SUR_MESURE)
+            vn.reactiver()
+            return ToolResult("🎙️ Voix sur mesure (base $base) : « $description ». Je parle maintenant avec cette voix.")
+        }
+        if (p == null) return ToolResult("Je n'ai pas trouvé de voix correspondant à « $demande ». Voix disponibles :\n$liste")
+        if (p.id == vn.SUR_MESURE) { store.voixNom.set(p.voix); store.voixPersonnage.set(vn.SUR_MESURE) } else store.voixPersonnage.set(p.id)
+        vn.reactiver()
+        return ToolResult("🎙️ Voix changée : ${p.libelle}. Je parle maintenant avec cette voix.")
     }
 
     private suspend fun trierMails(a: JSONObject): ToolResult {

@@ -299,6 +299,8 @@ class HorlogeReceiver : BroadcastReceiver() {
                 Horloge.restaurer(context)
                 // Écoute « Jarvis » : relancée si elle était active (ou notification « Relancer l'écoute » si Android refuse le micro).
                 fr.dd.jarvis.service.JarvisService.restaurer(context)
+                // Mise à jour : JARVIS est-il toujours visible dans Android Auto ? (sinon, proposition de le rétablir)
+                if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) runCatching { fr.dd.jarvis.car.VisibiliteAuto.apresMiseAJour(context) }
             }
             "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" -> Horloge.restaurer(context)
         }

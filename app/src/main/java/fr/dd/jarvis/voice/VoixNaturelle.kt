@@ -17,14 +17,115 @@ import java.util.concurrent.TimeUnit
  * Audio reçu : WAV ou PCM brut 16 bits mono (24 kHz).
  */
 object VoixNaturelle {
-    /** Voix proposées dans les réglages (nom Gemini → description). */
-    val VOIX = linkedMapOf(
-        "Charon" to "posée, informative (homme)", "Orus" to "ferme, assurée (homme)", "Iapetus" to "claire (homme)",
-        "Algenib" to "grave, rocailleuse (homme)", "Sadaltager" to "érudite (homme)", "Kore" to "ferme (femme)",
-        "Aoede" to "légère (femme)", "Sulafat" to "chaleureuse (femme)", "Despina" to "douce (femme)", "Puck" to "enjouée",
+    /** Les 30 voix de Gemini : nom → (genre, caractère). */
+    val CATALOGUE: Map<String, Pair<String, String>> = linkedMapOf(
+        "Charon" to ("homme" to "informative"), "Orus" to ("homme" to "ferme"), "Iapetus" to ("homme" to "claire"),
+        "Algenib" to ("homme" to "rocailleuse"), "Sadaltager" to ("homme" to "érudite"), "Puck" to ("homme" to "enjouée"),
+        "Fenrir" to ("homme" to "vive"), "Enceladus" to ("homme" to "soufflée"), "Umbriel" to ("homme" to "décontractée"),
+        "Algieba" to ("homme" to "veloutée"), "Rasalgethi" to ("homme" to "informative"), "Alnilam" to ("homme" to "ferme"),
+        "Schedar" to ("homme" to "égale"), "Achird" to ("homme" to "amicale"), "Zubenelgenubi" to ("homme" to "familière"),
+        "Sadachbia" to ("homme" to "animée"),
+        "Kore" to ("femme" to "ferme"), "Zephyr" to ("femme" to "lumineuse"), "Leda" to ("femme" to "jeune"),
+        "Aoede" to ("femme" to "légère"), "Callirrhoe" to ("femme" to "décontractée"), "Autonoe" to ("femme" to "lumineuse"),
+        "Despina" to ("femme" to "veloutée"), "Erinome" to ("femme" to "claire"), "Laomedeia" to ("femme" to "enjouée"),
+        "Achernar" to ("femme" to "douce"), "Gacrux" to ("femme" to "mûre"), "Pulcherrima" to ("femme" to "affirmée"),
+        "Vindemiatrix" to ("femme" to "tendre"), "Sulafat" to ("femme" to "chaleureuse"),
     )
+
+    /**
+     * Un personnage de voix : une voix Gemini + une description (âge, ton, débit) qui oriente l'interprétation ;
+     * [hauteur] et [debit] règlent la voix Android de repli (même genre) pour rester proche du personnage.
+     */
+    data class Personnage(val id: String, val icone: String, val nom: String, val groupe: String, val voix: String, val style: String,
+                          val hauteur: Float = 1f, val debit: Float = 1f, val mots: Set<String> = emptySet()) {
+        val genre get() = CATALOGUE[voix]?.first ?: "homme"
+        val libelle get() = "$icone $nom"
+    }
+
+    const val SUR_MESURE = "perso"
+    private const val FR = " Parle en français, avec un débit naturel et fluide."
+
+    val PERSONNAGES = listOf(
+        Personnage("jarvis", "🤵", "Jarvis, posé", "Hommes", "Charon", "Voix d'un assistant personnel futuriste, calme, posée et assurée, comme un majordome attentionné.", 1f, 1f,
+            setOf("jarvis", "majordome", "defaut", "normal", "normale", "habituelle", "pose", "homme", "adulte")),
+        Personnage("jeune_homme", "🧑", "Jeune homme dynamique", "Hommes", "Puck", "Voix d'un jeune homme d'environ 25 ans, dynamique, souriante et spontanée, débit vif.", 1.08f, 1.08f,
+            setOf("jeune", "homme", "garcon", "dynamique", "enjoue", "ado", "jeunot")),
+        Personnage("homme_assure", "👨‍💼", "Homme assuré, la quarantaine", "Hommes", "Orus", "Voix d'un homme d'une quarantaine d'années, assurée, nette et professionnelle.", 0.95f, 1f,
+            setOf("homme", "assure", "ferme", "professionnel", "quarantaine", "adulte", "pro")),
+        Personnage("homme_grave", "🧔", "Homme mûr, voix grave", "Hommes", "Algenib", "Voix d'un homme d'une cinquantaine d'années, grave, profonde et chaleureuse, débit posé.", 0.85f, 0.95f,
+            setOf("homme", "grave", "profonde", "mur", "cinquantaine", "basse")),
+        Personnage("homme_age", "👴", "Homme âgé, sage", "Hommes", "Sadaltager", "Voix d'un homme âgé d'environ 75 ans, sage et bienveillante, légèrement voilée, débit lent et posé.", 0.8f, 0.85f,
+            setOf("homme", "age", "vieux", "vieil", "sage", "grandpere", "papy", "papi", "senior", "ancien", "aine")),
+        Personnage("femme_assuree", "👩‍💼", "Femme assurée (façon FRIDAY)", "Femmes", "Kore", "Voix d'une femme d'environ 35 ans, claire, assurée et efficace, comme une assistante futuriste.", 1.05f, 1f,
+            setOf("femme", "feminine", "assuree", "ferme", "friday", "adulte", "pro", "professionnelle")),
+        Personnage("jeune_femme", "👱‍♀️", "Jeune femme pétillante", "Femmes", "Leda", "Voix d'une jeune femme d'environ 22 ans, pétillante, souriante et spontanée.", 1.15f, 1.08f,
+            setOf("femme", "jeune", "fille", "petillante", "enjouee", "dynamique", "ado")),
+        Personnage("femme_douce", "🌸", "Femme douce, apaisante", "Femmes", "Achernar", "Voix d'une femme douce, calme et apaisante, débit lent et rassurant.", 1f, 0.92f,
+            setOf("femme", "douce", "doux", "calme", "apaisante", "zen", "rassurante", "relax")),
+        Personnage("femme_mure", "👩", "Femme mûre, chaleureuse", "Femmes", "Gacrux", "Voix d'une femme d'une cinquantaine d'années, chaleureuse, rassurante et posée.", 0.92f, 0.95f,
+            setOf("femme", "mure", "chaleureuse", "cinquantaine", "maman", "mere")),
+        Personnage("femme_agee", "👵", "Femme âgée, tendre", "Femmes", "Sulafat", "Voix d'une dame âgée d'environ 75 ans, tendre et bienveillante, légèrement chevrotante, débit lent.", 0.88f, 0.85f,
+            setOf("femme", "agee", "vieille", "grandmere", "mamie", "mami", "senior", "tendre", "dame", "ancienne")),
+        Personnage("ia", "🤖", "IA futuriste", "Spéciales", "Schedar", "Voix d'une intelligence artificielle futuriste : neutre, précise, régulière, très légèrement synthétique.", 0.9f, 1f,
+            setOf("ia", "robot", "robotique", "synthetique", "machine", "futuriste", "neutre", "ordinateur")),
+        Personnage("narrateur", "🎬", "Narrateur de cinéma", "Spéciales", "Alnilam", "Voix de narrateur de bande-annonce de cinéma, profonde, intense et captivante.", 0.82f, 0.92f,
+            setOf("narrateur", "cinema", "film", "bandeannonce", "epique", "conteur")),
+        Personnage("radio", "📻", "Animatrice radio", "Spéciales", "Laomedeia", "Voix d'animatrice de radio du matin, enjouée, énergique et très articulée.", 1.08f, 1.1f,
+            setOf("radio", "animatrice", "presentatrice", "matin", "energique", "speakerine")),
+        Personnage("murmure", "🤫", "Murmure", "Spéciales", "Enceladus", "Voix basse et feutrée, presque chuchotée, calme et intime.", 0.95f, 0.9f,
+            setOf("chuchote", "chuchotee", "murmure", "chuchotement", "basse", "feutree", "discrete")),
+    )
+
+    /** Personnage choisi (un ancien choix de voix Gemini devient un personnage « sur mesure »). */
+    fun personnage(app: JarvisApp): Personnage {
+        val id = app.store.voixPersonnage.value
+        PERSONNAGES.firstOrNull { it.id == id }?.let { return it }
+        val voix = app.store.voixNom.value.ifBlank { "Charon" }.takeIf { it in CATALOGUE } ?: "Charon"
+        if (id.isBlank() && voix == "Charon") return PERSONNAGES[0]
+        return surMesure(voix, app.store.voixStyle.value)
+    }
+
+    fun surMesure(voix: String, style: String): Personnage {
+        val g = CATALOGUE[voix]?.first ?: "homme"
+        return Personnage(SUR_MESURE, "🎛️", "Sur mesure · $voix", "Sur mesure", voix,
+            style.trim().ifBlank { "Voix ${CATALOGUE[voix]?.second ?: "naturelle"} d'${if (g == "femme") "une femme" else "un homme"}, naturelle et posée." })
+    }
+
+    private fun norm(s: String) = java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
+
+    /** Personnage décrit en mots (« une voix de femme âgée », « le robot », « Kore »…) ; null si rien ne correspond. */
+    fun trouver(texte: String): Personnage? {
+        val n = norm(texte)
+        CATALOGUE.keys.firstOrNull { Regex("\\b${it.lowercase()}\\b").containsMatchIn(n) }?.let { v ->
+            return PERSONNAGES.firstOrNull { it.voix == v } ?: surMesure(v, "")
+        }
+        val mots = n.replace(Regex("grand[- ]?(pere|mere)")) { it.value.replace(Regex("[- ]"), "") }
+            .replace(Regex("bande[- ]annonce"), "bandeannonce").split(Regex("[^a-z0-9]+")).filter { it.isNotBlank() }
+            .map { it.removeSuffix("s") }.toSet()
+        val femme = mots.any { it in setOf("femme", "feminine", "fille", "dame", "mamie", "mami", "grandmere", "vieille") }
+        val homme = mots.any { it in setOf("homme", "masculine", "masculin", "garcon", "monsieur", "papy", "papi", "grandpere", "vieux", "mec") }
+        return PERSONNAGES.map { p ->
+            var score = p.mots.count { it in mots } * 2
+            if (femme && p.genre == "femme" || homme && p.genre == "homme") score += 1
+            if (femme && !homme && p.genre == "homme" || homme && !femme && p.genre == "femme") score -= 5
+            p to score
+        }.filter { it.second > 1 }.maxByOrNull { it.second }?.first
+    }
+
+    /** Description de la voix pour cette phrase : personnage + situation (nuit : plus bas ; voiture : bien articulé). */
+    fun style(app: JarvisApp, p: Personnage = personnage(app)): String {
+        val situation = when {
+            app.enVoiture -> " Articule bien, débit un peu plus posé, on t'écoute en conduisant."
+            runCatching { fr.dd.jarvis.device.Contexte.nuitMaintenant(app) }.getOrDefault(false) -> " C'est la nuit : parle plus doucement et plus bas, avec calme."
+            else -> ""
+        }
+        return p.style + situation + FR
+    }
+
+    /** Voix proposées dans les réglages (nom Gemini → description). */
+    val VOIX: Map<String, String> get() = CATALOGUE.mapValues { (_, v) -> "${v.second} (${v.first})" }
+
     private val MODELES = listOf("gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts", "gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts")
-    private const val STYLE = "Voix d'un assistant personnel futuriste, calme, posée et assurée, débit naturel et fluide, en français."
     private val JSON = "application/json; charset=utf-8".toMediaType()
 
     private val http = OkHttpClient.Builder().connectTimeout(6, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).callTimeout(25, TimeUnit.SECONDS).build()
@@ -54,14 +155,16 @@ object VoixNaturelle {
     fun synthese(app: JarvisApp, texte: String): Audio? {
         if (!active(app) || texte.isBlank()) return null
         val cles = app.store.geminiKeys.filter { it.isNotBlank() }
-        val voix = app.store.voixNom.value.ifBlank { "Charon" }
+        val p = personnage(app)
+        val voix = p.voix
+        val style = style(app, p)
         val modeles = (listOfNotNull(modeleQuiMarche) + MODELES).distinct()
         var quota = false; var dernier = ""
         for (m in modeles) {
             for (i in cles.indices) {
                 val k = cles[(cle + i) % cles.size]
                 try {
-                    val a = essayer(k, m, texte, voix)
+                    val a = essayer(k, m, texte, voix, style)
                     modeleQuiMarche = m; cle = (cle + i) % cles.size
                     return a
                 } catch (e: Echec) {
@@ -82,21 +185,21 @@ object VoixNaturelle {
     }
 
     /** Un modèle par ses deux API : Interactions (modèles récents), puis generateContent (anciens modèles, ou si refusé). */
-    private fun essayer(k: String, m: String, texte: String, voix: String): Audio {
-        if (m.startsWith("gemini-2.5")) return ancienne(k, m, texte, voix)
-        return try { interactions(k, m, texte, voix) } catch (e: Echec) {
-            if (e.code in setOf(400, 404, 501)) ancienne(k, m, texte, voix) else throw e
+    private fun essayer(k: String, m: String, texte: String, voix: String, style: String): Audio {
+        if (m.startsWith("gemini-2.5")) return ancienne(k, m, texte, voix, style)
+        return try { interactions(k, m, texte, voix, style) } catch (e: Echec) {
+            if (e.code in setOf(400, 404, 501)) ancienne(k, m, texte, voix, style) else throw e
         }
     }
 
     /** Essai de chaque modèle avec la première clé : résultat lisible (pour comprendre pourquoi la voix ne passe pas). */
     fun diagnostic(app: JarvisApp): String {
         val k = app.store.geminiKeys.firstOrNull { it.isNotBlank() } ?: return "Aucune clé Gemini dans les réglages."
-        val voix = app.store.voixNom.value.ifBlank { "Charon" }
-        return MODELES.joinToString("\n") { m ->
+        val p = personnage(app)
+        return "Voix : ${p.libelle} (${p.voix})\n" + MODELES.joinToString("\n") { m ->
             val debut = System.currentTimeMillis()
             try {
-                val a = essayer(k, m, "Bonjour, je suis JARVIS.", voix)
+                val a = essayer(k, m, "Bonjour, je suis JARVIS.", p.voix, style(app, p))
                 modeleQuiMarche = modeleQuiMarche ?: m
                 "✅ $m : ${a.pcm.size / (2 * a.frequence.coerceAtLeast(1))} s d'audio en ${System.currentTimeMillis() - debut} ms"
             } catch (e: Echec) {
@@ -118,20 +221,22 @@ object VoixNaturelle {
         }
     }
 
-    private fun interactions(cle: String, modele: String, texte: String, voix: String): Audio {
+    private fun interactions(cle: String, modele: String, texte: String, voix: String, style: String): Audio {
         val corps = JSONObject().put("model", modele)
             .put("input", JSONArray().put(JSONObject().put("type", "user_input").put("content", JSONArray().put(
                 JSONObject().put("type", "text").put("text", texte)
-                    .put("annotations", JSONArray().put(JSONObject().put("type", "speech_metadata").put("style", STYLE)))))))
+                    .put("annotations", JSONArray().put(JSONObject().put("type", "speech_metadata").put("style", style)))))))
             .put("response_format", JSONObject().put("type", "audio"))
             .put("generation_config", JSONObject().put("speech_config", JSONArray().put(JSONObject().put("voice", voix))))
         return audioDe(post("https://generativelanguage.googleapis.com/v1beta/interactions", cle, corps))
             ?: throw Echec(502, "réponse sans audio")
     }
 
-    private fun ancienne(cle: String, modele: String, texte: String, voix: String): Audio {
+    private fun ancienne(cle: String, modele: String, texte: String, voix: String, style: String): Audio {
+        // Anciens modèles : la description de la voix se donne en tête du texte (« Dis ce qui suit avec … : »).
+        val consigne = "Dis ce qui suit avec cette voix — ${style.trim()} :\n$texte"
         val corps = JSONObject()
-            .put("contents", JSONArray().put(JSONObject().put("parts", JSONArray().put(JSONObject().put("text", texte)))))
+            .put("contents", JSONArray().put(JSONObject().put("parts", JSONArray().put(JSONObject().put("text", consigne)))))
             .put("generationConfig", JSONObject().put("responseModalities", JSONArray().put("AUDIO"))
                 .put("speechConfig", JSONObject().put("voiceConfig", JSONObject().put("prebuiltVoiceConfig", JSONObject().put("voiceName", voix)))))
         return audioDe(post("https://generativelanguage.googleapis.com/v1beta/models/$modele:generateContent", cle, corps))

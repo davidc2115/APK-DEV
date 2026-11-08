@@ -103,11 +103,11 @@ object AdbShell {
     }
 
     /** Installation silencieuse d'un APK via ADB (flux « exec: », sans fichier intermédiaire). */
-    suspend fun installApk(ctx: Context, apk: File): String = withContext(Dispatchers.IO) {
+    suspend fun installApk(ctx: Context, apk: File, options: String = ""): String = withContext(Dispatchers.IO) {
         try {
             val m = mgr(ctx)
             if (!m.isConnected && !m.connectTls(ctx.applicationContext, 6000)) return@withContext "ADB non connecté."
-            m.openStream("exec:cmd package install -S ${apk.length()}").use { st ->
+            m.openStream("exec:cmd package install $options -S ${apk.length()}".replace("  ", " ")).use { st ->
                 st.openOutputStream().use { o -> apk.inputStream().use { it.copyTo(o) }; o.flush() }
                 st.openInputStream().bufferedReader().readText().trim()
             }
