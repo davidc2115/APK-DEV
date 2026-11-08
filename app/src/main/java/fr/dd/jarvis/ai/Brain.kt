@@ -263,7 +263,7 @@ class Brain(
                 }
                 onStatus("⚙️ $name…")
                 val res = try {
-                    if (name in retires) ToolResult(if (name.startsWith("ssh") || name == "serveur_diagnostic") "Pour Home Assistant, utilise l'API (ha_entites, ha_etat, ha_service, ha_config, ha_dashboard), pas le SSH." else "Outil indisponible ici.")
+                    if (name in retires) ToolResult(if (name.startsWith("ssh") || name == "serveur_diagnostic") "Pour Home Assistant, utilise l'API (ha_entites, ha_etat, ha_service, ha_config, ha_dashboard, ha_admin), pas le SSH." else "Outil indisponible ici.")
                     else tools.execute(name, args)
                 } catch (e: ApiException) {
                     ToolResult("Erreur du service IA : ${e.message}")

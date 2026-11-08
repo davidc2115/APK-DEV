@@ -12,9 +12,9 @@ import org.json.JSONObject
 class ServeurTools(private val app: JarvisApp, private val confirm: suspend (String, Boolean) -> Boolean) {
 
     companion object {
-        val KEYWORDS = Regex("home ?assistant|domotique|\\bha\\b|ssh|serveur|server|yaml|docker|lumi[èe]re|volet|thermostat|automatisation|automation|sc[èe]ne\\b|configuration\\.yaml|debian|raspberry|esphome|zigbee|mqtt|capteur|\\bprise\\b|interrupteur|box|livebox|freebox|bbox|vpn|wireguard|openvpn|redirection|\\bnat\\b|dmz|dhcp|disque|nas|\\bftp\\b|\\bsmb\\b|r[ée]seau|wifi|wi-fi|imprim|scann|\\bip\\b|adresse ip|github|\\bgit\\b|canon|epson|brother|\\bhp\\b|appareils?\\b|script|\\bcode\\b|ping|port|volume|\\bson\\b|t[ée]l[ée]\\b|t[ée]l[ée]vision|\\btv\\b|chauffage|climatisation|temp[ée]rature|consigne|po[êe]le|poil|degr[ée]s|granul[ée]s|pellet|chaudi[èe]re|radiateur|thermique|climate|media_player|lecteur multim[ée]dia|localis|o[uù] (est|se trouve)|position d|luminosit[ée]|store\\b|persienne|\\ballume\\b|allumer|[ée]teins?\\b|[ée]teindre", RegexOption.IGNORE_CASE)
+        val KEYWORDS = Regex("home ?assistant|domotique|\\bha\\b|hacs|int[ée]gration|entit[ée]s?\\b|helper|\\baides?\\b|ssh|serveur|server|yaml|docker|lumi[èe]re|volet|thermostat|automatisation|automation|sc[èe]ne\\b|configuration\\.yaml|debian|raspberry|esphome|zigbee|mqtt|capteur|\\bprise\\b|interrupteur|box|livebox|freebox|bbox|vpn|wireguard|openvpn|redirection|\\bnat\\b|dmz|dhcp|disque|nas|\\bftp\\b|\\bsmb\\b|r[ée]seau|wifi|wi-fi|imprim|scann|\\bip\\b|adresse ip|github|\\bgit\\b|canon|epson|brother|\\bhp\\b|appareils?\\b|script|\\bcode\\b|ping|port|volume|\\bson\\b|t[ée]l[ée]\\b|t[ée]l[ée]vision|\\btv\\b|chauffage|climatisation|temp[ée]rature|consigne|po[êe]le|poil|degr[ée]s|granul[ée]s|pellet|chaudi[èe]re|radiateur|thermique|climate|media_player|lecteur multim[ée]dia|localis|o[uù] (est|se trouve)|position d|luminosit[ée]|store\\b|persienne|\\ballume\\b|allumer|[ée]teins?\\b|[ée]teindre", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
-        val NAMES = setOf("ha_entites", "ha_position", "ha_etat", "ha_service", "ha_config", "ha_dashboard", "ssh_commande", "ssh_fichier", "serveur_diagnostic", "serveur_scan_ports", "routeur_diagnostiquer", "reseau_infos", "reseau_scanner", "appareil_sonder", "appareil_page", "imprimantes_trouver", "imprimer", "ssh_script", "github", "appareils_liste", "appareil_nommer", "ip_publique", "box_disque", "freebox")
+        val NAMES = setOf("ha_entites", "ha_position", "ha_etat", "ha_service", "ha_config", "ha_dashboard", "ha_admin", "ssh_commande", "ssh_fichier", "serveur_diagnostic", "serveur_scan_ports", "routeur_diagnostiquer", "reseau_infos", "reseau_scanner", "appareil_sonder", "appareil_page", "imprimantes_trouver", "imprimer", "ssh_script", "github", "appareils_liste", "appareil_nommer", "ip_publique", "box_disque", "freebox")
     }
 
     private fun prop(d: String) = JSONObject().put("type", "string").put("description", d)
@@ -46,6 +46,28 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 "section" to prop("Index de la section (0 par défaut) dans une vue Sections."),
                 "carte" to prop("JSON d'une carte Lovelace à ajouter, ex. {\"type\":\"tile\",\"entity\":\"light.salon\"}."),
                 "vue_json" to prop("JSON complet de la nouvelle vue à ajouter.")), listOf("action")),
+        tool("ha_admin", "Home Assistant : ADMINISTRATION COMPLÈTE (accès administrateur). " +
+            "Entités : entites (registre : recherche, domaine, integration) | entite_modifier (entity_id + nom, nouvel_id, icone, piece, desactiver=oui/non, masquer=oui/non) | entite_supprimer (entity_id). " +
+            "Appareils : appareils | appareil_modifier (appareil + nom, piece, desactiver) | appareil_supprimer. Pièces : pieces | piece_creer (nom) | piece_renommer (piece, nouveau_nom) | piece_supprimer. " +
+            "Intégrations : integrations | integration_ajouter (domaine, ex. hacs, mqtt, shelly, tuya, zha… → renvoie le formulaire à remplir) | integration_etape (flow_id + donnees ; type=options pour un flux d'options) | integration_options (integration) | integration_recharger | integration_supprimer | integration_annuler (flow_id). " +
+            "Automatisations/scripts/scènes de l'interface : automatisations | scripts | scenes | automatisation_lire / script_lire / scene_lire (id ou entity_id) | automatisation_ecrire / script_ecrire / scene_ecrire (id vide = création ; configuration = JSON complet : alias, triggers, conditions, actions…) | automatisation_supprimer / script_supprimer / scene_supprimer. " +
+            "Aides (interrupteurs virtuels, nombres, listes, textes, dates, boutons, compteurs, minuteurs, plannings) : aides | aide_creer (type + nom + options JSON, ex. {\"min\":0,\"max\":100,\"step\":1}) | aide_supprimer (type + id). " +
+            "HACS : hacs_etat | hacs_installer (installe HACS sur le serveur, redémarre, puis donne le code GitHub à saisir) | hacs_chercher (recherche, categorie integration/plugin/theme…) | hacs_telecharger (depot = propriétaire/dépôt ou id, version optionnelle) | hacs_depot_ajouter (dépôt personnalisé + categorie) | hacs_supprimer. " +
+            "Système : verifier (configuration) | journal (lignes) | modele (modèle Jinja à évaluer) | redemarrer. " +
+            "Accès brut à TOUT le reste : ws (type de commande WebSocket + donnees) | rest (methode GET/POST/DELETE + chemin /api/… + donnees). " +
+            "Les suppressions, redémarrages et commandes qui modifient demandent confirmation. Pour modifier une automatisation : la LIRE d'abord puis renvoyer la configuration COMPLÈTE.",
+            mapOf("action" to prop("Une des actions listées."),
+                "entity_id" to prop("Identifiant d'entité (ex. light.salon, automation.reveil)."),
+                "recherche" to prop("Filtre texte (entites, appareils, hacs_chercher)."), "domaine" to prop("entites : domaine (light, sensor…). integration_ajouter : domaine de l'intégration (hacs, mqtt…)."),
+                "integration" to prop("Nom, domaine ou entry_id d'une intégration."), "appareil" to prop("Nom ou id d'un appareil."), "piece" to prop("Nom d'une pièce (créée si elle n'existe pas pour entite_modifier / appareil_modifier)."),
+                "nom" to prop("Nouveau nom (entité, appareil, pièce, aide)."), "nouvel_id" to prop("entite_modifier : nouvel entity_id complet (ex. light.lampe_salon)."), "nouveau_nom" to prop("piece_renommer : nouveau nom."),
+                "icone" to prop("Icône MDI (ex. mdi:lamp)."), "desactiver" to prop("oui / non."), "masquer" to prop("oui / non."),
+                "id" to prop("Id d'une automatisation / scène / script / aide."), "configuration" to prop("JSON complet d'une automatisation, d'un script ou d'une scène."),
+                "flow_id" to prop("Identifiant du flux de configuration en cours."), "donnees" to prop("JSON : valeurs du formulaire (integration_etape), paramètres (ws, rest)."),
+                "type" to prop("aide_creer/aide_supprimer : input_boolean, input_number, input_select, input_text, input_datetime, input_button, counter, timer, schedule. ws : type de commande WebSocket. integration_etape : options pour un flux d'options."),
+                "options" to prop("aide_creer : JSON des options de l'aide."), "depot" to prop("HACS : propriétaire/dépôt (ex. custom-cards/button-card) ou id."), "categorie" to prop("HACS : integration, plugin (cartes), theme, python_script, template, appdaemon."),
+                "version" to prop("HACS : version à installer (optionnel)."), "methode" to prop("rest : GET, POST ou DELETE."), "chemin" to prop("rest : chemin de l'API, ex. /api/config/config_entries/entry."),
+                "modele" to prop("modele : modèle Jinja, ex. {{ states('sensor.temperature') }}."), "lignes" to prop("journal : nombre de lignes (défaut 60).")), listOf("action")),
         tool("ssh_commande", "Serveur SSH : exécute une commande shell sur le serveur (Debian) et retourne la sortie. Contrôle complet : docker, systemctl, apt, logs, réseau… Les commandes destructrices demandent une confirmation. PAS pour consulter ou piloter Home Assistant (utilise les outils ha_*), seulement pour la maintenance du serveur demandée explicitement.",
             mapOf("commande" to prop("Commande shell."), "delai" to prop("Délai maximal en secondes (défaut 60)."),
                 "hote" to prop("Autre machine à joindre en SSH (IP/nom) au lieu du serveur des Réglages (optionnel)."), "utilisateur" to prop("Utilisateur de cette autre machine."),
@@ -194,6 +216,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 ToolResult(sb.toString(), direct = true)
             }
             "ha_config" -> haConfig(a)
+            "ha_admin" -> ToolResult(HomeAssistantAdmin(app, confirm).executer(a.optString("action"), a))
             "ssh_script" -> {
                 ssh()
                 val code = a.optString("code")
