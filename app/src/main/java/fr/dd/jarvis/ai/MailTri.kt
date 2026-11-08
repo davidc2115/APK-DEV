@@ -14,9 +14,23 @@ object MailTri {
     )
     private val ARCHIVABLES = setOf("Newsletters et promos", "Notifications")
 
+    /** Catégories rangées dans UN SEUL libellé, sans sous-libellé par expéditeur : toutes les newsletters ensemble. */
+    val SANS_SOUS_LIBELLE = setOf("Newsletters et promos")
+
     data class Classe(val mail: MailItem, val cat: String, val prio: Int, val action: String, val sub: String = "") {
-        /** Libellé Gmail : « Clients/Dupont » (sous-libellé) ou simplement la catégorie. */
-        val label get() = if (sub.isBlank()) cat else "$cat/$sub"
+        /** Libellé Gmail : « Clients/Dupont » (sous-libellé) ou simplement la catégorie (toujours le cas des newsletters). */
+        val label get() = if (sub.isBlank() || cat in SANS_SOUS_LIBELLE) cat else "$cat/$sub"
+    }
+
+    /** Clé de comparaison d'un nom : sans accents, casse, espaces ni ponctuation (« Super-U » = « super u »). */
+    internal fun cle(s: String): String = java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFD)
+        .replace(Regex("\\p{M}+"), "").lowercase().replace(Regex("[^a-z0-9]"), "")
+
+    /** Réutilise l'orthographe d'une sous-catégorie déjà connue (« super-u » → « Super U ») : jamais deux libellés pour le même expéditeur. */
+    internal fun canonique(sub: String, connues: Collection<String>): String {
+        val k = cle(sub)
+        if (k.isEmpty()) return sub
+        return connues.firstOrNull { cle(it) == k } ?: sub
     }
 
     private val SYSTEM = """
@@ -24,7 +38,9 @@ Tu es l'agent Tri de mails de JARVIS (entreprise de maintenance photovoltaïque)
 Catégories (une seule par mail) : ${CATEGORIES.joinToString(" | ")}.
 Urgent = attend une action ou une réponse rapide (relance, délai, panne, problème). Clients = échanges avec clients et prospects. Chantiers et planning = rendez-vous, interventions, sites, organisation. Fournisseurs et matériel = devis/commandes/livraisons d'onduleurs, panneaux, outillage. Factures et paiements = factures, devis, relances, règlements. Administratif = impôts, URSSAF, comptable, démarches, juridique. Banque et assurances = banque, assurances, crédits. Notifications = alertes automatiques de services/sites. Newsletters et promos = publicité, lettres d'information. Perso = le reste.
 IMPORTANT : un même expéditeur peut relever de PLUSIEURS catégories selon le contenu (ex. un magasin : ses publicités → Newsletters et promos, ses factures/tickets → Factures et paiements, une commande → Fournisseurs). Lis l'objet ET le texte du mail : classe d'après ce que le mail DIT, jamais d'après l'expéditeur seul. Les indications « déjà vu » ne sont que des repères.
-Sous-catégorie = nom COURT (1 à 3 mots, sans « / ») de l'organisation, de la personne ou du sujet récurrent (ex. « Dupont », « Enedis », « Crédit Agricole », « Amazon », « Chantier Martin »). Un même expéditeur garde TOUJOURS la même sous-catégorie (son nom), même si la catégorie change ; réutilise celles déjà vues.
+Sous-catégorie = nom COURT (1 à 3 mots, sans « / ») de l'organisation, de la personne ou du sujet récurrent (ex. « Dupont », « Enedis », « Crédit Agricole », « Amazon », « Chantier Martin »). Un même expéditeur garde TOUJOURS la même sous-catégorie (son nom), même si la catégorie change ; réutilise celles déjà vues, à l'identique.
+Regroupe sous UN SEUL nom les services d'un même organisme : impots.gouv, DGFiP, taxe foncière, taxe d'habitation → « Impôts » ; Facebook, Messenger, Meta → « Facebook ».
+Newsletters et promos : TOUTES vont dans un seul et même libellé ; laisse la sous-catégorie vide.
 Réponds UNIQUEMENT par une ligne par mail, au format exact :
 numéro|catégorie|sous-catégorie|priorité (1 urgente, 2 normale, 3 faible)|action suggérée en 8 mots maximum (vide si aucune)
 N'invente rien et ne saute aucun numéro.
@@ -72,8 +88,12 @@ N'invente rien et ne saute aucun numéro.
         // Devis, factures et relances d'un client CONNU (fiche Société) : regroupés sous son seul libellé « Clients/Nom »
         // plutôt qu'éclatés entre « Clients/Nom » et « Factures et paiements/Nom » — tout ce qui le concerne au même endroit.
         val clientsConnus = runCatching { app.societe.data }.getOrNull()
+        // Sous-catégories déjà utilisées (mémoire des expéditeurs) : même orthographe d'un tri à l'autre, pas de doublons.
+        val connues = mutableListOf<String>()
+        memo.keys().forEach { k -> memo.optJSONObject(k)?.keys()?.forEach { l -> if (l.contains('/')) connues += l.substringAfter('/') } }
         val result2 = result.mapIndexed { i, c ->
-            val base = c ?: Classe(mails[i], "Perso", 2, "")
+            val brut = c ?: Classe(mails[i], "Perso", 2, "")
+            val base = if (brut.sub.isBlank()) brut else brut.copy(sub = canonique(brut.sub, connues).also { if (it == brut.sub) connues += it })
             if (clientsConnus != null && base.cat == "Factures et paiements" && base.sub.isNotBlank() && clientsConnus.chercherClients(base.sub).isNotEmpty())
                 base.copy(cat = "Clients") else base
         }
@@ -101,7 +121,7 @@ N'invente rien et ne saute aucun numéro.
                 val g = l.filter { it.cat == cat }.sortedBy { it.prio }
                 if (g.isEmpty()) return@forEach
                 append("\n## ${icones[cat]} $cat (${g.size})\n")
-                g.groupBy { it.sub }.toSortedMap(compareBy { it.lowercase() }).forEach { (sub, items) ->
+                g.groupBy { it.label.substringAfter('/', "") }.toSortedMap(compareBy { it.lowercase() }).forEach { (sub, items) ->
                   if (sub.isNotBlank()) append("\n**$sub** (${items.size})\n")
                   items.forEach { c ->
                     append("- ${if (c.mail.unread) "🔵 " else ""}**${c.mail.from}** — ${c.mail.subject}")

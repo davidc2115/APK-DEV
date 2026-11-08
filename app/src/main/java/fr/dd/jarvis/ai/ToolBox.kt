@@ -113,7 +113,7 @@ class ToolBox(
                 "message_id" to prop("Identifiant exact fourni par rechercher_mails."),
                 "texte" to prop("Texte complet de la réponse.")
             ), listOf("compte", "message_id", "texte")))
-        put(tool("trier_mails", "Analyse les derniers mails, les classe par catégorie (Urgent, Clients, Factures, Chantiers, Administratif, Notifications, Newsletters, Perso) et peut les ranger dans Gmail (libellés Urgent, Clients…).",
+        put(tool("trier_mails", "Analyse les derniers mails, les classe par catégorie (Urgent, Clients, Factures, Chantiers, Administratif, Notifications, Newsletters, Perso) et peut les ranger dans Gmail (libellés Urgent, Clients/Dupont…, toutes les newsletters dans un seul libellé).",
             mapOf(
                 "compte" to prop("Compte mail précis (adresse ou partie), même s'il est désactivé. Vide = comptes actifs seulement."),
                 "count" to prop("Nombre de mails à trier (5 à 500). Par défaut 100 ; mets 300-500 pour « toute la boîte »."),
@@ -138,8 +138,9 @@ class ToolBox(
                 "restants" to prop("« true » (défaut) pour ne garder que les rendez-vous restants aujourd'hui, « false » pour toute la journée."),
                 "calendar" to prop("Nom d'un agenda précis (optionnel).")
             )))
-        put(tool("marquer_mails_traites", "Marque des mails comme traités (lus + libellé Traité, archivés si demandé). Compte Google requis.",
+        put(tool("marquer_mails_traites", "Marque des mails comme traités OU simplement comme lus (« marque comme lu ») : ils sont d'abord triés automatiquement dans leur libellé (catégorie/expéditeur, toutes les newsletters dans un seul libellé), puis marqués lus (+ libellé Traité si traités), archivés si demandé. Compte Google requis.",
             mapOf(
+                "traite" to prop("« false » si l'utilisateur demande seulement de marquer comme LU (pas de libellé Traité). Par défaut true."),
                 "compte" to prop("Compte mail précis (adresse ou partie), même s'il est désactivé. Vide = comptes actifs seulement."),
                 "recherche" to prop("Texte à retrouver dans l'expéditeur ou l'objet. Vide ou « tous » = tous les mails récents non lus."),
                 "count" to prop("Nombre de mails récents à considérer (5 à 60). Par défaut 30."),
@@ -1684,21 +1685,33 @@ class ToolBox(
     }
 
     private suspend fun marquerTraites(a: JSONObject): ToolResult {
-        if (store.gmailAccounts.isEmpty()) return ToolResult("Marquer comme traité demande un compte Google connecté (Réglages › Mails).")
+        if (store.gmailAccounts.isEmpty()) return ToolResult("Marquer comme traité ou lu demande un compte Google connecté (Réglages › Mails).")
         val count = (a.optString("count").toIntOrNull() ?: 30).coerceIn(5, 60)
         val q = a.optString("recherche").trim().lowercase().let { if (it == "tous" || it == "tout") "" else it }
-        val mails = try { app.mail.fetchRecent(count, q.isBlank(), a.optString("compte")) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
+        val traite = !a.optString("traite").equals("false", true)
+        val mails = try { app.mail.fetchRecent(count, q.isBlank(), a.optString("compte"), full = true) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
             return ToolResult("❌ Impossible de lire les mails : ${e.message}")
         }
-        val cibles = mails.filter { it.id.isNotBlank() && (q.isBlank() || it.from.lowercase().contains(q) || it.subject.lowercase().contains(q)) }
+        val cibles = mails.filter { m -> m.id.isNotBlank() && store.gmailAccounts.any { it.equals(m.account, true) } &&
+            (q.isBlank() || m.from.lowercase().contains(q) || m.fromAddr.contains(q) || m.subject.lowercase().contains(q)) }
         if (cibles.isEmpty()) return ToolResult("Aucun mail correspondant.")
         val archiver = a.optString("archiver").equals("true", true)
-        if (!confirm("Marquer ${cibles.size} mail(s) comme traités" + (if (archiver) " et les archiver" else "") + " ?\n\n" + cibles.take(8).joinToString("\n") { "• ${it.from} — ${it.subject}" }, false))
+        val quoi = if (traite) "traités" else "lus"
+        if (!confirm("Ranger dans leur libellé et marquer ${cibles.size} mail(s) comme $quoi" + (if (archiver) " et les archiver" else "") + " ?\n\n" + cibles.take(8).joinToString("\n") { "• ${it.from} — ${it.subject}" }, false))
             return ToolResult("Refusé par l'utilisateur.")
+        // 1) Tri automatique : chaque mail rejoint son libellé (catégorie/expéditeur ; les newsletters dans un seul libellé).
+        val tri = try {
+            val classes = fr.dd.jarvis.ai.MailTri.classer(app, cibles)
+            val n = fr.dd.jarvis.ai.MailTri.ranger(app, classes, false)
+            "📂 $n rangé(s) : " + classes.groupingBy { it.label }.eachCount().entries.sortedByDescending { it.value }
+                .joinToString(", ") { "${it.key}${if (it.value > 1) " ×${it.value}" else ""}" }
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { "⚠️ Tri dans les libellés impossible : ${e.message}" }
+        // 2) Marquage lu / traité.
         return try {
-            val n = fr.dd.jarvis.device.GmailApi.marquerTraites(app, cibles.groupBy({ it.account }, { it.id }), archiver)
-            ToolResult("✅ $n mail(s) marqués comme traités (lus + libellé Traité${if (archiver) ", archivés" else ""}).")
-        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { ToolResult("❌ ${e.message}") }
+            val n = fr.dd.jarvis.device.GmailApi.marquerTraites(app, cibles.groupBy({ it.account }, { it.id }), archiver, traite)
+            val detail = listOfNotNull(if (traite) "lus + libellé Traité" else null, if (archiver) "archivés" else null)
+            ToolResult("✅ $n mail(s) marqués comme $quoi" + (if (detail.isEmpty()) "" else " (" + detail.joinToString(", ") + ")") + ".\n$tri")
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { ToolResult("❌ ${e.message}\n$tri") }
     }
 
     private suspend fun trierMails(a: JSONObject): ToolResult {

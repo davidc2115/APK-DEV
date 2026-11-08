@@ -308,31 +308,116 @@ object GmailApi {
             val token = auth.accessToken ?: continue
             val prefix = (ctx.applicationContext as fr.dd.jarvis.JarvisApp).store.mailLabelPrefix.value
             withContext(Dispatchers.IO) {
-                val existing = mutableMapOf<String, String>()
-                val ls = get(token, "$BASE/labels").optJSONArray("labels")
-                for (i in 0 until (ls?.length() ?: 0)) ls!!.getJSONObject(i).let { existing[it.getString("name")] = it.getString("id") }
+                val existing = libelles(token)
+                // Gmail ne distingue pas « Clients/Dupont » de « Clients/dupont » : on réutilise toujours le libellé existant.
+                fun idDe(nom: String) = existing[nom] ?: existing.entries.firstOrNull { it.key.equals(nom, true) }?.value
+                fusionnerSousLibelles(token, prefix, existing)
                 for (cat in items.map { it.second }.distinct()) {
                     // « Clients/Dupont » : on crée aussi le libellé parent « Clients » pour une arborescence propre.
                     val parts = cat.split("/")
                     for (k in 1..parts.size) {
                         val name = prefix + parts.take(k).joinToString("/")
-                        if (name !in existing) existing[name] = post(token, "$BASE/labels", JSONObject().put("name", name)).getString("id")
+                        if (idDe(name) == null) existing[name] = post(token, "$BASE/labels", JSONObject().put("name", name)).getString("id")
                     }
                 }
+                val utilises = mutableSetOf<String>()
                 for ((id, cat) in items) {
-                    val target = existing[prefix + cat]
+                    val target = idDe(prefix + cat) ?: continue
+                    utilises += target
                     val body = JSONObject().put("addLabelIds", org.json.JSONArray().put(target))
                     // Re-tri : on retire les anciens libellés de catégorie de ce mail (il n'en garde qu'un, le bon).
                     val remove = org.json.JSONArray()
-                    existing.forEach { (nm, lid) -> if (lid != target && nm.startsWith(prefix) && nm.removePrefix(prefix).substringBefore('/') in fr.dd.jarvis.ai.MailTri.CATEGORIES) remove.put(lid) }
+                    existing.forEach { (nm, lid) -> if (lid != target && estCategorie(nm, prefix)) remove.put(lid) }
                     if (cat.substringBefore('/') in archiver) remove.put("INBOX")
                     if (remove.length() > 0) body.put("removeLabelIds", remove)
                     post(token, "$BASE/messages/$id/modify", body)
                     n++
                 }
+                runCatching { supprimerVides(token, prefix, existing, utilises) }
             }
         }
         return n
+    }
+
+    private fun delete(token: String, url: String) {
+        appeler { Request.Builder().url(url).header("Authorization", "Bearer $token").delete().build() }
+    }
+
+    /** Libellés du compte : nom → id. */
+    private fun libelles(token: String): MutableMap<String, String> {
+        val existing = mutableMapOf<String, String>()
+        val ls = get(token, "$BASE/labels").optJSONArray("labels")
+        for (i in 0 until (ls?.length() ?: 0)) ls!!.getJSONObject(i).let { existing[it.getString("name")] = it.getString("id") }
+        return existing
+    }
+
+    /** Libellé de catégorie géré par Jarvis (« Clients », « Clients/Dupont »…). */
+    private fun estCategorie(nom: String, prefix: String) =
+        nom.startsWith(prefix) && nom.removePrefix(prefix).substringBefore('/') in fr.dd.jarvis.ai.MailTri.CATEGORIES
+
+    /** Identifiants de tous les mails portant un libellé (y compris archivés). */
+    private fun idsAvecLibelle(token: String, labelId: String): List<String> {
+        val ids = mutableListOf<String>()
+        var page: String? = null
+        do {
+            val r = get(token, "$BASE/messages?labelIds=$labelId&maxResults=500&includeSpamTrash=true" + (page?.let { "&pageToken=$it" } ?: ""))
+            val l = r.optJSONArray("messages")
+            for (i in 0 until (l?.length() ?: 0)) ids += l!!.getJSONObject(i).getString("id")
+            page = r.optString("nextPageToken").takeIf { it.isNotBlank() }
+        } while (page != null && ids.size < 20_000)
+        return ids
+    }
+
+    /**
+     * Catégories à libellé unique (newsletters) : les anciens sous-libellés « Newsletters et promos/Amazon »… sont
+     * fusionnés dans « Newsletters et promos » (leurs mails y sont déplacés), puis supprimés.
+     */
+    private fun fusionnerSousLibelles(token: String, prefix: String, existing: MutableMap<String, String>) {
+        for (cat in fr.dd.jarvis.ai.MailTri.SANS_SOUS_LIBELLE) {
+            val parentNom = prefix + cat
+            val enfants = existing.entries.filter { it.key.startsWith("$parentNom/", true) }.map { it.key to it.value }
+                .sortedByDescending { it.first.length }
+            if (enfants.isEmpty()) continue
+            val parent = existing[parentNom] ?: existing.entries.firstOrNull { it.key.equals(parentNom, true) }?.value
+                ?: post(token, "$BASE/labels", JSONObject().put("name", parentNom)).getString("id").also { existing[parentNom] = it }
+            for ((nom, id) in enfants) {
+                idsAvecLibelle(token, id).chunked(1000).forEach { lot ->
+                    post(token, "$BASE/messages/batchModify", JSONObject().put("ids", org.json.JSONArray(lot))
+                        .put("addLabelIds", org.json.JSONArray().put(parent)).put("removeLabelIds", org.json.JSONArray().put(id)))
+                }
+                runCatching { delete(token, "$BASE/labels/$id") }.onSuccess { existing.remove(nom) }
+            }
+        }
+    }
+
+    /**
+     * Pas de libellés vides : après un (re)tri, les libellés de catégorie qui ne contiennent plus aucun mail sont
+     * supprimés (d'abord les sous-libellés, puis les catégories sans mail ni sous-libellé). Les libellés qui viennent
+     * d'être utilisés sont épargnés, et un libellé n'est supprimé que si Gmail confirme qu'il est vide.
+     */
+    private suspend fun supprimerVides(token: String, prefix: String, existing: MutableMap<String, String>, utilises: Set<String>) {
+        val candidats = existing.entries.filter { estCategorie(it.key, prefix) && it.value !in utilises }.map { it.key to it.value }
+        if (candidats.isEmpty() || candidats.size > 400) return
+        val gate = kotlinx.coroutines.sync.Semaphore(5)
+        val vides = coroutineScope {
+            candidats.map { (nom, id) ->
+                async {
+                    gate.withPermit {
+                        runCatching {
+                            val l = get(token, "$BASE/labels/$id")
+                            nom.takeIf { l.optInt("messagesTotal", -1) == 0 && l.optInt("threadsTotal", -1) == 0 }
+                        }.getOrNull()
+                    }
+                }
+            }.awaitAll().filterNotNull().toMutableSet()
+        }
+        // Les sous-libellés d'abord (du plus profond au moins profond), puis les parents restés sans enfant.
+        for (nom in vides.sortedByDescending { it.count { c -> c == '/' } }) {
+            if (existing.keys.any { it != nom && it.startsWith("$nom/", true) }) continue
+            val id = existing[nom] ?: continue
+            if (idsAvecLibelle(token, id).isNotEmpty()) continue
+            runCatching { delete(token, "$BASE/labels/$id") }.onSuccess { existing.remove(nom) }
+        }
     }
 
     /** Change la couleur d'un agenda côté Google (liste d'agendas) : visible ensuite sur tous les appareils. Retourne null si OK, sinon l'erreur. */
@@ -356,22 +441,25 @@ object GmailApi {
         }
     } catch (e: Exception) { e.message ?: e.javaClass.simpleName }
 
-    /** Marque des mails comme traités : lus + libellé « Traité », et retirés de la boîte de réception si [archiver]. */
-    suspend fun marquerTraites(ctx: Context, parCompte: Map<String, List<String>>, archiver: Boolean): Int {
+    /** Marque des mails comme lus (+ libellé « Traité » si [traite]), et retirés de la boîte de réception si [archiver]. */
+    suspend fun marquerTraites(ctx: Context, parCompte: Map<String, List<String>>, archiver: Boolean, traite: Boolean = true): Int {
         var n = 0
         for ((account, ids) in parCompte) {
             val auth = authorize(ctx, account)
             if (auth.hasResolution()) throw IllegalStateException("autorisation à renouveler pour $account (Réglages › Mails › retire puis ajoute le compte).")
             val token = auth.accessToken ?: continue
-            val traite = (ctx.applicationContext as fr.dd.jarvis.JarvisApp).store.mailLabelPrefix.value + "Traité"
+            val nomTraite = (ctx.applicationContext as fr.dd.jarvis.JarvisApp).store.mailLabelPrefix.value + "Traité"
             withContext(Dispatchers.IO) {
                 var labelId: String? = null
-                val ls = get(token, "$BASE/labels").optJSONArray("labels")
-                for (i in 0 until (ls?.length() ?: 0)) ls!!.getJSONObject(i).let { if (it.getString("name") == traite) labelId = it.getString("id") }
-                if (labelId == null) labelId = post(token, "$BASE/labels", JSONObject().put("name", traite)).getString("id")
+                if (traite) {
+                    labelId = libelles(token).entries.firstOrNull { it.key.equals(nomTraite, true) }?.value
+                    if (labelId == null) labelId = post(token, "$BASE/labels", JSONObject().put("name", nomTraite)).getString("id")
+                }
                 for (id in ids) {
                     val rem = org.json.JSONArray().put("UNREAD").also { if (archiver) it.put("INBOX") }
-                    post(token, "$BASE/messages/$id/modify", JSONObject().put("addLabelIds", org.json.JSONArray().put(labelId)).put("removeLabelIds", rem))
+                    val body = JSONObject().put("removeLabelIds", rem)
+                    labelId?.let { body.put("addLabelIds", org.json.JSONArray().put(it)) }
+                    post(token, "$BASE/messages/$id/modify", body)
                     n++
                 }
             }
