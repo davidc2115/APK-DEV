@@ -107,6 +107,9 @@ dependencies {
 
     // Mails (IMAP)
     implementation("com.github.mwiede:jsch:0.2.20")
+    // Coffre-fort : QR code d'invitation (génération) et lecture par l'appareil photo (Google, sans permission caméra)
+    implementation("com.google.zxing:core:3.5.3")
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
     implementation("eu.agno3.jcifs:jcifs-ng:2.1.10") { exclude(group = "org.bouncycastle") }
     implementation("commons-net:commons-net:3.11.1")
     implementation("org.slf4j:slf4j-nop:1.7.36")

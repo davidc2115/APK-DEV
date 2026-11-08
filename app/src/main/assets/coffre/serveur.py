@@ -185,10 +185,31 @@ class Gestionnaire(BaseHTTPRequestHandler):
         self.send_header("Content-Type", type_contenu)
         self.send_header("Content-Length", str(len(donnees)))
         self.send_header("Cache-Control", "no-store")
+        if self.close_connection:
+            self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(donnees)
 
+    def vider_corps(self):
+        """Requête refusée avant d'avoir lu son contenu : on le lit (ou on ferme), sinon la requête suivante sur la même
+        connexion serait mélangée avec ces octets."""
+        if getattr(self, "corps_lu", True):
+            return
+        self.corps_lu = True
+        n = int(self.headers.get("Content-Length") or 0)
+        if n <= 0:
+            return
+        if n > 4 * 1024 * 1024:
+            self.close_connection = True
+            return
+        while n > 0:
+            m = self.rfile.read(min(n, 1 << 20))
+            if not m:
+                break
+            n -= len(m)
+
     def corps_json(self):
+        self.corps_lu = True
         n = int(self.headers.get("Content-Length") or 0)
         if n > 1_000_000:
             raise Erreur(413, "requête trop grosse")
@@ -227,17 +248,20 @@ class Gestionnaire(BaseHTTPRequestHandler):
             u = urlparse(self.path)
             chemin = unquote(u.path)
             q = {k: v[0] for k, v in parse_qs(u.query).items()}
+            self.corps_lu = int(self.headers.get("Content-Length") or 0) <= 0
             c = db()
             try:
                 self.router(c, methode, chemin, q)
             finally:
                 c.close()
         except Erreur as e:
+            self.vider_corps()
             self.repondre(e.code, dict({"erreur": e.message}, **e.extra))
         except (BrokenPipeError, ConnectionResetError):
             pass
         except Exception as e:  # noqa
             journal("Erreur interne :", repr(e))
+            self.close_connection = True
             self.repondre(500, {"erreur": "erreur interne du coffre"})
 
     def do_GET(self):
@@ -413,6 +437,7 @@ class Gestionnaire(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length") or 0)
         if n <= 0 or n > MAX_OBJET:
             raise Erreur(413, "taille invalide")
+        self.corps_lu = True
         tmp = os.path.join(DATA, "blobs", ".tmp-" + secrets.token_hex(8))
         os.makedirs(os.path.dirname(tmp), exist_ok=True)
         hs = hashlib.sha256()

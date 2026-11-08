@@ -849,6 +849,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
         if (settingsSection == "network") {
         // ------------------------------------------------------------ Serveur (SSH + Home Assistant)
         item { SectionHeader("Réseau et serveur") }
+        item { fr.dd.jarvis.ui.CoffrePanel(app) }
         item {
             ServeurPanel(store, app)
         }

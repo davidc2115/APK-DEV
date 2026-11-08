@@ -10,6 +10,7 @@ import java.io.File
 
 /** Données Société persistées dans le stockage privé et observables par Compose. */
 class SocieteRepo(ctx: Context) {
+    private val appCtx = ctx.applicationContext
     private val dir = File(ctx.filesDir, "societe").apply { mkdirs() }
     private val file = File(dir, "data.json")
     private val backup = File(dir, "data.json.bak")
@@ -94,5 +95,7 @@ class SocieteRepo(ctx: Context) {
         if (jsonSociete.encodeToString(SocieteData.serializer(), relu) != contenu)
             throw java.io.IOException("La base Société n'a pas été enregistrée intégralement.")
         data = relu
+        // Coffre-fort : la modification part vers le serveur dans quelques secondes (si le coffre est configuré).
+        runCatching { fr.dd.jarvis.coffre.Coffre.signalerChangement(appCtx) }
     }
 }
