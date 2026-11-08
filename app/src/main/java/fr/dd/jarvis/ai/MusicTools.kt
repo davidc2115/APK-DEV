@@ -28,7 +28,7 @@ class MusicTools(private val app: JarvisApp) {
             .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject().put("requete", prop("Titre, artiste ou morceau recherché.")).put("application", prop("Application musicale à utiliser (Morphe, Spotify, YouTube Music, Deezer…). Facultatif."))).put("required", JSONArray().put("requete")))),
         JSONObject().put("type", "function").put("function", JSONObject()
             .put("name", "musique_resultats")
-            .put("description", "Morphe / YouTube Music : CHERCHE dans le catalogue sans rien lancer et renvoie la liste numérotée des résultats (titres, albums, artistes, playlists, vidéos) pour que l'utilisateur choisisse. Ensuite musique_choisir(numero).")
+            .put("description", "YT Music Morphe : CHERCHE dans le catalogue sans rien lancer et renvoie la liste numérotée des résultats (titres, albums, artistes, playlists, vidéos) pour que l'utilisateur choisisse. Ensuite musique_choisir(numero).")
             .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject().put("requete", prop("Ce qu'il faut chercher."))
                 .put("type", prop("tout | titres | albums | artistes | playlists | videos (défaut tout)."))).put("required", JSONArray().put("requete")))),
         JSONObject().put("type", "function").put("function", JSONObject()
@@ -38,7 +38,7 @@ class MusicTools(private val app: JarvisApp) {
                 .put("radio", prop("oui pour la radio du titre."))).put("required", JSONArray().put("numero")))),
         JSONObject().put("type", "function").put("function", JSONObject()
             .put("name", "musique_bibliotheque")
-            .put("description", "Bibliothèque PERSONNELLE de Morphe / YouTube Music : section = jaime (titres J'aime), playlists, titres, albums, artistes, telechargements. Sans nom : liste ce qu'elle contient. Avec nom : lance cet élément (aleatoire=oui pour la lecture aléatoire). Ex. « mets ma playlist Sport », « lance mes titres j'aime en aléatoire ».")
+            .put("description", "Bibliothèque PERSONNELLE de YT Music Morphe : section = jaime (titres J'aime), playlists, titres, albums, artistes, telechargements. Sans nom : liste ce qu'elle contient. Avec nom : lance cet élément (aleatoire=oui pour la lecture aléatoire). Ex. « mets ma playlist Sport », « lance mes titres j'aime en aléatoire ».")
             .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject().put("section", prop("jaime | playlists | titres | albums | artistes | telechargements"))
                 .put("nom", prop("Élément à lancer (facultatif)."))
                 .put("aleatoire", prop("oui pour la lecture aléatoire."))).put("required", JSONArray().put("section")))),
@@ -53,7 +53,7 @@ class MusicTools(private val app: JarvisApp) {
     )
 
     private fun paquet(): String? = fr.dd.jarvis.device.YtMusique.paquet(app, app.store.appPrefs["musique"])
-    private fun nomAppli(p: String) = if (p == Musique.MORPHE_PACKAGE) "Morphe" else "YouTube Music"
+    @Suppress("UNUSED_PARAMETER") private fun nomAppli(p: String) = fr.dd.jarvis.device.YtMusique.NOM
     suspend fun execute(name: String, a: JSONObject): ToolResult = try {
         when (name) {
             "musique_etat" -> ToolResult(Musique.etat(app), direct = true)
@@ -74,13 +74,13 @@ class MusicTools(private val app: JarvisApp) {
                 val p = paquet()
                 when {
                     r == null -> "Il n'y a pas de résultat n° $n dans la dernière liste : redemande une recherche."
-                    p == null -> "Morphe / YouTube Music n'est pas installée."
+                    p == null -> "YT Music Morphe n'est pas installée."
                     else -> app.phone.jouerYtm(p, r.titre, nomAppli(p), r, radio = a.optString("radio").lowercase() in setOf("oui", "true", "1"))
                         ?: "❌ Impossible d'ouvrir ce résultat dans ${nomAppli(p)}."
                 }
             }, direct = true)
             "musique_bibliotheque" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                val p = paquet() ?: return@withContext "Morphe / YouTube Music n'est pas installée."
+                val p = paquet() ?: return@withContext "YT Music Morphe n'est pas installée."
                 val section = fr.dd.jarvis.societe.core.normaliser(a.optString("section")).replace(" ", "").let { s ->
                     when { s.contains("aime") || s.contains("like") -> "jaime"; s.startsWith("playlist") -> "playlists"; s.startsWith("titre") || s.startsWith("chanson") -> "titres"
                         s.startsWith("album") -> "albums"; s.startsWith("artiste") -> "artistes"; s.startsWith("telecharg") -> "telechargements"; else -> "playlists" } }

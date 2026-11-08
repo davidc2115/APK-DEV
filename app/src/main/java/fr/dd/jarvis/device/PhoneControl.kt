@@ -214,9 +214,14 @@ class PhoneControl(private val ctx: Context) {
             "morphe" to "app.morphe.android.apps.youtube.music", "youtube music morphe" to "app.morphe.android.apps.youtube.music",
             "deezer" to "deezer.android.app", "amazon music" to "com.amazon.mp3", "apple music" to "com.apple.android.music", "vlc" to "org.videolan.vlc"
         )
-        val a = appli.trim().lowercase()
+        var a = appli.trim().lowercase()
+        // YT Music Morphe installée : « YouTube Music », « YT Music », « Morphe » ou l'appli officielle mémorisée = Morphe,
+        // jamais l'appli YouTube Music officielle.
+        if (installed(Musique.MORPHE_PACKAGE) && (a.contains("morphe") || a.contains("youtube music") || a.contains("yt music") ||
+                a.contains("ytmusic") || a == YtMusique.YTM_OFFICIEL)) a = Musique.MORPHE_PACKAGE
         var pkg: String? = when {
             a.isBlank() -> null
+            a == Musique.MORPHE_PACKAGE -> a
             installed(appli.trim()) -> appli.trim()   // déjà un nom de paquet exact (préférence mémorisée, résolue une fois pour toutes)
             else -> known.entries.firstOrNull { a == it.key }?.value?.takeIf { installed(it) }   // correspondance exacte d'abord
                 ?: known.entries.firstOrNull { a.contains(it.key) }?.value?.takeIf { installed(it) }
@@ -230,7 +235,7 @@ class PhoneControl(private val ctx: Context) {
         }
         // Une appli précise a été demandée/mémorisée mais n'est pas installée : le dire, jamais en lancer une autre à la place.
         if (pkg == null && a.isNotBlank()) return "« $appli » n'est pas installée ou introuvable sur ce téléphone. Applis de musique installées : ${musicApps().keys.joinToString(", ").ifBlank { "aucune détectée" }}."
-        val nom = pkg?.let { findPackage(it)?.second ?: musicApps().entries.firstOrNull { e -> e.value == it }?.key ?: it } ?: "l'application de musique"
+        val nom = if (pkg == Musique.MORPHE_PACKAGE) YtMusique.NOM else pkg?.let { findPackage(it)?.second ?: musicApps().entries.firstOrNull { e -> e.value == it }?.key ?: it } ?: "l'application de musique"
         if (pkg == null) return "Aucune application de musique installée (Spotify, YouTube Music, Deezer…) : installe-en une, ou précise laquelle utiliser."
         // Pas la peine d'essayer de piloter la session média si la permission qui le permet n'est pas accordée :
         // c'est un « accès spécial », pas une autorisation listée dans la page Autorisations classique de l'appli.
@@ -250,7 +255,7 @@ class PhoneControl(private val ctx: Context) {
         // « lecture » tant que le titre n'a pas changé : c'est ce qui relançait la musique déjà en cours au lieu de la demandée.
         // Morphe / YouTube Music : JARVIS cherche lui-même dans le catalogue et fait lire LE bon résultat par son lien
         // (rapide et exact, sans piloter l'écran). En cas d'échec (pas de réseau, aucun résultat), méthode classique.
-        if (YtMusique.estYtm(pkg)) jouerYtm(pkg, requete, nom)?.let { return it }
+        if (YtMusique.estYtm(pkg)) jouerYtm(pkg, requete, YtMusique.NOM)?.let { return it }
         val sessionAvant = session(pkg)
         val titreAvant = sessionAvant?.let { titreDe(it) }
         var etat = "aucune"
@@ -331,7 +336,8 @@ class PhoneControl(private val ctx: Context) {
      * demande), ouverture de CE résultat dans l'appli, vérification sur la session média (relance « lecture » si l'appli
      * s'est ouverte en pause). Renvoie null si ça n'a pas pu aboutir (on retombe alors sur la méthode classique).
      */
-    fun jouerYtm(pkg: String, requete: String, nom: String, resultat: YtMusique.Resultat? = null, radio: Boolean = false): String? {
+    fun jouerYtm(pkg: String, requete: String, nomDemande: String, resultat: YtMusique.Resultat? = null, radio: Boolean = false): String? {
+        val nom = if (pkg == Musique.MORPHE_PACKAGE) YtMusique.NOM else nomDemande
         val liste = if (resultat != null) YtMusique.derniers else runCatching { YtMusique.rechercher(requete) }.getOrNull() ?: return null
         val choisi = (resultat ?: YtMusique.meilleur(requete, liste) ?: return null).let { YtMusique.completer(it) }
         val avant = session(pkg)?.let { titreDe(it) }
@@ -453,9 +459,14 @@ class PhoneControl(private val ctx: Context) {
         }
         // Filet de sécurité pour les applis connues qui ne déclarent pas ce service sur certains téléphones.
         mapOf("Spotify" to "com.spotify.music", "YouTube Music" to "com.google.android.apps.youtube.music",
-            "YouTube Music Morphe" to "app.morphe.android.apps.youtube.music",
+            "YT Music Morphe" to "app.morphe.android.apps.youtube.music",
             "Deezer" to "deezer.android.app", "Amazon Music" to "com.amazon.mp3", "Apple Music" to "com.apple.android.music", "VLC" to "org.videolan.vlc")
             .forEach { (label, pkg) -> if (installed(pkg) && out.values.none { it == pkg }) out[label] = pkg }
+        // YT Music Morphe installée : l'appli YouTube Music officielle n'est jamais proposée ni utilisée.
+        if (installed(Musique.MORPHE_PACKAGE)) {
+            out.entries.removeAll { it.value == YtMusique.YTM_OFFICIEL || it.value == Musique.MORPHE_PACKAGE }
+            out["YT Music Morphe"] = Musique.MORPHE_PACKAGE
+        }
         return out
     }
 

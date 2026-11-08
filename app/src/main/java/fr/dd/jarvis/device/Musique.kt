@@ -81,14 +81,9 @@ object Musique {
             val verification = etat(ctx)
             if (verification.contains("En lecture")) selection + "\n✅ Lecture détectée :\n" + verification
             else selection + "\nLe résultat a été sélectionné, mais la lecture n'est pas confirmée. État : " + verification
-        } catch (_: Exception) {
-            val fallback = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            try {
-                ctx.startActivity(fallback)
-                "Lien de recherche ouvert. Android peut proposer le navigateur ou une application musicale."
-            } catch (e: Exception) {
-                "Impossible d'ouvrir la recherche musicale : ${e.message ?: "application indisponible"}"
-            }
+        } catch (e: Exception) {
+            // Jamais d'autre appli (navigateur, YouTube Music officielle) à la place de YT Music Morphe.
+            "Impossible d'ouvrir la recherche dans YT Music Morphe : ${e.message ?: "appli indisponible"}"
         }
     }
 }

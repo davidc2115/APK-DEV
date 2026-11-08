@@ -11,8 +11,8 @@ import fr.dd.jarvis.societe.core.normaliser
 import kotlinx.coroutines.delay
 
 /**
- * Bibliothèque de Morphe / YouTube Music (playlists, titres, albums, artistes, « J'aime ») et commandes du lecteur
- * (j'aime, aléatoire, répétition, file d'attente) : ce que l'appli YouTube Music sait faire, depuis JARVIS.
+ * Bibliothèque de YT Music Morphe (playlists, titres, albums, artistes, « J'aime ») et commandes du lecteur
+ * (j'aime, aléatoire, répétition, file d'attente) : ce que YT Music Morphe sait faire, depuis JARVIS.
  * La bibliothèque est personnelle (compte Google de l'appli) : elle est lue à l'écran par l'accessibilité de JARVIS.
  */
 object MusiqueBibliotheque {

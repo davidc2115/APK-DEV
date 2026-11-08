@@ -67,7 +67,7 @@ private fun Pochette(url: String?, taille: Dp, bitmap: Bitmap? = null) {
 }
 
 /**
- * Écran Musique (Morphe / YouTube Music) : lecteur en cours avec ses commandes (lecture, suivant, j'aime, aléatoire,
+ * Écran Musique (YT Music Morphe) : lecteur en cours avec ses commandes (lecture, suivant, j'aime, aléatoire,
  * répéter, radio), recherche dans le catalogue avec filtres (titres, albums, artistes, playlists, vidéos) et choix du
  * résultat, bibliothèque personnelle (J'aime, playlists, titres, albums, artistes, téléchargements) et file d'attente.
  */
@@ -77,7 +77,7 @@ fun MusiqueEcran(app: JarvisApp, onFermer: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val paquet = remember { YtMusique.paquet(app, app.store.appPrefs["musique"]) }
-    val nomAppli = if (paquet == fr.dd.jarvis.device.Musique.MORPHE_PACKAGE) "Morphe" else "YouTube Music"
+    val nomAppli = YtMusique.NOM
     var enCours by remember { mutableStateOf<MusiqueBibliotheque.EnCours?>(null) }
     var message by remember { mutableStateOf("") }
     var requete by remember { mutableStateOf("") }
@@ -99,7 +99,7 @@ fun MusiqueEcran(app: JarvisApp, onFermer: () -> Unit) {
             .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NEW_TASK))
     }
     fun lancer(r: YtMusique.Resultat, radio: Boolean = false) {
-        val p = paquet ?: run { message = "Morphe / YouTube Music n'est pas installée."; return }
+        val p = paquet ?: run { message = "YT Music Morphe n'est pas installée."; return }
         message = "⏳ Lancement de « ${r.titre} »…"
         scope.launch {
             message = withContext(Dispatchers.IO) { app.phone.jouerYtm(p, r.titre, nomAppli, r, radio) ?: "❌ Impossible d'ouvrir ce résultat." }.substringBefore("\nAutres résultats")
@@ -123,7 +123,7 @@ fun MusiqueEcran(app: JarvisApp, onFermer: () -> Unit) {
             Text("🎵 MUSIQUE · $nomAppli", color = LocalAccent.current, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             HudButton("Fermer", onClick = onFermer)
         }
-        if (paquet == null) { Text("Installe Morphe (ou YouTube Music) pour utiliser cet écran.", color = HudText); return@Column }
+        if (paquet == null) { Text("Installe YT Music Morphe pour utiliser cet écran.", color = HudText); return@Column }
 
         // ---- Lecteur en cours
         HudPanel(Modifier.fillMaxWidth(), title = "En cours") {

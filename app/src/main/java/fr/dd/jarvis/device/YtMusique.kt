@@ -11,8 +11,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Catalogue YouTube Music (même moteur de recherche que l'appli, sans compte) : JARVIS cherche lui-même les titres,
- * albums, artistes et playlists, choisit le bon résultat, puis demande à Morphe (ou YouTube Music) de lire CE
+ * Catalogue de YT Music Morphe (le même que celui de l'appli, sans compte) : JARVIS cherche lui-même les titres,
+ * albums, artistes et playlists, choisit le bon résultat, puis demande à YT Music Morphe — et à elle seule — de lire CE
  * résultat précis par son lien (music.youtube.com/watch?v=…). Plus de pilotage d'écran pour taper dans la recherche :
  * c'est rapide et exact. Les résultats servent aussi à l'écran Musique (choisir parmi les résultats).
  */
@@ -231,7 +231,7 @@ object YtMusique {
         return if (id != null) r.copy(playlistId = id) else r
     }
 
-    /** Ouvre le résultat DANS l'appli [paquet] (Morphe, YouTube Music) : la lecture démarre sur ce résultat précis. */
+    /** Ouvre le résultat DANS YT Music Morphe ([paquet]) : la lecture démarre sur ce résultat précis. */
     fun ouvrir(ctx: Context, paquet: String, r: Resultat, radio: Boolean = false): Boolean {
         val lien = r.lien(radio) ?: return false
         return runCatching {
@@ -244,15 +244,14 @@ object YtMusique {
         ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(lien)).setPackage(paquet).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)); true
     }.getOrDefault(false)
 
-    /** Appli YouTube Music à utiliser : Morphe si installée, sinon YouTube Music officielle. */
-    fun paquet(ctx: Context, prefere: String? = null): String? {
-        val pm = ctx.packageManager
-        fun installe(p: String) = runCatching { pm.getPackageInfo(p, 0); true }.getOrDefault(false)
-        return listOfNotNull(prefere?.takeIf { it == Musique.MORPHE_PACKAGE || it == YTM_OFFICIEL }, Musique.MORPHE_PACKAGE, YTM_OFFICIEL).firstOrNull { installe(it) }
-    }
+    /** YT Music Morphe si elle est installée (JAMAIS l'appli YouTube Music officielle). */
+    @Suppress("UNUSED_PARAMETER")
+    fun paquet(ctx: Context, prefere: String? = null): String? =
+        Musique.MORPHE_PACKAGE.takeIf { runCatching { ctx.packageManager.getPackageInfo(it, 0); true }.getOrDefault(false) }
 
     const val YTM_OFFICIEL = "com.google.android.apps.youtube.music"
-    fun estYtm(paquet: String?) = paquet == Musique.MORPHE_PACKAGE || paquet == YTM_OFFICIEL
+    fun estYtm(paquet: String?) = paquet == Musique.MORPHE_PACKAGE
+    const val NOM = "YT Music Morphe"
 
     /** Liste numérotée des résultats (réponse de JARVIS, pour en choisir un autre). */
     fun liste(l: List<Resultat>, max: Int = 6): String = l.take(max).mapIndexed { i, r -> "${i + 1}. ${r.ligne()}" }.joinToString("\n")
