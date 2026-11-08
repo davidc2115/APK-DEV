@@ -160,7 +160,9 @@ fun MusiqueEcran(app: JarvisApp, onFermer: () -> Unit) {
                 if (e != null && e.file.isNotEmpty()) HudChip(if (voirFile) "📜 Masquer la file" else "📜 File (${e.file.size})", voirFile) { voirFile = !voirFile }
             }
             if (voirFile) e?.file?.forEachIndexed { i, (id, t) ->
-                Text("${i + 1}. $t", color = HudText, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                val courant = id == e.actif
+                Text("${i + 1}. " + (if (courant) "▶️ " else "") + t, color = if (courant) LocalAccent.current else HudText, fontSize = 12.sp,
+                    fontWeight = if (courant) FontWeight.Bold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.fillMaxWidth().clickable { MusiqueBibliotheque.allerA(app, id) }.padding(vertical = 5.dp))
             }
         }

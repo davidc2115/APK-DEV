@@ -153,7 +153,9 @@ object MusiqueBibliotheque {
     }.getOrNull()
 
     data class EnCours(val app: String, val titre: String, val artiste: String, val album: String, val lecture: Boolean,
-                       val actions: List<String>, val file: List<Pair<Long, String>>, val positionMs: Long, val dureeMs: Long, val image: android.graphics.Bitmap?)
+                       val actions: List<String>, val file: List<Pair<Long, String>>, val positionMs: Long, val dureeMs: Long, val image: android.graphics.Bitmap?,
+                       /** Identifiant, dans [file], du titre en cours de lecture (-1 si inconnu). */
+                       val actif: Long = -1L)
 
     fun enCours(ctx: Context, paquet: String? = null): EnCours? {
         val c = controleur(ctx, paquet) ?: return null
@@ -163,9 +165,11 @@ object MusiqueBibliotheque {
         return EnCours(nomApp, m?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty(), m?.getString(MediaMetadata.METADATA_KEY_ARTIST).orEmpty(),
             m?.getString(MediaMetadata.METADATA_KEY_ALBUM).orEmpty(), s?.state == PlaybackState.STATE_PLAYING,
             s?.customActions?.map { it.name.toString() }.orEmpty(),
-            c.queue?.take(50)?.map { it.queueId to (it.description.title?.toString().orEmpty() + (it.description.subtitle?.let { st -> " — $st" } ?: "")) }.orEmpty(),
+            // File complète (plus de coupure à 25 / 50 titres ; 1 000 au plus par sécurité).
+            c.queue?.take(1000)?.map { it.queueId to (it.description.title?.toString().orEmpty() + (it.description.subtitle?.let { st -> " — $st" } ?: "")) }.orEmpty(),
             s?.position ?: 0L, m?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L,
-            m?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART) ?: m?.getBitmap(MediaMetadata.METADATA_KEY_ART) ?: m?.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON))
+            m?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART) ?: m?.getBitmap(MediaMetadata.METADATA_KEY_ART) ?: m?.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON),
+            s?.activeQueueItemId ?: -1L)
     }
 
     private val SYNONYMES = mapOf(

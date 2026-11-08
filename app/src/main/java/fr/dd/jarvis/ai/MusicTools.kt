@@ -110,7 +110,7 @@ class MusicTools(private val app: JarvisApp) {
                 val n = a.optString("numero").filter { it.isDigit() }.toIntOrNull()
                 if (e.file.isEmpty()) "Le lecteur (${e.app}) ne donne pas sa file d'attente."
                 else if (n != null) e.file.getOrNull(n - 1)?.let { (id, t) -> if (fr.dd.jarvis.device.MusiqueBibliotheque.allerA(app, id)) "⏭️ $t" else "❌ Saut impossible." } ?: "Pas de n° $n dans la file."
-                else "📜 File d'attente (${e.app}) :\n" + e.file.take(25).mapIndexed { i, (_, t) -> "${i + 1}. $t" }.joinToString("\n")
+                else "📜 File d'attente (${e.app}, ${e.file.size} titres) :\n" + e.file.mapIndexed { i, (id, t) -> "${i + 1}. " + (if (id == e.actif) "▶️ " else "") + t }.joinToString("\n")
             }, direct = true)
             else -> ToolResult("Outil musical inconnu.")
         }
