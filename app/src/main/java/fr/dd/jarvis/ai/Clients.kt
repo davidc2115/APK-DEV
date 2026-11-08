@@ -123,7 +123,7 @@ class CloudflareChatClient(private val accounts: () -> List<String>, private val
 
     suspend fun chat(messages: JSONArray, tools: JSONArray?): JSONObject = withContext(Dispatchers.IO) {
         val list = accounts().filter { it.contains(':') }
-        if (list.isEmpty()) throw IllegalStateException("Aucun compte Cloudflare configuré (Réglages › Images).")
+        if (list.isEmpty()) throw IllegalStateException("Aucun compte Cloudflare configuré (Réglages › IA › Images & vidéo).")
         val now = System.currentTimeMillis()
         val order = list.indices.map { (next + it) % list.size }
         val (ready, cooling) = order.partition { (cooldown[list[it]] ?: 0L) <= now }

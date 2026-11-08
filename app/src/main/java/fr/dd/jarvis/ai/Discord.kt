@@ -127,7 +127,7 @@ object Discord {
     // ------------------------------------------------------------ appels HTTP
 
     private fun req(app: JarvisApp, method: String, path: String, corps: JSONObject? = null): JSONObject {
-        if (!configure(app)) throw IllegalStateException("Discord non configuré (Réglages › Discord : jeton du bot).")
+        if (!configure(app)) throw IllegalStateException("Discord non configuré (Réglages › Comptes › Discord : jeton du bot).")
         val b = Request.Builder().url(API + path).header("Authorization", "Bot ${jeton(app)}").header("User-Agent", "DiscordBot (https://github.com/davidc2115/APK-DEV, 1.0)")
         when (method) {
             "POST" -> b.post((corps?.toString() ?: "{}").toRequestBody("application/json".toMediaType()))
@@ -147,7 +147,7 @@ object Discord {
     }
 
     private fun reqArr(app: JarvisApp, method: String, path: String, corps: JSONObject? = null): JSONArray {
-        if (!configure(app)) throw IllegalStateException("Discord non configuré (Réglages › Discord : jeton du bot).")
+        if (!configure(app)) throw IllegalStateException("Discord non configuré (Réglages › Comptes › Discord : jeton du bot).")
         val b = Request.Builder().url(API + path).header("Authorization", "Bot ${jeton(app)}").header("User-Agent", "DiscordBot (https://github.com/davidc2115/APK-DEV, 1.0)")
         if (method == "GET") b.get() else b.post((corps?.toString() ?: "{}").toRequestBody("application/json".toMediaType()))
         http.newCall(b.build()).execute().use { r ->
@@ -214,7 +214,7 @@ object Discord {
 
     /** Déplace un rôle à une position donnée dans la hiérarchie du serveur (1 = juste au-dessus de @everyone). */
     fun roleDeplacer(app: JarvisApp, guildId: String, roleId: String, position: Int) {
-        if (!configure(app)) throw IllegalStateException("Discord non configuré (Réglages › Discord : jeton du bot).")
+        if (!configure(app)) throw IllegalStateException("Discord non configuré (Réglages › Comptes › Discord : jeton du bot).")
         val corps = JSONArray().put(JSONObject().put("id", roleId).put("position", position))
         val b = Request.Builder().url("$API/guilds/$guildId/roles").header("Authorization", "Bot ${jeton(app)}")
             .header("User-Agent", "DiscordBot (https://github.com/davidc2115/APK-DEV, 1.0)")

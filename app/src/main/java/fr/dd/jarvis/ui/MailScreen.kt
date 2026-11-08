@@ -68,7 +68,7 @@ fun MailScreen(app: JarvisApp) {
 
     if (!store.mailConfigured()) {
         HudPanel(Modifier.padding(12.dp).fillMaxWidth(), title = "Mails") {
-            Text("Connecte ton compte Google (lecture seule de ta boîte de réception), ou renseigne un serveur IMAP dans Réglages › Mails.", color = HudText, fontSize = 14.sp)
+            Text("Connecte ton compte Google (lecture seule de ta boîte de réception), ou renseigne un serveur IMAP dans Réglages › Comptes › Mails.", color = HudText, fontSize = 14.sp)
             Spacer(Modifier.height(8.dp))
             GoogleConnect(app)
         }

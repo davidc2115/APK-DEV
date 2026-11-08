@@ -42,7 +42,7 @@ object ImageToVideoGen {
     private fun cle(app: JarvisApp): String {
         val key = app.store.falApiKey.value.trim()
         if (!app.store.falApiKey.available) throw IllegalStateException("Le stockage chiffré Android est indisponible : la clé fal.ai ne peut pas être enregistrée de façon sûre.")
-        if (key.isBlank()) throw IllegalStateException("Ajoute ta clé fal.ai dans Réglages › Vidéo IA.")
+        if (key.isBlank()) throw IllegalStateException("Ajoute ta clé fal.ai dans Réglages › IA › Images & vidéo.")
         return key
     }
 
@@ -227,7 +227,7 @@ object ImageToVideoGen {
                         ?.ifBlank { null } ?: j.optString("detail").ifBlank { j.optString("error") }
                 }.getOrDefault(raw).ifBlank { raw }
                 val message = when (response.code) {
-                    401, 403 -> "Clé fal.ai refusée : vérifie-la dans Réglages › Vidéo IA."
+                    401, 403 -> "Clé fal.ai refusée : vérifie-la dans Réglages › IA › Images & vidéo."
                     402 -> "Crédit fal.ai insuffisant. Consulte ton solde avant de relancer."
                     422 -> "Paramètres, texte ou image refusés par fal.ai : ${detail.take(250)}"
                     429 -> "Limite de requêtes fal.ai atteinte. Attends un peu avant de réessayer."

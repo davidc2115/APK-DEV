@@ -1,6 +1,7 @@
 package fr.dd.jarvis.ui
 
 import androidx.compose.foundation.Canvas
+import kotlin.math.pow
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -60,12 +61,21 @@ fun TeteDragonAnimee(modifier: Modifier = Modifier.size(52.dp), active: Boolean 
                      apercu: Float? = null) {
     val accent = LocalAccent.current
     val tete = ImageBitmap.imageResource(R.drawable.dragon_tete)
+    // Horloge d'animation BRIDÉE : 30 images/s quand JARVIS écoute, réfléchit ou parle, 20 au repos (8 en économie
+    // d'énergie) au lieu de 60 à 120 : le médaillon est affiché en permanence dans l'en-tête, c'était le premier poste de
+    // consommation de l'appli ouverte. Synchronisée sur l'horloge d'images : s'arrête d'elle-même appli en arrière-plan.
+    val animeForce = androidx.compose.runtime.rememberUpdatedState(active || parle)
     val temps by produceState(0f) {
         val debut = withFrameNanos { it }
-        while (true) withFrameNanos { value = (it - debut) / 1_000_000_000f }
+        while (true) {
+            withFrameNanos { value = (it - debut) / 1_000_000_000f }
+            val anime = animeForce.value || Presence.parle || Presence.ecoute || Presence.etat == Presence.Etat.REFLEXION
+            kotlinx.coroutines.delay(when { anime -> 30L; fr.dd.jarvis.device.Energie.economie -> 120L; else -> 48L })
+        }
     }
     // Valeurs lissées d'une image à l'autre : intensité, parole, niveau de la voix, niveau du micro.
     val lisse = remember { FloatArray(4) }
+    val tPrecedent = remember { FloatArray(1) { -1f } }
 
     Canvas(modifier) {
         val t = temps
@@ -77,11 +87,15 @@ fun TeteDragonAnimee(modifier: Modifier = Modifier.size(52.dp), active: Boolean 
         val reflechitP = vivant && Presence.etat == Presence.Etat.REFLEXION
         val parleReel = vivant && Presence.parle
         val parleP = parle || parleReel
-        lisse[0] += ((if (active || parleP || ecouteP || reflechitP) 1f else 0f) - lisse[0]) * 0.06f
-        lisse[1] += ((if (parleP) 1f else 0f) - lisse[1]) * 0.15f
+        // Lissage indépendant du nombre d'images par seconde (coefficients réglés pour 60 images/s).
+        val dt = if (tPrecedent[0] < 0f) 1f / 60f else (t - tPrecedent[0]).coerceIn(0f, 0.5f)
+        tPrecedent[0] = t
+        fun a(x: Float) = 1f - (1f - x).pow(dt * 60f)
+        lisse[0] += ((if (active || parleP || ecouteP || reflechitP) 1f else 0f) - lisse[0]) * a(0.06f)
+        lisse[1] += ((if (parleP) 1f else 0f) - lisse[1]) * a(0.15f)
         val cibleNiveau = when { parleReel -> Presence.niveau(); parleP -> 0.45f + 0.45f * sin(t * 12f); else -> 0f }
-        lisse[2] += (cibleNiveau - lisse[2]) * (if (cibleNiveau > lisse[2]) 0.6f else 0.22f)
-        lisse[3] += ((if (ecouteP) Presence.micro else 0f) - lisse[3]) * 0.3f
+        lisse[2] += (cibleNiveau - lisse[2]) * a(if (cibleNiveau > lisse[2]) 0.6f else 0.22f)
+        lisse[3] += ((if (ecouteP) Presence.micro else 0f) - lisse[3]) * a(0.3f)
         // [apercu] (captures de test) : niveau de voix imposé, sans lissage.
         if (apercu != null) { lisse[0] = 1f; lisse[1] = 1f; lisse[2] = apercu }
         val intensite = lisse[0]; val voix = lisse[1]; val niveau = lisse[2]; val micro = lisse[3]

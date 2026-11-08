@@ -170,7 +170,7 @@ object VisibiliteAuto {
         val options = "-r -i $PLAY"
         val r = if (fr.dd.jarvis.device.ShizukuShell.ready()) shizuku(apk, options)
             else if (fr.dd.jarvis.device.AdbShell.hasKey(ctx)) fr.dd.jarvis.device.AdbShell.installApk(ctx, apk, options)
-            else return@withContext "❌ Il faut Shizuku démarré (ou l'ADB intégré appairé) : Réglages › Téléphone › Shizuku."
+            else return@withContext "❌ Il faut Shizuku démarré (ou l'ADB intégré appairé) : Réglages › Téléphone › Contrôle."
         // Si on lit encore ce résultat, c'est que l'installation n'a pas remplacé l'appli (sinon JARVIS a redémarré).
         if (r.contains("Success", true)) "✅ Réinstallé « depuis le Play Store » : JARVIS va se fermer quelques secondes." else "❌ Réinstallation refusée : ${r.take(300)}"
     }

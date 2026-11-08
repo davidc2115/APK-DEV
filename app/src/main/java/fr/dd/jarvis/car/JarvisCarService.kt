@@ -52,7 +52,7 @@ import java.util.Locale
  *  - agenda : un rendez-vous → y aller (navigation), appeler le client, en parler à JARVIS ;
  *  - conversation « messagerie » (notifications) : Android Auto lit les messages de JARVIS et permet d'y répondre.
  * Modèles utilisés : liste et message uniquement (acceptés par toutes les catégories d'applis voiture).
- * Visibilité : Android Auto exige une appli « installée depuis le Play Store » → Réglages › Communication › Android Auto.
+ * Visibilité : Android Auto exige une appli « installée depuis le Play Store » → Réglages › Téléphone › Android Auto.
  */
 class JarvisCarService : CarAppService() {
     override fun createHostValidator(): HostValidator =

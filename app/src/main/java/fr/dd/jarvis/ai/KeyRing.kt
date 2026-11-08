@@ -16,6 +16,24 @@ object Http {
     /** Client pour les agents : on préfère échouer vite (20 s) et basculer sur l'autre fournisseur. */
     val fast: OkHttpClient = client.newBuilder().callTimeout(20, TimeUnit.SECONDS).build()
     val JSON = "application/json; charset=utf-8".toMediaType()
+
+    @Volatile private var dernierPrechauffage = 0L
+
+    /**
+     * Ouvre à l'avance la connexion sécurisée vers l'IA (pendant que l'utilisateur parle ou écrit) : la demande part
+     * ensuite sur une connexion prête, sans les allers-retours de la poignée de main TLS. Au plus une fois par minute.
+     */
+    fun prechauffer(url: String = "https://api.groq.com/openai/v1/models") {
+        val maintenant = System.currentTimeMillis()
+        if (maintenant - dernierPrechauffage < 60_000L) return
+        dernierPrechauffage = maintenant
+        runCatching {
+            client.newCall(okhttp3.Request.Builder().url(url).head().build()).enqueue(object : okhttp3.Callback {
+                override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {}
+                override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) { response.close() }
+            })
+        }
+    }
 }
 
 /**

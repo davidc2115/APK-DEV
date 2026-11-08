@@ -27,7 +27,7 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
     }
 
     val schema: List<JSONObject> = listOf(
-        tool("tiktok_connexion", "TikTok : ouvre dans le navigateur la page de connexion du compte TikTok personnel (une seule fois, ou si la connexion a expiré/été révoquée). Nécessite que la Clé client et le Secret client TikTok soient renseignés dans Réglages › TikTok."),
+        tool("tiktok_connexion", "TikTok : ouvre dans le navigateur la page de connexion du compte TikTok personnel (une seule fois, ou si la connexion a expiré/été révoquée). Nécessite que la Clé client et le Secret client TikTok soient renseignés dans Réglages › Comptes › TikTok."),
         tool("tiktok_deconnexion", "TikTok : déconnecte le compte TikTok (efface les jetons enregistrés)."),
         tool("tiktok_profil", "TikTok : informations du compte connecté (nom, abonnés, nombre de vidéos, total de likes)."),
         tool("tiktok_mes_videos", "TikTok : liste les dernières vidéos du compte connecté avec leurs statistiques (vues, likes, commentaires, partages).",
@@ -86,7 +86,7 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
     }
 
     private suspend fun run(name: String, a: JSONObject): ToolResult {
-        fun configure() { if (!TikTok.configure(app)) throw IllegalStateException("Renseigne d'abord la Clé client et le Secret client TikTok dans Réglages › TikTok (depuis ton app TikTok for Developers).") }
+        fun configure() { if (!TikTok.configure(app)) throw IllegalStateException("Renseigne d'abord la Clé client et le Secret client TikTok dans Réglages › Comptes › TikTok (depuis ton app TikTok for Developers).") }
         return when (name) {
             "tiktok_connexion" -> {
                 configure()

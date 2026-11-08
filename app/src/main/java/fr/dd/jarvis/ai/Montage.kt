@@ -122,7 +122,7 @@ object Montage {
     fun lancer(app: JarvisApp, d: Demande): String {
         val sansIa = !ImageToVideoGen.disponible(app) && app.store.huggingFaceToken.value.isBlank()
         if (sansIa && d.sources.isBlank())
-            return "❌ Pour créer des plans vidéo, ajoute ta clé fal.ai dans Réglages › Vidéo IA — ou donne-moi des vidéos/images existantes à monter (paramètre sources)."
+            return "❌ Pour créer des plans vidéo, ajoute ta clé fal.ai dans Réglages › IA › Images & vidéo — ou donne-moi des vidéos/images existantes à monter (paramètre sources)."
         val duree = d.dureeS.coerceIn(5, 180)
         val n = d.nombre.coerceIn(1, 5)
         // Position dans la file : montages en attente + celui en cours.

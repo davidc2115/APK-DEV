@@ -32,11 +32,11 @@ object Serveur {
         val m = (e.message ?: "").lowercase()
         return when {
             e is java.net.UnknownHostException -> "Adresse « $hote » introuvable (faute de frappe, ou nom qui ne se résout pas depuis ce réseau)."
-            m.contains("auth fail") || m.contains("auth cancel") -> "Authentification refusée : utilisateur, mot de passe ou clé incorrects (vérifie Réglages › Serveur)."
+            m.contains("auth fail") || m.contains("auth cancel") -> "Authentification refusée : utilisateur, mot de passe ou clé incorrects (vérifie Réglages › Maison › Serveur)."
             e is java.net.ConnectException || m.contains("connection refused") -> "Connexion refusée par $hote:$port — rien n'écoute sur ce port, ou un pare-feu bloque SSH."
             e is java.net.NoRouteToHostException -> "$hote est injoignable depuis ce réseau (hors ligne, mauvaise IP, ou réseau différent)."
             e is java.net.SocketTimeoutException || m.contains("timeout") -> "Pas de réponse de $hote:$port dans le délai imparti (pare-feu, port fermé, ou mauvaise adresse distante/redirection de port)."
-            m.contains("host key") -> "L'empreinte du serveur a changé (réinstallation ?) — efface « Empreinte mémorisée » dans Réglages › Serveur et réessaie."
+            m.contains("host key") -> "L'empreinte du serveur a changé (réinstallation ?) — efface « Empreinte mémorisée » dans Réglages › Maison › Serveur et réessaie."
             m.contains("key") && m.contains("invalid") -> "Clé privée invalide ou mal collée (format PEM/OpenSSH attendu)."
             else -> e.message ?: e.javaClass.simpleName
         }
@@ -83,7 +83,7 @@ object Serveur {
             if (connu.isBlank()) st.sshFp.set(fp)
             else if (connu != fp) {
                 s.disconnect()
-                throw IllegalStateException("L'empreinte du serveur SSH a changé ($fp au lieu de $connu). Si c'est normal (réinstallation), efface-la dans Réglages › Serveur.")
+                throw IllegalStateException("L'empreinte du serveur SSH a changé ($fp au lieu de $connu). Si c'est normal (réinstallation), efface-la dans Réglages › Maison › Serveur.")
             }
             return s
         }
@@ -340,13 +340,13 @@ object Serveur {
     private fun base(app: JarvisApp) = app.store.haUrl.value.trim().trimEnd('/').let { if (it.startsWith("http")) it else "http://$it" }
 
     fun ha(app: JarvisApp, methode: String, chemin: String, corps: JSONObject? = null): String {
-        if (!haConfigure(app)) throw IllegalStateException("Home Assistant non configuré (Réglages › Serveur : adresse et jeton d'accès longue durée).")
+        if (!haConfigure(app)) throw IllegalStateException("Home Assistant non configuré (Réglages › Maison › Serveur : adresse et jeton d'accès longue durée).")
         val b = Request.Builder().url(base(app) + chemin).header("Authorization", "Bearer ${app.store.haToken.value.trim()}")
         if (methode == "POST") b.post((corps?.toString() ?: "{}").toRequestBody("application/json".toMediaType())) else b.get()
         try {
             http.newCall(b.build()).execute().use { r ->
                 val t = r.body?.string().orEmpty()
-                if (r.code == 401) throw IllegalStateException("Home Assistant 401 : le jeton est invalide ou expiré. Dans Home Assistant, connecte-toi avec le compte qui possède les droits d'administration, puis crée un nouveau jeton d'accès longue durée dans ton profil et remplace-le dans JARVIS › Réglages › Serveur.")
+                if (r.code == 401) throw IllegalStateException("Home Assistant 401 : le jeton est invalide ou expiré. Dans Home Assistant, connecte-toi avec le compte qui possède les droits d'administration, puis crée un nouveau jeton d'accès longue durée dans ton profil et remplace-le dans JARVIS › Réglages › Maison › Serveur.")
                 if (r.code == 403) throw IllegalStateException("Home Assistant 403 — action interdite pour le compte associé au jeton. Ce n'est pas une permission Android/Shizuku : le jeton reprend les droits du compte Home Assistant qui l'a créé. Vérifie que ce compte peut piloter cet appareil et, si nécessaire, crée un nouveau jeton depuis un compte administrateur. Détail HA : ${t.take(500)}")
                 if (r.code == 404) throw IllegalStateException("Home Assistant 404 : service ou entité introuvable. Vérifie le domaine, le nom du service et l'identifiant exact de l'appareil. Détail HA : ${t.take(400)}")
                 if (!r.isSuccessful) throw IllegalStateException("Home Assistant ${r.code} : ${t.take(500)}")
@@ -355,13 +355,13 @@ object Serveur {
         } catch (e: IllegalStateException) {
             throw e
         } catch (e: java.net.UnknownHostException) {
-            throw IllegalStateException("Home Assistant : adresse introuvable (« ${app.store.haUrl.value} »). Vérifie l'adresse dans Réglages › Serveur (faute de frappe, ou nom DNS qui ne résout plus).")
+            throw IllegalStateException("Home Assistant : adresse introuvable (« ${app.store.haUrl.value} »). Vérifie l'adresse dans Réglages › Maison › Serveur (faute de frappe, ou nom DNS qui ne résout plus).")
         } catch (e: java.net.ConnectException) {
-            throw IllegalStateException("Home Assistant : connexion refusée sur « ${base(app)} ». Soit Home Assistant est arrêté (vérifie avec serveur_diagnostic), soit le port/l'adresse est faux dans Réglages › Serveur, soit le téléphone n'est pas sur le même réseau (et l'accès distant n'est pas configuré).")
+            throw IllegalStateException("Home Assistant : connexion refusée sur « ${base(app)} ». Soit Home Assistant est arrêté (vérifie avec serveur_diagnostic), soit le port/l'adresse est faux dans Réglages › Maison › Serveur, soit le téléphone n'est pas sur le même réseau (et l'accès distant n'est pas configuré).")
         } catch (e: java.net.SocketTimeoutException) {
             throw IllegalStateException("Home Assistant : pas de réponse (délai dépassé) sur « ${base(app)} ». Le serveur est peut-être éteint/inaccessible depuis ce réseau, ou surchargé.")
         } catch (e: javax.net.ssl.SSLException) {
-            throw IllegalStateException("Home Assistant : erreur TLS/SSL sur « ${base(app)} ». Si l'adresse commence par https:// mais que Home Assistant n'a pas de certificat valide configuré, utilise http:// à la place (Réglages › Serveur).")
+            throw IllegalStateException("Home Assistant : erreur TLS/SSL sur « ${base(app)} ». Si l'adresse commence par https:// mais que Home Assistant n'a pas de certificat valide configuré, utilise http:// à la place (Réglages › Maison › Serveur).")
         } catch (e: Exception) {
             throw IllegalStateException("Home Assistant : connexion impossible sur « ${base(app)} » (${e.javaClass.simpleName} : ${e.message}).")
         }

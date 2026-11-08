@@ -15,7 +15,7 @@ import java.util.Locale
 
 /**
  * Annonces vocales des SMS, mails et notifications (en arrière-plan) : une sonnerie au choix par catégorie, puis JARVIS lit à voix haute.
- * Catégories : sms, mail, autres (applications listées dans Réglages › Annonces). Modes : off | annonce (expéditeur seulement) | lecture (contenu).
+ * Catégories : sms, mail, autres (applications listées dans Réglages › Voix › Annonces). Modes : off | annonce (expéditeur seulement) | lecture (contenu).
  */
 object Annonces {
     val CATEGORIES = listOf("sms" to "💬 SMS", "mail" to "📧 Mails", "autres" to "🔔 Autres notifications")

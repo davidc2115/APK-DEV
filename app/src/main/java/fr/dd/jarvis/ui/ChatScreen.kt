@@ -206,7 +206,7 @@ fun ChatScreen(vm: ChatViewModel, store: Store, app: JarvisApp) {
                 Icon(Icons.Filled.Add, contentDescription = "Joindre un fichier", tint = accent, modifier = Modifier.size(21.dp))
             }
             HudTextField(
-                value = input, onValueChange = { input = it },
+                value = input, onValueChange = { if (input.isEmpty() && it.isNotEmpty()) vm.saisieCommencee(); input = it },
                 modifier = Modifier.weight(1f),
                 placeholder = "Écris à JARVIS…", singleLine = false, maxLines = 4
             )

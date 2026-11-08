@@ -230,7 +230,7 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
 
     private fun <T> avecSession(app: JarvisApp, bloc: (String) -> T): T {
         val token = app.store.freeboxAppToken.value
-        require(token.isNotBlank()) { "JARVIS n'est pas encore associé à la Freebox (Réglages › Box › Associer)." }
+        require(token.isNotBlank()) { "JARVIS n'est pas encore associé à la Freebox (Réglages › Maison › Box Internet › Associer)." }
         val session = ouvrirSession(app, token)
         return try {
             bloc(session).also { sessionCache = Triple(token, session, System.currentTimeMillis()) }
@@ -283,7 +283,7 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
      */
     suspend fun gerer(app: JarvisApp, actionBrute: String, a: JSONObject, confirm: suspend (String, Boolean) -> Boolean): String {
         val action = actionBrute.trim().lowercase().replace(' ', '_').replace('-', '_')
-        if (app.store.freeboxAppToken.value.isBlank()) return "JARVIS n'est pas encore associé à la Freebox : Réglages › Box › Associer la Freebox (à valider sur l'écran de la box)."
+        if (app.store.freeboxAppToken.value.isBlank()) return "JARVIS n'est pas encore associé à la Freebox : Réglages › Maison › Box Internet › Associer la Freebox (à valider sur l'écran de la box)."
         // Confirmation AVANT d'ouvrir la session (pas de session ouverte pendant que l'utilisateur réfléchit).
         val question = when (action) {
             "ajouter_redirection" -> "Freebox : ouvrir le port ${a.optString("port_externe").ifBlank { a.optString("port") }} (${a.optString("protocole").ifBlank { "tcp" }}) vers ${a.optString("appareil").ifBlank { a.optString("ip") }}:${a.optString("port")} ?"
@@ -573,7 +573,7 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
         if (l.isEmpty()) {
             val v = vols.firstOrNull { it.chemin.trimEnd('/').equals(chemin.trimEnd('/'), true) }
             return entete + "$titre : la Freebox ne renvoie aucun élément." +
-                (if (v != null && v.utilise > 200L * 1024 * 1024) " ⚠️ Pourtant ${taille(v.utilise)} sont occupés sur ce disque : ce n'est PAS un disque vide. Lance l'action « diagnostic » (ou Réglages › Réseau › Box › « Diagnostic du disque ») et envoie le résultat." else "")
+                (if (v != null && v.utilise > 200L * 1024 * 1024) " ⚠️ Pourtant ${taille(v.utilise)} sont occupés sur ce disque : ce n'est PAS un disque vide. Lance l'action « diagnostic » (ou Réglages › Maison › Box Internet › « Diagnostic du disque ») et envoie le résultat." else "")
         }
         return entete + "$titre — ${l.count { it.optString("type") != "dir" }} fichier(s), ${l.count { it.optString("type") == "dir" }} dossier(s)\n" + lignes(l)
     }

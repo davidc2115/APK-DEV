@@ -73,8 +73,12 @@ object AntiVol {
         else -> null
     }
 
+    /** Chevrons, guillemets, crochets autour du code (« JARVIS <010815> SONNE », recopié du mode d'emploi) : ignorés. */
+    private val ENTOURAGE = Regex("[<>«»\\[\\]{}\"“”]")
+
     internal fun lire(texte: String): Commande? {
-        val m = FORME.matchEntire(texte.trim()) ?: return null
+        val propre = ENTOURAGE.replace(texte, " ").replace(Regex("[ \\t]+"), " ").trim()
+        val m = FORME.matchEntire(propre) ?: return null
         var code = m.groupValues[1].trimEnd(',', '.', ':', ';', '!')
         var reste = m.groupValues[2].trim()
         // « JARVIS VOL 123456 » : la commande écrite avant le code est acceptée aussi.
@@ -252,7 +256,7 @@ object AntiVol {
             }
             Action.SONNE -> { verrouiller(app); alarme(app, true); sms(app, numero, "🔊 Le téléphone sonne à fond (même en silencieux).\n" + position(app)) }
             Action.POSITION -> sms(app, numero, position(app))
-            Action.SUIVI -> { suivre(app, numero); sms(app, numero, "📡 Suivi activé : position toutes les $SUIVI_MIN min pendant 24 h (« JARVIS <code> STOP » pour arrêter).\n" + position(app)) }
+            Action.SUIVI -> { suivre(app, numero); sms(app, numero, "📡 Suivi activé : position toutes les $SUIVI_MIN min pendant 24 h (« JARVIS tonCode STOP » pour arrêter).\n" + position(app)) }
             Action.MESSAGE -> {
                 s.antivolMessage.set(c.argument.ifBlank { messageParDefaut(app) }); s.antivolAlerte.set(true)
                 verrouiller(app); afficher(app, sonore = false)
@@ -263,13 +267,13 @@ object AntiVol {
                 if (s.antivolMessage.value.isBlank() || c.argument.isNotBlank()) s.antivolMessage.set(c.argument.ifBlank { messageParDefaut(app) })
                 val ok = verrouiller(app); alarme(app, true); suivre(app, numero)
                 sms(app, numero, "🚨 JARVIS : mode VOL activé — " + (if (ok) "verrouillé" else "⚠️ verrouillage impossible") +
-                    ", alarme, message à l'écran, position toutes les $SUIVI_MIN min.\n" + position(app) + "\n« JARVIS <code> STOP » pour arrêter.")
+                    ", alarme, message à l'écran, position toutes les $SUIVI_MIN min.\n" + position(app) + "\n« JARVIS tonCode STOP » pour arrêter.")
             }
             null -> Unit
         }
     }
 
-    private const val AIDE = "JARVIS anti-vol — envoie « JARVIS <code> <commande> » :\nVOL : tout (verrouille, sonne, message, suivi)\n" +
+    private const val AIDE = "JARVIS anti-vol — envoie « JARVIS tonCode COMMANDE » (ton code tel quel, sans < >) :\nVOL : tout (verrouille, sonne, message, suivi)\n" +
         "VERROUILLE · SONNE · OU (position) · SUIVI · MESSAGE <texte> · STOP"
 
     private fun messageParDefaut(app: JarvisApp) = "📵 Ce téléphone a été perdu ou volé." +
@@ -394,7 +398,7 @@ object AntiVol {
         val secours = app.store.antivolSecours.value
         if (secours.isNotBlank()) portee.launch {
             sms(app, secours, "⚠️ JARVIS : la carte SIM de ton téléphone a été changée (opérateur ${sig.split('|').getOrNull(1).orEmpty().ifBlank { sig.substringBefore('|') }}). " +
-                "Ce SMS vient du nouveau numéro.\n" + position(app) + "\nRéponds « JARVIS <code> VOL » à ce numéro pour le bloquer.")
+                "Ce SMS vient du nouveau numéro.\n" + position(app) + "\nRéponds « JARVIS tonCode VOL » à ce numéro pour le bloquer.")
         }
     }
 

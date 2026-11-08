@@ -1,5 +1,6 @@
 package fr.dd.jarvis.ai
 
+import kotlinx.coroutines.async
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -32,7 +33,7 @@ class Brain(
 
     private suspend fun replyInterne(history: List<ChatMsg>, pourHermes: Boolean, onTexte: ((String) -> Unit)?, onStatus: (String) -> Unit): String {
         // Anti-vol déclenché : JARVIS ne fait plus rien tant que l'alerte n'est pas arrêtée avec le code.
-        if (app.store.antivolAlerte.value) return "🔒 Mode anti-vol actif : JARVIS est verrouillé. Arrête l'alerte avec ton code (écran d'alerte, Réglages › Anti-vol, ou SMS « JARVIS <code> STOP »)."
+        if (app.store.antivolAlerte.value) return "🔒 Mode anti-vol actif : JARVIS est verrouillé. Arrête l'alerte avec ton code (écran d'alerte, Réglages › Sécurité › Anti-vol, ou SMS « JARVIS tonCode STOP »)."
         // Carnet de notes (« prends note… », « relis mes notes sur le poêle ») : enregistré tout de suite, sans IA, sans
         // Home Assistant ni autre application — quel que soit le sujet de la note.
         if (!pourHermes) history.lastOrNull()?.takeIf { it.fromUser }?.let { m ->
@@ -118,7 +119,8 @@ class Brain(
             else runCatching { fr.dd.jarvis.hermes.Routeur.competence(texteUser, app.memo.skillsHermes()) }.getOrNull()
         // Mode « Hermès pour tout » : seules les commandes instantanées du téléphone (sans IA) passent avant Hermès ;
         // tout le reste (fichiers, Freebox, vidéos, position, installations…) est traité par Hermès avec les outils de Jarvis.
-        val toutHermes = !pourHermes && app.store.hermesMode.value == "tout" && !app.enVoiture && !fr.dd.jarvis.hermes.Hermes.degrade()
+        val toutHermes = !pourHermes && app.store.hermesMode.value == "tout" && !app.enVoiture && !fr.dd.jarvis.hermes.Hermes.degrade() &&
+            !(app.store.hermesRapide.value && fr.dd.jarvis.hermes.Routeur.commandeSimple(texteUser))
         if (reflexes) {
             if (!multi) commandeImmediate(texteUser, onStatus)?.let { return reflexe(it) }
         }
@@ -158,10 +160,16 @@ class Brain(
         }
         suivi.cerveauJarvis = true
         onStatus("🧠 Analyse de la demande…")
-        val notesUtiles = runCatching { fr.dd.jarvis.device.NotesPertinentes.pour(app, texteUser) }.getOrDefault("")
         val all = tools.schemaAll()
         val sansAnalyse = pourHermes || fr.dd.jarvis.hermes.Routeur.commandeSimple(texteUser)
-        val plan = if (sansAnalyse) null else try { Analyseur.analyser(app, history, all) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { null }
+        // Notes pertinentes et analyse de la demande EN MÊME TEMPS (avant : l'une après l'autre, jusqu'à 2,5 s de perdues).
+        val (notesUtiles, plan) = kotlinx.coroutines.coroutineScope {
+            val notes = async(kotlinx.coroutines.Dispatchers.IO) { runCatching { fr.dd.jarvis.device.NotesPertinentes.pour(app, texteUser) }.getOrDefault("") }
+            val analyse = async {
+                if (sansAnalyse) null else try { Analyseur.analyser(app, history, all) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { null }
+            }
+            notes.await() to analyse.await()
+        }
         // Pour une consigne de chauffage, le planificateur ne doit jamais retirer les outils nécessaires :
         // il faut pouvoir retrouver les correspondances dans Obsidian, vérifier les entités HA puis agir.
         val pilotageChauffage = Regex("po[eê]les?|poils?|pellets?|granul[eé]s?|chauffage|thermostats?|climate\\.|temp[eé]rature|consigne|degr[eé]s?", RegexOption.IGNORE_CASE).containsMatchIn(recent) &&
@@ -455,7 +463,7 @@ class Brain(
         if (action == "fichiers" && r.startsWith("❌")) {
             val partage = runCatching { tools.execute("box_disque", JSONObject().put("action", if (args.optString("chemin").isBlank()) "partages" else "lister").put("chemin", args.optString("chemin"))).text }.getOrNull()
             if (partage != null && partage.startsWith("📂") && Regex("^\\s*(📁|📄|\\S+/|d |- )", RegexOption.MULTILINE).containsMatchIn(partage.substringAfter('\n', "")))
-                return "$r\n\nℹ️ Contenu lu par le partage réseau de la box (Réglages › Box) :\n$partage"
+                return "$r\n\nℹ️ Contenu lu par le partage réseau de la box (Réglages › Maison › Box Internet) :\n$partage"
         }
         return r
     }

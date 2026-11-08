@@ -325,6 +325,19 @@ class Store(context: Context) {
     val confirmSensitive = BPref("confirmSensitive", true)
     val analyseGemini = BPref("analyseGemini", true)
 
+    // ---- Batterie & vitesse
+    /** Économie d'énergie : « auto » (économiseur Android ou batterie < 20 %), « performance », « eco ». */
+    val modeEnergie = SPref("modeEnergie", "auto")
+    /** Écoute « Jarvis » économe : le détecteur hors-ligne ne travaille que quand il y a du son (pas pendant le silence). */
+    val ecouteEconome = BPref("ecouteEconome", true)
+    /** Mode « Hermès pour tout » : les commandes simples (appel, SMS, musique, domotique, agenda…) restent à Jarvis, plus rapide. */
+    val hermesRapide = BPref("hermesRapide", true)
+    /** Derniers passages des travaux lourds du démarrage (index du graphe, contrôle des documents), en ms. */
+    val grapheIndexeLe = SPref("grapheIndexeLe", "")
+    val docsVerifiesLe = SPref("docsVerifiesLe", "")
+    /** Dernier onglet ouvert dans les Réglages (« onglet/sous-onglet »). */
+    val reglagesVue = SPref("reglagesVue", "")
+
     // ---- Arrière-plan : écoute « Jarvis » et agents autonomes
     val wakeOn = BPref("wakeOn", false)
     val convSeconds = IPref("convSeconds", 25)
@@ -405,6 +418,8 @@ class Store(context: Context) {
     val antivolJournal = SPref("antivolJournal", "[]")
     /** Heure (ms) du dernier SMS transmis par Android à JARVIS (diagnostic de l'anti-vol). */
     val antivolDernierSms = SPref("antivolDernierSms", "")
+    /** Heure (ms) du dernier message « JARVIS… » vu dans les notifications d'une messagerie (Chat/RCS). */
+    val antivolDerniereNotif = SPref("antivolDerniereNotif", "")
     val antivolVolume = SPref("antivolVolume", "")
     val annApps = SPref("annApps", "")
     private val annModes = androidx.compose.runtime.mutableStateMapOf<String, String>().also { m ->

@@ -40,11 +40,11 @@ class MailRepo(private val ctx: Context, private val store: Store) {
             val chosen = if (q.isNotEmpty()) store.gmailAccounts.filter { it.lowercase().contains(q) }
             else store.gmailAccounts.filter { store.mailActive(it) }
             if (chosen.isEmpty()) throw IllegalStateException(
-                if (q.isNotEmpty()) "Aucun compte ne correspond à « $compte »." else "Tous les comptes mail sont désactivés (Réglages › Mails) : demande un compte précisément pour le lire."
+                if (q.isNotEmpty()) "Aucun compte ne correspond à « $compte »." else "Tous les comptes mail sont désactivés (Réglages › Comptes › Mails) : demande un compte précisément pour le lire."
             )
             return GmailApi.fetchRecent(ctx, chosen, count, unreadOnly, full, everywhere)
         }
-        if (q.isEmpty() && !store.mailActive("imap")) throw IllegalStateException("Le compte mail est désactivé (Réglages › Mails).")
+        if (q.isEmpty() && !store.mailActive("imap")) throw IllegalStateException("Le compte mail est désactivé (Réglages › Comptes › Mails).")
         return fetchImap(count, unreadOnly)
     }
 

@@ -199,7 +199,7 @@ object AdbShell {
     suspend fun exec(ctx: Context, command: String): String = withContext(Dispatchers.IO) {
         try {
             val m = mgr(ctx)
-            if (!m.isConnected && !m.connectTls(ctx.applicationContext, 6000)) return@withContext "ADB non connecté (Réglages › Contrôle du téléphone)."
+            if (!m.isConnected && !m.connectTls(ctx.applicationContext, 6000)) return@withContext "ADB non connecté (Réglages › Téléphone › Contrôle)."
             m.openStream("shell:$command").use { s ->
                 val out = s.openInputStream().bufferedReader().readText().trim()
                 if (out.isEmpty()) "(commande exécutée)" else out.take(4000)

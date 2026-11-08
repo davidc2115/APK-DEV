@@ -23,10 +23,10 @@ object Box {
         val m = (e.message ?: "").lowercase()
         return when {
             e is java.net.UnknownHostException -> "Adresse « $h » introuvable."
-            m.contains("logon failure") || m.contains("access is denied") || m.contains("access_denied") || m.contains("identifiants") -> "Identifiants refusés par la box : vérifie l'utilisateur et le mot de passe du partage dans Réglages › Box (ou laisse-les vides pour l'invité, s'il est autorisé)."
+            m.contains("logon failure") || m.contains("access is denied") || m.contains("access_denied") || m.contains("identifiants") -> "Identifiants refusés par la box : vérifie l'utilisateur et le mot de passe du partage dans Réglages › Maison › Box Internet (ou laisse-les vides pour l'invité, s'il est autorisé)."
             m.contains("stacksavana") || m.contains("logon_failure") -> "Identifiants refusés par la box."
             e is java.net.ConnectException || m.contains("connection refused") -> "Connexion refusée par $h : le partage de fichiers n'est peut-être pas activé sur la box (interface de la box › réglages du disque dur / partage réseau)."
-            e is java.net.SocketTimeoutException || m.contains("timeout") -> "Pas de réponse de $h : vérifie l'adresse de la box dans Réglages › Box, et que le partage de fichiers est activé."
+            e is java.net.SocketTimeoutException || m.contains("timeout") -> "Pas de réponse de $h : vérifie l'adresse de la box dans Réglages › Maison › Box Internet, et que le partage de fichiers est activé."
             m.contains("no such file") || m.contains("does not exist") -> "Dossier ou partage introuvable à ce chemin."
             else -> e.message ?: e.javaClass.simpleName
         }
@@ -103,7 +103,7 @@ object Box {
     /** Recherche limitée dans les partages du disque USB. Le chemin retourné est directement réutilisable par lire_video_box. */
     fun rechercherVideos(app: JarvisApp, recherche: String, dossier: String = ""): String {
         val h = hote(app)
-        if (h.isBlank()) return "Adresse de la box inconnue : renseigne-la dans Réglages › Box ou connecte-toi à son Wi-Fi."
+        if (h.isBlank()) return "Adresse de la box inconnue : renseigne-la dans Réglages › Maison › Box Internet ou connecte-toi à son Wi-Fi."
         val q = recherche.trim().lowercase()
         val resultats = mutableListOf<String>()
         val visites = mutableSetOf<String>()
@@ -187,7 +187,7 @@ object Box {
     /** Actions : partages | lister | lire | telecharger | envoyer | supprimer | dossier. */
     fun action(app: JarvisApp, action: String, chemin: String, fichier: String): String {
         val h = hote(app)
-        if (h.isBlank()) return "Adresse de la box inconnue : connecte-toi à son Wi-Fi ou renseigne-la dans Réglages › Box."
+        if (h.isBlank()) return "Adresse de la box inconnue : connecte-toi à son Wi-Fi ou renseigne-la dans Réglages › Maison › Box Internet."
         val smb = app.store.boxProto.value != "ftp"
         return try { actionInterne(app, action, chemin, fichier, h, smb) } catch (e: Exception) { throw IllegalStateException(expliquer(e, h), e) }
     }

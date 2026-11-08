@@ -530,6 +530,7 @@ object Routeur {
             "musique|chanson|playlist|joue|mets (du|de la|la|le|un)|lecture|pause|suivant|volume|" +
             "alarme|r[ée]veil|minuteur|chrono|rappel|agenda|calendrier|planning|rendez.vous|rdv|[ée]v[ée]nement|" +
             "allume|[ée]teins|lumi[èe]re|lampe|torche|chauffage|po[êe]le|thermostat|volet|prise|wi-?fi|bluetooth|luminosit[ée]|" +
+            "t[ée]l[ée]\\b|t[ée]l[ée]vision|\\btv\\b|\\bson\\b|enceinte|baisse|monte (le|la|l.)|augmente|diminue|temp[ée]rature|degr[ée]s|clim|" +
             "itin[ée]raire|navigation|emm[èe]ne|guide.moi|waze|trajet|" +
             "ouvre|lance (l.app|l.application)|ferme|capture|photo|[ée]cran|screenshot|lis (moi )?l.[ée]cran|analyse (moi )?l.[ée]cran|" +
             "devis|factur|client|fiche|paie|bulletin|tarif|kml|google earth|" +
@@ -680,10 +681,10 @@ object Routeur {
 
     private fun choisirSansMemoire(app: JarvisApp, texte: String, precedent: String?): Choix =
         decider(app.store.hermesMode.value, app.enVoiture, Hermes.degrade(), texte, precedent,
-            competenceHermes = runCatching { competence(texte, app.memo.skillsHermes()) }.getOrNull())
+            competenceHermes = runCatching { competence(texte, app.memo.skillsHermes()) }.getOrNull(), rapide = app.store.hermesRapide.value)
 
     /** Décision pure (testable) : mode des réglages, Android Auto, Hermès saturé, demande, message précédent de l'assistant. */
-    internal fun decider(mode: String, enVoiture: Boolean, sature: Boolean, texte: String, precedent: String?, competenceHermes: String? = null): Choix {
+    internal fun decider(mode: String, enVoiture: Boolean, sature: Boolean, texte: String, precedent: String?, competenceHermes: String? = null, rapide: Boolean = false): Choix {
         if (mode == "off") return Choix(Cible.JARVIS, "Hermès désactivé dans les réglages")
         val t = texte.trim()
         if (sature && !NOMME.containsMatchIn(t)) return Choix(Cible.JARVIS, "Hermès momentanément saturé : Jarvis répond directement")
@@ -691,6 +692,10 @@ object Routeur {
         if (enVoiture) return Choix(Cible.JARVIS, "Android Auto : Jarvis, réponse rapide")
         // « Hermès pour tout » : TOUTES les demandes vont à Hermès (y compris « oui », « merci »… : il a l'historique).
         // Seules les commandes instantanées du téléphone (lampe, volume, Wi-Fi…) sont exécutées avant, sans aucune IA.
+        // Réponses rapides : une commande simple du téléphone (appel, SMS, musique, domotique, agenda…) est faite par
+        // Jarvis en un seul appel d'IA ; s'il n'aboutit pas, Hermès reprend automatiquement (Brain.reply).
+        if (mode == "tout" && rapide && competenceHermes == null && commandeSimple(t))
+            return Choix(Cible.JARVIS, "commande simple : Jarvis répond tout de suite (Hermès prend le relais si besoin)")
         if (mode == "tout") return Choix(Cible.HERMES, "Hermès pour tout")
         // Suite de conversation : « oui », « toutes », « Clairotte 3 »… en réponse à une question → au cerveau qui l'a posée.
         val reponseCourte = t.split(Regex("\\s+")).size <= 4 && !t.endsWith("?") && precedent != null && precedent.takeLast(250).contains("?") &&

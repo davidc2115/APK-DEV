@@ -290,9 +290,11 @@ object Coffre {
     fun planifier(ctx: Context) {
         val app = ctx.applicationContext as? JarvisApp ?: return
         if (!configure(app) || !app.store.coffreAuto.value) return
-        WorkManager.getInstance(ctx).enqueueUniquePeriodicWork("coffre_periodique", ExistingPeriodicWorkPolicy.KEEP,
-            PeriodicWorkRequestBuilder<CoffreWorker>(15, TimeUnit.MINUTES)
-                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build())
+        // Toutes les heures (chaque modification part déjà dans les 20 s, cf. signalerChangement) : rattrape les
+        // changements faits sur les autres téléphones sans réveiller celui-ci toutes les 15 min.
+        WorkManager.getInstance(ctx).enqueueUniquePeriodicWork("coffre_periodique", ExistingPeriodicWorkPolicy.UPDATE,
+            PeriodicWorkRequestBuilder<CoffreWorker>(60, TimeUnit.MINUTES)
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).setRequiresBatteryNotLow(true).build()).build())
     }
 
     /** Une modification de la base Société : synchro dans 20 s (les modifications rapprochées sont regroupées). */

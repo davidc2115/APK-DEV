@@ -122,7 +122,7 @@ fun CoffrePanel(app: JarvisApp) {
                 Text("Ajouter un appareil", color = HudText, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Coffre.ROLES.forEach { (role, libelle) ->
-                        HudChip("＋ $libelle") { lancer { val t = CoffreInstallation.inviter(app, role, ""); invitation = role to t; "Invitation prête : scanne ce QR code avec l'autre téléphone (JARVIS › Réglages › Coffre-fort › Scanner une invitation). Valable 1 h, une seule fois." } }
+                        HudChip("＋ $libelle") { lancer { val t = CoffreInstallation.inviter(app, role, ""); invitation = role to t; "Invitation prête : scanne ce QR code avec l'autre téléphone (JARVIS › Réglages › Sécurité › Coffre-fort › Scanner une invitation). Valable 1 h, une seule fois." } }
                     }
                 }
                 invitation?.let { (role, texte) ->

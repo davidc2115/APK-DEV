@@ -97,6 +97,9 @@ class JarvisNotificationListener : NotificationListenerService() {
                 @Suppress("DEPRECATION") e.getParcelableArray(Notification.EXTRA_MESSAGES)?.lastOrNull()?.let { (it as? android.os.Bundle)?.getCharSequence("text")?.toString() }
             }.getOrNull().orEmpty()
             val commande = listOf(texte, dernierMessage).firstOrNull { it.isNotBlank() && fr.dd.jarvis.securite.AntiVol.ressembleCommande(it) }
+            // Diagnostic de l'anti-vol : un message qui commence par « JARVIS » a bien été vu dans une notification.
+            if (listOf(texte, dernierMessage).any { it.trimStart().startsWith("jarvis", ignoreCase = true) } && (estMessage(sbn.packageName) || n.category == Notification.CATEGORY_MESSAGE))
+                runCatching { (applicationContext as fr.dd.jarvis.JarvisApp).store.antivolDerniereNotif.set(System.currentTimeMillis().toString()) }
             if (commande != null) {
                 // Secours de l'anti-vol : message en « Chat » (RCS) ou SMS non transmis par Android → lu ici.
                 if (estMessage(sbn.packageName) || n.category == Notification.CATEGORY_MESSAGE)

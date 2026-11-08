@@ -81,7 +81,7 @@ object VideoGen {
         // Clé fal.ai configurée : génération fiable (payante) avec Wan 2.2 sur fal.ai, plutôt que le service gratuit à quota.
         if (ImageToVideoGen.disponible(app)) return ImageToVideoGen.clipTexte(app, prompt, dureeDemandee.toDouble(), if (vertical) "9:16" else "16:9")
         val token = app.store.huggingFaceToken.value.trim()
-        if (token.isBlank()) throw ApiException(401, "token Hugging Face manquant — crée-en un gratuit (aucune carte bancaire) sur huggingface.co/settings/tokens puis ajoute-le dans Réglages › Vidéo IA")
+        if (token.isBlank()) throw ApiException(401, "token Hugging Face manquant — crée-en un gratuit (aucune carte bancaire) sur huggingface.co/settings/tokens puis ajoute-le dans Réglages › IA › Images & vidéo")
         val duree = dureeDemandee.coerceIn(2, 5) // le modèle gratuit (Wan 2.2) ne va pas au-delà de 5s par plan
         val (hauteur, largeur) = if (vertical) 768 to 448 else 448 to 768
         // Résolution et pas réduits par rapport aux réglages par défaut du Space : on vise un plan générable en
@@ -138,7 +138,7 @@ object VideoGen {
     }
 
     private fun erreurSoumission(code: Int, brut: String): String = when {
-        code == 401 || code == 403 -> "token Hugging Face refusé (vérifie qu'il est bien à jour dans Réglages › Vidéo IA)"
+        code == 401 || code == 403 -> "token Hugging Face refusé (vérifie qu'il est bien à jour dans Réglages › IA › Images & vidéo)"
         code == 429 -> "file d'attente du service gratuit pleine pour l'instant (réessaie dans quelques minutes)"
         code >= 500 -> "service de génération vidéo gratuit (Hugging Face) temporairement indisponible"
         else -> "génération refusée ($code) : ${brut.take(200)}"
@@ -186,7 +186,7 @@ object VideoGen {
         app: JarvisApp, sujet: String, script: String, dureePlan: Int, vertical: Boolean
     ): Pair<File?, String> = withContext(Dispatchers.IO) {
         if (!ImageToVideoGen.disponible(app) && app.store.huggingFaceToken.value.isBlank())
-            return@withContext null to "❌ Aucun service vidéo configuré : ajoute ta clé fal.ai (ou un token Hugging Face gratuit, sans carte bancaire, sur huggingface.co/settings/tokens) dans Réglages › Vidéo IA."
+            return@withContext null to "❌ Aucun service vidéo configuré : ajoute ta clé fal.ai (ou un token Hugging Face gratuit, sans carte bancaire, sur huggingface.co/settings/tokens) dans Réglages › IA › Images & vidéo."
         val listePlans = plans(app, sujet, script)
         if (listePlans.isEmpty()) return@withContext null to "❌ Impossible de découper le sujet en plans filmables."
         val clips = mutableListOf<File>()

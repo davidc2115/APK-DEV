@@ -214,7 +214,7 @@ fun AntiVolPanel(app: JarvisApp) {
     val retour = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { tick++ }
     fun ouvrir(i: android.content.Intent) = runCatching { retour.launch(i) }
     HudPanel(Modifier.fillMaxWidth(), title = "🛡️ Anti-vol par SMS") {
-        Text("Depuis N'IMPORTE QUEL téléphone, sans appli, envoie un SMS à ton numéro :\n« JARVIS <ton code> VOL » → verrouille, sonne à fond, affiche un message, envoie la position toutes les 10 min.\n" +
+        Text("Depuis N'IMPORTE QUEL téléphone, sans appli, envoie un SMS à ton numéro :\n« JARVIS 123abc VOL » (ton code tel quel, SANS < >) → verrouille, sonne à fond, affiche un message, envoie la position toutes les 10 min.\n" +
             "Autres commandes : VERROUILLE · SONNE · OU (position) · SUIVI · MESSAGE <texte> · STOP · AIDE.\n" +
             "Marche sans Internet tant que la carte SIM est dans le téléphone. Un mauvais code ne reçoit aucune réponse ; 3 erreurs bloquent l'expéditeur 24 h.",
             color = HudDim, fontSize = 11.sp)
@@ -231,7 +231,12 @@ fun AntiVolPanel(app: JarvisApp) {
             msg = when {
                 err != null -> "❌ $err"
                 code != code2 -> "❌ Les deux codes sont différents."
-                else -> { fr.dd.jarvis.securite.AntiVol.definirCode(app, code); code = ""; code2 = ""; "✅ Code enregistré. Note-le en lieu sûr : sans lui, impossible de piloter le téléphone à distance." }
+                else -> {
+                    val chiffres = code.trim().all { it.isDigit() }
+                    fr.dd.jarvis.securite.AntiVol.definirCode(app, code); code = ""; code2 = ""
+                    "✅ Code enregistré. Note-le en lieu sûr : sans lui, impossible de piloter le téléphone à distance." +
+                        (if (chiffres) "\n💡 Conseil : mets aussi des lettres (ex. lune82). Un code fait seulement de chiffres ressemble à un code de vérification : Android peut masquer le message à JARVIS dans les notifications." else "")
+                }
             }
         }
         HudTextField(store.antivolSecours.value, { store.antivolSecours.set(it.trim()) }, Modifier.fillMaxWidth().padding(top = 6.dp),
@@ -266,7 +271,7 @@ fun AntiVolPanel(app: JarvisApp) {
         ligne(etat.admin, "Administrateur de l'appareil (verrouiller à distance, empêche la désinstallation)") {
             ouvrir(android.content.Intent(android.app.admin.DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
                 .putExtra(android.app.admin.DevicePolicyManager.EXTRA_DEVICE_ADMIN, android.content.ComponentName(ctx, fr.dd.jarvis.securite.AdminJarvis::class.java))
-                .putExtra(android.app.admin.DevicePolicyManager.EXTRA_ADD_EXPLANATION, "JARVIS peut verrouiller ton téléphone à distance par SMS (« JARVIS <code> VOL ») en cas de perte ou de vol."))
+                .putExtra(android.app.admin.DevicePolicyManager.EXTRA_ADD_EXPLANATION, "JARVIS peut verrouiller ton téléphone à distance par SMS (« JARVIS + ton code + VOL ») en cas de perte ou de vol."))
         }
         ligne(etat.superposition, "Affichage par-dessus les autres applis (écran d'alerte)") {
             ouvrir(android.content.Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:${ctx.packageName}")))
@@ -295,6 +300,11 @@ fun AntiVolPanel(app: JarvisApp) {
         Text(
             if (dernierSms != null) "📶 Dernier SMS transmis à JARVIS par Android : " + java.text.SimpleDateFormat("dd/MM à HH:mm", java.util.Locale.FRANCE).format(java.util.Date(dernierSms))
             else "📶 Aucun SMS transmis à JARVIS par Android pour l'instant.",
+            color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+        val derniereNotif = store.antivolDerniereNotif.value.toLongOrNull()
+        Text(
+            if (derniereNotif != null) "🔔 Dernier message « JARVIS… » lu dans les notifications (Chat/RCS) : " + java.text.SimpleDateFormat("dd/MM à HH:mm", java.util.Locale.FRANCE).format(java.util.Date(derniereNotif))
+            else "🔔 Aucun message « JARVIS… » lu dans les notifications pour l'instant" + (if (!etat.notifications) " (accès aux notifications non accordé)." else "."),
             color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
         Text("Si ton message de test n'apparaît pas ici, il n'est pas arrivé à JARVIS en SMS :\n" +
             "• envoyé depuis un Android avec Google Messages, il part souvent en « Chat » (RCS, bulle sombre) et non en SMS : JARVIS le lit alors par les notifications (accès ci-dessus), ou désactive les « Fonctionnalités de chat » sur le téléphone qui envoie ;\n" +

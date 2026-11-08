@@ -64,7 +64,7 @@ object Stockage {
 
     /** Actions : lister | lire | renommer | deplacer | supprimer | dossier. */
     fun action(action: String, chemin: String, destination: String): String {
-        if (!autorise()) throw IllegalStateException("Accès « Tous les fichiers » non autorisé (Réglages › Téléphone et permissions).")
+        if (!autorise()) throw IllegalStateException("Accès « Tous les fichiers » non autorisé (Réglages › Général › Autorisations).")
         if (action.equals("chercher", true)) return chercher(chemin)
         val f = fichier(chemin)
         return when (action.lowercase()) {

@@ -74,7 +74,7 @@ object Meteo {
         val pt = p ?: run {
             val hq = app.societe.data.societe
             if (nom.isBlank() && hq.lat != null && hq.lon != null) { source = "\n_(position du téléphone indisponible : météo du siège — autorise la localisation dans Réglages)_"; nom = "le siège"; Geo.Point(hq.lat, hq.lon) }
-            else return@withContext if (nom.isBlank()) "Position indisponible : autorise la localisation (Réglages › Contrôle du téléphone) ou donne une ville." else "Lieu introuvable : $nom"
+            else return@withContext if (nom.isBlank()) "Position indisponible : autorise la localisation (Réglages › Téléphone › Contrôle) ou donne une ville." else "Lieu introuvable : $nom"
         }
         if (nom.isBlank()) {
             nom = get("https://nominatim.openstreetmap.org/reverse?format=json&zoom=12&lat=${pt.lat}&lon=${pt.lon}")?.let {

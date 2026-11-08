@@ -26,7 +26,7 @@ object HomeAssistantDashboard {
             return o
         }
         fun connect() {
-            if (!Serveur.haConfigure(app)) throw IllegalStateException("Home Assistant non configuré : adresse et jeton requis dans Réglages › Serveur.")
+            if (!Serveur.haConfigure(app)) throw IllegalStateException("Home Assistant non configuré : adresse et jeton requis dans Réglages › Maison › Serveur.")
             val base = app.store.haUrl.value.trim().trimEnd('/')
             val url = (if (base.startsWith("https://")) "wss://" + base.removePrefix("https://") else "ws://" + base.removePrefix("http://")) + "/api/websocket"
             ws = client.newWebSocket(Request.Builder().url(url).build(), this)

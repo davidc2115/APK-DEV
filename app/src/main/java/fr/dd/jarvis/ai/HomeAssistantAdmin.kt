@@ -59,7 +59,7 @@ class HomeAssistantAdmin(
             return o
         }
         fun ouvrir(): Ws {
-            if (base.isBlank() || jeton.isBlank()) throw IllegalStateException("Home Assistant non configuré : adresse et jeton dans Réglages › Serveur.")
+            if (base.isBlank() || jeton.isBlank()) throw IllegalStateException("Home Assistant non configuré : adresse et jeton dans Réglages › Maison › Serveur.")
             val url = (if (base.startsWith("https://")) "wss://" + base.removePrefix("https://") else "ws://" + base.removePrefix("http://")) + "/api/websocket"
             ws = client.newWebSocket(Request.Builder().url(url).build(), this)
             if (suivant(20).optString("type") != "auth_required") throw IllegalStateException("Réponse WebSocket Home Assistant inattendue.")
@@ -95,7 +95,7 @@ class HomeAssistantAdmin(
     // ------------------------------------------------------------------ REST (GET, POST, DELETE)
 
     private fun rest(methode: String, chemin: String, corps: Any? = null): Any? {
-        if (base.isBlank() || jeton.isBlank()) throw IllegalStateException("Home Assistant non configuré : adresse et jeton dans Réglages › Serveur.")
+        if (base.isBlank() || jeton.isBlank()) throw IllegalStateException("Home Assistant non configuré : adresse et jeton dans Réglages › Maison › Serveur.")
         val rb = if (methode == "GET" || methode == "DELETE" && corps == null) null
             else (corps?.toString() ?: "{}").toRequestBody("application/json".toMediaType())
         val req = Request.Builder().url(base + chemin).header("Authorization", "Bearer $jeton").method(methode, rb).build()
@@ -429,7 +429,7 @@ class HomeAssistantAdmin(
     /** Installe HACS dans le conteneur Home Assistant (script officiel), redémarre, puis lance sa configuration. */
     private suspend fun installerHacs(): String {
         if (runCatching { ws { w -> w.cmd("hacs/info") } }.isSuccess) return "✅ HACS est déjà installé et configuré."
-        val ssh = ssh ?: return "❌ Il faut l'accès SSH au serveur (Réglages › Serveur) pour installer HACS."
+        val ssh = ssh ?: return "❌ Il faut l'accès SSH au serveur (Réglages › Maison › Serveur) pour installer HACS."
         if (!confirm("Home Assistant : installer HACS (script officiel get.hacs.xyz) puis redémarrer Home Assistant ?", true)) return "Annulé."
         val ctn = conteneur() ?: return "❌ Conteneur Home Assistant introuvable sur le serveur."
         var r = ssh("docker exec -w /config $ctn bash -c 'wget -O - https://get.hacs.xyz | bash -' 2>&1", 300)

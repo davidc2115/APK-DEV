@@ -108,6 +108,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Écoute dans la conversation : se referme seule après « silenceSec » secondes sans parole. */
     private fun ecouter(delai: Long = silenceMs()) {
+        fr.dd.jarvis.ai.Http.prechauffer()
         voice.bargeIn = store.coupeParole.value
         voice.duplex = store.duplex.value
         voice.ecouterConversation(delai)
@@ -123,6 +124,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             ecouter(maxOf(silenceMs(), 8000L))
         }
     }
+
+    /** Saisie au clavier commencée : connexion à l'IA préparée pendant que l'utilisateur écrit. */
+    fun saisieCommencee() = fr.dd.jarvis.ai.Http.prechauffer()
 
     fun send(text: String, fromVoice: Boolean = false) {
         val t = text.trim()

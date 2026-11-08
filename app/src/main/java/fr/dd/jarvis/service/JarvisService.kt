@@ -137,7 +137,9 @@ class JarvisService : Service() {
         }
         getSystemService(NotificationManager::class.java).cancel(NOTIF_REPRISE)
         running = true
-        wake = (getSystemService(POWER_SERVICE) as PowerManager).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "jarvis:wake").apply { setReferenceCounted(false); acquire() }
+        // Verrou de veille seulement PENDANT une conversation (voir garderEveille) : en attente du mot « Jarvis », le
+        // micro actif suffit à Android ; le verrou permanent empêchait le téléphone de dormir même micro coupé.
+        wake = (getSystemService(POWER_SERVICE) as PowerManager).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "jarvis:wake").apply { setReferenceCounted(false) }
         tools = ToolBox(app) { q, _ ->
             // Action sensible à la voix, téléphone verrouillé : seulement si c'est TA voix (empreinte vocale),
             // sinon il faut déverrouiller le téléphone (personne d'autre ne peut la déclencher).
@@ -187,7 +189,7 @@ class JarvisService : Service() {
         }
         vosk = when {
             app.store.picoKey.value.isNotBlank() -> fr.dd.jarvis.voice.PorcupineWake(this, app.store.picoKey.value) { main.post { onWakeWord() } }
-            fr.dd.jarvis.voice.VoskModel.ready(this) -> fr.dd.jarvis.voice.VoskWake(this) { main.post { onWakeWord() } }
+            fr.dd.jarvis.voice.VoskModel.ready(this) -> fr.dd.jarvis.voice.VoskWake(this, app.store.ecouteEconome.value) { main.post { onWakeWord() } }
             else -> null
         }?.also { brancher(it) }
         main.postDelayed(surveillance, 30_000)
@@ -202,7 +204,7 @@ class JarvisService : Service() {
                 main.post {
                     if (running && fr.dd.jarvis.voice.VoskModel.ready(this@JarvisService)) {
                         nm.cancel(NOTIF + 1)
-                        vosk = fr.dd.jarvis.voice.VoskWake(this@JarvisService) { main.post { onWakeWord() } }.also { brancher(it) }
+                        vosk = fr.dd.jarvis.voice.VoskWake(this@JarvisService, app.store.ecouteEconome.value) { main.post { onWakeWord() } }.also { brancher(it) }
                         goIdle()
                     } else if (running) {
                         app.store.wakeOn.set(false)
@@ -227,8 +229,17 @@ class JarvisService : Service() {
     /** Écoute dans la conversation : se referme seule si personne ne parle dans le délai. */
     private fun ecouter(delai: Long = silenceMs()) { if (running) voice?.ecouterConversation(delai) }
 
+    /** Conversation en cours (écoute, réflexion, réponse) : le téléphone ne doit pas s'endormir au milieu (10 min au plus). */
+    private fun garderEveille(oui: Boolean) {
+        try {
+            if (oui) wake?.acquire(10 * 60_000L)
+            else if (wake?.isHeld == true) wake?.release()
+        } catch (_: Throwable) {}
+    }
+
     /** Retour à l'attente du mot « Jarvis » (détecteur hors-ligne s'il est installé, sinon écoute en boucle). */
     private fun goIdle() {
+        if (!busy) garderEveille(false)
         awake = false
         incompris = 0
         voice?.sessionFin()
@@ -273,7 +284,7 @@ class JarvisService : Service() {
         val err = (v as? fr.dd.jarvis.voice.PorcupineWake)?.error.orEmpty()
         if (v is fr.dd.jarvis.voice.PorcupineWake && echecsReveil >= 2 && fr.dd.jarvis.voice.VoskModel.ready(this)) {
             v.release()
-            vosk = fr.dd.jarvis.voice.VoskWake(this) { main.post { onWakeWord() } }.also { brancher(it) }
+            vosk = fr.dd.jarvis.voice.VoskWake(this, app.store.ecouteEconome.value) { main.post { onWakeWord() } }.also { brancher(it) }
             majNotification("Clé Picovoice refusée (${err.take(60)}) : détecteur hors-ligne utilisé")
             main.postDelayed({ vosk?.let { rearmer(it) } }, 500)
             return
@@ -307,6 +318,9 @@ class JarvisService : Service() {
         val maintenant = System.currentTimeMillis()
         if (maintenant - dernierReveil < 2500) return   // écho du bip / de la voix de JARVIS pris pour « Jarvis »
         dernierReveil = maintenant
+        garderEveille(true)
+        // Connexion à l'IA préparée pendant que tu parles (évite la poignée de main TLS au moment de la demande).
+        fr.dd.jarvis.ai.Http.prechauffer()
         vosk?.stop()
         awake = true; echangeReel = false; incompris = 0
         voice?.sessionDebut()
@@ -335,6 +349,7 @@ class JarvisService : Service() {
 
     private fun process(cmd: String) {
         busy = true; echangeReel = true
+        garderEveille(true)
         scope.launch {
             val app = application as JarvisApp
             app.chatCharger()

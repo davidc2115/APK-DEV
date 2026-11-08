@@ -52,7 +52,7 @@ object Sante {
             val h = fr.dd.jarvis.hermes.Hermes
             when {
                 app.store.hermesMode.value == "off" -> Indicateur("hermes", "🪽", "Hermès", Niveau.INACTIF, "désactivé (Jarvis seul)")
-                !h.enLigne() -> Indicateur("hermes", "🪽", "Hermès", Niveau.PANNE, "hors ligne : Jarvis répond à sa place", "Jarvis le relance tout seul ; sinon Réglages › Hermès › Démarrer.")
+                !h.enLigne() -> Indicateur("hermes", "🪽", "Hermès", Niveau.PANNE, "hors ligne : Jarvis répond à sa place", "Jarvis le relance tout seul ; sinon Réglages › IA › Hermès › Démarrer.")
                 h.degrade() -> Indicateur("hermes", "🪽", "Hermès", Niveau.ATTENTION, "saturé encore ${h.minutesSaturation()} min : ${h.derniereRaison.take(90)}", "Ajoute des clés Gemini/Groq pour répartir la charge.")
                 else -> Indicateur("hermes", "🪽", "Hermès", Niveau.OK, "en ligne")
             }
@@ -71,7 +71,7 @@ object Sante {
             val v = fr.dd.jarvis.voice.VoixNaturelle
             when {
                 !v.configuree(app) -> Indicateur("voix", "🎙️", "Voix naturelle", Niveau.INACTIF, v.etat(app))
-                !v.active(app) -> Indicateur("voix", "🎙️", "Voix naturelle", Niveau.ATTENTION, v.etat(app), "Réglages › Voix de JARVIS › « Diagnostiquer la voix naturelle ».")
+                !v.active(app) -> Indicateur("voix", "🎙️", "Voix naturelle", Niveau.ATTENTION, v.etat(app), "Réglages › Voix › Voix › « Diagnostiquer la voix naturelle ».")
                 else -> Indicateur("voix", "🎙️", "Voix naturelle", Niveau.OK, v.etat(app))
             }
         }

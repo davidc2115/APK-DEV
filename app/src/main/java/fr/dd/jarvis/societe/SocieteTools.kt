@@ -178,7 +178,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "action" to prop("afficher | convertir (devis → facture) | envoye | accepte | refuse | payee | annuler | exporter | supprimer"),
             "mode_paiement" to prop("Pour « payee » : virement, chèque, CB, espèces…")
         ), listOf("numero", "action")),
-        tool("document_email", "Envoie (ou renvoie) un devis ou une facture par email, avec le PDF du document en pièce jointe (compte Gmail connecté requis, Réglages › Mails). Demande toujours confirmation avant l'envoi.", mapOf(
+        tool("document_email", "Envoie (ou renvoie) un devis ou une facture par email, avec le PDF du document en pièce jointe (compte Gmail connecté requis, Réglages › Comptes › Mails). Demande toujours confirmation avant l'envoi.", mapOf(
             "numero" to prop("Numéro du devis/facture, ex. DEV-2026-0003."),
             "destinataire" to prop("Adresse email du destinataire (optionnel : par défaut l'email enregistré du client)."),
             "compte" to prop("Compte Gmail à utiliser pour l'envoi (optionnel ; vide = le seul compte connecté, ou demande si plusieurs)."),
@@ -943,7 +943,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
     private suspend fun documentEmail(a: JSONObject): ToolResult {
         val numero = a.s("numero").uppercase()
         val doc = d.doc(numero) ?: return err("Document $numero introuvable.")
-        if (app.store.gmailAccounts.isEmpty()) return err("Envoyer un mail demande un compte Google connecté (Réglages › Mails) — pas disponible en IMAP.")
+        if (app.store.gmailAccounts.isEmpty()) return err("Envoyer un mail demande un compte Google connecté (Réglages › Comptes › Mails) — pas disponible en IMAP.")
         val client = d.client(doc.clientId)
         val dest = a.s("destinataire").ifBlank { client?.email.orEmpty() }
         if (dest.isBlank() || !dest.contains("@"))

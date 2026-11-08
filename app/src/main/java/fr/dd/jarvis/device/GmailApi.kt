@@ -76,8 +76,8 @@ object GmailApi {
      *  Retourne l'identifiant du message envoyé (preuve que Gmail l'a bien accepté), et échoue explicitement sinon. */
     suspend fun envoyer(ctx: Context, account: String, destinataire: String, sujet: String, corps: String, piecesJointes: List<PieceJointe> = emptyList()): String = withContext(Dispatchers.IO) {
         val auth = authorize(ctx, account)
-        if (auth.hasResolution()) throw IllegalStateException("Autorisation Gmail à renouveler pour $account : ouvre Réglages › Mails et reconnecte ce compte (le consentement a expiré ou a changé).")
-        val token = auth.accessToken ?: throw IllegalStateException("Connexion Gmail expirée pour $account : reconnecte le compte dans Réglages › Mails.")
+        if (auth.hasResolution()) throw IllegalStateException("Autorisation Gmail à renouveler pour $account : ouvre Réglages › Comptes › Mails et reconnecte ce compte (le consentement a expiré ou a changé).")
+        val token = auth.accessToken ?: throw IllegalStateException("Connexion Gmail expirée pour $account : reconnecte le compte dans Réglages › Comptes › Mails.")
         val raw = if (piecesJointes.isEmpty()) {
             "From: $account\r\n" +
                 "To: $destinataire\r\n" +
@@ -151,7 +151,7 @@ object GmailApi {
 
     private suspend fun fetchOne(ctx: Context, account: String, count: Int, unreadOnly: Boolean, full: Boolean = false, everywhere: Boolean = false): List<MailItem> {
         val auth = authorize(ctx, account)
-        if (auth.hasResolution()) throw IllegalStateException("autorisation à renouveler (Réglages › Mails › Ajouter un compte Google).")
+        if (auth.hasResolution()) throw IllegalStateException("autorisation à renouveler (Réglages › Comptes › Mails › Ajouter un compte Google).")
         val token = auth.accessToken ?: throw IllegalStateException("jeton Google indisponible.")
         return withContext(Dispatchers.IO) {
             val qs = listOfNotNull(if (unreadOnly) "is:unread" else null, if (everywhere) "-in:spam -in:trash -in:drafts" else null).joinToString(" ")
@@ -206,7 +206,7 @@ object GmailApi {
         val all = mutableListOf<MailItem>()
         for (account in accounts) {
             val auth = authorize(ctx, account)
-            if (auth.hasResolution()) throw IllegalStateException("Autorisation Gmail à renouveler pour $account (Réglages › Mails).")
+            if (auth.hasResolution()) throw IllegalStateException("Autorisation Gmail à renouveler pour $account (Réglages › Comptes › Mails).")
             val token = auth.accessToken ?: throw IllegalStateException("Jeton Google indisponible pour $account.")
             val parts = mutableListOf<String>()
             if (sender.isNotBlank()) parts += "from:${sender.trim()}"
@@ -305,7 +305,7 @@ object GmailApi {
         var n = 0
         for ((account, items) in classement) {
             val auth = authorize(ctx, account)
-            if (auth.hasResolution()) throw IllegalStateException("autorisation à renouveler pour $account (Réglages › Mails › Ajouter un compte Google : le classement demande la permission « modifier »).")
+            if (auth.hasResolution()) throw IllegalStateException("autorisation à renouveler pour $account (Réglages › Comptes › Mails › Ajouter un compte Google : le classement demande la permission « modifier »).")
             val token = auth.accessToken ?: continue
             val prefix = (ctx.applicationContext as fr.dd.jarvis.JarvisApp).store.mailLabelPrefix.value
             withContext(Dispatchers.IO) {
@@ -456,7 +456,7 @@ object GmailApi {
     /** Change la couleur d'un agenda côté Google (liste d'agendas) : visible ensuite sur tous les appareils. Retourne null si OK, sinon l'erreur. */
     suspend fun setCalendarColor(ctx: Context, account: String, googleCalId: String, rgb: Int): String? = try {
         val auth = authorize(ctx, account)
-        if (auth.hasResolution()) "Autorisation Google Agenda à donner : Réglages › Mails › retire puis ajoute le compte Google."
+        if (auth.hasResolution()) "Autorisation Google Agenda à donner : Réglages › Comptes › Mails › retire puis ajoute le compte Google."
         else if (auth.accessToken == null) "Jeton Google indisponible."
         else {
             val token = auth.accessToken
@@ -479,7 +479,7 @@ object GmailApi {
         var n = 0
         for ((account, ids) in parCompte) {
             val auth = authorize(ctx, account)
-            if (auth.hasResolution()) throw IllegalStateException("autorisation à renouveler pour $account (Réglages › Mails › retire puis ajoute le compte).")
+            if (auth.hasResolution()) throw IllegalStateException("autorisation à renouveler pour $account (Réglages › Comptes › Mails › retire puis ajoute le compte).")
             val token = auth.accessToken ?: continue
             val nomTraite = (ctx.applicationContext as fr.dd.jarvis.JarvisApp).store.mailLabelPrefix.value + "Traité"
             withContext(Dispatchers.IO) {

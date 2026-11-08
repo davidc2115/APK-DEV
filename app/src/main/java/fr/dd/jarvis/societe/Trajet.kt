@@ -31,7 +31,7 @@ object Trajet {
 
     /** Trajet simple origine → destination. */
     suspend fun simple(app: JarvisApp, destination: String, depuis: String): String {
-        val o = origine(app, depuis) ?: return "Point de départ inconnu : autorise la localisation (Réglages › Contrôle du téléphone) ou renseigne l'adresse du siège."
+        val o = origine(app, depuis) ?: return "Point de départ inconnu : autorise la localisation (Réglages › Téléphone › Contrôle) ou renseigne l'adresse du siège."
         val dest = Geo.geocode(destination) ?: return "Adresse introuvable : $destination"
         val r = Geo.route(o.second, dest) ?: return "Itinéraire indisponible."
         return "# 🧭 Trajet\n\n**${o.first}** → **$destination**\n- 📏 ${nombre(Math.round(r.km * 10) / 10.0)} km\n- ⏱️ ${dur(r.minutes)}${if (r.estime) " (estimation à vol d'oiseau)" else ""}\n" +
@@ -93,7 +93,7 @@ object Trajet {
             else arrets += Arret(c?.let { it.nom + if (it.sites.size > 1 && site != null) " · ${site.nom}" else "" } ?: demande, adresse, p, c?.tel.orEmpty())
         }
         if (arrets.isEmpty()) return "Aucun client localisable dans « ${clients.joinToString(", ")} » (adresse ou position GPS manquante)."
-        val dep = origine(app, depuis) ?: return "Point de départ inconnu : autorise la localisation (Réglages › Contrôle du téléphone) ou renseigne l'adresse du siège."
+        val dep = origine(app, depuis) ?: return "Point de départ inconnu : autorise la localisation (Réglages › Téléphone › Contrôle) ou renseigne l'adresse du siège."
         val ordre = ordre(dep.second, arrets.map { it.point }, retour)
         val zone = ZoneId.systemDefault()
         var t = java.time.LocalDateTime.of(date, heureDe(heure) ?: if (date == LocalDate.now()) java.time.LocalTime.now().plusMinutes(5).withSecond(0).withNano(0) else java.time.LocalTime.of(8, 0))
@@ -143,7 +143,7 @@ object Trajet {
             .sortedBy { it.begin }
         if (evs.isEmpty()) return "Aucun rendez-vous avec un lieu${if (restants && date == LocalDate.now()) " restant aujourd'hui" else ""} dans l'agenda."
 
-        var cur = origine(app, depuis) ?: return "Point de départ inconnu : autorise la localisation (Réglages › Contrôle du téléphone) ou renseigne l'adresse du siège."
+        var cur = origine(app, depuis) ?: return "Point de départ inconnu : autorise la localisation (Réglages › Téléphone › Contrôle) ou renseigne l'adresse du siège."
         val depart = cur
         val etapes = mutableListOf<String>()
         val sb = StringBuilder("# 🧭 Tournée du ${date.format(DateTimeFormatter.ofPattern("EEEE d MMMM", java.util.Locale.FRENCH))}\n\nDépart : **${cur.first}**\n")

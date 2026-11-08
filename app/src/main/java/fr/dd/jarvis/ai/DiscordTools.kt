@@ -72,7 +72,7 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
     private fun guildeObj(a: JSONObject): JSONObject {
         val demande = a.optString("serveur").trim().ifBlank { app.store.discordGuildId.value.trim() }
         return Discord.trouverGuilde(app, demande) ?: throw IllegalStateException(
-            if (demande.isBlank()) "Le bot est présent sur plusieurs serveurs : précise lequel (nom ou ID), ou enregistre un serveur par défaut dans Réglages › Discord." else "Serveur « $demande » introuvable parmi ceux où le bot est présent."
+            if (demande.isBlank()) "Le bot est présent sur plusieurs serveurs : précise lequel (nom ou ID), ou enregistre un serveur par défaut dans Réglages › Comptes › Discord." else "Serveur « $demande » introuvable parmi ceux où le bot est présent."
         )
     }
 

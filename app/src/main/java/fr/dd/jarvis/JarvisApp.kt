@@ -116,8 +116,14 @@ class JarvisApp : Application() {
         val graphDatabase = GraphDatabase.getInstance(this)
         val graphIndexer = GraphIndexer(graphDatabase, obsidian)
         knowledgeRepository = KnowledgeRepository(graphDatabase, graphIndexer)
-        // Indexation initiale asynchrone : ne bloque pas le démarrage ni l'interface.
-        graphScope.launch { graphIndexReport = runCatching { knowledgeRepository.rebuildMarkdownIndex() }.getOrNull() }
+        // Index du graphe Obsidian (lecture de 400 notes) : au plus toutes les 6 h, et pas pendant les 30 premières
+        // secondes (le processus démarre aussi pour les tâches de fond : inutile de relire tout le coffre à chaque fois).
+        if (System.currentTimeMillis() - (store.grapheIndexeLe.value.toLongOrNull() ?: 0L) > 6 * 3_600_000L) graphScope.launch {
+            kotlinx.coroutines.delay(30_000)
+            graphIndexReport = runCatching { knowledgeRepository.rebuildMarkdownIndex() }.getOrNull()
+            if (graphIndexReport != null) store.grapheIndexeLe.set(System.currentTimeMillis().toString())
+        }
+        fr.dd.jarvis.device.Energie.suivre(this)
         phone = PhoneControl(this)
         memo = fr.dd.jarvis.device.Memo(this, obsidian)
         Thread { runCatching { memo.load() } }.start()
@@ -131,7 +137,10 @@ class JarvisApp : Application() {
             store.rapportsPhotosV2.set(true)
         }.start()
         societe.data.modeles["planning"]?.let { fr.dd.jarvis.ai.Prompts.planningFormat = it }
-        Thread { runCatching { societe.synchroniserAvecCoffre() } }.start()
+        // Contrôle des devis/factures présents dans Obsidian : une recherche par document, au plus toutes les 6 h.
+        if (System.currentTimeMillis() - (store.docsVerifiesLe.value.toLongOrNull() ?: 0L) > 6 * 3_600_000L) Thread {
+            runCatching { societe.synchroniserAvecCoffre(); store.docsVerifiesLe.set(System.currentTimeMillis().toString()) }
+        }.start()
         createChannel()
         // Pont MCP local (outils de Jarvis pour Hermès) : seulement si Hermès est utilisé.
         if (store.hermesMode.value != "off" && store.hermesInstalle.value) runCatching { fr.dd.jarvis.hermes.PontMcp.demarrer(this) }

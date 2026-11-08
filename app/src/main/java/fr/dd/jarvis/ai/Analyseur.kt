@@ -17,16 +17,33 @@ Réponds UNIQUEMENT avec un objet JSON, sans texte autour :
 Si aucune action n'est nécessaire (simple conversation) : {"outils":[],"plan":""}.
 Si la demande consiste à analyser le planning/l’agenda pour compléter ou mettre à jour les fiches clients à partir des rendez-vous, choisis obligatoirement analyser_planning_clients (pas get_planning seul). Cet outil sait traiter plusieurs clients dans un même rendez-vous.\nChoisis uniquement des noms présents dans la liste."""
 
+    /** Plans récents par demande (même demande, même contexte) : réutilisés 15 min sans rappeler Gemini. */
+    private val cache = object : LinkedHashMap<String, Pair<Long, Plan>>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<Long, Plan>>?) = size > 60
+    }
+
+    internal fun cle(historique: List<ChatMsg>): String? {
+        val dernier = historique.lastOrNull { it.fromUser }?.text?.trim().orEmpty()
+        // Réponses courtes (« oui », « la deuxième ») : dépendent trop du contexte pour être réutilisées.
+        if (dernier.split(Regex("\\s+")).size < 3) return null
+        val avant = historique.dropLastWhile { it.fromUser }.lastOrNull()?.text.orEmpty().takeLast(160)
+        return fr.dd.jarvis.societe.core.normaliser(dernier) + "|" + fr.dd.jarvis.societe.core.normaliser(avant)
+    }
+
     suspend fun analyser(app: fr.dd.jarvis.JarvisApp, historique: List<ChatMsg>, tousOutils: JSONArray): Plan? {
         if (!app.store.analyseGemini.value || app.store.geminiKeys.isEmpty()) return null
+        val cle = cle(historique)
+        if (cle != null) synchronized(cache) { cache[cle] }?.let { (quand, plan) -> if (System.currentTimeMillis() - quand < 15 * 60_000L) return plan }
         val noms = mutableMapOf<String, String>()
         for (i in 0 until tousOutils.length()) {
             val f = tousOutils.getJSONObject(i).getJSONObject("function")
-            noms[f.getString("name")] = f.optString("description").take(130)
+            // Descriptions courtes : le choix des outils n'a besoin que du sujet de chacun (requête 2× plus légère, plus rapide).
+            noms[f.getString("name")] = f.optString("description").substringBefore(". ").take(90)
         }
         val conv = historique.takeLast(6).joinToString("\n") { (if (it.fromUser) "Utilisateur : " else "JARVIS : ") + it.text.take(400) }
         val user = "Date : ${Prompts.now()}\n\nOUTILS :\n" + noms.entries.joinToString("\n") { "- ${it.key} : ${it.value}" } + "\n\nCONVERSATION :\n$conv"
-        val rep = withTimeoutOrNull(9_000) {
+        // Au-delà de 4,5 s, on n'attend plus : les outils sont choisis par mots-clés (la réponse part plus vite).
+        val rep = withTimeoutOrNull(4_500) {
             try { app.llm.agent(SYSTEM, user) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { null }
         } ?: return null
         val json = rep.substringAfter('{', "").let { if (it.isEmpty()) return null else "{$it" }.substringBeforeLast('}').let { "$it}" }
@@ -34,7 +51,7 @@ Si la demande consiste à analyser le planning/l’agenda pour compléter ou met
             val o = org.json.JSONObject(json)
             val arr = o.optJSONArray("outils") ?: JSONArray()
             val outils = (0 until arr.length()).map { arr.getString(it) }.filter { it in noms }.distinct()
-            Plan(outils, o.optString("plan"))
+            Plan(outils, o.optString("plan")).also { p -> if (cle != null) synchronized(cache) { cache[cle] = System.currentTimeMillis() to p } }
         } catch (e: Exception) { null }
     }
 }

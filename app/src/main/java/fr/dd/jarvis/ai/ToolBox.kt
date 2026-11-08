@@ -225,7 +225,7 @@ class ToolBox(
             mapOf("lieu" to prop("Ville ou adresse (optionnel : par défaut la position actuelle du téléphone)."), "jours" to prop("Nombre de jours de prévision (1 à 7). Par défaut 3."))))
         put(tool("generer_image", "Génère une ou plusieurs images à partir d'une description (Cloudflare). Les images sont affichées dans le chat et enregistrées dans Obsidian. Pour plusieurs images (planche, livre de coloriage, série d'illustrations), mets une description par ligne dans « prompt » : chacune est générée séparément et le nom de fichier de chacune est renvoyé (utile ensuite pour creer_fichier avec format=pdf et le paramètre images).",
             mapOf("prompt" to prop("Description détaillée de l'image, rédigée en anglais (sujet, style, lumière, cadrage). Pour plusieurs images, une description par ligne."),
-                "modele" to prop("Optionnel : « flux » (flux-2-dev, le plus réaliste/précis), « flux-klein » (flux-2-klein, qualité proche mais plus rapide) ou « flux-schnell » (le plus rapide, qualité moindre). Par défaut le modèle choisi dans Réglages › Images.")), listOf("prompt")))
+                "modele" to prop("Optionnel : « flux » (flux-2-dev, le plus réaliste/précis), « flux-klein » (flux-2-klein, qualité proche mais plus rapide) ou « flux-schnell » (le plus rapide, qualité moindre). Par défaut le modèle choisi dans Réglages › IA › Images & vidéo.")), listOf("prompt")))
         put(tool("jarvis_ai_status", "Indique les moteurs IA réellement configurés dans JARVIS (Gemini, Groq, Cloudflare), les modèles actifs et le nombre de clés disponibles. N'affiche jamais les clés ni les secrets."))
         put(tool("tester_cles_api", "Teste les clés API IA enregistrées dans les réglages de JARVIS : chaque clé Groq et Gemini séparément, les comptes Cloudflare et les fournisseurs externes Z.ai, OpenRouter, NVIDIA, Mistral et Hugging Face. Distingue clé refusée, permissions, quota, modèle/endpoint et panne fournisseur. Ne révèle jamais les secrets. Les tests d'inférence utilisent au maximum un jeton par clé lorsque le modèle est configuré.",
             mapOf("fournisseur" to prop("Optionnel : tous (défaut), groq, gemini, cloudflare, zai, openrouter, nvidia, mistral ou huggingface."))))
@@ -241,9 +241,9 @@ class ToolBox(
             "system" to prop("Rôle et consignes de l'agent spécialisé."),
             "prompt" to prop("Question autonome et contexte complet à analyser.")
         ), listOf("system", "prompt")))
-        put(tool("animer_image", "Anime une image déjà générée par JARVIS avec fal.ai / Wan 2.2 (image vers vidéo). Nécessite une clé fal.ai configurée dans Réglages › Vidéo IA. Le MP4 est téléchargé puis enregistré dans JARVIS/Vidéos IA et dans Obsidian. Génération payante selon le tarif fal.ai.",
+        put(tool("animer_image", "Anime une image déjà générée par JARVIS avec fal.ai / Wan 2.2 (image vers vidéo). Nécessite une clé fal.ai configurée dans Réglages › IA › Images & vidéo. Le MP4 est téléchargé puis enregistré dans JARVIS/Vidéos IA et dans Obsidian. Génération payante selon le tarif fal.ai.",
             mapOf("image" to prop("Nom exact de l’image (jarvis-img:...) ou « derniere » pour la plus récente."), "prompt" to prop("Mouvement souhaité : caméra, sujet, ambiance, gestes (optionnel)."), "duree" to prop("Durée du clip en secondes, 0.5 à 4.5 (défaut 3.5).")), listOf("image")))
-        put(tool("generer_video", "Génère une vidéo IA à partir d'une description, de N'IMPORTE QUELLE DURÉE : jusqu'à 5 s c'est un clip unique ; au-delà (10 s, 40 s, 2 min…) le montage de plusieurs plans se fait automatiquement (scénario et prompts précis écrits d'abord par l'agent Gemini). Ne réponds JAMAIS qu'une durée longue est impossible. Nécessite une clé fal.ai configurée dans Réglages › Vidéo IA. Pour animer une image existante, passe son nom dans « image » ou utilise animer_image. Pour une histoire en plusieurs plans, un TikTok/Reel/Short ou un montage avec durée totale, voix off ou musique, utilise tiktok_video (ou video_montage pour un montage général) : ces outils peuvent utiliser Hugging Face si son jeton est configuré. Le MP4 est enregistré dans JARVIS/Vidéos IA et Obsidian, et affiché dans le chat.",
+        put(tool("generer_video", "Génère une vidéo IA à partir d'une description, de N'IMPORTE QUELLE DURÉE : jusqu'à 5 s c'est un clip unique ; au-delà (10 s, 40 s, 2 min…) le montage de plusieurs plans se fait automatiquement (scénario et prompts précis écrits d'abord par l'agent Gemini). Ne réponds JAMAIS qu'une durée longue est impossible. Nécessite une clé fal.ai configurée dans Réglages › IA › Images & vidéo. Pour animer une image existante, passe son nom dans « image » ou utilise animer_image. Pour une histoire en plusieurs plans, un TikTok/Reel/Short ou un montage avec durée totale, voix off ou musique, utilise tiktok_video (ou video_montage pour un montage général) : ces outils peuvent utiliser Hugging Face si son jeton est configuré. Le MP4 est enregistré dans JARVIS/Vidéos IA et Obsidian, et affiché dans le chat.",
             mapOf("prompt" to prop("Description détaillée de la scène, rédigée en anglais (sujet, action, caméra, lumière, style)."),
                 "duree" to prop("Durée totale en secondes demandée par l'utilisateur (défaut 5 ; plus de 5 = montage automatique de plusieurs plans)."), "format" to prop("vertical (défaut), horizontal ou carre."),
                 "image" to prop("Optionnel : image à animer (jarvis-img:... ou « derniere »).")), listOf("prompt")))
@@ -448,8 +448,8 @@ class ToolBox(
         val h = fr.dd.jarvis.hermes.HermesTermux
         return when (action.lowercase()) {
             "installer" -> when {
-                !h.termuxInstalle(app) -> "Termux n'est pas installé : ouvre Réglages › Hermès (Termux) et touche « 1. Installer Termux »."
-                !h.permissionOk(app) -> "Accorde d'abord la permission Termux à JARVIS : Réglages › Hermès (Termux) › « 2. Autoriser »."
+                !h.termuxInstalle(app) -> "Termux n'est pas installé : ouvre Réglages › IA › Hermès (Termux) et touche « 1. Installer Termux »."
+                !h.permissionOk(app) -> "Accorde d'abord la permission Termux à JARVIS : Réglages › IA › Hermès (Termux) › « 2. Autoriser »."
                 else -> h.installer(app)
             }
             "configurer" -> h.configurer(app)
@@ -645,9 +645,9 @@ class ToolBox(
                 sujet = brief, dureeS = duree.toInt(), format = format,
                 tiktok = Regex("tiktok|reel|short", RegexOption.IGNORE_CASE).containsMatchIn(brief))), direct = true)
             if (nomImage.isBlank() && !fr.dd.jarvis.ai.ImageToVideoGen.disponible(app))
-                return ToolResult("❌ Aucune clé fal.ai : ajoute-la dans Réglages › Vidéo IA pour générer une vidéo.")
+                return ToolResult("❌ Aucune clé fal.ai : ajoute-la dans Réglages › IA › Images & vidéo pour générer une vidéo.")
             if (nomImage.isNotBlank() && !fr.dd.jarvis.ai.ImageToVideoGen.disponible(app))
-                return ToolResult("❌ L'animation d'image nécessite une clé fal.ai configurée dans Réglages › Vidéo IA.")
+                return ToolResult("❌ L'animation d'image nécessite une clé fal.ai configurée dans Réglages › IA › Images & vidéo.")
             val prompt = fr.dd.jarvis.ai.VideoGen.preparerPrompt(app, brief, duree, format, nomImage.isNotBlank())
             val (video, loc) = when {
                 nomImage.isNotBlank() -> {
@@ -656,7 +656,7 @@ class ToolBox(
                     fr.dd.jarvis.ai.ImageToVideoGen.generate(app, image, prompt, duree)
                 }
                 fr.dd.jarvis.ai.ImageToVideoGen.disponible(app) -> fr.dd.jarvis.ai.ImageToVideoGen.texteVersVideo(app, prompt, duree, format)
-                else -> return ToolResult("❌ Aucune clé fal.ai : ajoute-la dans Réglages › Vidéo IA pour générer une vidéo. (Sans clé, tiktok_video utilise le service gratuit Hugging Face, plus lent et limité.)")
+                else -> return ToolResult("❌ Aucune clé fal.ai : ajoute-la dans Réglages › IA › Images & vidéo pour générer une vidéo. (Sans clé, tiktok_video utilise le service gratuit Hugging Face, plus lent et limité.)")
             }
             ToolResult("🎬 Vidéo créée après analyse et préparation du prompt (fal.ai) : ${video.name}\n\n[▶ Lire la vidéo](jarvis-video-ia:${video.name})\n\n📁 Enregistrée dans Jarvis › Vidéos IA" + (if (loc.isNotBlank()) "\n🗂️ Obsidian : $loc" else ""), direct = true)
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
@@ -967,7 +967,7 @@ class ToolBox(
         }
         "lire_notifications" -> {
             val svc = fr.dd.jarvis.service.JarvisNotificationListener
-            if (!svc.active) ToolResult("Accès aux notifications non activé : Réglages › Autorisations › « Accès aux notifications ».")
+            if (!svc.active) ToolResult("Accès aux notifications non activé : Réglages › Général › Autorisations › « Accès aux notifications ».")
             else {
                 val n = (a.optString("count").toIntOrNull() ?: 15).coerceIn(1, 40)
                 val app0 = a.optString("appli").trim().lowercase()
@@ -1750,7 +1750,7 @@ class ToolBox(
     }
 
     private suspend fun mailEnvoyer(a: JSONObject): ToolResult {
-        if (store.gmailAccounts.isEmpty()) return ToolResult("Envoyer un mail demande un compte Google connecté (Réglages › Mails) — pas disponible en IMAP.")
+        if (store.gmailAccounts.isEmpty()) return ToolResult("Envoyer un mail demande un compte Google connecté (Réglages › Comptes › Mails) — pas disponible en IMAP.")
         val dest = a.optString("destinataire").trim()
         val sujet = a.optString("sujet").trim()
         val corps = a.optString("corps")
@@ -1776,7 +1776,7 @@ class ToolBox(
     }
 
     private suspend fun marquerTraites(a: JSONObject): ToolResult {
-        if (store.gmailAccounts.isEmpty()) return ToolResult("Marquer comme traité ou lu demande un compte Google connecté (Réglages › Mails).")
+        if (store.gmailAccounts.isEmpty()) return ToolResult("Marquer comme traité ou lu demande un compte Google connecté (Réglages › Comptes › Mails).")
         val count = (a.optString("count").toIntOrNull() ?: 30).coerceIn(5, 60)
         val q = a.optString("recherche").trim().lowercase().let { if (it == "tous" || it == "tout") "" else it }
         val traite = !a.optString("traite").equals("false", true)
@@ -1882,7 +1882,7 @@ class ToolBox(
     }
 
     private suspend fun trierMails(a: JSONObject): ToolResult {
-        if (!store.mailConfigured()) return ToolResult("Les mails ne sont pas configurés (Réglages › Mails).")
+        if (!store.mailConfigured()) return ToolResult("Les mails ne sont pas configurés (Réglages › Comptes › Mails).")
         val count = (a.optString("count").toIntOrNull() ?: 100).coerceIn(5, 500)
         val mails = try {
             app.mail.fetchRecent(count, a.optString("unread_only").equals("true", true), a.optString("compte"), full = true, everywhere = a.optString("toute_la_boite").equals("true", true))
@@ -1911,7 +1911,7 @@ class ToolBox(
 
 
     private suspend fun rechercherMails(a: JSONObject): ToolResult {
-        if (!store.mailConfigured()) return ToolResult("Les comptes mail ne sont pas configurés (Réglages › Mails).", direct = true)
+        if (!store.mailConfigured()) return ToolResult("Les comptes mail ne sont pas configurés (Réglages › Comptes › Mails).", direct = true)
         val count = (a.optString("count").toIntOrNull() ?: 5).coerceIn(1, 20)
         val q = a.optString("compte").trim().lowercase()
         val accounts = if (q.isBlank()) store.gmailAccounts.filter { store.mailActive(it) } else store.gmailAccounts.filter { it.lowercase().contains(q) }
@@ -1962,7 +1962,7 @@ class ToolBox(
     }
 
     private suspend fun summarizeMails(a: JSONObject): ToolResult {
-        if (!store.mailConfigured()) return ToolResult("Les mails ne sont pas configurés : renseigner le serveur IMAP dans Réglages › Mails.")
+        if (!store.mailConfigured()) return ToolResult("Les mails ne sont pas configurés : renseigner le serveur IMAP dans Réglages › Comptes › Mails.")
         val count = (a.optString("count").toIntOrNull() ?: 15).coerceIn(5, 40)
         val unread = a.optString("unread_only").equals("true", ignoreCase = true)
         val mails = try {
@@ -1970,7 +1970,7 @@ class ToolBox(
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
-            return ToolResult("❌ Impossible de lire les mails : ${e.message ?: e.javaClass.simpleName}\nVérifie Réglages › Mails (compte Google connecté ou IMAP).", direct = true)
+            return ToolResult("❌ Impossible de lire les mails : ${e.message ?: e.javaClass.simpleName}\nVérifie Réglages › Comptes › Mails (compte Google connecté ou IMAP).", direct = true)
         }
         if (mails.isEmpty()) return ToolResult("📭 Aucun mail ${if (unread) "non lu" else "récent"}.", direct = true)
         val text = try {
@@ -2117,7 +2117,7 @@ class ToolBox(
     private suspend fun runShell(a: JSONObject): ToolResult {
         val cmd = a.optString("command").trim()
         if (cmd.isBlank()) return ToolResult("Commande vide.")
-        if (!fr.dd.jarvis.device.PhoneShell.ready(app)) return ToolResult("Aucun accès adb : activer l'ADB intégré (ou Shizuku) dans Réglages › Contrôle du téléphone.")
+        if (!fr.dd.jarvis.device.PhoneShell.ready(app)) return ToolResult("Aucun accès adb : activer l'ADB intégré (ou Shizuku) dans Réglages › Téléphone › Contrôle.")
         if (!confirm("Exécuter cette commande shell ?\n\n$cmd", true)) return ToolResult("Commande refusée par l'utilisateur.")
         return ToolResult(fr.dd.jarvis.device.PhoneShell.exec(app, cmd))
     }

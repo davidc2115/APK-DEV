@@ -66,7 +66,7 @@ object Telephony {
     }
 
     fun lire(app: fr.dd.jarvis.JarvisApp, count: Int, de: String, nonLus: Boolean): String {
-        if (!ok(app, Manifest.permission.READ_SMS)) return "Permission SMS non accordée (Réglages › Contrôle du téléphone › Autoriser SMS et appels)."
+        if (!ok(app, Manifest.permission.READ_SMS)) return "Permission SMS non accordée (Réglages › Téléphone › Contrôle › Autoriser SMS et appels)."
         val num = if (de.isBlank()) null else (resolve(app, de)?.second ?: de)
         val sel = mutableListOf<String>(); val args = mutableListOf<String>()
         if (nonLus) sel += "read=0"
@@ -103,7 +103,7 @@ object Telephony {
 
     /** Recherche SMS sur l'historique local par contact, texte et plage de dates inclusives. */
     fun rechercher(app: fr.dd.jarvis.JarvisApp, contact: String, terme: String, du: String, au: String, count: Int): String {
-        if (!ok(app, Manifest.permission.READ_SMS)) return "Permission SMS non accordée (Réglages › Contrôle du téléphone)."
+        if (!ok(app, Manifest.permission.READ_SMS)) return "Permission SMS non accordée (Réglages › Téléphone › Contrôle)."
         val numero = if (contact.isBlank()) null else resolve(app, contact)?.second ?: contact
         val zone = java.time.ZoneId.systemDefault()
         fun borne(value: String, fin: Boolean): Long? = runCatching {
@@ -149,7 +149,7 @@ object Telephony {
     }
 
     fun appeler(ctx: Context, numero: String): String {
-        if (!callGranted(ctx)) return "Permission d'appel non accordée (Réglages › Contrôle du téléphone)."
+        if (!callGranted(ctx)) return "Permission d'appel non accordée (Réglages › Téléphone › Contrôle)."
         return try {
             ctx.startActivity(Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(numero))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             "📞 Appel de $numero lancé."

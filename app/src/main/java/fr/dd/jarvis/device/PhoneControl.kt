@@ -21,7 +21,7 @@ class PhoneControl(private val ctx: Context) {
         return enabled.contains(ctx.packageName)
     }
 
-    private fun needA11y(): String = "Le service d'accessibilité JARVIS n'est pas actif : va dans Réglages › Téléphone et permissions pour le réactiver (désactive puis réactive l'interrupteur dans Réglages Android › Accessibilité, et sur Xiaomi/MIUI vérifie aussi « Démarrage automatique » et la batterie sans restriction pour JARVIS)."
+    private fun needA11y(): String = "Le service d'accessibilité JARVIS n'est pas actif : va dans Réglages › Général › Autorisations pour le réactiver (désactive puis réactive l'interrupteur dans Réglages Android › Accessibilité, et sur Xiaomi/MIUI vérifie aussi « Démarrage automatique » et la batterie sans restriction pour JARVIS)."
 
     /** Force Android à rompre puis recréer la connexion aux services système (accès notifications, accessibilité) :
      *  bascule le composant « désactivé » puis « activé », ce qui force une vraie reconnexion même quand
@@ -477,7 +477,7 @@ class PhoneControl(private val ctx: Context) {
 
     /** Exécute une commande shell (ADB intégré ou Shizuku) hors du thread appelant. */
     private fun sh(cmd: String): String {
-        if (!PhoneShell.ready(ctx) && !AdbShell.hasKey(ctx)) return "Aucun accès adb : appairer l'ADB intégré dans Réglages › Contrôle du téléphone."
+        if (!PhoneShell.ready(ctx) && !AdbShell.hasKey(ctx)) return "Aucun accès adb : appairer l'ADB intégré dans Réglages › Téléphone › Contrôle."
         var out = ""
         val t = Thread { out = PhoneShell.exec(ctx, cmd) }
         t.start(); t.join(25_000)

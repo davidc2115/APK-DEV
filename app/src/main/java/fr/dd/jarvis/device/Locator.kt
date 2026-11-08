@@ -56,7 +56,7 @@ object Locator {
 
     /** « Ma position » : coordonnées au format Google Maps, précision, adresse précise et lien. */
     suspend fun describe(ctx: Context): String = withContext(Dispatchers.IO) {
-        if (!granted(ctx)) return@withContext "Permission de localisation non accordée (Réglages › Localisation)."
+        if (!granted(ctx)) return@withContext "Permission de localisation non accordée (Réglages › Général › Autorisations)."
         val l = precise(ctx) ?: return@withContext "Position indisponible : active la localisation du téléphone."
         val p = Geo.Point(l.latitude, l.longitude)
         val age = (System.currentTimeMillis() - l.time) / 1000

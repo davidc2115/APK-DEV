@@ -261,7 +261,7 @@ private suspend fun tuileMeteo(app: JarvisApp): Tuile {
 }
 
 private fun tuileMaison(app: JarvisApp): Tuile {
-    if (!fr.dd.jarvis.ai.Serveur.haConfigure(app)) return Tuile("🏠", "Maison", "Non configurée", "Home Assistant (Réglages › Serveur)", EtatTuile.INACTIF)
+    if (!fr.dd.jarvis.ai.Serveur.haConfigure(app)) return Tuile("🏠", "Maison", "Non configurée", "Home Assistant (Réglages › Maison › Serveur)", EtatTuile.INACTIF)
     val arr = org.json.JSONArray(fr.dd.jarvis.ai.Serveur.ha(app, "GET", "/api/states"))
     val etats = (0 until arr.length()).map { arr.getJSONObject(it) }
     val lumieres = etats.count { it.optString("entity_id").startsWith("light.") && it.optString("state") == "on" }
@@ -275,14 +275,14 @@ private fun tuileMaison(app: JarvisApp): Tuile {
 }
 
 private fun tuileFreebox(app: JarvisApp): Tuile {
-    val r = fr.dd.jarvis.ai.FreeboxOs.resume(app) ?: return Tuile("📶", "Freebox", "Non associée", "Réglages › Box", EtatTuile.INACTIF)
+    val r = fr.dd.jarvis.ai.FreeboxOs.resume(app) ?: return Tuile("📶", "Freebox", "Non associée", "Réglages › Maison › Box Internet", EtatTuile.INACTIF)
     val (premier, reste) = r.split(" · ", limit = 2).let { it[0] to it.getOrElse(1) { "" } }
     return Tuile("📶", "Freebox", premier, reste.replace(" · ", "\n"), if (premier.startsWith("🟢")) EtatTuile.OK else EtatTuile.ALERTE)
 }
 
 private fun tuileServeur(app: JarvisApp): Tuile {
     val hote = app.store.sshHost.value.trim()
-    if (hote.isBlank()) return Tuile("🖥️", "Serveur", "Non configuré", "Réglages › Serveur", EtatTuile.INACTIF)
+    if (hote.isBlank()) return Tuile("🖥️", "Serveur", "Non configuré", "Réglages › Maison › Serveur", EtatTuile.INACTIF)
     val port = app.store.sshPort.value.toIntOrNull() ?: 22
     val debut = System.currentTimeMillis()
     val ok = runCatching { java.net.Socket().use { it.connect(java.net.InetSocketAddress(hote, port), 2000) } }.isSuccess

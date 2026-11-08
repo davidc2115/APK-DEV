@@ -86,7 +86,7 @@ object ImageGen {
     /** Génère une image, la garde dans l'appli et dans Obsidian. Retourne (fichier, emplacement Obsidian). */
     suspend fun generate(app: JarvisApp, prompt: String, modele: String = ""): Pair<File, String> = withContext(Dispatchers.IO) {
         val list = app.store.cfAccounts.filter { it.contains(':') }
-        if (list.isEmpty()) throw IllegalStateException("Aucun compte Cloudflare : ajoute « idCompte:jeton » dans Réglages › Images.")
+        if (list.isEmpty()) throw IllegalStateException("Aucun compte Cloudflare : ajoute « idCompte:jeton » dans Réglages › IA › Images & vidéo.")
         val model = modele.trim().let { if (it.isBlank()) app.store.cfModel.value.ifBlank { MODELES[0] } else alias(it) }
         val now = System.currentTimeMillis()
         val order = list.indices.map { (next + it) % list.size }

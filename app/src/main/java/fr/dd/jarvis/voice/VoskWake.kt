@@ -106,9 +106,10 @@ class PorcupineWake(private val ctx: Context, private val accessKey: String, pri
  * ne déclenchent plus rien (c'était la cause des bips à répétition). Si des faux réveils se répètent, le service
  * relève [exigence] et le seuil monte.
  */
-class VoskWake(private val ctx: Context, private val onWake: () -> Unit) : WakeDetector {
+class VoskWake(private val ctx: Context, private val econome: Boolean = true, private val onWake: () -> Unit) : WakeDetector {
     private var model: Model? = null
     private var service: SpeechService? = null
+    @Volatile private var boucle: BoucleEconome? = null
     @Volatile private var fired = false
     override var onPanne: () -> Unit = {}
     @Volatile override var exigence: Int = 1
@@ -148,6 +149,13 @@ class VoskWake(private val ctx: Context, private val onWake: () -> Unit) : WakeD
             val rec = Recognizer(model, 16000f, GRAMMAIRE.joinToString(", ", "[", "]") { "\"$it\"" })
             rec.setWords(true)
             fired = false
+            if (econome) {
+                // Écoute économe : le modèle ne travaille que quand il y a du son (porte de silence), pas en continu.
+                val b = BoucleEconome(rec)
+                if (!b.demarrer()) { rec.close(); return false }
+                boucle = b
+                return true
+            }
             service = SpeechService(rec, 16000f).also { s ->
                 s.startListening(object : RecognitionListener {
                     private fun check(j: String?) {
@@ -171,7 +179,135 @@ class VoskWake(private val ctx: Context, private val onWake: () -> Unit) : WakeD
     override fun stop() {
         try { service?.stop(); service?.shutdown() } catch (_: Throwable) {}
         service = null
+        boucle?.arreter(); boucle = null
+    }
+
+    private fun verifier(j: String?) {
+        if (fired || j == null) return
+        try {
+            if (estReveil(org.json.JSONObject(j).optJSONArray("result"), seuil())) { fired = true; onWake() }
+        } catch (_: Throwable) {}
+    }
+
+    /**
+     * Micro lu par trames de 0,1 s ; tant que c'est le silence (ou le bruit de fond habituel), rien n'est envoyé au
+     * modèle (c'était lui qui consommait : il décodait le silence sans arrêt). Dès qu'un son dépasse le bruit de fond,
+     * les 0,6 s précédentes puis la suite sont analysées, jusqu'à 1,2 s de calme.
+     */
+    private inner class BoucleEconome(private val rec: Recognizer) {
+        @Volatile private var actif = true
+        private var fil: Thread? = null
+        private var micro: android.media.AudioRecord? = null
+
+        @android.annotation.SuppressLint("MissingPermission")
+        fun demarrer(): Boolean {
+            val taille = 1600   // 0,1 s à 16 kHz
+            val min = android.media.AudioRecord.getMinBufferSize(16000, android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT)
+            val ar = try {
+                android.media.AudioRecord(android.media.MediaRecorder.AudioSource.VOICE_RECOGNITION, 16000,
+                    android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT, maxOf(min, taille * 2 * 4))
+            } catch (_: Throwable) { return false }
+            if (ar.state != android.media.AudioRecord.STATE_INITIALIZED) { ar.release(); return false }
+            try { ar.startRecording() } catch (_: Throwable) { ar.release(); return false }
+            if (ar.recordingState != android.media.AudioRecord.RECORDSTATE_RECORDING) { ar.release(); return false }
+            micro = ar
+            fil = Thread({ boucle(ar, taille) }, "jarvis-ecoute").apply { isDaemon = true; start() }
+            return true
+        }
+
+        private fun boucle(ar: android.media.AudioRecord, taille: Int) {
+            val porte = PorteVocale()
+            val avant = ArrayDeque<ShortArray>()
+            val buf = ShortArray(taille)
+            var panne = false
+            try {
+                while (actif) {
+                    val n = ar.read(buf, 0, taille)
+                    if (n < 0) { panne = true; break }
+                    if (n == 0) continue
+                    when (porte.trame(PorteVocale.rms(buf, n))) {
+                        PorteVocale.Decision.IGNORER -> { avant.addLast(buf.copyOf(n)); while (avant.size > PorteVocale.PRE_ROULEMENT) avant.removeFirst() }
+                        PorteVocale.Decision.OUVRIR -> {
+                            avant.forEach { if (rec.acceptWaveForm(it, it.size)) verifier(rec.result) }
+                            avant.clear()
+                            if (rec.acceptWaveForm(buf, n)) verifier(rec.result)
+                        }
+                        PorteVocale.Decision.CONTINUER -> if (rec.acceptWaveForm(buf, n)) verifier(rec.result)
+                        PorteVocale.Decision.FERMER -> {
+                            rec.acceptWaveForm(buf, n)
+                            verifier(rec.finalResult)
+                            rec.reset()
+                        }
+                    }
+                    if (fired) break
+                }
+            } catch (_: Throwable) { panne = actif }
+            finally {
+                runCatching { ar.stop() }
+                runCatching { ar.release() }
+                runCatching { rec.close() }
+            }
+            if (panne && actif) onPanne()
+        }
+
+        fun arreter() {
+            actif = false
+            // Attend la libération du micro (au plus une trame) : la reconnaissance de la demande va le reprendre.
+            fil?.let { if (it !== Thread.currentThread()) runCatching { it.join(400) } }
+        }
     }
 
     override fun release() { stop(); try { model?.close() } catch (_: Throwable) {}; model = null }
+}
+
+/**
+ * Porte de silence de l'écoute économe (trames de 0,1 s). Elle suit le bruit de fond (pièce calme, ventilation, télé)
+ * et ne s'ouvre que sur un son nettement plus fort ; elle se referme après 1,2 s de calme, ou au bout de 8 s d'un son
+ * continu (télé, musique) dont elle prend alors le niveau comme nouveau bruit de fond.
+ */
+internal class PorteVocale {
+    enum class Decision { IGNORER, OUVRIR, CONTINUER, FERMER }
+
+    companion object {
+        const val PRE_ROULEMENT = 6     // 0,6 s gardées avant l'ouverture (début du mot)
+        const val MAINTIEN = 12         // 1,2 s de calme avant de refermer
+        const val DUREE_MAX = 80        // 8 s de son continu au plus
+
+        fun rms(b: ShortArray, n: Int): Double {
+            var somme = 0.0
+            for (i in 0 until n) { val v = b[i].toDouble(); somme += v * v }
+            return kotlin.math.sqrt(somme / n.coerceAtLeast(1))
+        }
+    }
+
+    var plancher = -1.0
+        private set
+    var ouverte = false
+        private set
+    private var restant = 0
+    private var duree = 0
+    private var somme = 0.0
+
+    fun seuil() = maxOf(plancher * 2.0, plancher + 100.0, 150.0)
+
+    fun trame(rms: Double): Decision {
+        if (plancher < 0) plancher = rms.coerceIn(20.0, 2000.0)
+        val fort = rms > seuil()
+        if (!ouverte) {
+            if (fort) { ouverte = true; restant = MAINTIEN; duree = 1; somme = rms; return Decision.OUVRIR }
+            plancher += (rms - plancher) * 0.1
+            return Decision.IGNORER
+        }
+        duree++; somme += rms
+        plancher += (rms - plancher) * 0.01
+        if (duree >= DUREE_MAX) {
+            // Son continu (télé, musique) : devient le bruit de fond.
+            plancher = maxOf(plancher, somme / duree * 0.9)
+            ouverte = false
+            return Decision.FERMER
+        }
+        if (fort) { restant = MAINTIEN; return Decision.CONTINUER }
+        if (--restant <= 0) { ouverte = false; return Decision.FERMER }
+        return Decision.CONTINUER
+    }
 }

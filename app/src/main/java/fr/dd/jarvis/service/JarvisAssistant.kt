@@ -9,7 +9,7 @@ import android.service.voice.VoiceInteractionSessionService
 import android.speech.RecognitionService
 
 /**
- * JARVIS comme assistant numérique d'Android (Réglages › Applications par défaut › Assistant) : l'appui long sur le bouton
+ * JARVIS comme assistant numérique d'Android (Réglages › Téléphone › Applis par défaut › Assistant) : l'appui long sur le bouton
  * d'alimentation / d'accueil, ou le geste d'angle, ouvre directement JARVIS à l'écoute. C'est le seul déclencheur « natif » ouvert
  * aux applications tierces : le mot d'éveil « Ok Google » lui-même est réservé au système (DSP du téléphone).
  */

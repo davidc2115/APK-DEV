@@ -383,7 +383,7 @@ setenv API_SERVER_HOST 127.0.0.1
 setenv API_SERVER_PORT $PORT_API
 setenv API_SERVER_KEY ${q(cleApi)}
 setenv API_SERVER_MODEL_NAME hermes-agent
-${if (gemini.isNotBlank()) "setenv GOOGLE_API_KEY ${q(gemini)}" else "p '⚠️ Aucune clé Gemini dans Jarvis : ajoute-en une (Réglages › Agents Gemini) puis « Configurer Hermès ».'"}
+${if (gemini.isNotBlank()) "setenv GOOGLE_API_KEY ${q(gemini)}" else "p '⚠️ Aucune clé Gemini dans Jarvis : ajoute-en une (Réglages › IA › Clés & modèles) puis « Configurer Hermès ».'"}
 ${if (groq.isNotBlank()) "setenv JARVIS_GROQ_RELAIS ${q(jeton)}" else ""}
 setenv HERMES_TIMEZONE ${q(java.util.TimeZone.getDefault().id)}
 chmod 600 "${'$'}H/.env"

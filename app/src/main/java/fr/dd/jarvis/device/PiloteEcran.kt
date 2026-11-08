@@ -49,7 +49,7 @@ Règles :
 
     private fun pourquoiIndisponible(app: JarvisApp): String = when {
         service() == null -> "❌ Le service d'accessibilité JARVIS n'est pas actif : active-le dans Réglages Android › Accessibilité › JARVIS (sur Xiaomi : autoriser aussi le démarrage automatique et la batterie sans restriction)."
-        app.store.geminiKeys.isEmpty() -> "❌ Il me faut une clé Gemini (Réglages › Agents Gemini) pour voir l'écran."
+        app.store.geminiKeys.isEmpty() -> "❌ Il me faut une clé Gemini (Réglages › IA › Clés & modèles) pour voir l'écran."
         else -> ""
     }
 

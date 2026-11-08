@@ -76,7 +76,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
             mapOf("action" to prop("lire | ecrire | lister"), "chemin" to prop("Chemin absolu sur le serveur."), "contenu" to prop("ecrire : contenu complet.")), listOf("action", "chemin")),
         tool("ssh_script", "Serveur SSH : envoie et exécute un script complet (bash ou python3, plusieurs lignes) sur le serveur Debian ; sert à installer, configurer, récupérer des données (git clone, curl…), automatiser.",
             mapOf("code" to prop("Code du script (plusieurs lignes)."), "langage" to prop("bash (défaut) ou python3."), "delai" to prop("Délai maximal en secondes (défaut 120).")), listOf("code")),
-        tool("github", "GitHub (public, ou privé avec un jeton enregistré dans Réglages › Serveur) : lit un fichier, liste un dossier, derniers commits, dernière version (release), infos ou recherche de dépôts. Si le jeton a les droits d'écriture (« repo » / « Contents: Read and write »), peut aussi CRÉER ou MODIFIER un fichier directement sur GitHub (action=ecrire), ou COPIER un fichier d'un chemin/dépôt vers un autre (action=copier) — sans passer par le serveur SSH ni un clone local.",
+        tool("github", "GitHub (public, ou privé avec un jeton enregistré dans Réglages › Maison › Serveur) : lit un fichier, liste un dossier, derniers commits, dernière version (release), infos ou recherche de dépôts. Si le jeton a les droits d'écriture (« repo » / « Contents: Read and write »), peut aussi CRÉER ou MODIFIER un fichier directement sur GitHub (action=ecrire), ou COPIER un fichier d'un chemin/dépôt vers un autre (action=copier) — sans passer par le serveur SSH ni un clone local.",
             mapOf("action" to prop("fichier | liste | commits | release | depot | recherche | ecrire | copier"), "depot" to prop("owner/repo (ex. home-assistant/core), ou mots de la recherche."), "chemin" to prop("Chemin du fichier ou dossier (chemin SOURCE pour « copier »)."), "ref" to prop("Branche, tag ou commit à lire (optionnel)."),
                 "contenu" to prop("ecrire : contenu complet du fichier à écrire."), "message" to prop("ecrire/copier : message de commit (optionnel)."), "branche" to prop("ecrire/copier : branche de destination (optionnel, défaut : branche par défaut du dépôt)."),
                 "vers_depot" to prop("copier : dépôt de destination (optionnel, défaut : même dépôt que « depot »)."), "vers_chemin" to prop("copier : chemin de destination.")), listOf("action", "depot")),
@@ -118,7 +118,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 "mac" to prop("Adresse MAC (bail DHCP)."),
                 "etat" to prop("dmz : activer ou desactiver."),
                 "nombre" to prop("appels : nombre d'appels à afficher (défaut 15).")), listOf("action")),
-        tool("box_disque", "Box internet : accède au disque dur branché sur la box (Freebox associée : par Freebox OS, sans réglage ; autres box : SMB ou FTP, selon Réglages › Box) : liste les partages et dossiers, lit un fichier texte, le télécharge dans l'appli, y envoie un fichier créé par JARVIS, crée un dossier, supprime, renomme ou déplace un fichier/dossier (utile pour réorganiser une bibliothèque de films/séries pour Plex, par exemple), ou lance directement la lecture d'une vidéo dans le lecteur vidéo du téléphone (aucune app spécifique requise, pas de téléchargement).",
+        tool("box_disque", "Box internet : accède au disque dur branché sur la box (Freebox associée : par Freebox OS, sans réglage ; autres box : SMB ou FTP, selon Réglages › Maison › Box Internet) : liste les partages et dossiers, lit un fichier texte, le télécharge dans l'appli, y envoie un fichier créé par JARVIS, crée un dossier, supprime, renomme ou déplace un fichier/dossier (utile pour réorganiser une bibliothèque de films/séries pour Plex, par exemple), ou lance directement la lecture d'une vidéo dans le lecteur vidéo du téléphone (aucune app spécifique requise, pas de téléchargement).",
             mapOf("action" to prop("partages | lister | lire | telecharger | envoyer | supprimer | dossier | renommer | deplacer | lire_telephone"), "chemin" to prop("Chemin sur la box : partage/dossier/fichier (ex. « Disque dur/Photos/2026 »). Pour renommer/deplacer : le chemin ACTUEL (source)."), "fichier" to prop("envoyer : nom du fichier créé par JARVIS à copier sur la box. renommer/deplacer : le NOUVEAU chemin complet sur la box (ex. « Disque dur/Films/Dirty Dancing (1987).avi »).")), listOf("action")),
         tool("serveur_diagnostic", "Diagnostic rapide du serveur : charge, mémoire, disque, conteneurs Docker et derniers logs de Home Assistant.", emptyMap()),
         tool("serveur_scan_ports", "Dépannage réseau : teste DIRECTEMENT DEPUIS LE TÉLÉPHONE (pas besoin que SSH fonctionne) quels ports répondent sur le serveur — utile en premier recours quand SSH refuse de se connecter (mauvais port probable). Teste les ports SSH non standards les plus courants et quelques ports de services courants, identifie lequel répond vraiment comme un serveur SSH (bannière « SSH-… »), et peut corriger le port SSH dans Réglages si tu le demandes et que l'utilisateur confirme. Ne fonctionne que si le téléphone peut atteindre cette adresse (même réseau local que le serveur, ou port déjà redirigé vers l'extérieur).",
@@ -136,7 +136,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
     }
 
     private suspend fun run(name: String, a: JSONObject): ToolResult {
-        fun ssh() { if (!Serveur.sshConfigure(app)) throw IllegalStateException("SSH non configuré (Réglages › Serveur : adresse, utilisateur, mot de passe ou clé).") }
+        fun ssh() { if (!Serveur.sshConfigure(app)) throw IllegalStateException("SSH non configuré (Réglages › Maison › Serveur : adresse, utilisateur, mot de passe ou clé).") }
         return when (name) {
             "ha_dashboard" -> {
                 val action = a.optString("action").lowercase()
@@ -189,16 +189,16 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 ssh()
                 val r = Serveur.exec(app, "uptime; echo; free -h | head -2; echo; df -h / | tail -1; echo; docker ps -a --format 'table {{.Names}}\\t{{.Status}}\\t{{.Image}}' 2>&1 | head -20; echo; n=\$(docker ps -a --format '{{.Names}}\\t{{.Image}}' 2>/dev/null | grep -i home-assistant | head -1 | cut -f1); [ -n \"\$n\" ] && { echo \"== logs \$n ==\"; docker logs --tail 25 \$n 2>&1; }; echo; echo \"== Home Assistant (local, port 8123) ==\"; curl -s -o /dev/null -m 5 -w 'HTTP %{http_code} en %{time_total}s\\n' http://localhost:8123/ 2>&1 || echo \"injoignable en local sur le serveur (curl a échoué)\"", 60)
                 ToolResult("# 🖥️ Serveur\n```\n" + sortie(r, 6000) + "\n```" +
-                    "\n\n_Le test « Home Assistant (local) » est fait DEPUIS le serveur Debian : s'il répond en local mais pas depuis le téléphone, le problème est le réseau entre le téléphone et le serveur (ou l'adresse/port dans Réglages › Serveur), pas Home Assistant lui-même._")
+                    "\n\n_Le test « Home Assistant (local) » est fait DEPUIS le serveur Debian : s'il répond en local mais pas depuis le téléphone, le problème est le réseau entre le téléphone et le serveur (ou l'adresse/port dans Réglages › Maison › Serveur), pas Home Assistant lui-même._")
             }
             "serveur_scan_ports" -> {
                 val hote = a.optString("hote").trim().ifBlank { app.store.sshHost.value.trim() }
-                if (hote.isBlank()) return ToolResult("Aucune adresse à tester : précise « hote », ou renseigne l'adresse du serveur dans Réglages › Serveur.")
+                if (hote.isBlank()) return ToolResult("Aucune adresse à tester : précise « hote », ou renseigne l'adresse du serveur dans Réglages › Maison › Serveur.")
                 val extra = a.optString("ports").split(",").mapNotNull { it.trim().toIntOrNull() }
                 val ports = (Serveur.PORTS_SSH_COURANTS + Serveur.PORTS_SERVICES_COURANTS + extra).distinct()
                 val ouverts = Serveur.scannerPorts(hote, ports).filter { it.second }.map { it.first }
                 if (ouverts.isEmpty()) return ToolResult(
-                    "Aucun des ${ports.size} ports testés ne répond sur $hote. Soit le téléphone n'a pas accès à cette adresse depuis ce réseau (es-tu sur le même Wi-Fi que le serveur ? sinon le port doit être redirigé vers l'extérieur sur la box, avec l'adresse publique/DDNS renseignée dans Réglages › Serveur › Adresse distante), soit le serveur est éteint.")
+                    "Aucun des ${ports.size} ports testés ne répond sur $hote. Soit le téléphone n'a pas accès à cette adresse depuis ce réseau (es-tu sur le même Wi-Fi que le serveur ? sinon le port doit être redirigé vers l'extérieur sur la box, avec l'adresse publique/DDNS renseignée dans Réglages › Maison › Serveur › Adresse distante), soit le serveur est éteint.")
                 val sb = StringBuilder("# 🔎 Ports ouverts sur $hote\n")
                 val sshTrouves = mutableListOf<Int>()
                 ouverts.sorted().forEach { p ->
@@ -211,7 +211,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                     if (confirm("Mettre à jour le port SSH dans Réglages sur ${sshTrouves.first()} ?", true)) {
                         app.store.sshPort.set(sshTrouves.first().toString())
                         sb.append("✅ Port SSH mis à jour sur ${sshTrouves.first()}.")
-                    } else sb.append("Tu peux le corriger toi-même dans Réglages › Serveur.")
+                    } else sb.append("Tu peux le corriger toi-même dans Réglages › Maison › Serveur.")
                 }
                 ToolResult(sb.toString(), direct = true)
             }
@@ -271,7 +271,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 if (act in setOf("supprimer", "envoyer") && !confirm("Box : $act « ${a.optString("chemin").ifBlank { a.optString("fichier") }} » ?", true)) return ToolResult("Refusé par l'utilisateur.")
                 if (act == "lire_telephone") {
                     val h = Box.hote(app)
-                    if (h.isBlank()) return ToolResult("Adresse de la box inconnue : connecte-toi à son Wi-Fi ou renseigne-la dans Réglages › Box.")
+                    if (h.isBlank()) return ToolResult("Adresse de la box inconnue : connecte-toi à son Wi-Fi ou renseigne-la dans Réglages › Maison › Box Internet.")
                     val chemin = a.optString("chemin").trim()
                     if (chemin.isBlank()) return ToolResult("Précise le fichier à lire (paramètre « chemin »).")
                     val url = fr.dd.jarvis.device.MediaServeur.url(app, chemin)
@@ -397,8 +397,8 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
         app.store.ghToken.value.trim().takeIf { it.isNotBlank() }?.let { b.header("Authorization", "Bearer $it") }
         gh.newCall(b.build()).execute().use { r ->
             val t = r.body?.string().orEmpty()
-            if (r.code == 404) throw IllegalStateException("Introuvable sur GitHub (dépôt privé ? ajoute un jeton dans Réglages › Serveur).")
-            if (r.code == 403 && t.contains("rate limit", true)) throw IllegalStateException("Limite GitHub atteinte (ajoute un jeton GitHub dans Réglages › Serveur).")
+            if (r.code == 404) throw IllegalStateException("Introuvable sur GitHub (dépôt privé ? ajoute un jeton dans Réglages › Maison › Serveur).")
+            if (r.code == 403 && t.contains("rate limit", true)) throw IllegalStateException("Limite GitHub atteinte (ajoute un jeton GitHub dans Réglages › Maison › Serveur).")
             if (!r.isSuccessful) throw IllegalStateException("GitHub ${r.code}")
             return t
         }
@@ -407,7 +407,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
     /** Écriture GitHub (création/modification d'un fichier) : demande toujours un jeton avec les droits d'écriture. */
     private fun ghPut(url: String, body: JSONObject): JSONObject {
         val token = app.store.ghToken.value.trim()
-        if (token.isBlank()) throw IllegalStateException("Écriture GitHub impossible : ajoute un jeton GitHub (droits « Contents: Read and write », ou scope « repo » pour un ancien jeton) dans Réglages › Serveur.")
+        if (token.isBlank()) throw IllegalStateException("Écriture GitHub impossible : ajoute un jeton GitHub (droits « Contents: Read and write », ou scope « repo » pour un ancien jeton) dans Réglages › Maison › Serveur.")
         val b = okhttp3.Request.Builder().url(url).header("Accept", "application/vnd.github+json").header("User-Agent", "JARVIS").header("Authorization", "Bearer $token")
             .put(body.toString().toRequestBody("application/json".toMediaType()))
         gh.newCall(b.build()).execute().use { r ->
@@ -499,8 +499,8 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
             }
             "valider" -> return ToolResult(Serveur.haValider(app)?.let { "❌ $it" } ?: "✅ Configuration valide.")
         }
-        if (!Serveur.sshConfigure(app)) return ToolResult("SSH non configuré : l'accès aux fichiers de configuration passe par le serveur (Réglages › Serveur).")
-        val dir = Serveur.haDossier(app) ?: return ToolResult("Dossier de configuration Home Assistant introuvable : indique-le dans Réglages › Serveur (là où se trouve configuration.yaml).")
+        if (!Serveur.sshConfigure(app)) return ToolResult("SSH non configuré : l'accès aux fichiers de configuration passe par le serveur (Réglages › Maison › Serveur).")
+        val dir = Serveur.haDossier(app) ?: return ToolResult("Dossier de configuration Home Assistant introuvable : indique-le dans Réglages › Maison › Serveur (là où se trouve configuration.yaml).")
         fun chemin(f: String): String {
             val r = f.trim().trimStart('/').ifBlank { "configuration.yaml" }
             if (r.contains("..")) throw IllegalArgumentException("Chemin non autorisé.")

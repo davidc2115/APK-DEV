@@ -29,7 +29,7 @@ object CoffreInstallation {
     }
 
     suspend fun installer(app: JarvisApp, progres: (String) -> Unit): String = withContext(Dispatchers.IO) {
-        if (!Serveur.sshConfigure(app)) return@withContext "❌ Configure d'abord l'accès SSH à ton serveur (Réglages › Réseau et serveur)."
+        if (!Serveur.sshConfigure(app)) return@withContext "❌ Configure d'abord l'accès SSH à ton serveur (Réglages › Maison › Serveur)."
         progres("Envoi des fichiers sur le serveur…")
         exec(app, "mkdir -p ~/$DOSSIER/data ~/$DOSSIER/sauvegardes")
         for (f in listOf("serveur.py", "Dockerfile", "docker-compose.yml")) {
