@@ -22,6 +22,8 @@ object NotesPertinentes {
         setOf("volume", "son", "sonore"),
         setOf("lumiere", "lumieres", "lampe", "lampes", "eclairage", "ampoule"),
         setOf("chauffage", "radiateur", "thermostat", "clim", "climatisation", "pac"),
+        // Poêle à granulés (la dictée écrit souvent « poils » ou « poile »).
+        setOf("poele", "poeles", "poile", "poiles", "poils", "pellet", "pellets", "granule", "granules", "insert"),
         setOf("portail", "garage", "porte"),
         setOf("voiture", "auto", "vehicule"),
         setOf("box", "freebox", "routeur"),
@@ -52,6 +54,13 @@ object NotesPertinentes {
         val mots = motsCles(demande)
         if (mots.isEmpty()) return ""
         val lignes = mutableListOf<Pair<Int, String>>()
+        // 0. Carnet de notes (« prends note… ») : priorité la plus haute, les plus récentes d'abord à score égal.
+        runCatching {
+            Carnet.toutes(app).asReversed().forEach { n ->
+                val s = score(n.sujet + " " + n.texte, mots)
+                if (s > 0) lignes += s * 3 + 1 to "[carnet · ${n.sujet}] ${extrait(n.texte, mots, 600)}"
+            }
+        }
         // 1. Consignes mémorisées par Jarvis (rubrique + contenu).
         runCatching {
             app.memo.all().forEach { (k, v) ->
@@ -70,7 +79,7 @@ object NotesPertinentes {
         runCatching {
             val candidats = mots.filter { it.length >= 4 }.sortedByDescending { it.length }.take(4)
                 .flatMap { m -> runCatching { app.knowledgeRepository.searchNodes(m, 15) }.getOrDefault(emptyList()) }
-                .filter { it.sourcePath.endsWith(".md", true) && !it.sourcePath.contains("Mémoire JARVIS") && !it.sourcePath.contains("Mémoire Hermès") }
+                .filter { it.sourcePath.endsWith(".md", true) && !it.sourcePath.contains("Mémoire JARVIS") && !it.sourcePath.contains("Mémoire Hermès") && !it.sourcePath.contains(Carnet.DOSSIER) }
                 .distinctBy { it.sourcePath }
                 .map { it to score(it.title, mots) }.filter { it.second > 0 }.sortedByDescending { it.second }.take(2)
             candidats.forEach { (node, s) ->
@@ -80,7 +89,8 @@ object NotesPertinentes {
         }
         if (lignes.isEmpty()) return ""
         return "\n\nNOTES DE L'UTILISATEUR UTILES POUR CETTE DEMANDE (à appliquer en priorité, avant toute supposition ; " +
-            "par ex. un nom d'entité, d'appareil, d'adresse ou une procédure déjà notés) :\n" +
+            "par ex. un nom d'entité, d'appareil, d'adresse ou une procédure déjà notés — une entité Home Assistant notée s'utilise telle quelle, " +
+            "sans la rechercher ni en choisir une autre) :\n" +
             lignes.sortedByDescending { it.first }.take(8).joinToString("\n") { "- " + it.second }.take(3000)
     }
 

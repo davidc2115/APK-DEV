@@ -330,6 +330,18 @@ class ToolBox(
                 "sujet" to prop("contacts (fiches contact) | briefing (point du matin) | planning | mails | societe | general"),
                 "texte" to prop("La consigne complète, formulée clairement (structure, rubriques, calendrier à utiliser, exemples).")
             ), listOf("sujet", "texte")))
+        put(tool("note_prendre", "Ajoute une note au CARNET DE NOTES de l'utilisateur (« prends note », « note que », « mets ça dans mes notes »). La note est ajoutée à sa rubrique (jamais remplacée), datée et recopiée dans Obsidian (JARVIS/Notes). Prendre note n'est JAMAIS une action : n'appelle ni Home Assistant ni une autre application pour une demande de note, même si elle parle du poêle, de la télé ou d'un réglage.",
+            mapOf(
+                "texte" to prop("La note complète, telle que dite par l'utilisateur (garde les valeurs, noms d'entités, codes, réglages)."),
+                "sujet" to prop("Rubrique (optionnel) : appareil ou thème, ex. « poêle », « télé », « portail ». Déduite du texte si absente.")
+            ), listOf("texte")))
+        put(tool("notes_lire", "Relit le carnet de notes de l'utilisateur : une rubrique (« poêle »), une recherche, ou tout le carnet. À appeler avant d'agir sur un appareil ou un sujet pour lequel l'utilisateur a pris des notes (entité Home Assistant à utiliser, réglages, procédure).",
+            mapOf("sujet" to prop("Rubrique ou mots recherchés (optionnel ; vide = tout le carnet).")) ))
+        put(tool("note_supprimer", "Supprime des notes du carnet : la dernière note, ou les notes d'une rubrique (toutes, ou celles qui contiennent un texte). Demande confirmation avant de supprimer une rubrique entière.",
+            mapOf(
+                "sujet" to prop("Rubrique concernée, ou « derniere » pour la dernière note prise."),
+                "contenant" to prop("Ne supprimer que les notes contenant ce texte (optionnel).")
+            ), listOf("sujet")))
         put(tool("tache_ajouter", "Crée une tâche personnelle locale à JARVIS, avec échéance et priorité facultatives.", mapOf(
             "titre" to prop("Intitulé clair de la tâche."),
             "echeance" to prop("Date d'échéance yyyy-MM-dd, optionnelle."),
@@ -960,6 +972,21 @@ class ToolBox(
         "graphe_suggere_lien" -> ToolResult(app.knowledgeRepository.suggestRelation(a.optString("source"), a.optString("cible"), a.optString("type", "RELATED_TO")))
         "routine_contextuelle" -> routineContextuelle(a)
         "reglage_jarvis" -> reglerJarvis(a)
+        "note_prendre" -> {
+            val texte = a.optString("texte").trim()
+            if (texte.isBlank()) ToolResult("Aucun texte à noter : demande à l'utilisateur ce qu'il faut noter.")
+            else ToolResult(fr.dd.jarvis.device.Carnet.noter(app, texte, a.optString("sujet").ifBlank { null }))
+        }
+        "notes_lire" -> ToolResult(fr.dd.jarvis.device.Carnet.lire(app, a.optString("sujet").ifBlank { a.optString("recherche") }))
+        "note_supprimer" -> {
+            val sujet = a.optString("sujet").trim()
+            if (fr.dd.jarvis.societe.core.normaliser(sujet) in setOf("derniere", "la derniere", "derniere note"))
+                ToolResult(fr.dd.jarvis.device.Carnet.supprimerDerniere(app)?.let { "🗑️ Note supprimée de « ${it.sujet} » : ${it.texte.take(200)}" } ?: "Le carnet est déjà vide.")
+            else {
+                val n = fr.dd.jarvis.device.Carnet.supprimer(app, sujet, a.optString("contenant"))
+                ToolResult(if (n == 0) "Aucune note ne correspond à « $sujet »${a.optString("contenant").takeIf { it.isNotBlank() }?.let { " contenant « $it »" } ?: ""}." else "🗑️ $n note(s) supprimée(s) de « $sujet ».")
+            }
+        }
         "memoire_lire" -> ToolResult(app.memo.all().entries.joinToString("\n\n") { "**${it.key}** : ${it.value}" }.ifBlank { "Aucune consigne enregistrée." } +
             app.memo.hermesPourPrompt().let { if (it.isBlank()) "" else "\n\n---\n**Mémoire d'Hermès (synchronisée)**" + it.substringAfter(":") }, direct = true)
         "memoire_oublier" -> ToolResult(if (app.memo.remove(a.optString("sujet"))) "Consigne oubliée." else "Aucune consigne pour ce sujet.")

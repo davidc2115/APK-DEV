@@ -360,6 +360,14 @@ object Serveur {
         val toutes = (0 until arr.length()).map { arr.getJSONObject(it) }
         val paires = toutes.map { it.getString("entity_id") to it.optJSONObject("attributes")?.optString("friendly_name").orEmpty() }
         val l = filtrerEntites(paires, recherche, domaine).map { toutes[it] }
+        // Entités que l'utilisateur a notées pour ce sujet (carnet, mémoire) : en tête, avec leur état réel.
+        val notees = if (recherche.isBlank() || decalage > 0) emptyList() else runCatching { fr.dd.jarvis.device.Carnet.entitesNotees(app, recherche) }.getOrDefault(emptyList())
+        val blocNotes = if (notees.isEmpty()) "" else "📝 D'APRÈS TES NOTES (à utiliser en priorité, sans chercher d'autre entité) :\n" + notees.joinToString("\n") { (id, note) ->
+            val o = toutes.firstOrNull { it.getString("entity_id") == id }
+            "- `$id` · " + (o?.let { x -> val a = x.optJSONObject("attributes"); "${a?.optString("friendly_name").orEmpty()} : **${x.getString("state")}${a?.optString("unit_of_measurement").orEmpty()}**" }
+                ?: "⚠️ introuvable dans Home Assistant (renommée ?)") + " — note : « ${note.take(160)} »"
+        } + "\n\n"
+        if (l.isEmpty() && blocNotes.isNotBlank()) return blocNotes.trim()
         if (l.isEmpty()) {
             // Jamais un simple « aucune entité » : on donne de quoi réessayer (domaines présents, appareils multimédia…).
             val parDomaine = paires.groupingBy { it.first.substringBefore('.') }.eachCount().entries.sortedByDescending { it.value }
@@ -372,14 +380,14 @@ object Serveur {
             return "Aucune entité ne correspond à « ${recherche.ifBlank { domaine }} » (${arr.length()} entités au total). Dis-le clairement à l'utilisateur, sans inventer. " +
                 "Domaines présents : " + parDomaine.take(14).joinToString(", ") { "${it.key} (${it.value})" } + "." +
                 (if (medias.isNotEmpty()) "\nAppareils multimédia (télé, enceintes) : " + medias.joinToString(" ; ") { "`${it.first}` ${it.second}" } else "") +
-                "\nRéessaie avec un autre mot (nom de la pièce, marque, tv…) ou un domaine, et regarde les notes de l'utilisateur (memoire_lire / obsidian_chercher)."
+                "\nRéessaie avec un autre mot (nom de la pièce, marque, tv…) ou un domaine, et regarde les notes de l'utilisateur (notes_lire / memoire_lire / obsidian_chercher)."
         }
         val debut = decalage.coerceIn(0, l.size)
         val taille = limite.coerceIn(1, 250)
         val page = l.drop(debut).take(taille)
         val fin = debut + page.size
         val suite = if (fin < l.size) "\n\nIl reste ${l.size - fin} entité(s). Pour continuer, rappelle ha_entites avec decalage=$fin et la même recherche/domaine." else "\n\nToutes les entités correspondant au filtre ont été parcourues."
-        return "# 🏠 Entités : ${l.size} résultat(s) · affichage ${if (page.isEmpty()) 0 else debut + 1}–$fin\n\n" + page.joinToString("\n") { o ->
+        return blocNotes + "# 🏠 Entités : ${l.size} résultat(s) · affichage ${if (page.isEmpty()) 0 else debut + 1}–$fin\n\n" + page.joinToString("\n") { o ->
             val a = o.optJSONObject("attributes"); val unit = a?.optString("unit_of_measurement").orEmpty()
             "- `${o.getString("entity_id")}` · ${a?.optString("friendly_name").orEmpty()} : **${o.getString("state")}$unit**"
         } + suite
