@@ -421,6 +421,9 @@ class Store(context: Context) {
     /** Heure (ms) du dernier message « JARVIS… » vu dans les notifications d'une messagerie (Chat/RCS). */
     val antivolDerniereNotif = SPref("antivolDerniereNotif", "")
     val antivolVolume = SPref("antivolVolume", "")
+    /** Pendant l'alerte : réglages d'avant à remettre (filtre « Ne pas déranger »|mode sonnerie ; notifications sur l'écran verrouillé). */
+    val antivolSilence = SPref("antivolSilence", "")
+    val antivolNotifsEcran = SPref("antivolNotifsEcran", "")
     val annApps = SPref("annApps", "")
     private val annModes = androidx.compose.runtime.mutableStateMapOf<String, String>().also { m ->
         listOf("sms", "mail", "autres").forEach { m[it] = prefs.getString("annMode_$it", if (it == "autres") "annonce" else "lecture") ?: "lecture" }

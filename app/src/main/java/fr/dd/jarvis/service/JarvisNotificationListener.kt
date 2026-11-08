@@ -102,8 +102,11 @@ class JarvisNotificationListener : NotificationListenerService() {
                 runCatching { (applicationContext as fr.dd.jarvis.JarvisApp).store.antivolDerniereNotif.set(System.currentTimeMillis().toString()) }
             if (commande != null) {
                 // Secours de l'anti-vol : message en « Chat » (RCS) ou SMS non transmis par Android → lu ici.
-                if (estMessage(sbn.packageName) || n.category == Notification.CATEGORY_MESSAGE)
+                if (estMessage(sbn.packageName) || n.category == Notification.CATEGORY_MESSAGE) {
                     (applicationContext as? fr.dd.jarvis.JarvisApp)?.let { a -> runCatching { fr.dd.jarvis.securite.AntiVol.depuisNotification(a, titre, commande, n) } }
+                    // La notification contient le code : retirée tout de suite (plus visible sur l'écran verrouillé).
+                    runCatching { cancelNotification(sbn.key) }
+                }
                 return
             }
             val label = try { packageManager.getApplicationLabel(packageManager.getApplicationInfo(sbn.packageName, 0)).toString() } catch (_: Exception) { sbn.packageName }

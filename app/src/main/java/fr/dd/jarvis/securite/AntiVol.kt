@@ -251,20 +251,24 @@ object AntiVol {
             Action.AIDE -> sms(app, numero, AIDE)
             Action.STOP -> { arreter(app); sms(app, numero, "✅ JARVIS : alerte arrêtée, téléphone rendu à la normale.") }
             Action.VERROUILLE -> {
-                val ok = verrouiller(app); s.antivolAlerte.set(true)
+                val ok = verrouiller(app); s.antivolAlerte.set(true); masquerNotifications(app, true)
                 sms(app, numero, (if (ok) "🔒 Téléphone verrouillé" else "⚠️ Verrouillage impossible (active « Administrateur de l'appareil » dans JARVIS)") + ". JARVIS est bloqué.\n" + position(app))
             }
-            Action.SONNE -> { verrouiller(app); alarme(app, true); sms(app, numero, "🔊 Le téléphone sonne à fond (même en silencieux).\n" + position(app)) }
+            Action.SONNE -> {
+                s.antivolAlerte.set(true); masquerNotifications(app, true)
+                verrouiller(app); alarme(app, true)
+                sms(app, numero, "🔊 Le téléphone sonne à fond (même en silencieux ou vibreur) et il est verrouillé.\n" + position(app) + "\n« JARVIS tonCode STOP » pour arrêter.")
+            }
             Action.POSITION -> sms(app, numero, position(app))
             Action.SUIVI -> { suivre(app, numero); sms(app, numero, "📡 Suivi activé : position toutes les $SUIVI_MIN min pendant 24 h (« JARVIS tonCode STOP » pour arrêter).\n" + position(app)) }
             Action.MESSAGE -> {
-                s.antivolMessage.set(c.argument.ifBlank { messageParDefaut(app) }); s.antivolAlerte.set(true)
+                s.antivolMessage.set(c.argument.ifBlank { messageParDefaut(app) }); s.antivolAlerte.set(true); masquerNotifications(app, true)
                 verrouiller(app); afficher(app, sonore = false)
                 sms(app, numero, "📝 Message affiché sur l'écran : « ${s.antivolMessage.value} »")
             }
             Action.VOL -> {
-                s.antivolAlerte.set(true)
-                if (s.antivolMessage.value.isBlank() || c.argument.isNotBlank()) s.antivolMessage.set(c.argument.ifBlank { messageParDefaut(app) })
+                s.antivolAlerte.set(true); masquerNotifications(app, true)
+                if (c.argument.isNotBlank()) s.antivolMessage.set(c.argument)
                 val ok = verrouiller(app); alarme(app, true); suivre(app, numero)
                 sms(app, numero, "🚨 JARVIS : mode VOL activé — " + (if (ok) "verrouillé" else "⚠️ verrouillage impossible") +
                     ", alarme, message à l'écran, position toutes les $SUIVI_MIN min.\n" + position(app) + "\n« JARVIS tonCode STOP » pour arrêter.")
@@ -292,22 +296,139 @@ object AntiVol {
         return false
     }
 
-    /** Alarme : volume des alarmes au maximum, notification insistante + écran d'alerte par-dessus le verrouillage. */
+    /**
+     * Alarme : jouée par JARVIS lui-même sur le canal des ALARMES (qui sonne même en silencieux ou vibreur), volume
+     * remis au maximum toutes les 2 s (le voleur ne peut pas le baisser), « Ne pas déranger » levé si JARVIS en a le
+     * droit, vibrations, notification insistante + écran d'alerte par-dessus le verrouillage.
+     */
     fun alarme(app: JarvisApp, on: Boolean) {
         val am = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         if (on) {
             if (app.store.antivolVolume.value.isBlank()) app.store.antivolVolume.set(am.getStreamVolume(AudioManager.STREAM_ALARM).toString())
             runCatching { am.setStreamVolume(AudioManager.STREAM_ALARM, am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0) }
-            afficher(app, sonore = true)
+            sortirDuSilence(app, true)
+            val joue = jouer(app)
+            afficher(app, sonore = !joue, sonnerieInterne = joue)
         } else {
+            arreterSon(app)
             runCatching { NotificationManagerCompat.from(app).cancel(NOTIF) }
             app.store.antivolVolume.value.toIntOrNull()?.let { v -> runCatching { am.setStreamVolume(AudioManager.STREAM_ALARM, v, 0) } }
             app.store.antivolVolume.set("")
+            sortirDuSilence(app, false)
+        }
+    }
+
+    @Volatile private var lecteur: android.media.MediaPlayer? = null
+    private val principal by lazy { android.os.Handler(android.os.Looper.getMainLooper()) }
+    private var maintien: Runnable? = null
+
+    /** Vrai si l'alarme sonne en ce moment (l'écran d'alerte bloque alors les touches de volume). */
+    val sonne: Boolean get() = lecteur != null
+
+    private fun jouer(app: JarvisApp): Boolean {
+        arreterSon(app)
+        val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM) ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+            ?: android.provider.Settings.System.DEFAULT_ALARM_ALERT_URI
+        val l = runCatching {
+            android.media.MediaPlayer().apply {
+                setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
+                setDataSource(app, uri)
+                isLooping = true
+                setWakeMode(app, android.os.PowerManager.PARTIAL_WAKE_LOCK)
+                prepare(); start()
+            }
+        }.getOrNull() ?: return false
+        lecteur = l
+        val am = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val vib = runCatching {
+            if (Build.VERSION.SDK_INT >= 31) (app.getSystemService(android.os.VibratorManager::class.java)).defaultVibrator
+            else @Suppress("DEPRECATION") app.getSystemService(Context.VIBRATOR_SERVICE) as android.os.Vibrator
+        }.getOrNull()
+        runCatching { vib?.vibrate(android.os.VibrationEffect.createWaveform(longArrayOf(0, 800, 400), 0)) }
+        val r = object : Runnable {
+            override fun run() {
+                if (lecteur == null) return
+                runCatching { am.setStreamVolume(AudioManager.STREAM_ALARM, am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0) }
+                principal.postDelayed(this, 2000)
+            }
+        }
+        maintien = r; principal.post(r)
+        journal(app, "🔊 Alarme lancée (canal des alarmes)")
+        return true
+    }
+
+    private fun arreterSon(app: JarvisApp) {
+        maintien?.let { principal.removeCallbacks(it) }; maintien = null
+        lecteur?.let { l -> runCatching { l.stop() }; runCatching { l.release() } }
+        lecteur = null
+        runCatching {
+            if (Build.VERSION.SDK_INT >= 31) app.getSystemService(android.os.VibratorManager::class.java).defaultVibrator.cancel()
+            else @Suppress("DEPRECATION") (app.getSystemService(Context.VIBRATOR_SERVICE) as android.os.Vibrator).cancel()
+        }
+    }
+
+    /**
+     * Mode silencieux / vibreur / Ne pas déranger : levés le temps de l'alarme si JARVIS a l'accès « Ne pas déranger »
+     * (sinon par Shizuku / l'ADB intégré), puis remis comme avant à l'arrêt.
+     */
+    private fun sortirDuSilence(app: JarvisApp, oui: Boolean) {
+        val nm = app.getSystemService(NotificationManager::class.java)
+        val am = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val s = app.store
+        if (oui) {
+            if (s.antivolSilence.value.isBlank()) s.antivolSilence.set("${nm.currentInterruptionFilter}|${am.ringerMode}")
+            if (nm.isNotificationPolicyAccessGranted) {
+                runCatching { nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL) }
+                runCatching { am.ringerMode = AudioManager.RINGER_MODE_NORMAL }
+            } else if (nm.currentInterruptionFilter != NotificationManager.INTERRUPTION_FILTER_ALL) shell(app, "cmd notification set_dnd off")
+        } else {
+            val avant = s.antivolSilence.value.split('|').mapNotNull { it.toIntOrNull() }
+            s.antivolSilence.set("")
+            if (avant.size != 2) return
+            if (nm.isNotificationPolicyAccessGranted) {
+                runCatching { am.ringerMode = avant[1] }
+                runCatching { nm.setInterruptionFilter(avant[0]) }
+            }
+        }
+    }
+
+    /** Commande système (Shizuku ou ADB intégré) en arrière-plan ; ignorée si aucun des deux n'est disponible. */
+    private fun shell(app: JarvisApp, commande: String, apres: (String) -> Unit = {}) {
+        if (!fr.dd.jarvis.device.ShizukuShell.ready() && !fr.dd.jarvis.device.AdbShell.hasKey(app)) return
+        Thread { runCatching { apres(fr.dd.jarvis.device.PhoneShell.exec(app, commande)) } }.start()
+    }
+
+    /**
+     * Notifications sur l'écran verrouillé : MASQUÉES pendant l'alerte (le voleur ne lit ni les messages ni les codes
+     * de vérification), remises comme avant à l'arrêt. Il faut Shizuku ou l'ADB intégré (réglage système protégé).
+     */
+    fun masquerNotifications(app: JarvisApp, oui: Boolean) {
+        val s = app.store
+        if (oui) {
+            if (s.antivolNotifsEcran.value.isNotBlank()) return
+            shell(app, "settings get secure lock_screen_show_notifications") { avant ->
+                s.antivolNotifsEcran.set(avant.trim().takeIf { it == "0" || it == "1" } ?: "1")
+                runCatching { fr.dd.jarvis.device.PhoneShell.exec(app, "settings put secure lock_screen_show_notifications 0") }
+                journal(app, "🙈 Notifications masquées sur l'écran verrouillé")
+            }
+        } else {
+            val avant = s.antivolNotifsEcran.value
+            if (avant.isBlank()) return
+            s.antivolNotifsEcran.set("")
+            shell(app, "settings put secure lock_screen_show_notifications $avant")
         }
     }
 
     /** Écran « téléphone volé » (par-dessus l'écran verrouillé) et notification ; [sonore] : alarme en boucle. */
-    fun afficher(app: JarvisApp, sonore: Boolean) {
+    /** Texte de l'écran d'alerte en cours (test, message de la commande MESSAGE / VOL, ou message par défaut). */
+    @Volatile var messageEcran: String? = null
+
+    fun messageAffiche(app: JarvisApp): String = messageEcran
+        ?: app.store.antivolMessage.value.takeIf { it.isNotBlank() && !it.startsWith("Test de l'alerte") }
+        ?: messageParDefaut(app)
+
+    fun afficher(app: JarvisApp, sonore: Boolean, message: String? = null, sonnerieInterne: Boolean = false) {
+        messageEcran = message
         val nm = app.getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= 26) {
             nm.createNotificationChannel(NotificationChannel(CANAL, "Alerte anti-vol", NotificationManager.IMPORTANCE_HIGH).apply {
@@ -317,11 +438,15 @@ object AntiVol {
                 lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
             })
             nm.createNotificationChannel(NotificationChannel("antivol_message", "Message anti-vol", NotificationManager.IMPORTANCE_HIGH).apply { setSound(null, null) })
+            // Alarme jouée par JARVIS lui-même : notification d'alerte sans son propre (pas de double sonnerie).
+            nm.createNotificationChannel(NotificationChannel("antivol_alerte", "Alerte anti-vol (écran)", NotificationManager.IMPORTANCE_HIGH).apply {
+                setSound(null, null); enableVibration(false); lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+            })
         }
         val ecran = Intent(app, AlerteVolActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         val pi = PendingIntent.getActivity(app, NOTIF, ecran, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val n = NotificationCompat.Builder(app, if (sonore) CANAL else "antivol_message").setSmallIcon(android.R.drawable.ic_lock_lock)
-            .setContentTitle("📵 Téléphone perdu ou volé").setContentText(app.store.antivolMessage.value.ifBlank { messageParDefaut(app) })
+        val n = NotificationCompat.Builder(app, when { sonore -> CANAL; sonnerieInterne -> "antivol_alerte"; else -> "antivol_message" }).setSmallIcon(android.R.drawable.ic_lock_lock)
+            .setContentTitle("📵 Téléphone perdu ou volé").setContentText(messageAffiche(app))
             .setPriority(NotificationCompat.PRIORITY_MAX).setCategory(NotificationCompat.CATEGORY_ALARM).setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOngoing(true).setAutoCancel(false).setFullScreenIntent(pi, true).setContentIntent(pi).build()
         if (sonore) n.flags = n.flags or android.app.Notification.FLAG_INSISTENT
@@ -333,6 +458,9 @@ object AntiVol {
         app.store.antivolAlerte.set(false)
         app.store.antivolSuiviJusqua.set("0")
         alarme(app, false)
+        masquerNotifications(app, false)
+        app.store.antivolMessage.set("")
+        messageEcran = null
         runCatching { (app.getSystemService(Context.ALARM_SERVICE) as AlarmManager).cancel(piSuivi(app)) }
         AlerteVolActivity.fermer()
         journal(app, "⏹️ Alerte arrêtée")
@@ -419,7 +547,8 @@ object AntiVol {
     // ------------------------------------------------------------------ état pour l'écran de réglages
 
     data class Etat(val sms: Boolean, val envoi: Boolean, val localisation: Boolean, val arrierePlan: Boolean, val admin: Boolean,
-                    val superposition: Boolean, val pleinEcran: Boolean, val accessibilite: Boolean, val notifications: Boolean = false, val contacts: Boolean = false)
+                    val superposition: Boolean, val pleinEcran: Boolean, val accessibilite: Boolean, val notifications: Boolean = false, val contacts: Boolean = false,
+                    val neDerangePas: Boolean = false, val shell: Boolean = false)
 
     fun etat(ctx: Context): Etat {
         fun ok(p: String) = ContextCompat.checkSelfPermission(ctx, p) == PackageManager.PERMISSION_GRANTED
@@ -433,6 +562,8 @@ object AntiVol {
             accessibilite = fr.dd.jarvis.service.JarvisAccessibilityService.instance != null,
             notifications = androidx.core.app.NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName),
             contacts = ok(Manifest.permission.READ_CONTACTS),
+            neDerangePas = runCatching { ctx.getSystemService(NotificationManager::class.java).isNotificationPolicyAccessGranted }.getOrDefault(false),
+            shell = fr.dd.jarvis.device.ShizukuShell.ready() || fr.dd.jarvis.device.AdbShell.hasKey(ctx),
         )
     }
 

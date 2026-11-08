@@ -61,12 +61,12 @@ class AlerteVolActivity : ComponentActivity() {
                 Text("📵", fontSize = 64.sp)
                 Text("TÉLÉPHONE PERDU OU VOLÉ", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                 Spacer(Modifier.height(16.dp))
-                Text(app.store.antivolMessage.value.ifBlank { "Ce téléphone a été perdu ou volé." }, color = Color.White, fontSize = 18.sp, textAlign = TextAlign.Center)
+                Text(AntiVol.messageAffiche(app), color = Color.White, fontSize = 18.sp, textAlign = TextAlign.Center)
                 app.store.antivolSecours.value.takeIf { it.isNotBlank() }?.let {
                     Spacer(Modifier.height(12.dp)); Text("📞 $it", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 }
                 Spacer(Modifier.height(10.dp))
-                Text("Sa position est transmise à son propriétaire.", color = Color(0xFFFFC9CF), fontSize = 13.sp, textAlign = TextAlign.Center)
+                Text("🔒 Téléphone verrouillé : seul son propriétaire peut l'utiliser.\nSa position est transmise à son propriétaire.", color = Color(0xFFFFC9CF), fontSize = 13.sp, textAlign = TextAlign.Center)
                 Spacer(Modifier.height(36.dp))
                 OutlinedTextField(code, { code = it; erreur = "" }, singleLine = true, label = { Text("Code du propriétaire", color = Color(0xFFFFC9CF)) },
                     visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -79,6 +79,12 @@ class AlerteVolActivity : ComponentActivity() {
                 }) { Text("Arrêter l'alerte") }
             }
         }
+    }
+
+    /** Pendant l'alarme, les touches de volume ne servent à rien (le volume reste au maximum). */
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean {
+        if (AntiVol.sonne && keyCode in setOf(android.view.KeyEvent.KEYCODE_VOLUME_DOWN, android.view.KeyEvent.KEYCODE_VOLUME_UP, android.view.KeyEvent.KEYCODE_VOLUME_MUTE)) return true
+        return super.onKeyDown(keyCode, event)
     }
 
     @Deprecated("Retour désactivé pendant l'alerte")

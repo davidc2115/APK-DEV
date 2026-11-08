@@ -273,6 +273,12 @@ fun AntiVolPanel(app: JarvisApp) {
                 .putExtra(android.app.admin.DevicePolicyManager.EXTRA_DEVICE_ADMIN, android.content.ComponentName(ctx, fr.dd.jarvis.securite.AdminJarvis::class.java))
                 .putExtra(android.app.admin.DevicePolicyManager.EXTRA_ADD_EXPLANATION, "JARVIS peut verrouiller ton téléphone à distance par SMS (« JARVIS + ton code + VOL ») en cas de perte ou de vol."))
         }
+        ligne(etat.neDerangePas, "Accès « Ne pas déranger » (l'alarme sonne même en mode Ne pas déranger)") {
+            ouvrir(android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
+        }
+        ligne(etat.shell, "Shizuku ou ADB intégré (masquer les notifications de l'écran verrouillé pendant l'alerte) — Réglages › Téléphone › Contrôle") {
+            ouvrir(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:${ctx.packageName}")))
+        }
         ligne(etat.superposition, "Affichage par-dessus les autres applis (écran d'alerte)") {
             ouvrir(android.content.Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:${ctx.packageName}")))
         }
@@ -281,8 +287,9 @@ fun AntiVolPanel(app: JarvisApp) {
         }
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             HudChip("🧪 Tester l'écran d'alerte") {
-                store.antivolMessage.set(store.antivolMessage.value.ifBlank { "Test de l'alerte anti-vol." })
-                fr.dd.jarvis.securite.AntiVol.afficher(app, sonore = false)
+                // Test : texte temporaire, jamais enregistré (il ne doit pas réapparaître lors d'une vraie alerte).
+                if (store.antivolMessage.value.startsWith("Test de l'alerte")) store.antivolMessage.set("")
+                fr.dd.jarvis.securite.AntiVol.afficher(app, sonore = false, message = "🧪 Test de l'écran d'alerte (aucune alarme réelle).")
                 msg = "Écran d'alerte affiché : saisis ton code pour le fermer."
             }
             HudChip("🔒 Tester le verrouillage") { msg = if (fr.dd.jarvis.securite.AntiVol.verrouiller(ctx)) "✅ Verrouillage OK." else "❌ Active « Administrateur de l'appareil » ci-dessus." }
