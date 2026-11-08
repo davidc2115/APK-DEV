@@ -87,12 +87,14 @@ object Echeancier {
         runCatching {
             app.memo.automatismesHermes().forEach { j ->
                 val nom = j.optString("nom").ifBlank { "Automatisme Hermès" }
-                val prochaine = date(j.optString("prochaine"))
                 val derniere = date(j.optString("derniere"))
+                val quandBrut = j.optString("quand")
+                // Prochaine exécution : celle d'Hermès, sinon calculée depuis l'horaire (cron, « every 30m »…).
+                val prochaine = date(j.optString("prochaine")) ?: prochaineHermes(quandBrut, derniere)
                 val actif = j.optBoolean("actif", true)
                 val statut = j.optString("statut")
                 val consigne = j.optString("consigne").replace(Regex("\\s+"), " ").take(120)
-                val detail = "Hermès · ${j.optString("quand").ifBlank { "planifié" }}" +
+                val detail = "Hermès · ${lisible(quandBrut).ifBlank { "planifié" }}" +
                     (j.optString("repetition").takeIf { it.isNotBlank() }?.let { " · $it" } ?: "") +
                     (if (consigne.isNotBlank()) "\n$consigne" else "")
                 l += Element("hermes", "🤖", nom, detail, prochaine,
@@ -117,6 +119,134 @@ object Echeancier {
         }
 
         return l.sortedWith(compareBy<Element> { it.etat.ordinal }.thenBy { e -> if (e.etat == Etat.PASSE) -(e.quand ?: 0L) else e.quand ?: Long.MAX_VALUE })
+    }
+
+    // ------------------------------------------------------------------ horaires d'Hermès (cron, anglais) en français
+
+    private val JOURS_FR = listOf("dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi")
+    private val MOIS_FR = listOf("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre")
+    private val JOURS_EN = mapOf("sunday" to 0, "monday" to 1, "tuesday" to 2, "wednesday" to 3, "thursday" to 4, "friday" to 5, "saturday" to 6,
+        "sun" to 0, "mon" to 1, "tue" to 2, "wed" to 3, "thu" to 4, "fri" to 5, "sat" to 6)
+    private val CRON = Regex("^\\s*(\\S+)\\s+(\\S+)\\s+(\\S+)\\s+(\\S+)\\s+(\\S+)\\s*$")
+
+    private fun hm(h: Int, m: Int) = if (m == 0) "${h}h" else "${h}h" + m.toString().padStart(2, '0')
+    private fun et(l: List<String>) = if (l.size <= 1) l.joinToString() else l.dropLast(1).joinToString(", ") + " et " + l.last()
+
+    /** Valeurs permises par un champ cron (étoile, pas « étoile/n », plages a-b et a-b/n, listes) ; null si illisible. */
+    internal fun champ(f: String, min: Int, max: Int): Set<Int>? = runCatching {
+        f.split(',').flatMap { part ->
+            val (plage, pas) = part.split('/').let { it[0] to (it.getOrNull(1)?.toInt() ?: 1) }
+            val (a, b) = when {
+                plage == "*" -> min to max
+                plage.contains('-') -> plage.split('-').let { it[0].toInt() to it[1].toInt() }
+                else -> plage.toInt().let { v -> v to (if (part.contains('/')) max else v) }
+            }
+            (a..b step pas).toList()
+        }.map { if (max == 7 && it == 7) 0 else it }.filter { it in min..max }.toSortedSet()
+    }.getOrNull()
+
+    /** Horaire d'Hermès en français : « 0 21 * * 0 » → « chaque dimanche à 21h », « every 30m » → « toutes les 30 min »… */
+    internal fun lisible(q: String): String {
+        val t = q.trim()
+        if (t.isBlank()) return ""
+        CRON.matchEntire(t)?.let { m ->
+            val (fm, fh, fdom, fmo, fdow) = m.destructured
+            val minutes = champ(fm, 0, 59) ?: return t
+            val heures = champ(fh, 0, 23) ?: return t
+            val dom = champ(fdom, 1, 31) ?: return t
+            val mois = champ(fmo, 1, 12) ?: return t
+            val dow = champ(fdow, 0, 7) ?: return t
+            // Fréquences : toutes les N minutes / heures
+            if (fm.startsWith("*/") && fh == "*") return "toutes les ${fm.removePrefix("*/")} min"
+            if (fm == "*" && fh == "*") return "toutes les minutes"
+            val heureTexte = when {
+                fh == "*" -> "toutes les heures à :" + minutes.first().toString().padStart(2, '0')
+                fh.startsWith("*/") -> "toutes les ${fh.removePrefix("*/")} h" + (if (minutes.first() != 0) " (à :${minutes.first().toString().padStart(2, '0')})" else "")
+                else -> "à " + et(heures.flatMap { h -> minutes.map { mi -> hm(h, mi) } }.take(6))
+            }
+            val jours = when {
+                fdom == "*" && fdow == "*" -> if (fh == "*" || fh.startsWith("*/")) "" else "tous les jours"
+                fdom == "*" && dow == setOf(1, 2, 3, 4, 5) -> "du lundi au vendredi"
+                fdom == "*" && dow == setOf(0, 6) -> "le week-end"
+                fdom == "*" && dow.size == 1 -> "chaque ${JOURS_FR[dow.first()]}"
+                fdom == "*" -> "le " + et(dow.sortedBy { (it + 6) % 7 }.map { JOURS_FR[it] })
+                fdow == "*" && fmo == "*" -> "le " + et(dom.map { if (it == 1) "1er" else "$it" }) + " de chaque mois"
+                fdow == "*" -> "le " + et(dom.map { if (it == 1) "1er" else "$it" }) + " " + et(mois.map { MOIS_FR[it - 1] })
+                else -> "le " + et(dom.map { "$it" }) + " du mois ou le " + et(dow.map { JOURS_FR[it] })
+            }
+            val moisTexte = if (fmo != "*" && fdow != "*" ) " (" + et(mois.map { MOIS_FR[it - 1] }) + ")" else ""
+            return listOf(jours, heureTexte).filter { it.isNotBlank() }.joinToString(" ") + moisTexte
+        }
+        val n = t.lowercase()
+        // « every 30m », « every 2 hours », « every 1d »
+        Regex("^every (\\d+)\\s*(m|min|mins|minutes?|h|hr|hrs|hours?|d|days?|w|weeks?)$").find(n)?.let { m ->
+            val v = m.groupValues[1]
+            return when (m.groupValues[2].first()) { 'm' -> "toutes les $v min"; 'h' -> if (v == "1") "toutes les heures" else "toutes les $v h"; 'd' -> if (v == "1") "tous les jours" else "tous les $v jours"; else -> if (v == "1") "chaque semaine" else "toutes les $v semaines" }
+        }
+        // « every day at 8am », « every monday at 18:30 », « every weekday at 7:15pm »
+        Regex("^every (day|weekday|weekend|[a-z]+) at (\\d{1,2})(?::(\\d{2}))?\\s*(am|pm)?$").find(n)?.let { m ->
+            var h = m.groupValues[2].toInt(); val mi = m.groupValues[3].toIntOrNull() ?: 0
+            if (m.groupValues[4] == "pm" && h < 12) h += 12; if (m.groupValues[4] == "am" && h == 12) h = 0
+            val quand = when (val j = m.groupValues[1]) {
+                "day" -> "tous les jours"; "weekday" -> "du lundi au vendredi"; "weekend" -> "le week-end"
+                else -> JOURS_EN[j]?.let { "chaque ${JOURS_FR[it]}" } ?: return t
+            }
+            return "$quand à ${hm(h, mi)}"
+        }
+        // Exécution unique : « once at 2026-11-09T09:00 », « at 2026-11-09 09:00 », date ISO seule
+        Regex("^(?:once )?(?:at |on )?(\\d{4}-\\d{2}-\\d{2}[t ][\\d:.]+(?:[+-]\\d{2}:?\\d{2}|z)?)$").find(n)?.let { m ->
+            date(m.groupValues[1].uppercase().replace("Z", "+00:00"))?.let { return "une fois, " + Rappels.format(it) }
+        }
+        return t
+    }
+
+    /** Prochaine exécution d'un automatisme d'Hermès quand le hook ne la donne pas : cron, ou « every N… » après la dernière. */
+    internal fun prochaineHermes(q: String, derniere: Long?, maintenant: LocalDateTime = LocalDateTime.now()): Long? {
+        val t = q.trim()
+        CRON.matchEntire(t)?.let { return prochaineCron(t, maintenant)?.atZone(ZoneId.systemDefault())?.toInstant()?.toEpochMilli() }
+        Regex("^every (\\d+)\\s*(m|min|mins|minutes?|h|hr|hrs|hours?|d|days?)$").find(t.lowercase())?.let { m ->
+            val d = derniere ?: return null
+            val pas = m.groupValues[1].toLong() * when (m.groupValues[2].first()) { 'm' -> 60_000L; 'h' -> 3_600_000L; else -> 86_400_000L }
+            val now = maintenant.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+            var x = d + pas
+            while (x <= now) x += pas
+            return x
+        }
+        Regex("^every (day|weekday|weekend|[a-z]+) at (\\d{1,2})(?::(\\d{2}))?\\s*(am|pm)?$").find(t.lowercase())?.let { m ->
+            var h = m.groupValues[2].toInt(); val mi = m.groupValues[3].toIntOrNull() ?: 0
+            if (m.groupValues[4] == "pm" && h < 12) h += 12; if (m.groupValues[4] == "am" && h == 12) h = 0
+            val dow = when (val j = m.groupValues[1]) { "day" -> "*"; "weekday" -> "1-5"; "weekend" -> "0,6"; else -> JOURS_EN[j]?.toString() ?: return null }
+            return prochaineCron("$mi $h * * $dow", maintenant)?.atZone(ZoneId.systemDefault())?.toInstant()?.toEpochMilli()
+        }
+        return null
+    }
+
+    /** Prochaine date (strictement après [apres]) d'une expression cron à 5 champs ; null si illisible. */
+    internal fun prochaineCron(expr: String, apres: LocalDateTime): LocalDateTime? {
+        val m = CRON.matchEntire(expr) ?: return null
+        val (fm, fh, fdom, fmo, fdow) = m.destructured
+        val minutes = champ(fm, 0, 59) ?: return null
+        val heures = champ(fh, 0, 23) ?: return null
+        val dom = champ(fdom, 1, 31) ?: return null
+        val mois = champ(fmo, 1, 12) ?: return null
+        val dow = champ(fdow, 0, 7) ?: return null
+        if (minutes.isEmpty() || heures.isEmpty()) return null
+        var jour = apres.toLocalDate()
+        repeat(800) {
+            val jdow = jour.dayOfWeek.value % 7
+            val jourOk = jour.monthValue in mois && when {
+                fdom != "*" && fdow != "*" -> jour.dayOfMonth in dom || jdow in dow
+                fdom != "*" -> jour.dayOfMonth in dom
+                fdow != "*" -> jdow in dow
+                else -> true
+            }
+            if (jourOk) for (h in heures) for (mi in minutes) {
+                val x = jour.atTime(h, mi)
+                if (x.isAfter(apres)) return x
+            }
+            jour = jour.plusDays(1)
+        }
+        return null
     }
 
     /** Prochaine occurrence d'une heure « HH:MM » / « 7h30 » selon les jours (tous, semaine, weekend). */
