@@ -74,7 +74,7 @@ class GroqClient(private val ring: KeyRing, private val model: () -> String) {
         val mdl = model()
         val body = JSONObject()
             .put("model", mdl)
-            .put("messages", messages)
+            .put("messages", sansChampsGemini(messages))
             .put("temperature", 0.4)
             .put("max_tokens", if (maxTokens == 1) 1 else out)
         if (tools != null && tools.length() > 0) {
@@ -132,7 +132,7 @@ class CloudflareChatClient(private val accounts: () -> List<String>, private val
             val (id, token) = list[i].split(":", limit = 2)
             try {
                 val body = JSONObject().put("model", model().ifBlank { "@cf/meta/llama-3.3-70b-instruct-fp8-fast" })
-                    .put("messages", messages).put("temperature", 0.4)
+                    .put("messages", sansChampsGemini(messages)).put("temperature", 0.4)
                 if (tools != null && tools.length() > 0) { body.put("tools", tools); body.put("tool_choice", "auto") }
                 val req = Request.Builder().url("https://api.cloudflare.com/client/v4/accounts/$id/ai/v1/chat/completions")
                     .header("Authorization", "Bearer $token").post(body.toString().toRequestBody(Http.JSON)).build()
@@ -147,10 +147,168 @@ class CloudflareChatClient(private val accounts: () -> List<String>, private val
                 return@withContext msg
             } catch (e: ApiException) {
                 last = e
-                cooldown[list[i]] = System.currentTimeMillis() + when (e.code) { 429 -> 60_000L; 401, 403 -> 600_000L; else -> 15_000L }
+                cooldown[list[i]] = System.currentTimeMillis() + (KeyRing.pause(e.code, e.message.orEmpty()) ?: 15_000L)
             }
         }
         throw last ?: IllegalStateException("Cloudflare : toutes les requêtes ont échoué.")
+    }
+
+    fun disponible() = accounts().any { it.contains(':') }
+
+    /** (comptes, en pause) — tableau de santé. */
+    fun etat(): Pair<Int, Int> {
+        val l = accounts().filter { it.contains(':') }
+        val now = System.currentTimeMillis()
+        return l.size to l.count { (cooldown[it] ?: 0L) > now }
+    }
+}
+
+/** Copie des messages sans les champs que seul Gemini comprend (signature de réflexion des appels d'outils) :
+ *  Groq et Cloudflare refusent les propriétés inconnues. */
+internal fun sansChampsGemini(messages: JSONArray): JSONArray {
+    if (!messages.toString().contains("extra_content")) return messages
+    val out = JSONArray()
+    for (i in 0 until messages.length()) {
+        val m = messages.optJSONObject(i) ?: continue
+        val appels = m.optJSONArray("tool_calls")
+        if (appels == null) { out.put(m); continue }
+        val c = JSONObject(m.toString())
+        val a = c.getJSONArray("tool_calls")
+        for (j in 0 until a.length()) a.optJSONObject(j)?.remove("extra_content")
+        out.put(c)
+    }
+    return out
+}
+
+/**
+ * Gemini en mode « compatible OpenAI » (appel d'outils compris) : relais du cerveau quand toutes les clés Groq sont
+ * épuisées, avant Cloudflare. Mêmes clés Gemini que les agents, en rotation (anneau partagé : une clé épuisée ici l'est
+ * aussi pour les agents, et inversement).
+ */
+class GeminiChatClient(private val ring: KeyRing, private val model: () -> String) {
+    private val url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+
+    fun disponible() = ring.count() > 0
+
+    suspend fun chat(messages: JSONArray, tools: JSONArray?, out: Int = 2048, forceText: Boolean = false): JSONObject =
+        ring.run { key -> withContext(Dispatchers.IO) { call(key, messages, tools, out, forceText, true) } }
+
+    private fun call(key: String, messages: JSONArray, tools: JSONArray?, out: Int, forceText: Boolean, reflexionReduite: Boolean): JSONObject {
+        val mdl = model().ifBlank { "gemini-2.5-flash" }.removePrefix("models/")
+        val body = JSONObject().put("model", mdl).put("messages", messagesPourGemini(messages)).put("temperature", 0.4)
+            // La réflexion de Gemini compte dans les jetons de sortie : marge pour que la réponse ne soit pas coupée.
+            .put("max_tokens", (out + 2048).coerceAtMost(8192))
+        val outils = outilsPourGemini(tools)
+        if (outils != null && outils.length() > 0) { body.put("tools", outils); body.put("tool_choice", if (forceText) "none" else "auto") }
+        if (reflexionReduite) when {
+            mdl.contains("2.5") && !mdl.contains("pro") -> body.put("reasoning_effort", "none")
+            mdl.contains("gemini-3") -> body.put("reasoning_effort", "low")
+        }
+        val req = Request.Builder().url(url).header("Authorization", "Bearer $key").post(body.toString().toRequestBody(Http.JSON)).build()
+        val (code, text) = Http.client.newCall(req).execute().use { it.code to it.body?.string().orEmpty() }
+        if (code == 400 && reflexionReduite && Regex("reasoning|think", RegexOption.IGNORE_CASE).containsMatchIn(text)) return call(key, messages, tools, out, forceText, false)
+        if (code !in 200..299) throw ApiException(code, "Gemini $code : ${text.take(300)}")
+        val racine = runCatching { JSONObject(if (text.trimStart().startsWith("[")) JSONArray(text).getJSONObject(0).toString() else text) }
+            .getOrElse { throw ApiException(502, "Gemini : réponse illisible") }
+        val msg = racine.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message") ?: throw ApiException(502, "Gemini : réponse vide")
+        val appels = msg.optJSONArray("tool_calls")
+        if (appels != null) for (i in 0 until appels.length()) appels.optJSONObject(i)?.let { a ->
+            if (a.optString("id").isBlank()) a.put("id", "call_" + System.nanoTime().toString(36) + i)
+            if (!a.has("type")) a.put("type", "function")
+        }
+        if (msg.has("content") && !msg.isNull("content")) msg.put("content", nettoyerRaisonnement(msg.optString("content")))
+        if ((appels == null || appels.length() == 0) && msg.optString("content").isBlank()) throw ApiException(502, "Gemini : réponse vide")
+        return msg
+    }
+
+    companion object {
+        /** Signature factice acceptée par Gemini 3 pour un appel d'outil qu'il n'a pas produit lui-même (historique Groq…). */
+        private const val SIGNATURE_NEUTRE = "skip_thought_signature_validator"
+
+        /** Messages au format accepté par Gemini : champs connus seulement, texte simple, nom de l'outil sur ses
+         *  résultats, signature de réflexion sur chaque appel d'outil. */
+        internal fun messagesPourGemini(messages: JSONArray): JSONArray {
+            val noms = mutableMapOf<String, String>()
+            val out = JSONArray()
+            for (i in 0 until messages.length()) {
+                val m = messages.optJSONObject(i) ?: continue
+                val role = m.optString("role").let { if (it == "developer") "system" else it }
+                val c = JSONObject().put("role", role)
+                val texte = when (val x = m.opt("content")) {
+                    is String -> x
+                    is JSONArray -> (0 until x.length()).mapNotNull { x.optJSONObject(it) }.filter { it.optString("type") in setOf("text", "input_text") }.joinToString("\n") { it.optString("text") }
+                    null, JSONObject.NULL -> ""
+                    else -> x.toString()
+                }
+                c.put("content", texte)
+                m.optJSONArray("tool_calls")?.takeIf { it.length() > 0 }?.let { a ->
+                    val appels = JSONArray()
+                    for (j in 0 until a.length()) {
+                        val t = JSONObject(a.optJSONObject(j)?.toString() ?: continue)
+                        val f = t.optJSONObject("function") ?: continue
+                        if (t.optString("id").isNotBlank()) noms[t.optString("id")] = f.optString("name")
+                        val g = t.optJSONObject("extra_content")?.optJSONObject("google")
+                        if (g == null || g.optString("thought_signature").isBlank())
+                            t.put("extra_content", JSONObject().put("google", JSONObject().put("thought_signature", SIGNATURE_NEUTRE)))
+                        if (!t.has("type")) t.put("type", "function")
+                        appels.put(t)
+                    }
+                    if (appels.length() > 0) c.put("tool_calls", appels)
+                }
+                if (role == "tool") {
+                    val id = m.optString("tool_call_id")
+                    c.put("tool_call_id", id)
+                    (m.optString("name").ifBlank { noms[id].orEmpty() }).takeIf { it.isNotBlank() }?.let { c.put("name", it) }
+                    if (texte.isBlank()) c.put("content", "(vide)")
+                }
+                out.put(c)
+            }
+            return out
+        }
+
+        private val CLES_REFUSEES = setOf("\$schema", "\$id", "additionalProperties", "strict", "examples", "default", "\$comment", "patternProperties", "unevaluatedProperties")
+
+        /** Schémas d'outils ramenés au sous-ensemble accepté par Gemini (pas d'additionalProperties, types simples…). */
+        internal fun outilsPourGemini(tools: JSONArray?): JSONArray? {
+            if (tools == null) return null
+            val out = JSONArray()
+            for (i in 0 until tools.length()) {
+                val t = JSONObject(tools.optJSONObject(i)?.toString() ?: continue)
+                val f = t.optJSONObject("function") ?: continue
+                f.remove("strict")
+                f.optJSONObject("parameters")?.let { p ->
+                    val propre = schema(p)
+                    if (propre.optJSONObject("properties")?.length() ?: 0 == 0) f.remove("parameters") else f.put("parameters", propre)
+                }
+                out.put(t)
+            }
+            return out
+        }
+
+        private fun schema(o: JSONObject): JSONObject {
+            val c = JSONObject()
+            for (k in o.keys()) {
+                if (k in CLES_REFUSEES) continue
+                when (val v = o.get(k)) {
+                    is JSONObject -> c.put(k, if (k == "properties") JSONObject().also { pr -> v.keys().forEach { n -> v.optJSONObject(n)?.let { pr.put(n, schema(it)) } } } else schema(v))
+                    is JSONArray -> c.put(k, if (k == "type") v else JSONArray().also { a -> for (j in 0 until v.length()) a.put((v.opt(j) as? JSONObject)?.let { schema(it) } ?: v.opt(j)) })
+                    else -> c.put(k, v)
+                }
+            }
+            // « type »: ["string","null"] → type simple + nullable ; « const » → enum.
+            (c.opt("type") as? JSONArray)?.let { a ->
+                val types = (0 until a.length()).map { a.optString(it) }
+                c.put("type", types.firstOrNull { it != "null" } ?: "string")
+                if ("null" in types) c.put("nullable", true)
+            }
+            if (c.has("const")) { c.put("enum", JSONArray().put(c.get("const").toString())); c.remove("const") }
+            // Gemini refuse un objet sans propriétés : on le décrit comme texte JSON.
+            if (c.optString("type") == "object" && (c.optJSONObject("properties")?.length() ?: 0) == 0 && !c.has("anyOf")) {
+                c.put("type", "string"); c.remove("properties"); c.remove("required")
+                c.put("description", (c.optString("description") + " (objet JSON)").trim())
+            }
+            return c
+        }
     }
 }
 

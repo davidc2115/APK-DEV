@@ -15,6 +15,10 @@ import org.json.JSONObject
  * l'envoyer : consignes raccourcies (début + fin conservés), historique ancien résumé, résultats d'outils tronqués,
  * seuls les outils utiles à la demande en cours (et ceux déjà utilisés) gardés, descriptions abrégées. Il utilise les
  * clés Groq de Jarvis (rotation automatique, jamais copiées dans Termux) et réessaie plus compact si Groq refuse encore.
+ *
+ * Quand TOUTES les clés Groq sont épuisées (quota) ou absentes, le relais ne renvoie plus d'erreur à Hermès : il
+ * répond avec Gemini (toutes les clés de Jarvis, en rotation, requête complète) puis Cloudflare (requête compactée).
+ * Hermès ne voit une erreur que si les trois fournisseurs sont à court.
  */
 object RelaisGroq {
     /** Budget d'entrée visé (jetons estimés) pour tenir sous ~8 000 jetons/min avec la réponse. */
@@ -35,11 +39,11 @@ object RelaisGroq {
 
     /** Traite une requête chat.completions (format OpenAI) ; renvoie (code HTTP, corps JSON non streamé). */
     fun repondre(app: JarvisApp, corps: JSONObject): Pair<Int, String> {
-        if (!app.llm.groq.disponible()) return 503 to erreur("Aucune clé Groq dans Jarvis.", "no_key")
         val messages = corps.optJSONArray("messages") ?: JSONArray()
         val outils = corps.optJSONArray("tools")
         val sortie = corps.optInt("max_tokens", corps.optInt("max_completion_tokens", 1024)).coerceIn(256, 1200)
         val forceText = corps.optString("tool_choice") == "none"
+        if (!app.llm.groq.disponible()) return relais(app, messages, outils, forceText, ApiException(503, "Aucune clé Groq dans Jarvis."))
         var derniere: ApiException? = null
         // Palier de départ : le premier dont l'estimation tient dans le budget.
         val depart = PALIERS.indexOfFirst { p -> estimer(compacter(messages, p), reduireOutils(outils, messages, p)) <= p.budget }.let { if (it < 0) PALIERS.lastIndex else it }
@@ -55,11 +59,24 @@ object RelaisGroq {
                 val tropGros = e.code == 413 || (e.code == 429 && (e.message ?: "").contains("tokens per minute", true) && (e.message ?: "").contains("Requested", true))
                 if (!tropGros) break
             } catch (e: Exception) {
-                return 502 to erreur("Relais Groq : ${e.message ?: e.javaClass.simpleName}", "relay_error")
+                return relais(app, messages, outils, forceText, e)
             }
         }
-        val code = derniere?.code ?: 502
-        return (if (code in 400..599) code else 502) to erreur(derniere?.message ?: "Groq indisponible.", if (code == 429) "rate_limit_exceeded" else "upstream_error")
+        return relais(app, messages, outils, forceText, derniere ?: ApiException(502, "Groq indisponible."))
+    }
+
+    /** Groq à court : Gemini puis Cloudflare (cf. Llm.relaisApresGroq) ; erreur pour Hermès seulement si tout échoue. */
+    private fun relais(app: JarvisApp, messages: JSONArray, outils: JSONArray?, forceText: Boolean, origine: Exception): Pair<Int, String> {
+        // Cloudflare (Llama 3.3, contexte court) reçoit la requête compactée comme pour Groq.
+        val compact = reduire(messages, if (forceText) null else outils, 1)
+        return try {
+            val m = runBlocking { app.llm.relaisApresGroq(messages, outils, forceText, origine, compact) }
+            200 to completionDe(m, modele(app), estimer(messages, outils))
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
+            val code = (e as? ApiException)?.code ?: (origine as? ApiException)?.code ?: 502
+            (if (code in 400..599) code else 502) to erreur("Groq, Gemini et Cloudflare à court : ${e.message ?: e.javaClass.simpleName}",
+                if (code == 429) "rate_limit_exceeded" else "upstream_error")
+        }
     }
 
     /** Même compactage que pour Groq (palier [niveau]) : historique, consignes (début + fin), outils utiles. */

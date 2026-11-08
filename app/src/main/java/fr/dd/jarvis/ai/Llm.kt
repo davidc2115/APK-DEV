@@ -10,10 +10,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Façade des deux fournisseurs :
- *  - Groq = cerveau principal (conversation + choix des outils), clés en rotation ;
- *  - Gemini = agents (analyse du planning, tri/résumé des mails, fiches contacts), clés en rotation.
- * Si aucune clé Gemini n'est configurée, les agents se rabattent sur Groq.
+ * Façade des fournisseurs, chacun avec plusieurs clés en rotation :
+ *  - cerveau (conversation + outils) : Groq → Gemini → Cloudflare → Ollama de la maison ;
+ *  - agents (planning, mails, contacts) : Gemini → Groq → Cloudflare → Ollama.
+ * Une clé qui atteint son quota est mise en pause le temps indiqué par le fournisseur ; quand toutes les clés d'un
+ * fournisseur sont en pause, on passe immédiatement au suivant.
  */
 class Llm(private val store: Store) {
     private val groqRing = KeyRing { store.groqKeys.toList() }
@@ -24,8 +25,14 @@ class Llm(private val store: Store) {
     fun etatGemini() = Triple(geminiRing.count(), geminiRing.pausedCount(), geminiRing.quotasDerniereHeure())
     fun etatGroq() = Triple(groqRing.count(), groqRing.pausedCount(), groqRing.quotasDerniereHeure())
     val gemini = GeminiClient(geminiRing) { store.geminiModel.value }
-    /** Dernier recours du cerveau principal (appel d'outils), seulement si TOUTES les clés Groq sont épuisées. */
+    /** Relais du cerveau (appel d'outils) quand TOUTES les clés Groq sont épuisées : mêmes clés que les agents. */
+    val geminiChat = GeminiChatClient(geminiRing) { store.geminiModel.value }
+    /** Dernier recours en ligne du cerveau, après Groq puis Gemini. */
     val cloudflare = CloudflareChatClient({ store.cfAccounts.toList() }) { store.cfChatModel.value }
+
+    /** Fournisseur qui a répondu au dernier tour du cerveau (« Groq », « Gemini (relais) »…), et quand. */
+    @Volatile var dernierFournisseur: String = ""
+    @Volatile var dernierRelais: Long = 0L
 
     fun keyStatus(): String {
         val g = groqRing.count()
@@ -33,7 +40,10 @@ class Llm(private val store: Store) {
         val c = store.cfAccounts.count { it.contains(':') }
         return "Groq $g clé(s)" + (if (groqRing.pausedCount() > 0) " (${groqRing.pausedCount()} en pause)" else "") +
             " · Gemini $m clé(s)" + (if (geminiRing.pausedCount() > 0) " (${geminiRing.pausedCount()} en pause)" else "") +
-            " · Cloudflare $c compte(s) (dernier recours)"
+            " · Cloudflare $c compte(s)" + (cloudflare.etat().second.takeIf { it > 0 }?.let { " ($it en pause)" } ?: "") +
+            "\nOrdre : Groq → Gemini → Cloudflare → Ollama" +
+            (if (dernierRelais > 0 && System.currentTimeMillis() - dernierRelais < 3_600_000L) " · dernier relais : $dernierFournisseur à " +
+                java.text.SimpleDateFormat("HH:mm", java.util.Locale.FRANCE).format(java.util.Date(dernierRelais)) else "")
     }
 
     /** Dernière erreur des agents (affichée quand un repli sans IA est utilisé). */
@@ -63,6 +73,16 @@ class Llm(private val store: Store) {
                 throw e
             } catch (e: Exception) {
                 errors += "Groq : " + (e.message ?: e.javaClass.simpleName).take(160)
+            }
+        }
+        if (cloudflare.disponible()) {
+            try {
+                val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", system)).put(JSONObject().put("role", "user").put("content", user))
+                return cloudflare.chat(msgs, null).optString("content").trim().ifBlank { throw IllegalStateException("réponse vide") }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                errors += "Cloudflare : " + (e.message ?: e.javaClass.simpleName).take(160)
             }
         }
         lastError = errors.joinToString(" | ").ifBlank { "aucune clé configurée" }
@@ -98,7 +118,15 @@ class Llm(private val store: Store) {
         catch (e: CancellationException) { throw e } catch (e: Exception) { throw origine }
     }
 
-    private suspend fun groqChatEnLigne(messages: org.json.JSONArray, tools: org.json.JSONArray?, forceText: Boolean): org.json.JSONObject = try {
+    private suspend fun groqChatEnLigne(messages: org.json.JSONArray, tools: org.json.JSONArray?, forceText: Boolean): org.json.JSONObject {
+        val erreurGroq = try {
+            return groqSeul(messages, tools, forceText).also { dernierFournisseur = "Groq" }
+        } catch (e: CancellationException) { throw e } catch (e: Exception) { e }
+        // Toutes les clés Groq ont échoué (quota, pause, panne, aucune clé) : Gemini (toutes ses clés), puis Cloudflare.
+        return relaisApresGroq(messages, tools, forceText, erreurGroq)
+    }
+
+    private suspend fun groqSeul(messages: org.json.JSONArray, tools: org.json.JSONArray?, forceText: Boolean): org.json.JSONObject = try {
         groq.chat(messages, tools, 1800, forceText)
     } catch (e: ApiException) {
         when {
@@ -108,11 +136,38 @@ class Llm(private val store: Store) {
                 try { groq.chat(compacter(messages, 1), compacterSchema(tools, 1), 1000, forceText) }
                 catch (e2: ApiException) { if (e2.code == 413) groq.chat(compacter(messages, 2), compacterSchema(tools, 2), 700, forceText) else throw e2 }
             }
-            // Toutes les clés Groq ont échoué (quota épuisé, clés en pause…) : Cloudflare en tout dernier recours, avec les
-            // comptes déjà configurés pour les images. S'il échoue aussi, on remonte l'erreur Groq d'origine (plus parlante).
-            else -> try { cloudflare.chat(messages, tools) } catch (e2: Exception) { throw e }
+            else -> throw e
         }
     }
+
+    /**
+     * Relais quand Groq ne répond plus : Gemini (format OpenAI avec outils, clés en rotation) puis Cloudflare (comptes
+     * en rotation). [cloudflareCompact] : requête déjà réduite pour Cloudflare (contexte plus court) ; sinon l'originale.
+     * Si tout échoue, on remonte l'erreur Groq d'origine, complétée des autres.
+     */
+    suspend fun relaisApresGroq(messages: org.json.JSONArray, tools: org.json.JSONArray?, forceText: Boolean, origine: Exception,
+                                cloudflareCompact: Pair<org.json.JSONArray, org.json.JSONArray?>? = null): org.json.JSONObject {
+        val erreurs = mutableListOf("Groq : " + (origine.message ?: origine.javaClass.simpleName).take(140))
+        if (geminiChat.disponible()) {
+            try {
+                return geminiChat.chat(messages, tools, 1800, forceText).also { noterRelais("Gemini") }
+            } catch (e: CancellationException) { throw e } catch (e: Exception) {
+                erreurs += "Gemini : " + (e.message ?: e.javaClass.simpleName).take(140)
+            }
+        }
+        if (cloudflare.disponible()) {
+            try {
+                val (m, t) = cloudflareCompact ?: (messages to tools)
+                return cloudflare.chat(m, if (forceText) null else t).also { noterRelais("Cloudflare") }
+            } catch (e: CancellationException) { throw e } catch (e: Exception) {
+                erreurs += "Cloudflare : " + (e.message ?: e.javaClass.simpleName).take(140)
+            }
+        }
+        lastError = erreurs.joinToString(" | ")
+        throw if (origine is ApiException) ApiException(origine.code, lastError) else IllegalStateException(lastError, origine)
+    }
+
+    private fun noterRelais(qui: String) { dernierFournisseur = "$qui (relais)"; dernierRelais = System.currentTimeMillis() }
 
     private fun compacter(messages: org.json.JSONArray, niveau: Int): org.json.JSONArray {
         val sys = if (niveau == 1) 5000 else 2800
