@@ -18,12 +18,20 @@ class CoffreException(val code: Int, message: String, val version: Int = 0) : Ex
  * Accès HTTPS au coffre du serveur. Le certificat est auto-signé : JARVIS n'accepte QUE celui dont l'empreinte SHA-256
  * a été mémorisée à l'installation (épinglage) — un faux serveur est refusé, même avec un certificat « valide ».
  * Deux adresses : locale (Wi-Fi de la maison) et distante (redirection de port sur la box) ; la bonne est essayée d'abord.
+ * En dernier recours, un tunnel SSH vers le serveur ([tunnel], téléphone qui a l'accès SSH) : le coffre reste joignable
+ * même si son port n'est pas ouvert sur la box ni dans le pare-feu.
  */
 class CoffreClient(
     private val adresses: List<String>,
     private val empreinte: String,
+    private val tunnel: (() -> String)? = null,
     private val jeton: () -> String = { "" },
 ) {
+    companion object {
+        /** Dernière adresse qui a répondu, par coffre (empreinte) : évite d'attendre les adresses injoignables à chaque fois. */
+        private val bonnes = java.util.concurrent.ConcurrentHashMap<String, String>()
+    }
+
     private val confiance = object : X509TrustManager {
         override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) = throw java.security.cert.CertificateException("non utilisé")
         override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {
@@ -40,17 +48,23 @@ class CoffreClient(
         .connectTimeout(6, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS).writeTimeout(120, TimeUnit.SECONDS)
         .build()
 
-    @Volatile private var bonne: String? = null
-
     private fun <T> essayer(f: (String) -> T): T {
-        val ordre = (listOfNotNull(bonne) + adresses).distinct().filter { it.isNotBlank() }
-        require(ordre.isNotEmpty()) { "Adresse du coffre non configurée." }
+        val cle = empreinte.trim().lowercase()
+        val ordre = (listOfNotNull(bonnes[cle]) + adresses).distinct().filter { it.isNotBlank() }
+        require(ordre.isNotEmpty() || tunnel != null) { "Adresse du coffre non configurée." }
         var derniere: Exception? = null
         for (a in ordre) {
-            try { return f(a.trimEnd('/')).also { bonne = a } }
+            try { return f(a.trimEnd('/')).also { bonnes[cle] = a } }
             catch (e: java.io.IOException) { derniere = e }   // injoignable : adresse suivante
         }
-        throw CoffreException(0, "Coffre injoignable (${ordre.joinToString(" / ")}) : ${derniere?.message ?: "pas de réponse"}")
+        if (tunnel != null) {
+            val parSsh = try { tunnel.invoke() } catch (e: Exception) { derniere = derniere ?: e; null }
+            if (parSsh != null) {
+                try { return f(parSsh.trimEnd('/')).also { bonnes[cle] = parSsh } }
+                catch (e: java.io.IOException) { derniere = e }
+            }
+        }
+        throw CoffreException(0, "Coffre injoignable (${(ordre + listOfNotNull(tunnel?.let { "tunnel SSH" })).joinToString(" / ")}) : ${derniere?.message ?: "pas de réponse"}")
     }
 
     private fun appel(methode: String, chemin: String, corps: ByteArray? = null, type: String = "application/json"): Pair<Int, ByteArray> = essayer { base ->

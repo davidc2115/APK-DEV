@@ -146,23 +146,36 @@ object Serveur {
     /** Ferme la session gardée ouverte (réglages modifiés, test de connexion). */
     @Synchronized fun fermerSession() { principale?.let { runCatching { it.disconnect() } }; principale = null }
 
-    @Volatile private var tunnelOllama: Pair<Session, Int>? = null
+    private val tunnels = HashMap<Int, Pair<Session, Int>>()
 
     /**
-     * Tunnel SSH persistant vers un port du serveur LUI-MÊME (Ollama n'écoute souvent que sur 127.0.0.1) ; renvoie le port
-     * local (127.0.0.1) à utiliser. Réutilisé tant que la session SSH reste ouverte.
+     * Tunnel SSH persistant vers un port du serveur LUI-MÊME (Ollama, coffre-fort… : joignables même si le port n'est
+     * pas ouvert sur la box ni dans le pare-feu) ; renvoie le port local (127.0.0.1) à utiliser. Réutilisé tant que la
+     * session SSH reste ouverte.
      */
     @Synchronized
-    fun tunnelOllama(app: JarvisApp, portDistant: Int): Int {
-        tunnelOllama?.let { (s, p) -> if (s.isConnected) return p; runCatching { s.disconnect() } }
+    fun tunnel(app: JarvisApp, portDistant: Int): Int {
+        tunnels[portDistant]?.let { (s, p) -> if (s.isConnected) return p; runCatching { s.disconnect() } }
         val s = try { ouvrir(app) } catch (e: Exception) {
             throw IllegalStateException(expliquer(e, app.store.sshHost.value, app.store.sshPort.value.toIntOrNull() ?: 22), e)
         }
         runCatching { s.setServerAliveInterval(30_000) }
         val p = s.setPortForwardingL("127.0.0.1", 0, "127.0.0.1", portDistant)
-        tunnelOllama = s to p
+        tunnels[portDistant] = s to p
         return p
     }
+
+    fun tunnelOllama(app: JarvisApp, portDistant: Int): Int = tunnel(app, portDistant)
+
+    /** Adresse IPv4 du serveur sur le réseau de la maison (192.168.x.x…), lue par SSH. */
+    fun ipLocaleServeur(app: JarvisApp): String? = runCatching {
+        exec(app, "hostname -I 2>/dev/null; ip -4 -o addr show scope global 2>/dev/null | awk '{print \$4}'", 15).second
+            .split(Regex("[\\s/]+")).filter { ipPrivee(it) }
+            // Les 172.x sont souvent les réseaux internes de Docker : la box est en 192.168.x ou 10.x.
+            .sortedBy { if (it.startsWith("192.168.")) 0 else if (it.startsWith("10.")) 1 else 2 }.firstOrNull()
+    }.getOrNull()
+
+    fun ipPrivee(ip: String) = Regex("^(10\\.\\d+|192\\.168|172\\.(1[6-9]|2\\d|3[01]))\\.\\d+\\.\\d+$").matches(ip.trim())
 
     private fun <T> session(app: JarvisApp, cible: Cible? = null, f: (Session) -> T): T {
         val hote = cible?.hote ?: app.store.sshHost.value; val port = cible?.port ?: (app.store.sshPort.value.toIntOrNull() ?: 22)

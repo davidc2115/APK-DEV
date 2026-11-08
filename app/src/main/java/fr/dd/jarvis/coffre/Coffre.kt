@@ -56,7 +56,11 @@ object Coffre {
         return (if (surLeReseau || distant.isBlank()) listOf(local, distant) else listOf(distant, local)).filter { it.isNotBlank() }
     }
 
-    fun client(app: JarvisApp) = CoffreClient(adresses(app), app.store.coffreEmpreinte.value) { app.store.coffreJeton.value }
+    /** Tunnel SSH vers le coffre (si ce téléphone a l'accès SSH au serveur) : marche sans aucun port ouvert sur la box. */
+    fun tunnel(app: JarvisApp): (() -> String)? =
+        if (fr.dd.jarvis.ai.Serveur.sshConfigure(app)) { { "https://127.0.0.1:" + fr.dd.jarvis.ai.Serveur.tunnel(app, CoffreInstallation.PORT) } } else null
+
+    fun client(app: JarvisApp) = CoffreClient(adresses(app), app.store.coffreEmpreinte.value, tunnel(app)) { app.store.coffreJeton.value }
 
     /** Clé d'une catégorie : dérivée de la clé maîtresse (administrateur) ou reçue à l'invitation (salarié). */
     fun cle(app: JarvisApp, categorie: String): ByteArray? {
