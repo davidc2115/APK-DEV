@@ -412,3 +412,102 @@ fun SanteEcran(app: JarvisApp, onFermer: () -> Unit, onDemander: (String) -> Uni
         Spacer(Modifier.height(24.dp))
     }
 }
+
+/**
+ * Page « Rappels et automatisations » : tout ce qui est programmé (rappels, alarmes, minuteurs, routines, automatismes
+ * d'Hermès et de Jarvis), classé en cours / à venir / sur évènement / en pause / passés, avec les actions utiles.
+ */
+@Composable
+fun RappelsEcran(app: JarvisApp, onFermer: () -> Unit, onDemander: (String) -> Unit) {
+    var tour by remember { mutableStateOf(0) }
+    var liste by remember { mutableStateOf<List<fr.dd.jarvis.device.Echeancier.Element>?>(null) }
+    var message by remember { mutableStateOf("") }
+    var nouveau by remember { mutableStateOf(false) }
+    var texte by remember { mutableStateOf("") }
+    var quand by remember { mutableStateOf("") }
+    var repetition by remember { mutableStateOf("") }
+    var passes by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(tour) {
+        while (true) {
+            liste = withContext(Dispatchers.IO) { fr.dd.jarvis.device.Echeancier.tout(app) }
+            kotlinx.coroutines.delay(30_000)
+        }
+    }
+    val ctx = LocalContext.current
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(14.dp)) {
+        EnteteEcran("⏰ RAPPELS & AUTOMATISATIONS", onFermer)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HudButton(if (nouveau) "Annuler" else "＋ Nouveau rappel") { nouveau = !nouveau }
+            HudButton("↻") { tour++ }
+        }
+        if (nouveau) HudPanel(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+            HudTextField(texte, { texte = it }, Modifier.fillMaxWidth(), label = "Me rappeler de…")
+            HudTextField(quand, { quand = it }, Modifier.fillMaxWidth().padding(top = 6.dp), label = "Quand ?", placeholder = "demain 9h · dans 20 min · vendredi 17h30")
+            Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                fr.dd.jarvis.device.Rappels.REPETITIONS.forEach { (k, v) -> HudChip(v, selected = repetition == k) { repetition = k } }
+            }
+            HudButton("Programmer", Modifier.padding(top = 8.dp), filled = true, enabled = texte.isNotBlank() && quand.isNotBlank()) {
+                message = fr.dd.jarvis.device.Rappels.creer(ctx, texte, quand, repetition).lines().first()
+                if (!message.startsWith("❌")) { nouveau = false; texte = ""; quand = ""; repetition = "" }
+                tour++
+            }
+        }
+        if (message.isNotBlank()) Text(message, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+        Spacer(Modifier.height(10.dp))
+        val l = liste
+        if (l == null) { Text("Chargement…", color = HudDim, fontSize = 13.sp); return@Column }
+        val visibles = l.filter { passes || it.etat != fr.dd.jarvis.device.Echeancier.Etat.PASSE }
+        if (visibles.isEmpty()) Text("Rien de programmé. Dis par exemple « Jarvis, rappelle-moi d'appeler Martin demain à 9 h » " +
+            "ou « Hermès, tous les lundis à 8 h envoie-moi le planning de la semaine ».", color = HudDim, fontSize = 13.sp)
+        visibles.groupBy { it.etat }.forEach { (etat, elements) ->
+            Text(etat.titre + " (${elements.size})", color = LocalAccent.current, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace, modifier = Modifier.padding(top = 10.dp, bottom = 6.dp))
+            elements.forEach { e ->
+                HudPanel(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(e.icone, fontSize = 18.sp)
+                        Column(Modifier.padding(start = 10.dp).weight(1f)) {
+                            Text(e.titre, color = HudText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            e.quand?.let { Text(fr.dd.jarvis.device.Rappels.format(it).replaceFirstChar { c -> c.uppercase() }, color = LocalAccent.current, fontSize = 12.sp) }
+                        }
+                    }
+                    Text(e.detail, color = HudDim, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                    val (type, id) = e.cle.substringBefore(':') to e.cle.substringAfter(':', "")
+                    Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        when (type) {
+                            "rappel" -> {
+                                if (e.etat == fr.dd.jarvis.device.Echeancier.Etat.A_VENIR) HudChip("⏰ +1 h") {
+                                    id.toIntOrNull()?.let { fr.dd.jarvis.device.Rappels.supprimer(ctx, it)?.let { r -> fr.dd.jarvis.device.Rappels.creer(ctx, r.texte, "dans 1 h", r.repetition) } }; tour++
+                                }
+                                HudChip("🗑 Supprimer") { id.toIntOrNull()?.let { fr.dd.jarvis.device.Rappels.supprimer(ctx, it) }; message = "Rappel supprimé : ${e.titre}"; tour++ }
+                            }
+                            "horloge" -> HudChip("🗑 Supprimer") { id.toIntOrNull()?.let { fr.dd.jarvis.device.Horloge.supprimer(ctx, it) }; message = "Supprimé : ${e.titre}"; tour++ }
+                            "routine" -> {
+                                val r = fr.dd.jarvis.device.Routines.liste(app).firstOrNull { it.id == id }
+                                if (r != null) {
+                                    HudChip(if (r.active) "⏸ Désactiver" else "▶️ Activer") { fr.dd.jarvis.device.Routines.ajouterOuModifier(app, r.copy(active = !r.active)); tour++ }
+                                    HudChip("▶️ Lancer maintenant") { onDemander("Lance la routine ${r.nom}") }
+                                }
+                            }
+                            "hermes" -> if (e.etat != fr.dd.jarvis.device.Echeancier.Etat.PASSE) {
+                                HudChip("▶️ Exécuter maintenant") { onDemander("Hermès, exécute maintenant l'automatisme « $id » et montre-moi le résultat.") }
+                                HudChip(if (e.etat == fr.dd.jarvis.device.Echeancier.Etat.PAUSE) "▶️ Reprendre" else "⏸ Pause") {
+                                    onDemander("Hermès, ${if (e.etat == fr.dd.jarvis.device.Echeancier.Etat.PAUSE) "réactive" else "mets en pause"} l'automatisme « $id ».")
+                                }
+                                HudChip("✏️ Modifier") { onDemander("Hermès, je veux modifier l'automatisme « $id » : ") }
+                                HudChip("🗑 Supprimer") { onDemander("Hermès, supprime l'automatisme « $id ».") }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HudChip(if (passes) "Masquer les passés" else "🕘 Voir les passés", selected = passes) { passes = !passes }
+        }
+        val synchro = app.memo.capacitesHermesDate()
+        Text("Automatismes d'Hermès synchronisés toutes les 30 s" + (if (synchro > 0) " · dernière synchro ${fr.dd.jarvis.device.Rappels.format(synchro)}" else " · pas encore synchronisés (Hermès arrêté ?)"),
+            color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 10.dp))
+        Spacer(Modifier.height(24.dp))
+    }
+}

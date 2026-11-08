@@ -91,12 +91,14 @@ dependencies {
     implementation("com.google.android.gms:play-services-auth:21.2.0")
 
     // ADB intégré (Débogage sans fil) : droits « adb » sans installer Shizuku
-    implementation("com.github.MuntashirAkon:libadb-android:3.0.0")
-    implementation("org.bouncycastle:bcprov-jdk15to18:1.78")
+    // Bibliothèques natives alignées sur 16 Ko (Android 15+/16 avec pages de 16 Ko : pas de mode de compatibilité ni
+    // d'alerte au démarrage) : libadb-android 3.1.1 (libspake2), Vosk 0.3.75, JNA 5.18.1, Conscrypt 2.5.3, Porcupine 4.
+    implementation("com.github.MuntashirAkon:libadb-android:3.1.1")
+    implementation("org.bouncycastle:bcprov-jdk15to18:1.81")
     implementation("org.conscrypt:conscrypt-android:2.5.3")
-    implementation("com.alphacephei:vosk-android:0.3.47")
+    implementation("com.alphacephei:vosk-android:0.3.75") { exclude(group = "net.java.dev.jna") }
     implementation("ai.picovoice:porcupine-android:4.0.2")
-    implementation("net.java.dev.jna:jna:5.13.0@aar")
+    implementation("net.java.dev.jna:jna:5.18.1@aar")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 
     // Contrôle du téléphone (shell via Shizuku)

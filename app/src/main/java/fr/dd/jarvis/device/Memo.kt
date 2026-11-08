@@ -223,6 +223,14 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         ?: runCatching { org.json.JSONObject(capacitesLocal.readText()) }.getOrNull()?.also { capacitesCache = it }
         ?: org.json.JSONObject()
 
+    /** Automatismes (cron) d'Hermès tels que synchronisés par le hook : nom, quand, prochaine, derniere, statut… */
+    fun automatismesHermes(): List<org.json.JSONObject> = capacites().optJSONArray("automatismes")?.let { a ->
+        (0 until a.length()).mapNotNull { a.optJSONObject(it) }
+    }.orEmpty()
+
+    /** Heure de la dernière synchronisation des capacités d'Hermès (0 si jamais). */
+    fun capacitesHermesDate(): Long = runCatching { capacitesLocal.lastModified() }.getOrDefault(0L)
+
     /** Skills ajoutés à Hermès (nom → description). */
     fun skillsHermes(): List<Pair<String, String>> = capacites().optJSONArray("skills")?.let { a ->
         (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { it.optString("nom") to it.optString("description") }.filter { it.first.isNotBlank() }

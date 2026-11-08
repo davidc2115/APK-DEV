@@ -35,9 +35,10 @@ class Brain(
         // Home Assistant ni autre application — quel que soit le sujet de la note.
         if (!pourHermes) history.lastOrNull()?.takeIf { it.fromUser }?.let { m ->
             val precedent = history.dropLast(1).lastOrNull { !it.fromUser }?.text
-            runCatching { fr.dd.jarvis.device.Carnet.reflexe(app, m.text, fr.dd.jarvis.hermes.Routeur.multiEtapes(m.text), precedent) }.getOrNull()?.let { r ->
+            (runCatching { fr.dd.jarvis.device.Carnet.reflexe(app, m.text, fr.dd.jarvis.hermes.Routeur.multiEtapes(m.text), precedent) }.getOrNull()
+                ?: runCatching { fr.dd.jarvis.device.Echeancier.reflexe(app, m.text) }.getOrNull())?.let { r ->
                 fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS
-                onStatus("📝 Carnet de notes")
+                onStatus(if (r.startsWith("# ⏰") || r.startsWith("Rien de programmé")) "⏰ Rappels et automatisations" else "📝 Carnet de notes")
                 return r
             }
         }
@@ -148,7 +149,7 @@ class Brain(
         val indispensables = if (domotique) listOf("notes_lire", "obsidian_chercher", "obsidian_lire", "ha_entites", "ha_etat", "ha_service") else emptyList()
         if (plan != null && plan.outils.isNotEmpty()) {
             val reglageDirect = Regex("r[eé]glage|param[eè]tre|mode conversation|[eé]coute continue|annonce vocale|r[eé]ponse vocale|confirmation|agent autonome|bips|analyse gemini|gemini|agents? autonomes?|notifications banni[eè]re", RegexOption.IGNORE_CASE).containsMatchIn(recent)
-            val keep = (plan.outils + indispensables + (if (reglageDirect) listOf("reglage_jarvis") else emptyList()) + (if (planningClientsSync) listOf("analyser_planning_clients") else emptyList()) + listOf("memoire_ajouter", "memoire_apprendre", "memoire_apprentissages", "memoire_lire", "memoire_oublier", "note_prendre", "notes_lire") + (if (societeOn || planningClientsSync) fr.dd.jarvis.societe.SocieteTools.NAMES else emptySet<String>()) +
+            val keep = (plan.outils + indispensables + (if (reglageDirect) listOf("reglage_jarvis") else emptyList()) + (if (planningClientsSync) listOf("analyser_planning_clients") else emptyList()) + listOf("memoire_ajouter", "memoire_apprendre", "memoire_apprentissages", "memoire_lire", "memoire_oublier", "note_prendre", "notes_lire", "rappel_creer", "rappels_liste") + (if (societeOn || planningClientsSync) fr.dd.jarvis.societe.SocieteTools.NAMES else emptySet<String>()) +
                 (if (fr.dd.jarvis.hermes.Hermes.enLigneConnu()) listOf("hermes_deleguer") else emptyList()) +
                 (if (Regex("herm[eè]s|termux", RegexOption.IGNORE_CASE).containsMatchIn(recent)) listOf("hermes") else emptyList()) +
                 (if (Regex("freebox|\\bbox\\b|vpn|wireguard|openvpn|redirection|ouvr\\w* (le|un|les) ports?|\\bdmz\\b|bail dhcp", RegexOption.IGNORE_CASE).containsMatchIn(recent)) listOf("freebox") else emptyList()) +

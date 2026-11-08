@@ -289,6 +289,16 @@ class ToolBox(
             mapOf("secondes" to prop("Durée totale en secondes (ex. 10 min = 600)."), "libelle" to prop("Nom du minuteur (optionnel).")), listOf("secondes")))
         put(tool("chronometre", "Chronomètre sans ouvrir d'application (notification avec compteur).", mapOf("action" to prop("demarrer (défaut) | arreter | etat"))))
         put(tool("alarmes_liste", "Liste les alarmes et minuteurs en cours."))
+        put(tool("rappel_creer", "Programme un RAPPEL (« rappelle-moi de … ») : notification sur le téléphone à l'heure exacte, avec « Fait » et « Plus tard », une fois ou en répétition. À utiliser pour tout rappel simple, plutôt qu'une alarme (réservée au réveil / à une sonnerie) ou un évènement d'agenda (sauf demande explicite). Termine ta réponse par le lien renvoyé.",
+            mapOf(
+                "texte" to prop("Ce qu'il faut rappeler, formulé pour l'utilisateur (ex. « Appeler Martin pour le devis »)."),
+                "quand" to prop("Moment : de préférence « AAAA-MM-JJ HH:MM » calculé depuis la date actuelle ; accepte aussi « dans 20 min », « demain 9h », « vendredi 17h30 »."),
+                "repetition" to prop("Optionnel : jour | ouvres (lundi→vendredi) | semaine | mois. Vide = une seule fois.")
+            ), listOf("texte", "quand")))
+        put(tool("rappels_liste", "Liste TOUT ce qui est programmé : rappels, alarmes, minuteurs, routines, automatismes d'Hermès (tâches planifiées) et de Jarvis, en cours ou à venir (et les passés si demandé). Renvoie aussi le lien vers la page « Rappels et automatisations ».",
+            mapOf("passes" to prop("« true » pour inclure ce qui s'est déclenché ces 7 derniers jours."))))
+        put(tool("rappel_supprimer", "Supprime un ou plusieurs rappels à venir dont le texte contient les mots donnés (demande confirmation s'il y en a plusieurs).",
+            mapOf("texte" to prop("Mots du rappel à supprimer (ex. « Martin »).")), listOf("texte")))
          put(tool("horloge_diagnostic", "Vérifie les alarmes, minuteurs, notifications et Shizuku en cas de panne."))
         put(tool("applis_musique", "Liste les applications de musique RÉELLEMENT installées sur le téléphone (jamais une liste inventée)."))
         put(tool("jouer_musique", "Lance la lecture d'un titre, artiste ou playlist dans une application de musique du téléphone, en arrière-plan. Si l'application n'est pas précisée et qu'aucune n'est mémorisée et qu'il y en a plusieurs d'installées, l'outil demande laquelle (liste réelle) : repose alors la question à l'utilisateur (et s'il veut « toujours » ou « une seule fois »), puis rappelle l'outil.",
@@ -797,6 +807,18 @@ class ToolBox(
         "alarme_supprimer" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.device.Horloge.supprimerAlarme(app, a.optString("heure"), a.optString("libelle")) })
         "minuteur_creer" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.device.Horloge.creerMinuteur(app, a.optString("secondes").toDoubleOrNull()?.toInt() ?: 0, a.optString("libelle")) }, direct = true)
         "chronometre" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.device.Horloge.chronometre(app, a.optString("action")) }, direct = true)
+        "rappel_creer" -> ToolResult(fr.dd.jarvis.device.Rappels.creer(app, a.optString("texte"), a.optString("quand"), a.optString("repetition")))
+        "rappels_liste" -> ToolResult(fr.dd.jarvis.device.Echeancier.texte(app, a.optString("passes").equals("true", true)))
+        "rappel_supprimer" -> {
+            val cle = a.optString("texte").trim()
+            val n = fr.dd.jarvis.societe.core.normaliser(cle)
+            val cibles = fr.dd.jarvis.device.Rappels.liste(app).filter { n.isNotBlank() && fr.dd.jarvis.societe.core.normaliser(it.texte).contains(n) && (it.repetition.isNotBlank() || it.at > System.currentTimeMillis()) }
+            when {
+                cibles.isEmpty() -> ToolResult("Aucun rappel à venir ne contient « $cle ».\n" + fr.dd.jarvis.device.Echeancier.texte(app))
+                cibles.size > 1 && !confirm("Supprimer ${cibles.size} rappels ?\n" + cibles.joinToString("\n") { "• ${it.texte} (${fr.dd.jarvis.device.Rappels.format(it.at)})" }, true) -> ToolResult("Annulé : aucun rappel supprimé.")
+                else -> ToolResult("🗑️ Rappel(s) supprimé(s) : " + fr.dd.jarvis.device.Rappels.supprimerParTexte(app, cle).joinToString(" ; ") { "« ${it.texte} »" } + "\n[📋 Voir tous mes rappels et automatisations](jarvis://ecran/rappels)")
+            }
+        }
         "alarmes_liste" -> ToolResult(fr.dd.jarvis.device.Horloge.liste(app), direct = true)
          "horloge_diagnostic" -> ToolResult(fr.dd.jarvis.device.Horloge.diagnostic(app), direct = true)
         "applis_musique" -> {

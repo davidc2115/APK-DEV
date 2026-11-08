@@ -241,7 +241,7 @@ arreter_passerelles_hermes() {
     // ------------------------------------------------------------------ 3-5. Installation, configuration, démarrage
 
     /** Version du hook de mémoire partagée : à augmenter quand memoire_handler.py change (réinstallation automatique). */
-    const val VERSION_HOOK_MEMOIRE = 5
+    const val VERSION_HOOK_MEMOIRE = 6
 
     /**
      * Installe (ou met à jour) le hook « jarvis-memoire » d'Hermès : au démarrage de la passerelle, il lance un fil qui

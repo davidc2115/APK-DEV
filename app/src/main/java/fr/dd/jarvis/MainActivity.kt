@@ -261,10 +261,11 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
             if (terrain == "regarder") fr.dd.jarvis.ui.RegarderEcran(app, onFermer = { terrain = "" }, onDemander = demander)
             else if (terrain == "compte_rendu") fr.dd.jarvis.ui.CompteRenduEcran(app, onFermer = { terrain = "" }, onDemander = demander)
             else if (terrain == "sante") fr.dd.jarvis.ui.SanteEcran(app, onFermer = { terrain = "" }, onDemander = demander)
+            else if (terrain == "rappels") fr.dd.jarvis.ui.RappelsEcran(app, onFermer = { terrain = "" }, onDemander = demander)
             else when (tab) {
                 0 -> fr.dd.jarvis.ui.CentreCommande(app, vm, onOnglet = { tab = it }, onDemander = demander,
                     onRegarder = { terrain = "regarder" }, onCompteRendu = { terrain = "compte_rendu" }, onSante = { terrain = "sante" },
-                    onPresence = { terrain = "presence"; presenceAuto = false })
+                    onPresence = { terrain = "presence"; presenceAuto = false }, onRappels = { terrain = "rappels" })
                 1 -> ChatScreen(vm, app.store, app)
                 2 -> PlanningScreen(app)
                 3 -> MailScreen(app)

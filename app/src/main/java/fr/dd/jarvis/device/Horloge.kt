@@ -183,6 +183,15 @@ object Horloge {
 
     private fun annuler(c: Context, id: Int) { runCatching { am(c).cancel(pi(c, id, ACT_FIRE)) }; runCatching { nm(c).cancel(id) } }
 
+    /** Supprime une alarme ou un minuteur par son identifiant (page « Rappels et automatisations »). */
+    fun supprimer(c: Context, id: Int): Boolean {
+        val l = load(c)
+        if (l.none { it.optInt("id") == id }) return false
+        annuler(c, id); runCatching { nm(c).cancel(id + 1) }
+        save(c, l.filter { it.optInt("id") != id })
+        return true
+    }
+
     fun diagnostic(c: Context): String {
         channels(c)
         val exact = exactAutorise(c)
@@ -204,6 +213,9 @@ object Horloge {
             append("Chronomètre : ${if (chrono == 0L) "arrêté" else "actif depuis " + formater(System.currentTimeMillis() - chrono)}")
         }
     }
+
+    /** Alarmes et minuteurs enregistrés (page « Rappels et automatisations ») : {id, kind, at, label, days}. */
+    fun elements(c: Context): List<JSONObject> = load(c)
 
     fun liste(c: Context): String {
         val f = java.time.format.DateTimeFormatter.ofPattern("EEE d MMM HH:mm", java.util.Locale.FRENCH)
@@ -297,6 +309,7 @@ class HorlogeReceiver : BroadcastReceiver() {
             Horloge.ACT_STOP -> Horloge.arreter(context, id)
             Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> {
                 Horloge.restaurer(context)
+                runCatching { Rappels.restaurer(context) }
                 // Écoute « Jarvis » : relancée si elle était active (ou notification « Relancer l'écoute » si Android refuse le micro).
                 fr.dd.jarvis.service.JarvisService.restaurer(context)
                 // Mise à jour : JARVIS est-il toujours visible dans Android Auto ? (sinon, proposition de le rétablir)

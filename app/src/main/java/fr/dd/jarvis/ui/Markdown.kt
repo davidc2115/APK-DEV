@@ -35,6 +35,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 fun openLink(ctx: Context, url: String) {
+    // Liens internes « jarvis://ecran/rappels » : ouvrent un écran de l'application (page des rappels…).
+    if (url.startsWith("jarvis://ecran/")) {
+        runCatching {
+            ctx.startActivity(Intent(ctx, fr.dd.jarvis.MainActivity::class.java).putExtra("terrain", url.removePrefix("jarvis://ecran/").substringBefore('?'))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+        }
+        return
+    }
     try {
         ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     } catch (_: Exception) {

@@ -340,7 +340,7 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
     private fun p64(chemin: String) = chemins64[chemin.trimEnd('/')] ?: b64brut(chemin)
 
     private fun ls(app: JarvisApp, s: String, chemin: String, path64: String? = null): List<JSONObject> {
-        fun lire(segment: String) = liste(json(app, "fs/ls/$segment", s)).filter { it.optString("name") !in setOf(".", "..") }
+        fun lire(segment: String) = lireTout(app, s, segment).filter { it.optString("name") !in setOf(".", "..") }
             .also { if (it.isNotEmpty()) retenir(chemin, it) }
         val params = "?countSubFolder=1&removeHidden=1"
         val connu = path64?.takeIf { it.isNotBlank() } ?: chemins64[chemin.trimEnd('/')]
@@ -359,9 +359,59 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
         return l
     }
 
+    /**
+     * Listage complet d'un dossier : API ≤ v14 = tableau d'entrées ; API v15 = objet paginé (« the file listing API
+     * returns an object rather than simply an array of entries ») → on y trouve le tableau et on lit les pages suivantes.
+     */
+    private fun lireTout(app: JarvisApp, s: String, segment: String): List<JSONObject> {
+        val res = json(app, "fs/ls/$segment", s)
+        val tout = entreesFs(res).toMutableList()
+        val total = totalFs(res)
+        if (total != null && total > tout.size && tout.isNotEmpty()) {
+            val sep = if (segment.contains('?')) "&" else "?"
+            val taillePage = tout.size
+            var pages = 0
+            while (tout.size < total && pages < 40) {
+                val suite = runCatching { entreesFs(json(app, "fs/ls/$segment${sep}start=${tout.size}&limit=$taillePage", s)) }.getOrDefault(emptyList())
+                val nouveaux = suite.filter { n -> tout.none { it.optString("path") == n.optString("path") && it.optString("name") == n.optString("name") } }
+                if (nouveaux.isEmpty()) break
+                tout += nouveaux; pages++
+            }
+        }
+        return tout
+    }
+
+    private val CLES_LISTE = listOf("entries", "files", "items", "list", "content", "contents", "children", "data", "result")
+    private fun estFichier(o: JSONObject) = o.has("name") && (o.has("path") || o.has("type"))
+
+    /** Entrées d'une réponse fs/ls, quel que soit son format (tableau, objet contenant le tableau, objet nom → entrée). */
+    internal fun entreesFs(v: Any?): List<JSONObject> = when (v) {
+        is org.json.JSONArray -> liste(v)
+        is JSONObject -> tableauFs(v, 0) ?: v.keys().asSequence().mapNotNull { v.optJSONObject(it) }.filter { estFichier(it) }.toList()
+        else -> emptyList()
+    }
+
+    private fun tableauFs(o: JSONObject, profondeur: Int): List<JSONObject>? {
+        val cles = o.keys().asSequence().toList().sortedBy { k -> CLES_LISTE.indexOf(k).let { if (it < 0) 99 else it } }
+        for (k in cles) {
+            val a = o.optJSONArray(k) ?: continue
+            val l = liste(a)
+            if (l.any { estFichier(it) }) return l
+            if (a.length() == 0 && k in CLES_LISTE) return emptyList()
+        }
+        if (profondeur < 2) for (k in cles) o.optJSONObject(k)?.let { tableauFs(it, profondeur + 1) }?.let { return it }
+        return null
+    }
+
+    /** Nombre total d'entrées annoncé par une réponse paginée (null si absent). */
+    internal fun totalFs(v: Any?): Int? = (v as? JSONObject)?.let { o ->
+        listOf("total", "total_count", "totalCount", "count", "nb_entries", "entries_count", "total_entries").firstNotNullOfOrNull { k -> (o.opt(k) as? Number)?.toInt() }
+            ?: o.optJSONObject("pagination")?.let { totalFs(it) }
+    }
+
     /** Chemin base64 exact d'un disque d'après la liste de la racine (la Freebox recommande de réutiliser ses chemins). */
     private fun racine64(app: JarvisApp, s: String, chemin: String): String? = runCatching {
-        liste(json(app, "fs/ls/${b64("/")}", s)).firstOrNull { cle(it.optString("name")) == cle(chemin.trim('/')) }?.optString("path")?.takeIf { it.isNotBlank() }
+        entreesFs(json(app, "fs/ls/${b64("/")}", s)).firstOrNull { cle(it.optString("name")) == cle(chemin.trim('/')) }?.optString("path")?.takeIf { it.isNotBlank() }
     }.getOrNull()
 
     /**
@@ -387,17 +437,20 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
                     val rep = r.getOrThrow(); val t = String(rep.octets, Charsets.UTF_8)
                     val j = runCatching { JSONObject(t) }.getOrNull()
                     val res = j?.opt("result")
-                    val n = (res as? org.json.JSONArray)?.length()
+                    val entrees = entreesFs(res)
+                    val n = if (res is org.json.JSONArray || res is JSONObject) entrees.size else null
                     append("   $libelle → HTTP ${rep.code} success=${j?.optBoolean("success")} " +
-                        (if (n != null) "$n élément(s)" else "result=${res?.javaClass?.simpleName ?: "absent"}") +
+                        (if (res is JSONObject) "objet{${res.keys().asSequence().joinToString(",")}} " else "") +
+                        (if (n != null) "$n élément(s)" + (totalFs(res)?.let { " sur $it" } ?: "") else "result=${res?.javaClass?.simpleName ?: "absent"}") +
                         (j?.optString("error_code")?.takeIf { it.isNotBlank() }?.let { " erreur=$it (${j.optString("msg")})" } ?: "") + "\n")
-                    if (n != null && n > 0) (res as org.json.JSONArray).let { a -> for (i in 0 until minOf(6, a.length())) a.optJSONObject(i)?.let { o -> append("      - ${o.optString("type")} « ${o.optString("name")} » → ${deB64(o.optString("path"))}\n") } }
+                    entrees.take(6).forEach { o -> append("      - ${o.optString("type")} « ${o.optString("name")} » → ${deB64(o.optString("path"))}\n") }
+                    if (res is JSONObject && entrees.isEmpty()) append("      brut : ${res.toString().replace(Regex("\\s+"), " ").take(400)}\n")
                     if (n == null && j == null) append("      brut : ${t.replace(Regex("\\s+"), " ").take(200)}\n")
                 }
                 append("\n📂 Racine de l'explorateur :\n")
                 essai("ls / (paramètres)", b64("/") + "?countSubFolder=1&removeHidden=1")
                 essai("ls / (sans paramètre)", b64("/"))
-                val racine = runCatching { liste(json(app, "fs/ls/${b64("/")}", s)) }.getOrDefault(emptyList())
+                val racine = runCatching { entreesFs(json(app, "fs/ls/${b64("/")}", s)) }.getOrDefault(emptyList())
                 val cibles = (disques.getOrNull().orEmpty().flatMap { d -> liste(d.optJSONArray("partitions")).map { deB64(it.optString("path")) to it.optString("path") } } +
                     racine.filter { it.optString("type") == "dir" }.map { deB64(it.optString("path")).ifBlank { "/" + it.optString("name") } to it.optString("path") })
                     .filter { it.first.isNotBlank() }.distinctBy { it.first }

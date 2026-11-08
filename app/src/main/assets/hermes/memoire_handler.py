@@ -91,6 +91,31 @@ def _frontmatter(texte: str) -> dict:
     return out
 
 
+def _automatisme(j: dict) -> dict:
+    """Un automatisme (cron) d'Hermès, tel que l'affiche la page « Rappels et automatisations » de Jarvis."""
+    sch = j.get("schedule")
+    if isinstance(sch, dict):
+        quand = sch.get("display") or sch.get("expr") or sch.get("run_at") or (f"toutes les {sch.get('minutes')} min" if sch.get("minutes") else "")
+    else:
+        quand = sch or ""
+    rep = j.get("repeat")
+    if isinstance(rep, dict):
+        rep = f"{rep.get('completed', 0)}/{rep.get('times')}" if rep.get("times") else ""
+    return {
+        "id": str(j.get("id") or ""),
+        "nom": str(j.get("name") or j.get("id") or ""),
+        "quand": str(j.get("schedule_display") or quand or ""),
+        "actif": bool(j.get("enabled", True)) and str(j.get("state") or "") not in ("paused", "completed"),
+        "etat": str(j.get("state") or ""),
+        "prochaine": str(j.get("next_run_at") or j.get("next_run") or ""),
+        "derniere": str(j.get("last_run_at") or j.get("last_run") or ""),
+        "statut": str(j.get("last_status") or ""),
+        "erreur": str(j.get("last_error") or "")[:200],
+        "consigne": str(j.get("prompt") or "")[:240],
+        "repetition": str(rep or ""),
+    }
+
+
 def capacites(home: Path) -> dict:
     """Ce qu'Hermès sait faire EN PLUS de Jarvis : skills ajoutés/créés (hors skills fournis d'origine),
     serveurs MCP et plugins configurés, automatismes (cron)."""
@@ -124,8 +149,7 @@ def capacites(home: Path) -> dict:
         jobs = brut.get("jobs", []) if isinstance(brut, dict) else brut
         for j in jobs if isinstance(jobs, list) else []:
             if isinstance(j, dict):
-                taches.append({"nom": str(j.get("name") or j.get("id") or ""), "quand": str(j.get("schedule_display") or j.get("schedule") or ""),
-                               "actif": bool(j.get("enabled", True))})
+                taches.append(_automatisme(j))
     except Exception:
         pass
     return {"skills": skills[:80], "mcp": mcp[:20], "plugins": plugins[:30], "automatismes": taches[:40]}

@@ -354,6 +354,14 @@ object PontMcp {
 
     // ------------------------------------------------------------------ JSON-RPC MCP
 
+    /** Texte d'un résultat d'outil ; un échec est marqué en tête (❌ ÉCHEC) au lieu du drapeau isError. */
+    internal fun texteResultat(texte: String, erreur: Boolean): String {
+        val t = texte.take(30_000)
+        if (!erreur) return t
+        return if (t.trimStart().startsWith("❌") || t.trimStart().startsWith("⚠")) "ÉCHEC DE L'OUTIL (le serveur Jarvis fonctionne) — $t"
+        else "❌ ÉCHEC DE L'OUTIL (le serveur Jarvis fonctionne) — $t"
+    }
+
     private fun rpc(f: Fournisseur, req: JSONObject): JSONObject? {
         if (!req.has("id")) return null // notification (initialized, cancelled…)
         val id = req.get("id")
@@ -386,8 +394,11 @@ object PontMcp {
             "tools/list" -> ok(JSONObject().put("tools", f.outils()))
             "tools/call" -> {
                 val (texte, erreur) = f.appeler(p.optString("name"), p.optJSONObject("arguments") ?: JSONObject())
-                ok(JSONObject().put("content", JSONArray().put(JSONObject().put("type", "text").put("text", texte.take(30_000))))
-                    .put("isError", erreur))
+                // Jamais isError=true : le disjoncteur MCP d'Hermès compte ces réponses comme des pannes du serveur et, après
+                // 3 d'affilée (« entité introuvable », appareil éteint…), coupe TOUS les outils Jarvis ~60 s (« serveur
+                // injoignable »). L'échec reste explicite dans le texte, que le modèle lit.
+                ok(JSONObject().put("content", JSONArray().put(JSONObject().put("type", "text").put("text", texteResultat(texte, erreur))))
+                    .put("isError", false))
             }
             "resources/list" -> ok(JSONObject().put("resources", JSONArray()))
             "resources/templates/list" -> ok(JSONObject().put("resourceTemplates", JSONArray()))
