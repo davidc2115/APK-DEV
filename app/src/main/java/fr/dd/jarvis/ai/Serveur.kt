@@ -45,7 +45,7 @@ object Serveur {
     private fun ouvrir(app: JarvisApp, cible: Cible? = null): Session {
         if (cible != null) {
             val s = JSch().getSession(cible.user, cible.hote, cible.port)
-            s.setPassword(cible.pass); s.setConfig("StrictHostKeyChecking", "no"); s.connect(15000); return s
+            s.setPassword(cible.pass); s.setConfig("StrictHostKeyChecking", "no"); s.connect(12000); return s
         }
         val st = app.store
         val jsch = JSch()
@@ -53,42 +53,98 @@ object Serveur {
             jsch.addIdentity("jarvis", st.sshKey.value.trim().replace("\r", "").plus("\n").toByteArray(), null,
                 st.sshPass.value.takeIf { it.isNotBlank() }?.toByteArray())
         }
-        val s = jsch.getSession(st.sshUser.value.trim(), st.sshHost.value.trim(), st.sshPort.value.toIntOrNull() ?: 22)
-        // Si une ancienne clé privée est encore renseignée, ne pas empêcher le repli sur le mot de passe.
-        // JSch n'essaie l'authentification password que si le mot de passe est explicitement fourni à la session.
-        if (st.sshPass.value.isNotBlank()) s.setPassword(st.sshPass.value)
-        s.setConfig("StrictHostKeyChecking", "no")
-        s.setConfig("PreferredAuthentications", when {
-            st.sshKey.value.isNotBlank() && st.sshPass.value.isNotBlank() -> "publickey,password,keyboard-interactive"
-            st.sshKey.value.isNotBlank() -> "publickey"
-            else -> "password,keyboard-interactive,publickey"
-        })
-        try { s.connect(if (st.sshHostDistant.value.isNotBlank()) 6000 else 15000) }
-        catch (e: Exception) {
-            // Hors du réseau local : repli sur l'adresse distante (IP publique ou nom DDNS, port redirigé sur la box).
-            if (st.sshHostDistant.value.isBlank()) throw e
-            runCatching { s.disconnect() }
-            val s2 = jsch.getSession(st.sshUser.value.trim(), st.sshHostDistant.value.trim(), st.sshPortDistant.value.toIntOrNull() ?: (st.sshPort.value.toIntOrNull() ?: 22))
-            if (st.sshPass.value.isNotBlank()) s2.setPassword(st.sshPass.value)
-            s2.setConfig("StrictHostKeyChecking", "no")
-            s2.setConfig("PreferredAuthentications", when {
+        val local = st.sshHost.value.trim() to (st.sshPort.value.toIntOrNull() ?: 22)
+        val distant = st.sshHostDistant.value.trim().takeIf { it.isNotBlank() }?.let { it to (st.sshPortDistant.value.toIntOrNull() ?: local.second) }
+        // Bonne adresse d'abord : hors du réseau de la maison, on ne perd plus 6 s à attendre l'adresse locale.
+        val ordre = if (distant == null) listOf(local) else if (distantDabord(local.first)) listOf(distant, local) else listOf(local, distant)
+        var erreur: Exception? = null
+        for ((i, cibleAdr) in ordre.withIndex()) {
+            val s = jsch.getSession(st.sshUser.value.trim(), cibleAdr.first, cibleAdr.second)
+            // Si une ancienne clé privée est encore renseignée, ne pas empêcher le repli sur le mot de passe.
+            // JSch n'essaie l'authentification password que si le mot de passe est explicitement fourni à la session.
+            if (st.sshPass.value.isNotBlank()) s.setPassword(st.sshPass.value)
+            s.setConfig("StrictHostKeyChecking", "no")
+            s.setConfig("PreferredAuthentications", when {
                 st.sshKey.value.isNotBlank() && st.sshPass.value.isNotBlank() -> "publickey,password,keyboard-interactive"
                 st.sshKey.value.isNotBlank() -> "publickey"
                 else -> "password,keyboard-interactive,publickey"
             })
-            s2.connect(15000)
-            return s2.also { sess ->
-                val fp2 = sess.hostKey.getFingerPrint(jsch)
-                if (st.sshFp.value.isNotBlank() && st.sshFp.value != fp2) { sess.disconnect(); throw IllegalStateException("L'empreinte du serveur distant ne correspond pas : connexion refusée.") }
+            try {
+                s.connect(if (i < ordre.size - 1) 5000 else 12000)
+            } catch (e: Exception) {
+                runCatching { s.disconnect() }
+                erreur = e
+                continue
+            }
+            derniereAdresse = cibleAdr.first to System.currentTimeMillis()
+            // Empreinte du serveur mémorisée à la première connexion ; refus si elle change (protège d'un faux serveur).
+            val fp = s.hostKey.getFingerPrint(jsch)
+            val connu = st.sshFp.value
+            if (connu.isBlank()) st.sshFp.set(fp)
+            else if (connu != fp) {
+                s.disconnect()
+                throw IllegalStateException("L'empreinte du serveur SSH a changé ($fp au lieu de $connu). Si c'est normal (réinstallation), efface-la dans Réglages › Serveur.")
+            }
+            return s
+        }
+        throw erreur ?: IllegalStateException("Connexion SSH impossible")
+    }
+
+    /** Adresse qui a fonctionné en dernier (et quand). */
+    @Volatile private var derniereAdresse: Pair<String, Long>? = null
+
+    /**
+     * Faut-il essayer l'adresse distante en premier ? Oui si l'adresse locale est une IP privée d'un autre réseau que celui
+     * du téléphone (4G, autre Wi-Fi) ; sinon on suit la dernière adresse qui a marché (moins de 30 min).
+     */
+    private fun distantDabord(hoteLocal: String): Boolean {
+        val ip = Regex("^(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.\\d{1,3}$").matchEntire(hoteLocal)
+        if (ip != null) {
+            val prive = ip.groupValues[1] == "10" || (ip.groupValues[1] == "192" && ip.groupValues[2] == "168") ||
+                (ip.groupValues[1] == "172" && ip.groupValues[2].toInt() in 16..31)
+            if (prive) {
+                val prefixe = hoteLocal.substringBeforeLast('.') + "."
+                val adresses = runCatching {
+                    java.net.NetworkInterface.getNetworkInterfaces().toList().filter { it.isUp && !it.isLoopback }
+                        .flatMap { it.inetAddresses.toList() }.filterIsInstance<java.net.Inet4Address>().map { it.hostAddress.orEmpty() }
+                }.getOrDefault(emptyList())
+                return adresses.none { it.startsWith(prefixe) }
             }
         }
-        // Empreinte du serveur mémorisée à la première connexion ; refus si elle change (protège d'un faux serveur).
-        val fp = s.hostKey.getFingerPrint(jsch)
-        val connu = st.sshFp.value
-        if (connu.isBlank()) st.sshFp.set(fp)
-        else if (connu != fp) { s.disconnect(); throw IllegalStateException("L'empreinte du serveur SSH a changé ($fp au lieu de $connu). Si c'est normal (réinstallation), efface-la dans Réglages › Serveur.") }
+        val d = derniereAdresse ?: return false
+        return d.first != hoteLocal && System.currentTimeMillis() - d.second < 30 * 60_000L
+    }
+
+    // Session SSH principale gardée ouverte quelques minutes : les commandes suivantes ne refont ni la connexion ni l'authentification.
+    @Volatile private var principale: Session? = null
+    @Volatile private var principaleCle = ""
+    @Volatile private var principaleUtilisee = 0L
+    private const val INACTIVITE = 4 * 60_000L
+
+    private fun cleReglages(app: JarvisApp) = with(app.store) {
+        listOf(sshHost.value, sshPort.value, sshHostDistant.value, sshPortDistant.value, sshUser.value, sshPass.value.hashCode(), sshKey.value.hashCode()).joinToString("|")
+    }
+
+    @Synchronized private fun sessionPrincipale(app: JarvisApp): Session {
+        val cle = cleReglages(app)
+        principale?.let { s ->
+            if (s.isConnected && cle == principaleCle && System.currentTimeMillis() - principaleUtilisee < INACTIVITE) {
+                principaleUtilisee = System.currentTimeMillis(); return s
+            }
+            runCatching { s.disconnect() }
+        }
+        val s = ouvrir(app)
+        runCatching { s.setServerAliveInterval(15_000); s.serverAliveCountMax = 2 }
+        principale = s; principaleCle = cle; principaleUtilisee = System.currentTimeMillis()
         return s
     }
+
+    @Synchronized private fun oublierPrincipale(s: Session) {
+        if (principale === s) { runCatching { s.disconnect() }; principale = null }
+    }
+
+    /** Ferme la session gardée ouverte (réglages modifiés, test de connexion). */
+    @Synchronized fun fermerSession() { principale?.let { runCatching { it.disconnect() } }; principale = null }
 
     @Volatile private var tunnelOllama: Pair<Session, Int>? = null
 
@@ -113,16 +169,25 @@ object Serveur {
         try {
             if (cible != null && cible.jump) {
                 // Rebond par le serveur : tunnel SSH vers une machine de SON réseau local (accessible de n'importe où si le serveur l'est).
-                val main = ouvrir(app)
+                val main = sessionPrincipale(app)
+                val lp = main.setPortForwardingL(0, cible.hote, cible.port)
                 try {
-                    val lp = main.setPortForwardingL(0, cible.hote, cible.port)
                     val s2 = JSch().getSession(cible.user, "127.0.0.1", lp)
-                    s2.setPassword(cible.pass); s2.setConfig("StrictHostKeyChecking", "no"); s2.connect(15000)
+                    s2.setPassword(cible.pass); s2.setConfig("StrictHostKeyChecking", "no"); s2.connect(12000)
                     try { return f(s2) } finally { runCatching { s2.disconnect() } }
-                } finally { runCatching { main.disconnect() } }
+                } finally { runCatching { main.delPortForwardingL(lp) } }
             }
-            val s = ouvrir(app, cible)
-            try { return f(s) } finally { runCatching { s.disconnect() } }
+            if (cible != null) {
+                val s = ouvrir(app, cible)
+                try { return f(s) } finally { runCatching { s.disconnect() } }
+            }
+            // Serveur principal : session réutilisée ; si elle était tombée entre-temps, une seule reconnexion.
+            val s = sessionPrincipale(app)
+            return try { f(s) } catch (e: com.jcraft.jsch.JSchException) {
+                oublierPrincipale(s)
+                if (!Regex("session is down|channel is not opened|not connected|socket|closed", RegexOption.IGNORE_CASE).containsMatchIn(e.message.orEmpty())) throw e
+                f(sessionPrincipale(app))
+            }
         } catch (e: Exception) { throw IllegalStateException(expliquer(e, hote, port), e) }
     }
 

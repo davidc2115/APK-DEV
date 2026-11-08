@@ -41,8 +41,11 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
         return tmf.trustManagers.filterIsInstance<X509TrustManager>().first()
     }
 
-    private fun socketFactory(): javax.net.ssl.SSLSocketFactory =
+    /** Une seule fabrique TLS : les connexions HTTPS vers la box sont réutilisées (pas de nouvelle poignée de main à chaque requête). */
+    private val fabriqueTls: javax.net.ssl.SSLSocketFactory by lazy {
         SSLContext.getInstance("TLS").apply { init(null, arrayOf(confiance()), null) }.socketFactory
+    }
+    private fun socketFactory(): javax.net.ssl.SSLSocketFactory = fabriqueTls
 
     private fun discover(app: JarvisApp) {
         val c = URL("http://mafreebox.freebox.fr/api_version").openConnection() as HttpURLConnection
@@ -137,6 +140,7 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
     }
 
     fun dissocier(app: JarvisApp) {
+        sessionCache = null
         app.store.freeboxAppToken.clear()
         app.store.freeboxApiDomain.set("")
         app.store.freeboxHttpsPort.set("443")
@@ -208,16 +212,35 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
         "camera" to "Accès aux caméras", "home" to "Gestion de l'alarme et maison connectée", "vm" to "Contrôle des VM",
     )
 
-    private fun <T> avecSession(app: JarvisApp, bloc: (String) -> T): T {
-        val token = app.store.freeboxAppToken.value
-        require(token.isNotBlank()) { "JARVIS n'est pas encore associé à la Freebox (Réglages › Box › Associer)." }
+    // Session Freebox gardée ouverte quelques minutes : une demande ne refait plus défi + ouverture + fermeture (3 requêtes).
+    @Volatile private var sessionCache: Triple<String, String, Long>? = null   // (jeton d'appli, session, dernière utilisation)
+    private const val SESSION_DUREE = 5 * 60_000L
+
+    @Synchronized private fun ouvrirSession(app: JarvisApp, token: String): String {
+        sessionCache?.let { (t, sess, quand) -> if (t == token && System.currentTimeMillis() - quand < SESSION_DUREE) return sess }
         val challenge = call(app, "login/").getJSONObject("result").getString("challenge")
         val mac = Mac.getInstance("HmacSHA1")
         mac.init(SecretKeySpec(token.toByteArray(Charsets.UTF_8), "HmacSHA1"))
         val password = mac.doFinal(challenge.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
         val session = call(app, "login/session/", "POST", JSONObject().put("app_id", APP_ID).put("app_version", "1.0").put("password", password))
             .getJSONObject("result").getString("session_token")
-        try { return bloc(session) } finally { runCatching { call(app, "login/logout/", "POST", JSONObject(), session) } }
+        sessionCache = Triple(token, session, System.currentTimeMillis())
+        return session
+    }
+
+    private fun <T> avecSession(app: JarvisApp, bloc: (String) -> T): T {
+        val token = app.store.freeboxAppToken.value
+        require(token.isNotBlank()) { "JARVIS n'est pas encore associé à la Freebox (Réglages › Box › Associer)." }
+        val session = ouvrirSession(app, token)
+        return try {
+            bloc(session).also { sessionCache = Triple(token, session, System.currentTimeMillis()) }
+        } catch (e: IllegalStateException) {
+            // Session expirée côté box (inactivité, redémarrage) : une nouvelle, et on réessaie une fois.
+            if (!e.message.orEmpty().contains("session Freebox expirée")) throw e
+            sessionCache = null
+            val s2 = ouvrirSession(app, token)
+            bloc(s2).also { sessionCache = Triple(token, s2, System.currentTimeMillis()) }
+        }
     }
 
     private fun liste(v: Any?): List<JSONObject> = (v as? org.json.JSONArray)?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }.orEmpty()

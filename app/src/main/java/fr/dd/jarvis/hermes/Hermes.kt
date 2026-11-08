@@ -634,6 +634,35 @@ object Routeur {
     /** Demande à orchestrer (récurrence, automatisme, surveillance, sous-agents) ou adressée nommément à Hermès. */
     fun pourHermesSeul(texte: String) = ORCHESTRATION.containsMatchIn(texte) || NOMME.containsMatchIn(texte) || multiEtapes(texte)
 
+    /** Bavardage : salutations, « comment ça va », remerciements, humeur, blague, « qui es-tu »… (aucune action ni recherche). */
+    private val BAVARDAGE = Regex(
+        "^(?:(?:salut|bonjour|bonsoir|coucou|hello|hey|yo|re|wesh|hola)(?: (?:à toi|a toi|mon ami|l.ami|toi))?|" +
+            "(?:ça|ca|sa) va(?: bien| toi| et toi| ou quoi)?|(?:comment|commen) (?:ça|ca|sa) va(?: aujourd.hui| ce (?:matin|soir))?|comment (?:tu )?vas[- ]?tu|comment tu vas|tu vas bien|vous allez bien|" +
+            "(?:la )?forme|quoi de neuf|quoi de beau|(?:qu.est[- ]ce que|que) tu (?:fais|racontes?)|tu fais quoi(?: de beau)?|tu (?:es|est) l[àa]|t.es l[àa]|t.es o[uù]|" +
+            "et toi|merci(?: beaucoup| bien| infiniment| mille fois| pour tout| à toi| a toi)?|c.est gentil|trop gentil|bravo|bien jou[ée]|super boulot|beau travail|" +
+            "(?:t.es|tu es|tu (?:es )?vraiment) (?:trop |vraiment |super |le meilleur|la meilleure|g[ée]nial|fort|dr[ôo]le|sympa|cool|top|bon|nul|b[êe]te|lent)\\w*|" +
+            "je t.aime(?: bien)?|tu me manques|raconte[- ]?moi (?:une |un )?(?:blague|histoire dr[ôo]le|anecdote)|(?:une |dis[- ]moi une |fais[- ]moi une )blague|fais[- ]moi rire|" +
+            "qui es[- ]tu|tu es qui|t.es qui|comment tu t.appelles?|pr[ée]sente[- ]toi|tu es une (?:ia|intelligence artificielle)|t.es un robot|tu dors|tu r[êe]ves|" +
+            "je m.ennuie|je suis (?:fatigu[ée]e?|crev[ée]e?|[ée]puis[ée]e?|content|contente|triste|heureux|heureuse|stress[ée]e?|[ée]nerv[ée]e?|malade|de bonne humeur|de mauvaise humeur)|" +
+            "(?:j.ai (?:pass[ée]|eu)|quelle) (?:une )?(?:bonne|mauvaise|dure|longue|grosse|belle|sale) journ[ée]e|" +
+            "bonne (?:journ[ée]e|soir[ée]e|apr[èe]s[- ]midi|fin de journ[ée]e|semaine|continuation)|[àa] plus(?: tard)?|[àa] tout [àa] l.heure|[àa] demain|bye|ciao|tchao|au revoir)" +
+            "(?:[ ,]+(?:jarvis|mon pote|mon ami|toi|alors|aujourd.hui|ce (?:matin|soir)|et toi|ça va|ca va))*[ !.?,…]*$",
+        RegexOption.IGNORE_CASE
+    )
+
+    /**
+     * Conversation simple (« salut », « comment ça va ? », « merci », « raconte-moi une blague ») : Jarvis répond en un seul
+     * appel d'IA, sans outils ni Hermès — même en mode « Hermès pour tout » — pour une réponse en une à deux secondes.
+     * Jamais pour une demande adressée nommément à Hermès, ni pour une réponse à une question (« oui », « non »…).
+     */
+    fun bavardage(texte: String): Boolean {
+        val t = texte.trim().replace(Regex("^(?:(?:ok|bon|alors|eh|dis)[ ,]+)?(?:jarvis)[ ,!.]*", RegexOption.IGNORE_CASE), "").trim()
+        if (t.isBlank() || t.length > 90 || NOMME.containsMatchIn(texte)) return false
+        // Plusieurs phrases sociales enchaînées (« Salut Jarvis ! Ça va ? ») : chacune doit être du bavardage.
+        val morceaux = t.split(Regex("(?<=[!?.…])\\s+|,\\s*(?=(?:ça|ca|comment|et toi|tu vas))")).map { it.trim() }.filter { it.isNotBlank() }
+        return morceaux.isNotEmpty() && morceaux.all { BAVARDAGE.matches(it) }
+    }
+
     private val BREF = Regex("^(merci|ok|okay|d.accord|super|parfait|salut|bonjour|bonsoir|coucou|oui|non|stop|annule|c.est bon)[ !.,]*\\S{0,12}$", RegexOption.IGNORE_CASE)
 
     /** Cerveau qui a traité la dernière demande (pour les réponses brèves de suite de conversation). */
