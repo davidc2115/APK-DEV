@@ -293,7 +293,7 @@ class ToolBox(
             mapOf(
                 "texte" to prop("Ce qu'il faut rappeler, formulé pour l'utilisateur (ex. « Appeler Martin pour le devis »)."),
                 "quand" to prop("Moment : de préférence « AAAA-MM-JJ HH:MM » calculé depuis la date actuelle ; accepte aussi « dans 20 min », « demain 9h », « vendredi 17h30 »."),
-                "repetition" to prop("Optionnel : jour | ouvres (lundi→vendredi) | semaine | mois. Vide = une seule fois.")
+                "repetition" to prop("Optionnel : jour | ouvres (lundi→vendredi) | semaine | 2semaines (une semaine sur deux, « tous les 15 jours ») | mois. Vide = une seule fois. Pour « une semaine sur deux », « quand » = la PROCHAINE bonne date (demande laquelle à l'utilisateur si ce n'est pas clair : cette semaine ou la suivante ?).")
             ), listOf("texte", "quand")))
         put(tool("rappels_liste", "Liste TOUT ce qui est programmé : rappels, alarmes, minuteurs, routines, automatismes d'Hermès (tâches planifiées) et de Jarvis, en cours ou à venir (et les passés si demandé). Renvoie aussi le lien vers la page « Rappels et automatisations ».",
             mapOf("passes" to prop("« true » pour inclure ce qui s'est déclenché ces 7 derniers jours."))))

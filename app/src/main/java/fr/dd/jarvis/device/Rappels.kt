@@ -45,7 +45,8 @@ object Rappels {
     const val ACT_PLUS_TARD = "fr.dd.jarvis.RAPPEL_PLUS_TARD"
     private const val BASE_NOTIF = 7800
 
-    val REPETITIONS = linkedMapOf("" to "une fois", "jour" to "tous les jours", "ouvres" to "du lundi au vendredi", "semaine" to "chaque semaine", "mois" to "chaque mois")
+    val REPETITIONS = linkedMapOf("" to "une fois", "jour" to "tous les jours", "ouvres" to "du lundi au vendredi", "semaine" to "chaque semaine",
+        "2semaines" to "une semaine sur deux", "mois" to "chaque mois")
 
     private fun fichier(c: Context) = File(c.filesDir, "rappels.json")
 
@@ -91,6 +92,8 @@ object Rappels {
         val n = normaliser(s)
         return when {
             n.isBlank() || n.contains("une fois") || n == "non" || n == "aucune" -> ""
+            // « tous les 15 jours », « une semaine sur deux », « un dimanche sur deux », « bimensuel » (au sens courant)
+            n == "2semaines" || Regex("\\b(15|quinze|14|quatorze) jours\\b|\\b(2|deux) semaines\\b|sur deux|quinzaine|bi.?mensuel|biweekly|every 2 weeks").containsMatchIn(n) -> "2semaines"
             n.contains("ouvr") || n.contains("lundi au vendredi") || n.contains("semaine de travail") || n == "semaine ouvree" -> "ouvres"
             n.contains("jour") || n.contains("quotidien") || n.contains("chaque matin") || n.contains("chaque soir") -> "jour"
             n.contains("mois") || n.contains("mensuel") -> "mois"
@@ -182,6 +185,7 @@ object Rappels {
         while (!d.isAfter(limite) && n < 4000) {
             d = when (repetition) {
                 "semaine" -> d.plusWeeks(1)
+                "2semaines" -> d.plusWeeks(2)
                 "mois" -> d.plusMonths(1)
                 "ouvres" -> { var x = d.plusDays(1); while (x.dayOfWeek == DayOfWeek.SATURDAY || x.dayOfWeek == DayOfWeek.SUNDAY) x = x.plusDays(1); x }
                 else -> d.plusDays(1)
@@ -277,6 +281,15 @@ object Rappels {
     fun fait(c: Context, id: Int) {
         runCatching { NotificationManagerCompat.from(c).cancel(BASE_NOTIF + id) }
         liste(c).firstOrNull { it.id == id }?.let { if (it.repetition.isBlank()) mettreAJour(c, it.copy(fait = true)) }
+    }
+
+    /** Décale un rappel (et toute sa série) de [jours] : ex. une semaine pour caler « une semaine sur deux » sur la bonne. */
+    fun decaler(c: Context, id: Int, jours: Int): Rappel? {
+        val r = liste(c).firstOrNull { it.id == id } ?: return null
+        annuler(c, id)
+        val x = r.copy(at = r.at + jours * 86_400_000L)
+        mettreAJour(c, x); planifier(c, x)
+        return x
     }
 
     fun plusTard(c: Context, id: Int, minutes: Int = 10) {

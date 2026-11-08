@@ -722,11 +722,12 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 val play = remember(tick) { fr.dd.jarvis.car.VisibiliteAuto.commePlayStore(ctx) }
                 StatusRow("Installé « depuis le Play Store » (exigé par Android Auto) — source : $source", play)
                 Text(
-                    "Pour voir JARVIS dans la voiture :\n" +
-                        "1) Android Auto récent n'affiche une appli « voiture » que si elle vient du Play Store : touche « Rendre JARVIS visible » ci-dessous (JARVIS se réinstalle avec cette marque grâce à Shizuku ou à l'ADB intégré ; tes données sont conservées ; JARVIS se ferme quelques secondes, l'écoute « Jarvis » repart toute seule, rouvre l'appli ensuite).\n" +
-                        "2) Dans Android Auto (bouton « Ouvrir Android Auto ») : touche 10 fois « Version » tout en bas, puis menu ⋮ › « Paramètres pour les développeurs » › coche « Sources inconnues ».\n" +
-                        "3) Android Auto › « Personnaliser le lanceur » : coche JARVIS. Débranche puis rebranche le téléphone.\n" +
-                        "Après chaque mise à jour installée à la main, une notification te propose de refaire l'étape 1 en un geste.",
+                    "Android Auto cache toute appli qui ne vient pas du Play Store. Les DEUX premières étapes sont obligatoires :\n" +
+                        "1) « Rendre JARVIS visible » ci-dessous : JARVIS se réinstalle avec la marque Play Store (Shizuku ou ADB intégré ; données conservées ; il se ferme quelques secondes). La ligne « source » doit passer à « Play Store ✅ ».\n" +
+                        "2) Le réglage « Sources inconnues » d'Android Auto (JARVIS ne peut pas le cocher lui-même) : « Ouvrir Android Auto » › tout en bas, touche 10 fois « Version » › accepte « Autoriser les paramètres de développement » › menu ⋮ en haut à droite › « Paramètres pour les développeurs » › coche « Sources inconnues ».\n" +
+                        "3) Redémarre le téléphone, puis rebranche-le à la voiture : Android Auto relit la liste des applis. Dans Android Auto › « Personnaliser le lanceur », vérifie que JARVIS est coché.\n" +
+                        "4) Toujours absent ? Réglages Android › Applications › Android Auto › Stockage › « Vider le cache » (pas les données), redémarre, rebranche. Envoie-moi le diagnostic ci-dessous si besoin.\n" +
+                        "Après chaque mise à jour installée à la main, une notification propose de refaire l'étape 1 en un geste.",
                     color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(vertical = 6.dp)
                 )
                 var autoMsg by remember { mutableStateOf("") }
@@ -747,6 +748,18 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     }.getOrNull() ?: pm.getLaunchIntentForPackage(aa)
                     runCatching { ctx.startActivity((reglages ?: Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$aa"))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
                         .onFailure { ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$aa")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                }
+                Spacer(Modifier.height(6.dp))
+                var diagAuto by remember { mutableStateOf("") }
+                HudButton(if (diagAuto.isBlank()) "🩺 Diagnostic Android Auto" else "Masquer le diagnostic", Modifier.fillMaxWidth()) {
+                    diagAuto = if (diagAuto.isBlank()) fr.dd.jarvis.car.VisibiliteAuto.diagnostic(ctx) else ""
+                }
+                if (diagAuto.isNotBlank()) {
+                    Text(diagAuto, color = HudText, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                    HudChip("📋 Copier") {
+                        (ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                            .setPrimaryClip(android.content.ClipData.newPlainText("Diagnostic Android Auto", diagAuto))
+                    }
                 }
                 Spacer(Modifier.height(10.dp))
                 Text("Dans la voiture", color = HudText, fontSize = 13.sp)

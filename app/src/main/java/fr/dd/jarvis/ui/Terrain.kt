@@ -476,6 +476,10 @@ fun RappelsEcran(app: JarvisApp, onFermer: () -> Unit, onDemander: (String) -> U
                     Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         when (type) {
                             "rappel" -> {
+                                val rap = id.toIntOrNull()?.let { i -> fr.dd.jarvis.device.Rappels.liste(ctx).firstOrNull { it.id == i } }
+                                if (rap != null && rap.repetition == "2semaines") HudChip("⏭ Décaler d'une semaine") {
+                                    fr.dd.jarvis.device.Rappels.decaler(ctx, rap.id, 7)?.let { message = "Prochain rappel : ${fr.dd.jarvis.device.Rappels.format(it.at)}" }; tour++
+                                }
                                 if (e.etat == fr.dd.jarvis.device.Echeancier.Etat.A_VENIR) HudChip("⏰ +1 h") {
                                     id.toIntOrNull()?.let { fr.dd.jarvis.device.Rappels.supprimer(ctx, it)?.let { r -> fr.dd.jarvis.device.Rappels.creer(ctx, r.texte, "dans 1 h", r.repetition) } }; tour++
                                 }
@@ -494,6 +498,12 @@ fun RappelsEcran(app: JarvisApp, onFermer: () -> Unit, onDemander: (String) -> U
                                 HudChip(if (e.etat == fr.dd.jarvis.device.Echeancier.Etat.PAUSE) "▶️ Reprendre" else "⏸ Pause") {
                                     onDemander("Hermès, ${if (e.etat == fr.dd.jarvis.device.Echeancier.Etat.PAUSE) "réactive" else "mets en pause"} l'automatisme « $id ».")
                                 }
+                                if (Regex("rappel|poubelle|penser|n'oublie", RegexOption.IGNORE_CASE).containsMatchIn(id) || e.detail.contains("⚠️ Se déclenche CHAQUE semaine"))
+                                    HudChip("🔁 Remplacer par un rappel Jarvis") {
+                                        onDemander("Hermès, remplace l'automatisme « $id » par un rappel Jarvis : crée-le avec mcp_jarvis_rappel_creer (même texte, même heure, " +
+                                            "même fréquence — « une semaine sur deux » si c'est un rappel tous les 15 jours, à partir de la prochaine bonne date : demande-moi laquelle si tu ne la connais pas), " +
+                                            "puis supprime l'automatisme « $id » et confirme-moi les deux.")
+                                    }
                                 HudChip("✏️ Modifier") { onDemander("Hermès, je veux modifier l'automatisme « $id » : ") }
                                 HudChip("🗑 Supprimer") { onDemander("Hermès, supprime l'automatisme « $id ».") }
                             }

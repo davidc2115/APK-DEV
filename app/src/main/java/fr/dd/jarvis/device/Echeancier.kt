@@ -94,7 +94,12 @@ object Echeancier {
                 val actif = j.optBoolean("actif", true)
                 val statut = j.optString("statut")
                 val consigne = j.optString("consigne").replace(Regex("\\s+"), " ").take(120)
-                val detail = "Hermès · ${lisible(quandBrut).ifBlank { "planifié" }}" +
+                // Nom « bi-mensuel / 15 jours / une semaine sur deux » mais horaire hebdomadaire : le cron se déclenche CHAQUE semaine.
+                val quinzaine = Regex("bi.?mensuel|15 jours|quinze jours|sur deux|quinzaine|2 semaines|deux semaines", RegexOption.IGNORE_CASE)
+                    .containsMatchIn(nom + " " + j.optString("consigne"))
+                val hebdo = CRON.matchEntire(quandBrut.trim())?.let { m -> m.groupValues[3] == "*" && m.groupValues[5] != "*" } == true
+                val alerte = if (quinzaine && hebdo) "\n⚠️ Se déclenche CHAQUE semaine : une tâche planifiée d'Hermès ne sait pas faire « une semaine sur deux ». Touche « Remplacer par un rappel Jarvis »." else ""
+                val detail = "Hermès · ${lisible(quandBrut).ifBlank { "planifié" }}" + alerte +
                     (j.optString("repetition").takeIf { it.isNotBlank() }?.let { " · $it" } ?: "") +
                     (if (consigne.isNotBlank()) "\n$consigne" else "")
                 l += Element("hermes", "🤖", nom, detail, prochaine,

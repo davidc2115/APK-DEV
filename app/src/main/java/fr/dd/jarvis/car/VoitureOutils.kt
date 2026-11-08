@@ -126,6 +126,32 @@ object VisibiliteAuto {
         else -> i
     }
 
+    /** Tout ce que JARVIS peut vérifier lui-même sur sa visibilité dans Android Auto (à copier pour un dépannage). */
+    fun diagnostic(ctx: Context): String = buildString {
+        val pm = ctx.packageManager
+        val aa = "com.google.android.projection.gearhead"
+        append("🚗 Diagnostic Android Auto\n")
+        val v = runCatching { pm.getPackageInfo(aa, 0).versionName }.getOrNull()
+        append("• Android Auto : ${v?.let { "installé (version $it)" } ?: "❌ non installé"}\n")
+        val src = runCatching { if (android.os.Build.VERSION.SDK_INT >= 30) pm.getInstallSourceInfo(ctx.packageName) else null }.getOrNull()
+        append("• Source de JARVIS : ${libelleSource(ctx)}" + (if (commePlayStore(ctx)) " ✅" else " ❌ (Android Auto le cache tant que « Sources inconnues » n'est pas coché)") + "\n")
+        src?.let { append("   installateur=${it.installingPackageName} · initiateur=${it.initiatingPackageName}\n") }
+        val services = runCatching {
+            pm.queryIntentServices(Intent("androidx.car.app.CarAppService").setPackage(ctx.packageName), android.content.pm.PackageManager.GET_RESOLVED_FILTER)
+        }.getOrDefault(emptyList())
+        if (services.isEmpty()) append("• Service voiture : ❌ introuvable\n") else services.forEach { r ->
+            val f = r.filter
+            val cats = (0 until (f?.countCategories() ?: 0)).map { f!!.getCategory(it).substringAfterLast('.') }
+            val etat = pm.getComponentEnabledSetting(android.content.ComponentName(ctx.packageName, r.serviceInfo.name))
+            append("• Service voiture : ✅ ${r.serviceInfo.name.substringAfterLast('.')} · catégories ${cats.joinToString("+")} · " +
+                (if (etat == android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED) "❌ désactivé" else "activé") + "\n")
+        }
+        val debug = (ctx.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        append("• Version de JARVIS : ${if (debug) "test (débogable, tous les hôtes acceptés)" else "normale (hôtes Google uniquement)"}\n")
+        append("• « Sources inconnues » dans Android Auto : impossible à lire depuis JARVIS — à vérifier (étape 2)\n")
+        append("• Connecté à la voiture : ${if ((ctx.applicationContext as? JarvisApp)?.enVoiture == true) "oui" else "non"}")
+    }
+
     /** Droits « adb » disponibles pour la réinstallation. */
     fun possible(ctx: Context) = fr.dd.jarvis.device.ShizukuShell.ready() || fr.dd.jarvis.device.AdbShell.hasKey(ctx)
 
