@@ -184,6 +184,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
         }
         if (settingsSection == "control") {
         item { fr.dd.jarvis.ui.EmpreinteVocalePanel(app) }
+        item { fr.dd.jarvis.ui.AntiVolPanel(app) }
         item { SectionHeader("Centre de contrôle JARVIS") }
         item {
             var runMsg by remember { mutableStateOf("") }

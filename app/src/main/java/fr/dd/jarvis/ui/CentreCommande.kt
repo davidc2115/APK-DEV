@@ -298,7 +298,13 @@ private suspend fun tuileHermes(app: JarvisApp): Tuile {
     return when {
         !enLigne -> Tuile("🪽", "Hermès", "🔴 Hors ligne", "Jarvis répond à sa place", EtatTuile.ALERTE)
         sature -> Tuile("🪽", "Hermès", "🟠 Saturé ${fr.dd.jarvis.hermes.Hermes.minutesSaturation()} min",
-            fr.dd.jarvis.hermes.Hermes.derniereRaison.take(90).ifBlank { "quota de l'IA" } + "\nTouche pour réessayer tout de suite", EtatTuile.ALERTE)
+            fr.dd.jarvis.hermes.Hermes.derniereRaison.let { r ->
+                when {
+                    Regex("rejected your API key|invalid api key|401", RegexOption.IGNORE_CASE).containsMatchIn(r) ->
+                        "Clés IA refusées en amont" + (app.llm.groqRing.refuseesMasquees().takeIf { it.isNotEmpty() }?.let { " (Groq ${it.joinToString(", ")})" } ?: "") + " : vérifie-les dans Réglages › IA"
+                    else -> r.take(90).ifBlank { "quota de l'IA" }
+                }
+            } + "\nTouche pour réessayer tout de suite", EtatTuile.ALERTE)
         else -> Tuile("🪽", "Hermès", "🟢 En ligne", mode + " · voix " + if (fr.dd.jarvis.voice.VoixNaturelle.active(app)) "naturelle" else "Android")
     }
 }

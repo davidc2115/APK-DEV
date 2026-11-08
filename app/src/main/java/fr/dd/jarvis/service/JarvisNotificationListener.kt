@@ -91,6 +91,8 @@ class JarvisNotificationListener : NotificationListenerService() {
             var titre = e.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
             val texte = (e.getCharSequence(Notification.EXTRA_BIG_TEXT) ?: e.getCharSequence(Notification.EXTRA_TEXT))?.toString().orEmpty()
             if (titre.isBlank() && texte.isBlank()) return
+            // Commande anti-vol (« JARVIS <code> … ») : jamais gardée, résumée ni lue à voix haute (elle contient le code).
+            if (fr.dd.jarvis.securite.AntiVol.ressembleCommande(texte)) return
             val label = try { packageManager.getApplicationLabel(packageManager.getApplicationInfo(sbn.packageName, 0)).toString() } catch (_: Exception) { sbn.packageName }
             if (appel) {
                 val candidat = Regex("(?:\\+?\\d[\\d .()/-]{6,}\\d)").find("$titre $texte")?.value.orEmpty()

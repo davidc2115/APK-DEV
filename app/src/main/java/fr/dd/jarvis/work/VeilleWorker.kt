@@ -41,6 +41,7 @@ class VeilleWorker(private val ctx: Context, params: WorkerParameters) : Corouti
         runCatching { Depart.meteo(app) }
         runCatching { fr.dd.jarvis.device.Routines.surveillerLieu(app) }
         runCatching { fr.dd.jarvis.device.Routines.horaires(app) }
+        runCatching { fr.dd.jarvis.securite.AntiVol.verifierSim(app) }
         runCatching { Journal.siLHeure(app) }
         runCatching { fr.dd.jarvis.service.Poignet.assurer(app) }
         runCatching { fr.dd.jarvis.widget.DragonWidget.majTous(app) }

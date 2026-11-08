@@ -17,7 +17,7 @@ import org.json.JSONObject
  * fournisseur sont en pause, on passe immédiatement au suivant.
  */
 class Llm(private val store: Store) {
-    private val groqRing = KeyRing { store.groqKeys.toList() }
+    val groqRing = KeyRing { store.groqKeys.toList() }
     private val geminiRing = KeyRing { store.geminiKeys.toList() }
     val groq = GroqClient(groqRing) { store.groqModel.value }
 
@@ -41,6 +41,8 @@ class Llm(private val store: Store) {
         return "Groq $g clé(s)" + (if (groqRing.pausedCount() > 0) " (${groqRing.pausedCount()} en pause)" else "") +
             " · Gemini $m clé(s)" + (if (geminiRing.pausedCount() > 0) " (${geminiRing.pausedCount()} en pause)" else "") +
             " · Cloudflare $c compte(s)" + (cloudflare.etat().second.takeIf { it > 0 }?.let { " ($it en pause)" } ?: "") +
+            groqRing.refuseesMasquees().takeIf { it.isNotEmpty() }?.let { "\n⚠️ Clé(s) Groq refusée(s) par Groq (invalides ou révoquées) : ${it.joinToString(", ")} — remplace-les" } .orEmpty() +
+            geminiRing.refuseesMasquees().takeIf { it.isNotEmpty() }?.let { "\n⚠️ Clé(s) Gemini refusée(s) : ${it.joinToString(", ")}" }.orEmpty() +
             "\nOrdre : Groq → Gemini → Cloudflare → Ollama" +
             (if (dernierRelais > 0 && System.currentTimeMillis() - dernierRelais < 3_600_000L) " · dernier relais : $dernierFournisseur à " +
                 java.text.SimpleDateFormat("HH:mm", java.util.Locale.FRANCE).format(java.util.Date(dernierRelais)) else "")

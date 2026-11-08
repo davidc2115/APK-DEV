@@ -1,0 +1,16 @@
+# Coffre-fort JARVIS — installé par JARVIS (Réglages › Coffre-fort société › Installer sur mon serveur).
+services:
+  coffre-jarvis:
+    build: .
+    container_name: coffre-jarvis
+    restart: unless-stopped
+    ports:
+      - "8443:8443"
+    volumes:
+      - ./data:/data
+      # Sauvegardes de chaque nuit : remplace ./sauvegardes par un autre disque si possible (ex. /mnt/disque-externe/coffre).
+      - ./sauvegardes:/sauvegardes
+    environment:
+      - COFFRE_SAUVEGARDES=/sauvegardes
+      - TZ=Europe/Paris
+    mem_limit: 160m

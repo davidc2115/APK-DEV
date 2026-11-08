@@ -80,7 +80,7 @@ object Telephony {
                 if (num != null && !addr.filter { it.isDigit() }.endsWith(num.filter { it.isDigit() }.takeLast(9))) continue
                 val nom = nomDe(app, addr)
                 val envoye = c.getInt(3) == 2
-                out.append("- ${if (envoye) "➡️ à" else "⬅️ de"} **${nom ?: addr}** _(${fmt.format(java.util.Date(c.getLong(2)))})_ : ${c.getString(1)?.take(300)}\n")
+                out.append("- ${if (envoye) "➡️ à" else "⬅️ de"} **${nom ?: addr}** _(${fmt.format(java.util.Date(c.getLong(2)))})_ : ${c.getString(1)?.let { fr.dd.jarvis.securite.AntiVol.masquer(it) }?.take(300)}\n")
                 n++
             }
         }
@@ -120,7 +120,7 @@ object Telephony {
             while (c.moveToNext() && out.size < 2000) {
                 val addr = c.getString(0).orEmpty()
                 if (numero != null && !addr.filter(Char::isDigit).endsWith(numero.filter(Char::isDigit).takeLast(9))) continue
-                val body = c.getString(1).orEmpty()
+                val body = fr.dd.jarvis.securite.AntiVol.masquer(c.getString(1).orEmpty())
                 if (terme.isNotBlank() && !body.contains(terme, true) && !addr.contains(terme, true)) continue
                 val sent = c.getInt(3) == 2
                 out += "• ${if (sent) "Envoyé à" else "Reçu de"} ${nomDe(app, addr) ?: addr} — ${fmt.format(java.util.Date(c.getLong(2)))}\n$body"

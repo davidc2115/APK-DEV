@@ -41,6 +41,16 @@ class KeyRing(private val keys: () -> List<String>) {
         return quotas.size
     }
 
+    /** Clés refusées par le fournisseur (401/403 : invalides, révoquées, compte suspendu) → quand. */
+    private val refusees = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** Clés refusées dans les 6 dernières heures, masquées (« gsk_…a1b2 »), pour l'écran de réglages. */
+    fun refuseesMasquees(): List<String> {
+        val limite = System.currentTimeMillis() - 6 * 3_600_000L
+        val l = keys().filter { it.isNotBlank() }
+        return l.filter { (refusees[it] ?: 0L) > limite }.map { k -> "n°${l.indexOf(k) + 1} (${k.take(4)}…${k.takeLast(4)})" }
+    }
+
     fun pausedCount(): Int {
         val now = System.currentTimeMillis()
         return keys().count { (cooldown[it] ?: 0L) > now }
@@ -108,11 +118,12 @@ class KeyRing(private val keys: () -> List<String>) {
             try {
                 val result = block(key)
                 next = (i + 1) % list.size
-                cooldown.remove(key)
+                cooldown.remove(key); refusees.remove(key)
                 return result
             } catch (e: ApiException) {
                 last = e
                 if (e.code == 429) quotas.addLast(System.currentTimeMillis())
+                if (e.code == 401 || e.code == 403) refusees[key] = System.currentTimeMillis()
                 val p = pause(e.code, e.message.orEmpty()) ?: throw e
                 cooldown[key] = System.currentTimeMillis() + p
             }

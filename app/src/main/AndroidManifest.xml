@@ -21,6 +21,9 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
@@ -109,6 +112,21 @@
         <receiver android:name=".device.AdbPairReceiver" android:exported="false" />
         <receiver android:name=".service.CarReplyReceiver" android:exported="false" />
         <receiver android:name=".device.RappelReceiver" android:exported="false" />
+        <!-- Anti-vol : commandes SMS « JARVIS <code> VOL », suivi de position, administrateur de l'appareil -->
+        <receiver android:name=".securite.AntiVolSmsReceiver" android:exported="true" android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter android:priority="999">
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
+        <receiver android:name=".securite.AntiVolReceiver" android:exported="false" />
+        <receiver android:name=".securite.AdminJarvis" android:exported="true" android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data android:name="android.app.device_admin" android:resource="@xml/device_admin" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+        </receiver>
+        <activity android:name=".securite.AlerteVolActivity" android:exported="false" android:excludeFromRecents="true"
+            android:launchMode="singleTask" android:showWhenLocked="true" android:turnScreenOn="true" android:taskAffinity=".antivol" />
         <receiver android:name=".device.HorlogeReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

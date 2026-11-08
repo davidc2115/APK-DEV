@@ -73,8 +73,11 @@ object RelaisGroq {
             val m = runBlocking { app.llm.relaisApresGroq(messages, outils, forceText, origine, compact) }
             200 to completionDe(m, modele(app), estimer(messages, outils))
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
-            val code = (e as? ApiException)?.code ?: (origine as? ApiException)?.code ?: 502
-            (if (code in 400..599) code else 502) to erreur("Groq, Gemini et Cloudflare à court : ${e.message ?: e.javaClass.simpleName}",
+            val brut = (e as? ApiException)?.code ?: (origine as? ApiException)?.code ?: 502
+            // Jamais 401/403 vers Hermès : pour lui ce serait « le relais refuse MA clé » (il abandonnerait ce fournisseur),
+            // alors que ce sont les clés Groq/Gemini de Jarvis qui sont refusées en amont → panne passagère du fournisseur.
+            val code = when (brut) { 429 -> 429; 401, 403 -> 503; in 500..599 -> brut; else -> 503 }
+            code to erreur("Groq, Gemini et Cloudflare à court (relais Jarvis) : ${e.message ?: e.javaClass.simpleName}",
                 if (code == 429) "rate_limit_exceeded" else "upstream_error")
         }
     }

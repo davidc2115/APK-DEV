@@ -31,6 +31,8 @@ class Brain(
     }
 
     private suspend fun replyInterne(history: List<ChatMsg>, pourHermes: Boolean, onTexte: ((String) -> Unit)?, onStatus: (String) -> Unit): String {
+        // Anti-vol déclenché : JARVIS ne fait plus rien tant que l'alerte n'est pas arrêtée avec le code.
+        if (app.store.antivolAlerte.value) return "🔒 Mode anti-vol actif : JARVIS est verrouillé. Arrête l'alerte avec ton code (écran d'alerte, Réglages › Anti-vol, ou SMS « JARVIS <code> STOP »)."
         // Carnet de notes (« prends note… », « relis mes notes sur le poêle ») : enregistré tout de suite, sans IA, sans
         // Home Assistant ni autre application — quel que soit le sujet de la note.
         if (!pourHermes) history.lastOrNull()?.takeIf { it.fromUser }?.let { m ->

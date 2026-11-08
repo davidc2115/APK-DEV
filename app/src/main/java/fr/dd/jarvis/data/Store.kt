@@ -375,6 +375,35 @@ class Store(context: Context) {
     // ---- Annonces vocales (SMS, mails, notifications) : mode par catégorie (off | annonce | lecture) et sonnerie (URI, « default » ou vide = aucune)
     val annOn = BPref("annOn", false)
     val annPrive = BPref("annPrive", false)
+
+    // ---- Coffre-fort de la société (serveur) : adresse, empreinte du certificat, accès de cet appareil, clés
+    val coffreUrlLocal = SPref("coffreUrlLocal", "")
+    val coffreUrlDistant = SPref("coffreUrlDistant", "")
+    val coffreEmpreinte = SPref("coffreEmpreinte", "")
+    val coffreJeton = SecretPref("coffreJeton")
+    val coffreAppareil = SPref("coffreAppareil", "")
+    val coffreRole = SPref("coffreRole", "")
+    val coffreCategories = SPref("coffreCategories", "")
+    val coffreCles = SecretPref("coffreCles")
+    val coffreMaitre = SecretPref("coffreMaitre")
+    val coffreSeq = SPref("coffreSeq", "0")
+    val coffreDerniere = SPref("coffreDerniere", "0")
+    val coffreBilan = SPref("coffreBilan", "")
+    val coffreAuto = BPref("coffreAuto", true)
+
+    // ---- Anti-vol par SMS (« JARVIS <code> VOL ») : le code est haché (PBKDF2) dans le stockage chiffré
+    val antivolActif = BPref("antivolActif", false)
+    val antivolCode = SecretPref("antivolCode")
+    val antivolSecours = SPref("antivolSecours", "")
+    val antivolAlerte = BPref("antivolAlerte", false)
+    val antivolMessage = SPref("antivolMessage", "")
+    val antivolSuiviJusqua = SPref("antivolSuiviJusqua", "0")
+    val antivolSuiviNumero = SPref("antivolSuiviNumero", "")
+    val antivolSim = SPref("antivolSim", "")
+    val antivolSimVerrou = BPref("antivolSimVerrou", true)
+    val antivolEchecs = SPref("antivolEchecs", "{}")
+    val antivolJournal = SPref("antivolJournal", "[]")
+    val antivolVolume = SPref("antivolVolume", "")
     val annApps = SPref("annApps", "")
     private val annModes = androidx.compose.runtime.mutableStateMapOf<String, String>().also { m ->
         listOf("sms", "mail", "autres").forEach { m[it] = prefs.getString("annMode_$it", if (it == "autres") "annonce" else "lecture") ?: "lecture" }
