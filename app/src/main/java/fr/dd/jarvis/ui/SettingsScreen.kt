@@ -920,12 +920,11 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 val play = remember(tick) { fr.dd.jarvis.car.VisibiliteAuto.commePlayStore(ctx) }
                 StatusRow("Installé « depuis le Play Store » (exigé par Android Auto) — source : $source", play)
                 Text(
-                    "Android Auto cache toute appli qui ne vient pas du Play Store. Les DEUX premières étapes sont obligatoires :\n" +
-                        "1) « Rendre JARVIS visible » ci-dessous : JARVIS se réinstalle avec la marque Play Store (Shizuku ou ADB intégré ; données conservées ; il se ferme quelques secondes). La ligne « source » doit passer à « Play Store ✅ ».\n" +
-                        "2) Le réglage « Sources inconnues » d'Android Auto (JARVIS ne peut pas le cocher lui-même) : « Ouvrir Android Auto » › tout en bas, touche 10 fois « Version » › accepte « Autoriser les paramètres de développement » › menu ⋮ en haut à droite › « Paramètres pour les développeurs » › coche « Sources inconnues ».\n" +
-                        "3) Redémarre le téléphone, puis rebranche-le à la voiture : Android Auto relit la liste des applis. Dans Android Auto › « Personnaliser le lanceur », vérifie que JARVIS est coché.\n" +
-                        "4) Toujours absent ? Réglages Android › Applications › Android Auto › Stockage › « Vider le cache » (pas les données), redémarre, rebranche. Envoie-moi le diagnostic ci-dessous si besoin.\n" +
-                        "Après chaque mise à jour installée à la main, une notification propose de refaire l'étape 1 en un geste.",
+                    "Depuis Android Auto 17, une appli qui ne vient pas du Play Store n'est acceptée QUE comme appli MÉDIA, même avec « Sources inconnues ». JARVIS s'affiche donc dans la voiture comme une appli média : 🎙️ micro/loupe = parler à JARVIS (il répond à voix haute), tes raccourcis, relire la dernière réponse, reprendre la musique. Étapes :\n" +
+                        "1) Le réglage « Sources inconnues » d'Android Auto (obligatoire, JARVIS ne peut pas le cocher lui-même) : « Ouvrir Android Auto » › tout en bas, touche 10 fois « Version » › accepte « Autoriser les paramètres de développement » › menu ⋮ en haut à droite › « Paramètres pour les développeurs » › coche « Sources inconnues ».\n" +
+                        "2) Réglages Android › Applications › Android Auto › Stockage › « Vider le cache » (pas les données), puis redémarre le téléphone : Android Auto garde en mémoire son ancien refus.\n" +
+                        "3) Rebranche à la voiture : JARVIS apparaît parmi les applis (avec les applis de musique) ; dans « Personnaliser le lanceur », vérifie qu'il est coché.\n" +
+                        "Facultatif : « Rendre JARVIS visible » ci-dessous (marque Play Store) ne suffit plus avec les versions récentes d'Android Auto, mais ne gêne pas.",
                     color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(vertical = 6.dp)
                 )
                 var autoMsg by remember { mutableStateOf("") }

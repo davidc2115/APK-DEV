@@ -181,6 +181,17 @@
             </intent-filter>
         </service>
         <meta-data android:name="androidx.car.app.minCarApiLevel" android:value="3" />
+        <!-- Android Auto 17+ : une appli hors Play Store n'est acceptée dans le lanceur (« Sources inconnues ») que si
+             c'est une appli MÉDIA. Ce service fait apparaître JARVIS dans le lanceur de la voiture. -->
+        <service
+            android:name=".car.JarvisMediaService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@drawable/ic_launcher">
+            <intent-filter>
+                <action android:name="android.media.browse.MediaBrowserService" />
+            </intent-filter>
+        </service>
         <receiver android:name=".car.VisibiliteReceiver" android:exported="false" />
         <service
             android:name=".service.JarvisSessionService"

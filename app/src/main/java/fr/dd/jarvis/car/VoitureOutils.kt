@@ -146,6 +146,8 @@ object VisibiliteAuto {
             append("• Service voiture : ✅ ${r.serviceInfo.name.substringAfterLast('.')} · catégories ${cats.joinToString("+")} · " +
                 (if (etat == android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED) "❌ désactivé" else "activé") + "\n")
         }
+        val media = runCatching { pm.queryIntentServices(Intent("android.media.browse.MediaBrowserService").setPackage(ctx.packageName), 0) }.getOrDefault(emptyList())
+        append("• Service MÉDIA (seul accepté par Android Auto 17+ hors Play Store) : " + (if (media.isNotEmpty()) "✅ ${media.first().serviceInfo.name.substringAfterLast('.')}" else "❌ absent") + "\n")
         val debug = (ctx.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
         append("• Version de JARVIS : ${if (debug) "test (débogable, tous les hôtes acceptés)" else "normale (hôtes Google uniquement)"}\n")
         append("• « Sources inconnues » dans Android Auto : impossible à lire depuis JARVIS — à vérifier (étape 2)\n")
