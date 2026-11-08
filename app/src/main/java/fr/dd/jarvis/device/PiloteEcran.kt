@@ -35,7 +35,8 @@ Tu pilotes un smartphone Android à la place de son propriétaire, comme une per
 Réponds UNIQUEMENT par un objet JSON :
 {"observation":"ce que tu vois d'utile pour l'objectif","action":"cliquer|saisir|appui_long|defiler_bas|defiler_haut|glisser_gauche|glisser_droite|retour|accueil|ouvrir_app|attendre|confirmer|terminer|echec","element":numéro de la liste ou 0,"x":0,"y":0,"texte":"texte à saisir, nom de l'application à ouvrir, ou question de confirmation","valider":true ou false,"resultat":"pour terminer/echec : compte rendu factuel de ce qui est réellement visible"}
 Règles :
-- Une seule action par réponse. Désigne de préférence l'élément par son numéro ; sinon donne x,y en pixels de la CAPTURE.
+- Sur la CAPTURE, chaque élément utilisable est entouré d'un cadre avec son NUMÉRO (le même que dans la liste) : choisis l'élément par ce numéro, c'est le plus précis. Sinon seulement, donne x,y en pixels de la capture.
+- Une seule action par réponse (saisir avec valider=true tape le texte ET lance la recherche : pas besoin de cliquer avant sur le champ).
 - saisir : l'élément est le champ de saisie ; valider=true pour appuyer ensuite sur Entrée/Rechercher.
 - Avant d'enchaîner, vérifie sur la capture que l'action précédente a eu l'effet attendu ; si l'écran n'a pas changé, essaie autrement (autre élément, défilement, retour, attendre un chargement).
 - Ferme les fenêtres gênantes (publicité, cookies, mise à jour, notation) sans rien accepter de payant.
@@ -67,11 +68,36 @@ Règles :
         }.getOrNull()
     }
 
-    private fun jpeg(b: Bitmap, largeurMax: Int = 720, qualite: Int = 70): Pair<ByteArray, Float> {
+    private fun jpeg(b: Bitmap, largeurMax: Int = 720, qualite: Int = 70, reperes: List<Elt> = emptyList()): Pair<ByteArray, Float> {
         val echelle = if (b.width > largeurMax) largeurMax.toFloat() / b.width else 1f
-        val r = if (echelle < 1f) Bitmap.createScaledBitmap(b, (b.width * echelle).toInt(), (b.height * echelle).toInt(), true) else b
+        var r = if (echelle < 1f) Bitmap.createScaledBitmap(b, (b.width * echelle).toInt(), (b.height * echelle).toInt(), true) else b
+        if (reperes.isNotEmpty()) r = annoter(r, reperes, echelle)
         val out = ByteArrayOutputStream(); r.compress(Bitmap.CompressFormat.JPEG, qualite, out)
         return out.toByteArray() to echelle
+    }
+
+    /**
+     * Repères numérotés dessinés SUR la capture (cadre + numéro de chaque élément utilisable) : le modèle de vision
+     * relie ce qu'il voit au bon numéro, au lieu d'estimer des coordonnées (c'était la source des appuis à côté).
+     */
+    private fun annoter(source: Bitmap, l: List<Elt>, echelle: Float): Bitmap {
+        val b = if (source.isMutable) source else source.copy(Bitmap.Config.ARGB_8888, true)
+        val c = android.graphics.Canvas(b)
+        val trait = android.graphics.Paint().apply { style = android.graphics.Paint.Style.STROKE; strokeWidth = 2f; isAntiAlias = true }
+        val fond = android.graphics.Paint().apply { style = android.graphics.Paint.Style.FILL }
+        val texte = android.graphics.Paint().apply { color = android.graphics.Color.WHITE; textSize = 15f; isFakeBoldText = true; isAntiAlias = true }
+        l.filter { it.clic || it.saisie || it.defil }.forEach { e ->
+            val couleur = when { e.saisie -> 0xFF00C853.toInt(); e.clic -> 0xFFFF1744.toInt(); else -> 0xFF2979FF.toInt() }
+            trait.color = couleur; fond.color = couleur
+            val x1 = e.r.left * echelle; val y1 = e.r.top * echelle; val x2 = e.r.right * echelle; val y2 = e.r.bottom * echelle
+            if (!e.defil || e.clic || e.saisie) c.drawRect(x1, y1, x2, y2, trait)
+            val num = e.n.toString()
+            val w = texte.measureText(num) + 6f
+            val lx = x1.coerceIn(0f, b.width - w); val ly = y1.coerceIn(0f, b.height - 18f)
+            c.drawRect(lx, ly, lx + w, ly + 18f, fond)
+            c.drawText(num, lx + 3f, ly + 14f, texte)
+        }
+        return b
     }
 
     /** Enregistre la capture pour l'afficher dans la conversation (« ![…](jarvis-img:…) »). */
@@ -128,8 +154,9 @@ Règles :
         return pkg to out
     }
 
-    private fun decrire(l: List<Elt>): String = l.joinToString("\n") { e ->
-        "[${e.n}] ${e.cls}" + (if (e.label.isNotBlank()) " « ${e.label} »" else "") + " (${e.r.left},${e.r.top},${e.r.right},${e.r.bottom})" +
+    private fun decrire(l: List<Elt>, echelle: Float = 1f): String = l.joinToString("\n") { e ->
+        "[${e.n}] ${e.cls}" + (if (e.label.isNotBlank()) " « ${e.label} »" else "") +
+            " (${(e.r.left * echelle).toInt()},${(e.r.top * echelle).toInt()},${(e.r.right * echelle).toInt()},${(e.r.bottom * echelle).toInt()})" +
             (if (e.clic) " cliquable" else "") + (if (e.saisie) " saisie" else "") + (if (e.defil) " défilable" else "") +
             (e.coche?.let { if (it) " coché" else " non coché" } ?: "")
     }.ifBlank { "(aucun élément exposé : utilise la capture et des coordonnées)" }
@@ -215,7 +242,7 @@ Règles :
             val b = capturer(app)
             if (b != null) derniereImage = b
             val m = app.resources.displayMetrics
-            val (octets, echelle) = if (b != null) jpeg(b) else (null to 1f)
+            val (octets, echelle) = if (b != null) jpeg(b, reperes = l) else (null to 1f)
             val empreinte = pkg + l.take(40).joinToString("|") { it.label }
             memeEcran = if (empreinte == empreintePrecedente) memeEcran + 1 else 0
             empreintePrecedente = empreinte
@@ -227,7 +254,7 @@ Règles :
                 append(".\n")
                 if (memeEcran >= 2) append("ATTENTION : l'écran n'a pas changé depuis ${memeEcran} actions, change de méthode.\n")
                 append("ACTIONS DÉJÀ FAITES :\n").append(historique.takeLast(10).joinToString("\n").ifBlank { "(aucune)" }).append("\n")
-                append("ÉLÉMENTS (accessibilité, coordonnées en pixels écran) :\n").append(decrire(l))
+                append("ÉLÉMENTS (numéros dessinés sur la capture ; coordonnées en pixels de la capture) :\n").append(decrire(l, echelle))
             }
             onStatus("👁️ Écran : étape $etape…")
             val brut = runCatching {
@@ -258,11 +285,27 @@ Règles :
                     val r = executer(app, j, l, echelle, m.widthPixels, m.heightPixels)
                     historique += "$etape. $action → $r" + j.optString("observation").takeIf { it.isNotBlank() }?.let { " (vu : ${it.take(120)})" }.orEmpty()
                     onStatus("👆 ${r.take(60)}")
-                    delay(if (action == "ouvrir_app") 2500 else 1300)
+                    // Attente ADAPTATIVE : on repart dès que l'écran a changé puis s'est stabilisé (au lieu de 1,3 s fixes).
+                    attendreStable(empreinte, if (action == "ouvrir_app" || action == "attendre") 3500 else 1600)
                 }
             }
         }
         fin(app, "⚠️ Pas terminé après $MAX_ETAPES étapes.", historique, derniereImage)
+    }
+
+    /** Attend que l'écran change par rapport à [avant] puis ne bouge plus (2 relevés identiques), au plus [maxMs]. */
+    private suspend fun attendreStable(avant: String, maxMs: Long) {
+        val fin = System.currentTimeMillis() + maxMs
+        var precedent = avant
+        var stables = 0
+        delay(200)
+        while (System.currentTimeMillis() < fin) {
+            val (pkg, l) = elements()
+            val e = pkg + l.take(40).joinToString("|") { it.label }
+            if (e != avant && e == precedent) { if (++stables >= 2) return } else stables = 0
+            precedent = e
+            delay(150)
+        }
     }
 
     private fun recap(h: List<String>) = if (h.isEmpty()) "" else "\n\nÉtapes :\n" + h.takeLast(12).joinToString("\n") { "• $it" }

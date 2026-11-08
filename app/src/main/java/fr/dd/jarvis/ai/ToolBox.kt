@@ -840,7 +840,7 @@ class ToolBox(
                 val requete = a.optString("requete")
                 val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.playMusic(requete, pkgChoisi) }
                 // Lecture non confirmée : Jarvis prend l'écran, termine dans l'appli (recherche, bon résultat, lecture) et vérifie.
-                if (requete.isNotBlank() && !r.contains("est en cours de lecture") && fr.dd.jarvis.device.PiloteEcran.disponible(app) &&
+                if (requete.isNotBlank() && !r.contains("est en cours de lecture") && !r.startsWith("🎵 En lecture") && fr.dd.jarvis.device.PiloteEcran.disponible(app) &&
                     !r.contains("n'est pas installée") && !r.contains("Accès aux notifications")) {
                     val nom = app.phone.musicApps().entries.firstOrNull { it.value == pkgChoisi || it.key == pkgChoisi }?.key ?: pkgChoisi
                     val pilote = fr.dd.jarvis.device.PiloteEcran.piloter(app,

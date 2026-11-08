@@ -395,9 +395,10 @@ fun PlanningScreen(app: JarvisApp) {
         AlertDialog(
             onDismissRequest = { selected = null; conflictCounterpart = null },
             containerColor = Color(0xFF0B1424), titleContentColor = LocalAccent.current, textContentColor = HudText,
-            title = { Text(e.title) },
+            // Titre : numéro de téléphone cliquable (appel).
+            title = { TexteCliquable(e.title, LocalAccent.current, taille = 21.sp, lien = Color(0xFFE6D2FF), gras = true) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("🕗 " + eventDay(e).format(dayTitleFmt) + " · " + timeLabel(e), fontSize = 13.sp)
                     conflictCounterpart?.let { other ->
                         Text(
@@ -443,7 +444,8 @@ fun PlanningScreen(app: JarvisApp) {
                         modifier = Modifier.clickable { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(osmGps))) } }
                     )
                     val descriptionVisible = e.description.lines().filterNot { it.startsWith("Voir l’adresse (OpenStreetMap) :") || it.startsWith("Ouvrir le point GPS (OpenStreetMap) :") }.joinToString("\n")
-                    if (descriptionVisible.isNotBlank()) Text(descriptionVisible.take(600), color = HudDim, fontSize = 12.sp)
+                    // Notes : HTML de Google Agenda mis en forme (gras, retours à la ligne), téléphones et liens cliquables.
+                    if (descriptionVisible.isNotBlank()) TexteCliquable(descriptionVisible.take(3000), HudText, taille = 13.sp)
                     HudButton("✎ Modifier le rendez-vous") { editing = e; selected = null }
                     Text("Couleur du rendez-vous", color = HudDim, fontSize = 12.sp)
                     ColorPalette(store.eventColor[e.id] ?: e.eventColor) {

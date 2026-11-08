@@ -248,6 +248,9 @@ class PhoneControl(private val ctx: Context) {
         //  3) si l'appli a seulement repris l'ancien morceau, on renvoie la recherche à sa session.
         // On ne confirme que si le morceau qui joue correspond à la demande (ou a changé), et on n'appuie JAMAIS sur
         // « lecture » tant que le titre n'a pas changé : c'est ce qui relançait la musique déjà en cours au lieu de la demandée.
+        // Morphe / YouTube Music : JARVIS cherche lui-même dans le catalogue et fait lire LE bon résultat par son lien
+        // (rapide et exact, sans piloter l'écran). En cas d'échec (pas de réseau, aucun résultat), méthode classique.
+        if (YtMusique.estYtm(pkg)) jouerYtm(pkg, requete, nom)?.let { return it }
         val sessionAvant = session(pkg)
         val titreAvant = sessionAvant?.let { titreDe(it) }
         var etat = "aucune"
@@ -321,6 +324,38 @@ class PhoneControl(private val ctx: Context) {
         val gere = try { ctx.packageManager.resolveActivity(intent, 0) != null } catch (e: Exception) { false }
         if (!gere) return false
         return try { ctx.startActivity(intent); true } catch (e: Exception) { false }
+    }
+
+    /**
+     * Lecture par le catalogue YouTube Music : recherche, meilleur résultat (titre, album, artiste, playlist selon la
+     * demande), ouverture de CE résultat dans l'appli, vérification sur la session média (relance « lecture » si l'appli
+     * s'est ouverte en pause). Renvoie null si ça n'a pas pu aboutir (on retombe alors sur la méthode classique).
+     */
+    fun jouerYtm(pkg: String, requete: String, nom: String, resultat: YtMusique.Resultat? = null, radio: Boolean = false): String? {
+        val liste = if (resultat != null) YtMusique.derniers else runCatching { YtMusique.rechercher(requete) }.getOrNull() ?: return null
+        val choisi = (resultat ?: YtMusique.meilleur(requete, liste) ?: return null).let { YtMusique.completer(it) }
+        val avant = session(pkg)?.let { titreDe(it) }
+        if (!YtMusique.ouvrir(ctx, pkg, choisi, radio)) return null
+        var c: android.media.session.MediaController? = null
+        val fin = System.currentTimeMillis() + 9000
+        var relance = false
+        while (System.currentTimeMillis() < fin) {
+            Thread.sleep(600)
+            c = session(pkg) ?: continue
+            val titre = titreDe(c)
+            val change = titre != null && titre != avant
+            if (joue(c) && (change || correspond(c, choisi.titre))) break
+            // Ouvert sur le bon titre mais en pause : on lance la lecture (une seule fois).
+            if (!joue(c) && change && !relance && System.currentTimeMillis() > fin - 6000) { runCatching { c.transportControls.play() }; relance = true }
+        }
+        val joueBien = c != null && joue(c)
+        val autres = liste.filter { it.cle() != choisi.cle() && it.type != YtMusique.Type.AUTRE }.take(4)
+        val suite = if (autres.isEmpty()) "" else "\nAutres résultats (dis « mets le 2 », etc.) :\n" +
+            autres.mapIndexed { i, r -> "${i + 2}. ${r.ligne()}" }.joinToString("\n")
+        YtMusique.retenir(listOf(choisi) + autres)
+        if (joueBien && fr.dd.jarvis.service.JarvisAccessibilityService.instance != null) runCatching { fr.dd.jarvis.service.JarvisAccessibilityService.instance?.global(AccessibilityService.GLOBAL_ACTION_HOME) }
+        return (if (joueBien) "🎵 En lecture dans $nom : ${choisi.ligne()}" + (c?.let { titreDe(it) }?.takeIf { it.isNotBlank() && !choisi.titre.contains(it, true) }?.let { "\n(lecteur : $it)" } ?: "")
+            else "🎵 J'ai ouvert ${choisi.ligne()} dans $nom" + (if (c == null) " (l'appli n'a pas encore confirmé la lecture)." else " ; la lecture n'est pas confirmée — appuie sur lecture si besoin.")) + suite
     }
 
     /** Titre en cours de lecture dans [pkg] (paquet ou nom d'appli), ou null si rien ne joue. */
