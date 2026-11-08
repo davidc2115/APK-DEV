@@ -40,7 +40,7 @@ object Echeancier {
         runCatching {
             Rappels.liste(app).forEach { r ->
                 val passe = r.repetition.isBlank() && r.at <= now
-                val rep = Rappels.REPETITIONS[r.repetition].orEmpty()
+                val rep = Rappels.libelle(r.repetition)
                 l += Element("rappel", if (passe && r.fait) "✅" else "⏰", r.texte,
                     if (passe) "Rappel · ${if (r.fait) "fait" else "passé"}" else "Rappel · " + (if (r.repetition.isBlank()) "une fois" else rep),
                     if (passe) maxOf(r.at, r.dernier) else r.at, if (passe) Etat.PASSE else Etat.A_VENIR, "rappel:${r.id}")
@@ -95,10 +95,12 @@ object Echeancier {
                 val statut = j.optString("statut")
                 val consigne = j.optString("consigne").replace(Regex("\\s+"), " ").take(120)
                 // Nom « bi-mensuel / 15 jours / une semaine sur deux » mais horaire hebdomadaire : le cron se déclenche CHAQUE semaine.
-                val quinzaine = Regex("bi.?mensuel|15 jours|quinze jours|sur deux|quinzaine|2 semaines|deux semaines", RegexOption.IGNORE_CASE)
+                val quinzaine = Regex("bi.?mensuel|bimestriel|15 jours|quinze jours|sur (deux|trois|quatre|\\d)|quinzaine|(tous|toutes) les (deux|trois|quatre|\\d+) (jours|semaines|mois)", RegexOption.IGNORE_CASE)
                     .containsMatchIn(nom + " " + j.optString("consigne"))
                 val hebdo = CRON.matchEntire(quandBrut.trim())?.let { m -> m.groupValues[3] == "*" && m.groupValues[5] != "*" } == true
-                val alerte = if (quinzaine && hebdo) "\n⚠️ Se déclenche CHAQUE semaine : une tâche planifiée d'Hermès ne sait pas faire « une semaine sur deux ». Touche « Remplacer par un rappel Jarvis »." else ""
+                val quotidien = CRON.matchEntire(quandBrut.trim())?.let { m -> m.groupValues[3] == "*" && m.groupValues[5] == "*" && !m.groupValues[2].startsWith("*") } == true ||
+                    Regex("^every (day|1d)\\b", RegexOption.IGNORE_CASE).containsMatchIn(quandBrut.trim())
+                val alerte = if (quinzaine && (hebdo || quotidien)) "\n⚠️ Se déclenche à CHAQUE ${if (hebdo) "semaine" else "jour"} : une tâche planifiée d'Hermès ne sait pas faire « un sur deux ». Touche « Remplacer par un rappel Jarvis »." else ""
                 val detail = "Hermès · ${lisible(quandBrut).ifBlank { "planifié" }}" + alerte +
                     (j.optString("repetition").takeIf { it.isNotBlank() }?.let { " · $it" } ?: "") +
                     (if (consigne.isNotBlank()) "\n$consigne" else "")

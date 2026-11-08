@@ -426,6 +426,7 @@ fun RappelsEcran(app: JarvisApp, onFermer: () -> Unit, onDemander: (String) -> U
     var texte by remember { mutableStateOf("") }
     var quand by remember { mutableStateOf("") }
     var repetition by remember { mutableStateOf("") }
+    var autre by remember { mutableStateOf("") }
     var passes by remember { mutableStateOf(false) }
     androidx.compose.runtime.LaunchedEffect(tour) {
         while (true) {
@@ -444,11 +445,18 @@ fun RappelsEcran(app: JarvisApp, onFermer: () -> Unit, onDemander: (String) -> U
             HudTextField(texte, { texte = it }, Modifier.fillMaxWidth(), label = "Me rappeler de…")
             HudTextField(quand, { quand = it }, Modifier.fillMaxWidth().padding(top = 6.dp), label = "Quand ?", placeholder = "demain 9h · dans 20 min · vendredi 17h30")
             Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                fr.dd.jarvis.device.Rappels.REPETITIONS.forEach { (k, v) -> HudChip(v, selected = repetition == k) { repetition = k } }
+                fr.dd.jarvis.device.Rappels.REPETITIONS.forEach { (k, v) -> HudChip(v, selected = repetition == k && autre.isBlank()) { repetition = k; autre = "" } }
+            }
+            HudTextField(autre, { autre = it }, Modifier.fillMaxWidth().padding(top = 6.dp), label = "Autre répétition (facultatif)",
+                placeholder = "tous les 3 jours · un mois sur deux · chaque lundi et jeudi")
+            if (autre.isNotBlank()) {
+                val code = fr.dd.jarvis.device.Rappels.repetitionDe(autre)
+                Text(if (code.isBlank()) "❓ Répétition non comprise" else "→ ${fr.dd.jarvis.device.Rappels.libelle(code)}",
+                    color = if (code.isBlank()) HudDim else LocalAccent.current, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
             }
             HudButton("Programmer", Modifier.padding(top = 8.dp), filled = true, enabled = texte.isNotBlank() && quand.isNotBlank()) {
-                message = fr.dd.jarvis.device.Rappels.creer(ctx, texte, quand, repetition).lines().first()
-                if (!message.startsWith("❌")) { nouveau = false; texte = ""; quand = ""; repetition = "" }
+                message = fr.dd.jarvis.device.Rappels.creer(ctx, texte, quand, autre.ifBlank { repetition }).lines().first()
+                if (!message.startsWith("❌")) { nouveau = false; texte = ""; quand = ""; repetition = ""; autre = "" }
                 tour++
             }
         }
@@ -477,8 +485,9 @@ fun RappelsEcran(app: JarvisApp, onFermer: () -> Unit, onDemander: (String) -> U
                         when (type) {
                             "rappel" -> {
                                 val rap = id.toIntOrNull()?.let { i -> fr.dd.jarvis.device.Rappels.liste(ctx).firstOrNull { it.id == i } }
-                                if (rap != null && rap.repetition == "2semaines") HudChip("⏭ Décaler d'une semaine") {
-                                    fr.dd.jarvis.device.Rappels.decaler(ctx, rap.id, 7)?.let { message = "Prochain rappel : ${fr.dd.jarvis.device.Rappels.format(it.at)}" }; tour++
+                                val decalage = rap?.let { fr.dd.jarvis.device.Rappels.decalage(it.repetition) }
+                                if (rap != null && decalage != null) HudChip("⏭ Décaler $decalage") {
+                                    fr.dd.jarvis.device.Rappels.decalerDUnPas(ctx, rap.id)?.let { message = "Prochain rappel : ${fr.dd.jarvis.device.Rappels.format(it.at)}" }; tour++
                                 }
                                 if (e.etat == fr.dd.jarvis.device.Echeancier.Etat.A_VENIR) HudChip("⏰ +1 h") {
                                     id.toIntOrNull()?.let { fr.dd.jarvis.device.Rappels.supprimer(ctx, it)?.let { r -> fr.dd.jarvis.device.Rappels.creer(ctx, r.texte, "dans 1 h", r.repetition) } }; tour++
@@ -498,10 +507,10 @@ fun RappelsEcran(app: JarvisApp, onFermer: () -> Unit, onDemander: (String) -> U
                                 HudChip(if (e.etat == fr.dd.jarvis.device.Echeancier.Etat.PAUSE) "▶️ Reprendre" else "⏸ Pause") {
                                     onDemander("Hermès, ${if (e.etat == fr.dd.jarvis.device.Echeancier.Etat.PAUSE) "réactive" else "mets en pause"} l'automatisme « $id ».")
                                 }
-                                if (Regex("rappel|poubelle|penser|n'oublie", RegexOption.IGNORE_CASE).containsMatchIn(id) || e.detail.contains("⚠️ Se déclenche CHAQUE semaine"))
+                                if (Regex("rappel|poubelle|penser|n'oublie", RegexOption.IGNORE_CASE).containsMatchIn(id) || e.detail.contains("⚠️ Se déclenche à CHAQUE"))
                                     HudChip("🔁 Remplacer par un rappel Jarvis") {
                                         onDemander("Hermès, remplace l'automatisme « $id » par un rappel Jarvis : crée-le avec mcp_jarvis_rappel_creer (même texte, même heure, " +
-                                            "même fréquence — « une semaine sur deux » si c'est un rappel tous les 15 jours, à partir de la prochaine bonne date : demande-moi laquelle si tu ne la connais pas), " +
+                                            "même fréquence — par exemple « une semaine sur deux » pour tous les 15 jours, à partir de la prochaine bonne date : demande-moi laquelle si tu ne la connais pas), " +
                                             "puis supprime l'automatisme « $id » et confirme-moi les deux.")
                                     }
                                 HudChip("✏️ Modifier") { onDemander("Hermès, je veux modifier l'automatisme « $id » : ") }

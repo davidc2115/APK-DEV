@@ -45,8 +45,10 @@ object Rappels {
     const val ACT_PLUS_TARD = "fr.dd.jarvis.RAPPEL_PLUS_TARD"
     private const val BASE_NOTIF = 7800
 
-    val REPETITIONS = linkedMapOf("" to "une fois", "jour" to "tous les jours", "ouvres" to "du lundi au vendredi", "semaine" to "chaque semaine",
-        "2semaines" to "une semaine sur deux", "mois" to "chaque mois")
+    /** Répétitions proposées en un geste sur la page (code → libellé). Toute autre répétition s'écrit en français. */
+    val REPETITIONS = linkedMapOf("" to "une fois", "1:jour" to "tous les jours", "2:jour" to "un jour sur deux", "jours:1,2,3,4,5" to "du lundi au vendredi",
+        "1:semaine" to "chaque semaine", "2:semaine" to "une semaine sur deux", "1:mois" to "chaque mois", "2:mois" to "tous les deux mois",
+        "3:mois" to "tous les trois mois", "1:an" to "chaque année")
 
     private fun fichier(c: Context) = File(c.filesDir, "rappels.json")
 
@@ -75,30 +77,138 @@ object Rappels {
     /** Crée un rappel ; [quand] : « 2026-11-09 09:00 », « 18h30 », « dans 20 min », « demain 9h », « vendredi 17h »… */
     fun creer(c: Context, texte: String, quand: String, repetition: String = ""): String {
         val t = texte.trim().ifBlank { return "❌ Rappel : précise ce que je dois te rappeler." }
-        val moment = interpreter(quand, LocalDateTime.now()) ?: return "❌ Rappel : je n'ai pas compris quand (« $quand »). Exemples : « demain 9h », « dans 20 min », « 2026-11-09 18:30 »."
-        val rep = repetitionDe(repetition)
+        // Répétition : le paramètre, sinon dite dans « quand » ou dans le texte (« un jour sur deux à 8h »).
+        val rep = repetitionDe(repetition).ifBlank { repetitionDe(quand, strict = true) }.ifBlank { repetitionDe(t, strict = true) }
+        val moment = interpreter(quand, LocalDateTime.now())?.let { premiere(it, rep) }
+            ?: return "❌ Rappel : je n'ai pas compris quand (« $quand »). Exemples : « demain 9h », « dans 20 min », « 2026-11-09 18:30 »."
         val at = moment.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         if (at <= System.currentTimeMillis() + 5_000 && rep.isBlank()) return "❌ Rappel : ce moment (${format(at)}) est déjà passé."
         val l = liste(c)
         val r = Rappel((l.maxOfOrNull { it.id } ?: 0) + 1, t, at, rep)
         enregistrer(c, l + r)
         val exact = planifier(c, r)
-        return "⏰ Rappel programmé ${format(at)}${if (rep.isNotBlank()) " (${REPETITIONS[rep]})" else ""} : « $t »." +
+        return "⏰ Rappel programmé ${format(at)}${if (rep.isNotBlank()) " (${libelle(rep)})" else ""} : « $t »." +
             (if (!exact) "\n⚠️ Android n'autorise pas encore les alarmes exactes pour JARVIS : le rappel peut arriver avec quelques minutes de retard (Réglages Android › Applications › Accès spécial › Alarmes et rappels › JARVIS)." else "") +
             "\n[📋 Voir tous mes rappels et automatisations](jarvis://ecran/rappels)"
     }
 
-    internal fun repetitionDe(s: String): String {
-        val n = normaliser(s)
+    /** Règle de répétition : tous les [n] jours / semaines / mois / ans, ou certains jours de la semaine (1 = lundi … 7 = dimanche). */
+    sealed class Regle {
+        data class Pas(val n: Int, val unite: String) : Regle()
+        data class Jours(val jours: Set<Int>) : Regle()
+    }
+
+    /** Code enregistré → règle (anciens codes « jour », « semaine », « 2semaines », « mois », « ouvres » compris). */
+    internal fun regle(code: String): Regle? {
+        val c = code.trim()
         return when {
-            n.isBlank() || n.contains("une fois") || n == "non" || n == "aucune" -> ""
-            // « tous les 15 jours », « une semaine sur deux », « un dimanche sur deux », « bimensuel » (au sens courant)
-            n == "2semaines" || Regex("\\b(15|quinze|14|quatorze) jours\\b|\\b(2|deux) semaines\\b|sur deux|quinzaine|bi.?mensuel|biweekly|every 2 weeks").containsMatchIn(n) -> "2semaines"
-            n.contains("ouvr") || n.contains("lundi au vendredi") || n.contains("semaine de travail") || n == "semaine ouvree" -> "ouvres"
-            n.contains("jour") || n.contains("quotidien") || n.contains("chaque matin") || n.contains("chaque soir") -> "jour"
-            n.contains("mois") || n.contains("mensuel") -> "mois"
-            n.contains("semaine") || n.contains("hebdo") -> "semaine"
-            n in REPETITIONS -> n
+            c.isBlank() -> null
+            c == "jour" -> Regle.Pas(1, "jour")
+            c == "semaine" -> Regle.Pas(1, "semaine")
+            c == "2semaines" -> Regle.Pas(2, "semaine")
+            c == "mois" -> Regle.Pas(1, "mois")
+            c == "ouvres" -> Regle.Jours(setOf(1, 2, 3, 4, 5))
+            c.startsWith("jours:") -> c.removePrefix("jours:").split(',').mapNotNull { it.trim().toIntOrNull() }.filter { it in 1..7 }.toSet()
+                .takeIf { it.isNotEmpty() }?.let { Regle.Jours(it) }
+            else -> Regex("^(\\d{1,3}):(jour|semaine|mois|an)$").matchEntire(c)?.let { m ->
+                m.groupValues[1].toInt().takeIf { it > 0 }?.let { Regle.Pas(it, m.groupValues[2]) }
+            }
+        }
+    }
+
+    private val NOMS_JOURS = listOf("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
+    private fun et(l: List<String>) = if (l.size <= 1) l.joinToString() else l.dropLast(1).joinToString(", ") + " et " + l.last()
+
+    /** Libellé lisible d'une répétition : « un jour sur deux », « tous les 3 mois », « chaque lundi et jeudi »… */
+    fun libelle(code: String): String = when (val r = regle(code)) {
+        null -> "une fois"
+        is Regle.Jours -> when (r.jours) {
+            setOf(1, 2, 3, 4, 5) -> "du lundi au vendredi"
+            setOf(6, 7) -> "le week-end"
+            (1..7).toSet() -> "tous les jours"
+            else -> "chaque " + et(r.jours.sorted().map { NOMS_JOURS[it - 1] })
+        }
+        is Regle.Pas -> when (r.unite) {
+            "jour" -> when (r.n) { 1 -> "tous les jours"; 2 -> "un jour sur deux"; else -> "tous les ${r.n} jours" }
+            "semaine" -> when (r.n) { 1 -> "chaque semaine"; 2 -> "une semaine sur deux"; else -> "toutes les ${r.n} semaines" }
+            "mois" -> when (r.n) { 1 -> "chaque mois"; 2 -> "tous les deux mois"; 3 -> "tous les trois mois"; 6 -> "tous les six mois"; else -> "tous les ${r.n} mois" }
+            else -> if (r.n == 1) "chaque année" else "tous les ${r.n} ans"
+        }
+    }
+
+    private val NOMBRES = mapOf("un" to 1, "une" to 1, "deux" to 2, "trois" to 3, "quatre" to 4, "cinq" to 5, "six" to 6, "sept" to 7, "huit" to 8,
+        "neuf" to 9, "dix" to 10, "onze" to 11, "douze" to 12, "treize" to 13, "quatorze" to 14, "quinze" to 15, "seize" to 16, "vingt" to 20, "trente" to 30)
+    private fun nombre(m: String): Int? = m.toIntOrNull() ?: NOMBRES[m]
+    private fun unite(m: String): String? = when {
+        m.startsWith("jour") -> "jour"
+        m.startsWith("semaine") || m in NOMS_JOURS.map { it } || m.removeSuffix("s") in NOMS_JOURS || m.startsWith("week") -> "semaine"
+        m.startsWith("mois") -> "mois"
+        m.startsWith("an") -> "an"
+        else -> null
+    }
+    private fun pas(n: Int, u: String): String = when {
+        // Usage courant : « tous les 15 jours » = toutes les deux semaines, « tous les 8 jours » = chaque semaine.
+        u == "jour" && n == 15 -> "2:semaine"
+        u == "jour" && n == 8 -> "1:semaine"
+        u == "jour" && n % 7 == 0 -> "${n / 7}:semaine"
+        u == "mois" && n % 12 == 0 -> "${n / 12}:an"
+        else -> "$n:$u"
+    }
+
+    /**
+     * Répétition demandée, en code : « 2:jour » (un jour sur deux), « 3:semaine », « 2:mois », « 1:an », « jours:1,4 »
+     * (lundi et jeudi)… Comprend le français courant : « tous les deux jours », « un jour sur deux », « tous les 15 jours »,
+     * « un dimanche sur deux », « toutes les 3 semaines », « tous les deux mois », « chaque trimestre », « tous les ans »,
+     * « tous les lundis et jeudis », « du lundi au vendredi », « le week-end ». [strict] : seulement si la phrase le dit
+     * clairement (pour la chercher dans « quand » ou le texte du rappel).
+     */
+    internal fun repetitionDe(s: String, strict: Boolean = false): String {
+        regle(s)?.let { return s.trim() }
+        val n = normaliser(s).replace('-', ' ').replace(Regex("\\s+"), " ").trim()
+        if (n.isBlank() || Regex("^(une fois|non|aucune?|jamais|pas de repetition)$").matches(n)) return ""
+        val mot = "(\\d{1,3}|un|une|deux|trois|quatre|cinq|six|sept|huit|neuf|dix|onze|douze|treize|quatorze|quinze|seize|vingt|trente)"
+        val jourSem = NOMS_JOURS.joinToString("|")
+        // « un jour sur deux », « une semaine sur trois », « un mois sur deux », « un dimanche sur deux », « un week-end sur deux »
+        Regex("\\b(?:un|une) (jour|semaine|mois|an|annee|$jourSem|week end) sur $mot\\b").find(n)?.let { m ->
+            val k = nombre(m.groupValues[2]) ?: return@let
+            val u = unite(m.groupValues[1].replace("annee", "an")) ?: return@let
+            return pas(k, u)
+        }
+        // « tous les deux jours », « toutes les 3 semaines », « tous les 2 mois », « tous les 5 ans »
+        Regex("\\b(?:tous|toutes) les $mot (jours?|semaines?|mois|ans?|annees?)\\b").find(n)?.let { m ->
+            val k = nombre(m.groupValues[1]) ?: return@let
+            val u = unite(m.groupValues[2].replace("annee", "an")) ?: return@let
+            return pas(k, u)
+        }
+        // Mots d'une fréquence
+        when {
+            Regex("quinzaine|bi ?mensuel|biweekly|every (2|two) weeks").containsMatchIn(n) -> return "2:semaine"
+            Regex("bimestri").containsMatchIn(n) -> return "2:mois"
+            Regex("trimestr").containsMatchIn(n) -> return "3:mois"
+            Regex("semestr").containsMatchIn(n) -> return "6:mois"
+            Regex("\\bannuel|chaque annee|tous les ans|une fois par an|every year|yearly").containsMatchIn(n) -> return "1:an"
+        }
+        // Jours de la semaine : « tous les lundis et jeudis », « chaque mardi », « du lundi au vendredi », « tous les week-ends »
+        val repete = Regex("\\b(tous|toutes|chaque)\\b").containsMatchIn(n)
+        if (Regex("du lundi au vendredi|jours? ouvr|en semaine|semaine de travail|weekdays?").containsMatchIn(n) && (repete || !strict || n.contains("lundi au vendredi"))) return "jours:1,2,3,4,5"
+        if (repete) {
+            if (Regex("\\bweek ?ends?\\b").containsMatchIn(n)) return "jours:6,7"
+            val jours = NOMS_JOURS.mapIndexedNotNull { i, j -> if (Regex("\\b${j}s?\\b").containsMatchIn(n)) i + 1 else null }
+            if (jours.isNotEmpty()) return if (jours.size == 7) "1:jour" else "jours:" + jours.joinToString(",")
+        }
+        when {
+            Regex("\\bmensuel|chaque mois|tous les mois|une fois par mois|every month|monthly").containsMatchIn(n) -> return "1:mois"
+            Regex("hebdo|chaque semaine|toutes les semaines|une fois par semaine|every week|weekly").containsMatchIn(n) -> return "1:semaine"
+            Regex("quotidien|chaque jour|tous les jours|chaque (matin|soir|midi)|tous les (matins|soirs|midis)|every day|daily").containsMatchIn(n) -> return "1:jour"
+        }
+        if (strict) return ""
+        // Mots seuls (paramètre « répétition » de l'outil) : « jour », « semaine », « mois », « an »…
+        return when (n) {
+            "jour", "jours", "journalier" -> "1:jour"
+            "semaine", "semaines" -> "1:semaine"
+            "mois" -> "1:mois"
+            "an", "ans", "annee" -> "1:an"
+            "week end" -> "jours:6,7"
             else -> ""
         }
     }
@@ -161,6 +271,15 @@ object Rappels {
             jour = runCatching { LocalDate.of(an ?: maintenant.year, m.groupValues[2].toInt(), m.groupValues[1].toInt()) }.getOrNull()
                 ?.let { if (an == null && it.isBefore(maintenant.toLocalDate())) it.plusYears(1) else it }
         }
+        if (jour == null) Regex("\\ble (\\d{1,2}|1er) (?:de chaque mois|du mois|de tous les mois|chaque mois)").find(n)?.let { m ->
+            val j = m.groupValues[1].removeSuffix("er").toInt().coerceIn(1, 31)
+            var x = maintenant.toLocalDate().withDayOfMonth(1)
+            repeat(14) {
+                val c = x.withDayOfMonth(minOf(j, x.lengthOfMonth()))
+                if (c.atTime(heure ?: LocalTime.of(9, 0)).isAfter(maintenant)) { jour = c; return@let }
+                x = x.plusMonths(1)
+            }
+        }
         if (jour == null) {
             val mois = listOf("janvier", "fevrier", "mars", "avril", "mai", "juin", "juillet", "aout", "septembre", "octobre", "novembre", "decembre")
             Regex("(\\d{1,2}|1er) (${mois.joinToString("|")})(?: (\\d{4}))?").find(n)?.let { m ->
@@ -178,21 +297,38 @@ object Rappels {
 
     /** Occurrence suivante d'un rappel répété (strictement après [apres]). */
     internal fun suivante(at: Long, repetition: String, apres: Long = System.currentTimeMillis()): Long {
+        val r = regle(repetition) ?: return at
         val z = ZoneId.systemDefault()
-        var d = java.time.Instant.ofEpochMilli(at).atZone(z).toLocalDateTime()
+        val debut = java.time.Instant.ofEpochMilli(at).atZone(z).toLocalDateTime()
         val limite = java.time.Instant.ofEpochMilli(apres).atZone(z).toLocalDateTime()
-        var n = 0
-        while (!d.isAfter(limite) && n < 4000) {
-            d = when (repetition) {
-                "semaine" -> d.plusWeeks(1)
-                "2semaines" -> d.plusWeeks(2)
-                "mois" -> d.plusMonths(1)
-                "ouvres" -> { var x = d.plusDays(1); while (x.dayOfWeek == DayOfWeek.SATURDAY || x.dayOfWeek == DayOfWeek.SUNDAY) x = x.plusDays(1); x }
-                else -> d.plusDays(1)
+        var d = debut
+        when (r) {
+            // Calculé depuis la date de départ (k × pas) : un rappel du 31 reste au 31 (ou au dernier jour du mois).
+            is Regle.Pas -> {
+                var k = 1L
+                do {
+                    d = when (r.unite) {
+                        "jour" -> debut.plusDays(r.n * k); "semaine" -> debut.plusWeeks(r.n * k)
+                        "mois" -> debut.plusMonths(r.n * k); else -> debut.plusYears(r.n * k)
+                    }
+                    k++
+                } while (!d.isAfter(limite) && k < 200_000)
             }
-            n++
+            is Regle.Jours -> {
+                var n = 0
+                do { d = d.plusDays(1); n++ } while ((d.dayOfWeek.value !in r.jours || !d.isAfter(limite)) && n < 200_000)
+            }
         }
         return d.atZone(z).toInstant().toEpochMilli()
+    }
+
+    /** Première occurrence d'un rappel à jours précis : avance jusqu'au premier jour permis. */
+    internal fun premiere(moment: LocalDateTime, code: String): LocalDateTime {
+        val r = regle(code) as? Regle.Jours ?: return moment
+        var d = moment
+        var n = 0
+        while (d.dayOfWeek.value !in r.jours && n < 8) { d = d.plusDays(1); n++ }
+        return d
     }
 
     fun format(at: Long): String {
@@ -290,6 +426,24 @@ object Rappels {
         val x = r.copy(at = r.at + jours * 86_400_000L)
         mettreAJour(c, x); planifier(c, x)
         return x
+    }
+
+    /** Pour une répétition « une X sur N » : libellé du décalage d'une unité (« d'un jour », « d'une semaine »…), sinon null. */
+    fun decalage(code: String): String? = (regle(code) as? Regle.Pas)?.takeIf { it.n > 1 }?.let {
+        when (it.unite) { "jour" -> "d'un jour"; "semaine" -> "d'une semaine"; "mois" -> "d'un mois"; else -> "d'un an" }
+    }
+
+    /** Décale toute la série d'une unité (choisir le bon jour pour « un jour sur deux », la bonne semaine…). */
+    fun decalerDUnPas(c: Context, id: Int): Rappel? {
+        val r = liste(c).firstOrNull { it.id == id } ?: return null
+        val p = regle(r.repetition) as? Regle.Pas ?: return null
+        val z = ZoneId.systemDefault()
+        val d = java.time.Instant.ofEpochMilli(r.at).atZone(z).toLocalDateTime()
+        val x = when (p.unite) { "jour" -> d.plusDays(1); "semaine" -> d.plusWeeks(1); "mois" -> d.plusMonths(1); else -> d.plusYears(1) }
+        annuler(c, id)
+        val n = r.copy(at = x.atZone(z).toInstant().toEpochMilli())
+        mettreAJour(c, n); planifier(c, n)
+        return n
     }
 
     fun plusTard(c: Context, id: Int, minutes: Int = 10) {
