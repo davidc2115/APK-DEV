@@ -183,6 +183,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
 
         }
         if (settingsSection == "control") {
+        item { fr.dd.jarvis.ui.EmpreinteVocalePanel(app) }
         item { SectionHeader("Centre de contrôle JARVIS") }
         item {
             var runMsg by remember { mutableStateOf("") }
@@ -1253,6 +1254,10 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
 
         }
         if (settingsSection == "automation") {
+        // ------------------------------------------------------------ Routines, départs, météo, journal, montre
+        item { SectionHeader("Assistant personnel") }
+        item { fr.dd.jarvis.ui.RoutinesPanel(app) }
+        item { fr.dd.jarvis.ui.AssistantProactifPanel(app) }
         // ------------------------------------------------------------ Arrière-plan et agents autonomes
         item { SectionHeader("Voix et automatisation") }
         item {

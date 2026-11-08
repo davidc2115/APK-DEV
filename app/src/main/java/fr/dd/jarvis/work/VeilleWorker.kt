@@ -19,8 +19,9 @@ import java.time.LocalDate
 import java.util.concurrent.TimeUnit
 
 /**
- * Veille toutes les 15 min : alertes de santé avant la panne, et arrivée chez un client (mode chantier) — sa fiche,
- * sa dernière intervention et un raccourci vers le compte-rendu.
+ * Veille toutes les 15 min : alertes de santé avant la panne, arrivée chez un client (mode chantier) — sa fiche,
+ * sa dernière intervention et un raccourci vers le compte-rendu —, heure de départ et météo des rendez-vous,
+ * routines (lieu, heure), journal de bord du soir et conversation JARVIS sur la montre.
  */
 class VeilleWorker(private val ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     companion object {
@@ -36,6 +37,12 @@ class VeilleWorker(private val ctx: Context, params: WorkerParameters) : Corouti
         val app = ctx.applicationContext as JarvisApp
         runCatching { fr.dd.jarvis.device.Sante.verifier(app) }
         runCatching { arrivee(app) }
+        runCatching { Depart.verifier(app) }
+        runCatching { Depart.meteo(app) }
+        runCatching { fr.dd.jarvis.device.Routines.surveillerLieu(app) }
+        runCatching { fr.dd.jarvis.device.Routines.horaires(app) }
+        runCatching { Journal.siLHeure(app) }
+        runCatching { fr.dd.jarvis.service.Poignet.assurer(app) }
         runCatching { fr.dd.jarvis.widget.DragonWidget.majTous(app) }
         return Result.success()
     }

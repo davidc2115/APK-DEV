@@ -139,10 +139,14 @@ class JarvisService : Service() {
         running = true
         wake = (getSystemService(POWER_SERVICE) as PowerManager).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "jarvis:wake").apply { setReferenceCounted(false); acquire() }
         tools = ToolBox(app) { q, _ ->
-            // Action sensible à la voix : seulement téléphone déverrouillé (personne d'autre ne peut la déclencher).
+            // Action sensible à la voix, téléphone verrouillé : seulement si c'est TA voix (empreinte vocale),
+            // sinon il faut déverrouiller le téléphone (personne d'autre ne peut la déclencher).
             if (app.store.biometrie.value && fr.dd.jarvis.device.Securite.sensible(q) && fr.dd.jarvis.device.Securite.verrouille(this)) {
-                withContext(Dispatchers.Main) { voice?.speak("C'est une action sensible : déverrouille d'abord le téléphone, puis redemande-la.") {} }
-                false
+                if (fr.dd.jarvis.voice.EmpreinteVocale.prete(app)) voiceConfirm(q) && verifierMaVoix()
+                else {
+                    withContext(Dispatchers.Main) { voice?.speak("C'est une action sensible : déverrouille d'abord le téléphone, puis redemande-la.") {} }
+                    false
+                }
             } else voiceConfirm(q)
         }
         // Hermès installé : on s'assure que sa passerelle tourne dans Termux (après un redémarrage du téléphone par ex.).
@@ -376,6 +380,21 @@ class JarvisService : Service() {
             .setContentTitle("« $cmd »").setContentText(plain.lineSequence().firstOrNull { it.isNotBlank() } ?: "")
             .setStyle(NotificationCompat.BigTextStyle().bigText(plain.take(3500))).setAutoCancel(true).build()
         runCatching { (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(4002, n) }
+    }
+
+    /** Dit [texte] et attend la fin de la phrase. */
+    private suspend fun dire(texte: String) {
+        val fin = CompletableDeferred<Unit>()
+        withContext(Dispatchers.Main) { voice?.speak(texte) { fin.complete(Unit) } ?: fin.complete(Unit) }
+        withTimeoutOrNull(20_000) { fin.await() }
+    }
+
+    /** Empreinte vocale : fait dire une phrase et vérifie que c'est bien la voix du propriétaire. */
+    private suspend fun verifierMaVoix(): Boolean {
+        dire("Pour confirmer, dis : ${fr.dd.jarvis.voice.EmpreinteVocale.PHRASE_VERIF}.")
+        val r = fr.dd.jarvis.voice.EmpreinteVocale.verifier(app)
+        dire(if (r.ok) "Voix reconnue." else "Je ne reconnais pas ta voix (${r.message}) : action annulée. Déverrouille le téléphone pour la faire.")
+        return r.ok
     }
 
     private suspend fun voiceConfirm(question: String): Boolean {

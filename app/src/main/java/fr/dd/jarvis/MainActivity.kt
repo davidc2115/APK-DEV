@@ -85,6 +85,8 @@ class MainActivity : ComponentActivity() {
     private val vm: ChatViewModel by viewModels()
     /** Écran de terrain demandé par une notification (compte-rendu, regarder, santé). */
     val terrainDemande = androidx.compose.runtime.mutableStateOf("")
+    /** Demande à envoyer à JARVIS, venue d'une notification (« prévenir de mon retard », « autre créneau »…). */
+    val demandeExterne = androidx.compose.runtime.mutableStateOf("")
 
     fun demarrerEcoute() { if (!vm.listening && !vm.busy) vm.toggleListening() }
 
@@ -95,6 +97,7 @@ class MainActivity : ComponentActivity() {
         handleSharedVideo(intent)
         handleTikTokCallback(intent)
         intent.getStringExtra("terrain")?.takeIf { it.isNotBlank() }?.let { terrainDemande.value = it; intent.removeExtra("terrain") }
+        intent.getStringExtra("demande")?.takeIf { it.isNotBlank() }?.let { demandeExterne.value = it; intent.removeExtra("demande") }
     }
 
     /** Retour de la connexion OAuth TikTok (via la page relais GitHub Pages → fr.dd.jarvis://tiktok-callback?...). */
@@ -155,11 +158,12 @@ class MainActivity : ComponentActivity() {
         handleSharedVideo(intent)
         handleTikTokCallback(intent)
         intent?.getStringExtra("terrain")?.takeIf { it.isNotBlank() }?.let { terrainDemande.value = it; intent.removeExtra("terrain") }
+        intent?.getStringExtra("demande")?.takeIf { it.isNotBlank() }?.let { demandeExterne.value = it; intent?.removeExtra("demande") }
         // Widget « dragon » à jour (prochain rendez-vous) à chaque ouverture.
         Thread { runCatching { fr.dd.jarvis.widget.DragonWidget.majTous(applicationContext) } }.start()
         setContent {
             HudTheme(accentById(app.store.accent.value).color, app.store.tileAlpha.value) {
-                HudBackground { Root(app, vm, terrainDemande) }
+                HudBackground { Root(app, vm, terrainDemande, demandeExterne) }
             }
         }
     }
@@ -186,7 +190,8 @@ private val tabs = listOf(
 )
 
 @Composable
-private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.compose.runtime.MutableState<String>) {
+private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.compose.runtime.MutableState<String>,
+                 demandeExterne: androidx.compose.runtime.MutableState<String> = androidx.compose.runtime.mutableStateOf("")) {
     val ctx = LocalContext.current
     val accent = LocalAccent.current
     // Android 13+ bloque toutes les notifications tant que l'autorisation runtime
@@ -208,6 +213,9 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
     androidx.activity.compose.BackHandler(enabled = terrain.isNotEmpty()) { terrain = "" }
     LaunchedEffect(terrainDemande.value) {
         if (terrainDemande.value.isNotBlank()) { terrain = terrainDemande.value; tab = 0; terrainDemande.value = "" }
+    }
+    LaunchedEffect(demandeExterne.value) {
+        if (demandeExterne.value.isNotBlank()) { vm.send(demandeExterne.value); terrain = ""; tab = 1; demandeExterne.value = "" }
     }
 
     // Dernier plantage (affiché au lancement suivant, sans ADB)

@@ -31,6 +31,13 @@ class Brain(
     }
 
     private suspend fun replyInterne(history: List<ChatMsg>, pourHermes: Boolean, onTexte: ((String) -> Unit)?, onStatus: (String) -> Unit): String {
+        // Routine déclenchée par une phrase (« Jarvis, je pars ») : toutes ses actions d'un coup.
+        if (!pourHermes) history.lastOrNull()?.takeIf { it.fromUser }?.let { m ->
+            fr.dd.jarvis.device.Routines.parPhrase(app, m.text)?.let { r ->
+                onStatus("⚙️ Routine « ${r.nom} »…")
+                return fr.dd.jarvis.device.Routines.executer(app, r, tools = tools)
+            }
+        }
         val suivi = Suivi()
         val r = try { repondre(history, pourHermes, onStatus, suivi, onTexte) }
         catch (e: kotlinx.coroutines.CancellationException) { throw e }

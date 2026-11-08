@@ -274,6 +274,21 @@ class Store(context: Context) {
     val voixPersonnage = SPref("voixPersonnage", "")
     /** Mode présence automatique : JARVIS plein écran quand le téléphone est posé en charge (et qu'on ne le touche plus). */
     val presenceAuto = BPref("presenceAuto", true)
+    // ---- Alerte de départ, météo des rendez-vous, routines, journal, montre, empreinte vocale
+    val departAlertes = BPref("departAlertes", true)
+    val departNotifie = SPref("departNotifie", "")
+    val meteoAlertes = BPref("meteoAlertes", true)
+    val meteoNotifie = SPref("meteoNotifie", "")
+    /** Clé TomTom (gratuite, facultative) : trafic en temps réel pour l'heure de départ. */
+    val tomtomKey = SPref("tomtomKey", "")
+    val routinesDernier = SPref("routinesDernier", "{}")
+    val veilleLieu = SPref("veilleLieu", "")
+    val journalAuto = BPref("journalAuto", true)
+    val journalHeure = SPref("journalHeure", "21")
+    val journalFait = SPref("journalFait", "")
+    val poignet = BPref("poignet", false)
+    val empreinteVocale = BPref("empreinteVocale", false)
+    val empreinteSeuil = SPref("empreinteSeuil", "")
     // ---- Android Auto
     /** Raccourcis de la voiture (une demande par ligne) ; vide = raccourcis par défaut. */
     val raccourcisVoiture = SPref("raccourcisVoiture", "")

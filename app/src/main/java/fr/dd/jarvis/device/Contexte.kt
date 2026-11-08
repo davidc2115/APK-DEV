@@ -36,15 +36,31 @@ object Contexte {
             Mode.values().firstOrNull { it.name == s.modeForce.value }?.let { return Etat(it, "choisi à la main", force = true) }
         }
         if (!s.modesAuto.value) return Etat(Mode.NORMAL)
-        val ici = runCatching { Locator.point(app) }.getOrNull()
-        val proche = ici?.let { p ->
-            app.societe.data.clients.asSequence().flatMap { c -> c.sites.asSequence().map { site -> Triple(c, site, site.lat?.let { la -> site.lon?.let { lo -> Geo.haversine(p, Geo.Point(la, lo)) } }) } }
-                .filter { it.third != null && it.third!! < 0.25 }.minByOrNull { it.third!! }
-                ?.let { (c, site, _) -> Triple(c.id, site.id, c.nom + if (c.sites.size > 1) " · ${site.nom}" else "") }
-        }
-        val hq = app.societe.data.societe
-        val kmMaison = if (ici != null && hq.lat != null && hq.lon != null) Geo.haversine(ici, Geo.Point(hq.lat, hq.lon)) else null
+        val (proche, kmMaison) = position(app) ?: (null to null)
         return decider(app.enVoiture, java.time.LocalTime.now().hour, s.nuitDebut.value.toIntOrNull() ?: 22, s.nuitFin.value.toIntOrNull() ?: 7, proche, kmMaison)
+    }
+
+    /** Installation cliente à moins de 250 m (client, site, libellé) et distance au siège ; null sans position. */
+    private fun position(app: JarvisApp): Pair<Triple<String, String, String>?, Double?>? {
+        val ici = runCatching { Locator.point(app) }.getOrNull() ?: return null
+        val proche = app.societe.data.clients.asSequence().flatMap { c -> c.sites.asSequence().map { site -> Triple(c, site, site.lat?.let { la -> site.lon?.let { lo -> Geo.haversine(ici, Geo.Point(la, lo)) } }) } }
+            .filter { it.third != null && it.third!! < 0.25 }.minByOrNull { it.third!! }
+            ?.let { (c, site, _) -> Triple(c.id, site.id, c.nom + if (c.sites.size > 1) " · ${site.nom}" else "") }
+        val hq = app.societe.data.societe
+        val kmMaison = if (hq.lat != null && hq.lon != null) Geo.haversine(ici, Geo.Point(hq.lat, hq.lon)) else null
+        return proche to kmMaison
+    }
+
+    /** Lieu pour les routines : « maison », « chantier:client|site|libellé », « ailleurs » ; null sans position. */
+    fun lieu(app: JarvisApp): String? {
+        val (proche, kmMaison) = position(app) ?: return null
+        return lieuDe(proche, kmMaison)
+    }
+
+    internal fun lieuDe(proche: Triple<String, String, String>?, kmMaison: Double?): String = when {
+        proche != null -> "chantier:${proche.first}|${proche.second}|${proche.third}"
+        kmMaison != null && kmMaison < 0.15 -> "maison"
+        else -> "ailleurs"
     }
 
     /** Nuit en ce moment (mode forcé ou plage horaire), sans localisation : assez léger pour être appelé à chaque phrase. */

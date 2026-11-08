@@ -142,7 +142,10 @@ class JarvisApp : Application() {
                 val avant = enVoiture
                 enVoiture = t == androidx.car.app.connection.CarConnection.CONNECTION_TYPE_PROJECTION
                 // Montée en voiture : accueil de JARVIS (prochain rendez-vous, météo) dans Android Auto.
-                if (enVoiture && !avant) graphScope.launch { runCatching { fr.dd.jarvis.car.AccueilVoiture.annoncer(this@JarvisApp) } }
+                if (enVoiture && !avant) graphScope.launch {
+                    runCatching { fr.dd.jarvis.car.AccueilVoiture.annoncer(this@JarvisApp) }
+                    runCatching { fr.dd.jarvis.device.Routines.declencher(this@JarvisApp, "voiture") }
+                }
                 if (!enVoiture && avant) fr.dd.jarvis.car.VoixVoiture.liberer()
             }
         }

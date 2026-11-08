@@ -125,6 +125,21 @@ class ToolBox(
         put(tool("changer_voix", "Change la voix de JARVIS (personnage) : homme, femme, jeune, âgé(e), grave, douce, IA/robot, narrateur, animatrice radio, murmure, Jarvis (par défaut), ou un nom de voix Gemini (Kore, Puck…). Sans précision : liste les voix.",
             mapOf("voix" to prop("Description de la voix voulue, ex. « femme âgée », « jeune homme », « robot », « par défaut ». Vide = lister."),
                 "description" to prop("Facultatif : description libre (âge, ton, accent) pour une voix sur mesure, ex. « homme de 60 ans avec un accent du Sud »."))))
+        put(tool("routines", "Routines de JARVIS (plusieurs actions d'un coup) : lister, lancer, creer/modifier, supprimer. Déclencheurs : phrase (« je pars »), depart_maison, arrivee_maison, arrivee_chantier, depart_chantier, voiture (connexion Android Auto), heure (+ jours : tous, semaine, weekend). Les actions sont des demandes en français que JARVIS exécutera dans l'ordre.",
+            mapOf("action" to prop("lister | lancer | creer | supprimer | activer | desactiver"),
+                "nom" to prop("Nom de la routine (ex. « Je pars »)."),
+                "declencheur" to prop("creer : phrase | depart_maison | arrivee_maison | arrivee_chantier | depart_chantier | voiture | heure"),
+                "phrases" to prop("creer, déclencheur phrase : phrases qui la lancent, séparées par « ; » (ex. « je pars ; on y va »)."),
+                "heure" to prop("creer, déclencheur heure : HH:MM."),
+                "jours" to prop("creer, déclencheur heure : tous | semaine | weekend."),
+                "actions" to prop("creer : actions séparées par « ; » ou des retours à la ligne, ex. « éteins les lumières ; lance ma playlist ; envoie un SMS à Thomas : je pars ».")),
+            listOf("action")))
+        put(tool("journal_de_bord", "Journal de bord (note Obsidian « Journal/… ») : jour = journal d'une journée (rendez-vous, interventions, devis/factures/paiements, km estimés, demandes à JARVIS, résumé) ; semaine = bilan de la semaine.",
+            mapOf("periode" to prop("jour (défaut) | semaine"), "date" to prop("Date yyyy-MM-dd (défaut : aujourd'hui)."))))
+        put(tool("heure_depart", "Calcule l'heure à laquelle partir pour le prochain rendez-vous (ou celui indiqué) depuis la position actuelle : durée du trajet, trafic (temps réel avec une clé TomTom, sinon heures de pointe), marge de 10 min.",
+            mapOf("rendez_vous" to prop("Titre (ou partie) du rendez-vous ; vide = le prochain avec une adresse."))))
+        put(tool("montre", "JARVIS sur la montre connectée (conversation relayée sur la montre : réponse à la voix ou réponses toutes faites) : activer ou desactiver.",
+            mapOf("etat" to prop("activer | desactiver")), listOf("etat")))
         put(tool("tournee_optimisee", "Tournée OPTIMISÉE d'une liste de clients à visiter (sans horaires imposés) : ordre le plus court, trajets, heures d'arrivée, météo et ensoleillement sur chaque installation (utile pour les mesures de production), lien Google Maps de toute la tournée. Pour des rendez-vous déjà fixés dans l'agenda, utilise itineraire.",
             mapOf(
                 "clients" to prop("Clients (ou adresses) à visiter, séparés par des virgules ou « ; »."),
@@ -473,6 +488,18 @@ class ToolBox(
         "mail_envoyer" -> mailEnvoyer(a)
         "marquer_mails_traites" -> marquerTraites(a)
         "changer_voix" -> changerVoix(a)
+        "routines" -> routines(a)
+        "journal_de_bord" -> {
+            val d = runCatching { java.time.LocalDate.parse(a.optString("date").trim()) }.getOrDefault(java.time.LocalDate.now())
+            val (chemin, md) = if (a.optString("periode").startsWith("sem", true)) fr.dd.jarvis.work.Journal.bilanSemaine(app, d) else fr.dd.jarvis.work.Journal.ecrire(app, d)
+            ToolResult("$md\n\n📓 Enregistré dans Obsidian : $chemin", direct = true)
+        }
+        "heure_depart" -> heureDepart(a)
+        "montre" -> {
+            val oui = !a.optString("etat").startsWith("desac", true)
+            fr.dd.jarvis.service.Poignet.activer(app, oui)
+            ToolResult(if (oui) "⌚ JARVIS est sur ta montre : réponds au message « JARVIS » (à la voix ou avec une réponse proposée) pour me parler." else "⌚ JARVIS n'est plus relayé sur la montre.")
+        }
         "rechercher_sms" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             fr.dd.jarvis.device.Telephony.rechercher(app, a.optString("contact"), a.optString("recherche"), a.optString("date_debut"), a.optString("date_fin"), a.optString("count").toIntOrNull() ?: 10)
         }, direct = true)
@@ -1716,6 +1743,60 @@ class ToolBox(
             val detail = listOfNotNull(if (traite) "lus + libellé Traité" else null, if (archiver) "archivés" else null)
             ToolResult("✅ $n mail(s) marqués comme $quoi" + (if (detail.isEmpty()) "" else " (" + detail.joinToString(", ") + ")") + ".\n$tri")
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { ToolResult("❌ ${e.message}\n$tri") }
+    }
+
+    private suspend fun routines(a: JSONObject): ToolResult {
+        val R = fr.dd.jarvis.device.Routines
+        val l = R.liste(app)
+        val nom = a.optString("nom").trim()
+        fun trouver() = l.firstOrNull { R.norm(it.nom) == R.norm(nom) } ?: l.firstOrNull { nom.isNotBlank() && R.norm(it.nom).contains(R.norm(nom)) }
+        fun decoupe(t: String) = t.split(Regex("\\s*(;|\\n)\\s*")).map { it.trim() }.filter { it.isNotBlank() }
+        return when (a.optString("action").trim().lowercase()) {
+            "lister", "" -> ToolResult(R.presenter(l), direct = true)
+            "lancer" -> trouver()?.let { ToolResult(R.executer(app, it, tools = this)) } ?: ToolResult("Aucune routine « $nom ». " + R.presenter(l))
+            "supprimer" -> trouver()?.let { r ->
+                if (!confirm("Supprimer la routine « ${r.nom} » ?", false)) ToolResult("Annulé.") else { R.supprimer(app, r.id); ToolResult("🗑️ Routine « ${r.nom} » supprimée.") }
+            } ?: ToolResult("Aucune routine « $nom ».")
+            "activer", "desactiver" -> trouver()?.let { r ->
+                R.ajouterOuModifier(app, r.copy(active = a.optString("action").startsWith("act", true)))
+                ToolResult("Routine « ${r.nom} » ${if (a.optString("action").startsWith("act", true)) "activée" else "désactivée"}.")
+            } ?: ToolResult("Aucune routine « $nom ».")
+            "creer", "modifier" -> {
+                if (nom.isBlank()) return ToolResult("Donne un nom à la routine.")
+                val existante = trouver()
+                val decl = a.optString("declencheur").trim().ifBlank { existante?.declencheur ?: "phrase" }
+                if (decl !in R.DECLENCHEURS) return ToolResult("Déclencheur inconnu « $decl » : ${R.DECLENCHEURS.keys.joinToString(", ")}.")
+                val actions = decoupe(a.optString("actions")).ifEmpty { existante?.actions.orEmpty() }
+                if (actions.isEmpty()) return ToolResult("Précise les actions de la routine (séparées par « ; »).")
+                val phrases = decoupe(a.optString("phrases")).ifEmpty { existante?.phrases ?: listOf(nom) }
+                val r = fr.dd.jarvis.device.Routine(existante?.id ?: R.nouvelId(nom), nom, decl, if (decl == "phrase") phrases else emptyList(),
+                    a.optString("heure").trim().ifBlank { existante?.heure.orEmpty() }, a.optString("jours").trim().ifBlank { existante?.jours ?: "tous" }, actions, true)
+                R.ajouterOuModifier(app, r)
+                ToolResult("✅ Routine enregistrée :\n" + R.presenter(listOf(r)), direct = true)
+            }
+            else -> ToolResult("Action inconnue : lister, lancer, creer, supprimer, activer, desactiver.")
+        }
+    }
+
+    private suspend fun heureDepart(a: JSONObject): ToolResult {
+        if (!app.calendar.hasPermission()) return ToolResult("Autorise l'agenda pour que je trouve tes rendez-vous.")
+        val maintenant = System.currentTimeMillis()
+        val q = fr.dd.jarvis.societe.core.normaliser(a.optString("rendez_vous"))
+        val e = app.calendar.events(java.time.LocalDate.now(), 7).filter { !it.allDay && it.location.isNotBlank() && it.begin > maintenant }
+            .filter { q.isBlank() || fr.dd.jarvis.societe.core.normaliser(it.title + " " + it.location).contains(q) }.minByOrNull { it.begin }
+            ?: return ToolResult("Aucun rendez-vous à venir avec une adresse" + (if (q.isNotBlank()) " correspondant à « ${a.optString("rendez_vous")} »" else "") + ".")
+        val hq = app.societe.data.societe
+        val ici = runCatching { fr.dd.jarvis.device.Locator.point(app) }.getOrNull() ?: if (hq.lat != null && hq.lon != null) fr.dd.jarvis.societe.Geo.Point(hq.lat, hq.lon) else
+            return ToolResult("Je ne connais pas ta position (autorise la localisation).")
+        val dest = fr.dd.jarvis.societe.Geo.geocode(e.location) ?: return ToolResult("Adresse introuvable : ${e.location}")
+        val d = fr.dd.jarvis.work.Depart.duree(app, ici, dest, e.begin) ?: return ToolResult("Itinéraire indisponible.")
+        val depart = fr.dd.jarvis.work.Depart.heureDepart(e.begin, d.minutes)
+        val f = java.time.format.DateTimeFormatter.ofPattern("EEE d MMM HH:mm", java.util.Locale.FRENCH)
+        fun t(ms: Long) = java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneId.systemDefault()).format(f)
+        return ToolResult("🚗 **${e.title}** — ${t(e.begin)}\n📍 ${e.location}\n⏱️ Trajet : ${d.minutes} min (${"%.0f".format(d.km)} km)" +
+            (if (d.tempsReel) (if (d.retardTrafic >= 3) ", dont ${d.retardTrafic} min de bouchons (trafic en temps réel)" else ", trafic fluide (temps réel)") else if (d.retardTrafic >= 3) ", heure de pointe : +${d.retardTrafic} min estimées" else "") +
+            "\n🕗 **Pars à ${t(depart)}** (marge de 10 min)" + (if (depart < maintenant) " — ⚠️ c'est déjà l'heure !" else "") +
+            "\n[🧭 Itinéraire](https://www.google.com/maps/dir/?api=1&destination=${java.net.URLEncoder.encode(e.location, "UTF-8")}&travelmode=driving)", direct = true)
     }
 
     private fun changerVoix(a: JSONObject): ToolResult {

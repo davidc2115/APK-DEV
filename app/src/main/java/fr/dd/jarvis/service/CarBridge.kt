@@ -32,8 +32,12 @@ object CarBridge {
 
     private val jarvis get() = Person.Builder().setName("JARVIS").setKey("jarvis").setImportant(true).build()
 
-    /** Publie (ou met à jour) la conversation JARVIS ; [texte] = dernier message de JARVIS. */
-    fun post(ctx: Context, texte: String) {
+    /**
+     * Publie (ou met à jour) la conversation JARVIS ; [texte] = dernier message de JARVIS. Elle sert à Android Auto ET
+     * à la montre (notifications relayées) : « Répondre » permet de parler à JARVIS, avec des réponses toutes faites.
+     * [silencieux] : mise à jour sans son ni vibration.
+     */
+    fun post(ctx: Context, texte: String, silencieux: Boolean = false) {
         val me = Person.Builder().setName("Moi").build()
         val style = NotificationCompat.MessagingStyle(me).setConversationTitle("JARVIS")
         val recent = synchronized(history) { history.takeLast(8) }
@@ -46,7 +50,9 @@ object CarBridge {
 
         val flagsMut = PendingIntent.FLAG_UPDATE_CURRENT or (if (android.os.Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
         val flagsImm = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        val remote = RemoteInput.Builder(KEY_TEXT).setLabel("Parle à JARVIS").build()
+        val app = ctx.applicationContext as? JarvisApp
+        val remote = RemoteInput.Builder(KEY_TEXT).setLabel("Parle à JARVIS")
+            .setChoices(app?.let { Poignet.choix(it).toTypedArray() } ?: emptyArray()).build()
         val replyPi = PendingIntent.getBroadcast(ctx, 11, Intent(ctx, CarReplyReceiver::class.java).setAction(ACTION_REPLY).setPackage(ctx.packageName), flagsMut)
         val reply = NotificationCompat.Action.Builder(android.R.drawable.ic_menu_send, "Répondre", replyPi)
             .addRemoteInput(remote).setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY).setShowsUserInterface(false).build()
@@ -55,10 +61,12 @@ object CarBridge {
             .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ).setShowsUserInterface(false).build()
         val open = PendingIntent.getActivity(ctx, 13, Intent(ctx, fr.dd.jarvis.MainActivity::class.java), flagsImm)
 
-        val n = NotificationCompat.Builder(ctx, JarvisApp.CHANNEL_CAR)
+        val canal = if (app != null && !app.enVoiture && app.store.poignet.value) Poignet.canal(ctx) else JarvisApp.CHANNEL_CAR
+        val n = NotificationCompat.Builder(ctx, canal)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setStyle(style).setCategory(NotificationCompat.CATEGORY_MESSAGE).setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setOnlyAlertOnce(false).setAutoCancel(false).setContentIntent(open)
+            .setOnlyAlertOnce(false).setAutoCancel(false).setContentIntent(open).setSilent(silencieux)
+            .extend(NotificationCompat.WearableExtender().addAction(reply))
             .addAction(reply).addAction(read).build()
         runCatching { (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(NOTIF_ID, n) }
     }

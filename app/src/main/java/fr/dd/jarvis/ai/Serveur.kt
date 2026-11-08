@@ -294,7 +294,12 @@ object Serveur {
         setOf("tele", "tv", "television", "televiseur", "telly", "bravia", "freebox player", "chromecast", "android tv", "media player") to "media_player",
         setOf("enceinte", "speaker", "sonos", "google home", "nest", "echo", "alexa", "barre de son", "soundbar") to "media_player",
         setOf("lumiere", "lumieres", "lampe", "lampes", "eclairage", "ampoule", "spot", "light", "plafonnier", "led") to "light",
-        setOf("chauffage", "radiateur", "thermostat", "clim", "climatisation", "poele", "pac", "climate") to "climate",
+        setOf("chauffage", "radiateur", "thermostat", "clim", "climatisation", "pac", "climate") to "climate",
+        // Poêle à granulés : la reconnaissance vocale entend souvent « poils », « poile »… ; intégrations par marque.
+        setOf("poele", "poel", "poile", "poil", "poils", "poiles", "granule", "granules", "pellet", "pellets", "stove", "stufa",
+            "mcz", "maestro", "palazzetti", "edilkamin", "rika", "firenet", "extraflame", "piazzetta", "ravelli", "jolly", "micronova",
+            "aguaiot", "fumis", "duepi", "laminox", "cadel", "freepoint", "evacalor", "haas", "wodtke") to null,
+        setOf("personne", "person", "localisation", "position", "tracker", "gps", "ou est") to "person",
         setOf("volet", "volets", "store", "stores", "rideau", "cover") to "cover",
         setOf("prise", "prises", "plug", "interrupteur", "switch") to "switch",
         setOf("temperature", "humidite", "capteur", "sensor") to "sensor",
@@ -329,6 +334,27 @@ object Serveur {
             .sortedWith(compareByDescending<Pair<Int, Int>> { it.second }.thenBy { entites[it.first].first }).map { it.first }
     }
 
+    /** Similarité de deux mots (bigrammes de lettres, 0..1) : tolère les fautes et les mots mal entendus. */
+    internal fun similarite(a: String, b: String): Double {
+        if (a == b) return 1.0
+        if (a.length < 2 || b.length < 2) return 0.0
+        val ba = a.windowed(2).toMutableList(); val bb = b.windowed(2)
+        var commun = 0
+        for (g in bb) { val i = ba.indexOf(g); if (i >= 0) { commun++; ba.removeAt(i) } }
+        return 2.0 * commun / (a.length - 1 + b.length - 1)
+    }
+
+    /** Entités les plus proches d'une recherche qui n'a rien donné (mots ressemblants), pour proposer au lieu d'inventer. */
+    internal fun proches(entites: List<Pair<String, String>>, recherche: String, n: Int = 8): List<Int> {
+        fun norm(x: String) = fr.dd.jarvis.societe.core.normaliser(x.replace('_', ' ').replace('.', ' '))
+        val mots = norm(recherche).split(' ').filter { it.length >= 3 }
+        if (mots.isEmpty()) return emptyList()
+        return entites.indices.map { i ->
+            val ws = norm(entites[i].first + " " + entites[i].second).split(' ').filter { it.length >= 3 }
+            i to mots.sumOf { m -> ws.maxOfOrNull { w -> maxOf(similarite(m, w), if (w.startsWith(m.take(4)) && m.length >= 4) 0.7 else 0.0) } ?: 0.0 } / mots.size
+        }.filter { it.second >= 0.45 }.sortedByDescending { it.second }.take(n).map { it.first }
+    }
+
     fun haEntites(app: JarvisApp, recherche: String, domaine: String, decalage: Int = 0, limite: Int = 100): String {
         val arr = JSONArray(ha(app, "GET", "/api/states"))
         val toutes = (0 until arr.length()).map { arr.getJSONObject(it) }
@@ -338,7 +364,12 @@ object Serveur {
             // Jamais un simple « aucune entité » : on donne de quoi réessayer (domaines présents, appareils multimédia…).
             val parDomaine = paires.groupingBy { it.first.substringBefore('.') }.eachCount().entries.sortedByDescending { it.value }
             val medias = paires.filter { it.first.startsWith("media_player.") }.take(15)
-            return "Aucune entité ne correspond à « ${recherche.ifBlank { domaine }} » (${arr.length()} entités au total). " +
+            val voisines = proches(paires, recherche).map { toutes[it] }
+            if (voisines.isNotEmpty()) return "Aucune entité ne correspond exactement à « $recherche » (${arr.length()} entités au total). " +
+                "Les plus proches (vérifie avec l'utilisateur avant d'agir, n'invente rien d'autre) :\n" + voisines.joinToString("\n") { o ->
+                    val a = o.optJSONObject("attributes"); "- `${o.getString("entity_id")}` · ${a?.optString("friendly_name").orEmpty()} : **${o.getString("state")}${a?.optString("unit_of_measurement").orEmpty()}**"
+                }
+            return "Aucune entité ne correspond à « ${recherche.ifBlank { domaine }} » (${arr.length()} entités au total). Dis-le clairement à l'utilisateur, sans inventer. " +
                 "Domaines présents : " + parDomaine.take(14).joinToString(", ") { "${it.key} (${it.value})" } + "." +
                 (if (medias.isNotEmpty()) "\nAppareils multimédia (télé, enceintes) : " + medias.joinToString(" ; ") { "`${it.first}` ${it.second}" } else "") +
                 "\nRéessaie avec un autre mot (nom de la pièce, marque, tv…) ou un domaine, et regarde les notes de l'utilisateur (memoire_lire / obsidian_chercher)."
@@ -352,6 +383,63 @@ object Serveur {
             val a = o.optJSONObject("attributes"); val unit = a?.optString("unit_of_measurement").orEmpty()
             "- `${o.getString("entity_id")}` · ${a?.optString("friendly_name").orEmpty()} : **${o.getString("state")}$unit**"
         } + suite
+    }
+
+    /**
+     * Position d'une personne suivie par Home Assistant (entités person.* et device_tracker.*) : zone, coordonnées
+     * GPS, adresse précise, précision, fraîcheur, distance, lien de carte. Dit clairement quand la position est inconnue.
+     */
+    suspend fun haPosition(app: JarvisApp, nom: String): String {
+        val arr = JSONArray(ha(app, "GET", "/api/states"))
+        val toutes = (0 until arr.length()).map { arr.getJSONObject(it) }
+        val suivis = toutes.filter { it.getString("entity_id").startsWith("person.") || it.getString("entity_id").startsWith("device_tracker.") }
+        if (suivis.isEmpty()) return "Home Assistant ne suit aucune personne (aucune entité person.* ni device_tracker.*). Je ne peux donc pas dire où elle se trouve."
+        val paires = suivis.map { it.getString("entity_id") to it.optJSONObject("attributes")?.optString("friendly_name").orEmpty() }
+        val personnes = suivis.filter { it.getString("entity_id").startsWith("person.") }
+        val idx = if (nom.isBlank()) personnes.map { suivis.indexOf(it) } else filtrerEntites(paires, nom, "").ifEmpty { proches(paires, nom, 3) }
+        if (idx.isEmpty()) return "Je ne trouve personne nommé « $nom » dans Home Assistant. Personnes suivies : " +
+            personnes.joinToString(", ") { it.optJSONObject("attributes")?.optString("friendly_name").orEmpty().ifBlank { it.getString("entity_id") } }.ifBlank { "aucune" } + "."
+        // Une personne (person.*) plutôt que l'un de ses appareils.
+        val choisies = idx.map { suivis[it] }.sortedBy { if (it.getString("entity_id").startsWith("person.")) 0 else 1 }.take(if (nom.isBlank()) 6 else 1)
+        val moi = runCatching { fr.dd.jarvis.device.Locator.point(app) }.getOrNull()
+        val fiches = mutableListOf<String>()
+        for (o in choisies) fiches += fichePosition(app, o, toutes, moi)
+        return fiches.joinToString("\n\n")
+    }
+
+    private suspend fun fichePosition(app: JarvisApp, o: JSONObject, toutes: List<JSONObject>, moi: fr.dd.jarvis.societe.Geo.Point?): String {
+        val a = o.optJSONObject("attributes") ?: JSONObject()
+        val nom = a.optString("friendly_name").ifBlank { o.getString("entity_id") }
+        val etat = o.optString("state")
+        // Coordonnées : celles de la personne, sinon celles de l'appareil qui la suit (attribut « source »).
+        var lat = a.optDouble("latitude"); var lon = a.optDouble("longitude"); var precision = a.optDouble("gps_accuracy")
+        val source = a.optString("source")
+        if ((lat.isNaN() || lon.isNaN()) && source.isNotBlank()) toutes.firstOrNull { it.getString("entity_id") == source }?.optJSONObject("attributes")?.let { s ->
+            lat = s.optDouble("latitude"); lon = s.optDouble("longitude"); precision = s.optDouble("gps_accuracy")
+        }
+        val zone = when (etat) {
+            "home" -> "🏠 à la maison"
+            "not_home" -> "🚶 absent·e (hors des zones connues)"
+            "unknown", "unavailable", "" -> "❓ position inconnue pour Home Assistant"
+            else -> "📍 zone « $etat »"
+        }
+        val maj = runCatching { java.time.OffsetDateTime.parse(o.optString("last_updated")).toInstant().toEpochMilli() }.getOrNull()
+        val age = maj?.let { val m = (System.currentTimeMillis() - it) / 60_000; when { m < 1 -> "à l'instant"; m < 60 -> "il y a $m min"; m < 1440 -> "il y a ${m / 60} h"; else -> "il y a ${m / 1440} j" } }
+        return buildString {
+            append("📍 **$nom** — $zone\n")
+            if (lat.isNaN() || lon.isNaN()) {
+                append("- Home Assistant ne fournit PAS de coordonnées GPS pour cette personne : je ne peux pas donner de position plus précise.")
+                append(" (Il faut que son téléphone envoie sa position : application Home Assistant Companion, capteur « Localisation » activé, lié à sa personne.)\n")
+            } else {
+                val p = fr.dd.jarvis.societe.Geo.Point(lat, lon)
+                val adr = runCatching { fr.dd.jarvis.societe.Geo.adresseDe(p) }.getOrNull()
+                append("- Adresse : ${adr?.libelle ?: "inconnue (coordonnées seulement)"}" + (if (!precision.isNaN() && precision > 0) " (± ${precision.toInt()} m)" else "") + "\n")
+                append("- Coordonnées : ${"%.5f".format(java.util.Locale.US, lat)}, ${"%.5f".format(java.util.Locale.US, lon)} · [Voir sur la carte](${fr.dd.jarvis.societe.Geo.lienGoogleMaps(p)})\n")
+                if (moi != null) append("- À ${"%.1f".format(fr.dd.jarvis.societe.Geo.haversine(moi, p))} km de toi\n")
+                if (!precision.isNaN() && precision > 500) append("- ⚠️ Précision faible (± ${precision.toInt()} m) : position approximative.\n")
+            }
+            if (age != null) append("- Mise à jour : $age" + (if (source.isNotBlank()) " (appareil : $source)" else "") + "\n")
+        }.trimEnd()
     }
 
     fun haEtat(app: JarvisApp, id: String): String {
