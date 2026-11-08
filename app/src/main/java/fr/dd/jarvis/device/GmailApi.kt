@@ -190,7 +190,8 @@ object GmailApi {
                             account = account,
                             id = id,
                             body = if (full) texteMail(m.optJSONObject("payload")).take(1500) else "",
-                            fromAddr = Regex("<([^>]+)>").find(h("From"))?.groupValues?.get(1)?.lowercase() ?: h("From").trim().lowercase()
+                            fromAddr = Regex("<([^>]+)>").find(h("From"))?.groupValues?.get(1)?.lowercase() ?: h("From").trim().lowercase(),
+                            labels = m.optJSONArray("labelIds")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
                         )
                       }
                     }
@@ -311,15 +312,8 @@ object GmailApi {
                 val existing = libelles(token)
                 // Gmail ne distingue pas « Clients/Dupont » de « Clients/dupont » : on réutilise toujours le libellé existant.
                 fun idDe(nom: String) = existing[nom] ?: existing.entries.firstOrNull { it.key.equals(nom, true) }?.value
-                fusionnerSousLibelles(token, prefix, existing)
-                for (cat in items.map { it.second }.distinct()) {
-                    // « Clients/Dupont » : on crée aussi le libellé parent « Clients » pour une arborescence propre.
-                    val parts = cat.split("/")
-                    for (k in 1..parts.size) {
-                        val name = prefix + parts.take(k).joinToString("/")
-                        if (idDe(name) == null) existing[name] = post(token, "$BASE/labels", JSONObject().put("name", name)).getString("id")
-                    }
-                }
+                // Libellés de l'organisation de l'utilisateur, créés au besoin avec leur couleur.
+                for (cat in items.map { it.second }.distinct()) libelleEnCouleur(token, existing, prefix + cat)
                 val utilises = mutableSetOf<String>()
                 for ((id, cat) in items) {
                     val target = idDe(prefix + cat) ?: continue
@@ -328,7 +322,7 @@ object GmailApi {
                     // Re-tri : on retire les anciens libellés de catégorie de ce mail (il n'en garde qu'un, le bon).
                     val remove = org.json.JSONArray()
                     existing.forEach { (nm, lid) -> if (lid != target && estCategorie(nm, prefix)) remove.put(lid) }
-                    if (cat.substringBefore('/') in archiver) remove.put("INBOX")
+                    if (cat in archiver || cat.substringBefore('/') in archiver) remove.put("INBOX")
                     if (remove.length() > 0) body.put("removeLabelIds", remove)
                     post(token, "$BASE/messages/$id/modify", body)
                     n++
@@ -352,8 +346,69 @@ object GmailApi {
     }
 
     /** Libellé de catégorie géré par Jarvis (« Clients », « Clients/Dupont »…). */
-    private fun estCategorie(nom: String, prefix: String) =
-        nom.startsWith(prefix) && nom.removePrefix(prefix).substringBefore('/') in fr.dd.jarvis.ai.MailTri.CATEGORIES
+    private fun estCategorie(nom: String, prefix: String) = nom.startsWith(prefix) && ReglesMail.estGere(nom.removePrefix(prefix))
+
+    /** Libellé [nom] présent (créé au besoin), avec la couleur prévue dans l'organisation des mails. Renvoie son id. */
+    internal fun libelleEnCouleur(token: String, existing: MutableMap<String, String>, nom: String): String {
+        val lib = (ReglesMail.LIBELLES + ReglesMail.TRAITE).firstOrNull { nom.endsWith(it.nom) }
+        val couleur = lib?.let { JSONObject().put("backgroundColor", it.fond).put("textColor", it.texte) }
+        existing[nom]?.let { return it }
+        existing.entries.firstOrNull { it.key.equals(nom, true) }?.let { return it.value }
+        val corps = JSONObject().put("name", nom).put("labelListVisibility", "labelShow").put("messageListVisibility", "show")
+        if (couleur != null) corps.put("color", couleur)
+        val id = runCatching { post(token, "$BASE/labels", corps).getString("id") }
+            .getOrElse { post(token, "$BASE/labels", JSONObject().put("name", nom)).getString("id") }
+        existing[nom] = id
+        return id
+    }
+
+    /** Applique la couleur prévue à un libellé existant. */
+    internal fun colorer(token: String, id: String, fond: String, texte: String) {
+        runCatching { appeler { Request.Builder().url("$BASE/labels/$id").header("Authorization", "Bearer $token")
+            .patch(JSONObject().put("color", JSONObject().put("backgroundColor", fond).put("textColor", texte)).toString().toRequestBody("application/json".toMediaType())).build() } }
+    }
+
+    /** Identifiants des mails d'une recherche Gmail ([max] au plus). */
+    internal fun idsRecherche(token: String, q: String, max: Int = 20_000): List<String> {
+        val ids = mutableListOf<String>()
+        var page: String? = null
+        do {
+            val r = get(token, "$BASE/messages?maxResults=500&q=" + java.net.URLEncoder.encode(q, "UTF-8") + (page?.let { "&pageToken=$it" } ?: ""))
+            val l = r.optJSONArray("messages")
+            for (i in 0 until (l?.length() ?: 0)) ids += l!!.getJSONObject(i).getString("id")
+            page = r.optString("nextPageToken").takeIf { it.isNotBlank() }
+        } while (page != null && ids.size < max)
+        return ids.take(max)
+    }
+
+    /** Modifie jusqu'à 1000 mails à la fois. */
+    internal fun modifierLot(token: String, ids: List<String>, ajouter: Collection<String>, retirer: Collection<String>) {
+        ids.chunked(1000).forEach { lot ->
+            post(token, "$BASE/messages/batchModify", JSONObject().put("ids", org.json.JSONArray(lot))
+                .put("addLabelIds", org.json.JSONArray(ajouter.toList())).put("removeLabelIds", org.json.JSONArray(retirer.filter { it !in ajouter })))
+        }
+    }
+
+    /** En-têtes utiles d'un mail : (expéditeur, sujet, étiquettes). */
+    internal fun entetes(token: String, id: String): Triple<String, String, List<String>> {
+        val m = get(token, "$BASE/messages/$id?format=metadata&metadataHeaders=From&metadataHeaders=Subject")
+        val h = m.optJSONObject("payload")?.optJSONArray("headers")
+        fun v(n: String) = (0 until (h?.length() ?: 0)).mapNotNull { h!!.optJSONObject(it) }.firstOrNull { it.optString("name").equals(n, true) }?.optString("value").orEmpty()
+        val from = v("From")
+        val adresse = Regex("<([^>]+)>").find(from)?.groupValues?.get(1)?.lowercase() ?: from.trim().lowercase()
+        val l = m.optJSONArray("labelIds")
+        return Triple(adresse, v("Subject"), (0 until (l?.length() ?: 0)).map { l!!.optString(it) })
+    }
+
+    internal fun supprimerLibelle(token: String, id: String) = runCatching { delete(token, "$BASE/labels/$id") }.isSuccess
+
+    internal fun tousLesLibelles(token: String) = libelles(token)
+
+    internal suspend fun jeton(ctx: Context, account: String): String {
+        val auth = authorize(ctx, account)
+        if (auth.hasResolution()) throw IllegalStateException("autorisation à renouveler pour $account (Mails › retire puis ajoute le compte Google).")
+        return auth.accessToken ?: throw IllegalStateException("jeton Google indisponible pour $account.")
+    }
 
     /** Identifiants de tous les mails portant un libellé (y compris archivés). */
     private fun idsAvecLibelle(token: String, labelId: String): List<String> {
@@ -369,34 +424,12 @@ object GmailApi {
     }
 
     /**
-     * Catégories à libellé unique (newsletters) : les anciens sous-libellés « Newsletters et promos/Amazon »… sont
-     * fusionnés dans « Newsletters et promos » (leurs mails y sont déplacés), puis supprimés.
-     */
-    private fun fusionnerSousLibelles(token: String, prefix: String, existing: MutableMap<String, String>) {
-        for (cat in fr.dd.jarvis.ai.MailTri.SANS_SOUS_LIBELLE) {
-            val parentNom = prefix + cat
-            val enfants = existing.entries.filter { it.key.startsWith("$parentNom/", true) }.map { it.key to it.value }
-                .sortedByDescending { it.first.length }
-            if (enfants.isEmpty()) continue
-            val parent = existing[parentNom] ?: existing.entries.firstOrNull { it.key.equals(parentNom, true) }?.value
-                ?: post(token, "$BASE/labels", JSONObject().put("name", parentNom)).getString("id").also { existing[parentNom] = it }
-            for ((nom, id) in enfants) {
-                idsAvecLibelle(token, id).chunked(1000).forEach { lot ->
-                    post(token, "$BASE/messages/batchModify", JSONObject().put("ids", org.json.JSONArray(lot))
-                        .put("addLabelIds", org.json.JSONArray().put(parent)).put("removeLabelIds", org.json.JSONArray().put(id)))
-                }
-                runCatching { delete(token, "$BASE/labels/$id") }.onSuccess { existing.remove(nom) }
-            }
-        }
-    }
-
-    /**
      * Pas de libellés vides : après un (re)tri, les libellés de catégorie qui ne contiennent plus aucun mail sont
      * supprimés (d'abord les sous-libellés, puis les catégories sans mail ni sous-libellé). Les libellés qui viennent
      * d'être utilisés sont épargnés, et un libellé n'est supprimé que si Gmail confirme qu'il est vide.
      */
     private suspend fun supprimerVides(token: String, prefix: String, existing: MutableMap<String, String>, utilises: Set<String>) {
-        val candidats = existing.entries.filter { estCategorie(it.key, prefix) && it.value !in utilises }.map { it.key to it.value }
+        val candidats = existing.entries.filter { it.key.startsWith(prefix) && ReglesMail.estObsolete(it.key.removePrefix(prefix)) && it.value !in utilises }.map { it.key to it.value }
         if (candidats.isEmpty() || candidats.size > 400) return
         val gate = kotlinx.coroutines.sync.Semaphore(5)
         val vides = coroutineScope {

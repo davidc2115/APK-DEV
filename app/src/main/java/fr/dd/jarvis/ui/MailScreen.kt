@@ -185,6 +185,21 @@ fun GoogleConnect(app: JarvisApp, onDone: () -> Unit = {}) {
                 HudButton("Retirer") { app.store.removeGmailAccount(acc); app.store.setMailActive(acc, true) }
             }
         }
+        // Grand ménage : toute la boîte rangée dans les libellés de l'utilisateur, lue, traitée, anciens libellés supprimés.
+        if (app.store.gmailAccounts.isNotEmpty()) {
+            var menage by remember { mutableStateOf(false) }
+            val bilan = remember(menage) { fr.dd.jarvis.device.GrandMenage.etat(app) }
+            HudButton("🧹 Grand ménage de toute la boîte", filled = false) { menage = true }
+            if (menage) {
+                Text("Tous les mails de ${app.store.gmailAccounts.first()} vont être rangés dans tes libellés en couleur (Facebook, Super U/…, Impôts, Pubs, Réseaux sociaux, Banque et crédit, Maison, Enfants, Santé, Achats et livraisons, Comptes et sécurité, Administratif, Travail, Personnel), marqués lus + « Traité » et retirés de la boîte de réception ; les anciens libellés de Jarvis seront supprimés. Ça tourne en arrière-plan (notification).",
+                    color = HudText, fontSize = 12.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HudButton("Lancer", filled = true) { fr.dd.jarvis.device.GrandMenage.lancer(ctx, app.store.gmailAccounts.first()); menage = false; msg = "🧹 Grand ménage lancé (voir la notification)." }
+                    HudButton("Annuler") { menage = false }
+                }
+            }
+            if (!bilan.startsWith("Aucun")) Text(bilan, color = HudDim, fontSize = 11.sp)
+        }
         HudButton(if (app.store.gmailAccounts.isEmpty()) "Connecter mon compte Google" else "Ajouter un autre compte Google", filled = true) {
             @Suppress("DEPRECATION")
             val i = android.accounts.AccountManager.newChooseAccountIntent(null, null, arrayOf("com.google"), null, null, null, null)

@@ -25,7 +25,9 @@ data class MailItem(
     val id: String = "",
     val fromAddr: String = "",
     val body: String = "",
-    val threadId: String = ""
+    val threadId: String = "",
+    /** Étiquettes Gmail (CATEGORY_PROMOTIONS, INBOX…) ; vide pour l'IMAP. */
+    val labels: List<String> = emptyList()
 )
 
 /** Lecture des mails en IMAP (Gmail : activer l'IMAP et utiliser un « mot de passe d'application »). */

@@ -289,6 +289,11 @@ class Store(context: Context) {
     val poignet = BPref("poignet", false)
     val empreinteVocale = BPref("empreinteVocale", false)
     val empreinteSeuil = SPref("empreinteSeuil", "")
+    // ---- Grand ménage des mails
+    val menageCompte = SPref("menageCompte", "")
+    val menageDemarre = SPref("menageDemarre", "")
+    val menageBilan = SPref("menageBilan", "{}")
+    val menageErreurs = SPref("menageErreurs", "0")
     // ---- Android Auto
     /** Raccourcis de la voiture (une demande par ligne) ; vide = raccourcis par défaut. */
     val raccourcisVoiture = SPref("raccourcisVoiture", "")

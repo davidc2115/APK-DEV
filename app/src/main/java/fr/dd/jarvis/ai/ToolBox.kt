@@ -113,14 +113,14 @@ class ToolBox(
                 "message_id" to prop("Identifiant exact fourni par rechercher_mails."),
                 "texte" to prop("Texte complet de la réponse.")
             ), listOf("compte", "message_id", "texte")))
-        put(tool("trier_mails", "Analyse les derniers mails, les classe par catégorie (Urgent, Clients, Factures, Chantiers, Administratif, Notifications, Newsletters, Perso) et peut les ranger dans Gmail (libellés Urgent, Clients/Dupont…, toutes les newsletters dans un seul libellé).",
+        put(tool("trier_mails", "Analyse les derniers mails, les classe dans les libellés de l'utilisateur (Facebook, Super U/…, Impôts, Pubs, Réseaux sociaux, Banque et crédit, Maison, Enfants, Santé, Achats et livraisons, Comptes et sécurité, Administratif, Travail, Personnel) et peut les ranger dans Gmail. Pour TOUTE la boîte, utilise grand_menage_mails.",
             mapOf(
                 "compte" to prop("Compte mail précis (adresse ou partie), même s'il est désactivé. Vide = comptes actifs seulement."),
                 "count" to prop("Nombre de mails à trier (5 à 500). Par défaut 100 ; mets 300-500 pour « toute la boîte »."),
                 "unread_only" to prop("« true » pour ne trier que les non lus."),
                 "toute_la_boite" to prop("« true » pour inclure aussi les mails déjà archivés (pas seulement la boîte de réception) : utile pour (re)trier tout un compte."),
                 "ranger" to prop("« true » pour appliquer les libellés dans Gmail. Un re-tri remplace les anciens libellés de catégorie par les bons."),
-                "archiver" to prop("« true » pour aussi retirer de la boîte de réception les newsletters et notifications (avec ranger).")
+                "archiver" to prop("« true » pour aussi retirer de la boîte de réception les mails rangés (ils restent dans leur libellé).")
             )))
         put(tool("changer_voix", "Change la voix de JARVIS (personnage) : homme, femme, jeune, âgé(e), grave, douce, IA/robot, narrateur, animatrice radio, murmure, Jarvis (par défaut), ou un nom de voix Gemini (Kore, Puck…). Sans précision : liste les voix.",
             mapOf("voix" to prop("Description de la voix voulue, ex. « femme âgée », « jeune homme », « robot », « par défaut ». Vide = lister."),
@@ -140,6 +140,8 @@ class ToolBox(
             mapOf("rendez_vous" to prop("Titre (ou partie) du rendez-vous ; vide = le prochain avec une adresse."))))
         put(tool("montre", "JARVIS sur la montre connectée (conversation relayée sur la montre : réponse à la voix ou réponses toutes faites) : activer ou desactiver.",
             mapOf("etat" to prop("activer | desactiver")), listOf("etat")))
+        put(tool("grand_menage_mails", "GRAND MÉNAGE de toute la boîte Gmail : chaque mail rangé dans son libellé (organisation de l'utilisateur, en couleur : Facebook, Super U/…, Impôts, Pubs, Réseaux sociaux, Banque et crédit, Maison, Enfants, Santé, Achats et livraisons, Comptes et sécurité, Administratif, Travail, Personnel), marqué lu + Traité et retiré de la boîte de réception ; anciens libellés supprimés. Tourne en arrière-plan (notification de progression). action=lancer ou etat.",
+            mapOf("action" to prop("lancer | etat"), "compte" to prop("Adresse Gmail (vide = le premier compte Google connecté)."))))
         put(tool("tournee_optimisee", "Tournée OPTIMISÉE d'une liste de clients à visiter (sans horaires imposés) : ordre le plus court, trajets, heures d'arrivée, météo et ensoleillement sur chaque installation (utile pour les mesures de production), lien Google Maps de toute la tournée. Pour des rendez-vous déjà fixés dans l'agenda, utilise itineraire.",
             mapOf(
                 "clients" to prop("Clients (ou adresses) à visiter, séparés par des virgules ou « ; »."),
@@ -162,7 +164,7 @@ class ToolBox(
                 "compte" to prop("Compte mail précis (adresse ou partie), même s'il est désactivé. Vide = comptes actifs seulement."),
                 "recherche" to prop("Texte à retrouver dans l'expéditeur ou l'objet. Vide ou « tous » = tous les mails récents non lus."),
                 "count" to prop("Nombre de mails récents à considérer (5 à 60). Par défaut 30."),
-                "archiver" to prop("« true » pour aussi les retirer de la boîte de réception.")
+                "archiver" to prop("Par défaut : traités → rangés dans leur libellé (retirés de la boîte de réception) ; lus → restent dans la boîte. « false » / « true » pour forcer.")
             )))
         put(tool("lire_sms", "Lit les SMS récents (reçus et envoyés).",
             mapOf(
@@ -488,6 +490,15 @@ class ToolBox(
         "mail_envoyer" -> mailEnvoyer(a)
         "marquer_mails_traites" -> marquerTraites(a)
         "changer_voix" -> changerVoix(a)
+        "grand_menage_mails" -> {
+            if (a.optString("action").startsWith("eta", true)) ToolResult(fr.dd.jarvis.device.GrandMenage.etat(app))
+            else {
+                val compte = store.gmailAccounts.firstOrNull { c -> a.optString("compte").isBlank() || c.contains(a.optString("compte").trim(), true) }
+                if (compte == null) ToolResult("Aucun compte Google connecté correspondant (Mails › Connecter mon compte Google).")
+                else if (!confirm("Grand ménage de $compte : TOUS les mails rangés dans leur libellé, marqués lus + Traité et retirés de la boîte de réception ; anciens libellés de Jarvis supprimés. Lancer ?", true)) ToolResult("Annulé.")
+                else { fr.dd.jarvis.device.GrandMenage.lancer(app, compte); ToolResult("🧹 Grand ménage lancé pour $compte : il tourne en arrière-plan (quelques minutes, notification de progression). Demande-moi « où en est le ménage des mails ? » pour le bilan.") }
+            }
+        }
         "routines" -> routines(a)
         "journal_de_bord" -> {
             val d = runCatching { java.time.LocalDate.parse(a.optString("date").trim()) }.getOrDefault(java.time.LocalDate.now())
@@ -1726,14 +1737,15 @@ class ToolBox(
         val cibles = mails.filter { m -> m.id.isNotBlank() && store.gmailAccounts.any { it.equals(m.account, true) } &&
             (q.isBlank() || m.from.lowercase().contains(q) || m.fromAddr.contains(q) || m.subject.lowercase().contains(q)) }
         if (cibles.isEmpty()) return ToolResult("Aucun mail correspondant.")
-        val archiver = a.optString("archiver").equals("true", true)
+        // « Traité » = rangé dans son libellé (hors de la boîte de réception), sauf demande contraire ; « lu » reste dans la boîte.
+        val archiver = a.optString("archiver").let { if (it.isBlank()) traite else it.equals("true", true) }
         val quoi = if (traite) "traités" else "lus"
         if (!confirm("Ranger dans leur libellé et marquer ${cibles.size} mail(s) comme $quoi" + (if (archiver) " et les archiver" else "") + " ?\n\n" + cibles.take(8).joinToString("\n") { "• ${it.from} — ${it.subject}" }, false))
             return ToolResult("Refusé par l'utilisateur.")
         // 1) Tri automatique : chaque mail rejoint son libellé (catégorie/expéditeur ; les newsletters dans un seul libellé).
         val tri = try {
             val classes = fr.dd.jarvis.ai.MailTri.classer(app, cibles)
-            val n = fr.dd.jarvis.ai.MailTri.ranger(app, classes, false)
+            val n = fr.dd.jarvis.ai.MailTri.ranger(app, classes, archiver)
             "📂 $n rangé(s) : " + classes.groupingBy { it.label }.eachCount().entries.sortedByDescending { it.value }
                 .joinToString(", ") { "${it.key}${if (it.value > 1) " ×${it.value}" else ""}" }
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { "⚠️ Tri dans les libellés impossible : ${e.message}" }
@@ -1841,7 +1853,7 @@ class ToolBox(
                 val archiver = a.optString("archiver").equals("true", true)
                 if (!confirm("Ranger ${classes.size} mails dans Gmail avec les libellés Urgent, Clients…" + (if (archiver) " et archiver newsletters/notifications ?" else " ?"), false)) note = "Rangement refusé."
                 else note = try {
-                    "✅ ${fr.dd.jarvis.ai.MailTri.ranger(app, classes, archiver)} mail(s) rangés dans Gmail (libellés Urgent, Clients…)."
+                    "✅ ${fr.dd.jarvis.ai.MailTri.ranger(app, classes, archiver)} mail(s) rangés dans Gmail (dans tes libellés)."
                 } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { "❌ Rangement impossible : ${e.message}" }
             }
         }

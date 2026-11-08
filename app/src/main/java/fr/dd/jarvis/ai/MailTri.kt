@@ -3,142 +3,115 @@ package fr.dd.jarvis.ai
 import fr.dd.jarvis.JarvisApp
 import fr.dd.jarvis.device.GmailApi
 import fr.dd.jarvis.device.MailItem
+import fr.dd.jarvis.device.ReglesMail
 import kotlinx.coroutines.async
 import kotlinx.coroutines.sync.withPermit
 
-/** Classement des mails par l'agent (Gemini) en catégories, et rangement dans Gmail par libellés. */
+/**
+ * Tri des mails dans l'organisation de l'utilisateur (ses libellés en couleur, voir [ReglesMail]) : d'abord les règles
+ * par expéditeur (instantané, sans IA), puis l'agent Gemini pour les mails qu'aucune règle ne reconnaît.
+ * Toutes les newsletters et publicités vont dans « Pubs » ; aucun sous-libellé par expéditeur.
+ */
 object MailTri {
-    val CATEGORIES = listOf(
-        "Urgent", "Clients", "Chantiers et planning", "Fournisseurs et matériel", "Factures et paiements",
-        "Administratif", "Banque et assurances", "Notifications", "Newsletters et promos", "Perso"
-    )
-    private val ARCHIVABLES = setOf("Newsletters et promos", "Notifications")
+    val CATEGORIES get() = ReglesMail.NOMS
 
-    /** Catégories rangées dans UN SEUL libellé, sans sous-libellé par expéditeur : toutes les newsletters ensemble. */
-    val SANS_SOUS_LIBELLE = setOf("Newsletters et promos")
-
+    /** [prio] 1 = urgent (alerte), 2 normal, 3 faible ; [action] = ce qu'il reste à faire. */
     data class Classe(val mail: MailItem, val cat: String, val prio: Int, val action: String, val sub: String = "") {
-        /** Libellé Gmail : « Clients/Dupont » (sous-libellé) ou simplement la catégorie (toujours le cas des newsletters). */
-        val label get() = if (sub.isBlank() || cat in SANS_SOUS_LIBELLE) cat else "$cat/$sub"
+        val label get() = cat
     }
 
-    /** Clé de comparaison d'un nom : sans accents, casse, espaces ni ponctuation (« Super-U » = « super u »). */
-    internal fun cle(s: String): String = java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFD)
-        .replace(Regex("\\p{M}+"), "").lowercase().replace(Regex("[^a-z0-9]"), "")
-
-    /** Réutilise l'orthographe d'une sous-catégorie déjà connue (« super-u » → « Super U ») : jamais deux libellés pour le même expéditeur. */
-    internal fun canonique(sub: String, connues: Collection<String>): String {
-        val k = cle(sub)
-        if (k.isEmpty()) return sub
-        return connues.firstOrNull { cle(it) == k } ?: sub
-    }
-
-    private val SYSTEM = """
-Tu es l'agent Tri de mails de JARVIS (entreprise de maintenance photovoltaïque). Tu ranges chaque mail comme le ferait un assistant humain soigneux, pour qu'il soit facile à retrouver : d'après l'EXPÉDITEUR (nom + adresse), l'OBJET et le CONTENU.
-Catégories (une seule par mail) : ${CATEGORIES.joinToString(" | ")}.
-Urgent = attend une action ou une réponse rapide (relance, délai, panne, problème). Clients = échanges avec clients et prospects. Chantiers et planning = rendez-vous, interventions, sites, organisation. Fournisseurs et matériel = devis/commandes/livraisons d'onduleurs, panneaux, outillage. Factures et paiements = factures, devis, relances, règlements. Administratif = impôts, URSSAF, comptable, démarches, juridique. Banque et assurances = banque, assurances, crédits. Notifications = alertes automatiques de services/sites. Newsletters et promos = publicité, lettres d'information. Perso = le reste.
-IMPORTANT : un même expéditeur peut relever de PLUSIEURS catégories selon le contenu (ex. un magasin : ses publicités → Newsletters et promos, ses factures/tickets → Factures et paiements, une commande → Fournisseurs). Lis l'objet ET le texte du mail : classe d'après ce que le mail DIT, jamais d'après l'expéditeur seul. Les indications « déjà vu » ne sont que des repères.
-Sous-catégorie = nom COURT (1 à 3 mots, sans « / ») de l'organisation, de la personne ou du sujet récurrent (ex. « Dupont », « Enedis », « Crédit Agricole », « Amazon », « Chantier Martin »). Un même expéditeur garde TOUJOURS la même sous-catégorie (son nom), même si la catégorie change ; réutilise celles déjà vues, à l'identique.
-Regroupe sous UN SEUL nom les services d'un même organisme : impots.gouv, DGFiP, taxe foncière, taxe d'habitation → « Impôts » ; Facebook, Messenger, Meta → « Facebook ».
-Newsletters et promos : TOUTES vont dans un seul et même libellé ; laisse la sous-catégorie vide.
+    private fun systeme() = """
+Tu es l'agent Tri de mails de JARVIS. Range chaque mail dans UN des libellés de l'utilisateur, d'après l'EXPÉDITEUR, l'OBJET et le CONTENU :
+${ReglesMail.consigneIa()}
+Règles : toute newsletter, publicité, offre ou promotion → « Pubs » (sauf celles des magasins U → « Super U/Pubs »). Un même expéditeur peut aller dans des libellés différents selon le contenu (ex. magasin : ticket → Super U/Tickets de caisse, commande → Super U/Commandes ou Achats et livraisons, pub → Pubs). Impôts, taxe foncière et taxe d'habitation → « Impôts ». Un mail écrit par une vraie personne de l'entourage → « Personnel ». Travail, clients, fournisseurs, chantiers → « Travail ».
+Priorité : 1 si le mail attend une action rapide (délai, relance, dossier incomplet, panne, paiement refusé), 2 normal, 3 faible (pub, notification).
 Réponds UNIQUEMENT par une ligne par mail, au format exact :
-numéro|catégorie|sous-catégorie|priorité (1 urgente, 2 normale, 3 faible)|action suggérée en 8 mots maximum (vide si aucune)
+numéro|libellé exact|priorité|action suggérée en 8 mots maximum (vide si aucune)
 N'invente rien et ne saute aucun numéro.
 """.trimIndent()
 
-    // Mémoire des expéditeurs déjà classés : garde le rangement cohérent d'un tri à l'autre.
-    private fun fichier(app: JarvisApp) = java.io.File(app.filesDir, "mail_senders.json")
-    private fun charge(app: JarvisApp): org.json.JSONObject = runCatching { org.json.JSONObject(fichier(app).readText()) }.getOrDefault(org.json.JSONObject())
+    private fun libelleValide(s: String?): String? {
+        val t = s?.trim().orEmpty()
+        return ReglesMail.NOMS.firstOrNull { it.equals(t, true) }
+            ?: ReglesMail.NOMS.firstOrNull { fr.dd.jarvis.societe.core.normaliser(it) == fr.dd.jarvis.societe.core.normaliser(t) }
+    }
+
+    /** Adresses mail des clients connus (fiche Société) : leurs mails vont dans « Travail ». */
+    fun adressesClients(app: JarvisApp): List<String> = runCatching { app.societe.data.clients.mapNotNull { it.email.trim().lowercase().takeIf { e -> e.contains('@') } } }.getOrDefault(emptyList())
 
     suspend fun classer(app: JarvisApp, mails: List<MailItem>, onProgress: (String) -> Unit = {}): List<Classe> {
-        val memo = charge(app)
+        val clients = adressesClients(app)
         val result = arrayOfNulls<Classe>(mails.size)
         val aLLM = mutableListOf<Int>()
         mails.forEachIndexed { i, m ->
-            val k = m.fromAddr.ifBlank { m.from.lowercase() }
-            aLLM += i
+            val r = ReglesMail.classer(m.fromAddr.ifBlank { m.from }, m.subject, m.labels, clients)
+            if (r != null) result[i] = Classe(m, r, if (r == "Pubs" || r == "Super U/Pubs" || r == "Facebook" || r == "Réseaux sociaux") 3 else 2, "")
+            else aLLM += i
         }
         val sem = kotlinx.coroutines.sync.Semaphore(3)
         var fait = 0
+        val sys = systeme()
         kotlinx.coroutines.coroutineScope {
             aLLM.chunked(20).map { idx ->
                 async {
                     sem.withPermit {
                         val lot = idx.map { mails[it] }
                         val user = "Aujourd'hui : ${Prompts.now()}\n\n" + lot.mapIndexed { i, m ->
-                            val k = m.fromAddr.ifBlank { m.from.lowercase() }
-                            val prev = memo.optJSONObject(k)?.let { o -> o.keys().asSequence().filter { c -> c.contains('/') || c in CATEGORIES }.map { c -> "$c ×${o.optInt(c)}" }.toList().takeIf { it.isNotEmpty() }?.joinToString(" ; ", " (déjà vu : ", ")") }.orEmpty()
-                            "#${i + 1} De : ${m.from} <${m.fromAddr}>$prev | Objet : ${m.subject} | Texte : ${m.body.ifBlank { m.snippet }.take(700)}"
+                            "#${i + 1} De : ${m.from} <${m.fromAddr}> | Objet : ${m.subject} | Texte : ${m.body.ifBlank { m.snippet }.take(600)}"
                         }.joinToString("\n")
-                        val rep = try { app.llm.agent(SYSTEM + app.memo.pour("mails", "tri"), user) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { "" }
+                        val rep = try { app.llm.agent(sys + app.memo.pour("mails", "tri"), user) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { "" }
                         val parsed = rep.lines().mapNotNull { l ->
                             val p = l.trim().removePrefix("#").split("|").map { it.trim() }
                             val n = p.getOrNull(0)?.toIntOrNull() ?: return@mapNotNull null
                             val m = lot.getOrNull(n - 1) ?: return@mapNotNull null
-                            val cat = CATEGORIES.firstOrNull { it.equals(p.getOrNull(1), true) } ?: "Perso"
-                            val sub = p.getOrNull(2).orEmpty().replace("/", "-").replace(Regex("[^\\p{L}0-9 '’.&-]"), "").trim().take(30)
-                            n to Classe(m, cat, p.getOrNull(3)?.toIntOrNull()?.coerceIn(1, 3) ?: 2, p.getOrNull(4).orEmpty(), sub)
+                            val cat = libelleValide(p.getOrNull(1)) ?: return@mapNotNull null
+                            n to Classe(m, cat, p.getOrNull(2)?.toIntOrNull()?.coerceIn(1, 3) ?: 2, p.getOrNull(3).orEmpty())
                         }.toMap()
-                        idx.forEachIndexed { j, gi -> result[gi] = parsed[j + 1] ?: Classe(mails[gi], "Perso", 2, "") }
+                        idx.forEachIndexed { j, gi -> result[gi] = parsed[j + 1] ?: replis(mails[gi]) }
                         synchronized(result) { fait += idx.size; onProgress("Tri en cours : $fait/${aLLM.size}") }
                     }
                 }
             }.forEach { it.await() }
         }
-        // Devis, factures et relances d'un client CONNU (fiche Société) : regroupés sous son seul libellé « Clients/Nom »
-        // plutôt qu'éclatés entre « Clients/Nom » et « Factures et paiements/Nom » — tout ce qui le concerne au même endroit.
-        val clientsConnus = runCatching { app.societe.data }.getOrNull()
-        // Sous-catégories déjà utilisées (mémoire des expéditeurs) : même orthographe d'un tri à l'autre, pas de doublons.
-        val connues = mutableListOf<String>()
-        memo.keys().forEach { k -> memo.optJSONObject(k)?.keys()?.forEach { l -> if (l.contains('/')) connues += l.substringAfter('/') } }
-        val result2 = result.mapIndexed { i, c ->
-            val brut = c ?: Classe(mails[i], "Perso", 2, "")
-            val base = if (brut.sub.isBlank()) brut else brut.copy(sub = canonique(brut.sub, connues).also { if (it == brut.sub) connues += it })
-            if (clientsConnus != null && base.cat == "Factures et paiements" && base.sub.isNotBlank() && clientsConnus.chercherClients(base.sub).isNotEmpty())
-                base.copy(cat = "Clients") else base
-        }
-        // Mémorise les expéditeurs pour garder le même rangement la prochaine fois.
-        val out = result2
-        runCatching {
-            out.forEach { c ->
-                val k = c.mail.fromAddr.ifBlank { c.mail.from.lowercase() }
-                if (k.isBlank() || c.cat == "Urgent") return@forEach
-                val o = memo.optJSONObject(k) ?: org.json.JSONObject().also { memo.put(k, it) }
-                o.put(c.label, o.optInt(c.label) + 1)
-            }
-            fichier(app).writeText(memo.toString())
-        }
-        return out
+        return result.mapIndexed { i, c -> c ?: replis(mails[i]) }
     }
+
+    /** Sans réponse de l'IA : d'après la catégorie Gmail. */
+    internal fun replis(m: MailItem): Classe = Classe(m, when {
+        "CATEGORY_PROMOTIONS" in m.labels || "CATEGORY_FORUMS" in m.labels -> "Pubs"
+        "CATEGORY_SOCIAL" in m.labels -> "Réseaux sociaux"
+        "CATEGORY_PERSONAL" in m.labels -> "Personnel"
+        else -> "Comptes et sécurité"
+    }, 2, "")
 
     fun presenter(l: List<Classe>, applique: String = ""): String {
         val fmt = java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.FRENCH)
-        val icones = mapOf("Urgent" to "🔴", "Clients" to "👤", "Factures et paiements" to "💶", "Chantiers et planning" to "☀️",
-            "Administratif" to "🗂️", "Notifications" to "🔔", "Newsletters et promos" to "📰", "Perso" to "🏠")
         return buildString {
             append("# 📧 Mails triés (${l.size})\n")
             CATEGORIES.forEach { cat ->
                 val g = l.filter { it.cat == cat }.sortedBy { it.prio }
                 if (g.isEmpty()) return@forEach
-                append("\n## ${icones[cat]} $cat (${g.size})\n")
-                g.groupBy { it.label.substringAfter('/', "") }.toSortedMap(compareBy { it.lowercase() }).forEach { (sub, items) ->
-                  if (sub.isNotBlank()) append("\n**$sub** (${items.size})\n")
-                  items.forEach { c ->
-                    append("- ${if (c.mail.unread) "🔵 " else ""}**${c.mail.from}** — ${c.mail.subject}")
+                append("\n## $cat (${g.size})\n")
+                g.forEach { c ->
+                    append("- ${if (c.prio == 1) "🔴 " else if (c.mail.unread) "🔵 " else ""}**${c.mail.from}** — ${c.mail.subject}")
                     c.mail.date?.let { append(" _(${fmt.format(it)})_") }
                     if (c.action.isNotBlank()) append(" → ${c.action}")
                     append("\n")
-                  }
                 }
             }
             if (applique.isNotBlank()) append("\n$applique")
         }.trim()
     }
 
+    /** Range dans Gmail ; [archiver] = « dans son libellé » (retiré de la boîte de réception), sauf les mails urgents. */
     suspend fun ranger(app: JarvisApp, l: List<Classe>, archiver: Boolean): Int {
         val parCompte = l.filter { it.mail.id.isNotBlank() && it.mail.account.isNotBlank() }
             .groupBy({ it.mail.account }, { it.mail.id to it.label })
         if (parCompte.isEmpty()) return 0
-        return GmailApi.appliquerLibelles(app, parCompte, if (archiver) ARCHIVABLES else emptySet())
+        val urgents = l.filter { it.prio == 1 }.map { it.mail.id }.toSet()
+        val archivables = if (archiver) CATEGORIES.toSet() else emptySet()
+        val (normaux, garder) = parCompte.mapValues { (_, v) -> v.partition { it.first !in urgents } }.let { m -> m.mapValues { it.value.first } to m.mapValues { it.value.second } }
+        return GmailApi.appliquerLibelles(app, normaux.filterValues { it.isNotEmpty() }, archivables) +
+            GmailApi.appliquerLibelles(app, garder.filterValues { it.isNotEmpty() }, emptySet())
     }
 }
