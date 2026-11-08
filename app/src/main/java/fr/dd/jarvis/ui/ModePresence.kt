@@ -157,28 +157,48 @@ private suspend fun infosDuJour(app: JarvisApp): String {
 
 /**
  * Déclenchement automatique du mode présence : téléphone EN CHARGE et IMMOBILE (posé), sans toucher l'écran depuis
- * [delaiMs]. Bouger le téléphone le referme. Le capteur ne tourne que pendant que JARVIS est à l'écran.
+ * [delaiMs]. S'il a été ouvert automatiquement ([auto]), le reprendre en main (téléphone incliné de plus de 35° par
+ * rapport à sa position posée) le referme ; ouvert à la main, il ne se ferme qu'en touchant l'écran ou par Retour.
+ * Le capteur ne tourne que pendant que JARVIS est à l'écran.
  */
 @Composable
-fun PresenceAuto(actif: Boolean, dernierToucher: () -> Long, ouvert: Boolean, onOuvrir: () -> Unit, onFermer: () -> Unit, delaiMs: Long = 45_000) {
+fun PresenceAuto(actif: Boolean, dernierToucher: () -> Long, ouvert: Boolean, auto: Boolean, onOuvrir: () -> Unit, onFermer: () -> Unit, delaiMs: Long = 45_000) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(actif, ouvert) {
-        if (!actif) return@LaunchedEffect
+    LaunchedEffect(actif, ouvert, auto) {
+        if (!actif || (ouvert && !auto)) return@LaunchedEffect
         lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
             val immobile = Immobilite(ctx)
             immobile.demarrer()
             try {
-                while (true) {
+                if (ouvert) {
+                    // Position « posée » de référence, puis surveillance : pris en main = forte inclinaison qui dure.
+                    delay(1500)
+                    val reference = immobile.gravite.copyOf()
+                    var depuis = 0L
+                    while (true) {
+                        delay(300)
+                        if (inclinaison(reference, immobile.gravite) > 35f) {
+                            if (depuis == 0L) depuis = System.currentTimeMillis()
+                            else if (System.currentTimeMillis() - depuis > 600) { onFermer(); break }
+                        } else depuis = 0L
+                    }
+                } else while (true) {
                     delay(2000)
                     val calme = System.currentTimeMillis() - maxOf(immobile.dernierMouvement, dernierToucher())
-                    if (!ouvert && enCharge(ctx) && calme > delaiMs) onOuvrir()
-                    // Téléphone pris en main : on revient à l'écran normal.
-                    if (ouvert && System.currentTimeMillis() - immobile.dernierMouvement < 1500) onFermer()
+                    if (enCharge(ctx) && calme > delaiMs) { onOuvrir(); break }
                 }
             } finally { immobile.arreter() }
         }
     }
+}
+
+/** Angle (degrés) entre deux directions de la gravité : de combien le téléphone a été incliné (testable). */
+internal fun inclinaison(a: FloatArray, b: FloatArray): Float {
+    val na = kotlin.math.sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]); val nb = kotlin.math.sqrt(b[0] * b[0] + b[1] * b[1] + b[2] * b[2])
+    if (na < 1f || nb < 1f) return 0f
+    val c = ((a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (na * nb)).coerceIn(-1f, 1f)
+    return Math.toDegrees(kotlin.math.acos(c).toDouble()).toFloat()
 }
 
 private fun enCharge(ctx: Context): Boolean {
@@ -192,6 +212,9 @@ private class Immobilite(ctx: Context) : SensorEventListener {
     private val sm = ctx.getSystemService(SensorManager::class.java)
     @Volatile var dernierMouvement = System.currentTimeMillis()
     private var precedent: FloatArray? = null
+    /** Direction de la gravité, lissée (filtre passe-bas). */
+    @Volatile var gravite = floatArrayOf(0f, 0f, 9.81f)
+    private var initialisee = false
 
     fun demarrer() {
         val a = sm?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) ?: return
@@ -204,6 +227,10 @@ private class Immobilite(ctx: Context) : SensorEventListener {
         val p = precedent
         if (p != null && bouge(p, e.values)) dernierMouvement = System.currentTimeMillis()
         precedent = e.values.copyOf()
+        val g = gravite.copyOf()
+        val k = if (initialisee) 0.15f else 1f
+        for (i in 0..2) g[i] += (e.values[i] - g[i]) * k
+        gravite = g; initialisee = true
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}

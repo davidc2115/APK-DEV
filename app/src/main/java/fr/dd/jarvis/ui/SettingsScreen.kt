@@ -894,6 +894,21 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     }
                 }
                 if (freeboxResult.isNotBlank()) Text(freeboxResult, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+                // Diagnostic brut du disque (disque annoncé vide alors qu'il est plein, etc.) : texte à copier tel quel.
+                if (store.freeboxAppToken.value.isNotBlank()) {
+                    var diagDisque by remember { mutableStateOf("") }
+                    Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        HudButton(if (diagDisque == "…") "Diagnostic…" else "🩺 Diagnostic du disque", enabled = diagDisque != "…") {
+                            diagDisque = "…"
+                            scope.launch { diagDisque = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.ai.FreeboxOs.diagnosticDisque(app) } }
+                        }
+                        if (diagDisque.length > 1) HudButton("Copier") {
+                            (ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                                .setPrimaryClip(android.content.ClipData.newPlainText("diagnostic Freebox", diagDisque))
+                        }
+                    }
+                    if (diagDisque.length > 1) Text(diagDisque, color = HudText, fontSize = 10.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(top = 6.dp))
+                }
                 Text("À savoir : le droit « settings » doit être activé dans Freebox OS › Paramètres de la Freebox › Gestion des accès › Applications pour modifier les réglages réseau. L'accès distant sécurisé sera utilisé après l'association locale.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
             }
         }

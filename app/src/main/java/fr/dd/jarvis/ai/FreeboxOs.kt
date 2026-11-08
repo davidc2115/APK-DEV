@@ -364,6 +364,58 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
         liste(json(app, "fs/ls/${b64("/")}", s)).firstOrNull { cle(it.optString("name")) == cle(chemin.trim('/')) }?.optString("path")?.takeIf { it.isNotBlank() }
     }.getOrNull()
 
+    /**
+     * Diagnostic détaillé du disque (réponses brutes de la Freebox) : disques et partitions annoncés, racine de
+     * l'explorateur, puis chaque forme de listage essayée sur chaque disque. Sert à comprendre un disque « vide ».
+     */
+    fun diagnosticDisque(app: JarvisApp): String = try {
+        avecSession(app) { s ->
+            buildString {
+                append("🩺 Diagnostic du disque de la Freebox (API v${version(app)})\n")
+                val disques = runCatching { liste(json(app, "storage/disk/", s)) }
+                disques.onFailure { append("storage/disk : ❌ ${it.message}\n") }
+                disques.getOrNull()?.forEach { d ->
+                    append("\n💽 Disque ${d.optInt("id")} : type=${d.optString("type")} état=${d.optString("state")} modèle=${d.optString("model")} ${taille(d.optLong("total_bytes"))}\n")
+                    liste(d.optJSONArray("partitions")).forEach { p ->
+                        append("   • partition « ${p.optString("label")} » état=${p.optString("state")} fs=${p.optString("fstype")} " +
+                            "chemin=${deB64(p.optString("path"))} [${p.optString("path")}] utilisé=${taille(p.optLong("used_bytes"))} libre=${taille(p.optLong("free_bytes"))}\n")
+                    }
+                }
+                fun essai(libelle: String, segment: String) {
+                    val r = runCatching { requete(app, "fs/ls/$segment", s) }
+                    r.onFailure { append("   $libelle → ❌ ${it.message}\n"); return }
+                    val rep = r.getOrThrow(); val t = String(rep.octets, Charsets.UTF_8)
+                    val j = runCatching { JSONObject(t) }.getOrNull()
+                    val res = j?.opt("result")
+                    val n = (res as? org.json.JSONArray)?.length()
+                    append("   $libelle → HTTP ${rep.code} success=${j?.optBoolean("success")} " +
+                        (if (n != null) "$n élément(s)" else "result=${res?.javaClass?.simpleName ?: "absent"}") +
+                        (j?.optString("error_code")?.takeIf { it.isNotBlank() }?.let { " erreur=$it (${j.optString("msg")})" } ?: "") + "\n")
+                    if (n != null && n > 0) (res as org.json.JSONArray).let { a -> for (i in 0 until minOf(6, a.length())) a.optJSONObject(i)?.let { o -> append("      - ${o.optString("type")} « ${o.optString("name")} » → ${deB64(o.optString("path"))}\n") } }
+                    if (n == null && j == null) append("      brut : ${t.replace(Regex("\\s+"), " ").take(200)}\n")
+                }
+                append("\n📂 Racine de l'explorateur :\n")
+                essai("ls / (paramètres)", b64("/") + "?countSubFolder=1&removeHidden=1")
+                essai("ls / (sans paramètre)", b64("/"))
+                val racine = runCatching { liste(json(app, "fs/ls/${b64("/")}", s)) }.getOrDefault(emptyList())
+                val cibles = (disques.getOrNull().orEmpty().flatMap { d -> liste(d.optJSONArray("partitions")).map { deB64(it.optString("path")) to it.optString("path") } } +
+                    racine.filter { it.optString("type") == "dir" }.map { deB64(it.optString("path")).ifBlank { "/" + it.optString("name") } to it.optString("path") })
+                    .filter { it.first.isNotBlank() }.distinctBy { it.first }
+                cibles.take(4).forEach { (chemin, p64) ->
+                    append("\n📁 $chemin :\n")
+                    if (p64.isNotBlank()) essai("chemin d'origine", enUrl(p64))
+                    essai("chemin réencodé", b64(chemin))
+                    essai("avec paramètres", b64(chemin) + "?countSubFolder=1&removeHidden=1")
+                    essai("avec « / » final", b64(chemin.trimEnd('/') + "/"))
+                    essai("fichiers cachés inclus", b64(chemin) + "?removeHidden=0")
+                    runCatching { json(app, "fs/info/${b64(chemin)}", s) as? JSONObject }.getOrNull()?.let { i ->
+                        append("   info → type=${i.optString("type")} dossiers=${i.optInt("foldercount", -1)} fichiers=${i.optInt("filecount", -1)} taille=${taille(i.optLong("size"))}\n")
+                    }
+                }
+            }
+        }
+    } catch (e: Exception) { "❌ Diagnostic impossible : ${e.message ?: e.javaClass.simpleName}" }
+
     /** Réponse brute de la Freebox (diagnostic d'une liste vide inexpliquée). */
     private fun brut(app: JarvisApp, s: String, chemin: String): String = runCatching {
         val r = requete(app, "fs/ls/${b64(chemin)}", s)
@@ -442,7 +494,11 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
                 (if (vols.isEmpty()) " La Freebox ne signale aucun disque monté : vérifie le branchement du disque USB." else " Demande-moi « liste le disque de la box » pour voir les dossiers disponibles.")
         val l = ls(app, s, chemin)
         val titre = "📂 Freebox › ${chemin.trim('/').replace("/", " › ")}"
-        if (l.isEmpty()) return entete + "$titre : dossier vide (aucun fichier)."
+        if (l.isEmpty()) {
+            val v = vols.firstOrNull { it.chemin.trimEnd('/').equals(chemin.trimEnd('/'), true) }
+            return entete + "$titre : la Freebox ne renvoie aucun élément." +
+                (if (v != null && v.utilise > 200L * 1024 * 1024) " ⚠️ Pourtant ${taille(v.utilise)} sont occupés sur ce disque : ce n'est PAS un disque vide. Lance l'action « diagnostic » (ou Réglages › Réseau › Box › « Diagnostic du disque ») et envoie le résultat." else "")
+        }
         return entete + "$titre — ${l.count { it.optString("type") != "dir" }} fichier(s), ${l.count { it.optString("type") == "dir" }} dossier(s)\n" + lignes(l)
     }
 
@@ -754,6 +810,7 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
         val a = JSONObject().put("chemin", chemin)
         return when (action.lowercase()) {
             "partages", "lister" -> gerer(app, "fichiers", JSONObject().put("chemin", if (action.lowercase() == "partages") "" else chemin), confirm)
+            "diagnostic" -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { diagnosticDisque(app) }
             "lire" -> gerer(app, "lire_fichier", a, confirm)
             "telecharger" -> gerer(app, "recuperer_fichier", a, confirm)
             "envoyer" -> gerer(app, "envoyer_fichier", JSONObject().put("fichier", fichier).put("destination", chemin), confirm)
@@ -802,6 +859,7 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
             val vols = volumes(app, s)
             lireTexte(app, s, unSeul(trouverElements(app, s, a.optString("chemin"), vols), a.optString("chemin")))
         }
+        "diagnostic", "diagnostic_disque" -> diagnosticDisque(app)
         "disques", "stockage" -> volumes(app, s).let { v -> if (v.isEmpty()) "💽 La Freebox ne signale aucun disque (branché, alimenté et visible dans Freebox OS ?)." else "💽 Disques de la Freebox :\n" + v.joinToString("\n") { "• " + libelleVolume(it) + (if (it.chemin.isNotBlank()) " → ${it.chemin}" else "") } }
         "telechargements", "telechargements_en_cours", "downloads" -> telechargements(app, s)
         "etat", "statut", "" -> {
