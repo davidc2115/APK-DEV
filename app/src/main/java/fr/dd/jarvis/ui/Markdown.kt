@@ -46,9 +46,15 @@ fun openLink(ctx: Context, url: String) {
         }
         return
     }
+    // Chemin ou lien local vers une image de JARVIS (« images/img_….png », file://…) : ouvert dans la visionneuse.
+    if (!url.startsWith("http", true)) {
+        val nom = url.substringAfterLast('/').substringBefore('?')
+        if (Regex("(?i).+\\.(png|jpe?g|webp)$").matches(nom) && fichierMedia(ctx, "jarvis-img", nom).exists()) { ouvrirMedia(ctx, "jarvis-img", nom); return }
+    }
     try {
         ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     } catch (_: Exception) {
+        android.widget.Toast.makeText(ctx, "Impossible d'ouvrir ce lien : $url", android.widget.Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -137,7 +143,7 @@ private fun MdLines(lines: List<String>, color: Color, accent: Color) {
     val ctx = LocalContext.current
     var i = 0
     while (i < lines.size) {
-        val line = lines[i].trimEnd()
+        val line = imagesLocales(ctx, lines[i].trimEnd())
         i++
         // Image, vidéo ou fichier n'importe où dans la ligne (même reformulé par Hermès) : affiché en vrai, pas en lien.
         val morceaux = if (line.contains("jarvis-") && !line.trimStart().startsWith("|")) fr.dd.jarvis.ai.Medias.decouper(line) else null
@@ -211,6 +217,21 @@ private fun Table(rows: List<String>, color: Color, accent: Color, ctx: Context)
             }
             HudDivider()
         }
+    }
+}
+
+/** Lien ou chemin vers un fichier image (relatif, absolu, file://, content:// de JARVIS) — pas une adresse web. */
+private val LIEN_IMAGE_LOCALE = Regex("""!?\[([^\]]*)]\(((?!https?:|jarvis-)[^)\s]*?([\w.\-]+\.(?:png|jpe?g|webp)))\)|(?<![\w(/:-])((?:file://)?/[^\s)]*/images/([\w.\-]+\.(?:png|jpe?g|webp)))""", RegexOption.IGNORE_CASE)
+
+/**
+ * Image générée citée sous une autre forme que « jarvis-img: » (Hermès écrit parfois « ![images](images/img_….png) »,
+ * un chemin du téléphone ou un lien file://) : si le fichier existe dans les images de JARVIS, on l'affiche quand même.
+ */
+internal fun imagesLocales(ctx: Context, ligne: String): String {
+    if (!ligne.contains('.') || ligne.contains("jarvis-img:")) return ligne
+    return LIEN_IMAGE_LOCALE.replace(ligne) { m ->
+        val nom = m.groupValues[3].ifBlank { m.groupValues[5] }
+        if (nom.isNotBlank() && fichierMedia(ctx, "jarvis-img", nom).exists()) "![image](jarvis-img:$nom)" else m.value
     }
 }
 

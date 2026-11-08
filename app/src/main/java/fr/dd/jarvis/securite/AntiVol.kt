@@ -61,24 +61,33 @@ object AntiVol {
     private val FORME = Regex("^\\s*jarvis[\\s,:;.!-]+(\\S+)\\s*(.*)$", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
 
     /** « JARVIS 482913 VOL » → (code, action, argument) ; null si ce n'est pas la forme d'une commande. */
+    private fun actionDe(motBrut: String): Action? = when (normaliser(motBrut).trim().trimEnd('.', '!', '?')) {
+        "vol", "vole", "volee", "perdu", "perdue", "alerte" -> Action.VOL
+        "verrouille", "verrouiller", "verrou", "bloque", "lock" -> Action.VERROUILLE
+        "sonne", "sonner", "alarme", "sirene", "ring", "bip" -> Action.SONNE
+        "ou", "position", "localise", "localisation", "gps", "loc", "where" -> Action.POSITION
+        "suivi", "suis", "suivre", "track" -> Action.SUIVI
+        "message", "msg", "affiche", "ecris" -> Action.MESSAGE
+        "stop", "fin", "arret", "arrete", "retrouve", "ok" -> Action.STOP
+        "aide", "help", "?", "" -> Action.AIDE
+        else -> null
+    }
+
     internal fun lire(texte: String): Commande? {
         val m = FORME.matchEntire(texte.trim()) ?: return null
-        val code = m.groupValues[1].trimEnd(',', '.', ':', ';', '!')
-        if (code.length < 4) return null
-        val reste = m.groupValues[2].trim()
-        val mot = normaliser(reste.substringBefore(' ').substringBefore('\n')).trim().trimEnd('.', '!', '?')
-        val argument = reste.substringAfter(' ', "").trim()
-        val action = when (mot) {
-            "vol", "vole", "volee", "perdu", "perdue", "alerte" -> Action.VOL
-            "verrouille", "verrouiller", "verrou", "bloque", "lock" -> Action.VERROUILLE
-            "sonne", "sonner", "alarme", "sirene", "ring", "bip" -> Action.SONNE
-            "ou", "position", "localise", "localisation", "gps", "loc", "where" -> Action.POSITION
-            "suivi", "suis", "suivre", "track" -> Action.SUIVI
-            "message", "msg", "affiche", "ecris" -> Action.MESSAGE
-            "stop", "fin", "arret", "arrete", "retrouve", "ok" -> Action.STOP
-            "aide", "help", "?", "" -> Action.AIDE
-            else -> null
+        var code = m.groupValues[1].trimEnd(',', '.', ':', ';', '!')
+        var reste = m.groupValues[2].trim()
+        // « JARVIS VOL 123456 » : la commande écrite avant le code est acceptée aussi.
+        if (actionDe(code) != null) {
+            val suivant = reste.substringBefore(' ').substringBefore('\n').trimEnd(',', '.', ':', ';', '!')
+            if (suivant.length >= 4 && actionDe(suivant) == null) {
+                reste = (code + " " + reste.removePrefix(reste.substringBefore(' ').substringBefore('\n'))).trim()
+                code = suivant
+            }
         }
+        if (code.length < 4) return null
+        val action = actionDe(reste.substringBefore(' ').substringBefore('\n'))
+        val argument = reste.substringAfter(' ', "").trim()
         return Commande(code, action, argument)
     }
 
@@ -121,7 +130,10 @@ object AntiVol {
 
     // ------------------------------------------------------------------ limitation des essais
 
-    private fun cle(numero: String) = numero.filter { it.isDigit() }.takeLast(9)
+    private fun cle(numero: String) = numero.filter { it.isDigit() }.takeLast(9).ifBlank { "nom:" + normaliser(numero).trim() }
+
+    /** Un vrai numéro de téléphone (pour répondre par SMS) ? */
+    internal fun estNumero(numero: String) = numero.count { it.isDigit() } >= 6 && !numero.any { it.isLetter() }
 
     /** Ce numéro est-il bloqué (3 mauvais codes en une heure → 24 h) ? */
     internal fun bloque(echecs: JSONObject, numero: String, maintenant: Long): Boolean {
@@ -154,16 +166,79 @@ object AntiVol {
     // ------------------------------------------------------------------ réception
 
     /** SMS reçu : renvoie vrai s'il s'agissait d'une commande anti-vol (traitée ou refusée). */
-    fun recevoir(app: JarvisApp, numero: String, texte: String): Boolean {
+    fun recevoir(app: JarvisApp, numero: String, texte: String, via: String = "SMS"): Boolean {
         val c = lire(texte) ?: return false
         if (c.action == null) return false
-        if (!app.store.antivolActif.value || app.store.antivolCode.value.isBlank()) return true
+        // Le même message peut arriver deux fois (SMS reçu + notification de l'appli de messagerie) : traité une seule fois.
+        if (dejaTraite(texte)) return true
+        if (!app.store.antivolActif.value || app.store.antivolCode.value.isBlank()) {
+            journal(app, "⚠️ Commande reçue ($via) mais l'anti-vol est " + (if (app.store.antivolCode.value.isBlank()) "sans code secret" else "désactivé") + " : rien fait")
+            return true
+        }
         val echecs = runCatching { JSONObject(app.store.antivolEchecs.value) }.getOrDefault(JSONObject())
         if (bloque(echecs, numero, System.currentTimeMillis())) { journal(app, "⛔ Commande ignorée (numéro bloqué) : $numero"); return true }
         if (!verifier(c.code, app.store.antivolCode.value)) { noterEchec(app, numero); return true }
-        journal(app, "✅ ${c.action.name} depuis $numero")
+        journal(app, "✅ ${c.action.name} depuis $numero ($via)" + (if (!estNumero(numero)) " — réponse par SMS impossible (numéro inconnu)" else ""))
         portee.launch { executer(app, c, numero) }
         return true
+    }
+
+    private val recents = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    internal fun dejaTraite(texte: String, maintenant: Long = System.currentTimeMillis()): Boolean {
+        val k = MessageDigest.getInstance("SHA-256").digest(texte.trim().replace(Regex("\\s+"), " ").lowercase().toByteArray()).joinToString("") { "%02x".format(it) }
+        recents.entries.removeIf { maintenant - it.value > 90_000L }
+        return recents.putIfAbsent(k, maintenant) != null
+    }
+
+    /**
+     * Secours quand Android ne transmet pas le SMS à JARVIS : message parti en « Chat » (RCS, Google Messages),
+     * blocage Xiaomi/HyperOS, autorisation SMS refusée. La notification de l'appli de messagerie contient le texte :
+     * la commande est traitée à partir d'elle (3 s plus tard, pour laisser passer le SMS direct qui a le numéro).
+     */
+    fun depuisNotification(app: JarvisApp, titre: String, texte: String, n: android.app.Notification) {
+        if (lire(texte)?.action == null) return
+        val numero = numeroDe(app, titre, n)
+        portee.launch {
+            kotlinx.coroutines.delay(3000)
+            runCatching { recevoir(app, numero.ifBlank { titre.ifBlank { "inconnu" } }, texte, via = "notification") }
+        }
+    }
+
+    /** Numéro de l'expéditeur d'une notification de messagerie : fiche « tel: », titre en chiffres, ou contact du même nom. */
+    private fun numeroDe(app: JarvisApp, titre: String, n: android.app.Notification): String {
+        val e = n.extras
+        if (Build.VERSION.SDK_INT >= 28) {
+            val personnes = runCatching {
+                @Suppress("DEPRECATION") (e.getParcelableArrayList<android.app.Person>(android.app.Notification.EXTRA_PEOPLE_LIST) ?: arrayListOf())
+            }.getOrDefault(arrayListOf())
+            val messages = runCatching {
+                @Suppress("DEPRECATION") e.getParcelableArray(android.app.Notification.EXTRA_MESSAGES)?.mapNotNull { (it as? android.os.Bundle)?.getParcelable<android.app.Person>("sender_person") }
+            }.getOrNull().orEmpty()
+            (messages.reversed() + personnes).mapNotNull { it.uri }.firstOrNull { it.startsWith("tel:") }?.let { return android.net.Uri.decode(it.removePrefix("tel:")) }
+        }
+        if (estNumero(titre)) return titre.trim()
+        if (titre.isBlank() || ContextCompat.checkSelfPermission(app, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return ""
+        return runCatching {
+            app.contentResolver.query(android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                arrayOf(android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER),
+                android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " = ?", arrayOf(titre.trim()), null)?.use { c ->
+                if (c.moveToFirst()) c.getString(0) else null
+            }
+        }.getOrNull().orEmpty()
+    }
+
+    /** Ce que JARVIS comprend d'un texte de commande (test dans les Réglages, rien n'est exécuté). */
+    fun tester(app: JarvisApp, texte: String): String {
+        val c = lire(texte) ?: return "❌ Pas reconnu : le message doit commencer par « JARVIS », puis ton code, puis la commande (ex. « JARVIS monCode VOL »)."
+        if (c.action == null) return "❌ Commande inconnue après le code. Commandes : VOL · VERROUILLE · SONNE · OU · SUIVI · MESSAGE <texte> · STOP · AIDE."
+        val code = when {
+            app.store.antivolCode.value.isBlank() -> "⚠️ aucun code secret enregistré"
+            verifier(c.code, app.store.antivolCode.value) -> "✅ code correct"
+            else -> "❌ code incorrect (attention aux majuscules et aux espaces)"
+        }
+        return "Commande ${c.action.name}" + (if (c.argument.isNotBlank()) " « ${c.argument.take(60)} »" else "") + " · $code" +
+            (if (!app.store.antivolActif.value) " · ⚠️ anti-vol désactivé" else "")
     }
 
     private suspend fun executer(app: JarvisApp, c: Commande, numero: String) {
@@ -340,7 +415,7 @@ object AntiVol {
     // ------------------------------------------------------------------ état pour l'écran de réglages
 
     data class Etat(val sms: Boolean, val envoi: Boolean, val localisation: Boolean, val arrierePlan: Boolean, val admin: Boolean,
-                    val superposition: Boolean, val pleinEcran: Boolean, val accessibilite: Boolean)
+                    val superposition: Boolean, val pleinEcran: Boolean, val accessibilite: Boolean, val notifications: Boolean = false, val contacts: Boolean = false)
 
     fun etat(ctx: Context): Etat {
         fun ok(p: String) = ContextCompat.checkSelfPermission(ctx, p) == PackageManager.PERMISSION_GRANTED
@@ -352,10 +427,15 @@ object AntiVol {
             superposition = android.provider.Settings.canDrawOverlays(ctx),
             pleinEcran = Build.VERSION.SDK_INT < 34 || ctx.getSystemService(NotificationManager::class.java).canUseFullScreenIntent(),
             accessibilite = fr.dd.jarvis.service.JarvisAccessibilityService.instance != null,
+            notifications = androidx.core.app.NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName),
+            contacts = ok(Manifest.permission.READ_CONTACTS),
         )
     }
 
-    private fun sms(ctx: Context, numero: String, texte: String) { runCatching { fr.dd.jarvis.device.Telephony.envoyer(ctx, numero, texte) } }
+    private fun sms(ctx: Context, numero: String, texte: String) {
+        if (!estNumero(numero)) return   // expéditeur connu seulement par son nom (notification) : pas de réponse possible
+        runCatching { fr.dd.jarvis.device.Telephony.envoyer(ctx, numero, texte) }
+    }
 }
 
 /** SMS reçus : les commandes anti-vol sont traitées immédiatement (avant toute autre lecture). */
@@ -363,12 +443,19 @@ class AntiVolSmsReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION) return
         val app = context.applicationContext as? JarvisApp ?: return
+        // Diagnostic (Réglages › Sécurité › Anti-vol) : preuve qu'Android transmet bien les SMS à JARVIS.
+        runCatching { app.store.antivolDernierSms.set(System.currentTimeMillis().toString()) }
         val messages = runCatching { Telephony.Sms.Intents.getMessagesFromIntent(intent) }.getOrNull() ?: return
-        // Un SMS long arrive en plusieurs morceaux : on les recolle par expéditeur.
-        messages.groupBy { it.displayOriginatingAddress ?: it.originatingAddress ?: "" }.forEach { (numero, parts) ->
-            val texte = parts.joinToString("") { it.displayMessageBody ?: it.messageBody ?: "" }
-            if (numero.isNotBlank()) runCatching { AntiVol.recevoir(app, numero, texte) }
-        }
+        val fin = goAsync()
+        Thread {
+            try {
+                // Un SMS long arrive en plusieurs morceaux : on les recolle par expéditeur.
+                messages.groupBy { it.displayOriginatingAddress ?: it.originatingAddress ?: "" }.forEach { (numero, parts) ->
+                    val texte = parts.joinToString("") { it.displayMessageBody ?: it.messageBody ?: "" }
+                    if (numero.isNotBlank()) runCatching { AntiVol.recevoir(app, numero, texte) }
+                }
+            } finally { fin.finish() }
+        }.start()
     }
 }
 

@@ -92,7 +92,17 @@ class JarvisNotificationListener : NotificationListenerService() {
             val texte = (e.getCharSequence(Notification.EXTRA_BIG_TEXT) ?: e.getCharSequence(Notification.EXTRA_TEXT))?.toString().orEmpty()
             if (titre.isBlank() && texte.isBlank()) return
             // Commande anti-vol (« JARVIS <code> … ») : jamais gardée, résumée ni lue à voix haute (elle contient le code).
-            if (fr.dd.jarvis.securite.AntiVol.ressembleCommande(texte)) return
+            // Dernier message d'une conversation (style « messagerie ») : c'est lui qui vient d'arriver.
+            val dernierMessage = runCatching {
+                @Suppress("DEPRECATION") e.getParcelableArray(Notification.EXTRA_MESSAGES)?.lastOrNull()?.let { (it as? android.os.Bundle)?.getCharSequence("text")?.toString() }
+            }.getOrNull().orEmpty()
+            val commande = listOf(texte, dernierMessage).firstOrNull { it.isNotBlank() && fr.dd.jarvis.securite.AntiVol.ressembleCommande(it) }
+            if (commande != null) {
+                // Secours de l'anti-vol : message en « Chat » (RCS) ou SMS non transmis par Android → lu ici.
+                if (estMessage(sbn.packageName) || n.category == Notification.CATEGORY_MESSAGE)
+                    (applicationContext as? fr.dd.jarvis.JarvisApp)?.let { a -> runCatching { fr.dd.jarvis.securite.AntiVol.depuisNotification(a, titre, commande, n) } }
+                return
+            }
             val label = try { packageManager.getApplicationLabel(packageManager.getApplicationInfo(sbn.packageName, 0)).toString() } catch (_: Exception) { sbn.packageName }
             if (appel) {
                 val candidat = Regex("(?:\\+?\\d[\\d .()/-]{6,}\\d)").find("$titre $texte")?.value.orEmpty()

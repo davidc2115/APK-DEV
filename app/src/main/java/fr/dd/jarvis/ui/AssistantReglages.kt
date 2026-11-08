@@ -250,6 +250,12 @@ fun AntiVolPanel(app: JarvisApp) {
         ligne(etat.sms && etat.envoi, "Recevoir et envoyer les SMS") {
             demander.launch(arrayOf(android.Manifest.permission.RECEIVE_SMS, android.Manifest.permission.SEND_SMS))
         }
+        ligne(etat.notifications, "Accès aux notifications (secours : message parti en « Chat » RCS, ou SMS bloqué par Xiaomi)") {
+            ouvrir(android.content.Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))
+        }
+        ligne(etat.contacts, "Contacts (retrouver le numéro d'un expéditeur enregistré, pour lui répondre)") {
+            demander.launch(arrayOf(android.Manifest.permission.READ_CONTACTS))
+        }
         ligne(etat.localisation, "Localisation précise") {
             demander.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))
         }
@@ -282,6 +288,30 @@ fun AntiVolPanel(app: JarvisApp) {
             HudChip("↻") { tick++ }
         }
         if (msg.isNotBlank()) Text(msg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+        // ---- Diagnostic : est-ce qu'Android transmet les SMS à JARVIS ? JARVIS comprend-il le message ?
+        Spacer(Modifier.height(8.dp))
+        Text("Diagnostic", color = HudText, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        val dernierSms = store.antivolDernierSms.value.toLongOrNull()
+        Text(
+            if (dernierSms != null) "📶 Dernier SMS transmis à JARVIS par Android : " + java.text.SimpleDateFormat("dd/MM à HH:mm", java.util.Locale.FRANCE).format(java.util.Date(dernierSms))
+            else "📶 Aucun SMS transmis à JARVIS par Android pour l'instant.",
+            color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+        Text("Si ton message de test n'apparaît pas ici, il n'est pas arrivé à JARVIS en SMS :\n" +
+            "• envoyé depuis un Android avec Google Messages, il part souvent en « Chat » (RCS, bulle sombre) et non en SMS : JARVIS le lit alors par les notifications (accès ci-dessus), ou désactive les « Fonctionnalités de chat » sur le téléphone qui envoie ;\n" +
+            "• autorisation SMS refusée sans fenêtre (Android 15+) : Infos de l'appli › ⋮ › « Autoriser les paramètres restreints », puis « Autoriser » ci-dessus ;\n" +
+            "• Xiaomi : Infos de l'appli › Autorisations › SMS sur « Autoriser », et « Démarrage automatique » activé.",
+            color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+        HudChip("Infos de l'appli") {
+            ouvrir(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:${ctx.packageName}")))
+        }
+        var essai by remember { mutableStateOf("") }
+        var resultatEssai by remember { mutableStateOf("") }
+        HudTextField(essai, { essai = it; resultatEssai = "" }, Modifier.fillMaxWidth().padding(top = 6.dp),
+            label = "Vérifier un message (rien n'est exécuté)", placeholder = "JARVIS monCode VOL", password = false)
+        HudButton("Vérifier ce message", Modifier.padding(top = 4.dp), enabled = essai.isNotBlank()) {
+            resultatEssai = fr.dd.jarvis.securite.AntiVol.tester(app, essai)
+        }
+        if (resultatEssai.isNotBlank()) Text(resultatEssai, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
         val journal = remember(tick, store.antivolJournal.value) {
             runCatching { org.json.JSONArray(store.antivolJournal.value) }.getOrDefault(org.json.JSONArray()).let { a ->
                 (0 until a.length()).mapNotNull { a.optJSONObject(it) }.takeLast(5).reversed()

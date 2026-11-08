@@ -403,6 +403,8 @@ class Store(context: Context) {
     val antivolSimVerrou = BPref("antivolSimVerrou", true)
     val antivolEchecs = SPref("antivolEchecs", "{}")
     val antivolJournal = SPref("antivolJournal", "[]")
+    /** Heure (ms) du dernier SMS transmis par Android à JARVIS (diagnostic de l'anti-vol). */
+    val antivolDernierSms = SPref("antivolDernierSms", "")
     val antivolVolume = SPref("antivolVolume", "")
     val annApps = SPref("annApps", "")
     private val annModes = androidx.compose.runtime.mutableStateMapOf<String, String>().also { m ->
