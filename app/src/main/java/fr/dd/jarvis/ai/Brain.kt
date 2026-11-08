@@ -25,6 +25,12 @@ class Brain(
      * AUTOMATIQUEMENT la demande — avec sa mémoire, ses notes, skills et outils — sans que l'utilisateur ait à le nommer.
      */
     suspend fun reply(history: List<ChatMsg>, pourHermes: Boolean = false, onTexte: ((String) -> Unit)? = null, onStatus: (String) -> Unit): String {
+        // L'avatar montre que JARVIS réfléchit tant que la réponse se prépare.
+        fr.dd.jarvis.voice.Presence.debutReflexion()
+        try { return replyInterne(history, pourHermes, onTexte, onStatus) } finally { fr.dd.jarvis.voice.Presence.finReflexion() }
+    }
+
+    private suspend fun replyInterne(history: List<ChatMsg>, pourHermes: Boolean, onTexte: ((String) -> Unit)?, onStatus: (String) -> Unit): String {
         val suivi = Suivi()
         val r = try { repondre(history, pourHermes, onStatus, suivi, onTexte) }
         catch (e: kotlinx.coroutines.CancellationException) { throw e }

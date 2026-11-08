@@ -1391,6 +1391,9 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 Text("La voix naturelle utilise tes clés Gemini (synthèse vocale) ; si elle n'est pas disponible (quota, réseau), la voix Android prend le relais automatiquement. Dans tous les cas, JARVIS commence à parler dès la première phrase de la réponse.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
                 Spacer(Modifier.height(6.dp))
                 HudChip(if (store.muteBeeps.value) "🔇 Bips coupés pendant l'écoute" else "Bips actifs", store.muteBeeps.value) { store.muteBeeps.set(!store.muteBeeps.value) }
+                Spacer(Modifier.height(6.dp))
+                HudChip(if (store.presenceAuto.value) "🐉 Mode présence automatique : oui" else "Mode présence automatique : non", store.presenceAuto.value) { store.presenceAuto.set(!store.presenceAuto.value) }
+                Text("Téléphone posé en charge, JARVIS ouvert et plus touché depuis 45 s : le dragon passe en plein écran (heure, prochain rendez-vous, météo, sous-titres de ce qu'il dit). Le reprendre en main le referme. Aussi disponible par le bouton « 🐉 Présence » de l'accueil.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
                 Spacer(Modifier.height(10.dp))
             }
         }

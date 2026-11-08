@@ -301,7 +301,8 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
     private fun deB64(v: String) = runCatching { String(java.util.Base64.getDecoder().decode(v), Charsets.UTF_8) }.getOrDefault("")
 
     /** Disque vu par la Freebox (interne, USB, SATA…) : partition montée → chemin dans l'explorateur. */
-    private data class Volume(val chemin: String, val libelle: String, val type: String, val etat: String, val total: Long, val libre: Long)
+    private data class Volume(val chemin: String, val libelle: String, val type: String, val etat: String, val total: Long, val libre: Long,
+                              val path64: String = "", val utilise: Long = 0)
 
     /** Tous les disques et partitions connus de la Freebox (API stockage), montés ou non. */
     private fun volumes(app: JarvisApp, s: String): List<Volume> = runCatching {
@@ -311,15 +312,63 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
             if (parts.isEmpty()) listOf(Volume("", d.optString("model").ifBlank { "Disque" }, type, d.optString("state"), d.optLong("total_bytes"), 0))
             else parts.map { p ->
                 val chemin = deB64(p.optString("path")).ifBlank { p.optString("label").takeIf { it.isNotBlank() }?.let { "/$it" }.orEmpty() }
-                Volume(chemin, p.optString("label").ifBlank { d.optString("model").ifBlank { "Disque" } }, type, p.optString("state"), p.optLong("total_bytes"), p.optLong("free_bytes"))
+                Volume(chemin, p.optString("label").ifBlank { d.optString("model").ifBlank { "Disque" } }, type, p.optString("state"), p.optLong("total_bytes"), p.optLong("free_bytes"),
+                    p.optString("path"), p.optLong("used_bytes").takeIf { it > 0 } ?: (p.optLong("total_bytes") - p.optLong("free_bytes")).coerceAtLeast(0))
             }
-        }
+        }.onEach { v -> if (v.path64.isNotBlank() && v.chemin.isNotBlank()) chemins64[v.chemin.trimEnd('/')] = v.path64 }
     }.getOrDefault(emptyList())
     internal fun cle(t: String) = java.text.Normalizer.normalize(t.lowercase(), java.text.Normalizer.Form.NFD)
         .replace(Regex("\\p{M}+"), "").replace(Regex("[^a-z0-9]+"), " ").trim().removeSuffix("s")
 
-    private fun ls(app: JarvisApp, s: String, chemin: String): List<JSONObject> =
-        liste(json(app, "fs/ls/${b64(chemin)}?onlyFolder=0&countSubFolder=1&removeHidden=1", s)).filter { it.optString("name") !in setOf(".", "..") }
+    /** Base64 tel que renvoyé par la Freebox, prêt pour l'URL (« / », « + » et « = » échappés). */
+    private fun enUrl(path64: String) = path64.replace("+", "%2B").replace("/", "%2F").replace("=", "%3D")
+
+    /**
+     * Contenu d'un dossier. Pour la racine et les disques (« /Elements »), si la Freebox renvoie une liste vide, on
+     * réessaie autrement avant de conclure : chemin exact renvoyé par la Freebox (base64 d'origine, recommandé par
+     * l'API), sans paramètres, avec « / » final — certains disques USB (NTFS, exFAT) ne répondent qu'à l'une des formes.
+     */
+    /** Chemins base64 exacts déjà vus (chemin lisible → base64 de la Freebox), réutilisés pour les dossiers suivants. */
+    private val chemins64 = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    private fun retenir(parent: String, l: List<JSONObject>) {
+        if (chemins64.size > 5000) chemins64.clear()
+        l.forEach { o -> o.optString("path").takeIf { it.isNotBlank() }?.let { chemins64[parent.trimEnd('/') + "/" + o.optString("name")] = it } }
+    }
+
+    /** Base64 d'un chemin : celui que la Freebox a donné s'il est connu, sinon l'encodage UTF-8. */
+    private fun p64(chemin: String) = chemins64[chemin.trimEnd('/')] ?: b64brut(chemin)
+
+    private fun ls(app: JarvisApp, s: String, chemin: String, path64: String? = null): List<JSONObject> {
+        fun lire(segment: String) = liste(json(app, "fs/ls/$segment", s)).filter { it.optString("name") !in setOf(".", "..") }
+            .also { if (it.isNotEmpty()) retenir(chemin, it) }
+        val params = "?countSubFolder=1&removeHidden=1"
+        val connu = path64?.takeIf { it.isNotBlank() } ?: chemins64[chemin.trimEnd('/')]
+        connu?.let { if (chemin.isNotBlank()) chemins64[chemin.trimEnd('/')] = it }
+        val premier = connu?.let { enUrl(it) } ?: b64(chemin)
+        val l = lire(premier + params)
+        val profondeur = chemin.trim('/').split('/').count { it.isNotBlank() }
+        if (l.isNotEmpty() || profondeur > 1) return l
+        val variantes = listOfNotNull(
+            premier,
+            path64?.let { b64(chemin) }, path64?.let { b64(chemin) + params },
+            b64(chemin.trimEnd('/') + "/") + params,
+            (if (profondeur == 1) racine64(app, s, chemin) else null)?.let { enUrl(it) + params },
+        ).distinct().filter { it != premier + params }
+        for (v in variantes) runCatching { lire(v) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { return it }
+        return l
+    }
+
+    /** Chemin base64 exact d'un disque d'après la liste de la racine (la Freebox recommande de réutiliser ses chemins). */
+    private fun racine64(app: JarvisApp, s: String, chemin: String): String? = runCatching {
+        liste(json(app, "fs/ls/${b64("/")}", s)).firstOrNull { cle(it.optString("name")) == cle(chemin.trim('/')) }?.optString("path")?.takeIf { it.isNotBlank() }
+    }.getOrNull()
+
+    /** Réponse brute de la Freebox (diagnostic d'une liste vide inexpliquée). */
+    private fun brut(app: JarvisApp, s: String, chemin: String): String = runCatching {
+        val r = requete(app, "fs/ls/${b64(chemin)}", s)
+        "HTTP ${r.code} · " + String(r.octets, Charsets.UTF_8).replace(Regex("\\s+"), " ").take(240)
+    }.getOrElse { it.message ?: it.javaClass.simpleName }
 
     /**
      * Retrouve un dossier du disque de la box à partir d'un nom approximatif (« téléchargement », « films/séries »,
@@ -375,11 +424,17 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
             // Vue d'ensemble : chaque disque monté et son premier niveau.
             if (vols.isEmpty() && runCatching { ls(app, s, "/") }.getOrDefault(emptyList()).isEmpty())
                 return entete + "💽 La Freebox ne signale aucun disque. Vérifie que le disque USB est branché et alimenté, puis qu'il apparaît dans Freebox OS › Explorateur de fichiers (ou Paramètres › Disques)."
-            val racines = if (montes.isNotEmpty()) montes.map { it.chemin } else ls(app, s, "/").filter { it.optString("type") == "dir" }.map { "/" + it.optString("name") }
-            return entete + bilanDisques + racines.joinToString("\n\n") { r ->
-                val l = runCatching { ls(app, s, r) }.getOrElse { e -> return@joinToString "📂 $r : ❌ ${e.message}" }
+            val racines: List<Pair<String, Volume?>> = if (montes.isNotEmpty()) montes.map { it.chemin to it }
+                else ls(app, s, "/").filter { it.optString("type") == "dir" }.map { "/" + it.optString("name") to null }
+            return entete + bilanDisques + racines.joinToString("\n\n") { (r, v) ->
+                val l = runCatching { ls(app, s, r, v?.path64) }.getOrElse { e -> return@joinToString "📂 $r : ❌ ${e.message}" }
                 "📂 Freebox › ${r.trim('/').replace("/", " › ")} — ${l.count { it.optString("type") != "dir" }} fichier(s), ${l.count { it.optString("type") == "dir" }} dossier(s)\n" +
-                    (if (l.isEmpty()) "(vide)" else lignes(l))
+                    (if (l.isNotEmpty()) lignes(l)
+                    else if (v != null && v.utilise > 200L * 1024 * 1024)
+                        "⚠️ La Freebox annonce ${taille(v.utilise)} occupés sur ce disque mais ne renvoie AUCUN élément : ce n'est pas un disque vide. " +
+                            "Vérifie dans Freebox OS › Explorateur de fichiers que son contenu s'affiche (s'il est vide là aussi, le disque est peut-être monté en lecture seule ou mal éjecté : débranche-le proprement puis rebranche-le).\n" +
+                            "Réponse de la Freebox : ${brut(app, s, r)}"
+                    else "(vide)")
             }
         }
         val chemin = resoudre(app, s, demande, vols)
@@ -460,7 +515,7 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
                 return enfants.filter { it.optString("name") in noms }.map { element(it, p) }
             }
             // Le dossier parent n'existe pas tel quel : peut-être un dossier entier (« Vidéos/Films »).
-            resoudre(app, s, d, vols)?.let { c -> return listOf(Element(c, b64brut(c), c.substringAfterLast('/'), true, 0)) }
+            resoudre(app, s, d, vols)?.let { c -> return listOf(Element(c, p64(c), c.substringAfterLast('/'), true, 0)) }
             return emptyList()
         }
         return chercher(app, s, nom, vols)
@@ -505,7 +560,7 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
         if (!creer) throw IllegalArgumentException("le dossier « ${demande.trim('/')} » n'existe pas sur le disque de la box.")
         var courant = base ?: racines(app, s, vols).firstOrNull() ?: throw IllegalStateException("aucun disque monté sur la Freebox.")
         for (m in morceaux.drop(i)) {
-            json(app, "fs/mkdir/", s, "POST", JSONObject().put("parent", b64brut(courant)).put("dirname", m))
+            json(app, "fs/mkdir/", s, "POST", JSONObject().put("parent", p64(courant)).put("dirname", m))
             courant = courant.trimEnd('/') + "/" + m
         }
         return courant
@@ -544,7 +599,7 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
 
     private fun deplacerOuCopier(app: JarvisApp, s: String, l: List<Element>, dest: String, copier: Boolean, remplacer: Boolean): String {
         require(l.isNotEmpty()) { "rien à ${if (copier) "copier" else "déplacer"}." }
-        val corps = JSONObject().put("files", org.json.JSONArray(l.map { it.path64 })).put("dst", b64brut(dest)).put("mode", if (remplacer) "overwrite" else "both")
+        val corps = JSONObject().put("files", org.json.JSONArray(l.map { it.path64 })).put("dst", p64(dest)).put("mode", if (remplacer) "overwrite" else "both")
         val r = json(app, if (copier) "fs/cp/" else "fs/mv/", s, "POST", corps)
         return tache(app, s, r, (if (copier) "Copié" else "Déplacé") + " vers ${lisible(dest)} : " + l.joinToString(", ") { it.nom } +
             if (!remplacer) "" else " (fichiers existants remplacés)")
@@ -599,7 +654,7 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
         val ws = client.newWebSocket(req, object : okhttp3.WebSocketListener() {
             override fun onOpen(webSocket: okhttp3.WebSocket, response: okhttp3.Response) {
                 webSocket.send(JSONObject().put("action", "upload_start").put("request_id", id).put("size", f.length())
-                    .put("dirname", b64brut(dossier)).put("filename", nom).put("force", if (ecraser) "overwrite" else "missing").toString())
+                    .put("dirname", p64(dossier)).put("filename", nom).put("force", if (ecraser) "overwrite" else "missing").toString())
             }
             override fun onMessage(webSocket: okhttp3.WebSocket, text: String) {
                 val j = runCatching { JSONObject(text) }.getOrNull() ?: return

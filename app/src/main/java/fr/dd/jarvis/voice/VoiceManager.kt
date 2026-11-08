@@ -43,6 +43,8 @@ class VoiceManager(private val ctx: Context) {
     var onFinal: (String) -> Unit = {}
     var onFail: (String) -> Unit = {}
     var onListening: (Boolean) -> Unit = {}
+    /** Écoute commencée / finie : avertit l'appelant et l'avatar (Presence). */
+    private fun signalerEcoute(actif: Boolean) { Presence.ecouteChange(actif); onListening(actif) }
     /** Écoute en conversation terminée : personne n'a commencé à parler dans le délai. */
     var onSilence: () -> Unit = {}
     /** Coupe les bips de la reconnaissance (écoute en arrière-plan). */
@@ -111,7 +113,7 @@ class VoiceManager(private val ctx: Context) {
         fenetreFin = 0
         main.removeCallbacks(finFenetre)
         main.postDelayed(unmuteLater, 900)
-        onListening(false)
+        signalerEcoute(false)
         onSilence()
     }
 
@@ -150,7 +152,7 @@ class VoiceManager(private val ctx: Context) {
                 private fun aParle() { if (!parole) { parole = true; main.removeCallbacks(finFenetre) } }
                 override fun onReadyForSpeech(params: Bundle?) {}
                 override fun onBeginningOfSpeech() { if (actif()) aParle() }
-                override fun onRmsChanged(rmsdB: Float) {}
+                override fun onRmsChanged(rmsdB: Float) { if (actif()) Presence.microDb(rmsdB) }
                 override fun onBufferReceived(buffer: ByteArray?) {}
                 override fun onEndOfSpeech() {}
                 override fun onEvent(eventType: Int, params: Bundle?) {}
@@ -171,7 +173,7 @@ class VoiceManager(private val ctx: Context) {
                     }
                     fenetreFin = 0
                     main.postDelayed(unmuteLater, 900)
-                    onListening(false)
+                    signalerEcoute(false)
                     when (error) {
                         SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> onFail("")
                         SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> onFail("Permission micro refusée.")
@@ -191,14 +193,14 @@ class VoiceManager(private val ctx: Context) {
                         if (fenetreFin > 0 && System.currentTimeMillis() < fenetreFin - 400) { onPartial(""); demarrer(0); return }
                         fenetreFin = 0
                         main.postDelayed(unmuteLater, 900)
-                        onListening(false)
+                        signalerEcoute(false)
                         onFail("")
                         return
                     }
                     fenetreFin = 0
                     main.removeCallbacks(finFenetre)
                     main.postDelayed(unmuteLater, 900)
-                    onListening(false)
+                    signalerEcoute(false)
                     val t = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
                     if (t.isNotBlank()) onFinal(t) else onFail("")
                 }
@@ -209,7 +211,7 @@ class VoiceManager(private val ctx: Context) {
                     // Un résultat partiel peut être une hallucination sur un bruit ou l'écho du TTS.
                     // Seul onBeginningOfSpeech (détection vocale du moteur) démarre la fenêtre de parole ;
                     // le texte partiel reste affiché sans empêcher la fermeture sur silence.
-                    if (t.isNotBlank() && !estEcho(t)) onPartial(t)
+                    if (t.isNotBlank() && !estEcho(t)) { Presence.entendu = t; onPartial(t) }
                 }
             })
             val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -223,7 +225,7 @@ class VoiceManager(private val ctx: Context) {
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1000L)
             }
             r.startListening(i)
-            onListening(true)
+            signalerEcoute(true)
             val reste = fenetreFin - System.currentTimeMillis()
             if (fenetreFin > 0) main.postDelayed(finFenetre, reste.coerceAtLeast(500))
         }
@@ -234,7 +236,7 @@ class VoiceManager(private val ctx: Context) {
             fenetreFin = 0
             main.removeCallbacks(finFenetre)
             recognizer?.stopListening()
-            onListening(false)
+            signalerEcoute(false)
         }
     }
 
@@ -475,6 +477,16 @@ class VoiceManager(private val ctx: Context) {
         @Volatile private var piste: AudioTrack? = null
         private var formatPiste = 0 to 0
         private val dits = StringBuilder()
+        /** Enveloppe de l'audio écrit dans la piste (un niveau toutes les 20 ms) : la bouche du dragon suit la voix. */
+        private val enveloppe = java.util.ArrayList<Float>()
+        @Volatile private var fenetre = 480
+
+        private fun niveauPiste(): Float {
+            val t = piste ?: return 0f
+            val pos = runCatching { t.playbackHeadPosition.toLong() and 0xFFFFFFFFL }.getOrDefault(0L)
+            val i = (pos / fenetre.coerceAtLeast(1)).toInt()
+            return synchronized(enveloppe) { enveloppe.getOrNull(i) ?: 0f }
+        }
 
         /** Ajoute du texte (morceau de réponse en cours d'écriture). */
         fun ajouter(texte: String) {
@@ -522,6 +534,7 @@ class VoiceManager(private val ctx: Context) {
         /** Arrête la voix ; [sansSuite] = sans appeler la suite (nouvelle demande, arrêt demandé). */
         fun arreter(sansSuite: Boolean) {
             if (!fini.compareAndSet(false, true)) return
+            Presence.parole(false); Presence.sousTitre = ""
             barge?.stop(); barge = null
             runCatching { piste?.pause(); piste?.flush() }
             runCatching { tts?.stop() }
@@ -557,6 +570,7 @@ class VoiceManager(private val ctx: Context) {
 
         /** La voix sort vraiment : l'écoute de coupure démarre (ses 400 premières ms servent à mesurer l'écho). */
         private fun voixLancee() {
+            Presence.parole(true)
             if (coupe) main.post {
                 if (!fini.get() && barge == null) barge = BargeIn { main.post { if (!fini.get()) arreter(sansSuite = false) } }.also { it.start() }
             }
@@ -588,6 +602,7 @@ class VoiceManager(private val ctx: Context) {
                     preparer()
                     dits.append(morceau).append(' ')
                     derniereVoix = dits.toString(); finVoix = System.currentTimeMillis() + 60_000
+                    Presence.sousTitre = morceau
                     if (audio != null) jouer(audio) else direAndroid(morceau)
                     occupe = false
                 }
@@ -610,11 +625,22 @@ class VoiceManager(private val ctx: Context) {
                     .setTransferMode(AudioTrack.MODE_STREAM).setBufferSizeInBytes(min * 4).build()
                 formatPiste = a.frequence to a.canaux
                 ecrits = 0L
+                fenetre = (a.frequence / 50).coerceAtLeast(1)
+                synchronized(enveloppe) { enveloppe.clear() }
+                Presence.brancher { niveauPiste() }
                 runCatching { piste?.setVolume(volume) }
                 piste?.play()
                 voixLancee()
             }
             val t = piste ?: return
+            // Fenêtres alignées sur la position de lecture (l'enveloppe continue celle des morceaux précédents).
+            val env = Presence.enveloppe(a.pcm, a.canaux, fenetre)
+            synchronized(enveloppe) {
+                val attendu = (ecrits / fenetre).toInt()
+                while (enveloppe.size < attendu) enveloppe.add(0f)
+                while (enveloppe.size > attendu) enveloppe.removeAt(enveloppe.size - 1)
+                env.forEach { enveloppe.add(it) }
+            }
             var off = 0
             while (off < a.pcm.size && !fini.get()) {
                 val n = t.write(a.pcm, off, minOf(8192, a.pcm.size - off))
@@ -651,6 +677,9 @@ class VoiceManager(private val ctx: Context) {
             finsAndroid[id] = latch
             var premier = true
             debutsAndroid[id] = { if (premier) { premier = false; voixLancee() } }
+            // Voix Android : l'audio n'est pas accessible, la bouche suit un rythme syllabique simulé.
+            val debutSim = System.nanoTime()
+            Presence.brancher { Presence.simule((System.nanoTime() - debutSim) / 1e9) }
             val params = if (volume < 1f) Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, volume) } else null
             val ok = runCatching { t.speak(morceau, TextToSpeech.QUEUE_ADD, params, id) }.getOrDefault(TextToSpeech.ERROR)
             if (ok == TextToSpeech.ERROR) { finsAndroid.remove(id); debutsAndroid.remove(id); return }
@@ -659,6 +688,7 @@ class VoiceManager(private val ctx: Context) {
         }
 
         private fun terminerApres() {
+            Presence.parole(false); Presence.sousTitre = ""
             barge?.stop(); barge = null
             finVoix = System.currentTimeMillis()
             main.post {

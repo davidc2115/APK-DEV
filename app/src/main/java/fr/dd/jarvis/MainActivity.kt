@@ -16,6 +16,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -215,8 +216,18 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
         mutableStateOf(if (f.exists()) f.readText() else null)
     }
 
+    // Mode présence : JARVIS plein écran (bouton de l'accueil, ou automatique quand le téléphone est posé en charge).
+    val dernierToucher = remember { longArrayOf(System.currentTimeMillis()) }
+    fr.dd.jarvis.ui.PresenceAuto(actif = app.store.presenceAuto.value, dernierToucher = { dernierToucher[0] }, ouvert = terrain == "presence",
+        onOuvrir = { terrain = "presence" }, onFermer = { if (terrain == "presence") terrain = "" })
+
     // Clavier ouvert : l'en-tête et la barre d'onglets se masquent pour laisser toute la place à la conversation.
     val imeOpen = androidx.compose.foundation.layout.WindowInsets.Companion.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
+    Box(Modifier.fillMaxSize().pointerInput(Unit) {
+        awaitPointerEventScope {
+            while (true) { awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial); dernierToucher[0] = System.currentTimeMillis() }
+        }
+    }) {
     Column(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
         if (!(imeOpen && tab == 1)) Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
@@ -243,7 +254,8 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
             else if (terrain == "sante") fr.dd.jarvis.ui.SanteEcran(app, onFermer = { terrain = "" }, onDemander = demander)
             else when (tab) {
                 0 -> fr.dd.jarvis.ui.CentreCommande(app, vm, onOnglet = { tab = it }, onDemander = demander,
-                    onRegarder = { terrain = "regarder" }, onCompteRendu = { terrain = "compte_rendu" }, onSante = { terrain = "sante" })
+                    onRegarder = { terrain = "regarder" }, onCompteRendu = { terrain = "compte_rendu" }, onSante = { terrain = "sante" },
+                    onPresence = { terrain = "presence" })
                 1 -> ChatScreen(vm, app.store, app)
                 2 -> PlanningScreen(app)
                 3 -> MailScreen(app)
@@ -275,6 +287,8 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
                 }
             }
         }
+    }
+    if (terrain == "presence") fr.dd.jarvis.ui.ModePresence(app, statut = vm.status, onParler = { vm.toggleListening() }, onFermer = { terrain = "" })
     }
 
     crash?.let { text ->
