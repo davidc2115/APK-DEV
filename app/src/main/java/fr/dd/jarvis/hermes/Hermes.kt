@@ -203,6 +203,7 @@ RAPPELS ET AUTOMATISMES : un simple rappel (« rappelle-moi de … à … », un
 OUTILS JARVIS EN PAUSE : si un outil mcp_jarvis répond « unreachable after N consecutive failures / Auto-retry available in ~Ns », ce n'est NI une panne de Jarvis NI une protection : ton client MCP met les outils Jarvis en pause ~60 s après plusieurs échecs d'affilée. Dis-le tel quel, cite les échecs précédents (leur texte réel), puis réessaie une fois le délai écoulé.
 CARNET DE NOTES : « prends note », « note que », « mets ça dans mes notes » = mcp_jarvis_note_prendre (carnet partagé avec Jarvis, ajouté à la rubrique du sujet, jamais remplacé). Prendre note n'est JAMAIS une action : n'appelle ni Home Assistant, ni une autre application, ni ta propre mémoire à la place, même si la note parle du poêle, d'un réglage ou d'une entité. « Relis mes notes sur X » = mcp_jarvis_notes_lire. AVANT d'agir sur un appareil ou un sujet (Home Assistant, application, procédure), applique ce que les notes de l'utilisateur disent (bloc « NOTES DE L'UTILISATEUR » ou mcp_jarvis_notes_lire) : une entité notée s'utilise telle quelle.
 HOME ASSISTANT : pour consulter ou piloter Home Assistant (états, lumières, chauffage, scènes, automatisations, tableaux de bord, configuration YAML), utilise UNIQUEMENT les outils API mcp_jarvis_ha_entites / ha_etat / ha_service / ha_config / ha_dashboard. ADMINISTRATION COMPLÈTE (tu as les droits administrateur) = mcp_jarvis_ha_admin : supprimer, renommer, désactiver, masquer une entité ou changer son identifiant/pièce/icône ; appareils et pièces ; intégrations (ajouter avec leur formulaire, options, recharger, supprimer) ; automatisations/scripts/scènes de l'interface (lire, créer, modifier, supprimer) ; aides (interrupteurs virtuels, nombres, minuteurs…) ; HACS (hacs_installer, hacs_chercher, hacs_telecharger, hacs_depot_ajouter) ; vérifier, journal, redémarrer ; et action ws / rest pour tout le reste de l'API. Ne réponds jamais que tu n'as pas accès à une fonction de Home Assistant : passe par ha_admin. « Où est X » / localisation d'une personne = mcp_jarvis_ha_position (zone, adresse, coordonnées, fraîcheur) : rends sa réponse telle quelle. Si ha_entites ne trouve rien, montre les entités les plus proches qu'il propose et demande laquelle est la bonne. N'utilise le SSH ou Docker pour Home Assistant que si l'utilisateur le demande explicitement (conteneur, logs, mise à jour, redémarrage du serveur) ou si l'API ne répond pas — dans ce cas, dis-le avant de passer par le serveur.
+IMAGES, VIDÉOS ET FICHIERS CRÉÉS : quand un outil Jarvis renvoie une ligne « ![image](jarvis-img:NOM) », « [▶ Lire la vidéo](jarvis-video-ia:NOM) » ou « [📎 …](jarvis-file:NOM) », recopie-la TELLE QUELLE, sur une ligne à part, dans ta réponse (jamais transformée en simple lien, jamais résumée) : c'est elle qui affiche le média dans la conversation.
 FREEBOX — DISQUE ET APPAREILS : « le disque (dur) de la box », un dossier (Téléchargements, Vidéos…) ou des fichiers sur la box = action fichiers de l'outil mcp_jarvis_freebox (paramètre chemin) ; « les appareils connectés » = action appareils. Ne confonds jamais les deux. Pour MODIFIER le disque de la box, utilise les actions de fichiers du même outil (association Freebox OS, aucun SMB/FTP ni SSH) : chercher_fichier (nom), renommer (chemin + nouveau_nom), deplacer / copier (chemin + destination ; plusieurs chemins séparés par « ; » ou joker « Téléchargements/*.mkv »), supprimer_fichier (chemin), creer_dossier (chemin), envoyer_fichier (fichier du téléphone + destination), recuperer_fichier (chemin). En cas de doute sur le nom exact, fais d'abord chercher_fichier.
 SERVEUR / SSH : le serveur de l'utilisateur est DÉJÀ configuré dans Jarvis (adresse, utilisateur, clé ou mot de passe) : utilise mcp_jarvis_ssh_commande / mcp_jarvis_ssh_fichier / mcp_jarvis_serveur_diagnostic, ainsi que tes propres notes, skills et ponts déjà mis en place ; ne redemande jamais les identifiants à l'utilisateur.
 CONTRÔLE DE L'ÉCRAN : mcp_jarvis_voir_ecran regarde l'écran (capture analysée) et mcp_jarvis_piloter_telephone agit dans n'importe quelle application en vérifiant visuellement chaque geste ; utilise-les (ou mcp_jarvis_agent) quand une action n'a pas d'outil dédié ou pour vérifier qu'elle a abouti.
@@ -352,16 +353,23 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
         }
         if (boite != null) PontMcp.boiteActive = boite
         PontMcp.statutActif = statut
+        val medias = mutableListOf<fr.dd.jarvis.ai.Medias.Media>()
+        val mediasPrecedents = PontMcp.mediasActifs
+        PontMcp.mediasActifs = medias
         statut("🪽 Hermès réfléchit…")
         val appel = AtomicReference<okhttp3.Call?>(null)
         // Réponse en flux : chaque morceau de texte part tout de suite (affichage et voix) tant que l'utilisateur attend.
         val ecrit = AtomicBoolean(false)
         val texte: ((String) -> Unit)? = onTexte?.let { f -> { d: String -> ecrit.set(true); if (attendu.get()) f(d) } }
         val travail = fond.async {
-            try { executer(app, messages, appel, texte, statut) } finally {
+            try {
+                // Images / vidéos / fichiers créés par les outils : toujours affichés, même si Hermès les a reformulés.
+                executer(app, messages, appel, texte, statut)?.let { r -> fr.dd.jarvis.ai.Medias.completer(r, synchronized(medias) { medias.toList() }) }
+            } finally {
                 // Le pont n'est rendu que s'il est encore le nôtre (une autre demande a pu le prendre entre-temps).
                 if (boite != null && PontMcp.boiteActive === boite) PontMcp.boiteActive = precedente
                 if (PontMcp.statutActif === statut) PontMcp.statutActif = statutPrecedent
+                if (PontMcp.mediasActifs === medias) PontMcp.mediasActifs = mediasPrecedents
             }
         }
         // Le temps écoulé reste visible : on voit que ça avance (et sur quel outil), pas un écran figé.

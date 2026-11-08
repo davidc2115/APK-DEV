@@ -57,6 +57,8 @@ object PontMcp {
     @Volatile var boiteActive: ToolBox? = null
     /** Ligne d'état de la conversation en cours (« Hermès → Jarvis : … »), posée par Hermes.appeler. */
     @Volatile var statutActif: ((String) -> Unit)? = null
+    /** Médias (images, vidéos, fichiers) produits par les outils pendant la demande d'Hermès en cours. */
+    @Volatile var mediasActifs: MutableList<fr.dd.jarvis.ai.Medias.Media>? = null
 
     /** Outils jamais exposés à Hermès (gestion d'Hermès lui-même → pas de boucle). */
     private val EXCLUS = setOf("hermes", "hermes_deleguer")
@@ -79,7 +81,13 @@ object PontMcp {
         private fun boite() = boiteActive ?: defaut
         override fun jeton() = app.store.mcpJeton.value
         override fun outils(): JSONArray = convertirOutils(boite().schemaAll())
-        override fun appeler(nom: String, args: JSONObject): Pair<String, Boolean> {
+        override fun appeler(nom: String, args: JSONObject): Pair<String, Boolean> =
+            appelerOutil(nom, args).also { (texte, _) ->
+                // Images, vidéos et fichiers créés : notés pour être affichés même si Hermès les reformule ou les oublie.
+                runCatching { mediasActifs?.let { l -> synchronized(l) { l.addAll(fr.dd.jarvis.ai.Medias.extraire(texte)) } } }
+            }
+
+        private fun appelerOutil(nom: String, args: JSONObject): Pair<String, Boolean> {
             if (nom in EXCLUS) return "Outil indisponible : $nom" to true
             // Certains clients Hermes préfixent les noms MCP par mcp_jarvis_.
             val nomCanonique = nom.removePrefix("mcp_jarvis_")

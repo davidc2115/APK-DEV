@@ -35,6 +35,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 fun openLink(ctx: Context, url: String) {
+    // Médias créés par JARVIS (images, vidéos IA, fichiers) : ouverts dans la visionneuse du téléphone.
+    val media = Regex("^(jarvis-img|jarvis-video-ia|jarvis-file):(.+)$").find(url.trim())
+    if (media != null) { ouvrirMedia(ctx, media.groupValues[1], media.groupValues[2]); return }
     // Liens internes « jarvis://ecran/rappels » : ouvrent un écran de l'application (page des rappels…).
     if (url.startsWith("jarvis://ecran/")) {
         runCatching {
@@ -47,6 +50,24 @@ fun openLink(ctx: Context, url: String) {
         ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     } catch (_: Exception) {
     }
+}
+
+/** Fichier local d'un média JARVIS (images/, videos_ia/, exports/). */
+internal fun fichierMedia(ctx: Context, type: String, nom: String): java.io.File = java.io.File(java.io.File(ctx.filesDir, when (type) {
+    "jarvis-img" -> "images"; "jarvis-video-ia" -> "videos_ia"; else -> "exports"
+}), nom.substringAfterLast('/'))
+
+/** Ouvre une image / vidéo / fichier créé par JARVIS dans l'application adaptée (visionneuse, lecteur…). */
+internal fun ouvrirMedia(ctx: Context, type: String, nom: String, partager: Boolean = false) {
+    val file = fichierMedia(ctx, type, nom)
+    if (!file.exists()) { android.widget.Toast.makeText(ctx, "Fichier introuvable : ${file.name}", android.widget.Toast.LENGTH_SHORT).show(); return }
+    runCatching {
+        val uri = androidx.core.content.FileProvider.getUriForFile(ctx, ctx.packageName + ".files", file)
+        val mime = when (type) { "jarvis-img" -> "image/" + (if (file.name.endsWith(".jpg", true) || file.name.endsWith(".jpeg", true)) "jpeg" else "png"); "jarvis-video-ia" -> "video/mp4"; else -> fr.dd.jarvis.ai.Fichiers.mimeDe(file.name) }
+        val i = if (partager) Intent.createChooser(Intent(Intent.ACTION_SEND).setType(mime).putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Partager")
+            else Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        ctx.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }.onFailure { android.widget.Toast.makeText(ctx, "Aucune application pour ouvrir ${file.name}", android.widget.Toast.LENGTH_SHORT).show() }
 }
 
 private val inlineRegex = Regex("""\*\*(.+?)\*\*|\[([^\]]+)]\(([^)\s]+)\)""")
@@ -118,23 +139,22 @@ private fun MdLines(lines: List<String>, color: Color, accent: Color) {
     while (i < lines.size) {
         val line = lines[i].trimEnd()
         i++
+        // Image, vidéo ou fichier n'importe où dans la ligne (même reformulé par Hermès) : affiché en vrai, pas en lien.
+        val morceaux = if (line.contains("jarvis-") && !line.trimStart().startsWith("|")) fr.dd.jarvis.ai.Medias.decouper(line) else null
+        if (morceaux != null) {
+            for (m in morceaux) when (m) {
+                is fr.dd.jarvis.ai.Medias.Morceau.Texte -> Line(inline(m.texte, accent), color, 14.sp, FontWeight.Normal, accent, ctx)
+                is fr.dd.jarvis.ai.Medias.Morceau.Image -> ChatImage(m.nom)
+                is fr.dd.jarvis.ai.Medias.Morceau.Video -> ChatVideo(m.nom, accent)
+                is fr.dd.jarvis.ai.Medias.Morceau.Fichier -> FichierChip(m.libelle, m.nom, accent)
+            }
+            continue
+        }
         when {
             line.trimStart().startsWith("|") -> {
                 val rows = mutableListOf(line)
                 while (i < lines.size && lines[i].trimStart().startsWith("|")) { rows += lines[i].trimEnd(); i++ }
                 Table(rows, color, accent, ctx)
-            }
-            line.contains("jarvis-video-ia:") -> {
-                val name = Regex("""jarvis-video-ia:([^)]+)""").find(line)?.groupValues?.get(1).orEmpty()
-                ChatVideo(name, accent)
-            }
-            line.startsWith("![") && line.contains("jarvis-img:") -> {
-                val name = Regex("""jarvis-img:([^)\s]+)""").find(line)?.groupValues?.get(1).orEmpty()
-                ChatImage(name)
-            }
-            line.contains("jarvis-file:") -> {
-                val m = Regex("""\[([^\]]*)]\(jarvis-file:([^)\s]+)\)""").find(line)
-                if (m != null) FichierChip(m.groupValues[1], m.groupValues[2], accent) else Line(inline(line, accent), color, 14.sp, FontWeight.Normal, accent, ctx)
             }
             line.isBlank() -> Spacer(Modifier.height(4.dp))
             line.trim() == "---" || line.trim() == "***" -> {
@@ -194,28 +214,43 @@ private fun Table(rows: List<String>, color: Color, accent: Color, ctx: Context)
     }
 }
 
+/** Miniatures déjà décodées (le chat ne redécode pas l'image à chaque défilement). */
+private val miniatures = android.util.LruCache<String, androidx.compose.ui.graphics.ImageBitmap>(24)
+
 @Composable
 private fun ChatImage(name: String) {
     val ctx = LocalContext.current
-    val file = java.io.File(java.io.File(ctx.filesDir, "images"), name.substringAfterLast('/'))
-    val bmp = androidx.compose.runtime.remember(name) {
-        runCatching {
-            val o = android.graphics.BitmapFactory.Options().apply { inSampleSize = 2 }
-            android.graphics.BitmapFactory.decodeFile(file.absolutePath, o)?.asImageBitmap()
-        }.getOrNull()
-    }
-    if (bmp == null) { androidx.compose.material3.Text("🖼️ (image introuvable)", color = HudDim, fontSize = 12.sp); return }
-    androidx.compose.foundation.Image(
-        bmp, contentDescription = "Image générée",
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(10.dp)).clickable {
+    val accent = LocalAccent.current
+    val file = fichierMedia(ctx, "jarvis-img", name)
+    // Décodage hors du fil principal : le défilement de la conversation reste fluide.
+    val etat = androidx.compose.runtime.produceState<Any?>(initialValue = miniatures.get(file.path), file.path) {
+        if (value != null) return@produceState
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             runCatching {
-                val uri = androidx.core.content.FileProvider.getUriForFile(ctx, ctx.packageName + ".files", file)
-                ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("image/png").putExtra(Intent.EXTRA_STREAM, uri)
-                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Partager l'image").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                val bornes = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                android.graphics.BitmapFactory.decodeFile(file.absolutePath, bornes)
+                var echantillon = 1
+                while (bornes.outWidth / (echantillon * 2) >= 900) echantillon *= 2
+                android.graphics.BitmapFactory.decodeFile(file.absolutePath, android.graphics.BitmapFactory.Options().apply { inSampleSize = echantillon })
+                    ?.asImageBitmap()?.also { miniatures.put(file.path, it) }
+            }.getOrNull() ?: false
+        }
+    }
+    when (val v = etat.value) {
+        null -> Box(Modifier.fillMaxWidth().height(180.dp).padding(vertical = 4.dp).clip(RoundedCornerShape(10.dp)).background(accent.copy(alpha = 0.08f)))
+        is androidx.compose.ui.graphics.ImageBitmap -> Column(Modifier.padding(vertical = 4.dp)) {
+            androidx.compose.foundation.Image(
+                v, contentDescription = "Image générée",
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { ouvrirMedia(ctx, "jarvis-img", name) },
+                contentScale = androidx.compose.ui.layout.ContentScale.FillWidth
+            )
+            Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                androidx.compose.material3.Text("🔍 Ouvrir", color = accent, fontSize = 12.sp, modifier = Modifier.clickable { ouvrirMedia(ctx, "jarvis-img", name) })
+                androidx.compose.material3.Text("↗ Partager", color = accent, fontSize = 12.sp, modifier = Modifier.clickable { ouvrirMedia(ctx, "jarvis-img", name, partager = true) })
             }
-        },
-        contentScale = androidx.compose.ui.layout.ContentScale.FillWidth
-    )
+        }
+        else -> androidx.compose.material3.Text("🖼️ Image introuvable : ${file.name}", color = HudDim, fontSize = 12.sp)
+    }
 }
 
 
