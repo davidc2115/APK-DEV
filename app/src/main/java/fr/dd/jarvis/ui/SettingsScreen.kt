@@ -917,21 +917,20 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 StatusRow("Android Auto installé sur le téléphone", aaInstalle)
                 StatusRow("Connecté à la voiture en ce moment", app.enVoiture)
                 val source = remember(tick) { fr.dd.jarvis.car.VisibiliteAuto.libelleSource(ctx) }
-                val play = remember(tick) { fr.dd.jarvis.car.VisibiliteAuto.commePlayStore(ctx) }
-                StatusRow("Source de l'installation : $source", play)
+                val play = remember(tick) { fr.dd.jarvis.car.VisibiliteAuto.marqueValide(ctx) }
+                StatusRow("Marque « Play Store » reconnue par Android Auto — source : $source", play)
                 Text(
-                    "Depuis Android Auto 17, une appli qui ne vient pas du Play Store n'est acceptée QUE comme appli MÉDIA, avec « Sources inconnues » coché. JARVIS se présente donc UNIQUEMENT comme appli média : ses « écrans voiture » (refusés hors Play Store, et qui pouvaient cacher tout JARVIS) sont désactivés. Dans la voiture, 3 onglets : 🎙️ JARVIS (une tuile micro : bip, tu parles, il répond à voix haute), 📅 Aujourd'hui (tes rendez-vous du jour et de demain ; un appui lance Waze vers l'adresse), ⚡ Raccourcis (demandes toutes faites, relire, reprendre la musique). L'écran de lecture a trois boutons : 🎙️ parler, 🧭 prochain rendez-vous dans Waze, 🔁 relire ; ▶ ouvre aussi le micro. Étapes :\n" +
-                        "1) Le réglage « Sources inconnues » d'Android Auto (obligatoire, JARVIS ne peut pas le cocher lui-même) : « Ouvrir Android Auto » › tout en bas, touche 10 fois « Version » › accepte « Autoriser les paramètres de développement » › menu ⋮ en haut à droite › « Paramètres pour les développeurs » › coche « Sources inconnues ».\n" +
+                    "Android Auto n'affiche une appli hors Play Store que dans deux cas : 1) elle porte une marque « Play Store » posée par l'INSTALLATEUR GOOGLE (bouton « Rendre JARVIS visible » : un appui sur « Mettre à jour », à refaire après chaque mise à jour) — alors tout JARVIS est accepté, écrans voiture compris ; 2) « Sources inconnues » est coché ET c'est une appli média. Dans la voiture, 3 onglets : 🎙️ JARVIS (une tuile micro : bip, tu parles, il répond à voix haute), 📅 Aujourd'hui (tes rendez-vous du jour et de demain ; un appui lance Waze vers l'adresse), ⚡ Raccourcis (demandes toutes faites, relire, reprendre la musique). L'écran de lecture a trois boutons : 🎙️ parler, 🧭 prochain rendez-vous dans Waze, 🔁 relire ; ▶ ouvre aussi le micro. Étapes :\n" +
+                        "1) Touche « 🚗 Rendre JARVIS visible » ci-dessous, puis « Mettre à jour ». Et en plus, par sécurité, le réglage « Sources inconnues » d'Android Auto (JARVIS ne peut pas le cocher lui-même) : « Ouvrir Android Auto » › tout en bas, touche 10 fois « Version » › accepte « Autoriser les paramètres de développement » › menu ⋮ en haut à droite › « Paramètres pour les développeurs » › coche « Sources inconnues ».\n" +
                         "2) Installe la dernière version de JARVIS (son numéro change à chaque version : Android Auto la revérifie), puis « 🔄 Relancer Android Auto » ci-dessous (ou redémarre le téléphone).\n" +
                         "3) Branche-toi à la voiture : JARVIS est dans le lanceur, avec les applis audio (et dans « Personnaliser le lanceur »). S'il n'y est pas, ouvre « 🩺 Diagnostic » dans la minute : il lit le verdict d'Android Auto dans le journal du téléphone (Shizuku ou ADB intégré) — envoie-le-moi.\n" +
-                        "La marque « Play Store » (bouton ci-dessous) ne sert plus pour l'appli média.",
+                        "Une marque posée par Shizuku / ADB (« initiateur com.android.shell ») n'est PAS reconnue par Android Auto : seul l'installateur Google compte.",
                     color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(vertical = 6.dp)
                 )
                 var autoMsg by remember { mutableStateOf("") }
-                HudButton(if (autoMsg == "…") "Réinstallation…" else if (play) "✅ Visible — refaire la réinstallation" else "🚗 Rendre JARVIS visible dans Android Auto",
+                HudButton(if (autoMsg == "…") "Préparation…" else if (play) "✅ Marque Play Store — la reposer" else "🚗 Rendre JARVIS visible (installateur Google)",
                     Modifier.fillMaxWidth(), enabled = autoMsg != "…", filled = !play) {
-                    if (!fr.dd.jarvis.car.VisibiliteAuto.possible(ctx)) autoMsg = "❌ Il faut d'abord Shizuku démarré (ou l'ADB intégré appairé) : Réglages › Téléphone › Contrôle."
-                    else { autoMsg = "…"; scope.launch { autoMsg = fr.dd.jarvis.car.VisibiliteAuto.reinstaller(ctx); tick++ } }
+                    autoMsg = "…"; scope.launch { autoMsg = fr.dd.jarvis.car.VisibiliteAuto.installerCommePlay(ctx); tick++ }
                 }
                 if (autoMsg.isNotBlank() && autoMsg != "…") Text(autoMsg, color = HudText, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
                 Spacer(Modifier.height(6.dp))

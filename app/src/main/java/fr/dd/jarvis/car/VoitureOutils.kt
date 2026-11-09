@@ -119,6 +119,72 @@ object VisibiliteAuto {
 
     fun commePlayStore(ctx: Context) = installateur(ctx) == PLAY
 
+    /** Installateur Google d'Android : seul « initiateur » dont Android Auto croit la source déclarée (Play Store). */
+    const val INSTALLATEUR_GOOGLE = "com.google.android.packageinstaller"
+
+    fun initiateur(ctx: Context): String? = if (android.os.Build.VERSION.SDK_INT >= 30)
+        runCatching { ctx.packageManager.getInstallSourceInfo(ctx.packageName).initiatingPackageName }.getOrNull() else null
+
+    /**
+     * Marque « Play Store » que Android Auto reconnaît : source Play Store ET installation lancée par l'installateur
+     * Google. Posée par le shell (Shizuku / ADB), l'initiateur est « com.android.shell » et Android Auto l'ignore.
+     */
+    fun marqueValide(ctx: Context) = installateur(ctx) == PLAY && initiateur(ctx) == INSTALLATEUR_GOOGLE
+
+    private fun intentionInstallateur(uri: android.net.Uri) = Intent(Intent.ACTION_VIEW)
+        .setDataAndType(uri, "application/vnd.android.package-archive").setPackage(INSTALLATEUR_GOOGLE)
+
+    fun installateurGoogleDispo(ctx: Context): Boolean = runCatching {
+        ctx.packageManager.queryIntentActivities(intentionInstallateur(android.net.Uri.parse("content://${ctx.packageName}.files/share/jarvis.apk")), 0).isNotEmpty()
+    }.getOrDefault(false)
+
+    /**
+     * Réinstalle JARVIS par-dessus lui-même avec l'installateur GOOGLE et « Play Store » comme source (méthode
+     * « KingInstaller ») : Android Auto l'accepte alors comme une appli du Play Store, écrans voiture compris. Il suffit
+     * de toucher « Mettre à jour » ; données et réglages sont conservés. À refaire après chaque mise à jour manuelle.
+     */
+    suspend fun installerCommePlay(ctx: Context): String {
+        val app = ctx.applicationContext as JarvisApp
+        if (android.os.Build.VERSION.SDK_INT >= 26 && !ctx.packageManager.canRequestPackageInstalls()) {
+            runCatching {
+                ctx.startActivity(Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, android.net.Uri.parse("package:${ctx.packageName}"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+            return "🔐 Autorise JARVIS à « installer des applis inconnues » (écran ouvert), reviens, puis retouche le bouton."
+        }
+        if (!installateurGoogleDispo(ctx)) return "❌ L'installateur Google d'Android (com.google.android.packageinstaller) est absent ou désactivé sur ce téléphone : Android Auto ne peut pas croire à une installation « Play Store »."
+        val info = ctx.applicationInfo
+        if (!info.splitSourceDirs.isNullOrEmpty()) return "❌ JARVIS est installé en plusieurs morceaux (split APK) : réinstallation impossible ici."
+        val dest = File(ctx.cacheDir, "share/jarvis-auto.apk")
+        val copie = withContext(Dispatchers.IO) { runCatching { dest.parentFile?.mkdirs(); File(info.sourceDir).copyTo(dest, overwrite = true); true }.getOrDefault(false) }
+        if (!copie) return "❌ Copie de l'application impossible (espace disque ?)."
+        val uri = androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", dest)
+        app.store.autoVisibilite.set(true)
+        app.store.autoReinstallTs.set(System.currentTimeMillis().toString())
+        val i = intentionInstallateur(uri)
+            .putExtra("android.intent.extra.INSTALLER_PACKAGE_NAME", PLAY)
+            .putExtra("android.intent.extra.NOT_UNKNOWN_SOURCE", true)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        return try {
+            withContext(Dispatchers.Main) { ctx.startActivity(i) }
+            "📦 Touche « Mettre à jour » (ou « Installer ») dans la fenêtre d'Android. JARVIS se ferme quelques secondes puis revient ; ouvre ensuite le 🩺 Diagnostic : « initiateur » doit valoir $INSTALLATEUR_GOOGLE."
+        } catch (e: Throwable) { "❌ Installateur Google impossible à ouvrir : ${e.message ?: e.javaClass.simpleName}" }
+    }
+
+    /**
+     * État du contrôleur d'Android Auto (« CarProjectionValidator » dans dumpsys) : la case « Sources inconnues » et les
+     * applis refusées. Nécessite Shizuku ou l'ADB intégré ; null si illisible.
+     */
+    fun etatValidateur(ctx: Context): Pair<Boolean?, String>? {
+        if (!possible(ctx)) return null
+        val r = runCatching {
+            fr.dd.jarvis.device.PhoneShell.exec(ctx, "dumpsys activity service com.google.android.projection.gearhead 2>/dev/null | grep -i -A30 CarProjectionValidator | head -n 45")
+        }.getOrNull() ?: return null
+        if (r.startsWith("Erreur") || r.startsWith("ADB non") || r.startsWith("Shizuku") || !r.contains("CarProjectionValidator", true)) return null
+        val sources = Regex("(?i)unknownSourcesEnabled\\s*=\\s*(true|false)").find(r)?.groupValues?.get(1)?.toBoolean()
+        return sources to r.lines().filter { it.isNotBlank() }.take(30).joinToString("\n") { "   " + it.trim().take(160) }
+    }
+
     fun libelleSource(ctx: Context): String = when (val i = installateur(ctx)) {
         PLAY -> "Play Store ✅"
         null -> "inconnue (installation manuelle)"
@@ -136,7 +202,8 @@ object VisibiliteAuto {
     fun appliquerMode(ctx: Context) {
         val app = ctx.applicationContext as? JarvisApp ?: return
         val pm = ctx.packageManager
-        val voulu = if (app.store.autoEcrans.value) android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
+        // Écrans voiture : avec une vraie marque Play Store (installateur Google), ou si on les force.
+        val voulu = if (app.store.autoEcrans.value || marqueValide(ctx)) android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
             else android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED
         runCatching {
             if (pm.getComponentEnabledSetting(composantEcrans(ctx)) != voulu)
@@ -176,7 +243,10 @@ object VisibiliteAuto {
             accord != null -> "✅ Android Auto accepte JARVIS"
             else -> "ℹ️ JARVIS vu par Android Auto (verdict non écrit)"
         }
-        return verdict + "\n" + miennes.takeLast(10).joinToString("\n") { "   " + it.substringAfter(": ", it).take(200) }
+        val explication = if (refus != null && miennes.any { it.contains("owners empty", true) })
+            "\n   → Android Auto a demandé au Play Store à qui appartient JARVIS (personne), puis aucune autre règle ne l'a accepté : " +
+                "ni marque « Play Store » posée par l'installateur Google, ni « Sources inconnues » pour l'appli média." else ""
+        return verdict + explication + "\n" + miennes.takeLast(6).joinToString("\n") { "   " + it.substringAfter(": ", it).take(200) }
     }
 
     /** Relevé automatique du verdict peu après le branchement à la voiture (si Shizuku / l'ADB intégré est disponible). */
@@ -205,8 +275,14 @@ object VisibiliteAuto {
         val v = runCatching { pm.getPackageInfo(aa, 0).versionName }.getOrNull()
         append("• Android Auto : ${v?.let { "installé (version $it)" } ?: "❌ non installé"}\n")
         val src = runCatching { if (android.os.Build.VERSION.SDK_INT >= 30) pm.getInstallSourceInfo(ctx.packageName) else null }.getOrNull()
-        append("• Source de JARVIS : ${libelleSource(ctx)} (sans importance pour l'appli média, seul « Sources inconnues » compte)\n")
+        append("• Source de JARVIS : ${libelleSource(ctx)}\n")
         src?.let { append("   installateur=${it.installingPackageName} · initiateur=${it.initiatingPackageName}\n") }
+        append("• Marque « Play Store » reconnue par Android Auto : " + when {
+            marqueValide(ctx) -> "✅ oui (installateur Google + Play Store)"
+            commePlayStore(ctx) -> "❌ non : posée par ${initiateur(ctx)} (Android Auto ne croit que l'installateur Google)"
+            else -> "❌ non"
+        } + "\n")
+        append("• Installateur Google ($INSTALLATEUR_GOOGLE) : " + (if (installateurGoogleDispo(ctx)) "✅ disponible" else "❌ absent ou désactivé") + "\n")
         val media = runCatching { pm.queryIntentServices(Intent("android.media.browse.MediaBrowserService").setPackage(ctx.packageName), 0) }.getOrDefault(emptyList())
         append("• Service MÉDIA (seul accepté par Android Auto 17+ hors Play Store) : " + (if (media.isNotEmpty()) "✅ ${media.first().serviceInfo.name.substringAfterLast('.')}" else "❌ absent") + "\n")
         val caps = capacites(ctx)
@@ -218,10 +294,16 @@ object VisibiliteAuto {
         append("• Version : ${pi?.versionName} (code $code)" + (if (code == 1L) " ⚠️ numéro fixe : Android Auto peut garder son ancien verdict" else "") + "\n")
         val debug = (ctx.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
         append("• Version de JARVIS : ${if (debug) "test (débogable, tous les hôtes acceptés)" else "normale (hôtes Google uniquement)"}\n")
-        append("• « Sources inconnues » dans Android Auto : illisible depuis JARVIS — à vérifier (étape 1)\n")
+        val etat = etatValidateur(ctx)
+        append("• « Sources inconnues » dans Android Auto : " + when (etat?.first) {
+            true -> "✅ cochée (lu dans Android Auto)"
+            false -> "❌ DÉCOCHÉE (lu dans Android Auto) : c'est elle qui bloque l'appli média"
+            null -> "illisible (Shizuku ou ADB intégré nécessaire) — à vérifier"
+        } + "\n")
         append("• Connecté à la voiture : ${if ((ctx.applicationContext as? JarvisApp)?.enVoiture == true) "oui" else "non"}\n")
         append("\n📜 Verdict d'Android Auto (journal système) :\n")
         append(journal(ctx))
+        etat?.second?.let { append("\n\n🔎 Contrôleur d'Android Auto (dumpsys) :\n$it") }
         val avant = (ctx.applicationContext as? JarvisApp)?.store?.autoJournal?.value.orEmpty()
         if (avant.isNotBlank()) append("\n\n🕘 Relevé à la dernière connexion à la voiture :\n$avant")
     }
@@ -265,8 +347,12 @@ object VisibiliteAuto {
         val app = ctx.applicationContext as? JarvisApp ?: return
         if (!app.store.autoVisibilite.value) return
         val recent = System.currentTimeMillis() - (app.store.autoReinstallTs.value.toLongOrNull() ?: 0L) < 10 * 60_000L
-        // La marque « Play Store » ne compte plus pour l'appli média (Android Auto 17+) : plus de rappel après une mise à jour.
-        if (commePlayStore(ctx) && recent) notifier(ctx, "✅ JARVIS réinstallé", "Rebranche le téléphone à la voiture (ou relance Android Auto).", ouvrir = true)
+        appliquerMode(ctx)
+        if (marqueValide(ctx)) {
+            if (recent) notifier(ctx, "✅ JARVIS reconnu « Play Store »", "Rebranche le téléphone à la voiture (ou relance Android Auto) : JARVIS est dans le lanceur.", ouvrir = true)
+        } else if (!recent) {
+            notifier(ctx, "🚗 Android Auto : JARVIS à rétablir", "La mise à jour a retiré la marque « Play Store ». Touche « Rétablir » puis « Mettre à jour » : 10 secondes.", ouvrir = false)
+        }
     }
 
     private fun notifier(ctx: Context, titre: String, texte: String, ouvrir: Boolean) {
@@ -277,8 +363,9 @@ object VisibiliteAuto {
         val b = NotificationCompat.Builder(ctx, CANAL).setSmallIcon(android.R.drawable.ic_menu_directions)
             .setContentTitle(titre).setContentText(texte).setStyle(NotificationCompat.BigTextStyle().bigText(texte))
             .setContentIntent(app).setAutoCancel(true)
-        if (!ouvrir) b.addAction(0, "Rétablir", PendingIntent.getBroadcast(ctx, NOTIF + 1,
-            Intent(ctx, VisibiliteReceiver::class.java).setAction(VisibiliteReceiver.ACTION).setPackage(ctx.packageName), flags))
+        // « Rétablir » ouvre JARVIS, qui lance l'installateur Google (une fenêtre d'Android ne peut s'ouvrir qu'au premier plan).
+        if (!ouvrir) b.addAction(0, "Rétablir", PendingIntent.getActivity(ctx, NOTIF + 1,
+            Intent(ctx, fr.dd.jarvis.MainActivity::class.java).putExtra("auto_play", true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), flags))
         runCatching { nm.notify(NOTIF, b.build()) }
     }
 

@@ -90,6 +90,16 @@ class MainActivity : ComponentActivity() {
 
     fun demarrerEcoute() { if (!vm.listening && !vm.busy) vm.toggleListening() }
 
+    /** Notification « Android Auto : rétablir » : réinstallation par l'installateur Google (marque Play Store). */
+    private fun autoPlay(i: android.content.Intent?) {
+        if (i?.getBooleanExtra("auto_play", false) != true) return
+        i.removeExtra("auto_play")
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+            val r = fr.dd.jarvis.car.VisibiliteAuto.installerCommePlay(this@MainActivity)
+            android.widget.Toast.makeText(this@MainActivity, r.take(180), android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -98,6 +108,7 @@ class MainActivity : ComponentActivity() {
         handleTikTokCallback(intent)
         intent.getStringExtra("terrain")?.takeIf { it.isNotBlank() }?.let { terrainDemande.value = it; intent.removeExtra("terrain") }
         intent.getStringExtra("demande")?.takeIf { it.isNotBlank() }?.let { demandeExterne.value = it; intent.removeExtra("demande") }
+        autoPlay(intent)
     }
 
     /** Retour de la connexion OAuth TikTok (via la page relais GitHub Pages → fr.dd.jarvis://tiktok-callback?...). */
@@ -159,6 +170,7 @@ class MainActivity : ComponentActivity() {
         handleTikTokCallback(intent)
         intent?.getStringExtra("terrain")?.takeIf { it.isNotBlank() }?.let { terrainDemande.value = it; intent.removeExtra("terrain") }
         intent?.getStringExtra("demande")?.takeIf { it.isNotBlank() }?.let { demandeExterne.value = it; intent?.removeExtra("demande") }
+        autoPlay(intent)
         // Widget « dragon » à jour (prochain rendez-vous) à chaque ouverture.
         Thread { runCatching { fr.dd.jarvis.widget.DragonWidget.majTous(applicationContext) } }.start()
         setContent {

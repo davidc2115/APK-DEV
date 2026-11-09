@@ -52,6 +52,9 @@
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
         <package android:name="com.google.android.tts" />
+        <!-- Installateur Google : réinstallation « Play Store » reconnue par Android Auto. -->
+        <package android:name="com.google.android.packageinstaller" />
+        <package android:name="com.google.android.projection.gearhead" />
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <category android:name="android.intent.category.DEFAULT" />
