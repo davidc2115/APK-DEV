@@ -156,7 +156,11 @@ class JarvisApp : Application() {
                     runCatching { fr.dd.jarvis.car.AccueilVoiture.annoncer(this@JarvisApp) }
                     runCatching { fr.dd.jarvis.device.Routines.declencher(this@JarvisApp, "voiture") }
                 }
-                if (!enVoiture && avant) fr.dd.jarvis.car.VoixVoiture.liberer()
+                if (!enVoiture && avant) {
+                    fr.dd.jarvis.car.VoixVoiture.liberer()
+                    // Écoute « Jarvis » allumée seulement pour la voiture (bouton micro d'Android Auto) : on la coupe en sortant.
+                    if (!store.wakeOn.value && fr.dd.jarvis.service.JarvisService.running) runCatching { fr.dd.jarvis.service.JarvisService.stop(this) }
+                }
             }
         }
         // Connexion à un Wi-Fi : analyse automatique du réseau (appareils + IP publique).

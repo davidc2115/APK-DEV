@@ -37,6 +37,9 @@ class JarvisService : Service() {
         @Volatile var running = false
         const val ACTION_STOP = "fr.dd.jarvis.WAKE_STOP"
         const val ACTION_RELANCER = "fr.dd.jarvis.WAKE_RELANCER"
+        /** Android Auto (appli média) : « Parler à JARVIS » → écoute immédiate, comme si on avait dit « Jarvis ». */
+        const val ACTION_ECOUTER = "fr.dd.jarvis.WAKE_ECOUTER"
+        @Volatile private var actuel: JarvisService? = null
         private const val NOTIF = 4001
         private const val NOTIF_REPRISE = 4003
 
@@ -45,6 +48,27 @@ class JarvisService : Service() {
             if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
         }
         fun stop(ctx: Context) { ctx.stopService(Intent(ctx, JarvisService::class.java)) }
+
+        /**
+         * Ouvre le micro de JARVIS (bip puis écoute de la demande) depuis la voiture. Démarre l'écoute si elle était
+         * coupée (elle s'arrête alors en quittant la voiture). Faux si Android refuse.
+         */
+        fun ecouterDepuisVoiture(ctx: Context): Boolean {
+            val s = actuel
+            if (running && s != null) { s.main.post { s.demandeExterne() }; return true }
+            if (!micAccorde(ctx)) return false
+            return try {
+                val i = Intent(ctx, JarvisService::class.java).setAction(ACTION_ECOUTER)
+                if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
+                true
+            } catch (_: Throwable) { false }
+        }
+
+        /** Bouton pause de la voiture : JARVIS se tait et la conversation se referme. */
+        fun interrompreDepuisVoiture() {
+            val s = actuel ?: return
+            s.main.post { s.interrompre() }
+        }
 
         private fun micAccorde(ctx: Context) = ctx.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
@@ -132,11 +156,15 @@ class JarvisService : Service() {
         }
         if (!premierPlan()) {
             // Lancement refusé (démarrage du téléphone, arrière-plan…) : on NE désactive PAS l'écoute, on propose de la relancer.
+            if (intent?.action == ACTION_ECOUTER) fr.dd.jarvis.car.ActiviteVoiture.signaler(fr.dd.jarvis.car.ActiviteVoiture.Etape.ECHEC,
+                texte = "Android bloque le micro en arrière-plan : active l'écoute « Jarvis » dans JARVIS avant de prendre la route.")
             notifierReprise(this, "Android a bloqué l'accès au micro en arrière-plan. Touche ici pour relancer l'écoute « Jarvis ».")
             stopSelf(); return START_NOT_STICKY
         }
         getSystemService(NotificationManager::class.java).cancel(NOTIF_REPRISE)
         running = true
+        actuel = this
+        if (intent?.action == ACTION_ECOUTER) main.postDelayed({ demandeExterne() }, 1800)
         // Verrou de veille seulement PENDANT une conversation (voir garderEveille) : en attente du mot « Jarvis », le
         // micro actif suffit à Android ; le verrou permanent empêchait le téléphone de dormir même micro coupé.
         wake = (getSystemService(POWER_SERVICE) as PowerManager).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "jarvis:wake").apply { setReferenceCounted(false) }
@@ -167,6 +195,7 @@ class JarvisService : Service() {
             v.bargeIn = app.store.coupeParole.value
             v.duplex = app.store.duplex.value
             v.onFinal = { t -> failures = 0; incompris = 0; handle(t) }
+            v.onPartial = { t -> fr.dd.jarvis.car.ActiviteVoiture.signaler(fr.dd.jarvis.car.ActiviteVoiture.Etape.PARTIEL, texte = t) }
             v.onSilence = {
                 val c = confirm
                 when {
@@ -227,7 +256,39 @@ class JarvisService : Service() {
     private fun silenceMs() = app.store.silenceSec.value.coerceIn(3, 30) * 1000L
 
     /** Écoute dans la conversation : se referme seule si personne ne parle dans le délai. */
-    private fun ecouter(delai: Long = silenceMs()) { if (running) voice?.ecouterConversation(delai) }
+    private fun ecouter(delai: Long = silenceMs()) {
+        if (!running) return
+        voice?.ecouterConversation(delai)
+        fr.dd.jarvis.car.ActiviteVoiture.signaler(fr.dd.jarvis.car.ActiviteVoiture.Etape.ECOUTE)
+    }
+
+    /**
+     * Demande venue de la voiture (bouton micro de l'appli média) : écoute tout de suite. Si JARVIS parle, il se tait
+     * d'abord ; s'il est encore en train de traiter une demande, on le signale au lieu d'attendre indéfiniment.
+     */
+    private fun demandeExterne(essai: Int = 0) {
+        if (!running) return
+        if (busy) {
+            voice?.stopSpeaking()
+            if (essai < 6) main.postDelayed({ demandeExterne(essai + 1) }, 500)
+            else fr.dd.jarvis.car.ActiviteVoiture.signaler(fr.dd.jarvis.car.ActiviteVoiture.Etape.ECHEC,
+                texte = "Je termine ta demande précédente, réessaie dans un instant.")
+            return
+        }
+        if (awake) {
+            voice?.stopSpeaking()
+            voice?.carillon(montant = true) { if (awake && !busy) ecouter(maxOf(silenceMs(), 6000L)) }
+            return
+        }
+        dernierReveil = 0L
+        onWakeWord()
+    }
+
+    /** Pause demandée par la voiture : on coupe la voix et on referme la conversation (sans toucher à une demande en cours). */
+    private fun interrompre() {
+        voice?.stopSpeaking()
+        if (awake && !busy) { voice?.stopListening(); finConversation() }
+    }
 
     /** Conversation en cours (écoute, réflexion, réponse) : le téléphone ne doit pas s'endormir au milieu (10 min au plus). */
     private fun garderEveille(oui: Boolean) {
@@ -240,6 +301,7 @@ class JarvisService : Service() {
     /** Retour à l'attente du mot « Jarvis » (détecteur hors-ligne s'il est installé, sinon écoute en boucle). */
     private fun goIdle() {
         if (!busy) garderEveille(false)
+        fr.dd.jarvis.car.ActiviteVoiture.signaler(fr.dd.jarvis.car.ActiviteVoiture.Etape.FIN)
         awake = false
         incompris = 0
         voice?.sessionFin()
@@ -354,6 +416,7 @@ class JarvisService : Service() {
             val app = application as JarvisApp
             app.chatCharger()
             val userMessage = ChatMsg(true, cmd)
+            fr.dd.jarvis.car.ActiviteVoiture.signaler(fr.dd.jarvis.car.ActiviteVoiture.Etape.REFLEXION, cmd)
             withContext(Dispatchers.Main) {
                 app.chatAjouter(userMessage)
                 if (app.enVoiture) CarBridge.ajouter(userMessage)
@@ -369,6 +432,7 @@ class JarvisService : Service() {
             } catch (e: CancellationException) { flux?.arreter(sansSuite = true); throw e }
               catch (e: Throwable) { "⚠️ ${e.message ?: e.javaClass.simpleName}" }
             val assistantMessage = ChatMsg(false, reply)
+            fr.dd.jarvis.car.ActiviteVoiture.signaler(fr.dd.jarvis.car.ActiviteVoiture.Etape.REPONSE, cmd, reply)
             withContext(Dispatchers.Main) {
                 app.chatAjouter(assistantMessage)
                 if (app.enVoiture) {
@@ -445,6 +509,7 @@ class JarvisService : Service() {
 
     override fun onDestroy() {
         running = false
+        if (actuel === this) actuel = null
         main.removeCallbacks(surveillance)
         main.removeCallbacks(relance)
         scope.cancel()
