@@ -142,8 +142,12 @@ class JarvisApp : Application() {
             runCatching { societe.synchroniserAvecCoffre(); store.docsVerifiesLe.set(System.currentTimeMillis().toString()) }
         }.start()
         createChannel()
-        // Android Auto : JARVIS se présente comme appli média (écrans voiture désactivés hors Play Store).
-        Thread { runCatching { fr.dd.jarvis.car.VisibiliteAuto.appliquerMode(this) } }.start()
+        // Android Auto : JARVIS se présente comme appli média (écrans voiture désactivés hors Play Store), et l'ancienne
+        // réinstallation en fond (qui tournait en boucle) est annulée.
+        Thread {
+            runCatching { fr.dd.jarvis.car.VisibiliteAuto.arreterAncienneReinstallation(this) }
+            runCatching { fr.dd.jarvis.car.VisibiliteAuto.appliquerMode(this) }
+        }.start()
         // Pont MCP local (outils de Jarvis pour Hermès) : seulement si Hermès est utilisé.
         if (store.hermesMode.value != "off" && store.hermesInstalle.value) runCatching { fr.dd.jarvis.hermes.PontMcp.demarrer(this) }
         if (store.briefingOn.value) Scheduler.schedule(this, store)

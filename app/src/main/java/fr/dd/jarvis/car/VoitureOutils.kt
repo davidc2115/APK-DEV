@@ -8,7 +8,6 @@ import android.os.Handler
 import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
-import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import fr.dd.jarvis.JarvisApp
@@ -316,6 +315,8 @@ object VisibiliteAuto {
         append("• Écrans voiture (Car App) : " + (if (ecrans) "activés ⚠️ (refusés hors Play Store, peuvent cacher JARVIS)" else "désactivés ✅ (JARVIS = appli média)") + "\n")
         val pi = runCatching { pm.getPackageInfo(ctx.packageName, 0) }.getOrNull()
         val code = pi?.let { if (android.os.Build.VERSION.SDK_INT >= 28) it.longVersionCode else @Suppress("DEPRECATION") it.versionCode.toLong() }
+        pi?.let { append("• Dernière installation de JARVIS : " + java.time.Instant.ofEpochMilli(it.lastUpdateTime).atZone(ZoneId.systemDefault())
+            .format(DateTimeFormatter.ofPattern("dd/MM HH:mm:ss", Locale.FRANCE)) + " (si l'heure change sans arrêt : réinstallation en boucle)\n") }
         append("• Version : ${pi?.versionName} (code $code)" + (if (code == 1L) " ⚠️ numéro fixe : Android Auto peut garder son ancien verdict" else "") + "\n")
         val debug = (ctx.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
         append("• Version de JARVIS : ${if (debug) "test (débogable, tous les hôtes acceptés)" else "normale (hôtes Google uniquement)"}\n")
@@ -335,37 +336,6 @@ object VisibiliteAuto {
 
     /** Droits « adb » disponibles pour la réinstallation. */
     fun possible(ctx: Context) = fr.dd.jarvis.device.ShizukuShell.ready() || fr.dd.jarvis.device.AdbShell.hasKey(ctx)
-
-    /**
-     * Réinstalle JARVIS par-dessus lui-même avec la marque « Play Store » (données conservées). En cas de succès,
-     * Android ferme JARVIS pendant la mise à jour ; l'écoute et les alarmes repartent toutes seules ensuite.
-     */
-    suspend fun reinstaller(ctx: Context): String = withContext(Dispatchers.IO) {
-        val app = ctx.applicationContext as JarvisApp
-        val info = ctx.applicationInfo
-        if (!info.splitSourceDirs.isNullOrEmpty()) return@withContext "❌ JARVIS est installé en plusieurs morceaux (split APK) : réinstallation impossible ici."
-        val apk = File(info.sourceDir)
-        if (!apk.canRead()) return@withContext "❌ Fichier de l'application illisible."
-        app.store.autoVisibilite.set(true)
-        app.store.autoReinstallTs.set(System.currentTimeMillis().toString())
-        val options = "-r -i $PLAY"
-        val r = if (fr.dd.jarvis.device.ShizukuShell.ready()) shizuku(apk, options)
-            else if (fr.dd.jarvis.device.AdbShell.hasKey(ctx)) fr.dd.jarvis.device.AdbShell.installApk(ctx, apk, options)
-            else return@withContext "❌ Il faut Shizuku démarré (ou l'ADB intégré appairé) : Réglages › Téléphone › Contrôle."
-        // Si on lit encore ce résultat, c'est que l'installation n'a pas remplacé l'appli (sinon JARVIS a redémarré).
-        if (r.contains("Success", true)) "✅ Réinstallé « depuis le Play Store » : JARVIS va se fermer quelques secondes." else "❌ Réinstallation refusée : ${r.take(300)}"
-    }
-
-    /** Installation par Shizuku : l'APK est envoyé sur l'entrée standard de « cmd package install -S taille ». */
-    private fun shizuku(apk: File, options: String): String = try {
-        val m = rikka.shizuku.Shizuku::class.java.getDeclaredMethod("newProcess", Array<String>::class.java, Array<String>::class.java, String::class.java)
-        m.isAccessible = true
-        val p = m.invoke(null, arrayOf("sh", "-c", "cmd package install $options -S ${apk.length()}"), null, null) as Process
-        p.outputStream.use { o -> apk.inputStream().use { it.copyTo(o, 256 * 1024) } }
-        val out = p.inputStream.bufferedReader().readText() + p.errorStream.bufferedReader().readText()
-        p.waitFor()
-        out.trim()
-    } catch (e: Throwable) { "Erreur Shizuku : ${(e.cause ?: e).message}" }
 
     /** Après une mise à jour : confirme la visibilité, ou propose de la rétablir (si l'utilisateur l'avait déjà fait). */
     fun apresMiseAJour(ctx: Context) {
@@ -395,30 +365,29 @@ object VisibiliteAuto {
         runCatching { nm.notify(NOTIF, b.build()) }
     }
 
-    fun lancerEnFond(ctx: Context) {
-        ctx.getSystemService(NotificationManager::class.java).cancel(NOTIF)
-        WorkManager.getInstance(ctx).enqueue(OneTimeWorkRequestBuilder<VisibiliteWorker>().build())
+    /**
+     * Arrête pour de bon l'ancienne réinstallation « en fond » (Shizuku / ADB). Elle remplaçait JARVIS par lui-même, ce qui
+     * TUAIT JARVIS avant la fin de la tâche : WorkManager la relançait donc à chaque redémarrage → mise à jour sans fin.
+     */
+    fun arreterAncienneReinstallation(ctx: Context) {
+        runCatching { WorkManager.getInstance(ctx).cancelAllWorkByTag(VisibiliteWorker::class.java.name) }
+        runCatching { WorkManager.getInstance(ctx).pruneWork() }
     }
 }
 
+/** Ancien bouton « Rétablir » (notifications des versions précédentes) : ne fait plus rien, sinon la boucle reprendrait. */
 class VisibiliteReceiver : android.content.BroadcastReceiver() {
     companion object { const val ACTION = "fr.dd.jarvis.AUTO_VISIBLE" }
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == ACTION) VisibiliteAuto.lancerEnFond(context)
+        runCatching { context.getSystemService(NotificationManager::class.java).cancel(7720) }
+        VisibiliteAuto.arreterAncienneReinstallation(context)
     }
 }
 
+/**
+ * Ancienne tâche de réinstallation : gardée vide pour que les tâches déjà en attente dans WorkManager se terminent
+ * aussitôt (sans réinstaller) au lieu d'échouer et d'être relancées.
+ */
 class VisibiliteWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
-    override suspend fun doWork(): Result {
-        val r = VisibiliteAuto.reinstaller(applicationContext)
-        if (!r.startsWith("✅")) {
-            val nm = applicationContext.getSystemService(NotificationManager::class.java)
-            runCatching {
-                nm.notify(7722, NotificationCompat.Builder(applicationContext, JarvisApp.CHANNEL_CAR).setSmallIcon(android.R.drawable.stat_notify_error)
-                    .setContentTitle("Android Auto : réinstallation impossible").setContentText(r.take(120))
-                    .setStyle(NotificationCompat.BigTextStyle().bigText(r)).setAutoCancel(true).build())
-            }
-        }
-        return Result.success()
-    }
+    override suspend fun doWork(): Result = Result.success()
 }
