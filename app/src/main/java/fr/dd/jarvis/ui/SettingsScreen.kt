@@ -918,13 +918,13 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 StatusRow("Connecté à la voiture en ce moment", app.enVoiture)
                 val source = remember(tick) { fr.dd.jarvis.car.VisibiliteAuto.libelleSource(ctx) }
                 val play = remember(tick) { fr.dd.jarvis.car.VisibiliteAuto.commePlayStore(ctx) }
-                StatusRow("Installé « depuis le Play Store » (exigé par Android Auto) — source : $source", play)
+                StatusRow("Source de l'installation : $source", play)
                 Text(
-                    "Depuis Android Auto 17, une appli qui ne vient pas du Play Store n'est acceptée QUE comme appli MÉDIA, même avec « Sources inconnues ». JARVIS s'affiche donc dans la voiture comme une appli média, en 3 onglets : 🎙️ JARVIS (une tuile micro : bip, tu parles, il répond à voix haute), 📅 Aujourd'hui (tes rendez-vous du jour et de demain ; un appui lance Waze vers l'adresse), ⚡ Raccourcis (demandes toutes faites, relire, reprendre la musique). L'écran de lecture a trois boutons : 🎙️ parler, 🧭 prochain rendez-vous dans Waze, 🔁 relire ; ▶ ouvre aussi le micro. Étapes :\n" +
+                    "Depuis Android Auto 17, une appli qui ne vient pas du Play Store n'est acceptée QUE comme appli MÉDIA, avec « Sources inconnues » coché. JARVIS se présente donc UNIQUEMENT comme appli média : ses « écrans voiture » (refusés hors Play Store, et qui pouvaient cacher tout JARVIS) sont désactivés. Dans la voiture, 3 onglets : 🎙️ JARVIS (une tuile micro : bip, tu parles, il répond à voix haute), 📅 Aujourd'hui (tes rendez-vous du jour et de demain ; un appui lance Waze vers l'adresse), ⚡ Raccourcis (demandes toutes faites, relire, reprendre la musique). L'écran de lecture a trois boutons : 🎙️ parler, 🧭 prochain rendez-vous dans Waze, 🔁 relire ; ▶ ouvre aussi le micro. Étapes :\n" +
                         "1) Le réglage « Sources inconnues » d'Android Auto (obligatoire, JARVIS ne peut pas le cocher lui-même) : « Ouvrir Android Auto » › tout en bas, touche 10 fois « Version » › accepte « Autoriser les paramètres de développement » › menu ⋮ en haut à droite › « Paramètres pour les développeurs » › coche « Sources inconnues ».\n" +
-                        "2) Réglages Android › Applications › Android Auto › Stockage › « Vider le cache » (pas les données), puis redémarre le téléphone : Android Auto garde en mémoire son ancien refus.\n" +
-                        "3) Rebranche à la voiture : JARVIS apparaît parmi les applis (avec les applis de musique) ; dans « Personnaliser le lanceur », vérifie qu'il est coché.\n" +
-                        "Facultatif : « Rendre JARVIS visible » ci-dessous (marque Play Store) ne suffit plus avec les versions récentes d'Android Auto, mais ne gêne pas.",
+                        "2) Installe la dernière version de JARVIS (son numéro change à chaque version : Android Auto la revérifie), puis « 🔄 Relancer Android Auto » ci-dessous (ou redémarre le téléphone).\n" +
+                        "3) Branche-toi à la voiture : JARVIS est dans le lanceur, avec les applis audio (et dans « Personnaliser le lanceur »). S'il n'y est pas, ouvre « 🩺 Diagnostic » dans la minute : il lit le verdict d'Android Auto dans le journal du téléphone (Shizuku ou ADB intégré) — envoie-le-moi.\n" +
+                        "La marque « Play Store » (bouton ci-dessous) ne sert plus pour l'appli média.",
                     color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(vertical = 6.dp)
                 )
                 var autoMsg by remember { mutableStateOf("") }
@@ -948,16 +948,31 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 }
                 Spacer(Modifier.height(6.dp))
                 var diagAuto by remember { mutableStateOf("") }
-                HudButton(if (diagAuto.isBlank()) "🩺 Diagnostic Android Auto" else "Masquer le diagnostic", Modifier.fillMaxWidth()) {
-                    diagAuto = if (diagAuto.isBlank()) fr.dd.jarvis.car.VisibiliteAuto.diagnostic(ctx) else ""
+                var relance by remember { mutableStateOf("") }
+                HudButton(if (relance == "…") "Relance…" else "🔄 Relancer Android Auto (nouvelle vérification de JARVIS)", Modifier.fillMaxWidth(), enabled = relance != "…") {
+                    relance = "…"
+                    scope.launch { relance = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.car.VisibiliteAuto.relancerAndroidAuto(ctx) } }
                 }
-                if (diagAuto.isNotBlank()) {
+                if (relance.isNotBlank() && relance != "…") Text(relance, color = HudText, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                Spacer(Modifier.height(6.dp))
+                HudButton(when (diagAuto) { "" -> "🩺 Diagnostic Android Auto"; "…" -> "Diagnostic…"; else -> "Masquer le diagnostic" }, Modifier.fillMaxWidth(), enabled = diagAuto != "…") {
+                    if (diagAuto.isBlank()) {
+                        diagAuto = "…"
+                        scope.launch { diagAuto = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { fr.dd.jarvis.car.VisibiliteAuto.diagnostic(ctx) }.getOrElse { "❌ ${it.message}" } } }
+                    } else diagAuto = ""
+                }
+                if (diagAuto.isNotBlank() && diagAuto != "…") {
                     Text(diagAuto, color = HudText, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
                     HudChip("📋 Copier") {
                         (ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
                             .setPrimaryClip(android.content.ClipData.newPlainText("Diagnostic Android Auto", diagAuto))
                     }
                 }
+                Spacer(Modifier.height(6.dp))
+                HudChip(if (store.autoEcrans.value) "⚠️ Écrans voiture (Car App) : activés" else "Écrans voiture (Car App) : désactivés", store.autoEcrans.value) {
+                    store.autoEcrans.set(!store.autoEcrans.value); fr.dd.jarvis.car.VisibiliteAuto.appliquerMode(ctx); tick++
+                }
+                Text("À n'activer que si JARVIS est réellement installé par le Play Store : sinon Android Auto refuse ces écrans et peut cacher tout JARVIS.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
                 Spacer(Modifier.height(10.dp))
                 Text("Dans la voiture", color = HudText, fontSize = 13.sp)
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {

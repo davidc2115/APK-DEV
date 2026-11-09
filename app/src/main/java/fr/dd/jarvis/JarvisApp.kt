@@ -142,6 +142,8 @@ class JarvisApp : Application() {
             runCatching { societe.synchroniserAvecCoffre(); store.docsVerifiesLe.set(System.currentTimeMillis().toString()) }
         }.start()
         createChannel()
+        // Android Auto : JARVIS se présente comme appli média (écrans voiture désactivés hors Play Store).
+        Thread { runCatching { fr.dd.jarvis.car.VisibiliteAuto.appliquerMode(this) } }.start()
         // Pont MCP local (outils de Jarvis pour Hermès) : seulement si Hermès est utilisé.
         if (store.hermesMode.value != "off" && store.hermesInstalle.value) runCatching { fr.dd.jarvis.hermes.PontMcp.demarrer(this) }
         if (store.briefingOn.value) Scheduler.schedule(this, store)
@@ -152,6 +154,11 @@ class JarvisApp : Application() {
                 val avant = enVoiture
                 enVoiture = t == androidx.car.app.connection.CarConnection.CONNECTION_TYPE_PROJECTION
                 // Montée en voiture : accueil de JARVIS (prochain rendez-vous, météo) dans Android Auto.
+                if (enVoiture && !avant) graphScope.launch(Dispatchers.IO) {
+                    // Verdict d'Android Auto sur JARVIS (journal système), relevé peu après le branchement.
+                    kotlinx.coroutines.delay(20_000); runCatching { fr.dd.jarvis.car.VisibiliteAuto.capturer(this@JarvisApp) }
+                    kotlinx.coroutines.delay(60_000); runCatching { fr.dd.jarvis.car.VisibiliteAuto.capturer(this@JarvisApp) }
+                }
                 if (enVoiture && !avant) graphScope.launch {
                     runCatching { fr.dd.jarvis.car.AccueilVoiture.annoncer(this@JarvisApp) }
                     runCatching { fr.dd.jarvis.device.Routines.declencher(this@JarvisApp, "voiture") }

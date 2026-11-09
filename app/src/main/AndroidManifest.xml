@@ -138,6 +138,8 @@
             </intent-filter>
         </receiver>
         <meta-data android:name="com.google.android.gms.car.application" android:resource="@xml/automotive_app_desc" />
+        <!-- Icône d'attribution (monochrome) des cartes média d'Android Auto. -->
+        <meta-data android:name="androidx.car.app.TintableAttributionIcon" android:resource="@drawable/ic_auto_micro" />
 
         <service
             android:name=".service.JarvisCallScreeningService"

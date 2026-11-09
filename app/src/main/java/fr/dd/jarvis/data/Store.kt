@@ -303,6 +303,10 @@ class Store(context: Context) {
     /** L'utilisateur a rendu JARVIS visible dans Android Auto (réinstallation « Play Store ») : on le lui repropose après chaque mise à jour. */
     val autoVisibilite = BPref("autoVisibilite", false)
     val autoReinstallTs = SPref("autoReinstallTs", "0")
+    /** Écrans voiture (Car App Library) : seulement pour une installation faite par le Play Store ; sinon JARVIS est une appli média. */
+    val autoEcrans = BPref("autoEcrans", false)
+    /** Dernier verdict d'Android Auto sur JARVIS relevé dans le journal système (à la connexion à la voiture). */
+    val autoJournal = SPref("autoJournal", "")
     val voixStyle = SPref("voixStyle", "")
     /** Voix Android choisie (nom de la voix du moteur Google) ; vide = la meilleure voix française disponible. */
     val voixAndroid = SPref("voixAndroid", "")

@@ -13,8 +13,11 @@ android {
         applicationId = "fr.dd.jarvis"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        // Numéro qui augmente à chaque build GitHub Actions : Android Auto (et Android) voient chaque mise à jour comme une
+        // nouvelle version et revérifient l'appli, au lieu de garder en mémoire leur verdict sur « la version 1 ».
+        val build = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0
+        versionCode = 1000 + build
+        versionName = "1.0.$build"
     }
 
     // Keystore fixe, commité dans le dépôt : permet d'installer les mises à jour par-dessus l'APK précédent.

@@ -126,7 +126,78 @@ object VisibiliteAuto {
         else -> i
     }
 
-    /** Tout ce que JARVIS peut vérifier lui-même sur sa visibilité dans Android Auto (à copier pour un dépannage). */
+    private fun composantEcrans(ctx: Context) = android.content.ComponentName(ctx.packageName, "fr.dd.jarvis.car.JarvisCarService")
+
+    /**
+     * Android Auto 17+ refuse les applis « écrans voiture » (Car App Library) installées hors Play Store, et peut alors
+     * cacher tout le paquet, y compris la partie média. Par défaut JARVIS se présente donc UNIQUEMENT comme appli média :
+     * le service des écrans voiture est désactivé. L'option « Écrans voiture » le réactive (installation par le Play Store).
+     */
+    fun appliquerMode(ctx: Context) {
+        val app = ctx.applicationContext as? JarvisApp ?: return
+        val pm = ctx.packageManager
+        val voulu = if (app.store.autoEcrans.value) android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
+            else android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+        runCatching {
+            if (pm.getComponentEnabledSetting(composantEcrans(ctx)) != voulu)
+                pm.setComponentEnabledSetting(composantEcrans(ctx), voulu, android.content.pm.PackageManager.DONT_KILL_APP)
+        }
+    }
+
+    /** Capacités déclarées à Android Auto (fichier automotive_app_desc) : « media » est indispensable hors Play Store. */
+    fun capacites(ctx: Context): List<String> = runCatching {
+        val x = ctx.resources.getXml(fr.dd.jarvis.R.xml.automotive_app_desc)
+        val l = mutableListOf<String>()
+        while (x.next() != org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
+            if (x.eventType == org.xmlpull.v1.XmlPullParser.START_TAG && x.name == "uses") x.getAttributeValue(null, "name")?.let { l += it }
+        }
+        l
+    }.getOrDefault(emptyList())
+
+    /**
+     * Verdict d'Android Auto sur JARVIS, lu dans le journal système (lignes « CAR.VALIDATOR ») grâce à Shizuku ou à
+     * l'ADB intégré. Le journal tourne vite : à lancer dans la minute qui suit le branchement à la voiture.
+     */
+    fun journal(ctx: Context): String {
+        if (!possible(ctx)) return "Journal d'Android Auto illisible : il faut Shizuku démarré ou l'ADB intégré appairé (Réglages › Téléphone › Contrôle)."
+        val brut = runCatching {
+            fr.dd.jarvis.device.PhoneShell.exec(ctx, "logcat -d -v time 2>/dev/null | grep -E 'CAR\\.VALIDATOR|PlayGearhead' | tail -n 80")
+        }.getOrElse { "Erreur : ${it.message}" }
+        if (brut.startsWith("Erreur") || brut.startsWith("ADB non") || brut.startsWith("Shizuku")) return "Journal illisible : ${brut.take(160)}"
+        val lignes = brut.lines().map { it.trim() }.filter { it.contains("VALIDATOR") || it.contains("PlayGearhead") }
+        val miennes = lignes.filter { it.contains(ctx.packageName) }
+        val autres = lignes.size - miennes.size
+        if (miennes.isEmpty()) return "Aucune trace de JARVIS dans le journal d'Android Auto ($autres autre(s) ligne(s)). Branche-toi à la voiture puis relance le diagnostic dans la minute."
+        val refus = miennes.lastOrNull { it.contains("DENIED", true) }
+        val accord = miennes.lastOrNull { it.contains("ALLOW", true) || it.contains("APPROVED", true) || it.contains("GRANTED", true) }
+        val verdict = when {
+            refus != null && (accord == null || miennes.indexOf(refus) > miennes.indexOf(accord)) ->
+                "❌ Android Auto REFUSE JARVIS : " + refus.substringAfter("DENIED", refus).trim(';', ' ', ':').take(160)
+            accord != null -> "✅ Android Auto accepte JARVIS"
+            else -> "ℹ️ JARVIS vu par Android Auto (verdict non écrit)"
+        }
+        return verdict + "\n" + miennes.takeLast(10).joinToString("\n") { "   " + it.substringAfter(": ", it).take(200) }
+    }
+
+    /** Relevé automatique du verdict peu après le branchement à la voiture (si Shizuku / l'ADB intégré est disponible). */
+    fun capturer(ctx: Context) {
+        val app = ctx.applicationContext as? JarvisApp ?: return
+        if (!possible(ctx)) return
+        val j = journal(ctx)
+        if (j.contains("JARVIS") && !j.startsWith("Aucune trace")) {
+            val quand = java.time.LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd/MM HH:mm", Locale.FRANCE))
+            app.store.autoJournal.set("($quand) $j")
+        }
+    }
+
+    /** Arrêt forcé d'Android Auto : il revérifie ses applis au prochain lancement (à faire à l'arrêt). */
+    fun relancerAndroidAuto(ctx: Context): String {
+        if (!possible(ctx)) return "❌ Il faut Shizuku démarré ou l'ADB intégré appairé. Sinon : Réglages Android › Applications › Android Auto › Forcer l'arrêt."
+        val r = fr.dd.jarvis.device.PhoneShell.exec(ctx, "am force-stop com.google.android.projection.gearhead")
+        return if (r.startsWith("Erreur") || r.startsWith("ADB non")) "❌ $r" else "✅ Android Auto relancé : il revérifie ses applis à la prochaine connexion. Rebranche le téléphone."
+    }
+
+    /** Tout ce que JARVIS peut vérifier lui-même sur sa visibilité dans Android Auto (à copier pour un dépannage). Bloquant. */
     fun diagnostic(ctx: Context): String = buildString {
         val pm = ctx.packageManager
         val aa = "com.google.android.projection.gearhead"
@@ -134,24 +205,25 @@ object VisibiliteAuto {
         val v = runCatching { pm.getPackageInfo(aa, 0).versionName }.getOrNull()
         append("• Android Auto : ${v?.let { "installé (version $it)" } ?: "❌ non installé"}\n")
         val src = runCatching { if (android.os.Build.VERSION.SDK_INT >= 30) pm.getInstallSourceInfo(ctx.packageName) else null }.getOrNull()
-        append("• Source de JARVIS : ${libelleSource(ctx)}" + (if (commePlayStore(ctx)) " ✅" else " ❌ (Android Auto le cache tant que « Sources inconnues » n'est pas coché)") + "\n")
+        append("• Source de JARVIS : ${libelleSource(ctx)} (sans importance pour l'appli média, seul « Sources inconnues » compte)\n")
         src?.let { append("   installateur=${it.installingPackageName} · initiateur=${it.initiatingPackageName}\n") }
-        val services = runCatching {
-            pm.queryIntentServices(Intent("androidx.car.app.CarAppService").setPackage(ctx.packageName), android.content.pm.PackageManager.GET_RESOLVED_FILTER)
-        }.getOrDefault(emptyList())
-        if (services.isEmpty()) append("• Service voiture : ❌ introuvable\n") else services.forEach { r ->
-            val f = r.filter
-            val cats = (0 until (f?.countCategories() ?: 0)).map { f!!.getCategory(it).substringAfterLast('.') }
-            val etat = pm.getComponentEnabledSetting(android.content.ComponentName(ctx.packageName, r.serviceInfo.name))
-            append("• Service voiture : ✅ ${r.serviceInfo.name.substringAfterLast('.')} · catégories ${cats.joinToString("+")} · " +
-                (if (etat == android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED) "❌ désactivé" else "activé") + "\n")
-        }
         val media = runCatching { pm.queryIntentServices(Intent("android.media.browse.MediaBrowserService").setPackage(ctx.packageName), 0) }.getOrDefault(emptyList())
         append("• Service MÉDIA (seul accepté par Android Auto 17+ hors Play Store) : " + (if (media.isNotEmpty()) "✅ ${media.first().serviceInfo.name.substringAfterLast('.')}" else "❌ absent") + "\n")
+        val caps = capacites(ctx)
+        append("• Déclaré à Android Auto : ${caps.joinToString(", ").ifBlank { "rien" }}" + (if ("media" in caps) " ✅" else " ❌ (« media » manquant)") + "\n")
+        val ecrans = pm.getComponentEnabledSetting(composantEcrans(ctx)) != android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+        append("• Écrans voiture (Car App) : " + (if (ecrans) "activés ⚠️ (refusés hors Play Store, peuvent cacher JARVIS)" else "désactivés ✅ (JARVIS = appli média)") + "\n")
+        val pi = runCatching { pm.getPackageInfo(ctx.packageName, 0) }.getOrNull()
+        val code = pi?.let { if (android.os.Build.VERSION.SDK_INT >= 28) it.longVersionCode else @Suppress("DEPRECATION") it.versionCode.toLong() }
+        append("• Version : ${pi?.versionName} (code $code)" + (if (code == 1L) " ⚠️ numéro fixe : Android Auto peut garder son ancien verdict" else "") + "\n")
         val debug = (ctx.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
         append("• Version de JARVIS : ${if (debug) "test (débogable, tous les hôtes acceptés)" else "normale (hôtes Google uniquement)"}\n")
-        append("• « Sources inconnues » dans Android Auto : impossible à lire depuis JARVIS — à vérifier (étape 2)\n")
-        append("• Connecté à la voiture : ${if ((ctx.applicationContext as? JarvisApp)?.enVoiture == true) "oui" else "non"}")
+        append("• « Sources inconnues » dans Android Auto : illisible depuis JARVIS — à vérifier (étape 1)\n")
+        append("• Connecté à la voiture : ${if ((ctx.applicationContext as? JarvisApp)?.enVoiture == true) "oui" else "non"}\n")
+        append("\n📜 Verdict d'Android Auto (journal système) :\n")
+        append(journal(ctx))
+        val avant = (ctx.applicationContext as? JarvisApp)?.store?.autoJournal?.value.orEmpty()
+        if (avant.isNotBlank()) append("\n\n🕘 Relevé à la dernière connexion à la voiture :\n$avant")
     }
 
     /** Droits « adb » disponibles pour la réinstallation. */
@@ -193,11 +265,8 @@ object VisibiliteAuto {
         val app = ctx.applicationContext as? JarvisApp ?: return
         if (!app.store.autoVisibilite.value) return
         val recent = System.currentTimeMillis() - (app.store.autoReinstallTs.value.toLongOrNull() ?: 0L) < 10 * 60_000L
-        if (commePlayStore(ctx)) {
-            if (recent) notifier(ctx, "✅ JARVIS est visible dans Android Auto", "Réinstallation réussie. Rebranche le téléphone à la voiture (ou relance Android Auto).", ouvrir = true)
-        } else if (!recent) {
-            notifier(ctx, "🚗 JARVIS n'est plus visible dans Android Auto", "La mise à jour a retiré la marque « Play Store ». Touche « Rétablir » : JARVIS se réinstalle en quelques secondes.", ouvrir = false)
-        }
+        // La marque « Play Store » ne compte plus pour l'appli média (Android Auto 17+) : plus de rappel après une mise à jour.
+        if (commePlayStore(ctx) && recent) notifier(ctx, "✅ JARVIS réinstallé", "Rebranche le téléphone à la voiture (ou relance Android Auto).", ouvrir = true)
     }
 
     private fun notifier(ctx: Context, titre: String, texte: String, ouvrir: Boolean) {

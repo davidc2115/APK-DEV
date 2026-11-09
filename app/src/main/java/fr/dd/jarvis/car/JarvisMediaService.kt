@@ -46,6 +46,8 @@ class JarvisMediaService : MediaBrowserService() {
     companion object {
         private const val RACINE = "racine"
         private const val VIDE = "vide"
+        private const val SUGGESTIONS = "suggestions"
+        private const val APPLI_GOOGLE = "com.google.android.googlequicksearchbox"
         private const val ONGLET_JARVIS = "onglet:jarvis"
         private const val ONGLET_AGENDA = "onglet:agenda"
         private const val ONGLET_RACCOURCIS = "onglet:raccourcis"
@@ -70,7 +72,8 @@ class JarvisMediaService : MediaBrowserService() {
         /** Seules la voiture, l'Assistant et le système voient l'agenda (le service est visible des autres applis). */
         private val CONFIANCE = setOf(
             "com.google.android.projection.gearhead", "com.google.android.carassistant", "com.android.car.media",
-            "com.google.android.googlequicksearchbox", "com.android.systemui", "com.google.android.gms",
+            APPLI_GOOGLE, "com.android.systemui", "com.google.android.gms", "com.google.android.apps.bard",
+            "com.google.android.apps.googleassistant",
         )
         private val heure = DateTimeFormatter.ofPattern("HH:mm", Locale.FRANCE)
         private fun hm(ms: Long) = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).format(heure)
@@ -107,13 +110,28 @@ class JarvisMediaService : MediaBrowserService() {
         super.onDestroy()
     }
 
+    /** Android Auto, l'Assistant / Gemini, le système et JARVIS lui-même ; les autres applis ne voient rien. */
+    private fun fiable(pkg: String?): Boolean {
+        if (pkg == null) return false
+        if (pkg == packageName || pkg in CONFIANCE) return true
+        return runCatching {
+            (packageManager.getApplicationInfo(pkg, 0).flags and
+                (android.content.pm.ApplicationInfo.FLAG_SYSTEM or android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0
+        }.getOrDefault(false)
+    }
+
     override fun onGetRoot(clientPackageName: String, clientUid: Int, rootHints: Bundle?): BrowserRoot {
-        val fiable = clientPackageName == packageName || clientPackageName in CONFIANCE
-        return BrowserRoot(if (fiable) RACINE else VIDE, Bundle().apply {
+        val extras = Bundle().apply {
             putBoolean("android.media.browse.SEARCH_SUPPORTED", true)       // loupe / micro de la voiture → onPlayFromSearch
             putInt(STYLE_DOSSIER, LISTE)
             putInt(STYLE_JOUABLE, LISTE)
-        })
+        }
+        if (!fiable(clientPackageName)) return BrowserRoot(VIDE, extras)
+        // Reprise de « la dernière écoute » (système) : rien à reprendre, JARVIS ne joue pas de musique lui-même.
+        if (rootHints?.getBoolean(BrowserRoot.EXTRA_RECENT) == true) return BrowserRoot(VIDE, extras)
+        // Carte « Pour vous » d'Android Auto : remplie par l'appli Google avec des éléments JOUABLES (les onglets n'en ont pas).
+        if (clientPackageName == APPLI_GOOGLE || rootHints?.getBoolean(BrowserRoot.EXTRA_SUGGESTED) == true) return BrowserRoot(SUGGESTIONS, extras)
+        return BrowserRoot(RACINE, extras)
     }
 
     private fun icone(nom: String): Uri = Uri.parse("android.resource://$packageName/drawable/$nom")
@@ -128,7 +146,7 @@ class JarvisMediaService : MediaBrowserService() {
 
     override fun onLoadChildren(parentId: String, result: Result<MutableList<MediaBrowser.MediaItem>>) {
         val client = if (Build.VERSION.SDK_INT >= 28) runCatching { currentBrowserInfo.packageName }.getOrNull() else null
-        if (parentId == VIDE || (client != null && client != packageName && client !in CONFIANCE)) {
+        if (parentId == VIDE || (client != null && !fiable(client))) {
             result.sendResult(mutableListOf()); return
         }
         result.detach()
@@ -145,6 +163,7 @@ class JarvisMediaService : MediaBrowserService() {
             element(ONGLET_AGENDA, "Aujourd'hui", icone = "auto_onglet_agenda", dossier = true),
             element(ONGLET_RACCOURCIS, "Raccourcis", icone = "auto_onglet_eclair", dossier = true),
         )
+        parentId == SUGGESTIONS -> suggestions()
         parentId == ONGLET_JARVIS -> mutableListOf(element(PARLER, "Parler à JARVIS", "Touche, attends le bip et parle", "auto_micro"))
         parentId == ONGLET_AGENDA -> agenda(LocalDate.now(), "aujourd'hui").apply {
             val demain = evenements(LocalDate.now().plusDays(1))
@@ -163,6 +182,23 @@ class JarvisMediaService : MediaBrowserService() {
             add(element(MUSIQUE, "🎵 Reprendre la musique", "YT Music Morphe", "auto_musique"))
         }
         else -> mutableListOf()
+    }
+
+    /** « Pour vous » : parler, Waze vers le prochain rendez-vous, lire la journée, premiers raccourcis. */
+    private fun suggestions(): MutableList<MediaBrowser.MediaItem> {
+        val l = mutableListOf(element(PARLER, "🎙️ Parler à JARVIS", "Touche, attends le bip et parle", "auto_micro"))
+        val maintenant = System.currentTimeMillis()
+        val aujourdhui = evenements(LocalDate.now())
+        aujourdhui.filter { !it.allDay && it.end > maintenant }
+            .firstNotNullOfOrNull { e -> destinations(e).firstOrNull()?.let { e to it } }
+            ?.let { (e, d) ->
+                l += element(EVT + cle(LocalDate.now(), e), "🧭 ${hm(e.begin)} · ${AgendaVoiture.texteBrut(e.title).ifBlank { "Rendez-vous" }.take(50)}",
+                    "Waze → ${d.libelle.take(60)}", "auto_route")
+            }
+        if (app.calendar.hasPermission()) l += element(LIRE_JOUR + LocalDate.now(), "🗣️ Lis-moi aujourd'hui",
+            if (aujourdhui.isEmpty()) "Aucun rendez-vous" else "${aujourdhui.size} rendez-vous", "auto_parole")
+        RaccourcisVoiture.liste(app).take(3).forEachIndexed { i, r -> l += element(RACCOURCI + i, "⚡ $r", icone = "auto_eclair") }
+        return l
     }
 
     // ------------------------------------------------------------------------------------------------ agenda
