@@ -88,6 +88,9 @@ class JarvisMediaService : MediaBrowserService() {
     private var enCours = false
     private var piloteJusqua = 0L
     private var veille: Job? = null
+    /** Fin de la dernière écoute / dernier appui micro : un ▶ envoyé juste après par la voiture n'est pas un vrai appui. */
+    private var derniereFin = 0L
+    private var dernierParler = 0L
     private val abonne: (ActiviteVoiture.Evt) -> Unit = { surActivite(it) }
 
     override fun onCreate() {
@@ -348,6 +351,7 @@ class JarvisMediaService : MediaBrowserService() {
 
     /** 🎙️ : JARVIS ouvre le micro (bip, puis ta demande) ; l'écran de lecture suit la conversation. */
     private fun parler() {
+        dernierParler = SystemClock.elapsedRealtime()
         VoixVoiture.taire()
         piloteJusqua = SystemClock.elapsedRealtime() + 8000
         afficher("🎙️ Je t'écoute…", "Parle après le bip", PlaybackState.STATE_BUFFERING)
@@ -364,7 +368,7 @@ class JarvisMediaService : MediaBrowserService() {
     }
 
     private fun echec(texte: String) {
-        enCours = false; piloteJusqua = 0L; veille?.cancel()
+        enCours = false; piloteJusqua = 0L; veille?.cancel(); derniereFin = SystemClock.elapsedRealtime()
         lire("🎙️ JARVIS", texte)
     }
 
@@ -383,7 +387,7 @@ class JarvisMediaService : MediaBrowserService() {
                 if (enCours) afficher("« ${e.question.take(70)} »", derniere, PlaybackState.STATE_PLAYING)
             }
             ActiviteVoiture.Etape.FIN -> if (enCours) {
-                enCours = false
+                enCours = false; derniereFin = SystemClock.elapsedRealtime()
                 session.setPlaybackState(etat(PlaybackState.STATE_PAUSED))
             }
             ActiviteVoiture.Etape.ECHEC -> if (pilote) echec(e.texte)
@@ -457,7 +461,8 @@ class JarvisMediaService : MediaBrowserService() {
          * dernière source audio) et hors voiture (boutons d'un casque Bluetooth).
          */
         override fun onPlay() {
-            if (SystemClock.elapsedRealtime() - creeLe < 15_000 || !app.enVoiture) {
+            val t = SystemClock.elapsedRealtime()
+            if (t - creeLe < 15_000 || !app.enVoiture || t - derniereFin < 5_000 || t - dernierParler < 5_000) {
                 session.setPlaybackState(etat(PlaybackState.STATE_PAUSED)); return
             }
             parler()
@@ -465,7 +470,7 @@ class JarvisMediaService : MediaBrowserService() {
 
         override fun onPause() {
             VoixVoiture.taire(); JarvisService.interrompreDepuisVoiture()
-            enCours = false; piloteJusqua = 0L; veille?.cancel()
+            enCours = false; piloteJusqua = 0L; veille?.cancel(); derniereFin = SystemClock.elapsedRealtime()
             session.setPlaybackState(etat(PlaybackState.STATE_PAUSED))
         }
 

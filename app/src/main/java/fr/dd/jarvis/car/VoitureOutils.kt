@@ -143,8 +143,13 @@ object VisibiliteAuto {
      * « KingInstaller ») : Android Auto l'accepte alors comme une appli du Play Store, écrans voiture compris. Il suffit
      * de toucher « Mettre à jour » ; données et réglages sont conservés. À refaire après chaque mise à jour manuelle.
      */
-    suspend fun installerCommePlay(ctx: Context): String {
+    @Volatile private var derniereInstallation = 0L
+
+    /** [apk] : APK d'une mise à jour choisi par l'utilisateur ; null = JARVIS tel qu'installé. */
+    suspend fun installerCommePlay(ctx: Context, apk: android.net.Uri? = null): String {
         val app = ctx.applicationContext as JarvisApp
+        val maintenant = System.currentTimeMillis()
+        if (maintenant - derniereInstallation < 20_000) return "⏳ Installation déjà en cours."
         if (android.os.Build.VERSION.SDK_INT >= 26 && !ctx.packageManager.canRequestPackageInstalls()) {
             runCatching {
                 ctx.startActivity(Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, android.net.Uri.parse("package:${ctx.packageName}"))
@@ -154,10 +159,30 @@ object VisibiliteAuto {
         }
         if (!installateurGoogleDispo(ctx)) return "❌ L'installateur Google d'Android (com.google.android.packageinstaller) est absent ou désactivé sur ce téléphone : Android Auto ne peut pas croire à une installation « Play Store »."
         val info = ctx.applicationInfo
-        if (!info.splitSourceDirs.isNullOrEmpty()) return "❌ JARVIS est installé en plusieurs morceaux (split APK) : réinstallation impossible ici."
+        if (apk == null && !info.splitSourceDirs.isNullOrEmpty()) return "❌ JARVIS est installé en plusieurs morceaux (split APK) : réinstallation impossible ici."
         val dest = File(ctx.cacheDir, "share/jarvis-auto.apk")
-        val copie = withContext(Dispatchers.IO) { runCatching { dest.parentFile?.mkdirs(); File(info.sourceDir).copyTo(dest, overwrite = true); true }.getOrDefault(false) }
-        if (!copie) return "❌ Copie de l'application impossible (espace disque ?)."
+        val copie = withContext(Dispatchers.IO) {
+            runCatching {
+                dest.parentFile?.mkdirs()
+                if (apk == null) File(info.sourceDir).copyTo(dest, overwrite = true)
+                else {
+                    val brut = File(ctx.cacheDir, "share/jarvis-choisi.tmp")
+                    ctx.contentResolver.openInputStream(apk)!!.use { e -> brut.outputStream().use { e.copyTo(it, 256 * 1024) } }
+                    // Artefact GitHub Actions = un .zip qui CONTIENT l'APK : on l'en sort ; un APK (lui-même un zip) a son manifeste.
+                    java.util.zip.ZipFile(brut).use { z ->
+                        if (z.getEntry("AndroidManifest.xml") != null) brut.copyTo(dest, overwrite = true)
+                        else {
+                            val e = z.entries().asSequence().firstOrNull { it.name.endsWith(".apk", true) } ?: error("pas d'APK")
+                            z.getInputStream(e).use { i -> dest.outputStream().use { i.copyTo(it, 256 * 1024) } }
+                        }
+                    }
+                    brut.delete()
+                }
+                dest.length() > 1_000_000
+            }.getOrDefault(false)
+        }
+        if (!copie) return "❌ Copie de l'APK impossible (fichier illisible ou espace disque insuffisant)."
+        derniereInstallation = maintenant
         val uri = androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", dest)
         app.store.autoVisibilite.set(true)
         app.store.autoReinstallTs.set(System.currentTimeMillis().toString())
@@ -365,7 +390,8 @@ object VisibiliteAuto {
             .setContentIntent(app).setAutoCancel(true)
         // « Rétablir » ouvre JARVIS, qui lance l'installateur Google (une fenêtre d'Android ne peut s'ouvrir qu'au premier plan).
         if (!ouvrir) b.addAction(0, "Rétablir", PendingIntent.getActivity(ctx, NOTIF + 1,
-            Intent(ctx, fr.dd.jarvis.MainActivity::class.java).putExtra("auto_play", true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), flags))
+            Intent(ctx, fr.dd.jarvis.MainActivity::class.java).putExtra("auto_play_jeton", System.currentTimeMillis().toString())
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), flags))
         runCatching { nm.notify(NOTIF, b.build()) }
     }
 

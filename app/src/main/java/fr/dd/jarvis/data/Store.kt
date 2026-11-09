@@ -305,6 +305,8 @@ class Store(context: Context) {
     val autoReinstallTs = SPref("autoReinstallTs", "0")
     /** Écrans voiture (Car App Library) : seulement pour une installation faite par le Play Store ; sinon JARVIS est une appli média. */
     val autoEcrans = BPref("autoEcrans", false)
+    /** Jeton de la dernière notification « Rétablir » traitée (évite de relancer l'installateur en boucle). */
+    val autoPlayJeton = SPref("autoPlayJeton", "")
     /** Dernier verdict d'Android Auto sur JARVIS relevé dans le journal système (à la connexion à la voiture). */
     val autoJournal = SPref("autoJournal", "")
     val voixStyle = SPref("voixStyle", "")

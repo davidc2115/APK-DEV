@@ -91,9 +91,19 @@ class MainActivity : ComponentActivity() {
     fun demarrerEcoute() { if (!vm.listening && !vm.busy) vm.toggleListening() }
 
     /** Notification « Android Auto : rétablir » : réinstallation par l'installateur Google (marque Play Store). */
-    private fun autoPlay(i: android.content.Intent?) {
-        if (i?.getBooleanExtra("auto_play", false) != true) return
-        i.removeExtra("auto_play")
+    /**
+     * Une seule fois par notification : l'intention d'origine est redonnée à JARVIS quand Android le relance (après la
+     * mise à jour qu'elle déclenche justement) — sans ce verrou, l'installateur se rouvrait en boucle.
+     */
+    private fun autoPlay(i: android.content.Intent?, restauree: Boolean = false) {
+        val jeton = i?.getStringExtra("auto_play_jeton")
+        i?.removeExtra("auto_play"); i?.removeExtra("auto_play_jeton")
+        if (jeton == null || restauree) return
+        if ((i.flags and android.content.Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0) return
+        val store = (application as JarvisApp).store
+        if (store.autoPlayJeton.value == jeton) return
+        store.autoPlayJeton.set(jeton)
+        if (fr.dd.jarvis.car.VisibiliteAuto.marqueValide(this)) return
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
             val r = fr.dd.jarvis.car.VisibiliteAuto.installerCommePlay(this@MainActivity)
             android.widget.Toast.makeText(this@MainActivity, r.take(180), android.widget.Toast.LENGTH_LONG).show()
@@ -170,7 +180,7 @@ class MainActivity : ComponentActivity() {
         handleTikTokCallback(intent)
         intent?.getStringExtra("terrain")?.takeIf { it.isNotBlank() }?.let { terrainDemande.value = it; intent.removeExtra("terrain") }
         intent?.getStringExtra("demande")?.takeIf { it.isNotBlank() }?.let { demandeExterne.value = it; intent?.removeExtra("demande") }
-        autoPlay(intent)
+        autoPlay(intent, restauree = savedInstanceState != null)
         // Widget « dragon » à jour (prochain rendez-vous) à chaque ouverture.
         Thread { runCatching { fr.dd.jarvis.widget.DragonWidget.majTous(applicationContext) } }.start()
         setContent {

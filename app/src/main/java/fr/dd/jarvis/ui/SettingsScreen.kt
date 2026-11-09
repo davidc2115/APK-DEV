@@ -933,6 +933,14 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     autoMsg = "…"; scope.launch { autoMsg = fr.dd.jarvis.car.VisibiliteAuto.installerCommePlay(ctx); tick++ }
                 }
                 if (autoMsg.isNotBlank() && autoMsg != "…") Text(autoMsg, color = HudText, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                // Mise à jour de JARVIS qui GARDE la marque : l'APK téléchargé passe par l'installateur Google (une seule installation).
+                val choixApk = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+                    if (uri != null) { autoMsg = "…"; scope.launch { autoMsg = fr.dd.jarvis.car.VisibiliteAuto.installerCommePlay(ctx, uri); tick++ } }
+                }
+                HudButton("📦 Installer une mise à jour de JARVIS (garde Android Auto)", Modifier.fillMaxWidth().padding(top = 6.dp), enabled = autoMsg != "…") {
+                    choixApk.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream", "application/zip"))
+                }
+                Text("Choisis l'APK téléchargé (ex. dans Téléchargements) : il est installé par l'installateur Google avec la marque « Play Store », plus besoin de « Rétablir » ensuite.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
                 Spacer(Modifier.height(6.dp))
                 HudButton("Ouvrir Android Auto", Modifier.fillMaxWidth(), enabled = aaInstalle, filled = true) {
                     val pm = ctx.packageManager
