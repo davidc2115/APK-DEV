@@ -216,7 +216,77 @@ Mise en forme Markdown obligatoire :
 - N'invente aucune information absente des données. Si un détail manque, ne l'écris pas.
 """.trim()
 
+    /**
+     * Rapport d'intervention : sobre, avec des emojis repères. Les sections n'apparaissent que si elles ont un contenu ;
+     * les mesures par série deviennent un tableau (2 séries par ligne).
+     */
+    val RAPPORT = """
+# 📋 {{titre}}
+
+**{{client}}** — {{installation}}
+
+| | |
+|---|---|
+| 📅 **Date** | {{date}} |
+| 🔧 **Intervention** | {{categorie}} |
+| 📌 **Statut** | {{statut}} |
+{{#adresse}}| 📍 **Adresse** | {{adresse}} |
+{{/adresse}}{{#onduleur}}| ⚡ **Onduleur** | {{onduleur}} |
+{{/onduleur}}{{#kwc}}| ☀️ **Puissance** | {{kwc}} kWc |
+{{/kwc}}
+{{#description}}
+## 📝 Description
+{{description}}
+{{/description}}
+{{#diagnostic}}
+## 🔍 Diagnostic
+{{diagnostic}}
+{{/diagnostic}}
+{{#a_actions}}
+## 🛠️ Actions réalisées
+{{#actions}}- ✅ {{action}}
+{{/actions}}{{/a_actions}}
+{{#a_pieces}}
+## 🔩 Pièces remplacées
+{{#pieces}}- 🔹 {{piece}}
+{{/pieces}}{{/a_pieces}}
+{{#a_series}}
+## 📊 Mesures par série
+| Série | Valeur | Série | Valeur |
+|---|---:|---|---:|
+{{#series_paires}}| {{serie_a}} | {{valeur_a}} | {{serie_b}} | {{valeur_b}} |
+{{/series_paires}}{{/a_series}}
+{{#a_mesures}}
+## 📏 Autres mesures
+{{#mesures}}- {{mesure}}
+{{/mesures}}{{/a_mesures}}
+{{#a_photos_avant}}
+## 📷 Photos avant intervention
+{{#photos_avant}}{{photo}}
+{{/photos_avant}}{{/a_photos_avant}}
+{{#a_photos_apres}}
+## 📷 Photos après intervention
+{{#photos_apres}}{{photo}}
+{{/photos_apres}}{{/a_photos_apres}}
+{{#prochaine_maintenance}}
+## 📆 Prochaine maintenance
+{{prochaine_maintenance}}
+{{/prochaine_maintenance}}
+{{#notes}}
+## 🗒️ Notes
+{{notes}}
+{{/notes}}
+{{#signature}}
+## ✍️ Signature du client
+{{signature}}
+{{/signature}}
+
+---
+**{{societe_nom}}**{{#societe_tel}} · 📞 {{societe_tel}}{{/societe_tel}}{{#societe_email}} · ✉️ {{societe_email}}{{/societe_email}}
+""".trimStart()
+
     fun defaut(type: String): String = when (type) {
+        "rapport" -> RAPPORT
         "devis", "facture" -> DEVIS_FACTURE
         "client" -> CLIENT
         "paie" -> PAIE

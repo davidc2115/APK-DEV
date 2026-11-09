@@ -122,14 +122,17 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "site_gps" to prop("Coordonnées GPS exactes de l'installation telles que copiées dans Google Maps (« 47.541558, 4.459845 »), en degrés-minutes-secondes (47°32'29.6\"N 4°27'35.4\"E) ou lien Google Maps. Prioritaires sur l'adresse. « ma position » = position GPS actuelle du téléphone (quand l'utilisateur est sur place).")
         ), listOf("nom")),
         tool("client_fiche", "Affiche et réexporte la fiche Markdown d'un client DÉJÀ présent dans la base interne Société. Ne crée jamais un client et ne remplace jamais client_ecrire.", mapOf("nom" to prop("Nom du client.")), listOf("nom")),
-        tool("intervention_enregistrer", "Enregistre une intervention photovoltaïque réellement effectuée dans l'historique du site et dans Obsidian.", mapOf(
+        tool("intervention_enregistrer", "Enregistre une intervention photovoltaïque réellement effectuée dans l'historique du site et dans Obsidian (note + rapport PDF). RÈGLE ABSOLUE : le rapport ne contient QUE ce que l'utilisateur a dit, avec ses mots (reformulés proprement au besoin). N'ajoute JAMAIS d'action, de mesure, de valeur (température, tension, courant…), de constat, d'état (« parfait état », « conforme »), de recommandation ni de date qu'il n'a pas donnés ; un champ non dicté reste vide. Pas de commentaire sur le rapport lui-même. Les éléments non dits sont retirés automatiquement et signalés.", mapOf(
             "client" to prop("Nom exact du client."), "installation" to prop("Nom exact de l'installation si plusieurs."),
             "date" to prop("Date de l'intervention au format yyyy-MM-dd (défaut : aujourd'hui)."),
             "categorie" to prop("maintenance | panne | diagnostic | nettoyage | remplacement | contrôle | autre."),
-            "description" to prop("Résumé factuel de l'intervention réalisée."), "diagnostic" to prop("Diagnostic constaté ; distinguer clairement constat et hypothèse."),
-            "actions" to prop("Actions et réparations réellement réalisées."), "pieces" to prop("Pièces remplacées, références et quantités."),
-            "mesures" to prop("Mesures réellement relevées avec unités."), "statut" to prop("terminee | a_suivre | en_attente."),
-            "prochaine_maintenance" to prop("Date recommandée yyyy-MM-dd si connue."), "notes" to prop("Informations complémentaires.")
+            "description" to prop("Résumé de ce que l'utilisateur a dit de l'intervention (une ou deux phrases, sans rien ajouter)."),
+            "diagnostic" to prop("Constat donné par l'utilisateur, seulement s'il en a donné un ; sinon vide."),
+            "actions" to prop("Actions dites par l'utilisateur, UNE PAR LIGNE (elles deviennent une liste ✅). Aucune action supposée."),
+            "pieces" to prop("Pièces remplacées dites par l'utilisateur, une par ligne (références et quantités s'il les donne)."),
+            "mesures" to prop("Mesures dites par l'utilisateur, recopiées telles quelles avec unités, une par ligne (ex. « 20 séries à environ 500 V », « série 7 : 320 V », « isolement 20 MΩ »). Les séries deviennent automatiquement un tableau Série 1…N. Aucune valeur supposée."),
+            "statut" to prop("terminee | a_suivre | en_attente."),
+            "prochaine_maintenance" to prop("Date yyyy-MM-dd UNIQUEMENT si l'utilisateur l'a demandée."), "notes" to prop("Remarques dites par l'utilisateur, sinon vide.")
         ), listOf("client", "description")),
         tool("intervention_supprimer", "Supprime une intervention précise de l'historique Jarvis et nettoie son rapport Obsidian/PDF et ses photos. À appeler uniquement après interventions_liste, avec l'ID exact et après un « oui » explicite de l'utilisateur. Ne crée jamais de nouvelle intervention.", mapOf(
             "client" to prop("Nom exact du client."),
@@ -140,7 +143,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         tool("interventions_liste", "Consulte l'historique des interventions photovoltaïques et renvoie l'identifiant exact de chaque fiche. Si installation est vide, liste toutes les installations du client avec leurs interventions.", mapOf(
             "client" to prop("Nom exact du client."), "installation" to prop("Nom de l'installation si le client en possède plusieurs.")
         ), listOf("client")),
-        tool("intervention_modifier", "Modifie une intervention existante dans Jarvis et régénère sa note Obsidian et son PDF sans supprimer les photos. Les champs omis restent inchangés ; « effacer » vide explicitement un champ.", mapOf(
+        tool("intervention_modifier", "Modifie le CONTENU d'un rapport d'intervention existant (description, actions, mesures, diagnostic…) et régénère sa note Obsidian et son PDF sans supprimer les photos. Les champs omis restent inchangés ; « effacer » vide explicitement un champ ; pour retirer une ligne (ex. une mesure), renvoie le champ complet SANS cette ligne (jamais de remarque « retiré du rapport »). Pour la MISE EN PAGE des rapports (ordre, titres, emojis, tableaux), utilise presentation_modifier avec cible « rapport ». RÈGLE ABSOLUE : le rapport ne contient QUE ce que l'utilisateur a dit, avec ses mots (reformulés proprement au besoin). N'ajoute JAMAIS d'action, de mesure, de valeur (température, tension, courant…), de constat, d'état (« parfait état », « conforme »), de recommandation ni de date qu'il n'a pas donnés ; un champ non dicté reste vide. Pas de commentaire sur le rapport lui-même. Les éléments non dits sont retirés automatiquement et signalés.", mapOf(
             "client" to prop("Nom exact du client."),
             "installation" to prop("Nom exact de l'installation."),
             "intervention_id" to prop("Identifiant exact obtenu via interventions_liste."),
@@ -148,9 +151,9 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "categorie" to prop("Nouvelle catégorie (optionnel)."),
             "description" to prop("Nouveau résumé factuel (optionnel)."),
             "diagnostic" to prop("Diagnostic constaté ou « effacer » (optionnel)."),
-            "actions" to prop("Actions réalisées ou « effacer » (optionnel)."),
+            "actions" to prop("Actions réalisées, une par ligne, ou « effacer » (optionnel)."),
             "pieces" to prop("Pièces remplacées ou « effacer » (optionnel)."),
-            "mesures" to prop("Mesures relevées avec unités ou « effacer » (optionnel)."),
+            "mesures" to prop("Mesures relevées avec unités, une par ligne (« 20 séries à environ 500 V » → tableau des séries), ou « effacer » (optionnel)."),
             "statut" to prop("terminee | a_suivre | en_attente (optionnel)."),
             "prochaine_maintenance" to prop("Date yyyy-MM-dd ou « effacer » (optionnel)."),
             "notes" to prop("Notes ou « effacer » (optionnel).")
@@ -207,8 +210,8 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "net_verse" to prop("Montant net réellement versé/transféré à l'employé ce mois-ci en € (optionnel). JARVIS calcule automatiquement le nombre d'heures (dont heures sup) qui correspond à ce net. Ne pas renseigner en même temps que heures_effectuees.")
         ), listOf("employe")),
         tool("reserve_bilan", "Bilan de la réserve bénéfices d'une année et répartition dirigeant / salariés.", mapOf("annee" to prop("Année (par défaut l'année en cours)."))),
-        tool("presentation_modifier", "Modifie la présentation d'un modèle : fiche client, devis, facture, bulletin de paie ou planning. Peut aussi annuler la dernière modification ou revenir au modèle d'origine.", mapOf(
-            "cible" to prop("client | devis | facture | paie | planning"),
+        tool("presentation_modifier", "Modifie la présentation d'un modèle : fiche client, devis, facture, bulletin de paie, planning ou RAPPORT D'INTERVENTION (titres, ordre des sections, emojis, tableaux…). Pour « rapport », les rapports récents sont régénérés avec la nouvelle présentation. Peut aussi annuler la dernière modification ou revenir au modèle d'origine.", mapOf(
+            "cible" to prop("client | devis | facture | paie | planning | rapport"),
             "action" to prop("modifier | annuler | reinitialiser | voir"),
             "instruction" to prop("Pour « modifier » : ce que l'utilisateur veut changer, avec ses propres mots.")
         ), listOf("cible", "action")),
@@ -672,8 +675,10 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         if (client == null) return err(erreur!!)
         val site = siteDe(client, a.s("installation"))
             ?: return err(if (client.sites.isEmpty()) "Aucune installation n'est enregistrée. Enregistre d'abord le site avec client_ecrire." else "Plusieurs installations existent pour " + client.nom + " : " + client.sites.joinToString { it.nom } + ". Précise installation.")
-        val description = a.s("description")
-        if (description.isBlank()) return err("La description de l'intervention est obligatoire.")
+        if (a.s("description").isBlank()) return err("La description de l'intervention est obligatoire.")
+        // Fidélité : seulement ce que l'utilisateur a dit (rien d'inventé : valeurs, actions, constats).
+        val garde = garder(a, client, site, null)
+        val description = garde.champs["description"].orEmpty().ifBlank { "Intervention de ${a.s("categorie").ifBlank { "maintenance" }}." }
         // Barrière anti-fausse fiche : Hermes ne doit jamais enregistrer un simple « test » pour simuler une suppression.
         if (description.trim().equals("test", true) || description.trim().matches(Regex("(?i)(test|essai) (de )?(suppression|intervention)"))) {
             return err("Création refusée : une intervention de test ne peut pas être ajoutée à l'historique. Pour supprimer une fiche existante, utilise interventions_liste puis intervention_supprimer avec son ID exact.")
@@ -698,8 +703,8 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         if (doublon != null) return err("⚠️ Intervention potentiellement en double : la fiche #${doublon.id} du $date (${doublon.categorie}) contient déjà exactement les mêmes éléments pour ${client.nom} — ${site.nom}. Aucune nouvelle fiche créée. Consulte interventions_liste ; modifie ou supprime la fiche existante avec l’outil adapté. Si ce sont deux interventions réellement distinctes, précise leur différence dans la description.")
         val intervention = Intervention(
             id = svc.newId(), date = date, categorie = categorie, description = description,
-            diagnostic = a.s("diagnostic"), actions = a.s("actions"), pieces = a.s("pieces"),
-            mesures = a.s("mesures"), statut = statut, prochaineMaintenance = prochaine, notes = a.s("notes")
+            diagnostic = garde.champs["diagnostic"].orEmpty(), actions = garde.champs["actions"].orEmpty(), pieces = garde.champs["pieces"].orEmpty(),
+            mesures = garde.champs["mesures"].orEmpty(), statut = statut, prochaineMaintenance = prochaine, notes = garde.champs["notes"].orEmpty()
         )
         val siteMaj = site.copy(interventions = (site.interventions + intervention).sortedByDescending { it.date })
         svc.repo.update { data -> data.copy(clients = data.clients.map { c ->
@@ -708,7 +713,46 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         val (emplacement, pdf) = svc.ecrireRapport(client, site, intervention)
         return ok("✅ Intervention enregistrée pour " + client.nom + " — " + site.nom + ".\n📅 " + date + " · " + categorie + " · " + statut + "\n📁 " + emplacement + "\n📄 " + pdf +
             (if (prochaine.isNotBlank()) "\n🔧 Prochaine maintenance : " + prochaine else "") +
-            "\n\nLe suivi est conservé dans la fiche de l'installation et dans Obsidian.")
+            "\n\nLe suivi est conservé dans la fiche de l'installation et dans Obsidian." + garde.message())
+    }
+
+    /** Résultat du contrôle de fidélité d'un rapport. */
+    private class Garde(val champs: Map<String, String>, val retires: List<String>, val verifie: Boolean) {
+        fun message(): String = when {
+            retires.isNotEmpty() -> "\n\n🛡️ Non repris dans le rapport (tu ne l'as pas dit) :\n" + retires.joinToString("\n") { "• ${it.take(160)}" } +
+                "\nSi c'est réellement fait ou mesuré, redis-le-moi et je l'ajoute."
+            else -> ""
+        }
+    }
+
+    /** Ce que l'utilisateur a dit récemment (messages de l'appli, de la voiture) : la seule source admise d'un rapport. */
+    private fun paroles(): String {
+        val limite = System.currentTimeMillis() - 4 * 3_600_000L
+        val msgs = runCatching { app.chat.toList() }.getOrDefault(emptyList()) + fr.dd.jarvis.service.CarBridge.contexte()
+        return msgs.filter { it.fromUser && it.ts >= limite }.takeLast(40).joinToString("\n") { it.text }
+    }
+
+    /**
+     * Filtre les champs texte d'un rapport : une ligne n'est gardée que si ses nombres et l'essentiel de ses mots
+     * viennent de ce que l'utilisateur a dit (ou de ce que la fiche / le rapport contenaient déjà). Si la demande vient
+     * d'ailleurs (aucune parole correspondante ici, ex. Hermès sur une autre messagerie), rien n'est filtré.
+     */
+    private fun garder(a: JSONObject, client: Client, site: Site, ancienne: Intervention?): Garde {
+        val cles = listOf("description", "diagnostic", "actions", "pieces", "mesures", "notes")
+        val champs = cles.filter { a.has(it) }.associateWith { a.s(it) }
+        val dits = paroles()
+        val connu = listOf(client.nom, site.nom, site.adresse, site.onduleur, site.notes,
+            if (site.kwc > 0) site.kwc.toString() else "", if (site.nbPanneaux > 0) site.nbPanneaux.toString() else "",
+            a.s("categorie"), ancienne?.let { listOf(it.description, it.diagnostic, it.actions, it.pieces, it.mesures, it.notes).joinToString("\n") }.orEmpty()
+        ).joinToString("\n")
+        val tout = champs.values.joinToString("\n")
+        val nomCite = Fidelite.normaliser(dits).let { d -> listOf(client.nom, site.nom).any { n -> n.length >= 3 && d.contains(Fidelite.normaliser(n).take(8)) } }
+        val ici = dits.isNotBlank() && (nomCite || Fidelite.appui(tout, dits) >= 0.15 || Fidelite.nombres(tout).any { it in Fidelite.nombres(dits) })
+        if (!ici) return Garde(champs, emptyList(), false)
+        val support = dits + "\n" + connu
+        val retires = mutableListOf<String>()
+        val gardes = champs.mapValues { (_, v) -> Fidelite.verifier(v, support).also { retires += it.retires }.garde }
+        return Garde(gardes, retires, true)
     }
 
     private fun interventionModifier(a: JSONObject): ToolResult {
@@ -732,19 +776,27 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         val statut = valeur("statut", ancienne.statut).lowercase()
         if (statut !in setOf("terminee", "a_suivre", "en_attente"))
             return err("Statut invalide : terminee, a_suivre ou en_attente.")
+        // Fidélité : les nouveaux textes ne gardent que ce que l'utilisateur a dit (ou ce que le rapport contenait déjà).
+        val garde = garder(a, client, site, ancienne)
+        fun champ(cle: String, precedente: String): String {
+            if (!a.has(cle)) return precedente
+            val v = a.s(cle)
+            if (v.equals("effacer", true) || v.equals("vider", true) || v.equals("aucun", true)) return ""
+            return garde.champs[cle].orEmpty().ifBlank { if (cle == "description") precedente else "" }
+        }
         val maj = ancienne.copy(
             date = date,
             categorie = valeur("categorie", ancienne.categorie),
-            description = valeur("description", ancienne.description),
-            diagnostic = valeur("diagnostic", ancienne.diagnostic),
-            actions = valeur("actions", ancienne.actions),
-            pieces = valeur("pieces", ancienne.pieces),
-            mesures = valeur("mesures", ancienne.mesures),
+            description = champ("description", ancienne.description),
+            diagnostic = champ("diagnostic", ancienne.diagnostic),
+            actions = champ("actions", ancienne.actions),
+            pieces = champ("pieces", ancienne.pieces),
+            mesures = champ("mesures", ancienne.mesures),
             statut = statut,
             prochaineMaintenance = prochaine,
-            notes = valeur("notes", ancienne.notes)
+            notes = champ("notes", ancienne.notes)
         )
-        return ok(svc.modifierIntervention(client.id, site.id, id, maj))
+        return ok(svc.modifierIntervention(client.id, site.id, id, maj) + garde.message())
     }
 
     private suspend fun interventionSupprimer(a: JSONObject): ToolResult {
@@ -1080,8 +1132,15 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
     }
 
     private suspend fun presentation(a: JSONObject): ToolResult {
-        val cible = normaliser(a.s("cible")).let { if (it == "factures") "facture" else if (it == "fiche client" || it == "clients") "client" else it }
-        if (cible !in setOf("client", "devis", "facture", "paie", "planning")) return err("Cible inconnue : ${a.s("cible")} (client, devis, facture, paie, planning).")
+        val cible = normaliser(a.s("cible")).let {
+            when {
+                it == "factures" -> "facture"
+                it == "fiche client" || it == "clients" -> "client"
+                it.startsWith("rapport") || it.startsWith("intervention") -> "rapport"
+                else -> it
+            }
+        }
+        if (cible !in setOf("client", "devis", "facture", "paie", "planning", "rapport")) return err("Cible inconnue : ${a.s("cible")} (client, devis, facture, paie, planning, rapport).")
         val courant = if (cible == "planning") Prompts.planningFormat else d.modele(cible)
         fun appliquer(nouveau: String?) {
             svc.repo.update { x ->
@@ -1092,6 +1151,8 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
                 )
             }
             if (cible == "planning") Prompts.planningFormat = nouveau ?: Templates.PLANNING_FORMAT_DEFAUT
+            // Rapports : les rapports récents (note + PDF) prennent tout de suite la nouvelle présentation.
+            if (cible == "rapport") Thread { runCatching { svc.regenererRapports() } }.start()
         }
         return when (normaliser(a.s("action"))) {
             "voir" -> ok("```\n$courant\n```")
@@ -1100,6 +1161,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
                 val prec = d.modelesPrec[cible] ?: return err("Rien à annuler pour « $cible ».")
                 svc.repo.update { x -> x.copy(modeles = x.modeles + (cible to prec), modelesPrec = x.modelesPrec - cible) }
                 if (cible == "planning") Prompts.planningFormat = prec
+                if (cible == "rapport") Thread { runCatching { svc.regenererRapports() } }.start()
                 ok("↩️ Dernière modification de « $cible » annulée.")
             }
             else -> {
@@ -1110,6 +1172,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
                 else
                     "Tu modifies un modèle Markdown à balises {{nom}}, {{#liste}}…{{/liste}} (répétition) et {{#variable}}…{{/variable}} (affiché si non vide). " +
                         "Applique UNIQUEMENT la demande de l'utilisateur (mise en page, ordre, emojis, titres, colonnes). Tu ne peux utiliser QUE ces balises :\n${Rendu.balisesDisponibles(cible)}\n" +
+                        (if (cible == "rapport") "Rapport d'intervention : garde les sections conditionnelles {{#a_…}} (une section vide ne s'affiche pas), les lignes d'images {{photo}} / {{signature}} seules sur leur ligne, et n'ajoute aucun texte de contenu inventé.\n" else "") +
                         "Conserve toutes les informations légales et les totaux. Chaque {{#x}} doit avoir son {{/x}}. Réponds uniquement avec le modèle complet, sans bloc de code ni commentaire."
                 var essai = 0
                 var motif: String? = null

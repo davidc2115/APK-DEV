@@ -15,7 +15,7 @@ data class SocieteData(
     val paie: ConfigPaie = ConfigPaie(),
     val provisions: List<Provision> = emptyList(),
     val bulletins: List<BulletinRef> = emptyList(),
-    val modeles: Map<String, String> = emptyMap(),        // présentations personnalisées (devis, facture, client, paie, planning)
+    val modeles: Map<String, String> = emptyMap(),        // présentations personnalisées (devis, facture, client, paie, planning, rapport)
     val modelesPrec: Map<String, String> = emptyMap()     // version précédente (pour annuler)
 ) {
     fun modele(type: String): String = modeles[type] ?: Templates.defaut(type)

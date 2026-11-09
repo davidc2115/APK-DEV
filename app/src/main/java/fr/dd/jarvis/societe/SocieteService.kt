@@ -409,22 +409,20 @@ class SocieteService(
     private fun dossierIntervention(client: Client, site: Site) = "Société/Interventions/" +
         client.nom.replace(Regex("[\\\\/:*?\"<>|]"), "_") + "/" + site.nom.replace(Regex("[\\\\/:*?\"<>|]"), "_")
 
-    /** Rapport d'intervention (Markdown Obsidian : photos et signature intégrées par « ![[…]] »). */
-    fun markdownIntervention(client: Client, site: Site, i: Intervention): String = buildString {
-        append("# Intervention — ${client.nom} / ${site.nom}\n\n")
-        append("- Date : ${i.date}\n- Catégorie : ${i.categorie}\n- Statut : ${i.statut}\n")
-        if (site.adresse.isNotBlank()) append("- Adresse : ${site.adresse}\n")
-        if (site.onduleur.isNotBlank()) append("- Onduleur : ${site.onduleur}\n")
-        append("\n## Description\n${i.description}\n")
-        if (i.diagnostic.isNotBlank()) append("\n## Diagnostic\n${i.diagnostic}\n")
-        if (i.actions.isNotBlank()) append("\n## Actions réalisées\n${i.actions}\n")
-        if (i.pieces.isNotBlank()) append("\n## Pièces remplacées\n${i.pieces}\n")
-        if (i.mesures.isNotBlank()) append("\n## Mesures relevées\n${i.mesures}\n")
-        if (i.photosAvant.isNotEmpty()) { append("\n## Photos avant intervention\n"); i.photosAvant.forEach { append("![[${i.id}-${it.substringAfterLast('/')}]]\n") } }
-        if (i.photosApres.isNotEmpty()) { append("\n## Photos après intervention\n"); i.photosApres.forEach { append("![[${i.id}-${it.substringAfterLast('/')}]]\n") } }
-        if (i.prochaineMaintenance.isNotBlank()) append("\n## Prochaine maintenance\n${i.prochaineMaintenance}\n")
-        if (i.notes.isNotBlank()) append("\n## Notes\n${i.notes}\n")
-        if (i.signature.isNotBlank()) append("\n## Signature du client\n![[${i.id}-${i.signature.substringAfterLast('/')}]]\n")
+    /**
+     * Rapport d'intervention (Markdown Obsidian : photos et signature intégrées par « ![[…]] »), selon le modèle
+     * « rapport » (modifiable par simple demande : presentation_modifier, cible rapport).
+     */
+    fun markdownIntervention(client: Client, site: Site, i: Intervention): String =
+        fr.dd.jarvis.societe.core.Rendu.rendreIntervention(data, client, site, i)
+
+    /** Régénère les rapports (note + PDF) des interventions récentes, après un changement de présentation. */
+    fun regenererRapports(jours: Long = 120): Int {
+        val depuis = LocalDate.now().minusDays(jours).toString()
+        var n = 0
+        data.clients.forEach { c -> c.sites.forEach { s -> s.interventions.filter { it.date >= depuis }
+            .forEach { i -> runCatching { ecrireRapport(c, s, i); n++ } } } }
+        return n
     }
 
     /** Image d'un rapport (« idIntervention-nom ») depuis le stockage privé, réduite pour le PDF. */
@@ -444,7 +442,7 @@ class SocieteService(
         val base = "${i.date} ${i.id}"
         val md = markdownIntervention(client, site, i)
         val note = obsidian.saveIn(dossier, base, md)
-        val pdf = runCatching { obsidian.saveBytes(dossier, "$base.pdf", PdfExporter.toPdf(md, Logo.bitmap(ctx)) { imageRapport(it) }, "application/pdf") }
+        val pdf = runCatching { obsidian.saveBytes(dossier, "$base.pdf", PdfExporter.toPdf(md, Logo.bitmap(ctx), rapport = true) { imageRapport(it) }, "application/pdf") }
             .getOrElse { "PDF non généré (${it.message})" }
         return note to pdf
     }

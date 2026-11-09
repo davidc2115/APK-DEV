@@ -136,7 +136,11 @@ class JarvisApp : Application() {
         fr.dd.jarvis.work.VeilleWorker.planifier(this)
         runCatching { fr.dd.jarvis.coffre.Coffre.planifier(this) }
         // Une fois : les rapports d'intervention existants sont régénérés avec leurs photos dans le PDF.
-        if (!store.rapportsPhotosV2.value) Thread {
+        if (!store.rapportsV3.value) Thread {
+            runCatching { societe.regenererRapports(jours = 3650) }
+            store.rapportsV3.set(true); store.rapportsPhotosV2.set(true)
+        }.start()
+        else if (!store.rapportsPhotosV2.value) Thread {
             runCatching { societe.regenererRapportsAvecPhotos() }
             store.rapportsPhotosV2.set(true)
         }.start()

@@ -157,6 +157,46 @@ object Rendu {
     fun rendreClient(d: SocieteData, c: Client) = Templates.render(d.modele("client"), clientCtx(d, c))
     fun rendreBulletin(d: SocieteData, b: Bulletin) = Templates.render(d.modele("paie"), bulletinCtx(d, b))
 
+    fun statutIntervention(s: String) = when (s) {
+        "terminee" -> "✅ Terminée"; "a_suivre" -> "🔁 À suivre"; "en_attente" -> "⏳ En attente"; else -> s
+    }
+
+    /** Données d'un rapport d'intervention (modèle « rapport »). */
+    fun interventionCtx(d: SocieteData, c: Client, s: Site, i: Intervention): Ctx {
+        val mes = MesuresSeries.analyser(i.mesures)
+        val actions = ListesRapport.elements(i.actions).map { mapOf("action" to it) }
+        val pieces = ListesRapport.elements(i.pieces).map { mapOf("piece" to it) }
+        val series = mes.series.map { mapOf("serie" to "Série ${it.numero}", "valeur" to it.valeur) }
+        val paires = mes.series.chunked(2).map { p ->
+            mapOf("serie_a" to "Série ${p[0].numero}", "valeur_a" to p[0].valeur,
+                "serie_b" to (p.getOrNull(1)?.let { "Série ${it.numero}" } ?: ""), "valeur_b" to (p.getOrNull(1)?.valeur ?: ""))
+        }
+        val autres = mes.autres.map { mapOf("mesure" to it) }
+        fun image(chemin: String) = "![[${i.id}-${chemin.substringAfterLast('/')}]]"
+        val avant = i.photosAvant.map { mapOf("photo" to image(it)) }
+        val apres = i.photosApres.map { mapOf("photo" to image(it)) }
+        fun drapeau(l: List<*>) = if (l.isEmpty()) "" else "oui"
+        val vars = societeVars(d) + mapOf(
+            "titre" to "Rapport d'intervention", "reference" to i.id,
+            "client" to c.nom, "installation" to s.nom.ifBlank { "Installation" },
+            "date" to dateFr(i.date), "categorie" to i.categorie.replaceFirstChar { it.uppercase() },
+            "statut" to statutIntervention(i.statut),
+            "adresse" to s.adresse, "onduleur" to s.onduleur, "kwc" to (if (s.kwc > 0) nombre(s.kwc) else ""),
+            "description" to Fidelite.sansMeta(i.description), "diagnostic" to Fidelite.sansMeta(i.diagnostic),
+            "a_actions" to drapeau(actions), "a_pieces" to drapeau(pieces), "a_series" to drapeau(series),
+            "a_mesures" to drapeau(autres), "a_photos_avant" to drapeau(avant), "a_photos_apres" to drapeau(apres),
+            "nb_series" to (if (series.isEmpty()) "" else series.size.toString()),
+            "prochaine_maintenance" to (if (i.prochaineMaintenance.isBlank()) "" else dateFr(i.prochaineMaintenance)),
+            "notes" to Fidelite.sansMeta(i.notes),
+            "signature" to (if (i.signature.isBlank()) "" else image(i.signature))
+        )
+        return Ctx(vars, mapOf("actions" to actions, "pieces" to pieces, "series" to series, "series_paires" to paires,
+            "mesures" to autres, "photos_avant" to avant, "photos_apres" to apres))
+    }
+
+    fun rendreIntervention(d: SocieteData, c: Client, s: Site, i: Intervention): String =
+        Templates.render(d.modele("rapport"), interventionCtx(d, c, s, i)).replace(Regex("\n{3,}"), "\n\n").trim() + "\n"
+
     /** Données fictives pour valider un modèle réécrit (balises autorisées + rendu sans erreur). */
     fun exemple(type: String): Ctx {
         val site = Site("s1", "Toiture Sud", "12 rue des Lilas 31000 Toulouse", 9.0, "2021-05-01", "Fronius", 20, "RAS", lat = 43.604652, lon = 1.444209, distanceKm = 25.0, gpsPrecision = "NUMERO")
@@ -168,6 +208,9 @@ object Rendu {
         val doc = Doc("DEV-2026-0001", if (type == "facture") "facture" else "devis", "c1", "s1", "2026-01-01", "2026-01-31",
             listOf(Ligne("Maintenance", 1.0, "forfait", 100.0, 5.0, 20.0)), notes = "n", remiseInfo = "fidélité", devisRef = "DEV-1")
         return when (type) {
+            "rapport" -> interventionCtx(d, cl, site, Intervention("i1", "2026-01-01", "maintenance", "Description", "Diagnostic",
+                "Action 1\nAction 2", "Fusible 10 A", "3 séries à environ 500 V\nIsolement : 20 MΩ", "terminee", "2027-01-01", "Notes",
+                listOf("interventions/i1/avant-01.jpg"), listOf("interventions/i1/apres-01.jpg"), "interventions/i1/signature.png"))
             "client" -> clientCtx(d.copy(docs = listOf(doc)), cl)
             "paie" -> bulletinCtx(d, Paie.bulletin(Employe("e", "Exemple", "Technicien", brutMensuel = 2000.0, tauxPas = 5.0), ConfigPaie(), "2026-01", 100.0))
             else -> docCtx(d, doc)

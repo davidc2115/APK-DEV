@@ -37,14 +37,16 @@ object CarBridge {
      * à la montre (notifications relayées) : « Répondre » permet de parler à JARVIS, avec des réponses toutes faites.
      * [silencieux] : mise à jour sans son ni vibration.
      */
-    fun post(ctx: Context, texte: String, silencieux: Boolean = false) {
+    fun post(ctx: Context, texteBrut: String, silencieux: Boolean = false) {
+        // Android Auto lit ce message à voix haute : noms en capitales lus comme des mots, pas de symboles prononcés.
+        val texte = fr.dd.jarvis.voice.TexteParle.preparer(texteBrut)
         val me = Person.Builder().setName("Moi").build()
         val style = NotificationCompat.MessagingStyle(me).setConversationTitle("JARVIS")
         val recent = synchronized(history) { history.takeLast(8) }
         recent.forEach { m ->
-            style.addMessage(m.text.take(500), m.ts, if (m.fromUser) me else jarvis)
+            style.addMessage((if (m.fromUser) m.text else fr.dd.jarvis.voice.TexteParle.preparer(m.text)).take(500), m.ts, if (m.fromUser) me else jarvis)
         }
-        if (recent.lastOrNull()?.let { !it.fromUser && it.text == texte } != true) {
+        if (recent.lastOrNull()?.let { !it.fromUser && (it.text == texteBrut || it.text == texte) } != true) {
             style.addMessage(texte.take(600), System.currentTimeMillis(), jarvis)
         }
 

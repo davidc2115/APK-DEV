@@ -43,7 +43,7 @@ object VoixNaturelle {
     }
 
     const val SUR_MESURE = "perso"
-    private const val FR = " Parle en français, avec un débit naturel et fluide."
+    private const val FR = " Parle en français, avec un débit naturel et fluide. Lis les noms propres comme des mots (jamais lettre par lettre) et ne prononce jamais la ponctuation ni les symboles."
 
     val PERSONNAGES = listOf(
         Personnage("jarvis", "🤵", "Jarvis, posé", "Hommes", "Charon", "Voix d'un assistant personnel futuriste, calme, posée et assurée, comme un majordome attentionné.", 1f, 1f,
