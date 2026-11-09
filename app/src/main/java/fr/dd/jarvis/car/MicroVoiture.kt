@@ -97,11 +97,15 @@ sealed class Ecoute {
 
 /**
  * Micro de la VOITURE (Android Auto, API voiture niveau 5+) : enregistre une phrase jusqu'au silence. La musique est
- * mise en pause pendant l'écoute (focus audio « assistant »), comme pour l'Assistant Google.
+ * mise en pause pendant l'écoute (focus audio « assistant »), comme pour l'Assistant Google. Si la voiture ne fournit
+ * pas son micro, repli sur le micro du TÉLÉPHONE ([telephone] passe alors à vrai).
  */
 class MicroVoiture(private val ctx: CarContext) {
     @Volatile private var arret = false
     fun arreter() { arret = true }
+    /** Vrai si la dernière écoute a utilisé le micro du téléphone (repli). */
+    @Volatile var telephone = false
+        private set
 
     /** Bloquant : à appeler hors du fil principal. [attenteMs] = délai pour commencer à parler. */
     fun ecouter(attenteMs: Long, maxMs: Long = 15_000): Ecoute {
@@ -110,57 +114,80 @@ class MicroVoiture(private val ctx: CarContext) {
             .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
             .build()
         runCatching { am.requestAudioFocus(focus) }
-        val rec = try { CarAudioRecord.create(ctx) } catch (e: Throwable) {
+        try {
+            // 1) Micro de la voiture (Android Auto le transmet au téléphone).
+            val voiture = runCatching { CarAudioRecord.create(ctx) }.getOrNull()
+            if (voiture != null) {
+                val r = runCatching {
+                    voiture.startRecording()
+                    try { boucle(attenteMs, maxMs, maxOf(CarAudioRecord.AUDIO_CONTENT_BUFFER_SIZE, Pcm.TRAME)) { b -> voiture.read(b, 0, b.size) } }
+                    finally { runCatching { voiture.stopRecording() } }
+                }.getOrNull()
+                if (r != null && r !is Ecoute.Erreur) { telephone = false; return r }
+            }
+            // 2) Repli : micro du téléphone.
+            telephone = true
+            return telephone(attenteMs, maxMs)
+        } finally {
             runCatching { am.abandonAudioFocusRequest(focus) }
-            return Ecoute.Erreur("micro de la voiture indisponible (${e.message ?: e.javaClass.simpleName})")
         }
+    }
+
+    @android.annotation.SuppressLint("MissingPermission")
+    private fun telephone(attenteMs: Long, maxMs: Long): Ecoute {
+        val min = android.media.AudioRecord.getMinBufferSize(Pcm.TAUX, android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT)
+        val rec = try {
+            android.media.AudioRecord(android.media.MediaRecorder.AudioSource.VOICE_RECOGNITION, Pcm.TAUX,
+                android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT, max(min, Pcm.TRAME * 16))
+        } catch (e: Throwable) { return Ecoute.Erreur("aucun micro disponible (${e.message ?: e.javaClass.simpleName})") }
+        if (rec.state != android.media.AudioRecord.STATE_INITIALIZED) { rec.release(); return Ecoute.Erreur("micro du téléphone indisponible") }
+        return try {
+            rec.startRecording()
+            boucle(attenteMs, maxMs, Pcm.TRAME * 4) { b -> rec.read(b, 0, b.size) }
+        } catch (e: Throwable) { Ecoute.Erreur(e.message ?: e.javaClass.simpleName) }
+        finally { runCatching { rec.stop() }; rec.release() }
+    }
+
+    /** Lit le flux jusqu'à la fin de la phrase (ou le silence). [lire] remplit le tampon et renvoie le nombre d'octets. */
+    private fun boucle(attenteMs: Long, maxMs: Long, taille: Int, lire: (ByteArray) -> Int): Ecoute {
         val tout = ByteArrayOutputStream()
         var grosBoutiste: Boolean? = null
         var fin: FinDePhrase? = null
         val calLE = ArrayList<Double>(); val calBE = ArrayList<Double>()
         val debut = System.currentTimeMillis()
-        try {
-            rec.startRecording()
-            val buf = ByteArray(maxOf(CarAudioRecord.AUDIO_CONTENT_BUFFER_SIZE, Pcm.TRAME))
-            val trame = ByteArray(Pcm.TRAME)
-            var rempli = 0
-            while (true) {
-                if (arret) return Ecoute.Annulee
-                val n = rec.read(buf, 0, buf.size)
-                if (n < 0) break
-                if (n > 0) tout.write(buf, 0, n)
-                var i = 0
-                while (i < n) {
-                    val k = minOf(n - i, Pcm.TRAME - rempli)
-                    System.arraycopy(buf, i, trame, rempli, k)
-                    rempli += k; i += k
-                    if (rempli < Pcm.TRAME) break
-                    rempli = 0
-                    if (grosBoutiste == null) {
-                        // L'ordre des octets du flux n'est pas garanti : le bon est celui où le bruit de fond est faible.
-                        calLE += Pcm.rms(trame, 0, Pcm.TRAME, false); calBE += Pcm.rms(trame, 0, Pcm.TRAME, true)
-                        if (calLE.size >= 15) {
-                            val be = calBE.sum() < calLE.sum()
-                            grosBoutiste = be
-                            fin = FinDePhrase((if (be) calBE else calLE).minOrNull() ?: 100.0)
-                        }
-                    } else if (fin!!.trame(Pcm.rms(trame, 0, Pcm.TRAME, grosBoutiste == true))) {
-                        return Ecoute.Phrase(decouper(tout.toByteArray(), grosBoutiste == true, fin!!.debut + 15))
+        val buf = ByteArray(taille)
+        val trame = ByteArray(Pcm.TRAME)
+        var rempli = 0
+        while (true) {
+            if (arret) return Ecoute.Annulee
+            val n = lire(buf)
+            if (n < 0) break
+            if (n > 0) tout.write(buf, 0, n)
+            var i = 0
+            while (i < n) {
+                val k = minOf(n - i, Pcm.TRAME - rempli)
+                System.arraycopy(buf, i, trame, rempli, k)
+                rempli += k; i += k
+                if (rempli < Pcm.TRAME) break
+                rempli = 0
+                if (grosBoutiste == null) {
+                    // L'ordre des octets du flux n'est pas garanti : le bon est celui où le bruit de fond est faible.
+                    calLE += Pcm.rms(trame, 0, Pcm.TRAME, false); calBE += Pcm.rms(trame, 0, Pcm.TRAME, true)
+                    if (calLE.size >= 15) {
+                        val be = calBE.sum() < calLE.sum()
+                        grosBoutiste = be
+                        fin = FinDePhrase((if (be) calBE else calLE).minOrNull() ?: 100.0)
                     }
+                } else if (fin!!.trame(Pcm.rms(trame, 0, Pcm.TRAME, grosBoutiste == true))) {
+                    return Ecoute.Phrase(decouper(tout.toByteArray(), grosBoutiste == true, fin!!.debut + 15))
                 }
-                val ecoule = System.currentTimeMillis() - debut
-                if (fin?.parle != true && ecoule > attenteMs) return Ecoute.Silence
-                if (ecoule > maxMs) break
             }
-            val pcm = tout.toByteArray()
-            val f = fin
-            return if (f != null && f.parle) Ecoute.Phrase(decouper(pcm, grosBoutiste == true, f.debut + 15)) else Ecoute.Silence
-        } catch (e: Throwable) {
-            return Ecoute.Erreur(e.message ?: e.javaClass.simpleName)
-        } finally {
-            runCatching { rec.stopRecording() }
-            runCatching { am.abandonAudioFocusRequest(focus) }
+            val ecoule = System.currentTimeMillis() - debut
+            if (fin?.parle != true && ecoule > attenteMs) return Ecoute.Silence
+            if (ecoule > maxMs) break
         }
+        val f = fin
+        return if (f != null && f.parle) Ecoute.Phrase(decouper(tout.toByteArray(), grosBoutiste == true, f.debut + 15)) else Ecoute.Silence
     }
 
     /** PCM petit-boutiste à partir de la trame [trameDebut] (un peu de marge avant la parole). */

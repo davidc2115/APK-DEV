@@ -247,7 +247,7 @@ class ConversationVoiture private constructor(private val ctx: CarContext, priva
             when (res) {
                 is Ecoute.Annulee -> return@launch
                 is Ecoute.Silence -> { terminer("Conversation terminée."); return@launch }
-                is Ecoute.Erreur -> { terminer("Micro de la voiture indisponible : ${res.message}"); return@launch }
+                is Ecoute.Erreur -> { terminer("Micro indisponible (voiture et téléphone) : ${res.message}"); return@launch }
                 is Ecoute.Phrase -> traiter(res.pcm)
             }
         }

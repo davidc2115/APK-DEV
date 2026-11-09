@@ -97,9 +97,15 @@ class JarvisMediaService : MediaBrowserService() {
         super.onCreate()
         session = MediaSession(this, "JARVIS").apply {
             setCallback(Rappels())
-            setPlaybackState(etat(PlaybackState.STATE_STOPPED))
-            setMetadata(meta("JARVIS", "Touche 🎙️ ou ▶ pour parler · 📅 ton agenda · 🧭 Waze"))
+            // « En pause » (et non arrêté) : la carte média d'Android Auto, à côté du GPS en grand, affiche alors JARVIS
+            // avec ▶ (= parler) et ses boutons 🎙️ / 🧭 / 🔁, au lieu des seules suggestions « Pour vous ».
+            setPlaybackState(etat(PlaybackState.STATE_PAUSED))
+            setMetadata(meta("JARVIS · ▶ pour parler", "🎙️ parler · 🧭 prochain rendez-vous dans Waze · 🔁 relire"))
             isActive = true
+        }
+        portee.launch {
+            val p = withContext(Dispatchers.IO) { runCatching { prochainResume() }.getOrNull() }
+            if (p != null && !enCours) session.setMetadata(meta("JARVIS · ▶ pour parler", p))
         }
         sessionToken = session.sessionToken
         ActiviteVoiture.abonne = abonne
@@ -185,6 +191,15 @@ class JarvisMediaService : MediaBrowserService() {
             add(element(MUSIQUE, "🎵 Reprendre la musique", "YT Music Morphe", "auto_musique"))
         }
         else -> mutableListOf()
+    }
+
+    /** Ligne de la carte média : prochain rendez-vous du jour (le bouton 🧭 y emmène). */
+    private fun prochainResume(): String {
+        val maintenant = System.currentTimeMillis()
+        val e = evenements(LocalDate.now()).firstOrNull { !it.allDay && it.end > maintenant }
+            ?: return "🎙️ parler · 📅 plus de rendez-vous aujourd'hui · 🔁 relire"
+        val t = AgendaVoiture.texteBrut(e.title).ifBlank { "Rendez-vous" }.take(40)
+        return "Prochain : ${hm(e.begin)} · $t" + (if (destinations(e).isNotEmpty()) " — 🧭 Waze" else "")
     }
 
     /** « Pour vous » : parler, Waze vers le prochain rendez-vous, lire la journée, premiers raccourcis. */
