@@ -47,6 +47,8 @@ class JarvisMediaService : MediaBrowserService() {
         private const val RACINE = "racine"
         private const val VIDE = "vide"
         private const val SUGGESTIONS = "suggestions"
+        private const val RECENT = "recent"
+        private val VOITURE = setOf("com.google.android.projection.gearhead", "com.android.car.media", "com.google.android.carassistant")
         private const val APPLI_GOOGLE = "com.google.android.googlequicksearchbox"
         private const val ONGLET_JARVIS = "onglet:jarvis"
         private const val ONGLET_AGENDA = "onglet:agenda"
@@ -137,7 +139,11 @@ class JarvisMediaService : MediaBrowserService() {
         }
         if (!fiable(clientPackageName)) return BrowserRoot(VIDE, extras)
         // Reprise de « la dernière écoute » (système) : rien à reprendre, JARVIS ne joue pas de musique lui-même.
-        if (rootHints?.getBoolean(BrowserRoot.EXTRA_RECENT) == true) return BrowserRoot(VIDE, extras)
+        // « Reprendre » : la carte média d'Android Auto (à côté du GPS en grand) affiche le dernier élément joué avec ▶.
+        // On lui donne « 🎙️ Parler à JARVIS » : la carte devient un bouton micro au lieu des seules suggestions.
+        if (rootHints?.getBoolean(BrowserRoot.EXTRA_RECENT) == true)
+            return if (clientPackageName in VOITURE || clientPackageName == packageName)
+                BrowserRoot(RECENT, Bundle().apply { putBoolean(BrowserRoot.EXTRA_RECENT, true) }) else BrowserRoot(VIDE, extras)
         // Carte « Pour vous » d'Android Auto : remplie par l'appli Google avec des éléments JOUABLES (les onglets n'en ont pas).
         if (clientPackageName == APPLI_GOOGLE || rootHints?.getBoolean(BrowserRoot.EXTRA_SUGGESTED) == true) return BrowserRoot(SUGGESTIONS, extras)
         return BrowserRoot(RACINE, extras)
@@ -173,6 +179,7 @@ class JarvisMediaService : MediaBrowserService() {
             element(ONGLET_RACCOURCIS, "Raccourcis", icone = "auto_onglet_eclair", dossier = true),
         )
         parentId == SUGGESTIONS -> suggestions()
+        parentId == RECENT -> mutableListOf(element(PARLER, "🎙️ Parler à JARVIS", prochainResume(), "auto_micro"))
         parentId == ONGLET_JARVIS -> mutableListOf(element(PARLER, "Parler à JARVIS", "Touche, attends le bip et parle", "auto_micro"))
         parentId == ONGLET_AGENDA -> agenda(LocalDate.now(), "aujourd'hui").apply {
             val demain = evenements(LocalDate.now().plusDays(1))
@@ -279,7 +286,8 @@ class JarvisMediaService : MediaBrowserService() {
     private fun naviguer(d: AgendaVoiture.Destination, titre: String) {
         afficher("🧭 $titre", "Waze → ${d.adresse}", PlaybackState.STATE_BUFFERING, "auto_route")
         portee.launch {
-            val r = withContext(Dispatchers.IO) {
+            val r = if (NavigationVoiture.lancer(d.adresse)) "🧭 Guidage lancé dans Android Auto vers ${d.adresse}"
+            else withContext(Dispatchers.IO) {
                 runCatching {
                     val pc = PhoneControl(app)
                     pc.navigate(d.adresse, "d", if (pc.navApps().containsKey("Waze")) "Waze" else "")
@@ -436,6 +444,12 @@ class JarvisMediaService : MediaBrowserService() {
         if (d.isNotBlank()) lire("🔁 Dernière réponse", d, "auto_relire") else lire("JARVIS", "Pas encore de réponse à relire.", "auto_relire")
     }
 
+    /** Lecture relancée toute seule par Android Auto au branchement (« démarrer la musique automatiquement ») : ignorée. */
+    private fun autoDemarrage(): Boolean {
+        val t = SystemClock.elapsedRealtime()
+        return t - app.voitureDepuis < 12_000
+    }
+
     private inner class Rappels : MediaSession.Callback() {
         override fun onPlayFromSearch(query: String?, extras: Bundle?) {
             val q = query.orEmpty().trim()
@@ -445,7 +459,7 @@ class JarvisMediaService : MediaBrowserService() {
         override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
             val id = mediaId.orEmpty()
             when {
-                id == PARLER -> parler()
+                id == PARLER -> if (autoDemarrage()) session.setPlaybackState(etat(PlaybackState.STATE_PAUSED)) else parler()
                 id == RELIRE -> relire()
                 id == MUSIQUE -> {
                     val c = fr.dd.jarvis.device.MusiqueBibliotheque.controleur(this@JarvisMediaService, fr.dd.jarvis.device.Musique.MORPHE_PACKAGE)
@@ -477,7 +491,7 @@ class JarvisMediaService : MediaBrowserService() {
          */
         override fun onPlay() {
             val t = SystemClock.elapsedRealtime()
-            if (t - creeLe < 15_000 || !app.enVoiture || t - derniereFin < 5_000 || t - dernierParler < 5_000) {
+            if (autoDemarrage() || !app.enVoiture || t - derniereFin < 5_000 || t - dernierParler < 5_000) {
                 session.setPlaybackState(etat(PlaybackState.STATE_PAUSED)); return
             }
             parler()

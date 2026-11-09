@@ -66,7 +66,39 @@ class JarvisCarService : CarAppService() {
 }
 
 class JarvisCarSession : Session() {
+    init {
+        // Tant que JARVIS est ouvert dans Android Auto (même caché derrière le GPS), son contexte voiture sert à lancer
+        // le guidage DANS Android Auto (Waze / Maps de la voiture), y compris depuis une demande vocale faite ailleurs.
+        lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onCreate(owner: LifecycleOwner) { NavigationVoiture.contexte = carContext }
+            override fun onDestroy(owner: LifecycleOwner) { if (NavigationVoiture.contexte === carContext) NavigationVoiture.contexte = null }
+        })
+    }
+
     override fun onCreateScreen(intent: Intent): Screen = JarvisCarScreen(carContext)
+}
+
+/**
+ * Guidage depuis la voiture : Android Auto lance lui-même son appli de navigation (Waze, Maps…) vers la destination.
+ * Fiable téléphone verrouillé, contrairement à l'ouverture de Waze sur le téléphone depuis l'arrière-plan.
+ */
+object NavigationVoiture {
+    @Volatile var contexte: CarContext? = null
+
+    /** Vrai si Android Auto a accepté la demande ; faux s'il faut se rabattre sur le téléphone. */
+    suspend fun lancer(destination: String, point: Pair<Double, Double>? = null): Boolean {
+        val c = contexte ?: return false
+        if (destination.isBlank() && point == null) return false
+        // Formats documentés par Android Auto : « geo:lat,lon » (point précis : fiche client, GPS) ou « geo:0,0?q=adresse ».
+        val geo = if (point != null) "geo:${point.first},${point.second}" else "geo:0,0?q=" + Uri.encode(destination)
+        return withContext(Dispatchers.Main) {
+            runCatching { c.startCarApp(Intent(CarContext.ACTION_NAVIGATE).setData(Uri.parse(geo))); true }
+                .recoverCatching {
+                    // Certaines applis de navigation refusent le format avec coordonnées : nouvel essai avec l'adresse seule.
+                    if (point != null) { c.startCarApp(Intent(CarContext.ACTION_NAVIGATE).setData(Uri.parse("geo:0,0?q=" + Uri.encode(destination)))); true } else false
+                }.getOrDefault(false)
+        }
+    }
 }
 
 private val heure = DateTimeFormatter.ofPattern("HH:mm", Locale.FRANCE)

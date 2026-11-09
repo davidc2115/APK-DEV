@@ -86,6 +86,10 @@ class JarvisApp : Application() {
     /** Téléphone connecté à Android Auto (projection sur l'écran de la voiture). */
     @Volatile var enVoiture = false
         private set
+    /** Heure (SystemClock.elapsedRealtime) du branchement à la voiture : Android Auto peut alors relancer seul la lecture. */
+    @Volatile var voitureDepuis = 0L
+        private set
+    private val lanceLe = android.os.SystemClock.elapsedRealtime()
 
     override fun onCreate() {
         super.onCreate()
@@ -157,6 +161,9 @@ class JarvisApp : Application() {
             androidx.car.app.connection.CarConnection(this).type.observeForever { t ->
                 val avant = enVoiture
                 enVoiture = t == androidx.car.app.connection.CarConnection.CONNECTION_TYPE_PROJECTION
+                // Seulement si JARVIS tournait déjà : un démarrage de JARVIS PAR un appui dans la voiture n'est pas une relance auto.
+                val maintenant = android.os.SystemClock.elapsedRealtime()
+                if (enVoiture && !avant && maintenant - lanceLe > 5_000) voitureDepuis = maintenant
                 // Montée en voiture : accueil de JARVIS (prochain rendez-vous, météo) dans Android Auto.
                 if (enVoiture && !avant) graphScope.launch(Dispatchers.IO) {
                     // Verdict d'Android Auto sur JARVIS (journal système), relevé peu après le branchement.

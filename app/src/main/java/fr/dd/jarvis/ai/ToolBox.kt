@@ -853,10 +853,18 @@ class ToolBox(
         }
         "controle_media" -> ToolResult(app.phone.mediaKey(a.optString("action")))
         "naviguer" -> {
+            // En voiture : Android Auto lance son propre GPS (Waze / Maps de la voiture), sans question ni écran du téléphone.
+            if (app.enVoiture && a.optString("destination").isNotBlank()) {
+                val pt = runCatching { fr.dd.jarvis.societe.Geo.geocode(a.optString("destination")) }.getOrNull()
+                if (fr.dd.jarvis.car.NavigationVoiture.lancer(a.optString("destination"), pt?.let { it.lat to it.lon }))
+                    return ToolResult("🧭 Guidage lancé dans Android Auto vers ${a.optString("destination")}.")
+            }
             var appli = a.optString("appli").trim()
             val toujours = a.optString("toujours").trim().lowercase() in setOf("true", "oui", "1", "vrai")
             if (appli.isBlank()) appli = app.store.appPrefs["navigation"].orEmpty()
             val dispo = app.phone.navApps().keys
+            // En voiture, pas de question : Waze s'il est installé (c'est le GPS d'Android Auto le plus courant).
+            if (appli.isBlank() && app.enVoiture) appli = dispo.firstOrNull { it.contains("Waze") } ?: dispo.firstOrNull().orEmpty()
             if (appli.isBlank() && dispo.size > 1)
                 ToolResult("CHOIX_REQUIS : demande à l'utilisateur avec quelle application lancer l'itinéraire (${dispo.joinToString(" ou ")}) et s'il veut la garder toujours ou une seule fois, puis rappelle naviguer avec appli et toujours.")
             else {
