@@ -158,10 +158,12 @@ class MicroVoiture(private val ctx: CarContext) {
         val buf = ByteArray(taille)
         val trame = ByteArray(Pcm.TRAME)
         var rempli = 0
+        var lus = 0L
         while (true) {
             if (arret) return Ecoute.Annulee
             val n = lire(buf)
-            if (n < 0) break
+            if (n < 0) { if (lus == 0L) return Ecoute.Erreur("flux du micro fermé"); break }
+            lus += n
             if (n > 0) tout.write(buf, 0, n)
             var i = 0
             while (i < n) {
@@ -174,6 +176,8 @@ class MicroVoiture(private val ctx: CarContext) {
                     // L'ordre des octets du flux n'est pas garanti : le bon est celui où le bruit de fond est faible.
                     calLE += Pcm.rms(trame, 0, Pcm.TRAME, false); calBE += Pcm.rms(trame, 0, Pcm.TRAME, true)
                     if (calLE.size >= 15) {
+                        // Silence numérique parfait : aucun vrai micro ne donne ça (micro refusé par l'hôte) → repli.
+                        if (calLE.sum() == 0.0 && calBE.sum() == 0.0) return Ecoute.Erreur("micro muet")
                         val be = calBE.sum() < calLE.sum()
                         grosBoutiste = be
                         fin = FinDePhrase((if (be) calBE else calLE).minOrNull() ?: 100.0)

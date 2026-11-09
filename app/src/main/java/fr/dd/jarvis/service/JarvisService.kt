@@ -384,6 +384,15 @@ class JarvisService : Service() {
         // Connexion à l'IA préparée pendant que tu parles (évite la poignée de main TLS au moment de la demande).
         fr.dd.jarvis.ai.Http.prechauffer()
         vosk?.stop()
+        // En voiture (JARVIS ouvert dans Android Auto) : micro de la VOITURE et haut-parleurs de la voiture, GPS toujours affiché.
+        if (fr.dd.jarvis.car.ConversationAuto.possible(app)) {
+            awake = true; busy = true; echangeReel = true
+            voice?.stopSpeaking()
+            voice?.carillon(montant = true) {
+                fr.dd.jarvis.car.ConversationAuto.demarrer(app) { busy = false; awake = false; goIdle() }
+            }
+            return
+        }
         awake = true; echangeReel = false; incompris = 0
         voice?.sessionDebut()
         voice?.stopSpeaking()

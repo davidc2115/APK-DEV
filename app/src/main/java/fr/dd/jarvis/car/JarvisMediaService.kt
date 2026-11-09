@@ -109,6 +109,8 @@ class JarvisMediaService : MediaBrowserService() {
             val p = withContext(Dispatchers.IO) { runCatching { prochainResume() }.getOrNull() }
             if (p != null && !enCours) session.setMetadata(meta("JARVIS · ▶ pour parler", p))
         }
+        // Les applis abonnées (appli Google pour « Pour vous ») rechargent le planning du jour.
+        portee.launch { kotlinx.coroutines.delay(4000); runCatching { notifyChildrenChanged(SUGGESTIONS); notifyChildrenChanged(RECENT) } }
         sessionToken = session.sessionToken
         ActiviteVoiture.abonne = abonne
         VoixVoiture.preparer(this)
@@ -209,20 +211,30 @@ class JarvisMediaService : MediaBrowserService() {
         return "Prochain : ${hm(e.begin)} · $t" + (if (destinations(e).isNotEmpty()) " — 🧭 Waze" else "")
     }
 
-    /** « Pour vous » : parler, Waze vers le prochain rendez-vous, lire la journée, premiers raccourcis. */
+    /**
+     * « Pour vous » (carte à côté du GPS en grand, remplie par l'appli Google) : le PLANNING du jour — rendez-vous
+     * restants (un appui = Waze vers l'adresse, ou les détails lus), sinon ceux de demain. Titres seuls, sans
+     * sous-titre ni « ? » : l'appli Google semble écarter ces éléments-là de la carte.
+     */
     private fun suggestions(): MutableList<MediaBrowser.MediaItem> {
-        val l = mutableListOf(element(PARLER, "🎙️ Parler à JARVIS", "Touche, attends le bip et parle", "auto_micro"))
+        val l = mutableListOf<MediaBrowser.MediaItem>()
+        if (!app.calendar.hasPermission()) return mutableListOf(element(PARLER, "🎙️ Parler à JARVIS", icone = "auto_micro"))
+        val jour = LocalDate.now()
         val maintenant = System.currentTimeMillis()
-        val aujourdhui = evenements(LocalDate.now())
-        aujourdhui.filter { !it.allDay && it.end > maintenant }
-            .firstNotNullOfOrNull { e -> destinations(e).firstOrNull()?.let { e to it } }
-            ?.let { (e, d) ->
-                l += element(EVT + cle(LocalDate.now(), e), "🧭 ${hm(e.begin)} · ${AgendaVoiture.texteBrut(e.title).ifBlank { "Rendez-vous" }.take(50)}",
-                    "Waze → ${d.libelle.take(60)}", "auto_route")
-            }
-        if (app.calendar.hasPermission()) l += element(LIRE_JOUR + LocalDate.now(), "🗣️ Lis-moi aujourd'hui",
-            if (aujourdhui.isEmpty()) "Aucun rendez-vous" else "${aujourdhui.size} rendez-vous", "auto_parole")
-        RaccourcisVoiture.liste(app).take(3).forEachIndexed { i, r -> l += element(RACCOURCI + i, "⚡ $r", icone = "auto_eclair") }
+        val evts = evenements(jour)
+        val restants = evts.filter { it.allDay || it.end > maintenant }
+        fun ligne(d: LocalDate, e: EventInfo, avant: String): MediaBrowser.MediaItem {
+            val lieux = destinations(e)
+            val quand = if (e.allDay) "Journée" else hm(e.begin)
+            val ville = lieux.firstOrNull()?.let { " · " + AgendaVoiture.ville(it.adresse) }.orEmpty()
+            val titre = AgendaVoiture.texteBrut(e.title).replace("?", "").ifBlank { "Rendez-vous" }
+            return element(EVT + cle(d, e), "$avant$quand $titre$ville".take(80), icone = if (lieux.isNotEmpty()) "auto_route" else "auto_agenda")
+        }
+        if (restants.isNotEmpty()) restants.take(6).forEach { l += ligne(jour, it, "📅 ") }
+        else {
+            l += element(LIRE_JOUR + jour, if (evts.isEmpty()) "📅 Aucun rendez-vous aujourd'hui" else "📅 Journée terminée : ${evts.size} rendez-vous", icone = "auto_agenda")
+            evenements(jour.plusDays(1)).take(5).forEach { l += ligne(jour.plusDays(1), it, "Demain ") }
+        }
         return l
     }
 
