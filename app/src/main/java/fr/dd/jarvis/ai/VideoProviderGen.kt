@@ -25,10 +25,12 @@ object VideoProviderGen {
         var flowError: Throwable? = null
         if (flowDisponible(app)) {
             try { return genererFlow(app, prompt, duration, vertical) }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (e: Exception) { flowError = e }
         }
         if (dreaminaDisponible(app)) {
             try { return genererDreamina(app, prompt, duration, vertical) }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (e: Exception) {
                 val previous = flowError?.message?.let { "Flow : " + it + ". " }.orEmpty()
                 throw IllegalStateException(previous + "Dreamina : " + e.message, e)
