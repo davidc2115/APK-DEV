@@ -156,6 +156,70 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
             val localNetworkOk = remember(t2) { android.os.Build.VERSION.SDK_INT < 36 || g("android.permission.ACCESS_LOCAL_NETWORK") }
             var msg by remember { mutableStateOf("") }
             val all = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) { t2++ }
+            HudPanel(Modifier.fillMaxWidth(), title = "Centre d'administration réseau") {
+                val wifiOn = remember(t2) {
+                    runCatching { ctx.applicationContext.getSystemService(android.net.wifi.WifiManager::class.java)?.isWifiEnabled == true }.getOrDefault(false)
+                }
+                val adbOn = remember(t2) { fr.dd.jarvis.device.AdbShell.connected() }
+                val shizukuOn = remember(t2) { ShizukuShell.running() && ShizukuShell.granted() }
+                val freeboxAssociee = store.freeboxAppToken.value.isNotBlank()
+                var diagReseau by remember { mutableStateOf("") }
+                var droitsFreebox by remember { mutableStateOf("") }
+                val nearbyLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { t2++ }
+                val localNetLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { t2++ }
+                StatusRow("Wi-Fi du téléphone", wifiOn)
+                StatusRow("Découverte Wi-Fi à proximité", nearbyWifiOk)
+                if (Build.VERSION.SDK_INT >= 36) StatusRow("Accès Android au réseau local", localNetworkOk)
+                StatusRow("ADB sans fil connecté", adbOn)
+                StatusRow("Shizuku démarré et autorisé", shizukuOn)
+                StatusRow("Freebox associée", freeboxAssociee)
+                Text(
+                    "Ce centre distingue les droits Android, l'accès ADB/Shizuku et les droits propres à la Freebox. Il ne contourne pas les validations système : l'appairage ADB, l'autorisation Shizuku et les droits Freebox doivent être acceptés sur leurs écrans respectifs.",
+                    color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(vertical = 5.dp)
+                )
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HudButton("Wi-Fi", filled = true) {
+                        runCatching { ctx.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    }
+                    HudButton("Débogage sans fil") {
+                        runCatching { ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    }
+                    HudButton("Appairer / connecter") {
+                        runCatching { ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    }
+                }
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HudButton("Autoriser Wi-Fi proche", enabled = Build.VERSION.SDK_INT >= 33 && !nearbyWifiOk) {
+                        if (Build.VERSION.SDK_INT >= 33) nearbyLauncher.launch(Manifest.permission.NEARBY_WIFI_DEVICES)
+                    }
+                    if (Build.VERSION.SDK_INT >= 36) HudButton("Autoriser réseau local", enabled = !localNetworkOk) {
+                        localNetLauncher.launch("android.permission.ACCESS_LOCAL_NETWORK")
+                    }
+                    HudButton("Actualiser les droits") { t2++ }
+                }
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HudButton("Vérifier les droits Freebox", enabled = freeboxAssociee) {
+                        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                            droitsFreebox = runCatching { fr.dd.jarvis.ai.FreeboxOs.verifierAcces(app) }
+                                .getOrElse { "Diagnostic Freebox impossible : " + (it.message ?: it.javaClass.simpleName) }
+                        }
+                    }
+                    HudButton("Diagnostic réseau ADB", enabled = adbOn) {
+                        scope.launch {
+                            diagReseau = fr.dd.jarvis.device.AdbShell.exec(
+                                ctx,
+                                "ip -brief addr; echo ROUTES; ip route; echo WIFI; cmd wifi status; echo LOCAL_NETWORK_PERMISSION; pm check-permission android.permission.ACCESS_LOCAL_NETWORK ${ctx.packageName}"
+                            )
+                        }
+                    }
+                }
+                if (droitsFreebox.isNotBlank()) Text(droitsFreebox, color = HudText, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+                if (diagReseau.isNotBlank()) Text(diagReseau, color = HudText, fontSize = 10.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(top = 6.dp))
+                Text(
+                    "Les redirections de ports, réservations DHCP, VPN et appareils connus se gèrent dans le volet Maison › Freebox. Pour le serveur Debian/Plex, il faut une session SSH distincte : les droits de la box ne donnent pas automatiquement les droits Linux.",
+                    color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp)
+                )
+            }
             HudPanel(Modifier.fillMaxWidth(), title = "Autorisations — tout en un") {
                 StatusRow("Notifications", ntfOk); StatusRow("Micro", micOk); StatusRow("Agenda", calOk); StatusRow("Contacts", ctcOk)
                 StatusRow("SMS et appels", smsOk2); StatusRow("Localisation", locOk2)
