@@ -166,7 +166,9 @@ class Brain(
         val (notesUtiles, plan) = kotlinx.coroutines.coroutineScope {
             val notes = async(kotlinx.coroutines.Dispatchers.IO) { runCatching { fr.dd.jarvis.device.NotesPertinentes.pour(app, texteUser) }.getOrDefault("") }
             val analyse = async {
-                if (sansAnalyse) null else try { Analyseur.analyser(app, history, all) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { null }
+                // L'analyse Gemini n'est utile que pour une vraie orchestration multiétape.
+                // Pour une demande simple, schemaFor() sélectionne localement les outils : un appel IA complet économisé.
+                if (sansAnalyse || !multi) null else try { Analyseur.analyser(app, history, all) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { null }
             }
             notes.await() to analyse.await()
         }
@@ -225,9 +227,11 @@ class Brain(
         // 12000 caractères ; les tours plus anciens (qui ne servent plus qu'à garder le fil de la conversation) sont ramenés
         // à 4000 caractères — largement assez pour une trentaine de lignes (noms de fichiers, SMS, etc.) sans repayer en
         // entier, à chaque nouveau tour, le texte complet d'une réponse déjà ancienne et déjà traitée.
-        val recentHistory = history.takeLast(16)
+        // Les 3 derniers messages restent complets pour préserver les détails opérationnels.
+        // Les 7 précédents servent uniquement à garder le fil et sont plafonnés à 1600 caractères.
+        val recentHistory = history.takeLast(10)
         recentHistory.forEachIndexed { idx, m ->
-            val cap = if (recentHistory.size - 1 - idx < 3) 12000 else 4000
+            val cap = if (recentHistory.size - 1 - idx < 3) 12000 else 1600
             messages.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(cap)))
         }
 
