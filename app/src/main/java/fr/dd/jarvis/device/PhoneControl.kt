@@ -175,18 +175,44 @@ class PhoneControl(private val ctx: Context) {
         return if (ok) "⏳ Minuteur de $txt lancé." + (if (libelle.isNotBlank()) " ($libelle)" else "") else "Impossible de lancer le minuteur."
     }
 
-    /** Supprime une alarme (recherche par heure ou libellé). */
+    /**
+     * Demande à l'application Horloge de supprimer une alarme.
+     * Android ne fournit ni liste ni API d'édition universelle : la suppression dépend donc du support
+     * de ACTION_DISMISS_ALARM par l'Horloge installée. Cette action ne requiert pas SCHEDULE_EXACT_ALARM.
+     */
     fun supprimerAlarme(heure: String, libelle: String): String {
         val m = Regex("(\\d{1,2})\\s*[:hH]\\s*(\\d{0,2})").find(heure)
-        val ok = if (m != null) horloge(
-            android.provider.AlarmClock.ACTION_DISMISS_ALARM,
-            ints = mapOf(android.provider.AlarmClock.EXTRA_HOUR to m.groupValues[1].toInt(), android.provider.AlarmClock.EXTRA_MINUTES to (m.groupValues[2].toIntOrNull() ?: 0)),
-            strs = mapOf(android.provider.AlarmClock.EXTRA_ALARM_SEARCH_MODE to android.provider.AlarmClock.ALARM_SEARCH_MODE_TIME)
-        ) else horloge(
-            android.provider.AlarmClock.ACTION_DISMISS_ALARM,
-            strs = mapOf(android.provider.AlarmClock.EXTRA_ALARM_SEARCH_MODE to android.provider.AlarmClock.ALARM_SEARCH_MODE_LABEL, android.provider.AlarmClock.EXTRA_MESSAGE to libelle)
-        )
-        return if (ok) "Demande de suppression de l'alarme envoyée à l'horloge." else "Impossible de supprimer l'alarme."
+        if (m == null && libelle.isBlank()) return "Précise l'heure HH:MM ou le libellé exact de l'alarme à supprimer."
+        val intent = Intent(android.provider.AlarmClock.ACTION_DISMISS_ALARM)
+        if (m != null) {
+            intent.putExtra(android.provider.AlarmClock.EXTRA_HOUR, m.groupValues[1].toInt())
+            intent.putExtra(android.provider.AlarmClock.EXTRA_MINUTES, m.groupValues[2].toIntOrNull() ?: 0)
+            intent.putExtra(android.provider.AlarmClock.EXTRA_ALARM_SEARCH_MODE, android.provider.AlarmClock.ALARM_SEARCH_MODE_TIME)
+        } else {
+            intent.putExtra(android.provider.AlarmClock.EXTRA_ALARM_SEARCH_MODE, android.provider.AlarmClock.ALARM_SEARCH_MODE_LABEL)
+            intent.putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, libelle)
+        }
+        val handler = runCatching {
+            ctx.packageManager.resolveActivity(intent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
+        }.getOrNull()
+        if (handler == null) {
+            val ouvert = horloge("android.intent.action.SHOW_ALARMS")
+            return if (ouvert)
+                "L'Horloge installée ne déclare pas la suppression directe des alarmes. J'ai ouvert sa liste : supprime l'alarme manuellement. Ce n'est pas un problème d'autorisation Android."
+            else "Aucune application Horloge ne prend en charge la suppression directe et je n'ai pas pu ouvrir la liste des alarmes."
+        }
+        val ok = horloge(android.provider.AlarmClock.ACTION_DISMISS_ALARM,
+            ints = if (m != null) mapOf(android.provider.AlarmClock.EXTRA_HOUR to m.groupValues[1].toInt(),
+                android.provider.AlarmClock.EXTRA_MINUTES to (m.groupValues[2].toIntOrNull() ?: 0)) else emptyMap(),
+            strs = if (m != null) mapOf(android.provider.AlarmClock.EXTRA_ALARM_SEARCH_MODE to android.provider.AlarmClock.ALARM_SEARCH_MODE_TIME)
+                else mapOf(android.provider.AlarmClock.EXTRA_ALARM_SEARCH_MODE to android.provider.AlarmClock.ALARM_SEARCH_MODE_LABEL,
+                    android.provider.AlarmClock.EXTRA_MESSAGE to libelle))
+        return if (ok) "Demande de suppression de l'alarme envoyée à l'Horloge. Vérifie qu'elle a bien disparu : Android ne confirme pas universellement la suppression."
+        else {
+            val ouvert = horloge("android.intent.action.SHOW_ALARMS")
+            if (ouvert) "L'Horloge a refusé la suppression directe. Sa liste est ouverte pour une suppression manuelle."
+            else "Impossible d'envoyer la suppression à l'Horloge."
+        }
     }
 
     /** Chronomètre : Android n'offre pas d'API publique, on ouvre l'onglet chronomètre de l'horloge. */
