@@ -193,7 +193,7 @@ class PhoneControl(private val ctx: Context) {
             intent.putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, libelle)
         }
         val handler = runCatching {
-            ctx.packageManager.resolveActivity(intent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
+            ctx.packageManager.resolveActivity(intent, 0)
         }.getOrNull()
         if (handler == null) {
             val ouvert = horloge("android.intent.action.SHOW_ALARMS")
