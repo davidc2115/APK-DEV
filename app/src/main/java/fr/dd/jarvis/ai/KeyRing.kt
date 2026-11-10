@@ -84,7 +84,12 @@ class KeyRing(private val keys: () -> List<String>) {
 
     companion object {
         /** Clé OpenAI / compatible OpenAI : ne doit jamais être envoyée à Google Gemini. */
-        fun estCleOpenAi(key: String): Boolean = key.trim().startsWith("sk-", ignoreCase = true)
+        fun estCleOpenAi(key: String): Boolean {
+            val value = key.trim().lowercase()
+            // OpenAI : anciennes clés sk-… et formats actuels sk-proj-/sk-svcacct-.
+            // Exclure les préfixes d'autres fournisseurs qui commencent aussi par sk- (OpenRouter, Anthropic).
+            return value.startsWith("sk-") && !value.startsWith("sk-or-") && !value.startsWith("sk-ant-")
+        }
 
         private val ATTENTE = Regex("(?:try again|retry) in ((?:\\d+h)?(?:\\d+m(?!s))?(?:\\d+(?:\\.\\d+)?s)?(?:\\d+ms)?)", RegexOption.IGNORE_CASE)
         private val DELAI_JSON = Regex("\"retryDelay\"\\s*:\\s*\"(\\d+(?:\\.\\d+)?)s\"")
