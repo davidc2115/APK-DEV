@@ -153,7 +153,7 @@ object Discord {
         http.newCall(b.build()).execute().use { r ->
             val t = r.body?.string().orEmpty()
             if (r.code == 401) throw IllegalStateException("Discord 401 : jeton refusé (${diagJeton(app)}). Réponse de Discord : ${t.take(200).ifBlank { "(vide)" }}. Vérifie que c'est bien le jeton du BOT (onglet Bot du developer portal \u203a \u00ab Reset Token \u00bb), pas le Client Secret/ID. Si ce jeton fonctionne par ailleurs (ex. un bot lancé sur le serveur Debian) mais pas ici, c'est probablement un copier-coller différent : régénère un jeton (\u00ab Reset Token \u00bb), colle-le UNE SEULE fois dans Réglages \u203a Discord sans le retaper, et utilise ce même nouveau jeton partout.")
-            if (r.code == 403) throw IllegalStateException("Discord 403 : le bot n'a pas la permission nécessaire.")
+            if (r.code == 403) throw IllegalStateException("Discord 403 : accès refusé à ce salon ou à ce fil. Vérifie les permissions VIEW_CHANNEL (Voir le salon) et READ_MESSAGE_HISTORY (Lire l’historique des messages), ainsi que l’accès du bot au fil. Si elles sont accordées et que le texte reste vide, vérifie l’intent privilégié MESSAGE_CONTENT dans le Discord Developer Portal.")
             if (!r.isSuccessful) throw IllegalStateException("Discord ${r.code} : ${t.take(300)}")
             return JSONArray(t)
         }
