@@ -244,7 +244,9 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
     var terrain by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(terrain, app.store.presenceVerrouillage.value) {
         val afficherVerrouille = terrain == "presence" && app.store.presenceVerrouillage.value
-        val activity = ctx as? MainActivity
+        var base: android.content.Context? = ctx
+        while (base is android.content.ContextWrapper && base !is MainActivity) base = base.baseContext
+        val activity = base as? MainActivity
         if (android.os.Build.VERSION.SDK_INT >= 27) activity?.setShowWhenLocked(afficherVerrouille)
         else if (afficherVerrouille) activity?.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
         else activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
