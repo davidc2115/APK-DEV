@@ -27,7 +27,7 @@ import java.util.concurrent.Executors
 object PontMcp {
     const val PORT = 38291
     private const val TAG = "PontMcp"
-    private const val maxOutilsExpose = 80
+    private const val maxOutilsExpose = 24
     private val pool = Executors.newCachedThreadPool()
     @Volatile private var serveur: ServerSocket? = null
     @Volatile private var fournisseur: Fournisseur? = null
@@ -79,8 +79,29 @@ object PontMcp {
         override fun capacitesHermes(json: String) { runCatching { app.memo.majCapacitesHermes(json) } }
         private val defaut by lazy { ToolBox(app) { _, force -> !force } }
         private fun boite() = boiteActive ?: defaut
+
+        // Le catalogue Jarvis est stable pendant la vie du processus. Le reconstruire à chaque
+        // tools/list et à chaque recherche coûtait inutilement du CPU et allongeait l'ouverture MCP.
+        // L'exécution continue d'utiliser boite() (et donc les confirmations de la conversation active).
+        @Volatile private var catalogueCache: JSONArray? = null
+        @Volatile private var outilsCache: JSONArray? = null
+        private fun catalogueComplet(): JSONArray {
+            catalogueCache?.let { return it }
+            return synchronized(this) {
+                catalogueCache ?: boite().schemaAll().also { catalogueCache = it }
+            }
+        }
+        fun prechaufferCatalogue() {
+            runCatching { outils() }
+        }
         override fun jeton() = app.store.mcpJeton.value
-        override fun outils(): JSONArray = convertirOutils(boite().schemaAll())
+        override fun outils(): JSONArray {
+            outilsCache?.let { return JSONArray(it.toString()) }
+            return synchronized(this) {
+                val cached = outilsCache ?: convertirOutils(catalogueComplet()).also { outilsCache = it }
+                JSONArray(cached.toString())
+            }
+        }
         override fun appeler(nom: String, args: JSONObject): Pair<String, Boolean> =
             appelerOutil(nom, args).also { (texte, _) ->
                 // Images, vidéos et fichiers créés : notés pour être affichés même si Hermès les reformule ou les oublie.
@@ -94,7 +115,7 @@ object PontMcp {
             if (nomCanonique == "jarvis_rechercher_outils") {
                 val termes = args.optString("requete").trim().lowercase().split(Regex("\\s+")).filter { it.isNotBlank() }
                 if (termes.isEmpty()) return "Précise le nom ou le domaine de l'outil recherché." to true
-                val tous = boite().schemaAll()
+                val tous = catalogueComplet()
                 val candidats = mutableListOf<Pair<Int, JSONObject>>()
                 for (i in 0 until tous.length()) {
                     val fn = tous.optJSONObject(i)?.optJSONObject("function") ?: continue
@@ -198,6 +219,9 @@ object PontMcp {
         if (fournisseur !is FournisseurJarvis) fournisseur = FournisseurJarvis(a)
         val ok = ecouter(PORT)
         if (!ok) Log.e(TAG, "Impossible de démarrer le serveur de progression/MCP sur 127.0.0.1:$PORT")
+        // Prépare les schémas hors du thread appelant : la première négociation MCP n'attend pas
+        // la construction du grand catalogue Jarvis.
+        if (ok) pool.execute { runCatching { (fournisseur as? FournisseurJarvis)?.prechaufferCatalogue() } }
         return ok && actif()
     }
 
@@ -420,26 +444,14 @@ object PontMcp {
         // Groq accepte au maximum 128 outils par requête. On plafonne Jarvis à 80
         // pour laisser une marge aux autres serveurs MCP connectés dans Hermès.
         val prioritaires = listOf(
-            // Capacités téléphone et musique : Hermès doit les voir directement sans dépendre
-            // d'une découverte différée ou d'un catalogue tronqué à 80 outils.
-            "phone_action", "piloter_telephone", "voir_ecran", "phone_health_report", "client_supprimer", "societe_liste", "client_fiche", "client_ecrire", "clients_gps", "musique_rechercher", "musique_etat", "musique_commander",
-            "jouer_musique", "applis_musique", "controle_media",
-            "reglage_jarvis", "hermes",
-            // Les outils métier sensibles doivent rester visibles même lorsque le catalogue
-            // dépasse le budget transmis au modèle (80 outils).
+            // Petit noyau toujours visible : contrôle du téléphone, métier, musique, réseau et coffre.
+            // Le catalogue complet reste interrogeable instantanément avec jarvis_rechercher_outils.
+            "phone_action", "piloter_telephone", "voir_ecran", "phone_health_report",
+            "societe_liste", "client_fiche", "client_ecrire", "clients_gps",
             "interventions_liste", "intervention_supprimer", "intervention_modifier", "installation_supprimer",
-            "intervention_enregistrer", "interventions_synthese",
-            // Gestion des extensions Hermès : garder la découverte des skills/plugins/MCP accessible.
-            "gerer_extension_hermes",
-            // Discord : exposer en priorité les outils de lecture ET d'administration.
-            "discord_guildes", "discord_roles", "discord_salons", "discord_audit_serveur",
-            "discord_role_creer", "discord_role_modifier", "discord_role_supprimer",
-            "discord_role_position", "discord_role_attribuer", "discord_salon_permission", "discord_message_envoyer",
-            // Réseau et accès distant : garder les diagnostics, la découverte et les outils SSH visibles pour Hermès.
-            // Freebox (redirections, VPN, Wi-Fi…) et recherche globale de fichiers/dossiers : toujours visibles.
-            "freebox", "stockage_telephone", "obsidian_fichiers",
-            "routeur_diagnostiquer", "reseau_infos", "ip_publique", "reseau_scanner", "imprimantes_trouver",
-            "appareil_sonder", "appareil_page", "ssh_commande", "ssh_fichier", "ssh_script"
+            "musique_rechercher", "musique_etat", "musique_commander", "jouer_musique",
+            "controle_media", "freebox", "stockage_telephone", "obsidian_fichiers",
+            "routeur_diagnostiquer", "reseau_infos", "reglage_jarvis", "gerer_extension_hermes"
         )
         val fonctions = mutableListOf<JSONObject>()
         val nomsDejaVus = mutableSetOf<String>()
