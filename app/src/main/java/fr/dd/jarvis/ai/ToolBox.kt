@@ -25,6 +25,7 @@ class ToolBox(
     private val discord = DiscordTools(app, confirm)
     private val tiktok = TikTokTools(app, confirm)
     private val musique = MusicTools(app)
+    private val plex = PlexTools(app, confirm)
     private val store get() = app.store
     private val llm get() = app.llm
 
@@ -424,7 +425,8 @@ class ToolBox(
         val soc = SocieteTools.concerned(recentUserText); val srv = ServeurTools.concerned(recentUserText)
         val dis = DiscordTools.concerned(recentUserText); val tik = TikTokTools.concerned(recentUserText)
         val mus = MusicTools.concerned(recentUserText)
-        if (!soc && !srv && !dis && !tik && !mus) return schema
+        val plx = PlexTools.concerned(recentUserText)
+        if (!soc && !srv && !dis && !tik && !mus && !plx) return schema
         return JSONArray().also { out ->
             for (i in 0 until schema.length()) out.put(schema.get(i))
             if (soc) societe.schema.forEach { out.put(it) }
@@ -432,6 +434,7 @@ class ToolBox(
             if (dis) discord.schema.forEach { out.put(it) }
             if (tik) tiktok.schema.forEach { out.put(it) }
             if (mus) musique.schema.forEach { out.put(it) }
+            if (plx) plex.schema.forEach { out.put(it) }
         }
     }
 
@@ -442,6 +445,7 @@ class ToolBox(
         discord.schema.forEach { out.put(it) }
         tiktok.schema.forEach { out.put(it) }
         musique.schema.forEach { out.put(it) }
+        plex.schema.forEach { out.put(it) }
     }
 
     private suspend fun hermesGerer(action: String, mode: String): String {
@@ -1097,6 +1101,7 @@ class ToolBox(
         in DiscordTools.NAMES -> discord.execute(name, a)
         in TikTokTools.NAMES -> tiktok.execute(name, a)
         in MusicTools.NAMES -> musique.execute(name, a)
+        in PlexTools.NAMES -> plex.execute(name, a)
         else -> ToolResult("Outil inconnu : $name")
     } }
 
