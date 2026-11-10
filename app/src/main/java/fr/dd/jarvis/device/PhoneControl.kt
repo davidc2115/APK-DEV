@@ -475,9 +475,14 @@ class PhoneControl(private val ctx: Context) {
         val m = when (mode.trim().lowercase()) { "marche", "a pied", "à pied", "walking", "w" -> "w"; "velo", "vélo", "bicycling", "b" -> "b"; else -> "d" }
         val a = appli.trim().lowercase()
         if (a.contains("waze")) {
-            val uri = if (point != null) "waze://?ll=${point.first},${point.second}&navigate=yes" else "waze://?q=" + Uri.encode(dest) + "&navigate=yes"
+            // Waze Deep Links : le chemin /ul est indispensable. Le schéma historique
+            // "waze://?q=..." ouvrait parfois simplement l'accueil sans transmettre la destination.
+            // Le lien HTTPS officiel est routé vers l'application installée grâce au package explicite.
+            val uri = if (point != null)
+                "https://waze.com/ul?ll=${point.first},${point.second}&navigate=yes"
+            else "https://waze.com/ul?q=" + Uri.encode(dest) + "&navigate=yes"
             val r = start(Intent.ACTION_VIEW, uri, "com.waze")
-            return r.ifBlank { "🧭 Waze : navigation vers $dest lancée." }
+            return r.ifBlank { "🧭 Waze ouvert pour $dest. Vérifie que le guidage est bien démarré." }
         }
         if (a.isNotBlank() && !a.contains("google") && !a.contains("maps")) {
             val (pkg, label) = findPackage(a) ?: return "Application « $appli » introuvable."
