@@ -14,7 +14,7 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
         val NAMES = setOf(
             "discord_guildes", "discord_roles", "discord_salons", "discord_audit_serveur", "discord_role_creer", "discord_role_modifier",
-            "discord_role_supprimer", "discord_role_position", "discord_role_attribuer", "discord_salon_permission", "discord_message_envoyer", "discord_messages_lire"
+            "discord_role_supprimer", "discord_role_position", "discord_role_attribuer", "discord_salon_permission", "discord_message_envoyer", "discord_messages_lire", "discord_messages_rechercher", "discord_fil_lire"
         )
     }
 
@@ -36,8 +36,12 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si un seul)."))),
         tool("discord_audit_serveur", "AUDIT DISCORD STRICTEMENT EN LECTURE SEULE : récupère l'inventaire complet des salons et catégories avec leurs identifiants, positions, rattachements et sujets. Ne modifie jamais le serveur.",
             mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si un seul)."))),
-        tool("discord_messages_lire", "Discord : lit les derniers messages d’un salon ou uniquement ceux arrivés après un identifiant de message. Lecture seule ; limite maximale 100 messages par appel.",
-            mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si un seul)."), "salon" to prop("Nom ou ID du salon textuel."), "limite" to prop("Nombre de messages à lire, de 1 à 100 (défaut 30)."), "apres_id" to prop("ID du dernier message déjà lu : ne renvoie que les messages plus récents (optionnel).")), listOf("salon")),
+        tool("discord_messages_lire", "Discord : lit l’historique récent d’un salon, avec pagination avant/après un message. Lecture seule ; 1 à 100 messages par appel. Peut aussi lire un fil si son ID est fourni et si le bot y a accès.",
+            mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si un seul)."), "salon" to prop("Nom ou ID du salon textuel ou du fil Discord."), "limite" to prop("Nombre de messages à lire, de 1 à 100 (défaut 30)."), "apres_id" to prop("ID du dernier message déjà lu : ne renvoie que les messages plus récents (optionnel)."), "avant_id" to prop("ID du message curseur : récupère les messages plus anciens (optionnel ; ne pas utiliser avec apres_id).")), listOf("salon")),
+        tool("discord_messages_rechercher", "Discord : recherche un mot ou une expression dans les 100 messages les plus récents d’un salon, avec filtre facultatif par auteur. Lecture seule.",
+            mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si un seul)."), "salon" to prop("Nom ou ID du salon."), "recherche" to prop("Mot ou expression à retrouver dans le contenu (facultatif, mais recommandé)."), "auteur" to prop("Nom ou pseudo à filtrer (facultatif).")), listOf("salon")),
+        tool("discord_fil_lire", "Discord : lit les messages d’un fil/thread Discord à partir de son ID (lecture seule). Le bot doit avoir accès au fil.",
+            mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si un seul)."), "fil_id" to prop("ID numérique du fil Discord."), "limite" to prop("Nombre de messages à lire, de 1 à 100 (défaut 30)."), "avant_id" to prop("ID curseur pour remonter dans l’historique (optionnel).")), listOf("fil_id")),
         tool("discord_message_envoyer", "Discord : envoie un message dans un salon textuel ou d'annonces. Les mentions automatiques (@everyone/@here et rôles) sont désactivées par sécurité.",
             mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si un seul)."),
                 "salon" to prop("Nom ou ID du salon textuel cible."),
@@ -131,16 +135,31 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             lines += "Contrôle des types : " + byType.entries.joinToString(", ") { "${it.key}=${it.value}" }
             ToolResult(lines.joinToString("\n"), direct = true)
         }
-        "discord_messages_lire" -> {
+        "discord_messages_lire", "discord_messages_rechercher", "discord_fil_lire" -> {
             val g = guildeObj(a); val gid = g.getString("id")
-            val nomSalon = a.optString("salon").trim()
-            val salon = Discord.trouverSalon(app, gid, nomSalon) ?: return ToolResult("Salon « $nomSalon » introuvable.")
-            if (salon.optInt("type") !in setOf(0, 5, 15, 16)) return ToolResult("Ce salon ne permet pas la lecture de messages par cet outil.")
+            val estFil = name == "discord_fil_lire"
+            val cible = if (estFil) a.optString("fil_id").trim() else a.optString("salon").trim()
+            if (cible.isBlank()) return ToolResult(if (estFil) "ID du fil manquant." else "Nom ou ID du salon manquant.")
+            val salon = Discord.trouverSalon(app, gid, cible)
+                ?: if (cible.matches(Regex("\\d{17,20}"))) JSONObject().put("id", cible).put("name", if (estFil) "fil $cible" else "salon $cible").put("type", if (estFil) 11 else 0)
+                   else return ToolResult("Salon/fil « $cible » introuvable sur le serveur.")
+            if (salon.optInt("type") !in setOf(0, 5, 10, 11, 12, 15, 16)) return ToolResult("Ce type de salon/fil ne permet pas la lecture de messages.")
             val limite = (a.optString("limite").toIntOrNull() ?: 30).coerceIn(1, 100)
             val apres = a.optString("apres_id").trim()
-            val arr = Discord.messages(app, salon.getString("id"), limite, apres)
-            if (arr.length() == 0) return ToolResult(if (apres.isBlank()) "Aucun message lisible dans #${salon.optString("name")}." else "Aucun nouveau message dans #${salon.optString("name")} depuis cet identifiant.", direct = true)
-            val messages = (0 until arr.length()).map { arr.getJSONObject(it) }.sortedBy { it.optString("id") }
+            val avant = a.optString("avant_id").trim()
+            val arr = Discord.messages(app, salon.getString("id"), if (name == "discord_messages_rechercher") 100 else limite, apres, avant)
+            var messages = (0 until arr.length()).map { arr.getJSONObject(it) }
+            if (name == "discord_messages_rechercher") {
+                val mot = a.optString("recherche").trim()
+                val auteurFiltre = a.optString("auteur").trim()
+                messages = messages.filter { m ->
+                    val contenu = m.optString("content")
+                    val auteur = m.optJSONObject("author")?.optString("global_name").orEmpty() + " " + m.optJSONObject("author")?.optString("username").orEmpty()
+                    (mot.isBlank() || contenu.contains(mot, ignoreCase = true)) && (auteurFiltre.isBlank() || auteur.contains(auteurFiltre, ignoreCase = true))
+                }
+            }
+            messages = messages.sortedBy { it.optString("id") }
+            if (messages.isEmpty()) return ToolResult(if (name == "discord_messages_rechercher") "Aucun résultat dans les 100 messages récents de #${salon.optString("name")}." else "Aucun message trouvé dans #${salon.optString("name")} / le fil demandé.", direct = true)
             val lignes = messages.map { m ->
                 val auteur = m.optJSONObject("author")?.optString("global_name").orEmpty().ifBlank { m.optJSONObject("author")?.optString("username").orEmpty().ifBlank { "Utilisateur inconnu" } }
                 val date = runCatching { java.time.Instant.parse(m.optString("timestamp")).atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("dd/MM HH:mm")) }.getOrDefault("")
