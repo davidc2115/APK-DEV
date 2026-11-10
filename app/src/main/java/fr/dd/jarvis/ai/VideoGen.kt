@@ -78,14 +78,10 @@ object VideoGen {
     /** Génère un plan (clip) via le Space Hugging Face ; retourne les octets mp4. Erreur explicite si le token
      *  manque/est refusé, si le quota GPU gratuit du jour est épuisé, ou si le service est indisponible. */
     internal fun genereClip(app: JarvisApp, prompt: String, dureeDemandee: Int, vertical: Boolean): ByteArray {
-        // Priorité au service gratuit Hugging Face ZeroGPU (quota GPU journalier).
-        // fal.ai n'est utilisé qu'en compatibilité si aucun token Hugging Face gratuit n'est configuré.
+        // Génération vidéo gratuite via Hugging Face ZeroGPU. Aucun appel fal.ai n'est effectué.
         val token = app.store.huggingFaceToken.value.trim()
-        if (token.isBlank()) {
-            if (ImageToVideoGen.disponible(app))
-                return ImageToVideoGen.clipTexte(app, prompt, dureeDemandee.toDouble(), if (vertical) "9:16" else "16:9")
-            throw ApiException(401, "token Hugging Face manquant — crée-en un gratuit (aucune carte bancaire) sur huggingface.co/settings/tokens puis ajoute-le dans Réglages › IA › Images & vidéo. fal.ai reste seulement un secours facultatif.")
-        }
+        if (token.isBlank()) throw ApiException(401,
+            "Token Hugging Face gratuit manquant : crée-en un sur huggingface.co/settings/tokens puis ajoute-le dans Réglages › IA › Images & vidéo. fal.ai n'est plus utilisé pour la génération vidéo.")
         val duree = dureeDemandee.coerceIn(2, 5) // le modèle gratuit (Wan 2.2) ne va pas au-delà de 5s par plan
         val (hauteur, largeur) = if (vertical) 768 to 448 else 448 to 768
         // Résolution et pas réduits par rapport aux réglages par défaut du Space : on vise un plan générable en
@@ -189,8 +185,8 @@ object VideoGen {
     suspend fun genererVideo(
         app: JarvisApp, sujet: String, script: String, dureePlan: Int, vertical: Boolean
     ): Pair<File?, String> = withContext(Dispatchers.IO) {
-        if (!ImageToVideoGen.disponible(app) && app.store.huggingFaceToken.value.isBlank())
-            return@withContext null to "❌ Aucun service vidéo configuré : ajoute ta clé fal.ai (ou un token Hugging Face gratuit, sans carte bancaire, sur huggingface.co/settings/tokens) dans Réglages › IA › Images & vidéo."
+        if (app.store.huggingFaceToken.value.isBlank())
+            return@withContext null to "❌ Ajoute ton token Hugging Face gratuit dans Réglages › IA › Images & vidéo pour générer les vidéos sans fal.ai."
         val listePlans = plans(app, sujet, script)
         if (listePlans.isEmpty()) return@withContext null to "❌ Impossible de découper le sujet en plans filmables."
         val clips = mutableListOf<File>()
@@ -213,7 +209,7 @@ object VideoGen {
         val fFinal = if (assemble.name == nomFinal) assemble else File(dossier(app), nomFinal).also { assemble.copyTo(it, overwrite = true) }
         val loc = app.obsidian.saveBytes("JARVIS/Vidéos TikTok", nomFinal, fFinal.readBytes(), "video/mp4")
         val msg = buildString {
-            append("🎬 Vidéo générée (${clips.size}/${listePlans.size} plans réussis" + (if (ImageToVideoGen.disponible(app)) ", fal.ai" else "") + ") : ${fFinal.name}")
+            append("🎬 Vidéo générée (${clips.size}/${listePlans.size} plans réussis, Hugging Face ZeroGPU) : ${fFinal.name}")
             append("\n\n[▶ Lire la vidéo](jarvis-video-ia:${fFinal.name})")
             if (loc.isNotBlank()) append("\n📁 $loc")
             if (echecs.isNotEmpty()) { append("\n⚠️ Plans manquants :\n"); append(echecs.joinToString("\n")) }
