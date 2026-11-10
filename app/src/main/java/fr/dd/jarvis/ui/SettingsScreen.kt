@@ -167,6 +167,9 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 var droitsFreebox by remember { mutableStateOf("") }
                 val nearbyLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { t2++ }
                 val localNetLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { t2++ }
+                val adbNotifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+                    fr.dd.jarvis.device.AdbShell.postPairingNotification(ctx)
+                }
                 StatusRow("Wi-Fi du téléphone", wifiOn)
                 StatusRow("Découverte Wi-Fi à proximité", nearbyWifiOk)
                 if (Build.VERSION.SDK_INT >= 36) StatusRow("Accès Android au réseau local", localNetworkOk)
@@ -188,6 +191,25 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                         runCatching {
                             ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                         }
+                    }
+                }
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HudButton("Appairer ADB") {
+                        if (Build.VERSION.SDK_INT >= 33 && ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                            adbNotifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        } else {
+                            fr.dd.jarvis.device.AdbShell.postPairingNotification(ctx)
+                        }
+                        runCatching { ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    }
+                    HudButton("Connecter ADB") {
+                        scope.launch {
+                            diagReseau = fr.dd.jarvis.device.AdbShell.connect(ctx)
+                            t2++
+                        }
+                    }
+                    HudButton("Autoriser Shizuku", enabled = ShizukuShell.running() && !ShizukuShell.granted()) {
+                        ShizukuShell.requestPermission()
                     }
                 }
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
