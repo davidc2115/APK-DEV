@@ -242,8 +242,6 @@ object Discord {
     fun salonPermission(app: JarvisApp, channelId: String, cibleId: String, type: Int, allow: Long, deny: Long) {
         req(app, "PUT", "/channels/$channelId/permissions/$cibleId", JSONObject().put("type", type).put("allow", allow.toString()).put("deny", deny.toString()))
     }
-    /** Réglages et overrides actuels d'un salon, utiles pour ne modifier que les bits explicitement demandés. */
-    fun salon(app: JarvisApp, channelId: String): JSONObject = req(app, "GET", "/channels/$channelId")
     fun salonPermissionSupprimer(app: JarvisApp, channelId: String, cibleId: String) { req(app, "DELETE", "/channels/$channelId/permissions/$cibleId") }
 
     // ------------------------------------------------------------ recherche par nom (pratique pour le langage naturel)
