@@ -80,10 +80,8 @@ object ConfirmationNotification {
     /** Fenêtre de confirmation tactile au-dessus de toute application (accord SYSTEM_ALERT_WINDOW requis). */
     private fun afficherOverlay(context: Context, question: String): Boolean {
         if (Build.VERSION.SDK_INT < 23 || !Settings.canDrawOverlays(context)) return false
-        val programme = java.util.concurrent.CountDownLatch(1)
-        val affiche = java.util.concurrent.atomic.AtomicBoolean(false)
         Handler(Looper.getMainLooper()).post {
-            try {
+            runCatching {
                 retirerOverlay()
                 val dm = context.resources.displayMetrics
                 val marge = (16 * dm.density).toInt()
@@ -142,19 +140,11 @@ object ConfirmationNotification {
                 wm.addView(racine, params)
                 overlay = racine
                 overlayManager = wm
-                affiche.set(true)
-            } catch (_: Exception) {
-                affiche.set(false)
-            } finally {
-                programme.countDown()
             }
         }
-        return try {
-            programme.await(700, java.util.concurrent.TimeUnit.MILLISECONDS) && affiche.get()
-        } catch (_: InterruptedException) {
-            Thread.currentThread().interrupt()
-            false
-        }
+        // L'autorisation est active : on réserve la confirmation à la fenêtre flottante.
+        // Si le système refuse exceptionnellement addView, on évite tout de même le doublon de notification.
+        return true
     }
 
     private fun retirerOverlay() {
