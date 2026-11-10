@@ -55,6 +55,44 @@ object PhonePowerMode {
         }
     }
 
+    /**
+     * Sélection déterministe via l'arbre d'accessibilité Android : aucun appel Gemini,
+     * aucune estimation de coordonnées. Le sélecteur Xiaomi expose normalement « Mode actuel »
+     * puis les choix Équilibré / Performance / Économiseur.
+     */
+    private suspend fun choisirModeParAccessibilite(mode: String): String? = withContext(Dispatchers.IO) {
+        val service = fr.dd.jarvis.service.JarvisAccessibilityService.instance ?: return@withContext null
+        val choix = when (mode) {
+            "economie" -> listOf("Économiseur de batterie", "Économie de batterie", "Battery saver")
+            "equilibre" -> listOf("Équilibré", "Balanced")
+            else -> listOf("Mode performance", "Performance mode", "Performance")
+        }
+        val autres = listOf(
+            "Économiseur de batterie", "Économie de batterie", "Battery saver",
+            "Équilibré", "Balanced", "Mode performance", "Performance mode"
+        )
+        val ouvre = service.clickText("Mode actuel") || service.clickText("Current mode")
+        if (ouvre) delay(350)
+        var clique = choix.any { service.clickText(it) }
+        if (!clique && !ouvre) {
+            // Certains firmwares affichent directement les choix sur la page Batterie.
+            clique = choix.any { service.clickText(it) }
+        }
+        if (!clique) return@withContext null
+        delay(650)
+        val ecran = service.inspectScreen().lowercase(java.util.Locale.ROOT)
+        val cibleVisible = choix.any { ecran.contains(it.lowercase(java.util.Locale.ROOT)) }
+        val alternativesVisibles = autres.count { libelle ->
+            ecran.contains(libelle.lowercase(java.util.Locale.ROOT)) &&
+                choix.none { cible -> cible.equals(libelle, ignoreCase = true) }
+        }
+        if (cibleVisible && alternativesVisibles == 0) {
+            "✅ Mode « ${choix.first()} » sélectionné directement par l'accessibilité HyperOS."
+        } else {
+            "Sélection envoyée par l'accessibilité, mais l'état final n'est pas suffisamment identifiable à l'écran."
+        }
+    }
+
     suspend fun appliquer(app: JarvisApp, demande: String): String {
         val mode = when (demande.trim().lowercase()) {
             "eco", "economie", "économie", "economy", "battery", "battery_saver", "saver" -> "economie"
@@ -82,6 +120,12 @@ object PhonePowerMode {
             "equilibre" -> "Équilibré"
             else -> "Mode performance"
         }
+        // Priorité au pilotage déterministe par libellés d'accessibilité, sans IA ni clé Gemini.
+        if (mode != "economie" || !economieActive(app)) {
+            val direct = choisirModeParAccessibilite(mode)
+            if (direct != null && direct.startsWith("✅")) return direct
+        }
+
         if (PiloteEcran.disponible(app)) {
             val objectif = when (mode) {
                 "economie" -> "Dans le sélecteur des modes de batterie Xiaomi/HyperOS, active « Économiseur de batterie » ou « Économie de batterie ». Si un choix doit d'abord être ouvert, ouvre « Mode actuel », puis sélectionne l'option exacte. Termine uniquement lorsque l'écran montre que l'option est sélectionnée."
