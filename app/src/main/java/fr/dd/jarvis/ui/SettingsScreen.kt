@@ -867,9 +867,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 if (!screeningRole) Text("Le rôle Android d'identification des appels n'est pas disponible sur cette version.", color = HudDim, fontSize = 11.sp)
                 if (screeningOn) {
                     StatusRow("Bandeau d'identification au-dessus de l'appel", overlayCallerId)
-                    if (!overlayCallerId) HudButton("Autoriser l'affichage du nom pendant l'appel") {
-                        ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + ctx.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                    }
+                    if (!overlayCallerId) Text("Autorisation commune : Réglages JARVIS → Général → Autorisations → Superposition.", color = HudDim, fontSize = 11.sp)
                 }
                 Spacer(Modifier.height(10.dp))
                 var smsOk by remember { mutableStateOf(fr.dd.jarvis.device.Telephony.smsGranted(ctx) && fr.dd.jarvis.device.Telephony.callGranted(ctx)) }
