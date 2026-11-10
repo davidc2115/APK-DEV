@@ -286,7 +286,7 @@ class ToolBox(
                 "jours" to prop("Répétition (optionnel) : « lun mar ven », « semaine », « tous les jours ». Vide = une seule fois.")), listOf("heure")))
         put(tool("alarme_supprimer", "Supprime une alarme de l'Horloge native. Aucune permission Android spéciale n'est nécessaire ; cela dépend du support de l'action standard DISMISS_ALARM par l'application Horloge installée. Si elle ne le prend pas en charge, ouvre sa liste pour une suppression manuelle.",
             mapOf("heure" to prop("Heure de l'alarme (optionnel)."), "libelle" to prop("Libellé de l'alarme (optionnel)."))))
-        put(tool("alarme_modifier", "Remplace une alarme Android : crée la nouvelle puis demande à l'Horloge de supprimer l'ancienne. Aucune permission spéciale n'est requise ; si l'Horloge ne prend pas en charge la suppression directe, sa liste est ouverte pour terminer manuellement.",
+        put(tool("alarme_modifier", "Modifie un réveil existant sans créer un doublon. Ne jamais appeler alarme_creer pour une demande de modification. Si l'édition exacte et vérifiable n'est pas disponible, ne rien modifier et ne pas ouvrir l'Horloge.",
             mapOf("ancienne_heure" to prop("Heure actuelle HH:MM de l'alarme à remplacer."), "ancien_libelle" to prop("Libellé actuel (optionnel, si l'heure n'est pas connue)."), "nouvelle_heure" to prop("Nouvelle heure HH:MM."), "nouveau_libelle" to prop("Nouveau libellé (optionnel)."), "jours" to prop("Répétition de la nouvelle alarme : lun, mar, semaine, tous les jours… (optionnel).")), listOf("nouvelle_heure")))
         put(tool("minuteur_creer", "Lance un minuteur avec compte à rebours en notification, SANS ouvrir aucune application.",
             mapOf("secondes" to prop("Durée totale en secondes (ex. 10 min = 600)."), "libelle" to prop("Nom du minuteur (optionnel).")), listOf("secondes")))
@@ -819,14 +819,8 @@ class ToolBox(
             val ancienLibelle = a.optString("ancien_libelle").trim()
             val nouvelleHeure = a.optString("nouvelle_heure").trim()
             if (nouvelleHeure.isBlank()) ToolResult("Précise la nouvelle heure.")
-            else if (ancienneHeure.isBlank() && ancienLibelle.isBlank()) ToolResult("Précise l'heure ou le libellé actuel de l'alarme à remplacer ; aucune alarme n'a été modifiée.")
-            else if (!confirm("Remplacer l'alarme ${ancienneHeure.ifBlank { ancienLibelle }} par ${nouvelleHeure} ?", true)) ToolResult("Modification annulée.")
-            else ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                val creation = app.phone.creerAlarme(nouvelleHeure, a.optString("nouveau_libelle"), a.optString("jours"))
-                if (!creation.startsWith("⏰")) return@withContext creation
-                val suppression = app.phone.supprimerAlarme(ancienneHeure, ancienLibelle)
-                "$creation\\n$suppression" + (if (suppression.startsWith("Demande de suppression")) "\\nℹ️ Vérifie dans l'application Horloge que l'ancienne alarme a bien disparu : Android dépend du support de cette action par l'horloge installée." else "\\n⚠️ La suppression de l'ancienne alarme n'a pas été confirmée par l'Horloge.")
-            }, direct = true)
+            else if (ancienneHeure.isBlank() && ancienLibelle.isBlank()) ToolResult("Précise l'heure ou le libellé actuel du réveil ; aucune modification effectuée.")
+            else ToolResult("Je n'ai pas encore de méthode fiable pour éditer et vérifier le réveil existant dans l'Horloge Xiaomi. Je n'en crée pas un deuxième et je n'ouvre plus l'Horloge automatiquement. Aucun changement effectué.", direct = true)
         }
         "minuteur_creer" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.device.Horloge.creerMinuteur(app, a.optString("secondes").toDoubleOrNull()?.toInt() ?: 0, a.optString("libelle")) }, direct = true)
         "chronometre" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.device.Horloge.chronometre(app, a.optString("action")) }, direct = true)
