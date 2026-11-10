@@ -222,7 +222,7 @@ class Llm(private val store: Store) {
     }
 
     fun bestGemini(models: List<String>): String? {
-        val pref = listOf("gemini-3.8-flash", "gemini-3.6-flash", "gemini-flash-latest", "gemini-3.5-flash-lite", "gemini-2.5-flash")
+        val pref = listOf("gemini-2.5-flash-lite", "gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-2.5-flash")
         pref.firstOrNull { it in models }?.let { return it }
         return models.filter { it.contains("flash") && !it.contains("preview") && !it.contains("exp") }.maxOrNull()
     }

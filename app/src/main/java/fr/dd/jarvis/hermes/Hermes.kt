@@ -313,7 +313,11 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
             "authentication failed|invalid api key",
         RegexOption.IGNORE_CASE
     )
+    // Une surcharge 503 d'un fournisseur (ex. Gemini « high demand ») ne signifie pas que toute la passerelle Hermès est HS.
+    // On garde une courte pause pour éviter une boucle immédiate, puis on retente Hermès au lieu de basculer 3 min sur Jarvis.
+    private val PANNE_TRANSITOIRE = Regex("(http|status|code)\\W{0,3}503\\b|currently experiencing high demand|model (is )?overloaded", RegexOption.IGNORE_CASE)
     private const val DEGRADE_MS = 3 * 60_000L
+    private const val DEGRADE_TRANSITOIRE_MS = 15_000L
     @Volatile private var degradeJusqua = 0L
     @Volatile var derniereRaison = ""
         private set
@@ -491,9 +495,12 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
                 }
                 if (contenu != null && estPanne(contenu)) {
                     // Message d'erreur d'Hermès (ex. « conversation has grown too large… ») : jamais affiché tel quel.
-                    degradeJusqua = System.currentTimeMillis() + DEGRADE_MS
+                    val transitoire = PANNE_TRANSITOIRE.containsMatchIn(contenu)
+                    degradeJusqua = System.currentTimeMillis() + if (transitoire) DEGRADE_TRANSITOIRE_MS else DEGRADE_MS
                     derniereRaison = contenu.lineSequence().first().take(160)
-                    HermesTermux.message = "⚠️ Hermès saturé (${derniereRaison}) : Jarvis répond directement pendant 3 min."
+                    HermesTermux.message = if (transitoire)
+                        "⚠️ Fournisseur Hermès momentanément surchargé (${derniereRaison}) : nouvel essai dans 15 s."
+                    else "⚠️ Hermès saturé (${derniereRaison}) : Jarvis répond directement pendant 3 min."
                     null
                 } else contenu?.let { signer(it) }
             }
