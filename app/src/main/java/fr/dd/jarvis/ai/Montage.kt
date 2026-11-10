@@ -120,7 +120,7 @@ object Montage {
 
     /** Lance le(s) montage(s) en arrière-plan ; le résultat arrive dans le chat. Renvoie le message immédiat. */
     fun lancer(app: JarvisApp, d: Demande): String {
-        val sansIa = !ImageToVideoGen.disponible(app) && app.store.huggingFaceToken.value.isBlank()
+        val sansIa = !ImageToVideoGen.disponible(app) && app.store.huggingFaceToken.value.isBlank() && !VideoProviderGen.disponible(app)
         if (sansIa && d.sources.isBlank())
             return "❌ Pour créer des plans vidéo, ajoute ta clé fal.ai dans Réglages › IA › Images & vidéo — ou donne-moi des vidéos/images existantes à monter (paramètre sources)."
         val duree = d.dureeS.coerceIn(5, 180)
@@ -189,7 +189,7 @@ object Montage {
         // 2. Plans IA pour compléter la durée (en parallèle, 3 à la fois).
         val dureeExistants = existants.sumOf { (f, image) -> if (image) 3500L else dureeMs(f) ?: 0L }
         val manque = (ms - dureeExistants).coerceAtLeast(0)
-        val iaPossible = ImageToVideoGen.disponible(app) || app.store.huggingFaceToken.value.isNotBlank()
+        val iaPossible = ImageToVideoGen.disponible(app) || app.store.huggingFaceToken.value.isNotBlank() || VideoProviderGen.disponible(app)
         val echecs = mutableListOf<String>()
         val clipsIa = if (manque > 0 && iaPossible) {
             val nb = max(1, ceil(manque / 5000.0).toInt())
@@ -231,7 +231,8 @@ object Montage {
                             val bytes = if (ImageToVideoGen.disponible(app)) ImageToVideoGen.clipTexte(app, p.visuel, dureeClip, if (vertical) "9:16" else "16:9",
                                 suivi = { e -> verifierAnnulation(); etats[i] = if (e.startsWith("file")) "file" else "en cours"; resume() },
                                 limiteMs = 6 * 60_000L, limiteFileMs = 10 * 60_000L)
-                            else VideoGen.genereClip(app, p.visuel, dureeClip.toInt(), vertical)
+                            else try { VideoGen.genereClip(app, p.visuel, dureeClip.toInt(), vertical) }
+                            catch (hf: Exception) { VideoProviderGen.genererClipSecours(app, p.visuel, dureeClip.toInt(), vertical) ?: throw hf }
                             File(travail, "plan_$i.mp4").apply { writeBytes(bytes) }
                         }
                         var r = essai()
