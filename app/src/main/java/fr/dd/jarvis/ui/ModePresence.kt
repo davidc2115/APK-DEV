@@ -106,7 +106,6 @@ fun ModePresenceVue(heure: String, date: String, infos: String, texte: String, p
 
     Box(
         Modifier.fillMaxSize().background(Color(0xFF020108))
-            .clickable(interactionSource = MutableInteractionSource(), indication = null) { onFermer() }
     ) {
         // Ciel étoilé qui dérive lentement, lueur qui respire derrière le dragon.
         Canvas(Modifier.fillMaxSize()) {
@@ -138,7 +137,8 @@ fun ModePresenceVue(heure: String, date: String, infos: String, texte: String, p
                 fontSize = if (parle) 20.sp else 16.sp, textAlign = TextAlign.Center,
                 maxLines = 4, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth().height(110.dp))
             Spacer(Modifier.weight(1f))
-            Text("Toucher ailleurs pour quitter", color = HudDim.copy(alpha = 0.6f), fontSize = 11.sp)
+            Text("QUITTER LE MODE PRÉSENCE", color = HudDim.copy(alpha = 0.72f), fontSize = 11.sp,
+                modifier = Modifier.clickable(interactionSource = MutableInteractionSource(), indication = null) { onFermer() }.padding(10.dp))
         }
     }
 }
