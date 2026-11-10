@@ -90,6 +90,19 @@ class MainActivity : ComponentActivity() {
 
     fun demarrerEcoute() { if (!vm.listening && !vm.busy) vm.toggleListening() }
 
+    /** Applique les options de fenêtre nécessaires au mode présence sur l'écran verrouillé. */
+    fun appliquerModePresenceVerrouillage(actif: Boolean) {
+        val flags = android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+            android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+            android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        if (android.os.Build.VERSION.SDK_INT >= 27) {
+            setShowWhenLocked(actif)
+            setTurnScreenOn(actif)
+        }
+        if (actif) window.addFlags(flags) else window.clearFlags(flags)
+    }
+
+
     /** Réponse à une confirmation depuis la bannière système, même si une autre application était affichée. */
     private fun handleConfirmation(i: android.content.Intent?) {
         if (i?.action != fr.dd.jarvis.service.ConfirmationNotification.ACTION) return
@@ -246,10 +259,7 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
         val afficherVerrouille = terrain == "presence" && app.store.presenceVerrouillage.value
         var base: android.content.Context? = ctx
         while (base is android.content.ContextWrapper && base !is MainActivity) base = base.baseContext
-        val activity = base as? MainActivity
-        if (android.os.Build.VERSION.SDK_INT >= 27) activity?.setShowWhenLocked(afficherVerrouille)
-        else if (afficherVerrouille) activity?.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
-        else activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
+        (base as? MainActivity)?.appliquerModePresenceVerrouillage(afficherVerrouille)
     }
     androidx.activity.compose.BackHandler(enabled = terrain.isNotEmpty()) { terrain = "" }
     LaunchedEffect(terrainDemande.value) {
