@@ -61,6 +61,7 @@ object PhonePowerMode {
      * puis les choix Équilibré / Performance / Économiseur.
      */
     private suspend fun choisirModeParAccessibilite(mode: String): String? = withContext(Dispatchers.IO) {
+        delay(500) // laisse le temps au sélecteur HyperOS de devenir la fenêtre active
         val service = fr.dd.jarvis.service.JarvisAccessibilityService.instance ?: return@withContext null
         val choix = when (mode) {
             "economie" -> listOf("Économiseur de batterie", "Économie de batterie", "Battery saver")
