@@ -101,7 +101,8 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
         VoletReglages("general", "apparence", "Mode présence", "presence dragon plein ecran charge horloge") {
             HudPanel(Modifier.fillMaxWidth(), title = "🐉 Mode présence (plein écran)") {
                 HudChip(if (store.presenceAuto.value) "🐉 Mode présence automatique : oui" else "Mode présence automatique : non", store.presenceAuto.value) { store.presenceAuto.set(!store.presenceAuto.value) }
-                Text("Téléphone posé en charge, JARVIS ouvert et plus touché depuis 45 s : le dragon passe en plein écran (heure, prochain rendez-vous, météo, sous-titres de ce qu'il dit). Le reprendre en main le referme. Aussi disponible par le bouton « 🐉 Présence » de l'accueil.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+                HudChip(if (store.presenceVerrouillage.value) "🔒 Visible sur écran verrouillé : oui" else "Visible sur écran verrouillé : non", store.presenceVerrouillage.value) { store.presenceVerrouillage.set(!store.presenceVerrouillage.value) }
+                Text("Téléphone posé en charge, JARVIS ouvert et plus touché depuis 45 s : le dragon passe en plein écran. Si l'option verrouillage est activée, le mode présence déjà ouvert peut rester visible au-dessus de l'écran de verrouillage. Android n'autorise pas JARVIS à lancer librement cet écran depuis l'arrière-plan : ouvre d'abord le mode présence. Désactive l'option ici à tout moment.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
             }
         },
         VoletReglages("general", "batterie", "Batterie & vitesse", "batterie economie energie performance vitesse rapide lent animations hermes analyse gemini") {
