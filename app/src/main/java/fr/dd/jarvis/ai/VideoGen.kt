@@ -192,12 +192,13 @@ object VideoGen {
         val echecs = mutableListOf<String>()
         listePlans.forEachIndexed { i, plan ->
             try {
-                val bytes = genereClip(app, plan, dureePlan, vertical)
-                val f = File(dossier(app), "clip_${System.currentTimeMillis()}_$i.mp4")
+                val bytes = try { genereClip(app, plan, dureePlan, vertical) }
+                catch (hf: Exception) { VideoProviderGen.genererClipSecours(app, plan, dureePlan, vertical) ?: throw hf }
+                val f = File(dossier(app), "clip_" + System.currentTimeMillis() + "_" + i + ".mp4")
                 f.writeBytes(bytes)
                 clips.add(f)
             } catch (e: Exception) {
-                echecs.add("Plan ${i + 1} (« ${plan.take(50)} ») : ${e.message}")
+                echecs.add("Plan " + (i + 1) + " (« " + plan.take(50) + " ») : " + e.message)
             }
         }
         if (clips.isEmpty()) {
