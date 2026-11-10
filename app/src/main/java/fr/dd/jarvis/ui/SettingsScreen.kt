@@ -1743,7 +1743,7 @@ private fun ServeurPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvi
         Text("Plex — serveur multimédia Debian", color = HudText, fontSize = 13.sp)
         Text("Jarvis utilise le tunnel SSH existant vers le port Plex 32400 : aucun port Plex supplémentaire à ouvrir sur la Freebox. Le jeton est conservé dans le stockage chiffré Android.", color = HudDim, fontSize = 11.sp)
         if (store.plexToken.available) {
-            HudTextField(store.plexToken.value, { runCatching { store.plexToken.set(it.trim()) }.onFailure { e -> android.widget.Toast.makeText(ctx, e.message ?: "Stockage sécurisé indisponible", android.widget.Toast.LENGTH_LONG).show() } },
+            HudTextField(store.plexToken.value, { runCatching { store.plexToken.set(it.trim()) }.onFailure { e -> android.widget.Toast.makeText(app, e.message ?: "Stockage sécurisé indisponible", android.widget.Toast.LENGTH_LONG).show() } },
                 Modifier.fillMaxWidth(), label = "Jeton Plex (X-Plex-Token)", password = true)
         } else {
             Text("⚠️ Stockage sécurisé indisponible : le jeton Plex ne peut pas être enregistré sur cet appareil.", color = HudDim, fontSize = 11.sp)
