@@ -652,13 +652,6 @@ if not p.exists():
     raise SystemExit("Configuration Hermes absente.")
 data = yaml.safe_load(p.read_text()) or {}
 # Force la divulgation progressive à chaque synchronisation : MCP ne doit jamais être envoyé en bloc à Groq.
-# Si Ollama répond et possède un modèle, il devient le cerveau principal local ; Gemini/Groq restent les secours cloud.
-if os.environ.get("JARVIS_HAS_OLLAMA") == "1":
-    if not isinstance(model_config, dict):
-        model_config = {}
-        data["model"] = model_config
-    model_config.clear()
-    model_config.update({"provider": "custom:jarvis_ollama", "default": os.environ["JARVIS_OLLAMA_MODEL"]})
 tools_cfg = data.setdefault("tools", {})
 if not isinstance(tools_cfg, dict):
     raise SystemExit("Section tools invalide ; aucune modification.")
@@ -691,6 +684,13 @@ if not isinstance(providers, dict):
 model_config = data.get("model")
 if isinstance(model_config, dict) and str(model_config.get("provider", "")) == "gemini" and os.environ.get("JARVIS_HAS_GEMINI") == "1":
     model_config["default"] = os.environ["JARVIS_GEMINI_MODEL"]
+# Si Ollama répond et possède un modèle, il devient le cerveau principal local ; Gemini/Groq restent les secours cloud.
+if os.environ.get("JARVIS_HAS_OLLAMA") == "1":
+    if not isinstance(model_config, dict):
+        model_config = {}
+        data["model"] = model_config
+    model_config.clear()
+    model_config.update({"provider": "custom:jarvis_ollama", "default": os.environ["JARVIS_OLLAMA_MODEL"]})
 fallbacks = data.get("fallback_providers") or []
 if not isinstance(fallbacks, list):
     raise SystemExit("Section fallback_providers invalide ; aucune modification.")
