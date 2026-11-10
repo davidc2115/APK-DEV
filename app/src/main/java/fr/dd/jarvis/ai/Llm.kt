@@ -19,7 +19,7 @@ import org.json.JSONObject
  */
 class Llm(private val store: Store) {
     val groqRing = KeyRing { store.groqKeys.toList() }
-    private val geminiRing = KeyRing { store.geminiKeys.toList() }
+    private val geminiRing = KeyRing { store.geminiKeys.toList().filterNot(KeyRing::estCleOpenAi) }
     val groq = GroqClient(groqRing) { store.groqModel.value }
 
     /** (clés, en pause, refus de quota dans la dernière heure) — tableau de santé. */
@@ -41,6 +41,7 @@ class Llm(private val store: Store) {
         val c = store.cfAccounts.count { it.contains(':') }
         return "Groq $g clé(s)" + (if (groqRing.pausedCount() > 0) " (${groqRing.pausedCount()} en pause)" else "") +
             " · Gemini $m clé(s)" + (if (geminiRing.pausedCount() > 0) " (${geminiRing.pausedCount()} en pause)" else "") +
+            store.geminiKeys.count(KeyRing::estCleOpenAi).takeIf { it > 0 }?.let { "\n⚠️ $it clé(s) au format OpenAI (sk-…) sont enregistrées dans Gemini : conservées, mais exclues des appels Google." }.orEmpty() +
             " · Cloudflare $c compte(s)" + (cloudflare.etat().second.takeIf { it > 0 }?.let { " ($it en pause)" } ?: "") +
             groqRing.refuseesMasquees().takeIf { it.isNotEmpty() }?.let { "\n⚠️ Clé(s) Groq refusée(s) par Groq (invalides ou révoquées) : ${it.joinToString(", ")} — remplace-les" } .orEmpty() +
             geminiRing.refuseesMasquees().takeIf { it.isNotEmpty() }?.let { "\n⚠️ Clé(s) Gemini refusée(s) : ${it.joinToString(", ")}" }.orEmpty() +
@@ -219,7 +220,7 @@ class Llm(private val store: Store) {
     }
 
     suspend fun listGroqModels(): List<String> = firstKey(store.groqKeys.toList()) { groq.listModels(it) }
-    suspend fun listGeminiModels(): List<String> = firstKey(store.geminiKeys.toList()) { gemini.listModels(it) }
+    suspend fun listGeminiModels(): List<String> = firstKey(store.geminiKeys.toList().filterNot(KeyRing::estCleOpenAi)) { gemini.listModels(it) }
 
     private suspend fun <T> firstKey(keys: List<String>, f: suspend (String) -> T): T {
         var last: Exception = IllegalStateException("Aucune clé configurée")
@@ -257,6 +258,7 @@ class Llm(private val store: Store) {
     }
 
     suspend fun testGeminiKeys(): List<String> = store.geminiKeys.toList().map { k ->
+        if (KeyRing.estCleOpenAi(k)) return@map mask(k) + " : ⚠️ CLÉ OPENAI — non envoyée à Gemini"
         mask(k) + " : " + try {
             val t0 = System.currentTimeMillis(); gemini.ping(k); "✅ OK (${System.currentTimeMillis() - t0} ms)"
         } catch (e: Exception) {
@@ -311,6 +313,10 @@ class Llm(private val store: Store) {
 
         if (fournisseur == "tous" || fournisseur == "gemini") {
             for ((i, key) in store.geminiKeys.toList().withIndex()) {
+                if (KeyRing.estCleOpenAi(key)) {
+                    resultats.add(false to "Gemini #${i + 1} (${mask(key)}) — ⚠️ FORMAT OPENAI : clé conservée, exclue des appels Gemini")
+                    continue
+                }
                 verifier("Gemini #${i + 1} (${mask(key)})") {
                     val modele = store.geminiModel.value
                     try {
