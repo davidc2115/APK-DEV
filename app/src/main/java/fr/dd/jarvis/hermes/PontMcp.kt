@@ -79,8 +79,25 @@ object PontMcp {
         override fun capacitesHermes(json: String) { runCatching { app.memo.majCapacitesHermes(json) } }
         private val defaut by lazy { ToolBox(app) { _, force -> !force } }
         private fun boite() = boiteActive ?: defaut
+        // Le catalogue complet est stable pendant un tour de conversation. Le reconstruire à chaque tools/list
+        // et à chaque recherche répétée ajoute du travail inutile ; cache très court, lié à l'instance ToolBox.
+        @Volatile private var schemaCacheBoite: ToolBox? = null
+        @Volatile private var schemaCacheAt = 0L
+        @Volatile private var schemaCache: JSONArray? = null
+        @Synchronized private fun catalogue(): JSONArray {
+            val b = boite()
+            val maintenant = System.currentTimeMillis()
+            val cache = schemaCache
+            if (cache != null && schemaCacheBoite === b && maintenant - schemaCacheAt < 2_500L)
+                return JSONArray(cache.toString())
+            val frais = b.schemaAll()
+            schemaCacheBoite = b
+            schemaCacheAt = maintenant
+            schemaCache = JSONArray(frais.toString())
+            return JSONArray(frais.toString())
+        }
         override fun jeton() = app.store.mcpJeton.value
-        override fun outils(): JSONArray = convertirOutils(boite().schemaAll())
+        override fun outils(): JSONArray = convertirOutils(catalogue())
         override fun appeler(nom: String, args: JSONObject): Pair<String, Boolean> =
             appelerOutil(nom, args).also { (texte, _) ->
                 // Images, vidéos et fichiers créés : notés pour être affichés même si Hermès les reformule ou les oublie.
@@ -94,7 +111,7 @@ object PontMcp {
             if (nomCanonique == "jarvis_rechercher_outils") {
                 val termes = args.optString("requete").trim().lowercase().split(Regex("\\s+")).filter { it.isNotBlank() }
                 if (termes.isEmpty()) return "Précise le nom ou le domaine de l'outil recherché." to true
-                val tous = boite().schemaAll()
+                val tous = catalogue()
                 val candidats = mutableListOf<Pair<Int, JSONObject>>()
                 for (i in 0 until tous.length()) {
                     val fn = tous.optJSONObject(i)?.optJSONObject("function") ?: continue
