@@ -90,6 +90,14 @@ class MainActivity : ComponentActivity() {
 
     fun demarrerEcoute() { if (!vm.listening && !vm.busy) vm.toggleListening() }
 
+    /** Réponse à une confirmation depuis la bannière système, même si une autre application était affichée. */
+    private fun handleConfirmation(i: android.content.Intent?) {
+        if (i?.action != fr.dd.jarvis.service.ConfirmationNotification.ACTION) return
+        vm.answerConfirm(i.getBooleanExtra(fr.dd.jarvis.service.ConfirmationNotification.EXTRA_OK, false))
+        i.action = null
+        i.removeExtra(fr.dd.jarvis.service.ConfirmationNotification.EXTRA_OK)
+    }
+
     /** Notification « Android Auto : rétablir » : réinstallation par l'installateur Google (marque Play Store). */
     /**
      * Une seule fois par notification : l'intention d'origine est redonnée à JARVIS quand Android le relance (après la
@@ -113,6 +121,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        handleConfirmation(intent)
         handleListen(intent)
         handleSharedVideo(intent)
         handleTikTokCallback(intent)
@@ -172,6 +181,7 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
         )
         val app = application as JarvisApp
+        handleConfirmation(intent)
         if (app.store.wakeOn.value && !fr.dd.jarvis.service.JarvisService.running &&
             checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
         ) fr.dd.jarvis.service.JarvisService.start(this)
