@@ -608,6 +608,8 @@ p "✅ Hermès installé (${'$'}{MODE})."
         val cloudflareModel = s.cfChatModel.value.ifBlank { "@cf/meta/llama-3.3-70b-instruct-fp8-fast" }
         // Réutiliser la clé persistée dans Jarvis pour authentifier l’API locale Hermès.
         if (s.hermesCle.value.isBlank()) s.hermesCle.set(UUID.randomUUID().toString().replace("-", ""))
+        // Réutiliser la clé persistée dans Jarvis pour authentifier l’API locale Hermès.
+        if (s.hermesCle.value.isBlank()) s.hermesCle.set(UUID.randomUUID().toString().replace("-", ""))
         val envScript = buildString {
             appendLine("H=\"${'HOME/.hermes\"; mkdir -p \"${'$' }H/logs\"")
             appendLine("setenv API_SERVER_ENABLED true")
