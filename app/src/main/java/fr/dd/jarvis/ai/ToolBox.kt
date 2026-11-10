@@ -283,7 +283,7 @@ class ToolBox(
         put(tool("alarme_creer", "Règle une alarme (sonnerie répétée jusqu'à l'arrêt) SANS ouvrir aucune application ; visible dans la barre d'état.",
             mapOf("heure" to prop("Heure au format HH:MM (24 h)."), "libelle" to prop("Nom de l'alarme (optionnel)."),
                 "jours" to prop("Répétition (optionnel) : « lun mar ven », « semaine », « tous les jours ». Vide = une seule fois.")), listOf("heure")))
-        put(tool("alarme_supprimer", "Supprime une alarme de l'Horloge (par heure HH:MM ou par libellé).",
+        put(tool("alarme_supprimer", "Supprime une alarme de l'Horloge native. Aucune permission Android spéciale n'est nécessaire ; cela dépend du support de l'action standard DISMISS_ALARM par l'application Horloge installée. Si elle ne le prend pas en charge, ouvre sa liste pour une suppression manuelle.",
             mapOf("heure" to prop("Heure de l'alarme (optionnel)."), "libelle" to prop("Libellé de l'alarme (optionnel)."))))
         put(tool("minuteur_creer", "Lance un minuteur avec compte à rebours en notification, SANS ouvrir aucune application.",
             mapOf("secondes" to prop("Durée totale en secondes (ex. 10 min = 600)."), "libelle" to prop("Nom du minuteur (optionnel).")), listOf("secondes")))
