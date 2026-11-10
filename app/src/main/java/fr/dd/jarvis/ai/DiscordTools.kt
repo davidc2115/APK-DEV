@@ -281,8 +281,8 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             fun appliquer(channel: JSONObject) {
                 val channelId = channel.getString("id")
                 if (autoriserBrut.isNotBlank() || refuserBrut.isNotBlank()) {
-                    // L'API PUT remplace tout l'override : on relit d'abord les bits existants pour préserver
-                    // chaque droit qui n'a pas été explicitement cité par l'utilisateur.
+                    // L'API PUT remplace tout l'override : on reprend les bits existants de l'inventaire
+                    // du salon pour préserver chaque droit qui n'a pas été explicitement cité.
                     val overwrites = channel.optJSONArray("permission_overwrites") ?: JSONArray()
                     val actuel = (0 until overwrites.length()).mapNotNull { overwrites.optJSONObject(it) }
                         .firstOrNull { it.optString("id") == cibleId && it.optInt("type", -1) == type }
