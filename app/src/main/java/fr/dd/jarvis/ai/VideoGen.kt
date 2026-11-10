@@ -204,15 +204,12 @@ object VideoGen {
         if (clips.isEmpty()) {
             val secours = buildString {
                 append("❌ Hugging Face n'a généré aucun plan. Tu peux poursuivre sans perdre le travail de préparation :")
-                append("\n\n**Génération de secours (connexion à ton compte nécessaire) :**")
-                append("\n- [Ouvrir Google Flow](https://labs.google/fx/fr/tools/flow)")
-                append("\n- [Ouvrir Dreamina](https://dreamina.capcut.com/fr-fr/)")
-                append("\n\n**Prompts prêts à copier :**")
+                append("\n\nConfigure une clé UseAPI Flow ou BytePlus Dreamina dans Réglages › IA › Images & vidéo pour activer les secours automatiques.")
+                append("\n\n**Prompts préparés :**")
                 listePlans.forEachIndexed { index, prompt ->
                     append("\n\nPlan ${index + 1} :\n")
                     append(prompt)
                 }
-                append("\n\nAprès génération, télécharge les clips MP4. Ils ne seront pas importés automatiquement dans Jarvis : tu pourras ensuite me les transmettre pour préparer le montage.")
                 if (echecs.isNotEmpty()) append("\n\nDétail HF :\n" + echecs.joinToString("\n"))
             }
             return@withContext null to secours
@@ -224,19 +221,17 @@ object VideoGen {
         val fFinal = if (assemble.name == nomFinal) assemble else File(dossier(app), nomFinal).also { assemble.copyTo(it, overwrite = true) }
         val loc = app.obsidian.saveBytes("JARVIS/Vidéos TikTok", nomFinal, fFinal.readBytes(), "video/mp4")
         val msg = buildString {
-            append("🎬 Vidéo générée (${clips.size}/${listePlans.size} plans réussis, Hugging Face ZeroGPU) : ${fFinal.name}")
+            append("🎬 Vidéo générée (${clips.size}/${listePlans.size} plans réussis, Hugging Face / Flow / Dreamina) : ${fFinal.name}")
             append("\n\n[▶ Lire la vidéo](jarvis-video-ia:${fFinal.name})")
             if (loc.isNotBlank()) append("\n📁 $loc")
             if (echecs.isNotEmpty()) {
                 append("\n⚠️ Plans manquants :\n")
                 append(echecs.joinToString("\n"))
-                append("\n\n**Compléter les plans manquants avec :**")
-                append("\n[Google Flow](https://labs.google/fx/fr/tools/flow) · [Dreamina](https://dreamina.capcut.com/fr-fr/)")
+                append("\n\nConfigure Flow ou Dreamina dans Réglages › IA › Images & vidéo pour activer les fournisseurs de secours sur les prochaines générations.")
                 echecs.forEach { detail ->
                     val plan = listePlans.firstOrNull { detail.contains(it.take(50)) }
                     if (plan != null) append("\n\nPrompt à reprendre :\n").append(plan)
                 }
-                append("\nTélécharge les clips externes en MP4 ; ils ne sont pas ajoutés automatiquement au montage.")
             }
         }
         fFinal to msg
