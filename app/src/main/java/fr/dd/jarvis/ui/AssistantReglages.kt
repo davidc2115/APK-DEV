@@ -279,9 +279,7 @@ fun AntiVolPanel(app: JarvisApp) {
         ligne(etat.shell, "Shizuku ou ADB intégré (masquer les notifications de l'écran verrouillé pendant l'alerte) — Réglages › Téléphone › Contrôle") {
             ouvrir(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:${ctx.packageName}")))
         }
-        ligne(etat.superposition, "Affichage par-dessus les autres applis (écran d'alerte)") {
-            ouvrir(android.content.Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:${ctx.packageName}")))
-        }
+        Text("Cette autorisation est centralisée dans Réglages JARVIS → Général → Autorisations → Superposition.", color = HudDim, fontSize = 11.sp)
         ligne(etat.pleinEcran, "Notifications en plein écran (alerte sur l'écran verrouillé)") {
             if (android.os.Build.VERSION.SDK_INT >= 34) ouvrir(android.content.Intent(android.provider.Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, android.net.Uri.parse("package:${ctx.packageName}")))
         }
