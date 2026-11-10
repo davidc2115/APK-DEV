@@ -293,7 +293,7 @@ p '🧠 Mémoire partagée Jarvis ↔ Hermès installée.'
         val s = app.store
         if (s.hermesCle.value.isBlank()) s.hermesCle.set(UUID.randomUUID().toString().replace("-", ""))
         if (s.mcpJeton.value.isBlank()) s.mcpJeton.set(UUID.randomUUID().toString().replace("-", ""))
-        val geminiKeys = if (s.apiKeysSecureAvailable) s.geminiKeys.toList() else emptyList()
+        val geminiKeys = if (s.apiKeysSecureAvailable) s.geminiKeys.toList().filterNot(fr.dd.jarvis.ai.KeyRing::estCleOpenAi) else emptyList()
         val groqKeys = if (s.apiKeysSecureAvailable) s.groqKeys.toList() else emptyList()
         val base = scriptConfiguration(
             cleApi = s.hermesCle.value, jeton = s.mcpJeton.value,
@@ -586,7 +586,7 @@ p "✅ Hermès installé (${'$'}{MODE})."
             return message
         }
         message = "✅ Pont local de progression actif sur 127.0.0.1:${PontMcp.PORT}. Préparation du script Hermès…"
-        val gemini = s.geminiKeys.toList()
+        val gemini = s.geminiKeys.toList().filterNot(fr.dd.jarvis.ai.KeyRing::estCleOpenAi).filterNot(fr.dd.jarvis.ai.KeyRing::estCleOpenAi)
         val groq = s.groqKeys.toList()
         val cloudflare = s.cfAccounts.toList().mapNotNull { raw ->
             val id = raw.substringBefore(':').trim()
