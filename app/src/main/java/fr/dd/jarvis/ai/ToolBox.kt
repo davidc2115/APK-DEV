@@ -804,7 +804,10 @@ class ToolBox(
             }
         }
         "alarme_creer" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.device.Horloge.creerAlarme(app, a.optString("heure"), a.optString("libelle"), a.optString("jours")) }, direct = true)
-        "alarme_supprimer" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.supprimerAlarme(a.optString("heure"), a.optString("libelle")) })
+        "alarme_supprimer" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val interne = fr.dd.jarvis.device.Horloge.supprimerAlarme(app, a.optString("heure"), a.optString("libelle"))
+            if (interne.startsWith("Aucune alarme")) app.phone.supprimerAlarme(a.optString("heure"), a.optString("libelle")) else interne
+        }, direct = true)
         "minuteur_creer" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.device.Horloge.creerMinuteur(app, a.optString("secondes").toDoubleOrNull()?.toInt() ?: 0, a.optString("libelle")) }, direct = true)
         "chronometre" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.device.Horloge.chronometre(app, a.optString("action")) }, direct = true)
         "rappel_creer" -> ToolResult(fr.dd.jarvis.device.Rappels.creer(app, a.optString("texte"), a.optString("quand"), a.optString("repetition")))
