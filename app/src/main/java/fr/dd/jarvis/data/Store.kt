@@ -78,13 +78,13 @@ class Store(context: Context) {
             // Écriture atomique : on ne retire les clés de Gemini que si leur copie chiffrée réussit.
             val geminiRaw = secure.getString("geminiKeys", "").orEmpty()
             val geminiList = geminiRaw.lines().map { it.trim() }.filter { it.isNotEmpty() }
-            val openAiFound = geminiList.filter(KeyRing::estCleOpenAi)
+            val openAiFound = geminiList.filter(fr.dd.jarvis.ai.KeyRing::estCleOpenAi)
             if (openAiFound.isNotEmpty()) {
                 val openAiCurrent = secure.getString("openaiKeys", "").orEmpty()
                     .lines().map { it.trim() }.filter { it.isNotEmpty() }
                 val editor = secure.edit()
                     .putString("openaiKeys", (openAiCurrent + openAiFound).distinct().joinToString(System.lineSeparator()))
-                    .putString("geminiKeys", geminiList.filterNot(KeyRing::estCleOpenAi).joinToString(System.lineSeparator()))
+                    .putString("geminiKeys", geminiList.filterNot(fr.dd.jarvis.ai.KeyRing::estCleOpenAi).joinToString(System.lineSeparator()))
                 check(editor.commit()) { "Migration sécurisée des clés OpenAI impossible." }
             }
         }
@@ -237,8 +237,8 @@ class Store(context: Context) {
     /** Les clés OpenAI reconnues dans le champ Gemini sont automatiquement rangées ici. */
     fun addGeminiKeys(raw: String) {
         val parts = raw.split(Regex("[\\s,;]+")).map { it.trim() }.filter { it.length >= 8 }.distinct()
-        val openAi = parts.filter(KeyRing::estCleOpenAi)
-        val google = parts.filterNot(KeyRing::estCleOpenAi)
+        val openAi = parts.filter(fr.dd.jarvis.ai.KeyRing::estCleOpenAi)
+        val google = parts.filterNot(fr.dd.jarvis.ai.KeyRing::estCleOpenAi)
         if (google.isNotEmpty()) addApiKeys(geminiKeys, "geminiKeys", google.joinToString("\n"))
         if (openAi.isNotEmpty()) addApiKeys(openaiKeys, "openaiKeys", openAi.joinToString("\n"))
     }
