@@ -60,15 +60,13 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
         tool("discord_role_attribuer", "Discord : donne ou retire un rôle à un membre du serveur.",
             mapOf("serveur" to prop("Nom ou ID du serveur (optionnel si un seul)."), "membre" to prop("Nom, pseudo ou ID du membre."),
                 "role" to prop("Nom (ou ID) du rôle."), "action" to prop("donner (défaut) ou retirer.")), listOf("membre", "role")),
-        tool("discord_salon_permission", "Discord : modifie l'accès d'un salon (ou de TOUS les salons d'un coup) pour un rôle (autoriser, refuser, ou remettre par défaut) — c'est ce qui permet de garder un salon inaccessible même à un rôle qui a par ailleurs beaucoup de permissions (tant qu'il n'a pas « administrateur »).",
+        tool("discord_salon_permission", "Discord : règle les permissions précises d'un salon pour un rôle ou un membre. Peut autoriser/refuser plusieurs droits individuellement, appliquer un profil d'accès, ou réinitialiser l'override.",
             mapOf("serveur" to prop("Nom ou ID du serveur (optionnel si un seul)."), "salon" to prop("Nom (ou ID) du salon. Inutile si « tous_les_salons » est à true."),
-                "tous_les_salons" to prop("« true » pour appliquer le même accès à TOUS les salons (texte, vocaux, annonces, forums) du serveur en une seule fois, au lieu d'un salon précis."),
+                "tous_les_salons" to prop("« true » pour appliquer la règle à TOUS les salons non-catégories du serveur."),
                 "role" to prop("Nom (ou ID) du rôle concerné (ou utilise « membre » à la place pour un membre précis)."), "membre" to prop("Nom, pseudo ou ID d'un membre précis (optionnel, à la place de « role »)."),
-                "acces" to prop("« voir_salon » pour AJOUTER le droit de voir/utiliser ce salon, sans toucher aux autres permissions déjà accordées par ailleurs (donc si le rôle a beaucoup de permissions au niveau du serveur, elles restent actives ici aussi). " +
-                    "« voir_salon_seulement » pour autoriser à voir ce salon ET interdire explicitement tout le reste dans CE salon précis, même si le rôle a par ailleurs beaucoup de permissions au niveau du serveur — c'est ce qu'il faut utiliser pour un salon où le rôle doit être limité à la lecture malgré ses autres permissions. " +
-                    "« toutes_permissions » pour autoriser toutes les permissions applicables dans ce salon. " +
-                    "« refuser_voir_salon » pour rendre le salon invisible et inaccessible à ce rôle/membre. " +
-                    "« defaut » pour effacer la règle spécifique à ce(s) salon(s) (retour à l'héritage normal des permissions du serveur).")), listOf("acces"))
+                "autoriser" to prop("Liste facultative des droits à autoriser, séparés par des virgules. Noms exacts : " + Discord.Perm.NOMS.keys.filter { it != "administrateur" }.joinToString(", ") + "."),
+                "refuser" to prop("Liste facultative des droits à refuser, séparés par des virgules. Même nomenclature que « autoriser »."),
+                "acces" to prop("Profil facultatif : « voir_salon », « voir_salon_seulement », « toutes_permissions », « refuser_voir_salon » ou « defaut ». Utilise autoriser/refuser pour régler des droits individuels.")))
     )
 
     private fun guildeObj(a: JSONObject): JSONObject {
@@ -260,20 +258,34 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
                 else -> return ToolResult("Précise un rôle ou un membre.")
             }
             val acces = a.optString("acces").trim().lowercase()
-            // Autoriser « voir_salon » n'ajoute QUE la permission de voir ce salon : si le rôle a par ailleurs beaucoup de
-            // permissions au niveau du serveur (ex. toutes_sauf_administrateur), elles restent actives dans ce salon aussi,
-            // puisqu'une autorisation de salon ne fait qu'AJOUTER un droit, jamais retirer ceux déjà accordés ailleurs.
-            // Pour un salon vraiment limité à la lecture malgré des permissions larges au niveau du serveur, il faut
-            // explicitement INTERDIRE tout le reste dans ce salon (« seulement »/« uniquement »).
+            val autoriserBrut = a.optString("autoriser").trim()
+            val refuserBrut = a.optString("refuser").trim()
+            if (acces.isBlank() && autoriserBrut.isBlank() && refuserBrut.isBlank())
+                return ToolResult("Précise un profil dans acces, ou les droits à régler dans autoriser et/ou refuser.")
+            fun masquePermissions(brut: String): Long {
+                if (brut.isBlank()) return 0L
+                val noms = brut.split(',', ';', '|').map { it.trim().lowercase().replace(' ', '_') }.filter { it.isNotBlank() }
+                val inconnus = noms.filter { it !in Discord.Perm.NOMS || it == "administrateur" }
+                if (inconnus.isNotEmpty()) throw IllegalArgumentException("Droits Discord inconnus/non configurables en salon : ${inconnus.joinToString(", ")}. Utilise les noms listés dans la description de l'outil.")
+                return noms.fold(0L) { bits, nom -> bits or Discord.Perm.NOMS.getValue(nom) }
+            }
+            val allowBits = masquePermissions(autoriserBrut)
+            val denyBits = masquePermissions(refuserBrut)
+            // Autoriser/refuser sont des overrides ciblés : les droits non cités restent hérités du serveur.
+            // L'administrateur ne peut pas être attribué par un override de salon dans Discord.
             val toutSaufVoir = Discord.Perm.TOUT_SAUF_ADMINISTRATEUR and Discord.Perm.VIEW_CHANNEL.inv()
-            fun appliquer(channelId: String) = when {
-                acces.contains("seulement") || acces.contains("uniquement") ->
-                    Discord.salonPermission(app, channelId, cibleId, type, Discord.Perm.VIEW_CHANNEL, toutSaufVoir)
-                acces.contains("toutes") || acces.contains("tout") ->
-                    Discord.salonPermission(app, channelId, cibleId, type, Discord.Perm.TOUT_SAUF_ADMINISTRATEUR, 0L)
-                acces.contains("refuser") -> Discord.salonPermission(app, channelId, cibleId, type, 0L, Discord.Perm.VIEW_CHANNEL)
-                acces.contains("defaut") || acces.contains("default") -> Discord.salonPermissionSupprimer(app, channelId, cibleId)
-                else -> Discord.salonPermission(app, channelId, cibleId, type, Discord.Perm.VIEW_CHANNEL, 0L)
+            fun appliquer(channelId: String) {
+                if (autoriserBrut.isNotBlank() || refuserBrut.isNotBlank()) {
+                    Discord.salonPermission(app, channelId, cibleId, type, allowBits, denyBits)
+                } else when {
+                    acces.contains("seulement") || acces.contains("uniquement") ->
+                        Discord.salonPermission(app, channelId, cibleId, type, Discord.Perm.VIEW_CHANNEL, toutSaufVoir)
+                    acces.contains("toutes") || acces.contains("tout") ->
+                        Discord.salonPermission(app, channelId, cibleId, type, Discord.Perm.TOUT_SAUF_ADMINISTRATEUR, 0L)
+                    acces.contains("refuser") -> Discord.salonPermission(app, channelId, cibleId, type, 0L, Discord.Perm.VIEW_CHANNEL)
+                    acces.contains("defaut") || acces.contains("default") -> Discord.salonPermissionSupprimer(app, channelId, cibleId)
+                    else -> Discord.salonPermission(app, channelId, cibleId, type, Discord.Perm.VIEW_CHANNEL, 0L)
+                }
             }
             if (a.optString("tous_les_salons").equals("true", true)) {
                 val arr = Discord.salons(app, gid)
