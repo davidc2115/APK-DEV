@@ -276,6 +276,8 @@ class Store(context: Context) {
     val voixPersonnage = SPref("voixPersonnage", "")
     /** Mode présence automatique : JARVIS plein écran quand le téléphone est posé en charge (et qu'on ne le touche plus). */
     val presenceAuto = BPref("presenceAuto", true)
+    /** Autorise l'écran de présence déjà ouvert à rester visible au-dessus du verrouillage Android. */
+    val presenceVerrouillage = BPref("presenceVerrouillage", false)
     // ---- Alerte de départ, météo des rendez-vous, routines, journal, montre, empreinte vocale
     val departAlertes = BPref("departAlertes", true)
     val departNotifie = SPref("departNotifie", "")
