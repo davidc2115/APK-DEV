@@ -114,11 +114,7 @@ object ConfirmationNotification {
                     isAllCaps = false
                     setOnClickListener {
                         retirerOverlay()
-                        runCatching {
-                            context.startActivity(Intent(context, MainActivity::class.java)
-                                .setAction(ACTION).putExtra(EXTRA_OK, accepte)
-                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))
-                        }
+                        runCatching { intent(context, accepte).send() }
                     }
                 }
                 actions.addView(action("Refuser", false))
