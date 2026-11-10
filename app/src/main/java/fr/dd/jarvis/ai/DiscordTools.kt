@@ -274,9 +274,19 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             // Autoriser/refuser sont des overrides ciblés : les droits non cités restent hérités du serveur.
             // L'administrateur ne peut pas être attribué par un override de salon dans Discord.
             val toutSaufVoir = Discord.Perm.TOUT_SAUF_ADMINISTRATEUR and Discord.Perm.VIEW_CHANNEL.inv()
-            fun appliquer(channelId: String) {
+            fun appliquer(channel: JSONObject) {
+                val channelId = channel.getString("id")
                 if (autoriserBrut.isNotBlank() || refuserBrut.isNotBlank()) {
-                    Discord.salonPermission(app, channelId, cibleId, type, allowBits, denyBits)
+                    // L'API PUT remplace tout l'override : on relit d'abord les bits existants pour préserver
+                    // chaque droit qui n'a pas été explicitement cité par l'utilisateur.
+                    val overwrites = channel.optJSONArray("permission_overwrites") ?: JSONArray()
+                    val actuel = (0 until overwrites.length()).mapNotNull { overwrites.optJSONObject(it) }
+                        .firstOrNull { it.optString("id") == cibleId && it.optInt("type", -1) == type }
+                    val ancienAllow = actuel?.optString("allow")?.toLongOrNull() ?: 0L
+                    val ancienDeny = actuel?.optString("deny")?.toLongOrNull() ?: 0L
+                    val nouveauAllow = (ancienAllow and denyBits.inv()) or allowBits
+                    val nouveauDeny = (ancienDeny and allowBits.inv()) or denyBits
+                    Discord.salonPermission(app, channelId, cibleId, type, nouveauAllow, nouveauDeny)
                 } else when {
                     acces.contains("seulement") || acces.contains("uniquement") ->
                         Discord.salonPermission(app, channelId, cibleId, type, Discord.Perm.VIEW_CHANNEL, toutSaufVoir)
@@ -292,12 +302,12 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
                 val ids = (0 until arr.length()).map { arr.getJSONObject(it) }.filter { it.optInt("type") != 4 } // on exclut les catégories, inutiles ici
                 if (!confirm("Modifier l'accès des ${ids.size} salon(s) du serveur pour $cibleNom ($acces) ?", true)) return ToolResult("Refusé par l'utilisateur.")
                 var erreurs = 0
-                ids.forEach { c -> runCatching { appliquer(c.getString("id")) }.onFailure { erreurs++ } }
+                ids.forEach { c -> runCatching { appliquer(c) }.onFailure { erreurs++ } }
                 ToolResult("✅ Accès mis à jour sur ${ids.size - erreurs}/${ids.size} salon(s) pour $cibleNom." + (if (erreurs > 0) " ($erreurs échec(s), probablement un salon où le bot n'a pas la main)." else ""), direct = true)
             } else {
                 val salon = Discord.trouverSalon(app, gid, a.optString("salon")) ?: return ToolResult("Salon « ${a.optString("salon")} » introuvable. Précise un nom de salon, ou mets tous_les_salons=true pour les appliquer tous d'un coup.")
                 if (!confirm("Modifier l'accès de « ${salon.optString("name")} » pour $cibleNom ($acces) ?", true)) return ToolResult("Refusé par l'utilisateur.")
-                appliquer(salon.getString("id"))
+                appliquer(salon)
                 ToolResult("✅ Accès de « ${salon.optString("name")} » mis à jour pour $cibleNom.", direct = true)
             }
         }
