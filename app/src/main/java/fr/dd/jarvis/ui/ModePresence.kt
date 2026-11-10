@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -119,7 +118,7 @@ fun ModePresenceVue(heure: String, date: String, infos: String, texte: String, p
                 drawCircle(Color.White.copy(alpha = a * 0.7f), 1f + (i % 3), Offset(x, y))
             }
         }
-        Column(Modifier.fillMaxSize().systemBarsPadding().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(heure, color = accent, fontSize = 64.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Light)
             Text(date,
                 color = HudDim, fontSize = 15.sp, letterSpacing = 2.sp)
