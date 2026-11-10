@@ -185,8 +185,7 @@ object VideoGen {
     suspend fun genererVideo(
         app: JarvisApp, sujet: String, script: String, dureePlan: Int, vertical: Boolean
     ): Pair<File?, String> = withContext(Dispatchers.IO) {
-        if (app.store.huggingFaceToken.value.isBlank())
-            return@withContext null to "❌ Ajoute ton token Hugging Face gratuit dans Réglages › IA › Images & vidéo pour générer les vidéos sans fal.ai."
+        // Même sans token HF, on prépare les plans et on propose les solutions web de secours.
         val listePlans = plans(app, sujet, script)
         if (listePlans.isEmpty()) return@withContext null to "❌ Impossible de découper le sujet en plans filmables."
         val clips = mutableListOf<File>()
@@ -201,7 +200,22 @@ object VideoGen {
                 echecs.add("Plan ${i + 1} (« ${plan.take(50)} ») : ${e.message}")
             }
         }
-        if (clips.isEmpty()) return@withContext null to "❌ Aucun plan n'a pu être généré :\n" + echecs.joinToString("\n")
+        if (clips.isEmpty()) {
+            val secours = buildString {
+                append("❌ Hugging Face n'a généré aucun plan. Tu peux poursuivre sans perdre le travail de préparation :")
+                append("\n\n**Génération de secours (connexion à ton compte nécessaire) :**")
+                append("\n- [Ouvrir Google Flow](https://labs.google/fx/fr/tools/flow)")
+                append("\n- [Ouvrir Dreamina](https://dreamina.capcut.com/fr-fr/)")
+                append("\n\n**Prompts prêts à copier :**")
+                listePlans.forEachIndexed { index, prompt ->
+                    append("\n\nPlan ${index + 1} :\n")
+                    append(prompt)
+                }
+                append("\n\nAprès génération, télécharge les clips MP4. Jarvis pourra ensuite les assembler dans le montage.")
+                if (echecs.isNotEmpty()) append("\n\nDétail HF :\n" + echecs.joinToString("\n"))
+            }
+            return@withContext null to secours
+        }
         val assemble = if (clips.size == 1) clips[0] else try { monter(app, clips) } catch (e: Exception) {
             return@withContext clips[0] to "⚠️ Montage impossible (${e.message}), voici le premier plan seul : ${clips[0].name}"
         }
@@ -212,7 +226,17 @@ object VideoGen {
             append("🎬 Vidéo générée (${clips.size}/${listePlans.size} plans réussis, Hugging Face ZeroGPU) : ${fFinal.name}")
             append("\n\n[▶ Lire la vidéo](jarvis-video-ia:${fFinal.name})")
             if (loc.isNotBlank()) append("\n📁 $loc")
-            if (echecs.isNotEmpty()) { append("\n⚠️ Plans manquants :\n"); append(echecs.joinToString("\n")) }
+            if (echecs.isNotEmpty()) {
+                append("\n⚠️ Plans manquants :\n")
+                append(echecs.joinToString("\n"))
+                append("\n\n**Compléter les plans manquants avec :**")
+                append("\n[Google Flow](https://labs.google/fx/fr/tools/flow) · [Dreamina](https://dreamina.capcut.com/fr-fr/)")
+                echecs.forEach { detail ->
+                    val plan = listePlans.firstOrNull { detail.contains(it.take(50)) }
+                    if (plan != null) append("\n\nPrompt à reprendre :\n").append(plan)
+                }
+                append("\nTélécharge les clips externes en MP4 pour les ajouter au montage.")
+            }
         }
         fFinal to msg
     }
