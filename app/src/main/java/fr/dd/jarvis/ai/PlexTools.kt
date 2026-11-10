@@ -43,7 +43,10 @@ object Plex {
         }
     }
 
-    fun serveur(app: JarvisApp): JSONObject = JSONObject(request(app, "/"))
+    fun serveur(app: JarvisApp): JSONObject {
+        val root = JSONObject(request(app, "/"))
+        return root.optJSONObject("MediaContainer") ?: root
+    }
     fun appareils(app: JarvisApp): JSONArray {
         val root = JSONObject(request(app, "/clients"))
         val container = root.optJSONObject("MediaContainer") ?: root
@@ -52,7 +55,7 @@ object Plex {
 
     fun rechercher(app: JarvisApp, texte: String, limite: Int = 15): List<JSONObject> {
         require(texte.isNotBlank()) { "Précise le titre à rechercher dans Plex." }
-        val root = JSONObject(request(app, "/hubs/search/", mapOf("query" to texte.trim(), "limit" to limite.coerceIn(1, 30).toString())))
+        val root = JSONObject(request(app, "/hubs/search", mapOf("query" to texte.trim(), "limit" to limite.coerceIn(1, 30).toString())))
         val hubs = root.optJSONObject("MediaContainer")?.optJSONArray("Hub") ?: JSONArray()
         val resultats = linkedMapOf<String, JSONObject>()
         for (i in 0 until hubs.length()) {
@@ -79,8 +82,9 @@ object Plex {
             "port" to PORT.toString(),
             "protocol" to "http",
             "offset" to "0",
-            "commandID" to "1",
-            "type" to "video"
+            "commandID" to (System.currentTimeMillis() % Int.MAX_VALUE).toString(),
+            "type" to "video",
+            "path" to "http://$adresse:$PORT/library/metadata/$ratingKey"
         ), clientId)
         return "Commande de lecture transmise à ${appareil.optString("name").ifBlank { appareil.optString("product").ifBlank { "lecteur Plex" } }}."
     }
