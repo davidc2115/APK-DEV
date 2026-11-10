@@ -14,7 +14,7 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
         val NAMES = setOf(
             "discord_guildes", "discord_roles", "discord_salons", "discord_audit_serveur", "discord_role_creer", "discord_role_modifier",
-            "discord_role_supprimer", "discord_role_position", "discord_role_attribuer", "discord_salon_permission", "discord_message_envoyer"
+            "discord_role_supprimer", "discord_role_position", "discord_role_attribuer", "discord_salon_permission", "discord_message_envoyer", "discord_messages_lire", "discord_messages_rechercher", "discord_fil_lire"
         )
     }
 
@@ -36,6 +36,12 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si un seul)."))),
         tool("discord_audit_serveur", "AUDIT DISCORD STRICTEMENT EN LECTURE SEULE : récupère l'inventaire complet des salons et catégories avec leurs identifiants, positions, rattachements et sujets. Ne modifie jamais le serveur.",
             mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si un seul)."))),
+        tool("discord_messages_lire", "Discord : lit l’historique récent d’un salon, avec pagination avant/après un message. Lecture seule ; 1 à 100 messages par appel. Peut aussi lire un fil si son ID est fourni et si le bot y a accès.",
+            mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si un seul)."), "salon" to prop("Nom ou ID du salon textuel ou du fil Discord."), "limite" to prop("Nombre de messages à lire, de 1 à 100 (défaut 30)."), "apres_id" to prop("ID du dernier message déjà lu : ne renvoie que les messages plus récents (optionnel)."), "avant_id" to prop("ID du message curseur : récupère les messages plus anciens (optionnel ; ne pas utiliser avec apres_id).")), listOf("salon")),
+        tool("discord_messages_rechercher", "Discord : recherche un mot ou une expression dans les 100 messages les plus récents d’un salon, avec filtre facultatif par auteur. Lecture seule.",
+            mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si un seul)."), "salon" to prop("Nom ou ID du salon."), "recherche" to prop("Mot ou expression à retrouver dans le contenu (facultatif, mais recommandé)."), "auteur" to prop("Nom ou pseudo à filtrer (facultatif).")), listOf("salon")),
+        tool("discord_fil_lire", "Discord : lit les messages d’un fil/thread Discord à partir de son ID (lecture seule). Le bot doit avoir accès au fil.",
+            mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si un seul)."), "fil_id" to prop("ID numérique du fil Discord."), "limite" to prop("Nombre de messages à lire, de 1 à 100 (défaut 30)."), "avant_id" to prop("ID curseur pour remonter dans l’historique (optionnel).")), listOf("fil_id")),
         tool("discord_message_envoyer", "Discord : envoie un message dans un salon textuel ou d'annonces. Les mentions automatiques (@everyone/@here et rôles) sont désactivées par sécurité.",
             mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si un seul)."),
                 "salon" to prop("Nom ou ID du salon textuel cible."),
@@ -58,15 +64,13 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
         tool("discord_role_attribuer", "Discord : donne ou retire un rôle à un membre du serveur.",
             mapOf("serveur" to prop("Nom ou ID du serveur (optionnel si un seul)."), "membre" to prop("Nom, pseudo ou ID du membre."),
                 "role" to prop("Nom (ou ID) du rôle."), "action" to prop("donner (défaut) ou retirer.")), listOf("membre", "role")),
-        tool("discord_salon_permission", "Discord : modifie l'accès d'un salon (ou de TOUS les salons d'un coup) pour un rôle (autoriser, refuser, ou remettre par défaut) — c'est ce qui permet de garder un salon inaccessible même à un rôle qui a par ailleurs beaucoup de permissions (tant qu'il n'a pas « administrateur »).",
+        tool("discord_salon_permission", "Discord : règle les permissions précises d'un salon pour un rôle ou un membre. Peut autoriser/refuser plusieurs droits individuellement, appliquer un profil d'accès, ou réinitialiser l'override.",
             mapOf("serveur" to prop("Nom ou ID du serveur (optionnel si un seul)."), "salon" to prop("Nom (ou ID) du salon. Inutile si « tous_les_salons » est à true."),
-                "tous_les_salons" to prop("« true » pour appliquer le même accès à TOUS les salons (texte, vocaux, annonces, forums) du serveur en une seule fois, au lieu d'un salon précis."),
+                "tous_les_salons" to prop("« true » pour appliquer la règle à TOUS les salons non-catégories du serveur."),
                 "role" to prop("Nom (ou ID) du rôle concerné (ou utilise « membre » à la place pour un membre précis)."), "membre" to prop("Nom, pseudo ou ID d'un membre précis (optionnel, à la place de « role »)."),
-                "acces" to prop("« voir_salon » pour AJOUTER le droit de voir/utiliser ce salon, sans toucher aux autres permissions déjà accordées par ailleurs (donc si le rôle a beaucoup de permissions au niveau du serveur, elles restent actives ici aussi). " +
-                    "« voir_salon_seulement » pour autoriser à voir ce salon ET interdire explicitement tout le reste dans CE salon précis, même si le rôle a par ailleurs beaucoup de permissions au niveau du serveur — c'est ce qu'il faut utiliser pour un salon où le rôle doit être limité à la lecture malgré ses autres permissions. " +
-                    "« toutes_permissions » pour autoriser toutes les permissions applicables dans ce salon. " +
-                    "« refuser_voir_salon » pour rendre le salon invisible et inaccessible à ce rôle/membre. " +
-                    "« defaut » pour effacer la règle spécifique à ce(s) salon(s) (retour à l'héritage normal des permissions du serveur).")), listOf("acces"))
+                "autoriser" to prop("Liste facultative des droits à autoriser, séparés par des virgules. Noms exacts : " + Discord.Perm.NOMS.keys.filter { it != "administrateur" }.joinToString(", ") + "."),
+                "refuser" to prop("Liste facultative des droits à refuser, séparés par des virgules. Même nomenclature que « autoriser »."),
+                "acces" to prop("Profil facultatif : « voir_salon », « voir_salon_seulement », « toutes_permissions », « refuser_voir_salon » ou « defaut ». Utilise autoriser/refuser pour régler des droits individuels.")))
     )
 
     private fun guildeObj(a: JSONObject): JSONObject {
@@ -130,6 +134,39 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             lines += ""
             lines += "Contrôle des types : " + byType.entries.joinToString(", ") { "${it.key}=${it.value}" }
             ToolResult(lines.joinToString("\n"), direct = true)
+        }
+        "discord_messages_lire", "discord_messages_rechercher", "discord_fil_lire" -> {
+            val g = guildeObj(a); val gid = g.getString("id")
+            val estFil = name == "discord_fil_lire"
+            val cible = if (estFil) a.optString("fil_id").trim() else a.optString("salon").trim()
+            if (cible.isBlank()) return ToolResult(if (estFil) "ID du fil manquant." else "Nom ou ID du salon manquant.")
+            val salon = Discord.trouverSalon(app, gid, cible)
+                ?: if (cible.matches(Regex("\\d{17,20}"))) JSONObject().put("id", cible).put("name", if (estFil) "fil $cible" else "salon $cible").put("type", if (estFil) 11 else 0)
+                   else return ToolResult("Salon/fil « $cible » introuvable sur le serveur.")
+            if (salon.optInt("type") !in setOf(0, 5, 10, 11, 12, 15, 16)) return ToolResult("Ce type de salon/fil ne permet pas la lecture de messages.")
+            val limite = (a.optString("limite").toIntOrNull() ?: 30).coerceIn(1, 100)
+            val apres = a.optString("apres_id").trim()
+            val avant = a.optString("avant_id").trim()
+            val arr = Discord.messages(app, salon.getString("id"), if (name == "discord_messages_rechercher") 100 else limite, apres, avant)
+            var messages = (0 until arr.length()).map { arr.getJSONObject(it) }
+            if (name == "discord_messages_rechercher") {
+                val mot = a.optString("recherche").trim()
+                val auteurFiltre = a.optString("auteur").trim()
+                messages = messages.filter { m ->
+                    val contenu = m.optString("content")
+                    val auteur = m.optJSONObject("author")?.optString("global_name").orEmpty() + " " + m.optJSONObject("author")?.optString("username").orEmpty()
+                    (mot.isBlank() || contenu.contains(mot, ignoreCase = true)) && (auteurFiltre.isBlank() || auteur.contains(auteurFiltre, ignoreCase = true))
+                }
+            }
+            messages = messages.sortedBy { it.optString("id") }
+            if (messages.isEmpty()) return ToolResult(if (name == "discord_messages_rechercher") "Aucun résultat dans les 100 messages récents de #${salon.optString("name")}." else "Aucun message trouvé dans #${salon.optString("name")} / le fil demandé.", direct = true)
+            val lignes = messages.map { m ->
+                val auteur = m.optJSONObject("author")?.optString("global_name").orEmpty().ifBlank { m.optJSONObject("author")?.optString("username").orEmpty().ifBlank { "Utilisateur inconnu" } }
+                val date = runCatching { java.time.Instant.parse(m.optString("timestamp")).atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("dd/MM HH:mm")) }.getOrDefault("")
+                val contenu = m.optString("content").trim().ifBlank { if (m.optJSONArray("attachments")?.length()?.let { it > 0 } == true) "[pièce jointe]" else "[message sans texte — contenu éventuellement masqué par les intents Discord]" }
+                "[$date] **$auteur** : $contenu" + (if (m.optJSONArray("attachments")?.length()?.let { it > 0 } == true) " 📎" else "") + "\n_ID ${m.optString("id")}_"
+            }
+            ToolResult("# Messages de #${salon.optString("name")} — ${messages.size} résultat(s)\n" + lignes.joinToString("\n"), direct = true)
         }
         "discord_message_envoyer" -> {
             val g = guildeObj(a)
@@ -240,32 +277,60 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
                 else -> return ToolResult("Précise un rôle ou un membre.")
             }
             val acces = a.optString("acces").trim().lowercase()
-            // Autoriser « voir_salon » n'ajoute QUE la permission de voir ce salon : si le rôle a par ailleurs beaucoup de
-            // permissions au niveau du serveur (ex. toutes_sauf_administrateur), elles restent actives dans ce salon aussi,
-            // puisqu'une autorisation de salon ne fait qu'AJOUTER un droit, jamais retirer ceux déjà accordés ailleurs.
-            // Pour un salon vraiment limité à la lecture malgré des permissions larges au niveau du serveur, il faut
-            // explicitement INTERDIRE tout le reste dans ce salon (« seulement »/« uniquement »).
+            val autoriserBrut = a.optString("autoriser").trim()
+            val refuserBrut = a.optString("refuser").trim()
+            if (acces.isBlank() && autoriserBrut.isBlank() && refuserBrut.isBlank())
+                return ToolResult("Précise un profil dans acces, ou les droits à régler dans autoriser et/ou refuser.")
+            fun masquePermissions(brut: String): Long {
+                if (brut.isBlank()) return 0L
+                val noms = brut.split(',', ';', '|').map { it.trim().lowercase().replace(' ', '_') }.filter { it.isNotBlank() }
+                val inconnus = noms.filter { it !in Discord.Perm.NOMS || it == "administrateur" }
+                if (inconnus.isNotEmpty()) throw IllegalArgumentException("Droits Discord inconnus/non configurables en salon : ${inconnus.joinToString(", ")}. Utilise les noms listés dans la description de l'outil.")
+                return noms.fold(0L) { bits, nom -> bits or Discord.Perm.NOMS.getValue(nom) }
+            }
+            val allowBits = masquePermissions(autoriserBrut)
+            val denyBits = masquePermissions(refuserBrut)
+            if ((allowBits and denyBits) != 0L)
+                return ToolResult("Un même droit ne peut pas être autorisé et refusé simultanément dans le même salon.")
+            val resumeAcces = if (autoriserBrut.isNotBlank() || refuserBrut.isNotBlank())
+                "autoriser=$autoriserBrut ; refuser=$refuserBrut" else acces
+            // Autoriser/refuser sont des overrides ciblés : les droits non cités restent hérités du serveur.
+            // L'administrateur ne peut pas être attribué par un override de salon dans Discord.
             val toutSaufVoir = Discord.Perm.TOUT_SAUF_ADMINISTRATEUR and Discord.Perm.VIEW_CHANNEL.inv()
-            fun appliquer(channelId: String) = when {
-                acces.contains("seulement") || acces.contains("uniquement") ->
-                    Discord.salonPermission(app, channelId, cibleId, type, Discord.Perm.VIEW_CHANNEL, toutSaufVoir)
-                acces.contains("toutes") || acces.contains("tout") ->
-                    Discord.salonPermission(app, channelId, cibleId, type, Discord.Perm.TOUT_SAUF_ADMINISTRATEUR, 0L)
-                acces.contains("refuser") -> Discord.salonPermission(app, channelId, cibleId, type, 0L, Discord.Perm.VIEW_CHANNEL)
-                acces.contains("defaut") || acces.contains("default") -> Discord.salonPermissionSupprimer(app, channelId, cibleId)
-                else -> Discord.salonPermission(app, channelId, cibleId, type, Discord.Perm.VIEW_CHANNEL, 0L)
+            fun appliquer(channel: JSONObject) {
+                val channelId = channel.getString("id")
+                if (autoriserBrut.isNotBlank() || refuserBrut.isNotBlank()) {
+                    // L'API PUT remplace tout l'override : on reprend les bits existants de l'inventaire
+                    // du salon pour préserver chaque droit qui n'a pas été explicitement cité.
+                    val overwrites = channel.optJSONArray("permission_overwrites") ?: JSONArray()
+                    val actuel = (0 until overwrites.length()).mapNotNull { overwrites.optJSONObject(it) }
+                        .firstOrNull { it.optString("id") == cibleId && it.optInt("type", -1) == type }
+                    val ancienAllow = actuel?.optString("allow")?.toLongOrNull() ?: 0L
+                    val ancienDeny = actuel?.optString("deny")?.toLongOrNull() ?: 0L
+                    val nouveauAllow = (ancienAllow and denyBits.inv()) or allowBits
+                    val nouveauDeny = (ancienDeny and allowBits.inv()) or denyBits
+                    Discord.salonPermission(app, channelId, cibleId, type, nouveauAllow, nouveauDeny)
+                } else when {
+                    acces.contains("seulement") || acces.contains("uniquement") ->
+                        Discord.salonPermission(app, channelId, cibleId, type, Discord.Perm.VIEW_CHANNEL, toutSaufVoir)
+                    acces.contains("toutes") || acces.contains("tout") ->
+                        Discord.salonPermission(app, channelId, cibleId, type, Discord.Perm.TOUT_SAUF_ADMINISTRATEUR, 0L)
+                    acces.contains("refuser") -> Discord.salonPermission(app, channelId, cibleId, type, 0L, Discord.Perm.VIEW_CHANNEL)
+                    acces.contains("defaut") || acces.contains("default") -> Discord.salonPermissionSupprimer(app, channelId, cibleId)
+                    else -> Discord.salonPermission(app, channelId, cibleId, type, Discord.Perm.VIEW_CHANNEL, 0L)
+                }
             }
             if (a.optString("tous_les_salons").equals("true", true)) {
                 val arr = Discord.salons(app, gid)
                 val ids = (0 until arr.length()).map { arr.getJSONObject(it) }.filter { it.optInt("type") != 4 } // on exclut les catégories, inutiles ici
-                if (!confirm("Modifier l'accès des ${ids.size} salon(s) du serveur pour $cibleNom ($acces) ?", true)) return ToolResult("Refusé par l'utilisateur.")
+                if (!confirm("Modifier l'accès des ${ids.size} salon(s) du serveur pour $cibleNom ($resumeAcces) ?", true)) return ToolResult("Refusé par l'utilisateur.")
                 var erreurs = 0
-                ids.forEach { c -> runCatching { appliquer(c.getString("id")) }.onFailure { erreurs++ } }
+                ids.forEach { c -> runCatching { appliquer(c) }.onFailure { erreurs++ } }
                 ToolResult("✅ Accès mis à jour sur ${ids.size - erreurs}/${ids.size} salon(s) pour $cibleNom." + (if (erreurs > 0) " ($erreurs échec(s), probablement un salon où le bot n'a pas la main)." else ""), direct = true)
             } else {
                 val salon = Discord.trouverSalon(app, gid, a.optString("salon")) ?: return ToolResult("Salon « ${a.optString("salon")} » introuvable. Précise un nom de salon, ou mets tous_les_salons=true pour les appliquer tous d'un coup.")
-                if (!confirm("Modifier l'accès de « ${salon.optString("name")} » pour $cibleNom ($acces) ?", true)) return ToolResult("Refusé par l'utilisateur.")
-                appliquer(salon.getString("id"))
+                if (!confirm("Modifier l'accès de « ${salon.optString("name")} » pour $cibleNom ($resumeAcces) ?", true)) return ToolResult("Refusé par l'utilisateur.")
+                appliquer(salon)
                 ToolResult("✅ Accès de « ${salon.optString("name")} » mis à jour pour $cibleNom.", direct = true)
             }
         }

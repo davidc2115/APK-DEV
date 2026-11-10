@@ -11,8 +11,9 @@ import org.json.JSONObject
 
 /**
  * Façade des fournisseurs, chacun avec plusieurs clés en rotation :
- *  - cerveau (conversation + outils) : Groq → Gemini → Cloudflare → Ollama de la maison ;
- *  - agents (planning, mails, contacts) : Gemini → Groq → Cloudflare → Ollama.
+ *  - cerveau (conversation + outils) : Ollama de la maison → Groq → Gemini → Cloudflare ;
+ *  - agents (planning, mails, contacts) : Ollama → Gemini → Groq → Cloudflare.
+ * Ollama est prioritaire lorsqu'il est réellement configuré ; les fournisseurs cloud restent les secours.
  * Une clé qui atteint son quota est mise en pause le temps indiqué par le fournisseur ; quand toutes les clés d'un
  * fournisseur sont en pause, on passe immédiatement au suivant.
  */
@@ -43,7 +44,7 @@ class Llm(private val store: Store) {
             " · Cloudflare $c compte(s)" + (cloudflare.etat().second.takeIf { it > 0 }?.let { " ($it en pause)" } ?: "") +
             groqRing.refuseesMasquees().takeIf { it.isNotEmpty() }?.let { "\n⚠️ Clé(s) Groq refusée(s) par Groq (invalides ou révoquées) : ${it.joinToString(", ")} — remplace-les" } .orEmpty() +
             geminiRing.refuseesMasquees().takeIf { it.isNotEmpty() }?.let { "\n⚠️ Clé(s) Gemini refusée(s) : ${it.joinToString(", ")}" }.orEmpty() +
-            "\nOrdre : Groq → Gemini → Cloudflare → Ollama" +
+            "\nOrdre : Ollama (si actif) → Groq → Gemini → Cloudflare" +
             (if (dernierRelais > 0 && System.currentTimeMillis() - dernierRelais < 3_600_000L) " · dernier relais : $dernierFournisseur à " +
                 java.text.SimpleDateFormat("HH:mm", java.util.Locale.FRANCE).format(java.util.Date(dernierRelais)) else "")
     }
@@ -55,6 +56,17 @@ class Llm(private val store: Store) {
     /** Agent : Gemini d'abord (clés en rotation), puis Groq en secours. Échoue avec un message lisible. */
     suspend fun agent(system: String, user: String): String {
         val errors = mutableListOf<String>()
+        // Les tâches courtes (analyse de brief vidéo, résumé, rédaction simple…) passent d'abord
+        // par le serveur Ollama de l'utilisateur : aucune consommation Gemini/Groq si le modèle local répond.
+        val local = Ollama.app
+        if (local != null && Ollama.configure(local)) {
+            try {
+                return withContext(Dispatchers.IO) {
+                    Ollama.generer(local, system, user).ifBlank { throw IllegalStateException("réponse locale vide") }
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { errors += "Ollama : " + (e.message ?: e.javaClass.simpleName).take(160) }
+        }
         if (geminiRing.count() > 0) {
             try {
                 return try {
@@ -88,8 +100,7 @@ class Llm(private val store: Store) {
             }
         }
         lastError = errors.joinToString(" | ").ifBlank { "aucune clé configurée" }
-        // Dernier recours : Ollama du serveur de la maison.
-        return secoursOllama(IllegalStateException(lastError)) { app -> Ollama.generer(app, system, user).ifBlank { throw IllegalStateException("réponse vide") } }
+        throw IllegalStateException(lastError)
     }
 
     private suspend fun plainGroq(system: String, user: String): String = try {

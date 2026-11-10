@@ -90,6 +90,66 @@ class MainActivity : ComponentActivity() {
 
     fun demarrerEcoute() { if (!vm.listening && !vm.busy) vm.toggleListening() }
 
+    /** Applique les options de fenêtre nécessaires au mode présence sur l'écran verrouillé. */
+    fun appliquerModePresenceVerrouillage(actif: Boolean) {
+        val flags = android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+            android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+            android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        if (android.os.Build.VERSION.SDK_INT >= 27) {
+            setShowWhenLocked(actif)
+            setTurnScreenOn(actif)
+        }
+        if (actif) {
+            window.addFlags(flags)
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                window.insetsController?.let { controller ->
+                    controller.hide(android.view.WindowInsets.Type.statusBars() or android.view.WindowInsets.Type.navigationBars())
+                    controller.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                window.decorView.systemUiVisibility = (
+                    android.view.View.SYSTEM_UI_FLAG_FULLSCREEN or
+                    android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                    android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                )
+            }
+        } else {
+            window.clearFlags(flags)
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                window.insetsController?.show(android.view.WindowInsets.Type.statusBars() or android.view.WindowInsets.Type.navigationBars())
+            } else {
+                @Suppress("DEPRECATION")
+                window.decorView.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_VISIBLE
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        appliquerModePresenceVerrouillage(
+            (application as JarvisApp).store.presenceModeActif.value &&
+                (application as JarvisApp).store.presenceVerrouillage.value
+        )
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        val store = (application as JarvisApp).store
+        if (hasFocus && store.presenceModeActif.value && store.presenceVerrouillage.value) {
+            appliquerModePresenceVerrouillage(true)
+        }
+    }
+
+
+    /** Réponse à une confirmation depuis la bannière système, même si une autre application était affichée. */
+    private fun handleConfirmation(i: android.content.Intent?) {
+        if (i?.action != fr.dd.jarvis.service.ConfirmationNotification.ACTION) return
+        vm.answerConfirm(i.getBooleanExtra(fr.dd.jarvis.service.ConfirmationNotification.EXTRA_OK, false))
+        i.action = null
+        i.removeExtra(fr.dd.jarvis.service.ConfirmationNotification.EXTRA_OK)
+    }
+
     /** Notification « Android Auto : rétablir » : réinstallation par l'installateur Google (marque Play Store). */
     /**
      * Une seule fois par notification : l'intention d'origine est redonnée à JARVIS quand Android le relance (après la
@@ -113,6 +173,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        handleConfirmation(intent)
         handleListen(intent)
         handleSharedVideo(intent)
         handleTikTokCallback(intent)
@@ -172,6 +233,7 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
         )
         val app = application as JarvisApp
+        handleConfirmation(intent)
         if (app.store.wakeOn.value && !fr.dd.jarvis.service.JarvisService.running &&
             checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
         ) fr.dd.jarvis.service.JarvisService.start(this)
@@ -231,7 +293,14 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
     }
     var tab by rememberSaveable { mutableStateOf(0) }
     // Écrans de terrain ouverts par-dessus l'onglet en cours (caméra, compte-rendu d'intervention).
-    var terrain by rememberSaveable { mutableStateOf("") }
+    var terrain by remember { mutableStateOf(if (app.store.presenceModeActif.value) "presence" else "") }
+    LaunchedEffect(terrain) { app.store.presenceModeActif.set(terrain == "presence") }
+    LaunchedEffect(terrain, app.store.presenceVerrouillage.value) {
+        val afficherVerrouille = terrain == "presence" && app.store.presenceVerrouillage.value
+        var base: android.content.Context? = ctx
+        while (base is android.content.ContextWrapper && base !is MainActivity) base = base.baseContext
+        (base as? MainActivity)?.appliquerModePresenceVerrouillage(afficherVerrouille)
+    }
     androidx.activity.compose.BackHandler(enabled = terrain.isNotEmpty()) { terrain = "" }
     LaunchedEffect(terrainDemande.value) {
         if (terrainDemande.value.isNotBlank()) { terrain = terrainDemande.value; tab = 0; terrainDemande.value = "" }
@@ -321,7 +390,7 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
             }
         }
     }
-    if (terrain == "presence") fr.dd.jarvis.ui.ModePresence(app, statut = vm.status, onParler = { vm.toggleListening() }, onFermer = { terrain = "" })
+    if (terrain == "presence") fr.dd.jarvis.ui.ModePresence(app, statut = vm.status, onParler = { vm.toggleListening() }, onFermer = { app.store.presenceModeActif.set(false); terrain = "" })
     }
 
     crash?.let { text ->

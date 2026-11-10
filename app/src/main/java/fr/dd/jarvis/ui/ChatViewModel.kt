@@ -82,12 +82,17 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val d = CompletableDeferred<Boolean>()
         confirmDeferred = d
         pendingConfirm = question
-        val r = d.await()
-        pendingConfirm = null
-        return r
+        fr.dd.jarvis.service.ConfirmationNotification.afficher(app, question)
+        return try {
+            d.await()
+        } finally {
+            pendingConfirm = null
+            fr.dd.jarvis.service.ConfirmationNotification.annuler(app)
+        }
     }
 
     fun answerConfirm(ok: Boolean) {
+        fr.dd.jarvis.service.ConfirmationNotification.annuler(app)
         confirmDeferred?.complete(ok)
     }
 

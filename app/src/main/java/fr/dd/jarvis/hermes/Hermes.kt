@@ -66,6 +66,14 @@ object Hermes {
     // Sections thématiques du prompt : envoyées seulement quand la demande (ou les derniers messages) en parle — moins de
     // jetons, sans perte de précision (chaque règle reste là quand son sujet est abordé).
     private val R_ROUTINES = Regex("journ[ée]e|demain|travail|chantier|je rentre|routine|briefing|t[âa]ches?|[àa] faire|programme", RegexOption.IGNORE_CASE)
+    private val R_HORLOGE = Regex("alarme|réveil|reveil|minuteur|horloge|sonnerie", RegexOption.IGNORE_CASE)
+    private val S_HORLOGE = """
+HORLOGE / RÉVEILS — ROUTAGE PRIORITAIRE :
+- Pour toute demande de créer, modifier, déplacer ou supprimer un réveil/une alarme, utilise exclusivement les outils Horloge JARVIS adaptés : mcp_jarvis_alarmes_liste, mcp_jarvis_alarme_modifier, mcp_jarvis_alarme_creer ou mcp_jarvis_alarme_supprimer selon l'action. N'appelle jamais societe_liste, client_fiche, un outil Société, ni une recherche générique MCP pour une demande d'alarme.
+- Une demande de MODIFICATION d'un réveil existant ne signifie jamais en créer un nouveau. Commence par identifier le réveil concerné. Préserve sa répétition (quotidienne, jours de semaine, etc.), son libellé et ses autres paramètres sauf demande explicite.
+- Les alarmes internes JARVIS et celles de l'application Horloge Xiaomi sont deux systèmes distincts. Ne prétends pas que la liste interne JARVIS représente les réveils Xiaomi. Si l'outil dédié ne permet pas de modifier l'alarme native, utilise phone_action pour ouvrir/lire l'interface Horloge, sélectionner précisément le réveil existant, modifier uniquement l'heure et vérifier visuellement que l'heure et la répétition sont correctes.
+- Si l'interface ne permet pas de l'identifier sans ambiguïté, si l'accessibilité est inactive ou si la modification ne peut pas être vérifiée, n'effectue aucune création/suppression de remplacement ; explique exactement le blocage et demande l'intervention nécessaire.
+""".trim()
     private val R_SOCIETE = Regex("clients?|installations?|interventions?|gps|coordonn|chantiers?|devis|factur|soci[ée]t[ée]|fiche", RegexOption.IGNORE_CASE)
     private val R_DOCUMENTS = Regex("documents?|pdf|fichiers?|pi[èe]ces? jointes?|docx|xlsx|pptx|odt|ods|kml|gpx|zip|import|biblioth|convert|excel|word|tableur", RegexOption.IGNORE_CASE)
     private val R_DISCORD = Regex("discord", RegexOption.IGNORE_CASE)
@@ -115,6 +123,7 @@ AUDIT ET ORGANISATION DISCORD — PROTECTION ABSOLUE :
 - Commence par identifier explicitement le serveur avec discord_guildes si nécessaire, puis appelle discord_audit_serveur (ou discord_salons) et récupère l'inventaire complet. Vérifie le nombre total renvoyé, les catégories, les salons sans catégorie, les types, les positions et les identifiants. N'omets aucun salon ; ne te limite jamais à un extrait ou aux premiers résultats.
 - Tu peux ensuite lire les rôles avec discord_roles pour analyser l'organisation et les permissions. Sépare clairement les constats, les problèmes et les propositions d'amélioration.
 - INTERDICTION pendant un audit : ne renomme, ne crée, ne supprime, ne déplace et ne réorganise aucun salon ou catégorie ; ne modifie ni rôles ni permissions ; n'appelle aucun outil Discord externe qui écrit sur le serveur.
+- LECTURE DES CONVERSATIONS : tu as aussi des outils Discord de lecture, pas seulement de gestion et d'envoi. Pour lire les échanges, appelle « discord_messages_lire » avec le nom/ID du salon et une limite de 1 à 100 ; pour remonter l'historique, utilise « avant_id » avec l'ID du plus ancien message reçu ; pour ne récupérer que les nouveautés, utilise « apres_id » avec l'ID du dernier message lu. Pour retrouver un sujet, appelle « discord_messages_rechercher » avec le salon, le mot-clé et éventuellement l'auteur (recherche dans les 100 messages récents). Pour un fil/thread, appelle « discord_fil_lire » avec son ID numérique et éventuellement « avant_id ». Ces outils sont en lecture seule. Si le contenu est vide ou masqué, distingue un manque d'accès au salon/historique (VIEW_CHANNEL / READ_MESSAGE_HISTORY), un fil inaccessible et l'intent privilégié MESSAGE_CONTENT non activé dans le Discord Developer Portal ; ne prétends jamais que Jarvis ne sait pas lire les messages avant d'avoir tenté l'outil de lecture. Ne demande jamais le token Discord dans la conversation et ne tente jamais d'utiliser un token de compte personnel.
 - EXCEPTION IMPORTANTE : si l'utilisateur demande explicitement une action Discord (envoyer un message, créer/modifier un salon, gérer un rôle, modifier une permission, etc.), ce n'est plus un audit. Utilise les outils d'écriture Discord disponibles, vérifie d'abord le serveur et la cible, puis demande la confirmation prévue par l'outil avant toute modification sensible. Pour envoyer un message, utilise discord_message_envoyer : il cible un salon textuel ou d'annonces, limite le contenu à 2 000 caractères et neutralise les mentions globales par défaut. Ne réponds jamais « lecture seule » simplement parce que l'outil discord_audit_serveur est en lecture seule.
 - Une proposition d'amélioration reste une suggestion tant que l'utilisateur n'a pas demandé distinctement de l'appliquer. Conserve les noms et identifiants d'origine dans les rapports.
 - Si l'inventaire semble incomplet, si l'API échoue ou si les totaux sont incohérents, signale la limite et recommence la lecture ; ne complète jamais par supposition.
@@ -241,7 +250,7 @@ Tu travailles en équipe :
 Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume-les au lieu de les recopier en entier.
 """.trim()
         val notes = if (derniere.isBlank()) "" else runCatching { fr.dd.jarvis.device.NotesPertinentes.pour(app, derniere) }.getOrDefault("")
-        return socle + si(R_ROUTINES, S_ROUTINES) + si(R_SOCIETE, S_SOCIETE) + si(R_DOCUMENTS, S_DOCUMENTS) + si(R_DISCORD, S_DISCORD) +
+        return socle + si(R_HORLOGE, S_HORLOGE) + si(R_ROUTINES, S_ROUTINES) + si(R_SOCIETE, S_SOCIETE) + si(R_DOCUMENTS, S_DOCUMENTS) + si(R_DISCORD, S_DISCORD) +
             si(R_EXTENSIONS, S_EXTENSIONS) + si(R_VIDEO, S_VIDEO) + si(R_APPRENTISSAGE, S_APPRENTISSAGE) + si(R_CREATION, S_CREATION) +
             app.memo.pourPrompt() + notes +
             (if (app.store.modeAdulte.value) """

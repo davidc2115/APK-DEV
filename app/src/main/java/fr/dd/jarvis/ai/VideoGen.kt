@@ -78,10 +78,10 @@ object VideoGen {
     /** Génère un plan (clip) via le Space Hugging Face ; retourne les octets mp4. Erreur explicite si le token
      *  manque/est refusé, si le quota GPU gratuit du jour est épuisé, ou si le service est indisponible. */
     internal fun genereClip(app: JarvisApp, prompt: String, dureeDemandee: Int, vertical: Boolean): ByteArray {
-        // Clé fal.ai configurée : génération fiable (payante) avec Wan 2.2 sur fal.ai, plutôt que le service gratuit à quota.
-        if (ImageToVideoGen.disponible(app)) return ImageToVideoGen.clipTexte(app, prompt, dureeDemandee.toDouble(), if (vertical) "9:16" else "16:9")
+        // Génération vidéo gratuite via Hugging Face ZeroGPU. Aucun appel fal.ai n'est effectué.
         val token = app.store.huggingFaceToken.value.trim()
-        if (token.isBlank()) throw ApiException(401, "token Hugging Face manquant — crée-en un gratuit (aucune carte bancaire) sur huggingface.co/settings/tokens puis ajoute-le dans Réglages › IA › Images & vidéo")
+        if (token.isBlank()) throw ApiException(401,
+            "Token Hugging Face gratuit manquant : crée-en un sur huggingface.co/settings/tokens puis ajoute-le dans Réglages › IA › Images & vidéo. fal.ai n'est plus utilisé pour la génération vidéo.")
         val duree = dureeDemandee.coerceIn(2, 5) // le modèle gratuit (Wan 2.2) ne va pas au-delà de 5s par plan
         val (hauteur, largeur) = if (vertical) 768 to 448 else 448 to 768
         // Résolution et pas réduits par rapport aux réglages par défaut du Space : on vise un plan générable en
@@ -185,23 +185,35 @@ object VideoGen {
     suspend fun genererVideo(
         app: JarvisApp, sujet: String, script: String, dureePlan: Int, vertical: Boolean
     ): Pair<File?, String> = withContext(Dispatchers.IO) {
-        if (!ImageToVideoGen.disponible(app) && app.store.huggingFaceToken.value.isBlank())
-            return@withContext null to "❌ Aucun service vidéo configuré : ajoute ta clé fal.ai (ou un token Hugging Face gratuit, sans carte bancaire, sur huggingface.co/settings/tokens) dans Réglages › IA › Images & vidéo."
+        // Même sans token HF, on prépare les plans et on propose les solutions web de secours.
         val listePlans = plans(app, sujet, script)
         if (listePlans.isEmpty()) return@withContext null to "❌ Impossible de découper le sujet en plans filmables."
         val clips = mutableListOf<File>()
         val echecs = mutableListOf<String>()
         listePlans.forEachIndexed { i, plan ->
             try {
-                val bytes = genereClip(app, plan, dureePlan, vertical)
-                val f = File(dossier(app), "clip_${System.currentTimeMillis()}_$i.mp4")
+                val bytes = try { genereClip(app, plan, dureePlan, vertical) }
+                catch (hf: Exception) { VideoProviderGen.genererClipSecours(app, plan, dureePlan, vertical) ?: throw hf }
+                val f = File(dossier(app), "clip_" + System.currentTimeMillis() + "_" + i + ".mp4")
                 f.writeBytes(bytes)
                 clips.add(f)
             } catch (e: Exception) {
-                echecs.add("Plan ${i + 1} (« ${plan.take(50)} ») : ${e.message}")
+                echecs.add("Plan " + (i + 1) + " (« " + plan.take(50) + " ») : " + e.message)
             }
         }
-        if (clips.isEmpty()) return@withContext null to "❌ Aucun plan n'a pu être généré :\n" + echecs.joinToString("\n")
+        if (clips.isEmpty()) {
+            val secours = buildString {
+                append("❌ Hugging Face n'a généré aucun plan. Tu peux poursuivre sans perdre le travail de préparation :")
+                append("\n\nConfigure une clé UseAPI Flow ou BytePlus Dreamina dans Réglages › IA › Images & vidéo pour activer les secours automatiques.")
+                append("\n\n**Prompts préparés :**")
+                listePlans.forEachIndexed { index, prompt ->
+                    append("\n\nPlan ${index + 1} :\n")
+                    append(prompt)
+                }
+                if (echecs.isNotEmpty()) append("\n\nDétail HF :\n" + echecs.joinToString("\n"))
+            }
+            return@withContext null to secours
+        }
         val assemble = if (clips.size == 1) clips[0] else try { monter(app, clips) } catch (e: Exception) {
             return@withContext clips[0] to "⚠️ Montage impossible (${e.message}), voici le premier plan seul : ${clips[0].name}"
         }
@@ -209,10 +221,18 @@ object VideoGen {
         val fFinal = if (assemble.name == nomFinal) assemble else File(dossier(app), nomFinal).also { assemble.copyTo(it, overwrite = true) }
         val loc = app.obsidian.saveBytes("JARVIS/Vidéos TikTok", nomFinal, fFinal.readBytes(), "video/mp4")
         val msg = buildString {
-            append("🎬 Vidéo générée (${clips.size}/${listePlans.size} plans réussis" + (if (ImageToVideoGen.disponible(app)) ", fal.ai" else "") + ") : ${fFinal.name}")
+            append("🎬 Vidéo générée (${clips.size}/${listePlans.size} plans réussis, Hugging Face / Flow / Dreamina) : ${fFinal.name}")
             append("\n\n[▶ Lire la vidéo](jarvis-video-ia:${fFinal.name})")
             if (loc.isNotBlank()) append("\n📁 $loc")
-            if (echecs.isNotEmpty()) { append("\n⚠️ Plans manquants :\n"); append(echecs.joinToString("\n")) }
+            if (echecs.isNotEmpty()) {
+                append("\n⚠️ Plans manquants :\n")
+                append(echecs.joinToString("\n"))
+                append("\n\nConfigure Flow ou Dreamina dans Réglages › IA › Images & vidéo pour activer les fournisseurs de secours sur les prochaines générations.")
+                echecs.forEach { detail ->
+                    val plan = listePlans.firstOrNull { detail.contains(it.take(50)) }
+                    if (plan != null) append("\n\nPrompt à reprendre :\n").append(plan)
+                }
+            }
         }
         fFinal to msg
     }

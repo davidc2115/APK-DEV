@@ -25,6 +25,7 @@ class ToolBox(
     private val discord = DiscordTools(app, confirm)
     private val tiktok = TikTokTools(app, confirm)
     private val musique = MusicTools(app)
+    private val plex = PlexTools(app, confirm)
     private val store get() = app.store
     private val llm get() = app.llm
 
@@ -283,8 +284,10 @@ class ToolBox(
         put(tool("alarme_creer", "Règle une alarme (sonnerie répétée jusqu'à l'arrêt) SANS ouvrir aucune application ; visible dans la barre d'état.",
             mapOf("heure" to prop("Heure au format HH:MM (24 h)."), "libelle" to prop("Nom de l'alarme (optionnel)."),
                 "jours" to prop("Répétition (optionnel) : « lun mar ven », « semaine », « tous les jours ». Vide = une seule fois.")), listOf("heure")))
-        put(tool("alarme_supprimer", "Supprime une alarme de l'Horloge (par heure HH:MM ou par libellé).",
+        put(tool("alarme_supprimer", "Supprime une alarme de l'Horloge native. Aucune permission Android spéciale n'est nécessaire ; cela dépend du support de l'action standard DISMISS_ALARM par l'application Horloge installée. Si elle ne le prend pas en charge, ouvre sa liste pour une suppression manuelle.",
             mapOf("heure" to prop("Heure de l'alarme (optionnel)."), "libelle" to prop("Libellé de l'alarme (optionnel)."))))
+        put(tool("alarme_modifier", "Modifie un réveil existant sans créer un doublon. Ne jamais appeler alarme_creer pour une demande de modification. Si l'édition exacte et vérifiable n'est pas disponible, ne rien modifier et ne pas ouvrir l'Horloge.",
+            mapOf("ancienne_heure" to prop("Heure actuelle HH:MM de l'alarme à remplacer."), "ancien_libelle" to prop("Libellé actuel (optionnel, si l'heure n'est pas connue)."), "nouvelle_heure" to prop("Nouvelle heure HH:MM."), "nouveau_libelle" to prop("Nouveau libellé (optionnel)."), "jours" to prop("Répétition de la nouvelle alarme : lun, mar, semaine, tous les jours… (optionnel).")), listOf("nouvelle_heure")))
         put(tool("minuteur_creer", "Lance un minuteur avec compte à rebours en notification, SANS ouvrir aucune application.",
             mapOf("secondes" to prop("Durée totale en secondes (ex. 10 min = 600)."), "libelle" to prop("Nom du minuteur (optionnel).")), listOf("secondes")))
         put(tool("chronometre", "Chronomètre sans ouvrir d'application (notification avec compteur).", mapOf("action" to prop("demarrer (défaut) | arreter | etat"))))
@@ -424,7 +427,8 @@ class ToolBox(
         val soc = SocieteTools.concerned(recentUserText); val srv = ServeurTools.concerned(recentUserText)
         val dis = DiscordTools.concerned(recentUserText); val tik = TikTokTools.concerned(recentUserText)
         val mus = MusicTools.concerned(recentUserText)
-        if (!soc && !srv && !dis && !tik && !mus) return schema
+        val plx = PlexTools.concerned(recentUserText)
+        if (!soc && !srv && !dis && !tik && !mus && !plx) return schema
         return JSONArray().also { out ->
             for (i in 0 until schema.length()) out.put(schema.get(i))
             if (soc) societe.schema.forEach { out.put(it) }
@@ -432,6 +436,7 @@ class ToolBox(
             if (dis) discord.schema.forEach { out.put(it) }
             if (tik) tiktok.schema.forEach { out.put(it) }
             if (mus) musique.schema.forEach { out.put(it) }
+            if (plx) plex.schema.forEach { out.put(it) }
         }
     }
 
@@ -442,6 +447,7 @@ class ToolBox(
         discord.schema.forEach { out.put(it) }
         tiktok.schema.forEach { out.put(it) }
         musique.schema.forEach { out.put(it) }
+        plex.schema.forEach { out.put(it) }
     }
 
     private suspend fun hermesGerer(action: String, mode: String): String {
@@ -640,27 +646,34 @@ class ToolBox(
             val duree = a.optString("duree").replace(',', '.').filter { it.isDigit() || it == '.' }.toDoubleOrNull() ?: 5.0
             val nomImage = a.optString("image").trim()
             val format = a.optString("format").ifBlank { "vertical" }
-            // Plus de 5 s : jamais refusé — montage de plusieurs plans (scénario + prompts par l'agent Gemini).
             if (duree > 5.5 && nomImage.isBlank()) return ToolResult(fr.dd.jarvis.ai.Montage.lancer(app, fr.dd.jarvis.ai.Montage.Demande(
                 sujet = brief, dureeS = duree.toInt(), format = format,
                 tiktok = Regex("tiktok|reel|short", RegexOption.IGNORE_CASE).containsMatchIn(brief))), direct = true)
-            if (nomImage.isBlank() && !fr.dd.jarvis.ai.ImageToVideoGen.disponible(app))
-                return ToolResult("❌ Aucune clé fal.ai : ajoute-la dans Réglages › IA › Images & vidéo pour générer une vidéo.")
+            if (nomImage.isBlank() && !fr.dd.jarvis.ai.ImageToVideoGen.disponible(app) &&
+                app.store.huggingFaceToken.value.isBlank() && !fr.dd.jarvis.ai.VideoProviderGen.disponible(app))
+                return ToolResult("❌ Aucun fournisseur vidéo configuré. Ajoute un token Hugging Face, une clé UseAPI Flow ou une clé BytePlus Dreamina dans Réglages › IA › Images & vidéo.")
             if (nomImage.isNotBlank() && !fr.dd.jarvis.ai.ImageToVideoGen.disponible(app))
-                return ToolResult("❌ L'animation d'image nécessite une clé fal.ai configurée dans Réglages › IA › Images & vidéo.")
+                return ToolResult("❌ L'animation d'image nécessite actuellement une clé fal.ai configurée dans Réglages › IA › Images & vidéo.")
             val prompt = fr.dd.jarvis.ai.VideoGen.preparerPrompt(app, brief, duree, format, nomImage.isNotBlank())
             val (video, loc) = when {
                 nomImage.isNotBlank() -> {
                     val image = fr.dd.jarvis.ai.ImageGen.fichier(app, nomImage)
-                        ?: return ToolResult("❌ Image introuvable : $nomImage. Utilise fichiers_generes pour retrouver son nom exact.")
+                        ?: return ToolResult("❌ Image introuvable : " + nomImage + ". Utilise fichiers_generes pour retrouver son nom exact.")
                     fr.dd.jarvis.ai.ImageToVideoGen.generate(app, image, prompt, duree)
                 }
                 fr.dd.jarvis.ai.ImageToVideoGen.disponible(app) -> fr.dd.jarvis.ai.ImageToVideoGen.texteVersVideo(app, prompt, duree, format)
-                else -> return ToolResult("❌ Aucune clé fal.ai : ajoute-la dans Réglages › IA › Images & vidéo pour générer une vidéo. (Sans clé, tiktok_video utilise le service gratuit Hugging Face, plus lent et limité.)")
+                else -> {
+                    val vertical = !format.trim().lowercase().let { it.startsWith("hori") || it == "16:9" || it.startsWith("pays") }
+                    val bytes = try { fr.dd.jarvis.ai.VideoGen.genereClip(app, prompt, duree.toInt().coerceIn(2, 5), vertical) }
+                    catch (hf: Exception) { fr.dd.jarvis.ai.VideoProviderGen.genererClipSecours(app, prompt, duree.toInt().coerceIn(4, 8), vertical) ?: throw hf }
+                    val file = java.io.File(fr.dd.jarvis.ai.VideoGen.dossier(app), "video_" + System.currentTimeMillis() + ".mp4").apply { writeBytes(bytes) }
+                    val location = runCatching { app.obsidian.saveBytes("JARVIS/Vidéos IA", file.name, bytes, "video/mp4") }.getOrDefault("")
+                    file to location
+                }
             }
-            ToolResult("🎬 Vidéo créée après analyse et préparation du prompt (fal.ai) : ${video.name}\n\n[▶ Lire la vidéo](jarvis-video-ia:${video.name})\n\n📁 Enregistrée dans Jarvis › Vidéos IA" + (if (loc.isNotBlank()) "\n🗂️ Obsidian : $loc" else ""), direct = true)
+            ToolResult("🎬 Vidéo créée après analyse et préparation du prompt : " + video.name + "\n\n[▶ Lire la vidéo](jarvis-video-ia:" + video.name + ")\n\n📁 Enregistrée dans Jarvis › Vidéos IA" + (if (loc.isNotBlank()) "\n🗂️ Obsidian : " + loc else ""), direct = true)
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
-            ToolResult("❌ Vidéo impossible : ${e.message}")
+            ToolResult("❌ Vidéo impossible : " + e.message)
         }
         "animer_image" -> try {
             val imageName = a.optString("image")
@@ -804,7 +817,18 @@ class ToolBox(
             }
         }
         "alarme_creer" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.device.Horloge.creerAlarme(app, a.optString("heure"), a.optString("libelle"), a.optString("jours")) }, direct = true)
-        "alarme_supprimer" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.device.Horloge.supprimerAlarme(app, a.optString("heure"), a.optString("libelle")) })
+        "alarme_supprimer" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val interne = fr.dd.jarvis.device.Horloge.supprimerAlarme(app, a.optString("heure"), a.optString("libelle"))
+            if (interne.startsWith("Aucune alarme")) app.phone.supprimerAlarme(a.optString("heure"), a.optString("libelle")) else interne
+        }, direct = true)
+        "alarme_modifier" -> {
+            val ancienneHeure = a.optString("ancienne_heure").trim()
+            val ancienLibelle = a.optString("ancien_libelle").trim()
+            val nouvelleHeure = a.optString("nouvelle_heure").trim()
+            if (nouvelleHeure.isBlank()) ToolResult("Précise la nouvelle heure.")
+            else if (ancienneHeure.isBlank() && ancienLibelle.isBlank()) ToolResult("Précise l'heure ou le libellé actuel du réveil ; aucune modification effectuée.")
+            else ToolResult("Je n'ai pas encore de méthode fiable pour éditer et vérifier le réveil existant dans l'Horloge Xiaomi. Je n'en crée pas un deuxième et je n'ouvre plus l'Horloge automatiquement. Aucun changement effectué.", direct = true)
+        }
         "minuteur_creer" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.device.Horloge.creerMinuteur(app, a.optString("secondes").toDoubleOrNull()?.toInt() ?: 0, a.optString("libelle")) }, direct = true)
         "chronometre" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.device.Horloge.chronometre(app, a.optString("action")) }, direct = true)
         "rappel_creer" -> ToolResult(fr.dd.jarvis.device.Rappels.creer(app, a.optString("texte"), a.optString("quand"), a.optString("repetition")))
@@ -1094,6 +1118,7 @@ class ToolBox(
         in DiscordTools.NAMES -> discord.execute(name, a)
         in TikTokTools.NAMES -> tiktok.execute(name, a)
         in MusicTools.NAMES -> musique.execute(name, a)
+        in PlexTools.NAMES -> plex.execute(name, a)
         else -> ToolResult("Outil inconnu : $name")
     } }
 

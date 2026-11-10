@@ -145,6 +145,8 @@ class Store(context: Context) {
     val sshPass = SPref("sshPass", "")
     val sshKey = SPref("sshKey", "")
     val sshFp = SPref("sshFp", "")
+    /** Jeton Plex Media Server : toujours conservé dans le stockage chiffré du Keystore. */
+    val plexToken = SecretPref("plexToken")
     val ghToken = SPref("ghToken", "")
     val scanAuto = BPref("scanAuto", true)
     val sshHostDistant = SPref("sshHostDistant", "")
@@ -274,6 +276,10 @@ class Store(context: Context) {
     val voixPersonnage = SPref("voixPersonnage", "")
     /** Mode présence automatique : JARVIS plein écran quand le téléphone est posé en charge (et qu'on ne le touche plus). */
     val presenceAuto = BPref("presenceAuto", true)
+    /** Autorise l'écran de présence déjà ouvert à rester visible au-dessus du verrouillage Android. */
+    val presenceVerrouillage = BPref("presenceVerrouillage", true)
+    /** Mode Présence épinglé comme écran de veille/verrouillage visuel ; restauré au retour de l’activité. */
+    val presenceModeActif = BPref("presenceModeActif", false)
     // ---- Alerte de départ, météo des rendez-vous, routines, journal, montre, empreinte vocale
     val departAlertes = BPref("departAlertes", true)
     val departNotifie = SPref("departNotifie", "")
@@ -387,6 +393,11 @@ class Store(context: Context) {
     // maintenant un abonnement payant ("Pollen") même pour la vidéo — plus utilisable gratuitement.
     val huggingFaceToken = SPref("huggingFaceToken", "")
     val falApiKey = SecretPref("falApiKey")
+    val googleFlowApiToken = SecretPref("googleFlowApiToken")
+    val dreaminaApiKey = SecretPref("dreaminaApiKey")
+    val googleFlowAccountEmail = SPref("googleFlowAccountEmail", "")
+    val googleFlowModel = SPref("googleFlowModel", "veo-3.1-fast")
+    val dreaminaModel = SPref("dreaminaModel", "seedance-1-5-pro-251215")
     // ---- Worker Cloudflare personnel pour animer une image avec Wan 2.2 (sans token Hugging Face côté Android)
     val imageVideoWorkerUrl = SPref("imageVideoWorkerUrl", "")
     val imageVideoWorkerToken = SPref("imageVideoWorkerToken", "")

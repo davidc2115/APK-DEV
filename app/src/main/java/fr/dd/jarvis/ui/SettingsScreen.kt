@@ -101,7 +101,8 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
         VoletReglages("general", "apparence", "Mode présence", "presence dragon plein ecran charge horloge") {
             HudPanel(Modifier.fillMaxWidth(), title = "🐉 Mode présence (plein écran)") {
                 HudChip(if (store.presenceAuto.value) "🐉 Mode présence automatique : oui" else "Mode présence automatique : non", store.presenceAuto.value) { store.presenceAuto.set(!store.presenceAuto.value) }
-                Text("Téléphone posé en charge, JARVIS ouvert et plus touché depuis 45 s : le dragon passe en plein écran (heure, prochain rendez-vous, météo, sous-titres de ce qu'il dit). Le reprendre en main le referme. Aussi disponible par le bouton « 🐉 Présence » de l'accueil.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+                HudChip(if (store.presenceVerrouillage.value) "🔒 Visible sur écran verrouillé : oui" else "Visible sur écran verrouillé : non", store.presenceVerrouillage.value) { store.presenceVerrouillage.set(!store.presenceVerrouillage.value) }
+                Text("Téléphone posé en charge, JARVIS ouvert et plus touché depuis 45 s : le dragon passe en plein écran. Si l'option verrouillage est activée, JARVIS demande à Android d'afficher l'activité au-dessus du verrouillage, de réveiller l'écran à son affichage et de le garder allumé pendant le mode présence. Ouvre d'abord le mode présence avant de verrouiller. Le bouton Marche/Arrêt reste prioritaire : Android peut éteindre l'écran lorsqu'il est pressé, et HyperOS peut limiter l'affichage. Désactive l'option ici à tout moment.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
             }
         },
         VoletReglages("general", "batterie", "Batterie & vitesse", "batterie economie energie performance vitesse rapide lent animations hermes analyse gemini") {
@@ -155,6 +156,96 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
             val localNetworkOk = remember(t2) { android.os.Build.VERSION.SDK_INT < 36 || g("android.permission.ACCESS_LOCAL_NETWORK") }
             var msg by remember { mutableStateOf("") }
             val all = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) { t2++ }
+            HudPanel(Modifier.fillMaxWidth(), title = "Centre d'administration réseau") {
+                val wifiOn = remember(t2) {
+                    runCatching { ctx.applicationContext.getSystemService(android.net.wifi.WifiManager::class.java)?.isWifiEnabled == true }.getOrDefault(false)
+                }
+                val adbOn = remember(t2) { fr.dd.jarvis.device.AdbShell.connected() }
+                val shizukuOn = remember(t2) { ShizukuShell.running() && ShizukuShell.granted() }
+                val freeboxAssociee = store.freeboxAppToken.value.isNotBlank()
+                var diagReseau by remember { mutableStateOf("") }
+                var droitsFreebox by remember { mutableStateOf("") }
+                val nearbyLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { t2++ }
+                val localNetLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { t2++ }
+                val adbNotifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+                    fr.dd.jarvis.device.AdbShell.postPairingNotification(ctx)
+                }
+                StatusRow("Wi-Fi du téléphone", wifiOn)
+                StatusRow("Découverte Wi-Fi à proximité", nearbyWifiOk)
+                if (Build.VERSION.SDK_INT >= 36) StatusRow("Accès Android au réseau local", localNetworkOk)
+                StatusRow("ADB sans fil connecté", adbOn)
+                StatusRow("Shizuku démarré et autorisé", shizukuOn)
+                StatusRow("Freebox associée", freeboxAssociee)
+                Text(
+                    "Ce centre distingue les droits Android, l'accès ADB/Shizuku et les droits propres à la Freebox. Il ne contourne pas les validations système : l'appairage ADB, l'autorisation Shizuku et les droits Freebox doivent être acceptés sur leurs écrans respectifs.",
+                    color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(vertical = 5.dp)
+                )
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HudButton("Wi-Fi", filled = true) {
+                        runCatching { ctx.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    }
+                    HudButton("Débogage sans fil") {
+                        runCatching { ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    }
+                    HudButton("Permissions de l'application") {
+                        runCatching {
+                            ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        }
+                    }
+                }
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HudButton("Appairer ADB") {
+                        if (Build.VERSION.SDK_INT >= 33 && ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                            adbNotifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        } else {
+                            fr.dd.jarvis.device.AdbShell.postPairingNotification(ctx)
+                        }
+                        runCatching { ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    }
+                    HudButton("Connecter ADB") {
+                        scope.launch {
+                            diagReseau = fr.dd.jarvis.device.AdbShell.connect(ctx)
+                            t2++
+                        }
+                    }
+                    HudButton("Autoriser Shizuku", enabled = ShizukuShell.running() && !ShizukuShell.granted()) {
+                        ShizukuShell.requestPermission()
+                    }
+                }
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HudButton("Autoriser Wi-Fi proche", enabled = Build.VERSION.SDK_INT >= 33 && !nearbyWifiOk) {
+                        if (Build.VERSION.SDK_INT >= 33) nearbyLauncher.launch(Manifest.permission.NEARBY_WIFI_DEVICES)
+                    }
+                    if (Build.VERSION.SDK_INT >= 36) HudButton("Autoriser réseau local", enabled = !localNetworkOk) {
+                        localNetLauncher.launch("android.permission.ACCESS_LOCAL_NETWORK")
+                    }
+                    HudButton("Actualiser les droits") { t2++ }
+                }
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HudButton("Vérifier les droits Freebox", enabled = freeboxAssociee) {
+                        scope.launch {
+                            droitsFreebox = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                runCatching { fr.dd.jarvis.ai.FreeboxOs.verifierAcces(app) }
+                                    .getOrElse { "Diagnostic Freebox impossible : " + (it.message ?: it.javaClass.simpleName) }
+                            }
+                        }
+                    }
+                    HudButton("Diagnostic réseau ADB", enabled = adbOn) {
+                        scope.launch {
+                            diagReseau = fr.dd.jarvis.device.AdbShell.exec(
+                                ctx,
+                                "ip -brief addr; echo ROUTES; ip route; echo WIFI; cmd wifi status; echo LOCAL_NETWORK_PERMISSION; pm check-permission android.permission.ACCESS_LOCAL_NETWORK ${ctx.packageName}"
+                            )
+                        }
+                    }
+                }
+                if (droitsFreebox.isNotBlank()) Text(droitsFreebox, color = HudText, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+                if (diagReseau.isNotBlank()) Text(diagReseau, color = HudText, fontSize = 10.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(top = 6.dp))
+                Text(
+                    "Les redirections de ports, réservations DHCP, VPN et appareils connus se gèrent dans le volet Maison › Freebox. Pour le serveur Debian/Plex, il faut une session SSH distincte : les droits de la box ne donnent pas automatiquement les droits Linux.",
+                    color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp)
+                )
+            }
             HudPanel(Modifier.fillMaxWidth(), title = "Autorisations — tout en un") {
                 StatusRow("Notifications", ntfOk); StatusRow("Micro", micOk); StatusRow("Agenda", calOk); StatusRow("Contacts", ctcOk)
                 StatusRow("SMS et appels", smsOk2); StatusRow("Localisation", locOk2)
@@ -162,8 +253,9 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 if (android.os.Build.VERSION.SDK_INT >= 36) StatusRow("Accès au réseau local (Android 16+)", localNetworkOk)
                 StatusRow("Accès aux notifications (lire / résumer)", notifOn)
                 StatusRow("Batterie sans restriction (arrière-plan)", batt)
-                StatusRow("Affichage par-dessus les autres applis (lancer des applis)", overlay)
+                StatusRow("Superposition — confirmations sur les autres applis", overlay)
                 StatusRow("Installer des applis", install)
+                Text(if (overlay) "✅ Les confirmations JARVIS peuvent s'afficher en fenêtre flottante au-dessus de l'application utilisée, avec les boutons Accepter et Refuser." else "Pour afficher les confirmations au-dessus des autres applications, active « Superposition » ci-dessous. Sans cette autorisation, JARVIS utilise uniquement la notification (si elle est autorisée).", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(vertical = 4.dp))
                 StatusRow3("Accessibilité", app.phone.accessibilityEnabled(), app.phone.accessibilityInSettings())
                 Spacer(Modifier.height(8.dp))
                 HudButton("Autoriser toutes les permissions Android", filled = true) {
@@ -865,9 +957,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 if (!screeningRole) Text("Le rôle Android d'identification des appels n'est pas disponible sur cette version.", color = HudDim, fontSize = 11.sp)
                 if (screeningOn) {
                     StatusRow("Bandeau d'identification au-dessus de l'appel", overlayCallerId)
-                    if (!overlayCallerId) HudButton("Autoriser l'affichage du nom pendant l'appel") {
-                        ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + ctx.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                    }
+                    if (!overlayCallerId) Text("Autorisation commune : Réglages JARVIS → Général → Autorisations → Superposition.", color = HudDim, fontSize = 11.sp)
                 }
                 Spacer(Modifier.height(10.dp))
                 var smsOk by remember { mutableStateOf(fr.dd.jarvis.device.Telephony.smsGranted(ctx) && fr.dd.jarvis.device.Telephony.callGranted(ctx)) }
@@ -1738,6 +1828,15 @@ private fun ServeurPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvi
         HudTextField(store.sshHostDistant.value, { store.sshHostDistant.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Adresse distante du serveur (IP publique ou nom DDNS, optionnel)")
         Spacer(Modifier.height(6.dp))
         HudTextField(store.sshPortDistant.value, { store.sshPortDistant.set(it.filter { c -> c.isDigit() }) }, Modifier.fillMaxWidth(), label = "Port distant (redirigé par la box, défaut = port SSH)")
+        Spacer(Modifier.height(8.dp))
+        Text("Plex — serveur multimédia Debian", color = HudText, fontSize = 13.sp)
+        Text("Jarvis utilise le tunnel SSH existant vers le port Plex 32400 : aucun port Plex supplémentaire à ouvrir sur la Freebox. Le jeton est conservé dans le stockage chiffré Android. Pour piloter une TV, son application Plex doit être ouverte, connectée au compte et autoriser le contrôle à distance ; elle doit apparaître dans la liste des lecteurs Plex.", color = HudDim, fontSize = 11.sp)
+        if (store.plexToken.available) {
+            HudTextField(store.plexToken.value, { runCatching { store.plexToken.set(it.trim()) }.onFailure { e -> android.widget.Toast.makeText(app, e.message ?: "Stockage sécurisé indisponible", android.widget.Toast.LENGTH_LONG).show() } },
+                Modifier.fillMaxWidth(), label = "Jeton Plex (X-Plex-Token)", password = true)
+        } else {
+            Text("⚠️ Stockage sécurisé indisponible : le jeton Plex ne peut pas être enregistré sur cet appareil.", color = HudDim, fontSize = 11.sp)
+        }
         Spacer(Modifier.height(6.dp))
         HudTextField(store.ghToken.value, { store.ghToken.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Jeton GitHub (optionnel : dépôts privés, plus de requêtes)", password = true)
         Spacer(Modifier.height(10.dp))
@@ -1794,7 +1893,7 @@ private fun DiscordPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvi
     var busy by remember { mutableStateOf(false) }
     HudPanel(Modifier.fillMaxWidth(), title = "Discord — bot (rôles et permissions de salons)") {
         Text(
-            "Permet à JARVIS de créer et modifier des rôles (couleur, permissions), de les attribuer, et de modifier l'accès des salons. Crée un bot sur discord.com/developers/applications, copie son jeton, active les « Server Members Intent », et invite-le sur ton serveur avec les permissions « Gérer les rôles » et « Gérer les salons ». Place toujours son rôle au-dessus, dans la hiérarchie, de tous les rôles qu'il doit gérer.",
+            "Permet à JARVIS de lire l'historique et les nouveaux messages, créer/modifier des rôles, attribuer un rôle et régler les permissions par salon. Dans discord.com/developers/applications, active « Server Members Intent » et « Message Content Intent » ; donne au bot « Voir les salons », « Lire l'historique des messages », et, pour l'administration, « Gérer les rôles » / « Gérer les salons ». Place son rôle au-dessus des rôles qu'il doit gérer. Pour limiter un rôle à un salon, JARVIS peut créer le rôle puis appliquer l'autorisation sur ce salon.",
             color = HudDim, fontSize = 12.sp
         )
         Spacer(Modifier.height(8.dp))
@@ -1875,56 +1974,36 @@ private fun TikTokPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvis
 @Composable
 private fun PollinationsPanel(store: fr.dd.jarvis.data.Store) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    HudPanel(Modifier.fillMaxWidth(), title = "Vidéo IA — fal.ai / Wan 2.2") {
-        Text(
-            "Anime une image de ton coffre avec Wan 2.2. Jarvis envoie l'image directement à fal.ai, suit la file de génération puis télécharge le MP4. Aucun Worker Cloudflare ni serveur personnel n'est nécessaire.",
-            color = HudDim, fontSize = 12.sp
-        )
+    HudPanel(Modifier.fillMaxWidth(), title = "Vidéo IA — fournisseurs") {
+        Text("Clés conservées dans le stockage chiffré Android. Les générations peuvent consommer des crédits ou l'abonnement du fournisseur.", color = HudDim, fontSize = 12.sp)
         Spacer(Modifier.height(8.dp))
-        if (store.falApiKey.available) {
-            HudTextField(
-                store.falApiKey.value,
-                { value -> runCatching { store.falApiKey.set(value.trim()) } },
-                Modifier.fillMaxWidth(),
-                label = "Clé API fal.ai",
-                password = true
-            )
-            Spacer(Modifier.height(8.dp))
-            Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                HudButton("Créer / gérer ma clé API") {
-                    ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://fal.ai/dashboard/keys")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
-                }
-                HudButton("Effacer la clé") { store.falApiKey.clear() }
-            }
-        } else {
-            Text(
-                "⚠️ Le stockage chiffré Android est indisponible sur cet appareil. Jarvis refuse d'enregistrer la clé en clair.",
-                color = HudText, fontSize = 12.sp
-            )
+        Text("Google Flow — UseAPI (service tiers, non affilié à Google)", color = HudText, fontSize = 13.sp)
+        Text("Jeton UseAPI et compte Flow associé nécessaires. Les crédits Flow de ton compte Google sont utilisés.", color = HudDim, fontSize = 11.sp)
+        HudTextField(store.googleFlowApiToken.value, { v -> runCatching { store.googleFlowApiToken.set(v.trim()) } }, Modifier.fillMaxWidth(), label = "Clé API UseAPI", password = true)
+        HudTextField(store.googleFlowAccountEmail.value, { store.googleFlowAccountEmail.set(it.trim()) }, Modifier.fillMaxWidth(), label = "E-mail compte Flow (facultatif)")
+        HudTextField(store.googleFlowModel.value, { store.googleFlowModel.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Modèle Flow", placeholder = "veo-3.1-fast")
+        Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HudButton("Gérer le jeton UseAPI") { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://useapi.net/account")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            HudButton("Effacer Flow") { store.googleFlowApiToken.clear() }
         }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Modèle : Wan 2.2 5B · image vers vidéo · jusqu'à 5 secondes · 720p. La facturation dépend du modèle et des paramètres fal.ai : vérifie ton solde et tes limites avant chaque utilisation.",
-            color = HudDim, fontSize = 11.sp
-        )
-        Text(
-            "Confidentialité : l'image choisie et le prompt sont envoyés à fal.ai pour la génération. La clé est conservée dans le stockage chiffré Android ; une clé utilisée dans une application mobile peut toutefois être extraite d'un appareil compromis.",
-            color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp)
-        )
-        Spacer(Modifier.height(14.dp))
-        Text("Vidéo texte — Hugging Face (fonction TikTok existante)", color = HudText, fontSize = 13.sp)
-        Text(
-            "Ce réglage reste indépendant de l'animation d'image fal.ai.",
-            color = HudDim, fontSize = 11.sp
-        )
-        Spacer(Modifier.height(6.dp))
-        HudTextField(store.huggingFaceToken.value, { store.huggingFaceToken.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Token Hugging Face (vidéo texte)", password = true)
+        Spacer(Modifier.height(12.dp))
+        Text("Dreamina — BytePlus ModelArk (API officielle)", color = HudText, fontSize = 13.sp)
+        Text("Le modèle Seedance doit être activé et disposer de crédits ou d'un forfait compatible.", color = HudDim, fontSize = 11.sp)
+        HudTextField(store.dreaminaApiKey.value, { v -> runCatching { store.dreaminaApiKey.set(v.trim()) } }, Modifier.fillMaxWidth(), label = "Clé API BytePlus", password = true)
+        HudTextField(store.dreaminaModel.value, { store.dreaminaModel.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Modèle Seedance", placeholder = "seedance-1-5-pro-251215")
+        Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HudButton("Gérer la clé ModelArk") { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://console.byteplus.com/ark/region:ap-southeast-1/apiKey")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            HudButton("Effacer Dreamina") { store.dreaminaApiKey.clear() }
+        }
+        Spacer(Modifier.height(12.dp))
+        Text("Hugging Face — service gratuit avec quota limité", color = HudText, fontSize = 13.sp)
+        HudTextField(store.huggingFaceToken.value, { store.huggingFaceToken.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Token Hugging Face", password = true)
         Text("Créer un token Hugging Face", color = HudDim, fontSize = 12.sp, modifier = Modifier.clickable {
             ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://huggingface.co/settings/tokens")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
         })
+        Text("Ordre prévu : Hugging Face gratuit, puis Flow, puis Dreamina. Dreamina peut facturer les générations. fal.ai reste disponible pour l'animation d'image.", color = HudDim, fontSize = 11.sp)
     }
 }
-
 
 @Composable
 private fun ImprimantePanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.JarvisApp) {

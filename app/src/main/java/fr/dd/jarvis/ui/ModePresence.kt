@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -106,7 +105,6 @@ fun ModePresenceVue(heure: String, date: String, infos: String, texte: String, p
 
     Box(
         Modifier.fillMaxSize().background(Color(0xFF020108))
-            .clickable(interactionSource = MutableInteractionSource(), indication = null) { onFermer() }
     ) {
         // Ciel étoilé qui dérive lentement, lueur qui respire derrière le dragon.
         Canvas(Modifier.fillMaxSize()) {
@@ -120,7 +118,7 @@ fun ModePresenceVue(heure: String, date: String, infos: String, texte: String, p
                 drawCircle(Color.White.copy(alpha = a * 0.7f), 1f + (i % 3), Offset(x, y))
             }
         }
-        Column(Modifier.fillMaxSize().systemBarsPadding().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(heure, color = accent, fontSize = 64.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Light)
             Text(date,
                 color = HudDim, fontSize = 15.sp, letterSpacing = 2.sp)
@@ -138,7 +136,8 @@ fun ModePresenceVue(heure: String, date: String, infos: String, texte: String, p
                 fontSize = if (parle) 20.sp else 16.sp, textAlign = TextAlign.Center,
                 maxLines = 4, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth().height(110.dp))
             Spacer(Modifier.weight(1f))
-            Text("Toucher ailleurs pour quitter", color = HudDim.copy(alpha = 0.6f), fontSize = 11.sp)
+            Text("QUITTER LE MODE PRÉSENCE", color = HudDim.copy(alpha = 0.72f), fontSize = 11.sp,
+                modifier = Modifier.clickable(interactionSource = MutableInteractionSource(), indication = null) { onFermer() }.padding(10.dp))
         }
     }
 }
