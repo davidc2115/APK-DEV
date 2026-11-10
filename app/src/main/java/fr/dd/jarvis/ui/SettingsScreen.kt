@@ -1886,56 +1886,36 @@ private fun TikTokPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvis
 @Composable
 private fun PollinationsPanel(store: fr.dd.jarvis.data.Store) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    HudPanel(Modifier.fillMaxWidth(), title = "Vidéo IA — fal.ai / Wan 2.2") {
-        Text(
-            "Anime une image de ton coffre avec Wan 2.2. Jarvis envoie l'image directement à fal.ai, suit la file de génération puis télécharge le MP4. Aucun Worker Cloudflare ni serveur personnel n'est nécessaire.",
-            color = HudDim, fontSize = 12.sp
-        )
+    HudPanel(Modifier.fillMaxWidth(), title = "Vidéo IA — fournisseurs") {
+        Text("Clés conservées dans le stockage chiffré Android. Les générations peuvent consommer des crédits ou l'abonnement du fournisseur.", color = HudDim, fontSize = 12.sp)
         Spacer(Modifier.height(8.dp))
-        if (store.falApiKey.available) {
-            HudTextField(
-                store.falApiKey.value,
-                { value -> runCatching { store.falApiKey.set(value.trim()) } },
-                Modifier.fillMaxWidth(),
-                label = "Clé API fal.ai",
-                password = true
-            )
-            Spacer(Modifier.height(8.dp))
-            Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                HudButton("Créer / gérer ma clé API") {
-                    ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://fal.ai/dashboard/keys")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
-                }
-                HudButton("Effacer la clé") { store.falApiKey.clear() }
-            }
-        } else {
-            Text(
-                "⚠️ Le stockage chiffré Android est indisponible sur cet appareil. Jarvis refuse d'enregistrer la clé en clair.",
-                color = HudText, fontSize = 12.sp
-            )
+        Text("Google Flow — UseAPI (service tiers, non affilié à Google)", color = HudText, fontSize = 13.sp)
+        Text("Jeton UseAPI et compte Flow associé nécessaires. Les crédits Flow de ton compte Google sont utilisés.", color = HudDim, fontSize = 11.sp)
+        HudTextField(store.googleFlowApiToken.value, { v -> runCatching { store.googleFlowApiToken.set(v.trim()) } }, Modifier.fillMaxWidth(), label = "Clé API UseAPI", password = true)
+        HudTextField(store.googleFlowAccountEmail.value, { store.googleFlowAccountEmail.set(it.trim()) }, Modifier.fillMaxWidth(), label = "E-mail compte Flow (facultatif)")
+        HudTextField(store.googleFlowModel.value, { store.googleFlowModel.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Modèle Flow", placeholder = "veo-3.1-fast")
+        Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HudButton("Gérer le jeton UseAPI") { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://useapi.net/account")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            HudButton("Effacer Flow") { store.googleFlowApiToken.clear() }
         }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Modèle : Wan 2.2 5B · image vers vidéo · jusqu'à 5 secondes · 720p. La facturation dépend du modèle et des paramètres fal.ai : vérifie ton solde et tes limites avant chaque utilisation.",
-            color = HudDim, fontSize = 11.sp
-        )
-        Text(
-            "Confidentialité : l'image choisie et le prompt sont envoyés à fal.ai pour la génération. La clé est conservée dans le stockage chiffré Android ; une clé utilisée dans une application mobile peut toutefois être extraite d'un appareil compromis.",
-            color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp)
-        )
-        Spacer(Modifier.height(14.dp))
-        Text("Vidéo texte — Hugging Face (fonction TikTok existante)", color = HudText, fontSize = 13.sp)
-        Text(
-            "Ce réglage reste indépendant de l'animation d'image fal.ai.",
-            color = HudDim, fontSize = 11.sp
-        )
-        Spacer(Modifier.height(6.dp))
-        HudTextField(store.huggingFaceToken.value, { store.huggingFaceToken.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Token Hugging Face (vidéo texte)", password = true)
+        Spacer(Modifier.height(12.dp))
+        Text("Dreamina — BytePlus ModelArk (API officielle)", color = HudText, fontSize = 13.sp)
+        Text("Le modèle Seedance doit être activé et disposer de crédits ou d'un forfait compatible.", color = HudDim, fontSize = 11.sp)
+        HudTextField(store.dreaminaApiKey.value, { v -> runCatching { store.dreaminaApiKey.set(v.trim()) } }, Modifier.fillMaxWidth(), label = "Clé API BytePlus", password = true)
+        HudTextField(store.dreaminaModel.value, { store.dreaminaModel.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Modèle Seedance", placeholder = "seedance-1-5-pro-251215")
+        Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HudButton("Gérer la clé ModelArk") { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://console.byteplus.com/ark/region:ap-southeast-1/apiKey")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            HudButton("Effacer Dreamina") { store.dreaminaApiKey.clear() }
+        }
+        Spacer(Modifier.height(12.dp))
+        Text("Hugging Face — service gratuit avec quota limité", color = HudText, fontSize = 13.sp)
+        HudTextField(store.huggingFaceToken.value, { store.huggingFaceToken.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Token Hugging Face", password = true)
         Text("Créer un token Hugging Face", color = HudDim, fontSize = 12.sp, modifier = Modifier.clickable {
             ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://huggingface.co/settings/tokens")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
         })
+        Text("Ordre prévu : Hugging Face gratuit, puis Flow, puis Dreamina. Dreamina peut facturer les générations. fal.ai reste disponible pour l'animation d'image.", color = HudDim, fontSize = 11.sp)
     }
 }
-
 
 @Composable
 private fun ImprimantePanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.JarvisApp) {
