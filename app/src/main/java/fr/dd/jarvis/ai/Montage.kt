@@ -224,7 +224,7 @@ object Montage {
             coroutineScopeAsync(plans.mapIndexed { i, p ->
                 suspend {
                     sem.withPermit {
-                        fun essai() = runCatching {
+                        suspend fun essai() = runCatching {
                             verifierAnnulation()
                             if (fileBloquee.get()) throw IllegalStateException("annulé : la file fal.ai ne démarre pas")
                             etats[i] = "file"; resume(force = true)
