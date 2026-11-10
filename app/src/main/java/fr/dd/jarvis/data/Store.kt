@@ -66,13 +66,26 @@ class Store(context: Context) {
     init {
         val secure = secretPrefs
         if (secure != null) {
-            listOf("geminiKeys", "groqKeys").forEach { key ->
+            listOf("geminiKeys", "groqKeys", "openaiKeys").forEach { key ->
                 val legacy = prefs.getString(key, null)
                 if (!legacy.isNullOrBlank()) {
                     val current = secure.getString(key, null)
                     val saved = if (current.isNullOrBlank()) secure.edit().putString(key, legacy).commit() else true
                     if (saved) prefs.edit().remove(key).commit()
                 }
+            }
+            // Migration automatique des clés OpenAI déjà collées dans le champ Gemini.
+            // Écriture atomique : on ne retire les clés de Gemini que si leur copie chiffrée réussit.
+            val geminiRaw = secure.getString("geminiKeys", "").orEmpty()
+            val geminiList = geminiRaw.lines().map { it.trim() }.filter { it.isNotEmpty() }
+            val openAiFound = geminiList.filter(KeyRing::estCleOpenAi)
+            if (openAiFound.isNotEmpty()) {
+                val openAiCurrent = secure.getString("openaiKeys", "").orEmpty()
+                    .lines().map { it.trim() }.filter { it.isNotEmpty() }
+                val editor = secure.edit()
+                    .putString("openaiKeys", (openAiCurrent + openAiFound).distinct().joinToString(System.lineSeparator()))
+                    .putString("geminiKeys", geminiList.filterNot(KeyRing::estCleOpenAi).joinToString(System.lineSeparator()))
+                check(editor.commit()) { "Migration sécurisée des clés OpenAI impossible." }
             }
         }
     }
@@ -132,8 +145,10 @@ class Store(context: Context) {
     // ---- Cerveau (Groq) et agents (Gemini)
     val groqModel = SPref("groqModel", "llama-3.3-70b-versatile")
     val geminiModel = SPref("geminiModel", "gemini-3.8-flash")
+    val openaiModel = SPref("openaiModel", "gpt-4.1-mini")
     val groqKeys: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readApiKeyList("groqKeys")) }
     val geminiKeys: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readApiKeyList("geminiKeys")) }
+    val openaiKeys: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readApiKeyList("openaiKeys")) }
 
     // ---- Serveur personnel : SSH + Home Assistant
     val haUrl = SPref("haUrl", "")
@@ -219,7 +234,21 @@ class Store(context: Context) {
         externalProviderIds.filter { externalProviderKey(it).isNotBlank() }
 
     fun addGroqKeys(raw: String) = addApiKeys(groqKeys, "groqKeys", raw)
-    fun addGeminiKeys(raw: String) = addApiKeys(geminiKeys, "geminiKeys", raw)
+    /** Les clés OpenAI reconnues dans le champ Gemini sont automatiquement rangées ici. */
+    fun addGeminiKeys(raw: String) {
+        val parts = raw.split(Regex("[\\s,;]+")).map { it.trim() }.filter { it.length >= 8 }.distinct()
+        val openAi = parts.filter(KeyRing::estCleOpenAi)
+        val google = parts.filterNot(KeyRing::estCleOpenAi)
+        if (google.isNotEmpty()) addApiKeys(geminiKeys, "geminiKeys", google.joinToString("\n"))
+        if (openAi.isNotEmpty()) addApiKeys(openaiKeys, "openaiKeys", openAi.joinToString("\n"))
+    }
+    fun addOpenAiKeys(raw: String) = addApiKeys(openaiKeys, "openaiKeys", raw)
+    fun removeOpenAiKey(i: Int) {
+        if (i !in openaiKeys.indices) return
+        val updated = openaiKeys.toList().toMutableList().also { it.removeAt(i) }
+        writeApiKeyList("openaiKeys", updated)
+        openaiKeys.removeAt(i)
+    }
     fun removeGroqKey(i: Int) {
         if (i !in groqKeys.indices) return
         val updated = groqKeys.toList().toMutableList().also { it.removeAt(i) }
