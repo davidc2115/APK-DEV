@@ -646,27 +646,33 @@ class ToolBox(
             val duree = a.optString("duree").replace(',', '.').filter { it.isDigit() || it == '.' }.toDoubleOrNull() ?: 5.0
             val nomImage = a.optString("image").trim()
             val format = a.optString("format").ifBlank { "vertical" }
-            // Plus de 5 s : jamais refusé — montage de plusieurs plans (scénario + prompts par l'agent Gemini).
             if (duree > 5.5 && nomImage.isBlank()) return ToolResult(fr.dd.jarvis.ai.Montage.lancer(app, fr.dd.jarvis.ai.Montage.Demande(
                 sujet = brief, dureeS = duree.toInt(), format = format,
                 tiktok = Regex("tiktok|reel|short", RegexOption.IGNORE_CASE).containsMatchIn(brief))), direct = true)
-            if (nomImage.isBlank() && !fr.dd.jarvis.ai.ImageToVideoGen.disponible(app))
-                return ToolResult("❌ Aucune clé fal.ai : ajoute-la dans Réglages › IA › Images & vidéo pour générer une vidéo.")
+            if (nomImage.isBlank() && !fr.dd.jarvis.ai.ImageToVideoGen.disponible(app) && !fr.dd.jarvis.ai.VideoProviderGen.disponible(app))
+                return ToolResult("❌ Aucun fournisseur vidéo configuré. Ajoute un token Hugging Face, une clé UseAPI Flow, une clé BytePlus Dreamina ou une clé fal.ai dans Réglages › IA › Images & vidéo.")
             if (nomImage.isNotBlank() && !fr.dd.jarvis.ai.ImageToVideoGen.disponible(app))
-                return ToolResult("❌ L'animation d'image nécessite une clé fal.ai configurée dans Réglages › IA › Images & vidéo.")
+                return ToolResult("❌ L'animation d'image nécessite actuellement une clé fal.ai configurée dans Réglages › IA › Images & vidéo.")
             val prompt = fr.dd.jarvis.ai.VideoGen.preparerPrompt(app, brief, duree, format, nomImage.isNotBlank())
             val (video, loc) = when {
                 nomImage.isNotBlank() -> {
                     val image = fr.dd.jarvis.ai.ImageGen.fichier(app, nomImage)
-                        ?: return ToolResult("❌ Image introuvable : $nomImage. Utilise fichiers_generes pour retrouver son nom exact.")
+                        ?: return ToolResult("❌ Image introuvable : " + nomImage + ". Utilise fichiers_generes pour retrouver son nom exact.")
                     fr.dd.jarvis.ai.ImageToVideoGen.generate(app, image, prompt, duree)
                 }
                 fr.dd.jarvis.ai.ImageToVideoGen.disponible(app) -> fr.dd.jarvis.ai.ImageToVideoGen.texteVersVideo(app, prompt, duree, format)
-                else -> return ToolResult("❌ Aucune clé fal.ai : ajoute-la dans Réglages › IA › Images & vidéo pour générer une vidéo. (Sans clé, tiktok_video utilise le service gratuit Hugging Face, plus lent et limité.)")
+                else -> {
+                    val bytes = fr.dd.jarvis.ai.VideoProviderGen.genererClipSecours(app, prompt, duree.toInt().coerceIn(4, 8),
+                        !format.trim().lowercase().let { it.startsWith("hori") || it == "16:9" || it.startsWith("pays") })
+                        ?: return ToolResult("❌ Aucun fournisseur texte-vers-vidéo disponible.")
+                    val file = java.io.File(fr.dd.jarvis.ai.VideoGen.dossier(app), "video_" + System.currentTimeMillis() + ".mp4").apply { writeBytes(bytes) }
+                    val location = runCatching { app.obsidian.saveBytes("JARVIS/Vidéos IA", file.name, bytes, "video/mp4") }.getOrDefault("")
+                    file to location
+                }
             }
-            ToolResult("🎬 Vidéo créée après analyse et préparation du prompt (fal.ai) : ${video.name}\n\n[▶ Lire la vidéo](jarvis-video-ia:${video.name})\n\n📁 Enregistrée dans Jarvis › Vidéos IA" + (if (loc.isNotBlank()) "\n🗂️ Obsidian : $loc" else ""), direct = true)
+            ToolResult("🎬 Vidéo créée après analyse et préparation du prompt : " + video.name + "\n\n[▶ Lire la vidéo](jarvis-video-ia:" + video.name + ")\n\n📁 Enregistrée dans Jarvis › Vidéos IA" + (if (loc.isNotBlank()) "\n🗂️ Obsidian : " + loc else ""), direct = true)
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
-            ToolResult("❌ Vidéo impossible : ${e.message}")
+            ToolResult("❌ Vidéo impossible : " + e.message)
         }
         "animer_image" -> try {
             val imageName = a.optString("image")
