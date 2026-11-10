@@ -295,6 +295,7 @@ p '🧠 Mémoire partagée Jarvis ↔ Hermès installée.'
         if (s.mcpJeton.value.isBlank()) s.mcpJeton.set(UUID.randomUUID().toString().replace("-", ""))
         val geminiKeys = if (s.apiKeysSecureAvailable) s.geminiKeys.toList().filterNot(fr.dd.jarvis.ai.KeyRing::estCleOpenAi) else emptyList()
         val groqKeys = if (s.apiKeysSecureAvailable) s.groqKeys.toList() else emptyList()
+        val openaiKeys = if (s.apiKeysSecureAvailable) s.openaiKeys.toList() else emptyList()
         val base = scriptConfiguration(
             cleApi = s.hermesCle.value, jeton = s.mcpJeton.value,
             gemini = geminiKeys.firstOrNull().orEmpty(), groq = groqKeys.firstOrNull().orEmpty(),
@@ -586,22 +587,25 @@ p "✅ Hermès installé (${'$'}{MODE})."
             return message
         }
         message = "✅ Pont local de progression actif sur 127.0.0.1:${PontMcp.PORT}. Préparation du script Hermès…"
-        val gemini = s.geminiKeys.toList().filterNot(fr.dd.jarvis.ai.KeyRing::estCleOpenAi).filterNot(fr.dd.jarvis.ai.KeyRing::estCleOpenAi)
+        val gemini = s.geminiKeys.toList().filterNot(fr.dd.jarvis.ai.KeyRing::estCleOpenAi)
         val groq = s.groqKeys.toList()
+        val openai = s.openaiKeys.toList()
         val cloudflare = s.cfAccounts.toList().mapNotNull { raw ->
             val id = raw.substringBefore(':').trim()
             val key = raw.substringAfter(':', "").trim()
             if (Regex("[0-9a-fA-F]{32}").matches(id) && key.isNotBlank()) id to key else null
         }
         val external = listOf(
+            Triple("openai", "JARVIS_OPENAI_API_KEY", "https://api.openai.com/v1"),
             Triple("zai", "JARVIS_ZAI_API_KEY", "https://api.z.ai/api/paas/v4"),
             Triple("openrouter", "JARVIS_OPENROUTER_API_KEY", "https://openrouter.ai/api/v1"),
             Triple("nvidia", "JARVIS_NVIDIA_API_KEY", "https://integrate.api.nvidia.com/v1"),
             Triple("mistral", "JARVIS_MISTRAL_API_KEY", "https://api.mistral.ai/v1"),
             Triple("huggingface", "JARVIS_HF_TOKEN", "https://router.huggingface.co/v1")
         ).mapNotNull { (id, env, defaultUrl) ->
-            val key = s.externalProviderKey(id)
-            if (key.isBlank()) null else listOf(id, env, s.externalProviderEndpoint(id).ifBlank { defaultUrl }.trimEnd('/'), s.externalProviderModel(id), key)
+            val key = if (id == "openai") openai.firstOrNull().orEmpty() else s.externalProviderKey(id)
+            val model = if (id == "openai") s.openaiModel.value else s.externalProviderModel(id)
+            if (key.isBlank()) null else listOf(id, env, if (id == "openai") defaultUrl else s.externalProviderEndpoint(id).ifBlank { defaultUrl }.trimEnd('/'), model, key)
         }
         message = "⏳ Clés et fournisseurs IA récupérés. Construction des règles multi-agents…"
         val model = s.groqModel.value.ifBlank { "llama-3.3-70b-versatile" }
@@ -624,7 +628,7 @@ p "✅ Hermès installé (${'$'}{MODE})."
             appendLine("setenv API_SERVER_KEY " + q(s.hermesCle.value))
             appendLine("removeenvfamily GROQ_API_KEY")
             appendLine("removeenvfamily JARVIS_CF_KEY")
-            listOf("JARVIS_ZAI_API_KEY", "JARVIS_OPENROUTER_API_KEY", "JARVIS_NVIDIA_API_KEY", "JARVIS_MISTRAL_API_KEY", "JARVIS_HF_TOKEN").forEach { appendLine("removeenvfamily " + it) }
+            listOf("JARVIS_OPENAI_API_KEY", "JARVIS_ZAI_API_KEY", "JARVIS_OPENROUTER_API_KEY", "JARVIS_NVIDIA_API_KEY", "JARVIS_MISTRAL_API_KEY", "JARVIS_HF_TOKEN").forEach { appendLine("removeenvfamily " + it) }
             gemini.forEachIndexed { index, key -> appendLine("setenv " + (if (index == 0) "GOOGLE_API_KEY" else "GOOGLE_API_KEY_" + (index + 1)) + " " + q(key)) }
             // Clés Groq : restent chiffrées dans Jarvis ; Hermès passe par le relais local avec le jeton du pont.
             if (groq.isNotEmpty()) appendLine("setenv JARVIS_GROQ_RELAIS " + q(s.mcpJeton.value))
@@ -633,7 +637,7 @@ p "✅ Hermès installé (${'$'}{MODE})."
             // Fuseau du téléphone : les automatismes (cronjob) d'Hermès se déclenchent à l'heure locale, pas en UTC.
             appendLine("setenv HERMES_TIMEZONE " + q(java.util.TimeZone.getDefault().id))
             cloudflare.forEachIndexed { index, pair -> appendLine("setenv JARVIS_CF_KEY_" + (index + 1) + " " + q(pair.second)) }
-            listOf("ZAI", "OPENROUTER", "NVIDIA", "MISTRAL", "HF").forEach { appendLine("setenv JARVIS_HAS_" + it + " 0") }
+            listOf("OPENAI", "ZAI", "OPENROUTER", "NVIDIA", "MISTRAL", "HF").forEach { appendLine("setenv JARVIS_HAS_" + it + " 0") }
             external.forEach { entry ->
                 val id = entry[0].uppercase()
                 appendLine("setenv " + entry[1] + " " + q(entry[4]))
@@ -794,6 +798,7 @@ for provider_name, provider_config in providers.items():
         add_route(f"jarvis-provider-{safe_name}", f"Endpoint personnalisé Hermes : {provider_name}", f"custom:{provider_name}", str(provider_model))
 # Fournisseurs API ajoutés depuis Jarvis : les secrets restent dans ~/.hermes/.env.
 external_specs = [
+    ("openai", "JARVIS_OPENAI_API_KEY", "https://api.openai.com/v1"),
     ("zai", "JARVIS_ZAI_API_KEY", "https://api.z.ai/api/paas/v4"),
     ("openrouter", "JARVIS_OPENROUTER_API_KEY", "https://openrouter.ai/api/v1"),
     ("nvidia", "JARVIS_NVIDIA_API_KEY", "https://integrate.api.nvidia.com/v1"),
@@ -837,6 +842,7 @@ if isinstance(aliases, dict):
 model_map["options"] = options
 if os.environ.get("JARVIS_HAS_GEMINI") == "1": model_map["default"] = "jarvis-gemini"
 elif os.environ.get("JARVIS_HAS_GROQ") == "1": model_map["default"] = "jarvis-groq"
+elif os.environ.get("JARVIS_HAS_OPENAI") == "1": model_map["default"] = "jarvis-openai"
 elif cf_ids: model_map["default"] = "jarvis-cloudflare-1"
 if os.environ.get("JARVIS_ADVANCED_DELEGATION") == "1" and delegation.get("backend", "default") in ("default", "model_map"):
     delegation["backend"] = "model_map"
