@@ -393,6 +393,11 @@ class Store(context: Context) {
     // maintenant un abonnement payant ("Pollen") même pour la vidéo — plus utilisable gratuitement.
     val huggingFaceToken = SPref("huggingFaceToken", "")
     val falApiKey = SecretPref("falApiKey")
+    val googleFlowApiToken = SecretPref("googleFlowApiToken")
+    val dreaminaApiKey = SecretPref("dreaminaApiKey")
+    val googleFlowAccountEmail = SPref("googleFlowAccountEmail", "")
+    val googleFlowModel = SPref("googleFlowModel", "veo-3.1-fast")
+    val dreaminaModel = SPref("dreaminaModel", "seedance-1-5-pro-251215")
     // ---- Worker Cloudflare personnel pour animer une image avec Wan 2.2 (sans token Hugging Face côté Android)
     val imageVideoWorkerUrl = SPref("imageVideoWorkerUrl", "")
     val imageVideoWorkerToken = SPref("imageVideoWorkerToken", "")
