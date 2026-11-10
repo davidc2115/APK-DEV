@@ -83,6 +83,9 @@ class KeyRing(private val keys: () -> List<String>) {
     }
 
     companion object {
+        /** Clé OpenAI / compatible OpenAI : ne doit jamais être envoyée à Google Gemini. */
+        fun estCleOpenAi(key: String): Boolean = key.trim().startsWith("sk-", ignoreCase = true)
+
         private val ATTENTE = Regex("(?:try again|retry) in ((?:\\d+h)?(?:\\d+m(?!s))?(?:\\d+(?:\\.\\d+)?s)?(?:\\d+ms)?)", RegexOption.IGNORE_CASE)
         private val DELAI_JSON = Regex("\"retryDelay\"\\s*:\\s*\"(\\d+(?:\\.\\d+)?)s\"")
         private val JOUR = Regex("per ?day|PerDay|\\(TPD\\)|\\(RPD\\)|daily", RegexOption.IGNORE_CASE)
@@ -100,6 +103,7 @@ class KeyRing(private val keys: () -> List<String>) {
         /** Pause d'une clé après une erreur (testable) : ce que demande le fournisseur, bornée entre 5 s et 24 h. */
         internal fun pause(code: Int, message: String, maintenant: Long = System.currentTimeMillis()): Long? {
             if (code == 401 || code == 403) return 10 * 60_000L
+            if (code == 400 && Regex("api.?key.*(not valid|invalid)|invalid.*api.?key|API_KEY_INVALID", RegexOption.IGNORE_CASE).containsMatchIn(message)) return 6 * 60 * 60_000L
             if (code >= 500) return 15_000L
             if (code != 429) return null
             val demande = ATTENTE.find(message)?.groupValues?.get(1)?.let { duree(it) }?.takeIf { it > 0 }
@@ -141,7 +145,7 @@ class KeyRing(private val keys: () -> List<String>) {
             } catch (e: ApiException) {
                 last = e
                 if (e.code == 429) quotas.addLast(System.currentTimeMillis())
-                if (e.code == 401 || e.code == 403) refusees[key] = System.currentTimeMillis()
+                if (e.code == 401 || e.code == 403 || (e.code == 400 && Regex("api.?key.*(not valid|invalid)|invalid.*api.?key|API_KEY_INVALID", RegexOption.IGNORE_CASE).containsMatchIn(e.message.orEmpty()))) refusees[key] = System.currentTimeMillis()
                 val p = pause(e.code, e.message.orEmpty()) ?: throw e
                 cooldown[key] = System.currentTimeMillis() + p
             }
