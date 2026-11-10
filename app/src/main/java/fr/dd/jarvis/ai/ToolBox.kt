@@ -649,8 +649,9 @@ class ToolBox(
             if (duree > 5.5 && nomImage.isBlank()) return ToolResult(fr.dd.jarvis.ai.Montage.lancer(app, fr.dd.jarvis.ai.Montage.Demande(
                 sujet = brief, dureeS = duree.toInt(), format = format,
                 tiktok = Regex("tiktok|reel|short", RegexOption.IGNORE_CASE).containsMatchIn(brief))), direct = true)
-            if (nomImage.isBlank() && !fr.dd.jarvis.ai.ImageToVideoGen.disponible(app) && !fr.dd.jarvis.ai.VideoProviderGen.disponible(app))
-                return ToolResult("❌ Aucun fournisseur vidéo configuré. Ajoute un token Hugging Face, une clé UseAPI Flow, une clé BytePlus Dreamina ou une clé fal.ai dans Réglages › IA › Images & vidéo.")
+            if (nomImage.isBlank() && !fr.dd.jarvis.ai.ImageToVideoGen.disponible(app) &&
+                app.store.huggingFaceToken.value.isBlank() && !fr.dd.jarvis.ai.VideoProviderGen.disponible(app))
+                return ToolResult("❌ Aucun fournisseur vidéo configuré. Ajoute un token Hugging Face, une clé UseAPI Flow ou une clé BytePlus Dreamina dans Réglages › IA › Images & vidéo.")
             if (nomImage.isNotBlank() && !fr.dd.jarvis.ai.ImageToVideoGen.disponible(app))
                 return ToolResult("❌ L'animation d'image nécessite actuellement une clé fal.ai configurée dans Réglages › IA › Images & vidéo.")
             val prompt = fr.dd.jarvis.ai.VideoGen.preparerPrompt(app, brief, duree, format, nomImage.isNotBlank())
@@ -662,9 +663,9 @@ class ToolBox(
                 }
                 fr.dd.jarvis.ai.ImageToVideoGen.disponible(app) -> fr.dd.jarvis.ai.ImageToVideoGen.texteVersVideo(app, prompt, duree, format)
                 else -> {
-                    val bytes = fr.dd.jarvis.ai.VideoProviderGen.genererClipSecours(app, prompt, duree.toInt().coerceIn(4, 8),
-                        !format.trim().lowercase().let { it.startsWith("hori") || it == "16:9" || it.startsWith("pays") })
-                        ?: return ToolResult("❌ Aucun fournisseur texte-vers-vidéo disponible.")
+                    val vertical = !format.trim().lowercase().let { it.startsWith("hori") || it == "16:9" || it.startsWith("pays") }
+                    val bytes = try { fr.dd.jarvis.ai.VideoGen.genereClip(app, prompt, duree.toInt().coerceIn(2, 5), vertical) }
+                    catch (hf: Exception) { fr.dd.jarvis.ai.VideoProviderGen.genererClipSecours(app, prompt, duree.toInt().coerceIn(4, 8), vertical) ?: throw hf }
                     val file = java.io.File(fr.dd.jarvis.ai.VideoGen.dossier(app), "video_" + System.currentTimeMillis() + ".mp4").apply { writeBytes(bytes) }
                     val location = runCatching { app.obsidian.saveBytes("JARVIS/Vidéos IA", file.name, bytes, "video/mp4") }.getOrDefault("")
                     file to location
