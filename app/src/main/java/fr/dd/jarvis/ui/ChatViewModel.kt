@@ -92,7 +92,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun answerConfirm(ok: Boolean) {
-        fr.dd.jarvis.service.ConfirmationNotification.annuler(application)
+        fr.dd.jarvis.service.ConfirmationNotification.annuler(app)
         confirmDeferred?.complete(ok)
     }
 
