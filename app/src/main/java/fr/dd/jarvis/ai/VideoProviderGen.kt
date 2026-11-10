@@ -1,5 +1,6 @@
 package fr.dd.jarvis.ai
 
+import android.util.Base64
 import fr.dd.jarvis.JarvisApp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -10,34 +11,107 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
-/** Génération texte-vers-vidéo : Google Flow via UseAPI, puis Dreamina via BytePlus ModelArk. */
+/** Génération vidéo : Gemini Omni Flash (clé Gemini existante), puis Flow/UseAPI et Dreamina/BytePlus. */
 object VideoProviderGen {
     private val http = OkHttpClient.Builder().connectTimeout(25, TimeUnit.SECONDS).readTimeout(45, TimeUnit.SECONDS).callTimeout(55, TimeUnit.SECONDS).build()
+    private val geminiHttp = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(7, TimeUnit.MINUTES)
+        .callTimeout(8, TimeUnit.MINUTES)
+        .build()
     private val jsonType = "application/json; charset=utf-8".toMediaType()
 
     fun flowDisponible(app: JarvisApp) = app.store.googleFlowApiToken.value.isNotBlank()
     fun dreaminaDisponible(app: JarvisApp) = app.store.dreaminaApiKey.value.isNotBlank()
-    fun disponible(app: JarvisApp) = flowDisponible(app) || dreaminaDisponible(app)
+    fun geminiDisponible(app: JarvisApp) = app.store.geminiKeys.any { !KeyRing.estCleOpenAi(it) }
+    fun disponible(app: JarvisApp) = geminiDisponible(app) || flowDisponible(app) || dreaminaDisponible(app)
 
+    /** Gemini Omni est essayé en premier avec les clés Google déjà enregistrées dans Réglages. */
     suspend fun genererClipSecours(app: JarvisApp, prompt: String, duration: Int, vertical: Boolean): ByteArray? {
-        var flowError: Throwable? = null
+        val erreurs = mutableListOf<String>()
+        if (geminiDisponible(app)) {
+            try { return genererGemini(app, prompt, duration, vertical) }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { erreurs += "Gemini Omni : " + (e.message ?: e.javaClass.simpleName) }
+        }
         if (flowDisponible(app)) {
             try { return genererFlow(app, prompt, duration, vertical) }
             catch (e: kotlinx.coroutines.CancellationException) { throw e }
-            catch (e: Exception) { flowError = e }
+            catch (e: Exception) { erreurs += "Flow : " + (e.message ?: e.javaClass.simpleName) }
         }
         if (dreaminaDisponible(app)) {
             try { return genererDreamina(app, prompt, duration, vertical) }
             catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { erreurs += "Dreamina : " + (e.message ?: e.javaClass.simpleName) }
+        }
+        if (erreurs.isNotEmpty()) throw IllegalStateException(erreurs.joinToString(". "))
+        return null
+    }
+
+    /**
+     * Gemini Omni Flash via l'API Interactions (sortie vidéo base64).
+     * Chaque clé Gemini est essayée au plus une fois ; les clés OpenAI sont explicitement exclues.
+     */
+    private suspend fun genererGemini(app: JarvisApp, prompt: String, duration: Int, vertical: Boolean): ByteArray = withContext(Dispatchers.IO) {
+        val keys = app.store.geminiKeys.toList().filterNot(KeyRing::estCleOpenAi)
+        if (keys.isEmpty()) throw IllegalStateException("Aucune clé API Gemini disponible.")
+        val input = prompt.trim() + "\nGenerate one finished video clip, approximately ${duration.coerceIn(3, 10)} seconds long."
+        val payload = JSONObject()
+            .put("model", "gemini-omni-1.1-flash")
+            .put("input", input)
+            .put("response_format", JSONObject()
+                .put("type", "video")
+                .put("aspect_ratio", if (vertical) "9:16" else "16:9")
+                .put("resolution", "720p"))
+        val failures = mutableListOf<String>()
+        for ((index, key) in keys.withIndex()) {
+            try {
+                val request = Request.Builder()
+                    .url("https://generativelanguage.googleapis.com/v1beta/interactions")
+                    .header("x-goog-api-key", key)
+                    .header("Accept", "application/json")
+                    .post(payload.toString().toRequestBody(jsonType))
+                    .build()
+                val result = geminiHttp.newCall(request).execute().use { response ->
+                    val raw = response.body?.string().orEmpty()
+                    if (!response.isSuccessful) {
+                        val detail = runCatching {
+                            val j = JSONObject(raw)
+                            j.optJSONObject("error")?.optString("message")?.ifBlank { null } ?: raw
+                        }.getOrDefault(raw)
+                        throw IllegalStateException("HTTP ${response.code} : ${detail.take(240)}")
+                    }
+                    JSONObject(raw)
+                }
+                val status = result.optString("status").lowercase()
+                if (status.isNotBlank() && status !in setOf("completed", "succeeded", "success")) {
+                    throw IllegalStateException(result.optString("error").ifBlank { "statut API : $status" })
+                }
+                val steps = result.optJSONArray("steps") ?: JSONArray()
+                for (i in steps.length() - 1 downTo 0) {
+                    val contents = steps.optJSONObject(i)?.optJSONArray("content") ?: continue
+                    for (j in 0 until contents.length()) {
+                        val part = contents.optJSONObject(j) ?: continue
+                        if (part.optString("type") != "video") continue
+                        val data = part.optString("data")
+                        if (data.isNotBlank()) {
+                            val bytes = Base64.decode(data, Base64.DEFAULT)
+                            if (bytes.isNotEmpty()) return@withContext bytes
+                        }
+                        val uri = part.optString("uri")
+                        if (uri.startsWith("https://")) return@withContext download(uri)
+                    }
+                }
+                throw IllegalStateException("Gemini a répondu sans contenu vidéo exploitable.")
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (e: Exception) {
-                val previous = flowError?.message?.let { "Flow : " + it + ". " }.orEmpty()
-                throw IllegalStateException(previous + "Dreamina : " + e.message, e)
+                failures += "clé ${index + 1}: ${e.message ?: e.javaClass.simpleName}"
             }
         }
-        if (flowError != null) throw IllegalStateException("Google Flow : " + flowError.message, flowError)
-        return null
+        throw IllegalStateException("Toutes les clés Gemini ont échoué : " + failures.joinToString(" ; "))
     }
 
     private suspend fun genererFlow(app: JarvisApp, prompt: String, duration: Int, vertical: Boolean): ByteArray = withContext(Dispatchers.IO) {
