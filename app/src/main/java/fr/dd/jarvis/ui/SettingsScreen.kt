@@ -318,7 +318,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
         VoletReglages("ia", "cles", "Clés Gemini", "gemini cles api modele agents rotation") {
             KeyPanel(
                 title = "Agents — clés Gemini (rotation automatique)",
-                hint = "Utilisées pour le planning, les mails et les contacts. Sans clé Gemini, les agents utilisent Groq.",
+                hint = "Utilisées pour le planning, les mails et les contacts. Si tu colles ici une clé OpenAI (sk-…), Jarvis la rangera automatiquement dans la rubrique OpenAI.",
                 keys = store.geminiKeys,
                 onAdd = {
                     if (store.apiKeysSecureAvailable) {
