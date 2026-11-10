@@ -66,6 +66,14 @@ object Hermes {
     // Sections thématiques du prompt : envoyées seulement quand la demande (ou les derniers messages) en parle — moins de
     // jetons, sans perte de précision (chaque règle reste là quand son sujet est abordé).
     private val R_ROUTINES = Regex("journ[ée]e|demain|travail|chantier|je rentre|routine|briefing|t[âa]ches?|[àa] faire|programme", RegexOption.IGNORE_CASE)
+    private val R_HORLOGE = Regex("alarme|réveil|reveil|minuteur|horloge|sonnerie", RegexOption.IGNORE_CASE)
+    private val S_HORLOGE = """
+HORLOGE / RÉVEILS — ROUTAGE PRIORITAIRE :
+- Pour toute demande de créer, modifier, déplacer ou supprimer un réveil/une alarme, utilise exclusivement les outils Horloge JARVIS adaptés : mcp_jarvis_alarmes_liste, mcp_jarvis_alarme_modifier, mcp_jarvis_alarme_creer ou mcp_jarvis_alarme_supprimer selon l'action. N'appelle jamais societe_liste, client_fiche, un outil Société, ni une recherche générique MCP pour une demande d'alarme.
+- Une demande de MODIFICATION d'un réveil existant ne signifie jamais en créer un nouveau. Commence par identifier le réveil concerné. Préserve sa répétition (quotidienne, jours de semaine, etc.), son libellé et ses autres paramètres sauf demande explicite.
+- Les alarmes internes JARVIS et celles de l'application Horloge Xiaomi sont deux systèmes distincts. Ne prétends pas que la liste interne JARVIS représente les réveils Xiaomi. Si l'outil dédié ne permet pas de modifier l'alarme native, utilise phone_action pour ouvrir/lire l'interface Horloge, sélectionner précisément le réveil existant, modifier uniquement l'heure et vérifier visuellement que l'heure et la répétition sont correctes.
+- Si l'interface ne permet pas de l'identifier sans ambiguïté, si l'accessibilité est inactive ou si la modification ne peut pas être vérifiée, n'effectue aucune création/suppression de remplacement ; explique exactement le blocage et demande l'intervention nécessaire.
+""".trim()
     private val R_SOCIETE = Regex("clients?|installations?|interventions?|gps|coordonn|chantiers?|devis|factur|soci[ée]t[ée]|fiche", RegexOption.IGNORE_CASE)
     private val R_DOCUMENTS = Regex("documents?|pdf|fichiers?|pi[èe]ces? jointes?|docx|xlsx|pptx|odt|ods|kml|gpx|zip|import|biblioth|convert|excel|word|tableur", RegexOption.IGNORE_CASE)
     private val R_DISCORD = Regex("discord", RegexOption.IGNORE_CASE)
@@ -241,7 +249,7 @@ Tu travailles en équipe :
 Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume-les au lieu de les recopier en entier.
 """.trim()
         val notes = if (derniere.isBlank()) "" else runCatching { fr.dd.jarvis.device.NotesPertinentes.pour(app, derniere) }.getOrDefault("")
-        return socle + si(R_ROUTINES, S_ROUTINES) + si(R_SOCIETE, S_SOCIETE) + si(R_DOCUMENTS, S_DOCUMENTS) + si(R_DISCORD, S_DISCORD) +
+        return socle + si(R_HORLOGE, S_HORLOGE) + si(R_ROUTINES, S_ROUTINES) + si(R_SOCIETE, S_SOCIETE) + si(R_DOCUMENTS, S_DOCUMENTS) + si(R_DISCORD, S_DISCORD) +
             si(R_EXTENSIONS, S_EXTENSIONS) + si(R_VIDEO, S_VIDEO) + si(R_APPRENTISSAGE, S_APPRENTISSAGE) + si(R_CREATION, S_CREATION) +
             app.memo.pourPrompt() + notes +
             (if (app.store.modeAdulte.value) """
