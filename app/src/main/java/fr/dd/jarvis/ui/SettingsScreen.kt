@@ -107,6 +107,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
         },
         VoletReglages("general", "batterie", "Batterie & vitesse", "batterie economie energie performance vitesse rapide lent animations hermes analyse gemini") {
             PerformancePanel(app)
+            PhonePowerModePanel(app)
         },
         VoletReglages("general", "batterie", "Fonctionnement en arrière-plan", "arriere plan xiaomi hyperos demarrage automatique optimisation batterie restriction") {
             HudPanel(Modifier.fillMaxWidth(), title = "Fonctionnement en arrière-plan (écran éteint, appli fermée)") {
