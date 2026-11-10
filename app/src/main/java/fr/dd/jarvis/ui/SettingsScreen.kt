@@ -163,8 +163,9 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 if (android.os.Build.VERSION.SDK_INT >= 36) StatusRow("Accès au réseau local (Android 16+)", localNetworkOk)
                 StatusRow("Accès aux notifications (lire / résumer)", notifOn)
                 StatusRow("Batterie sans restriction (arrière-plan)", batt)
-                StatusRow("Affichage par-dessus les autres applis (lancer des applis)", overlay)
+                StatusRow("Superposition — confirmations sur les autres applis", overlay)
                 StatusRow("Installer des applis", install)
+                Text(if (overlay) "✅ Les confirmations JARVIS peuvent s'afficher en fenêtre flottante au-dessus de l'application utilisée, avec les boutons Accepter et Refuser." else "Pour afficher les confirmations au-dessus des autres applications, active « Superposition » ci-dessous. Sans cette autorisation, JARVIS utilise uniquement la notification (si elle est autorisée).", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(vertical = 4.dp))
                 StatusRow3("Accessibilité", app.phone.accessibilityEnabled(), app.phone.accessibilityInSettings())
                 Spacer(Modifier.height(8.dp))
                 HudButton("Autoriser toutes les permissions Android", filled = true) {
