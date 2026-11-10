@@ -211,7 +211,7 @@ object VideoGen {
                     append("\n\nPlan ${index + 1} :\n")
                     append(prompt)
                 }
-                append("\n\nAprès génération, télécharge les clips MP4. Jarvis pourra ensuite les assembler dans le montage.")
+                append("\n\nAprès génération, télécharge les clips MP4. Ils ne seront pas importés automatiquement dans Jarvis : tu pourras ensuite me les transmettre pour préparer le montage.")
                 if (echecs.isNotEmpty()) append("\n\nDétail HF :\n" + echecs.joinToString("\n"))
             }
             return@withContext null to secours
@@ -235,7 +235,7 @@ object VideoGen {
                     val plan = listePlans.firstOrNull { detail.contains(it.take(50)) }
                     if (plan != null) append("\n\nPrompt à reprendre :\n").append(plan)
                 }
-                append("\nTélécharge les clips externes en MP4 pour les ajouter au montage.")
+                append("\nTélécharge les clips externes en MP4 ; ils ne sont pas ajoutés automatiquement au montage.")
             }
         }
         fFinal to msg
