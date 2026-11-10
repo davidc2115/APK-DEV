@@ -2,6 +2,7 @@ package fr.dd.jarvis.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -38,9 +39,9 @@ fun PhonePowerModePanel(app: JarvisApp) {
             color = HudDim, fontSize = 12.sp
         )
         Spacer(Modifier.height(6.dp))
-        AgentStatusRow("Économiseur Android", batterySaver, if (batterySaver) "actif" else "inactif")
-        AgentStatusRow("ADB / Shizuku", shellReady, if (shellReady) "prêt" else "non connecté")
-        AgentStatusRow("Accessibilité JARVIS", accessibilityReady, if (accessibilityReady) "connectée" else "non active")
+        PowerStatusRow("Économiseur Android", batterySaver, if (batterySaver) "actif" else "inactif")
+        PowerStatusRow("ADB / Shizuku", shellReady, if (shellReady) "prêt" else "non connecté")
+        PowerStatusRow("Accessibilité JARVIS", accessibilityReady, if (accessibilityReady) "connectée" else "non active")
         Text(
             "État détecté : " + fr.dd.jarvis.device.PhonePowerMode.etat(ctx),
             color = HudText, fontSize = 11.sp, modifier = Modifier.height(22.dp)
@@ -77,5 +78,13 @@ fun PhonePowerModePanel(app: JarvisApp) {
             "Économie est appliquée directement par ADB/Shizuku quand disponible. Équilibré et Performance utilisent le sélecteur HyperOS ; JARVIS peut le choisir automatiquement si l'accessibilité est active et qu'une clé Gemini est configurée. Sinon, l'écran s'ouvre pour une sélection manuelle. Aucun réglage CPU/GPU caché ni root.",
             color = HudDim, fontSize = 11.sp
         )
+    }
+}
+
+@Composable
+private fun PowerStatusRow(label: String, active: Boolean, detail: String) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text((if (active) "🟢 " else "⚪ ") + label, color = HudText, fontSize = 12.sp)
+        Text(detail, color = HudDim, fontSize = 11.sp)
     }
 }
