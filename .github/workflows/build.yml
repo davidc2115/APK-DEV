@@ -2,7 +2,7 @@ name: Build APK
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, feat/jarvis-plex-presence-discord]
   pull_request:
     branches: [main]
   workflow_dispatch:
