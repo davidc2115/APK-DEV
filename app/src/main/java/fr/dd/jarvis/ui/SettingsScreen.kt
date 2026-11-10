@@ -1741,7 +1741,7 @@ private fun ServeurPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvi
         HudTextField(store.sshPortDistant.value, { store.sshPortDistant.set(it.filter { c -> c.isDigit() }) }, Modifier.fillMaxWidth(), label = "Port distant (redirigé par la box, défaut = port SSH)")
         Spacer(Modifier.height(8.dp))
         Text("Plex — serveur multimédia Debian", color = HudText, fontSize = 13.sp)
-        Text("Jarvis utilise le tunnel SSH existant vers le port Plex 32400 : aucun port Plex supplémentaire à ouvrir sur la Freebox. Le jeton est conservé dans le stockage chiffré Android.", color = HudDim, fontSize = 11.sp)
+        Text("Jarvis utilise le tunnel SSH existant vers le port Plex 32400 : aucun port Plex supplémentaire à ouvrir sur la Freebox. Le jeton est conservé dans le stockage chiffré Android. Pour piloter une TV, son application Plex doit être ouverte, connectée au compte et autoriser le contrôle à distance ; elle doit apparaître dans la liste des lecteurs Plex.", color = HudDim, fontSize = 11.sp)
         if (store.plexToken.available) {
             HudTextField(store.plexToken.value, { runCatching { store.plexToken.set(it.trim()) }.onFailure { e -> android.widget.Toast.makeText(app, e.message ?: "Stockage sécurisé indisponible", android.widget.Toast.LENGTH_LONG).show() } },
                 Modifier.fillMaxWidth(), label = "Jeton Plex (X-Plex-Token)", password = true)
