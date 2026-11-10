@@ -43,7 +43,9 @@ object ConfirmationNotification {
     }
 
     fun afficher(context: Context, question: String) {
-        afficherOverlay(context.applicationContext, question)
+        // Un seul canal visible à la fois : la fenêtre flottante est prioritaire.
+        // La notification ne sert que de repli si la superposition n'est pas autorisée ou impossible.
+        if (afficherOverlay(context.applicationContext, question)) return
         if (Build.VERSION.SDK_INT >= 33 &&
             context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
         ) return
@@ -76,10 +78,12 @@ object ConfirmationNotification {
     }
 
     /** Fenêtre de confirmation tactile au-dessus de toute application (accord SYSTEM_ALERT_WINDOW requis). */
-    private fun afficherOverlay(context: Context, question: String) {
-        if (Build.VERSION.SDK_INT < 23 || !Settings.canDrawOverlays(context)) return
+    private fun afficherOverlay(context: Context, question: String): Boolean {
+        if (Build.VERSION.SDK_INT < 23 || !Settings.canDrawOverlays(context)) return false
+        val programme = java.util.concurrent.CountDownLatch(1)
+        val affiche = java.util.concurrent.atomic.AtomicBoolean(false)
         Handler(Looper.getMainLooper()).post {
-            runCatching {
+            try {
                 retirerOverlay()
                 val dm = context.resources.displayMetrics
                 val marge = (16 * dm.density).toInt()
@@ -138,7 +142,18 @@ object ConfirmationNotification {
                 wm.addView(racine, params)
                 overlay = racine
                 overlayManager = wm
+                affiche.set(true)
+            } catch (_: Exception) {
+                affiche.set(false)
+            } finally {
+                programme.countDown()
             }
+        }
+        return try {
+            programme.await(700, java.util.concurrent.TimeUnit.MILLISECONDS) && affiche.get()
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            false
         }
     }
 
