@@ -271,6 +271,10 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             }
             val allowBits = masquePermissions(autoriserBrut)
             val denyBits = masquePermissions(refuserBrut)
+            if ((allowBits and denyBits) != 0L)
+                return ToolResult("Un même droit ne peut pas être autorisé et refusé simultanément dans le même salon.")
+            val resumeAcces = if (autoriserBrut.isNotBlank() || refuserBrut.isNotBlank())
+                "autoriser=$autoriserBrut ; refuser=$refuserBrut" else acces
             // Autoriser/refuser sont des overrides ciblés : les droits non cités restent hérités du serveur.
             // L'administrateur ne peut pas être attribué par un override de salon dans Discord.
             val toutSaufVoir = Discord.Perm.TOUT_SAUF_ADMINISTRATEUR and Discord.Perm.VIEW_CHANNEL.inv()
@@ -300,13 +304,13 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             if (a.optString("tous_les_salons").equals("true", true)) {
                 val arr = Discord.salons(app, gid)
                 val ids = (0 until arr.length()).map { arr.getJSONObject(it) }.filter { it.optInt("type") != 4 } // on exclut les catégories, inutiles ici
-                if (!confirm("Modifier l'accès des ${ids.size} salon(s) du serveur pour $cibleNom ($acces) ?", true)) return ToolResult("Refusé par l'utilisateur.")
+                if (!confirm("Modifier l'accès des ${ids.size} salon(s) du serveur pour $cibleNom ($resumeAcces) ?", true)) return ToolResult("Refusé par l'utilisateur.")
                 var erreurs = 0
                 ids.forEach { c -> runCatching { appliquer(c) }.onFailure { erreurs++ } }
                 ToolResult("✅ Accès mis à jour sur ${ids.size - erreurs}/${ids.size} salon(s) pour $cibleNom." + (if (erreurs > 0) " ($erreurs échec(s), probablement un salon où le bot n'a pas la main)." else ""), direct = true)
             } else {
                 val salon = Discord.trouverSalon(app, gid, a.optString("salon")) ?: return ToolResult("Salon « ${a.optString("salon")} » introuvable. Précise un nom de salon, ou mets tous_les_salons=true pour les appliquer tous d'un coup.")
-                if (!confirm("Modifier l'accès de « ${salon.optString("name")} » pour $cibleNom ($acces) ?", true)) return ToolResult("Refusé par l'utilisateur.")
+                if (!confirm("Modifier l'accès de « ${salon.optString("name")} » pour $cibleNom ($resumeAcces) ?", true)) return ToolResult("Refusé par l'utilisateur.")
                 appliquer(salon)
                 ToolResult("✅ Accès de « ${salon.optString("name")} » mis à jour pour $cibleNom.", direct = true)
             }
