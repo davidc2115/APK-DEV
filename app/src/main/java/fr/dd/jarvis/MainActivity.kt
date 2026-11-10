@@ -99,7 +99,46 @@ class MainActivity : ComponentActivity() {
             setShowWhenLocked(actif)
             setTurnScreenOn(actif)
         }
-        if (actif) window.addFlags(flags) else window.clearFlags(flags)
+        if (actif) {
+            window.addFlags(flags)
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                window.insetsController?.let { controller ->
+                    controller.hide(android.view.WindowInsets.Type.statusBars() or android.view.WindowInsets.Type.navigationBars())
+                    controller.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                window.decorView.systemUiVisibility = (
+                    android.view.View.SYSTEM_UI_FLAG_FULLSCREEN or
+                    android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                    android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                )
+            }
+        } else {
+            window.clearFlags(flags)
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                window.insetsController?.show(android.view.WindowInsets.Type.statusBars() or android.view.WindowInsets.Type.navigationBars())
+            } else {
+                @Suppress("DEPRECATION")
+                window.decorView.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_VISIBLE
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        appliquerModePresenceVerrouillage(
+            (application as JarvisApp).store.presenceModeActif.value &&
+                (application as JarvisApp).store.presenceVerrouillage.value
+        )
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        val store = (application as JarvisApp).store
+        if (hasFocus && store.presenceModeActif.value && store.presenceVerrouillage.value) {
+            appliquerModePresenceVerrouillage(true)
+        }
     }
 
 
@@ -254,7 +293,8 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
     }
     var tab by rememberSaveable { mutableStateOf(0) }
     // Écrans de terrain ouverts par-dessus l'onglet en cours (caméra, compte-rendu d'intervention).
-    var terrain by rememberSaveable { mutableStateOf("") }
+    var terrain by remember { mutableStateOf(if (app.store.presenceModeActif.value) "presence" else "") }
+    LaunchedEffect(terrain) { app.store.presenceModeActif.set(terrain == "presence") }
     LaunchedEffect(terrain, app.store.presenceVerrouillage.value) {
         val afficherVerrouille = terrain == "presence" && app.store.presenceVerrouillage.value
         var base: android.content.Context? = ctx
@@ -350,7 +390,7 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
             }
         }
     }
-    if (terrain == "presence") fr.dd.jarvis.ui.ModePresence(app, statut = vm.status, onParler = { vm.toggleListening() }, onFermer = { terrain = "" })
+    if (terrain == "presence") fr.dd.jarvis.ui.ModePresence(app, statut = vm.status, onParler = { vm.toggleListening() }, onFermer = { app.store.presenceModeActif.set(false); terrain = "" })
     }
 
     crash?.let { text ->
