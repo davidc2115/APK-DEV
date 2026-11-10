@@ -286,6 +286,8 @@ class ToolBox(
                 "jours" to prop("Répétition (optionnel) : « lun mar ven », « semaine », « tous les jours ». Vide = une seule fois.")), listOf("heure")))
         put(tool("alarme_supprimer", "Supprime une alarme de l'Horloge (par heure HH:MM ou par libellé).",
             mapOf("heure" to prop("Heure de l'alarme (optionnel)."), "libelle" to prop("Libellé de l'alarme (optionnel)."))))
+        put(tool("alarme_modifier", "Modifie une alarme de l'Horloge native : programme la nouvelle heure puis demande à l'Horloge de supprimer l'ancienne par heure ou libellé. Le résultat de suppression dépend du support de l'application Horloge.",
+            mapOf("ancienne_heure" to prop("Heure actuelle HH:MM de l'alarme à remplacer."), "ancien_libelle" to prop("Libellé actuel (optionnel, si l'heure n'est pas connue)."), "nouvelle_heure" to prop("Nouvelle heure HH:MM."), "nouveau_libelle" to prop("Nouveau libellé (optionnel)."), "jours" to prop("Répétition de la nouvelle alarme : lun, mar, semaine, tous les jours… (optionnel).")), listOf("nouvelle_heure")))
         put(tool("minuteur_creer", "Lance un minuteur avec compte à rebours en notification, SANS ouvrir aucune application.",
             mapOf("secondes" to prop("Durée totale en secondes (ex. 10 min = 600)."), "libelle" to prop("Nom du minuteur (optionnel).")), listOf("secondes")))
         put(tool("chronometre", "Chronomètre sans ouvrir d'application (notification avec compteur).", mapOf("action" to prop("demarrer (défaut) | arreter | etat"))))
@@ -812,6 +814,20 @@ class ToolBox(
             val interne = fr.dd.jarvis.device.Horloge.supprimerAlarme(app, a.optString("heure"), a.optString("libelle"))
             if (interne.startsWith("Aucune alarme")) app.phone.supprimerAlarme(a.optString("heure"), a.optString("libelle")) else interne
         }, direct = true)
+        "alarme_modifier" -> {
+            val ancienneHeure = a.optString("ancienne_heure").trim()
+            val ancienLibelle = a.optString("ancien_libelle").trim()
+            val nouvelleHeure = a.optString("nouvelle_heure").trim()
+            if (nouvelleHeure.isBlank()) ToolResult("Précise la nouvelle heure.")
+            else if (!confirm("Remplacer l'alarme ${ancienneHeure.ifBlank { ancienLibelle.ifBlank { "désignée" } }} par ${nouvelleHeure} ?", true)) ToolResult("Modification annulée.")
+            else ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val creation = app.phone.creerAlarme(nouvelleHeure, a.optString("nouveau_libelle"), a.optString("jours"))
+                if (!creation.startsWith("⏰")) return@withContext creation
+                if (ancienneHeure.isBlank() && ancienLibelle.isBlank()) return@withContext "$creation\\n⚠️ La nouvelle alarme est créée, mais l'ancienne n'a pas été supprimée : indique son heure ou son libellé pour terminer le remplacement."
+                val suppression = app.phone.supprimerAlarme(ancienneHeure, ancienLibelle)
+                "$creation\\n$suppression" + (if (suppression.startsWith("Demande de suppression")) "\\nℹ️ Vérifie dans l'application Horloge que l'ancienne alarme a bien disparu : Android dépend du support de cette action par l'horloge installée." else "\\n⚠️ La suppression de l'ancienne alarme n'a pas été confirmée par l'Horloge.")
+            }, direct = true)
+        }
         "minuteur_creer" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.device.Horloge.creerMinuteur(app, a.optString("secondes").toDoubleOrNull()?.toInt() ?: 0, a.optString("libelle")) }, direct = true)
         "chronometre" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.device.Horloge.chronometre(app, a.optString("action")) }, direct = true)
         "rappel_creer" -> ToolResult(fr.dd.jarvis.device.Rappels.creer(app, a.optString("texte"), a.optString("quand"), a.optString("repetition")))
