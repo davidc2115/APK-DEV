@@ -71,7 +71,9 @@ object Plex {
 
     fun lancer(app: JarvisApp, media: JSONObject, appareil: JSONObject): String {
         val ratingKey = media.optString("ratingKey").ifBlank { throw IllegalStateException("Plex n'a pas fourni l'identifiant de ce média.") }
-        val clientId = appareil.optString("machineIdentifier").ifBlank { throw IllegalStateException("Ce lecteur Plex ne fournit pas d'identifiant de contrôle.") }
+        // /clients expose généralement clientIdentifier (et non machineIdentifier) pour les lecteurs Plex Companion.
+        val clientId = appareil.optString("clientIdentifier").ifBlank { appareil.optString("machineIdentifier") }
+            .ifBlank { throw IllegalStateException("Ce lecteur Plex ne fournit pas d'identifiant de contrôle (clientIdentifier).") }
         val server = serveur(app)
         val machineId = server.optString("machineIdentifier").ifBlank { throw IllegalStateException("Identifiant du serveur Plex introuvable.") }
         val adresse = Serveur.ipLocaleServeur(app) ?: throw IllegalStateException("Impossible de déterminer l'adresse locale du serveur Debian pour transmettre le flux au lecteur.")
