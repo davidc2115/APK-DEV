@@ -278,6 +278,8 @@ class Store(context: Context) {
     val presenceAuto = BPref("presenceAuto", true)
     /** Autorise l'écran de présence déjà ouvert à rester visible au-dessus du verrouillage Android. */
     val presenceVerrouillage = BPref("presenceVerrouillage", true)
+    /** Mode Présence épinglé comme écran de veille/verrouillage visuel ; restauré au retour de l’activité. */
+    val presenceModeActif = BPref("presenceModeActif", false)
     // ---- Alerte de départ, météo des rendez-vous, routines, journal, montre, empreinte vocale
     val departAlertes = BPref("departAlertes", true)
     val departNotifie = SPref("departNotifie", "")
