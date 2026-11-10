@@ -814,8 +814,8 @@ for provider_id, key_env, default_api in external_specs:
 fallbacks[:] = [x for x in fallbacks if not (isinstance(x, dict) and x.get("provider") == "custom:jarvis_ollama")]
 if os.environ.get("JARVIS_HAS_OLLAMA") == "1":
     providers["jarvis_ollama"] = {"api": os.environ["JARVIS_OLLAMA_RELAIS_URL"], "key_env": "JARVIS_OLLAMA_RELAIS"}
-    fallbacks.append({"provider": "custom:jarvis_ollama", "model": os.environ.get("JARVIS_OLLAMA_MODEL") or "auto"})
-    add_route("jarvis-ollama", "IA locale Ollama du serveur de la maison (secours hors ligne, plus lente : tâches simples)", "custom:jarvis_ollama", os.environ.get("JARVIS_OLLAMA_MODEL") or "auto")
+    # Ollama est déjà le modèle principal configuré plus haut : ne pas le dupliquer en dernier recours.
+    add_route("jarvis-ollama", "IA locale Ollama du serveur de la maison (modèle principal local)", "custom:jarvis_ollama", os.environ.get("JARVIS_OLLAMA_MODEL") or "auto")
 else:
     providers.pop("jarvis_ollama", None)
 known = {(str(x.get("provider", "")), str(x.get("model", ""))) for x in options if isinstance(x, dict)}
