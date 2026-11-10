@@ -1794,7 +1794,7 @@ private fun DiscordPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvi
     var busy by remember { mutableStateOf(false) }
     HudPanel(Modifier.fillMaxWidth(), title = "Discord — bot (rôles et permissions de salons)") {
         Text(
-            "Permet à JARVIS de créer et modifier des rôles (couleur, permissions), de les attribuer, et de modifier l'accès des salons. Crée un bot sur discord.com/developers/applications, copie son jeton, active les « Server Members Intent », et invite-le sur ton serveur avec les permissions « Gérer les rôles » et « Gérer les salons ». Place toujours son rôle au-dessus, dans la hiérarchie, de tous les rôles qu'il doit gérer.",
+            "Permet à JARVIS de lire l'historique et les nouveaux messages, créer/modifier des rôles, attribuer un rôle et régler les permissions par salon. Dans discord.com/developers/applications, active « Server Members Intent » et « Message Content Intent » ; donne au bot « Voir les salons », « Lire l'historique des messages », et, pour l'administration, « Gérer les rôles » / « Gérer les salons ». Place son rôle au-dessus des rôles qu'il doit gérer. Pour limiter un rôle à un salon, JARVIS peut créer le rôle puis appliquer l'autorisation sur ce salon.",
             color = HudDim, fontSize = 12.sp
         )
         Spacer(Modifier.height(8.dp))
