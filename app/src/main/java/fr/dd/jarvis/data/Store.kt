@@ -145,6 +145,8 @@ class Store(context: Context) {
     val sshPass = SPref("sshPass", "")
     val sshKey = SPref("sshKey", "")
     val sshFp = SPref("sshFp", "")
+    /** Jeton Plex Media Server : toujours conservé dans le stockage chiffré du Keystore. */
+    val plexToken = SecretPref("plexToken")
     val ghToken = SPref("ghToken", "")
     val scanAuto = BPref("scanAuto", true)
     val sshHostDistant = SPref("sshHostDistant", "")
