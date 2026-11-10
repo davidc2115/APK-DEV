@@ -14,7 +14,7 @@ import org.json.JSONObject
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
-/** Génération vidéo : Gemini Omni Flash (clé Gemini existante), puis Flow/UseAPI et Dreamina/BytePlus. */
+/** Génération vidéo : Gemini Omni 1.2 Flash (clé Gemini existante), puis Flow/UseAPI et Dreamina/BytePlus. */
 object VideoProviderGen {
     private val http = OkHttpClient.Builder().connectTimeout(25, TimeUnit.SECONDS).readTimeout(45, TimeUnit.SECONDS).callTimeout(55, TimeUnit.SECONDS).build()
     private val geminiHttp = OkHttpClient.Builder()
@@ -29,7 +29,7 @@ object VideoProviderGen {
     fun geminiDisponible(app: JarvisApp) = app.store.geminiKeys.any { !KeyRing.estCleOpenAi(it) }
     fun disponible(app: JarvisApp) = geminiDisponible(app) || flowDisponible(app) || dreaminaDisponible(app)
 
-    /** Gemini Omni est essayé en premier avec les clés Google déjà enregistrées dans Réglages. */
+    /** Gemini Omni 1.2 est essayé en premier avec les clés Google déjà enregistrées dans Réglages. */
     suspend fun genererClipSecours(app: JarvisApp, prompt: String, duration: Int, vertical: Boolean): ByteArray? {
         val erreurs = mutableListOf<String>()
         if (geminiDisponible(app)) {
@@ -52,7 +52,7 @@ object VideoProviderGen {
     }
 
     /**
-     * Gemini Omni Flash via l'API Interactions (sortie vidéo base64).
+     * Gemini Omni 1.2 Flash via l'API Interactions (sortie vidéo base64, jusqu'à 15 s).
      * Chaque clé Gemini est essayée au plus une fois ; les clés OpenAI sont explicitement exclues.
      */
     private suspend fun genererGemini(app: JarvisApp, prompt: String, duration: Int, vertical: Boolean): ByteArray = withContext(Dispatchers.IO) {
@@ -60,7 +60,7 @@ object VideoProviderGen {
         if (keys.isEmpty()) throw IllegalStateException("Aucune clé API Gemini disponible.")
         val input = prompt.trim() + "\nGenerate one finished video clip, approximately ${duration.coerceIn(3, 10)} seconds long."
         val payload = JSONObject()
-            .put("model", "gemini-omni-1.1-flash")
+            .put("model", "gemini-omni-1.2-flash")
             .put("input", input)
             .put("response_format", JSONObject()
                 .put("type", "video")
