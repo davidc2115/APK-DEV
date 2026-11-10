@@ -337,6 +337,31 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 onListModels = { app.llm.listGeminiModels() }
             )
         },
+        VoletReglages("ia", "cles", "Clés OpenAI", "openai clé api modèle chat gpt rotation fournisseur") {
+            if (!store.apiKeysSecureAvailable) {
+                Text("⚠️ Stockage chiffré Android indisponible : les clés OpenAI ne peuvent pas être modifiées.", color = Color(0xFFFFB74D), fontSize = 12.sp)
+            }
+            KeyPanel(
+                title = "OpenAI — fournisseur IA (rotation automatique)",
+                hint = "Clés API de la plateforme OpenAI. Elles sont distinctes d'un abonnement ChatGPT et peuvent entraîner une facturation API.",
+                keys = store.openaiKeys,
+                onAdd = {
+                    if (store.apiKeysSecureAvailable) {
+                        store.addOpenAiKeys(it)
+                        if (store.hermesInstalle.value) fr.dd.jarvis.hermes.HermesTermux.synchroniserCles(app)
+                    }
+                },
+                onRemove = {
+                    if (store.apiKeysSecureAvailable) {
+                        store.removeOpenAiKey(it)
+                        if (store.hermesInstalle.value) fr.dd.jarvis.hermes.HermesTermux.synchroniserCles(app)
+                    }
+                },
+                onTest = { app.llm.testOpenAiKeys() },
+                modelLabel = "Modèle OpenAI", model = store.openaiModel.value, onModel = { store.openaiModel.set(it) },
+                onListModels = { app.llm.listOpenAiModels() }
+            )
+        },
         VoletReglages("ia", "hermes", "Hermès", "hermes termux cerveau principal installer configurer demarrer repartition mode adulte modele vitesse") {
             val h = fr.dd.jarvis.hermes.HermesTermux
             var hTick by remember { mutableIntStateOf(0) }
