@@ -232,6 +232,12 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
     var tab by rememberSaveable { mutableStateOf(0) }
     // Écrans de terrain ouverts par-dessus l'onglet en cours (caméra, compte-rendu d'intervention).
     var terrain by rememberSaveable { mutableStateOf("") }
+    LaunchedEffect(terrain, app.store.presenceVerrouillage.value) {
+        val afficherVerrouille = terrain == "presence" && app.store.presenceVerrouillage.value
+        if (android.os.Build.VERSION.SDK_INT >= 27) setShowWhenLocked(afficherVerrouille)
+        else if (afficherVerrouille) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
+        else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
+    }
     androidx.activity.compose.BackHandler(enabled = terrain.isNotEmpty()) { terrain = "" }
     LaunchedEffect(terrainDemande.value) {
         if (terrainDemande.value.isNotBlank()) { terrain = terrainDemande.value; tab = 0; terrainDemande.value = "" }
