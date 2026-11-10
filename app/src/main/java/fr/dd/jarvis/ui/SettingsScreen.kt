@@ -1505,6 +1505,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 })
                 AgentStatusRow("Groq · " + store.groqModel.value, store.groqKeys.isNotEmpty(), "${store.groqKeys.size} clé(s)")
                 AgentStatusRow("Gemini · " + store.geminiModel.value, store.geminiKeys.isNotEmpty(), "${store.geminiKeys.size} clé(s)")
+                AgentStatusRow("OpenAI · " + store.openaiModel.value, store.openaiKeys.isNotEmpty(), "${store.openaiKeys.size} clé(s)")
                 AgentStatusRow("Cloudflare Workers AI", store.cfAccounts.isNotEmpty(), "${store.cfAccounts.size} compte(s)")
                 AgentStatusRow("Ollama · serveur de la maison (secours)", fr.dd.jarvis.ai.Ollama.configure(app), if (fr.dd.jarvis.ai.Ollama.configure(app)) fr.dd.jarvis.ai.Ollama.etat else "désactivé ou sans adresse")
                 AgentStatusRow("fal.ai · vidéo", store.falApiKey.value.isNotBlank(), if (store.falApiKey.value.isNotBlank()) "clé configurée" else "non configuré")
