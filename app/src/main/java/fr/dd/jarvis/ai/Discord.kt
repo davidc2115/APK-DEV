@@ -162,6 +162,13 @@ object Discord {
     fun guildes(app: JarvisApp): JSONArray = reqArr(app, "GET", "/users/@me/guilds")
     fun roles(app: JarvisApp, guildId: String): JSONArray = reqArr(app, "GET", "/guilds/$guildId/roles")
     fun salons(app: JarvisApp, guildId: String): JSONArray = reqArr(app, "GET", "/guilds/$guildId/channels")
+    /** Lit les derniers messages d’un salon. afterId permet de ne récupérer que les messages plus récents. */
+    fun messages(app: JarvisApp, channelId: String, limite: Int = 30, afterId: String = ""): JSONArray {
+        val n = limite.coerceIn(1, 100)
+        val curseur = afterId.trim().takeIf { it.matches(Regex("\\d{17,20}")) }
+        val query = "limit=$n" + (curseur?.let { "&after=$it" } ?: "")
+        return reqArr(app, "GET", "/channels/$channelId/messages?$query")
+    }
     /** Envoie un message ordinaire dans un salon texte. Les mentions globales sont désactivées par défaut. */
     fun envoyerMessage(app: JarvisApp, channelId: String, contenu: String): JSONObject {
         val texte = contenu.trim()
