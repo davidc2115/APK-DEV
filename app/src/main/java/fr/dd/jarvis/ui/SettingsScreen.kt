@@ -199,9 +199,11 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 }
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     HudButton("Vérifier les droits Freebox", enabled = freeboxAssociee) {
-                        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                            droitsFreebox = runCatching { fr.dd.jarvis.ai.FreeboxOs.verifierAcces(app) }
-                                .getOrElse { "Diagnostic Freebox impossible : " + (it.message ?: it.javaClass.simpleName) }
+                        scope.launch {
+                            droitsFreebox = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                runCatching { fr.dd.jarvis.ai.FreeboxOs.verifierAcces(app) }
+                                    .getOrElse { "Diagnostic Freebox impossible : " + (it.message ?: it.javaClass.simpleName) }
+                            }
                         }
                     }
                     HudButton("Diagnostic réseau ADB", enabled = adbOn) {
