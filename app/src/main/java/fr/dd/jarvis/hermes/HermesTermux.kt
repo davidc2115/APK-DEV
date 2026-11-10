@@ -301,31 +301,62 @@ p '🧠 Mémoire partagée Jarvis ↔ Hermès installée.'
             gemini = geminiKeys.firstOrNull().orEmpty(), groq = groqKeys.firstOrNull().orEmpty(),
             modele = s.hermesModele.value.ifBlank { s.geminiModel.value }.ifBlank { "gemini-2.5-flash" },
             modeleGroq = s.groqModel.value.ifBlank { "llama-3.3-70b-versatile" },
-            sunoActif = s.sunoMcpActive.value
+            sunoActif = s.sunoMcpActive.value,
+            openai = openaiKeys.firstOrNull().orEmpty(),
+            modeleOpenAi = s.openaiModel.value.ifBlank { "gpt-4.1-mini" }
         )
         val extraEnv = buildString {
             geminiKeys.drop(1).forEachIndexed { index, key -> appendLine("setenv GOOGLE_API_KEY_" + (index + 2) + " " + q(key)) }
+            if (openaiKeys.isNotEmpty()) appendLine("setenv JARVIS_OPENAI_API_KEY " + q(openaiKeys.first()))
             // Clés Groq : jamais copiées dans Termux, la rotation est faite par le relais de Jarvis.
         }
         return base.replace("setenv API_SERVER_MODEL_NAME hermes-agent", "setenv API_SERVER_MODEL_NAME hermes-agent\n" + extraEnv) + "\n" + scriptHookMemoire(app)
     }
 
-    internal fun scriptConfiguration(cleApi: String, jeton: String, gemini: String, groq: String, modele: String, modeleGroq: String, urlMcp: String = PontMcp.url(), sunoActif: Boolean = false): String {
+    internal fun scriptConfiguration(cleApi: String, jeton: String, gemini: String, groq: String, modele: String, modeleGroq: String, urlMcp: String = PontMcp.url(), sunoActif: Boolean = false, openai: String = "", modeleOpenAi: String = "gpt-4.1-mini"): String {
         val yaml = buildString {
             appendLine("# Géré par Jarvis (fr.dd.jarvis) : régénéré à chaque « Configurer Hermès » depuis l'application.")
             appendLine("# Ancienne configuration éventuelle : config.yaml.avant-jarvis")
+            val providerPrincipal = when {
+                gemini.isNotBlank() -> "gemini"
+                openai.isNotBlank() -> "custom:openai"
+                groq.isNotBlank() -> "custom:groq"
+                else -> "gemini"
+            }
+            val modelePrincipal = when (providerPrincipal) {
+                "custom:openai" -> modeleOpenAi
+                "custom:groq" -> modeleGroq
+                else -> modele
+            }
             appendLine("model:")
-            appendLine("  provider: gemini")
-            appendLine("  default: $modele")
-            if (groq.isNotBlank()) {
+            appendLine("  provider: $providerPrincipal")
+            appendLine("  default: $modelePrincipal")
+            if (groq.isNotBlank() || openai.isNotBlank()) {
                 appendLine("providers:")
-                appendLine("  groq:")
-                // Groq via le relais compact de Jarvis (127.0.0.1) : requêtes ramenées sous la limite jetons/minute.
-                appendLine("    api: http://127.0.0.1:${PontMcp.PORT}/groq/v1")
-                appendLine("    key_env: JARVIS_GROQ_RELAIS")
+                if (groq.isNotBlank()) {
+                    appendLine("  groq:")
+                    // Groq via le relais compact de Jarvis (127.0.0.1) : requêtes ramenées sous la limite jetons/minute.
+                    appendLine("    api: http://127.0.0.1:${PontMcp.PORT}/groq/v1")
+                    appendLine("    key_env: JARVIS_GROQ_RELAIS")
+                }
+                if (openai.isNotBlank()) {
+                    appendLine("  openai:")
+                    appendLine("    api: https://api.openai.com/v1")
+                    appendLine("    key_env: JARVIS_OPENAI_API_KEY")
+                }
                 appendLine("fallback_providers:")
-                appendLine("  - provider: custom:groq")
-                appendLine("    model: \"$modeleGroq\"")
+                if (gemini.isNotBlank() && providerPrincipal != "gemini") {
+                    appendLine("  - provider: gemini")
+                    appendLine("    model: \"$modele\"")
+                }
+                if (groq.isNotBlank() && providerPrincipal != "custom:groq") {
+                    appendLine("  - provider: custom:groq")
+                    appendLine("    model: \"$modeleGroq\"")
+                }
+                if (openai.isNotBlank() && providerPrincipal != "custom:openai") {
+                    appendLine("  - provider: custom:openai")
+                    appendLine("    model: \"$modeleOpenAi\"")
+                }
             }
             appendLine("credential_pool_strategies:")
             appendLine("  gemini: round_robin")
