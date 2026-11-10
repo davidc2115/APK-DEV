@@ -50,8 +50,8 @@ object ConfirmationNotification {
             .setAutoCancel(false)
             .setOngoing(true)
             .setContentIntent(ouvrir)
-            .addAction(0, "Refuser", intent(context, false))
-            .addAction(0, "Accepter", intent(context, true))
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Refuser", intent(context, false))
+            .addAction(android.R.drawable.ic_menu_send, "Accepter", intent(context, true))
             .build()
         runCatching { NotificationManagerCompat.from(context).notify(ID, notification) }
     }
