@@ -14,7 +14,7 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
         val NAMES = setOf(
             "discord_guildes", "discord_roles", "discord_salons", "discord_audit_serveur", "discord_role_creer", "discord_role_modifier",
-            "discord_role_supprimer", "discord_role_position", "discord_role_attribuer", "discord_salon_permission", "discord_message_envoyer"
+            "discord_role_supprimer", "discord_role_position", "discord_role_attribuer", "discord_salon_permission", "discord_message_envoyer", "discord_messages_lire"
         )
     }
 
@@ -36,6 +36,8 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si un seul)."))),
         tool("discord_audit_serveur", "AUDIT DISCORD STRICTEMENT EN LECTURE SEULE : récupère l'inventaire complet des salons et catégories avec leurs identifiants, positions, rattachements et sujets. Ne modifie jamais le serveur.",
             mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si un seul)."))),
+        tool("discord_messages_lire", "Discord : lit les derniers messages d’un salon ou uniquement ceux arrivés après un identifiant de message. Lecture seule ; limite maximale 100 messages par appel.",
+            mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si un seul)."), "salon" to prop("Nom ou ID du salon textuel."), "limite" to prop("Nombre de messages à lire, de 1 à 100 (défaut 30)."), "apres_id" to prop("ID du dernier message déjà lu : ne renvoie que les messages plus récents (optionnel).")), listOf("salon")),
         tool("discord_message_envoyer", "Discord : envoie un message dans un salon textuel ou d'annonces. Les mentions automatiques (@everyone/@here et rôles) sont désactivées par sécurité.",
             mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si un seul)."),
                 "salon" to prop("Nom ou ID du salon textuel cible."),
@@ -130,6 +132,24 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             lines += ""
             lines += "Contrôle des types : " + byType.entries.joinToString(", ") { "${it.key}=${it.value}" }
             ToolResult(lines.joinToString("\n"), direct = true)
+        }
+        "discord_messages_lire" -> {
+            val g = guildeObj(a); val gid = g.getString("id")
+            val nomSalon = a.optString("salon").trim()
+            val salon = Discord.trouverSalon(app, gid, nomSalon) ?: return ToolResult("Salon « $nomSalon » introuvable.")
+            if (salon.optInt("type") !in setOf(0, 5, 15, 16)) return ToolResult("Ce salon ne permet pas la lecture de messages par cet outil.")
+            val limite = (a.optString("limite").toIntOrNull() ?: 30).coerceIn(1, 100)
+            val apres = a.optString("apres_id").trim()
+            val arr = Discord.messages(app, salon.getString("id"), limite, apres)
+            if (arr.length() == 0) return ToolResult(if (apres.isBlank()) "Aucun message lisible dans #${salon.optString("name")}." else "Aucun nouveau message dans #${salon.optString("name")} depuis cet identifiant.", direct = true)
+            val messages = (0 until arr.length()).map { arr.getJSONObject(it) }.sortedBy { it.optString("id") }
+            val lignes = messages.map { m ->
+                val auteur = m.optJSONObject("author")?.optString("global_name").orEmpty().ifBlank { m.optJSONObject("author")?.optString("username").orEmpty().ifBlank { "Utilisateur inconnu" } }
+                val date = runCatching { java.time.Instant.parse(m.optString("timestamp")).atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("dd/MM HH:mm")) }.getOrDefault("")
+                val contenu = m.optString("content").trim().ifBlank { if (m.optJSONArray("attachments")?.length()?.let { it > 0 } == true) "[pièce jointe]" else "[message sans texte — contenu éventuellement masqué par les intents Discord]" }
+                "[$date] **$auteur** : $contenu" + (if (m.optJSONArray("attachments")?.length()?.let { it > 0 } == true) " 📎" else "") + "\n_ID ${m.optString("id")}_"
+            }
+            ToolResult("# Messages de #${salon.optString("name")} — ${messages.size} résultat(s)\n" + lignes.joinToString("\n"), direct = true)
         }
         "discord_message_envoyer" -> {
             val g = guildeObj(a)
