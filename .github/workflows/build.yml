@@ -4,7 +4,8 @@ on:
   push:
     branches: [main, master]
   pull_request:
-    branches: [main]
+    # Inclut la branche de base des PR empilées pour compiler aussi les lots suivants avant fusion.
+    branches: [main, fix/discord-history-native-alarms]
   workflow_dispatch:
 
 jobs:
