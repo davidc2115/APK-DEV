@@ -27,7 +27,7 @@ import java.util.concurrent.Executors
 object PontMcp {
     const val PORT = 38291
     private const val TAG = "PontMcp"
-    private const val maxOutilsExpose = 24
+    private const val maxOutilsExpose = 25
     private val pool = Executors.newCachedThreadPool()
     @Volatile private var serveur: ServerSocket? = null
     @Volatile private var fournisseur: Fournisseur? = null
