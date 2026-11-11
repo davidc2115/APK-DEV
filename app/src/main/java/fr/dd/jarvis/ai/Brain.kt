@@ -86,6 +86,19 @@ class Brain(
         history.takeLast(10).filter { it.text.isNotBlank() }.forEach { m ->
             msgs.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(1200)))
         }
+        // Gemini Nano/AICore est un accélérateur facultatif réservé au bavardage.
+        // S'il n'est pas déjà prêt ou ne répond pas très vite, on conserve exactement le chemin cloud actuel.
+        val promptNano = buildString {
+            append(sys)
+            append("\n\nHistorique récent :\n")
+            history.takeLast(6).filter { it.text.isNotBlank() }.forEach { m ->
+                append(if (m.fromUser) "Utilisateur : " else "Jarvis : ")
+                append(m.text.take(700))
+                append('\n')
+            }
+            append("\nRéponds au dernier message de l'utilisateur.")
+        }.take(6500)
+        GeminiNanoLocal.repondre(promptNano)?.let { return it }
         return try {
             app.llm.groqChat(msgs, null, forceText = true).optString("content").trim().takeIf { it.isNotBlank() }
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { null }
