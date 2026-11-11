@@ -77,11 +77,12 @@ class Brain(
         onStatus("💬 …")
         val ctx = runCatching { fr.dd.jarvis.device.Contexte.actuel(app) }.getOrNull()
         val maintenant = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("EEEE d MMMM yyyy, HH'h'mm", java.util.Locale.FRENCH))
+        val memoirePartagee = (runCatching { app.memo.pourPrompt() }.getOrDefault("") + runCatching { app.memo.hermesPourPrompt() }.getOrDefault("")).take(2200)
         val sys = "Tu es JARVIS, l'assistant personnel de ${userName().ifBlank { "l'utilisateur" }}, qui te tutoie. C'est un moment de conversation détendue : " +
             "réponds naturellement en français, chaleureux et vivant, avec une pointe d'humour quand ça s'y prête, en une à trois phrases courtes, " +
             "comme un ami attentionné ; relance parfois par une question. Pas de liste, pas de titre, pas d'emoji en excès. " +
             "Tu n'as consulté ni son agenda, ni ses mails, ni ses appareils : n'invente aucun fait sur sa journée ; s'il veut une info précise, propose de vérifier. " +
-            "Nous sommes le $maintenant." + (ctx?.let { " Contexte : ${it.mode.libelle}." } ?: "")
+            "Nous sommes le $maintenant." + (ctx?.let { " Contexte : ${it.mode.libelle}." } ?: "") + (if (memoirePartagee.isNotBlank()) "\n\nMémoire partagée Jarvis/Hermès : $memoirePartagee" else "")
         val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", sys))
         history.takeLast(10).filter { it.text.isNotBlank() }.forEach { m ->
             msgs.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(1200)))
@@ -91,7 +92,7 @@ class Brain(
         val promptNano = buildString {
             append(sys)
             append("\n\nHistorique récent :\n")
-            history.takeLast(6).filter { it.text.isNotBlank() }.forEach { m ->
+            history.takeLast(10).filter { it.text.isNotBlank() }.forEach { m ->
                 append(if (m.fromUser) "Utilisateur : " else "Jarvis : ")
                 append(m.text.take(700))
                 append('\n')
@@ -148,8 +149,11 @@ class Brain(
             }
         }
         // Conversation simple (« salut », « comment ça va ? », « merci ») : réponse immédiate, un seul appel d'IA, sans outils ni Hermès.
-        if (!pourHermes && !multi && fr.dd.jarvis.hermes.Routeur.bavardage(texteUser)) {
-            conversationRapide(history, onStatus)?.let { return reflexe(it) }
+        if (!pourHermes && !multi && (fr.dd.jarvis.hermes.Routeur.bavardage(texteUser) || fr.dd.jarvis.hermes.Routeur.suiteBavardage(texteUser))) {
+            conversationRapide(history, onStatus)?.let {
+                fr.dd.jarvis.hermes.Routeur.marquerBavardage()
+                return reflexe(it)
+            }
         }
         // Hermès, cerveau principal (mode « tout » : toutes les autres demandes ; mode « auto » : les tâches complexes).
         // S'il est indisponible, Jarvis reprend la main avec ses outils.
