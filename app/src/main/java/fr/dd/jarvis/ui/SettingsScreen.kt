@@ -2004,15 +2004,6 @@ private fun PollinationsPanel(store: fr.dd.jarvis.data.Store) {
     HudPanel(Modifier.fillMaxWidth(), title = "Vidéo IA — fournisseurs") {
         Text("Clés conservées dans le stockage chiffré Android. Les générations peuvent consommer des crédits ou l'abonnement du fournisseur.", color = HudDim, fontSize = 12.sp)
         Spacer(Modifier.height(8.dp))
-        Text("Google Flow — UseAPI (service tiers, non affilié à Google)", color = HudText, fontSize = 13.sp)
-        Text("Jeton UseAPI et compte Flow associé nécessaires. Les crédits Flow de ton compte Google sont utilisés.", color = HudDim, fontSize = 11.sp)
-        HudTextField(store.googleFlowApiToken.value, { v -> runCatching { store.googleFlowApiToken.set(v.trim()) } }, Modifier.fillMaxWidth(), label = "Clé API UseAPI", password = true)
-        HudTextField(store.googleFlowAccountEmail.value, { store.googleFlowAccountEmail.set(it.trim()) }, Modifier.fillMaxWidth(), label = "E-mail compte Flow (facultatif)")
-        HudTextField(store.googleFlowModel.value, { store.googleFlowModel.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Modèle Flow", placeholder = "veo-3.1-fast")
-        Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            HudButton("Gérer le jeton UseAPI") { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://useapi.net/account")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
-            HudButton("Effacer Flow") { store.googleFlowApiToken.clear() }
-        }
         Spacer(Modifier.height(12.dp))
         Text("Dreamina — BytePlus ModelArk (API officielle)", color = HudText, fontSize = 13.sp)
         Text("Le modèle Seedance doit être activé et disposer de crédits ou d'un forfait compatible.", color = HudDim, fontSize = 11.sp)
@@ -2028,7 +2019,7 @@ private fun PollinationsPanel(store: fr.dd.jarvis.data.Store) {
         Text("Créer un token Hugging Face", color = HudDim, fontSize = 12.sp, modifier = Modifier.clickable {
             ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://huggingface.co/settings/tokens")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
         })
-        Text("Ordre prévu : Hugging Face gratuit, puis Flow, puis Dreamina. Dreamina peut facturer les générations. fal.ai reste disponible pour l'animation d'image.", color = HudDim, fontSize = 11.sp)
+        Text("Ordre vidéo : Hugging Face (quota gratuit limité), puis Gemini Omni si le projet dispose d’un quota vidéo, puis Dreamina. Dreamina peut facturer les générations. fal.ai reste disponible pour l’animation d’image.", color = HudDim, fontSize = 11.sp)
     }
 }
 
