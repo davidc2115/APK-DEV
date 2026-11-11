@@ -145,6 +145,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         messages.add(ChatMsg(true, t))
+        // Point de reprise durable : la demande est écrite immédiatement, avant tout appel réseau/IA.
+        // Si Android ferme Jarvis ou si le fournisseur dépasse son délai, le dernier message reste récupérable.
+        persist()
         busy = true
         status = "Réflexion…"
         enDirect = ""
