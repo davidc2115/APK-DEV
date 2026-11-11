@@ -104,13 +104,22 @@ object PhonePowerMode {
         }
         if (mode == "etat") return etat(app)
 
-        if (mode == "economie" && PhoneShell.ready(app)) {
-            val shell = withContext(Dispatchers.IO) { PhoneShell.exec(app, "cmd power set-mode 1") }
-            delay(500)
-            if (!erreurShell(shell) && economieActive(app)) {
-                return "✅ Mode économie activé et vérifié par Android. L'activité en arrière-plan et certaines synchronisations peuvent être réduites."
+        // L'économie Android est appliquée directement par le service shell ADB/Shizuku.
+        // Aucun écran HyperOS, accessibilité, coordonnées ou pilote Gemini ne doit être utilisé ici.
+        if (mode == "economie") {
+            if (economieActive(app)) return "✅ Mode économie déjà actif et confirmé par Android."
+            if (!PhoneShell.ready(app)) {
+                return "Activation directe impossible : Shizuku doit être démarré et autorisé, ou ADB sans fil connecté. Aucun écran n'a été ouvert et aucun pilotage du téléphone n'a été lancé."
             }
-            if (economieActive(app)) return "✅ Mode économie actif selon Android."
+            val shell = withContext(Dispatchers.IO) {
+                PhoneShell.exec(app, "cmd power set-mode 1")
+            }
+            delay(700)
+            if (economieActive(app)) {
+                return "✅ Mode économie activé directement par ADB/Shizuku et confirmé par PowerManager Android. Certaines activités en arrière-plan et synchronisations peuvent être réduites."
+            }
+            val detail = shell.take(220).ifBlank { "La commande n'a pas renvoyé de détail." }
+            return "❌ Android ne confirme pas l'activation du mode économie. Réponse ADB/Shizuku : $detail. Aucun pilotage de l'écran n'a été tenté."
         }
 
         val ouverture = ouvrirSelecteur(app)
