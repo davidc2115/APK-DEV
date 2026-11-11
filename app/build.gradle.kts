@@ -3,6 +3,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.serialization")
     id("org.jetbrains.kotlin.kapt")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
@@ -50,9 +51,6 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
-    }
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.14"
     }
     packaging {
         resources {
@@ -129,7 +127,7 @@ dependencies {
     implementation("androidx.media3:media3-common:1.4.1")
 
     // Index local du graphe de connaissances (les fichiers Markdown restent les sources de vérité)
-    implementation("androidx.room:room-runtime:2.6.1")
-    implementation("androidx.room:room-ktx:2.6.1")
-    kapt("androidx.room:room-compiler:2.6.1")
+    implementation("androidx.room:room-runtime:2.8.5")
+    implementation("androidx.room:room-ktx:2.8.5")
+    kapt("androidx.room:room-compiler:2.8.5")
 }
