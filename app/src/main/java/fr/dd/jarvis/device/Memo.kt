@@ -281,7 +281,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         val toujours = items.filterKeys { fr.dd.jarvis.societe.core.normaliser(it) in generales }
         val autres = items.keys - toujours.keys
         return "\n\nMémoire de l'utilisateur (consignes durables, à appliquer) :\n" +
-            toujours.entries.joinToString("\n") { "- [${it.key}] ${it.value.take(500)}" }.take(1800) +
+            toujours.entries.joinToString("\n") { "- [${it.key}] ${it.value.take(500)}" }.take(3500) +
             (if (autres.isNotEmpty()) "\nAutres rubriques mémorisées (celles utiles à cette demande sont dans les notes ci-dessus ; détails avec memoire_lire) : ${autres.joinToString(", ")}" else "")
     }
 
