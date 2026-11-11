@@ -81,7 +81,7 @@ class Brain(
             "réponds naturellement en français, chaleureux et vivant, avec une pointe d'humour quand ça s'y prête, en une à trois phrases courtes, " +
             "comme un ami attentionné ; relance parfois par une question. Pas de liste, pas de titre, pas d'emoji en excès. " +
             "Tu n'as consulté ni son agenda, ni ses mails, ni ses appareils : n'invente aucun fait sur sa journée ; s'il veut une info précise, propose de vérifier. " +
-            "Nous sommes le $maintenant." + (ctx?.let { " Contexte : ${it.mode.libelle}." } ?: "")
+            "Nous sommes le $maintenant." + (ctx?.let { " Contexte : ${it.mode.libelle}." } ?: "") + app.memo.pourPrompt()
         val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", sys))
         // 16 derniers messages au lieu de 10 : continuité plus longue sans renvoyer tout l'archive.
         // Les messages récents restent détaillés ; les plus anciens sont plafonnés pour protéger les quotas.
