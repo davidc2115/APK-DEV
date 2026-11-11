@@ -83,8 +83,20 @@ class Brain(
             "Tu n'as consulté ni son agenda, ni ses mails, ni ses appareils : n'invente aucun fait sur sa journée ; s'il veut une info précise, propose de vérifier. " +
             "Nous sommes le $maintenant." + (ctx?.let { " Contexte : ${it.mode.libelle}." } ?: "")
         val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", sys))
-        history.takeLast(10).filter { it.text.isNotBlank() }.forEach { m ->
-            msgs.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(1200)))
+        // 16 derniers messages au lieu de 10 : continuité plus longue sans renvoyer tout l'archive.
+        // Les messages récents restent détaillés ; les plus anciens sont plafonnés pour protéger les quotas.
+        val recents = history.takeLast(16)
+        recents.forEachIndexed { i, m ->
+            if (m.text.isNotBlank()) {
+                val age = recents.size - 1 - i
+                val limite = when {
+                    age < 2 -> 1800
+                    age < 6 -> 1000
+                    age < 10 -> 600
+                    else -> 300
+                }
+                msgs.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(limite)))
+            }
         }
         return try {
             app.llm.groqChat(msgs, null, forceText = true).optString("content").trim().takeIf { it.isNotBlank() }
