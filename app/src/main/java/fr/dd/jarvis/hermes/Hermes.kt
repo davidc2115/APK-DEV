@@ -667,6 +667,30 @@ object Routeur {
         RegexOption.IGNORE_CASE
     )
 
+    // Une conversation légère reste sur le moteur rapide pendant ses rebonds naturels.
+    // Expire après 20 minutes et se ferme dès qu'une vraie demande opérationnelle apparaît.
+    @Volatile private var bavardageJusqua: Long = 0L
+
+    fun marquerBavardage() { bavardageJusqua = System.currentTimeMillis() + 20 * 60 * 1000L }
+
+    fun suiteBavardage(texte: String): Boolean {
+        if (System.currentTimeMillis() > bavardageJusqua) return false
+        val t = texte.trim()
+        if (t.isBlank() || t.length > 350 || NOMME.containsMatchIn(t)) { bavardageJusqua = 0L; return false }
+        val demandeAction = Regex(
+            "\\\\b(appelle|t[ée]l[ée]phone|sms|texto|envoie|r[ée]ponds? à|agenda|calendrier|planning|rendez.vous|rdv|" +
+                "allume|[ée]teins|ouvre|ferme|lance|r[ée]gle|modifie|change|cherche|recherche|trouve|t[ée]l[ée]charge|" +
+                "fichier|dossier|note|obsidian|freebox|vpn|port|gps|position|waze|home ?assistant|chauffage|poêle|" +
+                "automati|surveille|programme|installe|supprime|cr[ée]e|g[ée]n[èe]re|analyse|compare|explique|pourquoi|comment faire)\\\\b",
+            RegexOption.IGNORE_CASE
+        )
+        if (demandeAction.containsMatchIn(t) || ORCHESTRATION.containsMatchIn(t) || WEB.containsMatchIn(t)) {
+            bavardageJusqua = 0L
+            return false
+        }
+        return true
+    }
+
     /**
      * Conversation simple (« salut », « comment ça va ? », « merci », « raconte-moi une blague ») : Jarvis répond en un seul
      * appel d'IA, sans outils ni Hermès — même en mode « Hermès pour tout » — pour une réponse en une à deux secondes.
