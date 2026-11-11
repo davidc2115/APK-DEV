@@ -402,7 +402,6 @@ class ToolBox(
             mapOf("tache" to prop("La tâche détaillée, avec tout le contexte utile.")), listOf("tache")))
         put(tool("ma_position", "Donne la position GPS actuelle du téléphone (fix frais, format Google Maps) et l'ADRESSE PRÉCISE correspondante (numéro, rue, code postal, ville). Pour enregistrer cette position sur une fiche client, utilise client_ecrire avec site_gps = « ma position » (et site_adresse = « ma position » pour l'adresse)."))
         put(tool("phone_health_report", "Produit un diagnostic local en lecture seule du téléphone : batterie, température, stockage, RAM, réseau, Shizuku, accessibilité, notifications, alarmes exactes, optimisation batterie, service vocal et présence d'un rapport de plantage. N'affiche aucune donnée personnelle ni aucun secret.", mapOf("detail" to prop("Optionnel : bref, complet (défaut) ou historique des mesures locales."))))
-        put(tool("phone_power_mode", "Change le MODE D’ALIMENTATION GLOBAL du téléphone Xiaomi/HyperOS. Pour economie (Battery Saver), utilise EXCLUSIVEMENT ADB/Shizuku puis vérifie PowerManager : INTERDICTION d’ouvrir les réglages, d’utiliser accessibilité, voir_ecran ou piloter_telephone, même en cas d’échec. Si ADB/Shizuku échoue, signale l’échec sans autre méthode. Les modes equilibre/normal et performance Xiaomi sont distincts et peuvent nécessiter le sélecteur HyperOS.", mapOf("mode" to prop("economie | equilibre (ou normal) | performance | etat")), listOf("mode")))
         put(tool("phone_action", "Agit sur le téléphone et pilote les applications Android réellement installées. Actions : list_apps (inventaire réel), open_app, open_url, volume, wifi_on, wifi_off, wifi_connect (ouvre les réglages Wi-Fi), bluetooth_on, bluetooth_off, bluetooth_pair (ouvre les réglages Bluetooth), data_on, data_off, brightness, torch_on, torch_off, call, back, home, recents, notifications, quick_settings, lock, screenshot, read_screen, click_text, click_best_match (sélection sémantique du meilleur élément visible), type_text, scroll_down, scroll_up, tap, inspect_screen et watch_screen (arbre détaillé + journal des changements d'applications, fenêtres, clics, défilements et modifications d'interface observés en arrière-plan). Pour une tâche dans une application : list_apps si le nom est incertain, open_app, inspect_screen, interaction par étapes, puis inspect_screen/watch_screen pour vérifier et récupérer les événements récents. Le journal est alimenté en temps réel par Android lorsque l'accessibilité est active ; il ne conserve pas le texte saisi ni le contenu privé des événements. L'accessibilité JARVIS doit être active pour lire et manipuler l'interface. Les champs sécurisés, écrans protégés, validations Android et confirmations sensibles restent sous le contrôle du système ou de l'utilisateur.",
             mapOf(
                 "action" to prop("Nom de l'action."),
@@ -1053,15 +1052,11 @@ class ToolBox(
             ?.let { ToolResult(it, direct = true) }
             ?: ToolResult("Hermès est indisponible pour l'instant (non installé ou arrêté). Réponds toi-même au mieux.")
         "phone_health_report" -> ToolResult(if (a.optString("detail").equals("historique", true)) fr.dd.jarvis.device.PhoneHealth.historyReport(app) else fr.dd.jarvis.device.PhoneHealth.report(app), direct = true)
-        "phone_power_mode" -> ToolResult(fr.dd.jarvis.device.PhonePowerMode.appliquer(app, a.optString("mode")), direct = true)
         "phone_action" -> phoneAction(a)
         "voir_ecran" -> ToolResult(fr.dd.jarvis.device.PiloteEcran.voir(app, a.optString("question")), direct = true)
         "piloter_telephone" -> {
             val objectif = a.optString("objectif").trim()
-            // Barrière absolue : une demande d'économie batterie ne doit jamais atteindre PiloteEcran.
-            val demandeEconomie = Regex("(?i)(économ(?:ie|iseur|iser)|econom(?:y|izer|ize)|battery[\\s_-]*(?:saver|saving)|mode[\\s_-]*(?:éco|eco)|éco(?:nomie)?[\\s_-]*(?:d['’ ]?énergie|batterie)?|économie[\\s_-]*(?:d['’ ]?énergie|batterie)|économiser[\\s_-]+(?:la[\\s_-]+)?batterie)").containsMatchIn(objectif)
-            if (demandeEconomie) ToolResult(fr.dd.jarvis.device.PhonePowerMode.appliquer(app, "economie"), direct = true)
-            else if (objectif.isBlank()) ToolResult("Précise l'objectif à atteindre sur le téléphone.")
+            if (objectif.isBlank()) ToolResult("Précise l'objectif à atteindre sur le téléphone.")
             else if (!confirm("Je prends la main sur l'écran pour : « ${objectif.take(160)} ». Continuer ?", false)) ToolResult("Pilotage annulé.")
             else {
                 val appli = a.optString("application").trim()
