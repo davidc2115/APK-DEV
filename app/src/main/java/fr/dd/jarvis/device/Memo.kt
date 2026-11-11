@@ -202,9 +202,11 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         val (notes, profil) = entreesHermes(hermes())
         if (notes.isEmpty() && profil.isEmpty()) return ""
         val tout = (notes + profil).joinToString("\n") { "- " + it.replace("\n", " ").take(500) }
-        return if (tout.length <= 1500) "\n\nMémoire partagée avec Hermès (notes et préférences qu'il a retenues, à appliquer aussi) :\n$tout"
-        else "\n\nProfil de l'utilisateur retenu par Hermès :\n" + profil.joinToString("\n") { "- " + it.replace("\n", " ").take(300) }.take(1200) +
-            "\n(${notes.size} notes d'Hermès : celles utiles à cette demande sont dans les notes ci-dessus.)"
+        return if (tout.length <= 4000) "\n\nMémoire partagée avec Hermès (notes et préférences qu'il a retenues, à appliquer aussi) :\n$tout"
+        else "\n\nMémoire partagée avec Hermès — profil et notes récentes :\n" +
+            profil.joinToString("\n") { "- " + it.replace("\n", " ").take(300) }.take(3500) + "\n" +
+            notes.take(12).joinToString("\n") { "- " + it.replace("\n", " ").take(250) }.take(1800) +
+            "\n(${notes.size} notes au total ; les détails thématiques sont consultables dans la mémoire.)"
     }
 
     // ------------------------------------------------------------------ capacités propres à Hermès
@@ -261,7 +263,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         if (items.isEmpty()) return identite.trim()
         return identite + "## Mémoire partagée avec JARVIS\n" +
             "Consignes durables de l'utilisateur enregistrées par JARVIS (synchronisées automatiquement ; pour les modifier, utilise mcp_jarvis_memoire_ajouter ou mcp_jarvis_memoire_oublier) :\n" +
-            items.entries.joinToString("\n") { "- [${it.key}] ${it.value.replace("\n", " ").take(600)}" }.take(6000)
+            items.entries.joinToString("\n") { "- [${it.key}] ${it.value.replace("\n", " ").take(600)}" }.take(10000)
     }
 
     /**
@@ -274,7 +276,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         ensure()
         if (items.isEmpty()) return ""
         val complet = toutes()
-        if (complet.length <= 1800) return complet
+        if (complet.length <= 4000) return complet
         val generales = setOf("general", "preferences", "preference", "habitudes", "profil", "style", "identite", "ton", "langue")
         val toujours = items.filterKeys { fr.dd.jarvis.societe.core.normaliser(it) in generales }
         val autres = items.keys - toujours.keys
@@ -288,7 +290,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         ensure()
         if (items.isEmpty()) return ""
         return "\n\nMémoire de l'utilisateur (consignes durables, à appliquer) :\n" +
-            items.entries.joinToString("\n") { "- [${it.key}] ${it.value.take(600)}" }.take(3500)
+            items.entries.joinToString("\n") { "- [${it.key}] ${it.value.take(600)}" }.take(6000)
     }
 
     private val exclRegex = Regex(
