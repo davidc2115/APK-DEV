@@ -31,9 +31,9 @@ internal object GeminiNanoLocal {
                     checkedAt = now
                 }
                 if (status != FeatureStatus.AVAILABLE) return@withTimeout null
-                model.generateContent(prompt).text
-                    .trim()
-                    .takeIf { it.isNotBlank() && it.length <= 2_000 }
+                model.generateContent(prompt).candidates.firstOrNull()?.text
+                    ?.trim()
+                    ?.takeIf { it.isNotBlank() && it.length <= 2_000 }
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
