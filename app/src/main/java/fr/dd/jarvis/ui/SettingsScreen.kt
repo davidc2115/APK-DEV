@@ -105,9 +105,8 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 Text("Téléphone posé en charge, JARVIS ouvert et plus touché depuis 45 s : le dragon passe en plein écran. Si l'option verrouillage est activée, JARVIS demande à Android d'afficher l'activité au-dessus du verrouillage, de réveiller l'écran à son affichage et de le garder allumé pendant le mode présence. Ouvre d'abord le mode présence avant de verrouiller. Le bouton Marche/Arrêt reste prioritaire : Android peut éteindre l'écran lorsqu'il est pressé, et HyperOS peut limiter l'affichage. Désactive l'option ici à tout moment.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
             }
         },
-        VoletReglages("general", "batterie", "Batterie & vitesse", "batterie economie energie performance vitesse rapide lent animations hermes analyse gemini") {
+        VoletReglages("general", "batterie", "Batterie & vitesse", "batterie performance vitesse rapide lent animations hermes analyse gemini") {
             PerformancePanel(app)
-            PhonePowerModePanel(app)
         },
         VoletReglages("general", "batterie", "Fonctionnement en arrière-plan", "arriere plan xiaomi hyperos demarrage automatique optimisation batterie restriction") {
             HudPanel(Modifier.fillMaxWidth(), title = "Fonctionnement en arrière-plan (écran éteint, appli fermée)") {
