@@ -63,15 +63,11 @@ object PhonePowerMode {
     private suspend fun choisirModeParAccessibilite(mode: String): String? = withContext(Dispatchers.IO) {
         delay(500) // laisse le temps au sélecteur HyperOS de devenir la fenêtre active
         val service = fr.dd.jarvis.service.JarvisAccessibilityService.instance ?: return@withContext null
-        val choix = when (mode) {
-            "economie" -> listOf("Économiseur de batterie", "Économie de batterie", "Battery saver")
-            "equilibre" -> listOf("Équilibré", "Balanced")
-            else -> listOf("Mode performance", "Performance mode", "Performance")
-        }
-        val autres = listOf(
-            "Économiseur de batterie", "Économie de batterie", "Battery saver",
-            "Équilibré", "Balanced", "Mode performance", "Performance mode"
-        )
+        // Réservé aux modes Xiaomi Équilibré/Performance. Économie est exclue.
+        if (mode == "economie") return@withContext null
+        val choix = if (mode == "equilibre") listOf("Équilibré", "Balanced")
+            else listOf("Mode performance", "Performance mode", "Performance")
+        val autres = listOf("Équilibré", "Balanced", "Mode performance", "Performance mode", "Performance")
         val ouvre = service.clickText("Mode actuel") || service.clickText("Current mode")
         if (ouvre) delay(350)
         var clique = choix.any { service.clickText(it) }
@@ -127,38 +123,28 @@ object PhonePowerMode {
         val ouverture = ouvrirSelecteur(app)
         if (ouverture.startsWith("Impossible")) return ouverture
 
-        val cible = when (mode) {
-            "economie" -> "Économiseur de batterie"
-            "equilibre" -> "Équilibré"
-            else -> "Mode performance"
-        }
-        // Priorité au pilotage déterministe par libellés d'accessibilité, sans IA ni clé Gemini.
-        if (mode != "economie" || !economieActive(app)) {
-            val direct = choisirModeParAccessibilite(mode)
-            if (direct != null && direct.startsWith("✅")) return direct
-        }
+        val cible = if (mode == "equilibre") "Équilibré" else "Mode performance"
+        // Ce bloc n'est accessible que pour Équilibré/Performance, jamais pour Économie.
+        val direct = choisirModeParAccessibilite(mode)
+        if (direct != null && direct.startsWith("✅")) return direct
 
         if (PiloteEcran.disponible(app)) {
-            val objectif = when (mode) {
-                "economie" -> "Dans le sélecteur des modes de batterie Xiaomi/HyperOS, active « Économiseur de batterie » ou « Économie de batterie ». Si un choix doit d'abord être ouvert, ouvre « Mode actuel », puis sélectionne l'option exacte. Termine uniquement lorsque l'écran montre que l'option est sélectionnée."
-                "equilibre" -> "Dans le sélecteur des modes de batterie Xiaomi/HyperOS, sélectionne « Équilibré » (ou « Balanced »). Si nécessaire, ouvre d'abord « Mode actuel ». Ne choisis pas Performance ni Économiseur. Termine uniquement lorsque l'écran montre que le mode équilibré est sélectionné."
-                else -> "Dans le sélecteur des modes de batterie Xiaomi/HyperOS, sélectionne « Mode performance » (ou « Performance mode »). Si nécessaire, ouvre d'abord « Mode actuel ». Termine uniquement lorsque l'écran montre que le mode Performance est sélectionné."
-            }
+            val objectif = if (mode == "equilibre")
+                "Dans le sélecteur des modes de batterie Xiaomi/HyperOS, sélectionne « Équilibré » (ou « Balanced »). Si nécessaire, ouvre d'abord « Mode actuel ». Ne choisis pas Performance ni Économiseur."
+            else
+                "Dans le sélecteur des modes de batterie Xiaomi/HyperOS, sélectionne « Mode performance » (ou « Performance mode »). Si nécessaire, ouvre d'abord « Mode actuel ». Termine uniquement lorsque le mode Performance est sélectionné."
             val resultat = PiloteEcran.piloter(app, objectif)
             val eco = economieActive(app)
             return when {
-                resultat.contains("termin", true) && mode == "economie" && eco ->
-                    "✅ Mode économie activé et vérifié par Android. $resultat"
-                resultat.contains("termin", true) && mode != "economie" && !eco ->
+                resultat.contains("termin", true) && !eco ->
                     "✅ Sélection du mode « $cible » effectuée dans HyperOS. L'état Battery Saver Android est désactivé. $resultat"
                 else -> "Sélecteur ouvert, mais le changement n'a pas pu être confirmé automatiquement. $resultat"
             }
         }
 
-        return when (mode) {
-            "economie" -> "Le sélecteur batterie est ouvert. Pour activer l'économie, touche « Économiseur de batterie ». Pour le pilotage vocal automatique, active l'accessibilité JARVIS et configure une clé Gemini."
-            "equilibre" -> "Le sélecteur batterie est ouvert. Choisis « Équilibré ». Android ne permet pas à une application ordinaire de forcer directement ce mode Xiaomi sans passer par l'interface HyperOS."
-            else -> "Le sélecteur batterie est ouvert. Choisis « Mode performance ». Ce mode peut augmenter la consommation et la température du téléphone."
-        }
+        return if (mode == "equilibre")
+            "Le sélecteur batterie est ouvert. Choisis « Équilibré ». Android ne permet pas à une application ordinaire de forcer directement ce mode Xiaomi sans passer par l'interface HyperOS."
+        else
+            "Le sélecteur batterie est ouvert. Choisis « Mode performance ». Ce mode peut augmenter la consommation et la température du téléphone."
     }
 }
