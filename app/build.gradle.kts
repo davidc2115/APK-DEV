@@ -94,6 +94,8 @@ dependencies {
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     implementation("androidx.work:work-runtime-ktx:2.9.0")
     implementation("com.google.android.gms:play-services-auth:21.2.0")
+    // Gemini Nano sur l’appareil via Android AICore.
+    implementation("com.google.mlkit:genai-prompt:1.0.0-beta4")
 
     // ADB intégré (Débogage sans fil) : droits « adb » sans installer Shizuku
     // Bibliothèques natives alignées sur 16 Ko (Android 15+/16 avec pages de 16 Ko : pas de mode de compatibilité ni
