@@ -98,9 +98,9 @@ class KeyRing(private val keys: () -> List<String>, private val quotaPartagee: B
 
         private val ATTENTE = Regex("(?:try again|retry) in ((?:\\d+h)?(?:\\d+m(?!s))?(?:\\d+(?:\\.\\d+)?s)?(?:\\d+ms)?)", RegexOption.IGNORE_CASE)
         private val DELAI_JSON = Regex("\"retryDelay\"\\s*:\\s*\"(\\d+(?:\\.\\d+)?)s\"")
-        private val JOUR = Regex("per ?day|PerDay|\\(TPD\\)|\\(RPD\\)|daily", RegexOption.IGNORE_CASE)
+        private val JOUR = Regex("per ?day|PerDay|\\(TPD\\)|\\(RPD\\)|\\bTPD\\b|\\bRPD\\b|daily|requests per day|tokens per day", RegexOption.IGNORE_CASE)
 
-        private val ENTETE = Regex("(?:^|[;\\\\s])([a-z0-9-]+)\\\\s*=\\\\s*([^;\\\\s]+)", RegexOption.IGNORE_CASE)
+        private val ENTETE = Regex("(?:^|[;\\s])([a-z0-9-]+)\\s*=\\s*([^;\\s]+)", RegexOption.IGNORE_CASE)
         private fun entete(message: String, nom: String): String? =
             ENTETE.findAll(message).firstOrNull { it.groupValues[1].equals(nom, true) }?.groupValues?.get(2)
 
