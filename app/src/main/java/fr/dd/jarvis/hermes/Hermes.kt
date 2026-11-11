@@ -678,10 +678,10 @@ object Routeur {
         val t = texte.trim()
         if (t.isBlank() || t.length > 350 || NOMME.containsMatchIn(t)) { bavardageJusqua = 0L; return false }
         val demandeAction = Regex(
-            "\\\\b(appelle|t[ée]l[ée]phone|sms|texto|envoie|r[ée]ponds? à|agenda|calendrier|planning|rendez.vous|rdv|" +
+            "(appelle|t[ée]l[ée]phone|sms|texto|envoie|r[ée]ponds? à|agenda|calendrier|planning|rendez.vous|rdv|" +
                 "allume|[ée]teins|ouvre|ferme|lance|r[ée]gle|modifie|change|cherche|recherche|trouve|t[ée]l[ée]charge|" +
                 "fichier|dossier|note|obsidian|freebox|vpn|port|gps|position|waze|home ?assistant|chauffage|poêle|" +
-                "automati|surveille|programme|installe|supprime|cr[ée]e|g[ée]n[èe]re|analyse|compare|explique|pourquoi|comment faire)\\\\b",
+                "automati|surveille|programme|installe|supprime|cr[ée]e|g[ée]n[èe]re|analyse|compare|explique|pourquoi|comment faire)",
             RegexOption.IGNORE_CASE
         )
         if (demandeAction.containsMatchIn(t) || ORCHESTRATION.containsMatchIn(t) || WEB.containsMatchIn(t)) {
