@@ -66,13 +66,29 @@ class Store(context: Context) {
     init {
         val secure = secretPrefs
         if (secure != null) {
-            listOf("geminiKeys", "groqKeys").forEach { key ->
+            listOf("geminiKeys", "groqKeys", "openaiKeys").forEach { key ->
                 val legacy = prefs.getString(key, null)
                 if (!legacy.isNullOrBlank()) {
                     val current = secure.getString(key, null)
                     val saved = if (current.isNullOrBlank()) secure.edit().putString(key, legacy).commit() else true
                     if (saved) prefs.edit().remove(key).commit()
                 }
+            }
+            // Suppression des anciens identifiants Google Flow : fournisseur retiré de JARVIS.
+            secure.edit().remove("googleFlowApiToken").commit()
+            prefs.edit().remove("googleFlowAccountEmail").remove("googleFlowModel").apply()
+            // Migration automatique des clés OpenAI déjà collées dans le champ Gemini.
+            // Écriture atomique : on ne retire les clés de Gemini que si leur copie chiffrée réussit.
+            val geminiRaw = secure.getString("geminiKeys", "").orEmpty()
+            val geminiList = geminiRaw.lines().map { it.trim() }.filter { it.isNotEmpty() }
+            val openAiFound = geminiList.filter(fr.dd.jarvis.ai.KeyRing::estCleOpenAi)
+            if (openAiFound.isNotEmpty()) {
+                val openAiCurrent = secure.getString("openaiKeys", "").orEmpty()
+                    .lines().map { it.trim() }.filter { it.isNotEmpty() }
+                val editor = secure.edit()
+                    .putString("openaiKeys", (openAiCurrent + openAiFound).distinct().joinToString(System.lineSeparator()))
+                    .putString("geminiKeys", geminiList.filterNot(fr.dd.jarvis.ai.KeyRing::estCleOpenAi).joinToString(System.lineSeparator()))
+                check(editor.commit()) { "Migration sécurisée des clés OpenAI impossible." }
             }
         }
     }
@@ -132,8 +148,10 @@ class Store(context: Context) {
     // ---- Cerveau (Groq) et agents (Gemini)
     val groqModel = SPref("groqModel", "llama-3.3-70b-versatile")
     val geminiModel = SPref("geminiModel", "gemini-3.8-flash")
+    val openaiModel = SPref("openaiModel", "gpt-4.1-mini")
     val groqKeys: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readApiKeyList("groqKeys")) }
     val geminiKeys: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readApiKeyList("geminiKeys")) }
+    val openaiKeys: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readApiKeyList("openaiKeys")) }
 
     // ---- Serveur personnel : SSH + Home Assistant
     val haUrl = SPref("haUrl", "")
@@ -219,7 +237,21 @@ class Store(context: Context) {
         externalProviderIds.filter { externalProviderKey(it).isNotBlank() }
 
     fun addGroqKeys(raw: String) = addApiKeys(groqKeys, "groqKeys", raw)
-    fun addGeminiKeys(raw: String) = addApiKeys(geminiKeys, "geminiKeys", raw)
+    /** Les clés OpenAI reconnues dans le champ Gemini sont automatiquement rangées ici. */
+    fun addGeminiKeys(raw: String) {
+        val parts = raw.split(Regex("[\\s,;]+")).map { it.trim() }.filter { it.length >= 8 }.distinct()
+        val openAi = parts.filter(fr.dd.jarvis.ai.KeyRing::estCleOpenAi)
+        val google = parts.filterNot(fr.dd.jarvis.ai.KeyRing::estCleOpenAi)
+        if (google.isNotEmpty()) addApiKeys(geminiKeys, "geminiKeys", google.joinToString("\n"))
+        if (openAi.isNotEmpty()) addApiKeys(openaiKeys, "openaiKeys", openAi.joinToString("\n"))
+    }
+    fun addOpenAiKeys(raw: String) = addApiKeys(openaiKeys, "openaiKeys", raw)
+    fun removeOpenAiKey(i: Int) {
+        if (i !in openaiKeys.indices) return
+        val updated = openaiKeys.toList().toMutableList().also { it.removeAt(i) }
+        writeApiKeyList("openaiKeys", updated)
+        openaiKeys.removeAt(i)
+    }
     fun removeGroqKey(i: Int) {
         if (i !in groqKeys.indices) return
         val updated = groqKeys.toList().toMutableList().also { it.removeAt(i) }
@@ -393,10 +425,7 @@ class Store(context: Context) {
     // maintenant un abonnement payant ("Pollen") même pour la vidéo — plus utilisable gratuitement.
     val huggingFaceToken = SPref("huggingFaceToken", "")
     val falApiKey = SecretPref("falApiKey")
-    val googleFlowApiToken = SecretPref("googleFlowApiToken")
     val dreaminaApiKey = SecretPref("dreaminaApiKey")
-    val googleFlowAccountEmail = SPref("googleFlowAccountEmail", "")
-    val googleFlowModel = SPref("googleFlowModel", "veo-3.1-fast")
     val dreaminaModel = SPref("dreaminaModel", "seedance-1-5-pro-251215")
     // ---- Worker Cloudflare personnel pour animer une image avec Wan 2.2 (sans token Hugging Face côté Android)
     val imageVideoWorkerUrl = SPref("imageVideoWorkerUrl", "")

@@ -409,7 +409,7 @@ class ToolBox(
             ), listOf("action")))
         put(tool("voir_ecran", "REGARDE l'écran du téléphone (capture réelle analysée par la vision Gemini) : ce qui est affiché, l'application ouverte, l'état (lecture en cours, erreur, formulaire…) et réponse à une question précise. La capture est jointe dans la conversation.",
             mapOf("question" to prop("Ce qu'il faut vérifier ou décrire (optionnel).")), emptyList()))
-        put(tool("piloter_telephone", "CONTRÔLE COMPLET du téléphone : Jarvis voit l'écran et agit dans N'IMPORTE QUELLE application comme une personne (ouvrir l'appli, chercher, appuyer sur les boutons, saisir du texte, faire défiler, fermer les pop-ups…), en vérifiant visuellement après chaque geste, jusqu'à atteindre l'objectif ; capture finale jointe. À utiliser quand une action n'a pas d'outil dédié, ou pour terminer/vérifier une action qui n'a pas abouti. Les envois, paiements, suppressions et appels non demandés explicitement sont soumis à confirmation.",
+        put(tool("piloter_telephone", "CONTRÔLE COMPLET du téléphone pour les actions sans outil dédié. Jarvis voit l’écran et agit dans les applications, en vérifiant visuellement chaque geste.",
             mapOf("objectif" to prop("Ce qu'il faut obtenir à l'écran, précis et complet (ex. « dans Spotify, lance l'album Discovery de Daft Punk et vérifie que la lecture a démarré »)."),
                 "application" to prop("Application à ouvrir d'abord (optionnel).")), listOf("objectif")))
         put(tool("run_shell", "Exécute une commande shell sur le téléphone via adb/Shizuku (réservé aux besoins que phone_action ne couvre pas).",

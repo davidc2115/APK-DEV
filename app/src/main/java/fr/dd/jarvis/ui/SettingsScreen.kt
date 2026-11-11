@@ -105,9 +105,6 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 Text("Téléphone posé en charge, JARVIS ouvert et plus touché depuis 45 s : le dragon passe en plein écran. Si l'option verrouillage est activée, JARVIS demande à Android d'afficher l'activité au-dessus du verrouillage, de réveiller l'écran à son affichage et de le garder allumé pendant le mode présence. Ouvre d'abord le mode présence avant de verrouiller. Le bouton Marche/Arrêt reste prioritaire : Android peut éteindre l'écran lorsqu'il est pressé, et HyperOS peut limiter l'affichage. Désactive l'option ici à tout moment.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
             }
         },
-        VoletReglages("general", "batterie", "Batterie & vitesse", "batterie economie energie performance vitesse rapide lent animations hermes analyse gemini") {
-            PerformancePanel(app)
-        },
         VoletReglages("general", "batterie", "Fonctionnement en arrière-plan", "arriere plan xiaomi hyperos demarrage automatique optimisation batterie restriction") {
             HudPanel(Modifier.fillMaxWidth(), title = "Fonctionnement en arrière-plan (écran éteint, appli fermée)") {
                 var tArr by remember { mutableStateOf(0) }
@@ -318,7 +315,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
         VoletReglages("ia", "cles", "Clés Gemini", "gemini cles api modele agents rotation") {
             KeyPanel(
                 title = "Agents — clés Gemini (rotation automatique)",
-                hint = "Utilisées pour le planning, les mails et les contacts. Sans clé Gemini, les agents utilisent Groq.",
+                hint = "Utilisées pour le planning, les mails et les contacts. Si tu colles ici une clé OpenAI (sk-…), Jarvis la rangera automatiquement dans la rubrique OpenAI.",
                 keys = store.geminiKeys,
                 onAdd = {
                     if (store.apiKeysSecureAvailable) {
@@ -335,6 +332,31 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 onTest = { app.llm.testGeminiKeys() },
                 modelLabel = "Modèle Gemini", model = store.geminiModel.value, onModel = { store.geminiModel.set(it) },
                 onListModels = { app.llm.listGeminiModels() }
+            )
+        },
+        VoletReglages("ia", "cles", "Clés OpenAI", "openai clé api modèle chat gpt rotation fournisseur") {
+            if (!store.apiKeysSecureAvailable) {
+                Text("⚠️ Stockage chiffré Android indisponible : les clés OpenAI ne peuvent pas être modifiées.", color = Color(0xFFFFB74D), fontSize = 12.sp)
+            }
+            KeyPanel(
+                title = "OpenAI — fournisseur IA (rotation automatique)",
+                hint = "Clés API de la plateforme OpenAI. Elles sont distinctes d'un abonnement ChatGPT et peuvent entraîner une facturation API.",
+                keys = store.openaiKeys,
+                onAdd = {
+                    if (store.apiKeysSecureAvailable) {
+                        store.addOpenAiKeys(it)
+                        if (store.hermesInstalle.value) fr.dd.jarvis.hermes.HermesTermux.synchroniserCles(app)
+                    }
+                },
+                onRemove = {
+                    if (store.apiKeysSecureAvailable) {
+                        store.removeOpenAiKey(it)
+                        if (store.hermesInstalle.value) fr.dd.jarvis.hermes.HermesTermux.synchroniserCles(app)
+                    }
+                },
+                onTest = { app.llm.testOpenAiKeys() },
+                modelLabel = "Modèle OpenAI", model = store.openaiModel.value, onModel = { store.openaiModel.set(it) },
+                onListModels = { app.llm.listOpenAiModels() }
             )
         },
         VoletReglages("ia", "hermes", "Hermès", "hermes termux cerveau principal installer configurer demarrer repartition mode adulte modele vitesse") {
@@ -1480,6 +1502,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 })
                 AgentStatusRow("Groq · " + store.groqModel.value, store.groqKeys.isNotEmpty(), "${store.groqKeys.size} clé(s)")
                 AgentStatusRow("Gemini · " + store.geminiModel.value, store.geminiKeys.isNotEmpty(), "${store.geminiKeys.size} clé(s)")
+                AgentStatusRow("OpenAI · " + store.openaiModel.value, store.openaiKeys.isNotEmpty(), "${store.openaiKeys.size} clé(s)")
                 AgentStatusRow("Cloudflare Workers AI", store.cfAccounts.isNotEmpty(), "${store.cfAccounts.size} compte(s)")
                 AgentStatusRow("Ollama · serveur de la maison (secours)", fr.dd.jarvis.ai.Ollama.configure(app), if (fr.dd.jarvis.ai.Ollama.configure(app)) fr.dd.jarvis.ai.Ollama.etat else "désactivé ou sans adresse")
                 AgentStatusRow("fal.ai · vidéo", store.falApiKey.value.isNotBlank(), if (store.falApiKey.value.isNotBlank()) "clé configurée" else "non configuré")
@@ -1977,15 +2000,6 @@ private fun PollinationsPanel(store: fr.dd.jarvis.data.Store) {
     HudPanel(Modifier.fillMaxWidth(), title = "Vidéo IA — fournisseurs") {
         Text("Clés conservées dans le stockage chiffré Android. Les générations peuvent consommer des crédits ou l'abonnement du fournisseur.", color = HudDim, fontSize = 12.sp)
         Spacer(Modifier.height(8.dp))
-        Text("Google Flow — UseAPI (service tiers, non affilié à Google)", color = HudText, fontSize = 13.sp)
-        Text("Jeton UseAPI et compte Flow associé nécessaires. Les crédits Flow de ton compte Google sont utilisés.", color = HudDim, fontSize = 11.sp)
-        HudTextField(store.googleFlowApiToken.value, { v -> runCatching { store.googleFlowApiToken.set(v.trim()) } }, Modifier.fillMaxWidth(), label = "Clé API UseAPI", password = true)
-        HudTextField(store.googleFlowAccountEmail.value, { store.googleFlowAccountEmail.set(it.trim()) }, Modifier.fillMaxWidth(), label = "E-mail compte Flow (facultatif)")
-        HudTextField(store.googleFlowModel.value, { store.googleFlowModel.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Modèle Flow", placeholder = "veo-3.1-fast")
-        Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            HudButton("Gérer le jeton UseAPI") { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://useapi.net/account")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
-            HudButton("Effacer Flow") { store.googleFlowApiToken.clear() }
-        }
         Spacer(Modifier.height(12.dp))
         Text("Dreamina — BytePlus ModelArk (API officielle)", color = HudText, fontSize = 13.sp)
         Text("Le modèle Seedance doit être activé et disposer de crédits ou d'un forfait compatible.", color = HudDim, fontSize = 11.sp)
@@ -2001,7 +2015,7 @@ private fun PollinationsPanel(store: fr.dd.jarvis.data.Store) {
         Text("Créer un token Hugging Face", color = HudDim, fontSize = 12.sp, modifier = Modifier.clickable {
             ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://huggingface.co/settings/tokens")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
         })
-        Text("Ordre prévu : Hugging Face gratuit, puis Flow, puis Dreamina. Dreamina peut facturer les générations. fal.ai reste disponible pour l'animation d'image.", color = HudDim, fontSize = 11.sp)
+        Text("Ordre vidéo : Hugging Face (quota gratuit limité), puis Gemini Omni si le projet dispose d’un quota vidéo, puis Dreamina. Dreamina peut facturer les générations. fal.ai reste disponible pour l’animation d’image.", color = HudDim, fontSize = 11.sp)
     }
 }
 

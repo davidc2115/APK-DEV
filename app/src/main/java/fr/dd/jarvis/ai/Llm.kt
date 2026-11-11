@@ -19,8 +19,10 @@ import org.json.JSONObject
  */
 class Llm(private val store: Store) {
     val groqRing = KeyRing { store.groqKeys.toList() }
-    private val geminiRing = KeyRing { store.geminiKeys.toList() }
+    private val geminiRing = KeyRing { store.geminiKeys.toList().filterNot(KeyRing::estCleOpenAi) }
+    val openaiRing = KeyRing { store.openaiKeys.toList() }
     val groq = GroqClient(groqRing) { store.groqModel.value }
+    val openai = OpenAiClient(openaiRing) { store.openaiModel.value }
 
     /** (clés, en pause, refus de quota dans la dernière heure) — tableau de santé. */
     fun etatGemini() = Triple(geminiRing.count(), geminiRing.pausedCount(), geminiRing.quotasDerniereHeure())
@@ -39,12 +41,15 @@ class Llm(private val store: Store) {
         val g = groqRing.count()
         val m = geminiRing.count()
         val c = store.cfAccounts.count { it.contains(':') }
+        val o = openaiRing.count()
         return "Groq $g clé(s)" + (if (groqRing.pausedCount() > 0) " (${groqRing.pausedCount()} en pause)" else "") +
             " · Gemini $m clé(s)" + (if (geminiRing.pausedCount() > 0) " (${geminiRing.pausedCount()} en pause)" else "") +
+            " · OpenAI $o clé(s)" + (if (openaiRing.pausedCount() > 0) " (${openaiRing.pausedCount()} en pause)" else "") +
+            store.geminiKeys.count(KeyRing::estCleOpenAi).takeIf { it > 0 }?.let { "\n⚠️ $it clé(s) au format OpenAI (sk-…) sont enregistrées dans Gemini : conservées, mais exclues des appels Google." }.orEmpty() +
             " · Cloudflare $c compte(s)" + (cloudflare.etat().second.takeIf { it > 0 }?.let { " ($it en pause)" } ?: "") +
             groqRing.refuseesMasquees().takeIf { it.isNotEmpty() }?.let { "\n⚠️ Clé(s) Groq refusée(s) par Groq (invalides ou révoquées) : ${it.joinToString(", ")} — remplace-les" } .orEmpty() +
             geminiRing.refuseesMasquees().takeIf { it.isNotEmpty() }?.let { "\n⚠️ Clé(s) Gemini refusée(s) : ${it.joinToString(", ")}" }.orEmpty() +
-            "\nOrdre : Ollama (si actif) → Groq → Gemini → Cloudflare" +
+            "\nOrdre : Ollama (si actif) → Groq → Gemini → OpenAI → Cloudflare" +
             (if (dernierRelais > 0 && System.currentTimeMillis() - dernierRelais < 3_600_000L) " · dernier relais : $dernierFournisseur à " +
                 java.text.SimpleDateFormat("HH:mm", java.util.Locale.FRANCE).format(java.util.Date(dernierRelais)) else "")
     }
@@ -79,6 +84,12 @@ class Llm(private val store: Store) {
             } catch (e: Exception) {
                 errors += "Gemini : " + (e.message ?: e.javaClass.simpleName).take(160)
             }
+        }
+        if (openaiRing.count() > 0) {
+            try {
+                return openai.plain(system, user).ifBlank { throw IllegalStateException("réponse vide") }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { errors += "OpenAI : " + (e.message ?: e.javaClass.simpleName).take(160) }
         }
         if (groqRing.count() > 0) {
             try {
@@ -168,6 +179,13 @@ class Llm(private val store: Store) {
                 erreurs += "Gemini : " + (e.message ?: e.javaClass.simpleName).take(140)
             }
         }
+        if (openai.disponible()) {
+            try {
+                return openai.chat(messages, tools, 1800, forceText).also { noterRelais("OpenAI") }
+            } catch (e: CancellationException) { throw e } catch (e: Exception) {
+                erreurs += "OpenAI : " + (e.message ?: e.javaClass.simpleName).take(140)
+            }
+        }
         if (cloudflare.disponible()) {
             try {
                 val (m, t) = cloudflareCompact ?: (messages to tools)
@@ -219,7 +237,8 @@ class Llm(private val store: Store) {
     }
 
     suspend fun listGroqModels(): List<String> = firstKey(store.groqKeys.toList()) { groq.listModels(it) }
-    suspend fun listGeminiModels(): List<String> = firstKey(store.geminiKeys.toList()) { gemini.listModels(it) }
+    suspend fun listGeminiModels(): List<String> = firstKey(store.geminiKeys.toList().filterNot(KeyRing::estCleOpenAi)) { gemini.listModels(it) }
+    suspend fun listOpenAiModels(): List<String> = firstKey(store.openaiKeys.toList()) { openai.listModels(it) }
 
     private suspend fun <T> firstKey(keys: List<String>, f: suspend (String) -> T): T {
         var last: Exception = IllegalStateException("Aucune clé configurée")
@@ -256,7 +275,16 @@ class Llm(private val store: Store) {
         }
     }
 
+    suspend fun testOpenAiKeys(): List<String> = store.openaiKeys.toList().map { k ->
+        mask(k) + " : " + try {
+            val t0 = System.currentTimeMillis(); openai.ping(k); "✅ OK (${System.currentTimeMillis() - t0} ms)"
+        } catch (e: Exception) {
+            "❌ " + (e.message ?: "erreur").take(90)
+        }
+    }
+
     suspend fun testGeminiKeys(): List<String> = store.geminiKeys.toList().map { k ->
+        if (KeyRing.estCleOpenAi(k)) return@map mask(k) + " : ⚠️ CLÉ OPENAI — non envoyée à Gemini"
         mask(k) + " : " + try {
             val t0 = System.currentTimeMillis(); gemini.ping(k); "✅ OK (${System.currentTimeMillis() - t0} ms)"
         } catch (e: Exception) {
@@ -273,7 +301,7 @@ class Llm(private val store: Store) {
     suspend fun testerClesApi(fournisseurRaw: String = "tous"): String {
         val alias = mapOf("all" to "tous", "tout" to "tous", "toutes" to "tous", "google" to "gemini", "hf" to "huggingface", "hugging face" to "huggingface", "cloudflare workers ai" to "cloudflare", "workers ai" to "cloudflare", "z.ai" to "zai")
         val fournisseur = alias[fournisseurRaw.trim().lowercase()] ?: fournisseurRaw.trim().lowercase().ifBlank { "tous" }
-        val connus = setOf("tous", "groq", "gemini", "cloudflare", "zai", "openrouter", "nvidia", "mistral", "huggingface", "ollama")
+        val connus = setOf("tous", "groq", "gemini", "openai", "cloudflare", "zai", "openrouter", "nvidia", "mistral", "huggingface", "ollama")
         if (fournisseur !in connus) return "Fournisseur inconnu. Choix : tous, Groq, Gemini, Cloudflare, Z.ai, OpenRouter, NVIDIA, Mistral, Hugging Face ou Ollama."
 
         val resultats = mutableListOf<Pair<Boolean, String>>()
@@ -311,6 +339,10 @@ class Llm(private val store: Store) {
 
         if (fournisseur == "tous" || fournisseur == "gemini") {
             for ((i, key) in store.geminiKeys.toList().withIndex()) {
+                if (KeyRing.estCleOpenAi(key)) {
+                    resultats.add(false to "Gemini #${i + 1} (${mask(key)}) — ⚠️ FORMAT OPENAI : clé conservée, exclue des appels Gemini")
+                    continue
+                }
                 verifier("Gemini #${i + 1} (${mask(key)})") {
                     val modele = store.geminiModel.value
                     try {
@@ -319,6 +351,22 @@ class Llm(private val store: Store) {
                     } catch (e: ApiException) {
                         if (e.code != 400 && e.code != 404) throw e
                         val modeles = gemini.listModels(key)
+                        "⚠️ CLÉ ACCEPTÉE — ${modeles.size} modèles accessibles, mais le modèle configuré « $modele » est refusé"
+                    }
+                }
+            }
+        }
+
+        if (fournisseur == "tous" || fournisseur == "openai") {
+            for ((i, key) in store.openaiKeys.toList().withIndex()) {
+                verifier("OpenAI #${i + 1} (${mask(key)})") {
+                    val modele = store.openaiModel.value
+                    try {
+                        openai.ping(key)
+                        "✅ VALIDÉ — clé, modèle « $modele » et appel de test acceptés"
+                    } catch (e: ApiException) {
+                        if (e.code != 400 && e.code != 404) throw e
+                        val modeles = openai.listModels(key)
                         "⚠️ CLÉ ACCEPTÉE — ${modeles.size} modèles accessibles, mais le modèle configuré « $modele » est refusé"
                     }
                 }
