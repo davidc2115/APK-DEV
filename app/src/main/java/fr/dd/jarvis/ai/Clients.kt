@@ -73,7 +73,7 @@ class GroqClient(private val ring: KeyRing, private val model: () -> String) {
     private fun infosLimites(resp: okhttp3.Response): String {
         val noms = listOf("retry-after", "x-ratelimit-remaining-requests", "x-ratelimit-reset-requests", "x-ratelimit-remaining-tokens", "x-ratelimit-reset-tokens")
         val valeurs = noms.mapNotNull { nom -> resp.header(nom)?.let { "$nom=$it" } }
-        return if (valeurs.isEmpty()) "" else " [${valeurs.joinToString("; ")}]"
+        return if (valeurs.isEmpty()) "" else " rate-limit: ${valeurs.joinToString("; ")}"
     }
 
     private fun call(key: String, messages: JSONArray, tools: JSONArray?, maxTokens: Int, client: okhttp3.OkHttpClient = Http.client, out: Int = 2048, forceText: Boolean = false): JSONObject {
