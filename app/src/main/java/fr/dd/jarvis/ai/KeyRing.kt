@@ -100,6 +100,32 @@ class KeyRing(private val keys: () -> List<String>, private val quotaPartagee: B
         private val DELAI_JSON = Regex("\"retryDelay\"\\s*:\\s*\"(\\d+(?:\\.\\d+)?)s\"")
         private val JOUR = Regex("per ?day|PerDay|\\(TPD\\)|\\(RPD\\)|daily", RegexOption.IGNORE_CASE)
 
+        private val ENTETE = Regex("(?:^|[;\\\\s])([a-z0-9-]+)\\\\s*=\\\\s*([^;\\\\s]+)", RegexOption.IGNORE_CASE)
+        private fun entete(message: String, nom: String): String? =
+            ENTETE.findAll(message).firstOrNull { it.groupValues[1].equals(nom, true) }?.groupValues?.get(2)
+
+        /** Groq : reset-requests correspond au quota journalier, reset-tokens au quota par minute. */
+        internal fun pauseGroq(code: Int, message: String, maintenant: Long = System.currentTimeMillis()): Long? {
+            if (code != 429) return pause(code, message, maintenant)
+            val retry = entete(message, "retry-after")?.toDoubleOrNull()?.let { (it * 1000).toLong() }
+            if (retry != null && retry > 0) return (retry + 1000).coerceIn(5_000L, 24 * 3_600_000L)
+            val reqRestantes = entete(message, "x-ratelimit-remaining-requests")?.toLongOrNull()
+            val tokRestants = entete(message, "x-ratelimit-remaining-tokens")?.toLongOrNull()
+            val reset = when {
+                reqRestantes == 0L -> entete(message, "x-ratelimit-reset-requests")
+                tokRestants == 0L -> entete(message, "x-ratelimit-reset-tokens")
+                else -> entete(message, "x-ratelimit-reset-tokens") ?: entete(message, "x-ratelimit-reset-requests")
+            }
+            val delai = reset?.let { duree(it) }?.takeIf { it > 0 }
+            if (delai != null) return (delai + 1500L).coerceIn(5_000L, 24 * 3_600_000L)
+            if (JOUR.containsMatchIn(message) || reqRestantes == 0L) {
+                val utc = java.time.ZoneOffset.UTC
+                val minuit = java.time.ZonedDateTime.ofInstant(java.time.Instant.ofEpochMilli(maintenant), utc).toLocalDate().plusDays(1).atStartOfDay(utc).toInstant().toEpochMilli()
+                return (minuit - maintenant).coerceIn(60_000L, 24 * 3_600_000L)
+            }
+            return 5 * 60_000L
+        }
+
         /** Durée (ms) d'une expression « 1h2m3.5s », « 7m30s », « 41.2s », « 450ms ». */
         internal fun duree(t: String): Long {
             var ms = 0.0
