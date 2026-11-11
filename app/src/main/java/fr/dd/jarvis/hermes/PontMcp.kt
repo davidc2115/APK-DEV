@@ -446,7 +446,7 @@ object PontMcp {
         val prioritaires = listOf(
             // Petit noyau toujours visible : contrôle du téléphone, métier, musique, réseau et coffre.
             // Le catalogue complet reste interrogeable instantanément avec jarvis_rechercher_outils.
-            "phone_action", "piloter_telephone", "voir_ecran", "phone_health_report",
+            "phone_power_mode", "phone_action", "piloter_telephone", "voir_ecran", "phone_health_report",
             "societe_liste", "client_fiche", "client_ecrire", "clients_gps",
             "interventions_liste", "intervention_supprimer", "intervention_modifier", "installation_supprimer",
             "musique_rechercher", "musique_etat", "musique_commander", "jouer_musique",
@@ -470,7 +470,7 @@ object PontMcp {
         // L'équipe d'Hermès : l'agent téléphone (Jarvis) et le canal vers l'utilisateur. Toujours en tête de liste.
         out.put(JSONObject()
             .put("name", "agent")
-            .put("description", "AGENT TÉLÉPHONE JARVIS — à privilégier pour toute action ou recherche sur le téléphone et les données de l'utilisateur : fichiers et dossiers (coffre Obsidian + stockage), clients/devis/factures/interventions, agenda, mails, SMS, appels, contacts, musique, Freebox, domotique, position GPS, images, vidéos, réglages. Donne une consigne complète et autonome en français (une étape ou un petit enchaînement) ; Jarvis l'exécute avec ses outils natifs et renvoie le résultat réel. Ne cherche jamais ces données dans ton propre système de fichiers.")
+            .put("description", "AGENT TÉLÉPHONE JARVIS — à privilégier pour toute action ou recherche sur le téléphone et les données de l'utilisateur : fichiers et dossiers (coffre Obsidian + stockage), clients/devis/factures/interventions, agenda, mails, SMS, appels, contacts, musique, Freebox, domotique, position GPS, images, vidéos, réglages. Pour activer ou désactiver l'économie d'énergie, appelle EXCLUSIVEMENT phone_power_mode avec mode=economie ou etat ; INTERDICTION d'utiliser piloter_telephone, phone_action, voir_ecran ou un clic d'accessibilité pour cette demande. Donne une consigne complète et autonome en français ; Jarvis l'exécute avec ses outils natifs et renvoie le résultat réel. Ne cherche jamais ces données dans ton propre système de fichiers.")
             .put("inputSchema", JSONObject().put("type", "object").put("properties", JSONObject()
                 .put("demande", JSONObject().put("type", "string").put("description", "Consigne à exécuter, formulée comme l'utilisateur la dirait à Jarvis (ex. « trouve le dossier coloriage pompier », « ajoute un rendez-vous demain 9h chez Martin »)"))
                 .put("contexte", JSONObject().put("type", "string").put("description", "Informations utiles déjà connues (facultatif)")))
