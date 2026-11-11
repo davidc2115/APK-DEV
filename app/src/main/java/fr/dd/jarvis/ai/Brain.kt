@@ -100,9 +100,11 @@ class Brain(
             append("\nRéponds au dernier message de l'utilisateur.")
         }.take(6500)
         GeminiNanoLocal.repondre(promptNano)?.let { return it }
-        return try {
+        val cloud = try {
             app.llm.groqChat(msgs, null, forceText = true).optString("content").trim().takeIf { it.isNotBlank() }
-        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { null }
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
+        // Dernier recours strictement local : ne jamais laisser un bavardage simple tomber dans la chaîne Hermès.
+        return cloud ?: "Ça va bien, merci ! Et toi, comment se passe ta journée ?"
     }
 
     private fun escaladePossible(pourHermes: Boolean, suivi: Suivi) = !pourHermes && !suivi.hermesEssaye &&
@@ -149,11 +151,12 @@ class Brain(
             }
         }
         // Conversation simple (« salut », « comment ça va ? », « merci ») : réponse immédiate, un seul appel d'IA, sans outils ni Hermès.
-        if (!pourHermes && !multi && (fr.dd.jarvis.hermes.Routeur.bavardage(texteUser) || fr.dd.jarvis.hermes.Routeur.suiteBavardage(texteUser))) {
-            conversationRapide(history, onStatus)?.let {
-                fr.dd.jarvis.hermes.Routeur.marquerBavardage()
-                return reflexe(it)
-            }
+        // Le bavardage utilisateur est prioritaire sur le mode « Hermès pour tout » :
+        // une conversation sociale ne doit jamais être escaladée vers Hermès.
+        if (!multi && (fr.dd.jarvis.hermes.Routeur.bavardage(texteUser) || fr.dd.jarvis.hermes.Routeur.suiteBavardage(texteUser))) {
+            val reponse = conversationRapide(history, onStatus)
+            fr.dd.jarvis.hermes.Routeur.marquerBavardage()
+            return reflexe(reponse)
         }
         // Hermès, cerveau principal (mode « tout » : toutes les autres demandes ; mode « auto » : les tâches complexes).
         // S'il est indisponible, Jarvis reprend la main avec ses outils.
