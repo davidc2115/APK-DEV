@@ -154,7 +154,7 @@ class Brain(
         // Le bavardage utilisateur est prioritaire sur le mode « Hermès pour tout » :
         // une conversation sociale ne doit jamais être escaladée vers Hermès.
         if (!multi && (fr.dd.jarvis.hermes.Routeur.bavardage(texteUser) || fr.dd.jarvis.hermes.Routeur.suiteBavardage(texteUser))) {
-            val reponse = conversationRapide(history, onStatus)
+            val reponse = conversationRapide(history, onStatus) ?: "Ça va bien, merci ! Et toi, comment se passe ta journée ?"
             fr.dd.jarvis.hermes.Routeur.marquerBavardage()
             return reflexe(reponse)
         }
