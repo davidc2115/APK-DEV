@@ -11,10 +11,9 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
-import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
-/** Génération vidéo : Gemini Omni 1.2 Flash (clé Gemini existante), puis Flow/UseAPI et Dreamina/BytePlus. */
+/** Génération vidéo de secours : Gemini Omni (si quota disponible), puis Dreamina/BytePlus. */
 object VideoProviderGen {
     private val http = OkHttpClient.Builder().connectTimeout(25, TimeUnit.SECONDS).readTimeout(45, TimeUnit.SECONDS).callTimeout(55, TimeUnit.SECONDS).build()
     private val geminiHttp = OkHttpClient.Builder()
@@ -24,10 +23,9 @@ object VideoProviderGen {
         .build()
     private val jsonType = "application/json; charset=utf-8".toMediaType()
 
-    fun flowDisponible(app: JarvisApp) = app.store.googleFlowApiToken.value.isNotBlank()
     fun dreaminaDisponible(app: JarvisApp) = app.store.dreaminaApiKey.value.isNotBlank()
     fun geminiDisponible(app: JarvisApp) = app.store.geminiKeys.any { !KeyRing.estCleOpenAi(it) }
-    fun disponible(app: JarvisApp) = geminiDisponible(app) || flowDisponible(app) || dreaminaDisponible(app)
+    fun disponible(app: JarvisApp) = geminiDisponible(app) || dreaminaDisponible(app)
 
     /** Gemini Omni 1.2 est essayé en premier avec les clés Google déjà enregistrées dans Réglages. */
     suspend fun genererClipSecours(app: JarvisApp, prompt: String, duration: Int, vertical: Boolean): ByteArray? {
@@ -36,11 +34,6 @@ object VideoProviderGen {
             try { return genererGemini(app, prompt, duration, vertical) }
             catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (e: Exception) { erreurs += "Gemini Omni : " + (e.message ?: e.javaClass.simpleName) }
-        }
-        if (flowDisponible(app)) {
-            try { return genererFlow(app, prompt, duration, vertical) }
-            catch (e: kotlinx.coroutines.CancellationException) { throw e }
-            catch (e: Exception) { erreurs += "Flow : " + (e.message ?: e.javaClass.simpleName) }
         }
         if (dreaminaDisponible(app)) {
             try { return genererDreamina(app, prompt, duration, vertical) }
@@ -112,38 +105,6 @@ object VideoProviderGen {
             }
         }
         throw IllegalStateException("Toutes les clés Gemini ont échoué : " + failures.joinToString(" ; "))
-    }
-
-    private suspend fun genererFlow(app: JarvisApp, prompt: String, duration: Int, vertical: Boolean): ByteArray = withContext(Dispatchers.IO) {
-        val token = app.store.googleFlowApiToken.value.trim()
-        val payload = JSONObject()
-            .put("prompt", prompt)
-            .put("model", app.store.googleFlowModel.value.trim().ifBlank { "veo-3.1-fast" })
-            .put("aspectRatio", if (vertical) "portrait" else "landscape")
-            .put("duration", duration.coerceIn(4, 8))
-            .put("async", true)
-        app.store.googleFlowAccountEmail.value.trim().takeIf { it.isNotBlank() }?.let { payload.put("email", it) }
-        val submitted = requestJson("POST", "https://api.useapi.net/v1/google-flow/videos", token, payload)
-        val jobId = submitted.optString("jobid").ifBlank { submitted.optString("jobId") }
-        if (jobId.isBlank()) {
-            val directUrl = submitted.optJSONArray("media")?.optJSONObject(0)?.optString("videoUrl").orEmpty()
-            if (directUrl.isNotBlank()) return@withContext download(directUrl)
-            throw IllegalStateException("UseAPI n'a pas renvoyé d'identifiant de tâche.")
-        }
-        repeat(90) {
-            delay(4000)
-            val status = requestJson("GET", "https://api.useapi.net/v1/google-flow/jobs/" + jobId, token)
-            when (status.optString("status").lowercase()) {
-                "completed", "success", "succeeded" -> {
-                    val response = status.optJSONObject("response") ?: status
-                    val url = response.optJSONArray("media")?.optJSONObject(0)?.optString("videoUrl").orEmpty()
-                    if (url.isBlank()) throw IllegalStateException("Flow a terminé sans fournir d'URL vidéo.")
-                    return@withContext download(url)
-                }
-                "failed", "error", "cancelled" -> throw IllegalStateException(status.optString("error").ifBlank { "La génération Flow a échoué." })
-            }
-        }
-        throw IllegalStateException("Délai dépassé pendant la génération Google Flow.")
     }
 
     private suspend fun genererDreamina(app: JarvisApp, prompt: String, duration: Int, vertical: Boolean): ByteArray = withContext(Dispatchers.IO) {
