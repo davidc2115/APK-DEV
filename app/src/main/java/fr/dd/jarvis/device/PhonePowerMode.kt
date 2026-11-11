@@ -119,9 +119,11 @@ object PhonePowerMode {
                 return "✅ Mode économie activé directement par ADB/Shizuku et confirmé par PowerManager Android. Certaines activités en arrière-plan et synchronisations peuvent être réduites."
             }
             val detail = shell.take(220).ifBlank { "La commande n'a pas renvoyé de détail." }
-            return "❌ Android ne confirme pas l'activation du mode économie. Réponse ADB/Shizuku : $detail. Aucun pilotage de l'écran n'a été tenté."
+            // IMPORTANT : ne jamais poursuivre vers HyperOS/PiloteEcran pour l'économie.
+            return "❌ Android ne confirme pas l'activation du mode économie. Réponse ADB/Shizuku : $detail. Aucun écran n'a été ouvert et aucun pilotage du téléphone n'a été lancé."
         }
 
+        // Seuls les modes Xiaomi propriétaires Équilibré/Performance utilisent le sélecteur.
         val ouverture = ouvrirSelecteur(app)
         if (ouverture.startsWith("Impossible")) return ouverture
 
