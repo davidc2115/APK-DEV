@@ -41,7 +41,7 @@ class GroqClient(private val ring: KeyRing, private val model: () -> String) {
                 Http.client.newCall(req).execute().use { r ->
                     val t = r.body?.string().orEmpty()
                     if (r.isSuccessful) return@withContext JSONObject(t).optString("text").trim()
-                    val e = ApiException(r.code, "Groq ${r.code} : ${t.take(200)}")
+                    val e = ApiException(r.code, "Groq ${r.code} : ${t.take(200)}${if (r.code == 429) infosLimites(r) else ""}")
                     // Modèle retiré ou refusé : on tente le suivant ; quota / clé : on laisse l'anneau changer de clé.
                     if (r.code != 400 && r.code != 404) throw e
                     derniere = e
@@ -68,6 +68,12 @@ class GroqClient(private val ring: KeyRing, private val model: () -> String) {
                 .filter { id -> listOf("whisper", "orpheus", "guard", "safeguard", "tts", "embed").none { id.contains(it, true) } }
                 .sorted()
         }
+    }
+
+    private fun infosLimites(resp: okhttp3.Response): String {
+        val noms = listOf("retry-after", "x-ratelimit-remaining-requests", "x-ratelimit-reset-requests", "x-ratelimit-remaining-tokens", "x-ratelimit-reset-tokens")
+        val valeurs = noms.mapNotNull { nom -> resp.header(nom)?.let { "$nom=$it" } }
+        return if (valeurs.isEmpty()) "" else " [${valeurs.joinToString("; ")}]"
     }
 
     private fun call(key: String, messages: JSONArray, tools: JSONArray?, maxTokens: Int, client: okhttp3.OkHttpClient = Http.client, out: Int = 2048, forceText: Boolean = false): JSONObject {
@@ -98,7 +104,7 @@ class GroqClient(private val ring: KeyRing, private val model: () -> String) {
             .build()
         return client.newCall(req).execute().use { resp ->
             val text = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) throw ApiException(resp.code, "Groq ${resp.code} : ${text.take(300)}")
+            if (!resp.isSuccessful) throw ApiException(resp.code, "Groq ${resp.code} : ${text.take(300)}${if (resp.code == 429) infosLimites(resp) else ""}")
             val msg = JSONObject(text).getJSONArray("choices").getJSONObject(0).getJSONObject("message")
             if (msg.has("content") && !msg.isNull("content")) msg.put("content", nettoyerRaisonnement(msg.optString("content")))
             msg
