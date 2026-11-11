@@ -44,7 +44,7 @@ object Http {
  *  - si TOUTES les clés sont en pause, l'anneau échoue tout de suite (429) : l'appelant passe aussitôt au fournisseur
  *    suivant (Groq → Gemini → Cloudflare) au lieu de perdre du temps sur des clés épuisées.
  */
-class KeyRing(private val keys: () -> List<String>) {
+class KeyRing(private val keys: () -> List<String>, private val quotaPartagee: Boolean = false) {
     private var next = 0
     private val cooldown = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
