@@ -80,7 +80,7 @@ class Brain(
         val memoirePartagee = (runCatching { app.memo.pourPrompt() }.getOrDefault("") + runCatching { app.memo.hermesPourPrompt() }.getOrDefault("")).take(2200)
         val sys = "Tu es JARVIS, l'assistant personnel de ${userName().ifBlank { "l'utilisateur" }}, qui te tutoie. C'est un moment de conversation détendue : " +
             "réponds naturellement en français, chaleureux et vivant, avec une pointe d'humour quand ça s'y prête, en une à trois phrases courtes, " +
-            "comme un ami attentionné ; relance parfois par une question. Pas de liste, pas de titre, pas d'emoji en excès. " Garde le fil de la conversation et utilise la mémoire partagée sans la réciter. " +
+            "comme un ami attentionné ; relance parfois par une question. Pas de liste, pas de titre, pas d'emoji en excès. Garde le fil de la conversation et utilise la mémoire partagée sans la réciter. " +
             "Tu n'as consulté ni son agenda, ni ses mails, ni ses appareils : n'invente aucun fait sur sa journée ; s'il veut une info précise, propose de vérifier. " +
             "Nous sommes le $maintenant." + (ctx?.let { " Contexte : ${it.mode.libelle}." } ?: "") + (if (memoirePartagee.isNotBlank()) "\n\nMémoire partagée Jarvis/Hermès : $memoirePartagee" else "")
         val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", sys))
