@@ -1059,7 +1059,7 @@ class ToolBox(
         "piloter_telephone" -> {
             val objectif = a.optString("objectif").trim()
             // Barrière absolue : une demande d'économie batterie ne doit jamais atteindre PiloteEcran.
-            val demandeEconomie = Regex("(?i)(économ(?:ie|iseur)|econom(?:y|izer)|battery\\s*saver|mode\\s*eco|économie\\s*(?:d['’]énergie|batterie)|batterie\\s*(?:en\\s*)?économ)").containsMatchIn(objectif)
+            val demandeEconomie = Regex("(?i)(économ(?:ie|iseur|iser)|econom(?:y|izer|ize)|battery[\\s_-]*(?:saver|saving)|mode[\\s_-]*(?:éco|eco)|éco(?:nomie)?[\\s_-]*(?:d['’ ]?énergie|batterie)?|économie[\\s_-]*(?:d['’ ]?énergie|batterie)|économiser[\\s_-]+(?:la[\\s_-]+)?batterie)").containsMatchIn(objectif)
             if (demandeEconomie) ToolResult(fr.dd.jarvis.device.PhonePowerMode.appliquer(app, "economie"), direct = true)
             else if (objectif.isBlank()) ToolResult("Précise l'objectif à atteindre sur le téléphone.")
             else if (!confirm("Je prends la main sur l'écran pour : « ${objectif.take(160)} ». Continuer ?", false)) ToolResult("Pilotage annulé.")
