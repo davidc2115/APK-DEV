@@ -159,6 +159,10 @@ class KeyRing(private val keys: () -> List<String>, private val quotaPartagee: B
         val list = keys().filter { it.isNotBlank() }
         if (list.isEmpty()) throw IllegalStateException("Aucune clé configurée (Réglages)")
         val now = System.currentTimeMillis()
+        if (quotaPartagee && quotaPartageeJusqua > now) {
+            val min = ((quotaPartageeJusqua - now) / 60_000L).coerceAtLeast(1)
+            throw ApiException(429, "quota Groq partagé épuisé — aucune clé ne sera retentée avant la reprise dans ~$min min${if (derniereRaisonQuota.isNotBlank()) " ($derniereRaisonQuota)" else ""}")
+        }
         val order = list.indices.map { (next + it) % list.size }
         val (ready, cooling) = order.partition { (cooldown[list[it]] ?: 0L) <= now }
         // Toutes en pause : on ne retente que la clé qui se libère dans moins de 90 s ; sinon échec immédiat (relais suivant).
@@ -180,7 +184,20 @@ class KeyRing(private val keys: () -> List<String>, private val quotaPartagee: B
                 return result
             } catch (e: ApiException) {
                 last = e
-                if (e.code == 429) quotas.addLast(System.currentTimeMillis())
+                if (e.code == 429) {
+                    quotas.addLast(System.currentTimeMillis())
+                    if (quotaPartagee) {
+                        val delai = pauseGroq(e.code, e.message.orEmpty()) ?: 5 * 60_000L
+                        quotaPartageeJusqua = System.currentTimeMillis() + delai
+                        derniereRaisonQuota = when {
+                            entete(e.message.orEmpty(), "x-ratelimit-remaining-requests") == "0" -> "quota journalier de requêtes"
+                            entete(e.message.orEmpty(), "x-ratelimit-remaining-tokens") == "0" -> "quota de tokens par minute"
+                            JOUR.containsMatchIn(e.message.orEmpty()) -> "quota journalier"
+                            else -> "limite Groq"
+                        }
+                        throw ApiException(429, "Groq : $derniereRaisonQuota, reprise dans ~${(delai / 60_000L).coerceAtLeast(1)} min")
+                    }
+                }
                 if (e.code == 401 || e.code == 403 || (e.code == 400 && Regex("api.?key.*(not valid|invalid)|invalid.*api.?key|API_KEY_INVALID", RegexOption.IGNORE_CASE).containsMatchIn(e.message.orEmpty()))) refusees[key] = System.currentTimeMillis()
                 val p = pause(e.code, e.message.orEmpty()) ?: throw e
                 cooldown[key] = System.currentTimeMillis() + p
