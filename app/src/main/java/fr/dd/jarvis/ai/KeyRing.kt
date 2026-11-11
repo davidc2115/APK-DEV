@@ -47,6 +47,9 @@ object Http {
 class KeyRing(private val keys: () -> List<String>, private val quotaPartagee: Boolean = false) {
     private var next = 0
     private val cooldown = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    /** Groq applique ses quotas à l'organisation : une 429 bloque donc toutes les clés de cet anneau. */
+    @Volatile private var quotaPartageeJusqua = 0L
+    @Volatile private var derniereRaisonQuota = ""
 
     fun count(): Int = keys().count { it.isNotBlank() }
 
@@ -71,12 +74,14 @@ class KeyRing(private val keys: () -> List<String>, private val quotaPartagee: B
 
     fun pausedCount(): Int {
         val now = System.currentTimeMillis()
+        if (quotaPartagee && quotaPartageeJusqua > now) return count()
         return keys().count { (cooldown[it] ?: 0L) > now }
     }
 
     /** Fin de la pause la plus proche (0 si une clé est prête). */
     fun prochaineDisponibilite(): Long {
         val now = System.currentTimeMillis()
+        if (quotaPartagee && quotaPartageeJusqua > now) return quotaPartageeJusqua
         val l = keys().filter { it.isNotBlank() }
         if (l.any { (cooldown[it] ?: 0L) <= now }) return 0L
         return l.minOfOrNull { cooldown[it] ?: 0L } ?: 0L
