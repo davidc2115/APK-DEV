@@ -496,7 +496,8 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
                     val txt = r.body?.string().orEmpty()
                     JSONObject(txt).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
                         ?.optString("content").orEmpty().trim().ifBlank { null }
-                }                if (contenu != null && estPanne(contenu)) {
+                }
+                if (contenu != null && estPanne(contenu)) {
                     // Message d'erreur d'Hermès (ex. « conversation has grown too large… ») : jamais affiché tel quel.
                     degradeJusqua = System.currentTimeMillis() + DEGRADE_MS
                     derniereRaison = contenu.lineSequence().first().take(160)
