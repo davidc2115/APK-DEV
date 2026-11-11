@@ -275,18 +275,19 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
         val derniere = history.lastOrNull { it.fromUser }?.text.orEmpty()
         val sujet = history.filter { it.fromUser }.takeLast(3).joinToString(" ") { it.text.take(600) }
         val messages = JSONArray().put(JSONObject().put("role", "system").put("content", systeme(app, userName, sujet, derniere)))
-        // Contexte conversationnel compact pour accélérer l'inférence.
-        // Les deux derniers messages restent détaillés ; les échanges plus anciens sont résumés par troncature.
-        // La mémoire durable JARVIS/Obsidian est injectée séparément dans systeme() et n'est jamais réduite ici.
-        // Même fil que la partie rapide de Jarvis (12 derniers messages) : une seule conversation, pas de contradiction.
-        val recents = history.takeLast(12)
+        // Contexte conversationnel étendu : 20 derniers messages, au lieu de 12.
+        // Les échanges récents restent détaillés ; les anciens sont progressivement compactés
+        // pour préserver la continuité sans faire exploser les quotas Groq/Gemini.
+        // L'archive complète reste sur l'appareil ; seule cette fenêtre utile est envoyée au modèle.
+        val recents = history.takeLast(20)
         recents.forEachIndexed { i, m ->
             val age = recents.size - 1 - i
             val cap = when {
                 age < 2 -> 4500
-                age < 4 -> 1500
-                age < 8 -> 800
-                else -> 400
+                age < 4 -> 1800
+                age < 8 -> 900
+                age < 16 -> 450
+                else -> 250
             }
             messages.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(cap)))
         }
