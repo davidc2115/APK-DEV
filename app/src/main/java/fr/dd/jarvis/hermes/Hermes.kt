@@ -673,7 +673,7 @@ object Routeur {
      * Jamais pour une demande adressée nommément à Hermès, ni pour une réponse à une question (« oui », « non »…).
      */
     fun bavardage(texte: String): Boolean {
-        val t = texte.trim().replace(Regex("^(?:(?:ok|bon|alors|eh|dis)[ ,]+)?(?:jarvis)[ ,!.]*", RegexOption.IGNORE_CASE), "").trim()
+        val t = texte.trim().replace(Regex("^(?:(?:ok|bon|alors|eh)[ ,]+)?(?:dis[- ]moi[ ,]+)?(?:jarvis[ ,!.]*)?", RegexOption.IGNORE_CASE), "").trim()
         if (t.isBlank() || t.length > 90 || NOMME.containsMatchIn(texte)) return false
         // Plusieurs phrases sociales enchaînées (« Salut Jarvis ! Ça va ? ») : chacune doit être du bavardage.
         val morceaux = t.split(Regex("(?<=[!?.…])\\s+|,\\s*(?=(?:ça|ca|comment|et toi|tu vas))")).map { it.trim() }.filter { it.isNotBlank() }
