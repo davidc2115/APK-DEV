@@ -247,8 +247,7 @@ CONTENUS ADULTES / NSFW :
 Tu travailles en équipe :
 - toi (Hermès) : raisonnement, tâches en plusieurs étapes, recherche web, rédaction, code et scripts dans Termux, mémoire long terme, compétences et tâches planifiées ;
 - Les outils de JARVIS, via le serveur MCP « jarvis » (outils mcp__jarvis__*) : téléphone (appels, SMS, applications, réglages), agenda, mails, contacts, musique, réveils, domotique, coffre Obsidian, société (clients, devis, factures, paie, KML), localisation précise (ma_position), génération d'images/vidéos. Pour piloter une application Android quelconque, utilise phone_action : list_apps pour connaître les applications réellement installées, open_app pour l'ouvrir, read_screen pour lire l'interface, click_text ou click_best_match pour choisir un élément, type_text pour saisir, scroll_down/scroll_up pour défiler, puis read_screen pour vérifier le résultat. Procède par petites étapes et ne prétends jamais qu'une action a réussi sans retour de l'outil. L'accessibilité JARVIS doit être active ; les écrans sécurisés, mots de passe, paiements, validations système et actions sensibles restent protégés et peuvent exiger une intervention/confirmation de l'utilisateur. Pour TOUTE action sur le téléphone ou les données de l'utilisateur, utilise ces outils plutôt que des commandes shell ; n'invente jamais leur contenu. Pour toute demande de diagnostic, état, santé ou surveillance du téléphone, appelle phone_health_report avant de conclure : il fournit les valeurs réellement accessibles (batterie, température, stockage, RAM, réseau, permissions et services). Distingue toujours les mesures observées des éléments qu'Android ne permet pas de surveiller.
-Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume-les au lieu de les recopier en entier.
-""".trim()
+Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume-les au lieu de les recopier en entier.""".trim()
         val notes = if (derniere.isBlank()) "" else runCatching { fr.dd.jarvis.device.NotesPertinentes.pour(app, derniere) }.getOrDefault("")
         return socle + si(R_HORLOGE, S_HORLOGE) + si(R_ROUTINES, S_ROUTINES) + si(R_SOCIETE, S_SOCIETE) + si(R_DOCUMENTS, S_DOCUMENTS) + si(R_DISCORD, S_DISCORD) +
             si(R_EXTENSIONS, S_EXTENSIONS) + si(R_VIDEO, S_VIDEO) + si(R_APPRENTISSAGE, S_APPRENTISSAGE) + si(R_CREATION, S_CREATION) +
@@ -497,8 +496,7 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
                     val txt = r.body?.string().orEmpty()
                     JSONObject(txt).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
                         ?.optString("content").orEmpty().trim().ifBlank { null }
-                }
-                if (contenu != null && estPanne(contenu)) {
+                }                if (contenu != null && estPanne(contenu)) {
                     // Message d'erreur d'Hermès (ex. « conversation has grown too large… ») : jamais affiché tel quel.
                     degradeJusqua = System.currentTimeMillis() + DEGRADE_MS
                     derniereRaison = contenu.lineSequence().first().take(160)
@@ -655,7 +653,7 @@ object Routeur {
     /** Bavardage : salutations, « comment ça va », remerciements, humeur, blague, « qui es-tu »… (aucune action ni recherche). */
     private val BAVARDAGE = Regex(
         "^(?:(?:salut|bonjour|bonsoir|coucou|hello|hey|yo|re|wesh|hola)(?: (?:à toi|a toi|mon ami|l.ami|toi))?|" +
-            "(?:ça|ca|sa) va(?: bien| toi| et toi| ou quoi)?|(?:comment|commen) (?:ça|ca|sa) va(?: aujourd.hui| ce (?:matin|soir))?|comment (?:tu )?vas[- ]?tu|comment tu vas|tu vas bien|vous allez bien|" +
+            "(?:ça|ca|sa) va(?: bien| toi| et toi| ou quoi)?|(?:comment|commen) (?:ça|ca|sa) va(?: aujourd.hui| ce (?:matin|soir))?|comment se passe (?:le|ton|ta) (?:travail|boulot|journ[ée]e|matin[ée]e|soir[ée]e)(?: au travail| aujourd.hui| en ce moment)?|comment (?:ça|ca) se passe(?: au travail| aujourd.hui| en ce moment)?|comment (?:va|avance) (?:le travail|le boulot|ta journ[ée]e)|(?:ça|ca) se passe bien(?: au travail| aujourd.hui)?|comment (?:tu )?vas[- ]?tu|comment tu vas|tu vas bien|vous allez bien|" +
             "(?:la )?forme|quoi de neuf|quoi de beau|(?:qu.est[- ]ce que|que) tu (?:fais|racontes?)|tu fais quoi(?: de beau)?|tu (?:es|est) l[àa]|t.es l[àa]|t.es o[uù]|" +
             "et toi|merci(?: beaucoup| bien| infiniment| mille fois| pour tout| à toi| a toi)?|c.est gentil|trop gentil|bravo|bien jou[ée]|super boulot|beau travail|" +
             "(?:t.es|tu es|tu (?:es )?vraiment) (?:trop |vraiment |super |le meilleur|la meilleure|g[ée]nial|fort|dr[ôo]le|sympa|cool|top|bon|nul|b[êe]te|lent)\\w*|" +
