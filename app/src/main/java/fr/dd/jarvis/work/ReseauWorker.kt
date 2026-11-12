@@ -19,10 +19,11 @@ object ReseauScheduler {
     fun apply(ctx: Context, store: fr.dd.jarvis.data.Store) {
         val wm = WorkManager.getInstance(ctx)
         if (!store.scanAuto.value) { wm.cancelUniqueWork("reseau_auto"); return }
+        val adaptation = store.modeEnergie.value != "performance" && fr.dd.jarvis.device.Energie.economie
         val intervalle = when (store.modeEnergie.value) {
             "performance" -> 30L
             "eco" -> 360L
-            else -> 60L
+            else -> if (adaptation) 180L else 60L
         }
         wm.enqueueUniquePeriodicWork("reseau_auto", ExistingPeriodicWorkPolicy.UPDATE,
             PeriodicWorkRequestBuilder<ReseauWorker>(intervalle, TimeUnit.MINUTES).setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.UNMETERED).build()).build())
