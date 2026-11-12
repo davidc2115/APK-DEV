@@ -883,6 +883,10 @@ os.replace(name, p)
             upgradeCommand,
             "p '🔐 Vérification du relais IA local Jarvis (aucune clé fournisseur copiée)…'",
             envScript,
+            // Contrôle du jeton stocké et du endpoint IA local ; aucun appel à Groq/Gemini et aucun crédit consommé.
+            "grep -Fxq " + q("JARVIS_GROQ_RELAIS=" + PontMcp.jetonRelaisIA(s.hermesCle.value)) + " \"\$HOME/.hermes/.env\" || { p '❌ Jeton du relais IA absent ou désynchronisé dans Hermès.'; exit 1; }; " +
+                "curl -fsS -m 3 -H " + q("Authorization: Bearer " + PontMcp.jetonRelaisIA(s.hermesCle.value)) + " " + q("http://127.0.0.1:" + PontMcp.PORT + "/ai/health") +
+                " >/dev/null || { p '❌ Authentification du relais IA Jarvis refusée ; Hermès ne sera pas redémarré.'; exit 1; }; p '✅ Authentification du relais IA vérifiée.'",
             scriptHookMemoire(app),
             "p '🧩 Synchronisation des plugins et agents…'",
             pluginCommand,
