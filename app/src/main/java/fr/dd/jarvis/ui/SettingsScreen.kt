@@ -111,7 +111,8 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 }
             }
             HudPanel(Modifier.fillMaxWidth(), title = "⏰ Sonnerie des rappels") {
-                Text("Sonnerie actuelle : " + fr.dd.jarvis.device.Rappels.nomSonnerie(ctx), color = HudText, fontSize = 12.sp)
+                val sonnerieAffichee = remember(actualisationSonnerie) { fr.dd.jarvis.device.Rappels.nomSonnerie(ctx) }
+                Text("Sonnerie actuelle : " + sonnerieAffichee, color = HudText, fontSize = 12.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     HudButton("Choisir une sonnerie", filled = true) {
                         val intent = Intent(android.media.RingtoneManager.ACTION_RINGTONE_PICKER).apply {
