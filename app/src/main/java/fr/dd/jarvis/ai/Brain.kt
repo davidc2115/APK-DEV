@@ -134,6 +134,28 @@ class Brain(
         val multi = fr.dd.jarvis.hermes.Routeur.multiEtapes(texteUser)
         val reflexes = pourHermes || !fr.dd.jarvis.hermes.Routeur.pourHermesSeul(texteUser)
         fun reflexe(r: String) = r.also { if (!pourHermes) fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS }
+        // Changement de profil énergétique : commande locale immédiate, sans appel à Groq/Gemini/Hermès.
+        // Les trois profils sont persistés puis leurs planificateurs sont recalculés immédiatement.
+        if (!pourHermes) {
+            val demandeMode = fr.dd.jarvis.societe.core.normaliser(texteUser)
+            val commandeMode = Regex("\\\\b(passe|passer|mets|mettre|active|activer|bascule|choisis|choisir|regle|regler)\\\\b.{0,35}\\\\b(mode\\\\s*)?(eco(nomie)?|economique|haute\\\\s+performance|performance|equilibre|balanced)\\\\b").containsMatchIn(demandeMode)
+            if (commandeMode) {
+                val mode = when {
+                    Regex("\\\\b(eco(nomie)?|economique)\\\\b").containsMatchIn(demandeMode) -> "eco"
+                    Regex("\\\\b(haute\\\\s+performance|performance)\\\\b").containsMatchIn(demandeMode) -> "performance"
+                    else -> "balanced"
+                }
+                app.store.modeEnergie.set(mode)
+                fr.dd.jarvis.device.Energie.appliquerMode(app)
+                val libelle = when (mode) {
+                    "eco" -> "🔋 Mode économie activé. Les tâches secondaires sont réduites, l'écoute et les commandes restent disponibles."
+                    "performance" -> "⚡ Mode haute performance activé. Jarvis privilégie la réactivité et ses traitements internes, dans les limites imposées par Android."
+                    else -> "⚖️ Mode équilibré activé. Jarvis adapte automatiquement son activité à la batterie, à la température et à la mémoire."
+                }
+                onStatus("⚙️ Changement du mode énergétique…")
+                return reflexe(libelle)
+            }
+        }
         // Une procédure qu'Hermès a apprise (skill ajouté) passe avant les raccourcis de Jarvis sur le même sujet.
         val competence = if (pourHermes || app.store.hermesMode.value == "off") null
             else runCatching { fr.dd.jarvis.hermes.Routeur.competence(texteUser, app.memo.skillsHermes()) }.getOrNull()
