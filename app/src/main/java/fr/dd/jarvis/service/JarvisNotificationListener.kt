@@ -117,9 +117,11 @@ class JarvisNotificationListener : NotificationListenerService() {
                 if (!identite.isNullOrBlank()) titre = "$identite · $titre".trim(' ', '·')
                 else if (titre.isBlank()) titre = "Appel entrant"
             }
+            val message = estMessage(sbn.packageName) || n.category == Notification.CATEGORY_MESSAGE
+            val appelManque = n.category == Notification.CATEGORY_MISSED_CALL ||
+                (appel && (n.flags and Notification.FLAG_ONGOING_EVENT) == 0)
             add(Item(sbn.packageName, label, titre, texte, sbn.postTime))
             sauver(applicationContext)
-            val message = estMessage(sbn.packageName) || n.category == Notification.CATEGORY_MESSAGE
             val mail = estMail(sbn.packageName)
             // Jarvis ne republie plus de notification pour les SMS, mails et appels : celles d'Android suffisent.
             // Il les garde en mémoire pour les lire, les résumer, les annoncer à voix haute et alimenter ses agents.
@@ -135,6 +137,9 @@ class JarvisNotificationListener : NotificationListenerService() {
             runCatching {
                 fr.dd.jarvis.device.Annonces.traiter(applicationContext, applicationContext as fr.dd.jarvis.JarvisApp, sbn.key + sbn.postTime, sbn.packageName, label, n.category, titre, texte)
             }
+            // Masquer la notification système après archivage local : l'événement reste consultable dans Jarvis.
+            // Ne jamais retirer la notification d'un appel en cours : elle peut porter l'interface permettant de décrocher.
+            if (message || appelManque) runCatching { cancelNotification(sbn.key) }
         } catch (_: Throwable) {
         }
     }
