@@ -816,6 +816,7 @@ if isinstance(aliases, dict):
 # UNIFICATION : aucun fournisseur cloud ni aucune clé ne sont configurés directement dans Hermès.
 # Chaque demande Hermès passe par le relais de Jarvis, qui applique le même KeyRing, les mêmes quotas et les mêmes replis.
 providers.clear()
+data["credential_pool_strategies"] = {}
 providers["groq"] = {"api": os.environ["JARVIS_GROQ_RELAIS_URL"], "key_env": "JARVIS_GROQ_RELAIS"}
 if os.environ.get("JARVIS_HAS_OLLAMA") == "1":
     providers["jarvis_ollama"] = {"api": os.environ["JARVIS_OLLAMA_RELAIS_URL"], "key_env": "JARVIS_OLLAMA_RELAIS"}
