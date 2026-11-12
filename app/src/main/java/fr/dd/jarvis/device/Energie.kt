@@ -13,11 +13,11 @@ import fr.dd.jarvis.JarvisApp
 
 /**
  * Économie d'énergie de JARVIS. Trois réglages (Réglages › Général › Batterie & vitesse) :
- *  - « auto » (défaut) : économie dès que l'économiseur de batterie d'Android est actif, ou sous 20 % hors charge ;
- *  - « performance » : jamais d'économie ;
- *  - « eco » : toujours en économie.
- * En économie : animations ralenties, synchronisations et relevés de fond espacés. Les fonctions restent toutes là
- * (écoute « Jarvis », rappels, anti-vol, agents) : seules les dépenses invisibles sont réduites.
+ *  - « performance » : privilégie la réactivité et les traitements internes ;
+ *  - « balanced » (défaut, et ancien « auto ») : adapte l'activité à la batterie et à l'état énergétique Android ;
+ *  - « eco » : réduit les travaux secondaires, sans désactiver l'écoute ni les commandes.
+ * Android conserve la maîtrise des fréquences CPU, de la RAM et des limites thermiques : JARVIS optimise uniquement
+ * ses propres tâches et ne tente jamais de contourner le système.
  */
 object Energie {
     const val SEUIL_BATTERIE = 20
@@ -31,14 +31,16 @@ object Energie {
         private set
     var economiseurAndroid by mutableStateOf(false)
         private set
+    var contrainteThermique by mutableStateOf(false)
+        private set
 
     @Volatile private var suivi = false
 
     /** Décision pure (testable). */
-    internal fun decider(mode: String, economiseur: Boolean, niveau: Int, charge: Boolean): Boolean = when (mode) {
+    internal fun decider(mode: String, economiseur: Boolean, niveau: Int, charge: Boolean, thermique: Boolean = false): Boolean = when (mode) {
         "performance" -> false
         "eco" -> true
-        else -> economiseur || (!charge && niveau in 0..SEUIL_BATTERIE)
+        else -> economiseur || thermique || (!charge && niveau in 0..SEUIL_BATTERIE)
     }
 
     fun maj(ctx: Context, intentBatterie: Intent? = null) {
@@ -51,8 +53,12 @@ object Energie {
             val statut = i.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
             enCharge = statut == BatteryManager.BATTERY_STATUS_CHARGING || statut == BatteryManager.BATTERY_STATUS_FULL
         }
-        economiseurAndroid = runCatching { (ctx.getSystemService(Context.POWER_SERVICE) as PowerManager).isPowerSaveMode }.getOrDefault(false)
-        economie = decider(app.store.modeEnergie.value, economiseurAndroid, batterie, enCharge)
+        val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
+        economiseurAndroid = runCatching { pm.isPowerSaveMode }.getOrDefault(false)
+        contrainteThermique = if (Build.VERSION.SDK_INT >= 29) runCatching {
+            pm.currentThermalStatus >= PowerManager.THERMAL_STATUS_MODERATE
+        }.getOrDefault(false) else false
+        economie = decider(app.store.modeEnergie.value, economiseurAndroid, batterie, enCharge, contrainteThermique)
     }
 
     /** Suit la batterie et l'économiseur d'Android (appelé au démarrage de l'appli, sans coût : diffusions système). */
@@ -81,10 +87,11 @@ object Energie {
     fun economieMaintenant(ctx: Context): Boolean { maj(ctx); return economie }
 
     fun libelle(app: JarvisApp): String = when {
-        app.store.modeEnergie.value == "performance" -> "⚡ Performance : aucune économie"
-        economie && app.store.modeEnergie.value == "eco" -> "🔋 Économie forcée"
-        economie && economiseurAndroid -> "🔋 Économie (économiseur de batterie d'Android actif)"
-        economie -> "🔋 Économie (batterie à $batterie %, hors charge)"
-        else -> "✅ Normal" + (if (batterie >= 0) " · batterie $batterie %" + (if (enCharge) " en charge" else "") else "")
+        app.store.modeEnergie.value == "performance" -> "⚡ Performance · priorité à la réactivité"
+        app.store.modeEnergie.value == "eco" -> "🔋 Économie · tâches secondaires réduites"
+        economie && contrainteThermique -> "🌡️ Équilibré · activité réduite pour la température"
+        economie && economiseurAndroid -> "🔋 Équilibré · économiseur Android actif"
+        economie -> "🔋 Équilibré · batterie à $batterie %"
+        else -> "⚖️ Équilibré · ressources disponibles" + (if (batterie >= 0) " · batterie $batterie %" + (if (enCharge) " en charge" else "") else "")
     }
 }
