@@ -43,6 +43,9 @@ object ConfirmationNotification {
     }
 
     fun afficher(context: Context, question: String) {
+        // Nettoie une éventuelle confirmation précédente (notification persistante comprise) avant d'en afficher une.
+        // Une seule demande utilisateur peut être visible à la fois, même si plusieurs outils travaillent en parallèle.
+        annuler(context.applicationContext)
         // Un seul canal visible à la fois : la fenêtre flottante est prioritaire.
         // La notification ne sert que de repli si la superposition n'est pas autorisée ou impossible.
         if (afficherOverlay(context.applicationContext, question)) return
