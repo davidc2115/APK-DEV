@@ -821,7 +821,7 @@ if isinstance(aliases, dict):
 # Chaque demande Hermès passe par le relais de Jarvis, qui applique le même KeyRing, les mêmes quotas et les mêmes replis.
 providers.clear()
 data["credential_pool_strategies"] = {}
-providers["groq"] = {"api": os.environ["JARVIS_GROQ_RELAIS_URL"], "key_env": "JARVIS_GROQ_RELAIS"}
+providers["groq"] = {"api": os.environ["JARVIS_GROQ_RELAIS_URL"], "api_key": os.environ["JARVIS_GROQ_RELAIS_KEY"]}
 if os.environ.get("JARVIS_HAS_OLLAMA") == "1":
     providers["jarvis_ollama"] = {"api": os.environ["JARVIS_OLLAMA_RELAIS_URL"], "key_env": "JARVIS_OLLAMA_RELAIS"}
 model_config = {"provider": "custom:jarvis_ollama", "default": os.environ.get("JARVIS_OLLAMA_MODEL") or "auto"} if os.environ.get("JARVIS_HAS_OLLAMA") == "1" else {"provider": "custom:groq", "default": "jarvis-router"}
