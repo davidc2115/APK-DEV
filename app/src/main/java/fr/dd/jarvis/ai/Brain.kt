@@ -343,7 +343,7 @@ class Brain(
         val dernierTour = try { llm.groqChat(synthese, JSONArray(), forceText = true) }
             catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (_: Exception) { null }
-        dernierTour?.optString("content")?.trim()?.takeIf { it.isNotBlank() }
+        return dernierTour?.optString("content")?.trim()?.takeIf { it.isNotBlank() }
             ?: "La demande a atteint la limite d'étapes disponible. Je n'ai pas de confirmation suffisante pour annoncer sa réussite ; les résultats déjà obtenus restent dans le suivi."
 
     }
