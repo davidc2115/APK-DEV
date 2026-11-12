@@ -21,7 +21,7 @@ import java.util.concurrent.Executors
 /**
  * Pont MCP « jarvis » (Streamable HTTP, réponses JSON) : expose à Hermès TOUS les outils de Jarvis (téléphone, agenda,
  * SMS, mails, musique, Obsidian, société, domotique, localisation…). Écoute seulement sur 127.0.0.1 et exige le jeton
- * Bearer écrit dans la configuration d'Hermès : aucune autre app ni machine du réseau ne peut s'en servir.
+ * Bearer distincts : un pour MCP/mémoire, un pour le relais IA. Le serveur reste limité à 127.0.0.1.
  *
  * Il reçoit aussi la progression du script d'installation (POST /progres), lancé en arrière-plan dans Termux.
  */
@@ -77,7 +77,7 @@ object PontMcp {
     internal fun jetonRelaisIA(cleRacine: String): String {
         if (cleRacine.isBlank()) return ""
         val entree = "fr.dd.jarvis/hermes-ai-relay/v1:$cleRacine".toByteArray(Charsets.UTF_8)
-        return MessageDigest.getInstance("SHA-256").digest(entree).joinToString("") { "%02x".format(it) }
+        return MessageDigest.getInstance("SHA-256").digest(entree).joinToString("") { "%02x".format(it.toInt() and 0xff) }
     }
 
     private class FournisseurJarvis(val app: JarvisApp) : Fournisseur {
@@ -106,7 +106,7 @@ object PontMcp {
             runCatching { outils() }
         }
         override fun jeton() = app.store.mcpJeton.value
-        override fun jetonIA() = jetonRelaisIA(app.store.hermesCle.value)
+        override fun jetonIA() = PontMcp.jetonRelaisIA(app.store.hermesCle.value)
         override fun outils(): JSONArray {
             outilsCache?.let { return JSONArray(it.toString()) }
             return synchronized(this) {
