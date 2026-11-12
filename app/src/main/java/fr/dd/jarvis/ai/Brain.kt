@@ -333,7 +333,19 @@ class Brain(
             if (direct.isNotEmpty()) return direct.toString().trim()
             onStatus("Réflexion…")
         }
-        return "Je n'ai pas réussi à terminer cette opération."
+        // Dernière passe sans nouvel outil : restitue les résultats réellement obtenus plutôt qu'un échec générique.
+        // Les outils ont déjà disposé du budget complet ci-dessus ; cette synthèse ne doit rien inventer ni prétendre
+        // qu'une action non confirmée a réussi.
+        val synthese = JSONArray()
+        for (i in 0 until messages.length()) synthese.put(messages.get(i))
+        synthese.put(JSONObject().put("role", "system").put("content",
+            "Tu as atteint le budget d'étapes disponible. Fais maintenant un bilan précis à partir des résultats d'outils présents dans l'historique. N'invente aucun résultat. Distingue ce qui est confirmé, ce qui reste à faire et l'erreur exacte éventuelle. Ne prétends pas qu'une action non confirmée a réussi."))
+        val dernierTour = try { llm.groqChat(synthese, JSONArray(), forceText = true) }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (_: Exception) { null }
+        dernierTour?.optString("content")?.trim()?.takeIf { it.isNotBlank() }
+            ?: "La demande a atteint la limite d'étapes disponible. Je n'ai pas de confirmation suffisante pour annoncer sa réussite ; les résultats déjà obtenus restent dans le suivi."
+
     }
 
     /**
