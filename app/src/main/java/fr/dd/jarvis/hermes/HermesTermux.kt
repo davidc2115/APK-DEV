@@ -401,7 +401,9 @@ if [ -f "${'$'}H/config.yaml" ] && ! grep -q 'Géré par Jarvis' "${'$'}H/config
 cat > "${'$'}H/config.yaml" <<'JARVIS_YAML'
 ${yaml.trimEnd()}
 JARVIS_YAML
-[ -n "${'
+[ -n "${'$'}CV" ] && printf '%s\n' "${'$'}CV" >> "${'$'}H/config.yaml"
+chmod 600 "${'$'}H/config.yaml"
+p "⚙️ Configuration écrite : cerveau IA unifié via le relais Jarvis, clés centralisées dans l’application, pont MCP et API locale :$PORT_API."
 """.trimIndent()
     }
 
