@@ -138,11 +138,11 @@ class Brain(
         // Les trois profils sont persistés puis leurs planificateurs sont recalculés immédiatement.
         if (!pourHermes) {
             val demandeMode = fr.dd.jarvis.societe.core.normaliser(texteUser)
-            val commandeMode = Regex("\\\\b(passe|passer|mets|mettre|active|activer|bascule|choisis|choisir|regle|regler)\\\\b.{0,35}\\\\b(mode\\\\s*)?(eco(nomie)?|economique|haute\\\\s+performance|performance|equilibre|balanced)\\\\b").containsMatchIn(demandeMode)
+            val commandeMode = Regex("\\b(passe|passer|mets|mettre|active|activer|bascule|choisis|choisir|regle|regler)\\b.{0,35}\\b(mode\\s*)?(eco(nomie)?|economique|haute\\s+performance|performance|equilibre|balanced)\\b").containsMatchIn(demandeMode)
             if (commandeMode) {
                 val mode = when {
-                    Regex("\\\\b(eco(nomie)?|economique)\\\\b").containsMatchIn(demandeMode) -> "eco"
-                    Regex("\\\\b(haute\\\\s+performance|performance)\\\\b").containsMatchIn(demandeMode) -> "performance"
+                    Regex("\\b(eco(nomie)?|economique)\\b").containsMatchIn(demandeMode) -> "eco"
+                    Regex("\\b(haute\\s+performance|performance)\\b").containsMatchIn(demandeMode) -> "performance"
                     else -> "balanced"
                 }
                 app.store.modeEnergie.set(mode)
