@@ -14,6 +14,8 @@ import fr.dd.jarvis.ai.ToolBox
 import fr.dd.jarvis.voice.VoiceManager
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -40,6 +42,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         private set
 
     private var confirmDeferred: CompletableDeferred<Boolean>? = null
+    // Les appels d'outils peuvent être parallèles ; une seule confirmation utilisateur doit être affichée à la fois.
+    private val confirmationMutex = Mutex()
     val voice = VoiceManager(application)
 
     private val tools = ToolBox(app) { question, force ->
@@ -78,15 +82,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         voice.onSilence = { partial = ""; voiceSession = false }
     }
 
-    private suspend fun askConfirm(question: String): Boolean {
+    private suspend fun askConfirm(question: String): Boolean = confirmationMutex.withLock {
         val d = CompletableDeferred<Boolean>()
         confirmDeferred = d
         pendingConfirm = question
         fr.dd.jarvis.service.ConfirmationNotification.afficher(app, question)
-        return try {
+        try {
             d.await()
         } finally {
             pendingConfirm = null
+            confirmDeferred = null
             fr.dd.jarvis.service.ConfirmationNotification.annuler(app)
         }
     }
