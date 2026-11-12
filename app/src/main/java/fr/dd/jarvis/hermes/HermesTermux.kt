@@ -311,14 +311,15 @@ p '🧠 Mémoire partagée Jarvis ↔ Hermès installée.'
             appendLine("# Géré par Jarvis (fr.dd.jarvis) : régénéré à chaque « Configurer Hermès » depuis l'application.")
             appendLine("# Ancienne configuration éventuelle : config.yaml.avant-jarvis")
             // Hermès ne choisit plus un fournisseur ni ne possède de pool de clés : il appelle le routeur unique de Jarvis.
-            val providerPrincipal = "custom:groq"
+            val providerPrincipal = "custom:jarvis"
             val modelePrincipal = "jarvis-router"
             appendLine("model:")
             appendLine("  provider: $providerPrincipal")
             appendLine("  default: $modelePrincipal")
             appendLine("providers:")
-            appendLine("  groq:")
+            appendLine("  jarvis:")
             appendLine("    api: http://127.0.0.1:${PontMcp.PORT}/groq/v1")
+            appendLine("    transport: chat_completions")
             appendLine("    api_key: \"$jetonIA\"")
             appendLine("fallback_providers: []")
             appendLine("credential_pool_strategies: {}")
@@ -691,7 +692,7 @@ def is_groq(item):
     if not isinstance(item, dict): return False
     provider = str(item.get("provider", ""))
     base_url = str(item.get("base_url", ""))
-    return provider in ("custom:groq", "groq") or provider.startswith("custom:jarvis_cf_") or (provider == "custom" and "groq.com" in base_url)
+    return provider in ("custom:jarvis", "groq") or provider.startswith("custom:jarvis_cf_") or (provider == "custom" and "groq.com" in base_url)
 fallbacks = [item for item in fallbacks if not is_groq(item)]
 if isinstance(model_config, dict) and is_groq(model_config) and os.environ.get("JARVIS_HAS_GEMINI") == "1":
     model_config.clear(); model_config.update({"provider": "gemini", "default": os.environ["JARVIS_GEMINI_MODEL"]})
@@ -705,11 +706,11 @@ if not isinstance(strategies, dict):
 if os.environ.get("JARVIS_HAS_GEMINI") == "1": strategies["gemini"] = "round_robin"
 else: strategies.pop("gemini", None)
 if os.environ.get("JARVIS_HAS_GROQ") == "1":
-    providers["groq"] = {"api": os.environ["JARVIS_GROQ_RELAIS_URL"], "api_key": os.environ["JARVIS_GROQ_RELAIS_KEY"]}
-    fallbacks.append({"provider": "custom:groq", "model": os.environ["JARVIS_GROQ_MODEL"]})
+    providers["jarvis"] = {"api": os.environ["JARVIS_GROQ_RELAIS_URL"], "api_key": os.environ["JARVIS_GROQ_RELAIS_KEY"]}
+    fallbacks.append({"provider": "custom:jarvis", "model": os.environ["JARVIS_GROQ_MODEL"]})
     strategies.pop("groq", None)
 else:
-    providers.pop("groq", None)
+    providers.pop("jarvis", None)
     strategies.pop("groq", None)
 cf_ids = [x for x in os.environ.get("JARVIS_CF_IDS", "").split(",") if len(x) == 32]
 for name in list(providers):
@@ -745,7 +746,7 @@ delegation["orchestrator_enabled"] = True
 child_fallbacks = delegation.get("fallback_providers") or []
 if not isinstance(child_fallbacks, list): child_fallbacks = []
 child_fallbacks = [x for x in child_fallbacks if not is_groq(x)]
-if os.environ.get("JARVIS_HAS_GROQ") == "1": child_fallbacks.append({"provider": "custom:groq", "model": os.environ["JARVIS_GROQ_MODEL"]})
+if os.environ.get("JARVIS_HAS_GROQ") == "1": child_fallbacks.append({"provider": "custom:jarvis", "model": os.environ["JARVIS_GROQ_MODEL"]})
 if os.environ.get("JARVIS_HAS_GEMINI") == "1" and not any(isinstance(x, dict) and x.get("provider") == "gemini" and x.get("model") == os.environ["JARVIS_GEMINI_MODEL"] for x in child_fallbacks):
     child_fallbacks.append({"provider": "gemini", "model": os.environ["JARVIS_GEMINI_MODEL"]})
 for index in range(1, len(cf_ids) + 1): child_fallbacks.append({"provider": f"custom:jarvis_cf_{index}", "model": os.environ["JARVIS_CF_MODEL"]})
@@ -766,7 +767,7 @@ def add_route(name, description, provider, model_name):
     if provider and model_name and not any(isinstance(x, dict) and x.get("provider") == provider and x.get("model") == model_name for x in options):
         options.append({"name": name, "description": description, "provider": provider, "model": model_name})
 if os.environ.get("JARVIS_HAS_GEMINI") == "1": add_route("jarvis-gemini", "Analyse approfondie et raisonnement via Gemini", "gemini", os.environ["JARVIS_GEMINI_MODEL"])
-if os.environ.get("JARVIS_HAS_GROQ") == "1": add_route("jarvis-groq", "Agent rapide et technique via Groq", "custom:groq", os.environ["JARVIS_GROQ_MODEL"])
+if os.environ.get("JARVIS_HAS_GROQ") == "1": add_route("jarvis-groq", "Agent rapide et technique via Groq", "custom:jarvis", os.environ["JARVIS_GROQ_MODEL"])
 for index in range(1, len(cf_ids) + 1): add_route(f"jarvis-cloudflare-{index}", "Agent de secours Cloudflare Workers AI", f"custom:jarvis_cf_{index}", os.environ["JARVIS_CF_MODEL"])
 # Expose aussi le modèle principal actif (y compris Codex/OAuth s’il est déjà connecté).
 if isinstance(model_config, dict):
@@ -776,7 +777,7 @@ if isinstance(model_config, dict):
         add_route("jarvis-main", f"Modèle principal Hermes : {main_provider}", main_provider, main_model)
 # Les endpoints personnalisés existants deviennent des routes s’ils déclarent un modèle par défaut.
 for provider_name, provider_config in providers.items():
-    if provider_name == "groq" or str(provider_name).startswith("jarvis_cf_") or not isinstance(provider_config, dict):
+    if provider_name == "jarvis" or str(provider_name).startswith("jarvis_cf_") or not isinstance(provider_config, dict):
         continue
     provider_model = provider_config.get("default_model")
     models = provider_config.get("models")
@@ -833,25 +834,25 @@ if isinstance(aliases, dict):
 # Chaque demande Hermès passe par le relais de Jarvis, qui applique le même KeyRing, les mêmes quotas et les mêmes replis.
 providers.clear()
 data["credential_pool_strategies"] = {}
-providers["groq"] = {"api": os.environ["JARVIS_GROQ_RELAIS_URL"], "api_key": os.environ["JARVIS_GROQ_RELAIS_KEY"], "transport": "chat_completions"}
+providers["jarvis"] = {"api": os.environ["JARVIS_GROQ_RELAIS_URL"], "api_key": os.environ["JARVIS_GROQ_RELAIS_KEY"], "transport": "chat_completions"}
 if os.environ.get("JARVIS_HAS_OLLAMA") == "1":
     providers["jarvis_ollama"] = {"api": os.environ["JARVIS_OLLAMA_RELAIS_URL"], "key_env": "JARVIS_OLLAMA_RELAIS"}
-model_config = {"provider": "custom:jarvis_ollama", "default": os.environ.get("JARVIS_OLLAMA_MODEL") or "auto"} if os.environ.get("JARVIS_HAS_OLLAMA") == "1" else {"provider": "custom:groq", "default": "jarvis-router"}
+model_config = {"provider": "custom:jarvis_ollama", "default": os.environ.get("JARVIS_OLLAMA_MODEL") or "auto"} if os.environ.get("JARVIS_HAS_OLLAMA") == "1" else {"provider": "custom:jarvis", "default": "jarvis-router"}
 data["model"] = model_config
 # Contrôle de cohérence du secret local réellement consommé par Hermes.
 # api_key est volontairement inline : c'est un jeton local dérivé, pas une clé Groq fournisseur.
-groq_cfg = providers["groq"]
+groq_cfg = providers["jarvis"]
 if groq_cfg.get("api_key") != os.environ.get("JARVIS_GROQ_RELAIS_KEY") or groq_cfg.get("key_env"):
     raise SystemExit("Jeton du provider Jarvis absent ou incohérent ; configuration annulée.")
 if groq_cfg.get("transport") != "chat_completions":
     raise SystemExit("Transport du provider Jarvis invalide ; configuration annulée.")
-fallbacks = [] if os.environ.get("JARVIS_HAS_OLLAMA") != "1" else [{"provider": "custom:groq", "model": "jarvis-router"}]
+fallbacks = [] if os.environ.get("JARVIS_HAS_OLLAMA") != "1" else [{"provider": "custom:jarvis", "model": "jarvis-router"}]
 data["fallback_providers"] = fallbacks
 delegation["max_concurrent_children"] = 1
 delegation["max_spawn_depth"] = 1
-delegation["fallback_providers"] = [{"provider": "custom:groq", "model": "jarvis-router"}]
+delegation["fallback_providers"] = [{"provider": "custom:jarvis", "model": "jarvis-router"}]
 model_map["options"] = [
-    {"name": "jarvis-ai", "description": "Routeur IA unique Jarvis : Groq, Gemini et autres fournisseurs selon les réglages Jarvis", "provider": "custom:groq", "model": "jarvis-router"}
+    {"name": "jarvis-ai", "description": "Routeur IA unique Jarvis : Groq, Gemini et autres fournisseurs selon les réglages Jarvis", "provider": "custom:jarvis", "model": "jarvis-router"}
 ]
 if os.environ.get("JARVIS_HAS_OLLAMA") == "1":
     model_map["options"].append({"name": "jarvis-ollama", "description": "Modèle local du serveur via le relais Jarvis", "provider": "custom:jarvis_ollama", "model": os.environ.get("JARVIS_OLLAMA_MODEL") or "auto"})
