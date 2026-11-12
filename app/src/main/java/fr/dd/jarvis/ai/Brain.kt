@@ -264,9 +264,17 @@ class Brain(
             messages.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(cap)))
         }
 
-        // Une commande simple ne doit pas partir dans six cycles : 3 tours suffisent normalement
-        // (appel d'outil, résultat, réponse). Les missions multiétapes gardent les 6 tours.
-        val toursMax = when { multi -> 6; fr.dd.jarvis.hermes.Routeur.commandeSimple(texteUser) -> 3; else -> 4 }
+        // Budget d'orchestration adaptatif : les commandes simples restent courtes ; les demandes complexes
+        // disposent de davantage de cycles pour consulter, agir, vérifier le résultat et répondre sans faux échec.
+        // Le mode économie limite les cycles secondaires mais ne désactive jamais les outils ni l'écoute.
+        val modeRessources = app.store.modeEnergie.value
+        val toursMax = when {
+            fr.dd.jarvis.hermes.Routeur.commandeSimple(texteUser) -> 3
+            modeRessources == "performance" -> if (multi) 12 else 8
+            modeRessources == "eco" -> if (multi) 7 else 5
+            multi -> 10
+            else -> 7
+        }
         repeat(toursMax) {
             val msg = try {
                 llm.groqChat(messages, schemaFinal)
