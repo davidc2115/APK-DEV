@@ -19,8 +19,13 @@ object ReseauScheduler {
     fun apply(ctx: Context, store: fr.dd.jarvis.data.Store) {
         val wm = WorkManager.getInstance(ctx)
         if (!store.scanAuto.value) { wm.cancelUniqueWork("reseau_auto"); return }
-        wm.enqueueUniquePeriodicWork("reseau_auto", ExistingPeriodicWorkPolicy.KEEP,
-            PeriodicWorkRequestBuilder<ReseauWorker>(60, TimeUnit.MINUTES).setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.UNMETERED).build()).build())
+        val intervalle = when (store.modeEnergie.value) {
+            "performance" -> 30L
+            "eco" -> 360L
+            else -> 60L
+        }
+        wm.enqueueUniquePeriodicWork("reseau_auto", ExistingPeriodicWorkPolicy.UPDATE,
+            PeriodicWorkRequestBuilder<ReseauWorker>(intervalle, TimeUnit.MINUTES).setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.UNMETERED).build()).build())
     }
 
     /** À chaque connexion à un Wi-Fi : analyse (au plus une fois toutes les 20 minutes). */
