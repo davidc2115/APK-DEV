@@ -166,7 +166,7 @@ class Llm(private val store: Store) {
 
     /**
      * Relais quand Groq ne répond plus : Gemini (format OpenAI avec outils, clés en rotation) puis Cloudflare (comptes
-     * en rotation). [cloudflareCompact] : requête déjà réduite pour Cloudflare (contexte plus court) ; sinon l'originale.
+     * en rotation). [cloudflareCompact] : requête déjà réduite réutilisée pour Gemini puis Cloudflare ; sinon l'originale.
      * Si tout échoue, on remonte l'erreur Groq d'origine, complétée des autres.
      */
     suspend fun relaisApresGroq(messages: org.json.JSONArray, tools: org.json.JSONArray?, forceText: Boolean, origine: Exception,
