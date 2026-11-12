@@ -119,10 +119,14 @@ class ToolBox(
                 "compte" to prop("Compte mail précis (adresse ou partie), même s'il est désactivé. Vide = comptes actifs seulement."),
                 "count" to prop("Nombre de mails à trier (5 à 500). Par défaut 100 ; mets 300-500 pour « toute la boîte »."),
                 "unread_only" to prop("« true » pour ne trier que les non lus."),
+                "statut" to prop("Règle persistante du tri : lus | non_lus | tous. Si fourni, remplace la règle enregistrée ; sinon applique la règle actuelle."),
                 "toute_la_boite" to prop("« true » pour inclure aussi les mails déjà archivés (pas seulement la boîte de réception) : utile pour (re)trier tout un compte."),
                 "ranger" to prop("« true » pour appliquer les libellés dans Gmail. Un re-tri remplace les anciens libellés de catégorie par les bons."),
                 "archiver" to prop("« true » pour aussi retirer de la boîte de réception les mails rangés (ils restent dans leur libellé).")
             )))
+        put(tool("regler_tri_mails", "Modifie à la demande la règle persistante du tri automatique des emails. Par défaut seuls les emails déjà lus sont triés. Valeurs : lus (ne touche jamais aux non lus), non_lus (ne trie que les non lus), tous (lus et non lus). Cette règle s'applique à tous les tris automatiques, mais jamais au grand ménage explicite.",
+            mapOf("statut" to prop("lus | non_lus | tous : nouvelle règle à enregistrer."),
+                "action" to prop("definir | voir ; défaut définir si statut fourni, sinon voir."))))
         put(tool("changer_voix", "Change la voix de JARVIS (personnage) : homme, femme, jeune, âgé(e), grave, douce, IA/robot, narrateur, animatrice radio, murmure, Jarvis (par défaut), ou un nom de voix Gemini (Kore, Puck…). Sans précision : liste les voix.",
             mapOf("voix" to prop("Description de la voix voulue, ex. « femme âgée », « jeune homme », « robot », « par défaut ». Vide = lister."),
                 "description" to prop("Facultatif : description libre (âge, ton, accent) pour une voix sur mesure, ex. « homme de 60 ans avec un accent du Sud »."))))
@@ -514,6 +518,7 @@ class ToolBox(
         "summarize_mails" -> summarizeMails(a)
         "morning_briefing" -> ToolResult(briefing(), direct = true)
         "trier_mails" -> trierMails(a)
+        "regler_tri_mails" -> reglerTriMails(a)
         "mail_compte" -> mailCompte(a)
         "mail_envoyer" -> mailEnvoyer(a)
         "marquer_mails_traites" -> marquerTraites(a)
@@ -1826,10 +1831,18 @@ class ToolBox(
             return ToolResult("Refusé par l'utilisateur.")
         // 1) Tri automatique : chaque mail rejoint son libellé (catégorie/expéditeur ; les newsletters dans un seul libellé).
         val tri = try {
-            val classes = fr.dd.jarvis.ai.MailTri.classer(app, cibles)
-            val n = fr.dd.jarvis.ai.MailTri.ranger(app, classes, archiver)
-            "📂 $n rangé(s) : " + classes.groupingBy { it.label }.eachCount().entries.sortedByDescending { it.value }
-                .joinToString(", ") { "${it.key}${if (it.value > 1) " ×${it.value}" else ""}" }
+            val eligiblesTri = cibles.filter { m -> when (store.mailTriStatut.value) {
+                "non_lus" -> m.unread
+                "tous" -> true
+                else -> !m.unread
+            } }
+            if (eligiblesTri.isEmpty()) "📂 Aucun classement automatique : la règle actuelle est « ${store.mailTriStatut.value} » ; le marquage demandé reste effectué."
+            else {
+                val classes = fr.dd.jarvis.ai.MailTri.classer(app, eligiblesTri)
+                val n = fr.dd.jarvis.ai.MailTri.ranger(app, classes, archiver)
+                "📂 $n rangé(s) : " + classes.groupingBy { it.label }.eachCount().entries.sortedByDescending { it.value }
+                    .joinToString(", ") { "${it.key}${if (it.value > 1) " ×${it.value}" else ""}" }
+            }
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { "⚠️ Tri dans les libellés impossible : ${e.message}" }
         // 2) Marquage lu / traité.
         return try {
@@ -1914,15 +1927,38 @@ class ToolBox(
         return ToolResult("🎙️ Voix changée : ${p.libelle}. Je parle maintenant avec cette voix.")
     }
 
+    private fun reglerTriMails(a: JSONObject): ToolResult {
+        val statut = a.optString("statut").trim().lowercase()
+        if (statut.isBlank() || a.optString("action").equals("voir", true)) {
+            val actuel = store.mailTriStatut.value
+            val libelle = when (actuel) { "non_lus" -> "uniquement les non lus"; "tous" -> "lus et non lus"; else -> "uniquement les lus" }
+            return ToolResult("📧 Règle actuelle : $libelle. Tu peux me demander « trie uniquement les lus », « trie uniquement les non lus » ou « trie tous les emails ».", direct = true)
+        }
+        if (statut !in setOf("lus", "non_lus", "tous"))
+            return ToolResult("Règle inconnue. Utilise « lus », « non_lus » ou « tous ».")
+        store.mailTriStatut.set(statut)
+        val libelle = when (statut) { "non_lus" -> "uniquement les non lus"; "tous" -> "les lus et les non lus"; else -> "uniquement les lus" }
+        return ToolResult("✅ Règle de tri enregistrée : $libelle. Elle s'applique à tous les tris automatiques, jusqu'à ce que tu me demandes de la modifier. Le grand ménage reste indépendant.", direct = true)
+    }
+
     private suspend fun trierMails(a: JSONObject): ToolResult {
         if (!store.mailConfigured()) return ToolResult("Les mails ne sont pas configurés (Réglages › Comptes › Mails).")
         val count = (a.optString("count").toIntOrNull() ?: 100).coerceIn(5, 500)
-        val mails = try {
-            app.mail.fetchRecent(count, a.optString("unread_only").equals("true", true), a.optString("compte"), full = true, everywhere = a.optString("toute_la_boite").equals("true", true))
+        val demandeStatut = a.optString("statut").trim().lowercase()
+        val statut = when {
+            demandeStatut in setOf("lus", "non_lus", "tous") -> demandeStatut.also { store.mailTriStatut.set(it) }
+            a.optString("unread_only").equals("true", true) -> "non_lus"
+            else -> store.mailTriStatut.value.takeIf { it in setOf("lus", "non_lus", "tous") } ?: "lus"
+        }
+        // En mode « lus », on lit une fenêtre plus large pour ne pas laisser les non lus récents masquer les lus.
+        val limiteLecture = if (statut == "lus") (count * 5).coerceAtMost(500) else count
+        val mailsBruts = try {
+            app.mail.fetchRecent(limiteLecture, statut == "non_lus", a.optString("compte"), full = true, everywhere = a.optString("toute_la_boite").equals("true", true))
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
             return ToolResult("❌ Impossible de lire les mails : ${e.message}", direct = true)
         }
-        if (mails.isEmpty()) return ToolResult("📭 Aucun mail à trier.", direct = true)
+        val mails = mailsBruts.filter { when (statut) { "lus" -> !it.unread; "non_lus" -> it.unread; else -> true } }.take(count)
+        if (mails.isEmpty()) return ToolResult(if (statut == "lus") "📭 Aucun email déjà lu à trier. Les non lus ont été laissés intacts." else "📭 Aucun mail correspondant à la règle de tri.", direct = true)
         val classes = try {
             fr.dd.jarvis.ai.MailTri.classer(app, mails)
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
