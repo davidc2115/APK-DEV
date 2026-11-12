@@ -33,14 +33,15 @@ object AgentsScheduler {
         val wm = WorkManager.getInstance(ctx)
         // Le centre de surveillance conserve son historique même lorsque les agents IA sont suspendus.
         val mode = store.modeEnergie.value
-        val healthMinutes = when (mode) { "performance" -> 15L; "eco" -> 90L; else -> 30L }
+        val adaptation = mode != "performance" && fr.dd.jarvis.device.Energie.economie
+        val healthMinutes = when (mode) { "performance" -> 15L; "eco" -> 90L; else -> if (adaptation) 60L else 30L }
         val healthReq = PeriodicWorkRequestBuilder<PhoneHealthWorker>(healthMinutes, TimeUnit.MINUTES).build()
         wm.enqueueUniquePeriodicWork("phone_health", ExistingPeriodicWorkPolicy.UPDATE, healthReq)
         if (!store.agentsOn.value) { wm.cancelUniqueWork(NAME); return }
         val agentMinutes = when (mode) {
             "performance" -> 15L
             "eco" -> maxOf(60L, store.agentMinutes.value.toLong())
-            else -> store.agentMinutes.value.coerceAtLeast(15).toLong()
+            else -> if (adaptation) maxOf(45L, store.agentMinutes.value.toLong()) else store.agentMinutes.value.coerceAtLeast(15).toLong()
         }
         val req = PeriodicWorkRequestBuilder<AgentsWorker>(agentMinutes, TimeUnit.MINUTES).build()
         // Les contrôles locaux (batterie, stockage, tâches, factures) doivent aussi tourner hors connexion.
