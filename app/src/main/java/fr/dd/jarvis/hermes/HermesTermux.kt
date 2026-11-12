@@ -707,7 +707,7 @@ for index in range(1, len(cf_ids) + 1):
     fallbacks.append({"provider": f"custom:jarvis_cf_{index}", "model": os.environ["JARVIS_CF_MODEL"]})
 data["fallback_providers"] = fallbacks
 
-# Rapidité : réflexion « low » (Gemini répond bien plus vite) sauf si l'utilisateur a choisi un autre niveau.
+# Rapidité : niveau de réflexion bas par défaut sur le routeur unifié Jarvis.
 agent_cfg = data.setdefault("agent", {})
 if isinstance(agent_cfg, dict):
     agent_cfg["api_max_retries"] = 0
