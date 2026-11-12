@@ -7,6 +7,8 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.media.Ringtone
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.RingtoneManager
@@ -17,6 +19,8 @@ import fr.dd.jarvis.societe.core.normaliser
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import android.os.Handler
+import android.os.Looper
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -43,8 +47,9 @@ data class Rappel(
  */
 object Rappels {
     const val CANAL = "rappels_jarvis"
-    // Canaux versionnés : Android fige le son et la vibration d'un canal dès sa première création.
-    private const val CANAL_SONORE = "rappels_jarvis_sonore_v2"
+    // Android fige le son d'un canal : l'identifiant sonore inclut donc l'URI choisie.
+    private const val PREFIXE_CANAL_SONORE = "rappels_jarvis_son_"
+    private const val CANAL_SONORE_LEGACY = "rappels_jarvis_sonore_v2"
     private const val CANAL_VIBREUR = "rappels_jarvis_vibreur_v2"
     private const val CANAL_SILENCIEUX = "rappels_jarvis_silencieux_v2"
     private val VIBRATION_RAPPEL = longArrayOf(0, 350, 180, 350)
@@ -53,6 +58,34 @@ object Rappels {
         (c.getSystemService(Context.AUDIO_SERVICE) as? AudioManager)?.ringerMode
             ?: AudioManager.RINGER_MODE_NORMAL
 
+    private fun preferences(c: Context) = c.getSharedPreferences("rappels_jarvis_preferences", Context.MODE_PRIVATE)
+    fun sonnerieUri(c: Context): Uri = preferences(c).getString("sonnerie_uri", null)?.takeIf { it.isNotBlank() }?.let(Uri::parse)
+        ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+    fun nomSonnerie(c: Context): String = runCatching {
+        RingtoneManager.getRingtone(c, sonnerieUri(c))?.getTitle(c)
+    }.getOrNull()?.takeIf { it.isNotBlank() } ?: "Sonnerie de notification par défaut"
+
+    fun definirSonnerie(c: Context, uri: Uri?) {
+        preferences(c).edit().putString("sonnerie_uri", uri?.toString().orEmpty()).apply()
+        if (Build.VERSION.SDK_INT >= 26) {
+            val nm = c.getSystemService(NotificationManager::class.java)
+            nm.deleteNotificationChannel(CANAL_SONORE_LEGACY)
+            nm.notificationChannels.filter { it.id.startsWith(PREFIXE_CANAL_SONORE) }
+                .forEach { if (it.id != canalSonore(c)) nm.deleteNotificationChannel(it.id) }
+            preparerCanaux(c)
+        }
+    }
+
+    fun testerSonnerie(c: Context): Boolean = runCatching {
+        val ringtone = RingtoneManager.getRingtone(c, sonnerieUri(c)) ?: return false
+        ringtone.play()
+        Handler(Looper.getMainLooper()).postDelayed({ runCatching { ringtone.stop() } }, 3_000L)
+        true
+    }.getOrDefault(false)
+
+    private fun canalSonore(c: Context): String =
+        PREFIXE_CANAL_SONORE + Integer.toHexString(sonnerieUri(c).toString().hashCode())
+
     private fun preparerCanaux(c: Context) {
         if (Build.VERSION.SDK_INT < 26) return
         val nm = c.getSystemService(NotificationManager::class.java)
@@ -60,11 +93,11 @@ object Rappels {
             .setUsage(AudioAttributes.USAGE_NOTIFICATION)
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
             .build()
-        val sonore = NotificationChannel(CANAL_SONORE, "Rappels — sonnerie et vibration", NotificationManager.IMPORTANCE_HIGH).apply {
+        val sonore = NotificationChannel(canalSonore(c), "Rappels — sonnerie et vibration", NotificationManager.IMPORTANCE_HIGH).apply {
             description = "Rappels avec sonnerie et vibration lorsque le téléphone est en mode sonnerie."
             enableVibration(true)
             vibrationPattern = VIBRATION_RAPPEL
-            setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION), attributs)
+            setSound(sonnerieUri(c), attributs)
         }
         val vibreur = NotificationChannel(CANAL_VIBREUR, "Rappels — vibreur", NotificationManager.IMPORTANCE_HIGH).apply {
             description = "Rappels avec vibration, sans son."
@@ -80,8 +113,8 @@ object Rappels {
         nm.createNotificationChannels(listOf(sonore, vibreur, silencieux))
     }
 
-    private fun canalSelonSonnerie(mode: Int): String = when (mode) {
-        AudioManager.RINGER_MODE_NORMAL -> CANAL_SONORE
+    private fun canalSelonSonnerie(mode: Int, c: Context): String = when (mode) {
+        AudioManager.RINGER_MODE_NORMAL -> canalSonore(c)
         AudioManager.RINGER_MODE_VIBRATE -> CANAL_VIBREUR
         else -> CANAL_SILENCIEUX
     }
@@ -441,7 +474,7 @@ object Rappels {
         val r = liste(c).firstOrNull { it.id == id } ?: return
         val mode = modeSonnerie(c)
         preparerCanaux(c)
-        val canal = if (Build.VERSION.SDK_INT >= 26) canalSelonSonnerie(mode) else CANAL
+        val canal = if (Build.VERSION.SDK_INT >= 26) canalSelonSonnerie(mode, c) else CANAL
         val ouvrir = PendingIntent.getActivity(c, 880_000 - id, Intent(c, fr.dd.jarvis.MainActivity::class.java).putExtra("terrain", "rappels")
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         runCatching {
