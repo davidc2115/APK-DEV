@@ -152,7 +152,7 @@ fun PerformancePanel(app: JarvisApp) {
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             listOf("performance" to "⚡ Performance", "balanced" to "⚖️ Équilibré", "eco" to "🔋 Économie").forEach { (id, nom) ->
                 HudChip(nom, store.modeEnergie.value == id || (id == "balanced" && store.modeEnergie.value == "auto")) {
-                    store.modeEnergie.set(id); fr.dd.jarvis.device.Energie.maj(ctx)
+                    store.modeEnergie.set(id); fr.dd.jarvis.device.Energie.appliquerMode(ctx)
                 }
             }
         }
