@@ -197,7 +197,7 @@ class GeminiChatClient(private val ring: KeyRing, private val model: () -> Strin
         val mdl = model().ifBlank { "gemini-2.5-flash" }.removePrefix("models/")
         val body = JSONObject().put("model", mdl).put("messages", messagesPourGemini(messages)).put("temperature", 0.4)
             // La réflexion de Gemini compte dans les jetons de sortie : marge pour que la réponse ne soit pas coupée.
-            .put("max_tokens", (out + 2048).coerceAtMost(8192))
+            .put("max_tokens", out.coerceIn(256, 2048))
         val outils = outilsPourGemini(tools)
         if (outils != null && outils.length() > 0) { body.put("tools", outils); body.put("tool_choice", if (forceText) "none" else "auto") }
         if (reflexionReduite) when {
@@ -316,7 +316,7 @@ class GeminiChatClient(private val ring: KeyRing, private val model: () -> Strin
 class GeminiClient(private val ring: KeyRing, private val model: () -> String) {
 
     suspend fun generate(system: String, user: String): String =
-        ring.run { key -> withContext(Dispatchers.IO) { call(key, system, user, 4096) } }
+        ring.run { key -> withContext(Dispatchers.IO) { call(key, system, user, 2048) } }
 
     /** Analyse une image (description, lecture de texte dedans, etc.) avec un modèle Gemini multimodal. */
     suspend fun analyserImage(bytes: ByteArray, mimeType: String, question: String): String =
@@ -390,7 +390,7 @@ class GeminiClient(private val ring: KeyRing, private val model: () -> String) {
     }
 
     private fun call(key: String, system: String, user: String, maxTokens: Int, thinkingOff: Boolean = true): String {
-        val gen = JSONObject().put("temperature", 0.3).put("maxOutputTokens", if (maxTokens > 100) 8192 else maxTokens)
+        val gen = JSONObject().put("temperature", 0.3).put("maxOutputTokens", maxTokens.coerceIn(8, 2048))
         if (thinkingOff) {
             val m = model()
             when {
