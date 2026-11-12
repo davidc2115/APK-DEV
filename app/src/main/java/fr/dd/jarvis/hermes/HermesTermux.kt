@@ -710,7 +710,7 @@ data["fallback_providers"] = fallbacks
 # Rapidité : réflexion « low » (Gemini répond bien plus vite) sauf si l'utilisateur a choisi un autre niveau.
 agent_cfg = data.setdefault("agent", {})
 if isinstance(agent_cfg, dict):
-    agent_cfg["api_max_retries"] = 1
+    agent_cfg["api_max_retries"] = 0
     agent_cfg["auto_recovery_cycles"] = 0
 aux_cfg = data.setdefault("auxiliary", {})
 if isinstance(aux_cfg, dict):
@@ -718,7 +718,8 @@ if isinstance(aux_cfg, dict):
     if isinstance(br, dict): br["enabled"] = False
     tg = aux_cfg.setdefault("title_generation", {})
     if isinstance(tg, dict): tg["model_upgrade_enabled"] = False
-if isinstance(agent_cfg, dict) and str(agent_cfg.get("reasoning_effort") or "").strip().lower() in ("", "medium"):
+if isinstance(agent_cfg, dict):
+    # Le relais Jarvis gère déjà les fournisseurs et les clés : pas de réflexion moyenne/haute ni de retry Hermes en doublon.
     agent_cfg["reasoning_effort"] = "low"
 # Multi-agent orchestration, preserving all unrelated Hermes configuration.
 delegation = data.setdefault("delegation", {})
