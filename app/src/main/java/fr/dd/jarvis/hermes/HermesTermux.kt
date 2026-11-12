@@ -362,7 +362,7 @@ p '🧠 Mémoire partagée Jarvis ↔ Hermès installée.'
             appendLine("    enabled: \"on\"")
             appendLine("    search_default_limit: 8")
             appendLine("    max_search_limit: 20")
-            appendLine("    listing: \"off\"")
+            appendLine("    listing: \"on\"")
             appendLine("    listing_max_tokens: 2000")
         }
         return """
