@@ -298,6 +298,7 @@ p '🧠 Mémoire partagée Jarvis ↔ Hermès installée.'
         val base = scriptConfiguration(
             cleApi = s.hermesCle.value, jeton = s.mcpJeton.value,
             gemini = "", groq = "jarvis-router",
+            jetonIA = PontMcp.jetonRelaisIA(s.hermesCle.value),
             modele = s.geminiModel.value.ifBlank { "gemini-2.5-flash" },
             modeleGroq = s.groqModel.value.ifBlank { "llama-3.3-70b-versatile" },
             sunoActif = s.sunoMcpActive.value
@@ -305,7 +306,7 @@ p '🧠 Mémoire partagée Jarvis ↔ Hermès installée.'
         return base + "\n" + scriptHookMemoire(app)
     }
 
-    internal fun scriptConfiguration(cleApi: String, jeton: String, gemini: String, groq: String, modele: String, modeleGroq: String, urlMcp: String = PontMcp.url(), sunoActif: Boolean = false, openai: String = "", modeleOpenAi: String = "gpt-4.1-mini"): String {
+    internal fun scriptConfiguration(cleApi: String, jeton: String, gemini: String, groq: String, modele: String, modeleGroq: String, urlMcp: String = PontMcp.url(), sunoActif: Boolean = false, openai: String = "", modeleOpenAi: String = "gpt-4.1-mini", jetonIA: String = jeton): String {
         val yaml = buildString {
             appendLine("# Géré par Jarvis (fr.dd.jarvis) : régénéré à chaque « Configurer Hermès » depuis l'application.")
             appendLine("# Ancienne configuration éventuelle : config.yaml.avant-jarvis")
@@ -321,7 +322,7 @@ p '🧠 Mémoire partagée Jarvis ↔ Hermès installée.'
             appendLine("    key_env: JARVIS_GROQ_RELAIS")
             appendLine("fallback_providers: []")
             appendLine("credential_pool_strategies: {}")
-            // Le jeton JARVIS_GROQ_RELAIS authentifie uniquement le relais local ; aucune clé fournisseur ne réside ici.
+            // Jeton dédié au relais IA, distinct du jeton MCP ; aucune clé fournisseur ne réside ici.
             // Active explicitement la mémoire native évolutive d'Hermès.
             // La mémoire Jarvis/Obsidian reste la référence partagée pour les préférences utilisateur.
             // Réflexion « low » : Hermès répond nettement plus vite (modifiable dans config.yaml).
@@ -391,7 +392,7 @@ setenv API_SERVER_PORT $PORT_API
 setenv API_SERVER_KEY ${q(cleApi)}
 setenv API_SERVER_MODEL_NAME hermes-agent
 # Seul secret conservé dans Termux : jeton local du relais Jarvis, jamais une clé Groq/Gemini.
-setenv JARVIS_GROQ_RELAIS ${q(jeton)}
+setenv JARVIS_GROQ_RELAIS ${q(jetonIA)}
 setenv HERMES_TIMEZONE ${q(java.util.TimeZone.getDefault().id)}
 chmod 600 "${'$'}H/.env"
 # Version de schéma de la configuration installée : conservée, sinon Hermès croit à une vieille config et la migre.
@@ -614,9 +615,10 @@ p "✅ Hermès installé (${'$'}{MODE})."
             listOf("JARVIS_OPENAI_API_KEY", "JARVIS_ZAI_API_KEY", "JARVIS_OPENROUTER_API_KEY", "JARVIS_NVIDIA_API_KEY", "JARVIS_MISTRAL_API_KEY", "JARVIS_HF_TOKEN", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "MISTRAL_API_KEY", "ZAI_API_KEY", "NVIDIA_API_KEY", "HF_TOKEN").forEach { appendLine("removeenvfamily " + it) }
             // Toutes les clés fournisseurs restent exclusivement dans le coffre chiffré de Jarvis.
             // Hermès ne reçoit que le jeton local, qui ne permet que d'appeler le relais sur 127.0.0.1.
-            appendLine("setenv JARVIS_GROQ_RELAIS " + q(s.mcpJeton.value))
-            // Ollama du serveur de la maison : Hermès passe aussi par le relais de Jarvis.
-            if (hasOllama) appendLine("setenv JARVIS_OLLAMA_RELAIS " + q(s.mcpJeton.value))
+            val jetonRelaisIA = PontMcp.jetonRelaisIA(s.hermesCle.value)
+            appendLine("setenv JARVIS_GROQ_RELAIS " + q(jetonRelaisIA))
+            // Ollama passe également par le jeton dédié au relais IA, jamais par le secret MCP.
+            if (hasOllama) appendLine("setenv JARVIS_OLLAMA_RELAIS " + q(jetonRelaisIA))
             // Fuseau du téléphone : les automatismes (cronjob) d'Hermès se déclenchent à l'heure locale, pas en UTC.
             appendLine("setenv HERMES_TIMEZONE " + q(java.util.TimeZone.getDefault().id))
             listOf("OPENAI", "ZAI", "OPENROUTER", "NVIDIA", "MISTRAL", "HF").forEach { appendLine("setenv JARVIS_HAS_" + it + " 0") }
