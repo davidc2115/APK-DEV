@@ -347,7 +347,7 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
      * Attente maximale « interactive » : au-delà, la demande continue en arrière-plan (le résultat arrive dans la
      * conversation et en notification) au lieu de laisser l'écran bloqué sur « Jarvis réfléchit… ».
      */
-    @Volatile internal var attenteMaxMs = 25_000L
+    @Volatile internal var attenteMaxMs = 12_000L
     private val fond = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val numeroFond = AtomicInteger(0)
 
@@ -399,7 +399,7 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
             withTimeoutOrNull(attenteMs) { travail.join() }
             // Après le premier texte, on accorde une courte marge pour finir la réponse.
             // Ne jamais bloquer indéfiniment l'interface : une réflexion qui s'éternise continue en arrière-plan.
-            if (!travail.isCompleted && ecrit.get()) withTimeoutOrNull(8_000L) { travail.join() }
+            if (!travail.isCompleted && ecrit.get()) withTimeoutOrNull(4_000L) { travail.join() }
             if (travail.isCompleted) return travail.await()
             // Trop long : la demande continue en arrière-plan, l'utilisateur récupère la main.
             attendu.set(false)
