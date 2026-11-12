@@ -385,20 +385,34 @@ fun SanteEcran(app: JarvisApp, onFermer: () -> Unit, onDemander: (String) -> Uni
         else {
             Text(fr.dd.jarvis.device.Sante.resume(l), color = HudText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(10.dp))
-            l.sortedBy { when (it.niveau) { fr.dd.jarvis.device.Sante.Niveau.PANNE -> 0; fr.dd.jarvis.device.Sante.Niveau.ATTENTION -> 1; fr.dd.jarvis.device.Sante.Niveau.OK -> 2; else -> 3 } }.forEach { i ->
-                val couleur = when (i.niveau) {
-                    fr.dd.jarvis.device.Sante.Niveau.OK -> Color(0xFF4CE0A0); fr.dd.jarvis.device.Sante.Niveau.ATTENTION -> Color(0xFFFFB74D)
-                    fr.dd.jarvis.device.Sante.Niveau.PANNE -> Color(0xFFFF5370); else -> HudDim
-                }
-                HudPanel(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(i.icone, fontSize = 16.sp)
-                        Text(i.nom, color = HudText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 8.dp).weight(1f))
-                        Box(Modifier.size(10.dp).clip(RoundedCornerShape(5.dp)).background(couleur))
+            val problemes = l.filter { it.niveau == fr.dd.jarvis.device.Sante.Niveau.PANNE || it.niveau == fr.dd.jarvis.device.Sante.Niveau.ATTENTION }
+                .sortedBy { if (it.niveau == fr.dd.jarvis.device.Sante.Niveau.PANNE) 0 else 1 }
+            val autres = l.filterNot { it.niveau == fr.dd.jarvis.device.Sante.Niveau.PANNE || it.niveau == fr.dd.jarvis.device.Sante.Niveau.ATTENTION }
+                .sortedBy { if (it.niveau == fr.dd.jarvis.device.Sante.Niveau.OK) 0 else 1 }
+            if (problemes.isEmpty()) {
+                Text("✅ Aucun problème ni point de vigilance détecté.", color = Color(0xFF4CE0A0), fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(vertical = 8.dp))
+            }
+            listOf("⚠️ À CORRIGER / À SURVEILLER" to problemes, "AUTRES SYSTÈMES" to autres).forEach { (titre, elements) ->
+                if (elements.isNotEmpty()) {
+                    Text("$titre (${elements.size})", color = LocalAccent.current, fontSize = 11.sp, letterSpacing = 1.4.sp,
+                        fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(top = 8.dp, bottom = 6.dp))
+                    elements.forEach { i ->
+                        val couleur = when (i.niveau) {
+                            fr.dd.jarvis.device.Sante.Niveau.OK -> Color(0xFF4CE0A0); fr.dd.jarvis.device.Sante.Niveau.ATTENTION -> Color(0xFFFFB74D)
+                            fr.dd.jarvis.device.Sante.Niveau.PANNE -> Color(0xFFFF5370); else -> HudDim
+                        }
+                        HudPanel(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(i.icone, fontSize = 16.sp)
+                                Text(i.nom, color = HudText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 8.dp).weight(1f))
+                                Box(Modifier.size(10.dp).clip(RoundedCornerShape(5.dp)).background(couleur))
+                            }
+                            Text(i.detail, color = HudDim, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                            if (i.conseil.isNotBlank()) Text("→ ${i.conseil}", color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+                            if (i.cle == "hermes" && fr.dd.jarvis.hermes.Hermes.degrade()) HudChip("Réessayer Hermès maintenant") { fr.dd.jarvis.hermes.Hermes.reprendre(); tour++ }
+                        }
                     }
-                    Text(i.detail, color = HudDim, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
-                    if (i.conseil.isNotBlank()) Text("→ ${i.conseil}", color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
-                    if (i.cle == "hermes" && fr.dd.jarvis.hermes.Hermes.degrade()) HudChip("Réessayer Hermès maintenant") { fr.dd.jarvis.hermes.Hermes.reprendre(); tour++ }
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
