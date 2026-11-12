@@ -151,14 +151,14 @@ class Llm(private val store: Store) {
     }
 
     private suspend fun groqSeul(messages: org.json.JSONArray, tools: org.json.JSONArray?, forceText: Boolean): org.json.JSONObject = try {
-        groq.chat(messages, tools, 1800, forceText)
+        groq.chat(messages, tools, 900, forceText)
     } catch (e: ApiException) {
         when {
             e.code == 404 && autoFixGroq() -> groq.chat(messages, tools, 1800, forceText)
             // 413 : requête trop grosse pour la limite de jetons/minute du modèle → on compacte (historique, résultats d'outils, schéma) et on réessaie.
             e.code == 413 || (e.code == 429 && (e.message ?: "").contains("tokens per minute", true) && (e.message ?: "").contains("Requested")) -> {
-                try { groq.chat(compacter(messages, 1), compacterSchema(tools, 1), 1000, forceText) }
-                catch (e2: ApiException) { if (e2.code == 413) groq.chat(compacter(messages, 2), compacterSchema(tools, 2), 700, forceText) else throw e2 }
+                try { groq.chat(compacter(messages, 1), compacterSchema(tools, 1), 700, forceText) }
+                catch (e2: ApiException) { if (e2.code == 413) groq.chat(compacter(messages, 2), compacterSchema(tools, 2), 500, forceText) else throw e2 }
             }
             else -> throw e
         }
@@ -174,7 +174,7 @@ class Llm(private val store: Store) {
         val erreurs = mutableListOf("Groq : " + (origine.message ?: origine.javaClass.simpleName).take(140))
         if (geminiChat.disponible()) {
             try {
-                return geminiChat.chat(messages, tools, 1800, forceText).also { noterRelais("Gemini") }
+                return geminiChat.chat(messages, tools, 1200, forceText).also { noterRelais("Gemini") }
             } catch (e: CancellationException) { throw e } catch (e: Exception) {
                 erreurs += "Gemini : " + (e.message ?: e.javaClass.simpleName).take(140)
             }
