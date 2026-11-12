@@ -174,7 +174,9 @@ class Llm(private val store: Store) {
         val erreurs = mutableListOf("Groq : " + (origine.message ?: origine.javaClass.simpleName).take(140))
         if (geminiChat.disponible()) {
             try {
-                return geminiChat.chat(messages, tools, 1200, forceText).also { noterRelais("Gemini") }
+                // Dans le relais Hermes, réutilise la version compactée : Gemini ne doit pas recevoir un prompt géant après l'échec Groq.
+                val (messagesGemini, outilsGemini) = cloudflareCompact ?: (messages to tools)
+                return geminiChat.chat(messagesGemini, outilsGemini, 1200, forceText).also { noterRelais("Gemini") }
             } catch (e: CancellationException) { throw e } catch (e: Exception) {
                 erreurs += "Gemini : " + (e.message ?: e.javaClass.simpleName).take(140)
             }
