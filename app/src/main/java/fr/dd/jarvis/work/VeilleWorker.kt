@@ -26,8 +26,14 @@ import java.util.concurrent.TimeUnit
 class VeilleWorker(private val ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     companion object {
         fun planifier(ctx: Context) = runCatching {
-            WorkManager.getInstance(ctx).enqueueUniquePeriodicWork("veille_jarvis", ExistingPeriodicWorkPolicy.KEEP,
-                PeriodicWorkRequestBuilder<VeilleWorker>(15, TimeUnit.MINUTES).build())
+            val app = ctx.applicationContext as? JarvisApp
+            val intervalle = when (app?.store?.modeEnergie?.value) {
+                "performance" -> 15L
+                "eco" -> 60L
+                else -> 30L
+            }
+            WorkManager.getInstance(ctx).enqueueUniquePeriodicWork("veille_jarvis", ExistingPeriodicWorkPolicy.UPDATE,
+                PeriodicWorkRequestBuilder<VeilleWorker>(intervalle, TimeUnit.MINUTES).build())
         }
 
         private const val CANAL = "chantier_jarvis"
