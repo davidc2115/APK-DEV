@@ -528,6 +528,8 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
                 } else contenu?.let { signer(it) }
                     ?: "⚠️ Hermès n'a renvoyé aucun résultat exploitable. La demande n'est pas confirmée comme terminée."
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             if (!call.isCanceled()) { marquerEnLigne(false); relancerSiBesoin(app) }
             "⚠️ Connexion au moteur Hermès interrompue : ${e.message ?: e.javaClass.simpleName}. La demande n'a pas pu être confirmée."
