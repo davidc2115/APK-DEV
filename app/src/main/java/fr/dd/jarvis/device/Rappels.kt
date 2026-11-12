@@ -7,6 +7,9 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.AudioManager
+import android.media.RingtoneManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -40,6 +43,48 @@ data class Rappel(
  */
 object Rappels {
     const val CANAL = "rappels_jarvis"
+    // Canaux versionnés : Android fige le son et la vibration d'un canal dès sa première création.
+    private const val CANAL_SONORE = "rappels_jarvis_sonore_v2"
+    private const val CANAL_VIBREUR = "rappels_jarvis_vibreur_v2"
+    private const val CANAL_SILENCIEUX = "rappels_jarvis_silencieux_v2"
+    private val VIBRATION_RAPPEL = longArrayOf(0, 350, 180, 350)
+
+    private fun modeSonnerie(c: Context): Int =
+        (c.getSystemService(Context.AUDIO_SERVICE) as? AudioManager)?.ringerMode
+            ?: AudioManager.RINGER_MODE_NORMAL
+
+    private fun preparerCanaux(c: Context) {
+        if (Build.VERSION.SDK_INT < 26) return
+        val nm = c.getSystemService(NotificationManager::class.java)
+        val attributs = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+        val sonore = NotificationChannel(CANAL_SONORE, "Rappels — sonnerie et vibration", NotificationManager.IMPORTANCE_HIGH).apply {
+            description = "Rappels avec sonnerie et vibration lorsque le téléphone est en mode sonnerie."
+            enableVibration(true)
+            vibrationPattern = VIBRATION_RAPPEL
+            setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION), attributs)
+        }
+        val vibreur = NotificationChannel(CANAL_VIBREUR, "Rappels — vibreur", NotificationManager.IMPORTANCE_HIGH).apply {
+            description = "Rappels avec vibration, sans son."
+            enableVibration(true)
+            vibrationPattern = VIBRATION_RAPPEL
+            setSound(null, null)
+        }
+        val silencieux = NotificationChannel(CANAL_SILENCIEUX, "Rappels — silencieux", NotificationManager.IMPORTANCE_DEFAULT).apply {
+            description = "Rappels affichés en notification uniquement."
+            enableVibration(false)
+            setSound(null, null)
+        }
+        nm.createNotificationChannels(listOf(sonore, vibreur, silencieux))
+    }
+
+    private fun canalSelonSonnerie(mode: Int): String = when (mode) {
+        AudioManager.RINGER_MODE_NORMAL -> CANAL_SONORE
+        AudioManager.RINGER_MODE_VIBRATE -> CANAL_VIBREUR
+        else -> CANAL_SILENCIEUX
+    }
     const val ACT_SONNER = "fr.dd.jarvis.RAPPEL_SONNER"
     const val ACT_FAIT = "fr.dd.jarvis.RAPPEL_FAIT"
     const val ACT_PLUS_TARD = "fr.dd.jarvis.RAPPEL_PLUS_TARD"
@@ -394,19 +439,34 @@ object Rappels {
 
     fun sonner(c: Context, id: Int) {
         val r = liste(c).firstOrNull { it.id == id } ?: return
-        if (Build.VERSION.SDK_INT >= 26) c.getSystemService(NotificationManager::class.java)
-            .createNotificationChannel(NotificationChannel(CANAL, "Rappels", NotificationManager.IMPORTANCE_HIGH).apply { enableVibration(true) })
+        val mode = modeSonnerie(c)
+        preparerCanaux(c)
+        val canal = if (Build.VERSION.SDK_INT >= 26) canalSelonSonnerie(mode) else CANAL
         val ouvrir = PendingIntent.getActivity(c, 880_000 - id, Intent(c, fr.dd.jarvis.MainActivity::class.java).putExtra("terrain", "rappels")
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         runCatching {
-            NotificationManagerCompat.from(c).notify(BASE_NOTIF + id, NotificationCompat.Builder(c, CANAL)
+            val notification = NotificationCompat.Builder(c, canal)
                 .setSmallIcon(android.R.drawable.ic_popup_reminder).setContentTitle("⏰ Rappel").setContentText(r.texte)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(r.texte)).setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_REMINDER).setContentIntent(ouvrir).setAutoCancel(true)
-                .addAction(0, "✅ Fait", pi(c, id, ACT_FAIT)).addAction(0, "⏰ Dans 10 min", pi(c, id, ACT_PLUS_TARD)).build())
+                .addAction(0, "✅ Fait", pi(c, id, ACT_FAIT)).addAction(0, "⏰ Dans 10 min", pi(c, id, ACT_PLUS_TARD))
+            // Avant Android 8, le son et le vibreur se règlent directement sur la notification.
+            if (Build.VERSION.SDK_INT < 26) {
+                when (mode) {
+                    AudioManager.RINGER_MODE_NORMAL -> notification
+                        .setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION))
+                        .setVibrate(VIBRATION_RAPPEL)
+                    AudioManager.RINGER_MODE_VIBRATE -> notification.setVibrate(VIBRATION_RAPPEL)
+                    else -> Unit // silencieux : notification seule
+                }
+            }
+            NotificationManagerCompat.from(c).notify(BASE_NOTIF + id, notification.build())
         }
-        // Dit à voix haute si JARVIS parle (voiture, maison) — sans bloquer si la voix n'est pas prête.
-        runCatching { (c.applicationContext as? fr.dd.jarvis.JarvisApp)?.let { app -> if (app.enVoiture) fr.dd.jarvis.service.CarBridge.post(app, "⏰ Rappel : ${r.texte}") } }
+        // La voix en voiture ne doit pas contourner le mode vibreur ou silencieux du téléphone.
+        runCatching { (c.applicationContext as? fr.dd.jarvis.JarvisApp)?.let { app ->
+            if (mode == AudioManager.RINGER_MODE_NORMAL && app.enVoiture)
+                fr.dd.jarvis.service.CarBridge.post(app, "⏰ Rappel : ${r.texte}")
+        } }
         val now = System.currentTimeMillis()
         if (r.repetition.isNotBlank()) {
             val x = r.copy(at = suivante(r.at, r.repetition, now), dernier = now, fait = false)
