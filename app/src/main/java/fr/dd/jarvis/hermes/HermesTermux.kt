@@ -580,29 +580,9 @@ p "✅ Hermès installé (${'$'}{MODE})."
             return message
         }
         message = "✅ Pont local de progression actif sur 127.0.0.1:${PontMcp.PORT}. Préparation du script Hermès…"
-        val gemini = s.geminiKeys.toList().filterNot(fr.dd.jarvis.ai.KeyRing::estCleOpenAi)
-        val groq = s.groqKeys.toList()
-        val openai = s.openaiKeys.toList()
-        val cloudflare = s.cfAccounts.toList().mapNotNull { raw ->
-            val id = raw.substringBefore(':').trim()
-            val key = raw.substringAfter(':', "").trim()
-            if (Regex("[0-9a-fA-F]{32}").matches(id) && key.isNotBlank()) id to key else null
-        }
-        val external = listOf(
-            Triple("openai", "JARVIS_OPENAI_API_KEY", "https://api.openai.com/v1"),
-            Triple("zai", "JARVIS_ZAI_API_KEY", "https://api.z.ai/api/paas/v4"),
-            Triple("openrouter", "JARVIS_OPENROUTER_API_KEY", "https://openrouter.ai/api/v1"),
-            Triple("nvidia", "JARVIS_NVIDIA_API_KEY", "https://integrate.api.nvidia.com/v1"),
-            Triple("mistral", "JARVIS_MISTRAL_API_KEY", "https://api.mistral.ai/v1"),
-            Triple("huggingface", "JARVIS_HF_TOKEN", "https://router.huggingface.co/v1")
-        ).mapNotNull { (id, env, defaultUrl) ->
-            val key = if (id == "openai") openai.firstOrNull().orEmpty() else s.externalProviderKey(id)
-            val model = if (id == "openai") s.openaiModel.value else s.externalProviderModel(id)
-            if (key.isBlank()) null else listOf(id, env, if (id == "openai") defaultUrl else s.externalProviderEndpoint(id).ifBlank { defaultUrl }.trimEnd('/'), model, key)
-        }
-        message = "⏳ Clés et fournisseurs IA récupérés. Construction des règles multi-agents…"
+        // Toutes les clés restent dans le stockage chiffré de Jarvis ; aucune clé fournisseur n'est copiée dans Termux.
+        message = "⏳ Routeur IA Jarvis identifié. Préparation de la configuration unifiée d’Hermès…"
         val model = s.groqModel.value.ifBlank { "llama-3.3-70b-versatile" }
-        val cloudflareModel = s.cfChatModel.value.ifBlank { "@cf/meta/llama-3.3-70b-instruct-fp8-fast" }
         // Ne promouvoir Ollama que si le serveur répond réellement ET qu'un modèle de conversation est installé.
         // Cela évite de configurer Hermès avec un modèle fictif « auto » ou un endpoint seulement déclaré.
         val ollamaBase = runCatching { fr.dd.jarvis.ai.Ollama.base(app, force = true) }.getOrNull()
@@ -618,7 +598,7 @@ p "✅ Hermès installé (${'$'}{MODE})."
             appendLine("removeenvfamily GROQ_API_KEY")
             appendLine("removeenvfamily JARVIS_GROQ_RELAIS")
             appendLine("removeenvfamily JARVIS_CF_KEY")
-            listOf("JARVIS_OPENAI_API_KEY", "JARVIS_ZAI_API_KEY", "JARVIS_OPENROUTER_API_KEY", "JARVIS_NVIDIA_API_KEY", "JARVIS_MISTRAL_API_KEY", "JARVIS_HF_TOKEN").forEach { appendLine("removeenvfamily " + it) }
+            listOf("JARVIS_OPENAI_API_KEY", "JARVIS_ZAI_API_KEY", "JARVIS_OPENROUTER_API_KEY", "JARVIS_NVIDIA_API_KEY", "JARVIS_MISTRAL_API_KEY", "JARVIS_HF_TOKEN", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "MISTRAL_API_KEY", "ZAI_API_KEY", "NVIDIA_API_KEY", "HF_TOKEN").forEach { appendLine("removeenvfamily " + it) }
             // Toutes les clés fournisseurs restent exclusivement dans le coffre chiffré de Jarvis.
             // Hermès ne reçoit que le jeton local, qui ne permet que d'appeler le relais sur 127.0.0.1.
             appendLine("setenv JARVIS_GROQ_RELAIS " + q(s.mcpJeton.value))
@@ -852,18 +832,10 @@ os.chmod(name, 0o600)
 os.replace(name, p)
 """.trimIndent()
         message = "⏳ Règles multi-agents préparées. Assemblage des commandes de synchronisation…"
-        val hasGemini = "0"
-        // Groq (offre gratuite : ~8 000 jetons/minute) ne peut pas porter un tour d'agent Hermès brut : Hermès l'appelle
-        // donc via le RELAIS de Jarvis (127.0.0.1:${'$'}{PontMcp.PORT}/groq/v1) qui compacte chaque requête sous la limite et fait
-        // tourner les clés Groq de Jarvis (jamais copiées dans Termux). Gemini reste le modèle principal d'Hermès.
-        val hasGroq = "1" // routeur local disponible même si Groq est absent : Jarvis choisira Gemini ou un autre relais
-        val cfIds = "" // les comptes Cloudflare sont également gérés exclusivement par Jarvis
+        // Le relais /groq/v1 route tous les fournisseurs cloud via le gestionnaire IA de Jarvis.
+        val hasGroq = "1"
         val pluginCommand = "PLUGIN_OK=0; debian_utilisateur_jarvis; hermes_debian hermes plugins install advanced-delegation --no-deps --no-enable >/dev/null 2>&1 || true; if hermes_debian hermes plugins enable advanced-delegation --no-allow-tool-override >/dev/null 2>&1; then PLUGIN_OK=1; p \"🧠 Routage multi-modèles advanced-delegation activé.\"; else p \"⚠️ Extension avancée indisponible : délégation Hermes native conservée.\"; fi"
-        val extEnv = "" /* aucune clé externe n’est transmise à Termux */ + external.take(0).joinToString(" ") { entry ->
-            val id = entry[0].uppercase()
-            "JARVIS_HAS_$id=1 JARVIS_${id}_MODEL=${q(entry[3])} JARVIS_${id}_ENDPOINT=${q(entry[2])}"
-        }
-        val configCommand = "proot-distro login debian --termux-home -- env JARVIS_HAS_OPENAI=0 JARVIS_HAS_ZAI=0 JARVIS_HAS_OPENROUTER=0 JARVIS_HAS_NVIDIA=0 JARVIS_HAS_MISTRAL=0 JARVIS_HAS_HF=0 " + extEnv + " JARVIS_HAS_GEMINI=" + hasGemini + " JARVIS_HAS_GROQ=" + hasGroq + " JARVIS_GROQ_RELAIS_URL=" + q("http://127.0.0.1:${PontMcp.PORT}/groq/v1") + " JARVIS_GEMINI_MODEL=" + q(app.store.hermesModele.value.ifBlank { app.store.geminiModel.value }.ifBlank { "gemini-2.5-flash" }) + " JARVIS_GROQ_MODEL=" + q(model) + " JARVIS_CF_MODEL=" + q(cloudflareModel) + " JARVIS_CF_IDS=" + q(cfIds) + " JARVIS_HAS_OLLAMA=" + (if (hasOllama) "1" else "0") + " JARVIS_OLLAMA_RELAIS_URL=" + q("http://127.0.0.1:${PontMcp.PORT}/ollama/v1") + " JARVIS_OLLAMA_MODEL=" + q(ollamaModel ?: "auto") + " JARVIS_ADVANCED_DELEGATION=\"\$PLUGIN_OK\" python3 -c " + q(py) + " || exit 1"
+        val configCommand = "proot-distro login debian --termux-home -- env JARVIS_HAS_GEMINI=0 JARVIS_HAS_GROQ=" + hasGroq + " JARVIS_GROQ_RELAIS_URL=" + q("http://127.0.0.1:${PontMcp.PORT}/groq/v1") + " JARVIS_GROQ_MODEL=" + q(model) + " JARVIS_HAS_OLLAMA=" + (if (hasOllama) "1" else "0") + " JARVIS_OLLAMA_RELAIS_URL=" + q("http://127.0.0.1:${PontMcp.PORT}/ollama/v1") + " JARVIS_OLLAMA_MODEL=" + q(ollamaModel ?: "auto") + " JARVIS_ADVANCED_DELEGATION=\\\"\\$PLUGIN_OK\\\" python3 -c " + q(py) + " || exit 1"
         // L'installation Jarvis est une installation source dans Debian : utiliser son exécutable direct.
         // bash -lc réinitialisait le PATH et pouvait lancer un autre Hermes, d'où l'échec silencieux précédent.
         // En cas d'échec, arrêter la configuration : ne jamais annoncer une nouvelle version qui n'a pas été installée.
@@ -892,7 +864,7 @@ os.replace(name, p)
             "curl -fsS -m 4 -X POST -H \"Authorization: Bearer ${'$'}J_TOK\" --data-binary pong \"${'$'}J_URL\" >/dev/null || { rc=${'$'}?; p \"❌ Contrôle du pont Jarvis impossible (curl ${'$'}rc) vers ${'$'}J_URL\"; exit \"${'$'}rc\"; }",
             "p '🚀 Configuration Hermès : suivi des étapes confirmé.'",
             upgradeCommand,
-            "p '🔐 Mise à jour des clés et variables des fournisseurs…'",
+            "p '🔐 Vérification du relais IA local Jarvis (aucune clé fournisseur copiée)…'",
             envScript,
             scriptHookMemoire(app),
             "p '🧩 Synchronisation des plugins et agents…'",
