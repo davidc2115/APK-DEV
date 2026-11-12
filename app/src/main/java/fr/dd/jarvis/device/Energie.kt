@@ -49,6 +49,7 @@ object Energie {
 
     fun maj(ctx: Context, intentBatterie: Intent? = null) {
         val app = ctx.applicationContext as? JarvisApp ?: return
+        val ancienneEconomie = economie
         val i = intentBatterie ?: runCatching { ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED)) }.getOrNull()
         if (i != null) {
             val niveau = i.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
@@ -67,6 +68,11 @@ object Energie {
         ramLibrePct = if (memoire.totalMem > 0L) (memoire.availMem * 100L / memoire.totalMem).toInt() else -1
         val pressionMemoire = ramLibrePct in 0..12
         economie = decider(app.store.modeEnergie.value, economiseurAndroid, batterie, enCharge, contrainteThermique, pressionMemoire)
+        if (ancienneEconomie != economie) {
+            runCatching { fr.dd.jarvis.work.AgentsScheduler.apply(ctx, app.store) }
+            runCatching { fr.dd.jarvis.work.ReseauScheduler.apply(ctx, app.store) }
+            runCatching { fr.dd.jarvis.work.VeilleWorker.planifier(ctx) }
+        }
     }
 
     /** Suit la batterie et l'économiseur d'Android (appelé au démarrage de l'appli, sans coût : diffusions système). */
