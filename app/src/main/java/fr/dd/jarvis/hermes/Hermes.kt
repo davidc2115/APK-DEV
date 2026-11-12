@@ -251,7 +251,7 @@ CONTENUS ADULTES / NSFW :
 - Si un fournisseur comme Suno interdit le contenu pornographique, ne lui transmets pas ce contenu ; propose une version non explicite compatible ou conserve la création textuelle dans les limites autorisées.
 
 Tu travailles en équipe :
-- ton moteur Hermès interne :
+- ton moteur Hermès interne : raisonnement, tâches en plusieurs étapes, recherche web, rédaction, code et scripts dans Termux, mémoire long terme, compétences et tâches planifiées ; il reste invisible comme identité distincte pour l’utilisateur.
 - Les outils de JARVIS, via le serveur MCP « jarvis » (outils mcp__jarvis__*) : téléphone (appels, SMS, applications, réglages), agenda, mails, contacts, musique, réveils, domotique, coffre Obsidian, société (clients, devis, factures, paie, KML), localisation précise (ma_position), génération d'images/vidéos. Pour piloter une application Android quelconque, utilise phone_action : list_apps pour connaître les applications réellement installées, open_app pour l'ouvrir, read_screen pour lire l'interface, click_text ou click_best_match pour choisir un élément, type_text pour saisir, scroll_down/scroll_up pour défiler, puis read_screen pour vérifier le résultat. Procède par petites étapes et ne prétends jamais qu'une action a réussi sans retour de l'outil. L'accessibilité JARVIS doit être active ; les écrans sécurisés, mots de passe, paiements, validations système et actions sensibles restent protégés et peuvent exiger une intervention/confirmation de l'utilisateur. Pour TOUTE action sur le téléphone ou les données de l'utilisateur, utilise ces outils plutôt que des commandes shell ; n'invente jamais leur contenu. Pour toute demande de diagnostic, état, santé ou surveillance du téléphone, appelle phone_health_report avant de conclure : il fournit les valeurs réellement accessibles (batterie, température, stockage, RAM, réseau, permissions et services). Distingue toujours les mesures observées des éléments qu'Android ne permet pas de surveiller.
 Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume-les au lieu de les recopier en entier.""".trim()
         val notes = if (derniere.isBlank()) "" else runCatching { fr.dd.jarvis.device.NotesPertinentes.pour(app, derniere) }.getOrDefault("")
@@ -359,18 +359,18 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
         val precedente = PontMcp.boiteActive
         val statutPrecedent = PontMcp.statutActif
         val attendu = AtomicBoolean(true) // l'utilisateur attend encore la réponse à l'écran
-        val dernierStatut = AtomicReference("🪽 Hermès réfléchit…")
+        val dernierStatut = AtomicReference("JARVIS réfléchit…")
         val notif = 7400 + (numeroFond.incrementAndGet() % 40) * 2
         val statut: (String) -> Unit = { st ->
             dernierStatut.set(st)
-            if (attendu.get()) onStatus(st) else SuiviTaches.enCours(app, notif, "Hermès termine en arrière-plan", "${demande.take(80)}\n$st")
+            if (attendu.get()) onStatus(st) else SuiviTaches.enCours(app, notif, "JARVIS continue en arrière-plan", "${demande.take(80)}\n$st")
         }
         if (boite != null) PontMcp.boiteActive = boite
         PontMcp.statutActif = statut
         val medias = mutableListOf<fr.dd.jarvis.ai.Medias.Media>()
         val mediasPrecedents = PontMcp.mediasActifs
         PontMcp.mediasActifs = medias
-        statut("🪽 Hermès réfléchit…")
+        statut("JARVIS réfléchit…")
         val appel = AtomicReference<okhttp3.Call?>(null)
         // Réponse en flux : chaque morceau de texte part tout de suite (affichage et voix) tant que l'utilisateur attend.
         val ecrit = AtomicBoolean(false)
@@ -403,12 +403,12 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
             if (travail.isCompleted) return travail.await()
             // Trop long : la demande continue en arrière-plan, l'utilisateur récupère la main.
             attendu.set(false)
-            SuiviTaches.enCours(app, notif, "Hermès termine en arrière-plan", "${demande.take(80)}\n${dernierStatut.get()}")
+            SuiviTaches.enCours(app, notif, "JARVIS continue en arrière-plan", "${demande.take(80)}\n${dernierStatut.get()}")
             fond.launch {
                 val r = runCatching { travail.await() }.getOrNull()
                 val texte = r ?: "⚠️ Je n'ai pas réussi à terminer « ${demande.take(80).ifBlank { "ta demande" }} » (moteur approfondi indisponible ou délai dépassé). Redemande-la si besoin."
                 withContext(Dispatchers.Main) { app.chatAjouter(ChatMsg(false, texte)) }
-                SuiviTaches.termine(app, notif, if (r != null) "Hermès a terminé" else "Hermès n'a pas pu terminer", texte)
+                SuiviTaches.termine(app, notif, if (r != null) "JARVIS a terminé" else "Hermès n'a pas pu terminer", texte)
             }
             return MESSAGE_ARRIERE_PLAN
         } catch (e: CancellationException) {
