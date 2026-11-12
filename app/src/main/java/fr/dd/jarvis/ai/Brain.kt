@@ -100,9 +100,13 @@ class Brain(
             append("\nRéponds au dernier message de l'utilisateur.")
         }.take(6500)
         GeminiNanoLocal.repondre(promptNano)?.let { return it }
-        val cloud = try {
-            app.llm.groqChat(msgs, null, forceText = true).optString("content").trim().takeIf { it.isNotBlank() }
-        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
+        // Le bavardage ne doit jamais attendre toute la chaîne de secours réseau : Nano (1,6 s),
+        // puis au plus 3 s pour Groq / ses relais. Ensuite, réponse locale immédiate.
+        val cloud = kotlinx.coroutines.withTimeoutOrNull(3_000L) {
+            try {
+                app.llm.groqChat(msgs, null, forceText = true).optString("content").trim().takeIf { it.isNotBlank() }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
+        }
         // Dernier recours strictement local : ne jamais laisser un bavardage simple tomber dans la chaîne Hermès.
         return cloud ?: "Ça va bien, merci ! Et toi, comment se passe ta journée ?"
     }
@@ -260,7 +264,10 @@ class Brain(
             messages.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(cap)))
         }
 
-        repeat(6) {
+        // Une commande simple ne doit pas partir dans six cycles : 3 tours suffisent normalement
+        // (appel d'outil, résultat, réponse). Les missions multiétapes gardent les 6 tours.
+        val toursMax = when { multi -> 6; fr.dd.jarvis.hermes.Routeur.commandeSimple(texteUser) -> 3; else -> 4 }
+        repeat(toursMax) {
             val msg = try {
                 llm.groqChat(messages, schemaFinal)
             } catch (e: ApiException) {
