@@ -341,7 +341,7 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
      * Attente maximale « interactive » : au-delà, la demande continue en arrière-plan (le résultat arrive dans la
      * conversation et en notification) au lieu de laisser l'écran bloqué sur « Jarvis réfléchit… ».
      */
-    @Volatile internal var attenteMaxMs = 50_000L
+    @Volatile internal var attenteMaxMs = 25_000L
     private val fond = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val numeroFond = AtomicInteger(0)
 
@@ -391,8 +391,9 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
         }
         try {
             withTimeoutOrNull(attenteMs) { travail.join() }
-            // Hermès a commencé à répondre : on le laisse finir sa phrase au lieu de passer en arrière-plan.
-            if (!travail.isCompleted && ecrit.get()) travail.join()
+            // Après le premier texte, on accorde une courte marge pour finir la réponse.
+            // Ne jamais bloquer indéfiniment l'interface : une réflexion qui s'éternise continue en arrière-plan.
+            if (!travail.isCompleted && ecrit.get()) withTimeoutOrNull(8_000L) { travail.join() }
             if (travail.isCompleted) return travail.await()
             // Trop long : la demande continue en arrière-plan, l'utilisateur récupère la main.
             attendu.set(false)
@@ -515,12 +516,10 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
 /**
  * Répartition des demandes. Hermès est le cerveau : il orchestre, planifie, crée les automatismes (cronjob) et répartit le
  * travail entre ses sous-agents (delegate_task → routes Gemini et Groq) et l'agent téléphone Jarvis (outil MCP jarvis_agent).
- *  - mode « auto » : Hermès reçoit les tâches complexes, en plusieurs étapes, récurrentes ou multi-agents (même si elles
- *    touchent au téléphone), la recherche web, la rédaction, l'analyse, le code et les questions ouvertes ; Jarvis répond
- *    directement aux commandes simples du téléphone (une action, un fichier, la Freebox…), plus vite et sans détour ;
- *  - mode « auto » (par défaut, « Jarvis d'abord ») : Jarvis répond à tout, sauf automatismes, demandes en plusieurs
- *    étapes, serveur/SSH et recherche sur internet confiés directement à Hermès ; si Jarvis n'aboutit pas, Hermès reprend
- *    automatiquement la demande (Brain.reply) — jamais besoin de dire « Hermès » ;
+ *  - mode « auto » : Hermès est le cerveau principal des demandes qui nécessitent une réponse IA ; Jarvis conserve
+ *    les réflexes sans IA et le bavardage rapide (Nano, puis secours cloud borné) ;
+ *  - les commandes instantanées du téléphone restent exécutées directement par Jarvis ; les tâches longues d'Hermès
+ *    passent en arrière-plan au lieu de bloquer l'interface ;
  *  - mode « tout » : Hermès reçoit tout ce qui demande réflexion, mémoire ou orchestration. Pour la
  *    rapidité, les RÉFLEXES de Jarvis (lampe, volume, Wi-Fi, lecture… sans modèle ; position, recherche de fichiers,
  *    Freebox, vidéo) et les COMMANDES SIMPLES du téléphone (une action, sans réflexion) sont exécutés directement par
