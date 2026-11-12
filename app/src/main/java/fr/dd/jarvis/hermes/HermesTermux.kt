@@ -632,6 +632,18 @@ p = Path("/root/.hermes/config.yaml")
 if not p.exists():
     raise SystemExit("Configuration Hermes absente.")
 data = yaml.safe_load(p.read_text()) or {}
+# Hermes fusionne encore les anciens custom_providers AVANT les entrees v12 providers.
+# Une ancienne entree Groq (souvent creee par hermes setup) peut donc gagner la resolution
+# et conserver son ancienne cle/env, meme si providers.groq vient d'etre corrige par Jarvis.
+# Supprimer uniquement les anciennes definitions Groq ; conserver les autres endpoints personnels.
+legacy = data.get('custom_providers')
+if isinstance(legacy, list):
+    def is_legacy_groq(entry):
+        if not isinstance(entry, dict): return False
+        name = str(entry.get('name', entry.get('provider', ''))).strip().lower()
+        url = str(entry.get('base_url') or entry.get('api') or entry.get('url') or '').strip().lower()
+        return name in ('groq', 'jarvis-groq', 'custom:groq') or 'groq.com' in url or '/groq/v1' in url
+    data['custom_providers'] = [entry for entry in legacy if not is_legacy_groq(entry)]
 # Force la divulgation progressive à chaque synchronisation : MCP ne doit jamais être envoyé en bloc à Groq.
 tools_cfg = data.setdefault("tools", {})
 if not isinstance(tools_cfg, dict):
