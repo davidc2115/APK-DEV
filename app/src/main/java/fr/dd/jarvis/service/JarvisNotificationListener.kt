@@ -118,8 +118,9 @@ class JarvisNotificationListener : NotificationListenerService() {
                 else if (titre.isBlank()) titre = "Appel entrant"
             }
             val message = estMessage(sbn.packageName) || n.category == Notification.CATEGORY_MESSAGE
-            val appelManque = n.category == Notification.CATEGORY_MISSED_CALL ||
-                (appel && (n.flags and Notification.FLAG_ONGOING_EVENT) == 0)
+            // Seules les notifications d'appels manqués sont masquées. La notification d'appel entrant
+            // reste visible pour ne jamais gêner l'écran permettant de répondre.
+            val appelManque = n.category == Notification.CATEGORY_MISSED_CALL
             add(Item(sbn.packageName, label, titre, texte, sbn.postTime))
             sauver(applicationContext)
             val mail = estMail(sbn.packageName)
