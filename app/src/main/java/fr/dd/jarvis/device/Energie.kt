@@ -1,5 +1,6 @@
 package fr.dd.jarvis.device
 
+import android.app.ActivityManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -34,14 +35,16 @@ object Energie {
         private set
     var contrainteThermique by mutableStateOf(false)
         private set
+    var ramLibrePct by mutableStateOf(-1)
+        private set
 
     @Volatile private var suivi = false
 
     /** Décision pure (testable). */
-    internal fun decider(mode: String, economiseur: Boolean, niveau: Int, charge: Boolean, thermique: Boolean = false): Boolean = when (mode) {
+    internal fun decider(mode: String, economiseur: Boolean, niveau: Int, charge: Boolean, thermique: Boolean = false, memoireFaible: Boolean = false): Boolean = when (mode) {
         "performance" -> false
         "eco" -> true
-        else -> economiseur || thermique || (!charge && niveau in 0..SEUIL_BATTERIE)
+        else -> economiseur || thermique || memoireFaible || (!charge && niveau in 0..SEUIL_BATTERIE)
     }
 
     fun maj(ctx: Context, intentBatterie: Intent? = null) {
@@ -59,7 +62,11 @@ object Energie {
         contrainteThermique = if (Build.VERSION.SDK_INT >= 29) runCatching {
             pm.currentThermalStatus >= PowerManager.THERMAL_STATUS_MODERATE
         }.getOrDefault(false) else false
-        economie = decider(app.store.modeEnergie.value, economiseurAndroid, batterie, enCharge, contrainteThermique)
+        val memoire = ActivityManager.MemoryInfo()
+        runCatching { (ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).getMemoryInfo(memoire) }
+        ramLibrePct = if (memoire.totalMem > 0L) (memoire.availMem * 100L / memoire.totalMem).toInt() else -1
+        val pressionMemoire = ramLibrePct in 0..12
+        economie = decider(app.store.modeEnergie.value, economiseurAndroid, batterie, enCharge, contrainteThermique, pressionMemoire)
     }
 
     /** Suit la batterie et l'économiseur d'Android (appelé au démarrage de l'appli, sans coût : diffusions système). */
@@ -100,6 +107,7 @@ object Energie {
         app.store.modeEnergie.value == "performance" -> "⚡ Performance · priorité à la réactivité"
         app.store.modeEnergie.value == "eco" -> "🔋 Économie · tâches secondaires réduites"
         economie && contrainteThermique -> "🌡️ Équilibré · activité réduite pour la température"
+        economie && ramLibrePct in 0..12 -> "🧠 Équilibré · pression mémoire détectée"
         economie && economiseurAndroid -> "🔋 Équilibré · économiseur Android actif"
         economie -> "🔋 Équilibré · batterie à $batterie %"
         else -> "⚖️ Équilibré · ressources disponibles" + (if (batterie >= 0) " · batterie $batterie %" + (if (enCharge) " en charge" else "") else "")
