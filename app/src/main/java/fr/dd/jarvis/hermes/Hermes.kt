@@ -408,7 +408,7 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
                 val r = runCatching { travail.await() }.getOrNull()
                 val texte = r ?: "⚠️ Je n'ai pas réussi à terminer « ${demande.take(80).ifBlank { "ta demande" }} » (moteur approfondi indisponible ou délai dépassé). Redemande-la si besoin."
                 withContext(Dispatchers.Main) { app.chatAjouter(ChatMsg(false, texte)) }
-                SuiviTaches.termine(app, notif, if (r != null) "JARVIS a terminé" else "Hermès n'a pas pu terminer", texte)
+                SuiviTaches.termine(app, notif, if (r != null) "JARVIS a terminé" else "JARVIS n'a pas pu terminer", texte)
             }
             return MESSAGE_ARRIERE_PLAN
         } catch (e: CancellationException) {
