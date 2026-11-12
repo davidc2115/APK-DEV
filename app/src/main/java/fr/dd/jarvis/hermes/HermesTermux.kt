@@ -885,8 +885,10 @@ os.replace(name, p)
             envScript,
             // Contrôle du jeton stocké et du endpoint IA local ; aucun appel à Groq/Gemini et aucun crédit consommé.
             "grep -Fxq " + q("JARVIS_GROQ_RELAIS=" + PontMcp.jetonRelaisIA(s.hermesCle.value)) + " \"\$HOME/.hermes/.env\" || { p '❌ Jeton du relais IA absent ou désynchronisé dans Hermès.'; exit 1; }; " +
-                "curl -fsS -m 3 -H " + q("Authorization: Bearer " + PontMcp.jetonRelaisIA(s.hermesCle.value)) + " " + q("http://127.0.0.1:" + PontMcp.PORT + "/ai/health") +
-                " >/dev/null || { p '❌ Authentification du relais IA Jarvis refusée ; Hermès ne sera pas redémarré.'; exit 1; }; p '✅ Authentification du relais IA vérifiée.'",
+                // Teste le jeton réellement chargé depuis .env, comme le processus Hermes, pas une copie reconstruite par Jarvis.
+                "set -a; . \"\$HOME/.hermes/.env\"; set +a; test -n \"\$JARVIS_GROQ_RELAIS\" || { p '❌ Variable JARVIS_GROQ_RELAIS absente de l’environnement Hermès.'; exit 1; }; " +
+                "curl -fsS -m 3 -H \"Authorization: Bearer \$JARVIS_GROQ_RELAIS\" " + q("http://127.0.0.1:" + PontMcp.PORT + "/ai/health") +
+                " >/dev/null || { p '❌ Le jeton réellement chargé par Hermès est refusé par le relais IA Jarvis ; Hermès ne sera pas redémarré.'; exit 1; }; p '✅ Jeton réellement chargé par Hermès et relais IA vérifiés.'",
             scriptHookMemoire(app),
             "p '🧩 Synchronisation des plugins et agents…'",
             pluginCommand,
