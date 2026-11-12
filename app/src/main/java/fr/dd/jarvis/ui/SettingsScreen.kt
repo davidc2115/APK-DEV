@@ -98,6 +98,41 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 HudTextField(store.userName.value, { store.userName.set(it) }, label = "Ton prénom (pour les salutations)")
             }
         },
+        VoletReglages("general", "batterie", "Mode de fonctionnement Jarvis", "performance equilibré équilibre economie energie cpu processeur ram ressources vitesse") {
+            PerformancePanel(app)
+        },
+        VoletReglages("general", "rappels", "Sonnerie des rappels", "rappel sonnerie tonalite notification choisir tester vibration") {
+            var actualisationSonnerie by remember { mutableIntStateOf(0) }
+            val choisirSonnerie = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { resultat ->
+                if (resultat.resultCode == android.app.Activity.RESULT_OK) {
+                    val uri = resultat.data?.getParcelableExtra<Uri>(android.media.RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
+                    fr.dd.jarvis.device.Rappels.definirSonnerie(ctx, uri)
+                    actualisationSonnerie++
+                }
+            }
+            HudPanel(Modifier.fillMaxWidth(), title = "⏰ Sonnerie des rappels") {
+                Text("Sonnerie actuelle : " + fr.dd.jarvis.device.Rappels.nomSonnerie(ctx), color = HudText, fontSize = 12.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HudButton("Choisir une sonnerie", filled = true) {
+                        val intent = Intent(android.media.RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+                            putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_TYPE, android.media.RingtoneManager.TYPE_NOTIFICATION)
+                            putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_TITLE, "Sonnerie des rappels JARVIS")
+                            putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
+                            putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_DEFAULT_URI,
+                                android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION))
+                            putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
+                            putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, fr.dd.jarvis.device.Rappels.sonnerieUri(ctx))
+                        }
+                        choisirSonnerie.launch(intent)
+                    }
+                    HudButton("Tester") {
+                        fr.dd.jarvis.device.Rappels.testerSonnerie(ctx)
+                        actualisationSonnerie++
+                    }
+                }
+                Text("Le choix est enregistré pour les prochains rappels. Android conserve aussi ses propres réglages de volume, de mode silencieux et d'autorisation des notifications.", color = HudDim, fontSize = 11.sp)
+            }
+        },
         VoletReglages("general", "apparence", "Mode présence", "presence dragon plein ecran charge horloge") {
             HudPanel(Modifier.fillMaxWidth(), title = "🐉 Mode présence (plein écran)") {
                 HudChip(if (store.presenceAuto.value) "🐉 Mode présence automatique : oui" else "Mode présence automatique : non", store.presenceAuto.value) { store.presenceAuto.set(!store.presenceAuto.value) }
