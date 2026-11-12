@@ -14,6 +14,7 @@ import java.io.InputStream
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.Executors
 
@@ -34,7 +35,10 @@ object PontMcp {
 
     /** Ce que le pont expose : jeton attendu, outils, exécution, réception de la progression. */
     interface Fournisseur {
+        /** Jeton du pont MCP (outils et mémoire). */
         fun jeton(): String
+        /** Jeton distinct du relais IA ; compatibilité pour les fournisseurs de test/anciens. */
+        fun jetonIA(): String = jeton()
         fun outils(): JSONArray
         /** Exécute l'outil : (texte, erreur ?). */
         fun appeler(nom: String, args: JSONObject): Pair<String, Boolean>
@@ -69,6 +73,13 @@ object PontMcp {
 
     fun url() = "http://127.0.0.1:$PORT/mcp"
 
+    /** Dérive un secret dédié du secret Hermès déjà stocké ; aucun nouveau token à saisir ou stocker. */
+    internal fun jetonRelaisIA(cleRacine: String): String {
+        if (cleRacine.isBlank()) return ""
+        val entree = "fr.dd.jarvis/hermes-ai-relay/v1:$cleRacine".toByteArray(Charsets.UTF_8)
+        return MessageDigest.getInstance("SHA-256").digest(entree).joinToString("") { "%02x".format(it) }
+    }
+
     private class FournisseurJarvis(val app: JarvisApp) : Fournisseur {
         override fun groq(corps: JSONObject) = RelaisGroq.repondre(app, corps)
         override fun groqModeles() = RelaisGroq.modeles(app)
@@ -95,6 +106,7 @@ object PontMcp {
             runCatching { outils() }
         }
         override fun jeton() = app.store.mcpJeton.value
+        override fun jetonIA() = jetonRelaisIA(app.store.hermesCle.value)
         override fun outils(): JSONArray {
             outilsCache?.let { return JSONArray(it.toString()) }
             return synchronized(this) {
@@ -329,17 +341,27 @@ object PontMcp {
         s.soTimeout = 30_000
         val r = lire(BufferedInputStream(s.getInputStream())) ?: return@use
         val f = fournisseur ?: return@use repondre(s, 404)
-        val jeton = f.jeton()
-        if (jeton.isBlank() || r.entetes["authorization"] != "Bearer $jeton") return@use repondre(s, 401, """{"error":"unauthorized"}""")
+        val chemin = r.chemin.trimEnd('/')
+        // Les routes IA ont leur propre secret ; MCP et mémoire conservent leur jeton historique.
+        val routeIA = chemin == "/ai/health" || chemin.startsWith("/groq/v1/") || chemin.startsWith("/ollama/v1/")
+        val jeton = if (routeIA) f.jetonIA() else f.jeton()
+        val authorization = r.entetes["authorization"].orEmpty()
+        val jetonRecu = if (authorization.startsWith("Bearer ", ignoreCase = true)) authorization.substring(7).trim() else ""
+        if (jeton.isBlank() || jetonRecu != jeton) {
+            val code = if (routeIA) "JARVIS_AI_BRIDGE_AUTH" else "JARVIS_MCP_AUTH"
+            return@use repondre(s, 401, JSONObject().put("error", JSONObject().put("code", code).put("message", "Authentification locale refusée.")).toString())
+        }
         when {
-            r.chemin.trimEnd('/') == "/health" && r.methode == "GET" -> {
+            chemin == "/ai/health" && r.methode == "GET" -> repondre(s, 200, JSONObject()
+                .put("ok", true).put("service", "jarvis-ai-bridge").put("router", "jarvis-central").put("auth", "ok").toString())
+            chemin == "/health" && r.methode == "GET" -> {
                 repondre(s, 200, JSONObject()
                     .put("ok", true)
                     .put("port", PORT)
                     .put("lastProgressAt", dernierSignal)
                     .put("progressCount", progression.size).toString())
             }
-            r.chemin.trimEnd('/') == "/progres" && r.methode == "POST" -> {
+            chemin == "/progres" && r.methode == "POST" -> {
                 val ligne = r.corps.trim().take(300)
                 if (ligne.isEmpty()) {
                     repondre(s, 400, """{"error":"empty_progress"}""")
@@ -350,18 +372,18 @@ object PontMcp {
                 }
             }
             // Mémoire partagée : le hook « jarvis-memoire » d'Hermès envoie la sienne et recopie celle de Jarvis.
-            r.chemin.trimEnd('/') == "/memoire/hermes" && r.methode == "POST" -> { f.memoireHermes(r.corps); repondre(s, 200, """{"ok":true}""") }
-            r.chemin.trimEnd('/') == "/memoire/jarvis" && r.methode == "GET" -> repondre(s, 200, f.memoireJarvis(), type = "text/plain")
-            r.chemin.trimEnd('/') == "/memoire/hermes-capacites" && r.methode == "POST" -> { f.capacitesHermes(r.corps); repondre(s, 200, """{"ok":true}""") }
-            r.chemin.trimEnd('/') == "/groq/v1/models" && r.methode == "GET" -> repondre(s, 200, f.groqModeles())
-            r.chemin.trimEnd('/') == "/groq/v1/chat/completions" && r.methode == "POST" -> {
+            chemin == "/memoire/hermes" && r.methode == "POST" -> { f.memoireHermes(r.corps); repondre(s, 200, """{"ok":true}""") }
+            chemin == "/memoire/jarvis" && r.methode == "GET" -> repondre(s, 200, f.memoireJarvis(), type = "text/plain")
+            chemin == "/memoire/hermes-capacites" && r.methode == "POST" -> { f.capacitesHermes(r.corps); repondre(s, 200, """{"ok":true}""") }
+            chemin == "/groq/v1/models" && r.methode == "GET" -> repondre(s, 200, f.groqModeles())
+            chemin == "/groq/v1/chat/completions" && r.methode == "POST" -> {
                 val corps = runCatching { JSONObject(r.corps) }.getOrElse { return@use repondre(s, 400, """{"error":{"message":"JSON invalide"}}""") }
                 val (code, rep) = f.groq(corps)
                 if (code == 200 && corps.optBoolean("stream", false)) repondre(s, 200, enFlux(JSONObject(rep)), type = "text/event-stream")
                 else repondre(s, code, rep)
             }
-            r.chemin.trimEnd('/') == "/ollama/v1/models" && r.methode == "GET" -> repondre(s, 200, f.ollamaModeles())
-            r.chemin.trimEnd('/') == "/ollama/v1/chat/completions" && r.methode == "POST" -> {
+            chemin == "/ollama/v1/models" && r.methode == "GET" -> repondre(s, 200, f.ollamaModeles())
+            chemin == "/ollama/v1/chat/completions" && r.methode == "POST" -> {
                 val corps = runCatching { JSONObject(r.corps) }.getOrElse { return@use repondre(s, 400, """{"error":{"message":"JSON invalide"}}""") }
                 val (code, rep) = f.ollama(corps)
                 if (code == 200 && corps.optBoolean("stream", false)) repondre(s, 200, enFlux(JSONObject(rep)), type = "text/event-stream")
