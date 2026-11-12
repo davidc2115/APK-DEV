@@ -27,10 +27,12 @@ class VeilleWorker(private val ctx: Context, params: WorkerParameters) : Corouti
     companion object {
         fun planifier(ctx: Context) = runCatching {
             val app = ctx.applicationContext as? JarvisApp
-            val intervalle = when (app?.store?.modeEnergie?.value) {
+            val mode = app?.store?.modeEnergie?.value
+            val adaptation = mode != "performance" && fr.dd.jarvis.device.Energie.economie
+            val intervalle = when (mode) {
                 "performance" -> 15L
                 "eco" -> 60L
-                else -> 30L
+                else -> if (adaptation) 45L else 30L
             }
             WorkManager.getInstance(ctx).enqueueUniquePeriodicWork("veille_jarvis", ExistingPeriodicWorkPolicy.UPDATE,
                 PeriodicWorkRequestBuilder<VeilleWorker>(intervalle, TimeUnit.MINUTES).build())
