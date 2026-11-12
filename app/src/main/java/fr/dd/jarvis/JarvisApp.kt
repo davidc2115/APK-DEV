@@ -128,6 +128,7 @@ class JarvisApp : Application() {
             if (graphIndexReport != null) store.grapheIndexeLe.set(System.currentTimeMillis().toString())
         }
         fr.dd.jarvis.device.Energie.suivre(this)
+        fr.dd.jarvis.device.Energie.appliquerMode(this)
         phone = PhoneControl(this)
         memo = fr.dd.jarvis.device.Memo(this, obsidian)
         Thread { runCatching { memo.load() } }.start()
