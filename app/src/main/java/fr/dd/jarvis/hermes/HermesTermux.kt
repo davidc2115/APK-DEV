@@ -320,7 +320,7 @@ p '🧠 Mémoire partagée Jarvis ↔ Hermès installée.'
             appendLine("    key_env: JARVIS_GROQ_RELAIS")
             appendLine("fallback_providers: []")
             appendLine("credential_pool_strategies: {}")
-            // (une seule « clé » côté Hermès : la rotation des clés Groq est faite par le relais de Jarvis)
+            // Le jeton JARVIS_GROQ_RELAIS authentifie uniquement le relais local ; aucune clé fournisseur ne réside ici.
             // Active explicitement la mémoire native évolutive d'Hermès.
             // La mémoire Jarvis/Obsidian reste la référence partagée pour les préférences utilisateur.
             // Réflexion « low » : Hermès répond nettement plus vite (modifiable dans config.yaml).
@@ -370,8 +370,20 @@ setenv() { touch "${'$'}H/.env"; grep -v "^${'$'}1=" "${'$'}H/.env" > "${'$'}H/.
 removeenvfamily() { grep -v -E "^${'$'}1(_[0-9]+)?=" "${'$'}H/.env" > "${'$'}H/.env.j" 2>/dev/null || true; mv "${'$'}H/.env.j" "${'$'}H/.env"; }
 removeenvfamily GOOGLE_API_KEY
 removeenvfamily GROQ_API_KEY
-removeenvfamily JARVIS_OPENAI_API_KEY
 removeenvfamily JARVIS_GROQ_RELAIS
+removeenvfamily JARVIS_CF_KEY
+removeenvfamily JARVIS_OPENAI_API_KEY
+removeenvfamily JARVIS_ZAI_API_KEY
+removeenvfamily JARVIS_OPENROUTER_API_KEY
+removeenvfamily JARVIS_NVIDIA_API_KEY
+removeenvfamily JARVIS_MISTRAL_API_KEY
+removeenvfamily JARVIS_HF_TOKEN
+removeenvfamily OPENAI_API_KEY
+removeenvfamily OPENROUTER_API_KEY
+removeenvfamily MISTRAL_API_KEY
+removeenvfamily ZAI_API_KEY
+removeenvfamily NVIDIA_API_KEY
+removeenvfamily HF_TOKEN
 setenv API_SERVER_ENABLED true
 setenv API_SERVER_HOST 127.0.0.1
 setenv API_SERVER_PORT $PORT_API
