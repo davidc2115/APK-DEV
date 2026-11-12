@@ -130,14 +130,20 @@ class ToolBox(
         put(tool("changer_voix", "Change la voix de JARVIS (personnage) : homme, femme, jeune, âgé(e), grave, douce, IA/robot, narrateur, animatrice radio, murmure, Jarvis (par défaut), ou un nom de voix Gemini (Kore, Puck…). Sans précision : liste les voix.",
             mapOf("voix" to prop("Description de la voix voulue, ex. « femme âgée », « jeune homme », « robot », « par défaut ». Vide = lister."),
                 "description" to prop("Facultatif : description libre (âge, ton, accent) pour une voix sur mesure, ex. « homme de 60 ans avec un accent du Sud »."))))
-        put(tool("routines", "Routines de JARVIS (plusieurs actions d'un coup) : lister, lancer, creer/modifier, supprimer. Déclencheurs : phrase (« je pars »), depart_maison, arrivee_maison, arrivee_chantier, depart_chantier, voiture (connexion Android Auto), heure (+ jours : tous, semaine, weekend). Les actions sont des demandes en français que JARVIS exécutera dans l'ordre.",
-            mapOf("action" to prop("lister | lancer | creer | supprimer | activer | desactiver"),
-                "nom" to prop("Nom de la routine (ex. « Je pars »)."),
-                "declencheur" to prop("creer : phrase | depart_maison | arrivee_maison | arrivee_chantier | depart_chantier | voiture | heure"),
-                "phrases" to prop("creer, déclencheur phrase : phrases qui la lancent, séparées par « ; » (ex. « je pars ; on y va »)."),
-                "heure" to prop("creer, déclencheur heure : HH:MM."),
-                "jours" to prop("creer, déclencheur heure : tous | semaine | weekend."),
-                "actions" to prop("creer : actions séparées par « ; » ou des retours à la ligne, ex. « éteins les lumières ; lance ma playlist ; envoie un SMS à Thomas : je pars ».")),
+        put(tool("routines", "Gestion complète des routines JARVIS : lister, consulter, lancer, créer, modifier partiellement ou complètement, activer/désactiver et supprimer. Toute modification conserve les paramètres non mentionnés. Permet de changer le déclencheur, les phrases, l'heure, les jours, le nom et les actions ; ajouter/retirer/remplacer une action sans réécrire les autres.",
+            mapOf("action" to prop("lister | consulter | lancer | creer | modifier | supprimer | activer | desactiver"),
+                "nom" to prop("Nom actuel ou distinctif de la routine à consulter/modifier/lancer/supprimer ; pour créer, nom de la nouvelle routine."),
+                "nouveau_nom" to prop("Nouveau nom de la routine (optionnel, modification uniquement)."),
+                "declencheur" to prop("Nouveau déclencheur : phrase | depart_maison | arrivee_maison | arrivee_chantier | depart_chantier | voiture | heure. Non fourni = inchangé."),
+                "phrases" to prop("Nouvelles phrases de déclenchement, séparées par « ; ». Non fourni = inchangé."),
+                "heure" to prop("Nouvelle heure HH:MM pour un déclencheur heure. Non fourni = inchangée."),
+                "jours" to prop("Nouveaux jours : tous | semaine | weekend. Non fourni = inchangé."),
+                "actions" to prop("Remplace toute la liste d'actions si fourni explicitement ; actions séparées par « ; » ou retours à la ligne."),
+                "ajouter_action" to prop("Ajoute une ou plusieurs actions sans toucher aux autres (séparées par « ; »)."),
+                "retirer_action" to prop("Retire une action existante (texte exact ou distinctif). Si plusieurs correspondent, demande une précision."),
+                "ancienne_action" to prop("Action actuelle à remplacer (texte exact ou distinctif)."),
+                "nouvelle_action" to prop("Nouvelle formulation de l'action indiquée par ancienne_action."),
+                "active" to prop("true ou false pour modifier l'état sans changer le reste.")),
             listOf("action")))
         put(tool("journal_de_bord", "Journal de bord (note Obsidian « Journal/… ») : jour = journal d'une journée (rendez-vous, interventions, devis/factures/paiements, km estimés, demandes à JARVIS, résumé) ; semaine = bilan de la semaine.",
             mapOf("periode" to prop("jour (défaut) | semaine"), "date" to prop("Date yyyy-MM-dd (défaut : aujourd'hui)."))))
@@ -1856,32 +1862,85 @@ class ToolBox(
         val R = fr.dd.jarvis.device.Routines
         val l = R.liste(app)
         val nom = a.optString("nom").trim()
-        fun trouver() = l.firstOrNull { R.norm(it.nom) == R.norm(nom) } ?: l.firstOrNull { nom.isNotBlank() && R.norm(it.nom).contains(R.norm(nom)) }
+        fun trouver() = l.firstOrNull { R.norm(it.nom) == R.norm(nom) }
+            ?: l.firstOrNull { nom.isNotBlank() && R.norm(it.nom).contains(R.norm(nom)) }
         fun decoupe(t: String) = t.split(Regex("\\s*(;|\\n)\\s*")).map { it.trim() }.filter { it.isNotBlank() }
+        fun actionUnique(actions: List<String>, cible: String): Int? {
+            val q = R.norm(cible)
+            val matches = actions.indices.filter { i -> R.norm(actions[i]) == q || (q.isNotBlank() && R.norm(actions[i]).contains(q)) }
+            return if (matches.size == 1) matches.single() else null
+        }
         return when (a.optString("action").trim().lowercase()) {
             "lister", "" -> ToolResult(R.presenter(l), direct = true)
-            "lancer" -> trouver()?.let { ToolResult(R.executer(app, it, tools = this)) } ?: ToolResult("Aucune routine « $nom ». " + R.presenter(l))
+            "consulter" -> trouver()?.let { ToolResult(R.presenter(listOf(it)), direct = true) }
+                ?: ToolResult("Aucune routine « $nom ». " + R.presenter(l), direct = true)
+            "lancer" -> trouver()?.let { ToolResult(R.executer(app, it, tools = this)) }
+                ?: ToolResult("Aucune routine « $nom ». " + R.presenter(l))
             "supprimer" -> trouver()?.let { r ->
-                if (!confirm("Supprimer la routine « ${r.nom} » ?", false)) ToolResult("Annulé.") else { R.supprimer(app, r.id); ToolResult("🗑️ Routine « ${r.nom} » supprimée.") }
+                if (!confirm("Supprimer la routine « ${r.nom} » ?", false)) ToolResult("Annulé.")
+                else { R.supprimer(app, r.id); ToolResult("🗑️ Routine « ${r.nom} » supprimée.") }
             } ?: ToolResult("Aucune routine « $nom ».")
             "activer", "desactiver" -> trouver()?.let { r ->
-                R.ajouterOuModifier(app, r.copy(active = a.optString("action").startsWith("act", true)))
-                ToolResult("Routine « ${r.nom} » ${if (a.optString("action").startsWith("act", true)) "activée" else "désactivée"}.")
+                val active = a.optString("action").equals("activer", true)
+                R.ajouterOuModifier(app, r.copy(active = active))
+                ToolResult("Routine « ${r.nom} » ${if (active) "activée" else "désactivée"}.")
             } ?: ToolResult("Aucune routine « $nom ».")
-            "creer", "modifier" -> {
+            "creer" -> {
                 if (nom.isBlank()) return ToolResult("Donne un nom à la routine.")
-                val existante = trouver()
-                val decl = a.optString("declencheur").trim().ifBlank { existante?.declencheur ?: "phrase" }
+                if (trouver() != null) return ToolResult("La routine « $nom » existe déjà. Utilise modifier pour la changer.")
+                val decl = a.optString("declencheur").trim().ifBlank { "phrase" }
                 if (decl !in R.DECLENCHEURS) return ToolResult("Déclencheur inconnu « $decl » : ${R.DECLENCHEURS.keys.joinToString(", ")}.")
-                val actions = decoupe(a.optString("actions")).ifEmpty { existante?.actions.orEmpty() }
+                val actions = decoupe(a.optString("actions"))
                 if (actions.isEmpty()) return ToolResult("Précise les actions de la routine (séparées par « ; »).")
-                val phrases = decoupe(a.optString("phrases")).ifEmpty { existante?.phrases ?: listOf(nom) }
-                val r = fr.dd.jarvis.device.Routine(existante?.id ?: R.nouvelId(nom), nom, decl, if (decl == "phrase") phrases else emptyList(),
-                    a.optString("heure").trim().ifBlank { existante?.heure.orEmpty() }, a.optString("jours").trim().ifBlank { existante?.jours ?: "tous" }, actions, true)
+                val phrases = decoupe(a.optString("phrases")).ifEmpty { listOf(nom) }
+                val heure = a.optString("heure").trim()
+                if (decl == "heure" && heure.isBlank()) return ToolResult("Précise l'heure de déclenchement (HH:MM).")
+                val r = fr.dd.jarvis.device.Routine(R.nouvelId(nom), nom, decl, if (decl == "phrase") phrases else emptyList(),
+                    heure, a.optString("jours").trim().ifBlank { "tous" }, actions, true)
                 R.ajouterOuModifier(app, r)
-                ToolResult("✅ Routine enregistrée :\n" + R.presenter(listOf(r)), direct = true)
+                ToolResult("✅ Routine créée :\n" + R.presenter(listOf(r)), direct = true)
             }
-            else -> ToolResult("Action inconnue : lister, lancer, creer, supprimer, activer, desactiver.")
+            "modifier" -> {
+                val existante = trouver() ?: return ToolResult("Je ne trouve pas la routine « $nom ». Voici les routines disponibles :\n" + R.presenter(l), direct = true)
+                val nouveauNom = a.optString("nouveau_nom").trim().ifBlank { existante.nom }
+                if (l.any { it.id != existante.id && R.norm(it.nom) == R.norm(nouveauNom) })
+                    return ToolResult("Une autre routine porte déjà le nom « $nouveauNom ».")
+                val decl = a.optString("declencheur").trim().ifBlank { existante.declencheur }
+                if (decl !in R.DECLENCHEURS) return ToolResult("Déclencheur inconnu « $decl » : ${R.DECLENCHEURS.keys.joinToString(", ")}.")
+                var actions = if (a.has("actions") && !a.isNull("actions")) decoupe(a.optString("actions")) else existante.actions
+                if (a.has("ajouter_action") && !a.isNull("ajouter_action")) {
+                    val ajouts = decoupe(a.optString("ajouter_action"))
+                    if (ajouts.isNotEmpty()) actions = actions + ajouts.filter { ajout -> actions.none { R.norm(it) == R.norm(ajout) } }
+                }
+                val retirer = a.optString("retirer_action").trim()
+                if (retirer.isNotBlank()) {
+                    val idx = actionUnique(actions, retirer)
+                        ?: return ToolResult(if (actions.none { R.norm(it).contains(R.norm(retirer)) }) "Action « $retirer » introuvable dans « ${existante.nom} »."
+                            else "Plusieurs actions correspondent à « $retirer ». Précise laquelle.")
+                    actions = actions.toMutableList().also { it.removeAt(idx) }
+                }
+                val ancienne = a.optString("ancienne_action").trim()
+                val nouvelle = a.optString("nouvelle_action").trim()
+                if (ancienne.isNotBlank() || nouvelle.isNotBlank()) {
+                    if (ancienne.isBlank() || nouvelle.isBlank()) return ToolResult("Pour remplacer une action, précise ancienne_action et nouvelle_action.")
+                    val idx = actionUnique(actions, ancienne)
+                        ?: return ToolResult(if (actions.none { R.norm(it).contains(R.norm(ancienne)) }) "Action « $ancienne » introuvable."
+                            else "Plusieurs actions correspondent à « $ancienne ». Précise laquelle.")
+                    actions = actions.toMutableList().also { it[idx] = nouvelle }
+                }
+                if (actions.isEmpty()) return ToolResult("Une routine doit conserver au moins une action. Ajoute une action ou supprime la routine.")
+                val phrases = if (a.has("phrases") && !a.isNull("phrases")) decoupe(a.optString("phrases")) else existante.phrases
+                val heure = a.optString("heure").trim().ifBlank { existante.heure }
+                if (decl == "heure" && heure.isBlank()) return ToolResult("Précise l'heure de déclenchement (HH:MM).")
+                val jours = a.optString("jours").trim().ifBlank { existante.jours }
+                val active = if (a.has("active") && !a.isNull("active")) a.optString("active").trim().lowercase() !in setOf("false", "non", "0", "désactivée", "desactivee") else existante.active
+                val r = existante.copy(nom = nouveauNom, declencheur = decl,
+                    phrases = if (decl == "phrase") phrases.ifEmpty { listOf(nouveauNom) } else emptyList(),
+                    heure = heure, jours = jours, actions = actions, active = active)
+                R.ajouterOuModifier(app, r)
+                ToolResult("✅ Routine modifiée en conservant tous les paramètres non concernés :\n" + R.presenter(listOf(r)), direct = true)
+            }
+            else -> ToolResult("Action inconnue : lister, consulter, lancer, creer, modifier, supprimer, activer, desactiver.")
         }
     }
 
