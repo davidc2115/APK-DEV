@@ -874,6 +874,28 @@ os.replace(name, p)
             "if hermes_debian bash -c " + q(upgradeScript) + " 2>&1 | while IFS= read -r ligne; do p \"${'$'}ligne\" || true; done; [ \"${'$'}{PIPESTATUS[0]}\" -eq 0 ]; then " +
             "p '✅ Hermès est à jour.'; else " +
             "p '⚠️ Mise à niveau d’Hermès impossible pour le moment : la configuration continue avec la version installée.'; fi"
+        // Vérifie la configuration réellement relue par Hermes, puis l’authentification du relais local.
+        val validationPy = """
+import json, os, urllib.request, yaml
+with open("/root/.hermes/config.yaml", encoding="utf-8") as stream:
+    data = yaml.safe_load(stream) or {}
+model = data.get("model") or {}
+provider = (data.get("providers") or {}).get("groq") or {}
+url = os.environ["JARVIS_GROQ_RELAIS_URL"]
+key = os.environ["JARVIS_GROQ_RELAIS_KEY"]
+if model.get("provider") != "custom:groq" or model.get("default") != "jarvis-router": raise SystemExit("Mauvais modèle principal Hermes.")
+if provider.get("api") != url or provider.get("api_key") != key or "key_env" in provider: raise SystemExit("Configuration custom:groq désynchronisée.")
+if not url.startswith("http://127.0.0.1:38291/groq/v1"): raise SystemExit("Le fournisseur ne pointe pas vers Jarvis.")
+req = urllib.request.Request(url.rstrip("/") + "/models", headers={"Authorization": "Bearer " + key})
+with urllib.request.urlopen(req, timeout=5) as response:
+    if response.status != 200: raise SystemExit("Authentification du relais refusée.")
+    if not isinstance(json.loads(response.read().decode("utf-8")).get("data"), list): raise SystemExit("Réponse /models invalide.")
+print("OK: route custom:groq, jeton et endpoint local validés.")
+""".trimIndent()
+        val validationCommand = "proot-distro login debian --termux-home -- env JARVIS_GROQ_RELAIS_KEY=" +
+            q(PontMcp.jetonRelaisIA(s.hermesCle.value)) + " JARVIS_GROQ_RELAIS_URL=" +
+            q("http://127.0.0.1:38291/groq/v1") + " python3 -c " + q(validationPy) + " || exit 1; " +
+            "p \"Validation de la configuration Hermes et du relais Jarvis : OK (HTTP 200).\""
         val restartCommand = "arreter_passerelles_hermes; sleep 1"
         message = "⏳ Commandes de synchronisation prêtes. Assemblage du script final…"
         val script = listOf(
@@ -894,6 +916,7 @@ os.replace(name, p)
             pluginCommand,
             "p '⚙️ Écriture et validation de la configuration Hermès…'",
             configCommand,
+            validationCommand,
             "p '🔄 Redémarrage de la passerelle Hermès…'",
             restartCommand,
             demarrage
