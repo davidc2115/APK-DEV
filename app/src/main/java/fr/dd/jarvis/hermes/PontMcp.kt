@@ -216,12 +216,14 @@ object PontMcp {
 
     @Synchronized fun demarrer(a: JarvisApp): Boolean {
         if (a.store.mcpJeton.value.isBlank()) a.store.mcpJeton.set(UUID.randomUUID().toString().replace("-", ""))
-        if (fournisseur !is FournisseurJarvis) fournisseur = FournisseurJarvis(a)
+        // Le fournisseur et ses catalogues sont conservés tant que le processus Jarvis vit.
+        // Ne relance pas une tâche de préchauffage à chaque message Hermès.
+        val nouveauFournisseur = fournisseur !is FournisseurJarvis
+        if (nouveauFournisseur) fournisseur = FournisseurJarvis(a)
         val ok = ecouter(PORT)
         if (!ok) Log.e(TAG, "Impossible de démarrer le serveur de progression/MCP sur 127.0.0.1:$PORT")
-        // Prépare les schémas hors du thread appelant : la première négociation MCP n'attend pas
-        // la construction du grand catalogue Jarvis.
-        if (ok) pool.execute { runCatching { (fournisseur as? FournisseurJarvis)?.prechaufferCatalogue() } }
+        // Prépare les schémas hors du thread appelant une seule fois, à la création du fournisseur.
+        if (ok && nouveauFournisseur) pool.execute { runCatching { (fournisseur as? FournisseurJarvis)?.prechaufferCatalogue() } }
         return ok && actif()
     }
 
