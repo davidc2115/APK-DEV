@@ -135,7 +135,12 @@ class Brain(
             else runCatching { fr.dd.jarvis.hermes.Routeur.competence(texteUser, app.memo.skillsHermes()) }.getOrNull()
         // Mode « Hermès pour tout » : seules les commandes instantanées du téléphone (sans IA) passent avant Hermès ;
         // tout le reste (fichiers, Freebox, vidéos, position, installations…) est traité par Hermès avec les outils de Jarvis.
-        val toutHermes = !pourHermes && app.store.hermesMode.value == "tout" && !app.enVoiture && !fr.dd.jarvis.hermes.Hermes.degrade() &&
+        // En mode normal (« auto »), Hermès reste le cerveau principal : Nano ne traite que le bavardage
+        // et les réflexes sans IA restent instantanés. Les traitements directs (Freebox, fichiers, etc.)
+        // ne doivent pas intercepter une demande avant Hermès. « Hermès rapide » conserve l'exception
+        // explicite pour les commandes simples du téléphone.
+        val toutHermes = !pourHermes && app.store.hermesMode.value in setOf("auto", "demande", "tout") &&
+            !app.enVoiture && !fr.dd.jarvis.hermes.Hermes.degrade() &&
             !(app.store.hermesRapide.value && fr.dd.jarvis.hermes.Routeur.commandeSimple(texteUser))
         if (reflexes) {
             if (!multi) commandeImmediate(texteUser, onStatus)?.let { return reflexe(it) }
@@ -163,7 +168,7 @@ class Brain(
         if (!pourHermes) {
             val precedent = history.dropLastWhile { it.fromUser }.lastOrNull()?.text
             val choix = fr.dd.jarvis.hermes.Routeur.choisir(app, texteUser, precedent)
-            if (choix.cible == fr.dd.jarvis.hermes.Routeur.Cible.JARVIS && app.store.hermesMode.value == "tout" && fr.dd.jarvis.hermes.Hermes.degrade()) suivi.hermesIndisponible = true
+            if (choix.cible == fr.dd.jarvis.hermes.Routeur.Cible.JARVIS && app.store.hermesMode.value in setOf("auto", "demande", "tout") && fr.dd.jarvis.hermes.Hermes.degrade()) suivi.hermesIndisponible = true
             if (choix.cible == fr.dd.jarvis.hermes.Routeur.Cible.HERMES) {
                 suivi.hermesEssaye = true
                 val r = fr.dd.jarvis.hermes.Hermes.repondre(app, history, tools, userName(), onStatus, onTexte = onTexte)
