@@ -35,8 +35,9 @@ import java.util.concurrent.TimeUnit
  *  1. Termux (GitHub officiel) — installation silencieuse via l'ADB intégré s'il est appairé ;
  *  2. autorisation « Exécuter des commandes dans Termux » + `allow-external-apps` (une seule fois) ;
  *  3. script d'installation lancé en arrière-plan dans Termux (paquet officiel signé, sinon sources) ;
- *  4. configuration : Gemini comme modèle, Groq en secours, serveur API local, pont MCP vers les outils de Jarvis ;
- *  5. démarrage de la passerelle (`hermes gateway run`) et vérification sur http://127.0.0.1:8642/health.
+ *  4. configuration : routeur IA unique de Jarvis (Groq/Gemini et secours), sans clés fournisseurs dans Termux ;
+ *  5. passerelle API locale et pont MCP vers les outils de Jarvis ;
+ *  6. démarrage de la passerelle (`hermes gateway run`) et vérification sur http://127.0.0.1:8642/health.
  */
 object HermesTermux {
     const val TERMUX = "com.termux"
@@ -556,7 +557,7 @@ p "✅ Hermès installé (${'$'}{MODE})."
 
     @Volatile private var dernierSignalAvantCommande: Long = 0L
 
-    /** Synchronise les clés et le routage multi-agents sans écraser les autres réglages Hermes. */
+    /** Synchronise l'accès au routeur IA central et le routage des agents sans copier les clés fournisseurs dans Termux. */
     fun synchroniserCles(app: JarvisApp): String {
         val s = app.store
         if (!s.apiKeysSecureAvailable) return "⛔ Stockage chiffré Android indisponible : aucune clé transmise à Hermès."
