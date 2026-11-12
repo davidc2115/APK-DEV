@@ -264,16 +264,16 @@ class Brain(
             messages.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(cap)))
         }
 
-        // Budget d'orchestration adaptatif : les commandes simples restent courtes ; les demandes complexes
-        // disposent de davantage de cycles pour consulter, agir, vérifier le résultat et répondre sans faux échec.
-        // Le mode économie limite les cycles secondaires mais ne désactive jamais les outils ni l'écoute.
+        // Budget d'orchestration élargi : chaque cycle peut consulter des outils, vérifier leur résultat,
+        // corriger une action ou poursuivre le plan. Les demandes complexes ne doivent plus s'arrêter après
+        // seulement 7 à 12 cycles. Le mode économie reste plus sobre, sans couper les tâches ni l'écoute.
         val modeRessources = app.store.modeEnergie.value
         val toursMax = when {
             fr.dd.jarvis.hermes.Routeur.commandeSimple(texteUser) -> 3
-            modeRessources == "performance" -> if (multi) 12 else 8
-            modeRessources == "eco" -> if (multi) 7 else 5
-            multi -> 10
-            else -> 7
+            modeRessources == "performance" -> if (multi) 24 else 12
+            modeRessources == "eco" -> if (multi) 12 else 7
+            multi -> 18
+            else -> 10
         }
         repeat(toursMax) {
             val msg = try {
