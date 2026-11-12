@@ -526,6 +526,7 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
                     HermesTermux.message = "⚠️ Hermès saturé (${derniereRaison}) : Jarvis répond directement pendant 3 min."
                     null
                 } else contenu?.let { signer(it) }
+                    ?: "⚠️ Hermès n'a renvoyé aucun résultat exploitable. La demande n'est pas confirmée comme terminée."
             }
         } catch (e: Exception) {
             if (!call.isCanceled()) { marquerEnLigne(false); relancerSiBesoin(app) }
