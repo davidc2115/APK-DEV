@@ -48,7 +48,7 @@ object Hermes {
     fun enLigneConnu() = enLigneCache
 
     suspend fun enLigne(force: Boolean = false): Boolean = withContext(Dispatchers.IO) {
-        if (!force && System.currentTimeMillis() - verifieA < 15_000) return@withContext enLigneCache
+        if (!force && System.currentTimeMillis() - verifieA < 60_000) return@withContext enLigneCache
         val ok = runCatching {
             rapide.newCall(Request.Builder().url("http://127.0.0.1:${HermesTermux.PORT_API}/health").build()).execute().use { it.isSuccessful }
         }.getOrDefault(false)
