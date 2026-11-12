@@ -319,7 +319,7 @@ p '🧠 Mémoire partagée Jarvis ↔ Hermès installée.'
             appendLine("providers:")
             appendLine("  groq:")
             appendLine("    api: http://127.0.0.1:${PontMcp.PORT}/groq/v1")
-            appendLine("    key_env: JARVIS_GROQ_RELAIS")
+            appendLine("    api_key: \"$jetonIA\"")
             appendLine("fallback_providers: []")
             appendLine("credential_pool_strategies: {}")
             // Jeton dédié au relais IA, distinct du jeton MCP ; aucune clé fournisseur ne réside ici.
@@ -693,7 +693,7 @@ if not isinstance(strategies, dict):
 if os.environ.get("JARVIS_HAS_GEMINI") == "1": strategies["gemini"] = "round_robin"
 else: strategies.pop("gemini", None)
 if os.environ.get("JARVIS_HAS_GROQ") == "1":
-    providers["groq"] = {"api": os.environ["JARVIS_GROQ_RELAIS_URL"], "key_env": "JARVIS_GROQ_RELAIS"}
+    providers["groq"] = {"api": os.environ["JARVIS_GROQ_RELAIS_URL"], "api_key": os.environ["JARVIS_GROQ_RELAIS_KEY"]}
     fallbacks.append({"provider": "custom:groq", "model": os.environ["JARVIS_GROQ_MODEL"]})
     strategies.pop("groq", None)
 else:
@@ -852,7 +852,7 @@ os.replace(name, p)
         // Le relais /groq/v1 route tous les fournisseurs cloud via le gestionnaire IA de Jarvis.
         val hasGroq = "1"
         val pluginCommand = "PLUGIN_OK=0; debian_utilisateur_jarvis; hermes_debian hermes plugins install advanced-delegation --no-deps --no-enable >/dev/null 2>&1 || true; if hermes_debian hermes plugins enable advanced-delegation --no-allow-tool-override >/dev/null 2>&1; then PLUGIN_OK=1; p \"🧠 Routage multi-modèles advanced-delegation activé.\"; else p \"⚠️ Extension avancée indisponible : délégation Hermes native conservée.\"; fi"
-        val configCommand = "proot-distro login debian --termux-home -- env JARVIS_HAS_GEMINI=0 JARVIS_HAS_GROQ=" + hasGroq + " JARVIS_GROQ_RELAIS_URL=" + q("http://127.0.0.1:${PontMcp.PORT}/groq/v1") + " JARVIS_GROQ_MODEL=" + q(model) + " JARVIS_HAS_OLLAMA=" + (if (hasOllama) "1" else "0") + " JARVIS_OLLAMA_RELAIS_URL=" + q("http://127.0.0.1:${PontMcp.PORT}/ollama/v1") + " JARVIS_OLLAMA_MODEL=" + q(ollamaModel ?: "auto") + " JARVIS_ADVANCED_DELEGATION=\"${'$'}PLUGIN_OK\" python3 -c " + q(py) + " || exit 1"
+        val configCommand = "proot-distro login debian --termux-home -- env JARVIS_HAS_GEMINI=0 JARVIS_HAS_GROQ=" + hasGroq + " JARVIS_GROQ_RELAIS_KEY=" + q(PontMcp.jetonRelaisIA(s.hermesCle.value)) + " JARVIS_GROQ_RELAIS_URL=" + q("http://127.0.0.1:${PontMcp.PORT}/groq/v1") + " JARVIS_GROQ_MODEL=" + q(model) + " JARVIS_HAS_OLLAMA=" + (if (hasOllama) "1" else "0") + " JARVIS_OLLAMA_RELAIS_URL=" + q("http://127.0.0.1:${PontMcp.PORT}/ollama/v1") + " JARVIS_OLLAMA_MODEL=" + q(ollamaModel ?: "auto") + " JARVIS_ADVANCED_DELEGATION=\"${'$'}PLUGIN_OK\" python3 -c " + q(py) + " || exit 1"
         // L'installation Jarvis est une installation source dans Debian : utiliser son exécutable direct.
         // bash -lc réinitialisait le PATH et pouvait lancer un autre Hermes, d'où l'échec silencieux précédent.
         // En cas d'échec, arrêter la configuration : ne jamais annoncer une nouvelle version qui n'a pas été installée.
