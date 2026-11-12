@@ -373,7 +373,7 @@ class Store(context: Context) {
 
     // ---- Batterie & vitesse
     /** Économie d'énergie : « auto » (économiseur Android ou batterie < 20 %), « performance », « eco ». */
-    val modeEnergie = SPref("modeEnergie", "auto")
+    val modeEnergie = SPref("modeEnergie", "balanced")
     /** Écoute « Jarvis » économe : le détecteur hors-ligne ne travaille que quand il y a du son (pas pendant le silence). */
     val ecouteEconome = BPref("ecouteEconome", true)
     /** Mode « Hermès pour tout » : les commandes simples (appel, SMS, musique, domotique, agenda…) restent à Jarvis, plus rapide. */
