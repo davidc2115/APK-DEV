@@ -186,8 +186,11 @@ fun CentreCommandeVue(
         if (sante.isNotBlank()) {
             Spacer(Modifier.height(10.dp))
             val alerte = sante.startsWith("⚠")
-            HudPanel(Modifier.fillMaxWidth(), title = "🩺 Santé", accent = if (alerte) Color(0xFFFFB74D) else LocalAccent.current, onClick = onSante) {
+            HudPanel(Modifier.fillMaxWidth(), title = if (alerte) "⚠️ À SURVEILLER" else "🩺 SANTÉ",
+                accent = if (alerte) Color(0xFFFFB74D) else LocalAccent.current, onClick = onSante) {
                 Text(sante, color = HudText, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("Toucher pour afficher le diagnostic détaillé et les conseils.", color = HudDim, fontSize = 10.sp,
+                    modifier = Modifier.padding(top = 5.dp))
             }
         }
         // --- Tuiles en direct, deux par ligne
