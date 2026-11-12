@@ -322,7 +322,7 @@ p '🧠 Mémoire partagée Jarvis ↔ Hermès installée.'
             appendLine("    api_key: \"$jetonIA\"")
             appendLine("fallback_providers: []")
             appendLine("credential_pool_strategies: {}")
-            // Jeton dédié au relais IA, distinct du jeton MCP ; aucune clé fournisseur ne réside ici.
+            // Jeton local dérivé (pas la clé Groq) ; inline dans le provider nommé pour éviter les régressions Hermes key_env/.env.
             // Active explicitement la mémoire native évolutive d'Hermès.
             // La mémoire Jarvis/Obsidian reste la référence partagée pour les préférences utilisateur.
             // Réflexion « low » : Hermès répond nettement plus vite (modifiable dans config.yaml).
@@ -821,11 +821,18 @@ if isinstance(aliases, dict):
 # Chaque demande Hermès passe par le relais de Jarvis, qui applique le même KeyRing, les mêmes quotas et les mêmes replis.
 providers.clear()
 data["credential_pool_strategies"] = {}
-providers["groq"] = {"api": os.environ["JARVIS_GROQ_RELAIS_URL"], "key_env": "JARVIS_GROQ_RELAIS"}
+providers["groq"] = {"api": os.environ["JARVIS_GROQ_RELAIS_URL"], "api_key": os.environ["JARVIS_GROQ_RELAIS_KEY"], "transport": "chat_completions"}
 if os.environ.get("JARVIS_HAS_OLLAMA") == "1":
     providers["jarvis_ollama"] = {"api": os.environ["JARVIS_OLLAMA_RELAIS_URL"], "key_env": "JARVIS_OLLAMA_RELAIS"}
 model_config = {"provider": "custom:jarvis_ollama", "default": os.environ.get("JARVIS_OLLAMA_MODEL") or "auto"} if os.environ.get("JARVIS_HAS_OLLAMA") == "1" else {"provider": "custom:groq", "default": "jarvis-router"}
 data["model"] = model_config
+# Contrôle de cohérence du secret local réellement consommé par Hermes.
+# api_key est volontairement inline : c'est un jeton local dérivé, pas une clé Groq fournisseur.
+groq_cfg = providers["groq"]
+if groq_cfg.get("api_key") != os.environ.get("JARVIS_GROQ_RELAIS_KEY") or groq_cfg.get("key_env"):
+    raise SystemExit("Jeton du provider Jarvis absent ou incohérent ; configuration annulée.")
+if groq_cfg.get("transport") != "chat_completions":
+    raise SystemExit("Transport du provider Jarvis invalide ; configuration annulée.")
 fallbacks = [] if os.environ.get("JARVIS_HAS_OLLAMA") != "1" else [{"provider": "custom:groq", "model": "jarvis-router"}]
 data["fallback_providers"] = fallbacks
 delegation["max_concurrent_children"] = 1
