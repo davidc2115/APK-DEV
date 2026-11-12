@@ -23,10 +23,11 @@ import org.json.JSONObject
 object RelaisGroq {
     /** Budget d'entrée visé (jetons estimés) pour tenir sous ~8 000 jetons/min avec la réponse. */
     private val PALIERS = listOf(
-        Palier(budget = 6200, systeme = 9000, outils = 28, desc = 170, descParam = 70, historique = 10, texte = 900, resultat = 2500),
-        Palier(budget = 5200, systeme = 5500, outils = 16, desc = 110, descParam = 45, historique = 6, texte = 500, resultat = 1400),
-        Palier(budget = 4200, systeme = 3200, outils = 9, desc = 80, descParam = 0, historique = 4, texte = 300, resultat = 800),
-        Palier(budget = 3000, systeme = 1800, outils = 5, desc = 60, descParam = 0, historique = 2, texte = 200, resultat = 500)
+        // Premier passage plus léger : moins de prompt et d'outils à traiter à chaque tour, tout en gardant la découverte MCP.
+        Palier(budget = 4800, systeme = 6500, outils = 18, desc = 130, descParam = 55, historique = 8, texte = 700, resultat = 1800),
+        Palier(budget = 4000, systeme = 4800, outils = 14, desc = 100, descParam = 40, historique = 6, texte = 450, resultat = 1200),
+        Palier(budget = 3200, systeme = 3000, outils = 9, desc = 75, descParam = 0, historique = 4, texte = 280, resultat = 750),
+        Palier(budget = 2400, systeme = 1700, outils = 5, desc = 55, descParam = 0, historique = 2, texte = 180, resultat = 450)
     )
     private data class Palier(val budget: Int, val systeme: Int, val outils: Int, val desc: Int, val descParam: Int, val historique: Int, val texte: Int, val resultat: Int)
 
