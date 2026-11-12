@@ -47,7 +47,7 @@ object NotesPertinentes {
 
     /** Bloc à placer dans le prompt (vide s'il n'y a rien d'utile). */
     suspend fun pour(app: JarvisApp, demande: String): String = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-        kotlinx.coroutines.withTimeoutOrNull(2500) { calculer(app, demande) }.orEmpty()
+        kotlinx.coroutines.withTimeoutOrNull(1200) { calculer(app, demande) }.orEmpty()
     }
 
     private suspend fun calculer(app: JarvisApp, demande: String): String {
