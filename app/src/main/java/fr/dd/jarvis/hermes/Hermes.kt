@@ -299,7 +299,13 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
             "Ta partie rapide a d'abord essayé de traiter cette demande sans aboutir (l'utilisateur n'a PAS vu cette tentative). Brouillon : « ${tentativeJarvis.take(1500)} ». " +
                 "Reprends la demande avec ta mémoire, tes notes, tes skills et tous tes outils ; ne répète pas ce qui a échoué de la même façon, " +
                 "ne redemande pas une information que tu as déjà (identifiants, adresses, réglages) et réponds directement, sans évoquer cette première tentative."))
-        return appeler(app, messages, boite, onStatus, derniere, onTexte = onTexte)
+        val multiEtapes = fr.dd.jarvis.hermes.Routeur.multiEtapes(derniere)
+        val attente = when (app.store.modeEnergie.value) {
+            "performance" -> if (multiEtapes) 120_000L else 45_000L
+            "eco" -> if (multiEtapes) 60_000L else 25_000L
+            else -> if (multiEtapes) 90_000L else 35_000L
+        }
+        return appeler(app, messages, boite, onStatus, derniere, attenteMs = attente, onTexte = onTexte)
     }
 
     /** Délégation d'une tâche précise (outil hermes_deleguer du cerveau Jarvis de secours). */
@@ -347,7 +353,7 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
      * Attente maximale « interactive » : au-delà, la demande continue en arrière-plan (le résultat arrive dans la
      * conversation et en notification) au lieu de laisser l'écran bloqué sur « Jarvis réfléchit… ».
      */
-    @Volatile internal var attenteMaxMs = 12_000L
+    @Volatile internal var attenteMaxMs = 35_000L
     private val fond = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val numeroFond = AtomicInteger(0)
 
@@ -399,7 +405,7 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
             withTimeoutOrNull(attenteMs) { travail.join() }
             // Après le premier texte, on accorde une courte marge pour finir la réponse.
             // Ne jamais bloquer indéfiniment l'interface : une réflexion qui s'éternise continue en arrière-plan.
-            if (!travail.isCompleted && ecrit.get()) withTimeoutOrNull(4_000L) { travail.join() }
+            if (!travail.isCompleted && ecrit.get()) withTimeoutOrNull(10_000L) { travail.join() }
             if (travail.isCompleted) return travail.await()
             // Trop long : la demande continue en arrière-plan, l'utilisateur récupère la main.
             attendu.set(false)
@@ -491,8 +497,17 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
         return try {
             call.execute().use { r ->
                 if (!r.isSuccessful) {
-                    if (r.code == 401) HermesTermux.message = "⚠️ Hermès refuse la clé de Jarvis : touche « Configurer Hermès »."
-                    return null
+                    if (r.code == 401) {
+                        HermesTermux.message = "⚠️ Hermès refuse la clé de liaison Jarvis : touche « Configurer Hermès »."
+                        return "⚠️ Hermès refuse la clé de liaison Jarvis (HTTP 401). Vérifie la configuration du pont IA dans Réglages › IA › Hermès."
+                    }
+                    val cause = when (r.code) {
+                        408, 504 -> "Le moteur a dépassé son délai de réponse"
+                        429 -> "Le fournisseur IA limite temporairement les requêtes (quota ou débit)"
+                        in 500..599 -> "Le service IA ou le relais rencontre une erreur serveur"
+                        else -> "La requête a été refusée"
+                    }
+                    return "⚠️ $cause (HTTP ${r.code}). La demande n'a pas été déclarée terminée ; tu peux la relancer après résolution de cette erreur."
                 }
                 val contenu = if (onTexte != null && r.body?.contentType()?.subtype == "event-stream") {
                     val lecteur = LecteurFlux(onTexte) { outil -> statut("🪽 $outil") }
@@ -514,7 +529,7 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
             }
         } catch (e: Exception) {
             if (!call.isCanceled()) { marquerEnLigne(false); relancerSiBesoin(app) }
-            null
+            "⚠️ Connexion au moteur Hermès interrompue : ${e.message ?: e.javaClass.simpleName}. La demande n'a pas pu être confirmée."
         }
     }
 }
