@@ -84,6 +84,15 @@ object Energie {
         }
     }
 
+    /** Applique le profil aux travaux périodiques JARVIS sans toucher aux réglages énergétiques Android. */
+    fun appliquerMode(ctx: Context) {
+        val app = ctx.applicationContext as? JarvisApp ?: return
+        maj(ctx)
+        runCatching { fr.dd.jarvis.work.AgentsScheduler.apply(ctx, app.store) }
+        runCatching { fr.dd.jarvis.work.ReseauScheduler.apply(ctx, app.store) }
+        runCatching { fr.dd.jarvis.work.VeilleWorker.planifier(ctx) }
+    }
+
     /** Hors interface (workers) : état à jour sans dépendre du suivi. */
     fun economieMaintenant(ctx: Context): Boolean { maj(ctx); return economie }
 
