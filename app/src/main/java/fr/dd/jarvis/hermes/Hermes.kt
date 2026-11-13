@@ -361,7 +361,11 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
 
     private suspend fun appeler(app: JarvisApp, messages: JSONArray, boite: ToolBox?, onStatus: (String) -> Unit, demande: String = "", attenteMs: Long = attenteMaxMs,
                                 onTexte: ((String) -> Unit)? = null): String? {
-        PontMcp.demarrer(app)
+        if (!PontMcp.demarrer(app) || !PontMcp.actif()) {
+            val erreur = "❌ Pont MCP Jarvis indisponible sur 127.0.0.1:${PontMcp.PORT}. Hermès ne peut pas accéder aux outils du téléphone, de Home Assistant ou du serveur. Vérifie le port local et relance Jarvis ; aucune action n'a été déclarée exécutée."
+            onStatus("⚠️ Pont MCP indisponible")
+            return erreur
+        }
         val precedente = PontMcp.boiteActive
         val statutPrecedent = PontMcp.statutActif
         val attendu = AtomicBoolean(true) // l'utilisateur attend encore la réponse à l'écran
