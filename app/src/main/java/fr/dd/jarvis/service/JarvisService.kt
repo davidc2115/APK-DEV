@@ -40,6 +40,9 @@ class JarvisService : Service() {
         /** Android Auto (appli média) : « Parler à JARVIS » → écoute immédiate, comme si on avait dit « Jarvis ». */
         const val ACTION_ECOUTER = "fr.dd.jarvis.WAKE_ECOUTER"
         @Volatile private var actuel: JarvisService? = null
+
+        /** « Jarvis, déverrouille » reçu ailleurs que par l'écoute (écran de présence, chat…) : vérification de la voix ici. */
+        fun deverrouiller(): Boolean = actuel?.let { s -> android.os.Handler(android.os.Looper.getMainLooper()).post { s.deverrouillerALaVoix() }; true } ?: false
         private const val NOTIF = 4001
         private const val NOTIF_REPRISE = 4003
 

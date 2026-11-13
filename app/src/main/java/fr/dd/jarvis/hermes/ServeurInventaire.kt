@@ -60,6 +60,8 @@ object ServeurInventaire {
             }
             append(
                 "RÈGLES SERVEUR : chaque service est une chose distincte — Home Assistant ≠ Plex ≠ bot Discord ≠ Ollama ; ne les confonds jamais. " +
+                    "Home Assistant : l'INSTANCE (entités, réglages, automatisations… par son API, outils ha_*, sans SSH) n'est pas le SERVEUR qui l'héberge " +
+                    "(conteneur, fichiers, certificats, sauvegardes : serveur_service, ha_sauvegarde, ha_config, ssh_*). Ne redemande jamais adresses, jetons ni identifiants. " +
                     "Identifie un service par son nom EXACT dans le relevé (conteneur Docker, unité systemd, processus pm2/node/python) et cite ce nom. " +
                     "Le bot Discord a deux facettes : son compte sur Discord (outils mcp_jarvis_discord_* : salons, rôles, messages) et son programme sur le serveur (logs, redémarrage, code : SSH). " +
                     "Avant de redémarrer, arrêter ou modifier un service, vérifie qu'il existe sous ce nom (docker ps -a / systemctl status) et annonce lequel tu touches. " +
@@ -90,7 +92,9 @@ object ServeurInventaire {
         if (s.haUrl.value.isNotBlank()) {
             val dossier = s.haDir.value.trim().takeIf { it.isNotBlank() }?.let { " ; configuration YAML sur le serveur : $it" }.orEmpty()
             val jeton = if (s.haToken.value.isNotBlank()) "jeton API enregistré" else "AUCUN jeton API enregistré"
-            lignes += "- Home Assistant : ${s.haUrl.value.trim()} ($jeton$dossier) → outils mcp_jarvis_ha_entites / ha_etat / ha_service / ha_config / ha_dashboard / ha_admin (API d'abord ; SSH seulement pour le conteneur, les logs ou si l'API ne répond pas)."
+            val haLocal = runCatching { java.net.URI(s.haUrl.value.trim().let { if (it.startsWith("http")) it else "http://$it" }).host }.getOrNull()?.let { Serveur.ipPrivee(it) } == true
+            val joint = if (haLocal) " ; adresse du réseau de la maison — hors de la maison Jarvis passe automatiquement par le tunnel SSH du serveur" else " ; adresse Internet"
+            lignes += "- Home Assistant (INSTANCE, API) : ${s.haUrl.value.trim()} ($jeton$dossier$joint) → outils mcp_jarvis_ha_entites / ha_etat / ha_service / ha_config / ha_dashboard / ha_admin (API d'abord ; SSH seulement pour le conteneur, les logs ou si l'API ne répond pas)."
         }
         val plex = runCatching { s.plexToken.value.isNotBlank() }.getOrDefault(false)
         if (plex || s.sshHost.value.isNotBlank()) lignes += "- Plex Media Server : sur le serveur Debian, port 32400, joint par le tunnel SSH de Jarvis (" +

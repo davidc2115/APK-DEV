@@ -87,20 +87,36 @@ fun SystemesPanel(app: JarvisApp, onAsk: (String) -> Unit) {
         Text("🔢 Codes (stockage chiffré du téléphone, jamais envoyés à l'IA)", color = HudText, fontSize = 13.sp)
         if (!store.codeDeverrouillage.available) Text("⚠️ Stockage chiffré indisponible : les codes ne peuvent pas être enregistrés.", color = HudDim, fontSize = 11.sp)
         else {
-            var code by remember { mutableStateOf(store.codeDeverrouillage.value) }
-            HudTextField(code, { code = it.trim() }, Modifier.fillMaxWidth(), label = "Code de l'écran de verrouillage (déverrouillage à la voix)", password = true)
+            val enregistre = store.codeDeverrouillage.value
+            var typeSchema by remember { mutableStateOf(enregistre.startsWith("schema:")) }
+            var code by remember { mutableStateOf(if (enregistre.startsWith("schema:")) "" else enregistre) }
+            var schema by remember { mutableStateOf(enregistre.removePrefix("schema:").takeIf { enregistre.startsWith("schema:") }.orEmpty()) }
+            Text("Verrouillage de l'écran du téléphone :", color = HudDim, fontSize = 11.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                HudChip("🔢 Code / mot de passe", !typeSchema) { typeSchema = false }
+                HudChip("✳️ Schéma", typeSchema) { typeSchema = true }
+            }
+            if (!typeSchema) HudTextField(code, { code = it.trim() }, Modifier.fillMaxWidth(), label = "Code de l'écran de verrouillage (déverrouillage à la voix)", password = true)
+            else {
+                HudTextField(schema, { schema = it.filter { c -> c in '1'..'9' } }, Modifier.fillMaxWidth(), label = "Schéma : points dans l'ordre du tracé (ex. 1-5-9-6)", password = true)
+                Text("Points numérotés comme un clavier de téléphone :  1 2 3  /  4 5 6  /  7 8 9  (en haut à gauche = 1).", color = HudDim, fontSize = 11.sp)
+            }
             var alarme by remember { mutableStateOf(store.codeAlarmeHa.value) }
             HudTextField(alarme, { alarme = it.trim() }, Modifier.fillMaxWidth(), label = "Code de l'alarme Home Assistant (si elle en demande un)", password = true)
             var cleHa by remember { mutableStateOf(store.cleSauvegardeHa.value) }
             HudTextField(cleHa, { cleHa = it.trim() }, Modifier.fillMaxWidth(), label = "Clé de chiffrement des sauvegardes Home Assistant (restauration)", password = true)
             HudButton("Enregistrer les codes", Modifier.fillMaxWidth()) {
                 msg = when {
-                    code.isNotBlank() && !TelephoneSecurise.codeValide(code) -> "⚠️ Code d'écran : 4 à 32 chiffres ou lettres, sans espace."
-                    else -> runCatching { store.codeDeverrouillage.set(code); store.codeAlarmeHa.set(alarme); store.cleSauvegardeHa.set(cleHa); "✅ Codes enregistrés." }.getOrElse { "❌ ${it.message}" }
+                    !typeSchema && code.isNotBlank() && !TelephoneSecurise.codeValide(code) -> "⚠️ Code d'écran : 4 à 32 chiffres ou lettres, sans espace."
+                    typeSchema && schema.isNotBlank() && TelephoneSecurise.schema("schema:$schema") == null -> "⚠️ Schéma : au moins 4 points différents, de 1 à 9."
+                    else -> runCatching {
+                        store.codeDeverrouillage.set(if (typeSchema) (if (schema.isBlank()) "" else "schema:$schema") else code)
+                        store.codeAlarmeHa.set(alarme); store.cleSauvegardeHa.set(cleHa); "✅ Codes enregistrés."
+                    }.getOrElse { "❌ ${it.message}" }
                 }
             }
             Text("Le déverrouillage à la voix demande aussi ton empreinte vocale (Sécurité › Empreinte vocale) et l'ADB intégré ou Shizuku " +
-                "(Téléphone › Contrôle). Jarvis tape alors ce code à ta place, uniquement après avoir reconnu ta voix.", color = HudDim, fontSize = 11.sp)
+                "(Téléphone › Contrôle). Jarvis tape alors ce code ou trace ce schéma à ta place, uniquement après avoir reconnu ta voix.", color = HudDim, fontSize = 11.sp)
         }
     }
 }

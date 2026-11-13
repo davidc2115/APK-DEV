@@ -411,12 +411,33 @@ object Serveur {
 
     private fun base(app: JarvisApp) = app.store.haUrl.value.trim().trimEnd('/').let { if (it.startsWith("http")) it else "http://$it" }
 
+    /**
+     * Adresse effective de l'API Home Assistant et client HTTP : adresse LOCALE (192.168…) alors que le téléphone est
+     * hors de la maison → tunnel SSH vers le serveur qui l'héberge (certificat HTTPS toujours vérifié pour le vrai nom).
+     */
+    private fun acces(app: JarvisApp): Pair<String, OkHttpClient> {
+        val b = base(app)
+        val u = runCatching { java.net.URI(b) }.getOrNull() ?: return b to http
+        val hote = u.host.orEmpty()
+        val estServeur = hote == app.store.sshHost.value.trim() || hote == app.store.serveurIpLocale.value.trim()
+        if (!ipPrivee(hote) || !estServeur || !sshConfigure(app) || telephoneSurReseau(hote)) return b to http
+        val port = if (u.port > 0) u.port else if (u.scheme == "https") 443 else 80
+        val lp = runCatching { tunnel(app, port) }.getOrElse { return b to http }
+        val client = if (u.scheme == "https") http.newBuilder().hostnameVerifier { _, session ->
+            javax.net.ssl.HttpsURLConnection.getDefaultHostnameVerifier().verify(hote, session) || runCatching {
+                (session.peerCertificates.firstOrNull() as? java.security.cert.X509Certificate)?.subjectAlternativeNames?.any { it.getOrNull(1) == hote } == true
+            }.getOrDefault(false)
+        }.build() else http
+        return "${u.scheme}://127.0.0.1:$lp" + u.path.orEmpty().trimEnd('/') to client
+    }
+
     fun ha(app: JarvisApp, methode: String, chemin: String, corps: JSONObject? = null): String {
         if (!haConfigure(app)) throw IllegalStateException("Home Assistant non configuré (Réglages › Maison › Serveur : adresse et jeton d'accès longue durée).")
-        val b = Request.Builder().url(base(app) + chemin).header("Authorization", "Bearer ${app.store.haToken.value.trim()}")
+        val (adresse, client) = acces(app)
+        val b = Request.Builder().url(adresse + chemin).header("Authorization", "Bearer ${app.store.haToken.value.trim()}")
         if (methode == "POST") b.post((corps?.toString() ?: "{}").toRequestBody("application/json".toMediaType())) else b.get()
         try {
-            http.newCall(b.build()).execute().use { r ->
+            client.newCall(b.build()).execute().use { r ->
                 val t = r.body?.string().orEmpty()
                 if (r.code == 401) throw IllegalStateException("Home Assistant 401 : le jeton est invalide ou expiré. Dans Home Assistant, connecte-toi avec le compte qui possède les droits d'administration, puis crée un nouveau jeton d'accès longue durée dans ton profil et remplace-le dans JARVIS › Réglages › Maison › Serveur.")
                 if (r.code == 403) throw IllegalStateException("Home Assistant 403 — action interdite pour le compte associé au jeton. Ce n'est pas une permission Android/Shizuku : le jeton reprend les droits du compte Home Assistant qui l'a créé. Vérifie que ce compte peut piloter cet appareil et, si nécessaire, crée un nouveau jeton depuis un compte administrateur. Détail HA : ${t.take(500)}")

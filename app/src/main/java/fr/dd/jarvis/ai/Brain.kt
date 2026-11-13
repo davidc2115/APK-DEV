@@ -144,6 +144,14 @@ class Brain(
             val cibleJarvis = Regex("\\b(jarvis|application|appli|app|assistant)\\b").containsMatchIn(demandeMode)
             val commandeTelephone = cibleTelephone && !cibleJarvis && (commandeMode ||
                 Regex("\\b(active|desactive|coupe|enleve|retire|allume|eteins|mets|passe)\\b.{0,25}\\beconomiseur\\b|\\b(quel|dans quel) mode\\b.{0,30}\\b(telephone|portable|smartphone)\\b|\\bmode (du|de mon) (telephone|portable|smartphone)\\b").containsMatchIn(demandeMode))
+            if (fr.dd.jarvis.securite.TelephoneSecurise.estDemande(texteUser)) {
+                return reflexe(when {
+                    !fr.dd.jarvis.securite.TelephoneSecurise.verrouille(app) -> "🔓 Le téléphone est déjà déverrouillé."
+                    fr.dd.jarvis.service.JarvisService.deverrouiller() -> "🎤 Je vérifie ta voix : dis « Jarvis, c'est bien moi »."
+                    else -> { fr.dd.jarvis.securite.TelephoneSecurise.afficherDeverrouillage(app)
+                        "🔓 J'affiche le déverrouillage (empreinte, visage ou code). Pour déverrouiller à la voix, active l'écoute « Jarvis » (le téléphone vérifie alors ta voix)." }
+                })
+            }
             fr.dd.jarvis.securite.Systemes.intention(app, texteUser)?.let { args ->
                 onStatus("🧩 " + when (args.optString("action")) { "creer" -> "Création du mode…"; "modifier" -> "Modification du mode…"; "supprimer" -> "Suppression du mode…"; else -> "Mes modes…" })
                 return reflexe(tools.execute("modes_jarvis", args).text)

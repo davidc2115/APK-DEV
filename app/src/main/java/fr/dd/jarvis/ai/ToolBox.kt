@@ -422,6 +422,8 @@ class ToolBox(
         put(tool("hermes_deleguer", "Confie à Hermès (agent autonome : recherche web, analyse, rédaction, code, tâches en plusieurs étapes, automatismes, serveur/SSH, ses notes, skills, plugins et sa mémoire long terme) une tâche que tes outils ne couvrent pas, ou une information que tu n'as pas (identifiants, réglages, historique). À utiliser plutôt que de répondre « je ne peux pas » ou de redemander une information à l'utilisateur. Décris la tâche complète et le résultat attendu.",
             mapOf("tache" to prop("La tâche détaillée, avec tout le contexte utile.")), listOf("tache")))
         put(tool("ma_position", "Donne la position GPS actuelle du téléphone (fix frais, format Google Maps) et l'ADRESSE PRÉCISE correspondante (numéro, rue, code postal, ville). Pour enregistrer cette position sur une fiche client, utilise client_ecrire avec site_gps = « ma position » (et site_adresse = « ma position » pour l'adresse)."))
+        put(tool("jarvis_reglages", "Lit les RÉGLAGES de Jarvis (jamais de secret) : serveur Debian SSH (adresses locale et distante, utilisateur, port, connexion actuelle locale ou à distance), Home Assistant (adresse de l'instance, dossier de configuration), Plex, bot Discord, Freebox, imprimante, modèles d'IA. À utiliser AU LIEU de demander ces informations à l'utilisateur.",
+            emptyMap()))
         put(tool("modes_jarvis", "MODES de JARVIS créés, modifiés, activés, désactivés et supprimés par simple demande : n'importe quel mode décrit en français (« crée un mode cinéma qui ferme les volets du salon, baisse les lumières à 20 % et met le téléphone en ne pas déranger », « crée un mode vacances… », « dans le mode nuit, ajoute l'extinction de la lumière du couloir ») — Jarvis le compose lui-même avec les vrais appareils de Home Assistant ; ainsi que les modèles de sécurité « téléphone sécurisé » (veille + verrouillage, déverrouillage par la voix du propriétaire) et « maison sécurisée » (serrures, volets, alarme ; détection de personne → photos des caméras → notification Home Assistant avec image + MMS aux numéros). Pour créer ou modifier, passe simplement la demande de l'utilisateur dans « description » (création) ou « consigne » (modification). Ne demande JAMAIS un code (écran, alarme) dans la conversation : il se saisit dans Réglages › Sécurité › Systèmes.",
             mapOf(
                 "action" to prop("lister | creer | consulter | activer | desactiver | modifier | supprimer"),
@@ -560,6 +562,7 @@ class ToolBox(
             a.optString("jours").trim().toIntOrNull(), a.optString("tous").trim().lowercase() in setOf("true", "oui", "1"),
             a.optString("forcer").trim().lowercase() in setOf("true", "oui", "1")) { texte -> confirm(texte, false) })
         "modes_jarvis", "systeme_securite" -> systemeSecurite(a)
+        "jarvis_reglages" -> ToolResult(reglagesJarvis())
         "telephone_mode_energie" -> ToolResult(fr.dd.jarvis.device.ModeTelephone.appliquer(app, a.optString("mode").ifBlank { "etat" }))
         "delete_event" -> deleteEvent(a)
         "set_event_color" -> setEventColor(a)
@@ -2286,6 +2289,21 @@ class ToolBox(
             return ToolResult("Action refusée par l'utilisateur.")
         }
         return ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.perform(action, value) })
+    }
+
+    /** Réglages utiles à l'IA, sans aucun mot de passe, clé ni jeton. */
+    private fun reglagesJarvis(): String {
+        val st = app.store
+        val l = mutableListOf("# ⚙️ Réglages de Jarvis (sans secret)")
+        l += fr.dd.jarvis.hermes.ServeurInventaire.reglages(app).ifBlank { "- Serveur / Home Assistant : non configurés (Réglages › Maison › Serveur)." }
+        if (st.sshHost.value.isNotBlank()) l += "- Adresse locale relevée du serveur : ${st.serveurIpLocale.value.ifBlank { "pas encore relevée" }}"
+        l += "- Freebox : " + if (st.freeboxAppToken.value.isNotBlank()) "associée à Jarvis (outil freebox)" else "non associée"
+        if (st.printerHost.value.isNotBlank()) l += "- Imprimante : ${st.printerName.value.ifBlank { st.printerHost.value }} (${st.printerHost.value})"
+        l += "- IA : Gemini « ${st.geminiModel.value} » (${st.geminiKeys.size} clé(s)), Groq « ${st.groqModel.value} » (${st.groqKeys.size} clé(s)) ; moteur Hermès : ${st.relaisHermes.value} d'abord"
+        l += "- Déverrouillage à la voix : " + (if (runCatching { st.codeDeverrouillage.value }.getOrDefault("").let { it.startsWith("schema:") }) "schéma enregistré"
+            else if (runCatching { st.codeDeverrouillage.value }.getOrDefault("").isNotBlank()) "code enregistré" else "aucun code ni schéma") +
+            " ; empreinte vocale " + (if (fr.dd.jarvis.voice.EmpreinteVocale.prete(app)) "prête" else "non enregistrée")
+        return l.joinToString("\n")
     }
 
     /** Systèmes de JARVIS (téléphone sécurisé, maison sécurisée, personnalisés) : tout se règle à la demande. */
