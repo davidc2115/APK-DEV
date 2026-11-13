@@ -30,7 +30,8 @@ data class Bulletin(
     val pas: Double,
     val netAPayer: Double,
     val totalChargesPatronales: Double,
-    val coutEmployeur: Double
+    val coutEmployeur: Double,
+    val source: String = ""             // vide : calcul local ; sinon calcul officiel URSSAF (avec sa date)
 ) {
     // Compatibilité avec l'ancien modèle.
     val heuresMensuelles get() = heuresContrat
@@ -62,7 +63,7 @@ object Paie {
 
     /** Détail des cotisations pour un brut donné. */
     fun cotisations(brut: Double, dirigeant: Boolean, cfg: ConfigPaie): List<LigneCotisation> {
-        val plafond = if (cfg.plafondSecu > 0.0) cfg.plafondSecu else 3925.0
+        val plafond = if (cfg.plafondSecu > 0.0) cfg.plafondSecu else 4005.0
         val baseT1 = minOf(brut, plafond)
         val baseCsg = round2(brut * 0.9825) // abattement forfaitaire de 1,75 % pour frais professionnels
 

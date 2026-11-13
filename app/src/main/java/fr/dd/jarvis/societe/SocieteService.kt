@@ -545,7 +545,11 @@ class SocieteService(
     }
 
     fun bulletin(e: Employe, mois: String, primes: Double, heuresEffectuees: Double? = null, netVerse: Double? = null): Pair<String, String> {
-        val b = Paie.bulletin(e, data.paie, mois, primes, heuresEffectuees, netVerse)
+        val local = Paie.bulletin(e, data.paie, mois, primes, heuresEffectuees, netVerse)
+        // Cotisations officielles de l'URSSAF (taux, plafonds et réduction générale à jour) ; hors ligne : calcul local.
+        val b = if (Urssaf.horsRegimeGeneral(data, e)) local else runCatching {
+            BaremesCalcul.bulletinOfficiel(local, Urssaf.montantsPaie(data, e, local.brut), data.baremes.pmss.takeIf { it > 0 } ?: data.paie.plafondSecu, LocalDate.now().toString())
+        }.getOrElse { local.copy(source = Paie.AVERTISSEMENT + " (Calcul local : le service officiel de l'URSSAF n'a pas répondu — ${it.message?.take(80) ?: "hors ligne"}.)") }
         val md = Rendu.rendreBulletin(data, b)
         repo.update { d ->
             d.copy(bulletins = d.bulletins.filterNot { it.employeId == e.id && it.mois == mois } +
@@ -557,6 +561,48 @@ class SocieteService(
     }
 
     fun bilan(annee: Int) = Reserve.bilan(annee, data.provisions, data.employes, data.bulletins, data.societe.partDirigeantPct)
+
+    // ------------------------------------------------------------------ barèmes officiels (URSSAF), mis à jour automatiquement
+
+    /**
+     * Relève les barèmes officiels (plafond de la Sécurité sociale, SMIC, IS, prélèvement forfaitaire, coût de chaque
+     * salarié) et les applique si la mise à jour automatique est active. Renvoie le compte rendu (changements en tête).
+     */
+    fun actualiserBaremes(): String {
+        val avant = data.baremes
+        val nouveaux = try { Urssaf.baremes() } catch (e: Exception) {
+            repo.update { d -> d.copy(baremes = d.baremes.copy(erreur = "${LocalDate.now()} : ${e.message ?: e.javaClass.simpleName}".take(200))) }
+            return "❌ Mise à jour des barèmes impossible (service URSSAF injoignable ou réponse inattendue) : ${e.message}. Les valeurs actuelles sont conservées."
+        }
+        val couts = runCatching { Urssaf.couts(data) }.getOrDefault(avant.couts)
+        val changements = BaremesCalcul.changements(avant, nouveaux)
+        val b = nouveaux.copy(couts = couts, changements = changements.ifEmpty { avant.changements })
+        repo.update { d -> BaremesCalcul.appliquer(d, b) }
+        return baremesTexte(if (changements.isEmpty()) "✅ Barèmes vérifiés : aucune valeur n'a changé." else "📈 **Nouvelles valeurs officielles appliquées :**\n" + changements.joinToString("\n") { "- $it" })
+    }
+
+    fun baremesTexte(entete: String = ""): String {
+        val b = data.baremes; val s = data.societe
+        return buildString {
+            if (entete.isNotBlank()) append(entete).append("\n\n")
+            append("# 📡 Barèmes officiels (URSSAF)\n")
+            if (!b.valide()) append("Pas encore relevés : ils le seront automatiquement dès que le téléphone aura Internet (ou dis « mets à jour les barèmes »).\n")
+            else {
+                append("Relevés le ${b.dateMaj} — ${b.source}. Vérification automatique chaque semaine${if (s.baremesAuto) ", valeurs appliquées automatiquement" else " (application automatique désactivée)"}.\n\n")
+                append("- Plafond mensuel de la Sécurité sociale : ${euro(b.pmss)}\n")
+                if (b.smicHoraire > 0) append("- SMIC horaire brut : ${euro(b.smicHoraire)}\n")
+                append("- Impôt sur les sociétés : ${nombre(b.isTauxReduit)} % jusqu'à ${euro(b.isPlafondReduit)} de bénéfice, ${nombre(b.isTauxNormal)} % au-delà\n")
+                append("- Prélèvement forfaitaire sur les dividendes : ${nombre(b.pfuPct)} % (dont ${nombre(b.prelevementsSociauxPct)} % de prélèvements sociaux)\n")
+                if (b.couts.isNotEmpty()) {
+                    append("- Coût mensuel officiel de chaque salarié (cotisations, réduction générale comprises) :\n")
+                    b.couts.forEach { (id, c) -> append("  - ${data.employes.firstOrNull { it.id == id }?.nom ?: id} : brut ${euro(c.brut)} → net ${euro(c.netAvantImpot)}, coût ${euro(c.cout)}\n") }
+                }
+                if (b.changements.isNotEmpty()) append("\nDerniers changements : ${b.changements.joinToString(" ; ")}\n")
+            }
+            if (b.erreur.isNotBlank()) append("\n⚠️ Dernière tentative échouée : ${b.erreur}\n")
+            append("\nLes fiches de paie utilisent le moteur de calcul officiel de l'URSSAF (cotisations, retraite, réduction générale…) dès que le téléphone a Internet.")
+        }
+    }
 
     // ------------------------------------------------------------------ résultat, bénéfice et dividende
 

@@ -83,9 +83,11 @@ object Resultat {
             var m = if (entree != null && entree.isAfter(debut)) entree else debut
             while (!m.isAfter(jusqua)) {
                 if (d.bulletins.none { it.employeId == e.id && it.mois == m.toString() }) {
-                    val b = Paie.bulletin(e, d.paie, m.toString())
-                    cout += b.coutEmployeur; net += b.netAPayer; estime += b.coutEmployeur; moisEstimes++
-                    parEmploye[e.nom] = (parEmploye[e.nom] ?: 0.0) + b.coutEmployeur
+                    // Coût officiel URSSAF relevé chaque semaine pour ce salaire, sinon calcul local.
+                    val officiel = d.baremes.couts[e.id]?.takeIf { kotlin.math.abs(it.brut - e.brutMensuel) < 0.01 }
+                    val (c, n) = officiel?.let { it.cout to it.netAvantImpot } ?: Paie.bulletin(e, d.paie, m.toString()).let { it.coutEmployeur to it.netAPayer }
+                    cout += c; net += n; estime += c; moisEstimes++
+                    parEmploye[e.nom] = (parEmploye[e.nom] ?: 0.0) + c
                 }
                 m = m.plusMonths(1)
             }

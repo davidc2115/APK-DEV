@@ -37,6 +37,7 @@ data class Societe(
     val isPlafondReduit: Double = 42_500.0,
     val isTauxNormal: Double = 25.0,
     val pfuPct: Double = 31.4,             // prélèvement forfaitaire unique 2026 : 12,8 % + 18,6 %
+    val baremesAuto: Boolean = true,       // barèmes officiels (URSSAF) appliqués automatiquement à chaque mise à jour
     val kmlCouleurParticulier: String = "#20A45A",
     val kmlCouleurProfessionnel: String = "#2878D0",
     val kmlCouleurSiege: String = "#FF9800"
@@ -175,7 +176,7 @@ data class Employe(
 @Serializable
 data class ConfigPaie(
     val cadre: Boolean = false,                      // régime cadre (AGIRC-ARRCO + APEC/CET) ou non-cadre
-    val plafondSecu: Double = 3925.0,                // plafond mensuel de la Sécurité sociale (PMSS) — à vérifier chaque année
+    val plafondSecu: Double = 4005.0,                // plafond mensuel de la Sécurité sociale (PMSS 2026) — mis à jour automatiquement (URSSAF)
     val tauxAtmp: Double = 1.2,                      // taux accident du travail / maladies professionnelles (patronal, dépend de l'activité)
     val tauxFormationPct: Double = 0.55,             // contribution formation professionnelle (patronal)
     val tauxTaxeApprentissagePct: Double = 0.68,     // taxe d'apprentissage (patronal)

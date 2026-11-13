@@ -19,12 +19,12 @@ class SocieteTools(
     companion object {
         val NAMES = setOf(
             "societe_info_set", "societe_info_get", "tarif_set", "tarif_delete", "regles_set", "client_ecrire", "client_fiche", "client_supprimer",
-            "document_creer", "document_action", "document_email", "societe_liste", "employe_ecrire", "paie", "reserve_bilan", "societe_resultat",
+            "document_creer", "document_action", "document_email", "societe_liste", "employe_ecrire", "paie", "reserve_bilan", "societe_resultat", "societe_baremes",
             "presentation_modifier", "distance_deplacement", "clients_exporter_kml", "kml_couleurs_set", "clients_gps", "intervention_enregistrer", "intervention_modifier", "intervention_supprimer", "interventions_liste", "interventions_synthese",
             "installation_supprimer"
         )
         private val KEYWORDS = Regex(
-            "devis|factur|client|soci[ée]t[ée]|tarif|remise|d[ée]placement|paie|salaire|bulletin|r[ée]serve|dividende|b[ée]n[ée]fice|r[ée]sultat|tr[ée]sorerie|charges fixes|imp[ôo]t sur les soci[ée]t[ée]s|capital social|" +
+            "devis|factur|client|soci[ée]t[ée]|tarif|remise|d[ée]placement|paie|salaire|bulletin|r[ée]serve|dividende|b[ée]n[ée]fice|r[ée]sultat|tr[ée]sorerie|charges fixes|imp[ôo]t sur les soci[ée]t[ée]s|capital social|bar[èe]mes?|urssaf|cotisations|s[ée]curit[ée] sociale|smic|plafond|" +
                 "installation|photovolta|kwc|fiche|pr[ée]sentation|mise en forme|mise en page|si[èe]ge|employ[ée]|prix|onduleur|maintenance|" +
                 "entretien|intervention|historique photovolta[ïi]que|bilan maintenance|panne|diagnostic|pi[èe]ce remplac[ée]e|planning|agenda|pdf|obsidian|distance|itin[ée]raire|km|fid[ée]lit[ée]|kml|google earth|carte des clients|" +
                 "gps|coordonn[ée]es|g[ée]oloc|localis|latitude|longitude|google maps",
@@ -101,6 +101,8 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         )),
         tool("societe_resultat", "Résultat de la société (recalculé automatiquement à chaque facture payée) : chiffre d'affaires encaissé HT, salaires versés (coût employeur, bulletins ou estimation), charges fixes, ce qu'il reste à la société avant impôt, impôt sur les sociétés, bénéfice net, réserve légale, dividende de fin d'année possible (brut et net après prélèvement forfaitaire), et projection au 31 décembre.",
             mapOf("annee" to prop("Année (défaut : l'année en cours)."))),
+        tool("societe_baremes", "Barèmes officiels relevés automatiquement chaque semaine auprès de l'URSSAF (plafond de la Sécurité sociale, SMIC, taux et plafond de l'impôt sur les sociétés, prélèvement forfaitaire sur les dividendes, coût officiel de chaque salarié) et appliqués au calcul du résultat, du dividende et des fiches de paie. action=voir (défaut) | actualiser (vérifie tout de suite) | auto_oui / auto_non (application automatique).",
+            mapOf("action" to prop("voir | actualiser | auto_oui | auto_non"))),
         tool("societe_info_get", "Affiche les informations société, les tarifs, les règles de remise/déplacement et la réserve enregistrés."),
         tool("tarif_set", "Crée ou modifie un tarif. Mode : forfait (prix fixe selon la puissance de l'installation), par_kwc (prix par kWc), heure, unite.", mapOf(
             "designation" to prop("Nom de la prestation, ex. « Maintenance annuelle »."),
@@ -262,6 +264,15 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         "paie" -> paie(a)
         "reserve_bilan" -> ok(svc.bilanTexte(a.s("annee").toIntOrNull() ?: LocalDate.now().year))
         "societe_resultat" -> ok(svc.resultatTexte(a.s("annee").toIntOrNull() ?: LocalDate.now().year))
+        "societe_baremes" -> when (a.s("action").lowercase()) {
+            "actualiser", "mettre_a_jour", "maj" -> ok(svc.actualiserBaremes())
+            "auto_oui", "auto_non" -> {
+                val auto = a.s("action").lowercase() == "auto_oui"
+                svc.repo.update { it.copy(societe = it.societe.copy(baremesAuto = auto)) }
+                if (auto) ok(svc.actualiserBaremes()) else ok("✅ Application automatique des barèmes désactivée : les valeurs actuelles restent figées (la vérification hebdomadaire continue de les relever).")
+            }
+            else -> ok(svc.baremesTexte())
+        }
         "presentation_modifier" -> presentation(a)
         "distance_deplacement" -> distanceTool(a)
         "clients_exporter_kml" -> ok(svc.exporterKml(a.s("recherche")))

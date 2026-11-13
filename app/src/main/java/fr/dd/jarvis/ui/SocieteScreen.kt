@@ -923,13 +923,14 @@ private fun FichesPaieTab(app: JarvisApp) {
     var primes by remember { mutableStateOf("0") }
     var bulletin by remember { mutableStateOf<String?>(null) }
     var erreur by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
     fun n(t: String) = t.replace(',', '.').trim().toDoubleOrNull()
     val e = d.employes.firstOrNull { it.id == empId }
 
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             HudPanel(Modifier.fillMaxWidth(), title = "Création d'une fiche de paie") {
-                Text("⚠️ Estimation simplifiée (taux standards, modifiables dans Réglages). À faire valider par un expert-comptable ou un logiciel de paie.", color = HudDim, fontSize = 12.sp)
+                Text("📡 Cotisations calculées par le moteur officiel de l'URSSAF (taux, plafonds, réduction générale à jour) quand le téléphone a Internet ; sinon estimation locale. À faire valider par un expert-comptable ou un logiciel de paie.", color = HudDim, fontSize = 12.sp)
             }
         }
         if (d.employes.isEmpty()) {
@@ -970,7 +971,11 @@ private fun FichesPaieTab(app: JarvisApp) {
                         erreur = ""
                         val heuresEff = if (mode == 1) n(saisie) else null
                         val netV = if (mode == 2) n(saisie) else null
-                        bulletin = svc.bulletin(e, mois, n(primes) ?: 0.0, heuresEff, netV).first
+                        erreur = "⏳ Calcul des cotisations avec le moteur officiel de l'URSSAF…"
+                        scope.launch {
+                            bulletin = withContext(Dispatchers.IO) { runCatching { svc.bulletin(e, mois, n(primes) ?: 0.0, heuresEff, netV).first }.getOrElse { "❌ ${it.message}" } }
+                            erreur = ""
+                        }
                     }
                 }
             }
@@ -1145,6 +1150,7 @@ private fun ReglagesTab(app: JarvisApp) {
                     HudTextField(capital, { capital = it }, Modifier.fillMaxWidth(), label = "Capital social (€)")
                     HudTextField(reserveLegale, { reserveLegale = it }, Modifier.fillMaxWidth(), label = "Réserve légale déjà constituée (€)")
                     HudTextField(distribution, { distribution = it }, Modifier.fillMaxWidth(), label = "Part du bénéfice versée en dividende (%)")
+                    BaremesReglages(app)
                 }
             }
         }
@@ -1204,7 +1210,7 @@ private fun ReglagesTab(app: JarvisApp) {
                             it.regles.remiseSurDeplacement, num(kmPrix) ?: 0.0, num(kmGratuit) ?: 0.0, num(depMin) ?: 0.0, ar
                         ),
                         paie = it.paie.copy(
-                            cadre = cadre, plafondSecu = num(plafondSecu) ?: 3925.0,
+                            cadre = cadre, plafondSecu = num(plafondSecu) ?: 4005.0,
                             tauxAtmp = num(tauxAtmp) ?: 1.2, tauxFormationPct = num(tauxFormation) ?: 0.55
                         )
                     )
@@ -1365,4 +1371,30 @@ private fun partagerDiagnosticClient(
         addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     context.startActivity(android.content.Intent.createChooser(partage, "Partager le diagnostic JARVIS"))
+}
+
+/** Barèmes officiels (URSSAF) : date de la dernière vérification, valeurs, mise à jour immédiate, application automatique. */
+@Composable
+private fun BaremesReglages(app: JarvisApp) {
+    val svc = app.societe
+    val scope = rememberCoroutineScope()
+    var tick by remember { mutableStateOf(0) }
+    var message by remember { mutableStateOf("") }
+    val b = remember(tick) { svc.data.baremes }
+    val auto = remember(tick) { svc.data.societe.baremesAuto }
+    Spacer(Modifier.height(6.dp))
+    Text("📡 Barèmes officiels (URSSAF) — vérifiés automatiquement chaque semaine", color = HudText, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+    Text(if (b.valide()) "Relevés le ${b.dateMaj} : plafond Sécu ${euro(b.pmss)} · IS ${nombre(b.isTauxReduit)} % jusqu'à ${euro(b.isPlafondReduit)} puis ${nombre(b.isTauxNormal)} % · dividendes ${nombre(b.pfuPct)} %"
+        else "Pas encore relevés (il faut Internet).", color = HudDim, fontSize = 11.sp)
+    if (b.erreur.isNotBlank()) Text("⚠️ ${b.erreur}", color = HudDim, fontSize = 11.sp)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        HudChip("Appliquer automatiquement", auto) {
+            svc.repo.update { it.copy(societe = it.societe.copy(baremesAuto = !auto)) }; tick++
+        }
+        HudButton("Vérifier maintenant") {
+            message = "⏳ Interrogation de l'URSSAF…"
+            scope.launch { message = withContext(Dispatchers.IO) { runCatching { svc.actualiserBaremes().substringBefore("\n\n# ") }.getOrElse { "❌ ${it.message}" } }; tick++ }
+        }
+    }
+    if (message.isNotBlank()) Text(message.replace("**", ""), color = LocalAccent.current, fontSize = 11.sp)
 }

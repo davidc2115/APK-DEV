@@ -135,7 +135,7 @@ object Rendu {
             "taux_pas" to nombre(b.tauxPas), "pas" to euro(b.pas), "net_a_payer" to euro(b.netAPayer),
             "net_a_payer_num" to num(b.netAPayer),
             "charges_patronales" to euro(b.totalChargesPatronales), "cout_employeur" to euro(b.coutEmployeur),
-            "avertissement" to AVERTISSEMENT_PAIE
+            "avertissement" to b.source.ifBlank { AVERTISSEMENT_PAIE }
         )
         val lignes = b.lignes.map {
             mapOf(

@@ -135,6 +135,7 @@ class JarvisApp : Application() {
         tasks = fr.dd.jarvis.data.TaskStore(this)
         societe = SocieteService(this, SocieteRepo(this), obsidian)
         fr.dd.jarvis.work.VeilleWorker.planifier(this)
+        fr.dd.jarvis.work.BaremesWorker.planifier(this)
         runCatching { fr.dd.jarvis.coffre.Coffre.planifier(this) }
         // Une fois : les rapports d'intervention existants sont régénérés avec leurs photos dans le PDF.
         if (!store.rapportsV3.value) Thread {

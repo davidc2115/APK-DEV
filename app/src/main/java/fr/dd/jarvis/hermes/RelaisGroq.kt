@@ -210,6 +210,7 @@ object RelaisGroq {
         if (Regex("sauvegarde|restaur|backup|remettre en (service|route)|r[ée]par").containsMatchIn(t)) out += listOf("ha_sauvegarde", "serveur_tache", "serveur_service")
         if (Regex("discord|\\bbot\\b|salon|serveur discord").containsMatchIn(t)) out += "discord"
         if (Regex("dividende|b[ée]n[ée]fice|r[ée]sultat (de la |de ma )?soci[ée]t[ée]|reste (pour|[àa]) la soci[ée]t[ée]|imp[ôo]t sur les soci[ée]t[ée]s|tr[ée]sorerie").containsMatchIn(t)) out += listOf("societe_resultat", "societe_info_set", "reserve_bilan")
+        if (Regex("bar[èe]mes?|urssaf|cotisations|s[ée]curit[ée] sociale|\\bsmic\\b|plafond (de la )?s[ée]cu|fiches? de paie|bulletins? de (paie|salaire)").containsMatchIn(t)) out += listOf("societe_baremes", "paie", "employe_ecrire")
         if (Regex("freebox|\\bbox\\b").containsMatchIn(t)) out += listOf("freebox", "box_")
         if (fichierServeur(t)) out += listOf("ssh_fichier", "serveur_fichiers", "ssh_")
         if (Regex("r[ée]seau|wi-?fi|\\bip\\b|imprimante|appareils? connect").containsMatchIn(t)) out += listOf("reseau_", "appareil", "ip_publique", "imprim")
