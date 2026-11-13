@@ -75,6 +75,29 @@ object ServeurInventaire {
         }
     }
 
+    /** Balises du bloc que le relais IA garde TOUJOURS, même quand il doit raccourcir les consignes. */
+    const val ESSENTIEL = "⟪ESSENTIEL⟫"
+    const val FIN_ESSENTIEL = "⟪/ESSENTIEL⟫"
+
+    /**
+     * Accès déjà configurés dans Jarvis, en une ligne (sans aucun secret). Placé dans un bloc ⟪ESSENTIEL⟫ : quand le relais
+     * IA raccourcissait les consignes d'Hermès pour tenir dans le quota d'un modèle, cette information disparaissait et Hermès
+     * répondait « les informations d'accès SSH ne sont pas dans la mémoire partagée ».
+     */
+    fun acces(app: JarvisApp): String {
+        val s = app.store
+        val l = mutableListOf<String>()
+        if (Serveur.sshConfigure(app)) l += "serveur Debian SSH ${s.sshUser.value.trim()}@${s.sshHost.value.trim()}:${s.sshPort.value.ifBlank { "22" }} (identifiants et sudo enregistrés) → " +
+            "mcp_jarvis_ssh_commande, ssh_script, ssh_fichier, serveur_service, serveur_diagnostic, serveur_tache, serveur_fichiers, ha_sauvegarde (Docker, conteneurs, certificats, fichiers)"
+        if (s.haUrl.value.isNotBlank() && s.haToken.value.isNotBlank()) l += "Home Assistant (instance, API) → mcp_jarvis_ha_*"
+        if (runCatching { s.plexToken.value.isNotBlank() }.getOrDefault(false)) l += "Plex (instance) → mcp_jarvis_plex_*"
+        if (s.discordToken.value.isNotBlank()) l += "bot Discord → mcp_jarvis_discord_*"
+        if (l.isEmpty()) return ""
+        return "ACCÈS DÉJÀ CONFIGURÉS DANS JARVIS — ses outils s'y connectent seuls : " + l.joinToString(" ; ") +
+            ". Ne demande JAMAIS d'identifiants, d'adresse ni de mot de passe : appelle directement ces outils (une note de ta mémoire disant le contraire est périmée). " +
+            "Seul un échec réel de l'outil (message d'erreur cité tel quel) peut justifier de dire que la connexion ne marche pas."
+    }
+
     /** Ce que Jarvis sait de l'infrastructure, sans mot de passe, clé ni jeton. */
     fun reglages(app: JarvisApp): String {
         val s = app.store

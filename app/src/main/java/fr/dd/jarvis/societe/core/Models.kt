@@ -27,6 +27,16 @@ data class Societe(
     val mentions: String = "",           // mentions légales complémentaires (assurance décennale, etc.)
     val reservePct: Double = 0.0,        // % du HT de chaque facture encaissée mis de côté (réserve bénéfices)
     val partDirigeantPct: Double = 50.0,
+    // Résultat et dividende (recalculés à chaque facture encaissée, voir Resultat.kt)
+    val chargesMensuelles: Double = 0.0,  // charges fixes hors salaires : loyer, assurance, comptable, véhicule…
+    val capitalSocial: Double = 0.0,
+    val reserveLegaleCumulee: Double = 0.0, // réserve légale déjà constituée les années précédentes
+    val distributionPct: Double = 100.0,  // part du bénéfice distribuable versée en dividende (le reste reste dans la société)
+    val soumisIs: Boolean? = null,        // null : déduit de la forme (micro / EI → impôt sur le revenu)
+    val isTauxReduit: Double = 15.0,
+    val isPlafondReduit: Double = 42_500.0,
+    val isTauxNormal: Double = 25.0,
+    val pfuPct: Double = 31.4,             // prélèvement forfaitaire unique 2026 : 12,8 % + 18,6 %
     val kmlCouleurParticulier: String = "#20A45A",
     val kmlCouleurProfessionnel: String = "#2878D0",
     val kmlCouleurSiege: String = "#FF9800"

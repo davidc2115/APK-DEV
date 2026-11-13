@@ -558,6 +558,31 @@ class SocieteService(
 
     fun bilan(annee: Int) = Reserve.bilan(annee, data.provisions, data.employes, data.bulletins, data.societe.partDirigeantPct)
 
+    // ------------------------------------------------------------------ résultat, bénéfice et dividende
+
+    /** Résultat de l'année à date (+ projection au 31/12), en Markdown. */
+    fun resultatTexte(annee: Int = LocalDate.now().year): String {
+        val d = data
+        val arrete = if (annee < LocalDate.now().year) LocalDate.of(annee, 12, 31) else LocalDate.now()
+        return Resultat.texte(Resultat.bilan(d, annee, arrete), if (annee == LocalDate.now().year) Resultat.projection(d, annee, arrete) else null, d.societe)
+    }
+
+    /**
+     * Facture encaissée : répartition de cette facture (salaires et charges couverts, impôt, réserve légale, dividende) et
+     * mise à jour automatique de la note « Société/Finances/Résultat <année> » du coffre.
+     */
+    fun repartitionPaiement(numero: String): String {
+        val d = data
+        val f = d.doc(numero)?.takeIf { it.type == "facture" && it.statut == "payee" } ?: return ""
+        val annee = runCatching { LocalDate.parse(f.payeLe.ifBlank { f.date }).year }.getOrDefault(LocalDate.now().year)
+        val part = Resultat.partFacture(d, f)
+        val b = Resultat.bilan(d, annee, if (annee < LocalDate.now().year) LocalDate.of(annee, 12, 31) else LocalDate.now())
+        runCatching { obsidian.saveIn("Société/Finances", "Résultat $annee", resultatTexte(annee)) }
+        return Resultat.texteFacture(part, d.societe) + "\n📊 **Cumul $annee** : reste à la société avant impôt ${euro(b.avantImpot)}" +
+            (if (b.soumisIs) " · bénéfice net ${euro(b.net)} · dividende possible ${euro(b.dividendeBrut)} brut (${euro(b.dividendeNet)} net)" else "") +
+            "\n_Détail et projection : « résultat de la société » (note « Société/Finances/Résultat $annee »)._"
+    }
+
     fun bilanTexte(annee: Int): String {
         val b = bilan(annee)
         val s = data.societe

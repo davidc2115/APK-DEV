@@ -261,6 +261,17 @@ private fun ResumeTab(app: JarvisApp) {
             }
         }
         item {
+            val res = remember(d) { runCatching { fr.dd.jarvis.societe.core.Resultat.bilan(d, annee) }.getOrNull() }
+            var detail by remember { mutableStateOf<String?>(null) }
+            if (res != null) HudPanel(Modifier.fillMaxWidth(), title = "Résultat et dividende $annee", onClick = { detail = app.societe.resultatTexte(annee) }) {
+                Text("Encaissé HT : ${euro(res.caHt)} · salaires : − ${euro(res.salaires.cout)}" + (if (res.charges > 0) " · charges : − ${euro(res.charges)}" else ""), color = HudText, fontSize = 13.sp)
+                Text("Reste à la société : ${euro(res.avantImpot)}" + (if (res.soumisIs) " · bénéfice net : ${euro(res.net)}" else ""), color = HudText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                if (res.soumisIs) Text("💶 Dividende possible : ${euro(res.dividendeBrut)} brut (${euro(res.dividendeNet)} net)", color = HudText, fontSize = 13.sp)
+                Text("Touche pour le détail et la projection au 31/12.", color = HudDim, fontSize = 11.sp)
+            }
+            detail?.let { md -> Dialogue("Résultat $annee", { detail = null }) { MarkdownText(md) } }
+        }
+        item {
             HudPanel(Modifier.fillMaxWidth(), title = "Avec JARVIS") {
                 Text(
                     "« Mon tarif maintenance : jusqu'à 3 kWc 150 €, jusqu'à 9 kWc 220 €, au-delà 350 € »\n" +
@@ -616,6 +627,7 @@ private fun DocsTab(app: JarvisApp, type: String) {
     var creating by remember { mutableStateOf(false) }
     var info by remember { mutableStateOf("") }
     var confirmSuppr by remember { mutableStateOf<String?>(null) }
+    var repartition by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val list = d.docs.filter { it.type == type }.sortedByDescending { it.numero }
 
@@ -640,6 +652,8 @@ private fun DocsTab(app: JarvisApp, type: String) {
         }
     }
 
+    repartition?.let { md -> Dialogue("Facture payée", { repartition = null }) { MarkdownText(md) } }
+
     selected?.let { num ->
         val x = d.doc(num)
         if (x == null) selected = null else {
@@ -655,6 +669,7 @@ private fun DocsTab(app: JarvisApp, type: String) {
                     Action("Payée") {
                         val r = svc.marquerPayee(x.numero, "")
                         info = "✅ Payée" + (r?.second?.let { " · réserve ${euro(it.montant)}" } ?: ""); selected = null
+                        repartition = runCatching { svc.repartitionPaiement(x.numero) }.getOrNull()?.takeIf { it.isNotBlank() }
                     }
                 if (x.statut in setOf("brouillon", "envoye", "accepte", "a_payer")) Action("✎ Modifier") { editingDoc = x.numero; selected = null }
                 if (x.statut != "annulee" && x.statut != "refuse" && x.statut != "facture") Action("Annuler") { svc.annuler(x.numero); selected = null }
@@ -1047,6 +1062,10 @@ private fun ReglagesTab(app: JarvisApp) {
     var mentions by remember { mutableStateOf(s.mentions) }
     var reserve by remember { mutableStateOf(nombre(s.reservePct)) }
     var partDir by remember { mutableStateOf(nombre(s.partDirigeantPct)) }
+    var chargesMois by remember { mutableStateOf(if (s.chargesMensuelles > 0) nombre(s.chargesMensuelles) else "") }
+    var capital by remember { mutableStateOf(if (s.capitalSocial > 0) nombre(s.capitalSocial) else "") }
+    var reserveLegale by remember { mutableStateOf(if (s.reserveLegaleCumulee > 0) nombre(s.reserveLegaleCumulee) else "") }
+    var distribution by remember { mutableStateOf(nombre(s.distributionPct)) }
     var saved by remember { mutableStateOf("") }
     fun num(t: String) = t.replace(',', '.').trim().toDoubleOrNull()
 
@@ -1121,6 +1140,11 @@ private fun ReglagesTab(app: JarvisApp) {
                     HudTextField(mentions, { mentions = it }, Modifier.fillMaxWidth(), label = "Mentions légales (assurance, RCS…)", singleLine = false)
                     HudTextField(reserve, { reserve = it }, Modifier.fillMaxWidth(), label = "Réserve bénéfices (% du HT encaissé)")
                     HudTextField(partDir, { partDir = it }, Modifier.fillMaxWidth(), label = "Part dirigeant de la réserve (%)")
+                    Text("📊 Résultat et dividende — recalculés à chaque facture payée (salaires versés, charges, impôt sur les sociétés, réserve légale) :", color = HudDim, fontSize = 11.sp)
+                    HudTextField(chargesMois, { chargesMois = it }, Modifier.fillMaxWidth(), label = "Charges fixes par mois hors salaires (€)")
+                    HudTextField(capital, { capital = it }, Modifier.fillMaxWidth(), label = "Capital social (€)")
+                    HudTextField(reserveLegale, { reserveLegale = it }, Modifier.fillMaxWidth(), label = "Réserve légale déjà constituée (€)")
+                    HudTextField(distribution, { distribution = it }, Modifier.fillMaxWidth(), label = "Part du bénéfice versée en dividende (%)")
                 }
             }
         }
@@ -1171,7 +1195,9 @@ private fun ReglagesTab(app: JarvisApp) {
                             franchiseTva = franchise, tvaDefaut = num(tva) ?: 20.0, tarifsSaisisTtc = tarifsTtc,
                             delaiPaiementJours = delai.toIntOrNull() ?: 30, validiteDevisJours = validite.toIntOrNull() ?: 30,
                             mentions = mentions, reservePct = (num(reserve) ?: 0.0).coerceIn(0.0, 100.0),
-                            partDirigeantPct = (num(partDir) ?: 50.0).coerceIn(0.0, 100.0)
+                            partDirigeantPct = (num(partDir) ?: 50.0).coerceIn(0.0, 100.0),
+                            chargesMensuelles = (num(chargesMois) ?: 0.0).coerceAtLeast(0.0), capitalSocial = (num(capital) ?: 0.0).coerceAtLeast(0.0),
+                            reserveLegaleCumulee = (num(reserveLegale) ?: 0.0).coerceAtLeast(0.0), distributionPct = (num(distribution) ?: 100.0).coerceIn(0.0, 100.0)
                         ),
                         regles = Regles(
                             Pricing.parserSeuils(fid), Pricing.parserSeuils(vol), cumul, num(rmax) ?: 0.0,

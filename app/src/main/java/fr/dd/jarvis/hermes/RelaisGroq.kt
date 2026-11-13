@@ -138,6 +138,15 @@ object RelaisGroq {
 
     private fun estimer(messages: JSONArray, outils: JSONArray?) = jetons(messages.toString()) + jetons(outils?.toString().orEmpty())
 
+    /** Sépare les blocs ⟪ESSENTIEL⟫ (sans balises, 1200 caractères au plus) du reste des consignes. */
+    internal fun essentiel(texte: String): Pair<String, String> {
+        val debut = ServeurInventaire.ESSENTIEL; val fin = ServeurInventaire.FIN_ESSENTIEL
+        val r = Regex(Regex.escape(debut) + "([\\s\\S]*?)" + Regex.escape(fin))
+        val blocs = r.findAll(texte).map { it.groupValues[1].trim() }.filter { it.isNotBlank() }.distinct().toList()
+        if (blocs.isEmpty()) return texte to ""
+        return r.replace(texte, "").replace(Regex("\n{3,}"), "\n\n") to blocs.joinToString("\n").take(1200)
+    }
+
     private fun couper(s: String, max: Int): String = if (s.length <= max) s
     else if (max < 400) s.take(max) + "…"
     else s.take((max * 0.7).toInt()) + "\n[…consignes abrégées…]\n" + s.takeLast((max * 0.3).toInt())
@@ -159,8 +168,10 @@ object RelaisGroq {
         while (garde.isNotEmpty() && garde.first().optString("role") == "tool") garde = garde.drop(1) // pas de résultat orphelin
         val out = JSONArray()
         if (systemes.isNotEmpty()) {
-            val texte = systemes.joinToString("\n\n") { contenu(it) }
-            out.put(JSONObject().put("role", "system").put("content", couper(texte, p.systeme)))
+            val (texte, essentiel) = essentiel(systemes.joinToString("\n\n") { contenu(it) })
+            // Le bloc ⟪ESSENTIEL⟫ (accès déjà configurés…) est toujours gardé, en entier, après les consignes raccourcies.
+            val coupe = couper(texte, (p.systeme - essentiel.length).coerceAtLeast(p.systeme / 2))
+            out.put(JSONObject().put("role", "system").put("content", if (essentiel.isBlank()) coupe else coupe + "\n\n" + essentiel))
         }
         (garde + tour).forEachIndexed { i, m ->
             // Seuls les champs acceptés par Groq (pas de reasoning_content, metadata…).
@@ -198,6 +209,7 @@ object RelaisGroq {
         if (Regex("site (web|internet)|\\bsite\\b|page web|vitrine|mettre en ligne|mise en ligne|h[ée]berg").containsMatchIn(t)) out += "site_web"
         if (Regex("sauvegarde|restaur|backup|remettre en (service|route)|r[ée]par").containsMatchIn(t)) out += listOf("ha_sauvegarde", "serveur_tache", "serveur_service")
         if (Regex("discord|\\bbot\\b|salon|serveur discord").containsMatchIn(t)) out += "discord"
+        if (Regex("dividende|b[ée]n[ée]fice|r[ée]sultat (de la |de ma )?soci[ée]t[ée]|reste (pour|[àa]) la soci[ée]t[ée]|imp[ôo]t sur les soci[ée]t[ée]s|tr[ée]sorerie").containsMatchIn(t)) out += listOf("societe_resultat", "societe_info_set", "reserve_bilan")
         if (Regex("freebox|\\bbox\\b").containsMatchIn(t)) out += listOf("freebox", "box_")
         if (fichierServeur(t)) out += listOf("ssh_fichier", "serveur_fichiers", "ssh_")
         if (Regex("r[ée]seau|wi-?fi|\\bip\\b|imprimante|appareils? connect").containsMatchIn(t)) out += listOf("reseau_", "appareil", "ip_publique", "imprim")

@@ -74,7 +74,7 @@ HORLOGE / RÉVEILS — ROUTAGE PRIORITAIRE :
 - Les alarmes internes JARVIS et celles de l'application Horloge Xiaomi sont deux systèmes distincts. Ne prétends pas que la liste interne JARVIS représente les réveils Xiaomi. Si l'outil dédié ne permet pas de modifier l'alarme native, utilise phone_action pour ouvrir/lire l'interface Horloge, sélectionner précisément le réveil existant, modifier uniquement l'heure et vérifier visuellement que l'heure et la répétition sont correctes.
 - Si l'interface ne permet pas de l'identifier sans ambiguïté, si l'accessibilité est inactive ou si la modification ne peut pas être vérifiée, n'effectue aucune création/suppression de remplacement ; explique exactement le blocage et demande l'intervention nécessaire.
 """.trim()
-    private val R_SOCIETE = Regex("clients?|installations?|interventions?|gps|coordonn|chantiers?|devis|factur|soci[ée]t[ée]|fiche", RegexOption.IGNORE_CASE)
+    private val R_SOCIETE = Regex("clients?|installations?|interventions?|gps|coordonn|chantiers?|devis|factur|soci[ée]t[ée]|fiche|dividende|b[ée]n[ée]fice|salaires?|paie|r[ée]sultat|tr[ée]sorerie", RegexOption.IGNORE_CASE)
     private val R_DOCUMENTS = Regex("documents?|pdf|fichiers?|pi[èe]ces? jointes?|docx|xlsx|pptx|odt|ods|kml|gpx|zip|import|biblioth|convert|excel|word|tableur", RegexOption.IGNORE_CASE)
     private val R_DISCORD = Regex("discord", RegexOption.IGNORE_CASE)
     private val R_EXTENSIONS = Regex("skills?|comp[ée]tences?|plugins?|\\bmcp\\b|extensions?|r[ée]seau|routeur|\\bbox\\b|imprim|ip publique|\\bports?\\b|\\bnat\\b|upnp|pare.feu|firewall|install", RegexOption.IGNORE_CASE)
@@ -277,8 +277,19 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
             """.trimIndent() else "") +
             runCatching { ServeurInventaire.bloc(app, demande) }.getOrDefault("") +
             runCatching { fr.dd.jarvis.device.Contexte.consigne(fr.dd.jarvis.device.Contexte.actuel(app)) }.getOrDefault("") +
+            runCatching { ServeurInventaire.acces(app) }.getOrDefault("").let { if (it.isBlank()) "" else "\n\n${ServeurInventaire.ESSENTIEL}$it${ServeurInventaire.FIN_ESSENTIEL}" } +
             "\n\nNous sommes le $maintenant."
     }
+
+    /** La réponse réclame des accès (serveur, SSH, identifiants) que Jarvis possède déjà. */
+    private val RECLAME_ACCES = Regex(
+        "(identifiants?|informations? d.acc[eè]s|param[eè]tres de connexion|acc[eè]s ssh|mot de passe|cl[ée] ssh|h[ôo]te, utilisateur|nom d.utilisateur).{0,140}" +
+            "(ne sont pas|n.est pas|manqu|absent|pas pr[ée]sent|fournis|donne|communique|pr[ée]cise|indique|besoin)|" +
+            "(fournis|donne|communique|pr[ée]cise|indique)[- ]moi.{0,80}(identifiants|acc[eè]s|h[ôo]te|mot de passe|cl[ée])|" +
+            "je ne (peux|pourrai) pas me connecter (au|[àa] ton) serveur|pas acc[eè]s (au|[àa] ton) serveur",
+        RegexOption.IGNORE_CASE
+    )
+    internal fun reclameAcces(r: String) = RECLAME_ACCES.containsMatchIn(r.take(2500)) && Regex("ssh|serveur|server|docker|debian|home ?assistant", RegexOption.IGNORE_CASE).containsMatchIn(r.take(2500))
 
     /**
      * Confie la conversation à Hermès. Renvoie sa réponse, ou null s'il est indisponible (l'appelant bascule alors
@@ -309,6 +320,9 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
             }
             messages.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(cap)))
         }
+        // Demande qui touche au serveur : les accès configurés sont rappelés DANS la demande (jamais raccourcie par le relais).
+        val rappel = if (fr.dd.jarvis.ai.Serveur.sshConfigure(app) && ServeurInventaire.concerne(sujet)) ServeurInventaire.acces(app) else ""
+        if (rappel.isNotBlank()) ajouterALaDemande(messages, "\n\n[$rappel]")
         if (!tentativeJarvis.isNullOrBlank()) messages.put(JSONObject().put("role", "system").put("content",
             "Ta partie rapide a d'abord essayé de traiter cette demande sans aboutir (l'utilisateur n'a PAS vu cette tentative). Brouillon : « ${tentativeJarvis.take(1500)} ». " +
                 "Reprends la demande avec ta mémoire, tes notes, tes skills et tous tes outils ; ne répète pas ce qui a échoué de la même façon, " +
@@ -320,7 +334,24 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
             else -> if (multiEtapes) 90_000L else 35_000L
         }
         // Dernier filet : un message d'Hermès resté en anglais (erreur interne, réponse d'outil…) est traduit.
-        return appeler(app, messages, boite, onStatus, derniere, attenteMs = attente, onTexte = onTexte)?.let { Francais.traduireSiAnglais(app, it) }
+        val r = appeler(app, messages, boite, onStatus, derniere, attenteMs = attente, onTexte = onTexte)?.let { Francais.traduireSiAnglais(app, it) }
+        // Hermès réclame des accès que Jarvis a déjà (serveur SSH configuré) : une relance, avec la consigne dans la demande.
+        if (r != null && fr.dd.jarvis.ai.Serveur.sshConfigure(app) && reclameAcces(r)) {
+            onStatus("🔁 Accès au serveur déjà configurés : JARVIS reprend avec ses outils…")
+            ajouterALaDemande(messages, "\n\n[IMPORTANT — ta tentative précédente a demandé des identifiants : c'est une erreur. " + ServeurInventaire.acces(app) +
+                " Commence MAINTENANT par l'outil adapté (par ex. mcp_jarvis_serveur_diagnostic ou mcp_jarvis_ssh_commande « docker ps -a »), puis traite la demande.]")
+            val r2 = appeler(app, messages, boite, onStatus, derniere, attenteMs = attente, onTexte = null)?.let { Francais.traduireSiAnglais(app, it) }
+            if (r2 != null && !reclameAcces(r2)) return r2
+        }
+        return r
+    }
+
+    /** Ajoute un texte au dernier message de l'utilisateur (la seule partie que le relais IA ne raccourcit jamais). */
+    private fun ajouterALaDemande(messages: JSONArray, ajout: String) {
+        for (i in messages.length() - 1 downTo 0) {
+            val m = messages.optJSONObject(i) ?: continue
+            if (m.optString("role") == "user") { m.put("content", m.optString("content") + ajout); return }
+        }
     }
 
     /** Délégation d'une tâche précise (outil hermes_deleguer du cerveau Jarvis de secours). */

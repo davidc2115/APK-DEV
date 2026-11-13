@@ -19,12 +19,12 @@ class SocieteTools(
     companion object {
         val NAMES = setOf(
             "societe_info_set", "societe_info_get", "tarif_set", "tarif_delete", "regles_set", "client_ecrire", "client_fiche", "client_supprimer",
-            "document_creer", "document_action", "document_email", "societe_liste", "employe_ecrire", "paie", "reserve_bilan",
+            "document_creer", "document_action", "document_email", "societe_liste", "employe_ecrire", "paie", "reserve_bilan", "societe_resultat",
             "presentation_modifier", "distance_deplacement", "clients_exporter_kml", "kml_couleurs_set", "clients_gps", "intervention_enregistrer", "intervention_modifier", "intervention_supprimer", "interventions_liste", "interventions_synthese",
             "installation_supprimer"
         )
         private val KEYWORDS = Regex(
-            "devis|factur|client|soci[ée]t[ée]|tarif|remise|d[ée]placement|paie|salaire|bulletin|r[ée]serve|dividende|b[ée]n[ée]fice|" +
+            "devis|factur|client|soci[ée]t[ée]|tarif|remise|d[ée]placement|paie|salaire|bulletin|r[ée]serve|dividende|b[ée]n[ée]fice|r[ée]sultat|tr[ée]sorerie|charges fixes|imp[ôo]t sur les soci[ée]t[ée]s|capital social|" +
                 "installation|photovolta|kwc|fiche|pr[ée]sentation|mise en forme|mise en page|si[èe]ge|employ[ée]|prix|onduleur|maintenance|" +
                 "entretien|intervention|historique photovolta[ïi]que|bilan maintenance|panne|diagnostic|pi[èe]ce remplac[ée]e|planning|agenda|pdf|obsidian|distance|itin[ée]raire|km|fid[ée]lit[ée]|kml|google earth|carte des clients|" +
                 "gps|coordonn[ée]es|g[ée]oloc|localis|latitude|longitude|google maps",
@@ -90,8 +90,17 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "validite_devis_jours" to prop("Durée de validité des devis en jours."),
             "mentions" to prop("Mentions légales complémentaires (assurance décennale, RCS…)."),
             "reserve_pct" to prop("Pourcentage du HT de chaque facture encaissée mis de côté en réserve bénéfices."),
-            "part_dirigeant_pct" to prop("Part de la réserve attribuée au dirigeant en fin d'année en % (le reste aux salariés).")
+            "part_dirigeant_pct" to prop("Part de la réserve attribuée au dirigeant en fin d'année en % (le reste aux salariés)."),
+            "charges_mensuelles" to prop("Charges fixes mensuelles hors salaires en € (loyer, assurance, comptable, véhicule…), pour le calcul du résultat."),
+            "capital_social" to prop("Capital social en € (plafond de la réserve légale : 10 % du capital)."),
+            "reserve_legale_cumulee" to prop("Réserve légale déjà constituée les années précédentes, en €."),
+            "distribution_pct" to prop("Part du bénéfice distribuable versée en dividende en fin d'année, en % (le reste reste dans la société)."),
+            "impot_societes" to prop("« true » si la société est à l'impôt sur les sociétés, « false » si elle est à l'impôt sur le revenu (déduit de la forme sinon)."),
+            "is_taux_reduit" to prop("Taux réduit d'IS en % (15 par défaut)."), "is_plafond_reduit" to prop("Plafond de bénéfice du taux réduit en € (42500 par défaut)."),
+            "is_taux_normal" to prop("Taux normal d'IS en % (25 par défaut)."), "pfu_pct" to prop("Prélèvement forfaitaire unique sur les dividendes en % (31,4 en 2026).")
         )),
+        tool("societe_resultat", "Résultat de la société (recalculé automatiquement à chaque facture payée) : chiffre d'affaires encaissé HT, salaires versés (coût employeur, bulletins ou estimation), charges fixes, ce qu'il reste à la société avant impôt, impôt sur les sociétés, bénéfice net, réserve légale, dividende de fin d'année possible (brut et net après prélèvement forfaitaire), et projection au 31 décembre.",
+            mapOf("annee" to prop("Année (défaut : l'année en cours)."))),
         tool("societe_info_get", "Affiche les informations société, les tarifs, les règles de remise/déplacement et la réserve enregistrés."),
         tool("tarif_set", "Crée ou modifie un tarif. Mode : forfait (prix fixe selon la puissance de l'installation), par_kwc (prix par kWc), heure, unite.", mapOf(
             "designation" to prop("Nom de la prestation, ex. « Maintenance annuelle »."),
@@ -252,6 +261,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         "employe_ecrire" -> employeEcrire(a)
         "paie" -> paie(a)
         "reserve_bilan" -> ok(svc.bilanTexte(a.s("annee").toIntOrNull() ?: LocalDate.now().year))
+        "societe_resultat" -> ok(svc.resultatTexte(a.s("annee").toIntOrNull() ?: LocalDate.now().year))
         "presentation_modifier" -> presentation(a)
         "distance_deplacement" -> distanceTool(a)
         "clients_exporter_kml" -> ok(svc.exporterKml(a.s("recherche")))
@@ -320,6 +330,15 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         if (a.hv("mentions")) s = s.copy(mentions = a.s("mentions"))
         a.dbl("reserve_pct")?.let { s = s.copy(reservePct = it.coerceIn(0.0, 100.0)) }
         a.dbl("part_dirigeant_pct")?.let { s = s.copy(partDirigeantPct = it.coerceIn(0.0, 100.0)) }
+        a.dbl("charges_mensuelles")?.let { s = s.copy(chargesMensuelles = it.coerceAtLeast(0.0)) }
+        a.dbl("capital_social")?.let { s = s.copy(capitalSocial = it.coerceAtLeast(0.0)) }
+        a.dbl("reserve_legale_cumulee")?.let { s = s.copy(reserveLegaleCumulee = it.coerceAtLeast(0.0)) }
+        a.dbl("distribution_pct")?.let { s = s.copy(distributionPct = it.coerceIn(0.0, 100.0)) }
+        a.bool("impot_societes")?.let { s = s.copy(soumisIs = it) }
+        a.dbl("is_taux_reduit")?.let { s = s.copy(isTauxReduit = it.coerceIn(0.0, 100.0)) }
+        a.dbl("is_plafond_reduit")?.let { s = s.copy(isPlafondReduit = it.coerceAtLeast(0.0)) }
+        a.dbl("is_taux_normal")?.let { s = s.copy(isTauxNormal = it.coerceIn(0.0, 100.0)) }
+        a.dbl("pfu_pct")?.let { s = s.copy(pfuPct = it.coerceIn(0.0, 100.0)) }
         if (s == before) return err("Aucune information reconnue à enregistrer.")
         val siegeDeplace = before.adresse != s.adresse || before.lat != s.lat || before.lon != s.lon
         svc.repo.update { current ->
@@ -358,6 +377,10 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             append(if (Pricing.deplacementConfigure(r)) "- ${euro(r.kmPrix)}/km · ${nombre(r.kmGratuits)} km offerts · minimum ${euro(r.deplacementMin)} · " + (if (r.allerRetour) "aller-retour" else "aller simple") + "\n" else "- Non configuré.\n")
             append("\n## 💰 Réserve bénéfices\n")
             append(if (s.reservePct > 0) "- ${nombre(s.reservePct)} % du HT des factures encaissées · dirigeant ${nombre(s.partDirigeantPct)} % / salariés ${nombre(100 - s.partDirigeantPct)} %\n" else "- Non configurée.\n")
+            append("\n## 📊 Résultat et dividende (calcul automatique à chaque facture payée)\n")
+            append("- Charges fixes : ${if (s.chargesMensuelles > 0) euro(s.chargesMensuelles) + " / mois" else "non renseignées"} · capital social : ${if (s.capitalSocial > 0) euro(s.capitalSocial) else "non renseigné"}\n")
+            append("- ${if (fr.dd.jarvis.societe.core.Resultat.soumisIs(s)) "Impôt sur les sociétés : ${nombre(s.isTauxReduit)} % jusqu'à ${euro(s.isPlafondReduit)}, ${nombre(s.isTauxNormal)} % au-delà" else "Impôt sur le revenu (pas d'IS ni de dividende)"}" +
+                " · dividende : ${nombre(s.distributionPct)} % du distribuable · prélèvement forfaitaire ${nombre(s.pfuPct)} %\n")
         }
     }
 
@@ -973,7 +996,8 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
                 if (!confirm("Marquer la facture ${doc.numero} comme payée (${euro(d.totaux(doc).ttc)} TTC) ?", false)) return err("Refusé par l'utilisateur.")
                 val (f, prov) = svc.marquerPayee(numero, a.s("mode_paiement")) ?: return err("Introuvable.")
                 ok("✅ Facture ${f.numero} payée (${euro(d.totaux(f).ttc)} TTC)." +
-                    (if (prov != null) "\n💰 Mis en réserve : **${euro(prov.montant)}** (${nombre(prov.pct)} % de ${euro(prov.baseHt)} HT)" else if (d.societe.reservePct <= 0) "\nℹ️ Aucune réserve configurée (reserve_pct)." else ""))
+                    (if (prov != null) "\n💰 Mis en réserve : **${euro(prov.montant)}** (${nombre(prov.pct)} % de ${euro(prov.baseHt)} HT)" else "") +
+                    runCatching { "\n\n" + svc.repartitionPaiement(f.numero) }.getOrDefault(""))
             }
             "annuler" -> {
                 if (!confirm("Annuler ${doc.numero} ? Le numéro reste conservé (une facture n'est jamais supprimée).", false)) return err("Refusé par l'utilisateur.")

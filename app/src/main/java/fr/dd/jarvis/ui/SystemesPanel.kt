@@ -98,8 +98,18 @@ fun SystemesPanel(app: JarvisApp, onAsk: (String) -> Unit) {
             }
             if (!typeSchema) HudTextField(code, { code = it.trim() }, Modifier.fillMaxWidth(), label = "Code de l'écran de verrouillage (déverrouillage à la voix)", password = true)
             else {
-                HudTextField(schema, { schema = it.filter { c -> c in '1'..'9' } }, Modifier.fillMaxWidth(), label = "Schéma : points dans l'ordre du tracé (ex. 1-5-9-6)", password = true)
-                Text("Points numérotés comme un clavier de téléphone :  1 2 3  /  4 5 6  /  7 8 9  (en haut à gauche = 1).", color = HudDim, fontSize = 11.sp)
+                // Le schéma se TRACE au doigt, comme sur l'écran de verrouillage (plus de numéros à taper).
+                var voir by remember { mutableStateOf(false) }
+                var essai by remember { mutableIntStateOf(0) }
+                Text(if (schema.length >= 4) "✅ Schéma tracé (${schema.length} points). Retrace-le pour le changer." else "Trace ton schéma ci-dessous, exactement comme sur l'écran de verrouillage (au moins 4 points).",
+                    color = HudDim, fontSize = 11.sp)
+                androidx.compose.runtime.key(voir, essai) {
+                    SchemaDessin(schema, voir || schema.isEmpty(), { schema = it; voir = true }, Modifier.padding(vertical = 6.dp).align(androidx.compose.ui.Alignment.CenterHorizontally))
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (schema.isNotEmpty()) HudChip(if (voir) "🙈 Masquer" else "👁️ Afficher le schéma", voir) { voir = !voir }
+                    HudChip("🔁 Effacer", false) { schema = ""; voir = false; essai++ }
+                }
             }
             var alarme by remember { mutableStateOf(store.codeAlarmeHa.value) }
             HudTextField(alarme, { alarme = it.trim() }, Modifier.fillMaxWidth(), label = "Code de l'alarme Home Assistant (si elle en demande un)", password = true)
