@@ -85,6 +85,7 @@ object ServeurInventaire {
             val distant = s.sshHostDistant.value.trim().takeIf { it.isNotBlank() }
                 ?.let { " ; accès hors de la maison : $it:${s.sshPortDistant.value.ifBlank { s.sshPort.value.ifBlank { "22" } }}" }.orEmpty()
             lignes += "- Serveur Debian : ${s.sshUser.value.ifBlank { "?" }}@${s.sshHost.value.trim()}:${s.sshPort.value.ifBlank { "22" }} ($auth$distant) → outils mcp_jarvis_ssh_commande / ssh_fichier / ssh_script / serveur_diagnostic / serveur_scan_ports."
+            lignes += "- Connexion actuelle : ${Serveur.situation(app)}. Les outils Jarvis choisissent seuls l'adresse locale ou distante."
         }
         if (s.haUrl.value.isNotBlank()) {
             val dossier = s.haDir.value.trim().takeIf { it.isNotBlank() }?.let { " ; configuration YAML sur le serveur : $it" }.orEmpty()
@@ -106,6 +107,7 @@ object ServeurInventaire {
         enCours?.takeIf { it.isActive }?.let { return it }
         return scope.async {
             val (code, sortie) = runCatching { Serveur.exec(app, COMMANDE, timeoutS = 40) }.getOrElse { return@async null }
+            runCatching { Serveur.ipLocaleServeur(app)?.let { app.store.serveurIpLocale.set(it) } }
             val texte = nettoyer(sortie)
             if (code == 0 || texte.isNotBlank()) {
                 app.store.serveurServices.set(cleServeur(app) + "\n" + texte)

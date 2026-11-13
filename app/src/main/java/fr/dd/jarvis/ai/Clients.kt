@@ -375,6 +375,19 @@ class GeminiChatClient(private val ring: KeyRing, private val model: () -> Strin
 /** Gemini (REST) : les agents spécialisés (planning, mails, contacts). */
 class GeminiClient(private val ring: KeyRing, private val model: () -> String) {
 
+    /** Client pour les longues rédactions (site web complet…) : jusqu'à 4 min. */
+    private val long = Http.client.newBuilder().callTimeout(240, java.util.concurrent.TimeUnit.SECONDS).readTimeout(240, java.util.concurrent.TimeUnit.SECONDS).build()
+
+    /** Longue réponse (jusqu'à [maxTokens] jetons, plafond 60 000) : sites web, documents complets. */
+    suspend fun generateLong(system: String, user: String, maxTokens: Int = 48_000): String =
+        ring.run { key -> withContext(Dispatchers.IO) {
+            val principal = GeminiModeles.pour(key, model())
+            try { call(key, system, user, maxTokens, m = principal, plafond = 60_000, client = long) } catch (e: ApiException) {
+                if (!GeminiModeles.modeleInaccessible(e.code, e.message.orEmpty())) throw e
+                call(key, system, user, maxTokens, m = GeminiModeles.secours(key, principal) ?: throw e, plafond = 60_000, client = long)
+            }
+        } }
+
     suspend fun generate(system: String, user: String): String =
         ring.run { key -> withContext(Dispatchers.IO) {
             val principal = GeminiModeles.pour(key, model())
@@ -455,8 +468,9 @@ class GeminiClient(private val ring: KeyRing, private val model: () -> String) {
         }
     }
 
-    private fun call(key: String, system: String, user: String, maxTokens: Int, thinkingOff: Boolean = true, m: String = model()): String {
-        val gen = JSONObject().put("temperature", 0.3).put("maxOutputTokens", maxTokens.coerceIn(8, 2048))
+    private fun call(key: String, system: String, user: String, maxTokens: Int, thinkingOff: Boolean = true, m: String = model(),
+                     plafond: Int = 2048, client: okhttp3.OkHttpClient = Http.fast): String {
+        val gen = JSONObject().put("temperature", 0.3).put("maxOutputTokens", maxTokens.coerceIn(8, plafond))
         if (thinkingOff) {
             when {
                 m.contains("2.5") -> gen.put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
@@ -477,9 +491,9 @@ class GeminiClient(private val ring: KeyRing, private val model: () -> String) {
             .header("x-goog-api-key", key)
             .post(body.toString().toRequestBody(Http.JSON))
             .build()
-        val (code, text) = Http.fast.newCall(req).execute().use { it.code to it.body?.string().orEmpty() }
+        val (code, text) = client.newCall(req).execute().use { it.code to it.body?.string().orEmpty() }
         // Certains modèles refusent le réglage de réflexion : on réessaie sans.
-        if (code == 400 && thinkingOff && text.contains("think", ignoreCase = true)) return call(key, system, user, maxTokens, false, m)
+        if (code == 400 && thinkingOff && text.contains("think", ignoreCase = true)) return call(key, system, user, maxTokens, false, m, plafond, client)
         if (code !in 200..299) throw ApiException(code, "Gemini $code : ${text.take(300)}")
         val cands = JSONObject(text).optJSONArray("candidates")
         val parts = cands?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")

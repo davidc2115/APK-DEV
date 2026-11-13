@@ -189,6 +189,7 @@ object RelaisGroq {
             out += listOf("ssh_", "serveur_")
         if (Regex("home ?assistant|domotique|\\bha\\b|lumi[èe]re|volet|chauffage|thermostat|po[êe]le|capteur|entit[ée]|automatisation|sc[èe]ne|prise").containsMatchIn(t)) out += "ha_"
         if (Regex("plex|films?\\b|s[ée]ries? t[ée]l[ée]|biblioth[èe]que (de )?films|playlist|liste de lecture|[ée]pisode|regarder").containsMatchIn(t)) out += "plex"
+        if (Regex("site (web|internet)|\\bsite\\b|page web|vitrine|mettre en ligne|mise en ligne|h[ée]berg").containsMatchIn(t)) out += "site_web"
         if (Regex("sauvegarde|restaur|backup|remettre en (service|route)|r[ée]par").containsMatchIn(t)) out += listOf("ha_sauvegarde", "serveur_tache", "serveur_service")
         if (Regex("discord|\\bbot\\b|salon|serveur discord").containsMatchIn(t)) out += "discord"
         if (Regex("freebox|\\bbox\\b").containsMatchIn(t)) out += listOf("freebox", "box_")

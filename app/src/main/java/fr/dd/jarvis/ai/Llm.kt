@@ -59,6 +59,13 @@ class Llm(private val store: Store) {
     var lastError: String = ""
 
     /** Agent : Gemini d'abord (clés en rotation), puis Groq en secours. Échoue avec un message lisible. */
+    /** Longue rédaction (site web, document complet) : Gemini avec une grande sortie, sinon la chaîne habituelle. */
+    suspend fun redigerLong(system: String, user: String): String {
+        if (geminiRing.count() > 0) runCatching { return gemini.generateLong(system, user).ifBlank { throw IllegalStateException("réponse vide") } }
+            .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+        return agent(system, user)
+    }
+
     suspend fun agent(system: String, user: String): String {
         val errors = mutableListOf<String>()
         if (geminiRing.count() > 0) {

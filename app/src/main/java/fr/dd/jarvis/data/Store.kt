@@ -178,6 +178,8 @@ class Store(context: Context) {
     val cleSauvegardeHa = SecretPref("cleSauvegardeHa")
     val serveurServices = SPref("serveurServices", "")
     val serveurServicesLe = SPref("serveurServicesLe", "0")
+    /** Adresse du serveur sur le réseau de la maison (relevée par SSH) : connexion locale automatique à la maison. */
+    val serveurIpLocale = SPref("serveurIpLocale", "")
     // ---- Box internet (disque dur USB)
     val boxHost = SPref("boxHost", "")
     val boxProto = SPref("boxProto", "smb")

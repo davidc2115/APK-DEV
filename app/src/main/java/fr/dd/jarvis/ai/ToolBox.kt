@@ -27,6 +27,7 @@ class ToolBox(
     private val musique = MusicTools(app)
     private val plex = PlexTools(app, confirm)
     private val serveurAdmin = ServeurAdminTools(app, confirm)
+    private val sitesWeb = SitesWebTools(app, confirm)
     private val store get() = app.store
     private val llm get() = app.llm
 
@@ -470,12 +471,14 @@ class ToolBox(
         val mus = MusicTools.concerned(recentUserText)
         val plx = PlexTools.concerned(recentUserText)
         val adm = ServeurAdminTools.concerned(recentUserText)
-        if (!soc && !srv && !dis && !tik && !mus && !plx && !adm) return schema
+        val web = SitesWebTools.concerned(recentUserText)
+        if (!soc && !srv && !dis && !tik && !mus && !plx && !adm && !web) return schema
         return JSONArray().also { out ->
             for (i in 0 until schema.length()) out.put(schema.get(i))
             if (soc) societe.schema.forEach { out.put(it) }
             if (srv) serveur.schema.forEach { out.put(it) }
             if (srv || adm) serveurAdmin.schema.forEach { out.put(it) }
+            if (web) sitesWeb.schema.forEach { out.put(it) }
             if (dis) discord.schema.forEach { out.put(it) }
             if (tik) tiktok.schema.forEach { out.put(it) }
             if (mus) musique.schema.forEach { out.put(it) }
@@ -488,6 +491,7 @@ class ToolBox(
         societe.schema.forEach { out.put(it) }
         serveur.schema.forEach { out.put(it) }
         serveurAdmin.schema.forEach { out.put(it) }
+        sitesWeb.schema.forEach { out.put(it) }
         discord.schema.forEach { out.put(it) }
         tiktok.schema.forEach { out.put(it) }
         musique.schema.forEach { out.put(it) }
@@ -1168,6 +1172,7 @@ class ToolBox(
         in SocieteTools.NAMES -> societe.execute(name, a)
         in ServeurTools.NAMES -> serveur.execute(name, a)
         in ServeurAdminTools.NAMES -> serveurAdmin.execute(name, a)
+        in SitesWebTools.NAMES -> sitesWeb.execute(name, a)
         in DiscordTools.NAMES -> discord.execute(name, a)
         in TikTokTools.NAMES -> tiktok.execute(name, a)
         in MusicTools.NAMES -> musique.execute(name, a)

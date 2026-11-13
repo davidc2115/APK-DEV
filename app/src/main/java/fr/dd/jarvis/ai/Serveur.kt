@@ -56,8 +56,13 @@ object Serveur {
         val local = st.sshHost.value.trim() to (st.sshPort.value.toIntOrNull() ?: 22)
         val distant = st.sshHostDistant.value.trim().takeIf { it.isNotBlank() }?.let { it to (st.sshPortDistant.value.toIntOrNull() ?: local.second) }
         // Bonne adresse d'abord : hors du réseau de la maison, on ne perd plus 6 s à attendre l'adresse locale.
-        val ordre = if (distant == null) listOf(local) else if (distantDabord(local.first)) listOf(distant, local) else listOf(local, distant)
+        var ordre = if (distant == null) listOf(local) else if (distantDabord(local.first)) listOf(distant, local) else listOf(local, distant)
+        // À la maison avec une adresse PUBLIQUE dans les Réglages : l'adresse locale relevée du serveur passe en premier
+        // (beaucoup de box ne savent pas « revenir » vers leur propre IP publique depuis le réseau local).
+        val lan = st.serveurIpLocale.value.trim().takeIf { ipPrivee(it) && ordre.none { o -> o.first == it } }
+        if (lan != null && telephoneSurReseau(lan)) ordre = (listOf(lan to local.second, lan to 22).distinct() + ordre).distinct()
         var erreur: Exception? = null
+        val essais = mutableListOf<String>()
         for ((i, cibleAdr) in ordre.withIndex()) {
             val s = jsch.getSession(st.sshUser.value.trim(), cibleAdr.first, cibleAdr.second)
             // Si une ancienne clé privée est encore renseignée, ne pas empêcher le repli sur le mot de passe.
@@ -73,6 +78,7 @@ object Serveur {
                 s.connect(if (i < ordre.size - 1) 5000 else 12000)
             } catch (e: Exception) {
                 runCatching { s.disconnect() }
+                essais += "${cibleAdr.first}:${cibleAdr.second} → ${expliquer(e, cibleAdr.first, cibleAdr.second)}"
                 erreur = e
                 continue
             }
@@ -87,7 +93,38 @@ object Serveur {
             }
             return s
         }
+        if (essais.size > 1) throw IllegalStateException("Connexion SSH impossible par toutes les adresses connues : " + essais.joinToString(" ; "), erreur)
         throw erreur ?: IllegalStateException("Connexion SSH impossible")
+    }
+
+    /** Le téléphone est-il sur le même réseau local que [ipServeur] (même préfixe /24) ? */
+    fun telephoneSurReseau(ipServeur: String): Boolean {
+        val prefixe = ipServeur.substringBeforeLast('.') + "."
+        return adressesTelephone().any { it.second.startsWith(prefixe) }
+    }
+
+    /** Adresses IPv4 du téléphone : (interface, adresse). wlan = Wi-Fi ; rmnet / ccmni = données mobiles. */
+    fun adressesTelephone(): List<Pair<String, String>> = runCatching {
+        java.net.NetworkInterface.getNetworkInterfaces().toList().filter { it.isUp && !it.isLoopback }
+            .flatMap { n -> n.inetAddresses.toList().filterIsInstance<java.net.Inet4Address>().map { n.name to it.hostAddress.orEmpty() } }
+    }.getOrDefault(emptyList())
+
+    /** Situation réseau en clair : à la maison (connexion locale) ou dehors (connexion à distance), et par quelle adresse. */
+    fun situation(app: JarvisApp): String {
+        val st = app.store
+        val lan = listOf(st.sshHost.value.trim(), st.serveurIpLocale.value.trim()).firstOrNull { ipPrivee(it) }
+        val tel = adressesTelephone()
+        val wifi = tel.firstOrNull { it.first.startsWith("wlan") }?.second
+        val mobile = tel.any { Regex("^(rmnet|ccmni|pdp|seth|v4-rmnet)").containsMatchIn(it.first) }
+        val distant = st.sshHostDistant.value.trim().ifBlank { st.sshHost.value.trim().takeIf { !ipPrivee(it) }.orEmpty() }
+        val ou = when {
+            lan != null && telephoneSurReseau(lan) -> "🏠 téléphone sur le réseau de la maison (Wi-Fi $wifi) → connexion LOCALE au serveur ($lan)"
+            lan == null -> "réseau du téléphone : ${if (wifi != null) "Wi-Fi $wifi" else if (mobile) "données mobiles" else "inconnu"} (adresse locale du serveur pas encore relevée)"
+            else -> "🌍 téléphone HORS du réseau de la maison (${if (wifi != null) "autre Wi-Fi $wifi" else "données mobiles"}) → connexion À DISTANCE" +
+                (if (distant.isNotBlank()) " par $distant" else " : aucune adresse distante dans les Réglages")
+        }
+        val d = derniereAdresse?.let { (adr, quand) -> " · dernière connexion SSH réussie par $adr il y a ${(System.currentTimeMillis() - quand) / 60_000} min" }.orEmpty()
+        return ou + d
     }
 
     /** Adresse qui a fonctionné en dernier (et quand). */
@@ -201,7 +238,11 @@ object Serveur {
                 if (!Regex("session is down|channel is not opened|not connected|socket|closed", RegexOption.IGNORE_CASE).containsMatchIn(e.message.orEmpty())) throw e
                 f(sessionPrincipale(app))
             }
-        } catch (e: Exception) { throw IllegalStateException(expliquer(e, hote, port), e) }
+        } catch (e: Exception) {
+            val detail = if (e is IllegalStateException && e.message?.startsWith("Connexion SSH impossible par") == true) e.message!! else expliquer(e, hote, port)
+            // Les identifiants SONT dans Jarvis : l'IA ne doit pas les redemander mais traiter le problème de connexion.
+            throw IllegalStateException("$detail (Identifiants SSH bien enregistrés dans Jarvis — ne pas les redemander ; ${situation(app)}.)", e)
+        }
     }
 
     /**
