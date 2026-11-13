@@ -10,8 +10,10 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * « Systèmes » de JARVIS : des modes complets créés, réglés, activés et désactivés à la demande (« installe le mode
- * maison sécurisée », « ajoute le numéro de Marie », « active la maison sécurisée »…). Chaque système a :
+ * Modes / « systèmes » de JARVIS : des modes complets créés, réglés, activés, désactivés et supprimés à la demande
+ * (« crée un mode cinéma qui ferme les volets et baisse les lumières », « installe le mode maison sécurisée »,
+ * « ajoute le numéro de Marie », « active la maison sécurisée »…). Une demande en français suffit : Jarvis la traduit
+ * en étapes concrètes avec les vrais appareils de Home Assistant (voir [composer]). Chaque mode a :
  *  - des étapes d'activation et de désactivation (service Home Assistant, action du téléphone, SMS, demande en français) ;
  *  - pour la maison : une surveillance (capteurs de personne → photos des caméras → notification Home Assistant avec
  *    image et/ou MMS aux numéros configurés, sirène en option).
@@ -39,7 +41,11 @@ object Systemes {
         val automationHa: String = "",
         val actif: Boolean = false,
         val activeLe: Long = 0L,
-    )
+        val description: String = "",
+    ) {
+        /** Mode de sécurité : sa désactivation exige la voix du propriétaire quand le téléphone est verrouillé. */
+        val securite get() = modele in setOf("telephone_securise", "maison_securisee") || capteurs.isNotEmpty()
+    }
 
     /** Début de la question de confirmation d'une désactivation (voix du propriétaire exigée si le téléphone est verrouillé). */
     const val QUESTION = "🛡️ Désactiver le système de sécurité"
@@ -47,7 +53,7 @@ object Systemes {
     val MODELES = linkedMapOf(
         "telephone_securise" to "📱 Téléphone sécurisé (veille + verrouillage, déverrouillage par ta voix)",
         "maison_securisee" to "🏠 Maison sécurisée (portes, volets, alarme, photos si une personne est détectée)",
-        "personnalise" to "🧩 Système personnalisé (étapes au choix)",
+        "personnalise" to "🧩 Mode personnalisé (décris-le, Jarvis le compose)",
     )
 
     // ------------------------------------------------------------------ stockage
@@ -80,7 +86,7 @@ object Systemes {
                 .put("activation", etapesJson(s.activation)).put("desactivation", etapesJson(s.desactivation))
                 .put("capteurs", JSONArray(s.capteurs)).put("cameras", JSONArray(s.cameras)).put("notifierHa", JSONArray(s.notifierHa))
                 .put("destinataires", JSONArray(s.destinataires)).put("sirenes", JSONArray(s.sirenes)).put("sireneSurDetection", s.sireneSurDetection)
-                .put("viaHa", s.viaHa).put("viaMms", s.viaMms).put("automationHa", s.automationHa).put("actif", s.actif).put("activeLe", s.activeLe))
+                .put("viaHa", s.viaHa).put("viaMms", s.viaMms).put("automationHa", s.automationHa).put("actif", s.actif).put("activeLe", s.activeLe).put("description", s.description))
         }
     }
 
@@ -88,7 +94,7 @@ object Systemes {
         Systeme(o.optString("id"), o.optString("nom"), o.optString("modele", "personnalise"), liste(o, "phrasesActiver"), liste(o, "phrasesDesactiver"),
             etapes(o, "activation"), etapes(o, "desactivation"), liste(o, "capteurs"), liste(o, "cameras"), liste(o, "notifierHa"),
             liste(o, "destinataires"), liste(o, "sirenes"), o.optBoolean("sireneSurDetection"), o.optBoolean("viaHa", true), o.optBoolean("viaMms", true),
-            o.optString("automationHa"), o.optBoolean("actif"), o.optLong("activeLe"))
+            o.optString("automationHa"), o.optBoolean("actif"), o.optLong("activeLe"), o.optString("description"))
     }
 
     // ------------------------------------------------------------------ recherche par nom / phrase
@@ -244,6 +250,9 @@ object Systemes {
                 "telephone" -> when (e.cible) {
                     "verrouiller", "veille" -> TelephoneSecurise.verrouiller(app)
                     "economie", "equilibre", "performance" -> fr.dd.jarvis.device.ModeTelephone.appliquer(app, e.cible)
+                    "ne_pas_deranger_on", "ne_pas_deranger_off" -> neDerangerPas(app, e.cible.endsWith("_on"))
+                    "silencieux", "vibreur", "sonnerie" -> sonnerie(app, e.cible)
+                    in ACTIONS_TELEPHONE -> "📱 " + app.phone.perform(e.cible, e.texte)
                     else -> "⚠️ Action du téléphone inconnue : ${e.cible}"
                 }
                 "message" -> {
@@ -264,6 +273,26 @@ object Systemes {
         }
     }
 
+    /** Actions directes du téléphone utilisables dans un mode (en plus de veille, modes d'alimentation, ne pas déranger, sonnerie). */
+    val ACTIONS_TELEPHONE = setOf("torch_on", "torch_off", "volume", "wifi_on", "wifi_off", "bluetooth_on", "bluetooth_off", "data_on", "data_off",
+        "brightness", "music", "media", "open_app", "open_url", "navigate", "lock")
+
+    private fun neDerangerPas(app: JarvisApp, actif: Boolean): String {
+        val nm = app.getSystemService(android.app.NotificationManager::class.java)
+        if (nm.isNotificationPolicyAccessGranted) {
+            nm.setInterruptionFilter(if (actif) android.app.NotificationManager.INTERRUPTION_FILTER_PRIORITY else android.app.NotificationManager.INTERRUPTION_FILTER_ALL)
+            return if (actif) "✅ 🔕 Ne pas déranger activé" else "✅ 🔔 Ne pas déranger désactivé"
+        }
+        if (fr.dd.jarvis.device.PhoneShell.ready(app)) { fr.dd.jarvis.device.PhoneShell.exec(app, "cmd notification set_dnd " + if (actif) "priority" else "off"); return if (actif) "✅ 🔕 Ne pas déranger activé" else "✅ 🔔 Ne pas déranger désactivé" }
+        return "⚠️ Ne pas déranger : autorise JARVIS dans Réglages Android › Notifications › Accès « Ne pas déranger »."
+    }
+
+    private fun sonnerie(app: JarvisApp, mode: String): String = runCatching {
+        val am = app.getSystemService(android.media.AudioManager::class.java)
+        am.ringerMode = when (mode) { "silencieux" -> android.media.AudioManager.RINGER_MODE_SILENT; "vibreur" -> android.media.AudioManager.RINGER_MODE_VIBRATE; else -> android.media.AudioManager.RINGER_MODE_NORMAL }
+        "✅ 📳 Téléphone en mode $mode"
+    }.getOrElse { "⚠️ Sonnerie : ${it.message?.take(120)} (autorise l'accès « Ne pas déranger » à JARVIS)" }
+
     fun libelle(e: Etape): String = when (e.type) {
         "ha" -> when (e.cible) {
             "lock.lock" -> "🔒 Verrouiller ${e.entites.joinToString()}"
@@ -274,7 +303,12 @@ object Systemes {
             "alarm_control_panel.alarm_disarm" -> "🔕 Désarmer l'alarme ${e.entites.joinToString()}"
             else -> "🏠 ${e.cible} ${e.entites.joinToString()}".trim()
         }
-        "telephone" -> when (e.cible) { "verrouiller", "veille" -> "📴 Veille et verrouillage du téléphone"; else -> "📱 Téléphone : ${e.cible}" }
+        "telephone" -> when (e.cible) {
+            "verrouiller", "veille" -> "📴 Veille et verrouillage du téléphone"
+            "ne_pas_deranger_on" -> "🔕 Ne pas déranger"; "ne_pas_deranger_off" -> "🔔 Fin du ne pas déranger"
+            "economie", "equilibre", "performance" -> "🔋 Téléphone en mode ${e.cible}"
+            else -> "📱 Téléphone : ${e.cible}" + (if (e.texte.isNotBlank()) " ${e.texte}" else "")
+        }
         "message" -> "✉️ SMS aux destinataires : « ${e.texte} »"
         "jarvis" -> "🤖 ${e.texte}"
         else -> "${e.type} ${e.cible}"
@@ -329,10 +363,140 @@ object Systemes {
         return (listOf("✅ « ${s.nom} » désactivé.") + lignes).joinToString("\n")
     }
 
+    // ------------------------------------------------------------------ composition à partir d'une demande en français
+
+    private val DOMAINES_UTILES = setOf("light", "switch", "cover", "lock", "alarm_control_panel", "climate", "media_player", "scene", "script",
+        "fan", "siren", "camera", "input_boolean", "vacuum", "water_heater", "humidifier", "valve", "button", "automation")
+
+    /** Appareils de Home Assistant utiles à un mode : (entity_id, nom, type). */
+    suspend fun inventaireHa(app: JarvisApp): List<Triple<String, String, String>> = withContext(Dispatchers.IO) {
+        if (!Serveur.haConfigure(app)) return@withContext emptyList()
+        runCatching {
+            val etats = JSONArray(Serveur.ha(app, "GET", "/api/states"))
+            (0 until etats.length()).mapNotNull { etats.optJSONObject(it) }.mapNotNull { o ->
+                val id = o.optString("entity_id")
+                val dom = id.substringBefore('.')
+                val at = o.optJSONObject("attributes") ?: JSONObject()
+                val classe = at.optString("device_class")
+                val utile = dom in DOMAINES_UTILES ||
+                    (dom == "binary_sensor" && (classe in setOf("motion", "occupancy", "presence", "door", "window", "opening", "garage_door") ||
+                        Regex("person|personne|human").containsMatchIn(id)))
+                if (!utile || id.startsWith("automation.jarvis_")) null else Triple(id, at.optString("friendly_name"), classe)
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    private suspend fun telephonesHa(app: JarvisApp): List<String> = withContext(Dispatchers.IO) {
+        if (!Serveur.haConfigure(app)) return@withContext emptyList()
+        runCatching {
+            val svc = JSONArray(Serveur.ha(app, "GET", "/api/services"))
+            (0 until svc.length()).mapNotNull { svc.optJSONObject(it) }.firstOrNull { it.optString("domain") == "notify" }
+                ?.optJSONObject("services")?.keys()?.asSequence()?.filter { it.startsWith("mobile_app_") }?.map { "notify.$it" }?.toList().orEmpty()
+        }.getOrDefault(emptyList())
+    }
+
+    private val CONSIGNE = """
+Tu composes un MODE de l'assistant JARVIS (Android + Home Assistant) à partir d'une demande en français. Réponds UNIQUEMENT par un objet JSON, sans texte autour :
+{"nom": "Mode …", "description": "une phrase", "phrases_activation": ["…"], "phrases_desactivation": ["…"],
+ "activation": [ÉTAPE, …], "desactivation": [ÉTAPE, …],
+ "surveillance": {"capteurs": ["binary_sensor.…"], "cameras": ["camera.…"], "sirenes": ["siren.…"], "sirene_sur_detection": false},
+ "destinataires": ["numéro ou nom de contact"], "notifier_ha": ["notify.mobile_app_…"], "remarques": "…"}
+ÉTAPE = {"type":"ha","service":"domaine.service","entites":["entity_id", …],"donnees":{…}}
+      | {"type":"telephone","action":"verrouiller|ne_pas_deranger_on|ne_pas_deranger_off|silencieux|vibreur|sonnerie|economie|equilibre|performance|wifi_on|wifi_off|bluetooth_on|bluetooth_off|data_on|data_off|torch_on|torch_off|volume|brightness|music|open_app","valeur":"…"}
+      | {"type":"sms","texte":"message envoyé aux destinataires"}
+      | {"type":"jarvis","texte":"demande en français que JARVIS exécutera avec ses outils (tout ce qui n'a pas d'étape directe)"}
+RÈGLES :
+- N'utilise QUE des entity_id présents dans la liste fournie, choisis d'après leur nom (pièce, appareil). N'en invente jamais. Si l'appareil demandé n'existe pas, mets une étape "jarvis" qui décrit l'action et signale-le dans "remarques".
+- Services courants : light.turn_on / light.turn_off (donnees brightness_pct), switch.turn_on / turn_off, cover.close_cover / open_cover / set_cover_position (position), lock.lock / lock.unlock, alarm_control_panel.alarm_arm_away / alarm_arm_home / alarm_arm_night / alarm_disarm, climate.set_temperature (temperature) / set_hvac_mode (hvac_mode), media_player.turn_on / turn_off / media_pause / volume_set (volume_level 0 à 1), scene.turn_on, script.turn_on, fan.turn_on / turn_off, vacuum.start / return_to_base, siren.turn_on / turn_off, input_boolean.turn_on / turn_off.
+- Regroupe dans une même étape les appareils qui reçoivent le même service.
+- La désactivation remet logiquement les choses comme avant (rallumer, rouvrir, désarmer ce qui a été armé…) sauf si la demande dit autre chose. Ne déverrouille jamais une porte à la désactivation sans demande explicite.
+- "surveillance" uniquement si la demande parle de détecter une présence / un intrus / de prendre des photos ; sinon listes vides.
+- Phrases : formulations françaises courtes et naturelles, sans « Jarvis ». Toujours au moins « active le mode <nom> » et « désactive le mode <nom> ».
+- MODIFICATION : si un mode actuel est fourni, renvoie le mode COMPLET après modification, en gardant tout ce que la demande ne change pas.
+- Aucun code (écran, alarme) dans le JSON.
+""".trim()
+
+    /**
+     * Crée ou modifie un mode à partir d'une simple demande en français : l'IA de Jarvis la traduit en étapes concrètes
+     * avec les vrais appareils de Home Assistant ; les entités inconnues sont écartées et signalées.
+     */
+    suspend fun composer(app: JarvisApp, demande: String, existant: Systeme?): Pair<Systeme, String> {
+        val inventaire = inventaireHa(app)
+        val telephones = telephonesHa(app)
+        val connus = inventaire.map { it.first }.toSet()
+        val user = buildString {
+            append("Demande : ").append(demande.trim()).append("\n\n")
+            if (existant != null) append("Mode actuel à modifier (JSON) :\n")
+                .append(versJson(listOf(existant)).getJSONObject(0).apply { remove("automationHa"); remove("actif"); remove("activeLe"); remove("id") }.toString()).append("\n\n")
+            if (inventaire.isEmpty()) append("(Home Assistant non configuré ou injoignable : aucun appareil disponible, utilise des étapes « telephone », « sms » ou « jarvis ».)\n")
+            else {
+                append("Appareils Home Assistant disponibles (entity_id | nom | type) :\n")
+                inventaire.take(400).forEach { (id, nom, classe) -> append(id).append(" | ").append(nom).append(if (classe.isNotBlank()) " | $classe" else "").append('\n') }
+            }
+            if (telephones.isNotEmpty()) append("\nTéléphones avec l'appli Home Assistant : ").append(telephones.joinToString())
+        }.take(26_000)
+        val brut = app.llm.agent(CONSIGNE, user)
+        return interpreter(brut, existant, connus, telephones, liste(app).map { it.id }.toSet())
+    }
+
+    /** Réponse JSON de l'IA → mode validé (entités inconnues écartées, phrases de base ajoutées) + remarques. Testable. */
+    internal fun interpreter(brut: String, existant: Systeme?, connus: Set<String>, telephones: List<String>, idsPris: Set<String>): Pair<Systeme, String> {
+        val o = runCatching { JSONObject(brut.substring(brut.indexOf('{'), brut.lastIndexOf('}') + 1)) }
+            .getOrElse { throw IllegalStateException("la demande n'a pas pu être traduite en mode (réponse de l'IA illisible), reformule-la") }
+        val remarques = mutableListOf<String>()
+        o.optString("remarques").takeIf { it.isNotBlank() && it != "null" }?.let { remarques += it }
+        fun garder(ids: List<String>, prefixe: String): List<String> {
+            val ok = ids.filter { it.startsWith(prefixe) && (connus.isEmpty() || it in connus) }
+            (ids - ok.toSet()).takeIf { it.isNotEmpty() }?.let { remarques += "Appareil(s) inconnu(s) de Home Assistant écarté(s) : ${it.joinToString()}" }
+            return ok
+        }
+        fun etapesDe(a: JSONArray?): List<Etape> = (0 until (a?.length() ?: 0)).mapNotNull { a!!.optJSONObject(it) }.mapNotNull { e ->
+            when (e.optString("type")) {
+                "ha" -> {
+                    val svc = e.optString("service").ifBlank { e.optString("cible") }
+                    val ids = liste(e, "entites").filter { connus.isEmpty() || it in connus }
+                    (liste(e, "entites") - ids.toSet()).takeIf { it.isNotEmpty() }?.let { remarques += "Appareil(s) inconnu(s) écarté(s) : ${it.joinToString()}" }
+                    val donnees = e.optJSONObject("donnees")?.takeIf { it.length() > 0 }?.toString().orEmpty()
+                    if (!svc.contains('.') || (ids.isEmpty() && liste(e, "entites").isNotEmpty())) null else Etape("ha", svc, ids, donnees)
+                }
+                "telephone" -> Etape("telephone", e.optString("action").ifBlank { e.optString("cible") }, texte = e.optString("valeur").takeIf { it != "null" }.orEmpty())
+                "sms", "message" -> Etape("message", texte = e.optString("texte")).takeIf { it.texte.isNotBlank() }
+                "jarvis" -> Etape("jarvis", texte = e.optString("texte")).takeIf { it.texte.isNotBlank() }
+                else -> null
+            }
+        }
+        fun chaines(k: String) = liste(o, k).filter { it != "null" }
+        val nom = o.optString("nom").trim().takeIf { it.isNotBlank() && it != "null" } ?: existant?.nom ?: "Nouveau mode"
+        val surv = o.optJSONObject("surveillance") ?: JSONObject()
+        var s = (existant ?: Systeme(id = id(nom).let { base -> if (base in idsPris) base + "_" + (System.currentTimeMillis() % 1000) else base }, nom = nom)).copy(
+            nom = nom,
+            description = o.optString("description").takeIf { it.isNotBlank() && it != "null" } ?: existant?.description.orEmpty(),
+            phrasesActiver = chaines("phrases_activation").ifEmpty { existant?.phrasesActiver.orEmpty() },
+            phrasesDesactiver = chaines("phrases_desactivation").ifEmpty { existant?.phrasesDesactiver.orEmpty() },
+            activation = if (o.has("activation")) etapesDe(o.optJSONArray("activation")) else existant?.activation.orEmpty(),
+            desactivation = if (o.has("desactivation")) etapesDe(o.optJSONArray("desactivation")) else existant?.desactivation.orEmpty(),
+            capteurs = garder(liste(surv, "capteurs"), "binary_sensor."),
+            cameras = garder(liste(surv, "cameras"), "camera."),
+            sirenes = garder(liste(surv, "sirenes"), "siren."),
+            sireneSurDetection = surv.optBoolean("sirene_sur_detection", existant?.sireneSurDetection ?: false),
+            destinataires = if (o.has("destinataires")) chaines("destinataires") else existant?.destinataires.orEmpty(),
+            notifierHa = (if (o.has("notifier_ha")) chaines("notifier_ha") else existant?.notifierHa.orEmpty())
+                .filter { telephones.isEmpty() || it in telephones },
+        )
+        // Toujours de quoi l'activer et le désactiver à la voix.
+        val court = norm(s.nom).removePrefix("mode ").trim()
+        if (court.isNotBlank()) s = s.copy(
+            phrasesActiver = (s.phrasesActiver + "active le mode $court").distinctBy { norm(it) },
+            phrasesDesactiver = (s.phrasesDesactiver + "desactive le mode $court").distinctBy { norm(it) })
+        if (s.activation.isEmpty() && s.capteurs.isEmpty()) remarques += "Aucune étape n'a pu être composée : précise ce que le mode doit faire."
+        return s to remarques.distinct().joinToString("\n")
+    }
+
     // ------------------------------------------------------------------ présentation
 
     fun presenter(s: Systeme): String = buildString {
         append("## ${if (s.actif) "🟢" else "⚪"} ${s.nom}  (${MODELES[s.modele]?.substringBefore(" (") ?: s.modele})\n")
+        if (s.description.isNotBlank()) append("${s.description}\n")
         if (s.phrasesActiver.isNotEmpty()) append("🗣️ Activer : « ${s.phrasesActiver.take(3).joinToString("», « ")} »\n")
         if (s.phrasesDesactiver.isNotEmpty()) append("🗣️ Désactiver : « ${s.phrasesDesactiver.take(3).joinToString("», « ")} »\n")
         if (s.activation.isNotEmpty()) append("▶️ À l'activation :\n" + s.activation.joinToString("\n") { "- " + libelle(it) } + "\n")
@@ -349,8 +513,8 @@ object Systemes {
 
     fun presenterTous(app: JarvisApp): String {
         val l = liste(app)
-        if (l.isEmpty()) return "Aucun système installé. Modèles disponibles :\n" + MODELES.values.joinToString("\n") { "- $it" } +
-            "\nDis par exemple « installe le mode maison sécurisée »."
-        return "# 🛡️ Systèmes JARVIS\n" + l.joinToString("\n\n") { presenter(it) }
+        if (l.isEmpty()) return "Aucun mode installé. Modèles disponibles :\n" + MODELES.values.joinToString("\n") { "- $it" } +
+            "\nDis par exemple « installe le mode maison sécurisée » ou « crée un mode cinéma qui ferme les volets et baisse les lumières »."
+        return "# 🧩 Modes JARVIS\n" + l.joinToString("\n\n") { presenter(it) }
     }
 }

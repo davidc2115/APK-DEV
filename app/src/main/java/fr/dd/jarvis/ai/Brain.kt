@@ -151,7 +151,7 @@ class Brain(
             }
             fr.dd.jarvis.securite.Systemes.parPhrase(app, texteUser)?.let { (s, activer) ->
                 onStatus(if (activer) "🛡️ Activation de « ${s.nom} »…" else "🛡️ Désactivation de « ${s.nom} »…")
-                return reflexe(tools.execute("systeme_securite", org.json.JSONObject().put("action", if (activer) "activer" else "desactiver").put("nom", s.nom)).text)
+                return reflexe(tools.execute("modes_jarvis", org.json.JSONObject().put("action", if (activer) "activer" else "desactiver").put("nom", s.nom)).text)
             }
             if (commandeMode && !cibleTelephone) {
                 val mode = when {

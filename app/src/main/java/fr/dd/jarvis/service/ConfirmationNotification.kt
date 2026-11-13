@@ -34,6 +34,23 @@ object ConfirmationNotification {
     @Volatile private var overlayManager: WindowManager? = null
     /** JARVIS est affiché à l'écran (MainActivity démarrée) : sa propre fenêtre de confirmation suffit. */
     @Volatile var appVisible = false
+    /** Réponse directe à la demande en cours (fournie par l'écran de conversation) : « Accepter » / « Refuser »
+     *  depuis la fenêtre flottante ou la notification répondent sans ramener JARVIS au premier plan. */
+    @Volatile var reponse: ((Boolean) -> Unit)? = null
+
+    /** Applique la réponse sur place ; faux si personne n'attend (on ouvre alors JARVIS en secours). */
+    fun repondre(context: Context, accepte: Boolean): Boolean {
+        val r = reponse ?: return false
+        annuler(context.applicationContext)
+        Handler(Looper.getMainLooper()).post { r(accepte) }
+        return true
+    }
+
+    /** Bouton de notification : diffusion interne traitée par [ConfirmationReceiver], sans ouvrir l'application. */
+    private fun intentDirect(context: Context, accepte: Boolean): PendingIntent =
+        PendingIntent.getBroadcast(context, if (accepte) 48124 else 48125,
+            Intent(context, ConfirmationReceiver::class.java).setAction(ACTION).putExtra(EXTRA_OK, accepte),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
     private fun intent(context: Context, accepte: Boolean): PendingIntent {
         val i = Intent(context, MainActivity::class.java)
@@ -78,8 +95,8 @@ object ConfirmationNotification {
             .setAutoCancel(false)
             .setOngoing(true)
             .setContentIntent(ouvrir)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Refuser", intent(context, false))
-            .addAction(android.R.drawable.ic_menu_send, "Accepter", intent(context, true))
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Refuser", intentDirect(context, false))
+            .addAction(android.R.drawable.ic_menu_send, "Accepter", intentDirect(context, true))
             .build()
         runCatching { NotificationManagerCompat.from(context).notify(ID, notification) }
     }
@@ -123,7 +140,8 @@ object ConfirmationNotification {
                     isAllCaps = false
                     setOnClickListener {
                         retirerOverlay()
-                        runCatching { intent(context, accepte).send() }
+                        // On reste dans l'application en cours : JARVIS n'est rouvert que si plus rien n'attend la réponse.
+                        if (!repondre(context, accepte)) runCatching { intent(context, accepte).send() }
                     }
                 }
                 actions.addView(action("Refuser", false))
@@ -165,5 +183,16 @@ object ConfirmationNotification {
     fun annuler(context: Context) {
         Handler(Looper.getMainLooper()).post { retirerOverlay() }
         runCatching { NotificationManagerCompat.from(context).cancel(ID) }
+    }
+}
+
+/** « Accepter » / « Refuser » d'une notification de confirmation : réponse appliquée sans ouvrir JARVIS. */
+class ConfirmationReceiver : android.content.BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        val ok = intent.getBooleanExtra(ConfirmationNotification.EXTRA_OK, false)
+        if (!ConfirmationNotification.repondre(context, ok)) runCatching {
+            context.startActivity(Intent(context, MainActivity::class.java).setAction(ConfirmationNotification.ACTION)
+                .putExtra(ConfirmationNotification.EXTRA_OK, ok).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+        }
     }
 }

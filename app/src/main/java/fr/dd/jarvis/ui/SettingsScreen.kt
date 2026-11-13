@@ -1431,7 +1431,9 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 }
             }
         },
-        VoletReglages("agents", "modes", "Modes automatiques", "modes automatiques voiture chantier nuit maison") {
+        VoletReglages("agents", "modes", "Modes", "modes a la demande creer modifier supprimer mode cinema nuit vacances automatiques voiture chantier maison") {
+            fr.dd.jarvis.ui.SystemesPanel(app, onAsk)
+            Spacer(Modifier.height(10.dp))
             HudPanel(Modifier.fillMaxWidth(), title = "🌙 Modes automatiques") {
                 Text("JARVIS adapte ses réponses, sa voix et ses notifications : 🚗 voiture (Android Auto), 👷 chantier (à moins de 250 m d'une installation cliente), 🌙 nuit, 🏠 maison (au siège).", color = HudDim, fontSize = 11.sp)
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { store.modesAuto.set(!store.modesAuto.value) }) {
@@ -1482,7 +1484,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 Text("Suppressions, envois de mails et SMS, paiements, redémarrages : après ton « oui », JARVIS demande ton empreinte. À la voix, ces actions ne passent que si le téléphone est déverrouillé.", color = HudDim, fontSize = 11.sp)
             }
         },
-        VoletReglages("securite", "systemes", "Systèmes de sécurité", "systeme securite mode telephone securise maison securisee alarme camera mms deverrouillage voix code") {
+        VoletReglages("securite", "systemes", "Systèmes et modes", "systeme securite mode telephone securise maison securisee alarme camera mms deverrouillage voix code") {
             fr.dd.jarvis.ui.SystemesPanel(app, onAsk)
         },
         VoletReglages("securite", "coffre", "Coffre-fort", "coffre-fort serveur sauvegarde societe donnees salaries recuperation") {

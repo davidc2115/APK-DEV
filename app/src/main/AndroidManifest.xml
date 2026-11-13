@@ -222,6 +222,11 @@
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
+        <!-- Réponse à une confirmation depuis la notification, sans rouvrir JARVIS. -->
+        <receiver
+            android:name=".service.ConfirmationReceiver"
+            android:exported="false" />
+
         <!-- Surveillance de la maison (systèmes de sécurité) : abonnement aux capteurs Home Assistant, photos par MMS. -->
         <service
             android:name=".securite.SurveillanceMaison"

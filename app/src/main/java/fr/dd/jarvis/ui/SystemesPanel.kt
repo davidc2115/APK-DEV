@@ -26,7 +26,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Réglages › Sécurité › Systèmes : systèmes installés (activer / désactiver / détails) et codes chiffrés. */
+/** Modes de JARVIS (Réglages › Sécurité › Systèmes et Agents › Modes) : liste, activer / désactiver, modifier, supprimer, codes chiffrés. */
 @Composable
 fun SystemesPanel(app: JarvisApp, onAsk: (String) -> Unit) {
     val store = app.store
@@ -35,19 +35,22 @@ fun SystemesPanel(app: JarvisApp, onAsk: (String) -> Unit) {
     var msg by remember { mutableStateOf("") }
     var occupe by remember { mutableStateOf(false) }
     var ouvert by remember { mutableStateOf("") }
+    var aSupprimer by remember { mutableStateOf("") }
     val systemes = remember(tick) { Systemes.liste(app) }
 
-    HudPanel(Modifier.fillMaxWidth(), title = "🛡️ Systèmes de sécurité") {
-        Text("Crée et règle tes systèmes en le demandant à JARVIS (à la voix ou par écrit) : « installe le mode maison sécurisée », " +
-            "« ajoute le numéro de Marie au mode maison sécurisée », « ajoute la caméra du garage », « active la sirène en cas de détection », " +
-            "« active la maison sécurisée »…", color = HudDim, fontSize = 11.sp)
+    HudPanel(Modifier.fillMaxWidth(), title = "🧩 Modes à la demande") {
+        Text("Crée, modifie et supprime tes modes simplement en le demandant à JARVIS (à la voix ou par écrit) : « crée un mode cinéma qui ferme " +
+            "les volets du salon et baisse les lumières », « dans le mode nuit, ajoute la lumière du couloir », « installe le mode maison sécurisée », " +
+            "« ajoute le numéro de Marie au mode maison sécurisée », « supprime le mode cinéma »… Puis « active le mode cinéma ».", color = HudDim, fontSize = 11.sp)
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             HudButton("📱 Téléphone sécurisé", Modifier.weight(1f)) { onAsk("Installe le mode téléphone sécurisé") }
             HudButton("🏠 Maison sécurisée", Modifier.weight(1f)) { onAsk("Installe le mode maison sécurisée") }
         }
+        Spacer(Modifier.height(6.dp))
+        HudButton("➕ Nouveau mode (décris-le à Jarvis)", Modifier.fillMaxWidth()) { onAsk("Je voudrais créer un nouveau mode. Demande-moi ce qu'il doit faire.") }
         Spacer(Modifier.height(10.dp))
-        if (systemes.isEmpty()) Text("Aucun système installé pour l'instant.", color = HudText, fontSize = 12.sp)
+        if (systemes.isEmpty()) Text("Aucun mode créé pour l'instant.", color = HudText, fontSize = 12.sp)
         systemes.forEach { s ->
             Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
                 Text((if (s.actif) "🟢 " else "⚪ ") + s.nom + (if (s.actif) " — actif" else ""), color = HudText, fontSize = 13.sp,
@@ -62,6 +65,20 @@ fun SystemesPanel(app: JarvisApp, onAsk: (String) -> Unit) {
                         }
                     }
                     HudButton(if (ouvert == s.id) "Masquer" else "Détails", Modifier.weight(1f)) { ouvert = if (ouvert == s.id) "" else s.id }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
+                    HudButton("✏️ Modifier", Modifier.weight(1f)) { onAsk("Je voudrais modifier le mode « ${s.nom} ». Demande-moi ce qu'il faut changer.") }
+                    HudButton(if (aSupprimer == s.id) "Confirmer ?" else "🗑️ Supprimer", Modifier.weight(1f), enabled = !occupe) {
+                        if (aSupprimer != s.id) aSupprimer = s.id else scope.launch {
+                            occupe = true
+                            msg = withContext(Dispatchers.IO) { runCatching {
+                                if (s.actif) Systemes.desactiver(app, s)
+                                if (s.automationHa.isNotBlank()) runCatching { fr.dd.jarvis.ai.Serveur.ha(app, "POST", "/api/services/automation/turn_off", org.json.JSONObject().put("entity_id", s.automationHa)) }
+                                Systemes.retirer(app, s.id); "🗑️ « ${s.nom} » supprimé."
+                            }.getOrElse { "❌ ${it.message}" } }
+                            aSupprimer = ""; occupe = false; tick++
+                        }
+                    }
                 }
             }
         }
