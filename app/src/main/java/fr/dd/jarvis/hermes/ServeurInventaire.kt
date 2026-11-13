@@ -94,9 +94,7 @@ object ServeurInventaire {
         if (s.discordToken.value.isNotBlank()) lignes += "- Bot Discord : jeton du bot enregistré dans Jarvis" +
             (s.discordGuildId.value.trim().takeIf { it.isNotBlank() }?.let { ", serveur Discord $it" }.orEmpty()) +
             " → outils mcp_jarvis_discord_* (API Discord). Son programme, s'il tourne sur le serveur Debian, se gère par SSH."
-        if (s.ollamaActif.value && (s.ollamaUrl.value.isNotBlank() || s.sshHost.value.isNotBlank())) lignes += "- Ollama (IA locale) : " +
-            s.ollamaUrl.value.trim().ifBlank { "sur le serveur Debian, port 11434" } +
-            (s.ollamaModele.value.trim().takeIf { it.isNotBlank() }?.let { ", modèle $it" }.orEmpty()) + "."
+        if (lignes.isNotEmpty()) lignes += "- IA : uniquement le routeur IA de Jarvis (Gemini, Groq…). L'Ollama du serveur n'est PAS utilisé : ne l'appelle jamais comme modèle ou sous-agent."
         return lignes.joinToString("\n")
     }
 

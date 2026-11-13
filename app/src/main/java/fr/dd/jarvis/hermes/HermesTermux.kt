@@ -560,7 +560,7 @@ p "✅ Hermès installé (${'$'}{MODE})."
     @Volatile private var dernierSignalAvantCommande: Long = 0L
 
     /** À incrémenter quand la configuration écrite dans ~/.hermes change : JarvisApp la réapplique alors une fois. */
-    const val VERSION_CONFIG = 3
+    const val VERSION_CONFIG = 4
 
     /** Synchronise l'accès au routeur IA central et le routage des agents sans copier les clés fournisseurs dans Termux. */
     fun synchroniserCles(app: JarvisApp): String {
@@ -601,11 +601,10 @@ p "✅ Hermès installé (${'$'}{MODE})."
         // Toutes les clés restent dans le stockage chiffré de Jarvis ; aucune clé fournisseur n'est copiée dans Termux.
         message = "⏳ Routeur IA Jarvis identifié. Préparation de la configuration unifiée d’Hermès…"
         val model = s.groqModel.value.ifBlank { "llama-3.3-70b-versatile" }
-        // Ne promouvoir Ollama que si le serveur répond réellement ET qu'un modèle de conversation est installé.
-        // Cela évite de configurer Hermès avec un modèle fictif « auto » ou un endpoint seulement déclaré.
-        val ollamaBase = runCatching { fr.dd.jarvis.ai.Ollama.base(app, force = true) }.getOrNull()
-        val ollamaModel = ollamaBase?.let { runCatching { fr.dd.jarvis.ai.Ollama.modele(app, it) }.getOrNull() }
-        val hasOllama = !ollamaModel.isNullOrBlank()
+        // Ollama (serveur de la maison) est retiré d'Hermès : ni cerveau, ni secours, ni sous-agent. Le script ci-dessous
+        // efface aussi toute route Ollama héritée d'une ancienne configuration.
+        val hasOllama = false
+        val ollamaModel: String? = null
         // Réutiliser la clé persistée dans Jarvis pour authentifier l’API locale Hermès.
         if (s.hermesCle.value.isBlank()) s.hermesCle.set(UUID.randomUUID().toString().replace("-", ""))
         val envScript = buildString {
@@ -621,8 +620,7 @@ p "✅ Hermès installé (${'$'}{MODE})."
             // Hermès ne reçoit que le jeton local, qui ne permet que d'appeler le relais sur 127.0.0.1.
             val jetonRelaisIA = PontMcp.jetonRelaisIA(s.hermesCle.value)
             appendLine("setenv JARVIS_GROQ_RELAIS " + q(jetonRelaisIA))
-            // Ollama passe également par le jeton dédié au relais IA, jamais par le secret MCP.
-            if (hasOllama) appendLine("setenv JARVIS_OLLAMA_RELAIS " + q(jetonRelaisIA))
+            appendLine("removeenvfamily JARVIS_OLLAMA_RELAIS")
             // Fuseau du téléphone : les automatismes (cronjob) d'Hermès se déclenchent à l'heure locale, pas en UTC.
             appendLine("setenv HERMES_TIMEZONE " + q(java.util.TimeZone.getDefault().id))
             listOf("OPENAI", "ZAI", "OPENROUTER", "NVIDIA", "MISTRAL", "HF").forEach { appendLine("setenv JARVIS_HAS_" + it + " 0") }
@@ -868,6 +866,29 @@ if os.environ.get("JARVIS_ADVANCED_DELEGATION") == "1" and delegation.get("backe
     delegation["backend"] = "model_map"
 elif delegation.get("backend") == "model_map":
     delegation["backend"] = "default"
+# Ollama retiré : aucune route, aucun secours ni sous-agent vers l'Ollama de la maison, y compris dans d'anciens réglages
+# (fallback_providers, delegation, auxiliary, custom_providers, model_aliases…). Une tâche qui le visait passe par Jarvis.
+def ollama_dans(x):
+    return "ollama" in str(x).lower()
+def entree_ollama(x):
+    if isinstance(x, str): return ollama_dans(x)
+    return isinstance(x, dict) and any(ollama_dans(x.get(c, "")) for c in ("provider", "name", "base_url", "api", "url"))
+def purger_ollama(node):
+    if isinstance(node, dict):
+        if ollama_dans(node.get("provider", "")):
+            node["provider"] = "custom:jarvis"
+            for c in ("model", "default"):
+                if c in node: node[c] = "jarvis-router"
+        for c in ("base_url", "api", "url", "key_env"):
+            if c in node and ollama_dans(node[c]): node.pop(c)
+        for k in list(node.keys()):
+            if ollama_dans(k):
+                node.pop(k); continue
+            v = node[k]
+            if isinstance(v, list): node[k] = [purger_ollama(x) for x in v if not entree_ollama(x)]
+            elif isinstance(v, dict): purger_ollama(v)
+    return node
+purger_ollama(data)
 backup = p.with_name("config.yaml.before-jarvis-key-sync")
 if not backup.exists(): shutil.copy2(p, backup)
 fd, name = tempfile.mkstemp(prefix="config.yaml.", dir=str(p.parent))

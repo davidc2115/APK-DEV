@@ -11,9 +11,9 @@ import org.json.JSONObject
 
 /**
  * Façade des fournisseurs, chacun avec plusieurs clés en rotation :
- *  - cerveau (conversation + outils) : Ollama de la maison → Groq → Gemini → Cloudflare ;
- *  - agents (planning, mails, contacts) : Ollama → Gemini → Groq → Cloudflare.
- * Ollama est prioritaire lorsqu'il est réellement configuré ; les fournisseurs cloud restent les secours.
+ *  - cerveau (conversation + outils) : Groq → Gemini → Cloudflare ;
+ *  - agents (planning, mails, contacts) : Gemini → Groq → Cloudflare.
+ * L'Ollama du serveur de la maison n'est plus utilisé (ni en premier, ni en secours).
  * Une clé qui atteint son quota est mise en pause le temps indiqué par le fournisseur ; quand toutes les clés d'un
  * fournisseur sont en pause, on passe immédiatement au suivant.
  */
@@ -49,7 +49,7 @@ class Llm(private val store: Store) {
             " · Cloudflare $c compte(s)" + (cloudflare.etat().second.takeIf { it > 0 }?.let { " ($it en pause)" } ?: "") +
             groqRing.refuseesMasquees().takeIf { it.isNotEmpty() }?.let { "\n⚠️ Clé(s) Groq refusée(s) par Groq (invalides ou révoquées) : ${it.joinToString(", ")} — remplace-les" } .orEmpty() +
             geminiRing.refuseesMasquees().takeIf { it.isNotEmpty() }?.let { "\n⚠️ Clé(s) Gemini refusée(s) : ${it.joinToString(", ")}" }.orEmpty() +
-            "\nOrdre : Ollama (si actif) → Groq → Gemini → OpenAI → Cloudflare" +
+            "\nOrdre : Groq → Gemini → OpenAI → Cloudflare" +
             (if (dernierRelais > 0 && System.currentTimeMillis() - dernierRelais < 3_600_000L) " · dernier relais : $dernierFournisseur à " +
                 java.text.SimpleDateFormat("HH:mm", java.util.Locale.FRANCE).format(java.util.Date(dernierRelais)) else "")
     }
@@ -61,17 +61,6 @@ class Llm(private val store: Store) {
     /** Agent : Gemini d'abord (clés en rotation), puis Groq en secours. Échoue avec un message lisible. */
     suspend fun agent(system: String, user: String): String {
         val errors = mutableListOf<String>()
-        // Les tâches courtes (analyse de brief vidéo, résumé, rédaction simple…) passent d'abord
-        // par le serveur Ollama de l'utilisateur : aucune consommation Gemini/Groq si le modèle local répond.
-        val local = Ollama.app
-        if (local != null && Ollama.configure(local)) {
-            try {
-                return withContext(Dispatchers.IO) {
-                    Ollama.generer(local, system, user).ifBlank { throw IllegalStateException("réponse locale vide") }
-                }
-            } catch (e: CancellationException) { throw e }
-            catch (e: Exception) { errors += "Ollama : " + (e.message ?: e.javaClass.simpleName).take(160) }
-        }
         if (geminiRing.count() > 0) {
             try {
                 return try {
@@ -123,24 +112,8 @@ class Llm(private val store: Store) {
     /** Appel du cerveau ; si le modèle n'existe plus (404), choisit automatiquement un modèle disponible.
      *  [forceText] = interdit explicitement un appel d'outil ce tour-ci (reprise après un échec), en gardant les outils
      *  visibles pour le modèle plutôt que de les retirer (ce qui provoquait une erreur Groq, cf. Clients.kt). */
-    suspend fun groqChat(messages: org.json.JSONArray, tools: org.json.JSONArray?, forceText: Boolean = false): org.json.JSONObject = try {
+    suspend fun groqChat(messages: org.json.JSONArray, tools: org.json.JSONArray?, forceText: Boolean = false): org.json.JSONObject =
         groqChatEnLigne(messages, tools, forceText)
-    } catch (e: CancellationException) { throw e } catch (e: Exception) {
-        // Groq, puis Cloudflare, ont échoué (quotas, panne, pas d'internet) : Ollama du serveur de la maison en tout dernier
-        // recours, avec la requête compactée à sa mesure. S'il échoue aussi, on remonte l'erreur d'origine (plus parlante).
-        secoursOllama(e) { app ->
-            val (msgs, outils) = fr.dd.jarvis.hermes.RelaisGroq.reduire(messages, if (forceText) null else tools, Ollama.NIVEAU)
-            Ollama.chat(app, msgs, outils)
-        }
-    }
-
-    /** Exécute [f] sur Ollama s'il est configuré ; sinon (ou en cas d'échec) relance [origine]. */
-    private suspend fun <T> secoursOllama(origine: Exception, f: (fr.dd.jarvis.JarvisApp) -> T): T {
-        val app = Ollama.app
-        if (app == null || !Ollama.configure(app)) throw origine
-        return try { withContext(Dispatchers.IO) { f(app) } }
-        catch (e: CancellationException) { throw e } catch (e: Exception) { throw origine }
-    }
 
     private suspend fun groqChatEnLigne(messages: org.json.JSONArray, tools: org.json.JSONArray?, forceText: Boolean): org.json.JSONObject {
         val erreurGroq = try {
@@ -309,8 +282,8 @@ class Llm(private val store: Store) {
     suspend fun testerClesApi(fournisseurRaw: String = "tous"): String {
         val alias = mapOf("all" to "tous", "tout" to "tous", "toutes" to "tous", "google" to "gemini", "hf" to "huggingface", "hugging face" to "huggingface", "cloudflare workers ai" to "cloudflare", "workers ai" to "cloudflare", "z.ai" to "zai")
         val fournisseur = alias[fournisseurRaw.trim().lowercase()] ?: fournisseurRaw.trim().lowercase().ifBlank { "tous" }
-        val connus = setOf("tous", "groq", "gemini", "openai", "cloudflare", "zai", "openrouter", "nvidia", "mistral", "huggingface", "ollama")
-        if (fournisseur !in connus) return "Fournisseur inconnu. Choix : tous, Groq, Gemini, Cloudflare, Z.ai, OpenRouter, NVIDIA, Mistral, Hugging Face ou Ollama."
+        val connus = setOf("tous", "groq", "gemini", "openai", "cloudflare", "zai", "openrouter", "nvidia", "mistral", "huggingface")
+        if (fournisseur !in connus) return "Fournisseur inconnu. Choix : tous, Groq, Gemini, Cloudflare, Z.ai, OpenRouter, NVIDIA, Mistral ou Hugging Face."
 
         val resultats = mutableListOf<Pair<Boolean, String>>()
         suspend fun verifier(label: String, action: suspend () -> String) {
@@ -408,14 +381,6 @@ class Llm(private val store: Store) {
                     "✅ VALIDÉ — clé et accès API acceptés"
                 }
             }
-        }
-
-        // Ollama du serveur de la maison (secours local) : testé s'il est activé et qu'une adresse est connue.
-        val app = Ollama.app
-        if ((fournisseur == "tous" || fournisseur == "ollama") && app != null && Ollama.configure(app)) {
-            val debut = System.currentTimeMillis()
-            val t = withContext(Dispatchers.IO) { runCatching { Ollama.tester(app) }.getOrElse { "❌ Ollama : ${it.message}" } }
-            resultats.add(t.startsWith("✅") to "$t (${System.currentTimeMillis() - debut} ms)")
         }
 
         if (resultats.isEmpty()) {

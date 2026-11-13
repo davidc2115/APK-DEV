@@ -86,8 +86,6 @@ object PontMcp {
     private class FournisseurJarvis(val app: JarvisApp) : Fournisseur {
         override fun groq(corps: JSONObject) = RelaisGroq.repondre(app, corps)
         override fun groqModeles() = RelaisGroq.modeles(app)
-        override fun ollama(corps: JSONObject) = fr.dd.jarvis.ai.Ollama.relais(app, corps)
-        override fun ollamaModeles() = fr.dd.jarvis.ai.Ollama.modelesJson(app)
         override fun memoireHermes(texte: String) { runCatching { app.memo.majHermes(texte) } }
         override fun memoireJarvis(): String = runCatching { app.memo.pourHermes() }.getOrDefault("")
         override fun capacitesHermes(json: String) { runCatching { app.memo.majCapacitesHermes(json) } }

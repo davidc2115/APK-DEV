@@ -1551,7 +1551,6 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 AgentStatusRow("Gemini · " + store.geminiModel.value, store.geminiKeys.isNotEmpty(), "${store.geminiKeys.size} clé(s)")
                 AgentStatusRow("OpenAI · " + store.openaiModel.value, store.openaiKeys.isNotEmpty(), "${store.openaiKeys.size} clé(s)")
                 AgentStatusRow("Cloudflare Workers AI", store.cfAccounts.isNotEmpty(), "${store.cfAccounts.size} compte(s)")
-                AgentStatusRow("Ollama · serveur de la maison (secours)", fr.dd.jarvis.ai.Ollama.configure(app), if (fr.dd.jarvis.ai.Ollama.configure(app)) fr.dd.jarvis.ai.Ollama.etat else "désactivé ou sans adresse")
                 AgentStatusRow("fal.ai · vidéo", store.falApiKey.value.isNotBlank(), if (store.falApiKey.value.isNotBlank()) "clé configurée" else "non configuré")
                 AgentStatusRow("Hugging Face", store.huggingFaceToken.value.isNotBlank(), if (store.huggingFaceToken.value.isNotBlank()) "jeton configuré" else "non configuré")
                 val external = store.externalProvidersConfigured()
@@ -1910,22 +1909,6 @@ private fun ServeurPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvi
         Spacer(Modifier.height(6.dp))
         HudTextField(store.ghToken.value, { store.ghToken.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Jeton GitHub (optionnel : dépôts privés, plus de requêtes)", password = true)
         Spacer(Modifier.height(10.dp))
-        Text("Ollama — IA locale de secours (serveur de la maison)", color = HudText, fontSize = 13.sp)
-        Text("Utilisée quand Groq, Gemini et Cloudflare ne répondent plus (quotas, pas d'internet) et proposée à Hermès comme sous-agent « jarvis-ollama ». Adresse vide = le serveur SSH ci-dessus, port 11434 ; si Ollama n'écoute que sur le serveur lui-même, Jarvis passe par un tunnel SSH.", color = HudDim, fontSize = 11.sp)
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { store.ollamaActif.set(!store.ollamaActif.value) }) {
-            Text((if (store.ollamaActif.value) "✅ " else "⬜ ") + "Utiliser Ollama en secours", color = HudText, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
-        }
-        HudTextField(store.ollamaUrl.value, { store.ollamaUrl.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Adresse d'Ollama (vide = serveur SSH:11434, ex. 192.168.1.30:11434)")
-        Spacer(Modifier.height(6.dp))
-        HudTextField(store.ollamaModele.value, { store.ollamaModele.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Modèle (vide = choix automatique, ex. qwen2.5:1.5b)")
-        Spacer(Modifier.height(6.dp))
-        HudButton(if (busy) "Test…" else "Tester Ollama", Modifier.fillMaxWidth(), enabled = !busy && fr.dd.jarvis.ai.Ollama.configure(app)) {
-            scope.launch {
-                busy = true
-                msg = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { fr.dd.jarvis.ai.Ollama.tester(app) }.getOrElse { "❌ Ollama : ${it.message}" } }
-                busy = false
-            }
-        }
         Spacer(Modifier.height(8.dp))
         Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             HudButton(if (busy) "Test…" else "Tester HA", enabled = !busy && fr.dd.jarvis.ai.Serveur.haConfigure(app)) {
