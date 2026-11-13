@@ -210,7 +210,8 @@ object RelaisGroq {
         if (Regex("sauvegarde|restaur|backup|remettre en (service|route)|r[ée]par").containsMatchIn(t)) out += listOf("ha_sauvegarde", "serveur_tache", "serveur_service")
         if (Regex("discord|\\bbot\\b|salon|serveur discord").containsMatchIn(t)) out += "discord"
         if (Regex("dividende|b[ée]n[ée]fice|r[ée]sultat (de la |de ma )?soci[ée]t[ée]|reste (pour|[àa]) la soci[ée]t[ée]|imp[ôo]t sur les soci[ée]t[ée]s|tr[ée]sorerie").containsMatchIn(t)) out += listOf("societe_resultat", "societe_info_set", "reserve_bilan")
-        if (Regex("bar[èe]mes?|urssaf|cotisations|s[ée]curit[ée] sociale|\\bsmic\\b|plafond (de la )?s[ée]cu|fiches? de paie|bulletins? de (paie|salaire)").containsMatchIn(t)) out += listOf("societe_baremes", "paie", "employe_ecrire")
+        if (Regex("bar[èe]mes?|urssaf|cotisations|s[ée]curit[ée] sociale|\\bsmic\\b|plafond (de la )?s[ée]cu|fiches? de paie|bulletins? de (paie|salaire)").containsMatchIn(t)) out += listOf("societe_baremes", "paie", "employe_ecrire", "bulletins")
+        if (Regex("\\bfactures?\\b|\\bdevis\\b").containsMatchIn(t)) out += listOf("document_action", "documents_supprimer", "document_creer", "societe_liste")
         if (Regex("freebox|\\bbox\\b").containsMatchIn(t)) out += listOf("freebox", "box_")
         if (fichierServeur(t)) out += listOf("ssh_fichier", "serveur_fichiers", "ssh_")
         if (Regex("r[ée]seau|wi-?fi|\\bip\\b|imprimante|appareils? connect").containsMatchIn(t)) out += listOf("reseau_", "appareil", "ip_publique", "imprim")
@@ -245,8 +246,15 @@ object RelaisGroq {
         // Fichier du serveur : les outils de fichiers natifs d'Hermès (qui écriraient sur le téléphone) sont retirés,
         // sauf s'il les a déjà appelés pendant ce tour ; ssh_fichier passe en tête.
         val serveurFichier = fichierServeur(if (dernierUser >= 0) contenu(src[dernierUser]).lowercase() else "")
+        // SSH / outils du serveur : seulement si la demande concerne le serveur (ou s'ils ont déjà servi pendant ce tour).
+        // Proposés à chaque demande, ils étaient appelés pour n'importe quoi (« où est Angeline ? » → commande SSH).
+        val serveurOk = ServeurInventaire.serveurDemande(if (dernierUser >= 0) contenu(src[dernierUser]) else "")
         val liste = (0 until outils.length()).mapNotNull { outils.optJSONObject(it) }
             .filter { t -> val nom = t.optJSONObject("function")?.optString("name").orEmpty(); !(serveurFichier && nom in FICHIERS_LOCAUX && nom !in tourEnCours) }
+            .filter { t ->
+                val nom = t.optJSONObject("function")?.optString("name").orEmpty(); val canon = nom.removePrefix("mcp_jarvis_")
+                serveurOk || nom in tourEnCours || !(canon.startsWith("ssh_") || canon.startsWith("serveur_"))
+            }
         val classes = liste.sortedByDescending { t ->
             val f = t.optJSONObject("function") ?: JSONObject()
             val nom = f.optString("name")

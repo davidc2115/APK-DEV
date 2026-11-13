@@ -66,46 +66,47 @@ total_ttc: {{total_ttc_num}}
 tags: [societe, {{type_doc}}]
 ---
 
-# {{type_label}} n° {{numero}}
+# {{type_label_maj}} N° {{numero}}
 
-**{{societe_nom}}** {{societe_forme}}
-{{societe_adresse}}
-{{#societe_tel}}📞 {{societe_tel}}  {{/societe_tel}}{{#societe_email}}✉️ {{societe_email}}  {{/societe_email}}
-{{#societe_siret}}SIRET : {{societe_siret}}  {{/societe_siret}}{{#societe_tva}}TVA : {{societe_tva}}{{/societe_tva}}
+| Émetteur | Client |
+|---|---|
+{{#entete}}| {{gauche}} | {{droite}} |
+{{/entete}}
 
----
-
-**Client** : {{client_nom}}
-{{client_adresse}}
-{{#site_adresse}}**Installation** : {{site_nom}} — {{site_adresse}} ({{site_kwc}} kWc){{/site_adresse}}
-
-**Date** : {{date}} · **{{echeance_label}}** : {{echeance}}
-{{#devis_ref}}**Réf. devis** : {{devis_ref}}{{/devis_ref}}
-
-| Désignation | Qté | PU HT | Remise | Total HT |
-|---|---:|---:|---:|---:|
-{{#lignes}}| {{designation}} | {{qte}} {{unite}} | {{pu_ht}} | {{remise}} | {{total_ht}} |
+**Date d'émission : {{date}}**{{#facture}} · Date de la prestation : {{date_prestation}}{{/facture}} · {{echeance_label}} : {{echeance}}
+{{#devis_ref}}Référence du devis : {{devis_ref}}
+{{/devis_ref}}{{#site_adresse}}Lieu d'intervention : {{site_nom}} — {{site_adresse}} ({{site_kwc}} kWc)
+{{/site_adresse}}
+| Désignation | Qté | PU HT | Remise | TVA | Total HT |
+|---|---:|---:|---:|---:|---:|
+{{#lignes}}| {{designation}} | {{qte}} {{unite}} | {{pu_ht}} | {{remise}} | {{tva}} | {{total_ht}} |
 {{/lignes}}
 
-{{#remise_info}}🎁 Remise commerciale : {{remise_info}}{{/remise_info}}
-
+{{#remise_info}}Remise commerciale : {{remise_info}}
+{{/remise_info}}
 | Récapitulatif | Montant |
 |---|---:|
-| **Total HT** | **{{total_ht}}** |
-{{#tva_lignes}}| TVA {{taux}} % (base {{base}}) | {{montant}} |
+| Total HT | {{total_ht}} |
+{{#tva_lignes}}| TVA {{taux}} % sur {{base}} | {{montant}} |
 {{/tva_lignes}}| **Total TTC** | **{{total_ttc}}** |
+{{#facture}}| **Net à payer** | **{{net_a_payer}}** |
+{{/facture}}
 
-{{#tva_mention}}{{tva_mention}}{{/tva_mention}}
+{{#tva_mention}}{{tva_mention}}
+{{/tva_mention}}Nature de l'opération : {{nature}}.
 
-{{#notes}}**Notes** : {{notes}}{{/notes}}
+{{#notes}}Notes : {{notes}}
+{{/notes}}
+Conditions de règlement : {{conditions}}
 
-**Conditions** : {{conditions}}
-
-{{#societe_iban}}**IBAN** : {{societe_iban}} {{#societe_bic}}· BIC : {{societe_bic}}{{/societe_bic}}{{/societe_iban}}
-
-{{#societe_mentions}}{{societe_mentions}}{{/societe_mentions}}
-
-{{#signature}}Bon pour accord — date et signature du client :{{/signature}}
+{{#societe_iban}}Règlement par virement — IBAN : {{societe_iban}}{{#societe_bic}} · BIC : {{societe_bic}}{{/societe_bic}}
+{{/societe_iban}}{{#paye_le}}Facture acquittée le {{paye_le}}{{#mode_paiement}} ({{mode_paiement}}){{/mode_paiement}}.
+{{/paye_le}}
+{{#societe_mentions}}{{societe_mentions}}
+{{/societe_mentions}}
+{{#signature}}**Bon pour accord**
+Date, signature et cachet du client, précédés de la mention « Devis reçu avant l'exécution des travaux, bon pour accord » :
+{{/signature}}
 """.trimStart()
 
     val CLIENT = """
@@ -159,48 +160,53 @@ net_a_payer: {{net_a_payer_num}}
 tags: [societe, paie]
 ---
 
-# 💶 Bulletin de paie — {{mois_label}}
+# BULLETIN DE PAIE
 
-**Employeur** : {{societe_nom}} — {{societe_adresse}} {{#societe_siret}}· SIRET {{societe_siret}}{{/societe_siret}}
-**Salarié** : {{employe_nom}} — {{poste}} ({{statut_label}})
-**Base horaire** : {{heures_hebdo}} h/semaine · {{heures_contrat}} h/mois (contrat) · taux horaire {{taux_horaire}}
-{{#net_vise}}**Net visé (contrat)** : {{net_vise}} (brut recalculé automatiquement pour l'atteindre){{/net_vise}}
-**Heures retenues ce mois** : {{heures_effectuees}} h
-{{#heures_manquantes}}⚠️ Dont {{heures_manquantes}} h en-deçà de la base contractuelle (absence non rémunérée non calculée automatiquement).
+**Période du {{periode_debut}} au {{periode_fin}}** · Paiement le {{date_paiement}} par virement
+
+| Employeur | Salarié |
+|---|---|
+{{#entete}}| {{gauche}} | {{droite}} |
+{{/entete}}
+
+## Rémunération
+| Élément | Nombre | Taux | Montant |
+|---|---:|---:|---:|
+| Salaire de base | {{heures_normales}} h | {{taux_horaire}} | {{brut_heures_normales}} |
+{{#heures_sup25}}| Heures supplémentaires majorées à 25 % | {{heures_sup25}} h | {{taux_sup25}} | {{montant_sup25}} |
+{{/heures_sup25}}{{#heures_sup50}}| Heures supplémentaires majorées à 50 % | {{heures_sup50}} h | {{taux_sup50}} | {{montant_sup50}} |
+{{/heures_sup50}}{{#primes}}| Primes | | | {{primes}} |
+{{/primes}}| **SALAIRE BRUT** | | | **{{brut}}** |
+{{#heures_manquantes}}
+Heures en deçà de la base contractuelle : {{heures_manquantes}} h (absence non rémunérée, non déduite automatiquement).
 {{/heures_manquantes}}
 
-| Rubrique | Détail | Montant |
-|---|---|---:|
-| Heures normales | {{heures_normales}} h × {{taux_horaire}} | {{brut_heures_normales}} |
-{{#heures_sup25}}| Heures sup. à 25 % | {{heures_sup25}} h majorées 25 % | — |
-{{/heures_sup25}}{{#heures_sup50}}| Heures sup. à 50 % | {{heures_sup50}} h majorées 50 % | — |
-{{/heures_sup50}}{{#brut_heures_sup}}| **Total heures supplémentaires** | | **{{brut_heures_sup}}** |
-{{/brut_heures_sup}}{{#primes}}| Primes | | {{primes}} |
-{{/primes}}| **Salaire brut** | | **{{brut}}** |
+## Cotisations et contributions sociales
+| Rubrique | Base | Taux salarié | Part salarié | Taux employeur | Part employeur |
+|---|---:|---:|---:|---:|---:|
+{{#rubriques}}| {{libelle}} | {{base}} | {{taux_sal}} | {{montant_sal}} | {{taux_pat}} | {{montant_pat}} |
+{{/rubriques}}| **TOTAL DES COTISATIONS ET CONTRIBUTIONS** | | | **{{cotisations_salariales}}** | | **{{charges_patronales}}** |
 {{#reduction_heures_sup}}
-ℹ️ Réduction salariale heures sup. (loi TEPA) déjà incluse dans les cotisations ci-dessous : **- {{reduction_heures_sup}}**
+Réduction de cotisations salariales sur heures supplémentaires (loi TEPA) incluse : - {{reduction_heures_sup}}
 {{/reduction_heures_sup}}
 
-## Cotisations et contributions sociales
-| Rubrique | Base | Part salariale | Part patronale |
-|---|---:|---:|---:|
-{{#cotisations}}| {{libelle}} | {{base}} | {{taux_sal}} → {{montant_sal}} | {{taux_pat}} → {{montant_pat}} |
-{{/cotisations}}
-| **Total cotisations salariales** | | **- {{cotisations_salariales}}** | |
-
-| Rubrique | Montant |
+| Net | Montant |
 |---|---:|
-| **Net avant impôt** | **{{net_avant_impot}}** |
-| Prélèvement à la source | {{taux_pas}} % → - {{pas}} |
-| **Net à payer** | **{{net_a_payer}}** |
+| **NET À PAYER AVANT IMPÔT SUR LE REVENU** | **{{net_avant_impot}}** |
+| Impôt sur le revenu prélevé à la source (base {{net_imposable}}, taux {{taux_pas}} %) | - {{pas}} |
+| **NET PAYÉ** | **{{net_a_payer}}** |
+| Montant net social | {{net_social}} |
 
-## Coût employeur
-| Rubrique | Montant |
-|---|---:|
-| Total charges patronales | {{charges_patronales}} |
-| **Coût total employeur** | **{{cout_employeur}}** |
+## Cumuls {{annee}}
+| Salaire brut | Net imposable | Heures | Coût employeur |
+|---:|---:|---:|---:|
+| {{cumul_brut}} | {{cumul_imposable}} | {{cumul_heures}} | {{cumul_cout}} |
 
-⚠️ {{avertissement}}
+Coût total pour l'employeur ce mois-ci : {{cout_employeur}}{{#allegements}} (dont allègements de cotisations : - {{allegements}}){{/allegements}}.
+
+Dans votre intérêt et pour vous aider à faire valoir vos droits, conservez ce bulletin de paie sans limitation de durée. Rubrique dédiée au bulletin de paie sur le portail www.service-public.fr.
+
+{{avertissement}}
 """.trimStart()
 
     val PLANNING_FORMAT_DEFAUT = """

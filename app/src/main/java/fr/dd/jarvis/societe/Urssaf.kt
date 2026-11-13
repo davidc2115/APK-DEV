@@ -106,8 +106,12 @@ object Urssaf {
     fun horsRegimeGeneral(d: SocieteData, e: Employe) = e.statut == "dirigeant" && Regex("sarl|eurl").containsMatchIn(normaliser(d.societe.forme))
 
     fun montantsPaie(d: SocieteData, e: Employe, brut: Double): BaremesCalcul.MontantsPaie {
-        val v = evaluer(situation(d, e, brut), EXPRESSIONS_PAIE.map { it.second to "€/mois" })
-        return BaremesCalcul.MontantsPaie(EXPRESSIONS_PAIE.mapIndexed { i, (k, _) -> k to (v.getOrNull(i) ?: 0.0) }.toMap())
+        val sit = situation(d, e, brut)
+        val v = evaluer(sit, EXPRESSIONS_PAIE.map { it.second to "€/mois" })
+        // Montant net social (mention obligatoire du bulletin) : règle encore « expérimentale » chez l'URSSAF, demandée à
+        // part pour qu'un renommage éventuel ne fasse pas échouer tout le bulletin (repli : net avant impôt).
+        val social = runCatching { evaluer(sit, listOf("salarié . rémunération . montant net social" to "€/mois"))[0] }.getOrNull() ?: 0.0
+        return BaremesCalcul.MontantsPaie(EXPRESSIONS_PAIE.mapIndexed { i, (k, _) -> k to (v.getOrNull(i) ?: 0.0) }.toMap() + ("net.social" to social))
     }
 
     /** Coût employeur et net officiels pour le salaire contractuel de chaque employé (mis en cache dans les barèmes). */

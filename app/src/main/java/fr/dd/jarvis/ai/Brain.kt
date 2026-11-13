@@ -167,6 +167,23 @@ class Brain(
                         "🔓 J'affiche le déverrouillage (empreinte, visage ou code). Pour déverrouiller à la voix, active l'écoute « Jarvis » (le téléphone vérifie alors ta voix)." }
                 })
             }
+            // Factures / devis (payée, envoyée, acceptée…) : directement dans la base Société du TÉLÉPHONE (le coffre du
+            // serveur n'est qu'une copie synchronisée après chaque modification) — jamais par SSH ni par Hermès.
+            // « Où est Angeline ? » : position donnée par Home Assistant (person.* / device_tracker.*), jamais par SSH.
+            if (PersonneOu.personne(texteUser) != null) {
+                onStatus("📍 Position…")
+                runCatching { PersonneOu.repondre(app, texteUser) }.getOrNull()?.let { return reflexe(it) }
+            }
+            // Annuler / supprimer des factures ou devis (une, plusieurs, toutes), gérer les fiches de paie : même chose.
+            runCatching { fr.dd.jarvis.societe.SocieteTools.intentionGestion(app.societe.data, texteUser) }.getOrNull()?.let { (outil, args) ->
+                onStatus("🧾 Société…")
+                return reflexe(tools.execute(outil, args).text)
+            }
+            runCatching { fr.dd.jarvis.societe.SocieteTools.intentionDocument(app.societe.data, texteUser) }.getOrNull()?.let { args ->
+                args.optString("question").takeIf { it.isNotBlank() }?.let { return reflexe(it) }
+                onStatus("🧾 Société : ${args.optString("numero")}…")
+                return reflexe(tools.execute("document_action", args).text)
+            }
             // Accès à distance d'un appareil du Wi-Fi : bail fixe + redirection Freebox + adresse publique, par l'outil dédié.
             fr.dd.jarvis.ai.AccesDistant.intention(app, texteUser)?.let { args ->
                 onStatus("🌍 Accès à distance…")

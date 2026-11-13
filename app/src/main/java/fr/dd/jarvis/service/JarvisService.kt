@@ -85,7 +85,11 @@ class JarvisService : Service() {
             s.main.post {
                 if (oui) {
                     s.main.removeCallbacks(s.relance)
-                    if (s.awake && !s.busy) { s.voice?.stopSpeaking(); s.voice?.stopListening(); s.awake = false; s.voice?.sessionFin() }
+                    // La réponse que le service était en train de dire s'arrête (sa suite libère le service sans rouvrir
+                    // le micro) : sinon sa « coupure de parole » entendait l'utilisateur parler à l'appli et reprenait le micro.
+                    s.voice?.couperParole()
+                    s.voice?.fermer()
+                    if (s.awake && !s.busy) { s.awake = false; s.voice?.sessionFin() }
                     s.vosk?.stop()
                 } else if (!s.awake && !s.busy) s.goIdle()
             }
@@ -224,6 +228,9 @@ class JarvisService : Service() {
             v.muteBeeps = app.store.muteBeeps.value
             v.bargeIn = app.store.coupeParole.value
             v.duplex = app.store.duplex.value
+            // Pendant une conversation dans l'appli, le service n'ouvre plus le micro et ne coupe plus la parole.
+            v.autorise = { !suspenduParAppli }
+            v.coupureAutorisee = { !suspenduParAppli }
             v.onFinal = { t -> failures = 0; incompris = 0; handle(t) }
             v.onPartial = { t -> fr.dd.jarvis.car.ActiviteVoiture.signaler(fr.dd.jarvis.car.ActiviteVoiture.Etape.PARTIEL, texte = t) }
             v.onSilence = {
@@ -240,8 +247,9 @@ class JarvisService : Service() {
                 when {
                     confirm != null -> main.postDelayed({ ecouter(8000) }, 400)
                     busy -> {}
-                    // Phrase entendue mais pas comprise : on réécoute (dans la limite de 3 fois), sinon on referme.
-                    awake -> if (msg.isBlank() && ++incompris < 3) ecouter() else finConversation()
+                    // Phrase entendue mais pas comprise (souvent un bruit ou l'écho de la réponse) : une seule réécoute,
+                    // sinon on referme — plus de micro rouvert 3 fois de suite (avec un bip à chaque fois).
+                    awake -> if (msg.isBlank() && ++incompris < 2) ecouter() else finConversation()
                     vosk == null -> main.postDelayed({ listen() }, if (failures > 4) 5000L else 1200L) // repli sans détecteur : écoute en boucle
                 }
             }
@@ -288,6 +296,7 @@ class JarvisService : Service() {
     /** Écoute dans la conversation : se referme seule si personne ne parle dans le délai. */
     private fun ecouter(delai: Long = silenceMs()) {
         if (!running) return
+        if (suspenduParAppli) { awake = false; voice?.sessionFin(); return }   // l'appli a le micro
         voice?.ecouterConversation(delai)
         fr.dd.jarvis.car.ActiviteVoiture.signaler(fr.dd.jarvis.car.ActiviteVoiture.Etape.ECOUTE)
     }
@@ -323,7 +332,7 @@ class JarvisService : Service() {
     /** Pause demandée par la voiture : on coupe la voix et on referme la conversation (sans toucher à une demande en cours). */
     private fun interrompre() {
         voice?.stopSpeaking()
-        if (awake && !busy) { voice?.stopListening(); finConversation() }
+        if (awake && !busy) { voice?.fermer(); finConversation() }
     }
 
     /** Conversation en cours (écoute, réflexion, réponse) : le téléphone ne doit pas s'endormir au milieu (10 min au plus). */
@@ -342,7 +351,8 @@ class JarvisService : Service() {
         incompris = 0
         finLe = System.currentTimeMillis()
         voice?.sessionFin()
-        voice?.stopListening()
+        // Fermeture définitive de l'écoute : aucune relance du reconnaisseur ne rouvrira le micro après le bip de fin.
+        voice?.fermer()
         if (suspenduParAppli) return
         if (vosk != null) {
             // Laisse retomber l'écho de la voix de JARVIS (ou du bip) avant de réarmer l'écoute du mot « Jarvis »,
@@ -463,7 +473,9 @@ class JarvisService : Service() {
         if (busy) return
         val t = norm(text)
         val m = wakeRegex.find(t)
-        if (!awake && m == null) { listen(); return }   // repli sans détecteur : on ignore tout ce qui ne commence pas par Jarvis
+        // Repli sans détecteur : on ignore tout ce qui ne commence pas par Jarvis. (Avec le détecteur, un résultat arrivé
+        // après la fin de la conversation est ignoré, sans rouvrir le micro.)
+        if (!awake && m == null) { if (vosk == null) listen(); return }
         val cmd = (if (m != null && m.range.first <= 2) t.substring(m.range.last + 1) else text).trim()
         awake = true
         voice?.sessionDebut()

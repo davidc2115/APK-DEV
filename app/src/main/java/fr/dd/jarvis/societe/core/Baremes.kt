@@ -102,6 +102,7 @@ object BaremesCalcul {
         return local.copy(
             lignes = lignes, totalCotisationsSalariales = totalSal, netAvantImpot = netAvant, pas = pas, netAPayer = round2(netAvant - pas),
             totalChargesPatronales = patronal, coutEmployeur = round2(brut + patronal),
+            netImposable = netImposable, netSocial = round2(m["net.social"].takeIf { it > 0 } ?: netAvant), allegements = round2(m["exo.employeur"]),
             source = "Cotisations calculées par le moteur officiel de l'URSSAF (mon-entreprise.urssaf.fr) avec les barèmes en vigueur au $date. " +
                 "À faire valider par un expert-comptable ou un logiciel de paie avant tout usage officiel (convention collective, prévoyance et mutuelle réelles, taux AT/MP notifié)."
         )

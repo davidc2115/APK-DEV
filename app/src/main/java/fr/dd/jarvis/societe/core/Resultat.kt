@@ -66,8 +66,12 @@ object Resultat {
             runCatching { LocalDate.parse(it.payeLe.ifBlank { it.date }) }.getOrNull()?.let { p -> p.year == annee && !p.isAfter(jusqua) } == true
     }
 
-    /** Salaires de janvier au mois [jusqua] : bulletins enregistrés, sinon estimés depuis la fiche de l'employé. */
-    fun salaires(d: SocieteData, annee: Int, jusqua: YearMonth): Salaires {
+    /**
+     * Salaires de janvier au mois [jusqua] : les BULLETINS ENREGISTRÉS (seuls vrais salaires versés). Les mois sans
+     * bulletin ne sont estimés d'après la fiche de l'employé que si l'option « estimer les salaires » est active, ou à
+     * partir de [estimerDepuis] (mois futurs d'une projection). Un bulletin supprimé disparaît donc du résultat.
+     */
+    fun salaires(d: SocieteData, annee: Int, jusqua: YearMonth, estimerDepuis: YearMonth? = null): Salaires {
         var cout = 0.0; var net = 0.0; var estime = 0.0; var moisEstimes = 0
         val parEmploye = linkedMapOf<String, Double>()
         val debut = YearMonth.of(annee, 1)
@@ -82,7 +86,8 @@ object Resultat {
             val entree = runCatching { YearMonth.from(LocalDate.parse(e.dateEntree)) }.getOrNull()
             var m = if (entree != null && entree.isAfter(debut)) entree else debut
             while (!m.isAfter(jusqua)) {
-                if (d.bulletins.none { it.employeId == e.id && it.mois == m.toString() }) {
+                val estimer = d.societe.estimerSalaires || (estimerDepuis != null && !m.isBefore(estimerDepuis))
+                if (estimer && d.bulletins.none { it.employeId == e.id && it.mois == m.toString() }) {
                     // Coût officiel URSSAF relevé chaque semaine pour ce salaire, sinon calcul local.
                     val officiel = d.baremes.couts[e.id]?.takeIf { kotlin.math.abs(it.brut - e.brutMensuel) < 0.01 }
                     val (c, n) = officiel?.let { it.cout to it.netAvantImpot } ?: Paie.bulletin(e, d.paie, m.toString()).let { it.coutEmployeur to it.netAPayer }
@@ -114,6 +119,10 @@ object Resultat {
         val divBrut = round2(distribuable * s.distributionPct.coerceIn(0.0, 100.0) / 100.0)
         val notes = mutableListOf<String>()
         if (sal.moisEstimes > 0) notes += "${sal.moisEstimes} mois de salaire sans bulletin enregistré : estimés d'après la fiche de chaque employé (${euro(sal.estime)})."
+        if (!s.estimerSalaires && d.employes.any { it.brutMensuel > 0 || it.netMensuelVise > 0 }) {
+            val sans = d.employes.sumOf { e -> (1..mois).count { m -> d.bulletins.none { it.employeId == e.id && it.mois == "%d-%02d".format(annee, m) } } }
+            if (sans > 0) notes += "Seuls les bulletins de paie enregistrés comptent comme salaires versés ($sans mois sans bulletin non comptés). Pour les estimer d'après les contrats : « estime les salaires sans bulletin »."
+        }
         if (s.chargesMensuelles <= 0.0) notes += "Aucune charge fixe renseignée (loyer, assurance, comptable, véhicule…) : dis « mes charges fixes sont de … € par mois » pour un résultat plus juste."
         if (is_ && s.capitalSocial <= 0.0) notes += "Capital social non renseigné : réserve légale estimée à 5 % sans plafond."
         if (!is_) notes += "Entreprise à l'impôt sur le revenu (${s.forme.ifBlank { "forme non précisée" }}) : pas d'impôt sur les sociétés ni de dividende ; le bénéfice est imposé à ton nom."
@@ -132,7 +141,7 @@ object Resultat {
         if (b.mois >= 12 || b.caHt <= 0.0) return null
         val s = d.societe
         val caHt = round2(b.caHt / b.mois * 12)
-        val sal = salaires(d, annee, YearMonth.of(annee, 12))
+        val sal = salaires(d, annee, YearMonth.of(annee, 12), estimerDepuis = YearMonth.from(arrete).plusMonths(1))
         val charges = round2(s.chargesMensuelles.coerceAtLeast(0.0) * 12)
         val avant = round2(caHt - sal.cout - charges)
         val impot = if (b.soumisIs) impot(avant, s) else 0.0

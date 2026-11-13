@@ -276,6 +276,7 @@ class ToolBox(
                 "contenu" to prop("Contenu du fichier (voir la description). Pour vcf : texte vCard, ou « tous »."), "titre" to prop("Titre du document (optionnel)."),
                 "feuille" to prop("Nom de la feuille Excel (optionnel)."), "recherche" to prop("vcf : filtre sur le nom des contacts à exporter (optionnel)."),
                 "inclure" to prop("zip : noms des fichiers déjà créés à inclure, séparés par des virgules."),
+                "pour_la_societe" to prop("« oui » si le document est fait POUR LA SOCIÉTÉ (courrier, attestation, rapport, offre, document client…) : PDF et Word reçoivent alors le logo et les mentions légales de la société et sont rangés dans Société/Documents. « non » pour tout autre fichier (personnel, coloriage, liste…), qui reste sans logo. Les devis, factures, fiches de paie et rapports d'intervention ont leurs propres outils."),
                 "images" to prop("Pour format=pdf uniquement : noms de fichiers d'images déjà générées par generer_image (ex. img_20261031_120000_123.png, visibles dans jarvis-img: des résultats précédents), séparés par une virgule ou un retour à la ligne — une par page, dans l'ordre. Ajoute une légende par image avec « nomFichier.png::légende ». Si tu ne connais pas les noms exacts, mets « dernieres » (10 dernières), « dernieres:N » ou « toutes » plutôt que de deviner, ou appelle d'abord fichiers_generes.")),
             listOf("nom", "format")))
         put(tool("fichiers_generes", "Liste les fichiers déjà créés par JARVIS (images de generer_image, documents de creer_fichier), les plus récents en premier, avec leur nom exact. À utiliser dès que l'utilisateur fait référence à une image ou un fichier déjà généré sans te redonner son nom exact, avant de dire que tu ne le retrouves pas.",
@@ -482,8 +483,12 @@ class ToolBox(
         return JSONArray().also { out ->
             for (i in 0 until schema.length()) out.put(schema.get(i))
             if (soc) societe.schema.forEach { out.put(it) }
-            if (srv) serveur.schema.forEach { out.put(it) }
-            if (srv || adm) serveurAdmin.schema.forEach { out.put(it) }
+            // SSH et commandes du serveur : seulement pour une demande qui concerne le serveur — « où est Angeline »,
+            // « allume le salon » passent par Home Assistant (API), pas par une commande SSH.
+            val ssh = adm || fr.dd.jarvis.hermes.ServeurInventaire.serveurDemande(recentUserText)
+            fun serveurSeul(o: JSONObject) = o.optJSONObject("function")?.optString("name").orEmpty().let { it.startsWith("ssh_") || it.startsWith("serveur_") }
+            if (srv) serveur.schema.forEach { if (ssh || !serveurSeul(it)) out.put(it) }
+            if (ssh && (srv || adm)) serveurAdmin.schema.forEach { out.put(it) }
             if (web) sitesWeb.schema.forEach { out.put(it) }
             if (dis) discord.schema.forEach { out.put(it) }
             if (tik) tiktok.schema.forEach { out.put(it) }

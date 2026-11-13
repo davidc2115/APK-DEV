@@ -192,7 +192,9 @@ object PdfExporter {
 
     /** [logo] : dessiné en haute qualité (bitmap d'origine, filtré, jamais agrandi au-delà de sa résolution réelle) en
      *  haut de la première page, au-dessus du contenu — qui démarre ensuite en dessous, sans jamais le chevaucher. */
-    fun toPdf(markdown: String, logo: Bitmap? = null, rapport: Boolean = false, images: (String) -> Bitmap? = { null }): ByteArray {
+    fun toPdf(markdown: String, logo: Bitmap? = null, rapport: Boolean = false, images: (String) -> Bitmap? = { null }, pied: String? = null): ByteArray {
+        // Pied de page (documents de la société) : mentions légales + « Page n / N » — N connu par un premier passage à blanc.
+        val total = if (pied.isNullOrBlank()) 0 else compterPages(markdown, logo, rapport, images)
         val doc = PdfDocument()
         var numero = 0
         var page: PdfDocument.Page? = null
@@ -200,7 +202,9 @@ object PdfExporter {
             override fun nouvelle(): Canvas {
                 page?.let { doc.finishPage(it) }
                 numero++
-                return doc.startPage(PdfDocument.PageInfo.Builder(W, H, numero).create()).also { page = it }.canvas
+                val c = doc.startPage(PdfDocument.PageInfo.Builder(W, H, numero).create()).also { page = it }.canvas
+                if (!pied.isNullOrBlank()) piedDePage(c, pied, numero, total)
+                return c
             }
             override fun finir() { page?.let { doc.finishPage(it) }; page = null }
         })
@@ -208,6 +212,57 @@ object PdfExporter {
         doc.writeTo(out)
         doc.close()
         return out.toByteArray()
+    }
+
+    /**
+     * Impression d'un PDF par le service d'impression d'Android (imprimante Wi-Fi/Mopria, « Enregistrer en PDF »…).
+     * [ctx] doit être l'écran (Activity) affiché. Renvoie "" si la fenêtre d'impression s'est ouverte, sinon l'erreur.
+     */
+    fun imprimer(ctx: android.content.Context, f: java.io.File, nom: String): String = runCatching {
+        val pm = ctx.getSystemService(android.content.Context.PRINT_SERVICE) as android.print.PrintManager
+        val adaptateur = object : android.print.PrintDocumentAdapter() {
+            override fun onLayout(ancien: android.print.PrintAttributes?, nouveau: android.print.PrintAttributes?, annuler: android.os.CancellationSignal?,
+                                  rappel: LayoutResultCallback, extras: android.os.Bundle?) {
+                if (annuler?.isCanceled == true) { rappel.onLayoutCancelled(); return }
+                rappel.onLayoutFinished(android.print.PrintDocumentInfo.Builder(f.name).setContentType(android.print.PrintDocumentInfo.CONTENT_TYPE_DOCUMENT).build(), true)
+            }
+            override fun onWrite(pages: Array<out android.print.PageRange>?, dest: android.os.ParcelFileDescriptor?, annuler: android.os.CancellationSignal?,
+                                 rappel: WriteResultCallback) {
+                try {
+                    java.io.FileInputStream(f).use { i -> java.io.FileOutputStream(dest!!.fileDescriptor).use { o -> i.copyTo(o) } }
+                    rappel.onWriteFinished(arrayOf(android.print.PageRange.ALL_PAGES))
+                } catch (e: Exception) { rappel.onWriteFailed(e.message) }
+            }
+        }
+        pm.print(nom, adaptateur, android.print.PrintAttributes.Builder().setMediaSize(android.print.PrintAttributes.MediaSize.ISO_A4).build())
+        ""
+    }.getOrElse { "Impression impossible : ${it.message}" }
+
+    /** Nombre de pages qu'occupera le document (dessin à blanc, sans rien produire). */
+    private fun compterPages(markdown: String, logo: Bitmap?, rapport: Boolean, images: (String) -> Bitmap?): Int {
+        var n = 0
+        val vide = Bitmap.createBitmap(1, 1, Bitmap.Config.ALPHA_8)
+        runCatching { dessiner(markdown, logo, rapport, images, object : Pages {
+            override fun nouvelle(): Canvas { n++; return Canvas(vide) }
+            override fun finir() {}
+        }) }
+        vide.recycle()
+        return n
+    }
+
+    /** Pied de page : mentions légales de la société (centrées, petites, grises) et numéro de page à droite. */
+    private fun piedDePage(c: Canvas, pied: String, numero: Int, total: Int) {
+        val gris = Color.rgb(110, 116, 126)
+        c.drawLine(M, H - 30f, W - M, H - 30f, Paint().apply { color = Color.rgb(214, 219, 226); strokeWidth = 0.6f })
+        val p = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = gris; textSize = 7f }
+        val texte = nettoyer(pied)
+        val lay = StaticLayout.Builder.obtain(texte, 0, texte.length, p, (W - 2 * M - 60).toInt()).setAlignment(Layout.Alignment.ALIGN_CENTER)
+            .setMaxLines(2).setEllipsize(android.text.TextUtils.TruncateAt.END).build()
+        c.save(); c.translate(M + 30f, H - 26f); lay.draw(c); c.restore()
+        if (total > 0) {
+            val num = "Page $numero / $total"
+            c.drawText(num, W - M - p.measureText(num), H - 19f, p)
+        }
     }
 
     /** Aperçu : pages en images (fond blanc), [echelle] = pixels par point PDF. */
@@ -348,8 +403,11 @@ object PdfExporter {
                         }
                         val h = (lays.maxOf { it.height } + (if (rapport) 9 else 8)).toFloat()
                         if (y + h > H - M) nouvellePage()
+                        // Ligne de rubrique (« **SANTÉ** » seule, autres cases vides) : bandeau gris, comme sur un vrai bulletin.
+                        val rubrique = !rapport && !entete && row.firstOrNull()?.trim()?.startsWith("**") == true && row.drop(1).all { it.isBlank() }
                         when {
                             entete -> canvas.drawRect(M, y, W - M, y + h, Paint().apply { color = Color.rgb(232, 238, 246) })
+                            rubrique -> canvas.drawRect(M, y, W - M, y + h, Paint().apply { color = Color.rgb(243, 245, 248) })
                             rapport && ri % 2 == (if (sansEntete) 0 else 1) -> canvas.drawRect(M, y, W - M, y + h, Paint().apply { color = Color.rgb(247, 249, 252) })
                         }
                         var x = M

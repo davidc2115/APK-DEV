@@ -4,5 +4,6 @@
     <cache-path name="mms" path="mms/" />
     <files-path name="images" path="images/" />
     <files-path name="exports" path="exports/" />
+    <files-path name="societe_paie" path="societe/paie/" />
     <files-path name="videos_ia" path="videos_ia/" />
 </paths>

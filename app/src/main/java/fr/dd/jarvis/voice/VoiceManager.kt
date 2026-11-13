@@ -124,6 +124,19 @@ class VoiceManager(private val ctx: Context) {
     private var parole = false
     /** Numéro de l'écoute en cours : les rappels d'une écoute annulée sont ignorés. */
     private var jeton = 0
+    /** Relance programmée après une erreur passagère : annulée dès que l'écoute est refermée (plus de micro rouvert après la fin). */
+    private var relanceEnAttente: Runnable? = null
+    /** Reconnaisseur réutilisé d'une écoute à l'autre (le recréer à chaque fois faisait répondre « service déconnecté »,
+     *  erreur 11, à la première ouverture : un micro ouvert pour rien, donc un bip de plus). */
+    private var recoCle = ""
+    private var recoCasse = false
+    private var ouvertLe = 0L
+    /** Le micro peut-il s'ouvrir ? (le service se tait pendant une conversation dans l'appli). */
+    var autorise: () -> Boolean = { true }
+    /** La coupure de parole (voix entendue pendant la réponse) est-elle permise en ce moment ? */
+    var coupureAutorisee: () -> Boolean = { true }
+
+    private fun annulerRelance() { relanceEnAttente?.let { main.removeCallbacks(it) }; relanceEnAttente = null }
 
     private val finFenetre = Runnable {
         if (fenetreFin > 0 && !parole) {
@@ -164,6 +177,13 @@ class VoiceManager(private val ctx: Context) {
     /** [essai] : relances automatiques sur les erreurs transitoires (service vocal déconnecté…), puis repli sur la reconnaissance locale. */
     private fun demarrer(essai: Int) {
         main.post {
+            annulerRelance()
+            if (!autorise()) {
+                JournalVoix.noter(nom, "micro non ouvert : l'appli JARVIS a le micro")
+                fenetreFin = 0; ecoute = false
+                signalerEcoute(false)
+                return@post
+            }
             if (!SpeechRecognizer.isRecognitionAvailable(ctx)) {
                 fenetreFin = 0
                 onFail("Reconnaissance vocale indisponible sur cet appareil (installer / activer Google).")
@@ -175,21 +195,29 @@ class VoiceManager(private val ctx: Context) {
             main.removeCallbacks(unmuteLater)
             main.removeCallbacks(finFenetre)
             setMuted(true)
-            recognizer?.destroy()
             parole = false
             val moi = ++jeton
             ecoute = true
             val local = essai >= 2 && Build.VERSION.SDK_INT >= 33 && SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx)
             val composant = if (local) null else moteur(ctx)
-            JournalVoix.noter(nom, "micro ouvert (reconnaissance ${if (local) "locale" else composant?.packageName ?: "par défaut"}${if (essai > 0) ", essai ${essai + 1}" else ""})")
-            val r = when {
-                local -> SpeechRecognizer.createOnDeviceSpeechRecognizer(ctx)
-                composant != null -> SpeechRecognizer.createSpeechRecognizer(ctx, composant)
-                else -> SpeechRecognizer.createSpeechRecognizer(ctx)
+            val cle = if (local) "local" else composant?.flattenToString() ?: "defaut"
+            // Même moteur et aucune erreur : on garde le reconnaisseur (annulé puis relancé) au lieu d'en recréer un.
+            val reutilise = recognizer != null && recoCle == cle && !recoCasse
+            val r = if (reutilise) recognizer!!.also { runCatching { it.cancel() } } else {
+                runCatching { recognizer?.destroy() }
+                when {
+                    local -> SpeechRecognizer.createOnDeviceSpeechRecognizer(ctx)
+                    composant != null -> SpeechRecognizer.createSpeechRecognizer(ctx, composant)
+                    else -> SpeechRecognizer.createSpeechRecognizer(ctx)
+                }.also { recoCle = cle; recoCasse = false }
             }
+            JournalVoix.noter(nom, "micro ouvert (reconnaissance ${if (local) "locale" else composant?.packageName ?: "par défaut"}${if (essai > 0) ", essai ${essai + 1}" else ""}${if (reutilise) "" else ", nouveau"})")
             recognizer = r
+            ouvertLe = System.currentTimeMillis()
             r.setRecognitionListener(object : RecognitionListener {
-                private fun actif() = moi == jeton
+                /** Un reconnaisseur envoie parfois une 2e erreur après son résultat (ou après une 1re erreur) : ignorée. */
+                private var termine = false
+                private fun actif() = moi == jeton && !termine
                 private fun aParle() { if (!parole) { parole = true; main.removeCallbacks(finFenetre) } }
                 override fun onReadyForSpeech(params: Bundle?) {}
                 override fun onBeginningOfSpeech() { if (actif()) aParle() }
@@ -200,20 +228,26 @@ class VoiceManager(private val ctx: Context) {
 
                 override fun onError(error: Int) {
                     if (!actif()) return
+                    termine = true
                     JournalVoix.noter(nom, "reconnaissance : erreur $error${if (parole) " (après parole)" else ""}")
                     ecoute = false
                     main.removeCallbacks(finFenetre)
                     // 11 = service de reconnaissance déconnecté, 5 = erreur client, 10 = trop de requêtes, 8 = occupé : on recrée et on relance
                     // (2 essais au plus, espacés : un reconnaisseur recréé trop vite répond « occupé » et rebipe.)
+                    if (error in setOf(11, 5, 10, 8, SpeechRecognizer.ERROR_SERVER)) recoCasse = true
                     if (error in setOf(11, 5, 10, 8, SpeechRecognizer.ERROR_SERVER) && essai < 2) {
-                        main.postDelayed({ if (moi == jeton) demarrer(essai + 1) }, 800L * (essai + 1))
+                        val immediat = !parole && System.currentTimeMillis() - ouvertLe < 600
+                        val relance = Runnable { relanceEnAttente = null; if (moi == jeton) demarrer(essai + 1) }
+                        relanceEnAttente = relance
+                        main.postDelayed(relance, if (immediat && error == 11) 250L else 800L * (essai + 1))
                         return
                     }
                     val silence = error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
-                    if (fenetreFin > 0 && silence && !parole) {
-                        // Le reconnaisseur abandonne avant la fin du délai de conversation : on le relance sans bruit.
-                        if (System.currentTimeMillis() < fenetreFin - 400 && relancesMuettes++ < 2) { demarrer(0); return }
-                        finirSilence(); return
+                    if (fenetreFin > 0 && silence) {
+                        // Rien de compris (silence, bruit, écho de la voix de JARVIS) avant la fin du délai de conversation :
+                        // une relance discrète s'il reste vraiment du temps, sinon la conversation se referme.
+                        if (System.currentTimeMillis() < fenetreFin - 1500 && relancesMuettes++ < 2) { demarrer(0); return }
+                        if (!parole) { finirSilence(); return }
                     }
                     fenetreFin = 0
                     main.postDelayed(unmuteLater, 900)
@@ -230,6 +264,7 @@ class VoiceManager(private val ctx: Context) {
 
                 override fun onResults(results: Bundle?) {
                     if (!actif()) return
+                    termine = true
                     ecoute = false
                     JournalVoix.noter(nom, "entendu : « ${results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty().take(60)} »")
                     val entendu = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
@@ -283,6 +318,7 @@ class VoiceManager(private val ctx: Context) {
     /** Une autre partie de JARVIS prend le micro : on referme notre écoute (comme un silence, sans relance). */
     private fun ceder(a: String) {
         main.post {
+            if (relanceEnAttente != null) { annulerRelance(); jeton++ }
             if (!ecoute) return@post
             ecoute = false
             JournalVoix.noter(nom, "écoute refermée : le micro passe à « $a »")
@@ -295,8 +331,31 @@ class VoiceManager(private val ctx: Context) {
         }
     }
 
+    /**
+     * Ferme l'écoute pour de bon (retour à l'attente de « Jarvis ») : plus aucun rappel de cette écoute n'est traité et
+     * aucune relance programmée ne rouvrira le micro — sinon il se rouvrait après le bip de fin, pendant que le
+     * détecteur « Jarvis » était réarmé (micro « occupé », bips en plus).
+     */
+    fun fermer() {
+        main.post {
+            annulerRelance()
+            jeton++
+            val etait = ecoute
+            ecoute = false
+            fenetreFin = 0
+            main.removeCallbacks(finFenetre)
+            runCatching { recognizer?.cancel() }
+            if (etait) signalerEcoute(false)
+            main.removeCallbacks(unmuteLater); main.postDelayed(unmuteLater, 900)
+        }
+    }
+
+    /** Coupe la réponse parlée en cours en laissant l'appelant reprendre la main (sa suite est appelée). */
+    fun couperParole() = main.post { paroleEnCours?.arreter(sansSuite = false) }
+
     fun stopListening() {
         main.post {
+            annulerRelance()
             ecoute = false
             fenetreFin = 0
             main.removeCallbacks(finFenetre)
@@ -638,7 +697,7 @@ class VoiceManager(private val ctx: Context) {
         private fun voixLancee() {
             Presence.parole(true)
             if (coupe) main.post {
-                if (!fini.get() && barge == null) barge = BargeIn { main.post { if (!fini.get()) { JournalVoix.noter(nom, "coupure de parole : voix entendue pendant la réponse"); arreter(sansSuite = false) } } }.also { it.start() }
+                if (!fini.get() && barge == null && coupureAutorisee()) barge = BargeIn { main.post { if (!fini.get() && coupureAutorisee()) { JournalVoix.noter(nom, "coupure de parole : voix entendue pendant la réponse"); arreter(sansSuite = false) } } }.also { it.start() }
             }
         }
 
@@ -782,6 +841,7 @@ class VoiceManager(private val ctx: Context) {
         sessionFin()
         main.post { main.removeCallbacks(unmuteLater); main.removeCallbacks(finFenetre); setMuted(false) }
         main.post {
+            annulerRelance()
             jeton++
             recognizer?.destroy()
             recognizer = null

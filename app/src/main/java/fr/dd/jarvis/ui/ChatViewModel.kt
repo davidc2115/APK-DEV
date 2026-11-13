@@ -72,8 +72,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
         voice.onFail = { msg ->
             partial = ""
-            // Phrase entendue mais pas comprise : on réécoute (3 fois au plus) ; vraie erreur : on arrête et on l'affiche.
-            if (msg.isBlank() && voiceSession && ++incompris < 3) {
+            // Phrase entendue mais pas comprise : on réécoute une fois ; vraie erreur : on arrête et on l'affiche.
+            if (msg.isBlank() && voiceSession && ++incompris < 2) {
                 ecouter()
             } else {
                 voiceSession = false

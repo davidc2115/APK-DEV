@@ -31,6 +31,16 @@ object ServeurInventaire {
 
     fun concerne(demande: String) = demande.isNotBlank() && R_SERVEUR.containsMatchIn(demande)
 
+    private val R_SSH_EXPLICITE = Regex("\\bssh\\b|\\bsudo\\b|terminal|ligne de commande|\\btls\\b|\\bssl\\b|certificat|duckdns|reverse.?proxy|crontab|/etc/|/opt/|/srv/|/var/|/home/", RegexOption.IGNORE_CASE)
+
+    /**
+     * La demande porte-t-elle vraiment sur le SERVEUR (et peut donc justifier SSH) ? Non pour la domotique ordinaire
+     * (Home Assistant par l'API : états, pilotage, positions des personnes) ni pour une question de la vie courante.
+     */
+    fun serveurDemande(demande: String): Boolean = demande.isNotBlank() &&
+        (R_SSH_EXPLICITE.containsMatchIn(demande) || fr.dd.jarvis.hermes.RelaisGroq.fichierServeur(demande.lowercase()) ||
+            (R_SERVEUR.containsMatchIn(demande) && !Routeur.homeAssistantApi(demande)))
+
     /** Bloc à ajouter au prompt d'Hermès (vide si la demande ne concerne pas le serveur ou si rien n'est configuré). */
     suspend fun bloc(app: JarvisApp, demande: String): String {
         if (!concerne(demande)) return ""
@@ -84,10 +94,10 @@ object ServeurInventaire {
      * IA raccourcissait les consignes d'Hermès pour tenir dans le quota d'un modèle, cette information disparaissait et Hermès
      * répondait « les informations d'accès SSH ne sont pas dans la mémoire partagée ».
      */
-    fun acces(app: JarvisApp): String {
+    fun acces(app: JarvisApp, avecSsh: Boolean = true): String {
         val s = app.store
         val l = mutableListOf<String>()
-        if (Serveur.sshConfigure(app)) l += "serveur Debian SSH ${s.sshUser.value.trim()}@${s.sshHost.value.trim()}:${s.sshPort.value.ifBlank { "22" }} (identifiants et sudo enregistrés) → " +
+        if (avecSsh && Serveur.sshConfigure(app)) l += "serveur Debian SSH ${s.sshUser.value.trim()}@${s.sshHost.value.trim()}:${s.sshPort.value.ifBlank { "22" }} (identifiants et sudo enregistrés) → " +
             "mcp_jarvis_ssh_commande, ssh_script, ssh_fichier, serveur_service, serveur_diagnostic, serveur_tache, serveur_fichiers, ha_sauvegarde (Docker, conteneurs, certificats, fichiers)"
         if (s.haUrl.value.isNotBlank() && s.haToken.value.isNotBlank()) l += "Home Assistant (instance, API) → mcp_jarvis_ha_*"
         if (runCatching { s.plexToken.value.isNotBlank() }.getOrDefault(false)) l += "Plex (instance) → mcp_jarvis_plex_*"

@@ -31,7 +31,10 @@ data class Bulletin(
     val netAPayer: Double,
     val totalChargesPatronales: Double,
     val coutEmployeur: Double,
-    val source: String = ""             // vide : calcul local ; sinon calcul officiel URSSAF (avec sa date)
+    val source: String = "",            // vide : calcul local ; sinon calcul officiel URSSAF (avec sa date)
+    val netImposable: Double = 0.0,     // base du prélèvement à la source (0 = net avant impôt + CSG/CRDS non déductible)
+    val netSocial: Double = 0.0,        // montant net social (mention obligatoire depuis 2024) ; 0 = net avant impôt
+    val allegements: Double = 0.0       // réduction générale / exonérations de cotisations patronales du mois
 ) {
     // Compatibilité avec l'ancien modèle.
     val heuresMensuelles get() = heuresContrat
@@ -143,7 +146,9 @@ object Paie {
         val totalSal = round2(lignes.sumOf { it.montantSalarial })
         val totalPat = round2(lignes.sumOf { it.montantPatronal })
         val netAvant = round2(brut - totalSal)
-        val pas = round2(netAvant * e.tauxPas / 100.0)
+        // Le prélèvement à la source s'applique au NET IMPOSABLE (net avant impôt + CSG/CRDS non déductible).
+        val netImposable = round2(netAvant + lignes.filter { it.libelle.startsWith("CSG/CRDS non déductible") }.sumOf { it.montantSalarial })
+        val pas = round2(netImposable * e.tauxPas / 100.0)
         return Bulletin(
             employe = e, mois = mois, heuresContrat = heuresContrat, heuresEffectuees = round2(heuresEffectuees),
             heuresSup25 = round2(sup25), heuresSup50 = round2(sup50), tauxHoraire = taux,
@@ -151,7 +156,8 @@ object Paie {
             primes = round2(primes), brut = brut,
             lignes = lignes, totalCotisationsSalariales = totalSal, netAvantImpot = netAvant,
             tauxPas = e.tauxPas, pas = pas, netAPayer = round2(netAvant - pas),
-            totalChargesPatronales = totalPat, coutEmployeur = round2(brut + totalPat)
+            totalChargesPatronales = totalPat, coutEmployeur = round2(brut + totalPat),
+            netImposable = netImposable, netSocial = netAvant
         )
     }
 
@@ -191,7 +197,11 @@ data class BilanReserve(
     val nbFactures: Int,
     val dirigeant: Double,
     val salaries: List<Pair<Employe, Double>>,
-    val nonAffecte: Double
+    val nonAffecte: Double,
+    /** Part de chaque personne (dirigeants compris) quand la réserve est répartie selon les salaires versés. */
+    val parPersonne: List<Triple<Employe, Double, Double>> = emptyList(),   // (personne, brut pris en compte, part)
+    val selonSalaires: Boolean = false,
+    val brutEstime: Boolean = false
 )
 
 object Reserve {
@@ -213,10 +223,25 @@ object Reserve {
         provisions: List<Provision>,
         employes: List<Employe>,
         bulletins: List<BulletinRef>,
-        partDirigeantPct: Double
+        partDirigeantPct: Double,
+        selonSalaires: Boolean = false
     ): BilanReserve {
         val delAnnee = provisions.filter { it.date.startsWith(annee.toString()) }
         val total = round2(delAnnee.sumOf { it.montant })
+        // Répartition automatique : chacun (dirigeants compris) reçoit la part de la réserve égale à sa part des
+        // salaires bruts versés dans l'année (bulletins), à défaut des salaires prévus au contrat.
+        if (selonSalaires && employes.isNotEmpty()) {
+            val verses = employes.associateWith { e -> bulletins.filter { it.employeId == e.id && it.mois.startsWith(annee.toString()) }.sumOf { it.brut } }
+            val estime = verses.values.sum() <= 0.0
+            val base = if (!estime) verses else employes.associateWith { it.brutMensuel * 12 }
+            val somme = base.values.sum()
+            if (somme > 0.0) {
+                val parts = employes.filter { (base[it] ?: 0.0) > 0.0 }.map { e -> Triple(e, round2(base[e] ?: 0.0), round2(total * (base[e] ?: 0.0) / somme)) }
+                val dirigeant = round2(parts.filter { it.first.statut == "dirigeant" }.sumOf { it.third })
+                val sal = parts.filter { it.first.statut != "dirigeant" }.map { it.first to it.third }
+                return BilanReserve(annee, total, delAnnee.size, dirigeant, sal, round2(total - parts.sumOf { it.third }), parts, true, estime)
+            }
+        }
         val dirigeant = round2(total * partDirigeantPct / 100.0)
         val partSalaries = round2(total - dirigeant)
         val salaries = employes.filter { it.statut != "dirigeant" }
