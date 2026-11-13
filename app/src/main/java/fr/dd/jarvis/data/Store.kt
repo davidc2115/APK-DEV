@@ -174,6 +174,8 @@ class Store(context: Context) {
      *  Home Assistant : uniquement dans le stockage chiffré, jamais dans la conversation. */
     val codeDeverrouillage = SecretPref("codeDeverrouillage")
     val codeAlarmeHa = SecretPref("codeAlarmeHa")
+    /** Clé de chiffrement des sauvegardes Home Assistant (restauration d'une sauvegarde chiffrée par SSH). */
+    val cleSauvegardeHa = SecretPref("cleSauvegardeHa")
     val serveurServices = SPref("serveurServices", "")
     val serveurServicesLe = SPref("serveurServicesLe", "0")
     // ---- Box internet (disque dur USB)

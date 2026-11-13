@@ -188,7 +188,8 @@ object RelaisGroq {
         if (Regex("serveur|\\bssh\\b|debian|docker|conteneur|systemctl|\\bservices?\\b|\\bbot\\b|plex|ollama|discord|home ?assistant|\\blogs?\\b|red[ée]marr|\\bapt\\b|mise à jour du serveur").containsMatchIn(t))
             out += listOf("ssh_", "serveur_")
         if (Regex("home ?assistant|domotique|\\bha\\b|lumi[èe]re|volet|chauffage|thermostat|po[êe]le|capteur|entit[ée]|automatisation|sc[èe]ne|prise").containsMatchIn(t)) out += "ha_"
-        if (Regex("plex|films?\\b|s[ée]ries? t[ée]l[ée]|biblioth[èe]que (de )?films").containsMatchIn(t)) out += "plex"
+        if (Regex("plex|films?\\b|s[ée]ries? t[ée]l[ée]|biblioth[èe]que (de )?films|playlist|liste de lecture|[ée]pisode|regarder").containsMatchIn(t)) out += "plex"
+        if (Regex("sauvegarde|restaur|backup|remettre en (service|route)|r[ée]par").containsMatchIn(t)) out += listOf("ha_sauvegarde", "serveur_tache", "serveur_service")
         if (Regex("discord|\\bbot\\b|salon|serveur discord").containsMatchIn(t)) out += "discord"
         if (Regex("freebox|\\bbox\\b").containsMatchIn(t)) out += listOf("freebox", "box_")
         if (Regex("r[ée]seau|wi-?fi|\\bip\\b|imprimante|appareils? connect").containsMatchIn(t)) out += listOf("reseau_", "appareil", "ip_publique", "imprim")

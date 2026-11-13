@@ -204,10 +204,26 @@ object Serveur {
         } catch (e: Exception) { throw IllegalStateException(expliquer(e, hote, port), e) }
     }
 
+    /**
+     * Commande avec « sudo » : TOUTE la commande passe en root en une seule fois (`sudo -S bash -c '…'`, mot de passe
+     * envoyé une fois sur l'entrée standard). Avant, chaque « sudo » d'une même ligne redemandait le mot de passe
+     * (sans terminal) et seule la première partie s'exécutait. Testable.
+     */
+    internal fun commandeSudo(commande: String, root: Boolean): String {
+        if (!Regex("\\bsudo\\b").containsMatchIn(commande)) return commande
+        // « sudo -n » ne demande jamais de mot de passe : commande laissée telle quelle (ex. relevé des services).
+        if (Regex("\\bsudo\\s+-n\\b").containsMatchIn(commande)) return commande
+        // « sudo -u autre … » : on garde chaque sudo tel quel (mot de passe lu par le premier).
+        if (Regex("\\bsudo\\s+(-[A-Za-z]+\\s+)*-u\\b").containsMatchIn(commande)) return commande.replace(Regex("\\bsudo\\s+(?!-S)"), "sudo -S -p '' ")
+        val sans = commande.replace(Regex("\\bsudo\\s+(-[A-Za-z]+\\s+(''\\s+)?)*"), "")
+        // HOME de l'utilisateur conservé : « ~ » et les chemins relatifs à son dossier restent les mêmes qu'avant.
+        return if (root) sans else "sudo -S -p '' env HOME=\"\$HOME\" bash -c " + q(sans)
+    }
+
     /** Exécute une commande ; « sudo » utilise le mot de passe enregistré. Retourne (code de sortie, sortie). */
     fun exec(app: JarvisApp, commande: String, timeoutS: Int = 60, cible: Cible? = null): Pair<Int, String> = session(app, cible) { s ->
-        val sudo = commande.contains("sudo ")
-        val cmd = if (sudo) commande.replace(Regex("\\bsudo\\s+(?!-S)"), "sudo -S -p '' ") else commande
+        val sudo = Regex("\\bsudo\\b").containsMatchIn(commande)
+        val cmd = commandeSudo(commande, (cible?.user ?: app.store.sshUser.value).trim() == "root")
         val ch = s.openChannel("exec") as ChannelExec
         ch.setCommand("export LANG=C.UTF-8; $cmd")
         val out = ByteArrayOutputStream()
@@ -238,6 +254,21 @@ object Serveur {
             if (e.id == ChannelSftp.SSH_FX_PERMISSION_DENIED) null else throw e
         } finally { c.disconnect() }
     } ?: exec(app, "sudo cat " + q(chemin)).second
+
+    /** Contenu binaire d'un fichier du serveur (SFTP ; fichier protégé : lu en root, transmis en base64). */
+    fun lireOctets(app: JarvisApp, chemin: String, max: Long = 50_000_000L): ByteArray = session(app) { s ->
+        val c = s.openChannel("sftp") as ChannelSftp; c.connect(10000)
+        try {
+            val st = c.stat(chemin)
+            if (st.size > max) throw IllegalStateException("Fichier trop gros (${st.size / 1_048_576} Mo, limite ${max / 1_048_576} Mo).")
+            c.get(chemin).use { it.readBytes() }
+        } catch (e: com.jcraft.jsch.SftpException) {
+            if (e.id == ChannelSftp.SSH_FX_PERMISSION_DENIED) null else throw IllegalStateException("Fichier introuvable : $chemin")
+        } finally { c.disconnect() }
+    } ?: exec(app, "sudo base64 -w0 " + q(chemin), 300).let { (code, out) ->
+        if (code != 0) throw IllegalStateException("Lecture refusée : ${out.take(200)}")
+        android.util.Base64.decode(out.trim().lines().last(), android.util.Base64.DEFAULT)
+    }
 
     /** Écrit un fichier (sauvegarde .jarvis-bak-… avant écrasement) ; passe par sudo si les droits manquent. */
     fun ecrire(app: JarvisApp, chemin: String, contenu: String, sauvegarde: Boolean = true): String? {

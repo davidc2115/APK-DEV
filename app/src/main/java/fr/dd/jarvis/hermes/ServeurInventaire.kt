@@ -63,7 +63,10 @@ object ServeurInventaire {
                     "Identifie un service par son nom EXACT dans le relevé (conteneur Docker, unité systemd, processus pm2/node/python) et cite ce nom. " +
                     "Le bot Discord a deux facettes : son compte sur Discord (outils mcp_jarvis_discord_* : salons, rôles, messages) et son programme sur le serveur (logs, redémarrage, code : SSH). " +
                     "Avant de redémarrer, arrêter ou modifier un service, vérifie qu'il existe sous ce nom (docker ps -a / systemctl status) et annonce lequel tu touches. " +
-                    "Toute commande sur le serveur passe par mcp_jarvis_ssh_commande (ou ssh_fichier / ssh_script) — jamais par ssh dans ton terminal. " +
+                    "Toute commande sur le serveur passe par les outils Jarvis — jamais par ssh dans ton terminal : serveur_service (état, journaux, démarrer, arrêter, redémarrer, " +
+                    "mettre à jour un service par son nom : Home Assistant, Plex, bot Discord…), ha_sauvegarde (lister / créer / RESTAURER une sauvegarde Home Assistant, même arrêté, " +
+                    "et vérifier la remise en service), serveur_tache (tout ce qui dure plus de quelques minutes, suivi du journal), serveur_fichiers (chercher, copier, archiver, " +
+                    "récupérer sur le téléphone…), ssh_commande / ssh_script (le reste ; « sudo » utilise le mot de passe enregistré). " +
                     "Si un service attendu n'apparaît pas dans le relevé, vérifie avec ssh_commande au lieu de supposer."
             )
         }

@@ -75,7 +75,8 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
         tool("ssh_fichier", "Serveur SSH : lit, écrit (sauvegarde auto) ou liste des fichiers du serveur.",
             mapOf("action" to prop("lire | ecrire | lister"), "chemin" to prop("Chemin absolu sur le serveur."), "contenu" to prop("ecrire : contenu complet.")), listOf("action", "chemin")),
         tool("ssh_script", "Serveur SSH : envoie et exécute un script complet (bash ou python3, plusieurs lignes) sur le serveur Debian ; sert à installer, configurer, récupérer des données (git clone, curl…), automatiser.",
-            mapOf("code" to prop("Code du script (plusieurs lignes)."), "langage" to prop("bash (défaut) ou python3."), "delai" to prop("Délai maximal en secondes (défaut 120).")), listOf("code")),
+            mapOf("code" to prop("Code du script (plusieurs lignes)."), "langage" to prop("bash (défaut) ou python3."), "delai" to prop("Délai maximal en secondes (défaut 120 ; au-delà de 15 min, utilise serveur_tache)."),
+                "root" to prop("« oui » : exécuter tout le script en root (automatique si le script contient sudo).")), listOf("code")),
         tool("github", "GitHub (public, ou privé avec un jeton enregistré dans Réglages › Maison › Serveur) : lit un fichier, liste un dossier, derniers commits, dernière version (release), infos ou recherche de dépôts. Si le jeton a les droits d'écriture (« repo » / « Contents: Read and write »), peut aussi CRÉER ou MODIFIER un fichier directement sur GitHub (action=ecrire), ou COPIER un fichier d'un chemin/dépôt vers un autre (action=copier) — sans passer par le serveur SSH ni un clone local.",
             mapOf("action" to prop("fichier | liste | commits | release | depot | recherche | ecrire | copier"), "depot" to prop("owner/repo (ex. home-assistant/core), ou mots de la recherche."), "chemin" to prop("Chemin du fichier ou dossier (chemin SOURCE pour « copier »)."), "ref" to prop("Branche, tag ou commit à lire (optionnel)."),
                 "contenu" to prop("ecrire : contenu complet du fichier à écrire."), "message" to prop("ecrire/copier : message de commit (optionnel)."), "branche" to prop("ecrire/copier : branche de destination (optionnel, défaut : branche par défaut du dépôt)."),
@@ -225,7 +226,9 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 if (!confirm("Exécuter ce script ${if (py) "Python" else "bash"} sur le serveur ${app.store.sshHost.value} ?\n\n" + code.take(900), true)) return ToolResult("Refusé par l'utilisateur.")
                 val f = "/tmp/jarvis_script_${System.currentTimeMillis()}" + if (py) ".py" else ".sh"
                 Serveur.envoyerOctets(app, f, (if (py) code else "set -e\n$code").toByteArray())
-                val r = Serveur.exec(app, "${if (py) "python3" else "bash"} $f; c=\$?; rm -f $f; exit \$c", (a.optString("delai").toIntOrNull() ?: 120).coerceIn(10, 900))
+                // Script avec sudo (ou root demandé) : tout le script tourne en root, ses « sudo » internes passent sans mot de passe.
+                val root = a.optString("root").lowercase() in setOf("oui", "true", "1") || Regex("\\bsudo\\b").containsMatchIn(code)
+                val r = Serveur.exec(app, (if (root) "sudo " else "") + "${if (py) "python3" else "bash"} $f; c=\$?; rm -f $f; exit \$c", (a.optString("delai").toIntOrNull() ?: 120).coerceIn(10, 900))
                 ToolResult("```\n" + sortie(r) + "\n```")
             }
             "github" -> {

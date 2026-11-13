@@ -91,10 +91,12 @@ fun SystemesPanel(app: JarvisApp, onAsk: (String) -> Unit) {
             HudTextField(code, { code = it.trim() }, Modifier.fillMaxWidth(), label = "Code de l'écran de verrouillage (déverrouillage à la voix)", password = true)
             var alarme by remember { mutableStateOf(store.codeAlarmeHa.value) }
             HudTextField(alarme, { alarme = it.trim() }, Modifier.fillMaxWidth(), label = "Code de l'alarme Home Assistant (si elle en demande un)", password = true)
+            var cleHa by remember { mutableStateOf(store.cleSauvegardeHa.value) }
+            HudTextField(cleHa, { cleHa = it.trim() }, Modifier.fillMaxWidth(), label = "Clé de chiffrement des sauvegardes Home Assistant (restauration)", password = true)
             HudButton("Enregistrer les codes", Modifier.fillMaxWidth()) {
                 msg = when {
                     code.isNotBlank() && !TelephoneSecurise.codeValide(code) -> "⚠️ Code d'écran : 4 à 32 chiffres ou lettres, sans espace."
-                    else -> runCatching { store.codeDeverrouillage.set(code); store.codeAlarmeHa.set(alarme); "✅ Codes enregistrés." }.getOrElse { "❌ ${it.message}" }
+                    else -> runCatching { store.codeDeverrouillage.set(code); store.codeAlarmeHa.set(alarme); store.cleSauvegardeHa.set(cleHa); "✅ Codes enregistrés." }.getOrElse { "❌ ${it.message}" }
                 }
             }
             Text("Le déverrouillage à la voix demande aussi ton empreinte vocale (Sécurité › Empreinte vocale) et l'ADB intégré ou Shizuku " +
