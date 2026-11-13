@@ -28,7 +28,10 @@ import java.util.concurrent.Executors
 object PontMcp {
     const val PORT = 38291
     private const val TAG = "PontMcp"
-    private const val maxOutilsExpose = 80
+    /** Tout le catalogue (≈ 190 outils) : le relais IA de Jarvis ne transmet au modèle que ceux utiles à chaque tour.
+     *  Plafonné à 80 auparavant, ce qui cachait à Hermès les outils SSH, Home Assistant, Plex et Discord (rangés après
+     *  les 107 outils du téléphone) : il tentait alors un « ssh » sans identifiants depuis son terminal. */
+    private const val maxOutilsExpose = 400
     private val pool = Executors.newCachedThreadPool()
     @Volatile private var serveur: ServerSocket? = null
     @Volatile private var fournisseur: Fournisseur? = null
@@ -440,7 +443,7 @@ object PontMcp {
                     "GPS D’INSTALLATION : opération exclusivement métier et locale à la base Société Jarvis. N’utilise JAMAIS ssh_commande, ssh_fichier, ssh_script, run_shell, Termux, ADB, Shizuku, stockage_telephone, obsidian_fichiers ni un chemin système pour ajouter/modifier ces coordonnées ; le serveur Debian et SSH n’ont aucun rôle dans cette opération. Même si ces outils sont visibles, ignore-les pour toute demande GPS/client/installation. Ne cherche JAMAIS un fichier Markdown, un contact Android ou un chemin Obsidian. Interroge d’abord societe_liste (quoi=clients, filtre sur le nom fourni) pour retrouver le nom exact du client dans la base Société ; si nécessaire, appelle client_fiche pour vérifier le nom exact de l’installation. Ensuite appelle obligatoirement client_ecrire avec nom=nom exact du client, site_nom=nom exact de l’installation et site_gps=coordonnées originales fournies, sans les reformater ni les recalculer. Ne modifie pas l’adresse ni les autres champs. N’annonce la réussite que si client_ecrire confirme l’enregistrement et la relecture du GPS. Si le client ou l’installation reste ambigu, demande uniquement la précision manquante. " +
                     "MUSIQUE : pour rechercher ET lancer un titre, utilise musique_rechercher (requete, application facultative) ; cette fonction utilise le contrôleur multi-applications Android et vérifie la session de lecture. Morphe est pris en charge en plus de Spotify, YouTube Music, Deezer, Amazon Music et VLC. Ne réponds pas « introuvable » avant d'avoir consulté les applications installées et tenté l'application musicale appropriée. " +
                     "IMPORTANT pour les interventions photovoltaïques : les noms exacts des outils MCP sont interventions_liste, intervention_supprimer et intervention_modifier (sans préfixe). Ils sont exposés par le pont local Jarvis. " +
-                    "Si ces outils ne sont pas visibles, utilise tool_search avec les termes exacts interventions_liste et intervention_supprimer ; ne remplace jamais cette recherche par une recherche de PDF dans Obsidian. " +
+                    "Si un outil Jarvis n'est pas dans ta liste, trouve-le avec jarvis_rechercher_outils puis exécute-le avec jarvis_appeler_outil ; ne remplace jamais cette recherche par une recherche de PDF dans Obsidian. " +
                     "SOCIÉTÉ / CLIENTS : la suppression d'une fiche client est une opération autorisée par Jarvis. Si l'utilisateur demande de supprimer un client, utilise client_supprimer ; ne refuse jamais au nom d'une règle générale de conservation et n'invente pas une interdiction. L'outil vérifie les devis/factures liés, demande lui-même une confirmation explicite avant l'action irréversible, supprime la fiche de la base et sa copie Obsidian, puis vérifie le résultat. Si des documents comptables sont liés, explique le blocage précis renvoyé par l'outil ; sinon laisse l'outil exécuter après confirmation. " +
                     "Pour supprimer une intervention, utilise obligatoirement interventions_liste pour obtenir son ID, puis intervention_supprimer avec cet ID et confirmation='oui' après accord explicite. " +
                     "N'utilise jamais les outils génériques du coffre Obsidian pour supprimer une intervention et n'appelle jamais intervention_enregistrer pour simuler une suppression. " +
@@ -486,10 +489,12 @@ object PontMcp {
         }
         // Les outils métier indispensables restent toujours visibles, puis on complète
         // avec les autres outils sans dépasser le budget transmis aux modèles.
-        fonctions.sortBy { f ->
-            val index = prioritaires.indexOf(f.optString("name"))
-            if (index < 0) prioritaires.size else index
+        // Puis les familles serveur / domotique / médias (souvent confondues si elles manquent), puis le reste.
+        fun famille(nom: String) = when {
+            Regex("^(ssh_|serveur_|ha_|plex|discord|github|freebox|box_|reseau_|appareil|ip_publique|ollama)").containsMatchIn(nom) -> 0
+            else -> 1
         }
+        fonctions.sortWith(compareBy({ f -> prioritaires.indexOf(f.optString("name")).let { if (it < 0) prioritaires.size else it } }, { f -> famille(f.optString("name")) }))
         val out = JSONArray()
         // L'équipe d'Hermès : l'agent téléphone (Jarvis) et le canal vers l'utilisateur. Toujours en tête de liste.
         out.put(JSONObject()

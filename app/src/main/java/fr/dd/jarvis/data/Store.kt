@@ -169,6 +169,9 @@ class Store(context: Context) {
     val scanAuto = BPref("scanAuto", true)
     val sshHostDistant = SPref("sshHostDistant", "")
     val sshPortDistant = SPref("sshPortDistant", "")
+    /** Dernier relevé SSH des services du serveur (Docker, systemd, pm2…) et sa date (ms) : fiche « infrastructure » d'Hermès. */
+    val serveurServices = SPref("serveurServices", "")
+    val serveurServicesLe = SPref("serveurServicesLe", "0")
     // ---- Box internet (disque dur USB)
     val boxHost = SPref("boxHost", "")
     val boxProto = SPref("boxProto", "smb")
@@ -546,6 +549,8 @@ class Store(context: Context) {
     val hermesCle = SPref("hermesCle", "")
     val mcpJeton = SPref("mcpJeton", "")
     val hermesInstalle = BPref("hermesInstalle", false)
+    /** Version de configuration Hermès déjà poussée dans Termux ; une version plus récente déclenche une resynchronisation unique. */
+    val hermesConfigVersion = IPref("hermesConfigVersion", 0)
 
     // ---- Briefing du matin
     val briefingOn = BPref("briefingOn", false)

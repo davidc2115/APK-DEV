@@ -159,6 +159,14 @@ class JarvisApp : Application() {
         }.start()
         // Pont MCP local (outils de Jarvis pour Hermès) : seulement si Hermès est utilisé.
         if (store.hermesMode.value != "off" && store.hermesInstalle.value) runCatching { fr.dd.jarvis.hermes.PontMcp.demarrer(this) }
+        // Nouvelle configuration Hermès (modèle principal = routeur Jarvis, outils Jarvis visibles directement) :
+        // appliquée une fois automatiquement après la mise à jour, sans attendre un appui sur « Configurer ».
+        if (store.hermesMode.value != "off" && store.hermesInstalle.value &&
+            store.hermesConfigVersion.value < fr.dd.jarvis.hermes.HermesTermux.VERSION_CONFIG) graphScope.launch {
+            kotlinx.coroutines.delay(20_000)
+            val r = kotlinx.coroutines.withContext(Dispatchers.Main) { runCatching { fr.dd.jarvis.hermes.HermesTermux.synchroniserCles(this@JarvisApp) }.getOrDefault("") }
+            if (r.startsWith("⏳")) store.hermesConfigVersion.set(fr.dd.jarvis.hermes.HermesTermux.VERSION_CONFIG)
+        }
         if (store.briefingOn.value) Scheduler.schedule(this, store)
         fr.dd.jarvis.work.AgentsScheduler.apply(this, store)
         fr.dd.jarvis.work.ReseauScheduler.apply(this, store)

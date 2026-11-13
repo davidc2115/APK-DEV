@@ -358,10 +358,10 @@ p '🧠 Mémoire partagée Jarvis ↔ Hermès installée.'
             appendLine("  api_server:")
             appendLine("    enabled: true")
             appendLine("    port: $PORT_API")
-            // Découverte progressive : les schémas MCP complets restent différés derrière tool_search / tool_describe / tool_call.
+            // Outils visibles directement (le relais de Jarvis choisit ceux utiles à chaque tour) : pas de découverte différée.
             appendLine("tools:")
             appendLine("  tool_search:")
-            appendLine("    enabled: \"on\"")
+            appendLine("    enabled: \"off\"")
             appendLine("    search_default_limit: 8")
             appendLine("    max_search_limit: 20")
             appendLine("    listing: \"on\"")
@@ -559,6 +559,9 @@ p "✅ Hermès installé (${'$'}{MODE})."
 
     @Volatile private var dernierSignalAvantCommande: Long = 0L
 
+    /** À incrémenter quand la configuration écrite dans ~/.hermes change : JarvisApp la réapplique alors une fois. */
+    const val VERSION_CONFIG = 3
+
     /** Synchronise l'accès au routeur IA central et le routage des agents sans copier les clés fournisseurs dans Termux. */
     fun synchroniserCles(app: JarvisApp): String {
         val s = app.store
@@ -645,7 +648,8 @@ if isinstance(legacy, list):
         url = str(entry.get('base_url') or entry.get('api') or entry.get('url') or '').strip().lower()
         return name in ('groq', 'jarvis-groq', 'custom:groq') or 'groq.com' in url or '/groq/v1' in url
     data['custom_providers'] = [entry for entry in legacy if not is_legacy_groq(entry)]
-# Force la divulgation progressive à chaque synchronisation : MCP ne doit jamais être envoyé en bloc à Groq.
+# Outils visibles directement : le relais de Jarvis ne transmet au modèle que les outils utiles à chaque tour
+# (64 avec Gemini, 18 avec Groq). La découverte différée (tool_search) ajoutait des tours et cachait les outils serveur.
 tools_cfg = data.setdefault("tools", {})
 if not isinstance(tools_cfg, dict):
     raise SystemExit("Section tools invalide ; aucune modification.")
@@ -655,7 +659,7 @@ if isinstance(search_cfg, bool):
     tools_cfg["tool_search"] = search_cfg
 if not isinstance(search_cfg, dict):
     raise SystemExit("Section tools.tool_search invalide ; aucune modification.")
-search_cfg["enabled"] = "on"
+search_cfg["enabled"] = "off"
 search_cfg["search_default_limit"] = 8
 search_cfg["max_search_limit"] = 20
 search_cfg["listing"] = "on"
@@ -837,7 +841,10 @@ data["credential_pool_strategies"] = {}
 providers["jarvis"] = {"api": os.environ["JARVIS_GROQ_RELAIS_URL"], "api_key": os.environ["JARVIS_GROQ_RELAIS_KEY"], "transport": "chat_completions"}
 if os.environ.get("JARVIS_HAS_OLLAMA") == "1":
     providers["jarvis_ollama"] = {"api": os.environ["JARVIS_OLLAMA_RELAIS_URL"], "key_env": "JARVIS_OLLAMA_RELAIS"}
-model_config = {"provider": "custom:jarvis_ollama", "default": os.environ.get("JARVIS_OLLAMA_MODEL") or "auto"} if os.environ.get("JARVIS_HAS_OLLAMA") == "1" else {"provider": "custom:jarvis", "default": "jarvis-router"}
+# Cerveau principal : TOUJOURS le routeur IA de Jarvis (Gemini / Groq…). L'Ollama du petit serveur de la maison (2 Go
+# de RAM, petit modèle) ne sait ni suivre de longues consignes ni appeler des outils de façon fiable : il ne sert plus
+# que de sous-agent local et de tout dernier secours, jamais de cerveau.
+model_config = {"provider": "custom:jarvis", "default": "jarvis-router"}
 data["model"] = model_config
 # Contrôle de cohérence du secret local réellement consommé par Hermes.
 # api_key est volontairement inline : c'est un jeton local dérivé, pas une clé Groq fournisseur.
@@ -846,7 +853,7 @@ if groq_cfg.get("api_key") != os.environ.get("JARVIS_GROQ_RELAIS_KEY") or groq_c
     raise SystemExit("Jeton du provider Jarvis absent ou incohérent ; configuration annulée.")
 if groq_cfg.get("transport") != "chat_completions":
     raise SystemExit("Transport du provider Jarvis invalide ; configuration annulée.")
-fallbacks = [] if os.environ.get("JARVIS_HAS_OLLAMA") != "1" else [{"provider": "custom:jarvis", "model": "jarvis-router"}]
+fallbacks = [{"provider": "custom:jarvis_ollama", "model": os.environ.get("JARVIS_OLLAMA_MODEL") or "auto"}] if os.environ.get("JARVIS_HAS_OLLAMA") == "1" else []
 data["fallback_providers"] = fallbacks
 delegation["max_concurrent_children"] = 1
 delegation["max_spawn_depth"] = 1
@@ -856,7 +863,7 @@ model_map["options"] = [
 ]
 if os.environ.get("JARVIS_HAS_OLLAMA") == "1":
     model_map["options"].append({"name": "jarvis-ollama", "description": "Modèle local du serveur via le relais Jarvis", "provider": "custom:jarvis_ollama", "model": os.environ.get("JARVIS_OLLAMA_MODEL") or "auto"})
-model_map["default"] = "jarvis-ollama" if os.environ.get("JARVIS_HAS_OLLAMA") == "1" else "jarvis-ai"
+model_map["default"] = "jarvis-ai"
 if os.environ.get("JARVIS_ADVANCED_DELEGATION") == "1" and delegation.get("backend", "default") in ("default", "model_map"):
     delegation["backend"] = "model_map"
 elif delegation.get("backend") == "model_map":

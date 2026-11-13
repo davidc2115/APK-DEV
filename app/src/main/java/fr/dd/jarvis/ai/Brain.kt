@@ -271,6 +271,7 @@ class Brain(
             Prompts.brain(userName(), avecDate = false) + (if (societeNeeded) "\n\n" + fr.dd.jarvis.societe.SocieteTools.PROMPT else "") +
                 app.memo.pourPrompt() + app.memo.hermesPourPrompt() + app.memo.capacitesPourPrompt() + notesUtiles +
                 (if (plan != null && plan.note.isNotBlank()) "\n\nAnalyse préalable de la demande (Gemini) — suis ce plan, avec les outils fournis : ${plan.note}" else "") +
+                runCatching { fr.dd.jarvis.hermes.ServeurInventaire.bloc(app, texteUser) }.getOrDefault("") +
                 runCatching { fr.dd.jarvis.device.Contexte.consigne(fr.dd.jarvis.device.Contexte.actuel(app)) }.getOrDefault("") +
                 "\n\nDate et heure actuelles : ${Prompts.now()}."))
         // Réduction de tokens sans perte de précision : seuls les derniers échanges (où un détail précis — liste de fichiers,

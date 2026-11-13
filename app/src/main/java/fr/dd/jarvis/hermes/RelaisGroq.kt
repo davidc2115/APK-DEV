@@ -180,6 +180,20 @@ object RelaisGroq {
 
     private fun mots(s: String) = Regex("[\\p{L}\\p{N}]{4,}").findAll(s.lowercase()).map { it.value }.toSet()
 
+    /** Familles d'outils Jarvis concernées par la demande (préfixes), même si ses mots ne figurent pas dans leurs descriptions. */
+    internal fun domaines(demande: String): Set<String> {
+        val t = demande.lowercase()
+        val out = mutableSetOf<String>()
+        if (Regex("serveur|\\bssh\\b|debian|docker|conteneur|systemctl|\\bservices?\\b|\\bbot\\b|plex|ollama|discord|home ?assistant|\\blogs?\\b|red[ée]marr|\\bapt\\b|mise à jour du serveur").containsMatchIn(t))
+            out += listOf("ssh_", "serveur_")
+        if (Regex("home ?assistant|domotique|\\bha\\b|lumi[èe]re|volet|chauffage|thermostat|po[êe]le|capteur|entit[ée]|automatisation|sc[èe]ne|prise").containsMatchIn(t)) out += "ha_"
+        if (Regex("plex|films?\\b|s[ée]ries? t[ée]l[ée]|biblioth[èe]que (de )?films").containsMatchIn(t)) out += "plex"
+        if (Regex("discord|\\bbot\\b|salon|serveur discord").containsMatchIn(t)) out += "discord"
+        if (Regex("freebox|\\bbox\\b").containsMatchIn(t)) out += listOf("freebox", "box_")
+        if (Regex("r[ée]seau|wi-?fi|\\bip\\b|imprimante|appareils? connect").containsMatchIn(t)) out += listOf("reseau_", "appareil", "ip_publique", "imprim")
+        return out
+    }
+
     /** Garde les outils pertinents pour la demande en cours (et ceux déjà appelés), descriptions abrégées. */
     private fun reduireOutils(outils: JSONArray?, messages: JSONArray, p: Palier): JSONArray? {
         if (outils == null || outils.length() == 0) return null
@@ -190,20 +204,23 @@ object RelaisGroq {
         val tourEnCours = appels(if (dernierUser >= 0) src.subList(dernierUser, src.size) else src)
         val avant = appels(if (dernierUser > 0) src.subList(0, dernierUser).takeLast(p.historique) else emptyList())
         val demande = mots(if (dernierUser >= 0) contenu(src[dernierUser]) else "")
+        val domaines = domaines(if (dernierUser >= 0) contenu(src[dernierUser]) else "")
         val contexte = mots(src.filter { it.optString("role") in setOf("user", "tool") }.takeLast(3).joinToString(" ") { contenu(it).take(1500) })
         val liste = (0 until outils.length()).mapNotNull { outils.optJSONObject(it) }
         val classes = liste.sortedByDescending { t ->
             val f = t.optJSONObject("function") ?: JSONObject()
             val nom = f.optString("name")
             val m = mots(nom.replace('_', ' ') + " " + f.optString("description").take(400))
-            val score = 3 * m.count { it in demande } + m.count { it in contexte }
+            val canon = nom.removePrefix("mcp_jarvis_")
+            val score = 3 * m.count { it in demande } + m.count { it in contexte } +
+                (if (domaines.any { canon.startsWith(it) || canon == it }) 40 else 0)
             when {
                 nom in tourEnCours -> 1000 + score
                 // Grand contexte : les outils propres d'Hermès (terminal, web, mémoire, compétences, automatismes,
                 // sous-agents…) et l'agent téléphone Jarvis restent toujours disponibles, quelle que soit la formulation.
                 p === GRAND && (!nom.startsWith("mcp_") || nom in setOf("mcp_jarvis_agent", "mcp_jarvis_notifier")) -> 300 + score
                 // Outils de découverte d'Hermès : gardent l'accès au reste du catalogue.
-                nom in setOf("tool_search", "tool_describe", "tool_call", "jarvis_rechercher_outils", "jarvis_appeler_outil") -> 500 + score
+                canon in setOf("tool_search", "tool_describe", "tool_call", "jarvis_rechercher_outils", "jarvis_appeler_outil") -> 500 + score
                 nom in avant -> 20 + score
                 else -> score
             }
