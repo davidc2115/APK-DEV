@@ -62,6 +62,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             store.lastBriefing.set("")
             persist()
         }
+        voice.muteBeeps = store.muteBeeps.value
         voice.onListening = { listening = it }
         voice.onPartial = { partial = it }
         voice.onFinal = {
@@ -111,6 +112,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         private set(v) {
             if (v == voiceSessionEtat) return
             voiceSessionEtat = v
+            // Un seul micro à la fois : pendant la conversation à l'écran, le service ne guette plus « Jarvis »
+            // (sinon les deux entendaient la même phrase : bips et réponses en double).
+            fr.dd.jarvis.service.JarvisService.suspendrePourAppli(v)
             // Musique en pause pour toute la conversation, reprise à la fin (et plus à chaque phrase).
             if (v) voice.sessionDebut() else voice.sessionFin()
         }
@@ -285,6 +289,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private fun load() { app.chatCharger() }
 
     override fun onCleared() {
+        fr.dd.jarvis.service.JarvisService.suspendrePourAppli(false)
         voice.release()
         super.onCleared()
     }

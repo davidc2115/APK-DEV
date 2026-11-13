@@ -67,6 +67,29 @@ class JarvisService : Service() {
             } catch (_: Throwable) { false }
         }
 
+        /**
+         * L'appli JARVIS (micro du chat, conversation à l'écran) prend le micro : le service suspend l'écoute du mot
+         * « Jarvis » et ignore tout réveil jusqu'à la fin — sinon les deux entendaient la même phrase (double détection,
+         * bips en double, deux réponses).
+         */
+        @Volatile var suspenduParAppli = false
+            private set
+
+        fun suspendrePourAppli(oui: Boolean) {
+            if (suspenduParAppli == oui) return
+            suspenduParAppli = oui
+            val s = actuel ?: return
+            s.main.removeCallbacks(s.finSuspension)
+            if (oui) s.main.postDelayed(s.finSuspension, 5 * 60_000L)   // filet : jamais sourd plus de 5 min
+            s.main.post {
+                if (oui) {
+                    s.main.removeCallbacks(s.relance)
+                    if (s.awake && !s.busy) { s.voice?.stopSpeaking(); s.voice?.stopListening(); s.awake = false; s.voice?.sessionFin() }
+                    s.vosk?.stop()
+                } else if (!s.awake && !s.busy) s.goIdle()
+            }
+        }
+
         /** Bouton pause de la voiture : JARVIS se tait et la conversation se referme. */
         fun interrompreDepuisVoiture() {
             val s = actuel ?: return
@@ -273,6 +296,12 @@ class JarvisService : Service() {
      */
     private fun demandeExterne(essai: Int = 0) {
         if (!running) return
+        // La voiture envoie parfois deux fois le même appui (▶ puis « jouer depuis la recherche ») : un seul bip.
+        if (essai == 0) {
+            val t = System.currentTimeMillis()
+            if (t - derniereDemandeExterne < 1500) return
+            derniereDemandeExterne = t
+        }
         if (busy) {
             voice?.stopSpeaking()
             if (essai < 6) main.postDelayed({ demandeExterne(essai + 1) }, 500)
@@ -309,15 +338,22 @@ class JarvisService : Service() {
         fr.dd.jarvis.car.ActiviteVoiture.signaler(fr.dd.jarvis.car.ActiviteVoiture.Etape.FIN)
         awake = false
         incompris = 0
+        finLe = System.currentTimeMillis()
         voice?.sessionFin()
         voice?.stopListening()
-        val v = vosk
-        if (v != null) {
+        if (suspenduParAppli) return
+        if (vosk != null) {
             // Laisse retomber l'écho de la voix de JARVIS (ou du bip) avant de réarmer l'écoute du mot « Jarvis »,
-            // sinon le micro peut se réentendre lui-même et redéclencher aussitôt.
-            main.postDelayed({ rearmer(v) }, 900)
+            // sinon le micro peut se réentendre lui-même et redéclencher aussitôt. Un seul réarmement en attente à la
+            // fois (plusieurs fins de conversation rapprochées relançaient plusieurs détecteurs).
+            main.removeCallbacks(relance)
+            main.postDelayed(relance, 900)
         } else listen()
     }
+
+    /** Fin de la dernière conversation : un « Jarvis » entendu juste après est l'écho de la voix ou du bip. */
+    private var finLe = 0L
+    private var derniereDemandeExterne = 0L
 
     /** Fin de conversation (silence) : petit carillon descendant s'il y a eu un vrai échange, puis attente de « Jarvis ». */
     private fun finConversation() {
@@ -341,7 +377,7 @@ class JarvisService : Service() {
      */
     private fun rearmer(v: fr.dd.jarvis.voice.WakeDetector) {
         main.removeCallbacks(relance)
-        if (!running || awake || busy || vosk !== v) return
+        if (!running || awake || busy || vosk !== v || suspenduParAppli) return
         if (v.start()) {
             echecsReveil = 0
             majNotification("Dis « Jarvis », attends le bip, puis ta demande")
@@ -362,6 +398,7 @@ class JarvisService : Service() {
     }
 
     private val relance = Runnable { vosk?.let { rearmer(it) } }
+    private val finSuspension = Runnable { suspendrePourAppli(false) }
 
     // ---- faux réveils : si « Jarvis » se déclenche tout seul (télé, conversation), le détecteur devient plus strict.
     private val fauxReveils = ArrayDeque<Long>()
@@ -381,9 +418,10 @@ class JarvisService : Service() {
 
     /** « Jarvis » entendu : bip montant puis écoute immédiate de la demande (plus de « Oui ? » parlé qui fait attendre). */
     private fun onWakeWord() {
-        if (!running || awake || busy) return
+        if (!running || awake || busy || suspenduParAppli) return
         val maintenant = System.currentTimeMillis()
         if (maintenant - dernierReveil < 2500) return   // écho du bip / de la voix de JARVIS pris pour « Jarvis »
+        if (dernierReveil != 0L && maintenant - finLe < 1500) return   // écho de la fin de réponse / du bip de fin
         dernierReveil = maintenant
         garderEveille(true)
         // Connexion à l'IA préparée pendant que tu parles (évite la poignée de main TLS au moment de la demande).

@@ -55,7 +55,8 @@ class VoiceManager(private val ctx: Context) {
     var duplex = true
 
     private var muted = false
-    private val beepStreams = intArrayOf(AudioManager.STREAM_NOTIFICATION, AudioManager.STREAM_SYSTEM, AudioManager.STREAM_MUSIC)
+    // Bips du reconnaisseur de Google : flux système / notification (et accessibilité sur certains téléphones).
+    private val beepStreams = intArrayOf(AudioManager.STREAM_NOTIFICATION, AudioManager.STREAM_SYSTEM, AudioManager.STREAM_ACCESSIBILITY, AudioManager.STREAM_MUSIC)
 
     private fun setMuted(on: Boolean) {
         if (!muteBeeps || muted == on) return
@@ -126,8 +127,16 @@ class VoiceManager(private val ctx: Context) {
      */
     fun ecouterConversation(silenceMs: Long) {
         fenetreFin = System.currentTimeMillis() + silenceMs.coerceAtLeast(2000)
+        relancesMuettes = 0
         demarrer(0)
     }
+
+    /**
+     * Relances du reconnaisseur dans la même fenêtre d'écoute. Chaque relance redémarre le reconnaisseur de Google, qui
+     * joue son propre bip (surtout en Bluetooth / Android Auto, où il n'est pas toujours coupé) : au-delà de 2, on
+     * referme plutôt que d'enchaîner les bips comme si JARVIS se déclenchait plusieurs fois.
+     */
+    private var relancesMuettes = 0
 
     /** [essai] : relances automatiques sur les erreurs transitoires (service vocal déconnecté…), puis repli sur la reconnaissance locale. */
     private fun demarrer(essai: Int) {
@@ -161,14 +170,15 @@ class VoiceManager(private val ctx: Context) {
                     if (!actif()) return
                     main.removeCallbacks(finFenetre)
                     // 11 = service de reconnaissance déconnecté, 5 = erreur client, 10 = trop de requêtes, 8 = occupé : on recrée et on relance
-                    if (error in setOf(11, 5, 10, 8, SpeechRecognizer.ERROR_SERVER) && essai < 3) {
-                        main.postDelayed({ if (moi == jeton) demarrer(essai + 1) }, 500L * (essai + 1))
+                    // (2 essais au plus, espacés : un reconnaisseur recréé trop vite répond « occupé » et rebipe.)
+                    if (error in setOf(11, 5, 10, 8, SpeechRecognizer.ERROR_SERVER) && essai < 2) {
+                        main.postDelayed({ if (moi == jeton) demarrer(essai + 1) }, 800L * (essai + 1))
                         return
                     }
                     val silence = error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
                     if (fenetreFin > 0 && silence && !parole) {
                         // Le reconnaisseur abandonne avant la fin du délai de conversation : on le relance sans bruit.
-                        if (System.currentTimeMillis() < fenetreFin - 400) { demarrer(0); return }
+                        if (System.currentTimeMillis() < fenetreFin - 400 && relancesMuettes++ < 2) { demarrer(0); return }
                         finirSilence(); return
                     }
                     fenetreFin = 0
@@ -190,7 +200,7 @@ class VoiceManager(private val ctx: Context) {
                     if (entendu.isNotBlank() && estEcho(entendu)) {
                         // Jarvis s'est réentendu (voix renvoyée par l'autoradio) : on ignore et on continue d'écouter.
                         main.removeCallbacks(finFenetre)
-                        if (fenetreFin > 0 && System.currentTimeMillis() < fenetreFin - 400) { onPartial(""); demarrer(0); return }
+                        if (fenetreFin > 0 && System.currentTimeMillis() < fenetreFin - 400 && relancesMuettes++ < 2) { onPartial(""); demarrer(0); return }
                         fenetreFin = 0
                         main.postDelayed(unmuteLater, 900)
                         signalerEcoute(false)
