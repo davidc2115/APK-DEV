@@ -425,6 +425,7 @@ class JarvisService : Service() {
 
     private fun process(cmd: String) {
         if (fr.dd.jarvis.securite.TelephoneSecurise.estDemande(cmd)) { deverrouillerALaVoix(); return }
+        fr.dd.jarvis.device.CommandeMedia.intention(cmd) { fr.dd.jarvis.device.CommandeMedia.musiqueOuverte(this) }?.let { musique(cmd, it); return }
         busy = true; echangeReel = true
         garderEveille(true)
         scope.launch {
@@ -452,8 +453,9 @@ class JarvisService : Service() {
                 app.chatAjouter(assistantMessage)
                 if (app.enVoiture) {
                     CarBridge.ajouter(assistantMessage)
-                    // Rend aussi la réponse disponible dans le canal de messagerie Android Auto.
-                    CarBridge.post(this@JarvisService, reply)
+                    // Rend aussi la réponse disponible dans le canal de messagerie Android Auto — SANS alerte : JARVIS vient de
+                    // la dire ; une alerte faisait annoncer / relire le message par Android Auto (double voix, musique coupée).
+                    CarBridge.post(this@JarvisService, reply, silencieux = true)
                 }
             }
             notifier(cmd, reply)
@@ -464,6 +466,39 @@ class JarvisService : Service() {
                 // radio ou la suite de sa propre réponse ; il suffit de redire « Jarvis » pour une nouvelle demande.
                 relancer = awake && (voice?.sortieExterne() != true || reply.trimEnd().endsWith("?"))
                 flux?.finir(reply) ?: run { busy = false }
+            }
+        }
+    }
+
+    /**
+     * Commande de musique à la voix : exécutée tout de suite, sans IA, sans Hermès ni agent, et sans phrase parlée (un bip
+     * suffit) — la musique ne se fait plus couper par la réponse de JARVIS. « Pause » : la musique mise en pause pour
+     * l'écoute ne repart pas à la fin. Lecture / suivant / précédent : envoyés une fois le micro et la voix libérés.
+     */
+    private fun musique(cmd: String, a: fr.dd.jarvis.device.CommandeMedia.Action) {
+        val app = application as JarvisApp
+        val info = a == fr.dd.jarvis.device.CommandeMedia.Action.INFO
+        fun noter(rep: String) {
+            app.chatAjouter(ChatMsg(true, cmd)); app.chatAjouter(ChatMsg(false, rep))
+            if (app.enVoiture) { CarBridge.ajouter(ChatMsg(true, cmd)); CarBridge.ajouter(ChatMsg(false, rep)) }
+            fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS
+        }
+        when {
+            info -> {
+                busy = true
+                val rep = fr.dd.jarvis.device.CommandeMedia.executer(this, a, app.enVoiture)
+                noter(rep)
+                voice?.speak(fr.dd.jarvis.voice.TexteParle.preparer(rep)) { busy = false; goIdle() } ?: run { busy = false; goIdle() }
+            }
+            a == fr.dd.jarvis.device.CommandeMedia.Action.PAUSE -> {
+                JarvisNotificationListener.oublierPauseVoix()
+                val rep = fr.dd.jarvis.device.CommandeMedia.executer(this, a, app.enVoiture)
+                noter(rep); voice?.carillon(montant = false); goIdle()
+            }
+            else -> {
+                voice?.carillon(montant = false); goIdle()
+                // Après la fin de session (focus audio rendu, musique mise en pause pour l'écoute relancée) : la commande.
+                main.postDelayed({ noter(fr.dd.jarvis.device.CommandeMedia.executer(this, a, app.enVoiture)) }, 850)
             }
         }
     }

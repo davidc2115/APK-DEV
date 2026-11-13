@@ -934,7 +934,8 @@ class ToolBox(
                 } else ToolResult(r, direct = true)
             }
         }
-        "controle_media" -> ToolResult(app.phone.mediaKey(a.optString("action")))
+        "controle_media" -> ToolResult(fr.dd.jarvis.device.CommandeMedia.depuisOutil(a.optString("action"))?.let { fr.dd.jarvis.device.CommandeMedia.executer(app, it, app.enVoiture) }
+            ?: app.phone.mediaKey(a.optString("action")))
         "naviguer" -> {
             // En voiture : Android Auto lance son propre GPS (Waze / Maps de la voiture), sans question ni écran du téléphone.
             if (app.enVoiture && a.optString("destination").isNotBlank()) {

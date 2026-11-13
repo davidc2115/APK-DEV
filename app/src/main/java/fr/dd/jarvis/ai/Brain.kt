@@ -45,6 +45,14 @@ class Brain(
                 return r
             }
         }
+        // Musique (« reprends la musique », « pause », « chanson suivante »…) : réflexe immédiat, sans IA ni Hermès.
+        if (!pourHermes) history.lastOrNull()?.takeIf { it.fromUser }?.let { m ->
+            fr.dd.jarvis.device.CommandeMedia.intention(m.text) { fr.dd.jarvis.device.CommandeMedia.musiqueOuverte(app) }?.let { a ->
+                fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS
+                onStatus("🎵 Musique")
+                return fr.dd.jarvis.device.CommandeMedia.executer(app, a, app.enVoiture)
+            }
+        }
         // Routine déclenchée par une phrase (« Jarvis, je pars ») : toutes ses actions d'un coup.
         if (!pourHermes) history.lastOrNull()?.takeIf { it.fromUser }?.let { m ->
             fr.dd.jarvis.device.Routines.parPhrase(app, m.text)?.let { r ->
@@ -111,7 +119,8 @@ class Brain(
         return cloud ?: "Ça va bien, merci ! Et toi, comment se passe ta journée ?"
     }
 
-    private fun escaladePossible(pourHermes: Boolean, suivi: Suivi) = !pourHermes && !suivi.hermesEssaye &&
+    // En voiture, pas de relais automatique vers Hermès (jusqu'à 35 s d'attente de plus au volant) : Jarvis répond.
+    private fun escaladePossible(pourHermes: Boolean, suivi: Suivi) = !pourHermes && !suivi.hermesEssaye && !app.enVoiture &&
         app.store.hermesMode.value in setOf("auto", "tout") && !fr.dd.jarvis.hermes.Hermes.degrade()
 
     private suspend fun repondre(history: List<ChatMsg>, pourHermes: Boolean, onStatus: (String) -> Unit, suivi: Suivi, onTexte: ((String) -> Unit)? = null): String {
@@ -262,7 +271,11 @@ class Brain(
         val sansAnalyse = pourHermes || fr.dd.jarvis.hermes.Routeur.commandeSimple(texteUser)
         // Notes pertinentes et analyse de la demande EN MÊME TEMPS (avant : l'une après l'autre, jusqu'à 2,5 s de perdues).
         val (notesUtiles, plan) = kotlinx.coroutines.coroutineScope {
-            val notes = async(kotlinx.coroutines.Dispatchers.IO) { runCatching { fr.dd.jarvis.device.NotesPertinentes.pour(app, texteUser) }.getOrDefault("") }
+            // En voiture : on n'attend pas plus d'une demi-seconde les notes (chaque seconde compte au volant).
+            val notes = async(kotlinx.coroutines.Dispatchers.IO) { runCatching {
+                if (app.enVoiture) kotlinx.coroutines.withTimeoutOrNull(500) { fr.dd.jarvis.device.NotesPertinentes.pour(app, texteUser) }.orEmpty()
+                else fr.dd.jarvis.device.NotesPertinentes.pour(app, texteUser)
+            }.getOrDefault("") }
             val analyse = async {
                 // L'analyse Gemini n'est utile que pour une vraie orchestration multiétape.
                 // Pour une demande simple, schemaFor() sélectionne localement les outils : un appel IA complet économisé.

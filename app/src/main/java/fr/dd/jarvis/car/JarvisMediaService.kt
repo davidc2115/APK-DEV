@@ -197,7 +197,7 @@ class JarvisMediaService : MediaBrowserService() {
         parentId == ONGLET_RACCOURCIS -> mutableListOf<MediaBrowser.MediaItem>().apply {
             RaccourcisVoiture.liste(app).forEachIndexed { i, r -> add(element(RACCOURCI + i, r, icone = "auto_eclair")) }
             add(element(RELIRE, "🔁 Relire la dernière réponse", derniereReponse().take(80), "auto_relire"))
-            add(element(MUSIQUE, "🎵 Reprendre la musique", "YT Music Morphe", "auto_musique"))
+            add(element(MUSIQUE, "🎵 Reprendre la musique", "Dernière appli de musique", "auto_musique"))
         }
         else -> mutableListOf()
     }
@@ -351,7 +351,9 @@ class JarvisMediaService : MediaBrowserService() {
 
     private fun etat(e: Int) = PlaybackState.Builder()
         .setActions(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE or
-            PlaybackState.ACTION_STOP or PlaybackState.ACTION_PLAY_FROM_MEDIA_ID or PlaybackState.ACTION_PLAY_FROM_SEARCH)
+            PlaybackState.ACTION_STOP or PlaybackState.ACTION_PLAY_FROM_MEDIA_ID or PlaybackState.ACTION_PLAY_FROM_SEARCH or
+            // ⏭ / ⏮ (écran ou volant) quand JARVIS est la source affichée : transmis à l'appli de musique.
+            PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS)
         .addCustomAction(PlaybackState.CustomAction.Builder(ACT_PARLER, "Parler à JARVIS", R.drawable.ic_auto_micro).build())
         .addCustomAction(PlaybackState.CustomAction.Builder(ACT_WAZE, "Prochain rendez-vous dans Waze", R.drawable.ic_auto_route).build())
         .addCustomAction(PlaybackState.CustomAction.Builder(ACT_RELIRE, "Relire la dernière réponse", R.drawable.ic_auto_relire).build())
@@ -474,8 +476,10 @@ class JarvisMediaService : MediaBrowserService() {
                 id == PARLER -> if (autoDemarrage()) session.setPlaybackState(etat(PlaybackState.STATE_PAUSED)) else parler()
                 id == RELIRE -> relire()
                 id == MUSIQUE -> {
-                    val c = fr.dd.jarvis.device.MusiqueBibliotheque.controleur(this@JarvisMediaService, fr.dd.jarvis.device.Musique.MORPHE_PACKAGE)
-                    if (c != null) c.transportControls.play() else lire("🎵 Musique", "Aucune musique de YT Music Morphe à reprendre : demande-moi un titre.", "auto_musique")
+                    // N'importe quelle appli de musique (Spotify, YT Music, Deezer…) : sa session, jamais celle de JARVIS.
+                    val r = fr.dd.jarvis.device.CommandeMedia.executer(this@JarvisMediaService, fr.dd.jarvis.device.CommandeMedia.Action.PLAY, voiture = true)
+                    if (!r.startsWith("▶️")) lire("🎵 Musique", r, "auto_musique")
+                    else session.setPlaybackState(etat(PlaybackState.STATE_PAUSED))
                 }
                 id.startsWith(LIRE_JOUR) -> lireJour(id.removePrefix(LIRE_JOUR))
                 id.startsWith(EVT) -> jouerEvenement(id.removePrefix(EVT), null)
@@ -507,6 +511,14 @@ class JarvisMediaService : MediaBrowserService() {
                 session.setPlaybackState(etat(PlaybackState.STATE_PAUSED)); return
             }
             parler()
+        }
+
+        override fun onSkipToNext() {
+            fr.dd.jarvis.device.CommandeMedia.executer(this@JarvisMediaService, fr.dd.jarvis.device.CommandeMedia.Action.NEXT, voiture = true)
+        }
+
+        override fun onSkipToPrevious() {
+            fr.dd.jarvis.device.CommandeMedia.executer(this@JarvisMediaService, fr.dd.jarvis.device.CommandeMedia.Action.PREVIOUS, voiture = true)
         }
 
         override fun onPause() {

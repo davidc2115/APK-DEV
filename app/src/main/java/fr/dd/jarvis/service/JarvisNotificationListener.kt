@@ -35,6 +35,9 @@ class JarvisNotificationListener : NotificationListenerService() {
             enLecture.isNotEmpty()
         }.getOrDefault(false)
 
+        /** « Mets en pause » demandé pendant la conversation : la musique ne doit PAS repartir à la fin de la conversation. */
+        @Synchronized fun oublierPauseVoix() { sessionsPauseesPourVoix = emptyList() }
+
         /** Reprend uniquement les sessions que Jarvis avait mises en pause et qui sont toujours en pause. */
         @Synchronized fun reprendreMediaApresVoix() {
             val sessions = sessionsPauseesPourVoix
