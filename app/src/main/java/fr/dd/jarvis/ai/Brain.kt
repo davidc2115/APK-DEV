@@ -149,6 +149,10 @@ class Brain(
                 onStatus("📱 Réglage du mode du téléphone…")
                 return reflexe(fr.dd.jarvis.device.ModeTelephone.appliquer(app, modeTel))
             }
+            fr.dd.jarvis.securite.Systemes.parPhrase(app, texteUser)?.let { (s, activer) ->
+                onStatus(if (activer) "🛡️ Activation de « ${s.nom} »…" else "🛡️ Désactivation de « ${s.nom} »…")
+                return reflexe(tools.execute("systeme_securite", org.json.JSONObject().put("action", if (activer) "activer" else "desactiver").put("nom", s.nom)).text)
+            }
             if (commandeMode && !cibleTelephone) {
                 val mode = when {
                     Regex("\\b(eco(nomie)?|economique)\\b").containsMatchIn(demandeMode) -> "eco"

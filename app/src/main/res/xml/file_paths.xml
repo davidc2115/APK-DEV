@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <cache-path name="share" path="share/" />
+    <cache-path name="mms" path="mms/" />
     <files-path name="images" path="images/" />
     <files-path name="exports" path="exports/" />
     <files-path name="videos_ia" path="videos_ia/" />

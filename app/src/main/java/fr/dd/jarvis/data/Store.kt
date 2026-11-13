@@ -170,6 +170,10 @@ class Store(context: Context) {
     val sshHostDistant = SPref("sshHostDistant", "")
     val sshPortDistant = SPref("sshPortDistant", "")
     /** Dernier relevé SSH des services du serveur (Docker, systemd, pm2…) et sa date (ms) : fiche « infrastructure » d'Hermès. */
+    /** Code de l'écran de verrouillage (déverrouillage à la voix du mode « téléphone sécurisé ») et code de l'alarme
+     *  Home Assistant : uniquement dans le stockage chiffré, jamais dans la conversation. */
+    val codeDeverrouillage = SecretPref("codeDeverrouillage")
+    val codeAlarmeHa = SecretPref("codeAlarmeHa")
     val serveurServices = SPref("serveurServices", "")
     val serveurServicesLe = SPref("serveurServicesLe", "0")
     // ---- Box internet (disque dur USB)

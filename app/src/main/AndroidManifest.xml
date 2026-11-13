@@ -32,6 +32,7 @@
     <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Anti-vol : l'alarme sonne même en mode « Ne pas déranger » (accès accordé par l'utilisateur) et vibre -->
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
@@ -220,6 +221,16 @@
             android:name=".service.JarvisService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <!-- Surveillance de la maison (systèmes de sécurité) : abonnement aux capteurs Home Assistant, photos par MMS. -->
+        <service
+            android:name=".securite.SurveillanceMaison"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Surveillance de la maison choisie par l'utilisateur : alerte et photos quand une personne est détectée" />
+        </service>
 
         <provider
             android:name="androidx.core.content.FileProvider"

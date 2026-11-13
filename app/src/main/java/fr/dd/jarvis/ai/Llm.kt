@@ -266,11 +266,19 @@ class Llm(private val store: Store) {
 
     suspend fun testGeminiKeys(): List<String> = store.geminiKeys.toList().map { k ->
         if (KeyRing.estCleOpenAi(k)) return@map mask(k) + " : ⚠️ CLÉ OPENAI — non envoyée à Gemini"
-        mask(k) + " : " + try {
-            val t0 = System.currentTimeMillis(); gemini.ping(k); "✅ OK (${System.currentTimeMillis() - t0} ms)"
-        } catch (e: Exception) {
-            "❌ " + (e.message ?: "erreur").take(90)
-        }
+        mask(k) + " : " + testerGemini(k)
+    }
+
+    /** Test d'une clé Gemini sur le point d'accès du chat (celui de Jarvis et d'Hermès) ; succès = clé réhabilitée. */
+    private suspend fun testerGemini(k: String): String = try {
+        val t0 = System.currentTimeMillis()
+        val modele = geminiChat.ping(k)
+        geminiRing.effacer(k)
+        "✅ OK (${System.currentTimeMillis() - t0} ms)" + (if (modele != store.geminiModel.value) " — modèle « ${store.geminiModel.value} » non ouvert à cette clé : « $modele » utilisé à la place" else "")
+    } catch (e: ApiException) {
+        "❌ " + KeyRing.motif(e.code, e.message.orEmpty())
+    } catch (e: Exception) {
+        "❌ " + (e.message ?: "erreur").take(120)
     }
 
 
@@ -324,17 +332,9 @@ class Llm(private val store: Store) {
                     resultats.add(false to "Gemini #${i + 1} (${mask(key)}) — ⚠️ FORMAT OPENAI : clé conservée, exclue des appels Gemini")
                     continue
                 }
-                verifier("Gemini #${i + 1} (${mask(key)})") {
-                    val modele = store.geminiModel.value
-                    try {
-                        gemini.ping(key)
-                        "✅ VALIDÉ — clé, modèle « $modele » et appel de test acceptés"
-                    } catch (e: ApiException) {
-                        if (e.code != 400 && e.code != 404) throw e
-                        val modeles = gemini.listModels(key)
-                        "⚠️ CLÉ ACCEPTÉE — ${modeles.size} modèles accessibles, mais le modèle configuré « $modele » est refusé"
-                    }
-                }
+                // Point d'accès réellement utilisé par Jarvis et Hermès ; le motif exact de Google est affiché en cas d'échec.
+                val r = testerGemini(key)
+                resultats.add(r.startsWith("✅") to "Gemini #${i + 1} (${mask(key)}) — " + r.replace("✅ OK", "✅ VALIDÉ"))
             }
         }
 

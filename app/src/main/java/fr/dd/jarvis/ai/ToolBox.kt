@@ -420,6 +420,23 @@ class ToolBox(
         put(tool("hermes_deleguer", "Confie à Hermès (agent autonome : recherche web, analyse, rédaction, code, tâches en plusieurs étapes, automatismes, serveur/SSH, ses notes, skills, plugins et sa mémoire long terme) une tâche que tes outils ne couvrent pas, ou une information que tu n'as pas (identifiants, réglages, historique). À utiliser plutôt que de répondre « je ne peux pas » ou de redemander une information à l'utilisateur. Décris la tâche complète et le résultat attendu.",
             mapOf("tache" to prop("La tâche détaillée, avec tout le contexte utile.")), listOf("tache")))
         put(tool("ma_position", "Donne la position GPS actuelle du téléphone (fix frais, format Google Maps) et l'ADRESSE PRÉCISE correspondante (numéro, rue, code postal, ville). Pour enregistrer cette position sur une fiche client, utilise client_ecrire avec site_gps = « ma position » (et site_adresse = « ma position » pour l'adresse)."))
+        put(tool("systeme_securite", "SYSTÈMES / MODES de JARVIS créés et réglés à la demande : « installe le mode téléphone sécurisé » (veille + verrouillage, déverrouillage par la voix du propriétaire), « installe le mode maison sécurisée » (serrures, volets, alarme Home Assistant ; détection de personne → photos des caméras → notification Home Assistant avec image + MMS aux numéros), ou un système personnalisé. Permet d'installer, lister, consulter, activer, désactiver, modifier (numéros, caméras, capteurs, téléphones notifiés, sirène, étapes, phrases) et supprimer. Ne demande JAMAIS un code (écran, alarme) dans la conversation : il se saisit dans Réglages › Sécurité › Systèmes.",
+            mapOf(
+                "action" to prop("lister | installer | consulter | activer | desactiver | modifier | supprimer"),
+                "nom" to prop("Nom du système (« maison sécurisée », « téléphone sécurisé », ou nom choisi)."),
+                "modele" to prop("Pour installer : telephone_securise | maison_securisee | personnalise."),
+                "destinataires" to prop("Numéros ou contacts recevant les photos par MMS, séparés par « ; ». Préfixe « - » pour retirer (« -Marie »)."),
+                "cameras" to prop("Entités camera.* à photographier, séparées par « ; » (préfixe « - » pour retirer)."),
+                "capteurs" to prop("Entités binary_sensor.* de détection de personne / mouvement (préfixe « - » pour retirer)."),
+                "notifier" to prop("Services notify.mobile_app_* des téléphones (appli Home Assistant) à prévenir (préfixe « - » pour retirer)."),
+                "sirenes" to prop("Entités siren.* (préfixe « - » pour retirer)."),
+                "etapes_activation" to prop("Étapes à ajouter à l'activation, séparées par « ; » : « ha:domaine.service:entite1,entite2 », « telephone:verrouiller », « sms:texte », ou une demande en français. Préfixe « - » pour retirer une étape (texte ou service)."),
+                "etapes_desactivation" to prop("Même format, pour la désactivation."),
+                "phrases_activation" to prop("Phrases qui activent le système, séparées par « ; » (préfixe « - » pour retirer)."),
+                "phrases_desactivation" to prop("Phrases qui le désactivent (préfixe « - » pour retirer)."),
+                "options" to prop("Réglages « cle=oui|non » séparés par « ; » : sirene_detection, notifications_ha, mms."),
+                "nouveau_nom" to prop("Nouveau nom (modifier).")
+            ), listOf("action")))
         put(tool("telephone_mode_energie", "Règle le MODE D'ALIMENTATION DU TÉLÉPHONE lui-même — économie d'énergie (économiseur de batterie), équilibré ou performance — directement par le système, sans piloter l'écran ; « etat » indique le mode actuel. À NE PAS confondre avec le mode de fonctionnement de l'application Jarvis.",
             mapOf("mode" to prop("economie, equilibre, performance ou etat.")), listOf("mode")))
         put(tool("phone_health_report", "Produit un diagnostic local en lecture seule du téléphone : batterie, température, stockage, RAM, réseau, Shizuku, accessibilité, notifications, alarmes exactes, optimisation batterie, service vocal et présence d'un rapport de plantage. N'affiche aucune donnée personnelle ni aucun secret.", mapOf("detail" to prop("Optionnel : bref, complet (défaut) ou historique des mesures locales."))))
@@ -532,6 +549,7 @@ class ToolBox(
             runCatching { java.time.LocalDate.parse(a.optString("date").trim().take(10)) }.getOrNull(),
             a.optString("jours").trim().toIntOrNull(), a.optString("tous").trim().lowercase() in setOf("true", "oui", "1"),
             a.optString("forcer").trim().lowercase() in setOf("true", "oui", "1")) { texte -> confirm(texte, false) })
+        "systeme_securite" -> systemeSecurite(a)
         "telephone_mode_energie" -> ToolResult(fr.dd.jarvis.device.ModeTelephone.appliquer(app, a.optString("mode").ifBlank { "etat" }))
         "delete_event" -> deleteEvent(a)
         "set_event_color" -> setEventColor(a)
@@ -2256,6 +2274,114 @@ class ToolBox(
             return ToolResult("Action refusée par l'utilisateur.")
         }
         return ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.perform(action, value) })
+    }
+
+    /** Systèmes de JARVIS (téléphone sécurisé, maison sécurisée, personnalisés) : tout se règle à la demande. */
+    private suspend fun systemeSecurite(a: JSONObject): ToolResult {
+        val action = fr.dd.jarvis.societe.core.normaliser(a.optString("action")).replace(' ', '_')
+        val nom = a.optString("nom").trim()
+        fun liste(cle: String) = a.optString(cle).split(';', '\n').map { it.trim() }.filter { it.isNotBlank() }
+        /** Ajouts et retraits (« -x ») appliqués à une liste existante. */
+        fun maj(l: List<String>, cle: String, normaliser: (String) -> String = { it }): List<String> {
+            var r = l
+            for (x in liste(cle)) {
+                if (x.startsWith("-")) { val v = normaliser(x.drop(1).trim()); r = r.filterNot { fr.dd.jarvis.securite.Systemes.norm(it) == fr.dd.jarvis.securite.Systemes.norm(v) || fr.dd.jarvis.securite.Systemes.norm(it).contains(fr.dd.jarvis.securite.Systemes.norm(v)) } }
+                else { val v = normaliser(x); if (r.none { fr.dd.jarvis.securite.Systemes.norm(it) == fr.dd.jarvis.securite.Systemes.norm(v) }) r = r + v }
+            }
+            return r
+        }
+        fun etape(x: String): fr.dd.jarvis.securite.Systemes.Etape {
+            val p = x.split(':', limit = 3).map { it.trim() }
+            return when (p[0].lowercase()) {
+                "ha" -> fr.dd.jarvis.securite.Systemes.Etape("ha", p.getOrElse(1) { "" }, p.getOrElse(2) { "" }.split(',').map { it.trim() }.filter { it.isNotBlank() })
+                "telephone" -> fr.dd.jarvis.securite.Systemes.Etape("telephone", p.getOrElse(1) { "verrouiller" })
+                "sms" -> fr.dd.jarvis.securite.Systemes.Etape("message", texte = x.substringAfter(':').trim())
+                else -> fr.dd.jarvis.securite.Systemes.Etape("jarvis", texte = x)
+            }
+        }
+        fun majEtapes(l: List<fr.dd.jarvis.securite.Systemes.Etape>, cle: String): List<fr.dd.jarvis.securite.Systemes.Etape> {
+            var r = l
+            for (x in liste(cle)) {
+                if (x.startsWith("-")) { val v = fr.dd.jarvis.securite.Systemes.norm(x.drop(1)); r = r.filterNot { e -> fr.dd.jarvis.securite.Systemes.norm(e.cible + " " + e.texte + " " + fr.dd.jarvis.securite.Systemes.libelle(e)).contains(v) } }
+                else r = r + etape(x)
+            }
+            return r
+        }
+        fun oui(v: String) = fr.dd.jarvis.securite.Systemes.norm(v) in setOf("oui", "true", "1", "on", "active")
+        return when (action) {
+            "lister", "liste" -> ToolResult(fr.dd.jarvis.securite.Systemes.presenterTous(app))
+            "installer", "creer" -> {
+                val modele = a.optString("modele").trim().ifBlank {
+                    val n = fr.dd.jarvis.securite.Systemes.norm(nom)
+                    when { n.contains("telephone") || n.contains("portable") -> "telephone_securise"; n.contains("maison") || n.contains("domicile") -> "maison_securisee"; else -> "personnalise" }
+                }
+                var (s, note) = when (modele) {
+                    "telephone_securise" -> fr.dd.jarvis.securite.Systemes.nouveauTelephone() to "Ta voix sera vérifiée (empreinte vocale) avant chaque déverrouillage."
+                    "maison_securisee" -> try { fr.dd.jarvis.securite.Systemes.nouvelleMaison(app, nom.ifBlank { "Maison sécurisée" }) } catch (e: Exception) {
+                        return ToolResult("❌ Home Assistant ne répond pas (${e.message?.take(200)}) : impossible de trouver les serrures, volets, alarmes et caméras. Vérifie Réglages › Maison › Serveur.") }
+                    else -> fr.dd.jarvis.securite.Systemes.Systeme(id = fr.dd.jarvis.securite.Systemes.norm(nom.ifBlank { "Système" }).replace(' ', '_').take(30), nom = nom.ifBlank { "Système" }, viaHa = false, viaMms = false) to ""
+                }
+                fr.dd.jarvis.securite.Systemes.trouver(app, s.nom)?.takeIf { it.id == s.id }?.let { ancien ->
+                    // Réinstallation : on garde ce que l'utilisateur a déjà réglé.
+                    s = s.copy(destinataires = ancien.destinataires.ifEmpty { s.destinataires }, actif = ancien.actif, automationHa = ancien.automationHa)
+                }
+                s = s.copy(destinataires = maj(s.destinataires, "destinataires"), cameras = maj(s.cameras, "cameras"), capteurs = maj(s.capteurs, "capteurs"),
+                    notifierHa = maj(s.notifierHa, "notifier") { if (it.startsWith("notify.")) it else "notify.$it" }, sirenes = maj(s.sirenes, "sirenes"),
+                    activation = majEtapes(s.activation, "etapes_activation"), desactivation = majEtapes(s.desactivation, "etapes_desactivation"),
+                    phrasesActiver = maj(s.phrasesActiver, "phrases_activation"), phrasesDesactiver = maj(s.phrasesDesactiver, "phrases_desactivation"))
+                val (s2, noteHa) = runCatching { fr.dd.jarvis.securite.Systemes.synchroniserHa(app, s) }.getOrElse { s to "⚠️ Automatisation Home Assistant non créée : ${it.message?.take(160)}" }
+                fr.dd.jarvis.securite.Systemes.sauver(app, s2)
+                val manque = buildList {
+                    if (modele == "telephone_securise" && !fr.dd.jarvis.voice.EmpreinteVocale.prete(app)) add("🎤 Enregistre ton empreinte vocale (Réglages › Sécurité › Empreinte vocale) : sans elle, pas de déverrouillage à la voix.")
+                    if (modele == "telephone_securise" && runCatching { app.store.codeDeverrouillage.value }.getOrDefault("").isBlank()) add("🔢 Saisis le code de l'écran dans Réglages › Sécurité › Systèmes pour un déverrouillage complet à la voix (sinon il restera l'empreinte digitale).")
+                    if (modele == "maison_securisee" && s2.destinataires.isEmpty()) add("📱 Dis-moi à quels numéros envoyer les photos par MMS (« ajoute le numéro de Marie au mode maison sécurisée »).")
+                }
+                ToolResult("✅ Système installé.\n" + listOf(note, noteHa).filter { it.isNotBlank() }.joinToString("\n") + "\n\n" + fr.dd.jarvis.securite.Systemes.presenter(s2) +
+                    (if (manque.isNotEmpty()) "\n\nÀ faire :\n" + manque.joinToString("\n") { "- $it" } else ""))
+            }
+            "consulter", "voir" -> ToolResult(fr.dd.jarvis.securite.Systemes.trouver(app, nom)?.let { fr.dd.jarvis.securite.Systemes.presenter(it) } ?: fr.dd.jarvis.securite.Systemes.presenterTous(app))
+            "activer" -> {
+                val s = fr.dd.jarvis.securite.Systemes.trouver(app, nom) ?: return ToolResult("Système « $nom » introuvable.\n" + fr.dd.jarvis.securite.Systemes.presenterTous(app))
+                ToolResult(fr.dd.jarvis.securite.Systemes.activer(app, s, this))
+            }
+            "desactiver" -> {
+                val s = fr.dd.jarvis.securite.Systemes.trouver(app, nom) ?: return ToolResult("Système « $nom » introuvable.\n" + fr.dd.jarvis.securite.Systemes.presenterTous(app))
+                if (!confirm("${fr.dd.jarvis.securite.Systemes.QUESTION} « ${s.nom} » ?", true)) return ToolResult("Désactivation refusée : « ${s.nom} » reste actif.")
+                ToolResult(fr.dd.jarvis.securite.Systemes.desactiver(app, s, this))
+            }
+            "supprimer" -> {
+                val s = fr.dd.jarvis.securite.Systemes.trouver(app, nom) ?: return ToolResult("Système « $nom » introuvable.")
+                if (!confirm("${fr.dd.jarvis.securite.Systemes.QUESTION} « ${s.nom} » et le supprimer ?", true)) return ToolResult("Suppression annulée.")
+                if (s.actif) fr.dd.jarvis.securite.Systemes.desactiver(app, s, this)
+                if (s.automationHa.isNotBlank()) runCatching { fr.dd.jarvis.ai.Serveur.ha(app, "POST", "/api/services/automation/turn_off", JSONObject().put("entity_id", s.automationHa)) }
+                fr.dd.jarvis.securite.Systemes.retirer(app, s.id)
+                ToolResult("🗑️ Système « ${s.nom} » supprimé." + if (s.automationHa.isNotBlank()) " (Son automatisation Home Assistant ${s.automationHa} est désactivée ; supprime-la dans Home Assistant si tu n'en veux plus.)" else "")
+            }
+            "modifier", "configurer", "regler" -> {
+                var s = fr.dd.jarvis.securite.Systemes.trouver(app, nom) ?: return ToolResult("Système « $nom » introuvable.\n" + fr.dd.jarvis.securite.Systemes.presenterTous(app))
+                val avant = s
+                s = s.copy(nom = a.optString("nouveau_nom").trim().ifBlank { s.nom },
+                    destinataires = maj(s.destinataires, "destinataires"), cameras = maj(s.cameras, "cameras"), capteurs = maj(s.capteurs, "capteurs"),
+                    notifierHa = maj(s.notifierHa, "notifier") { if (it.startsWith("notify.")) it else "notify.$it" }, sirenes = maj(s.sirenes, "sirenes"),
+                    activation = majEtapes(s.activation, "etapes_activation"), desactivation = majEtapes(s.desactivation, "etapes_desactivation"),
+                    phrasesActiver = maj(s.phrasesActiver, "phrases_activation"), phrasesDesactiver = maj(s.phrasesDesactiver, "phrases_desactivation"))
+                for (o in liste("options")) {
+                    val (k, v) = o.split('=', limit = 2).map { it.trim() }.let { (it.getOrElse(0) { "" }) to (it.getOrElse(1) { "oui" }) }
+                    when (fr.dd.jarvis.securite.Systemes.norm(k).replace(' ', '_')) {
+                        "sirene_detection", "sirene" -> s = s.copy(sireneSurDetection = oui(v))
+                        "notifications_ha", "via_ha", "ha" -> s = s.copy(viaHa = oui(v))
+                        "mms", "via_mms" -> s = s.copy(viaMms = oui(v))
+                    }
+                }
+                val noteHa = if (s.capteurs != avant.capteurs || s.cameras != avant.cameras || s.notifierHa != avant.notifierHa || s.sirenes != avant.sirenes ||
+                    s.sireneSurDetection != avant.sireneSurDetection || s.viaHa != avant.viaHa || s.nom != avant.nom)
+                    runCatching { fr.dd.jarvis.securite.Systemes.synchroniserHa(app, s) }.getOrElse { s to "⚠️ Automatisation Home Assistant non mise à jour : ${it.message?.take(160)}" }.let { (n, t) -> s = n; t } else ""
+                fr.dd.jarvis.securite.Systemes.sauver(app, s)
+                fr.dd.jarvis.securite.SurveillanceMaison.actualiser(app)
+                ToolResult("✅ « ${s.nom} » mis à jour." + (if (noteHa.isNotBlank()) "\n$noteHa" else "") + "\n\n" + fr.dd.jarvis.securite.Systemes.presenter(s))
+            }
+            else -> ToolResult("Action inconnue « ${a.optString("action")} ». Choix : lister, installer, consulter, activer, desactiver, modifier, supprimer.")
+        }
     }
 
     private suspend fun runShell(a: JSONObject): ToolResult {

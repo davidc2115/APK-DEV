@@ -157,6 +157,20 @@ class MainActivity : ComponentActivity() {
 
 
     /** Réponse à une confirmation depuis la bannière système, même si une autre application était affichée. */
+    /** « Jarvis, déverrouille » (voix vérifiée) sans code enregistré : réveille l'écran et affiche empreinte / visage / code. */
+    private fun handleDeverrouiller(i: android.content.Intent?) {
+        if (i?.action != fr.dd.jarvis.securite.TelephoneSecurise.ACTION_DEVERROUILLER) return
+        i.action = null
+        if (android.os.Build.VERSION.SDK_INT >= 27) {
+            setShowWhenLocked(true); setTurnScreenOn(true)
+            (getSystemService(KEYGUARD_SERVICE) as android.app.KeyguardManager).requestDismissKeyguard(this, object : android.app.KeyguardManager.KeyguardDismissCallback() {
+                override fun onDismissSucceeded() { setShowWhenLocked(false) }
+                override fun onDismissCancelled() { setShowWhenLocked(false) }
+                override fun onDismissError() { setShowWhenLocked(false) }
+            })
+        }
+    }
+
     private fun handleConfirmation(i: android.content.Intent?) {
         if (i?.action != fr.dd.jarvis.service.ConfirmationNotification.ACTION) return
         vm.answerConfirm(i.getBooleanExtra(fr.dd.jarvis.service.ConfirmationNotification.EXTRA_OK, false))
@@ -187,6 +201,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        handleDeverrouiller(intent)
         handleConfirmation(intent)
         handleListen(intent)
         handleSharedVideo(intent)
@@ -247,6 +262,7 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
         )
         val app = application as JarvisApp
+        handleDeverrouiller(intent)
         handleConfirmation(intent)
         if (app.store.wakeOn.value && !fr.dd.jarvis.service.JarvisService.running &&
             checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED

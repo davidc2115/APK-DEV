@@ -1482,6 +1482,9 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 Text("Suppressions, envois de mails et SMS, paiements, redémarrages : après ton « oui », JARVIS demande ton empreinte. À la voix, ces actions ne passent que si le téléphone est déverrouillé.", color = HudDim, fontSize = 11.sp)
             }
         },
+        VoletReglages("securite", "systemes", "Systèmes de sécurité", "systeme securite mode telephone securise maison securisee alarme camera mms deverrouillage voix code") {
+            fr.dd.jarvis.ui.SystemesPanel(app, onAsk)
+        },
         VoletReglages("securite", "coffre", "Coffre-fort", "coffre-fort serveur sauvegarde societe donnees salaries recuperation") {
             fr.dd.jarvis.ui.CoffrePanel(app)
         },

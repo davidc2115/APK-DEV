@@ -61,13 +61,21 @@ class KeyRing(private val keys: () -> List<String>) {
 
     /** Clés refusées par le fournisseur (401/403 : invalides, révoquées, compte suspendu) → quand. */
     private val refusees = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    /** Dernier motif d'erreur réel de chaque clé (« 403 · Your API key was reported as leaked »). */
+    private val raisons = java.util.concurrent.ConcurrentHashMap<String, String>()
 
-    /** Clés refusées dans les 6 dernières heures, masquées (« gsk_…a1b2 »), pour l'écran de réglages. */
+    /** Clés refusées dans les 6 dernières heures, masquées (« gsk_…a1b2 ») avec le motif donné par le fournisseur. */
     fun refuseesMasquees(): List<String> {
         val limite = System.currentTimeMillis() - 6 * 3_600_000L
         val l = keys().filter { it.isNotBlank() }
-        return l.filter { (refusees[it] ?: 0L) > limite }.map { k -> "n°${l.indexOf(k) + 1} (${k.take(4)}…${k.takeLast(4)})" }
+        return l.filter { (refusees[it] ?: 0L) > limite }.map { k -> "n°${l.indexOf(k) + 1} (${k.take(4)}…${k.takeLast(4)})" + (raisons[k]?.let { " : $it" } ?: "") }
     }
+
+    /** Dernier motif d'erreur de [key] (null si la clé n'a pas échoué depuis son dernier succès). */
+    fun raison(key: String): String? = raisons[key]
+
+    /** Test réussi (Réglages) : la clé n'est plus considérée comme refusée ni en pause. */
+    fun effacer(key: String) { refusees.remove(key); cooldown.remove(key); raisons.remove(key) }
 
     fun pausedCount(): Int {
         val now = System.currentTimeMillis()
@@ -105,10 +113,29 @@ class KeyRing(private val keys: () -> List<String>) {
             return ms.toLong()
         }
 
+        /** Motifs propres à la CLÉ (invalide, expirée, suspendue, signalée comme divulguée, API coupée sur le projet). */
+        private val CLE_INVALIDE = Regex("API_KEY_INVALID|api.?key.*(not valid|invalid|expired)|invalid.*api.?key|CONSUMER_SUSPENDED|has been suspended|" +
+            "API_KEY_SERVICE_BLOCKED|reported as leaked|leaked|SERVICE_DISABLED|has not been used in project|is disabled|revoked|organization.*restricted", RegexOption.IGNORE_CASE)
+        /** 403 lié à la REQUÊTE (modèle non ouvert à ce projet, région, ressource) : la clé elle-même reste bonne. */
+        private val REFUS_REQUETE = Regex("caller does not have permission|model|not found|not supported|unsupported|location|region|country|resource", RegexOption.IGNORE_CASE)
+
+        /** La clé elle-même est refusée (et pas seulement cette requête). */
+        internal fun cleRefusee(code: Int, message: String): Boolean = code == 401 ||
+            ((code == 400 || code == 403) && CLE_INVALIDE.containsMatchIn(message)) ||
+            (code == 403 && !REFUS_REQUETE.containsMatchIn(message))
+
+        /** Motif lisible d'une erreur API (« 403 · Your API key was reported as leaked… »). */
+        internal fun motif(code: Int, message: String): String {
+            val m = Regex("\"message\"\\s*:\\s*\"([^\"]{1,220})").find(message)?.groupValues?.get(1)
+                ?: message.substringAfter(" : ", message).replace(Regex("\\s+"), " ").take(160)
+            return "$code · ${m.trim().take(160)}"
+        }
+
         /** Pause d'une clé après une erreur (testable) : ce que demande le fournisseur, bornée entre 5 s et 24 h. */
         internal fun pause(code: Int, message: String, maintenant: Long = System.currentTimeMillis()): Long? {
-            if (code == 401 || code == 403) return 10 * 60_000L
-            if (code == 400 && Regex("api.?key.*(not valid|invalid)|invalid.*api.?key|API_KEY_INVALID", RegexOption.IGNORE_CASE).containsMatchIn(message)) return 6 * 60 * 60_000L
+            if (code == 401) return 10 * 60_000L
+            if (code == 403) return if (CLE_INVALIDE.containsMatchIn(message)) 6 * 60 * 60_000L else if (cleRefusee(code, message)) 10 * 60_000L else 60_000L
+            if (code == 400 && CLE_INVALIDE.containsMatchIn(message)) return 6 * 60 * 60_000L
             if (code >= 500) return 15_000L
             if (code != 429) return null
             val demande = ATTENTE.find(message)?.groupValues?.get(1)?.let { duree(it) }?.takeIf { it > 0 }
@@ -145,12 +172,13 @@ class KeyRing(private val keys: () -> List<String>) {
             try {
                 val result = block(key)
                 next = (i + 1) % list.size
-                cooldown.remove(key); refusees.remove(key)
+                cooldown.remove(key); refusees.remove(key); raisons.remove(key)
                 return result
             } catch (e: ApiException) {
                 last = e
                 if (e.code == 429) quotas.addLast(System.currentTimeMillis())
-                if (e.code == 401 || e.code == 403 || (e.code == 400 && Regex("api.?key.*(not valid|invalid)|invalid.*api.?key|API_KEY_INVALID", RegexOption.IGNORE_CASE).containsMatchIn(e.message.orEmpty()))) refusees[key] = System.currentTimeMillis()
+                if (e.code != 429) raisons[key] = motif(e.code, e.message.orEmpty())
+                if (cleRefusee(e.code, e.message.orEmpty())) refusees[key] = System.currentTimeMillis()
                 val p = pause(e.code, e.message.orEmpty()) ?: throw e
                 cooldown[key] = System.currentTimeMillis() + p
             }

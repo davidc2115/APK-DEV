@@ -185,16 +185,75 @@ internal fun sansChampsGemini(messages: JSONArray): JSONArray {
  * épuisées, avant Cloudflare. Mêmes clés Gemini que les agents, en rotation (anneau partagé : une clé épuisée ici l'est
  * aussi pour les agents, et inversement).
  */
+/**
+ * Modèle Gemini utilisable PAR CLÉ : certaines clés (comptes / projets différents) n'ont pas accès au modèle choisi
+ * dans les Réglages et Google répond 403 / 404 alors que la clé est valide. On retient alors, pour cette clé seulement,
+ * le meilleur modèle qu'elle peut utiliser (6 h), au lieu de la déclarer « refusée ».
+ */
+object GeminiModeles {
+    private val parCle = java.util.concurrent.ConcurrentHashMap<String, Pair<String, Long>>()
+    private val PREFERES = listOf("gemini-3.8-flash", "gemini-3.6-flash", "gemini-flash-latest", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash")
+
+    fun pour(key: String, defaut: String): String = parCle[key]?.takeIf { it.second > System.currentTimeMillis() }?.first ?: defaut
+
+    /** Erreur due au modèle (pas à la clé). */
+    fun modeleInaccessible(code: Int, message: String): Boolean = when (code) {
+        404 -> true
+        403 -> !KeyRing.cleRefusee(code, message)
+        400 -> Regex("model.*(not found|not supported|unavailable|does not exist)|is not found for API version", RegexOption.IGNORE_CASE).containsMatchIn(message)
+        else -> false
+    }
+
+    /** Meilleur autre modèle accessible à cette clé (liste demandée à Google), retenu 6 h. */
+    fun secours(key: String, refuse: String): String? = runCatching {
+        val req = Request.Builder().url("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200").header("x-goog-api-key", key).build()
+        val modeles = Http.fast.newCall(req).execute().use { r ->
+            if (!r.isSuccessful) return@runCatching null
+            val arr = JSONObject(r.body?.string().orEmpty()).optJSONArray("models") ?: return@runCatching null
+            (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
+                .filter { it.optJSONArray("supportedGenerationMethods")?.toString()?.contains("generateContent") == true }
+                .map { it.optString("name").removePrefix("models/") }
+                .filter { id -> id != refuse && listOf("image", "tts", "live", "audio", "embed", "robotics", "veo", "imagen").none { id.contains(it, true) } }
+        }
+        (PREFERES.firstOrNull { it in modeles } ?: modeles.filter { it.contains("flash") && !it.contains("exp") }.maxOrNull())
+            ?.also { parCle[key] = it to System.currentTimeMillis() + 6 * 3_600_000L }
+    }.getOrNull()
+}
+
 class GeminiChatClient(private val ring: KeyRing, private val model: () -> String) {
     private val url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 
     fun disponible() = ring.count() > 0
 
     suspend fun chat(messages: JSONArray, tools: JSONArray?, out: Int = 2048, forceText: Boolean = false): JSONObject =
-        ring.run { key -> withContext(Dispatchers.IO) { call(key, messages, tools, out, forceText, true) } }
+        ring.run { key -> withContext(Dispatchers.IO) { appel(key, messages, tools, out, forceText) } }
 
-    private fun call(key: String, messages: JSONArray, tools: JSONArray?, out: Int, forceText: Boolean, reflexionReduite: Boolean): JSONObject {
-        val mdl = model().ifBlank { "gemini-2.5-flash" }.removePrefix("models/")
+    /** Test réel d'une clé sur ce point d'accès (celui qu'utilisent Jarvis et Hermès), en une réponse très courte. */
+    suspend fun ping(key: String): String = withContext(Dispatchers.IO) {
+        val m = appel(key, JSONArray().put(JSONObject().put("role", "user").put("content", "Réponds juste : ok")), null, 256, false)
+        if (m.optString("content").isBlank() && m.optJSONArray("tool_calls") == null) throw ApiException(502, "Gemini : réponse vide")
+        GeminiModeles.pour(key, model().ifBlank { "gemini-2.5-flash" }.removePrefix("models/"))
+    }
+
+    /**
+     * Appel avec ses replis : autre façon de présenter la clé (en-tête Google au lieu de « Bearer ») si Google refuse
+     * l'authentification, puis autre modèle si celui des Réglages n'est pas ouvert à cette clé.
+     */
+    private fun appel(key: String, messages: JSONArray, tools: JSONArray?, out: Int, forceText: Boolean): JSONObject {
+        val principal = GeminiModeles.pour(key, model().ifBlank { "gemini-2.5-flash" }.removePrefix("models/"))
+        var erreur: ApiException
+        try { return call(key, principal, messages, tools, out, forceText, true, true) } catch (e: ApiException) { erreur = e }
+        if (erreur.code == 401 || erreur.code == 403) {
+            try { return call(key, principal, messages, tools, out, forceText, true, false) } catch (e: ApiException) { erreur = e }
+        }
+        if (GeminiModeles.modeleInaccessible(erreur.code, erreur.message.orEmpty())) {
+            val autre = GeminiModeles.secours(key, principal) ?: throw erreur
+            return call(key, autre, messages, tools, out, forceText, true, true)
+        }
+        throw erreur
+    }
+
+    private fun call(key: String, mdl: String, messages: JSONArray, tools: JSONArray?, out: Int, forceText: Boolean, reflexionReduite: Boolean, bearer: Boolean): JSONObject {
         val body = JSONObject().put("model", mdl).put("messages", messagesPourGemini(messages)).put("temperature", 0.4)
             // La réflexion de Gemini compte dans les jetons de sortie : marge pour que la réponse ne soit pas coupée.
             .put("max_tokens", out.coerceIn(256, 2048))
@@ -204,9 +263,10 @@ class GeminiChatClient(private val ring: KeyRing, private val model: () -> Strin
             mdl.contains("2.5") && !mdl.contains("pro") -> body.put("reasoning_effort", "none")
             mdl.contains("gemini-3") -> body.put("reasoning_effort", "low")
         }
-        val req = Request.Builder().url(url).header("Authorization", "Bearer $key").post(body.toString().toRequestBody(Http.JSON)).build()
+        val req = Request.Builder().url(url).apply { if (bearer) header("Authorization", "Bearer $key") else header("x-goog-api-key", key) }
+            .post(body.toString().toRequestBody(Http.JSON)).build()
         val (code, text) = Http.client.newCall(req).execute().use { it.code to it.body?.string().orEmpty() }
-        if (code == 400 && reflexionReduite && Regex("reasoning|think", RegexOption.IGNORE_CASE).containsMatchIn(text)) return call(key, messages, tools, out, forceText, false)
+        if (code == 400 && reflexionReduite && Regex("reasoning|think", RegexOption.IGNORE_CASE).containsMatchIn(text)) return call(key, mdl, messages, tools, out, forceText, false, bearer)
         if (code !in 200..299) throw ApiException(code, "Gemini $code : ${text.take(300)}")
         val racine = runCatching { JSONObject(if (text.trimStart().startsWith("[")) JSONArray(text).getJSONObject(0).toString() else text) }
             .getOrElse { throw ApiException(502, "Gemini : réponse illisible") }
@@ -316,7 +376,13 @@ class GeminiChatClient(private val ring: KeyRing, private val model: () -> Strin
 class GeminiClient(private val ring: KeyRing, private val model: () -> String) {
 
     suspend fun generate(system: String, user: String): String =
-        ring.run { key -> withContext(Dispatchers.IO) { call(key, system, user, 2048) } }
+        ring.run { key -> withContext(Dispatchers.IO) {
+            val principal = GeminiModeles.pour(key, model())
+            try { call(key, system, user, 2048, m = principal) } catch (e: ApiException) {
+                if (!GeminiModeles.modeleInaccessible(e.code, e.message.orEmpty())) throw e
+                call(key, system, user, 2048, m = GeminiModeles.secours(key, principal) ?: throw e)
+            }
+        } }
 
     /** Analyse une image (description, lecture de texte dedans, etc.) avec un modèle Gemini multimodal. */
     suspend fun analyserImage(bytes: ByteArray, mimeType: String, question: String): String =
@@ -389,10 +455,9 @@ class GeminiClient(private val ring: KeyRing, private val model: () -> String) {
         }
     }
 
-    private fun call(key: String, system: String, user: String, maxTokens: Int, thinkingOff: Boolean = true): String {
+    private fun call(key: String, system: String, user: String, maxTokens: Int, thinkingOff: Boolean = true, m: String = model()): String {
         val gen = JSONObject().put("temperature", 0.3).put("maxOutputTokens", maxTokens.coerceIn(8, 2048))
         if (thinkingOff) {
-            val m = model()
             when {
                 m.contains("2.5") -> gen.put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
                 m.contains("gemini-3") -> gen.put("thinkingConfig", JSONObject().put("thinkingLevel", "minimal"))
@@ -408,13 +473,13 @@ class GeminiClient(private val ring: KeyRing, private val model: () -> String) {
             body.put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
         }
         val req = Request.Builder()
-            .url("https://generativelanguage.googleapis.com/v1beta/models/${model()}:generateContent")
+            .url("https://generativelanguage.googleapis.com/v1beta/models/$m:generateContent")
             .header("x-goog-api-key", key)
             .post(body.toString().toRequestBody(Http.JSON))
             .build()
         val (code, text) = Http.fast.newCall(req).execute().use { it.code to it.body?.string().orEmpty() }
         // Certains modèles refusent le réglage de réflexion : on réessaie sans.
-        if (code == 400 && thinkingOff && text.contains("think", ignoreCase = true)) return call(key, system, user, maxTokens, false)
+        if (code == 400 && thinkingOff && text.contains("think", ignoreCase = true)) return call(key, system, user, maxTokens, false, m)
         if (code !in 200..299) throw ApiException(code, "Gemini $code : ${text.take(300)}")
         val cands = JSONObject(text).optJSONArray("candidates")
         val parts = cands?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")

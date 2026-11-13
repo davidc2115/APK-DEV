@@ -157,6 +157,20 @@ class JarvisApp : Application() {
             runCatching { fr.dd.jarvis.car.VisibiliteAuto.arreterAncienneReinstallation(this) }
             runCatching { fr.dd.jarvis.car.VisibiliteAuto.appliquerMode(this) }
         }.start()
+        runCatching {
+            val f = android.content.IntentFilter(android.content.Intent.ACTION_USER_PRESENT)
+            val r = object : android.content.BroadcastReceiver() {
+                override fun onReceive(c: android.content.Context, i: android.content.Intent) {
+                    Thread { runCatching {
+                        fr.dd.jarvis.securite.Systemes.liste(this@JarvisApp).filter { it.actif && it.modele == "telephone_securise" }
+                            .forEach { fr.dd.jarvis.securite.Systemes.sauver(this@JarvisApp, it.copy(actif = false)) }
+                    } }.start()
+                }
+            }
+            if (android.os.Build.VERSION.SDK_INT >= 33) registerReceiver(r, f, android.content.Context.RECEIVER_NOT_EXPORTED) else registerReceiver(r, f)
+        }
+        // Surveillance de la maison par le téléphone : reprise après un redémarrage de JARVIS si un système est actif.
+        Thread { runCatching { fr.dd.jarvis.securite.SurveillanceMaison.actualiser(this) } }.start()
         // Pont MCP local (outils de Jarvis pour Hermès) : seulement si Hermès est utilisé.
         if (store.hermesMode.value != "off" && store.hermesInstalle.value) runCatching { fr.dd.jarvis.hermes.PontMcp.demarrer(this) }
         // Nouvelle configuration Hermès (modèle principal = routeur Jarvis, outils Jarvis visibles directement) :

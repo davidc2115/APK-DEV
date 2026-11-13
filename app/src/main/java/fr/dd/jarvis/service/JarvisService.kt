@@ -171,7 +171,9 @@ class JarvisService : Service() {
         tools = ToolBox(app) { q, _ ->
             // Action sensible à la voix, téléphone verrouillé : seulement si c'est TA voix (empreinte vocale),
             // sinon il faut déverrouiller le téléphone (personne d'autre ne peut la déclencher).
-            if (app.store.biometrie.value && fr.dd.jarvis.device.Securite.sensible(q) && fr.dd.jarvis.device.Securite.verrouille(this)) {
+            // Désactiver un système de sécurité téléphone verrouillé : empreinte vocale exigée même si l'option est coupée.
+            if ((app.store.biometrie.value || q.startsWith(fr.dd.jarvis.securite.Systemes.QUESTION)) &&
+                fr.dd.jarvis.device.Securite.sensible(q) && fr.dd.jarvis.device.Securite.verrouille(this)) {
                 if (fr.dd.jarvis.voice.EmpreinteVocale.prete(app)) voiceConfirm(q) && verifierMaVoix()
                 else {
                     withContext(Dispatchers.Main) { voice?.speak("C'est une action sensible : déverrouille d'abord le téléphone, puis redemande-la.") {} }
@@ -419,6 +421,7 @@ class JarvisService : Service() {
     }
 
     private fun process(cmd: String) {
+        if (fr.dd.jarvis.securite.TelephoneSecurise.estDemande(cmd)) { deverrouillerALaVoix(); return }
         busy = true; echangeReel = true
         garderEveille(true)
         scope.launch {
@@ -468,6 +471,35 @@ class JarvisService : Service() {
             .setContentTitle("« $cmd »").setContentText(plain.lineSequence().firstOrNull { it.isNotBlank() } ?: "")
             .setStyle(NotificationCompat.BigTextStyle().bigText(plain.take(3500))).setAutoCancel(true).build()
         runCatching { (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(4002, n) }
+    }
+
+    /** Déverrouillage à la voix : seulement si l'empreinte vocale reconnaît le propriétaire. */
+    private fun deverrouillerALaVoix() {
+        busy = true
+        garderEveille(true)
+        scope.launch {
+            val app = application as JarvisApp
+            val r = try {
+                when {
+                    !fr.dd.jarvis.securite.TelephoneSecurise.verrouille(app) -> {
+                        fr.dd.jarvis.securite.Systemes.liste(app).filter { it.actif && it.modele == "telephone_securise" }
+                            .forEach { fr.dd.jarvis.securite.Systemes.sauver(app, it.copy(actif = false)) }
+                        "Le téléphone est déjà déverrouillé."
+                    }
+                    !fr.dd.jarvis.voice.EmpreinteVocale.prete(app) -> {
+                        fr.dd.jarvis.securite.TelephoneSecurise.afficherDeverrouillage(app)
+                        "Je n'ai pas encore ton empreinte vocale : j'affiche le déverrouillage. Enregistre ta voix dans Réglages, Sécurité, Empreinte vocale."
+                    }
+                    verifierMaVoix() -> fr.dd.jarvis.securite.TelephoneSecurise.deverrouiller(app).also {
+                        if (!fr.dd.jarvis.securite.TelephoneSecurise.verrouille(app)) fr.dd.jarvis.securite.Systemes.liste(app)
+                            .filter { it.actif && it.modele == "telephone_securise" }.forEach { fr.dd.jarvis.securite.Systemes.sauver(app, it.copy(actif = false)) }
+                    }
+                    else -> ""   // voix non reconnue : verifierMaVoix l'a déjà dit
+                }
+            } catch (e: Throwable) { "Déverrouillage impossible : ${e.message ?: e.javaClass.simpleName}" }
+            if (r.isNotBlank()) dire(r)
+            withContext(Dispatchers.Main) { busy = false; garderEveille(false); goIdle() }
+        }
     }
 
     /** Dit [texte] et attend la fin de la phrase. */

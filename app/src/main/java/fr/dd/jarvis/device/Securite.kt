@@ -17,7 +17,7 @@ object Securite {
     // Comparé au texte sans accents ni majuscules (« REDÉMARRER » → « redemarrer »).
     private val SENSIBLE = Regex(
         "supprim|effac|vider|corbeille|envoi|envoy|mail|\\bsms\\b|message|\\bpay|\\bpaie|paiement|virement|\\bregl|" +
-            "redemarr|reboot|formater|ecras|remplac|desinstall|reinitialis|couper le wi")
+            "redemarr|reboot|formater|ecras|remplac|desinstall|reinitialis|couper le wi|systeme de securite|desarm")
 
     fun sensible(question: String) = SENSIBLE.containsMatchIn(fr.dd.jarvis.societe.core.normaliser(question))
 
