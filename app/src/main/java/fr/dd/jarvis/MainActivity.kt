@@ -125,6 +125,20 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        // Retour dans JARVIS : la confirmation en attente s'affiche dans l'application, la fenêtre flottante disparaît.
+        fr.dd.jarvis.service.ConfirmationNotification.appVisible = true
+        fr.dd.jarvis.service.ConfirmationNotification.annuler(applicationContext)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Sortie de JARVIS avec une confirmation en attente : elle passe en fenêtre flottante (ou notification).
+        fr.dd.jarvis.service.ConfirmationNotification.appVisible = false
+        vm.pendingConfirm?.let { fr.dd.jarvis.service.ConfirmationNotification.afficher(applicationContext, it) }
+    }
+
     override fun onResume() {
         super.onResume()
         appliquerModePresenceVerrouillage(
@@ -278,6 +292,8 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
                  demandeExterne: androidx.compose.runtime.MutableState<String> = androidx.compose.runtime.mutableStateOf("")) {
     val ctx = LocalContext.current
     val accent = LocalAccent.current
+    // Une seule fenêtre de confirmation, visible quel que soit l'onglet (la fenêtre flottante ne sert qu'hors de JARVIS).
+    fr.dd.jarvis.ui.ConfirmationJarvis(vm)
     // Android 13+ bloque toutes les notifications tant que l'autorisation runtime
     // n'a pas été accordée. Sans cette demande, minuteurs et chronomètre pouvaient
     // être lancés en interne tout en restant totalement invisibles.

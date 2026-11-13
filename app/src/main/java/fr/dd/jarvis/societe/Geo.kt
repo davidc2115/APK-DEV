@@ -91,6 +91,9 @@ object Geo {
     /** Coordonnées d'un repère KML : longitude,latitude,altitude (ordre imposé par la norme KML). */
     fun texteKml(p: Point) = "${f6(p.lon)},${f6(p.lat)},0"
 
+    /** Lien Waze qui lance directement le guidage vers le point. */
+    fun lienWaze(p: Point) = "https://waze.com/ul?ll=${f6(p.lat)},${f6(p.lon)}&navigate=yes"
+
     fun lienGoogleMaps(p: Point) = "https://www.google.com/maps/search/?api=1&query=${f6(p.lat)},${f6(p.lon)}"
     fun lienItineraire(p: Point) = "https://www.google.com/maps/dir/?api=1&destination=${f6(p.lat)},${f6(p.lon)}"
 

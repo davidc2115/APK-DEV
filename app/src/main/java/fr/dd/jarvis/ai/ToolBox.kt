@@ -64,9 +64,9 @@ class ToolBox(
                 "start" to prop("Début, yyyy-MM-dd'T'HH:mm (heure locale)."),
                 "end" to prop("Fin, yyyy-MM-dd'T'HH:mm. Par défaut début + 1 h."),
                 "calendar" to prop("Nom de l'agenda (optionnel)."),
-                "location" to prop("Adresse ou coordonnées du lieu (optionnel) : géocode le point. Google Agenda reçoit uniquement un lien GPS cliquable dans le champ Lieu ; l’adresse postale reste dans la description."),
+                "location" to prop("Adresse ou coordonnées du lieu (optionnel) : géocode le point. Le champ Lieu reçoit uniquement le point GPS « latitude, longitude » (compatible Waze et Google Maps) ; l’adresse postale et un lien Waze restent dans la description."),
                 "description" to prop("Notes (optionnel)."),
-                "client" to prop("Nom exact ou distinctif d’une fiche client Société : utilise l’adresse et le GPS de la bonne installation. Le champ Lieu Google Agenda ne doit contenir que le lien GPS cliquable ; l’adresse complète reste dans la description."),
+                "client" to prop("Nom exact ou distinctif d’une fiche client Société : utilise l’adresse et le GPS de la bonne installation. Le champ Lieu ne contient que le point GPS « latitude, longitude » (compatible Waze et Google Maps) ; l’adresse complète reste dans la description."),
                 "installation" to prop("Nom de l’installation du client si plusieurs ; optionnel.")
             ), listOf("title", "start")))
         put(tool("update_event", "Modifie un rendez-vous existant (identifiant visible dans le planning : #id).",
@@ -75,8 +75,17 @@ class ToolBox(
                 "title" to prop("Nouveau titre (optionnel)."),
                 "start" to prop("Nouveau début yyyy-MM-dd'T'HH:mm (optionnel)."),
                 "end" to prop("Nouvelle fin (optionnel)."),
-                "location" to prop("Nouvelle adresse ou coordonnées (optionnel) : géocode le point ; le champ Lieu Google Agenda reçoit uniquement le lien GPS cliquable et l’adresse reste dans la description.")
+                "location" to prop("Nouvelle adresse ou coordonnées (optionnel) : géocode le point ; le champ Lieu reçoit uniquement le point GPS « latitude, longitude » (compatible Waze et Google Maps) et l’adresse reste dans la description.")
             ), listOf("event_id")))
+        put(tool("agenda_lieu_gps", "Remplace le LIEU (adresse) d'un ou plusieurs rendez-vous du planning par leur POINT GPS « latitude, longitude », compatible Waze et Google Maps (« mets le point GPS Waze du rendez-vous chez X », « remplace l'adresse de mon rdv de demain par les coordonnées GPS »). Géocode l'adresse (ou prend le GPS de l'installation client si le rendez-vous la désigne), garde l'adresse d'origine et un lien Waze dans la description. Ne pilote pas l'écran.",
+            mapOf(
+                "event_id" to prop("Identifiant #id du rendez-vous (optionnel)."),
+                "recherche" to prop("Mots du titre, du lieu ou du client pour trouver le rendez-vous (optionnel)."),
+                "date" to prop("Jour, yyyy-MM-dd (optionnel ; par défaut aujourd'hui, ou les 30 prochains jours si « recherche » est donnée)."),
+                "jours" to prop("Nombre de jours à parcourir à partir de la date (optionnel)."),
+                "tous" to prop("true pour convertir TOUS les rendez-vous trouvés (sinon Jarvis demande lequel s'il y en a plusieurs)."),
+                "forcer" to prop("true pour accepter un point approximatif (centre de la commune) quand l'adresse exacte est introuvable.")
+            )))
         put(tool("set_event_color", "Change la couleur d'un rendez-vous (synchronisée avec Google Agenda). Identifiant #id visible dans le planning ; sinon cherche par titre.",
             mapOf(
                 "event_id" to prop("Identifiant(s) numérique(s), séparés par des virgules (optionnel)."),
@@ -411,6 +420,8 @@ class ToolBox(
         put(tool("hermes_deleguer", "Confie à Hermès (agent autonome : recherche web, analyse, rédaction, code, tâches en plusieurs étapes, automatismes, serveur/SSH, ses notes, skills, plugins et sa mémoire long terme) une tâche que tes outils ne couvrent pas, ou une information que tu n'as pas (identifiants, réglages, historique). À utiliser plutôt que de répondre « je ne peux pas » ou de redemander une information à l'utilisateur. Décris la tâche complète et le résultat attendu.",
             mapOf("tache" to prop("La tâche détaillée, avec tout le contexte utile.")), listOf("tache")))
         put(tool("ma_position", "Donne la position GPS actuelle du téléphone (fix frais, format Google Maps) et l'ADRESSE PRÉCISE correspondante (numéro, rue, code postal, ville). Pour enregistrer cette position sur une fiche client, utilise client_ecrire avec site_gps = « ma position » (et site_adresse = « ma position » pour l'adresse)."))
+        put(tool("telephone_mode_energie", "Règle le MODE D'ALIMENTATION DU TÉLÉPHONE lui-même — économie d'énergie (économiseur de batterie), équilibré ou performance — directement par le système, sans piloter l'écran ; « etat » indique le mode actuel. À NE PAS confondre avec le mode de fonctionnement de l'application Jarvis.",
+            mapOf("mode" to prop("economie, equilibre, performance ou etat.")), listOf("mode")))
         put(tool("phone_health_report", "Produit un diagnostic local en lecture seule du téléphone : batterie, température, stockage, RAM, réseau, Shizuku, accessibilité, notifications, alarmes exactes, optimisation batterie, service vocal et présence d'un rapport de plantage. N'affiche aucune donnée personnelle ni aucun secret.", mapOf("detail" to prop("Optionnel : bref, complet (défaut) ou historique des mesures locales."))))
         put(tool("phone_action", "Agit sur le téléphone et pilote les applications Android réellement installées. Actions : list_apps (inventaire réel), open_app, open_url, volume, wifi_on, wifi_off, wifi_connect (ouvre les réglages Wi-Fi), bluetooth_on, bluetooth_off, bluetooth_pair (ouvre les réglages Bluetooth), data_on, data_off, brightness, torch_on, torch_off, call, back, home, recents, notifications, quick_settings, lock, screenshot, read_screen, click_text, click_best_match (sélection sémantique du meilleur élément visible), type_text, scroll_down, scroll_up, tap, inspect_screen et watch_screen (arbre détaillé + journal des changements d'applications, fenêtres, clics, défilements et modifications d'interface observés en arrière-plan). Pour une tâche dans une application : list_apps si le nom est incertain, open_app, inspect_screen, interaction par étapes, puis inspect_screen/watch_screen pour vérifier et récupérer les événements récents. Le journal est alimenté en temps réel par Android lorsque l'accessibilité est active ; il ne conserve pas le texte saisi ni le contenu privé des événements. L'accessibilité JARVIS doit être active pour lire et manipuler l'interface. Les champs sécurisés, écrans protégés, validations Android et confirmations sensibles restent sous le contrôle du système ou de l'utilisateur.",
             mapOf(
@@ -516,6 +527,12 @@ class ToolBox(
         "analyser_planning_clients" -> analyserPlanningClients(a)
         "create_event" -> createEvent(a)
         "update_event" -> updateEvent(a)
+        "agenda_lieu_gps" -> ToolResult(fr.dd.jarvis.device.AgendaGps.convertir(app,
+            a.optString("event_id").trim().removePrefix("#").toLongOrNull(), a.optString("recherche").trim(),
+            runCatching { java.time.LocalDate.parse(a.optString("date").trim().take(10)) }.getOrNull(),
+            a.optString("jours").trim().toIntOrNull(), a.optString("tous").trim().lowercase() in setOf("true", "oui", "1"),
+            a.optString("forcer").trim().lowercase() in setOf("true", "oui", "1")) { texte -> confirm(texte, false) })
+        "telephone_mode_energie" -> ToolResult(fr.dd.jarvis.device.ModeTelephone.appliquer(app, a.optString("mode").ifBlank { "etat" }))
         "delete_event" -> deleteEvent(a)
         "set_event_color" -> setEventColor(a)
         "set_calendar_color" -> setCalendarColor(a)
@@ -1684,19 +1701,20 @@ class ToolBox(
         } else if (address.isNotBlank()) {
             position = fr.dd.jarvis.societe.Geo.localiser(address)
         }
-        // Google Agenda : le champ Lieu ne contient que le lien GPS ; l’adresse postale reste dans la description.
+        // Champ Lieu : uniquement le point GPS « lat, lon » (Waze et Google Maps) ; l’adresse postale reste dans la description.
         val point = position?.takeIf { it.precision.rang >= fr.dd.jarvis.societe.Geo.Precision.LIEU_DIT.rang }?.point
-        if (point != null) location = fr.dd.jarvis.societe.Geo.lienGoogleMaps(point)
+        if (point != null) location = fr.dd.jarvis.device.AgendaGps.lieu(point)
         val details = buildList {
             if (clientLabel.isNotBlank()) add("Client : $clientLabel")
             if (siteLabel.isNotBlank()) add("Installation : $siteLabel")
             if (address.isNotBlank()) add("Adresse : $address")
+            if (point != null) add("Waze : ${fr.dd.jarvis.societe.Geo.lienWaze(point)}")
             if (point == null && address.isNotBlank()) add("Point GPS non trouvé avec une précision suffisante : le champ Lieu est laissé vide.")
         }
         description = listOf(description, details.joinToString("\n")).filter { it.isNotBlank() }.joinToString("\n")
         val id = app.calendar.create(cal.id, title, start, end, location, description)
         return if (id != null) ToolResult("Événement « $title » créé le $start dans « ${app.calendar.displayName(cal)} » (#$id)." +
-            if (point != null) " Le champ Lieu contient uniquement le lien GPS cliquable ; l’adresse est dans la description."
+            if (point != null) " Le champ Lieu contient le point GPS ${fr.dd.jarvis.device.AgendaGps.lieu(point)} (Waze et Google Maps) ; l’adresse et un lien Waze sont dans la description."
             else if (address.isNotBlank()) " Adresse conservée dans la description ; aucun point GPS assez précis n’a été trouvé, le champ Lieu reste vide."
             else "")
         else ToolResult("Échec de la création.")
@@ -1711,10 +1729,9 @@ class ToolBox(
         if (rawAddress != null) {
             val position = fr.dd.jarvis.societe.Geo.localiser(rawAddress)
             val point = position?.takeIf { it.precision.rang >= fr.dd.jarvis.societe.Geo.Precision.LIEU_DIT.rang }?.point
-            gpsLocation = point?.let { fr.dd.jarvis.societe.Geo.lienGoogleMaps(it) } ?: ""
-            val lines = old.description.lines().filterNot { it.trim().startsWith("Adresse :", true) || it.trim().startsWith("Point GPS non trouvé", true) }
-            newDescription = (lines + "Adresse : $rawAddress" + if (point == null) "Point GPS non trouvé avec une précision suffisante : le champ Lieu reste vide." else "")
-                .filter { it.isNotBlank() }.joinToString("\n")
+            gpsLocation = point?.let { fr.dd.jarvis.device.AgendaGps.lieu(it) } ?: ""
+            newDescription = fr.dd.jarvis.device.AgendaGps.description(old.description, rawAddress, point) +
+                if (point == null) "\nPoint GPS non trouvé avec une précision suffisante : le champ Lieu reste vide." else ""
         }
         val ok = app.calendar.update(
             id,
@@ -1726,7 +1743,7 @@ class ToolBox(
         )
         return ToolResult(if (ok) "Événement #$id modifié." + if (rawAddress != null) {
             if (gpsLocation.isNullOrBlank()) " Adresse conservée dans la description ; aucun point GPS assez précis n’a été trouvé, le champ Lieu est vidé."
-            else " Le champ Lieu contient uniquement le lien GPS cliquable ; l’adresse est dans la description."
+            else " Le champ Lieu contient le point GPS $gpsLocation (Waze et Google Maps) ; l’adresse et un lien Waze sont dans la description."
         } else "" else "Rien à modifier ou événement introuvable.")
     }
 

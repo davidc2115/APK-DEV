@@ -275,6 +275,12 @@ fun ChatScreen(vm: ChatViewModel, store: Store, app: JarvisApp) {
         )
     }
 
+}
+
+/** Confirmation d'une action de JARVIS, affichée par-dessus n'importe quel onglet de l'application. */
+@Composable
+fun ConfirmationJarvis(vm: ChatViewModel) {
+    val accent = LocalAccent.current
     vm.pendingConfirm?.let { question ->
         AlertDialog(
             onDismissRequest = { vm.answerConfirm(false) },

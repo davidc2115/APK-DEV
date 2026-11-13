@@ -191,6 +191,9 @@ object RelaisGroq {
         if (Regex("discord|\\bbot\\b|salon|serveur discord").containsMatchIn(t)) out += "discord"
         if (Regex("freebox|\\bbox\\b").containsMatchIn(t)) out += listOf("freebox", "box_")
         if (Regex("r[ée]seau|wi-?fi|\\bip\\b|imprimante|appareils? connect").containsMatchIn(t)) out += listOf("reseau_", "appareil", "ip_publique", "imprim")
+        if (Regex("waze|gps|coordonn").containsMatchIn(t) && Regex("planning|agenda|rendez|\\brdv\\b|lieu|adresse").containsMatchIn(t)) out += listOf("agenda_lieu_gps", "get_planning")
+        if (Regex("[ée]conomiseur|mode (d.)?alimentation|(mode|performance|[ée]quilibr|[ée]conomie).{0,40}(t[ée]l[ée]phone|portable|smartphone)|(t[ée]l[ée]phone|portable|smartphone).{0,40}(mode|performance|[ée]quilibr|[ée]conomie)").containsMatchIn(t))
+            out += "telephone_mode_energie"
         return out
     }
 

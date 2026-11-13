@@ -66,11 +66,21 @@ object AgendaVoiture {
             if (k.length >= 6 && out.keys.none { it.contains(k) || k.contains(it) }) out[k] = d
         }
         val lieu = texteBrut(e.location).replace("\n", ", ").trim(' ', ',')
-        if (lieu.isNotBlank() && !PAS_UN_LIEU.containsMatchIn(lieu)) {
-            val dedans = adressesDans(lieu)
-            if (dedans.size >= 2) dedans.forEach { ajout(Destination(it, it)) } else ajout(Destination(lieu, lieu))
+        val desc = texteBrut(e.description)
+        val gps = pointGps(lieu)
+        if (gps != null) {
+            // Lieu converti en point GPS pour Waze : on y va directement, l'adresse d'origine (description) sert d'étiquette.
+            val adr = desc.lines().firstOrNull { it.trim().startsWith("Adresse :", true) }?.substringAfter(':')?.trim()?.ifBlank { null }
+                ?: adressesDans(desc).firstOrNull()
+            out[cle(lieu)] = Destination("📍 GPS — " + (adr ?: lieu), lieu)
+            adressesDans(desc).filter { adr == null || (!cle(adr).contains(cle(it)) && !cle(it).contains(cle(adr))) }.forEach { ajout(Destination(it, it)) }
+        } else {
+            if (lieu.isNotBlank() && !PAS_UN_LIEU.containsMatchIn(lieu)) {
+                val dedans = adressesDans(lieu)
+                if (dedans.size >= 2) dedans.forEach { ajout(Destination(it, it)) } else ajout(Destination(lieu, lieu))
+            }
+            adressesDans(desc).forEach { ajout(Destination(it, it)) }
         }
-        adressesDans(texteBrut(e.description)).forEach { ajout(Destination(it, it)) }
         if (out.isEmpty()) client.forEach { ajout(it) }
         return out.values.toList()
     }
@@ -79,6 +89,18 @@ object AgendaVoiture {
     fun heureParlee(ms: Long): String {
         val t = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault())
         return if (t.minute == 0) "${t.hour} h" else "${t.hour} h ${"%02d".format(t.minute)}"
+    }
+
+    /** Le texte n'est qu'un point GPS « latitude, longitude » (lieu converti pour Waze). */
+    fun pointGps(texte: String): fr.dd.jarvis.societe.Geo.Point? = texte.trim()
+        .takeIf { Regex("^-?\\d{1,2}[.,]\\d{3,}\\s*[,; ]\\s*-?\\d{1,3}[.,]\\d{3,}$").matches(it) }
+        ?.let { fr.dd.jarvis.societe.Geo.lireCoordonnees(it) }
+
+    /** Ville où se rend [d] (jamais des coordonnées lues à voix haute) ; null si inconnue. */
+    fun villeDe(d: Destination): String? {
+        val gps = pointGps(d.adresse) != null
+        val src = if (gps) d.libelle else d.adresse
+        return Regex("\\b\\d{5}\\s+([^,\\n]+)").find(src)?.groupValues?.get(1)?.trim() ?: if (gps) null else ville(src)
     }
 
     /** Ville d'une adresse (après le code postal), sinon l'adresse raccourcie. */
@@ -91,7 +113,7 @@ object AgendaVoiture {
         val n = evts.size
         return "$jour, $n rendez-vous. " + evts.joinToString(" ") { e ->
             val quand = if (e.allDay) "Toute la journée" else "À ${heureParlee(e.begin)}"
-            val ou = lieux(e).firstOrNull()?.let { ", à ${ville(it.adresse)}" }.orEmpty()
+            val ou = lieux(e).firstOrNull()?.let { villeDe(it) }?.let { ", à $it" }.orEmpty()
             "$quand, ${texteBrut(e.title).ifBlank { "sans titre" }}$ou."
         }
     }

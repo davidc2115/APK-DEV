@@ -139,7 +139,17 @@ class Brain(
         if (!pourHermes) {
             val demandeMode = fr.dd.jarvis.societe.core.normaliser(texteUser)
             val commandeMode = Regex("\\b(passe|passer|mets|mettre|active|activer|bascule|choisis|choisir|regle|regler)\\b.{0,35}\\b(mode\\s*)?(eco(nomie)?|economique|haute\\s+performance|performance|equilibre|balanced)\\b").containsMatchIn(demandeMode)
-            if (commandeMode) {
+            // Mode du TÉLÉPHONE (économiseur de batterie / équilibré / performance) : distinct du mode de Jarvis, réglé par le système.
+            val cibleTelephone = Regex("\\b(telephone|smartphone|portable|mobile|xiaomi|redmi|hyperos|economiseur|batterie du tel\\w*|mode (d )?alimentation)\\b").containsMatchIn(demandeMode)
+            val cibleJarvis = Regex("\\b(jarvis|application|appli|app|assistant)\\b").containsMatchIn(demandeMode)
+            val commandeTelephone = cibleTelephone && !cibleJarvis && (commandeMode ||
+                Regex("\\b(active|desactive|coupe|enleve|retire|allume|eteins|mets|passe)\\b.{0,25}\\beconomiseur\\b|\\b(quel|dans quel) mode\\b.{0,30}\\b(telephone|portable|smartphone)\\b|\\bmode (du|de mon) (telephone|portable|smartphone)\\b").containsMatchIn(demandeMode))
+            val modeTel = if (commandeTelephone) fr.dd.jarvis.device.ModeTelephone.lire(texteUser) else null
+            if (modeTel != null) {
+                onStatus("📱 Réglage du mode du téléphone…")
+                return reflexe(fr.dd.jarvis.device.ModeTelephone.appliquer(app, modeTel))
+            }
+            if (commandeMode && !cibleTelephone) {
                 val mode = when {
                     Regex("\\b(eco(nomie)?|economique)\\b").containsMatchIn(demandeMode) -> "eco"
                     Regex("\\b(haute\\s+performance|performance)\\b").containsMatchIn(demandeMode) -> "performance"

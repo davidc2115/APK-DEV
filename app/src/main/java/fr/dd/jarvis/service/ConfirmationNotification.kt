@@ -32,6 +32,8 @@ object ConfirmationNotification {
     private const val ID = 48120
     @Volatile private var overlay: View? = null
     @Volatile private var overlayManager: WindowManager? = null
+    /** JARVIS est affiché à l'écran (MainActivity démarrée) : sa propre fenêtre de confirmation suffit. */
+    @Volatile var appVisible = false
 
     private fun intent(context: Context, accepte: Boolean): PendingIntent {
         val i = Intent(context, MainActivity::class.java)
@@ -46,6 +48,8 @@ object ConfirmationNotification {
         // Nettoie une éventuelle confirmation précédente (notification persistante comprise) avant d'en afficher une.
         // Une seule demande utilisateur peut être visible à la fois, même si plusieurs outils travaillent en parallèle.
         annuler(context.applicationContext)
+        // Dans l'application, la fenêtre de confirmation de JARVIS est déjà affichée : pas de doublon par-dessus.
+        if (appVisible) return
         // Un seul canal visible à la fois : la fenêtre flottante est prioritaire.
         // La notification ne sert que de repli si la superposition n'est pas autorisée ou impossible.
         if (afficherOverlay(context.applicationContext, question)) return

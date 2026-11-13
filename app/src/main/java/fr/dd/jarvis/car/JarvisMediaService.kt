@@ -226,7 +226,7 @@ class JarvisMediaService : MediaBrowserService() {
         fun ligne(d: LocalDate, e: EventInfo, avant: String): MediaBrowser.MediaItem {
             val lieux = destinations(e)
             val quand = if (e.allDay) "Journée" else hm(e.begin)
-            val ville = lieux.firstOrNull()?.let { " · " + AgendaVoiture.ville(it.adresse) }.orEmpty()
+            val ville = lieux.firstOrNull()?.let { AgendaVoiture.villeDe(it) }?.let { " · $it" }.orEmpty()
             val titre = AgendaVoiture.texteBrut(e.title).replace("?", "").ifBlank { "Rendez-vous" }
             return element(EVT + cle(d, e), "$avant$quand $titre$ville".take(80), icone = if (lieux.isNotEmpty()) "auto_route" else "auto_agenda")
         }
@@ -298,7 +298,7 @@ class JarvisMediaService : MediaBrowserService() {
     private fun naviguer(d: AgendaVoiture.Destination, titre: String) {
         afficher("🧭 $titre", "Waze → ${d.adresse}", PlaybackState.STATE_BUFFERING, "auto_route")
         portee.launch {
-            val r = if (NavigationVoiture.lancer(d.adresse)) "🧭 Guidage lancé dans Android Auto vers ${d.adresse}"
+            val r = if (NavigationVoiture.lancer(d.adresse, AgendaVoiture.pointGps(d.adresse)?.let { it.lat to it.lon })) "🧭 Guidage lancé dans Android Auto vers ${d.libelle.removePrefix("📍 GPS — ")}"
             else withContext(Dispatchers.IO) {
                 runCatching {
                     val pc = PhoneControl(app)
