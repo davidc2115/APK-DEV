@@ -154,6 +154,9 @@ class Brain(
         // Changement de profil énergétique : commande locale immédiate, sans appel à Groq/Gemini/Hermès.
         // Les trois profils sont persistés puis leurs planificateurs sont recalculés immédiatement.
         if (!pourHermes) {
+            // Plusieurs actions simples dans la même phrase (« passe Jarvis en mode économie et le téléphone aussi »,
+            // « allume la torche et mets en vibreur ») : toutes exécutées ici, sans IA ni Hermès.
+            if (!fr.dd.jarvis.hermes.Routeur.orchestrationOuNomme(texteUser)) actionsCombinees(texteUser, onStatus)?.let { return reflexe(it) }
             val demandeMode = fr.dd.jarvis.societe.core.normaliser(texteUser)
             val commandeMode = Regex("\\b(passe|passer|mets|mettre|active|activer|bascule|choisis|choisir|regle|regler)\\b.{0,35}\\b(mode\\s*)?(eco(nomie)?|economique|haute\\s+performance|performance|equilibre|balanced)\\b").containsMatchIn(demandeMode)
             // Mode du TÉLÉPHONE (économiseur de batterie / équilibré / performance) : distinct du mode de Jarvis, réglé par le système.
@@ -235,20 +238,8 @@ class Brain(
                 return reflexe("Quel mode veux-tu ${if (activer) "activer" else "désactiver"} : ${noms.joinToString(" ou ") { "« $it »" }} ?")
             }
             if (commandeMode && !cibleTelephone) {
-                val mode = when {
-                    Regex("\\b(eco(nomie)?|economique)\\b").containsMatchIn(demandeMode) -> "eco"
-                    Regex("\\b(haute\\s+performance|performance)\\b").containsMatchIn(demandeMode) -> "performance"
-                    else -> "balanced"
-                }
-                app.store.modeEnergie.set(mode)
-                fr.dd.jarvis.device.Energie.appliquerMode(app)
-                val libelle = when (mode) {
-                    "eco" -> "🔋 Mode économie activé. Les tâches secondaires sont réduites, l'écoute et les commandes restent disponibles."
-                    "performance" -> "⚡ Mode haute performance activé. Jarvis privilégie la réactivité et ses traitements internes, dans les limites imposées par Android."
-                    else -> "⚖️ Mode équilibré activé. Jarvis adapte automatiquement son activité à la batterie, à la température et à la mémoire."
-                }
                 onStatus("⚙️ Changement du mode énergétique…")
-                return reflexe(libelle)
+                return reflexe(appliquerModeJarvis(modeEnergieDans(demandeMode) ?: "equilibre"))
             }
         }
         // Une procédure qu'Hermès a apprise (skill ajouté) passe avant les raccourcis de Jarvis sur le même sujet.
@@ -627,6 +618,57 @@ class Brain(
      * lampe torche, volume et luminosité chiffrés, Wi-Fi, Bluetooth, lecture/pause/suivant/précédent, verrouillage,
      * capture d'écran. Les confirmations habituelles (Wi-Fi coupé, verrouillage…) restent demandées par l'outil.
      */
+    /** Mode de fonctionnement de JARVIS (économie / équilibré / performance) : réglé tout de suite, sans IA. */
+    private fun appliquerModeJarvis(mode: String): String {
+        val m = when (mode) { "economie", "eco" -> "eco"; "performance" -> "performance"; else -> "balanced" }
+        app.store.modeEnergie.set(m)
+        fr.dd.jarvis.device.Energie.appliquerMode(app)
+        return when (m) {
+            "eco" -> "🔋 Jarvis en mode économie : les tâches secondaires sont réduites, l'écoute et les commandes restent disponibles."
+            "performance" -> "⚡ Jarvis en mode haute performance : réactivité maximale, dans les limites imposées par Android."
+            else -> "⚖️ Jarvis en mode équilibré : son activité s'adapte à la batterie, à la température et à la mémoire."
+        }
+    }
+
+    /**
+     * Plusieurs actions simples dans une même phrase : chacune reconnue SANS IA (modes de Jarvis et du téléphone, mode
+     * sonore, lampe, Wi-Fi, volume, musique…), puis toutes exécutées dans l'ordre. Si une seule partie n'est pas
+     * reconnue, rien n'est exécuté et la phrase suit le chemin habituel.
+     */
+    private suspend fun actionsCombinees(texte: String, onStatus: (String) -> Unit): String? {
+        val brut = texte.trim().replace(Regex("^(jarvis|ok|alors)[ ,]+", RegexOption.IGNORE_CASE), "")
+        val parties = decouperActions(brut)
+        if (parties.size !in 2..5) return null
+        val modeGlobal = modeEnergieDans(fr.dd.jarvis.societe.core.normaliser(brut))
+        val actions = parties.map { p -> actionLocale(p, modeGlobal) ?: return null }
+        onStatus("⚡ ${actions.size} actions…")
+        return actions.map { a -> runCatching { a() }.getOrElse { "❌ ${it.message}" } }.joinToString("\n")
+    }
+
+    /** Action locale reconnue dans une partie de phrase (rien n'est exécuté ici). */
+    private fun actionLocale(partie: String, modeGlobal: String?): (suspend () -> String)? {
+        val n = fr.dd.jarvis.societe.core.normaliser(partie)
+        fr.dd.jarvis.device.ModeSonore.intention(partie)?.let { m -> return { fr.dd.jarvis.device.ModeSonore.appliquer(app, m) } }
+        val jarvis = Regex("\\b(jarvis|application|appli|app|assistant|toi)\\b").containsMatchIn(n)
+        val telephone = Regex("\\b(telephone|smartphone|portable|mobile|tel|xiaomi|redmi|economiseur)\\b").containsMatchIn(n)
+        val parleMode = Regex("\\bmode\\b|\\beco(nomie)?\\b|economiseur|performance|equilibre").containsMatchIn(n)
+        if ((jarvis || telephone) && (parleMode || modeGlobal != null)) {
+            val m = modeEnergieDans(n) ?: modeGlobal ?: return null
+            return when {
+                telephone && !jarvis -> ({ fr.dd.jarvis.device.ModeTelephone.appliquer(app, m) })
+                jarvis && !telephone -> ({ appliquerModeJarvis(m) })
+                else -> null
+            }
+        }
+        actionImmediate(partie)?.let { (outil, action, valeur) ->
+            return { tools.execute(outil, if (outil == "controle_media") JSONObject().put("action", action) else JSONObject().put("action", action).put("value", valeur)).text }
+        }
+        fr.dd.jarvis.device.CommandeMedia.intention(partie) { fr.dd.jarvis.device.CommandeMedia.musiqueOuverte(app) }?.let { a ->
+            return { fr.dd.jarvis.device.CommandeMedia.executer(app, a, app.enVoiture) }
+        }
+        return null
+    }
+
     private suspend fun commandeImmediate(texte: String, onStatus: (String) -> Unit): String? {
         val (outil, action, valeur) = actionImmediate(texte) ?: return null
         val args = if (outil == "controle_media") JSONObject().put("action", action) else JSONObject().put("action", action).put("value", valeur)
@@ -738,6 +780,19 @@ class Brain(
             val avecClient = candidats.filter { (c, _) -> dans(c) }
             return avecClient.singleOrNull()
         }
+
+        /** « économie » / « performance » / « equilibre » nommé dans la phrase (normalisée), ou null. */
+        internal fun modeEnergieDans(n: String): String? = when {
+            Regex("\\b(eco|economie|economique|economiseur|basse consommation)\\b").containsMatchIn(n) -> "economie"
+            Regex("\\b(haute\\s+)?performances?\\b|\\bturbo\\b").containsMatchIn(n) -> "performance"
+            Regex("\\b(equilibre|normal|standard|balanced)\\b").containsMatchIn(n) -> "equilibre"
+            else -> null
+        }
+
+        /** Parties d'une phrase à plusieurs actions (« … et … », « … puis … », « …, … »). */
+        internal fun decouperActions(texte: String): List<String> =
+            texte.split(Regex("\\s*(?:[,;]|\\bet (?:aussi |puis |ensuite )?|\\bpuis\\b|\\bensuite\\b|\\bet\\b)\\s*", RegexOption.IGNORE_CASE))
+                .map { it.trim().trimEnd('.', '!', '?') }.filter { it.isNotBlank() }
 
         /** Commande immédiate reconnue sans modèle : (outil, action, valeur), ou null. */
         internal fun actionImmediate(texte: String): Triple<String, String, String>? {

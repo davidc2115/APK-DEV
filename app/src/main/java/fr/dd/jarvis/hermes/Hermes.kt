@@ -638,7 +638,9 @@ object Routeur {
             "mails?|courriels?|bo[iî]te de r[ée]ception|contacts?|r[ée]glage|" +
             "freebox|vpn|domotique|interventions?|chantiers?|installations?|position|gps|" +
             "permissions?|autorisations?|notifications?|acc[eè]s [àa]|batterie|stockage|t[ée]l[ée]charg|galerie|cam[ée]ra|" +
-            "clique|appuie|tape sur|pilote|prends? (le contr[ôo]le|la main)|regarde (mon |l.)[ée]cran|[ée]cran)",
+            "clique|appuie|tape sur|pilote|prends? (le contr[ôo]le|la main)|regarde (mon |l.)[ée]cran|[ée]cran|" +
+            "\\bmode\\b|[ée]conomi|performance|ne pas d[ée]ranger|\\bnpd\\b|silencieux|vibreur|sonnerie|mode avion|donn[ée]es mobiles|" +
+            "point d.acc[eè]s|hotspot|\\bnfc\\b|localisation|rotation|verrouill|d[ée]verrouill|t[ée]l[ée]phone|portable)",
         RegexOption.IGNORE_CASE
     )
     private val COMPLEXE = Regex(
@@ -740,6 +742,9 @@ object Routeur {
     /** Demande en plusieurs étapes enchaînées (« trouve… puis envoie… »). */
     fun multiEtapes(texte: String) = MULTI.containsMatchIn(texte) && texte.trim().split(Regex("\\s+")).size >= 5
 
+    /** Automatisme / orchestration ou Hermès nommé (sans compter le simple enchaînement « et », « puis »). */
+    fun orchestrationOuNomme(texte: String) = ORCHESTRATION.containsMatchIn(texte) || NOMME.containsMatchIn(texte)
+
     /** Demande à orchestrer (récurrence, automatisme, surveillance, sous-agents) ou adressée nommément à Hermès. */
     fun pourHermesSeul(texte: String) = ORCHESTRATION.containsMatchIn(texte) || NOMME.containsMatchIn(texte) || multiEtapes(texte)
 
@@ -836,6 +841,9 @@ object Routeur {
         // pour tout le reste Jarvis répond, et passe la main à Hermès s'il n'aboutit pas (Brain.reply).
         if (mode == "auto" || mode == "demande") return when {
             ORCHESTRATION.containsMatchIn(t) || multiEtapes(t) -> Choix(Cible.HERMES, "automatisme / plusieurs étapes : Hermès orchestre")
+            // Action simple sur le téléphone : Jarvis l'exécute lui-même (un appel d'IA avec ses outils) ; Hermès ne
+            // prend le relais que si Jarvis n'aboutit pas.
+            rapide && competenceHermes == null && commandeSimple(t) -> Choix(Cible.JARVIS, "commande simple du téléphone : Jarvis directement")
             homeAssistantApi(t) -> Choix(Cible.JARVIS, "Home Assistant : API (pas de SSH)")
             HA.containsMatchIn(t) -> Choix(Cible.HERMES, "Home Assistant côté serveur (maintenance, panne) : moteur approfondi")
             // Ce qu'Hermès faisait seul (skills ajoutés : procédures, ponts, accès…) reste chez lui.
