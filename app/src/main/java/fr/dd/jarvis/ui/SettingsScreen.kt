@@ -496,6 +496,17 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 }
                 if (vitesse.isNotBlank()) Text(vitesse, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
                 Spacer(Modifier.height(8.dp))
+                Text("IA du moteur Hermès", color = HudDim, fontSize = 12.sp)
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("gemini" to "Gemini d'abord (précis, recommandé)", "groq" to "Groq d'abord (compacté)").forEach { (id, nom) ->
+                        HudChip(nom, selected = store.relaisHermes.value == id) { store.relaisHermes.set(id) }
+                    }
+                }
+                Text("Gemini reçoit toute la demande (consignes, mémoire, notes, outils) en un appel ; Groq, limité à quelques milliers de jetons par minute, " +
+                    "ne reçoit qu'une version raccourcie et fait attendre quand son quota est atteint. Chacun sert de secours à l'autre." +
+                    (if (app.llm.fournisseurHermes.isNotBlank()) " Dernier tour : ${app.llm.fournisseurHermes}." else ""),
+                    color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+                Spacer(Modifier.height(8.dp))
                 Text("Répartition des demandes", color = HudDim, fontSize = 12.sp)
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf("tout" to "Hermès pour tout (recommandé)", "auto" to "Jarvis d'abord", "off" to "Jarvis seul").forEach { (id, nom) ->

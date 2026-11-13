@@ -378,6 +378,9 @@ class Store(context: Context) {
     val ecouteEconome = BPref("ecouteEconome", true)
     /** Mode « Hermès pour tout » : les commandes simples (appel, SMS, musique, domotique, agenda…) restent à Jarvis, plus rapide. */
     val hermesRapide = BPref("hermesRapide", true)
+    /** IA du moteur Hermès (via le relais Jarvis) : « gemini » = Gemini d'abord, requête complète (précis, sans attente de
+     *  quota) puis Groq compacté en secours ; « groq » = Groq d'abord (requêtes compactées), comme avant. */
+    val relaisHermes = SPref("relaisHermes", "gemini")
     /** Derniers passages des travaux lourds du démarrage (index du graphe, contrôle des documents), en ms. */
     val grapheIndexeLe = SPref("grapheIndexeLe", "")
     val docsVerifiesLe = SPref("docsVerifiesLe", "")

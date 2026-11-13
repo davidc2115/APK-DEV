@@ -31,6 +31,17 @@ object RelaisGroq {
     )
     private data class Palier(val budget: Int, val systeme: Int, val outils: Int, val desc: Int, val descParam: Int, val historique: Int, val texte: Int, val resultat: Int)
 
+    /**
+     * Grand contexte (Gemini : des centaines de milliers de jetons par minute, contexte d'un million) : la requête
+     * d'Hermès passe presque entière — consignes, mémoire, notes, date et outils utiles avec leurs descriptions. Avec
+     * Groq, ces consignes étaient coupées en leur milieu et les outils réduits à 18 descriptions de 130 caractères :
+     * c'est ce qui rendait les réponses lentes (quota par minute vite atteint) et imprécises.
+     */
+    private val GRAND = Palier(budget = 60_000, systeme = 32_000, outils = 64, desc = 700, descParam = 220, historique = 12, texte = 4500, resultat = 9000)
+
+    /** Requête telle qu'envoyée à Gemini (testable). */
+    internal fun pourGemini(messages: JSONArray, outils: JSONArray?): Pair<JSONArray, JSONArray?> = compacter(messages, GRAND) to reduireOutils(outils, messages, GRAND)
+
     private fun jetons(s: String) = s.length / 3
 
     fun modele(app: JarvisApp) = app.store.groqModel.value.ifBlank { "llama-3.3-70b-versatile" }
@@ -44,7 +55,18 @@ object RelaisGroq {
         val outils = corps.optJSONArray("tools")
         val sortie = corps.optInt("max_tokens", corps.optInt("max_completion_tokens", 1024)).coerceIn(256, 1200)
         val forceText = corps.optString("tool_choice") == "none"
-        if (!app.llm.groq.disponible()) return relais(app, messages, outils, forceText, ApiException(503, "Aucune clé Groq dans Jarvis."))
+        // Gemini d'abord (réglage par défaut, si Jarvis a des clés Gemini) : requête quasi complète, un seul appel, pas
+        // d'attente de quota Groq. En cas d'échec (quota, panne), Groq compacté prend le relais comme avant.
+        var geminiEchoue = false
+        if (app.store.relaisHermes.value != "groq" && app.llm.geminiChat.disponible()) {
+            try {
+                val (msgs, tls) = pourGemini(messages, outils)
+                val m = runBlocking { app.llm.geminiChat.chat(msgs, tls, maxOf(sortie, 1600), forceText) }
+                app.llm.noterFournisseurHermes("Gemini")
+                return 200 to completion(app, m, estimer(msgs, tls))
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { geminiEchoue = true }
+        }
+        if (!app.llm.groq.disponible()) return relais(app, messages, outils, forceText, ApiException(503, "Aucune clé Groq dans Jarvis."), geminiEchoue)
         var derniere: ApiException? = null
         // Palier de départ : le premier dont l'estimation tient dans le budget.
         val depart = PALIERS.indexOfFirst { p -> estimer(compacter(messages, p), reduireOutils(outils, messages, p)) <= p.budget }.let { if (it < 0) PALIERS.lastIndex else it }
@@ -54,24 +76,25 @@ object RelaisGroq {
             val tls = reduireOutils(outils, messages, p)
             try {
                 val m = runBlocking { app.llm.groq.chat(msgs, tls, sortie, forceText) }
+                app.llm.noterFournisseurHermes("Groq")
                 return 200 to completion(app, m, estimer(msgs, tls))
             } catch (e: ApiException) {
                 derniere = e
                 val tropGros = e.code == 413 || (e.code == 429 && (e.message ?: "").contains("tokens per minute", true) && (e.message ?: "").contains("Requested", true))
                 if (!tropGros) break
             } catch (e: Exception) {
-                return relais(app, messages, outils, forceText, e)
+                return relais(app, messages, outils, forceText, e, geminiEchoue)
             }
         }
-        return relais(app, messages, outils, forceText, derniere ?: ApiException(502, "Groq indisponible."))
+        return relais(app, messages, outils, forceText, derniere ?: ApiException(502, "Groq indisponible."), geminiEchoue)
     }
 
     /** Groq à court : Gemini puis Cloudflare (cf. Llm.relaisApresGroq) ; erreur pour Hermès seulement si tout échoue. */
-    private fun relais(app: JarvisApp, messages: JSONArray, outils: JSONArray?, forceText: Boolean, origine: Exception): Pair<Int, String> {
+    private fun relais(app: JarvisApp, messages: JSONArray, outils: JSONArray?, forceText: Boolean, origine: Exception, sansGemini: Boolean = false): Pair<Int, String> {
         // Cloudflare (Llama 3.3, contexte court) reçoit la requête compactée comme pour Groq.
         val compact = reduire(messages, if (forceText) null else outils, 1)
         return try {
-            val m = runBlocking { app.llm.relaisApresGroq(messages, outils, forceText, origine, compact) }
+            val m = runBlocking { app.llm.relaisApresGroq(messages, outils, forceText, origine, compact, sansGemini) }
             200 to completionDe(m, modele(app), estimer(messages, outils))
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
             val brut = (e as? ApiException)?.code ?: (origine as? ApiException)?.code ?: 502
@@ -176,6 +199,9 @@ object RelaisGroq {
             val score = 3 * m.count { it in demande } + m.count { it in contexte }
             when {
                 nom in tourEnCours -> 1000 + score
+                // Grand contexte : les outils propres d'Hermès (terminal, web, mémoire, compétences, automatismes,
+                // sous-agents…) et l'agent téléphone Jarvis restent toujours disponibles, quelle que soit la formulation.
+                p === GRAND && (!nom.startsWith("mcp_") || nom in setOf("mcp_jarvis_agent", "mcp_jarvis_notifier")) -> 300 + score
                 // Outils de découverte d'Hermès : gardent l'accès au reste du catalogue.
                 nom in setOf("tool_search", "tool_describe", "tool_call", "jarvis_rechercher_outils", "jarvis_appeler_outil") -> 500 + score
                 nom in avant -> 20 + score

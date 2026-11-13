@@ -170,9 +170,10 @@ class Llm(private val store: Store) {
      * Si tout échoue, on remonte l'erreur Groq d'origine, complétée des autres.
      */
     suspend fun relaisApresGroq(messages: org.json.JSONArray, tools: org.json.JSONArray?, forceText: Boolean, origine: Exception,
-                                cloudflareCompact: Pair<org.json.JSONArray, org.json.JSONArray?>? = null): org.json.JSONObject {
+                                cloudflareCompact: Pair<org.json.JSONArray, org.json.JSONArray?>? = null, sansGemini: Boolean = false): org.json.JSONObject {
         val erreurs = mutableListOf("Groq : " + (origine.message ?: origine.javaClass.simpleName).take(140))
-        if (geminiChat.disponible()) {
+        if (sansGemini) erreurs += "Gemini : déjà essayé en premier"
+        if (geminiChat.disponible() && !sansGemini) {
             try {
                 // Dans le relais Hermes, réutilise la version compactée : Gemini ne doit pas recevoir un prompt géant après l'échec Groq.
                 val (messagesGemini, outilsGemini) = cloudflareCompact ?: (messages to tools)
@@ -201,6 +202,11 @@ class Llm(private val store: Store) {
     }
 
     private fun noterRelais(qui: String) { dernierFournisseur = "$qui (relais)"; dernierRelais = System.currentTimeMillis() }
+
+    /** Fournisseur qui a répondu au dernier tour du moteur Hermès (affiché dans le diagnostic). */
+    @Volatile var fournisseurHermes: String = ""
+        private set
+    fun noterFournisseurHermes(qui: String) { fournisseurHermes = qui }
 
     private fun compacter(messages: org.json.JSONArray, niveau: Int): org.json.JSONArray {
         val sys = if (niveau == 1) 5000 else 2800
