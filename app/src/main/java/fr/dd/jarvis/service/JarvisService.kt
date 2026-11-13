@@ -78,6 +78,7 @@ class JarvisService : Service() {
         fun suspendrePourAppli(oui: Boolean) {
             if (suspenduParAppli == oui) return
             suspenduParAppli = oui
+            fr.dd.jarvis.voice.JournalVoix.noter("service", if (oui) "détecteur « Jarvis » suspendu (conversation dans l'appli)" else "détecteur « Jarvis » repris")
             val s = actuel ?: return
             s.main.removeCallbacks(s.finSuspension)
             if (oui) s.main.postDelayed(s.finSuspension, 5 * 60_000L)   // filet : jamais sourd plus de 5 min
@@ -219,6 +220,7 @@ class JarvisService : Service() {
             }
         }
         voice = VoiceManager(this).also { v ->
+            v.nom = "service"
             v.muteBeeps = app.store.muteBeeps.value
             v.bargeIn = app.store.coupeParole.value
             v.duplex = app.store.duplex.value
@@ -379,6 +381,7 @@ class JarvisService : Service() {
         main.removeCallbacks(relance)
         if (!running || awake || busy || vosk !== v || suspenduParAppli) return
         if (v.start()) {
+            fr.dd.jarvis.voice.JournalVoix.noter("service", "détecteur « Jarvis » armé (${if (v is fr.dd.jarvis.voice.PorcupineWake) "Porcupine" else "Vosk"})")
             echecsReveil = 0
             majNotification("Dis « Jarvis », attends le bip, puis ta demande")
             return
@@ -418,10 +421,18 @@ class JarvisService : Service() {
 
     /** « Jarvis » entendu : bip montant puis écoute immédiate de la demande (plus de « Oui ? » parlé qui fait attendre). */
     private fun onWakeWord() {
-        if (!running || awake || busy || suspenduParAppli) return
         val maintenant = System.currentTimeMillis()
-        if (maintenant - dernierReveil < 2500) return   // écho du bip / de la voix de JARVIS pris pour « Jarvis »
-        if (dernierReveil != 0L && maintenant - finLe < 1500) return   // écho de la fin de réponse / du bip de fin
+        val refus = when {
+            !running -> "service arrêté"
+            awake -> "conversation déjà en cours"
+            busy -> "demande en cours de traitement"
+            suspenduParAppli -> "l'appli a le micro"
+            maintenant - dernierReveil < 2500 -> "2e détection en moins de 2,5 s (écho)"   // écho du bip / de la voix de JARVIS
+            dernierReveil != 0L && maintenant - finLe < 1500 -> "juste après la fin d'une réponse (écho)"
+            else -> null
+        }
+        fr.dd.jarvis.voice.JournalVoix.noter("service", if (refus == null) "réveil accepté" else "réveil ignoré : $refus")
+        if (refus != null) return
         dernierReveil = maintenant
         garderEveille(true)
         // Connexion à l'IA préparée pendant que tu parles (évite la poignée de main TLS au moment de la demande).

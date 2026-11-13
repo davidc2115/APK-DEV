@@ -786,6 +786,23 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 Text("Couper la parole : si tu reparles pendant que JARVIS répond, il se tait et t'écoute. Mode duplex (haut-parleur du téléphone seulement) : sa voix passe en mode « appel » le temps de la réponse, pour que l'annulation d'écho du téléphone ne confonde pas sa voix avec la tienne — la coupure est bien plus fiable. Le volume suit alors celui des appels ; désactive-le si la voix te semble trop faible.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
                 Spacer(Modifier.height(6.dp))
                 HudChip(if (store.muteBeeps.value) "🔇 Bips coupés pendant l'écoute" else "Bips actifs", store.muteBeeps.value) { store.muteBeeps.set(!store.muteBeeps.value) }
+                // Journal de l'écoute : qui a détecté « Jarvis », qui a bipé, qui a ouvert le micro.
+                var journal by remember { mutableStateOf<String?>(null) }
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    HudChip(if (journal == null) "🔎 Journal de l'écoute" else "Masquer le journal", journal != null) {
+                        journal = if (journal == null) fr.dd.jarvis.voice.JournalVoix.texte() else null
+                    }
+                    if (journal != null) {
+                        HudChip("Copier", false) {
+                            runCatching { (ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                                .setPrimaryClip(android.content.ClipData.newPlainText("Journal écoute JARVIS", journal)) }
+                        }
+                        HudChip("Effacer", false) { fr.dd.jarvis.voice.JournalVoix.vider(); journal = fr.dd.jarvis.voice.JournalVoix.texte() }
+                    }
+                }
+                journal?.let { Text(it, color = HudDim, fontSize = 10.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, modifier = Modifier.padding(top = 4.dp)) }
+                if (journal != null) Text("Reproduis le problème (dis « Jarvis »…), rouvre ce journal et envoie-le : chaque bip y est noté avec le système qui l'a joué.", color = HudDim, fontSize = 11.sp)
             }
         },
         VoletReglages("voix", "voix", "Voix de JARVIS", "voix naturelle gemini personnage android tts homme femme") {

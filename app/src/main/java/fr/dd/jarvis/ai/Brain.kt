@@ -85,7 +85,8 @@ class Brain(
         onStatus("💬 …")
         val ctx = runCatching { fr.dd.jarvis.device.Contexte.actuel(app) }.getOrNull()
         val maintenant = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("EEEE d MMMM yyyy, HH'h'mm", java.util.Locale.FRENCH))
-        val memoirePartagee = (runCatching { app.memo.pourPrompt() }.getOrDefault("") + runCatching { app.memo.hermesPourPrompt() }.getOrDefault("")).take(2200)
+        val memoirePartagee = (runCatching { fr.dd.jarvis.device.Faits.bloc(app) }.getOrDefault("") + runCatching { app.memo.pourPrompt() }.getOrDefault("") +
+            runCatching { app.memo.hermesPourPrompt() }.getOrDefault("")).take(3000)
         val sys = "Tu es JARVIS, l'assistant personnel de ${userName().ifBlank { "l'utilisateur" }}, qui te tutoie. C'est un moment de conversation détendue : " +
             "réponds naturellement en français, chaleureux et vivant, avec une pointe d'humour quand ça s'y prête, en une à trois phrases courtes, " +
             "comme un ami attentionné ; relance parfois par une question. Pas de liste, pas de titre, pas d'emoji en excès. Garde le fil de la conversation et utilise la mémoire partagée sans la réciter. " +
@@ -165,6 +166,11 @@ class Brain(
                     else -> { fr.dd.jarvis.securite.TelephoneSecurise.afficherDeverrouillage(app)
                         "🔓 J'affiche le déverrouillage (empreinte, visage ou code). Pour déverrouiller à la voix, active l'écoute « Jarvis » (le téléphone vérifie alors ta voix)." }
                 })
+            }
+            // Accès à distance d'un appareil du Wi-Fi : bail fixe + redirection Freebox + adresse publique, par l'outil dédié.
+            fr.dd.jarvis.ai.AccesDistant.intention(app, texteUser)?.let { args ->
+                onStatus("🌍 Accès à distance…")
+                return reflexe(tools.execute("appareil_acces_distant", args).text)
             }
             // Sites web : créés, retrouvés, publiés et modifiés par l'outil dédié (jamais « à la main » par une IA).
             SitesWebTools.intention(app, texteUser)?.let { args ->
@@ -330,6 +336,7 @@ class Brain(
             // Partie stable d'abord (mise en cache par le fournisseur), puis le contexte propre à la demande.
             Prompts.brain(userName(), avecDate = false) + (if (societeNeeded) "\n\n" + fr.dd.jarvis.societe.SocieteTools.PROMPT else "") +
                 app.memo.pourPrompt() + app.memo.hermesPourPrompt() + app.memo.capacitesPourPrompt() + notesUtiles +
+                runCatching { fr.dd.jarvis.device.Faits.bloc(app) }.getOrDefault("").let { if (it.isBlank()) "" else "\n\n$it" } +
                 (if (plan != null && plan.note.isNotBlank()) "\n\nAnalyse préalable de la demande (Gemini) — suis ce plan, avec les outils fournis : ${plan.note}" else "") +
                 runCatching { fr.dd.jarvis.hermes.ServeurInventaire.bloc(app, texteUser) }.getOrDefault("") +
                 runCatching { fr.dd.jarvis.device.Contexte.consigne(fr.dd.jarvis.device.Contexte.actuel(app)) }.getOrDefault("") +

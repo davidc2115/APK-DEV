@@ -65,7 +65,10 @@ object Registre {
                 e.put("ips_precedentes", JSONArray(uniques))
                 m.remove(ancienneCle!!)
             }
-            e.put("ip", d.ip).put("type", d.type).put("ports", JSONArray(d.ports)).put("vu", now).put("reseau", reseau)
+            // Une source sans ports ni type précis (liste de la Freebox) n'efface pas ce qu'une analyse a trouvé.
+            e.put("ip", d.ip).put("vu", now).put("reseau", reseau)
+            if (d.ports.isNotEmpty() || !e.has("ports")) e.put("ports", JSONArray(d.ports))
+            if (!d.type.startsWith("❔") || e.optString("type").isBlank()) e.put("type", d.type)
             if (mac.isNotBlank()) e.put("mac", mac)
             if (d.nom.isNotBlank()) e.put("hote", d.nom)
             if (d.titre.isNotBlank()) e.put("titre", d.titre)
@@ -87,6 +90,35 @@ object Registre {
         e.put("alias", alias).put("ip", adresse)
         m.put(adresse, e); o.put("appareils", m); ecrire(app, o)
         return true
+    }
+
+    /** Tous les appareils enregistrés (copie), les plus récemment vus d'abord. */
+    fun tous(app: JarvisApp): List<JSONObject> {
+        val m = lire(app).optJSONObject("appareils") ?: return emptyList()
+        return m.keys().asSequence().mapNotNull { m.optJSONObject(it) }.sortedByDescending { it.optLong("vu") }.toList()
+    }
+
+    fun nomDe(e: JSONObject): String = e.optString("alias").ifBlank { e.optString("hote").ifBlank { e.optString("titre").ifBlank { e.optString("info") } } }.ifBlank { e.optString("ip") }
+
+    /** Appareil désigné par son IP, son nom donné, son nom réseau ou son type. */
+    fun trouver(app: JarvisApp, nomOuIp: String): JSONObject? {
+        val v = nomOuIp.trim(); if (v.isBlank()) return null
+        val l = tous(app)
+        l.firstOrNull { it.optString("ip") == v || it.optString("mac").equals(v, true) }?.let { return it }
+        val n = fr.dd.jarvis.societe.core.normaliser(v)
+        fun champs(e: JSONObject) = listOf("alias", "hote", "titre", "info", "type").map { fr.dd.jarvis.societe.core.normaliser(e.optString(it)) }
+        l.firstOrNull { e -> champs(e).first() == n }?.let { return it }
+        return l.filter { e -> champs(e).any { it.isNotBlank() && (it.contains(n) || n.contains(it)) } }.let { if (it.size == 1) it[0] else it.firstOrNull { e -> champs(e)[0].contains(n) } }
+    }
+
+    /** Mémorise un accès à distance configuré pour un appareil (port, port externe, adresse publique). */
+    @Synchronized fun noterAcces(app: JarvisApp, ip: String, acces: JSONObject?, portLan: Int) {
+        val o = lire(app); val m = o.optJSONObject("appareils") ?: return
+        val e = m.optJSONObject(ip) ?: return
+        val l = e.optJSONArray("distant") ?: JSONArray()
+        val garde = JSONArray(); for (i in 0 until l.length()) l.optJSONObject(i)?.takeIf { it.optInt("port") != portLan }?.let { garde.put(it) }
+        if (acces != null) garde.put(acces)
+        e.put("distant", garde); m.put(ip, e); o.put("appareils", m); ecrire(app, o)
     }
 
     fun alias(app: JarvisApp): Map<String, String> {

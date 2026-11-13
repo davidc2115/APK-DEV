@@ -278,6 +278,8 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
             runCatching { ServeurInventaire.bloc(app, demande) }.getOrDefault("") +
             runCatching { fr.dd.jarvis.device.Contexte.consigne(fr.dd.jarvis.device.Contexte.actuel(app)) }.getOrDefault("") +
             runCatching { ServeurInventaire.acces(app) }.getOrDefault("").let { if (it.isBlank()) "" else "\n\n${ServeurInventaire.ESSENTIEL}$it${ServeurInventaire.FIN_ESSENTIEL}" } +
+            // Mémoire fiable (domicile, surnoms…) : bloc essentiel, jamais raccourci par le relais IA.
+            runCatching { fr.dd.jarvis.device.Faits.bloc(app) }.getOrDefault("").let { if (it.isBlank()) "" else "\n\n${ServeurInventaire.ESSENTIEL}$it${ServeurInventaire.FIN_ESSENTIEL}" } +
             "\n\nNous sommes le $maintenant."
     }
 

@@ -165,6 +165,8 @@ class Store(context: Context) {
     val sshFp = SPref("sshFp", "")
     /** Jeton Plex Media Server : toujours conservé dans le stockage chiffré du Keystore. */
     val plexToken = SecretPref("plexToken")
+    /** Noms donnés aux lecteurs Plex (« télé du salon » → identifiant du lecteur), en JSON. */
+    val plexAlias = SPref("plexAlias", "{}")
     val ghToken = SPref("ghToken", "")
     val scanAuto = BPref("scanAuto", true)
     val sshHostDistant = SPref("sshHostDistant", "")
@@ -180,6 +182,8 @@ class Store(context: Context) {
     val serveurServicesLe = SPref("serveurServicesLe", "0")
     /** Adresse du serveur sur le réseau de la maison (relevée par SSH) : connexion locale automatique à la maison. */
     val serveurIpLocale = SPref("serveurIpLocale", "")
+    /** Position réelle de la grille du schéma sur l'écran de verrouillage (« gauche,haut,droite,bas »), relevée automatiquement. */
+    val schemaGrille = SPref("schemaGrille", "")
     // ---- Box internet (disque dur USB)
     val boxHost = SPref("boxHost", "")
     val boxProto = SPref("boxProto", "smb")

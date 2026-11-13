@@ -33,6 +33,29 @@ import kotlin.math.sin
  */
 class VoiceManager(private val ctx: Context) {
 
+    companion object {
+        /** Toutes les instances vivantes (service, appli, voiture…) : une seule peut écouter à la fois. */
+        private val instances = java.util.Collections.newSetFromMap(java.util.WeakHashMap<VoiceManager, Boolean>())
+
+        /**
+         * Moteur de reconnaissance à utiliser : jamais celui de JARVIS. Quand JARVIS est l'assistant par défaut, Android
+         * désigne son moteur « factice » comme reconnaissance du système : chaque écoute échouait, était relancée
+         * (bips, délais) puis basculait sur la reconnaissance locale. On vise directement celui de Google.
+         */
+        fun moteur(ctx: Context): android.content.ComponentName? = runCatching {
+            val l = ctx.packageManager.queryIntentServices(Intent(android.speech.RecognitionService.SERVICE_INTERFACE), 0)
+                .map { it.serviceInfo }.filter { it.packageName != ctx.packageName }
+            val choisi = l.firstOrNull { it.packageName == "com.google.android.googlequicksearchbox" }
+                ?: l.firstOrNull { it.packageName == "com.google.android.as" } ?: l.firstOrNull { it.packageName.startsWith("com.google") } ?: l.firstOrNull()
+            choisi?.let { android.content.ComponentName(it.packageName, it.name) }
+        }.getOrNull()
+    }
+
+    /** Nom affiché dans le journal de l'écoute (service, appli, voiture…). */
+    var nom = "voix"
+
+    init { synchronized(instances) { instances.add(this) } }
+
     private val main = Handler(Looper.getMainLooper())
     private val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private var recognizer: SpeechRecognizer? = null
@@ -147,14 +170,23 @@ class VoiceManager(private val ctx: Context) {
                 return@post
             }
             stopSpeaking()
+            // Un seul micro pour tout JARVIS : une autre écoute en cours (appli / service) est refermée.
+            synchronized(instances) { instances.filter { it !== this }.toList() }.forEach { it.ceder(nom) }
             main.removeCallbacks(unmuteLater)
             main.removeCallbacks(finFenetre)
             setMuted(true)
             recognizer?.destroy()
             parole = false
             val moi = ++jeton
+            ecoute = true
             val local = essai >= 2 && Build.VERSION.SDK_INT >= 33 && SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx)
-            val r = if (local) SpeechRecognizer.createOnDeviceSpeechRecognizer(ctx) else SpeechRecognizer.createSpeechRecognizer(ctx)
+            val composant = if (local) null else moteur(ctx)
+            JournalVoix.noter(nom, "micro ouvert (reconnaissance ${if (local) "locale" else composant?.packageName ?: "par défaut"}${if (essai > 0) ", essai ${essai + 1}" else ""})")
+            val r = when {
+                local -> SpeechRecognizer.createOnDeviceSpeechRecognizer(ctx)
+                composant != null -> SpeechRecognizer.createSpeechRecognizer(ctx, composant)
+                else -> SpeechRecognizer.createSpeechRecognizer(ctx)
+            }
             recognizer = r
             r.setRecognitionListener(object : RecognitionListener {
                 private fun actif() = moi == jeton
@@ -168,6 +200,8 @@ class VoiceManager(private val ctx: Context) {
 
                 override fun onError(error: Int) {
                     if (!actif()) return
+                    JournalVoix.noter(nom, "reconnaissance : erreur $error${if (parole) " (après parole)" else ""}")
+                    ecoute = false
                     main.removeCallbacks(finFenetre)
                     // 11 = service de reconnaissance déconnecté, 5 = erreur client, 10 = trop de requêtes, 8 = occupé : on recrée et on relance
                     // (2 essais au plus, espacés : un reconnaisseur recréé trop vite répond « occupé » et rebipe.)
@@ -196,6 +230,8 @@ class VoiceManager(private val ctx: Context) {
 
                 override fun onResults(results: Bundle?) {
                     if (!actif()) return
+                    ecoute = false
+                    JournalVoix.noter(nom, "entendu : « ${results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty().take(60)} »")
                     val entendu = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
                     if (entendu.isNotBlank() && estEcho(entendu)) {
                         // Jarvis s'est réentendu (voix renvoyée par l'autoradio) : on ignore et on continue d'écouter.
@@ -241,8 +277,27 @@ class VoiceManager(private val ctx: Context) {
         }
     }
 
+    /** Écoute en cours de cette instance (micro du reconnaisseur ouvert). */
+    @Volatile private var ecoute = false
+
+    /** Une autre partie de JARVIS prend le micro : on referme notre écoute (comme un silence, sans relance). */
+    private fun ceder(a: String) {
+        main.post {
+            if (!ecoute) return@post
+            ecoute = false
+            JournalVoix.noter(nom, "écoute refermée : le micro passe à « $a »")
+            jeton++
+            fenetreFin = 0
+            main.removeCallbacks(finFenetre)
+            runCatching { recognizer?.cancel() }
+            signalerEcoute(false)
+            onSilence()
+        }
+    }
+
     fun stopListening() {
         main.post {
+            ecoute = false
             fenetreFin = 0
             main.removeCallbacks(finFenetre)
             recognizer?.stopListening()
@@ -254,6 +309,7 @@ class VoiceManager(private val ctx: Context) {
 
     /** Petit carillon : deux notes montantes (« je t'écoute ») ou descendantes (« fin de la conversation »), puis [puis]. */
     fun carillon(montant: Boolean = true, puis: () -> Unit = {}) {
+        JournalVoix.noter(nom, "bip ${if (montant) "montant (je t'écoute)" else "descendant (fin)"}")
         Thread {
             var piste: AudioTrack? = null
             try {
@@ -582,7 +638,7 @@ class VoiceManager(private val ctx: Context) {
         private fun voixLancee() {
             Presence.parole(true)
             if (coupe) main.post {
-                if (!fini.get() && barge == null) barge = BargeIn { main.post { if (!fini.get()) arreter(sansSuite = false) } }.also { it.start() }
+                if (!fini.get() && barge == null) barge = BargeIn { main.post { if (!fini.get()) { JournalVoix.noter(nom, "coupure de parole : voix entendue pendant la réponse"); arreter(sansSuite = false) } } }.also { it.start() }
             }
         }
 
@@ -722,6 +778,7 @@ class VoiceManager(private val ctx: Context) {
     }
 
     fun release() {
+        synchronized(instances) { instances.remove(this) }
         sessionFin()
         main.post { main.removeCallbacks(unmuteLater); main.removeCallbacks(finFenetre); setMuted(false) }
         main.post {

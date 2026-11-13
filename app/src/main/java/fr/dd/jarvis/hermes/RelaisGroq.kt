@@ -138,13 +138,13 @@ object RelaisGroq {
 
     private fun estimer(messages: JSONArray, outils: JSONArray?) = jetons(messages.toString()) + jetons(outils?.toString().orEmpty())
 
-    /** Sépare les blocs ⟪ESSENTIEL⟫ (sans balises, 1200 caractères au plus) du reste des consignes. */
+    /** Sépare les blocs ⟪ESSENTIEL⟫ (accès configurés, mémoire fiable ; 3000 caractères au plus) du reste des consignes. */
     internal fun essentiel(texte: String): Pair<String, String> {
         val debut = ServeurInventaire.ESSENTIEL; val fin = ServeurInventaire.FIN_ESSENTIEL
         val r = Regex(Regex.escape(debut) + "([\\s\\S]*?)" + Regex.escape(fin))
         val blocs = r.findAll(texte).map { it.groupValues[1].trim() }.filter { it.isNotBlank() }.distinct().toList()
         if (blocs.isEmpty()) return texte to ""
-        return r.replace(texte, "").replace(Regex("\n{3,}"), "\n\n") to blocs.joinToString("\n").take(1200)
+        return r.replace(texte, "").replace(Regex("\n{3,}"), "\n\n") to blocs.joinToString("\n").take(3000)
     }
 
     private fun couper(s: String, max: Int): String = if (s.length <= max) s
@@ -214,6 +214,7 @@ object RelaisGroq {
         if (Regex("freebox|\\bbox\\b").containsMatchIn(t)) out += listOf("freebox", "box_")
         if (fichierServeur(t)) out += listOf("ssh_fichier", "serveur_fichiers", "ssh_")
         if (Regex("r[ée]seau|wi-?fi|\\bip\\b|imprimante|appareils? connect").containsMatchIn(t)) out += listOf("reseau_", "appareil", "ip_publique", "imprim")
+        if (Regex("[àa] distance|depuis (l.)?internet|redirection|ouvrir (le|un) port").containsMatchIn(t)) out += listOf("appareil_acces_distant", "appareils_liste", "freebox")
         if (Regex("s[ée]curis|syst[èe]me de s[ée]curit|mode maison|alarme|surveillance|d[ée]verrouill|cam[ée]ra|intrus|\\bmodes?\\b").containsMatchIn(t)) out += listOf("modes_jarvis", "ha_")
         if (Regex("waze|gps|coordonn").containsMatchIn(t) && Regex("planning|agenda|rendez|\\brdv\\b|lieu|adresse").containsMatchIn(t)) out += listOf("agenda_lieu_gps", "get_planning")
         if (Regex("[ée]conomiseur|mode (d.)?alimentation|(mode|performance|[ée]quilibr|[ée]conomie).{0,40}(t[ée]l[ée]phone|portable|smartphone)|(t[ée]l[ée]phone|portable|smartphone).{0,40}(mode|performance|[ée]quilibr|[ée]conomie)").containsMatchIn(t))

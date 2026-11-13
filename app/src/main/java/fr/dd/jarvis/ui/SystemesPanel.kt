@@ -110,6 +110,12 @@ fun SystemesPanel(app: JarvisApp, onAsk: (String) -> Unit) {
                     if (schema.isNotEmpty()) HudChip(if (voir) "🙈 Masquer" else "👁️ Afficher le schéma", voir) { voir = !voir }
                     HudChip("🔁 Effacer", false) { schema = ""; voir = false; essai++ }
                 }
+                val grille = TelephoneSecurise.grilleEnregistree(store.schemaGrille.value)
+                val acces = fr.dd.jarvis.service.JarvisAccessibilityService.instance != null
+                Text((if (grille != null) "📐 Position de la grille sur l'écran de verrouillage : relevée ✅" else
+                    "📐 Position de la grille pas encore relevée : verrouille le téléphone et fais apparaître la grille du schéma une fois (JARVIS la mesure tout seul).") +
+                    (if (!acces) "\n⚠️ Active l'accessibilité de JARVIS : c'est elle qui trace le schéma d'un seul geste continu, au bon endroit." else ""),
+                    color = HudDim, fontSize = 11.sp)
             }
             var alarme by remember { mutableStateOf(store.codeAlarmeHa.value) }
             HudTextField(alarme, { alarme = it.trim() }, Modifier.fillMaxWidth(), label = "Code de l'alarme Home Assistant (si elle en demande un)", password = true)

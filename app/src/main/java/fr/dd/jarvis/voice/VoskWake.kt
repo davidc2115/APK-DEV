@@ -84,7 +84,7 @@ class PorcupineWake(private val ctx: Context, private val accessKey: String, pri
                     .setKeyword(ai.picovoice.porcupine.Porcupine.BuiltInKeyword.JARVIS)
                     .setSensitivity(sensibilite())
                     .setErrorCallback { onPanne() }
-                    .build(ctx, ai.picovoice.porcupine.PorcupineManagerCallback { onWake() })
+                    .build(ctx, ai.picovoice.porcupine.PorcupineManagerCallback { JournalVoix.noter("Porcupine", "« Jarvis » détecté"); onWake() })
             }
             // Redémarrage : on arrête d'abord l'écoute en cours (jamais deux enregistrements du micro en parallèle).
             runCatching { mgr?.stop() }
@@ -169,7 +169,7 @@ class VoskWake(private val ctx: Context, private val econome: Boolean = true, pr
                     private fun check(j: String?) {
                         if (fired || j == null) return
                         try {
-                            if (estReveil(org.json.JSONObject(j).optJSONArray("result"), seuil())) { fired = true; onWake() }
+                            if (estReveil(org.json.JSONObject(j).optJSONArray("result"), seuil())) { fired = true; JournalVoix.noter("Vosk", "« Jarvis » détecté"); onWake() }
                         } catch (_: Throwable) {}
                     }
                     override fun onPartialResult(hypothesis: String?) {}
@@ -193,7 +193,7 @@ class VoskWake(private val ctx: Context, private val econome: Boolean = true, pr
     private fun verifier(j: String?) {
         if (fired || j == null) return
         try {
-            if (estReveil(org.json.JSONObject(j).optJSONArray("result"), seuil())) { fired = true; onWake() }
+            if (estReveil(org.json.JSONObject(j).optJSONArray("result"), seuil())) { fired = true; JournalVoix.noter("Vosk", "« Jarvis » détecté"); onWake() }
         } catch (_: Throwable) {}
     }
 

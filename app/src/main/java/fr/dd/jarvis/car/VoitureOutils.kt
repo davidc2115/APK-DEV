@@ -34,7 +34,7 @@ object VoixVoiture {
     private var vm: VoiceManager? = null
 
     private fun voix(ctx: Context): VoiceManager = vm ?: VoiceManager(ctx.applicationContext).also {
-        it.bargeIn = false; it.duplex = false; vm = it
+        it.bargeIn = false; it.duplex = false; it.nom = "voiture"; vm = it
     }
 
     /** Prépare la voix (à l'ouverture de JARVIS dans la voiture) pour que la première phrase parte sans attendre. */

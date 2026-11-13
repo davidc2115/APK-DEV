@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.Hub
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -300,6 +301,7 @@ private val tabs = listOf(
     Tab("Contacts", Icons.Filled.Contacts),
     Tab("Société", Icons.Filled.Business),
     Tab("Graphe", Icons.Filled.Hub),
+    Tab("Wi-Fi", Icons.Filled.Wifi),
     Tab("Réglages", Icons.Filled.Settings)
 )
 
@@ -396,6 +398,7 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
                 4 -> ContactsScreen(app)
                 5 -> SocieteScreen(app)
                 6 -> GraphScreen(app)
+                7 -> fr.dd.jarvis.ui.AppareilsWifiScreen(app, demander)
                 else -> SettingsScreen(app) { vm.send(it) }
             }
         }

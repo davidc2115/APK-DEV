@@ -117,6 +117,143 @@ object Plex {
     fun clientId(appareil: JSONObject) = appareil.optString("clientIdentifier").ifBlank { appareil.optString("machineIdentifier") }
         .ifBlank { throw IllegalStateException("Ce lecteur Plex ne fournit pas d'identifiant de contrôle (clientIdentifier).") }
 
+    // ------------------------------------------------------------------ lecteurs (tous les appareils), lecture partout
+
+    /** Un lecteur Plex : vu par le serveur (réseau de la maison), en lecture, ou déclaré sur le compte plex.tv. */
+    data class Lecteur(val id: String, val nom: String, val produit: String, val plateforme: String, val sources: Set<String>,
+                       val enLigne: Boolean, val maison: Boolean?, val adresse: String) {
+        val libelle get() = nom.ifBlank { produit.ifBlank { "lecteur Plex" } }
+    }
+
+    /** « ce téléphone » : la lecture s'ouvre dans l'appli Plex de CE téléphone (pas besoin qu'il soit déclaré comme lecteur). */
+    const val CE_TELEPHONE = "ce_telephone"
+    private val R_CE_TELEPHONE = Regex("^(ce|mon|le) (telephone|portable|smartphone|tel)$|^ici$|^(sur )?moi$")
+
+    private fun ressources(app: JarvisApp): List<JSONObject> = runCatching {
+        val a = JSONArray(request(app, "https://plex.tv/api/v2/resources", mapOf("includeHttps" to "1", "includeRelay" to "1", "includeIPv6" to "0")))
+        (0 until a.length()).mapNotNull { a.optJSONObject(it) }
+    }.getOrDefault(emptyList())
+
+    /**
+     * Tous les lecteurs : ceux que le serveur voit sur le réseau de la maison (/clients), ceux qui lisent en ce moment
+     * (/status/sessions) et ceux du compte plex.tv (télé, téléphones, ordinateurs, même hors de la maison).
+     */
+    fun lecteurs(app: JarvisApp): List<Lecteur> {
+        val out = linkedMapOf<String, Lecteur>()
+        fun ajouter(l: Lecteur) {
+            if (l.id.isBlank()) return
+            val ex = out[l.id]
+            out[l.id] = if (ex == null) l else ex.copy(nom = ex.nom.ifBlank { l.nom }, produit = ex.produit.ifBlank { l.produit }, plateforme = ex.plateforme.ifBlank { l.plateforme },
+                sources = ex.sources + l.sources, enLigne = ex.enLigne || l.enLigne, maison = ex.maison ?: l.maison, adresse = ex.adresse.ifBlank { l.adresse })
+        }
+        runCatching { appareils(app) }.getOrNull()?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let { d ->
+            ajouter(Lecteur(d.optString("clientIdentifier").ifBlank { d.optString("machineIdentifier") }, d.optString("name"), d.optString("product"),
+                d.optString("platform"), setOf("réseau de la maison"), true, true, d.optString("address")))
+        } }
+        runCatching { liste(mc(app, "/status/sessions")) }.getOrDefault(emptyList()).forEach { s ->
+            val p = s.optJSONObject("Player") ?: return@forEach
+            ajouter(Lecteur(p.optString("machineIdentifier"), p.optString("title"), p.optString("product"), p.optString("platform"),
+                setOf("en lecture"), true, if (p.has("local")) p.optBoolean("local") else null, p.optString("address")))
+        }
+        val res = ressources(app)
+        val ipServeur = res.firstOrNull { it.optString("provides").contains("server") && it.optString("clientIdentifier") == runCatching { machineId(app) }.getOrNull() }?.optString("publicAddress").orEmpty()
+        res.filter { r -> r.optString("provides").split(',').any { it.trim() in setOf("player", "client") } && !r.optString("provides").contains("server") }.forEach { r ->
+            ajouter(Lecteur(r.optString("clientIdentifier"), r.optString("name"), r.optString("product"), r.optString("platform").ifBlank { r.optString("device") },
+                setOf("compte plex.tv"), r.optBoolean("presence", false), if (ipServeur.isNotBlank() && r.optString("publicAddress").isNotBlank()) r.optString("publicAddress") == ipServeur else null, r.optString("publicAddress")))
+        }
+        return out.values.toList()
+    }
+
+    private fun aliasMap(app: JarvisApp) = runCatching { JSONObject(app.store.plexAlias.value) }.getOrDefault(JSONObject())
+
+    /** Donne un nom à un lecteur (« télé du salon », « téléphone de Marie »…). */
+    fun nommer(app: JarvisApp, lecteur: Lecteur, alias: String) {
+        val m = aliasMap(app)
+        m.put(fr.dd.jarvis.societe.core.normaliser(alias), lecteur.id)
+        app.store.plexAlias.set(m.toString())
+    }
+
+    private val R_TELE = Regex("\\b(tele|tv|televiseur|television|salon)\\b")
+    private val R_TEL = Regex("\\b(telephone|portable|smartphone|mobile|tel)\\b")
+    private val R_PC = Regex("\\b(ordinateur|ordi|pc|mac|laptop|portable pc|navigateur|web)\\b")
+
+    /** Lecteur désigné par son nom, un nom donné, ou son genre (télé, téléphone, ordinateur) ; « ce téléphone » = ce téléphone. */
+    fun lecteur(app: JarvisApp, nom: String): Lecteur {
+        val n = fr.dd.jarvis.societe.core.normaliser(nom)
+        if (R_CE_TELEPHONE.containsMatchIn(n)) return Lecteur(CE_TELEPHONE, "ce téléphone", "Plex", "Android", setOf("ce téléphone"), true, null, "")
+        val tous = lecteurs(app)
+        aliasMap(app).let { m -> m.keys().asSequence().firstOrNull { k -> n == k || n.contains(k) }?.let { k -> tous.firstOrNull { it.id == m.optString(k) }?.let { return it } } }
+        fun norm(l: Lecteur) = fr.dd.jarvis.societe.core.normaliser("${l.nom} ${l.produit} ${l.plateforme}")
+        tous.firstOrNull { fr.dd.jarvis.societe.core.normaliser(it.nom) == n }?.let { return it }
+        tous.filter { n.isNotBlank() && (fr.dd.jarvis.societe.core.normaliser(it.nom).contains(n) || n.contains(fr.dd.jarvis.societe.core.normaliser(it.nom).ifBlank { "\u0000" })) }
+            .let { if (it.size == 1) return it[0] }
+        val genre = when {
+            R_TELE.containsMatchIn(n) -> tous.filter { Regex("tv|tvos|webos|tizen|roku|shield|bravia|fire|android tv|smart", RegexOption.IGNORE_CASE).containsMatchIn(norm(it)) }
+            R_PC.containsMatchIn(n) -> tous.filter { Regex("windows|macos|linux|web|htpc|desktop|chrome|firefox|safari", RegexOption.IGNORE_CASE).containsMatchIn(norm(it)) }
+            R_TEL.containsMatchIn(n) -> tous.filter { Regex("mobile|ios|iphone|android", RegexOption.IGNORE_CASE).containsMatchIn(norm(it)) && !Regex("tv", RegexOption.IGNORE_CASE).containsMatchIn(norm(it)) }
+            else -> emptyList()
+        }.sortedByDescending { it.enLigne }
+        if (genre.size == 1 || (genre.isNotEmpty() && genre.count { it.enLigne } == 1)) return genre.first()
+        if (n.isBlank() && tous.count { it.enLigne } == 1) return tous.first { it.enLigne }
+        throw IllegalStateException(
+            (if (genre.size > 1) "Plusieurs lecteurs correspondent à « $nom » : ${genre.joinToString { it.libelle }}. Précise lequel (ou donne-lui un nom avec plex_appareils action=nommer)."
+            else "Lecteur Plex « $nom » introuvable.") +
+                (if (tous.isNotEmpty()) " Lecteurs connus : ${tous.joinToString { it.libelle + if (it.enLigne) "" else " (hors ligne)" }}." else " Aucun lecteur visible.") +
+                " Sur la télé / l'autre téléphone, l'appli Plex doit être ouverte, connectée au même compte, avec « Annoncer comme lecteur » (Réglages Plex › Avancé) activé.")
+    }
+
+    /** Adresse du serveur que le lecteur doit utiliser : réseau de la maison, sinon connexion distante de plex.tv (ou relais). */
+    private fun connexionPour(app: JarvisApp, l: Lecteur): Triple<String, Int, String> {
+        val lan = Serveur.ipLocaleServeur(app)
+        if (l.maison != false && lan != null) return Triple(lan, PORT, "http")
+        val machine = machineId(app)
+        val srv = ressources(app).firstOrNull { it.optString("clientIdentifier") == machine }
+        val cx = srv?.optJSONArray("connections")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }.orEmpty()
+        val c = cx.firstOrNull { !it.optBoolean("local") && !it.optBoolean("relay") } ?: cx.firstOrNull { it.optBoolean("relay") }
+        if (c != null) {
+            val u = runCatching { c.optString("uri").toHttpUrl() }.getOrNull()
+            if (u != null) return Triple(u.host, u.port, u.scheme)
+        }
+        return Triple(lan ?: throw IllegalStateException("Adresse du serveur Plex introuvable (ni locale ni distante)."), PORT, "http")
+    }
+
+    /** File de lecture (exigée par les applis Plex récentes pour démarrer une lecture à distance). */
+    private fun fileLecture(app: JarvisApp, machine: String, media: JSONObject): String? = runCatching {
+        val type = if (media.optString("type") in setOf("track", "album", "artist")) "audio" else "video"
+        val o = JSONObject(request(app, "/playQueues", mapOf("type" to type, "shuffle" to "0", "repeat" to "0", "continuous" to "1", "own" to "1",
+            "uri" to "server://$machine/com.plexapp.plugins.library/library/metadata/${media.optString("ratingKey")}"), methode = "POST"))
+        (o.optJSONObject("MediaContainer") ?: o).optString("playQueueID").ifBlank { null }
+    }.getOrNull()
+
+    /** Lance [media] sur [l] (n'importe quel lecteur, à la maison ou à distance ; « ce téléphone » : appli Plex locale). */
+    fun lancerSur(app: JarvisApp, media: JSONObject, l: Lecteur, offsetMs: Long = 0): String {
+        val ratingKey = media.optString("ratingKey").ifBlank { throw IllegalStateException("Plex n'a pas fourni l'identifiant de ce média.") }
+        val machine = machineId(app)
+        if (l.id == CE_TELEPHONE) {
+            val lien = "https://app.plex.tv/desktop/#!/server/$machine/details?key=" + java.net.URLEncoder.encode("/library/metadata/$ratingKey", "UTF-8")
+            val i = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(lien)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            val plexApp = "com.plexapp.android"
+            if (runCatching { app.packageManager.getPackageInfo(plexApp, 0) }.isSuccess) i.setPackage(plexApp)
+            runCatching { app.startActivity(i) }.recoverCatching { app.startActivity(i.setPackage(null)) }.getOrThrow()
+            return "📱 « ${titre(media)} » ouvert dans Plex sur ce téléphone : touche ▶ Lecture."
+        }
+        val (adresse, port, proto) = connexionPour(app, l)
+        val jeton = runCatching { mc(app, "/security/token", mapOf("type" to "delegation", "scope" to "all")).optString("token") }.getOrNull().orEmpty().ifBlank { token(app) }
+        val q = linkedMapOf(
+            "key" to "/library/metadata/$ratingKey", "machineIdentifier" to machine, "address" to adresse, "port" to port.toString(),
+            "protocol" to proto, "token" to jeton, "offset" to offsetMs.toString(),
+            "commandID" to (System.currentTimeMillis() % Int.MAX_VALUE).toString(),
+            "type" to if (media.optString("type") in setOf("track", "album", "artist")) "music" else "video")
+        fileLecture(app, machine, media)?.let { q["containerKey"] = "/playQueues/$it?window=100&own=1" }
+        try { request(app, "/player/playback/playMedia", q, l.id) }
+        catch (e: Exception) {
+            throw IllegalStateException("${l.libelle} n'a pas reçu la commande (${e.message?.take(120)}). L'appli Plex doit y être ouverte, connectée au même compte, avec « Annoncer comme lecteur » activé" +
+                (if (!l.enLigne) " — ce lecteur est actuellement hors ligne." else "."))
+        }
+        return "▶️ « ${titre(media)} » lancé sur ${l.libelle}" + (if (offsetMs > 0) " (reprise à ${duree(offsetMs)})" else "") +
+            (if (proto == "https") " — flux par la connexion distante du serveur." else ".")
+    }
+
     fun lancer(app: JarvisApp, media: JSONObject, appareil: JSONObject, offsetMs: Long = 0): String {
         val ratingKey = media.optString("ratingKey").ifBlank { throw IllegalStateException("Plex n'a pas fourni l'identifiant de ce média.") }
         val machineId = machineId(app)
@@ -165,9 +302,10 @@ class PlexTools(private val app: JarvisApp, private val confirm: suspend (String
     val schema = listOf(
         tool("plex_rechercher", "Plex (INSTANCE Plex Media Server, par son API — pas le serveur Debian) : recherche un film, une série, un épisode, un artiste… dans les bibliothèques du serveur (lecture seule).",
             mapOf("titre" to prop("Titre ou partie du titre à rechercher.")), listOf("titre")),
-        tool("plex_appareils", "Plex : liste les lecteurs Plex visibles par le serveur (TV, téléphone, boîtier…).", emptyMap()),
-        tool("plex_lancer", "Plex : lance un film, une série (épisode précis, ou le prochain non vu) ou de la musique sur un lecteur Plex visible ; reprend là où la lecture s'était arrêtée. Demande confirmation.",
-            mapOf("titre" to prop("Titre du film, de la série ou de la musique (ou identifiant)."), "appareil" to prop("Nom du lecteur Plex (TV salon, téléphone…)."),
+        tool("plex_appareils", "Plex : TOUS les lecteurs — vus par le serveur à la maison, en lecture, et ceux du compte plex.tv (télé, téléphones, ordinateurs, même hors de la maison) avec leur état ; action=nommer pour donner un nom à un lecteur (« télé du salon », « téléphone de Marie »).",
+            mapOf("action" to prop("lister (défaut) | nommer"), "appareil" to prop("nommer : lecteur actuel (nom, produit…)."), "nom" to prop("nommer : nom à lui donner."))),
+        tool("plex_lancer", "Plex : lance n'importe quel film, série (épisode précis, ou le prochain non vu) ou musique de la bibliothèque sur N'IMPORTE QUEL lecteur — télé, téléphone (« ce téléphone » = celui-ci), téléphone d'un proche, ordinateur… — à la maison comme à distance ; reprend là où la lecture s'était arrêtée. Demande confirmation.",
+            mapOf("titre" to prop("Titre du film, de la série ou de la musique (ou identifiant)."), "appareil" to prop("Lecteur : son nom, un nom donné (« télé du salon »), un genre (télé, téléphone, ordinateur) ou « ce téléphone »."),
                 "saison" to prop("Série : numéro de saison (optionnel)."), "episode" to prop("Série : numéro d'épisode (optionnel ; sans saison ni épisode = prochain épisode non vu)."),
                 "depuis_le_debut" to prop("« oui » pour ne pas reprendre la lecture en cours.")), listOf("titre", "appareil")),
         tool("plex_bibliotheques", "Plex : bibliothèques du serveur — lister (avec nombre d'éléments) | scanner (rechercher les nouveaux fichiers, une bibliothèque ou toutes) | vider_corbeille | analyser.",
@@ -232,12 +370,22 @@ class PlexTools(private val app: JarvisApp, private val confirm: suspend (String
                         item.optString("summary").takeIf { it.isNotBlank() }?.let { "\n  ${it.take(180)}" }.orEmpty() }, direct = true)
                 }
                 "plex_appareils" -> {
-                    val devices = Plex.appareils(app)
-                    if (devices.length() == 0) ToolResult("Aucun lecteur Plex n'est actuellement visible. Vérifie que l'application Plex est ouverte, connectée au même compte et que le contrôle à distance est autorisé.", direct = true)
-                    else ToolResult("# Lecteurs Plex visibles\n" + (0 until devices.length()).joinToString("\n") { i ->
-                        val d = devices.getJSONObject(i)
-                        "- **${d.optString("name").ifBlank { d.optString("product") }}** · ${d.optString("product")} · ${d.optString("platform")} · ${d.optString("address")}"
-                    }, direct = true)
+                    if (a.optString("action").lowercase() == "nommer") {
+                        val l = Plex.lecteur(app, a.optString("appareil"))
+                        val nom = a.optString("nom").trim().ifBlank { return@withContextIo ToolResult("Indique « nom » (ex. télé du salon).") }
+                        Plex.nommer(app, l, nom)
+                        return@withContextIo ToolResult("✅ « ${l.libelle} » s'appelle maintenant « $nom » pour Plex.", direct = true)
+                    }
+                    val l = Plex.lecteurs(app)
+                    val alias = runCatching { JSONObject(app.store.plexAlias.value) }.getOrDefault(JSONObject())
+                    fun nomsDonnes(id: String) = alias.keys().asSequence().filter { alias.optString(it) == id }.toList()
+                    if (l.isEmpty()) ToolResult("Aucun lecteur Plex connu. Ouvre l'appli Plex sur la télé / l'autre téléphone, connectée au même compte, avec « Annoncer comme lecteur » (Réglages Plex › Avancé). « ce téléphone » fonctionne toujours.", direct = true)
+                    else ToolResult("# Lecteurs Plex\n" + l.sortedByDescending { it.enLigne }.joinToString("\n") { x ->
+                        "- ${if (x.enLigne) "🟢" else "⚪"} **${x.libelle}** · ${x.produit} · ${x.plateforme}" +
+                            (when (x.maison) { true -> " · à la maison"; false -> " · hors de la maison"; null -> "" }) +
+                            nomsDonnes(x.id).let { if (it.isEmpty()) "" else " · appelé « ${it.joinToString("», «")} »" } +
+                            " · ${x.sources.joinToString(", ")}"
+                    } + "\n- 📱 **ce téléphone** · l'appli Plex de ce téléphone", direct = true)
                 }
                 "plex_lancer" -> {
                     var media = Plex.media(app, a.optString("titre"))
@@ -245,11 +393,11 @@ class PlexTools(private val app: JarvisApp, private val confirm: suspend (String
                         val serie = if (media.optString("type") == "season") Plex.metadata(app, media.optString("parentRatingKey")) else media
                         media = episode(serie, a.optString("saison").toIntOrNull() ?: (if (media.optString("type") == "season") media.optInt("index") else null), a.optString("episode").toIntOrNull())
                     } else if (media.optString("type") == "movie" || media.optString("type") == "episode") media = Plex.metadata(app, media.optString("ratingKey"))
-                    val device = Plex.appareil(app, a.optString("appareil").trim())
+                    val l = Plex.lecteur(app, a.optString("appareil").trim())
                     val offset = if (a.optString("depuis_le_debut").lowercase() in setOf("oui", "true", "1")) 0L else media.optLong("viewOffset")
-                    if (!confirm("Lancer « ${Plex.titre(media)} » sur « ${device.optString("name")} » via Plex" + (if (offset > 0) " (reprise à ${Plex.duree(offset)})" else "") + " ?", true))
+                    if (!confirm("Lancer « ${Plex.titre(media)} » sur « ${l.libelle} » via Plex" + (if (offset > 0) " (reprise à ${Plex.duree(offset)})" else "") + " ?", true))
                         return@withContextIo ToolResult("Lecture annulée.")
-                    ToolResult(Plex.lancer(app, media, device, offset), direct = true)
+                    ToolResult(Plex.lancerSur(app, media, l, offset), direct = true)
                 }
                 "plex_bibliotheques" -> bibliotheques(a)
                 "plex_parcourir" -> {
@@ -398,8 +546,10 @@ class PlexTools(private val app: JarvisApp, private val confirm: suspend (String
     }
 
     private fun controle(a: JSONObject): ToolResult {
-        val d = Plex.appareil(app, a.optString("appareil").trim())
-        val id = Plex.clientId(d)
+        val d0 = Plex.lecteur(app, a.optString("appareil").trim())
+        if (d0.id == Plex.CE_TELEPHONE) return ToolResult("Pour l'appli Plex de ce téléphone, utilise les commandes de musique / média de JARVIS (pause, lecture…).")
+        val d = JSONObject().put("name", d0.libelle)
+        val id = d0.id
         val c = fr.dd.jarvis.societe.core.normaliser(a.optString("commande")).replace(' ', '_')
         val cmd = (System.currentTimeMillis() % Int.MAX_VALUE).toString()
         val (chemin, q) = when (c) {

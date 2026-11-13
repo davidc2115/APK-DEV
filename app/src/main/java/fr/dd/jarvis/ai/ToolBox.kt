@@ -359,6 +359,10 @@ class ToolBox(
             mapOf("name" to prop("Nom du contact à supprimer.")), listOf("name")))
         put(tool("lire_notifications", "Lit les notifications récentes du téléphone (WhatsApp, SMS, mails, banque…). Nécessite l'accès aux notifications.",
             mapOf("count" to prop("Nombre maximum (1 à 40). Par défaut 15."), "appli" to prop("Filtrer par application (optionnel)."), "minutes" to prop("Seulement celles des N dernières minutes (optionnel)."))))
+        put(tool("memoire_faits", "Mémoire FIABLE des faits durables de l'utilisateur, toujours connus et appliqués par les outils : lieu (domicile, travail… → adresse), surnom (un autre nom donné à un serveur ou salon Discord, une personne, un appareil, un lieu → son nom exact), fait (clé → valeur). À utiliser dès que l'utilisateur dit « retiens / souviens-toi / prends note » d'une adresse, d'un surnom ou d'une information à réutiliser. action=voir (défaut) | lieu | surnom | fait | oublier.",
+            mapOf("action" to prop("voir | lieu | surnom | fait | oublier"), "nom" to prop("lieu : domicile, travail ou autre nom ; surnom : le surnom ; fait : la clé ; oublier : ce qu'il faut oublier."),
+                "valeur" to prop("lieu : adresse ; surnom : ce qu'il désigne (nom exact) ; fait : la valeur."),
+                "domaine" to prop("surnom : discord_serveur | discord_salon | contact | appareil | lieu | autre."))))
         put(tool("memoire_ajouter", "Enregistre une consigne durable de l'utilisateur dans la note Obsidian « Mémoire JARVIS » (remplace la consigne du même sujet).",
             mapOf(
                 "sujet" to prop("contacts (fiches contact) | briefing (point du matin) | planning | mails | societe | general"),
@@ -528,7 +532,20 @@ class ToolBox(
 
     // ------------------------------------------------------------------ exécution
 
-    suspend fun execute(name: String, a: JSONObject): ToolResult { return when (name) {
+    /** Exécute un outil ; les surnoms et lieux mémorisés (« les potes », « la maison »…) sont d'abord remplacés par leur cible. */
+    suspend fun execute(name: String, a0: JSONObject): ToolResult {
+        val a = runCatching { fr.dd.jarvis.device.Faits.appliquer(app, name, a0) }.getOrDefault(a0)
+        return executerOutil(name, a)
+    }
+
+    private suspend fun executerOutil(name: String, a: JSONObject): ToolResult { return when (name) {
+        "memoire_faits" -> ToolResult(when (a.optString("action").lowercase()) {
+            "lieu" -> fr.dd.jarvis.device.Faits.definirLieu(app, a.optString("nom"), a.optString("valeur")).ifBlank { "Indique « nom » (domicile, travail…) et « valeur » (adresse)." }
+            "surnom" -> fr.dd.jarvis.device.Faits.definirSurnom(app, a.optString("nom"), a.optString("valeur"), a.optString("domaine")).ifBlank { "Indique « nom » (le surnom) et « valeur » (ce qu'il désigne, nom exact)." }
+            "fait" -> fr.dd.jarvis.device.Faits.definirFait(app, a.optString("nom"), a.optString("valeur")).ifBlank { "Indique « nom » et « valeur »." }
+            "oublier" -> if (fr.dd.jarvis.device.Faits.oublier(app, a.optString("nom"))) "🗑️ « ${a.optString("nom")} » oublié." else "Rien de mémorisé sous « ${a.optString("nom")} »."
+            else -> fr.dd.jarvis.device.Faits.texte(app)
+        })
         "configurer_fournisseur_ia" -> {
             val provider = a.optString("fournisseur").trim().lowercase()
             val key = a.optString("cle_api").trim()
@@ -1079,7 +1096,8 @@ class ToolBox(
             }
         }, direct = true)
         "tache_terminer" -> ToolResult(app.tasks.complete(a.optString("id")))
-        "memoire_ajouter" -> ToolResult("✅ Consigne « ${a.optString("sujet")} » enregistrée (" + app.memo.set(a.optString("sujet"), a.optString("texte")) + ").")
+        "memoire_ajouter" -> ToolResult("✅ Consigne « ${a.optString("sujet")} » enregistrée (" + app.memo.set(a.optString("sujet"), a.optString("texte")) + ")." +
+            runCatching { fr.dd.jarvis.device.Faits.apprendre(app, a.optString("sujet") + " : " + a.optString("texte")) }.getOrDefault(emptyList()).let { r -> if (r.isEmpty()) "" else "\nMémoire fiable : " + r.joinToString(" ; ") })
         "memoire_apprendre" -> ToolResult(app.memo.apprendre(a.optString("sujet"), a.optString("preference"), a.optString("preuve")))
         "memoire_apprentissages" -> ToolResult(app.memo.apprentissagesEnCours(), direct = true)
         "agents_centre" -> agentsCentre(a)

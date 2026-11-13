@@ -62,6 +62,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             store.lastBriefing.set("")
             persist()
         }
+        voice.nom = "appli"
         voice.muteBeeps = store.muteBeeps.value
         voice.onListening = { listening = it }
         voice.onPartial = { partial = it }

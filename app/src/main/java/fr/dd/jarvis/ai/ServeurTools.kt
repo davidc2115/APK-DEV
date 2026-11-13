@@ -14,7 +14,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
     companion object {
         val KEYWORDS = Regex("home ?assistant|domotique|\\bha\\b|hacs|int[ée]gration|entit[ée]s?\\b|helper|\\baides?\\b|ssh|serveur|server|yaml|docker|lumi[èe]re|volet|thermostat|automatisation|automation|sc[èe]ne\\b|configuration\\.yaml|debian|raspberry|esphome|zigbee|mqtt|capteur|\\bprise\\b|interrupteur|box|livebox|freebox|bbox|vpn|wireguard|openvpn|redirection|\\bnat\\b|dmz|dhcp|disque|nas|\\bftp\\b|\\bsmb\\b|r[ée]seau|wifi|wi-fi|imprim|scann|\\bip\\b|adresse ip|github|\\bgit\\b|canon|epson|brother|\\bhp\\b|appareils?\\b|script|\\bcode\\b|ping|port|volume|\\bson\\b|t[ée]l[ée]\\b|t[ée]l[ée]vision|\\btv\\b|chauffage|climatisation|temp[ée]rature|consigne|po[êe]le|poil|degr[ée]s|granul[ée]s|pellet|chaudi[èe]re|radiateur|thermique|climate|media_player|lecteur multim[ée]dia|localis|o[uù] (est|se trouve)|position d|luminosit[ée]|store\\b|persienne|\\ballume\\b|allumer|[ée]teins?\\b|[ée]teindre", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
-        val NAMES = setOf("ha_entites", "ha_position", "ha_etat", "ha_service", "ha_config", "ha_dashboard", "ha_admin", "ssh_commande", "ssh_fichier", "serveur_diagnostic", "serveur_scan_ports", "routeur_diagnostiquer", "reseau_infos", "reseau_scanner", "appareil_sonder", "appareil_page", "imprimantes_trouver", "imprimer", "ssh_script", "github", "appareils_liste", "appareil_nommer", "ip_publique", "box_disque", "freebox")
+        val NAMES = setOf("ha_entites", "ha_position", "ha_etat", "ha_service", "ha_config", "ha_dashboard", "ha_admin", "ssh_commande", "ssh_fichier", "serveur_diagnostic", "serveur_scan_ports", "routeur_diagnostiquer", "reseau_infos", "reseau_scanner", "appareil_sonder", "appareil_page", "imprimantes_trouver", "imprimer", "ssh_script", "github", "appareils_liste", "appareil_nommer", "ip_publique", "box_disque", "freebox", "appareil_acces_distant")
     }
 
     private fun prop(d: String) = JSONObject().put("type", "string").put("description", d)
@@ -72,6 +72,8 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
             mapOf("commande" to prop("Commande shell."), "delai" to prop("Délai maximal en secondes (défaut 60)."),
                 "hote" to prop("Autre machine à joindre en SSH (IP/nom) au lieu du serveur des Réglages (optionnel)."), "utilisateur" to prop("Utilisateur de cette autre machine."),
                 "mot_de_passe" to prop("Mot de passe de cette autre machine."), "port" to prop("Port SSH (défaut 22)."), "via_serveur" to prop("« oui » : joindre cette machine DU RÉSEAU LOCAL à travers le serveur Debian (connexion à distance).")), listOf("commande")),
+        tool("appareil_acces_distant", "Réseau de la maison : rend un appareil du Wi-Fi (caméra, NAS, Home Assistant, Plex, imprimante, PC…) joignable DEPUIS INTERNET, automatiquement — réserve son adresse IP (bail DHCP fixe), choisit un port externe libre, crée la redirection sur la Freebox, relève l'IP publique et retient l'adresse obtenue. action=ouvrir (défaut) | fermer | inventaire (analyse le Wi-Fi et met à jour l'onglet Appareils Wi-Fi).",
+            mapOf("action" to prop("ouvrir | fermer | inventaire"), "appareil" to prop("Nom donné, nom réseau ou IP de l'appareil."), "port" to prop("Port du service sur l'appareil (optionnel : service principal détecté).")), listOf()),
         tool("ssh_fichier", "Serveur Debian (SSH) : LIRE, CHERCHER, MODIFIER, CRÉER ou RÉÉCRIRE un fichier du serveur — ou d'un conteneur Docker du serveur (paramètre conteneur). " +
             "C'est LE moyen de modifier un fichier du serveur (les outils de fichiers natifs d'Hermès agissent sur le téléphone). Actions : " +
             "lire (lignes numérotées ; debut/fin pour un long fichier) | chercher (motif → lignes numérotées) | remplacer (ancien → nouveau : passage exact recopié SANS numéros ; tout=oui pour toutes les occurrences) | " +
@@ -297,6 +299,11 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 } else ToolResult(github(a))
             }
             "appareils_liste" -> ToolResult(Registre.liste(app), direct = true)
+            "appareil_acces_distant" -> when (a.optString("action").lowercase()) {
+                "inventaire", "analyser", "scanner" -> ToolResult(AccesDistant.inventorier(app) + "\n\n" + Registre.liste(app), direct = true)
+                "fermer", "supprimer" -> ToolResult(AccesDistant.fermer(app, a.optString("appareil"), a.optString("port").toIntOrNull(), confirm))
+                else -> ToolResult(AccesDistant.configurer(app, a.optString("appareil"), a.optString("port").filter { it.isDigit() }.toIntOrNull(), confirm))
+            }
             "appareil_nommer" -> {
                 val ip = a.optString("ip").trim()
                 val nom = a.optString("nom").trim()

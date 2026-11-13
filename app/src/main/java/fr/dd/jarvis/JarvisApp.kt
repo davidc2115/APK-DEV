@@ -136,6 +136,8 @@ class JarvisApp : Application() {
         societe = SocieteService(this, SocieteRepo(this), obsidian)
         fr.dd.jarvis.work.VeilleWorker.planifier(this)
         fr.dd.jarvis.work.BaremesWorker.planifier(this)
+        // Mémoire fiable : une fois, les notes déjà prises sont relues pour en tirer adresse, surnoms et faits.
+        runCatching { fr.dd.jarvis.device.Faits.rattrapage(this) }
         runCatching { fr.dd.jarvis.coffre.Coffre.planifier(this) }
         // Une fois : les rapports d'intervention existants sont régénérés avec leurs photos dans le PDF.
         if (!store.rapportsV3.value) Thread {

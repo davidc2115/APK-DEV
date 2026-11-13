@@ -251,6 +251,30 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
     private fun ipv4(h: JSONObject): String = liste(h.optJSONArray("l3connectivities")).filter { it.optString("af") == "ipv4" }
         .sortedByDescending { it.optBoolean("active") }.firstOrNull()?.optString("addr").orEmpty()
 
+    /** Appareils connus de la Freebox (noms, MAC, IP, actifs) pour l'inventaire du réseau ; null si non associée. */
+    fun appareilsReseau(app: JarvisApp): List<Reseau.Appareil>? {
+        if (app.store.freeboxAppToken.value.isBlank()) return null
+        return runCatching { avecSession(app) { s ->
+            hotes(app, s).filter { it.optBoolean("active") && ipv4(it).isNotBlank() }.map { h ->
+                val mac = h.optJSONObject("l2ident")?.optString("id").orEmpty()
+                Reseau.Appareil(ipv4(h), h.optString("primary_name"), emptyList(), h.optString("vendor_name"),
+                    Reseau.typeDeApp(emptyList(), h.optString("host_type")).let { t -> if (t == "❔ appareil" && h.optString("host_type").isNotBlank()) "📟 ${h.optString("host_type")}" else t },
+                    if (mac.isNotBlank()) "MAC $mac" else "")
+            }
+        } }.getOrNull()
+    }
+
+    /** IP publique donnée par la Freebox (plus fiable qu'un service web), ou null. */
+    fun ipPublique(app: JarvisApp): String? {
+        if (app.store.freeboxAppToken.value.isBlank()) return null
+        return runCatching { avecSession(app) { s -> (json(app, "connection/", s) as? JSONObject)?.optString("ipv4")?.takeIf { it.isNotBlank() } } }.getOrNull()
+    }
+
+    /** Ports externes déjà redirigés (pour en choisir un libre). */
+    fun portsRediriges(app: JarvisApp): Set<Int> = runCatching { avecSession(app) { s ->
+        liste(json(app, "fw/redir/", s)).flatMap { (it.optInt("wan_port_start")..maxOf(it.optInt("wan_port_start"), it.optInt("wan_port_end"))).toList() }.toSet()
+    } }.getOrDefault(emptySet())
+
     /** Adresse IP d'un appareil du réseau à partir de son nom (tel qu'affiché par la Freebox). */
     private fun ipDe(app: JarvisApp, s: String, nomOuIp: String): String {
         val v = nomOuIp.trim()

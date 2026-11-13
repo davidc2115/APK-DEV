@@ -57,21 +57,43 @@ object TelephoneSecurise {
         return intArrayOf((l - cote) / 2, cy - cote / 2, (l + cote) / 2, cy + cote / 2)
     }
 
-    /** Trace du schéma au doigt simulé (input motionevent), points intermédiaires pour un geste continu. */
+    /** Centre d'un point (1 à 9, 1 = en haut à gauche) dans la grille [g] (gauche, haut, droite, bas). */
+    internal fun centre(d: Int, g: IntArray): Pair<Int, Int> {
+        val r = (d - 1) / 3; val c = (d - 1) % 3
+        return (g[0] + (c * 2 + 1) * (g[2] - g[0]) / 6) to (g[1] + (r * 2 + 1) * (g[3] - g[1]) / 6)
+    }
+
+    /** Trace du schéma au doigt simulé (input motionevent), points intermédiaires pour un geste continu (repli sans accessibilité). */
     internal fun traceSchema(points: List<Int>, g: IntArray): String {
-        fun p(d: Int): Pair<Int, Int> { val r = (d - 1) / 3; val c = (d - 1) % 3
-            return (g[0] + (c * 2 + 1) * (g[2] - g[0]) / 6) to (g[1] + (r * 2 + 1) * (g[3] - g[1]) / 6) }
         val sb = StringBuilder()
-        val depart = p(points.first())
+        val depart = centre(points.first(), g)
         sb.append("input motionevent DOWN ${depart.first} ${depart.second}")
         var avant = depart
         for (d in points.drop(1)) {
-            val cible = p(d)
+            val cible = centre(d, g)
             for (k in 1..4) sb.append("; input motionevent MOVE ${avant.first + (cible.first - avant.first) * k / 4} ${avant.second + (cible.second - avant.second) * k / 4}")
             avant = cible
         }
         sb.append("; input motionevent UP ${avant.first} ${avant.second}")
         return sb.toString()
+    }
+
+    /** Grille relevée (« g,h,d,b ») valide, ou null. */
+    internal fun grilleEnregistree(s: String): IntArray? = s.split(',').mapNotNull { it.trim().toIntOrNull() }.takeIf { it.size == 4 }
+        ?.toIntArray()?.takeIf { it[2] - it[0] > 200 && it[3] - it[1] > 200 }
+
+    /**
+     * Trace le schéma par l'ACCESSIBILITÉ : un seul geste continu, doigt posé du premier au dernier point, sur la grille
+     * réellement affichée (lue à l'écran, sinon relevée lors d'un précédent affichage de l'écran de verrouillage).
+     * Faux si l'accessibilité de JARVIS n'est pas active ou si le geste n'a pas été exécuté.
+     */
+    private suspend fun tracerAccessibilite(app: JarvisApp, points: List<Int>): Boolean {
+        val a = fr.dd.jarvis.service.JarvisAccessibilityService.instance ?: return false
+        val g = a.grilleSchema()?.also { app.store.schemaGrille.set(it.joinToString(",")) } ?: grilleEnregistree(app.store.schemaGrille.value) ?: return false
+        val pts = points.map { centre(it, g).let { (x, y) -> x.toFloat() to y.toFloat() } }
+        val fait = kotlinx.coroutines.CompletableDeferred<Boolean>()
+        val lance = withContext(Dispatchers.Main) { a.tracer(pts) { ok -> fait.complete(ok) } }
+        return lance && (kotlinx.coroutines.withTimeoutOrNull(8000) { fait.await() } ?: false)
     }
 
     /** Mise en veille + verrouillage. */
@@ -88,6 +110,17 @@ object TelephoneSecurise {
     suspend fun deverrouiller(app: JarvisApp): String = withContext(Dispatchers.IO) {
         if (!verrouille(app)) return@withContext "🔓 Le téléphone est déjà déverrouillé."
         val code = runCatching { app.store.codeDeverrouillage.value }.getOrDefault("")
+        // Schéma sans ADB : l'accessibilité suffit (affichage de la saisie par JARVIS, puis geste continu sur la grille).
+        val pointsSchema = schema(code)?.let { fr.dd.jarvis.ui.SchemaDessinLogique.completer(it) }
+        if (pointsSchema != null && !shellPossible(app) && fr.dd.jarvis.service.JarvisAccessibilityService.instance != null) {
+            afficherDeverrouillage(app)
+            delay(1300)
+            val ok = tracerAccessibilite(app, pointsSchema)
+            delay(1200)
+            return@withContext if (!verrouille(app)) "🔓 Téléphone déverrouillé." else if (!ok)
+                "⚠️ Je n'ai pas pu tracer le schéma : affiche une fois l'écran de verrouillage avec la grille du schéma (JARVIS relève alors sa position), puis redemande."
+            else "⚠️ Le schéma tracé n'a pas été accepté : retrace-le dans Réglages › Sécurité › Systèmes (exactement comme sur l'écran de verrouillage)."
+        }
         if (code.isBlank() || !codeValide(code) || !shellPossible(app)) {
             afficherDeverrouillage(app)
             return@withContext if (code.isBlank()) "🔓 Écran réveillé : termine avec ton empreinte ou ton visage. (Pour un déverrouillage complet à la voix, enregistre le code de l'écran dans Réglages › Sécurité › Systèmes.)"
@@ -100,8 +133,11 @@ object TelephoneSecurise {
         val h = taille?.groupValues?.get(2)?.toIntOrNull() ?: 2400
         sh(app, "input swipe ${l / 2} ${(h * 0.85).toInt()} ${l / 2} ${(h * 0.25).toInt()} 250")   // fait apparaître la saisie du code
         delay(700)
-        val points = schema(code)
-        if (points != null) sh(app, traceSchema(points, grille(app, l, h)))
+        val points = schema(code)?.let { fr.dd.jarvis.ui.SchemaDessinLogique.completer(it) }
+        if (points != null) {
+            // 1) Geste continu par l'accessibilité sur la vraie grille ; 2) repli : commandes « input » sur la grille lue ou relevée.
+            if (!tracerAccessibilite(app, points)) sh(app, traceSchema(points, grilleEnregistree(app.store.schemaGrille.value) ?: grille(app, l, h)))
+        }
         else {
             sh(app, "input text '$code'")
             delay(300)
