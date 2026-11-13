@@ -163,7 +163,7 @@ class PlexTools(private val app: JarvisApp, private val confirm: suspend (String
                 .put("required", JSONArray(required))))
 
     val schema = listOf(
-        tool("plex_rechercher", "Plex : recherche un film, une série, un épisode, un artiste… dans les bibliothèques du serveur (lecture seule).",
+        tool("plex_rechercher", "Plex (INSTANCE Plex Media Server, par son API — pas le serveur Debian) : recherche un film, une série, un épisode, un artiste… dans les bibliothèques du serveur (lecture seule).",
             mapOf("titre" to prop("Titre ou partie du titre à rechercher.")), listOf("titre")),
         tool("plex_appareils", "Plex : liste les lecteurs Plex visibles par le serveur (TV, téléphone, boîtier…).", emptyMap()),
         tool("plex_lancer", "Plex : lance un film, une série (épisode précis, ou le prochain non vu) ou de la musique sur un lecteur Plex visible ; reprend là où la lecture s'était arrêtée. Demande confirmation.",
@@ -190,7 +190,7 @@ class PlexTools(private val app: JarvisApp, private val confirm: suspend (String
         tool("plex_playlists", "Plex : listes de lecture — lister | voir | creer (titre + éléments) | ajouter | retirer | supprimer.",
             mapOf("action" to prop("lister | voir | creer | ajouter | retirer | supprimer"), "playlist" to prop("Nom de la liste de lecture."),
                 "elements" to prop("Titres ou identifiants séparés par « ; ».")), listOf("action")),
-        tool("plex_serveur", "Plex Media Server : etat (version, mise à jour disponible, activités en cours, transcodages, bibliothèques) | maintenance (optimiser la base, nettoyer les anciens fichiers, vider les corbeilles) | reglages (lire, filtre optionnel) | modifier_reglage (cle + valeur) | verifier_mise_a_jour.",
+        tool("plex_serveur", "Plex Media Server (INSTANCE, par son API ; pour démarrer / arrêter / mettre à jour le SERVICE sur le serveur Debian, utilise serveur_service) : etat (version, mise à jour disponible, activités en cours, transcodages, bibliothèques) | maintenance (optimiser la base, nettoyer les anciens fichiers, vider les corbeilles) | reglages (lire, filtre optionnel) | modifier_reglage (cle + valeur) | verifier_mise_a_jour.",
             mapOf("action" to prop("etat | maintenance | reglages | modifier_reglage | verifier_mise_a_jour"), "filtre" to prop("reglages : mot à chercher dans les réglages."),
                 "cle" to prop("modifier_reglage : identifiant du réglage."), "valeur" to prop("modifier_reglage : nouvelle valeur.")), listOf("action")),
         tool("plex_supprimer", "Plex : SUPPRIME définitivement un média (fichier compris) — confirmation obligatoire ; nécessite « Autoriser la suppression des médias » dans les réglages du serveur.",

@@ -61,6 +61,7 @@ object ServeurInventaire {
             append(
                 "RÈGLES SERVEUR : chaque service est une chose distincte — Home Assistant ≠ Plex ≠ bot Discord ≠ Ollama ; ne les confonds jamais. " +
                     "Home Assistant : l'INSTANCE (entités, réglages, automatisations… par son API, outils ha_*, sans SSH) n'est pas le SERVEUR qui l'héberge " +
+                    "(de même, l'INSTANCE Plex — bibliothèques, lecture, réglages : outils plex_* — n'est pas le SERVEUR qui l'héberge — service plexmediaserver, fichiers vidéo : serveur_service, serveur_fichiers) ; " +
                     "(conteneur, fichiers, certificats, sauvegardes : serveur_service, ha_sauvegarde, ha_config, ssh_*). Ne redemande jamais adresses, jetons ni identifiants. " +
                     "Identifie un service par son nom EXACT dans le relevé (conteneur Docker, unité systemd, processus pm2/node/python) et cite ce nom. " +
                     "Le bot Discord a deux facettes : son compte sur Discord (outils mcp_jarvis_discord_* : salons, rôles, messages) et son programme sur le serveur (logs, redémarrage, code : SSH). " +
@@ -97,7 +98,7 @@ object ServeurInventaire {
             lignes += "- Home Assistant (INSTANCE, API) : ${s.haUrl.value.trim()} ($jeton$dossier$joint) → outils mcp_jarvis_ha_entites / ha_etat / ha_service / ha_config / ha_dashboard / ha_admin (API d'abord ; SSH seulement pour le conteneur, les logs ou si l'API ne répond pas)."
         }
         val plex = runCatching { s.plexToken.value.isNotBlank() }.getOrDefault(false)
-        if (plex || s.sshHost.value.isNotBlank()) lignes += "- Plex Media Server : sur le serveur Debian, port 32400, joint par le tunnel SSH de Jarvis (" +
+        if (plex || s.sshHost.value.isNotBlank()) lignes += "- Plex Media Server (INSTANCE, API) : hébergé sur le serveur Debian, port 32400, joint par le tunnel SSH de Jarvis (" +
             (if (plex) "jeton Plex enregistré" else "jeton Plex NON enregistré") + ") → outils mcp_jarvis_plex_rechercher / plex_appareils / plex_lancer ; administration du service (logs, redémarrage, bibliothèques sur disque) par SSH."
         if (s.discordToken.value.isNotBlank()) lignes += "- Bot Discord : jeton du bot enregistré dans Jarvis" +
             (s.discordGuildId.value.trim().takeIf { it.isNotBlank() }?.let { ", serveur Discord $it" }.orEmpty()) +

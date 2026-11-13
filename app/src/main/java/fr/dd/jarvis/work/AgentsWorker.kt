@@ -95,6 +95,9 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
     private fun writeSet(n: String, s: Set<String>) = runCatching { seenFile(n).writeText(s.toList().takeLast(600).joinToString("\n")) }
 
     private fun alert(id: Int, titre: String, texte: String): Boolean {
+        // Arrivée de mails / SMS / messages : Android affiche déjà ses notifications, Jarvis n'en ajoute plus.
+        // Le résumé reste dans le journal des agents (et Jarvis le donne quand on le lui demande).
+        if (id == 2001 || id == 2003) { journal.append("- $titre (sans notification Jarvis)\n"); return true }
         if (android.os.Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             journal.append("- ⚠️ Alerte « $titre » non publiée : autorisation de notifications Android absente.\n")
             return false

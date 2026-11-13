@@ -152,6 +152,11 @@ class Brain(
                         "🔓 J'affiche le déverrouillage (empreinte, visage ou code). Pour déverrouiller à la voix, active l'écoute « Jarvis » (le téléphone vérifie alors ta voix)." }
                 })
             }
+            // Sites web : créés, retrouvés, publiés et modifiés par l'outil dédié (jamais « à la main » par une IA).
+            SitesWebTools.intention(app, texteUser)?.let { args ->
+                onStatus("🌐 Site web…")
+                return reflexe(tools.execute("site_web", args).text)
+            }
             fr.dd.jarvis.securite.Systemes.intention(app, texteUser)?.let { args ->
                 onStatus("🧩 " + when (args.optString("action")) { "creer" -> "Création du mode…"; "modifier" -> "Modification du mode…"; "supprimer" -> "Suppression du mode…"; else -> "Mes modes…" })
                 return reflexe(tools.execute("modes_jarvis", args).text)

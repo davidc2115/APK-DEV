@@ -60,26 +60,59 @@ Si rien n'est à changer, réponds : === AUCUN ==="""
             .takeIf { it.isNotBlank() && !it.split('/').any { p -> p == ".." } && Regex("^[\\w./ -]+$").matches(it) }
 
         internal fun slug(nom: String) = fr.dd.jarvis.societe.core.normaliser(nom).replace(' ', '-').take(30).trim('-').ifBlank { "site" }
+
+        private fun fichierMeta(app: JarvisApp) = File(app.filesDir, "sites_web.json")
+
+        @Synchronized internal fun lireSites(app: JarvisApp): List<Site> = runCatching {
+            val a = JSONArray(fichierMeta(app).readText())
+            (0 until a.length()).map { a.getJSONObject(it) }.map { Site(it.optString("slug"), it.optString("nom"), it.optString("dossier"), it.optInt("port"), it.optInt("portExterne"),
+                it.optString("description"), it.optLong("creeLe"), it.optString("statut", "pret"), it.optString("erreur")) }
+        }.getOrDefault(emptyList())
+
+        @Synchronized internal fun ecrireSites(app: JarvisApp, l: List<Site>) {
+            fichierMeta(app).writeText(JSONArray().also { a -> l.forEach { x -> a.put(JSONObject().put("slug", x.slug).put("nom", x.nom).put("dossier", x.dossier).put("port", x.port)
+                .put("portExterne", x.portExterne).put("description", x.description).put("creeLe", x.creeLe).put("statut", x.statut).put("erreur", x.erreur)) } }.toString(1))
+        }
+
+        /** Demande sur les sites reconnue sans IA (évite qu'une IA fabrique le site ailleurs que sur le serveur). */
+        fun intention(app: JarvisApp, texte: String): JSONObject? = intention(texte, lireSites(app).map { it.nom })
+
+        internal fun intention(texte: String, noms: List<String>): JSONObject? {
+            if (texte.length > 1500) return null
+            val t = fr.dd.jarvis.societe.core.normaliser(texte).removePrefix("jarvis ").trim()
+            if (!Regex("\\b(sites?|page web|landing)\\b").containsMatchIn(t)) return null
+            val cite = noms.filter { n -> slug(n).replace('-', ' ').let { it.length >= 3 && t.contains(it) } }.maxByOrNull { it.length }
+            fun avecNom(o: JSONObject) = o.also { if (cite != null) it.put("nom", cite) }
+            return when {
+                Regex("^(montre|liste|affiche|quels sont|donne moi)\\b.{0,30}\\bsites\\b").containsMatchIn(t) -> JSONObject().put("action", "lister")
+                Regex("\\b(ou en est|est il pret|est pret|retrouve|lien|adresse|url)\\b").containsMatchIn(t) && !Regex("^(cree|fais|fabrique)").containsMatchIn(t) -> avecNom(JSONObject().put("action", "voir"))
+                Regex("\\ben ligne\\b|\\bpublie|accessible (depuis|sur) (internet|l exterieur)").containsMatchIn(t) && !Regex("^(cree|creer|fais|fabrique|construis|genere|realise|developpe)").containsMatchIn(t) ->
+                    avecNom(JSONObject().put("action", if (Regex("\\b(retire|enleve|plus en ligne|hors ligne)\\b").containsMatchIn(t)) "retirer_en_ligne" else "mettre_en_ligne"))
+                Regex("^(supprime|efface|detruis)\\b").containsMatchIn(t) -> avecNom(JSONObject().put("action", "supprimer"))
+                Regex("^(cree|creer|fais|fabrique|construis|genere|realise|monte|developpe|code|je veux|je voudrais|j aimerais)\\b.{0,40}\\b(site|page web|landing)").containsMatchIn(t) && cite == null -> {
+                    if (t.split(' ').size < 6) return null   // trop vague : l'IA pose ses questions
+                    val sujet = Regex("(?:site|page)(?: web| internet)?(?: vitrine)? (?:pour|de|du|des|sur) (.{3,45}?)(?:[,.;!]| avec | qui | en | et |$)").find(t)?.groupValues?.get(1)
+                    JSONObject().put("action", "creer").put("description", texte.trim()).put("nom", "Site " + (sujet ?: t.split(' ').drop(3).take(4).joinToString(" ")))
+                }
+                (cite != null || noms.size == 1) && Regex("^(modifie|change|ajoute|enleve|retire|remplace|corrige|mets a jour|ameliore|refais|traduis|dans le site)\\b").containsMatchIn(t) ->
+                    JSONObject().put("action", "modifier").put("nom", cite ?: noms.single()).put("consigne", texte.trim())
+                else -> null
+            }
+        }
     }
 
-    private data class Site(val slug: String, val nom: String, val dossier: String, val port: Int, val portExterne: Int = 0, val description: String = "", val creeLe: Long = 0)
+    internal data class Site(val slug: String, val nom: String, val dossier: String, val port: Int, val portExterne: Int = 0, val description: String = "",
+                             val creeLe: Long = 0, val statut: String = "pret", val erreur: String = "")
 
-    private fun fichierMeta() = File(app.filesDir, "sites_web.json")
-    @Synchronized private fun sites(): List<Site> = runCatching {
-        val a = JSONArray(fichierMeta().readText())
-        (0 until a.length()).map { a.getJSONObject(it) }.map { Site(it.optString("slug"), it.optString("nom"), it.optString("dossier"), it.optInt("port"), it.optInt("portExterne"), it.optString("description"), it.optLong("creeLe")) }
-    }.getOrDefault(emptyList())
-    @Synchronized private fun sauver(s: Site) {
-        val l = sites().filter { it.slug != s.slug } + s
-        fichierMeta().writeText(JSONArray().also { a -> l.forEach { x -> a.put(JSONObject().put("slug", x.slug).put("nom", x.nom).put("dossier", x.dossier).put("port", x.port)
-            .put("portExterne", x.portExterne).put("description", x.description).put("creeLe", x.creeLe)) } }.toString(1))
-    }
-    @Synchronized private fun retirer(slug: String) { val l = sites().filter { it.slug != slug }
-        fichierMeta().writeText(JSONArray().also { a -> l.forEach { x -> a.put(JSONObject().put("slug", x.slug).put("nom", x.nom).put("dossier", x.dossier).put("port", x.port).put("portExterne", x.portExterne).put("description", x.description).put("creeLe", x.creeLe)) } }.toString(1)) }
+    private fun sites(): List<Site> = lireSites(app)
+    private fun sauver(s: Site) = ecrireSites(app, lireSites(app).filter { it.slug != s.slug } + s)
+    private fun retirer(slug: String) = ecrireSites(app, lireSites(app).filter { it.slug != slug })
 
     private fun trouver(nom: String): Site? {
         val l = sites(); val n = slug(nom)
-        return l.firstOrNull { it.slug == n } ?: l.firstOrNull { it.slug.contains(n) || n.contains(it.slug) } ?: (if (nom.isBlank()) l.singleOrNull() else null)
+        return l.firstOrNull { it.slug == n } ?: l.firstOrNull { it.slug.contains(n) || n.contains(it.slug) }
+            // « mon site », « le site », nom vide : le seul site, sinon le plus récent.
+            ?: (if (nom.isBlank() || Regex("^(mon |le |ce )?site( web| internet)?$").matches(fr.dd.jarvis.societe.core.normaliser(nom))) l.maxByOrNull { it.creeLe } else null)
     }
 
     private fun root() = app.store.sshUser.value.trim() == "root" || app.store.sshPass.value.isNotBlank()
@@ -105,12 +138,12 @@ Si rien n'est à changer, réponds : === AUCUN ==="""
             when (action) {
                 "creer" -> creer(a)
                 "modifier" -> modifier(a)
-                "lister" -> ToolResult(sites().joinToString("\n", "# 🌐 Sites web\n") { s -> "- **${s.nom}** · ${adresseLocale(s)}" + (if (s.portExterne > 0) " · en ligne sur le port ${s.portExterne}" else "") + " · ${s.dossier}" }
+                "lister" -> ToolResult(sites().joinToString("\n", "# 🌐 Sites web\n") { s -> "- **${s.nom}** · ${statut(s)} · ${adresseLocale(s)}" + (if (s.portExterne > 0) " · en ligne : ${adressePublique(s)}" else "") + " · ${s.dossier}" }
                     .takeIf { sites().isNotEmpty() } ?: "Aucun site créé. Dis par exemple « crée un site vitrine pour mon entreprise de maintenance photovoltaïque ».")
                 "voir" -> {
                     val s = trouver(a.optString("nom")) ?: return@withContext ToolResult("Site « ${a.optString("nom")} » introuvable.")
                     val r = Serveur.exec(app, "cd ${Serveur.q(s.dossier)} && find . -type f | sort | head -80; echo; du -sh .; " + su("docker ps -a --filter name=^/jarvis-site-${s.slug}\$ --format '{{.Status}}'"), 30)
-                    ToolResult("# 🌐 ${s.nom}\n- Adresse à la maison : ${adresseLocale(s)}\n" + (if (s.portExterne > 0) "- En ligne : ${adressePublique(s)}\n" else "- Pas encore en ligne sur Internet\n") +
+                    ToolResult("# 🌐 ${s.nom}\n- État : ${statut(s)}\n- Adresse à la maison : ${adresseLocale(s)}\n" + (if (s.portExterne > 0) "- En ligne : ${adressePublique(s)}\n" else "- Pas encore en ligne sur Internet (dis « mets le site en ligne »)\n") +
                         "- Dossier : ${s.dossier}\n```\n${r.second.trim().take(4000)}\n```")
                 }
                 "mettre_en_ligne" -> enLigne(a)
@@ -198,26 +231,61 @@ Si rien n'est à changer, réponds : === AUCUN ==="""
         runCatching { fr.dd.jarvis.work.SuiviTaches.termine(app, 7700 + (System.currentTimeMillis() % 200).toInt(), titre.take(60), message.take(300)) }
     }
 
+    private fun statut(s: Site) = when {
+        s.statut == "creation" && System.currentTimeMillis() - s.creeLe > 15 * 60_000L -> "❌ création interrompue (redemande-la)"
+        s.statut == "creation" -> "⏳ en cours de création"
+        s.statut == "echec" -> "❌ échec : ${s.erreur.take(160)}"
+        else -> "✅ prêt"
+    }
+
+    /** Pages du site : d'un seul coup, sinon fichier par fichier (réponse trop longue ou coupée). */
+    private suspend fun generer(nom: String, description: String): Map<String, String> {
+        val (fichiers, _) = lireFichiers(app.llm.redigerLong(CONSIGNE_CREATION, "Nom du site : $nom\nDemande : $description"))
+        if (fichiers.keys.any { it.endsWith(".html") } && fichiers.values.all { it.isNotBlank() }) return fichiers
+        val plan = app.llm.agent("Tu prépares un site web statique (HTML, CSS, JavaScript, servi par nginx). Donne uniquement la liste de ses fichiers, un chemin relatif par ligne, " +
+            "index.html en premier, de 3 à 7 fichiers (pages .html, css/style.css, js/main.js si utile). Rien d'autre.", "Site : $nom\nDemande : $description")
+        val chemins = plan.lines().mapNotNull { propre(it.trim().trimStart('-', '*', '•', ' ').substringBefore(' ')) }.filter { it.contains('.') }.distinct().take(8)
+            .let { l -> if ("index.html" in l) l else listOf("index.html") + l }
+        val out = linkedMapOf<String, String>()
+        for (c in chemins) {
+            val r = app.llm.redigerLong("Tu écris UN fichier d'un site web statique moderne et responsive, contenu réel et soigné en français (jamais de lorem ipsum), " +
+                "cohérent avec les autres fichiers du site (mêmes noms de pages, de classes CSS et de liens). Réponds UNIQUEMENT par le contenu complet du fichier, sans explication.",
+                "Site : $nom\nDemande : $description\nFichiers du site : ${chemins.joinToString()}\nÉcris maintenant le fichier : $c")
+            out[c] = Regex("^```[a-zA-Z]*\\r?\\n([\\s\\S]*?)\\r?\\n```\\s*$").find(r.trim())?.groupValues?.get(1) ?: r.trim()
+        }
+        return out
+    }
+
     private fun creer(a: JSONObject): ToolResult {
         val description = a.optString("description").trim().ifBlank { a.optString("consigne").trim() }
         val nom = a.optString("nom").trim().ifBlank { description.take(40).ifBlank { "Mon site" } }
         if (description.length < 10) return ToolResult("Décris le site : sujet, pages et sections, style, couleurs, coordonnées à afficher…")
         if (trouver(nom)?.slug == slug(nom)) return ToolResult("Un site « $nom » existe déjà : dis « modifie le site $nom … » pour le changer, ou donne un autre nom.")
         val home = Serveur.exec(app, "echo \$HOME", 15).second.trim().lines().last()
-        val site = Site(slug(nom), nom, "$home/jarvis-sites/${slug(nom)}", portLibre(), description = description.take(500), creeLe = System.currentTimeMillis())
+        val site = Site(slug(nom), nom, "$home/jarvis-sites/${slug(nom)}", portLibre(), description = description.take(500), creeLe = System.currentTimeMillis(), statut = "creation")
+        sauver(site)   // visible tout de suite (« où en est mon site ? »)
+        val publier = Regex("en ligne|publi|internet|accessible", RegexOption.IGNORE_CASE).containsMatchIn(description)
         portee.launch {
-            val compte = runCatching {
-                val rep = app.llm.redigerLong(CONSIGNE_CREATION, "Nom du site : $nom\nDemande : $description")
-                val (fichiers, _) = lireFichiers(rep)
+            val compte = try {
+                val fichiers = generer(nom, description)
                 if (fichiers.isEmpty() || fichiers.keys.none { it.endsWith(".html") }) throw IllegalStateException("l'IA n'a pas renvoyé de fichiers de site exploitables, réessaie en reformulant")
                 val complet = if ("index.html" !in fichiers) fichiers + ("index.html" to fichiers.entries.first { it.key.endsWith(".html") }.value) else fichiers
                 deposer(site, complet, emptyList())
                 val r = servir(site)
                 if (r.contains("DOCKER ABSENT")) throw IllegalStateException("Docker n'est pas installé sur le serveur (nécessaire pour servir le site)")
-                sauver(site)
-                "Site « $nom » créé (${complet.size} fichiers : ${complet.keys.take(8).joinToString()}).\n\n👉 À la maison : ${adresseLocale(site)}\n\n" +
-                    "Pour le rendre accessible depuis Internet : « mets le site $nom en ligne ». Pour le changer : « modifie le site $nom : … »."
-            }.getOrElse { "❌ Création du site « $nom » impossible : ${it.message}" }
+                // Vérification réelle : la page répond-elle sur le serveur ?
+                val code = Serveur.exec(app, "sleep 2; curl -s -o /dev/null -w '%{http_code}' -m 8 http://localhost:${site.port}/", 30).second.trim().takeLast(3)
+                sauver(site.copy(statut = "pret"))
+                var texte = "Site « $nom » créé (${complet.size} fichiers : ${complet.keys.take(8).joinToString()})" +
+                    (if (code == "200") " et il répond sur le serveur ✅" else " — le serveur répond « $code » : vérifie avec « montre le site $nom »") +
+                    ".\n\n👉 À la maison : ${adresseLocale(site)}"
+                if (publier) texte += "\n\n" + runCatching { enLigne(JSONObject().put("nom", nom)).text }.getOrElse { "⚠️ Mise en ligne impossible : ${it.message}" }
+                else texte += "\n\nPour le rendre accessible depuis Internet : « mets le site $nom en ligne »."
+                texte + "\nPour le changer : « modifie le site $nom : … »."
+            } catch (e: Exception) {
+                sauver(site.copy(statut = "echec", erreur = e.message ?: e.javaClass.simpleName))
+                "❌ Création du site « $nom » impossible : ${e.message}"
+            }
             prevenir(if (compte.startsWith("❌")) "Site web : échec" else "Site web prêt", compte)
         }
         return ToolResult("⏳ Je crée le site « $nom » (1 à 3 minutes) : l'IA écrit les pages, puis je les dépose sur ton serveur et je le démarre sur le port ${site.port}. Je te préviens ici dès qu'il est prêt.")

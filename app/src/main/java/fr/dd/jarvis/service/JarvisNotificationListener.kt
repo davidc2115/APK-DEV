@@ -138,9 +138,8 @@ class JarvisNotificationListener : NotificationListenerService() {
             runCatching {
                 fr.dd.jarvis.device.Annonces.traiter(applicationContext, applicationContext as fr.dd.jarvis.JarvisApp, sbn.key + sbn.postTime, sbn.packageName, label, n.category, titre, texte)
             }
-            // Masquer la notification système après archivage local : l'événement reste consultable dans Jarvis.
-            // Ne jamais retirer la notification d'un appel en cours : elle peut porter l'interface permettant de décrocher.
-            if (message || appelManque) runCatching { cancelNotification(sbn.key) }
+            // Les notifications d'Android (SMS, mails, appels, appels manqués) restent affichées : Jarvis les garde seulement
+            // en mémoire pour les lire, les résumer et les annoncer — il n'en retire plus aucune (sauf commande anti-vol).
         } catch (_: Throwable) {
         }
     }
