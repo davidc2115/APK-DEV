@@ -194,7 +194,12 @@ object GeminiModeles {
     private val parCle = java.util.concurrent.ConcurrentHashMap<String, Pair<String, Long>>()
     private val PREFERES = listOf("gemini-3.8-flash", "gemini-3.6-flash", "gemini-flash-latest", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash")
 
-    fun pour(key: String, defaut: String): String = parCle[key]?.takeIf { it.second > System.currentTimeMillis() }?.first ?: defaut
+    /** Modèle à utiliser pour [key] : celui des Réglages, sauf s'il a été refusé à CETTE clé (le remplaçant est retenu
+     *  pour ce modèle-là seulement : choisir un autre modèle dans les Réglages s'applique tout de suite). */
+    fun pour(key: String, defaut: String): String {
+        val d = defaut.trim().removePrefix("models/")
+        return parCle["$key|$d"]?.takeIf { it.second > System.currentTimeMillis() }?.first ?: d
+    }
 
     /** Erreur due au modèle (pas à la clé). */
     fun modeleInaccessible(code: Int, message: String): Boolean = when (code) {
@@ -216,7 +221,7 @@ object GeminiModeles {
                 .filter { id -> id != refuse && listOf("image", "tts", "live", "audio", "embed", "robotics", "veo", "imagen").none { id.contains(it, true) } }
         }
         (PREFERES.firstOrNull { it in modeles } ?: modeles.filter { it.contains("flash") && !it.contains("exp") }.maxOrNull())
-            ?.also { parCle[key] = it to System.currentTimeMillis() + 6 * 3_600_000L }
+            ?.also { parCle["$key|${refuse.trim().removePrefix("models/")}"] = it to System.currentTimeMillis() + 6 * 3_600_000L }
     }.getOrNull()
 }
 

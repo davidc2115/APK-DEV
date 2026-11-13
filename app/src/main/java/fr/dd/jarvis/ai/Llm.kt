@@ -73,7 +73,8 @@ class Llm(private val store: Store) {
                 return try {
                     gemini.generate(system, user)
                 } catch (e: ApiException) {
-                    if (e.code == 404 && autoFixGemini()) gemini.generate(system, user) else throw e
+                    // Le modèle choisi dans les Réglages n'est plus remplacé d'office : le repli se fait appel par appel.
+                    throw e
                 }.ifBlank { throw IllegalStateException("réponse vide") }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -281,7 +282,7 @@ class Llm(private val store: Store) {
         val t0 = System.currentTimeMillis()
         val modele = geminiChat.ping(k)
         geminiRing.effacer(k)
-        "✅ OK (${System.currentTimeMillis() - t0} ms)" + (if (modele != store.geminiModel.value) " — modèle « ${store.geminiModel.value} » non ouvert à cette clé : « $modele » utilisé à la place" else "")
+        "✅ OK (${System.currentTimeMillis() - t0} ms)" + (if (modele != store.geminiModel.value.trim().removePrefix("models/")) " — modèle « ${store.geminiModel.value} » non ouvert à cette clé : « $modele » utilisé à la place" else " — modèle « $modele »")
     } catch (e: ApiException) {
         "❌ " + KeyRing.motif(e.code, e.message.orEmpty())
     } catch (e: Exception) {

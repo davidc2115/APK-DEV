@@ -366,7 +366,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     }
                 },
                 onTest = { app.llm.testGeminiKeys() },
-                modelLabel = "Modèle Gemini", model = store.geminiModel.value, onModel = { store.geminiModel.set(it) },
+                modelLabel = "Modèle Gemini", model = store.geminiModel.value, onModel = { store.geminiModel.set(it.trim().removePrefix("models/")) },
                 onListModels = { app.llm.listGeminiModels() }
             )
         },
