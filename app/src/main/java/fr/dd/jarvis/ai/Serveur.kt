@@ -285,16 +285,57 @@ object Serveur {
         code to out.toString("UTF-8")
     }
 
-    fun lire(app: JarvisApp, chemin: String, max: Int = 400_000): String = session(app) { s ->
-        val c = s.openChannel("sftp") as ChannelSftp; c.connect(10000)
-        try {
-            val st = c.stat(chemin)
-            if (st.size > max) throw IllegalStateException("Fichier trop gros (${st.size / 1024} Ko).")
-            c.get(chemin).use { String(it.readBytes(), Charsets.UTF_8) }
-        } catch (e: com.jcraft.jsch.SftpException) {
-            if (e.id == ChannelSftp.SSH_FX_PERMISSION_DENIED) null else throw e
-        } finally { c.disconnect() }
-    } ?: exec(app, "sudo cat " + q(chemin)).second
+    @Volatile private var maisonCache: Pair<String, String>? = null
+
+    /** Dossier personnel de l'utilisateur SSH sur le serveur ($HOME). */
+    fun maison(app: JarvisApp): String {
+        val cle = app.store.sshUser.value.trim() + "@" + app.store.sshHost.value.trim()
+        maisonCache?.takeIf { it.first == cle }?.let { return it.second }
+        val h = exec(app, "printf '%s' \"\$HOME\"", 20).second.trim().lines().lastOrNull()?.trim().orEmpty()
+            .takeIf { it.startsWith("/") } ?: (if (app.store.sshUser.value.trim() == "root") "/root" else "/home/" + app.store.sshUser.value.trim())
+        maisonCache = cle to h
+        return h
+    }
+
+    /** Chemin absolu sur le serveur : « ~ », « ~/… » et les chemins relatifs partent du dossier personnel de l'utilisateur SSH
+     *  (SFTP et les commandes entre guillemets ne développent pas « ~ » : sans ça, l'écriture visait un dossier « ~ » inexistant). */
+    fun absolu(app: JarvisApp, chemin: String): String {
+        val c = chemin.trim().removeSurrounding("\"").removeSurrounding("'").trim()
+        if (c.startsWith("/")) return c
+        val home = maison(app).trimEnd('/')
+        return when {
+            c.isEmpty() || c == "~" -> home
+            c.startsWith("~/") -> home + c.substring(1)
+            c.startsWith("\$HOME/") -> home + c.removePrefix("\$HOME")
+            else -> home + "/" + c.removePrefix("./")
+        }
+    }
+
+    /** Commande essayée d'abord avec les droits de l'utilisateur, puis avec sudo (jamais les deux mélangés). */
+    private fun essayer(app: JarvisApp, cmd: String, delai: Int = 60): Pair<Int, String> =
+        exec(app, cmd, delai).takeIf { it.first == 0 } ?: exec(app, "sudo $cmd", delai)
+
+    fun lire(app: JarvisApp, chemin0: String, max: Int = 400_000): String {
+        val chemin = absolu(app, chemin0)
+        return session(app) { s ->
+            val c = s.openChannel("sftp") as ChannelSftp; c.connect(10000)
+            try {
+                val st = c.stat(chemin)
+                if (st.isDir) throw IllegalStateException("$chemin est un dossier : utilise action=lister.")
+                if (st.size > max) throw IllegalStateException("Fichier trop gros (${st.size / 1024} Ko).")
+                c.get(chemin).use { String(it.readBytes(), Charsets.UTF_8) }
+            } catch (e: com.jcraft.jsch.SftpException) {
+                when (e.id) {
+                    ChannelSftp.SSH_FX_PERMISSION_DENIED -> null
+                    ChannelSftp.SSH_FX_NO_SUCH_FILE -> throw IllegalStateException("Fichier introuvable sur le serveur : $chemin")
+                    else -> throw e
+                }
+            } finally { c.disconnect() }
+        } ?: exec(app, "sudo cat " + q(chemin)).let { (code, out) ->
+            if (code != 0) throw IllegalStateException("Lecture de $chemin refusée : ${out.trim().take(200)}")
+            out
+        }
+    }
 
     /** Contenu binaire d'un fichier du serveur (SFTP ; fichier protégé : lu en root, transmis en base64). */
     fun lireOctets(app: JarvisApp, chemin: String, max: Long = 50_000_000L): ByteArray = session(app) { s ->
@@ -311,28 +352,41 @@ object Serveur {
         android.util.Base64.decode(out.trim().lines().last(), android.util.Base64.DEFAULT)
     }
 
-    /** Écrit un fichier (sauvegarde .jarvis-bak-… avant écrasement) ; passe par sudo si les droits manquent. */
-    fun ecrire(app: JarvisApp, chemin: String, contenu: String, sauvegarde: Boolean = true): String? {
-        val bak = if (sauvegarde) "$chemin.jarvis-bak-" + java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date()) else null
-        if (bak != null && exec(app, "test -f ${q(chemin)} && (cp -p ${q(chemin)} ${q(bak)} 2>/dev/null || sudo cp -p ${q(chemin)} ${q(bak)})").first != 0) {
-            // fichier inexistant : pas de sauvegarde à faire
+    /**
+     * Écrit un fichier (dossier créé au besoin, sauvegarde « .jarvis-bak-… » de l'ancienne version) et vérifie le contenu
+     * relu. Sans les droits : réécrit en place avec sudo (propriétaire et droits du fichier conservés ; un nouveau fichier
+     * prend le propriétaire de son dossier). Renvoie le chemin de la sauvegarde, ou null si le fichier n'existait pas.
+     */
+    fun ecrire(app: JarvisApp, chemin0: String, contenu: String, sauvegarde: Boolean = true): String? {
+        val chemin = absolu(app, chemin0)
+        val dossier = chemin.substringBeforeLast('/').ifBlank { "/" }
+        if (exec(app, "test -d ${q(dossier)}").first != 0) {
+            val r = essayer(app, "mkdir -p ${q(dossier)}")
+            if (r.first != 0) throw IllegalStateException("Impossible de créer le dossier $dossier : ${r.second.trim().take(200)}")
         }
-        val ok = try {
-            session(app) { s ->
-                val c = s.openChannel("sftp") as ChannelSftp; c.connect(10000)
-                try { c.put(ByteArrayInputStream(contenu.toByteArray()), chemin, ChannelSftp.OVERWRITE); true }
-                catch (e: com.jcraft.jsch.SftpException) { false } finally { c.disconnect() }
-            }
-        } catch (e: Exception) { throw e }
-        if (!ok) {
+        val existe = exec(app, "test -e ${q(chemin)}").first == 0
+        if (existe && exec(app, "test -d ${q(chemin)}").first == 0) throw IllegalStateException("$chemin est un dossier, pas un fichier.")
+        var bak: String? = null
+        if (sauvegarde && existe) {
+            val b = "$chemin.jarvis-bak-" + java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())
+            if (essayer(app, "cp -p ${q(chemin)} ${q(b)}").first == 0) bak = b
+        }
+        val octets = contenu.toByteArray(Charsets.UTF_8)
+        val direct = runCatching { envoyerOctets(app, chemin, octets) }.isSuccess
+        if (!direct) {
             val tmp = "/tmp/jarvis_up_${System.currentTimeMillis()}"
-            session(app) { s ->
-                val c = s.openChannel("sftp") as ChannelSftp; c.connect(10000)
-                try { c.put(ByteArrayInputStream(contenu.toByteArray()), tmp, ChannelSftp.OVERWRITE) } finally { c.disconnect() }
-            }
-            val r = exec(app, "sudo cp ${q(tmp)} ${q(chemin)} && rm -f ${q(tmp)}")
-            if (r.first != 0) throw IllegalStateException("Écriture refusée : ${r.second.take(200)}")
+            envoyerOctets(app, tmp, octets)
+            val r = try {
+                if (existe) exec(app, "sudo tee ${q(chemin)} < ${q(tmp)} > /dev/null")
+                else exec(app, "sudo cp ${q(tmp)} ${q(chemin)} && sudo chown --reference=${q(dossier)} ${q(chemin)} && sudo chmod 644 ${q(chemin)}")
+            } finally { runCatching { exec(app, "rm -f ${q(tmp)}") } }
+            if (r.first != 0) throw IllegalStateException("Écriture de $chemin refusée : ${r.second.trim().take(300)}" +
+                if (app.store.sshPass.value.isBlank() && app.store.sshUser.value.trim() != "root") " (aucun mot de passe sudo enregistré dans Réglages › Maison › Serveur)" else "")
         }
+        // Vérification : le fichier relu doit être exactement celui qui a été écrit.
+        val attendu = java.security.MessageDigest.getInstance("SHA-256").digest(octets).joinToString("") { "%02x".format(it.toInt() and 0xff) }
+        val v = essayer(app, "sha256sum ${q(chemin)}", 30)
+        if (v.first == 0 && !v.second.contains(attendu)) throw IllegalStateException("Vérification échouée : le contenu relu de $chemin ne correspond pas à ce qui a été écrit." + (bak?.let { " Ancienne version : $it" } ?: ""))
         return bak
     }
 
@@ -341,7 +395,11 @@ object Serveur {
         try { c.put(ByteArrayInputStream(octets), chemin, ChannelSftp.OVERWRITE) } finally { c.disconnect() }
     }
 
-    fun lister(app: JarvisApp, dossier: String): String = exec(app, "ls -lAh --time-style=long-iso ${q(dossier)} | head -150").second
+    fun lister(app: JarvisApp, dossier: String): String = absolu(app, dossier).let { d ->
+        exec(app, "ls -lAh --time-style=long-iso ${q(d)} | head -150").let { r ->
+            if (r.first != 0 && r.second.contains("Permission denied", ignoreCase = true)) exec(app, "sudo ls -lAh --time-style=long-iso ${q(d)} | head -150").second else r.second
+        }
+    }
 
     /** Analyse le LAN du serveur Debian : sous-réseaux réellement configurés, table ARP/neigh et ports TCP.
      *  Les appareils sans adresse MAC connue restent visibles dans les résultats. */

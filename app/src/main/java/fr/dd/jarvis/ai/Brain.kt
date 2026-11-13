@@ -115,7 +115,9 @@ class Brain(
         app.store.hermesMode.value in setOf("auto", "tout") && !fr.dd.jarvis.hermes.Hermes.degrade()
 
     private suspend fun repondre(history: List<ChatMsg>, pourHermes: Boolean, onStatus: (String) -> Unit, suivi: Suivi, onTexte: ((String) -> Unit)? = null): String {
-        val recent = history.takeLast(4).filter { it.fromUser }.joinToString(" ") { it.text }
+        // Sujet en cours inclus : une suite (« du coup regarde directement sur la Freebox ») garde les outils et consignes de ce sujet.
+        val recent = history.takeLast(4).filter { it.fromUser }.joinToString(" ") { it.text } +
+            FilConversation.sujet(history).let { if (it.isBlank()) "" else " " + it.take(1500) }
         val societeOn = fr.dd.jarvis.societe.SocieteTools.concerned(recent)
         val planningClientsSync = Regex("(planning|agenda).{0,100}(fiche|client)|(fiche|client).{0,100}(planning|agenda)", RegexOption.IGNORE_CASE).containsMatchIn(recent) &&
             Regex("analys|ajout|compl[eé]t|rendez|enregistr|synchron|mettre à jour", RegexOption.IGNORE_CASE).containsMatchIn(recent)
@@ -133,6 +135,9 @@ class Brain(
         // adressée nommément à Hermès.
         val multi = fr.dd.jarvis.hermes.Routeur.multiEtapes(texteUser)
         val reflexes = pourHermes || !fr.dd.jarvis.hermes.Routeur.pourHermesSeul(texteUser)
+        // Suite qui renvoie à l'échange précédent (« ça », « du coup », « directement »…) : les réflexes qui ne lisent que la
+        // dernière phrase la comprendraient de travers ; elle va aux cerveaux, qui ont l'historique et le fil.
+        val suite = !pourHermes && FilConversation.renvoie(texteUser) && FilConversation.fil(history)?.let { FilConversation.estSuite(it) } == true
         fun reflexe(r: String) = r.also { if (!pourHermes) fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS }
         // Changement de profil énergétique : commande locale immédiate, sans appel à Groq/Gemini/Hermès.
         // Les trois profils sont persistés puis leurs planificateurs sont recalculés immédiatement.
@@ -216,16 +221,17 @@ class Brain(
             positionDirecte(dernier, history, onStatus)?.let { return reflexe(it) }
             if (competence == null) {
                 rangementDirect(history, onStatus)?.let { return reflexe(it) }
-                if (!multi) rechercheDirecte(texteUser, onStatus)?.let { return reflexe(it) }
-                if (!multi) freeboxDirect(texteUser, onStatus)?.let { return reflexe(it) }
+                if (!multi && !suite) rechercheDirecte(texteUser, onStatus)?.let { return reflexe(it) }
+                if (!multi && !suite) freeboxDirect(texteUser, onStatus)?.let { return reflexe(it) }
                 if (!multi) videoDirecte(history, onStatus)?.let { return reflexe(it) }
-                if (!multi) installationDirecte(texteUser, onStatus)?.let { return reflexe(it) }
+                if (!multi && !suite) installationDirecte(texteUser, onStatus)?.let { return reflexe(it) }
             }
         }
         // Conversation simple (« salut », « comment ça va ? », « merci ») : réponse immédiate, un seul appel d'IA, sans outils ni Hermès.
         // Le bavardage utilisateur est prioritaire sur le mode « Hermès pour tout » :
         // une conversation sociale ne doit jamais être escaladée vers Hermès.
-        if (!multi && (fr.dd.jarvis.hermes.Routeur.bavardage(texteUser) || fr.dd.jarvis.hermes.Routeur.suiteBavardage(texteUser))) {
+        val reponsePrecedente = history.dropLastWhile { it.fromUser }.lastOrNull()?.text
+        if (!multi && (fr.dd.jarvis.hermes.Routeur.bavardage(texteUser) || (!suite && fr.dd.jarvis.hermes.Routeur.suiteBavardage(texteUser, reponsePrecedente)))) {
             val reponse = conversationRapide(history, onStatus) ?: "Ça va bien, merci ! Et toi, comment se passe ta journée ?"
             fr.dd.jarvis.hermes.Routeur.marquerBavardage()
             return reflexe(reponse)
@@ -322,7 +328,8 @@ class Brain(
         // entier, à chaque nouveau tour, le texte complet d'une réponse déjà ancienne et déjà traitée.
         // Les 3 derniers messages restent complets pour préserver les détails opérationnels.
         // Les 7 précédents servent uniquement à garder le fil et sont plafonnés à 1600 caractères.
-        val recentHistory = history.takeLast(10)
+        // La dernière demande porte le fil de la conversation (sujet en cours) quand elle prolonge l'échange.
+        val recentHistory = (if (pourHermes) history else FilConversation.historiqueEnrichi(history)).takeLast(10)
         recentHistory.forEachIndexed { idx, m ->
             val cap = if (recentHistory.size - 1 - idx < 3) 12000 else 1600
             messages.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(cap)))

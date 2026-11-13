@@ -54,7 +54,11 @@ object RelaisGroq {
         // Français uniquement : règle en tête des consignes, puis traduction de toute réponse finale restée en anglais.
         val messages = Francais.avecRegle(corps.optJSONArray("messages") ?: JSONArray())
         val outils = corps.optJSONArray("tools")
-        val sortie = corps.optInt("max_tokens", corps.optInt("max_completion_tokens", 1024)).coerceIn(256, 1200)
+        // Sortie : un appel d'outil qui écrit un fichier porte tout son contenu dans les jetons de sortie — plafonnée trop bas,
+        // la réponse était coupée au milieu de l'appel (fichier jamais écrit). Gemini : large ; Groq : élargie pour un fichier
+        // du serveur (si son quota refuse, les paliers suivants réduisent l'entrée).
+        val dernierTexte = (0 until messages.length()).mapNotNull { messages.optJSONObject(it) }.lastOrNull { it.optString("role") == "user" }?.let { contenu(it) }.orEmpty().lowercase()
+        val sortie = corps.optInt("max_tokens", corps.optInt("max_completion_tokens", 1024)).coerceIn(256, if (fichierServeur(dernierTexte)) 2400 else 1200)
         val forceText = corps.optString("tool_choice") == "none"
         // Gemini d'abord (réglage par défaut, si Jarvis a des clés Gemini) : requête quasi complète, un seul appel, pas
         // d'attente de quota Groq. En cas d'échec (quota, panne), Groq compacté prend le relais comme avant.
@@ -62,7 +66,7 @@ object RelaisGroq {
         if (app.store.relaisHermes.value != "groq" && app.llm.geminiChat.disponible()) {
             try {
                 val (msgs, tls) = pourGemini(messages, outils)
-                val m = runBlocking { Francais.message(app, app.llm.geminiChat.chat(msgs, tls, maxOf(sortie, 1600), forceText)) }
+                val m = runBlocking { Francais.message(app, app.llm.geminiChat.chat(msgs, tls, maxOf(sortie, 8192), forceText)) }
                 app.llm.noterFournisseurHermes("Gemini")
                 return 200 to completion(app, m, estimer(msgs, tls))
             } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { geminiEchoue = true }
@@ -165,7 +169,8 @@ object RelaisGroq {
             if (!c.has("content")) c.put("content", if (c.has("tool_calls")) JSONObject.NULL else "")
             val role = c.optString("role")
             val dansTour = i >= garde.size
-            val limite = when { role == "tool" -> p.resultat; dansTour && role == "user" -> 6000; else -> p.texte }
+            // Le message juste avant la demande en cours (souvent la réponse ou le résultat 🔔 qu'elle prolonge) garde plus de place.
+            val limite = when { role == "tool" -> p.resultat; dansTour && role == "user" -> 6000; i == garde.size - 1 -> p.texte * 2; else -> p.texte }
             val t = contenu(c)
             if (c.opt("content") is String || c.opt("content") is JSONArray) c.put("content", if (t.length > limite) t.take(limite) + "…" else t)
             out.put(c)
@@ -194,6 +199,7 @@ object RelaisGroq {
         if (Regex("sauvegarde|restaur|backup|remettre en (service|route)|r[ée]par").containsMatchIn(t)) out += listOf("ha_sauvegarde", "serveur_tache", "serveur_service")
         if (Regex("discord|\\bbot\\b|salon|serveur discord").containsMatchIn(t)) out += "discord"
         if (Regex("freebox|\\bbox\\b").containsMatchIn(t)) out += listOf("freebox", "box_")
+        if (fichierServeur(t)) out += listOf("ssh_fichier", "serveur_fichiers", "ssh_")
         if (Regex("r[ée]seau|wi-?fi|\\bip\\b|imprimante|appareils? connect").containsMatchIn(t)) out += listOf("reseau_", "appareil", "ip_publique", "imprim")
         if (Regex("s[ée]curis|syst[èe]me de s[ée]curit|mode maison|alarme|surveillance|d[ée]verrouill|cam[ée]ra|intrus|\\bmodes?\\b").containsMatchIn(t)) out += listOf("modes_jarvis", "ha_")
         if (Regex("waze|gps|coordonn").containsMatchIn(t) && Regex("planning|agenda|rendez|\\brdv\\b|lieu|adresse").containsMatchIn(t)) out += listOf("agenda_lieu_gps", "get_planning")
@@ -201,6 +207,14 @@ object RelaisGroq {
             if (!Regex("s[ée]curis").containsMatchIn(t)) out += "telephone_mode_energie"
         return out
     }
+
+    /** Fichier du SERVEUR à lire ou modifier (configuration, YAML, docker-compose, nginx, chemins Linux…). */
+    private val FICHIER = Regex("fichier|\\.ya?ml\\b|\\.conf\\b|\\.json\\b|\\.env\\b|\\.sh\\b|\\.py\\b|\\.ini\\b|\\.toml\\b|docker-compose|compose\\.ya?ml|configuration\\.yaml|secrets\\.yaml|crontab|nginx|\\bconfig(uration)?\\b|(?<![\\p{L}])(/etc|/home|/opt|/srv|/var|/usr|/root|/config|~)/")
+    private val SERVEUR_CTX = Regex("serveur|\\bssh\\b|debian|docker|conteneur|home ?assistant|\\bha\\b|plex|discord|\\bbot\\b|nginx|(?<![\\p{L}])(/etc|/home|/opt|/srv|/var|/root|/config|~)/")
+    internal fun fichierServeur(t: String) = FICHIER.containsMatchIn(t) && SERVEUR_CTX.containsMatchIn(t)
+
+    /** Outils natifs d'Hermès qui agissent sur le téléphone (Termux) : jamais proposés pour un fichier du serveur. */
+    private val FICHIERS_LOCAUX = setOf("read_file", "write_file", "patch", "search_files")
 
     /** Garde les outils pertinents pour la demande en cours (et ceux déjà appelés), descriptions abrégées. */
     private fun reduireOutils(outils: JSONArray?, messages: JSONArray, p: Palier): JSONArray? {
@@ -214,7 +228,11 @@ object RelaisGroq {
         val demande = mots(if (dernierUser >= 0) contenu(src[dernierUser]) else "")
         val domaines = domaines(if (dernierUser >= 0) contenu(src[dernierUser]) else "")
         val contexte = mots(src.filter { it.optString("role") in setOf("user", "tool") }.takeLast(3).joinToString(" ") { contenu(it).take(1500) })
+        // Fichier du serveur : les outils de fichiers natifs d'Hermès (qui écriraient sur le téléphone) sont retirés,
+        // sauf s'il les a déjà appelés pendant ce tour ; ssh_fichier passe en tête.
+        val serveurFichier = fichierServeur(if (dernierUser >= 0) contenu(src[dernierUser]).lowercase() else "")
         val liste = (0 until outils.length()).mapNotNull { outils.optJSONObject(it) }
+            .filter { t -> val nom = t.optJSONObject("function")?.optString("name").orEmpty(); !(serveurFichier && nom in FICHIERS_LOCAUX && nom !in tourEnCours) }
         val classes = liste.sortedByDescending { t ->
             val f = t.optJSONObject("function") ?: JSONObject()
             val nom = f.optString("name")
@@ -224,6 +242,7 @@ object RelaisGroq {
                 (if (domaines.any { canon.startsWith(it) || canon == it }) 40 else 0)
             when {
                 nom in tourEnCours -> 1000 + score
+                serveurFichier && canon == "ssh_fichier" -> 800 + score
                 // Grand contexte : les outils propres d'Hermès (terminal, web, mémoire, compétences, automatismes,
                 // sous-agents…) et l'agent téléphone Jarvis restent toujours disponibles, quelle que soit la formulation.
                 p === GRAND && (!nom.startsWith("mcp_") || nom in setOf("mcp_jarvis_agent", "mcp_jarvis_notifier")) -> 300 + score

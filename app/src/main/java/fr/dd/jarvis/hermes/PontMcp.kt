@@ -213,6 +213,8 @@ object PontMcp {
             val titre = args.optString("titre").trim().ifBlank { "JARVIS" }
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 app.chatAjouter(fr.dd.jarvis.ai.ChatMsg(false, "🔔 **$titre**\n\n$message"))
+                // « oui », « vas-y »… en réponse à ce message : à Hermès, qui a mené la tâche.
+                fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.HERMES
             }
             val ok = fr.dd.jarvis.work.SuiviTaches.bloquees(app) == null
             fr.dd.jarvis.work.SuiviTaches.termine(app, 7320 + (System.currentTimeMillis() % 200).toInt() * 2, titre.take(60), message)

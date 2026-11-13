@@ -72,8 +72,22 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
             mapOf("commande" to prop("Commande shell."), "delai" to prop("Délai maximal en secondes (défaut 60)."),
                 "hote" to prop("Autre machine à joindre en SSH (IP/nom) au lieu du serveur des Réglages (optionnel)."), "utilisateur" to prop("Utilisateur de cette autre machine."),
                 "mot_de_passe" to prop("Mot de passe de cette autre machine."), "port" to prop("Port SSH (défaut 22)."), "via_serveur" to prop("« oui » : joindre cette machine DU RÉSEAU LOCAL à travers le serveur Debian (connexion à distance).")), listOf("commande")),
-        tool("ssh_fichier", "Serveur SSH : lit, écrit (sauvegarde auto) ou liste des fichiers du serveur.",
-            mapOf("action" to prop("lire | ecrire | lister"), "chemin" to prop("Chemin absolu sur le serveur."), "contenu" to prop("ecrire : contenu complet.")), listOf("action", "chemin")),
+        tool("ssh_fichier", "Serveur Debian (SSH) : LIRE, CHERCHER, MODIFIER, CRÉER ou RÉÉCRIRE un fichier du serveur — ou d'un conteneur Docker du serveur (paramètre conteneur). " +
+            "C'est LE moyen de modifier un fichier du serveur (les outils de fichiers natifs d'Hermès agissent sur le téléphone). Actions : " +
+            "lire (lignes numérotées ; debut/fin pour un long fichier) | chercher (motif → lignes numérotées) | remplacer (ancien → nouveau : passage exact recopié SANS numéros ; tout=oui pour toutes les occurrences) | " +
+            "inserer (contenu après la ligne contenant « apres », avant celle contenant « avant », ou à la ligne n° « ligne ») | ajouter (contenu en fin de fichier) | " +
+            "remplacer_lignes (debut, fin, contenu) | supprimer_lignes (debut, fin) | ecrire (contenu COMPLET : crée ou réécrit tout le fichier) | restaurer (remet la dernière sauvegarde) | lister (dossier). " +
+            "Pour changer quelques lignes, préfère remplacer / remplacer_lignes à ecrire. Sauvegarde automatique avant chaque modification, droits conservés (sudo si nécessaire), contenu vérifié après écriture ; « ~ » = dossier de l'utilisateur SSH.",
+            mapOf("action" to prop("lire | chercher | remplacer | inserer | ajouter | remplacer_lignes | supprimer_lignes | ecrire | restaurer | lister"),
+                "chemin" to prop("Chemin du fichier (ou du dossier pour lister) : absolu, ou relatif / « ~/… » depuis le dossier de l'utilisateur SSH ; dans le conteneur si « conteneur » est donné."),
+                "contenu" to prop("ecrire : contenu complet ; inserer / ajouter / remplacer_lignes : lignes à mettre."),
+                "ancien" to prop("remplacer : passage exact actuel (une ou plusieurs lignes)."), "nouveau" to prop("remplacer : nouveau passage (vide = supprimer le passage)."),
+                "tout" to prop("remplacer : « oui » pour remplacer toutes les occurrences."),
+                "apres" to prop("inserer : texte d'une ligne repère (insertion après elle)."), "avant" to prop("inserer : texte d'une ligne repère (insertion avant elle)."),
+                "ligne" to prop("inserer : numéro de ligne où insérer."), "debut" to prop("lire / remplacer_lignes / supprimer_lignes : première ligne."),
+                "fin" to prop("lire / remplacer_lignes / supprimer_lignes : dernière ligne."), "motif" to prop("chercher : texte à trouver (sans tenir compte des majuscules)."),
+                "conteneur" to prop("Nom du conteneur Docker (ex. homeassistant) pour un fichier À L'INTÉRIEUR du conteneur ; vide = fichier du serveur lui-même.")),
+            listOf("action", "chemin")),
         tool("ssh_script", "Serveur SSH : envoie et exécute un script complet (bash ou python3, plusieurs lignes) sur le serveur Debian ; sert à installer, configurer, récupérer des données (git clone, curl…), automatiser.",
             mapOf("code" to prop("Code du script (plusieurs lignes)."), "langage" to prop("bash (défaut) ou python3."), "delai" to prop("Délai maximal en secondes (défaut 120 ; au-delà de 15 min, utilise serveur_tache)."),
                 "root" to prop("« oui » : exécuter tout le script en root (automatique si le script contient sudo).")), listOf("code")),
@@ -136,6 +150,62 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
         catch (e: Exception) { ToolResult("❌ ${e.message ?: e.javaClass.simpleName}") }
     }
 
+    /** ssh_fichier : lecture, recherche, modifications ciblées, réécriture et restauration (serveur ou conteneur Docker). */
+    private suspend fun sshFichier(a: JSONObject): ToolResult {
+        val ct = a.optString("conteneur").trim()
+        val p = a.optString("chemin").trim().let { if (ct.isBlank() && it.isNotBlank()) Serveur.absolu(app, it) else it }
+        if (p.isBlank()) return ToolResult("Indique « chemin » (fichier, ou dossier pour lister).")
+        val ou = if (ct.isBlank()) "sur le serveur" else "dans le conteneur $ct"
+        fun nombre(k: String) = a.optString(k).trim().toIntOrNull()
+        val action = fr.dd.jarvis.societe.core.normaliser(a.optString("action")).replace(' ', '_')
+        val lecture = setOf("lire", "chercher", "lister")
+        if (action in lecture) return when (action) {
+            "lister" -> ToolResult("📁 $p ($ou)\n```\n" + FichiersServeur.lister(app, p, ct) + "\n```")
+            "chercher" -> ToolResult("🔎 $p ($ou)\n```\n" + FichiersServeur.chercher(FichiersServeur.lire(app, p, ct), a.optString("motif").ifBlank { a.optString("ancien") }) + "\n```")
+            else -> ToolResult("📄 $p ($ou) " + FichiersServeur.numeroter(FichiersServeur.lire(app, p, ct), nombre("debut"), nombre("fin")).let { t ->
+                t.substringBefore('\n') + "\n```\n" + t.substringAfter('\n', "") + "\n```" })
+        }
+        // Modifications : version actuelle (vide pour un nouveau fichier), changement appliqué ici, puis écriture vérifiée.
+        val actuel: String? = if (action == "ecrire") runCatching { FichiersServeur.lire(app, p, ct) }.getOrNull()
+            else if (action == "restaurer") null
+            else runCatching { FichiersServeur.lire(app, p, ct) }.getOrElse { e ->
+                if (action in setOf("ajouter", "inserer") && (e.message ?: "").contains("introuvable", true)) "" else throw e
+            }
+        val avant = actuel.orEmpty()
+        val (apres, resume) = when (action) {
+            "ecrire" -> {
+                if (!a.has("contenu")) return ToolResult("Indique « contenu » (contenu complet du fichier).")
+                a.optString("contenu") to (if (actuel == null) "fichier créé" else "fichier réécrit")
+            }
+            "remplacer" -> FichiersServeur.remplacer(avant, a.optString("ancien"), a.optString("nouveau"), a.optString("tout").lowercase() in setOf("oui", "true", "1")).let { it.texte to it.resume }
+            "inserer" -> FichiersServeur.inserer(avant, a.optString("contenu"), a.optString("apres").ifBlank { null }, a.optString("avant").ifBlank { null }, nombre("ligne")).let { it.texte to it.resume }
+            "ajouter" -> FichiersServeur.ajouter(avant, a.optString("contenu")).let { it.texte to it.resume }
+            "remplacer_lignes" -> {
+                val d = nombre("debut") ?: return ToolResult("Indique « debut » (et « fin »).")
+                FichiersServeur.remplacerLignes(avant, d, nombre("fin") ?: d, a.optString("contenu")).let { it.texte to it.resume }
+            }
+            "supprimer_lignes" -> {
+                val d = nombre("debut") ?: return ToolResult("Indique « debut » (et « fin »).")
+                FichiersServeur.supprimerLignes(avant, d, nombre("fin") ?: d).let { it.texte to it.resume }
+            }
+            "restaurer" -> {
+                val bak = FichiersServeur.derniereSauvegarde(app, p, ct) ?: return ToolResult("Aucune sauvegarde « .jarvis-bak-… » de $p $ou.")
+                val courant = runCatching { FichiersServeur.lire(app, p, ct) }.getOrDefault("")
+                val ancienne = FichiersServeur.lire(app, bak, ct)
+                if (!confirm("Restaurer $p $ou depuis $bak ?\n\n" + FichiersServeur.difference(courant, ancienne, 20).take(900), true)) return ToolResult("Refusé par l'utilisateur.")
+                val b2 = FichiersServeur.ecrire(app, p, ancienne, ct)
+                return ToolResult("✅ $p restauré depuis $bak." + (b2?.let { " Version remplacée sauvegardée : $it" } ?: ""))
+            }
+            else -> return ToolResult("Action inconnue : lire, chercher, remplacer, inserer, ajouter, remplacer_lignes, supprimer_lignes, ecrire, restaurer, lister.")
+        }
+        if (actuel != null && apres == actuel) return ToolResult("Aucun changement : $p ($ou) contient déjà exactement ce contenu.")
+        val diff = if (actuel == null) "(nouveau fichier, ${apres.lines().size} lignes)" else FichiersServeur.difference(avant, apres)
+        if (!confirm("Modifier $p $ou ($resume) ?\n\n" + diff.take(900), true)) return ToolResult("Refusé par l'utilisateur : $p n'a pas été modifié.")
+        val bak = FichiersServeur.ecrire(app, p, apres, ct)
+        return ToolResult("✅ $p modifié $ou : $resume ; contenu vérifié après écriture." + (bak?.let { "\nSauvegarde de l'ancienne version : $it (action=restaurer pour revenir en arrière)." } ?: "") +
+            "\n```diff\n" + diff.take(3500) + "\n```")
+    }
+
     private suspend fun run(name: String, a: JSONObject): ToolResult {
         fun ssh() { if (!Serveur.sshConfigure(app)) throw IllegalStateException("SSH non configuré (Réglages › Maison › Serveur : adresse, utilisateur, mot de passe ou clé).") }
         return when (name) {
@@ -171,21 +241,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 if ((Serveur.dangereuse(cmd) || cible != null) && !confirm("Exécuter sur ${cible?.hote ?: app.store.sshHost.value} :\n\n$cmd", true)) return ToolResult("Refusé par l'utilisateur.")
                 ToolResult("```\n" + sortie(Serveur.exec(app, cmd, (a.optString("delai").toIntOrNull() ?: 60).coerceIn(5, 600), cible)) + "\n```")
             }
-            "ssh_fichier" -> {
-                ssh()
-                val p = a.optString("chemin").trim()
-                when (a.optString("action").lowercase()) {
-                    "lire" -> ToolResult("```\n" + Serveur.lire(app, p).take(9000) + "\n```")
-                    "lister" -> ToolResult("```\n" + Serveur.lister(app, p) + "\n```")
-                    "ecrire" -> {
-                        val c = a.optString("contenu")
-                        if (!confirm("Écrire le fichier $p sur le serveur (${c.length} caractères, sauvegarde automatique) ?", true)) return ToolResult("Refusé par l'utilisateur.")
-                        val bak = Serveur.ecrire(app, p, c)
-                        ToolResult("✅ $p écrit." + (bak?.let { " Sauvegarde : $it" } ?: ""))
-                    }
-                    else -> ToolResult("Action inconnue (lire, ecrire, lister).")
-                }
-            }
+            "ssh_fichier" -> { ssh(); sshFichier(a) }
             "serveur_diagnostic" -> {
                 ssh()
                 val r = Serveur.exec(app, "uptime; echo; free -h | head -2; echo; df -h / | tail -1; echo; docker ps -a --format 'table {{.Names}}\\t{{.Status}}\\t{{.Image}}' 2>&1 | head -20; echo; n=\$(docker ps -a --format '{{.Names}}\\t{{.Image}}' 2>/dev/null | grep -i home-assistant | head -1 | cut -f1); [ -n \"\$n\" ] && { echo \"== logs \$n ==\"; docker logs --tail 25 \$n 2>&1; }; echo; echo \"== Home Assistant (local, port 8123) ==\"; curl -s -o /dev/null -m 5 -w 'HTTP %{http_code} en %{time_total}s\\n' http://localhost:8123/ 2>&1 || echo \"injoignable en local sur le serveur (curl a échoué)\"", 60)

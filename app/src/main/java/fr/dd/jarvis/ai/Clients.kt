@@ -256,7 +256,8 @@ class GeminiChatClient(private val ring: KeyRing, private val model: () -> Strin
     private fun call(key: String, mdl: String, messages: JSONArray, tools: JSONArray?, out: Int, forceText: Boolean, reflexionReduite: Boolean, bearer: Boolean): JSONObject {
         val body = JSONObject().put("model", mdl).put("messages", messagesPourGemini(messages)).put("temperature", 0.4)
             // La réflexion de Gemini compte dans les jetons de sortie : marge pour que la réponse ne soit pas coupée.
-            .put("max_tokens", out.coerceIn(256, 2048))
+            // Jusqu'à 8192 : un appel d'outil qui écrit un fichier complet porte tout le fichier dans la sortie.
+            .put("max_tokens", out.coerceIn(256, 8192))
         val outils = outilsPourGemini(tools)
         if (outils != null && outils.length() > 0) { body.put("tools", outils); body.put("tool_choice", if (forceText) "none" else "auto") }
         if (reflexionReduite) when {

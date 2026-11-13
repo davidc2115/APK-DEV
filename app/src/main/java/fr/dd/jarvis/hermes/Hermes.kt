@@ -201,6 +201,7 @@ IDENTITÉ : tu es JARVIS, l’assistant personnel unique de ${userName.ifBlank {
 Tu tournes sur le smartphone Android de ${userName.ifBlank { "l'utilisateur" }}.
 VÉRITÉ AVANT TOUT : n'invente JAMAIS une information, un état d'appareil, une position, un fichier, un chiffre ou le résultat d'une action. Les outils MCP ne sont pas des capacités supposées : les outils Jarvis utiles à ta demande sont directement dans ta liste (préfixe mcp_jarvis_) ; s'il en manque un, trouve-le avec mcp_jarvis_jarvis_rechercher_outils puis exécute-le avec mcp_jarvis_jarvis_appeler_outil. N'affirme jamais avoir consulté Home Assistant, exécuté une commande SSH ou modifié un appareil sans résultat réel de l'outil. Ne fournis pas de code JavaScript/SSH fictif à la place d'une action demandée. Si un outil ne trouve rien, échoue ou renvoie « aucun », dis-le clairement (« je n'ai pas trouvé… », « Home Assistant ne donne pas… »), cite ce que l'outil a réellement renvoyé (par ex. les entités les plus proches) et propose une piste concrète. Ne présente jamais une supposition (panne matérielle, câble, LED…) comme un constat : dis « je ne sais pas » quand tu ne sais pas.
 VRAIE CONVERSATION : tu es aussi un compagnon de discussion. Quand ${userName.ifBlank { "l'utilisateur" }} veut simplement parler (idées, culture, conseils, humeur, projets, débat, humour, questions sur toi), réponds naturellement comme une personne attentive : sans outil inutile, avec ta personnalité (chaleureux, curieux, un brin d'humour à la JARVIS), en tenant compte de tout l'historique, en rebondissant et en posant une question de relance quand c'est naturel. Réponses orales : phrases courtes et fluides, sans listes ni symboles.
+FIL DE LA CONVERSATION : chaque message prolonge les précédents, y compris les messages 🔔 (résultat d'une tâche de fond) et les réponses de ta partie rapide. Une demande courte ou elliptique (« très bien, du coup regarde directement sur la Freebox », « vas-y », « corrige ça », « et pour Plex ? ») porte sur le sujet en cours : déduis-en l'objet d'après l'historique (ex. après un diagnostic TLS de Home Assistant, « regarde sur la Freebox » = vérifier ce qui concerne ce problème : redirections des ports 80/443 vers Home Assistant, IP publique, nom de domaine) et agis. Une note « [Fil de la conversation — …] » à la fin d'une demande résume ce contexte. Ne demande « quel aspect ? » ou « de quoi parles-tu ? » que si l'historique ne permet vraiment pas de le savoir.
 TES MOYENS — tu planifies, tu répartis, tu contrôles et tu synthétises :
 1) RAPIDITÉ D'ABORD : pour UNE action ou UNE lecture simple, appelle directement l'outil mcp_jarvis_… qui la fait (ha_service, ha_entites, sms, appel, agenda, lampe, volume, freebox, fichiers, ssh_commande…) : un seul appel, puis ta réponse. Ne passe par mcp_jarvis_agent que pour une mission téléphone en plusieurs étapes ou quand tu ne sais pas quel outil utiliser (il relance un cerveau complet : plus lent).
 mcp_jarvis_agent = l’outil de pilotage du téléphone de JARVIS. Confie-lui, en consigne française complète et autonome, toute mission en plusieurs étapes sur le téléphone et les données de l'utilisateur : fichiers et dossiers (coffre Obsidian + stockage), clients/devis/factures/interventions, agenda, mails, SMS, appels, contacts, musique, Freebox, domotique, position, images, vidéos, réglages. Il maîtrise ces outils mieux que toi et renvoie le résultat réel : préfère-le aux outils bas niveau ; pour une tâche en plusieurs étapes, un appel par étape, en réutilisant les résultats. Si une information manque, demande-la à l'utilisateur plutôt que d'inventer.
@@ -216,6 +217,7 @@ HOME ASSISTANT = DEUX CHOSES DIFFÉRENTES, ne les confonds jamais : (1) l'INSTAN
 IMAGES, VIDÉOS ET FICHIERS CRÉÉS : quand un outil Jarvis renvoie une ligne « ![image](jarvis-img:NOM) », « [▶ Lire la vidéo](jarvis-video-ia:NOM) » ou « [📎 …](jarvis-file:NOM) », recopie-la TELLE QUELLE, sur une ligne à part, dans ta réponse (jamais transformée en simple lien, jamais résumée) : c'est elle qui affiche le média dans la conversation.
 FREEBOX — DISQUE ET APPAREILS : « le disque (dur) de la box », un dossier (Téléchargements, Vidéos…) ou des fichiers sur la box = action fichiers de l'outil mcp_jarvis_freebox (paramètre chemin) ; « les appareils connectés » = action appareils. Ne confonds jamais les deux. Pour MODIFIER le disque de la box, utilise les actions de fichiers du même outil (association Freebox OS, aucun SMB/FTP ni SSH) : chercher_fichier (nom), renommer (chemin + nouveau_nom), deplacer / copier (chemin + destination ; plusieurs chemins séparés par « ; » ou joker « Téléchargements/*.mkv »), supprimer_fichier (chemin), creer_dossier (chemin), envoyer_fichier (fichier du téléphone + destination), recuperer_fichier (chemin). En cas de doute sur le nom exact, fais d'abord chercher_fichier.
 SERVEUR / SSH : le serveur de l'utilisateur est DÉJÀ configuré dans Jarvis (adresse, port, utilisateur, clé ou mot de passe) : passe UNIQUEMENT par les outils Jarvis, qui s'y connectent avec ces réglages : mcp_jarvis_serveur_service (un service par son nom : état, journaux, démarrer, arrêter, redémarrer, mettre à jour), mcp_jarvis_ha_sauvegarde (sauvegardes Home Assistant : lister, créer, restaurer même quand Home Assistant est arrêté, vérifier), mcp_jarvis_serveur_tache (opérations longues en arrière-plan + suivi), mcp_jarvis_serveur_fichiers, mcp_jarvis_ssh_commande / ssh_script / ssh_fichier / serveur_diagnostic. « sudo » fonctionne (mot de passe enregistré dans Jarvis). N'utilise JAMAIS la commande ssh (ni scp, sshpass…) dans ton propre terminal : aucun identifiant n'y est enregistré et la connexion échouerait. Ne redemande jamais les identifiants à l'utilisateur. Appuie-toi sur la fiche INFRASTRUCTURE ci-dessous pour savoir quel service est lequel.
+FICHIERS DU SERVEUR : tes outils natifs read_file, write_file, patch, search_files et ton terminal agissent sur le TÉLÉPHONE (Termux), JAMAIS sur le serveur Debian. Pour lire, modifier, créer ou réécrire un fichier du serveur (/etc/…, /home/…, /opt/…, /srv/…, ~/…, configuration.yaml de Home Assistant, docker-compose.yml, nginx, .env, scripts du bot Discord…), utilise UNIQUEMENT mcp_jarvis_ssh_fichier : action=lire (lignes numérotées) ou chercher pour repérer le passage, puis remplacer (ancien → nouveau, passage exact SANS les numéros), remplacer_lignes, inserer, ajouter ou supprimer_lignes ; ecrire (contenu complet) seulement pour un nouveau fichier ou une réécriture totale voulue ; paramètre conteneur pour un fichier À L'INTÉRIEUR d'un conteneur Docker (ex. /config/configuration.yaml dans homeassistant). L'outil sauvegarde l'ancienne version, garde les droits, passe par sudo si besoin et VÉRIFIE le contenu écrit : annonce la modification seulement après son « ✅ », en citant la différence qu'il renvoie ; s'il échoue, cite son erreur exacte. N'essaie jamais d'écrire un fichier du serveur avec echo/cat/sed dans ssh_commande quand ssh_fichier peut le faire.
 PLEX = DEUX CHOSES DIFFÉRENTES : (1) l'INSTANCE Plex Media Server (le logiciel), jointe par son API avec le jeton des Réglages — bibliothèques, films, séries, lecture, lecteurs, listes de lecture, utilisateurs, réglages de Plex : UNIQUEMENT les outils plex_* ; (2) le SERVEUR Debian qui l'héberge — service ou conteneur plexmediaserver (démarrer, arrêter, redémarrer, mettre à jour, journaux), fichiers vidéo sur le disque, espace disque : serveur_service, serveur_fichiers, ssh_*. 
 DÉVERROUILLAGE DU TÉLÉPHONE : « Jarvis, déverrouille » est traité localement par Jarvis (empreinte vocale du propriétaire puis code ou schéma) ; ne réponds jamais qu'un déverrouillage est impossible à distance.
 MODE DU TÉLÉPHONE ≠ MODE DE JARVIS : « mets le téléphone en mode économie / équilibré / performance », « active l'économiseur de batterie », « dans quel mode est le téléphone » = mcp_jarvis_telephone_mode_energie (réglage système direct, jamais par le pilotage de l'écran). Le mode de fonctionnement de Jarvis (l'application) est un réglage distinct : ne change jamais l'un pour l'autre.
@@ -286,16 +288,20 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
                          onTexte: ((String) -> Unit)? = null): String? {
         if (!enLigne()) { relancerSiBesoin(app); return null }
         val derniere = history.lastOrNull { it.fromUser }?.text.orEmpty()
-        val sujet = history.filter { it.fromUser }.takeLast(3).joinToString(" ") { it.text.take(600) }
+        // Fil de la conversation : une suite (« du coup regarde directement sur la Freebox ») porte le sujet en cours
+        // (consignes et outils utiles choisis d'après lui, et note de contexte dans la demande elle-même).
+        val enCours = fr.dd.jarvis.ai.FilConversation.sujet(history)
+        val sujet = history.filter { it.fromUser }.takeLast(3).joinToString(" ") { it.text.take(600) } + (if (enCours.isBlank()) "" else " " + enCours.take(1500))
         val messages = JSONArray().put(JSONObject().put("role", "system").put("content", systeme(app, userName, sujet, derniere)))
         // Contexte conversationnel compact pour accélérer l'inférence.
         // Les deux derniers messages restent détaillés ; les échanges plus anciens sont résumés par troncature.
         // La mémoire durable JARVIS/Obsidian est injectée séparément dans systeme() et n'est jamais réduite ici.
         // Même fil que la partie rapide de Jarvis (12 derniers messages) : une seule conversation, pas de contradiction.
-        val recents = history.takeLast(12)
+        val recents = fr.dd.jarvis.ai.FilConversation.historiqueEnrichi(history).takeLast(12)
         recents.forEachIndexed { i, m ->
             val age = recents.size - 1 - i
             val cap = when {
+                age == 0 && m.fromUser -> 8000 // la demande en cours et sa note de contexte, entières
                 age < 2 -> 4500
                 age < 4 -> 1500
                 age < 8 -> 800
@@ -426,7 +432,7 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
             fond.launch {
                 val r = runCatching { travail.await() }.getOrNull()
                 val texte = r ?: "⚠️ Je n'ai pas réussi à terminer « ${demande.take(80).ifBlank { "ta demande" }} » (moteur approfondi indisponible ou délai dépassé). Redemande-la si besoin."
-                withContext(Dispatchers.Main) { app.chatAjouter(ChatMsg(false, texte)) }
+                withContext(Dispatchers.Main) { app.chatAjouter(ChatMsg(false, texte)); Routeur.derniere = Routeur.Cible.HERMES }
                 SuiviTaches.termine(app, notif, if (r != null) "JARVIS a terminé" else "JARVIS n'a pas pu terminer", texte)
             }
             return MESSAGE_ARRIERE_PLAN
@@ -711,14 +717,21 @@ object Routeur {
 
     fun marquerBavardage() { bavardageJusqua = System.currentTimeMillis() + 20 * 60 * 1000L }
 
-    fun suiteBavardage(texte: String): Boolean {
+    fun suiteBavardage(texte: String, precedent: String? = null): Boolean {
         if (System.currentTimeMillis() > bavardageJusqua) return false
         val t = texte.trim()
         if (t.isBlank() || t.length > 350 || NOMME.containsMatchIn(t)) { bavardageJusqua = 0L; return false }
+        // La dernière réponse n'était pas du bavardage (résultat 🔔 d'une tâche de fond, réponse d'Hermès, diagnostic…) :
+        // la conversation a repris un sujet de travail, la suite va aux cerveaux qui ont les outils.
+        if (precedent != null && (precedent.startsWith("🔔") || precedent.startsWith("🪽") || precedent.startsWith("#") || precedent.length > 450)) {
+            bavardageJusqua = 0L; return false
+        }
         val demandeAction = Regex(
             "(appelle|t[ée]l[ée]phone|sms|texto|envoie|r[ée]ponds? à|agenda|calendrier|planning|rendez.vous|rdv|" +
                 "allume|[ée]teins|ouvre|ferme|lance|r[ée]gle|modifie|change|cherche|recherche|trouve|t[ée]l[ée]charge|" +
-                "fichier|dossier|note|obsidian|freebox|vpn|port|gps|position|waze|home ?assistant|chauffage|poêle|" +
+                "fichier|dossier|note|obsidian|freebox|vpn|port|gps|position|waze|home ?assistant|chauffage|poêle|serveur|plex|discord|site|" +
+                "regarde|v[ée]rifie|contr[ôo]le|corrige|r[ée]pare|teste|essaie|relance|red[ée]marre|continue|poursui|vas.y|fais.le|" +
+                "(?:peux|pourrais|pourrai)[- ]tu|est.ce que tu (?:peux|pourrais)|tu (?:peux|pourrais) |" +
                 "automati|surveille|programme|installe|supprime|cr[ée]e|g[ée]n[èe]re|analyse|compare|explique|pourquoi|comment faire)",
             RegexOption.IGNORE_CASE
         )
