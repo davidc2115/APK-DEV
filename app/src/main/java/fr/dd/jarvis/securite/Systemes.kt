@@ -127,6 +127,42 @@ object Systemes {
         return s to activer
     }
 
+    /**
+     * Demande de gestion d'un mode reconnue sans IA (créer, modifier, supprimer, lister) → arguments de l'outil
+     * modes_jarvis ; null si la phrase n'en est pas une (ou trop vague : l'IA posera alors ses questions).
+     * Évite qu'une IA confonde « installe le mode téléphone sécurisé » avec les modes d'alimentation du téléphone.
+     */
+    fun intention(app: JarvisApp, texte: String): JSONObject? = intention(texte, liste(app).map { it.nom })
+
+    internal fun intention(texte: String, noms: List<String>): JSONObject? {
+        if (texte.length > 400) return null
+        val t = norm(texte).removePrefix("jarvis ").trim()
+        if (!Regex("\\b(modes?|systemes?)\\b").containsMatchIn(t)) return null
+        // Mode existant cité dans la phrase (le nom le plus long l'emporte).
+        val cite = noms.filter { n -> norm(n).removePrefix("mode ").let { it.length >= 3 && Regex("\\b" + Regex.escape(it) + "\\b").containsMatchIn(t) } }.maxByOrNull { it.length }
+        if (Regex("^(montre|liste|affiche|quels sont|donne moi|dis moi)\\b.{0,30}\\bmodes\\b|^mes modes$").containsMatchIn(t)) return JSONObject().put("action", "lister")
+        if (cite != null && Regex("^(supprime|efface|desinstalle|retire|enleve) (le |la |mon |ma )?(mode |systeme )?").containsMatchIn(t) &&
+            t.replace(Regex("^(supprime|efface|desinstalle|retire|enleve) (le |la |mon |ma )?(mode |systeme )?"), "").trim().let { reste -> norm(cite).removePrefix("mode ").let { reste == it || reste == "mode $it" } })
+            return JSONObject().put("action", "supprimer").put("nom", cite)
+        val modele = when {
+            Regex("\\b(telephone|portable|smartphone) securise").containsMatchIn(t) -> "telephone_securise"
+            Regex("\\b(maison|domicile) securisee").containsMatchIn(t) -> "maison_securisee"
+            else -> ""
+        }
+        val creer = Regex("^(installe|reinstalle|cree|creer|creons|mets en place|met en place|prepare|configure (un|une|le|la) nouve|fais moi|fabrique|ajoute un nouveau|nouveau)\\b").containsMatchIn(t) ||
+            Regex("^(je veux|je voudrais|j aimerais|peux tu|tu peux) (installer|creer|mettre en place|un mode|le mode)").containsMatchIn(t)
+        // « Active le mode téléphone sécurisé » alors qu'il n'est pas encore installé : on l'installe d'abord.
+        val installerModele = modele.isNotBlank() && cite == null && Regex("^(active|lance|mets|passe|demarre|enclenche)\\b").containsMatchIn(t)
+        if ((creer && (cite == null || modele.isNotBlank())) || installerModele) {
+            if (modele.isBlank() && !(Regex("\\b(qui|pour|avec|quand|ou)\\b|:").containsMatchIn(t) && t.split(' ').size >= 7)) return null
+            return JSONObject().put("action", "creer").put("description", texte.trim()).also { if (modele.isNotBlank()) it.put("modele", modele) }
+        }
+        val modifier = cite != null && (Regex("^(ajoute|enleve|retire|supprime|modifie|change|remplace|renomme|mets|met|ne |n )").containsMatchIn(t) ||
+            Regex("^dans (le |la |mon |ma )?(mode |systeme )?").containsMatchIn(t) || creer)
+        if (modifier && cite != null) return JSONObject().put("action", "modifier").put("nom", cite).put("consigne", texte.trim())
+        return null
+    }
+
     // ------------------------------------------------------------------ installation des modèles
 
     private fun id(nom: String) = norm(nom).replace(' ', '_').take(30).ifBlank { "systeme" }

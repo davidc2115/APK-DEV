@@ -52,7 +52,8 @@ object ModeTelephone {
     suspend fun appliquer(ctx: Context, mode: String): String = withContext(Dispatchers.IO) {
         val m = lire(mode) ?: mode.trim().lowercase()
         if (m == "etat") return@withContext etat(ctx)
-        if (m !in setOf("economie", "equilibre", "performance")) return@withContext "Mode du téléphone inconnu : « $mode ». Choix : économie, équilibré ou performance."
+        if (m !in setOf("economie", "equilibre", "performance")) return@withContext "« $mode » n'est pas un mode d'alimentation du téléphone (seulement économie, équilibré, performance). " +
+            "Pour les modes de Jarvis (téléphone sécurisé, maison sécurisée, cinéma, nuit…), utilise l'outil modes_jarvis (action creer / activer / modifier)."
         if (!shellPossible(ctx)) return@withContext "⛔ $SANS_SHELL"
         val eco = if (m == "economie") 1 else 0
         val perf = if (m == "performance") 1 else 0

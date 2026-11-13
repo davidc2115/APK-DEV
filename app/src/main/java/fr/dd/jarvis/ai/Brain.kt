@@ -144,7 +144,11 @@ class Brain(
             val cibleJarvis = Regex("\\b(jarvis|application|appli|app|assistant)\\b").containsMatchIn(demandeMode)
             val commandeTelephone = cibleTelephone && !cibleJarvis && (commandeMode ||
                 Regex("\\b(active|desactive|coupe|enleve|retire|allume|eteins|mets|passe)\\b.{0,25}\\beconomiseur\\b|\\b(quel|dans quel) mode\\b.{0,30}\\b(telephone|portable|smartphone)\\b|\\bmode (du|de mon) (telephone|portable|smartphone)\\b").containsMatchIn(demandeMode))
-            val modeTel = if (commandeTelephone) fr.dd.jarvis.device.ModeTelephone.lire(texteUser) else null
+            fr.dd.jarvis.securite.Systemes.intention(app, texteUser)?.let { args ->
+                onStatus("🧩 " + when (args.optString("action")) { "creer" -> "Création du mode…"; "modifier" -> "Modification du mode…"; "supprimer" -> "Suppression du mode…"; else -> "Mes modes…" })
+                return reflexe(tools.execute("modes_jarvis", args).text)
+            }
+            val modeTel = if (commandeTelephone && !Regex("securis").containsMatchIn(demandeMode)) fr.dd.jarvis.device.ModeTelephone.lire(texteUser) else null
             if (modeTel != null) {
                 onStatus("📱 Réglage du mode du téléphone…")
                 return reflexe(fr.dd.jarvis.device.ModeTelephone.appliquer(app, modeTel))
