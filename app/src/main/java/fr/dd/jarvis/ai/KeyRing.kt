@@ -12,10 +12,12 @@ object Http {
      * plages IPv6 d'opérateurs (Free, Orange, hébergeurs…) et répond alors « 400 · User location is not supported for
      * the API use » pour TOUTES les clés Gemini, alors que la France est bien autorisée.
      */
-    val dnsGoogleIpv4 = okhttp3.Dns { host ->
-        val tout = okhttp3.Dns.SYSTEM.lookup(host)
-        if (host.endsWith("googleapis.com") || host.endsWith(".google.com") || host.endsWith("googleusercontent.com"))
-            tout.filterIsInstance<java.net.Inet4Address>().ifEmpty { tout } else tout
+    val dnsGoogleIpv4: okhttp3.Dns = object : okhttp3.Dns {
+        override fun lookup(hostname: String): List<java.net.InetAddress> {
+            val tout = okhttp3.Dns.SYSTEM.lookup(hostname)
+            return if (hostname.endsWith("googleapis.com") || hostname.endsWith(".google.com") || hostname.endsWith("googleusercontent.com"))
+                tout.filterIsInstance<java.net.Inet4Address>().ifEmpty { tout } else tout
+        }
     }
 
     /** « User location is not supported » : refus lié à l'adresse IP de la connexion, pas à la clé. */
