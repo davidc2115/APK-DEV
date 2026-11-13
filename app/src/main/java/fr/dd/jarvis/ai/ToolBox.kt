@@ -2384,6 +2384,8 @@ class ToolBox(
                     if (modele == "telephone_securise" && runCatching { app.store.codeDeverrouillage.value }.getOrDefault("").isBlank()) add("🔢 Saisis le code de l'écran dans Réglages › Sécurité › Systèmes pour un déverrouillage complet à la voix (sinon il restera l'empreinte digitale).")
                     if (modele == "maison_securisee" && s2.destinataires.isEmpty()) add("📱 Dis-moi à quels numéros envoyer les photos par MMS (« ajoute le numéro de Marie au mode maison sécurisée »).")
                 }
+                if (a.optBoolean("activer_apres")) return ToolResult(fr.dd.jarvis.securite.Systemes.activer(app, s2, this) +
+                    (if (manque.isNotEmpty()) "\n\nÀ faire :\n" + manque.joinToString("\n") { "- $it" } else ""))
                 ToolResult("✅ Système installé.\n" + listOf(note, noteHa).filter { it.isNotBlank() }.joinToString("\n") + "\n\n" + fr.dd.jarvis.securite.Systemes.presenter(s2) +
                     (if (manque.isNotEmpty()) "\n\nÀ faire :\n" + manque.joinToString("\n") { "- $it" } else ""))
             }

@@ -166,9 +166,19 @@ class Brain(
                 onStatus("📱 Réglage du mode du téléphone…")
                 return reflexe(fr.dd.jarvis.device.ModeTelephone.appliquer(app, modeTel))
             }
+            // Réponse à « Quel mode veux-tu activer : … ? » posée juste avant.
+            history.dropLast(1).lastOrNull { !it.fromUser }?.text?.takeIf { it.startsWith("Quel mode veux-tu ") }?.let { q ->
+                fr.dd.jarvis.securite.Systemes.choix(app, texteUser)?.let { s ->
+                    val activer = q.startsWith("Quel mode veux-tu activer")
+                    return reflexe(tools.execute("modes_jarvis", org.json.JSONObject().put("action", if (activer) "activer" else "desactiver").put("nom", s.nom)).text)
+                }
+            }
             fr.dd.jarvis.securite.Systemes.parPhrase(app, texteUser)?.let { (s, activer) ->
                 onStatus(if (activer) "🛡️ Activation de « ${s.nom} »…" else "🛡️ Désactivation de « ${s.nom} »…")
                 return reflexe(tools.execute("modes_jarvis", org.json.JSONObject().put("action", if (activer) "activer" else "desactiver").put("nom", s.nom)).text)
+            }
+            fr.dd.jarvis.securite.Systemes.ambigus(app, texteUser)?.let { (noms, activer) ->
+                return reflexe("Quel mode veux-tu ${if (activer) "activer" else "désactiver"} : ${noms.joinToString(" ou ") { "« $it »" }} ?")
             }
             if (commandeMode && !cibleTelephone) {
                 val mode = when {

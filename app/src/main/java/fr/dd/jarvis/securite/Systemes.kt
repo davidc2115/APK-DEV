@@ -111,20 +111,73 @@ object Systemes {
     }
 
     /** Phrase d'activation / de désactivation d'un système (true = activer). Seulement pour une phrase courte. */
-    fun parPhrase(app: JarvisApp, texte: String): Pair<Systeme, Boolean>? {
-        if (texte.length > 90) return null
+    fun parPhrase(app: JarvisApp, texte: String): Pair<Systeme, Boolean>? =
+        parPhrase(texte, liste(app))?.let { (i, activer) -> liste(app)[i] to activer }
+
+    /**
+     * Activation / désactivation demandée sans préciser lequel de plusieurs modes (« passe en mode sécurisé ») :
+     * noms des modes possibles (au moins un mot de leur nom cité), pour poser la question tout de suite. Testable.
+     */
+    internal fun ambigus(texte: String, l: List<Systeme>): Pair<List<String>, Boolean>? {
         val t = norm(texte).removePrefix("jarvis ").trim()
-        if (t.isBlank() || Regex("\\b(installe|cree|configure|ajoute|retire|enleve|modifie|supprime|parametre|regle)\\b").containsMatchIn(t)) return null
-        val l = liste(app)
-        l.firstOrNull { s -> s.phrasesDesactiver.any { norm(it) == t } }?.let { return it to false }
-        l.firstOrNull { s -> s.phrasesActiver.any { norm(it) == t } }?.let { return it to true }
-        val desactiver = Regex("^(desactive|coupe|arrete|desarme|stoppe|quitte|sors du|eteins)\\b").containsMatchIn(t)
-        val activer = !desactiver && Regex("^(active|lance|enclenche|arme|demarre|mets|passe)\\b").containsMatchIn(t)
+        if (t.split(' ').size > 10 || !Regex("\\bmode\\b").containsMatchIn(t)) return null
+        val desactiver = Regex("\\b(desactiv\\w*|coupe\\w*|arret\\w*|desarm\\w*|stop\\w*|quitt\\w*)\\b").containsMatchIn(t)
+        val activer = !desactiver && Regex("\\b(activ\\w*|lance\\w*|mets|met|passe\\w*|bascule\\w*|enclench\\w*)\\b").containsMatchIn(t)
         if (!desactiver && !activer) return null
-        val reste = t.replace(Regex("^(desactive|coupe|arrete|desarme|stoppe|quitte|sors du|eteins|active|lance|enclenche|arme|demarre|mets|passe)\\s+(en\\s+)?(le |la |l |mon |ma )?(mode |systeme )?"), "").trim()
-        if (reste.length < 4) return null
-        val s = l.firstOrNull { norm(it.nom).removePrefix("mode ") == reste.removePrefix("mode ") } ?: return null
-        return s to activer
+        val mots = t.split(' ')
+        val possibles = l.filter { s -> norm(s.nom).split(' ').filter { it.length >= 4 && it != "mode" }.any { c -> mots.any { m -> m.startsWith(c.take(5)) } } }
+        return if (possibles.size >= 2) possibles.map { it.nom } to activer else null
+    }
+
+    fun ambigus(app: JarvisApp, texte: String) = ambigus(texte, liste(app))
+
+    /** Réponse à « Quel mode veux-tu activer : … ? » (« le téléphone », « la maison ») : le mode désigné par un mot qui lui est propre. */
+    internal fun choix(texte: String, l: List<Systeme>): Int? {
+        val mots = norm(texte).split(' ')
+        val cles = l.map { s -> norm(s.nom).split(' ').filter { it.length >= 4 && it != "mode" }.map { it.take(5) } }
+        val communs = cles.flatten().groupingBy { it }.eachCount().filter { it.value > 1 }.keys
+        val trouves = cles.indices.filter { i -> cles[i].filter { it !in communs }.any { c -> mots.any { m -> (SYNONYMES[c] ?: listOf(c)).any { m.startsWith(it) } } } }
+        return trouves.singleOrNull()
+    }
+
+    fun choix(app: JarvisApp, texte: String): Systeme? = liste(app).let { l -> choix(texte, l)?.let { l[it] } }
+
+    /** Familles de mots équivalents dans un nom de mode (« téléphone » ≈ portable, « sécurisé » ≈ sécurité…). */
+    private val SYNONYMES = mapOf(
+        "telep" to listOf("telep", "porta", "smart", "mobil"), "porta" to listOf("telep", "porta", "smart", "mobil"),
+        "maiso" to listOf("maiso", "domic", "logem", "foyer"), "secur" to listOf("secur", "proteg"),
+    )
+
+    /**
+     * Activer / désactiver un mode par une phrase naturelle : phrase enregistrée, sinon un verbe (« active », « lance »,
+     * « mets », « sécurise »… / « désactive », « coupe », « arrête »…) + TOUS les mots du nom du mode, dans n'importe quel
+     * ordre (« mets le téléphone en mode sécurisé », « désactive la sécurité de la maison »). Index du mode + activer. Testable.
+     */
+    internal fun parPhrase(texte: String, l: List<Systeme>): Pair<Int, Boolean>? {
+        if (texte.length > 120) return null
+        val t = norm(texte).removePrefix("jarvis ").trim()
+        if (t.isBlank() || Regex("\\b(installe|reinstalle|cree|configure|ajoute|retire|enleve|modifie|supprime|parametre|regle|renomme)\\b").containsMatchIn(t)) return null
+        if (Regex("\\b(est ce|est il|est elle|quel|quels|pourquoi|comment)\\b").containsMatchIn(t)) return null
+        l.indexOfFirst { s -> s.phrasesDesactiver.any { norm(it) == t } }.takeIf { it >= 0 }?.let { return it to false }
+        l.indexOfFirst { s -> s.phrasesActiver.any { norm(it) == t } }.takeIf { it >= 0 }?.let { return it to true }
+        if (t.split(' ').size > 14) return null
+        val desactiver = Regex("\\b(desactiv\\w*|coupe\\w*|arret\\w*|desarm\\w*|stop\\w*|quitt\\w*|sors|sortir|eteins|eteindre|termine\\w*|fin du)\\b").containsMatchIn(t)
+        val activer = !desactiver && Regex("\\b(activ\\w*|lance\\w*|enclench\\w*|arme\\w*|demarr\\w*|mets|met|mettre|passe\\w*|bascule\\w*|securise\\w*|verrouille\\w*)\\b").containsMatchIn(t)
+        if (!desactiver && !activer) return null
+        val mots = t.split(' ').filter { it.isNotBlank() }
+        fun present(cle: String): Boolean {
+            val racine = cle.take(5)
+            val familles = SYNONYMES[racine] ?: listOf(racine)
+            return mots.any { m -> familles.any { m.startsWith(it) } }
+        }
+        val scores = l.mapIndexed { i, s ->
+            val cles = norm(s.nom).split(' ').filter { it.length >= 3 && it != "mode" && it != "systeme" }
+            i to (if (cles.isNotEmpty() && cles.all { present(it) }) cles.size else 0)
+        }.filter { it.second > 0 }
+        val meilleur = scores.maxOfOrNull { it.second } ?: return null
+        val gagnants = scores.filter { it.second == meilleur }
+        if (gagnants.size != 1) return null
+        return gagnants.single().first to activer
     }
 
     /**
@@ -155,7 +208,10 @@ object Systemes {
         val installerModele = modele.isNotBlank() && cite == null && Regex("^(active|lance|mets|passe|demarre|enclenche)\\b").containsMatchIn(t)
         if ((creer && (cite == null || modele.isNotBlank())) || installerModele) {
             if (modele.isBlank() && !(Regex("\\b(qui|pour|avec|quand|ou)\\b|:").containsMatchIn(t) && t.split(' ').size >= 7)) return null
-            return JSONObject().put("action", "creer").put("description", texte.trim()).also { if (modele.isNotBlank()) it.put("modele", modele) }
+            return JSONObject().put("action", "creer").put("description", texte.trim()).also {
+                if (modele.isNotBlank()) it.put("modele", modele)
+                if (installerModele) it.put("activer_apres", true)   // « active le mode … » pas encore installé : installé PUIS activé
+            }
         }
         val modifier = cite != null && (Regex("^(ajoute|enleve|retire|supprime|modifie|change|remplace|renomme|mets|met|ne |n )").containsMatchIn(t) ||
             Regex("^dans (le |la |mon |ma )?(mode |systeme )?").containsMatchIn(t) || creer)
