@@ -36,6 +36,7 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Anti-vol : l'alarme sonne même en mode « Ne pas déranger » (accès accordé par l'utilisateur) et vibre -->
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />

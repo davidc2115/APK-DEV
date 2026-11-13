@@ -334,6 +334,7 @@ class ToolBox(
         put(tool("jouer_musique", "Lance la lecture d'un titre, artiste ou playlist dans une application de musique du téléphone, en arrière-plan. Si l'application n'est pas précisée et qu'aucune n'est mémorisée et qu'il y en a plusieurs d'installées, l'outil demande laquelle (liste réelle) : repose alors la question à l'utilisateur (et s'il veut « toujours » ou « une seule fois »), puis rappelle l'outil.",
             mapOf("requete" to prop("Titre, artiste ou style à écouter."), "appli" to prop("Nom exact d'une application RENVOYÉE PAR applis_musique ou déjà mémorisée (jamais une application supposée sans l'avoir vérifiée)."), "toujours" to prop("« true » pour toujours utiliser cette application pour la musique."))))
         put(tool("controle_media", "Contrôle la lecture en cours : play, pause, next, previous, stop.", mapOf("action" to prop("play | pause | next | previous | stop")), listOf("action")))
+        put(tool("mode_sonore", "Mode sonore du téléphone : ne pas déranger (NPD / silencieux), vibreur, sonnerie (sonnerie + vibreur), ou l'état actuel.", mapOf("mode" to prop("npd | npd_off | vibreur | sonnerie | etat")), listOf("mode")))
         put(tool("naviguer", "OBLIGATOIRE pour toute demande de lancement/démarrage d’un itinéraire GPS vers une adresse ou un lieu : transmet la destination à Waze, Google Maps ou l’application choisie afin de démarrer le guidage, pas seulement d’ouvrir sa page d’accueil. Si l’application n’est pas précisée et qu’aucune n’est mémorisée, demande laquelle (Waze / Google Maps…) et si le choix doit être conservé (« toujours ») ou ponctuel (« une seule fois »), puis rappelle l’outil.",
             mapOf("destination" to prop("Adresse ou lieu."), "mode" to prop("voiture (défaut), marche ou velo"),
                 "appli" to prop("Application : Waze, Google Maps, ou autre (optionnel)."),
@@ -961,6 +962,9 @@ class ToolBox(
                 } else ToolResult(r, direct = true)
             }
         }
+        "mode_sonore" -> ToolResult(fr.dd.jarvis.device.ModeSonore.appliquer(app, a.optString("mode").trim().lowercase().let { m ->
+            when { m.startsWith("npd_off") || m.contains("off") || m.contains("desactiv") -> "npd_off"; m.contains("npd") || m.contains("deranger") || m.contains("silen") -> "npd"
+                m.contains("vibr") -> "vibreur"; m.contains("sonn") || m.contains("normal") -> "sonnerie"; else -> "etat" } }), direct = true)
         "controle_media" -> ToolResult(fr.dd.jarvis.device.CommandeMedia.depuisOutil(a.optString("action"))?.let { fr.dd.jarvis.device.CommandeMedia.executer(app, it, app.enVoiture) }
             ?: app.phone.mediaKey(a.optString("action")))
         "naviguer" -> {

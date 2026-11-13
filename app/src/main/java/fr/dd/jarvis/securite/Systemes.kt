@@ -342,8 +342,8 @@ object Systemes {
                 "telephone" -> when (e.cible) {
                     "verrouiller", "veille" -> TelephoneSecurise.verrouiller(app)
                     "economie", "equilibre", "performance" -> fr.dd.jarvis.device.ModeTelephone.appliquer(app, e.cible)
-                    "ne_pas_deranger_on", "ne_pas_deranger_off" -> neDerangerPas(app, e.cible.endsWith("_on"))
-                    "silencieux", "vibreur", "sonnerie" -> sonnerie(app, e.cible)
+                    "ne_pas_deranger_on", "ne_pas_deranger_off" -> fr.dd.jarvis.device.ModeSonore.appliquer(app, if (e.cible.endsWith("_on")) "npd" else "npd_off")
+                    "silencieux", "vibreur", "sonnerie" -> fr.dd.jarvis.device.ModeSonore.appliquer(app, when (e.cible) { "silencieux" -> "npd"; "vibreur" -> "vibreur"; else -> "sonnerie" })
                     in ACTIONS_TELEPHONE -> "📱 " + app.phone.perform(e.cible, e.texte)
                     else -> "⚠️ Action du téléphone inconnue : ${e.cible}"
                 }
@@ -368,22 +368,6 @@ object Systemes {
     /** Actions directes du téléphone utilisables dans un mode (en plus de veille, modes d'alimentation, ne pas déranger, sonnerie). */
     val ACTIONS_TELEPHONE = setOf("torch_on", "torch_off", "volume", "wifi_on", "wifi_off", "bluetooth_on", "bluetooth_off", "data_on", "data_off",
         "brightness", "music", "media", "open_app", "open_url", "navigate", "lock")
-
-    private fun neDerangerPas(app: JarvisApp, actif: Boolean): String {
-        val nm = app.getSystemService(android.app.NotificationManager::class.java)
-        if (nm.isNotificationPolicyAccessGranted) {
-            nm.setInterruptionFilter(if (actif) android.app.NotificationManager.INTERRUPTION_FILTER_PRIORITY else android.app.NotificationManager.INTERRUPTION_FILTER_ALL)
-            return if (actif) "✅ 🔕 Ne pas déranger activé" else "✅ 🔔 Ne pas déranger désactivé"
-        }
-        if (fr.dd.jarvis.device.PhoneShell.ready(app)) { fr.dd.jarvis.device.PhoneShell.exec(app, "cmd notification set_dnd " + if (actif) "priority" else "off"); return if (actif) "✅ 🔕 Ne pas déranger activé" else "✅ 🔔 Ne pas déranger désactivé" }
-        return "⚠️ Ne pas déranger : autorise JARVIS dans Réglages Android › Notifications › Accès « Ne pas déranger »."
-    }
-
-    private fun sonnerie(app: JarvisApp, mode: String): String = runCatching {
-        val am = app.getSystemService(android.media.AudioManager::class.java)
-        am.ringerMode = when (mode) { "silencieux" -> android.media.AudioManager.RINGER_MODE_SILENT; "vibreur" -> android.media.AudioManager.RINGER_MODE_VIBRATE; else -> android.media.AudioManager.RINGER_MODE_NORMAL }
-        "✅ 📳 Téléphone en mode $mode"
-    }.getOrElse { "⚠️ Sonnerie : ${it.message?.take(120)} (autorise l'accès « Ne pas déranger » à JARVIS)" }
 
     fun libelle(e: Etape): String = when (e.type) {
         "ha" -> when (e.cible) {

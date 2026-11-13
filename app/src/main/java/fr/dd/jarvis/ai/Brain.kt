@@ -171,6 +171,8 @@ class Brain(
             }
             // Factures / devis (payée, envoyée, acceptée…) : directement dans la base Société du TÉLÉPHONE (le coffre du
             // serveur n'est qu'une copie synchronisée après chaque modification) — jamais par SSH ni par Hermès.
+            // Mode sonore du téléphone (ne pas déranger, vibreur, sonnerie + vibreur) : immédiat, sans IA.
+            fr.dd.jarvis.device.ModeSonore.intention(texteUser)?.let { mode -> return reflexe(fr.dd.jarvis.device.ModeSonore.appliquer(app, mode)) }
             // « Où est Angeline ? » : position donnée par Home Assistant (person.* / device_tracker.*), jamais par SSH.
             if (PersonneOu.personne(texteUser) != null) {
                 onStatus("📍 Position…")
