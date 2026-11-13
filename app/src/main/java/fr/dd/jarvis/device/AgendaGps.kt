@@ -10,9 +10,9 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /**
- * Remplace le lieu (adresse) de rendez-vous du planning par leur point GPS « latitude, longitude » : format reconnu par
- * Waze (synchronisation de l'agenda et recherche) comme par Google Maps / Google Agenda. L'adresse d'origine est
- * conservée dans la description, avec un lien Waze direct.
+ * Remplace le lieu (adresse) de rendez-vous du planning par leurs coordonnées GPS brutes « latitude, longitude »
+ * (aucun lien Waze ni Google Maps) : format reconnu tel quel par Waze comme par Google Maps / Google Agenda.
+ * L'adresse d'origine est conservée en texte dans la description.
  */
 object AgendaGps {
     private fun n(s: String) = fr.dd.jarvis.societe.core.normaliser(s)
@@ -21,11 +21,9 @@ object AgendaGps {
     /** Point GPS au format Waze / Google Maps, tel qu'il est écrit dans le champ Lieu. */
     fun lieu(p: Geo.Point) = Geo.texteGps(p)
 
-    /** Description : anciennes lignes « Adresse / Waze » remplacées par les nouvelles, le reste conservé. */
-    fun description(ancienne: String, adresse: String, p: Geo.Point?): String =
-        (ancienne.lines().filterNot { LIGNES_GEREES.containsMatchIn(it) } +
-            (if (adresse.isNotBlank()) "Adresse : $adresse" else "") +
-            (if (p != null) "Waze : ${Geo.lienWaze(p)}" else ""))
+    /** Description : ancienne ligne « Adresse » (et anciens liens Waze) remplacés par l'adresse d'origine, le reste conservé. */
+    fun description(ancienne: String, adresse: String): String =
+        (ancienne.lines().filterNot { LIGNES_GEREES.containsMatchIn(it) } + (if (adresse.isNotBlank()) "Adresse : $adresse" else ""))
             .filter { it.isNotBlank() }.joinToString("\n")
 
     private fun adresseDescription(desc: String) = desc.lines().firstOrNull { it.trim().startsWith("Adresse :", true) }
@@ -102,10 +100,10 @@ object AgendaGps {
                 lignes += "⚠️ $titre : seul le ${loc.precision.libelle} a été trouvé pour « $adresse » ; lieu inchangé (dis « même approximatif » pour l'appliquer quand même)."
                 continue
             }
-            val ok = app.calendar.update(e.id, null, null, null, lieu(loc.point), description(e.description, adresse, loc.point))
+            val ok = app.calendar.update(e.id, null, null, null, lieu(loc.point), description(e.description, adresse))
             lignes += if (ok) "✅ $titre : lieu → ${lieu(loc.point)} (${loc.precision.libelle}${if (loc.source.isNotBlank()) ", " + loc.source else ""})"
                 else "❌ $titre : modification refusée par l'agenda."
         }
-        return lignes.joinToString("\n") + "\nLe champ Lieu contient maintenant « latitude, longitude » : Waze et Google Maps y vont directement ; l'adresse d'origine et un lien Waze sont dans la description."
+        return lignes.joinToString("\n") + "\nLe champ Lieu contient maintenant uniquement les coordonnées GPS brutes « latitude, longitude » (sans lien) ; l'adresse d'origine est gardée dans la description."
     }
 }

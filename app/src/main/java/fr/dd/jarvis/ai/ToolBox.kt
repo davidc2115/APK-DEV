@@ -64,9 +64,9 @@ class ToolBox(
                 "start" to prop("Début, yyyy-MM-dd'T'HH:mm (heure locale)."),
                 "end" to prop("Fin, yyyy-MM-dd'T'HH:mm. Par défaut début + 1 h."),
                 "calendar" to prop("Nom de l'agenda (optionnel)."),
-                "location" to prop("Adresse ou coordonnées du lieu (optionnel) : géocode le point. Le champ Lieu reçoit uniquement le point GPS « latitude, longitude » (compatible Waze et Google Maps) ; l’adresse postale et un lien Waze restent dans la description."),
+                "location" to prop("Adresse ou coordonnées du lieu (optionnel) : géocode le point. Le champ Lieu reçoit uniquement les coordonnées GPS brutes « latitude, longitude », sans aucun lien ; l’adresse postale reste dans la description."),
                 "description" to prop("Notes (optionnel)."),
-                "client" to prop("Nom exact ou distinctif d’une fiche client Société : utilise l’adresse et le GPS de la bonne installation. Le champ Lieu ne contient que le point GPS « latitude, longitude » (compatible Waze et Google Maps) ; l’adresse complète reste dans la description."),
+                "client" to prop("Nom exact ou distinctif d’une fiche client Société : utilise l’adresse et le GPS de la bonne installation. Le champ Lieu ne contient que les coordonnées GPS brutes « latitude, longitude », sans aucun lien ; l’adresse complète reste dans la description."),
                 "installation" to prop("Nom de l’installation du client si plusieurs ; optionnel.")
             ), listOf("title", "start")))
         put(tool("update_event", "Modifie un rendez-vous existant (identifiant visible dans le planning : #id).",
@@ -75,9 +75,9 @@ class ToolBox(
                 "title" to prop("Nouveau titre (optionnel)."),
                 "start" to prop("Nouveau début yyyy-MM-dd'T'HH:mm (optionnel)."),
                 "end" to prop("Nouvelle fin (optionnel)."),
-                "location" to prop("Nouvelle adresse ou coordonnées (optionnel) : géocode le point ; le champ Lieu reçoit uniquement le point GPS « latitude, longitude » (compatible Waze et Google Maps) et l’adresse reste dans la description.")
+                "location" to prop("Nouvelle adresse ou coordonnées (optionnel) : géocode le point ; le champ Lieu reçoit uniquement les coordonnées GPS brutes « latitude, longitude », sans aucun lien et l’adresse reste dans la description.")
             ), listOf("event_id")))
-        put(tool("agenda_lieu_gps", "Remplace le LIEU (adresse) d'un ou plusieurs rendez-vous du planning par leur POINT GPS « latitude, longitude », compatible Waze et Google Maps (« mets le point GPS Waze du rendez-vous chez X », « remplace l'adresse de mon rdv de demain par les coordonnées GPS »). Géocode l'adresse (ou prend le GPS de l'installation client si le rendez-vous la désigne), garde l'adresse d'origine et un lien Waze dans la description. Ne pilote pas l'écran.",
+        put(tool("agenda_lieu_gps", "Remplace le LIEU (adresse) d'un ou plusieurs rendez-vous du planning par ses COORDONNÉES GPS BRUTES « latitude, longitude », sans aucun lien Waze ni Google Maps (« mets les coordonnées GPS du rendez-vous chez X », « remplace l'adresse de mon rdv de demain par les coordonnées GPS »). Géocode l'adresse (ou prend le GPS de l'installation client si le rendez-vous la désigne), garde l'adresse d'origine en texte dans la description. Ne pilote pas l'écran.",
             mapOf(
                 "event_id" to prop("Identifiant #id du rendez-vous (optionnel)."),
                 "recherche" to prop("Mots du titre, du lieu ou du client pour trouver le rendez-vous (optionnel)."),
@@ -1708,13 +1708,12 @@ class ToolBox(
             if (clientLabel.isNotBlank()) add("Client : $clientLabel")
             if (siteLabel.isNotBlank()) add("Installation : $siteLabel")
             if (address.isNotBlank()) add("Adresse : $address")
-            if (point != null) add("Waze : ${fr.dd.jarvis.societe.Geo.lienWaze(point)}")
             if (point == null && address.isNotBlank()) add("Point GPS non trouvé avec une précision suffisante : le champ Lieu est laissé vide.")
         }
         description = listOf(description, details.joinToString("\n")).filter { it.isNotBlank() }.joinToString("\n")
         val id = app.calendar.create(cal.id, title, start, end, location, description)
         return if (id != null) ToolResult("Événement « $title » créé le $start dans « ${app.calendar.displayName(cal)} » (#$id)." +
-            if (point != null) " Le champ Lieu contient le point GPS ${fr.dd.jarvis.device.AgendaGps.lieu(point)} (Waze et Google Maps) ; l’adresse et un lien Waze sont dans la description."
+            if (point != null) " Le champ Lieu contient uniquement les coordonnées GPS ${fr.dd.jarvis.device.AgendaGps.lieu(point)} ; l’adresse est dans la description."
             else if (address.isNotBlank()) " Adresse conservée dans la description ; aucun point GPS assez précis n’a été trouvé, le champ Lieu reste vide."
             else "")
         else ToolResult("Échec de la création.")
@@ -1730,7 +1729,7 @@ class ToolBox(
             val position = fr.dd.jarvis.societe.Geo.localiser(rawAddress)
             val point = position?.takeIf { it.precision.rang >= fr.dd.jarvis.societe.Geo.Precision.LIEU_DIT.rang }?.point
             gpsLocation = point?.let { fr.dd.jarvis.device.AgendaGps.lieu(it) } ?: ""
-            newDescription = fr.dd.jarvis.device.AgendaGps.description(old.description, rawAddress, point) +
+            newDescription = fr.dd.jarvis.device.AgendaGps.description(old.description, rawAddress) +
                 if (point == null) "\nPoint GPS non trouvé avec une précision suffisante : le champ Lieu reste vide." else ""
         }
         val ok = app.calendar.update(
@@ -1743,7 +1742,7 @@ class ToolBox(
         )
         return ToolResult(if (ok) "Événement #$id modifié." + if (rawAddress != null) {
             if (gpsLocation.isNullOrBlank()) " Adresse conservée dans la description ; aucun point GPS assez précis n’a été trouvé, le champ Lieu est vidé."
-            else " Le champ Lieu contient le point GPS $gpsLocation (Waze et Google Maps) ; l’adresse et un lien Waze sont dans la description."
+            else " Le champ Lieu contient uniquement les coordonnées GPS $gpsLocation ; l’adresse est dans la description."
         } else "" else "Rien à modifier ou événement introuvable.")
     }
 
