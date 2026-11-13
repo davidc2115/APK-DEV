@@ -284,7 +284,8 @@ class Llm(private val store: Store) {
         geminiRing.effacer(k)
         "✅ OK (${System.currentTimeMillis() - t0} ms)" + (if (modele != store.geminiModel.value.trim().removePrefix("models/")) " — modèle « ${store.geminiModel.value} » non ouvert à cette clé : « $modele » utilisé à la place" else " — modèle « $modele »")
     } catch (e: ApiException) {
-        "❌ " + KeyRing.motif(e.code, e.message.orEmpty())
+        "❌ " + KeyRing.motif(e.code, e.message.orEmpty()) +
+            (if (Http.refusLocalisation(e.message.orEmpty())) " → Google refuse l'adresse IP de ta connexion (pas la clé) : coupe un éventuel VPN, ou essaie en Wi-Fi puis en données mobiles." else "")
     } catch (e: Exception) {
         "❌ " + (e.message ?: "erreur").take(120)
     }

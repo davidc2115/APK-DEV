@@ -7,7 +7,22 @@ import java.util.concurrent.TimeUnit
 class ApiException(val code: Int, message: String) : Exception(message)
 
 object Http {
+    /**
+     * Vers les API de Google : IPv4 seulement (IPv6 en repli s'il n'y a aucune adresse IPv4). Google localise mal des
+     * plages IPv6 d'opérateurs (Free, Orange, hébergeurs…) et répond alors « 400 · User location is not supported for
+     * the API use » pour TOUTES les clés Gemini, alors que la France est bien autorisée.
+     */
+    val dnsGoogleIpv4 = okhttp3.Dns { host ->
+        val tout = okhttp3.Dns.SYSTEM.lookup(host)
+        if (host.endsWith("googleapis.com") || host.endsWith(".google.com") || host.endsWith("googleusercontent.com"))
+            tout.filterIsInstance<java.net.Inet4Address>().ifEmpty { tout } else tout
+    }
+
+    /** « User location is not supported » : refus lié à l'adresse IP de la connexion, pas à la clé. */
+    fun refusLocalisation(message: String) = message.contains("location is not supported", ignoreCase = true)
+
     val client: OkHttpClient = OkHttpClient.Builder()
+        .dns(dnsGoogleIpv4)
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(90, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
