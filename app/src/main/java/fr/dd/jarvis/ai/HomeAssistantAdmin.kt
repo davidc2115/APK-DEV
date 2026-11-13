@@ -32,7 +32,7 @@ class HomeAssistantAdmin(
     private val conteneur: () -> String? = { null },
 ) {
     constructor(app: JarvisApp, confirm: suspend (String, Boolean) -> Boolean) : this(
-        app.store.haUrl.value, app.store.haToken.value, confirm,
+        Serveur.haBaseDirecte(app), app.store.haToken.value, confirm,
         if (Serveur.sshConfigure(app)) { c, t -> Serveur.exec(app, c, t) } else null,
         { Serveur.haConteneur(app) })
 

@@ -1072,6 +1072,18 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     "Les commandes shell demandent toujours une confirmation, quel que soit ce réglage.",
                     color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp)
                 )
+                // « Toujours autoriser » : actions qui ne demandent plus de confirmation (révocables une par une).
+                var autorisees by remember { mutableStateOf(fr.dd.jarvis.device.Autorisations.permanentes(app)) }
+                Spacer(Modifier.height(8.dp))
+                Text("✅ Toujours autorisé (choisi avec « Toujours » sur l'écran de confirmation) :", color = HudText, fontSize = 12.sp)
+                if (autorisees.isEmpty()) Text("Rien pour l'instant : chaque action sensible demande confirmation.", color = HudDim, fontSize = 11.sp)
+                autorisees.forEach { cle ->
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
+                        Text("• " + fr.dd.jarvis.device.Autorisations.libelle(cle), color = HudText, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                        HudButton("Retirer") { fr.dd.jarvis.device.Autorisations.retirer(app, cle); autorisees = fr.dd.jarvis.device.Autorisations.permanentes(app) }
+                    }
+                }
+                Text("Les suppressions, effacements définitifs, déverrouillages et paiements restent toujours confirmés.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
             }
         },
         VoletReglages("telephone", "applis", "Applications par défaut", "applications defaut itineraire musique waze maps") {
@@ -1895,6 +1907,10 @@ private fun ServeurPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvi
         Spacer(Modifier.height(8.dp))
         Text("Home Assistant", color = HudText, fontSize = 13.sp)
         HudTextField(store.haUrl.value, { store.haUrl.set(it) }, Modifier.fillMaxWidth(), label = "Adresse (ex. http://192.168.1.20:8123)")
+        Spacer(Modifier.height(6.dp))
+        HudTextField(store.haUrlDistant.value, { store.haUrlDistant.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Adresse hors de la maison (ex. https://xxx.ui.nabu.casa, optionnel)")
+        Text("JARVIS parle toujours directement à Home Assistant avec le jeton : adresse locale à la maison, adresse extérieure dehors " +
+            "(ou celle ouverte depuis l'onglet Wi-Fi). Le serveur SSH n'est utilisé que si tu parles du « serveur ».", color = HudDim, fontSize = 11.sp)
         Spacer(Modifier.height(6.dp))
         HudTextField(store.haToken.value, { store.haToken.set(it) }, Modifier.fillMaxWidth(), label = "Jeton d'accès longue durée (profil HA)", password = true)
         Spacer(Modifier.height(10.dp))

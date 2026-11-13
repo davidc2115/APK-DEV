@@ -28,6 +28,9 @@ import fr.dd.jarvis.MainActivity
 object ConfirmationNotification {
     const val ACTION = "fr.dd.jarvis.CONFIRMATION"
     const val EXTRA_OK = "jarvis_confirmation_ok"
+    const val EXTRA_TOUJOURS = "jarvis_confirmation_toujours"
+    /** Question affichée (pour « Toujours autoriser » depuis la notification ou la fenêtre flottante). */
+    @Volatile var questionCourante: String = ""
     private const val CHANNEL = "jarvis_confirmations_v1"
     private const val ID = 48120
     @Volatile private var overlay: View? = null
@@ -47,9 +50,9 @@ object ConfirmationNotification {
     }
 
     /** Bouton de notification : diffusion interne traitée par [ConfirmationReceiver], sans ouvrir l'application. */
-    private fun intentDirect(context: Context, accepte: Boolean): PendingIntent =
-        PendingIntent.getBroadcast(context, if (accepte) 48124 else 48125,
-            Intent(context, ConfirmationReceiver::class.java).setAction(ACTION).putExtra(EXTRA_OK, accepte),
+    private fun intentDirect(context: Context, accepte: Boolean, toujours: Boolean = false): PendingIntent =
+        PendingIntent.getBroadcast(context, if (toujours) 48126 else if (accepte) 48124 else 48125,
+            Intent(context, ConfirmationReceiver::class.java).setAction(ACTION).putExtra(EXTRA_OK, accepte).putExtra(EXTRA_TOUJOURS, toujours),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
     private fun intent(context: Context, accepte: Boolean): PendingIntent {
@@ -65,6 +68,7 @@ object ConfirmationNotification {
         // Nettoie une éventuelle confirmation précédente (notification persistante comprise) avant d'en afficher une.
         // Une seule demande utilisateur peut être visible à la fois, même si plusieurs outils travaillent en parallèle.
         annuler(context.applicationContext)
+        questionCourante = question
         // Dans l'application, la fenêtre de confirmation de JARVIS est déjà affichée : pas de doublon par-dessus.
         if (appVisible) return
         // Un seul canal visible à la fois : la fenêtre flottante est prioritaire.
@@ -97,6 +101,7 @@ object ConfirmationNotification {
             .setContentIntent(ouvrir)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Refuser", intentDirect(context, false))
             .addAction(android.R.drawable.ic_menu_send, "Accepter", intentDirect(context, true))
+            .apply { if (fr.dd.jarvis.device.Autorisations.clePour(question) != null) addAction(android.R.drawable.ic_menu_send, "Toujours", intentDirect(context, true, toujours = true)) }
             .build()
         runCatching { NotificationManagerCompat.from(context).notify(ID, notification) }
     }
@@ -135,16 +140,18 @@ object ConfirmationNotification {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.END
                 }
-                fun action(label: String, accepte: Boolean) = Button(context).apply {
+                fun action(label: String, accepte: Boolean, toujours: Boolean = false) = Button(context).apply {
                     text = label
                     isAllCaps = false
                     setOnClickListener {
                         retirerOverlay()
+                        if (toujours) (context.applicationContext as? fr.dd.jarvis.JarvisApp)?.let { fr.dd.jarvis.device.Autorisations.toujours(it, question) }
                         // On reste dans l'application en cours : JARVIS n'est rouvert que si plus rien n'attend la réponse.
                         if (!repondre(context, accepte)) runCatching { intent(context, accepte).send() }
                     }
                 }
                 actions.addView(action("Refuser", false))
+                if (fr.dd.jarvis.device.Autorisations.clePour(question) != null) actions.addView(action("Toujours", true, toujours = true))
                 actions.addView(action("Accepter", true))
                 racine.addView(actions)
                 val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -190,6 +197,8 @@ object ConfirmationNotification {
 class ConfirmationReceiver : android.content.BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val ok = intent.getBooleanExtra(ConfirmationNotification.EXTRA_OK, false)
+        if (ok && intent.getBooleanExtra(ConfirmationNotification.EXTRA_TOUJOURS, false))
+            (context.applicationContext as? fr.dd.jarvis.JarvisApp)?.let { fr.dd.jarvis.device.Autorisations.toujours(it, ConfirmationNotification.questionCourante) }
         if (!ConfirmationNotification.repondre(context, ok)) runCatching {
             context.startActivity(Intent(context, MainActivity::class.java).setAction(ConfirmationNotification.ACTION)
                 .putExtra(ConfirmationNotification.EXTRA_OK, ok).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))

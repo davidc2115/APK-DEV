@@ -28,7 +28,9 @@ class Brain(
     suspend fun reply(history: List<ChatMsg>, pourHermes: Boolean = false, onTexte: ((String) -> Unit)? = null, onStatus: (String) -> Unit): String {
         // L'avatar montre que JARVIS réfléchit tant que la réponse se prépare.
         fr.dd.jarvis.voice.Presence.debutReflexion()
-        try { return replyInterne(history, pourHermes, onTexte, onStatus) } finally { fr.dd.jarvis.voice.Presence.finReflexion() }
+        // « Recommence / reprends là où tu en étais » après une demande interrompue (délai, coupure) : elle est relancée.
+        val h = runCatching { fr.dd.jarvis.hermes.Reprise.reecrire(app, history) }.getOrNull()?.also { onStatus("🔁 Reprise de la demande interrompue…") } ?: history
+        try { return replyInterne(h, pourHermes, onTexte, onStatus) } finally { fr.dd.jarvis.voice.Presence.finReflexion() }
     }
 
     private suspend fun replyInterne(history: List<ChatMsg>, pourHermes: Boolean, onTexte: ((String) -> Unit)?, onStatus: (String) -> Unit): String {
@@ -188,6 +190,19 @@ class Brain(
             fr.dd.jarvis.ai.AccesDistant.intention(app, texteUser)?.let { args ->
                 onStatus("🌍 Accès à distance…")
                 return reflexe(tools.execute("appareil_acces_distant", args).text)
+            }
+            // Plex (lancer un film sur la télé, pause, reprise…) : directement par l'API de Plex, sans Home Assistant ni Hermès.
+            if (app.store.plexToken.value.isNotBlank()) PlexTools.intention(texteUser)?.let { (outil, args) ->
+                // « Lance X sur la télé » sans le mot film / série : seulement si X est bien dans la bibliothèque Plex.
+                val ok = args.optString("verifier") != "oui" || runCatching {
+                    val t = fr.dd.jarvis.societe.core.normaliser(args.optString("titre"))
+                    Plex.rechercher(app, args.optString("titre"), 5).any { fr.dd.jarvis.societe.core.normaliser(it.optString("title")).let { x -> x == t || (t.length >= 4 && x.contains(t)) } }
+                }.getOrDefault(false)
+                if (ok) {
+                    onStatus("🎬 Plex…")
+                    args.remove("verifier")
+                    return reflexe(tools.execute(outil, args).text)
+                }
             }
             // Sites web : créés, retrouvés, publiés et modifiés par l'outil dédié (jamais « à la main » par une IA).
             SitesWebTools.intention(app, texteUser)?.let { args ->

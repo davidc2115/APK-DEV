@@ -156,6 +156,8 @@ class Store(context: Context) {
     // ---- Serveur personnel : SSH + Home Assistant
     val haUrl = SPref("haUrl", "")
     val haToken = SPref("haToken", "")
+    /** Adresse de Home Assistant depuis l'extérieur (Nabu Casa, DuckDNS, port ouvert…) : utilisée hors de la maison. */
+    val haUrlDistant = SPref("haUrlDistant", "")
     val haDir = SPref("haDir", "")
     val sshHost = SPref("sshHost", "")
     val sshPort = SPref("sshPort", "22")
@@ -167,6 +169,8 @@ class Store(context: Context) {
     val plexToken = SecretPref("plexToken")
     /** Noms donnés aux lecteurs Plex (« télé du salon » → identifiant du lecteur), en JSON. */
     val plexAlias = SPref("plexAlias", "{}")
+    /** Actions autorisées une fois pour toutes (« Toujours autoriser »), par type d'outil (JSON). */
+    val autorisationsPermanentes = SPref("autorisationsPermanentes", "[]")
     val ghToken = SPref("ghToken", "")
     val scanAuto = BPref("scanAuto", true)
     val sshHostDistant = SPref("sshHostDistant", "")

@@ -31,15 +31,17 @@ object ServeurInventaire {
 
     fun concerne(demande: String) = demande.isNotBlank() && R_SERVEUR.containsMatchIn(demande)
 
-    private val R_SSH_EXPLICITE = Regex("\\bssh\\b|\\bsudo\\b|terminal|ligne de commande|\\btls\\b|\\bssl\\b|certificat|duckdns|reverse.?proxy|crontab|/etc/|/opt/|/srv/|/var/|/home/", RegexOption.IGNORE_CASE)
+    /** Mots qui désignent explicitement le serveur (règle de l'utilisateur : SSH seulement quand il parle du « serveur »). */
+    private val R_SSH_EXPLICITE = Regex(
+        "\\bserveurs?\\b|\\bservers?\\b|\\bssh\\b|\\bdebian\\b|\\bdocker\\b|\\bconteneurs?\\b|\\bcontainers?\\b|\\bsudo\\b|\\bsystemctl\\b|" +
+            "\\bterminal\\b|ligne de commande|(?<![\\p{L}])(/etc|/opt|/srv|/var|/home|/root|/usr)/", RegexOption.IGNORE_CASE)
 
     /**
-     * La demande porte-t-elle vraiment sur le SERVEUR (et peut donc justifier SSH) ? Non pour la domotique ordinaire
-     * (Home Assistant par l'API : états, pilotage, positions des personnes) ni pour une question de la vie courante.
+     * La demande porte-t-elle EXPLICITEMENT sur le serveur (mot « serveur », SSH, Docker, Debian, chemin de fichier) ?
+     * Seulement alors SSH est permis. Home Assistant (entités, personnes, appareils, automatisations) passe toujours par
+     * l'instance elle-même (API + jeton), jamais par une commande sur le serveur qui l'héberge.
      */
-    fun serveurDemande(demande: String): Boolean = demande.isNotBlank() &&
-        (R_SSH_EXPLICITE.containsMatchIn(demande) || fr.dd.jarvis.hermes.RelaisGroq.fichierServeur(demande.lowercase()) ||
-            (R_SERVEUR.containsMatchIn(demande) && !Routeur.homeAssistantApi(demande)))
+    fun serveurDemande(demande: String): Boolean = demande.isNotBlank() && R_SSH_EXPLICITE.containsMatchIn(demande)
 
     /** Bloc à ajouter au prompt d'Hermès (vide si la demande ne concerne pas le serveur ou si rien n'est configuré). */
     suspend fun bloc(app: JarvisApp, demande: String): String {

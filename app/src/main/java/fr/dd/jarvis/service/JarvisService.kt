@@ -468,6 +468,9 @@ class JarvisService : Service() {
     private fun handle(text: String) {
         confirm?.let { d ->
             val t = norm(text)
+            // « Toujours », « toujours autoriser » : oui, et cette action ne sera plus demandée.
+            if (Regex("\\btoujours\\b").containsMatchIn(t) && !Regex("\\b(non|jamais)\\b").containsMatchIn(t) &&
+                confirmQuestion.isNotBlank() && fr.dd.jarvis.device.Autorisations.toujours(app, confirmQuestion)) { d.complete(true); return }
             d.complete(Regex("\\b(oui|ouais|ok|okay|confirme|vas-y|d'accord|yes|allez)\\b").containsMatchIn(t)); return
         }
         if (busy) return
@@ -616,12 +619,18 @@ class JarvisService : Service() {
         return r.ok
     }
 
+    /** Question de la confirmation vocale en cours (pour « toujours »). */
+    private var confirmQuestion = ""
+
     private suspend fun voiceConfirm(question: String): Boolean {
         val d = CompletableDeferred<Boolean>()
         confirm = d
-        withContext(Dispatchers.Main) { voice?.speak(question.take(300) + " Dis oui ou non.") { ecouter(8000) } }
+        confirmQuestion = question
+        val toujours = fr.dd.jarvis.device.Autorisations.clePour(question) != null
+        withContext(Dispatchers.Main) { voice?.speak(question.take(300) + (if (toujours) " Dis oui, non, ou toujours." else " Dis oui ou non.")) { ecouter(8000) } }
         val r = withTimeoutOrNull(25_000) { d.await() } ?: false
         confirm = null
+        confirmQuestion = ""
         return r
     }
 

@@ -77,9 +77,13 @@ Si rien n'est à changer, réponds : === AUCUN ==="""
         /** Demande sur les sites reconnue sans IA (évite qu'une IA fabrique le site ailleurs que sur le serveur). */
         fun intention(app: JarvisApp, texte: String): JSONObject? = intention(texte, lireSites(app).map { it.nom })
 
+        /** Formules de politesse devant la demande (« est-ce que tu peux créer… », « j'aimerais que tu fasses… »). */
+        private val POLI = Regex("^(?:(?:alors|ok|bon|du coup|jarvis|est ce que|tu peux|peux tu|pourrais tu|tu pourrais|j aimerais que tu|je voudrais que tu|il faut que tu|il faudrait que tu|merci de|s il te plait)\\s+)+")
+        private val SOCIETE = Regex("\\b(societe|entreprise|ma boite|mon activite|mon business|ma structure)\\b")
+
         internal fun intention(texte: String, noms: List<String>): JSONObject? {
             if (texte.length > 1500) return null
-            val t = fr.dd.jarvis.societe.core.normaliser(texte).removePrefix("jarvis ").trim()
+            val t = fr.dd.jarvis.societe.core.normaliser(texte).removePrefix("jarvis ").trim().replace(POLI, "")
             if (!Regex("\\b(sites?|page web|landing)\\b").containsMatchIn(t)) return null
             val cite = noms.filter { n -> slug(n).replace('-', ' ').let { it.length >= 3 && t.contains(it) } }.maxByOrNull { it.length }
             fun avecNom(o: JSONObject) = o.also { if (cite != null) it.put("nom", cite) }
@@ -90,7 +94,8 @@ Si rien n'est à changer, réponds : === AUCUN ==="""
                     avecNom(JSONObject().put("action", if (Regex("\\b(retire|enleve|plus en ligne|hors ligne)\\b").containsMatchIn(t)) "retirer_en_ligne" else "mettre_en_ligne"))
                 Regex("^(supprime|efface|detruis)\\b").containsMatchIn(t) -> avecNom(JSONObject().put("action", "supprimer"))
                 Regex("^(cree|creer|fais|fabrique|construis|genere|realise|monte|developpe|code|je veux|je voudrais|j aimerais)\\b.{0,40}\\b(site|page web|landing)").containsMatchIn(t) && cite == null -> {
-                    if (t.split(' ').size < 6) return null   // trop vague : l'IA pose ses questions
+                    // Trop vague : l'IA pose ses questions — sauf pour la société, dont JARVIS a déjà toutes les informations.
+                    if (t.split(' ').size < 6 && !SOCIETE.containsMatchIn(t)) return null
                     val sujet = Regex("(?:site|page)(?: web| internet)?(?: vitrine)? (?:pour|de|du|des|sur) (.{3,45}?)(?:[,.;!]| avec | qui | en | et |$)").find(t)?.groupValues?.get(1)
                     JSONObject().put("action", "creer").put("description", texte.trim()).put("nom", "Site " + (sujet ?: t.split(' ').drop(3).take(4).joinToString(" ")))
                 }
@@ -121,7 +126,7 @@ Si rien n'est à changer, réponds : === AUCUN ==="""
     private fun prop(d: String) = JSONObject().put("type", "string").put("description", d)
 
     val schema = listOf(JSONObject().put("type", "function").put("function", JSONObject().put("name", "site_web").put("description",
-        "SITES WEB créés et hébergés par JARVIS sur le serveur Debian : creer (l'IA écrit un site complet à partir de la description, Jarvis le dépose sur le serveur et le sert avec nginx) | modifier (n'importe quel changement demandé en français) | lister | voir | mettre_en_ligne (accessible depuis Internet : redirection de port de la Freebox) | retirer_en_ligne | arreter | demarrer | versions | restaurer_version | supprimer. Les créations et modifications prennent 1 à 3 minutes : Jarvis prévient quand c'est prêt.")
+        "SITES WEB créés et hébergés par JARVIS sur le serveur Debian : creer (l'IA écrit un site complet à partir de la description, Jarvis le dépose sur le serveur et le sert avec nginx) | modifier (n'importe quel changement demandé en français) | lister | voir | mettre_en_ligne (accessible depuis Internet : redirection de port de la Freebox) | retirer_en_ligne | arreter | demarrer | versions | restaurer_version | supprimer. Les créations et modifications prennent 1 à 3 minutes : Jarvis prévient quand c'est prêt. Site de la SOCIÉTÉ de l'utilisateur : appelle directement creer (description « site pour la société » + ses souhaits éventuels) — Jarvis y ajoute lui-même le nom, l'activité, les coordonnées, les prestations, les mentions légales et le logo enregistrés : ne les demande JAMAIS à l'utilisateur.")
         .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject()
             .put("action", prop("creer | modifier | lister | voir | mettre_en_ligne | retirer_en_ligne | arreter | demarrer | versions | restaurer_version | supprimer"))
             .put("nom", prop("Nom du site (ex. « site entreprise PV »)."))
@@ -256,9 +261,47 @@ Si rien n'est à changer, réponds : === AUCUN ==="""
         return out
     }
 
+    /** Le site est celui de la société (« site pour ma société / mon entreprise », ou son nom cité). */
+    private fun pourSociete(texte: String): Boolean {
+        val s = app.societe.data.societe
+        if (s.nom.isBlank()) return false
+        val n = fr.dd.jarvis.societe.core.normaliser(texte)
+        val nom = fr.dd.jarvis.societe.core.normaliser(s.nom)
+        return SOCIETE.containsMatchIn(n) || (nom.length >= 4 && n.contains(nom))
+    }
+
+    /**
+     * Informations RÉELLES de la société pour son site : nom, activité, coordonnées, prestations du catalogue, mentions
+     * légales, logo — l'IA n'a plus à les demander (ni à les inventer).
+     */
+    private fun contexteSociete(avecLogo: Boolean): String {
+        val d = app.societe.data; val s = d.societe
+        val dirigeant = d.employes.firstOrNull { it.statut == "dirigeant" }?.nom.orEmpty()
+        val ville = Regex("\\b\\d{5}\\s+(.+)$").find(s.adresse.trim())?.groupValues?.get(1)?.trim().orEmpty()
+        return buildString {
+            append("\n\nINFORMATIONS RÉELLES DE LA SOCIÉTÉ (à utiliser telles quelles ; n'invente ni chiffres, ni avis clients, ni certifications) :\n")
+            append("- Nom : ${s.nom}${if (s.forme.isNotBlank()) " (${fr.dd.jarvis.societe.core.Rendu.formeCapital(s)})" else ""}\n")
+            append("- Activité : maintenance, entretien, contrôle et dépannage d'installations photovoltaïques (particuliers et professionnels)\n")
+            if (s.adresse.isNotBlank()) append("- Siège : ${s.adresse}${if (ville.isNotBlank()) " — intervient autour de $ville" else ""}\n")
+            if (s.tel.isNotBlank()) append("- Téléphone : ${s.tel} (lien tel:)\n")
+            if (s.email.isNotBlank()) append("- Email : ${s.email} (lien mailto:, aussi pour le formulaire de contact)\n")
+            if (d.tarifs.isNotEmpty()) append("- Prestations proposées : ${d.tarifs.joinToString("; ") { it.designation }}\n")
+            if (dirigeant.isNotBlank()) append("- Dirigeant : $dirigeant\n")
+            append("- Page « Mentions légales » obligatoire : ${fr.dd.jarvis.societe.core.Rendu.identiteLegale(d)}" +
+                (if (dirigeant.isNotBlank()) " ; directeur de la publication : $dirigeant" else "") + " ; hébergement : serveur de la société.\n")
+            if (avecLogo) append("- LOGO : le fichier img/logo.png est fourni (seule image binaire autorisée) : affiche-le dans l'en-tête de chaque page et utilise-le comme favicon.\n")
+            append("Pages conseillées : Accueil, Prestations, À propos, Contact, Mentions légales. Ton professionnel et rassurant.")
+        }
+    }
+
     private fun creer(a: JSONObject): ToolResult {
-        val description = a.optString("description").trim().ifBlank { a.optString("consigne").trim() }
-        val nom = a.optString("nom").trim().ifBlank { description.take(40).ifBlank { "Mon site" } }
+        val demande = a.optString("description").trim().ifBlank { a.optString("consigne").trim() }
+        val societe = pourSociete(demande + " " + a.optString("nom"))
+        val logo = if (societe) fr.dd.jarvis.societe.Logo.png(app) else null
+        val description = if (societe) demande + contexteSociete(logo != null) else demande
+        val nomDemande = a.optString("nom").trim()
+        val nom = if (societe && (nomDemande.isBlank() || SOCIETE.containsMatchIn(fr.dd.jarvis.societe.core.normaliser(nomDemande)))) "Site ${app.societe.data.societe.nom}"
+            else nomDemande.ifBlank { description.take(40).ifBlank { "Mon site" } }
         if (description.length < 10) return ToolResult("Décris le site : sujet, pages et sections, style, couleurs, coordonnées à afficher…")
         if (trouver(nom)?.slug == slug(nom)) return ToolResult("Un site « $nom » existe déjà : dis « modifie le site $nom … » pour le changer, ou donne un autre nom.")
         val home = Serveur.exec(app, "echo \$HOME", 15).second.trim().lines().last()
@@ -271,6 +314,8 @@ Si rien n'est à changer, réponds : === AUCUN ==="""
                 if (fichiers.isEmpty() || fichiers.keys.none { it.endsWith(".html") }) throw IllegalStateException("l'IA n'a pas renvoyé de fichiers de site exploitables, réessaie en reformulant")
                 val complet = if ("index.html" !in fichiers) fichiers + ("index.html" to fichiers.entries.first { it.key.endsWith(".html") }.value) else fichiers
                 deposer(site, complet, emptyList())
+                // Logo de la société, déposé tel quel (PNG) à l'endroit où les pages l'attendent.
+                if (logo != null) { Serveur.exec(app, "mkdir -p ${Serveur.q(site.dossier + "/img")}", 20); Serveur.envoyerOctets(app, "${site.dossier}/img/logo.png", logo.first); Serveur.exec(app, "chmod -R a+rX ${Serveur.q(site.dossier)}", 20) }
                 val r = servir(site)
                 if (r.contains("DOCKER ABSENT")) throw IllegalStateException("Docker n'est pas installé sur le serveur (nécessaire pour servir le site)")
                 // Vérification réelle : la page répond-elle sur le serveur ?
@@ -288,7 +333,8 @@ Si rien n'est à changer, réponds : === AUCUN ==="""
             }
             prevenir(if (compte.startsWith("❌")) "Site web : échec" else "Site web prêt", compte)
         }
-        return ToolResult("⏳ Je crée le site « $nom » (1 à 3 minutes) : l'IA écrit les pages, puis je les dépose sur ton serveur et je le démarre sur le port ${site.port}. Je te préviens ici dès qu'il est prêt.")
+        return ToolResult((if (societe) "🏢 Site de la société : je reprends ses informations enregistrées (nom, activité, coordonnées, prestations, mentions légales${if (logo != null) ", logo" else ""}).\n" else "") +
+            "⏳ Je crée le site « $nom » (1 à 3 minutes) : l'IA écrit les pages, puis je les dépose sur ton serveur et je le démarre sur le port ${site.port}. Je te préviens ici dès qu'il est prêt.")
     }
 
     private fun modifier(a: JSONObject): ToolResult {

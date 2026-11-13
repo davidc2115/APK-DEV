@@ -288,8 +288,22 @@ fun ConfirmationJarvis(vm: ChatViewModel) {
             titleContentColor = accent,
             textContentColor = HudText,
             title = { Text("Confirmation", fontFamily = FontFamily.Monospace) },
-            text = { Text(question) },
-            confirmButton = { TextButton({ vm.answerConfirm(true) }) { Text("Autoriser", color = accent) } },
+            text = {
+                Column {
+                    Text(question)
+                    fr.dd.jarvis.device.Autorisations.clePour(question)?.let { cle ->
+                        Text("« Toujours » : « ${fr.dd.jarvis.device.Autorisations.libelle(cle)} » ne sera plus demandé (révocable dans Réglages › Contrôle du téléphone).",
+                            color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
+                    }
+                }
+            },
+            confirmButton = {
+                Row {
+                    if (fr.dd.jarvis.device.Autorisations.clePour(question) != null)
+                        TextButton({ vm.answerConfirm(true, toujours = true) }) { Text("Toujours", color = accent) }
+                    TextButton({ vm.answerConfirm(true) }) { Text("Autoriser", color = accent) }
+                }
+            },
             dismissButton = { TextButton({ vm.answerConfirm(false) }) { Text("Refuser", color = HudDim) } }
         )
     }

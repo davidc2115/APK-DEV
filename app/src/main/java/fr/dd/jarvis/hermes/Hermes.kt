@@ -217,7 +217,8 @@ HOME ASSISTANT = DEUX CHOSES DIFFÉRENTES, ne les confonds jamais : (1) l'INSTAN
 IMAGES, VIDÉOS ET FICHIERS CRÉÉS : quand un outil Jarvis renvoie une ligne « ![image](jarvis-img:NOM) », « [▶ Lire la vidéo](jarvis-video-ia:NOM) » ou « [📎 …](jarvis-file:NOM) », recopie-la TELLE QUELLE, sur une ligne à part, dans ta réponse (jamais transformée en simple lien, jamais résumée) : c'est elle qui affiche le média dans la conversation.
 FREEBOX — DISQUE ET APPAREILS : « le disque (dur) de la box », un dossier (Téléchargements, Vidéos…) ou des fichiers sur la box = action fichiers de l'outil mcp_jarvis_freebox (paramètre chemin) ; « les appareils connectés » = action appareils. Ne confonds jamais les deux. Pour MODIFIER le disque de la box, utilise les actions de fichiers du même outil (association Freebox OS, aucun SMB/FTP ni SSH) : chercher_fichier (nom), renommer (chemin + nouveau_nom), deplacer / copier (chemin + destination ; plusieurs chemins séparés par « ; » ou joker « Téléchargements/*.mkv »), supprimer_fichier (chemin), creer_dossier (chemin), envoyer_fichier (fichier du téléphone + destination), recuperer_fichier (chemin). En cas de doute sur le nom exact, fais d'abord chercher_fichier.
 SERVEUR / SSH : le serveur de l'utilisateur est DÉJÀ configuré dans Jarvis (adresse, port, utilisateur, clé ou mot de passe) : passe UNIQUEMENT par les outils Jarvis, qui s'y connectent avec ces réglages : mcp_jarvis_serveur_service (un service par son nom : état, journaux, démarrer, arrêter, redémarrer, mettre à jour), mcp_jarvis_ha_sauvegarde (sauvegardes Home Assistant : lister, créer, restaurer même quand Home Assistant est arrêté, vérifier), mcp_jarvis_serveur_tache (opérations longues en arrière-plan + suivi), mcp_jarvis_serveur_fichiers, mcp_jarvis_ssh_commande / ssh_script / ssh_fichier / serveur_diagnostic. « sudo » fonctionne (mot de passe enregistré dans Jarvis). N'utilise JAMAIS la commande ssh (ni scp, sshpass…) dans ton propre terminal : aucun identifiant n'y est enregistré et la connexion échouerait. Ne redemande jamais les identifiants à l'utilisateur. Appuie-toi sur la fiche INFRASTRUCTURE ci-dessous pour savoir quel service est lequel.
-SSH ET COMMANDES SERVEUR : UNIQUEMENT quand la demande porte explicitement sur le serveur Debian (Docker, conteneur, service, fichier ou panne du serveur, configuration de Home Assistant, du bot Discord, de Plex). JAMAIS pour : où se trouve une personne (outil ha_position : entités person.* / device_tracker.* de Home Assistant, par l'API), l'état ou le pilotage d'un appareil de la maison (outils ha_*), une information notée (memoire_faits, mémoire, notes Obsidian, carnet), un contact, l'agenda, le téléphone ou la Société. Une question de la vie courante ne se règle jamais par une commande sur le serveur.
+SSH ET COMMANDES SERVEUR : UNIQUEMENT quand l'utilisateur parle explicitement du SERVEUR (le mot « serveur », SSH, Docker, Debian, un chemin de fichier du serveur). HOME ASSISTANT passe TOUJOURS par l'instance elle-même, avec le jeton configuré (outils ha_entites, ha_etat, ha_service, ha_position, ha_config, ha_dashboard, ha_admin) : jamais par SSH ni docker exec, même si Home Assistant est hébergé sur le serveur. JAMAIS de SSH pour : où se trouve une personne (outil ha_position : entités person.* / device_tracker.* de Home Assistant, par l'API), l'état ou le pilotage d'un appareil de la maison (outils ha_*), une information notée (memoire_faits, mémoire, notes Obsidian, carnet), un contact, l'agenda, le téléphone ou la Société. Une question de la vie courante ne se règle jamais par une commande sur le serveur.
+PLEX (lancer un film, une série sur la télé, un téléphone, un ordinateur ; pause, reprise, arrêt) : outils plex_* — ils parlent DIRECTEMENT au serveur Plex (Wi-Fi de la maison ou connexion distante de Plex) : jamais par Home Assistant, ni par SSH.
 SOCIÉTÉ (clients, devis, factures, paie, interventions) : la base est SUR LE TÉLÉPHONE ; utilise UNIQUEMENT les outils Jarvis de la Société (mcp_jarvis_document_action pour « payée », « envoyée », « acceptée »…, documents_supprimer pour annuler ou supprimer une, plusieurs ou toutes les factures/devis, bulletins pour lister ou supprimer des fiches de paie, document_creer, client_*, paie, societe_*). JAMAIS de SSH, de commande ou de fichier sur le serveur pour la Société : le coffre-jarvis du serveur n'est qu'une copie chiffrée, synchronisée automatiquement après chaque modification faite sur le téléphone.
 FICHIERS DU SERVEUR : tes outils natifs read_file, write_file, patch, search_files et ton terminal agissent sur le TÉLÉPHONE (Termux), JAMAIS sur le serveur Debian. Pour lire, modifier, créer ou réécrire un fichier du serveur (/etc/…, /home/…, /opt/…, /srv/…, ~/…, configuration.yaml de Home Assistant, docker-compose.yml, nginx, .env, scripts du bot Discord…), utilise UNIQUEMENT mcp_jarvis_ssh_fichier : action=lire (lignes numérotées) ou chercher pour repérer le passage, puis remplacer (ancien → nouveau, passage exact SANS les numéros), remplacer_lignes, inserer, ajouter ou supprimer_lignes ; ecrire (contenu complet) seulement pour un nouveau fichier ou une réécriture totale voulue ; paramètre conteneur pour un fichier À L'INTÉRIEUR d'un conteneur Docker (ex. /config/configuration.yaml dans homeassistant). L'outil sauvegarde l'ancienne version, garde les droits, passe par sudo si besoin et VÉRIFIE le contenu écrit : annonce la modification seulement après son « ✅ », en citant la différence qu'il renvoie ; s'il échoue, cite son erreur exacte. N'essaie jamais d'écrire un fichier du serveur avec echo/cat/sed dans ssh_commande quand ssh_fichier peut le faire.
 PLEX = DEUX CHOSES DIFFÉRENTES : (1) l'INSTANCE Plex Media Server (le logiciel), jointe par son API avec le jeton des Réglages — bibliothèques, films, séries, lecture, lecteurs, listes de lecture, utilisateurs, réglages de Plex : UNIQUEMENT les outils plex_* ; (2) le SERVEUR Debian qui l'héberge — service ou conteneur plexmediaserver (démarrer, arrêter, redémarrer, mettre à jour, journaux), fichiers vidéo sur le disque, espace disque : serveur_service, serveur_fichiers, ssh_*. 
@@ -277,7 +278,7 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
                 - Si la demande exige une description pornographique explicite que tu ne peux pas produire, propose directement une version sensuelle et suggestive plutôt qu'un refus général.
                 - Ce réglage ne désactive aucune règle de sécurité et ne modifie pas les filtres du fournisseur. Ne transmets pas de contenu adulte à un service externe qui l'interdit, notamment Suno.
             """.trimIndent() else "") +
-            runCatching { ServeurInventaire.bloc(app, demande) }.getOrDefault("") +
+            runCatching { if (ServeurInventaire.serveurDemande(demande)) ServeurInventaire.bloc(app, demande) else "" }.getOrDefault("") +
             runCatching { fr.dd.jarvis.device.Contexte.consigne(fr.dd.jarvis.device.Contexte.actuel(app)) }.getOrDefault("") +
             // Accès du serveur (SSH) rappelés seulement pour une demande qui concerne le serveur : rappelés partout, ils
             // poussaient le moteur à lancer des commandes SSH pour n'importe quelle question (« où est Angeline ? »).
@@ -328,7 +329,7 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
             messages.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(cap)))
         }
         // Demande qui touche au serveur : les accès configurés sont rappelés DANS la demande (jamais raccourcie par le relais).
-        val rappel = if (fr.dd.jarvis.ai.Serveur.sshConfigure(app) && ServeurInventaire.concerne(sujet)) ServeurInventaire.acces(app) else ""
+        val rappel = if (fr.dd.jarvis.ai.Serveur.sshConfigure(app) && ServeurInventaire.serveurDemande(sujet)) ServeurInventaire.acces(app) else ""
         if (rappel.isNotBlank()) ajouterALaDemande(messages, "\n\n[$rappel]")
         if (!tentativeJarvis.isNullOrBlank()) messages.put(JSONObject().put("role", "system").put("content",
             "Ta partie rapide a d'abord essayé de traiter cette demande sans aboutir (l'utilisateur n'a PAS vu cette tentative). Brouillon : « ${tentativeJarvis.take(1500)} ». " +
@@ -463,13 +464,15 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
             // Après le premier texte, on accorde une courte marge pour finir la réponse.
             // Ne jamais bloquer indéfiniment l'interface : une réflexion qui s'éternise continue en arrière-plan.
             if (!travail.isCompleted && ecrit.get()) withTimeoutOrNull(10_000L) { travail.join() }
-            if (travail.isCompleted) return travail.await()
+            if (travail.isCompleted) return travail.await().also { r -> retenir(app, demande, r) }
             // Trop long : la demande continue en arrière-plan, l'utilisateur récupère la main.
             attendu.set(false)
             SuiviTaches.enCours(app, notif, "JARVIS continue en arrière-plan", "${demande.take(80)}\n${dernierStatut.get()}")
             fond.launch {
                 val r = runCatching { travail.await() }.getOrNull()
-                val texte = r ?: "⚠️ Je n'ai pas réussi à terminer « ${demande.take(80).ifBlank { "ta demande" }} » (moteur approfondi indisponible ou délai dépassé). Redemande-la si besoin."
+                retenir(app, demande, r)
+                val texte = (r ?: "⚠️ Je n'ai pas réussi à terminer « ${demande.take(80).ifBlank { "ta demande" }} » (moteur approfondi indisponible ou délai dépassé).") +
+                    (if (Reprise.echec(r)) "\n\n🔁 Dis « reprends » pour la relancer là où elle s'est arrêtée." else "")
                 withContext(Dispatchers.Main) { app.chatAjouter(ChatMsg(false, texte)); Routeur.derniere = Routeur.Cible.HERMES }
                 SuiviTaches.termine(app, notif, if (r != null) "JARVIS a terminé" else "JARVIS n'a pas pu terminer", texte)
             }
@@ -481,6 +484,13 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
         } finally {
             minuteur.cancel()
         }
+    }
+
+    /** Demande interrompue : gardée pour « reprends » ; demande aboutie : la reprise en attente est terminée. */
+    private fun retenir(app: JarvisApp, demande: String, r: String?) {
+        if (demande.isBlank()) return
+        if (Reprise.echec(r)) Reprise.noter(app, demande, r?.lineSequence()?.firstOrNull()?.take(200) ?: "délai dépassé")
+        else if (Reprise.derniere(app)?.texte == demande.substringBefore("\n\n[REPRISE —").trim()) Reprise.effacer(app)
     }
 
     /** Temps de réponse d'Hermès à une question triviale, comparé à l'IA appelée directement (diagnostic de lenteur). */
@@ -589,7 +599,7 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
             throw e
         } catch (e: Exception) {
             if (!call.isCanceled()) { marquerEnLigne(false); relancerSiBesoin(app) }
-            "⚠️ Connexion au moteur Hermès interrompue : ${e.message ?: e.javaClass.simpleName}. La demande n'a pas pu être confirmée."
+            "⚠️ Connexion au moteur Hermès interrompue : ${e.message ?: e.javaClass.simpleName}. La demande n'a pas pu être confirmée — dis « reprends » pour la relancer."
         }
     }
 }

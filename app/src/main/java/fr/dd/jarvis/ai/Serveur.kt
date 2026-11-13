@@ -469,16 +469,39 @@ object Serveur {
 
     private fun base(app: JarvisApp) = app.store.haUrl.value.trim().trimEnd('/').let { if (it.startsWith("http")) it else "http://$it" }
 
+    /** Adresse extérieure de Home Assistant : celle des réglages, sinon l'accès à distance ouvert depuis l'onglet Wi-Fi. */
+    private fun haDistant(app: JarvisApp, hoteLocal: String, portLocal: Int): String? {
+        app.store.haUrlDistant.value.trim().trimEnd('/').takeIf { it.isNotBlank() }?.let { return if (it.startsWith("http")) it else "https://$it" }
+        return runCatching {
+            Registre.tous(app).firstOrNull { it.optString("ip") == hoteLocal }?.optJSONArray("distant")?.let { a ->
+                (0 until a.length()).mapNotNull { a.optJSONObject(it) }.firstOrNull { it.optInt("port") == portLocal }?.optString("adresse")?.takeIf { it.startsWith("http") }
+            }
+        }.getOrNull()
+    }
+
+    /** Adresse directe de l'instance Home Assistant (locale à la maison, extérieure dehors), sans tunnel SSH. */
+    fun haBaseDirecte(app: JarvisApp): String {
+        val b = base(app)
+        val u = runCatching { java.net.URI(b) }.getOrNull() ?: return b
+        val hote = u.host.orEmpty()
+        if (!ipPrivee(hote) || telephoneSurReseau(hote)) return b
+        return haDistant(app, hote, if (u.port > 0) u.port else if (u.scheme == "https") 443 else 80) ?: b
+    }
+
     /**
-     * Adresse effective de l'API Home Assistant et client HTTP : adresse LOCALE (192.168…) alors que le téléphone est
-     * hors de la maison → tunnel SSH vers le serveur qui l'héberge (certificat HTTPS toujours vérifié pour le vrai nom).
+     * Adresse effective de l'API Home Assistant : TOUJOURS l'instance elle-même, avec le jeton — adresse locale à la
+     * maison, adresse extérieure dehors (réglage, ou accès ouvert depuis l'onglet Wi-Fi). Le tunnel SSH par le serveur
+     * n'est plus qu'un dernier recours (adresse locale, téléphone dehors, et aucune adresse extérieure connue).
      */
     private fun acces(app: JarvisApp): Pair<String, OkHttpClient> {
         val b = base(app)
         val u = runCatching { java.net.URI(b) }.getOrNull() ?: return b to http
         val hote = u.host.orEmpty()
+        if (!ipPrivee(hote) || telephoneSurReseau(hote)) return b to http
+        val portLocal = if (u.port > 0) u.port else if (u.scheme == "https") 443 else 80
+        haDistant(app, hote, portLocal)?.let { return it to http }
         val estServeur = hote == app.store.sshHost.value.trim() || hote == app.store.serveurIpLocale.value.trim()
-        if (!ipPrivee(hote) || !estServeur || !sshConfigure(app) || telephoneSurReseau(hote)) return b to http
+        if (!estServeur || !sshConfigure(app)) return b to http
         val port = if (u.port > 0) u.port else if (u.scheme == "https") 443 else 80
         val lp = runCatching { tunnel(app, port) }.getOrElse { return b to http }
         val client = if (u.scheme == "https") http.newBuilder().hostnameVerifier { _, session ->
