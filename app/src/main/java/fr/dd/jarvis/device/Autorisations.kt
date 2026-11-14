@@ -114,6 +114,24 @@ object Autorisations {
         return true
     }
 
+    // ------------------------------------------------------------------ journal des actions faites sans confirmation
+
+    data class Trace(val quand: Long, val outil: String, val action: String, val motif: String)
+
+    /** Les 200 dernières actions exécutées sans demander, grâce à une autorisation permanente (le plus récent d'abord). */
+    fun journal(app: JarvisApp): List<Trace> = runCatching {
+        val a = JSONArray(app.store.journalAutorisations.value)
+        (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Trace(it.optLong("t"), it.optString("o"), it.optString("a"), it.optString("m")) }
+    }.getOrDefault(emptyList())
+
+    @Synchronized private fun journaliser(app: JarvisApp, outil: String, question: String, motif: String) = runCatching {
+        val o = org.json.JSONObject().put("t", System.currentTimeMillis()).put("o", libelle(outil)).put("a", question.replace(Regex("\\s+"), " ").take(220)).put("m", motif)
+        val l = listOf(o) + runCatching { JSONArray(app.store.journalAutorisations.value).let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } } }.getOrDefault(emptyList())
+        app.store.journalAutorisations.set(JSONArray(l.take(200)).toString())
+    }
+
+    fun viderJournal(app: JarvisApp) = app.store.journalAutorisations.set("[]")
+
     /** Description courte d'une commande pour la liste des autorisations (outil + question, sans secret). */
     private fun decrire(outil: String, question: String): String =
         libelle(outil) + " — " + question.replace(Regex("\\s+"), " ").take(140)
@@ -124,9 +142,9 @@ object Autorisations {
      */
     suspend fun confirmer(app: JarvisApp, outil: OutilEnCours?, question: String, demander: suspend () -> Boolean): Boolean {
         val c = cle(outil?.nom, question)
-        if (estPermanente(app, c)) return true
+        if (estPermanente(app, c)) { journaliser(app, outil?.nom ?: c.orEmpty(), question, "type d'action toujours autorisé"); return true }
         val e = outil?.takeIf { it.nom.isNotBlank() && !CRITIQUE.containsMatchIn(question) && !CRITIQUE.containsMatchIn(it.nom) }?.let { empreinte(it.nom, it.args) }
-        if (commandeAutorisee(app, e)) return true
+        if (commandeAutorisee(app, e)) { journaliser(app, outil!!.nom, question, "commande toujours autorisée"); return true }
         if (c != null) enAttente[question] = c
         if (e != null) commandeEnAttente[question] = e to decrire(outil!!.nom, question)
         return try { demander() } finally { if (c != null) enAttente.remove(question); if (e != null) commandeEnAttente.remove(question) }

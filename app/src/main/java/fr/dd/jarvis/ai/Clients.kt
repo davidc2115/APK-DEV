@@ -239,9 +239,18 @@ class GeminiChatClient(private val ring: KeyRing, private val model: () -> Strin
      * d'authentification : le point d'accès compatible OpenAI les refuse ou les traite mal), le compatible OpenAI sinon.
      */
     internal fun voies(key: String): List<Voie> {
-        val base = if (key.startsWith("AQ.")) listOf(Voie.NATIF, Voie.OPENAI_CLE, Voie.OPENAI_BEARER) else listOf(Voie.OPENAI_BEARER, Voie.OPENAI_CLE, Voie.NATIF)
-        return voieOk[key]?.let { v -> listOf(v) + (base - v) } ?: base
+        val base = if (key.startsWith("AQ.")) listOf(Voie.NATIF, Voie.OPENAI_BEARER, Voie.OPENAI_CLE) else listOf(Voie.OPENAI_BEARER, Voie.OPENAI_CLE, Voie.NATIF)
+        val ordre = voieOk[key]?.let { v -> listOf(v) + (base - v) } ?: base
+        // Voies que Google refuse pour CETTE clé alors qu'une autre marche (ex. clé « AQ. » + en-tête sur le point compatible
+        // OpenAI) : inutile de les retenter — et surtout leur refus ne doit pas faire passer la clé pour invalide.
+        val maintenant = System.currentTimeMillis()
+        val ko = voiesKo[key].orEmpty().filterValues { it > maintenant }.keys
+        return ordre.filter { it !in ko }.ifEmpty { ordre }
     }
+
+    /** Voies refusées pour une clé (voie → jusqu'à quand), alors qu'une autre voie de la même clé fonctionne. */
+    private val voiesKo = java.util.concurrent.ConcurrentHashMap<String, MutableMap<Voie, Long>>()
+    private fun voieKo(key: String, v: Voie) { voiesKo.getOrPut(key) { java.util.concurrent.ConcurrentHashMap() }[v] = System.currentTimeMillis() + 12 * 3_600_000L }
 
     fun disponible() = ring.count() > 0
 
@@ -262,13 +271,50 @@ class GeminiChatClient(private val ring: KeyRing, private val model: () -> Strin
     suspend fun diagnostic(key: String): List<Pair<Voie, ApiException?>> = withContext(Dispatchers.IO) {
         val m = GeminiModeles.pour(key, model().ifBlank { "gemini-2.5-flash" }.removePrefix("models/"))
         val msg = JSONArray().put(JSONObject().put("role", "user").put("content", "Réponds juste : ok"))
-        Voie.values().map { v -> v to try { essai(v, key, m, msg, null, 256, false); null } catch (e: ApiException) { e } }
+        val r = Voie.values().map { v -> v to try { essai(v, key, m, msg, null, 256, false); null } catch (e: ApiException) { e } }
+        val bonnes = r.filter { it.second == null }.map { it.first }
+        if (bonnes.isNotEmpty()) {
+            voieOk[key] = voies(key).firstOrNull { it in bonnes } ?: bonnes.first()
+            r.filter { it.second != null && voieRefusee(it.second!!) }.forEach { voieKo(key, it.first) }
+            r.filter { it.second == null }.forEach { voiesKo[key]?.remove(it.first) }
+        }
+        r
     }
 
-    private fun essai(v: Voie, key: String, mdl: String, messages: JSONArray, tools: JSONArray?, out: Int, forceText: Boolean): JSONObject = when (v) {
-        Voie.NATIF -> callNatif(key, mdl, messages, tools, out, forceText, true)
-        Voie.OPENAI_BEARER -> call(key, mdl, messages, tools, out, forceText, true, true)
-        Voie.OPENAI_CLE -> call(key, mdl, messages, tools, out, forceText, true, false)
+    /** L'erreur vient de la FAÇON d'appeler (authentification, adresse) et pas du contenu de la requête. */
+    private fun voieRefusee(e: ApiException): Boolean = e.code in setOf(401, 403) || (e.code == 400 && (Http.refusLocalisation(e.message.orEmpty()) ||
+        Regex("credential|authenticat|api key|API_KEY|ACCESS_TOKEN", RegexOption.IGNORE_CASE).containsMatchIn(e.message.orEmpty())))
+
+    /** Requête refusée à cause des schémas d'outils (imbrication trop profonde, champ inconnu, valeur invalide). */
+    private fun schemaRefuse(e: ApiException): Boolean = e.code == 400 &&
+        Regex("nesting depth|FunctionDeclaration|function_declarations|functionDeclarations|parameters|schema|Invalid JSON payload|Unknown name|Invalid value|tools\\[", RegexOption.IGNORE_CASE)
+            .containsMatchIn(e.message.orEmpty())
+
+    private fun essai(v: Voie, key: String, mdl: String, messages: JSONArray, tools: JSONArray?, out: Int, forceText: Boolean, profondeur: Int = 0): JSONObject {
+        // Profondeur limitée : les paramètres trop imbriqués deviennent un texte JSON, reconverti dans la réponse.
+        val aplatis = HashMap<String, MutableSet<String>>()
+        val outils = if (profondeur > 0 && tools != null) aplatir(tools, profondeur, aplatis) else tools
+        val m = when (v) {
+            Voie.NATIF -> callNatif(key, mdl, messages, outils, out, forceText, true)
+            Voie.OPENAI_BEARER -> call(key, mdl, messages, outils, out, forceText, true, true)
+            Voie.OPENAI_CLE -> call(key, mdl, messages, outils, out, forceText, true, false)
+        }
+        if (aplatis.isNotEmpty()) restaurer(m, aplatis)
+        return m
+    }
+
+    /** Essai d'une voie ; si Google refuse les schémas d'outils, nouvel essai avec des schémas de moins en moins imbriqués. */
+    private fun essaiSouple(v: Voie, key: String, mdl: String, messages: JSONArray, tools: JSONArray?, out: Int, forceText: Boolean): JSONObject {
+        try { return essai(v, key, mdl, messages, tools, out, forceText) }
+        catch (e: ApiException) {
+            if (tools == null || tools.length() == 0 || !schemaRefuse(e)) throw e
+            var derniere = e
+            for (p in listOf(4, 3, 2)) {
+                try { return essai(v, key, mdl, messages, tools, out, forceText, p) }
+                catch (e2: ApiException) { derniere = e2; if (!schemaRefuse(e2)) throw e2 }
+            }
+            throw derniere
+        }
     }
 
     /**
@@ -277,23 +323,30 @@ class GeminiChatClient(private val ring: KeyRing, private val model: () -> Strin
      */
     private fun appel(key: String, messages: JSONArray, tools: JSONArray?, out: Int, forceText: Boolean): JSONObject {
         val principal = GeminiModeles.pour(key, model().ifBlank { "gemini-2.5-flash" }.removePrefix("models/"))
-        var erreur: ApiException? = null
+        val erreurs = mutableListOf<Pair<Voie, ApiException>>()
         for (v in voies(key)) {
-            try { return essai(v, key, principal, messages, tools, out, forceText).also { voieOk[key] = v } }
+            try { return essaiSouple(v, key, principal, messages, tools, out, forceText).also { voieOk[key] = v; voiesKo[key]?.remove(v) } }
             catch (e: ApiException) {
-                erreur = e
+                erreurs += v to e
                 val m = e.message.orEmpty()
                 if (GeminiModeles.modeleInaccessible(e.code, m)) {
                     val autre = GeminiModeles.secours(key, principal) ?: throw e
-                    return essai(v, key, autre, messages, tools, out, forceText).also { voieOk[key] = v }
+                    return essaiSouple(v, key, autre, messages, tools, out, forceText).also { voieOk[key] = v }
                 }
-                // Autre voie seulement si c'est la façon d'appeler qui est refusée (authentification, adresse, format).
-                val voieEnCause = e.code in setOf(401, 403) || (e.code == 400 && (Http.refusLocalisation(m) ||
-                    Regex("credential|authenticat|api key|API_KEY|ACCESS_TOKEN|Invalid JSON|Unknown name|Invalid value", RegexOption.IGNORE_CASE).containsMatchIn(m)))
-                if (!voieEnCause) throw e
+                // Autre voie seulement si c'est la façon d'appeler (authentification, adresse) ou le format qui est refusé.
+                if (!voieRefusee(e) && !schemaRefuse(e)) throw e
             }
         }
-        throw erreur ?: ApiException(502, "Gemini : aucune voie")
+        // Aucune voie n'a marché. Ne JAMAIS faire passer la clé pour refusée à cause d'une voie secondaire : si la clé a déjà
+        // marché par une voie (test ou appel précédent), les refus d'authentification des autres voies sont des refus de voie.
+        val connueBonne = voieOk[key] != null
+        if (connueBonne) erreurs.filter { voieRefusee(it.second) && it.first != voieOk[key] }.forEach { voieKo(key, it.first) }
+        val utile = erreurs.firstOrNull { !voieRefusee(it.second) }?.second
+            ?: erreurs.firstOrNull { it.first == voieOk[key] }?.second
+        if (utile != null) throw ApiException(if (KeyRing.cleRefusee(utile.code, utile.message.orEmpty()) && connueBonne) 503 else utile.code, utile.message.orEmpty())
+        val derniere = erreurs.lastOrNull()?.second ?: throw ApiException(502, "Gemini : aucune voie")
+        if (connueBonne) throw ApiException(503, "Gemini : appel refusé sur toutes les voies alors que la clé fonctionnait (${KeyRing.motif(derniere.code, derniere.message.orEmpty())})")
+        throw derniere
     }
 
     /** Appel par l'API native (generateContent) : messages et outils OpenAI convertis, réponse reconvertie au format OpenAI. */
@@ -442,6 +495,64 @@ class GeminiChatClient(private val ring: KeyRing, private val model: () -> Strin
         }
 
         private val CLES_NATIVES = setOf("type", "format", "description", "nullable", "enum", "items", "properties", "required", "anyOf", "minimum", "maximum", "minItems", "maxItems", "title")
+        /** Formats acceptés par l'API native (les autres — uri, email, date… — font refuser toute la requête). */
+        private val FORMATS_NATIFS = setOf("enum", "date-time", "int32", "int64", "float", "double")
+
+        /**
+         * Outils dont les paramètres plus imbriqués que [max] niveaux (objet = 1 niveau, tableau = 1 niveau) sont décrits
+         * comme un texte JSON ; [aplatis] reçoit, par outil, les chemins concernés (« lignes[] », « options.filtre »).
+         */
+        internal fun aplatir(tools: JSONArray, max: Int, aplatis: MutableMap<String, MutableSet<String>>): JSONArray {
+            val out = JSONArray()
+            for (i in 0 until tools.length()) {
+                val t = JSONObject(tools.optJSONObject(i)?.toString() ?: continue)
+                val f = t.optJSONObject("function")
+                val p = f?.optJSONObject("parameters")
+                if (f != null && p != null) {
+                    val chemins = mutableSetOf<String>()
+                    f.put("parameters", aplatirSchema(p, 1, max, "", chemins))
+                    if (chemins.isNotEmpty()) aplatis[f.optString("name")] = chemins
+                }
+                out.put(t)
+            }
+            return out
+        }
+
+        private fun aplatirSchema(o: JSONObject, niveau: Int, max: Int, chemin: String, chemins: MutableSet<String>): JSONObject {
+            val type = o.optString("type").lowercase()
+            val compose = type == "object" || type == "array" || o.has("properties") || o.has("items")
+            if (compose && niveau > max && chemin.isNotEmpty()) {
+                chemins += chemin
+                return JSONObject().put("type", "string").put("description", (o.optString("description") + " (texte JSON : " +
+                    (if (type == "array" || o.has("items")) "tableau" else "objet") + ")").trim())
+            }
+            val c = JSONObject(o.toString())
+            o.optJSONObject("properties")?.let { pr ->
+                val np = JSONObject()
+                pr.keys().forEach { n -> pr.optJSONObject(n)?.let { np.put(n, aplatirSchema(it, niveau + 1, max, if (chemin.isEmpty()) n else "$chemin.$n", chemins)) } }
+                c.put("properties", np)
+            }
+            o.optJSONObject("items")?.let { c.put("items", aplatirSchema(it, niveau + 1, max, "$chemin[]", chemins)) }
+            return c
+        }
+
+        /** Remet en JSON les arguments que le modèle a donnés sous forme de texte pour les paramètres aplatis. */
+        internal fun restaurer(message: JSONObject, aplatis: Map<String, Set<String>>) {
+            val appels = message.optJSONArray("tool_calls") ?: return
+            for (i in 0 until appels.length()) {
+                val f = appels.optJSONObject(i)?.optJSONObject("function") ?: continue
+                val chemins = aplatis[f.optString("name")] ?: continue
+                val args = runCatching { JSONObject(f.optString("arguments").ifBlank { "{}" }) }.getOrNull() ?: continue
+                fun visiter(v: Any?, chemin: String): Any? = when {
+                    chemin in chemins && v is String -> runCatching { val t = v.trim(); if (t.startsWith("[")) JSONArray(t) else JSONObject(t) }.getOrDefault(v)
+                    v is JSONObject -> { v.keys().asSequence().toList().forEach { k -> v.put(k, visiter(v.opt(k), if (chemin.isEmpty()) k else "$chemin.$k")) }; v }
+                    v is JSONArray -> { for (j in 0 until v.length()) v.put(j, visiter(v.opt(j), "$chemin[]")); v }
+                    else -> v
+                }
+                visiter(args, "")
+                f.put("arguments", args.toString())
+            }
+        }
 
         private fun schemaNatif(o: JSONObject): JSONObject {
             val c = JSONObject()
@@ -456,6 +567,14 @@ class GeminiChatClient(private val ring: KeyRing, private val model: () -> Strin
             }
             if (c.has("enum") && c.optString("type", "STRING") != "STRING") c.remove("enum")
             if (!c.has("type") && !c.has("anyOf")) c.put("type", if (c.has("properties")) "OBJECT" else "STRING")
+            if (c.has("format") && c.optString("format") !in FORMATS_NATIFS) c.remove("format")
+            // « required » ne doit citer que des propriétés décrites, sinon Google refuse toute la requête.
+            c.optJSONArray("required")?.let { r ->
+                val props = c.optJSONObject("properties")
+                val gardes = (0 until r.length()).map { r.optString(it) }.filter { props?.has(it) == true }
+                if (gardes.isEmpty()) c.remove("required") else c.put("required", JSONArray(gardes))
+            }
+            if (c.optString("type") == "ARRAY" && !c.has("items")) c.put("items", JSONObject().put("type", "STRING"))
             return c
         }
 

@@ -36,6 +36,20 @@ class Brain(
     private suspend fun replyInterne(history: List<ChatMsg>, pourHermes: Boolean, onTexte: ((String) -> Unit)?, onStatus: (String) -> Unit): String {
         // Anti-vol déclenché : JARVIS ne fait plus rien tant que l'alerte n'est pas arrêtée avec le code.
         if (app.store.antivolAlerte.value) return "🔒 Mode anti-vol actif : JARVIS est verrouillé. Arrête l'alerte avec ton code (écran d'alerte, Réglages › Sécurité › Anti-vol, ou SMS « JARVIS tonCode STOP »)."
+        // Corrections de noms (« quand je dis bag je parle du serveur B&G », « non, c'est B&G » après un « introuvable ») :
+        // le surnom est retenu dans la mémoire fiable et la demande précédente est refaite avec le bon nom.
+        if (!pourHermes) history.lastOrNull()?.takeIf { it.fromUser }?.let { m ->
+            val avant = history.dropLast(1)
+            val precedent = avant.lastOrNull { !it.fromUser }?.text
+            val demandePrecedente = avant.lastOrNull { it.fromUser }?.text
+            runCatching { fr.dd.jarvis.device.Corrections.reflexe(app, m.text, precedent, demandePrecedente) { q ->
+                replyInterne(avant.dropLastWhile { !it.fromUser }.dropLast(1) + ChatMsg(true, q), false, null, onStatus)
+            } }.getOrNull()?.let { r ->
+                fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS
+                onStatus("🏷️ Surnom retenu")
+                return r
+            }
+        }
         // Carnet de notes (« prends note… », « relis mes notes sur le poêle ») : enregistré tout de suite, sans IA, sans
         // Home Assistant ni autre application — quel que soit le sujet de la note.
         if (!pourHermes) history.lastOrNull()?.takeIf { it.fromUser }?.let { m ->

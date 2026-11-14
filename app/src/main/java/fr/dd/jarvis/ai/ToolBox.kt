@@ -262,6 +262,7 @@ class ToolBox(
             mapOf("prompt" to prop("Description détaillée de l'image, rédigée en anglais (sujet, style, lumière, cadrage). Pour plusieurs images, une description par ligne."),
                 "modele" to prop("Optionnel : « flux » (flux-2-dev, le plus réaliste/précis), « flux-klein » (flux-2-klein, qualité proche mais plus rapide) ou « flux-schnell » (le plus rapide, qualité moindre). Par défaut le modèle choisi dans Réglages › IA › Images & vidéo.")), listOf("prompt")))
         put(tool("jarvis_ai_status", "Indique les moteurs IA réellement configurés dans JARVIS (Gemini, Groq, Cloudflare), les modèles actifs et le nombre de clés disponibles. N'affiche jamais les clés ni les secrets."))
+        put(tool("bilan_sante", "Bilan de santé complet de JARVIS et de la maison : clés Gemini et Groq (acceptées ou refusées, sans consommer de quota), Home Assistant, Plex, Freebox, bot Discord, serveur (disque, mémoire, conteneurs Docker arrêtés), coffre-fort, copie Freebox de la société et sauvegardes chiffrées. Fait aussi automatiquement chaque matin (notification seulement en cas de problème)."))
         put(tool("tester_cles_api", "Teste les clés API IA enregistrées dans les réglages de JARVIS : chaque clé Groq et Gemini séparément, les comptes Cloudflare et les fournisseurs externes Z.ai, OpenRouter, NVIDIA, Mistral et Hugging Face. Distingue clé refusée, permissions, quota, modèle/endpoint et panne fournisseur. Ne révèle jamais les secrets. Les tests d'inférence utilisent au maximum un jeton par clé lorsque le modèle est configuré.",
             mapOf("fournisseur" to prop("Optionnel : tous (défaut), groq, gemini, cloudflare, zai, openrouter, nvidia, mistral ou huggingface."))))
         put(tool("configurer_fournisseur_ia", "Enregistre une clé API fournie par l'utilisateur dans la conversation, dans le stockage chiffré de JARVIS, puis configure Hermès et ses routes de délégation. Ne jamais afficher ni répéter la clé. Fournisseurs : zai, openrouter, nvidia, mistral, huggingface. Demande confirmation avant l'enregistrement et la synchronisation.",
@@ -703,6 +704,7 @@ class ToolBox(
         "delete_contact" -> deleteContact(a)
         "meteo" -> ToolResult(fr.dd.jarvis.ai.Meteo.get(app, a.optString("lieu"), a.optString("jours").toIntOrNull() ?: 3))
         "tester_cles_api" -> ToolResult(llm.testerClesApi(a.optString("fournisseur", "tous")), direct = true)
+        "bilan_sante" -> ToolResult(fr.dd.jarvis.work.BilanSante.executer(app, notifier = false), direct = true)
         "jarvis_ai_status" -> ToolResult(
             "Moteurs IA JARVIS : ${llm.keyStatus()}\n" +
                 "Modèles configurés : Gemini ${store.geminiModel.value.ifBlank { "non défini" }} ; " +

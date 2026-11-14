@@ -90,13 +90,15 @@ object Capacites {
             i("Appareils liés à Jarvis et comment il les joint, en local et à distance (onglet Wi-Fi › Liés à Jarvis)", "quels appareils contrôles-tu ?", "", Voie.REFLEXE),
             i("Imprimantes : trouver, imprimer un document de Jarvis", "trouve les imprimantes|imprime la facture F-2026-012", "imprimantes_trouver,imprimer"),
         )),
-        Categorie("societe", "🧾", "Société", r("societe|entreprise|clients?|factures?|devis|paie|bulletins?|salaires?|salaries?|interventions?|chantiers?|installations?|tarifs?|urssaf|site web|site internet|kml|google earth"), listOf(
+        Categorie("societe", "🧾", "Société", r("societe|entreprise|clients?|factures?|devis|paie|bulletins?|salaires?|salaries?|interventions?|chantiers?|installations?|tarifs?|urssaf|site web|site internet|kml|google earth|sauvegardes?|factur x|e reporting"), listOf(
             i("Clients et installations : fiches, GPS, carte Google Earth, import depuis l'agenda", "crée la fiche client Martin|mets à jour la fiche Martin avec ma position", "client_ecrire,client_fiche,client_supprimer,installation_supprimer,clients_gps,clients_exporter_kml,export_kml,kml_couleurs_set,analyser_planning_clients,distance_deplacement", Voie.REFLEXE),
             i("Devis et factures : créer, marquer envoyé / accepté / payé, envoyer par mail, annuler, supprimer, impayés", "fais un devis pour Martin|la facture F-2026-012 est payée|supprime toutes les factures", "document_creer,document_action,document_email,documents_supprimer,factures_impayees", Voie.REFLEXE),
             i("Fiches de paie : générer, lister, imprimer, supprimer ; salariés et dirigeant", "fais la fiche de paie d'octobre de Paul|supprime le bulletin de septembre", "paie,bulletins,employe_ecrire", Voie.REFLEXE),
             i("Interventions photovoltaïques : rapports PDF, historique, bilan", "enregistre l'intervention d'aujourd'hui chez Martin|bilan des interventions", "intervention_enregistrer,intervention_modifier,intervention_supprimer,interventions_liste,interventions_synthese"),
             i("Informations, tarifs, remises, résultat, barèmes URSSAF, réserve, présentation des documents", "quel est le résultat de la société ?|ajoute le tarif nettoyage", "societe_info_get,societe_info_set,societe_liste,tarif_set,tarif_delete,regles_set,societe_resultat,societe_baremes,reserve_bilan,presentation_modifier"),
             i("Site web de la société : créer, modifier, publier", "crée le site web de la société", "site_web", Voie.REFLEXE),
+            i("Données de la société sur la Freebox (lisibles depuis un ordinateur) et sauvegardes chiffrées datées sur le serveur, restauration", "copie les données de la société sur la Freebox|liste les sauvegardes|restaure la sauvegarde du 3 novembre", "societe_sauvegarde"),
+            i("Facturation électronique (Factur-X, e-reporting) — désactivée tant que la société est en test", "active la facturation électronique|contrôle la facture FAC-2026-0007|e-reporting d'octobre", "facture_electronique"),
         )),
         Categorie("notes", "📝", "Notes, fichiers et mémoire", r("notes?|carnet|fichiers?|documents?|dossiers?|obsidian|coffre|pdf|word|excel|memoire|souviens|conversations?|graphiques?"), listOf(
             i("Carnet de notes : prendre note, relire, supprimer", "prends note que le code du portail est changé|relis mes notes sur le poêle", "note_prendre,notes_lire,note_supprimer", Voie.REFLEXE),
@@ -120,10 +122,12 @@ object Capacites {
             i("Sauvegardes et remise en service de Home Assistant", "liste les sauvegardes de Home Assistant sur le serveur", "ha_sauvegarde", Voie.HERMES),
             i("GitHub : fichiers, commits, versions", "dernière version de Home Assistant sur GitHub", "github"),
         )),
-        Categorie("jarvis", "⚙️", "Jarvis lui-même", r("jarvis|reglages?|parametres?|voix|ia|cles? api|gemini|groq|agents?|mode (eco|economie|performance)|reprise|recommence"), listOf(
+        Categorie("jarvis", "⚙️", "Jarvis lui-même", r("jarvis|reglages?|parametres?|voix|ia|cles? api|gemini|groq|agents?|mode (eco|economie|performance)|reprise|recommence|bilan de sante|sante|surnoms?"), listOf(
             i("Mode de Jarvis : économie, équilibré, performance", "passe Jarvis en mode économie", "", Voie.REFLEXE),
             i("Réglages et voix de Jarvis", "active l'écoute continue|prends une voix de femme", "reglage_jarvis,jarvis_reglages,changer_voix"),
             i("Moteurs d'IA : état, test des clés, configuration, deuxième avis", "teste les clés Gemini|quels modèles utilises-tu ?", "jarvis_ai_status,tester_cles_api,configurer_fournisseur_ia,jarvis_ai_agent"),
+            i("Bilan de santé (clés IA, maison, box, serveur, sauvegardes) — aussi chaque matin", "fais le bilan de santé|tout fonctionne ?", "bilan_sante"),
+            i("Surnoms appris en direct (« quand je dis bag je parle du serveur B&G », « non, c'est B&G »)", "quand je dis les potes je parle du serveur Les Copains", "", Voie.REFLEXE),
             i("Agents autonomes et tâches longues en arrière-plan", "état des agents|trie tous mes mails en arrière-plan", "agents_centre,tache_arriere_plan"),
             i("Reprendre une demande interrompue", "recommence|reprends là où tu en étais", "", Voie.REFLEXE),
             i("Cette liste, par domaine ou en détail", "que sais-tu faire avec les mails ?|liste tous tes outils", "", Voie.REFLEXE),

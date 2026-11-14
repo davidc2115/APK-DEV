@@ -21,10 +21,10 @@ class SocieteTools(
             "societe_info_set", "societe_info_get", "tarif_set", "tarif_delete", "regles_set", "client_ecrire", "client_fiche", "client_supprimer",
             "document_creer", "document_action", "document_email", "societe_liste", "employe_ecrire", "paie", "reserve_bilan", "societe_resultat", "societe_baremes",
             "presentation_modifier", "distance_deplacement", "clients_exporter_kml", "kml_couleurs_set", "clients_gps", "intervention_enregistrer", "intervention_modifier", "intervention_supprimer", "interventions_liste", "interventions_synthese",
-            "installation_supprimer"
+            "installation_supprimer", "facture_electronique", "societe_sauvegarde"
         )
         private val KEYWORDS = Regex(
-            "devis|factur|client|soci[ée]t[ée]|tarif|remise|d[ée]placement|paie|salaire|bulletin|r[ée]serve|dividende|b[ée]n[ée]fice|r[ée]sultat|tr[ée]sorerie|charges fixes|imp[ôo]t sur les soci[ée]t[ée]s|capital social|bar[èe]mes?|urssaf|cotisations|s[ée]curit[ée] sociale|smic|plafond|" +
+            "devis|factur|client|soci[ée]t[ée]|sauvegard|restaur|e-reporting|dossier jarvis soci|tarif|remise|d[ée]placement|paie|salaire|bulletin|r[ée]serve|dividende|b[ée]n[ée]fice|r[ée]sultat|tr[ée]sorerie|charges fixes|imp[ôo]t sur les soci[ée]t[ée]s|capital social|bar[èe]mes?|urssaf|cotisations|s[ée]curit[ée] sociale|smic|plafond|" +
                 "installation|photovolta|kwc|fiche|pr[ée]sentation|mise en forme|mise en page|si[èe]ge|employ[ée]|prix|onduleur|maintenance|" +
                 "entretien|intervention|historique photovolta[ïi]que|bilan maintenance|panne|diagnostic|pi[èe]ce remplac[ée]e|planning|agenda|pdf|obsidian|distance|itin[ée]raire|km|fid[ée]lit[ée]|kml|google earth|carte des clients|" +
                 "gps|coordonn[ée]es|g[ée]oloc|localis|latitude|longitude|google maps",
@@ -182,6 +182,16 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
 
     val schema: List<JSONObject> = listOf(
         tool("clients_exporter_kml", "Génère ou met à jour la carte KML Google Earth depuis toute la base Société persistée : anciens et nouveaux clients et toutes leurs installations GPS. Laisse recherche vide pour la carte complète. Ne renseigne recherche QUE si l'utilisateur demande explicitement une carte filtrée sur un client ou une installation nommés ; ne transmets JAMAIS la consigne complète ni une longue phrase dans recherche.", mapOf("recherche" to prop("OPTIONNEL. Vide par défaut pour exporter TOUS les clients. Renseigner uniquement un nom précis de client/installation si l'utilisateur demande explicitement un filtre."))),
+        tool("facture_electronique", "Facturation électronique (Factur-X, e-reporting) — DÉSACTIVÉE par défaut (société en test). Actions : etat (calendrier, réglages, factures à compléter), controler (mentions obligatoires d'une facture), generer (PDF Factur-X + XML d'une facture), ereporting (CSV des ventes aux particuliers d'un mois), activer, desactiver, supprimer_fichiers (efface tout ce qui a été généré), plateforme (nom de la plateforme agréée choisie).", mapOf(
+            "action" to prop("etat | controler | generer | ereporting | activer | desactiver | supprimer_fichiers | plateforme"),
+            "numero" to prop("Numéro de facture (controler, generer)."), "mois" to prop("Mois AAAA-MM (ereporting ; défaut : mois dernier)."),
+            "plateforme" to prop("Nom de la plateforme agréée (action plateforme).")
+        ), listOf("action")),
+        tool("societe_sauvegarde", "Données de la société hors du téléphone : copie lisible sur le disque de la Freebox (dossier « JARVIS Société », consultable depuis un ordinateur) et sauvegardes chiffrées datées sur le serveur SSH (chaque nuit, 30 jours + 1 par mois). Actions : etat, copier_freebox (synchroniser maintenant ; tout=true pour tout renvoyer), sauvegarder (sauvegarde chiffrée maintenant), lister (sauvegardes du serveur), restaurer (nom ou date d'une sauvegarde — demande confirmation), dossier_freebox (changer le dossier).", mapOf(
+            "action" to prop("etat | copier_freebox | sauvegarder | lister | restaurer | dossier_freebox"),
+            "nom" to prop("Sauvegarde à restaurer (nom de fichier ou date AAAA-MM-JJ)."), "tout" to prop("« true » pour renvoyer tous les fichiers sur la Freebox."),
+            "dossier" to prop("Nouveau dossier sur le disque de la Freebox (action dossier_freebox).")
+        ), listOf("action")),
         tool("clients_gps", "Affiche les coordonnées GPS (format Google Maps « latitude, longitude ») et la précision de localisation (adresse exacte, rue, lieu-dit, commune, saisie) de chaque installation, positions approximatives en tête. relocaliser=true recalcule les positions avec la Base Adresse Nationale (IGN) puis OpenStreetMap, sans toucher aux coordonnées saisies à la main.", mapOf(
             "recherche" to prop("Nom de client, d'installation ou d'adresse pour filtrer (optionnel)."),
             "relocaliser" to prop("« true » pour recalculer les positions (hors coordonnées saisies).")
@@ -414,7 +424,59 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         "clients_exporter_kml" -> ok(svc.exporterKml(a.s("recherche")))
         "kml_couleurs_set" -> kmlCouleursSet(a)
         "clients_gps" -> ok(svc.rapportGps(a.s("recherche"), a.bool("relocaliser") == true))
+        "facture_electronique" -> factureElectronique(a)
+        "societe_sauvegarde" -> sauvegarde(a)
         else -> err("Outil inconnu : $name")
+    }
+
+    private suspend fun factureElectronique(a: JSONObject): ToolResult = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val fe = FactureElectronique
+        when (normaliser(a.s("action")).replace(" ", "_")) {
+            "", "etat", "statut" -> ok(fe.etat(app))
+            "activer" -> ok(fe.activer(app, true))
+            "desactiver" -> ok(fe.activer(app, false))
+            "plateforme" -> { app.store.facturePlateforme.set(a.s("plateforme")); ok("✅ Plateforme agréée enregistrée : ${a.s("plateforme").ifBlank { "aucune" }}.") }
+            "supprimer_fichiers", "supprimer" ->
+                if (!confirm("Supprimer tous les fichiers de facturation électronique générés (Factur-X, e-reporting) ? Les factures elles-mêmes ne sont pas touchées.", true)) ok("Suppression annulée.")
+                else ok(fe.supprimerFichiers(app))
+            "controler", "verifier" -> ok(fe.controler(app, a.s("numero")))
+            "generer", "creer" -> if (!fe.active(app)) ok("⏸️ La facturation électronique est désactivée (Réglages › Société). Dis « active la facturation électronique » pour l'utiliser.")
+                else ok(runCatching { fe.generer(app, a.s("numero")) }.getOrElse { "❌ ${it.message}" })
+            "ereporting", "e_reporting" -> if (!fe.active(app)) ok("⏸️ La facturation électronique est désactivée (Réglages › Société).")
+                else ok(runCatching { fe.eReporting(app, a.s("mois")) }.getOrElse { "❌ ${it.message}" })
+            else -> err("Action inconnue : etat, controler, generer, ereporting, activer, desactiver, supprimer_fichiers, plateforme.")
+        }
+    }
+
+    private suspend fun sauvegarde(a: JSONObject): ToolResult = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val sv = fr.dd.jarvis.coffre.Sauvegardes
+        when (normaliser(a.s("action")).replace(" ", "_")) {
+            "", "etat", "statut" -> ok(etatSauvegardes())
+            "copier_freebox", "freebox", "synchroniser" -> if (!MiroirFreebox.disponible(app)) ok("JARVIS n'est pas associé à la Freebox (Réglages › Maison › Box Internet).")
+                else ok(MiroirFreebox.synchroniser(app, a.bool("tout") == true))
+            "sauvegarder", "sauvegarde" -> ok(sv.sauvegarder(app, forcer = true))
+            "lister", "liste" -> ok(runCatching { sv.texteListe(app) }.getOrElse { "❌ ${it.message}" })
+            "restaurer" -> {
+                val nom = a.s("nom")
+                val choix = runCatching { sv.lister(app) }.getOrDefault(emptyList()).firstOrNull { it.nom == nom || it.nom.contains(nom) && nom.isNotBlank() }
+                    ?: return@withContext ok("Sauvegarde « $nom » introuvable. " + runCatching { sv.texteListe(app) }.getOrDefault(""))
+                if (!confirm("Restaurer la sauvegarde ${choix.nom} ? La base Société actuelle (clients, devis, factures, paie…) sera remplacée par celle de la sauvegarde. L'état actuel est gardé sur le téléphone.", true)) ok("Restauration annulée.")
+                else ok(sv.restaurer(app, choix.nom))
+            }
+            "dossier_freebox" -> { app.store.miroirFreeboxDossier.set(a.s("dossier").trim('/').ifBlank { "JARVIS Société" }); MiroirFreebox.signalerChangement(app, 5)
+                ok("✅ Dossier Freebox : « ${MiroirFreebox.dossier(app)} » — copie complète en cours.") }
+            else -> err("Action inconnue : etat, copier_freebox, sauvegarder, lister, restaurer, dossier_freebox.")
+        }
+    }
+
+    private fun etatSauvegardes(): String {
+        val s = app.store
+        fun quand(ms: String) = ms.toLongOrNull()?.takeIf { it > 0 }?.let { java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.FRANCE).format(java.util.Date(it)) } ?: "jamais"
+        return "📁 Copie Freebox : " + (if (!MiroirFreebox.disponible(app)) "Freebox non associée" else if (!s.miroirFreebox.value) "désactivée"
+            else "« ${MiroirFreebox.dossier(app)} » — dernière : ${quand(s.miroirFreeboxDerniere.value)} — ${s.miroirFreeboxBilan.value.ifBlank { "pas encore faite" }}") +
+            "\n🔐 Coffre-fort (synchro chiffrée) : " + (if (fr.dd.jarvis.coffre.Coffre.configure(app)) "dernière : ${quand(s.coffreDerniere.value)} — ${s.coffreBilan.value.ifBlank { "—" }}" else "non installé") +
+            "\n🗄️ Sauvegardes chiffrées datées (serveur) : " + (if (!fr.dd.jarvis.coffre.Sauvegardes.configure(app)) "serveur SSH non configuré" else if (!s.sauvegardeAuto.value) "désactivées"
+            else "chaque nuit — dernière : ${quand(s.sauvegardeDerniere.value)} — ${s.sauvegardeBilan.value.ifBlank { "pas encore faite" }}")
     }
 
     private fun kmlCouleursSet(a: JSONObject): ToolResult {
@@ -1193,9 +1255,10 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "Bonjour,\n\nVeuillez trouver ci-joint votre $typeLabel ${doc.numero} (${euro(d.totaux(doc).ttc)} TTC).\n\nCordialement,\n${d.societe.nom.ifBlank { compte }}"
         }
         val nomFichier = "${doc.numero}.pdf"
-        val pdf = svc.pdfBytes(doc)
+        // Facturation électronique activée : la facture part au format Factur-X (même PDF lisible + XML structuré attaché).
+        val (pdf, format) = FactureElectronique.pieceJointe(app, doc)
         // force=true : une vraie confirmation à chaque fois ; direct=true : le ✅/❌ réel s'affiche tel quel, jamais reformulé.
-        if (!confirm("Envoyer $article $typeLabel ${doc.numero} par email depuis $compte ?\n\nÀ : $dest\nObjet : $sujet\nPièce jointe : $nomFichier\n\n${corps.take(400)}", true))
+        if (!confirm("Envoyer $article $typeLabel ${doc.numero} par email depuis $compte ?\n\nÀ : $dest\nObjet : $sujet\nPièce jointe : $nomFichier${if (format == "Factur-X") " (Factur-X)" else ""}\n\n${corps.take(400)}", true))
             return ToolResult("Envoi refusé par l'utilisateur.", direct = true)
         return try {
             val id = fr.dd.jarvis.device.GmailApi.envoyer(app, compte, dest, sujet, corps, listOf(fr.dd.jarvis.device.GmailApi.PieceJointe(nomFichier, "application/pdf", pdf)))

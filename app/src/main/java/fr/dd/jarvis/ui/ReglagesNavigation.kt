@@ -29,7 +29,7 @@ import fr.dd.jarvis.JarvisApp
 /** Onglet des Réglages : icône, nom court, ce qu'on y trouve, sous-onglets (identifiant → nom). */
 data class OngletReglages(val id: String, val icone: String, val nom: String, val aide: String, val sous: List<Pair<String, String>>)
 
-/** Organisation des Réglages : 10 onglets, chacun découpé en sous-onglets (un sujet par page). */
+/** Organisation des Réglages : 11 onglets, chacun découpé en sous-onglets (un sujet par page). */
 val ONGLETS_REGLAGES = listOf(
     OngletReglages("general", "⚙️", "Général", "Apparence, modes de fonctionnement, sonnerie des rappels et autorisations Android.",
         listOf("apparence" to "🎨 Apparence", "batterie" to "⚡ Fonctionnement", "rappels" to "⏰ Rappels", "autorisations" to "🔐 Autorisations")),
@@ -47,8 +47,10 @@ val ONGLETS_REGLAGES = listOf(
         listOf("agents" to "🤖 Agents autonomes", "routines" to "⚙️ Routines", "proactif" to "🌅 Assistant proactif", "modes" to "🌙 Modes", "metier" to "☀️ Métier PV")),
     OngletReglages("securite", "🛡️", "Sécurité", "Systèmes de sécurité, anti-vol, empreinte vocale, confirmations, coffre-fort de la société.",
         listOf("systemes" to "🛡️ Systèmes", "antivol" to "🚨 Anti-vol", "empreinte" to "🎤 Empreinte vocale", "confirmations" to "🔒 Confirmations", "coffre" to "🗄️ Coffre-fort")),
-    OngletReglages("diagnostic", "📊", "Diagnostic", "État du téléphone et des moteurs d'IA.",
-        listOf("telephone" to "📱 Téléphone", "moteurs" to "🧠 Moteurs IA")),
+    OngletReglages("societe", "🏢", "Société", "Données de la société sur la Freebox, sauvegardes chiffrées, facturation électronique.",
+        listOf("donnees" to "📁 Freebox & sauvegardes", "facturation" to "🧾 Facture électronique")),
+    OngletReglages("diagnostic", "📊", "Diagnostic", "État du téléphone et des moteurs d'IA, bilan de santé quotidien, journal des actions.",
+        listOf("telephone" to "📱 Téléphone", "moteurs" to "🧠 Moteurs IA", "sante" to "🩺 Bilan quotidien", "journal" to "📜 Journal des actions")),
     OngletReglages("fichiers", "📁", "Fichiers", "Bibliothèque des fichiers créés et reçus par JARVIS.", emptyList()),
 )
 

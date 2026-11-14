@@ -143,6 +143,9 @@ class JarvisApp : Application() {
         // Tri des mails : désormais seuls les NON LUS par défaut (une seule fois ; modifiable ensuite à la demande).
         if (!store.mailTriNonLusApplique.value) { store.mailTriStatut.set("non_lus"); store.mailTriNonLusApplique.set(true) }
         runCatching { fr.dd.jarvis.coffre.Coffre.planifier(this) }
+        runCatching { fr.dd.jarvis.societe.MiroirFreebox.planifier(this) }
+        runCatching { fr.dd.jarvis.coffre.Sauvegardes.planifier(this) }
+        runCatching { fr.dd.jarvis.work.BilanSante.planifier(this) }
         // Une fois : les rapports d'intervention existants sont régénérés avec leurs photos dans le PDF.
         if (!store.rapportsV3.value) Thread {
             runCatching { societe.regenererRapports(jours = 3650) }

@@ -1531,6 +1531,18 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
         VoletReglages("securite", "coffre", "Coffre-fort", "coffre-fort serveur sauvegarde societe donnees salaries recuperation") {
             fr.dd.jarvis.ui.CoffrePanel(app)
         },
+        VoletReglages("societe", "donnees", "Freebox & sauvegardes", "societe donnees freebox dossier ordinateur copie sauvegarde chiffree serveur restaurer nuit") {
+            fr.dd.jarvis.ui.DonneesSocietePanel(app)
+        },
+        VoletReglages("societe", "facturation", "Facture électronique", "facture electronique factur-x e-reporting plateforme agreee reforme 2026 2027") {
+            fr.dd.jarvis.ui.FactureElectroniquePanel(app)
+        },
+        VoletReglages("diagnostic", "sante", "Bilan quotidien", "bilan sante quotidien verification cles home assistant plex freebox discord serveur disque sauvegardes") {
+            fr.dd.jarvis.ui.BilanSantePanel(app)
+        },
+        VoletReglages("diagnostic", "journal", "Journal des actions", "journal actions autorisees automatiquement sans confirmation toujours autoriser historique") {
+            fr.dd.jarvis.ui.JournalAutorisationsPanel(app)
+        },
         VoletReglages("diagnostic", "telephone", "Centre de surveillance", "surveillance batterie stockage ram temperature services") {
             HudPanel(Modifier.fillMaxWidth(), title = "Centre de surveillance du téléphone") {
                     val phone = remember(tick) { fr.dd.jarvis.device.PhoneHealth.dashboard(app) }

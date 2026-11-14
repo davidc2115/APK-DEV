@@ -937,6 +937,66 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
             else "⚠️ Envoi terminé sans confirmation de la Freebox : vérifie le dossier ${lisible(dossier)}."
     }
 
+    // ------------------------------------------------------------------ dossier géré par JARVIS (copie des données de la société)
+
+    /**
+     * Dossier du disque de la box tenu à jour par JARVIS (ex. « JARVIS Société ») : sous-dossiers créés au besoin, fichiers
+     * remplacés par leur nouvelle version, suppression limitée aux fichiers que JARVIS y a lui-même déposés.
+     */
+    class Depot internal constructor(
+        /** Chemin complet sur la box (ex. « /Disque dur/JARVIS Société »). */
+        val chemin: String,
+        private val dossierFn: (String, Boolean) -> String?,
+        private val envoyerFn: (java.io.File, String, String) -> String,
+        private val supprimerFn: (String, String) -> Boolean,
+    ) {
+        /** « Freebox › Disque dur › JARVIS Société » */
+        val lisible: String get() = "Freebox › " + chemin.trim('/').replace("/", " › ")
+
+        /** Envoie [f] sous [rel] (« Factures/2026/FAC-2026-0001 Dupont.pdf ») ; exception si la box refuse. */
+        fun envoyer(rel: String, f: java.io.File) {
+            val dossier = dossierFn(rel.substringBeforeLast('/', ""), true) ?: throw IllegalStateException("dossier ${rel.substringBeforeLast('/', "")} impossible à créer")
+            val r = envoyerFn(f, dossier, rel.substringAfterLast('/'))
+            if (!r.startsWith("✅")) throw IllegalStateException(r.removePrefix("⚠️ ").removePrefix("❌ "))
+        }
+
+        /** Supprime [rel] : true si supprimé ou déjà absent. */
+        fun supprimer(rel: String): Boolean {
+            val dossier = dossierFn(rel.substringBeforeLast('/', ""), false) ?: return true
+            return supprimerFn(dossier, rel.substringAfterLast('/'))
+        }
+    }
+
+    /** Sous-dossier [rel] de [base] (noms exacts, sans tenir compte des majuscules), créé au besoin quand [creer]. */
+    private fun sousDossier(app: JarvisApp, s: String, base: String, rel: String, creer: Boolean): String? {
+        var courant = base.trimEnd('/')
+        for (m in rel.trim('/').split('/').filter { it.isNotBlank() }) {
+            val existant = runCatching { ls(app, s, courant) }.getOrDefault(emptyList())
+                .firstOrNull { it.optString("type") == "dir" && it.optString("name").equals(m, ignoreCase = true) }
+            if (existant != null) { courant = "$courant/" + existant.optString("name"); continue }
+            if (!creer) return null
+            json(app, "fs/mkdir/", s, "POST", JSONObject().put("parent", p64(courant)).put("dirname", m))
+            courant = "$courant/$m"
+        }
+        return courant
+    }
+
+    /** Ouvre le dossier [dossier] du disque de la box (créé s'il manque) et y exécute [bloc] dans une même session. */
+    fun <T> depot(app: JarvisApp, dossier: String, bloc: (Depot) -> T): T = avecSession(app) { s ->
+        val vols = volumes(app, s)
+        require(vols.any { it.etat == "mounted" } || racines(app, s, vols).isNotEmpty()) { "aucun disque n'est branché ou monté sur la Freebox." }
+        val racine = dossierCible(app, s, dossier, vols, creer = true)
+        val cache = HashMap<String, String>()
+        bloc(Depot(racine,
+            dossierFn = { rel, creer -> if (rel.isBlank()) racine else cache[rel] ?: sousDossier(app, s, racine, rel, creer)?.also { cache[rel] = it } },
+            envoyerFn = { f, d, nom -> televerser(app, s, f, d, nom, ecraser = true) },
+            supprimerFn = { d, nom ->
+                val e = runCatching { ls(app, s, d) }.getOrDefault(emptyList()).firstOrNull { it.optString("name") == nom }
+                if (e == null) true
+                else tache(app, s, json(app, "fs/rm/", s, "POST", JSONObject().put("files", org.json.JSONArray(listOf(e.optString("path").ifBlank { p64("$d/$nom") })))), "Supprimé").startsWith("✅")
+            }))
+    }
+
     /** Copie un fichier de la box sur le téléphone (fichiers de Jarvis), en flux (500 Mo au plus). */
     private fun recuperer(app: JarvisApp, s: String, e: Element): String {
         require(!e.dossier) { "« ${e.nom} » est un dossier : précise un fichier." }

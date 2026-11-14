@@ -97,5 +97,7 @@ class SocieteRepo(ctx: Context) {
         data = relu
         // Coffre-fort : la modification part vers le serveur dans quelques secondes (si le coffre est configuré).
         runCatching { fr.dd.jarvis.coffre.Coffre.signalerChangement(appCtx) }
+        // Copie lisible sur le disque de la Freebox (« JARVIS Société »), si la box est associée.
+        runCatching { MiroirFreebox.signalerChangement(appCtx) }
     }
 }

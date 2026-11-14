@@ -476,6 +476,32 @@ class Store(context: Context) {
     val coffreBilan = SPref("coffreBilan", "")
     val coffreAuto = BPref("coffreAuto", true)
 
+    // ---- Copie lisible des données de la société sur le disque de la Freebox (accessible depuis un ordinateur)
+    val miroirFreebox = BPref("miroirFreebox", true)
+    val miroirFreeboxDossier = SPref("miroirFreeboxDossier", "JARVIS Société")
+    val miroirFreeboxDerniere = SPref("miroirFreeboxDerniere", "0")
+    val miroirFreeboxBilan = SPref("miroirFreeboxBilan", "")
+
+    // ---- Sauvegardes chiffrées et datées de la société sur le serveur SSH (chaque nuit, 30 jours + 1 par mois)
+    val sauvegardeAuto = BPref("sauvegardeAuto", true)
+    val sauvegardeDossier = SPref("sauvegardeDossier", "jarvis-sauvegardes")
+    val sauvegardeMaitre = SecretPref("sauvegardeMaitre")
+    val sauvegardeDerniere = SPref("sauvegardeDerniere", "0")
+    val sauvegardeBilan = SPref("sauvegardeBilan", "")
+    val sauvegardeEmpreinte = SPref("sauvegardeEmpreinte", "")
+
+    // ---- Facturation électronique (Factur-X, e-reporting) : désactivée tant que la société n'est pas en activité
+    val factureElectronique = BPref("factureElectronique", false)
+    val facturePlateforme = SPref("facturePlateforme", "")
+
+    // ---- Bilan de santé quotidien (clés IA, maison, box, serveur, sauvegardes)
+    val santeAuto = BPref("santeAuto", true)
+    val santeDernier = SPref("santeDernier", "")
+    val santeQuand = SPref("santeQuand", "0")
+
+    // ---- Actions autorisées sans confirmation : journal (les 200 dernières)
+    val journalAutorisations = SPref("journalAutorisations", "[]")
+
     // ---- Anti-vol par SMS (« JARVIS <code> VOL ») : le code est haché (PBKDF2) dans le stockage chiffré
     val antivolActif = BPref("antivolActif", false)
     val antivolCode = SecretPref("antivolCode")

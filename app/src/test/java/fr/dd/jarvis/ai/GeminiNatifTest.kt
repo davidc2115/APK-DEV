@@ -57,3 +57,34 @@ class GeminiNatifTest {
             GeminiPasserelle.url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent", "abc"))
     }
 }
+
+class GeminiAplatirTest {
+    private fun outil(): org.json.JSONArray = org.json.JSONArray().put(org.json.JSONObject("""{"type":"function","function":{"name":"document_creer","parameters":
+        {"type":"object","properties":{"client":{"type":"string"},"lignes":{"type":"array","items":{"type":"object","properties":{"designation":{"type":"string"},
+        "options":{"type":"object","properties":{"x":{"type":"object","properties":{"y":{"type":"string"}}}}}}}}}}}}"""))
+
+    @Test fun aplatitEtRestaure() {
+        val aplatis = HashMap<String, MutableSet<String>>()
+        val t = GeminiChatClient.aplatir(outil(), 1, aplatis)
+        val lignes = t.getJSONObject(0).getJSONObject("function").getJSONObject("parameters").getJSONObject("properties").getJSONObject("lignes")
+        assertEquals("string", lignes.getString("type"))
+        assertEquals(setOf("lignes"), aplatis["document_creer"])
+        val msg = org.json.JSONObject().put("tool_calls", org.json.JSONArray().put(org.json.JSONObject().put("function", org.json.JSONObject().put("name", "document_creer")
+            .put("arguments", org.json.JSONObject().put("client", "Dupont").put("lignes", "[{\"designation\":\"Maintenance\"}]").toString()))))
+        GeminiChatClient.restaurer(msg, aplatis)
+        val args = org.json.JSONObject(msg.getJSONArray("tool_calls").getJSONObject(0).getJSONObject("function").getString("arguments"))
+        assertEquals("Maintenance", args.getJSONArray("lignes").getJSONObject(0).getString("designation"))
+        // Profondeur 2 : chaque ligne devient un texte JSON (tableau de textes).
+        val a2 = HashMap<String, MutableSet<String>>()
+        GeminiChatClient.aplatir(outil(), 2, a2)
+        assertEquals(setOf("lignes[]"), a2["document_creer"])
+        val m2 = org.json.JSONObject().put("tool_calls", org.json.JSONArray().put(org.json.JSONObject().put("function", org.json.JSONObject().put("name", "document_creer")
+            .put("arguments", org.json.JSONObject().put("lignes", org.json.JSONArray().put("{\"designation\":\"A\"}")).toString()))))
+        GeminiChatClient.restaurer(m2, a2)
+        assertEquals("A", org.json.JSONObject(m2.getJSONArray("tool_calls").getJSONObject(0).getJSONObject("function").getString("arguments")).getJSONArray("lignes").getJSONObject(0).getString("designation"))
+        // Profondeur 4 : seul l'objet le plus profond (lignes[].options.x) devient du texte.
+        val a4 = HashMap<String, MutableSet<String>>()
+        GeminiChatClient.aplatir(outil(), 4, a4)
+        assertEquals(setOf("lignes[].options.x"), a4["document_creer"])
+    }
+}
