@@ -118,11 +118,6 @@ object Sante {
             if (pb.isEmpty()) Indicateur("telephone", "📱", "Téléphone", Niveau.OK, "batterie ${d.battery ?: "?"} %" + (d.storageFreeGb?.let { " · ${String.format(Locale.FRENCH, "%.0f", it)} Go libres" } ?: ""))
             else Indicateur("telephone", "📱", "Téléphone", Niveau.ATTENTION, pb.joinToString(" · "), "Réglages Android › Applications › JARVIS (batterie : sans restriction ; notifications) et Accessibilité.")
         }
-        ajouter {
-            if (!fr.dd.jarvis.ai.Ollama.configure(app)) null
-            else if (fr.dd.jarvis.ai.Ollama.base(app) != null) Indicateur("ollama", "🦙", "Ollama (secours)", Niveau.OK, fr.dd.jarvis.ai.Ollama.etat)
-            else Indicateur("ollama", "🦙", "Ollama (secours)", Niveau.ATTENTION, fr.dd.jarvis.ai.Ollama.etat, "Le secours hors ligne n'est pas disponible.")
-        }
         l
     }
 

@@ -66,6 +66,8 @@ object Carnet {
     private val NOTER = Regex(
         "^\\s*$POLI(?:(?:me |nous )?prend(?:s|re|ez)? (?:bien |vite |juste )?(?:en )?(?:une |des |la |bonne )?notes?|" +
             "not(?:e|es|er|ez)\\b(?! de frais)(?: (?:bien|vite|juste))?|" +
+            // « retiens que… », « souviens-toi que… », « mémorise… » : même carnet (et faits durables extraits).
+            "(?:retiens|retenez|souviens[- ]toi|m[ée]morise[rz]?|rappelle[- ]toi|n'oublie pas que|garde (?:bien )?en (?:t[eê]te|m[ée]moire))(?: bien)?|" +
             "(?:ajoute|rajoute|mets?|mettre|[ée]cri(?:s|re)|inscri(?:s|re)|enregistre|garde)\\b(.{0,300}?)\\b(?:dans|à|a|aux|sur|en) " +
             "(?:mes |les |tes |ton |mon |le |la |ma )?(?:notes?|carnet|bloc[- ]notes|pense[- ]b[êe]te))(?=[\\s,:;.!-]|$)",
         RegexOption.IGNORE_CASE
@@ -269,9 +271,13 @@ object Carnet {
 
     fun noter(app: JarvisApp, texte: String, sujet: String?): String {
         val (rubrique, nb) = ajouter(app, texte, sujet)
+        // Faits durables (adresse du domicile, surnoms…) rangés à part : toujours connus de Jarvis et d'Hermès, et
+        // appliqués par les outils (Discord, itinéraires, contacts…). L'IA complète en arrière-plan.
+        val retenus = runCatching { Faits.apprendre(app, texte) }.getOrDefault(emptyList())
         val entites = ENTITE.findAll(texte).map { it.value }.distinct().toList()
         val obsidian = app.store.obsidianUri.value.isNotBlank()
         return "📝 Noté dans ton carnet, rubrique « $rubrique » ($nb note${if (nb > 1) "s" else ""}) :\n> ${texte.take(600).replace("\n", "\n> ")}" +
+            (if (retenus.isNotEmpty()) "\n\nRetenu dans ma mémoire fiable :\n" + retenus.joinToString("\n") { "- $it" } else "") +
             (if (entites.isNotEmpty()) "\n\nJe m'en servirai pour piloter cet appareil (${entites.joinToString(", ") { "`$it`" }})." else "") +
             (if (obsidian) "\n_Copie dans Obsidian : $DOSSIER/$rubrique.md_" else "")
     }

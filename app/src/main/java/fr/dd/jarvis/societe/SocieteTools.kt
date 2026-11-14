@@ -19,18 +19,125 @@ class SocieteTools(
     companion object {
         val NAMES = setOf(
             "societe_info_set", "societe_info_get", "tarif_set", "tarif_delete", "regles_set", "client_ecrire", "client_fiche", "client_supprimer",
-            "document_creer", "document_action", "document_email", "societe_liste", "employe_ecrire", "paie", "reserve_bilan",
+            "document_creer", "document_action", "document_email", "societe_liste", "employe_ecrire", "paie", "reserve_bilan", "societe_resultat", "societe_baremes",
             "presentation_modifier", "distance_deplacement", "clients_exporter_kml", "kml_couleurs_set", "clients_gps", "intervention_enregistrer", "intervention_modifier", "intervention_supprimer", "interventions_liste", "interventions_synthese",
             "installation_supprimer"
         )
         private val KEYWORDS = Regex(
-            "devis|factur|client|soci[ée]t[ée]|tarif|remise|d[ée]placement|paie|salaire|bulletin|r[ée]serve|dividende|b[ée]n[ée]fice|" +
+            "devis|factur|client|soci[ée]t[ée]|tarif|remise|d[ée]placement|paie|salaire|bulletin|r[ée]serve|dividende|b[ée]n[ée]fice|r[ée]sultat|tr[ée]sorerie|charges fixes|imp[ôo]t sur les soci[ée]t[ée]s|capital social|bar[èe]mes?|urssaf|cotisations|s[ée]curit[ée] sociale|smic|plafond|" +
                 "installation|photovolta|kwc|fiche|pr[ée]sentation|mise en forme|mise en page|si[èe]ge|employ[ée]|prix|onduleur|maintenance|" +
                 "entretien|intervention|historique photovolta[ïi]que|bilan maintenance|panne|diagnostic|pi[èe]ce remplac[ée]e|planning|agenda|pdf|obsidian|distance|itin[ée]raire|km|fid[ée]lit[ée]|kml|google earth|carte des clients|" +
                 "gps|coordonn[ée]es|g[ée]oloc|localis|latitude|longitude|google maps",
             RegexOption.IGNORE_CASE
         )
         fun concerned(text: String) = KEYWORDS.containsMatchIn(text)
+
+        /**
+         * « Marque la facture FAC-2026-0003 comme payée », « Dupont a payé sa facture (par virement) », « le devis 12 est
+         * accepté », « facture de Martin envoyée » : arguments de document_action, exécutés DIRECTEMENT dans la base Société
+         * du téléphone (jamais par le serveur), ou une question si plusieurs documents correspondent ; null sinon.
+         */
+        fun intentionDocument(data: fr.dd.jarvis.societe.core.SocieteData, texte: String): JSONObject? {
+            val n = normaliser(texte)
+            val facture = Regex("\\bfactures?\\b").containsMatchIn(n); val devis = Regex("\\bdevis\\b").containsMatchIn(n)
+            if (!facture && !devis) return null
+            if (Regex("\\b(cree|creer|fais|faire|prepare|redige|genere|etablis|nouveau|nouvelle|modifie|envoie|envoyer|mail|email)\\b").containsMatchIn(n.substringBefore(" comme ")) &&
+                !Regex("\\b(envoyee?|envoyes)\\b").containsMatchIn(n)) return null
+            val action = when {
+                facture && Regex("\\b(payee?s?|reglee?s?|encaissee?s?|a paye|ont paye|a regle|paiement recu|recu le (paiement|reglement|virement|cheque)|virement recu|soldee?)\\b").containsMatchIn(n) -> "payee"
+                devis && Regex("\\b(accepte|acceptee|signe|signee|valide|validee|bon pour accord)\\b").containsMatchIn(n) -> "accepte"
+                devis && Regex("\\b(refuse|refusee|decline)\\b").containsMatchIn(n) -> "refuse"
+                Regex("\\b(envoyee?s?|transmise?s?|expediee?s?)\\b").containsMatchIn(n) -> "envoye"
+                Regex("\\b(annulee?|annule)\\b").containsMatchIn(n) -> "annuler"
+                else -> return null
+            }
+            val type = if (facture && (action == "payee" || !devis)) "facture" else "devis"
+            val args = JSONObject().put("action", action)
+            Regex("\\b(?:virement|cheque|especes|carte bancaire|carte|cb|paypal|prelevement)\\b").find(n)?.let { args.put("mode_paiement", it.value) }
+            // Numéro complet (FAC-2026-0003) ou court (« facture 3 », « n° 12 » : année en cours).
+            Regex("\\b(FAC|DEV)[- ]?(\\d{4})[- ]?(\\d{1,4})\\b", RegexOption.IGNORE_CASE).find(texte)?.let { m ->
+                return args.put("numero", "%s-%s-%04d".format(m.groupValues[1].uppercase(), m.groupValues[2], m.groupValues[3].toInt()))
+            }
+            val candidats = data.docs.filter { it.type == type && when (action) {
+                "payee" -> it.statut == "a_payer"; "envoye" -> it.statut in setOf("brouillon", "a_payer"); "accepte", "refuse" -> it.statut in setOf("brouillon", "envoye")
+                else -> it.statut != "annulee" } }
+            Regex("\\b(?:n|no|numero|num)?\\s*(\\d{1,4})\\b").findAll(n.substringAfter(if (type == "facture") "facture" else "devis")).firstOrNull()?.let { m ->
+                val k = m.groupValues[1].toInt()
+                candidats.filter { it.numero.substringAfterLast('-').toIntOrNull() == k }.sortedByDescending { it.numero }.firstOrNull()?.let { return args.put("numero", it.numero) }
+            }
+            // Par client : « la facture de Dupont », « Dupont a payé ».
+            val clients = data.clients.filter { c -> normaliser(c.nom).let { cn -> cn.length >= 3 && (n.contains(cn) || cn.split(' ').any { it.length >= 4 && Regex("\\b$it\\b").containsMatchIn(n) }) } }
+            val docs = candidats.filter { d -> clients.any { it.id == d.clientId } }
+            return when {
+                clients.isEmpty() -> null
+                docs.size == 1 -> args.put("numero", docs[0].numero)
+                docs.isEmpty() -> JSONObject().put("question", "Je ne trouve pas de ${if (type == "facture") "facture" else "devis"} ${when (action) { "payee" -> "à encaisser"; "envoye" -> "à envoyer"; else -> "en cours" }} pour ${clients.joinToString(" / ") { it.nom }}.")
+                else -> JSONObject().put("question", "${clients.first().nom} a plusieurs ${if (type == "facture") "factures" else "devis"} concernés : " +
+                    docs.joinToString(" ; ") { "${it.numero} du ${it.date} (${fr.dd.jarvis.societe.core.euro(data.totaux(it).ttc)} TTC)" } + ". Laquelle ?")
+            }
+        }
+
+        private val MOIS = listOf("janvier", "fevrier", "mars", "avril", "mai", "juin", "juillet", "aout", "septembre", "octobre", "novembre", "decembre")
+
+        /** « novembre » → 2026-11 (année précédente si le mois n'est pas encore arrivé), « 2026-03 » tel quel. */
+        fun mois(n: String, aujourdhui: LocalDate = LocalDate.now()): String? {
+            Regex("\\b(20\\d\\d)-(\\d{2})\\b").find(n)?.let { return it.value }
+            val i = MOIS.indexOfFirst { Regex("\\b$it\\b").containsMatchIn(n) }.takeIf { it >= 0 } ?: return null
+            val an = Regex("\\b(20\\d\\d)\\b").find(n)?.value?.toInt() ?: if (i + 1 > aujourdhui.monthValue) aujourdhui.year - 1 else aujourdhui.year
+            return "%d-%02d".format(an, i + 1)
+        }
+
+        /**
+         * Gestion directe (sur le téléphone, sans IA ni serveur) : « supprime toutes les factures », « annule les factures de
+         * Dupont », « supprime la facture 3 », « supprime la fiche de paie de novembre de Paul », « montre mes fiches de paie ».
+         * Renvoie (outil, arguments) — les outils demandent confirmation avant toute suppression — ou null.
+         */
+        fun intentionGestion(data: fr.dd.jarvis.societe.core.SocieteData, texte: String): Pair<String, JSONObject>? {
+            val n = normaliser(texte)
+            val bulletin = Regex("\\b(fiches? de (paie|paye|salaire)|bulletins?( de (paie|paye|salaire))?)\\b").containsMatchIn(n)
+            val supprimer = Regex("\\b(supprimes?|supprimez|supprimer|efface[rsz]?|retire[rsz]?|enleve[rsz]?|detrui[st]|detruire|jette[rsz]?)\\b").containsMatchIn(n)
+            val annuler = Regex("\\b(annules?|annulez|annuler)\\b").containsMatchIn(n)
+            if (bulletin) {
+                if (Regex("\\b(fais|faire|genere[rsz]?|cree[rsz]?|creer|etablis|prepare[rsz]?|refai[st]|refaire|calcule[rsz]?)\\b").containsMatchIn(n)) return null
+                val a = JSONObject().put("action", if (supprimer) "supprimer" else "lister")
+                if (!supprimer && !Regex("\\b(montre|affiche|liste|lister|voir|vois|ou sont|acces|accede|ouvre|quelles?|mes)\\b").containsMatchIn(n)) return null
+                mois(n)?.let { a.put("mois", it) }
+                if (!a.has("mois")) Regex("\\b(20\\d\\d)\\b").find(n)?.let { a.put("annee", it.value) }
+                data.employes.firstOrNull { e -> normaliser(e.nom).split(' ').any { it.length >= 3 && Regex("\\b$it\\b").containsMatchIn(n) } }?.let { a.put("employe", it.nom) }
+                if (supprimer) {
+                    if (Regex("\\b(toutes|tous)\\b").containsMatchIn(n)) a.put("tous", "oui")
+                    if (!a.has("tous") && !a.has("mois") && !a.has("annee") && !a.has("employe")) return null   // trop vague : l'IA demandera lequel
+                }
+                return "bulletins" to a
+            }
+            if (!supprimer && !annuler) return null
+            val facture = Regex("\\bfactures?\\b").containsMatchIn(n); val devis = Regex("\\bdevis\\b").containsMatchIn(n)
+            if (!facture && !devis) return null
+            if (Regex("\\b(cree|creer|fais|faire|nouvelle|nouveau|envoie|envoyer)\\b").containsMatchIn(n)) return null
+            val numeros = Regex("\\b(FAC|DEV)[- ]?(\\d{4})[- ]?(\\d{1,4})\\b", RegexOption.IGNORE_CASE).findAll(texte)
+                .map { m -> "%s-%s-%04d".format(m.groupValues[1].uppercase(), m.groupValues[2], m.groupValues[3].toInt()) }.toList()
+            val pluriel = Regex("\\b(toutes|tous|les factures|les devis|mes factures|mes devis|ces factures|ces devis)\\b").containsMatchIn(n)
+            val type = if (facture && devis) "tous" else if (facture) "facture" else "devis"
+            if (!pluriel && numeros.isEmpty()) {
+                // Un seul document : « annule la facture 3 » reste à document_action ; « supprime la facture 3 » ici.
+                if (!supprimer) return null
+                val k = Regex("\\b(?:n|no|numero|num)?\\s*(\\d{1,4})\\b").find(n.substringAfter(if (facture) "facture" else "devis"))?.groupValues?.get(1)?.toIntOrNull() ?: return null
+                val doc = data.docs.filter { it.type == (if (facture) "facture" else "devis") && it.numero.substringAfterLast('-').toIntOrNull() == k }.maxByOrNull { it.numero } ?: return null
+                return "documents_supprimer" to JSONObject().put("action", "supprimer").put("type", doc.type).put("numeros", doc.numero)
+            }
+            val a = JSONObject().put("action", if (supprimer) "supprimer" else "annuler").put("type", type)
+            if (numeros.isNotEmpty()) a.put("numeros", numeros.joinToString(","))
+            data.clients.filter { c -> normaliser(c.nom).let { cn -> cn.length >= 3 && n.contains(cn) } }.takeIf { it.size == 1 }?.let { a.put("client", it[0].nom) }
+            when {
+                Regex("\\b(impayees?|a payer|non payees?|en attente)\\b").containsMatchIn(n) -> a.put("statut", "a_payer")
+                Regex("\\bpayees?\\b").containsMatchIn(n) -> a.put("statut", "payee")
+                supprimer && Regex("\\bannulees?\\b").containsMatchIn(n) -> a.put("statut", "annulee")
+                Regex("\\bbrouillons?\\b").containsMatchIn(n) -> a.put("statut", "brouillon")
+            }
+            Regex("\\b(20\\d\\d)\\b").find(n)?.let { a.put("annee", it.value) }
+            if (numeros.isEmpty() && !a.has("client") && !a.has("statut") && !a.has("annee")) a.put("tous", "oui")
+            return "documents_supprimer" to a
+        }
 
         val PROMPT = """
 Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu disposes d'outils pour : enregistrer les informations de l'entreprise (siège, SIRET, IBAN, TVA…), les tarifs par puissance (kWc), les règles de remise (fidélité, nombre d'installations) et de déplacement, les clients et leurs installations, créer des devis et factures, convertir un devis en facture, marquer une facture payée (mise en réserve), produire des bulletins de paie, le bilan de la réserve, et modifier la présentation des documents.
@@ -53,6 +160,9 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
 - Pour supprimer une intervention en double ou erronée, consulte d’abord interventions_liste, identifie exactement la bonne fiche par son ID et utilise intervention_supprimer. L’outil demande une confirmation explicite avant suppression et retire la fiche de Jarvis, le rapport Obsidian/PDF et les photos associées si elles sont accessibles. Ne supprime jamais une intervention sur la seule base d’une date ou d’un intitulé ambigu.
 - Pour un devis ou une facture, identifie le client et l'installation (client_ecrire si le client n'existe pas encore). Si une information indispensable manque (client, prestation), demande-la en une phrase.
 - Le texte renvoyé par les outils société est déjà mis en forme et affiché tel quel : ne le répète pas.
+- ANNULER / SUPPRIMER des factures ou devis (un, plusieurs, ceux d'un client, ou TOUS) : documents_supprimer (une seule confirmation pour le lot). Tu disposes de cet outil : ne dis jamais qu'aucun outil ne permet de supprimer ou d'annuler une facture.
+- FICHES DE PAIE déjà générées (lister, afficher, supprimer) : bulletins. Pour refaire un bulletin faux, rappelle paie pour le même mois (il remplace l'ancien). Chaque bulletin est enregistré en PDF imprimable (Société › Bulletins).
+- Tout ce qui concerne la société (clients, devis, factures, paie, interventions) est dans la base du TÉLÉPHONE : n'utilise jamais SSH, le serveur ni des commandes pour ces données.
 - Les montants sont toujours en euros, la TVA est gérée par l'application.
 - Pour envoyer un devis ou une facture par email (envoi initial ou relance), utilise TOUJOURS document_email : il joint le PDF du document au mail. N'utilise jamais mail_envoyer pour un devis/une facture, car il n'attache aucune pièce jointe.
 - N'invente JAMAIS un pourcentage de remise (remise_pct) pour qu'un devis atteigne un montant total donné par l'utilisateur : laisse remise_pct vide et affiche le vrai total (tarif + déplacement), quitte à dire explicitement qu'il dépasse le montant évoqué. Seule une remise que l'utilisateur chiffre lui-même explicitement doit être passée dans remise_pct.
@@ -88,10 +198,27 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "tarifs_saisis_ttc" to prop("« true » si les prix donnés pour tarif_set sont TTC (convertis en HT automatiquement) ; « false » (défaut) s'ils sont déjà HT."),
             "delai_paiement_jours" to prop("Délai de paiement des factures en jours."),
             "validite_devis_jours" to prop("Durée de validité des devis en jours."),
-            "mentions" to prop("Mentions légales complémentaires (assurance décennale, RCS…)."),
+            "mentions" to prop("Mentions légales complémentaires (assurance décennale…)."),
+            "rcs" to prop("Immatriculation, ex. « RCS Dijon 123 456 789 » (ou « RM 123 456 789 » pour un artisan) — imprimée sur les factures."),
+            "code_ape" to prop("Code APE/NAF, ex. 4321A (factures et bulletins de paie)."),
+            "convention_collective" to prop("Convention collective appliquée (bulletins de paie), ex. « Bâtiment ouvriers (IDCC 1597) »."),
+            "urssaf" to prop("Organisme de recouvrement des cotisations (bulletins), ex. « URSSAF Bourgogne-Franche-Comté »."),
+            "estimer_salaires" to prop("« true » : les mois sans bulletin de paie sont estimés d'après les contrats dans le résultat ; « false » (défaut) : seuls les bulletins enregistrés comptent comme salaires versés."),
             "reserve_pct" to prop("Pourcentage du HT de chaque facture encaissée mis de côté en réserve bénéfices."),
-            "part_dirigeant_pct" to prop("Part de la réserve attribuée au dirigeant en fin d'année en % (le reste aux salariés).")
+            "part_dirigeant_pct" to prop("Part de la réserve attribuée au dirigeant en fin d'année en % (le reste aux salariés) — seulement si la répartition selon les salaires est désactivée."),
+            "reserve_selon_salaires" to prop("« true » (défaut) : réserve répartie automatiquement entre dirigeant(s) et salariés au prorata des salaires bruts versés ; « false » : part dirigeant fixe."),
+            "charges_mensuelles" to prop("Charges fixes mensuelles hors salaires en € (loyer, assurance, comptable, véhicule…), pour le calcul du résultat."),
+            "capital_social" to prop("Capital social en € (plafond de la réserve légale : 10 % du capital)."),
+            "reserve_legale_cumulee" to prop("Réserve légale déjà constituée les années précédentes, en €."),
+            "distribution_pct" to prop("Part du bénéfice distribuable versée en dividende en fin d'année, en % (le reste reste dans la société)."),
+            "impot_societes" to prop("« true » si la société est à l'impôt sur les sociétés, « false » si elle est à l'impôt sur le revenu (déduit de la forme sinon)."),
+            "is_taux_reduit" to prop("Taux réduit d'IS en % (15 par défaut)."), "is_plafond_reduit" to prop("Plafond de bénéfice du taux réduit en € (42500 par défaut)."),
+            "is_taux_normal" to prop("Taux normal d'IS en % (25 par défaut)."), "pfu_pct" to prop("Prélèvement forfaitaire unique sur les dividendes en % (31,4 en 2026).")
         )),
+        tool("societe_resultat", "Résultat de la société (recalculé automatiquement à chaque facture payée) : chiffre d'affaires encaissé HT, salaires versés (coût employeur, bulletins ou estimation), charges fixes, ce qu'il reste à la société avant impôt, impôt sur les sociétés, bénéfice net, réserve légale, dividende de fin d'année possible (brut et net après prélèvement forfaitaire), et projection au 31 décembre.",
+            mapOf("annee" to prop("Année (défaut : l'année en cours)."))),
+        tool("societe_baremes", "Barèmes officiels relevés automatiquement chaque semaine auprès de l'URSSAF (plafond de la Sécurité sociale, SMIC, taux et plafond de l'impôt sur les sociétés, prélèvement forfaitaire sur les dividendes, coût officiel de chaque salarié) et appliqués au calcul du résultat, du dividende et des fiches de paie. action=voir (défaut) | actualiser (vérifie tout de suite) | auto_oui / auto_non (application automatique).",
+            mapOf("action" to prop("voir | actualiser | auto_oui | auto_non"))),
         tool("societe_info_get", "Affiche les informations société, les tarifs, les règles de remise/déplacement et la réserve enregistrés."),
         tool("tarif_set", "Crée ou modifie un tarif. Mode : forfait (prix fixe selon la puissance de l'installation), par_kwc (prix par kWc), heure, unite.", mapOf(
             "designation" to prop("Nom de la prestation, ex. « Maintenance annuelle »."),
@@ -115,6 +242,8 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "tel" to prop("Téléphone."), "email" to prop("Email."), "adresse" to prop("Adresse postale du client."),
             "depuis" to prop("Date de début de la relation yyyy-MM-dd (ou année) pour l'ancienneté/fidélité."),
             "notes" to prop("Notes."),
+            "siren" to prop("Client professionnel : SIREN (9 chiffres), imprimé sur ses factures."),
+            "tva_intracom" to prop("Client professionnel : n° de TVA intracommunautaire."),
             "site_nom" to prop("Nom de l'installation (ex. « Toiture garage »). « toutes » pour appliquer la mise à jour à toutes les installations du client."),
             "site_adresse" to prop("Adresse de l'installation. « ma position » = adresse précise (n°, rue, code postal, ville) de l'endroit où se trouve le téléphone."),
             "kwc" to prop("Puissance de l'installation en kWc."), "mise_en_service" to prop("Date de mise en service yyyy-MM-dd."),
@@ -181,6 +310,22 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "action" to prop("afficher | convertir (devis → facture) | envoye | accepte | refuse | payee | annuler | exporter | supprimer"),
             "mode_paiement" to prop("Pour « payee » : virement, chèque, CB, espèces…")
         ), listOf("numero", "action")),
+        tool("documents_supprimer", "Annule ou supprime des factures/devis : un seul, plusieurs (numéros), ceux d'un client, d'un statut ou d'une année, ou TOUS. Les documents sont dans la base Société du téléphone (jamais sur le serveur). « annuler » garde le numéro (statut Annulée, recommandé pour une facture envoyée) ; « supprimer » efface définitivement le document, son PDF et sa note. Demande toujours confirmation (une seule pour le lot).", mapOf(
+            "action" to prop("annuler | supprimer"),
+            "type" to prop("facture | devis | tous (défaut : facture)"),
+            "numeros" to prop("Numéros séparés par des virgules (ex. FAC-2026-0003, FAC-2026-0004). Optionnel."),
+            "client" to prop("Nom du client (optionnel)."),
+            "statut" to prop("Filtre de statut : a_payer | payee | annulee | brouillon | envoye | accepte | refuse (optionnel)."),
+            "annee" to prop("Année (optionnel)."),
+            "tous" to prop("« oui » pour TOUS les documents du type demandé (sans autre filtre).")
+        ), listOf("action")),
+        tool("bulletins", "Fiches de paie déjà générées (enregistrées en PDF imprimable : onglet Société › Bulletins, et coffre « Société/Paie »). action=lister (défaut) | afficher | supprimer. Supprimer retire le bulletin, ses fichiers ET ses montants des salaires versés, du résultat et de la réserve (pour refaire un bulletin faux, appelle simplement « paie » à nouveau pour le même mois : il remplace l'ancien). Confirmation demandée avant suppression.", mapOf(
+            "action" to prop("lister | afficher | supprimer"),
+            "employe" to prop("Nom du salarié ou du dirigeant (optionnel)."),
+            "mois" to prop("Mois yyyy-MM (optionnel)."),
+            "annee" to prop("Année (optionnel)."),
+            "tous" to prop("« oui » pour tous les bulletins (avec action=supprimer).")
+        )),
         tool("document_email", "Envoie (ou renvoie) un devis ou une facture par email, avec le PDF du document en pièce jointe (compte Gmail connecté requis, Réglages › Comptes › Mails). Demande toujours confirmation avant l'envoi.", mapOf(
             "numero" to prop("Numéro du devis/facture, ex. DEV-2026-0003."),
             "destinataire" to prop("Adresse email du destinataire (optionnel : par défaut l'email enregistré du client)."),
@@ -248,10 +393,22 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         "document_creer" -> documentCreer(a)
         "document_action" -> documentAction(a)
         "document_email" -> documentEmail(a)
+        "documents_supprimer" -> documentsLot(a)
+        "bulletins" -> bulletins(a)
         "societe_liste" -> liste(a)
         "employe_ecrire" -> employeEcrire(a)
         "paie" -> paie(a)
         "reserve_bilan" -> ok(svc.bilanTexte(a.s("annee").toIntOrNull() ?: LocalDate.now().year))
+        "societe_resultat" -> ok(svc.resultatTexte(a.s("annee").toIntOrNull() ?: LocalDate.now().year))
+        "societe_baremes" -> when (a.s("action").lowercase()) {
+            "actualiser", "mettre_a_jour", "maj" -> ok(svc.actualiserBaremes())
+            "auto_oui", "auto_non" -> {
+                val auto = a.s("action").lowercase() == "auto_oui"
+                svc.repo.update { it.copy(societe = it.societe.copy(baremesAuto = auto)) }
+                if (auto) ok(svc.actualiserBaremes()) else ok("✅ Application automatique des barèmes désactivée : les valeurs actuelles restent figées (la vérification hebdomadaire continue de les relever).")
+            }
+            else -> ok(svc.baremesTexte())
+        }
         "presentation_modifier" -> presentation(a)
         "distance_deplacement" -> distanceTool(a)
         "clients_exporter_kml" -> ok(svc.exporterKml(a.s("recherche")))
@@ -318,8 +475,23 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         a.s("delai_paiement_jours").toIntOrNull()?.let { s = s.copy(delaiPaiementJours = it) }
         a.s("validite_devis_jours").toIntOrNull()?.let { s = s.copy(validiteDevisJours = it) }
         if (a.hv("mentions")) s = s.copy(mentions = a.s("mentions"))
+        if (a.hv("rcs")) s = s.copy(rcs = a.s("rcs"))
+        if (a.hv("code_ape")) s = s.copy(codeApe = a.s("code_ape").uppercase().replace(" ", ""))
+        if (a.hv("convention_collective")) s = s.copy(conventionCollective = a.s("convention_collective"))
+        if (a.hv("urssaf")) s = s.copy(urssaf = a.s("urssaf"))
+        a.bool("estimer_salaires")?.let { s = s.copy(estimerSalaires = it) }
         a.dbl("reserve_pct")?.let { s = s.copy(reservePct = it.coerceIn(0.0, 100.0)) }
         a.dbl("part_dirigeant_pct")?.let { s = s.copy(partDirigeantPct = it.coerceIn(0.0, 100.0)) }
+        a.bool("reserve_selon_salaires")?.let { s = s.copy(reserveSelonSalaires = it) }
+        a.dbl("charges_mensuelles")?.let { s = s.copy(chargesMensuelles = it.coerceAtLeast(0.0)) }
+        a.dbl("capital_social")?.let { s = s.copy(capitalSocial = it.coerceAtLeast(0.0)) }
+        a.dbl("reserve_legale_cumulee")?.let { s = s.copy(reserveLegaleCumulee = it.coerceAtLeast(0.0)) }
+        a.dbl("distribution_pct")?.let { s = s.copy(distributionPct = it.coerceIn(0.0, 100.0)) }
+        a.bool("impot_societes")?.let { s = s.copy(soumisIs = it) }
+        a.dbl("is_taux_reduit")?.let { s = s.copy(isTauxReduit = it.coerceIn(0.0, 100.0)) }
+        a.dbl("is_plafond_reduit")?.let { s = s.copy(isPlafondReduit = it.coerceAtLeast(0.0)) }
+        a.dbl("is_taux_normal")?.let { s = s.copy(isTauxNormal = it.coerceIn(0.0, 100.0)) }
+        a.dbl("pfu_pct")?.let { s = s.copy(pfuPct = it.coerceIn(0.0, 100.0)) }
         if (s == before) return err("Aucune information reconnue à enregistrer.")
         val siegeDeplace = before.adresse != s.adresse || before.lat != s.lat || before.lon != s.lon
         svc.repo.update { current ->
@@ -358,6 +530,10 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             append(if (Pricing.deplacementConfigure(r)) "- ${euro(r.kmPrix)}/km · ${nombre(r.kmGratuits)} km offerts · minimum ${euro(r.deplacementMin)} · " + (if (r.allerRetour) "aller-retour" else "aller simple") + "\n" else "- Non configuré.\n")
             append("\n## 💰 Réserve bénéfices\n")
             append(if (s.reservePct > 0) "- ${nombre(s.reservePct)} % du HT des factures encaissées · dirigeant ${nombre(s.partDirigeantPct)} % / salariés ${nombre(100 - s.partDirigeantPct)} %\n" else "- Non configurée.\n")
+            append("\n## 📊 Résultat et dividende (calcul automatique à chaque facture payée)\n")
+            append("- Charges fixes : ${if (s.chargesMensuelles > 0) euro(s.chargesMensuelles) + " / mois" else "non renseignées"} · capital social : ${if (s.capitalSocial > 0) euro(s.capitalSocial) else "non renseigné"}\n")
+            append("- ${if (fr.dd.jarvis.societe.core.Resultat.soumisIs(s)) "Impôt sur les sociétés : ${nombre(s.isTauxReduit)} % jusqu'à ${euro(s.isPlafondReduit)}, ${nombre(s.isTauxNormal)} % au-delà" else "Impôt sur le revenu (pas d'IS ni de dividende)"}" +
+                " · dividende : ${nombre(s.distributionPct)} % du distribuable · prélèvement forfaitaire ${nombre(s.pfuPct)} %\n")
         }
     }
 
@@ -555,6 +731,8 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         if (a.hv("contact")) c = c.copy(contact = a.s("contact"))
         if (a.hv("tel")) c = c.copy(tel = a.s("tel"))
         if (a.hv("email")) c = c.copy(email = a.s("email"))
+        if (a.hv("siren")) c = c.copy(siren = a.s("siren").filter { it.isDigit() }.ifBlank { a.s("siren") })
+        if (a.hv("tva_intracom")) c = c.copy(tvaNum = a.s("tva_intracom").uppercase().replace(" ", ""))
         if (a.hv("adresse") && normaliser(a.s("adresse")) != normaliser(c.adresse)) c = c.copy(
             adresse = a.s("adresse"), distanceKm = null, distanceDureeMin = null, distanceCle = ""
         )
@@ -973,7 +1151,8 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
                 if (!confirm("Marquer la facture ${doc.numero} comme payée (${euro(d.totaux(doc).ttc)} TTC) ?", false)) return err("Refusé par l'utilisateur.")
                 val (f, prov) = svc.marquerPayee(numero, a.s("mode_paiement")) ?: return err("Introuvable.")
                 ok("✅ Facture ${f.numero} payée (${euro(d.totaux(f).ttc)} TTC)." +
-                    (if (prov != null) "\n💰 Mis en réserve : **${euro(prov.montant)}** (${nombre(prov.pct)} % de ${euro(prov.baseHt)} HT)" else if (d.societe.reservePct <= 0) "\nℹ️ Aucune réserve configurée (reserve_pct)." else ""))
+                    (if (prov != null) "\n💰 Mis en réserve : **${euro(prov.montant)}** (${nombre(prov.pct)} % de ${euro(prov.baseHt)} HT)" else "") +
+                    runCatching { "\n\n" + svc.repartitionPaiement(f.numero) }.getOrDefault(""))
             }
             "annuler" -> {
                 if (!confirm("Annuler ${doc.numero} ? Le numéro reste conservé (une facture n'est jamais supprimée).", false)) return err("Refusé par l'utilisateur.")
@@ -1098,6 +1277,69 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         return ok("✅ ${fin.nom} ${if (nouveau) "ajouté(e)" else "mis(e) à jour"} (${fin.statut}, $salaireTxt, ${nombre(fin.heuresHebdo)} h/semaine, PAS ${nombre(fin.tauxPas)} %).")
     }
 
+    /** Annulation / suppression d'un lot de factures ou devis (une seule confirmation). */
+    private suspend fun documentsLot(a: JSONObject): ToolResult {
+        val action = normaliser(a.s("action")).let { if (it.startsWith("supp") || it.startsWith("eff")) "supprimer" else if (it.startsWith("annul")) "annuler" else "" }
+        if (action.isBlank()) return err("action : annuler ou supprimer.")
+        val type = normaliser(a.s("type")).let { when { it.startsWith("dev") -> "devis"; it.startsWith("tou") || it == "les deux" -> ""; else -> "facture" } }
+        val numeros = a.s("numeros").split(Regex("[,;\\s]+")).map { it.trim().uppercase() }.filter { it.isNotBlank() }
+        val clientsCibles = if (a.hv("client")) d.chercherClients(a.s("client")) else null
+        if (clientsCibles != null && clientsCibles.isEmpty()) return err("Client « ${a.s("client")} » introuvable.")
+        val statut = a.s("statut").trim().lowercase()
+        val annee = a.s("annee").trim()
+        val tous = normaliser(a.s("tous")) in setOf("oui", "true", "1")
+        if (numeros.isEmpty() && clientsCibles == null && statut.isBlank() && annee.isBlank() && !tous)
+            return err("Précise les documents : numéros, client, statut, année, ou tous=oui.")
+        val cibles = d.docs.filter { x ->
+            (type.isBlank() || x.type == type) &&
+                (numeros.isEmpty() || numeros.any { n -> x.numero.equals(n, true) || x.numero.endsWith("-" + n.padStart(4, '0')) }) &&
+                (clientsCibles == null || clientsCibles.any { it.id == x.clientId }) &&
+                (statut.isBlank() || x.statut == statut) && (annee.isBlank() || x.date.startsWith(annee)) &&
+                (action == "supprimer" || x.statut !in setOf("annulee", "refuse", "facture"))
+        }.sortedBy { it.numero }
+        if (cibles.isEmpty()) return ok("Aucun document ne correspond (rien n'a été modifié).")
+        val liste = cibles.joinToString("\n") { "- ${it.numero} · ${d.client(it.clientId)?.nom.orEmpty()} · ${euro(d.totaux(it).ttc)} TTC · ${Rendu.statutLabel(it.type, it.statut)}" }
+        val avert = if (action == "supprimer" && cibles.any { it.type == "facture" && it.statut != "brouillon" })
+            "\n⚠️ Des factures émises : la numérotation doit rester continue ; « annuler » conserve le numéro." else ""
+        if (!confirm("${if (action == "supprimer") "Supprimer définitivement" else "Annuler"} ${cibles.size} document(s) ?\n$liste$avert", true))
+            return ok("Rien n'a été modifié.")
+        val faits = cibles.mapNotNull { x -> if (action == "supprimer") svc.supprimerDocument(x.numero)?.first?.numero else svc.annuler(x.numero)?.numero }
+        val restants = if (action == "supprimer") faits.filter { svc.data.doc(it) != null } else emptyList()
+        if (restants.isNotEmpty()) return err("❌ Toujours présents après suppression : ${restants.joinToString()}.")
+        return ok("${if (action == "supprimer") "🗑️ Supprimé(s)" else "🚫 Annulé(s)"} : ${faits.size} document(s)\n$liste" +
+            "\nRésultat, réserve et salaires recalculés en conséquence.")
+    }
+
+    /** Fiches de paie générées : liste, affichage, suppression. */
+    private suspend fun bulletins(a: JSONObject): ToolResult {
+        val action = normaliser(a.s("action")).ifBlank { "lister" }
+        val emp = a.s("employe").takeIf { it.isNotBlank() }?.let { n ->
+            val nn = normaliser(n)
+            d.employes.filter { normaliser(it.nom) == nn }.ifEmpty { d.employes.filter { normaliser(it.nom).contains(nn) || nn.contains(normaliser(it.nom)) } }
+        }
+        val mois = a.s("mois").trim(); val annee = a.s("annee").trim()
+        val tous = normaliser(a.s("tous")) in setOf("oui", "true", "1")
+        val liste = svc.bulletins().filter { r ->
+            (emp == null || emp.any { it.id == r.employeId } || emp.isEmpty() && normaliser(r.nomEmploye).contains(normaliser(a.s("employe")))) &&
+                (mois.isBlank() || r.mois == mois) && (annee.isBlank() || r.mois.startsWith(annee))
+        }
+        fun ligne(r: fr.dd.jarvis.societe.core.BulletinRef) = "- ${svc.nomBulletin(r)} · brut ${euro(r.brut)} · net payé ${euro(r.netAPayer)} · coût ${euro(r.coutEmployeur)}"
+        return when {
+            action.startsWith("supp") || action.startsWith("eff") -> {
+                if (liste.isEmpty()) return ok("Aucun bulletin ne correspond.")
+                if (!tous && emp == null && mois.isBlank() && annee.isBlank()) return err("Précise le salarié, le mois, l'année ou tous=oui.")
+                if (!confirm("Supprimer ${liste.size} bulletin(s) de paie (fichiers compris) ?\n" + liste.joinToString("\n") { ligne(it) }, true)) ok("Rien n'a été supprimé.")
+                else ok(svc.supprimerBulletins(liste))
+            }
+            action.startsWith("aff") || action.startsWith("voir") -> {
+                val r = liste.firstOrNull() ?: return ok("Aucun bulletin ne correspond.")
+                ok(r.md.ifBlank { "Bulletin ${svc.nomBulletin(r)} : contenu non conservé (bulletin ancien) — refais-le avec « paie » pour le régénérer.\n${ligne(r)}" })
+            }
+            else -> ok(if (liste.isEmpty()) "Aucune fiche de paie enregistrée${if (emp != null || mois.isNotBlank() || annee.isNotBlank()) " pour ce filtre" else ""}."
+                else "🧾 **Fiches de paie enregistrées (${liste.size})** — PDF imprimables dans Société › Bulletins :\n" + liste.joinToString("\n") { ligne(it) })
+        }
+    }
+
     private fun paie(a: JSONObject): ToolResult {
         val n = normaliser(a.s("employe"))
         val e = d.employes.firstOrNull { normaliser(it.nom) == n } ?: d.employes.firstOrNull { normaliser(it.nom).contains(n) }
@@ -1107,7 +1349,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         val netVerse = a.dbl("net_verse")
         if (heuresEff != null && netVerse != null) return err("Renseigne soit heures_effectuees, soit net_verse, pas les deux à la fois.")
         val (md, loc) = svc.bulletin(e, mois, a.dbl("primes") ?: 0.0, heuresEff, netVerse)
-        return ok("✅ Bulletin enregistré : $loc\n\n---\n\n$md")
+        return ok("✅ Bulletin enregistré (PDF imprimable dans Société › Bulletins, et $loc)\n\n---\n\n$md")
     }
 
     private suspend fun distanceTool(a: JSONObject): ToolResult {

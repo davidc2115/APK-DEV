@@ -251,6 +251,30 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
     private fun ipv4(h: JSONObject): String = liste(h.optJSONArray("l3connectivities")).filter { it.optString("af") == "ipv4" }
         .sortedByDescending { it.optBoolean("active") }.firstOrNull()?.optString("addr").orEmpty()
 
+    /** Appareils connus de la Freebox (noms, MAC, IP, actifs) pour l'inventaire du réseau ; null si non associée. */
+    fun appareilsReseau(app: JarvisApp): List<Reseau.Appareil>? {
+        if (app.store.freeboxAppToken.value.isBlank()) return null
+        return runCatching { avecSession(app) { s ->
+            hotes(app, s).filter { it.optBoolean("active") && ipv4(it).isNotBlank() }.map { h ->
+                val mac = h.optJSONObject("l2ident")?.optString("id").orEmpty()
+                Reseau.Appareil(ipv4(h), h.optString("primary_name"), emptyList(), h.optString("vendor_name"),
+                    Reseau.typeDeApp(emptyList(), h.optString("host_type")).let { t -> if (t == "❔ appareil" && h.optString("host_type").isNotBlank()) "📟 ${h.optString("host_type")}" else t },
+                    if (mac.isNotBlank()) "MAC $mac" else "")
+            }
+        } }.getOrNull()
+    }
+
+    /** IP publique donnée par la Freebox (plus fiable qu'un service web), ou null. */
+    fun ipPublique(app: JarvisApp): String? {
+        if (app.store.freeboxAppToken.value.isBlank()) return null
+        return runCatching { avecSession(app) { s -> (json(app, "connection/", s) as? JSONObject)?.optString("ipv4")?.takeIf { it.isNotBlank() } } }.getOrNull()
+    }
+
+    /** Ports externes déjà redirigés (pour en choisir un libre). */
+    fun portsRediriges(app: JarvisApp): Set<Int> = runCatching { avecSession(app) { s ->
+        liste(json(app, "fw/redir/", s)).flatMap { (it.optInt("wan_port_start")..maxOf(it.optInt("wan_port_start"), it.optInt("wan_port_end"))).toList() }.toSet()
+    } }.getOrDefault(emptySet())
+
     /** Adresse IP d'un appareil du réseau à partir de son nom (tel qu'affiché par la Freebox). */
     private fun ipDe(app: JarvisApp, s: String, nomOuIp: String): String {
         val v = nomOuIp.trim()
@@ -302,6 +326,9 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
             else -> null
         }
         if (question != null && !confirm(question, true)) return "Annulé : rien n'a été modifié sur la Freebox."
+        if (action in setOf("supprimer_appareil", "supprimer_appareils", "oublier_appareil", "retirer_appareil")) return try {
+            supprimerAppareils(app, a, confirm)
+        } catch (e: Exception) { "❌ Freebox : ${e.message ?: e.javaClass.simpleName}" }
         if (action in ACTIONS_SUPPRESSION) return try {
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 val cibles = avecSession(app) { s -> trouverElements(app, s, a.optString("chemin").ifBlank { a.optString("fichier") }, volumes(app, s)) }
@@ -314,6 +341,83 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
         } catch (e: Exception) { "❌ Freebox : ${e.message ?: e.javaClass.simpleName}" }
         return try { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { avecSession(app) { s -> executer(app, s, action, a) } } }
         catch (e: Exception) { "❌ Freebox : ${e.message ?: e.javaClass.simpleName}" }
+    }
+
+    // ------------------------------------------------------------------ appareils connus de la box (liste du réseau local)
+
+    /** Nom affiché d'un appareil de la box, ou vide s'il n'en a pas de vrai (vide, adresse MAC, identifiant). */
+    internal fun nomReel(nom: String, mac: String): String {
+        val n = nom.trim()
+        if (n.isBlank() || n.equals(mac, true) || Regex("^([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}$").matches(n) || Regex("^(ether|wifi)-", RegexOption.IGNORE_CASE).containsMatchIn(n)) return ""
+        return n
+    }
+
+    private fun macDe(h: JSONObject) = h.optJSONObject("l2ident")?.optString("id").orEmpty()
+
+    /** Appareils visés : par nom, IP, MAC ou identifiant (plusieurs séparés par « ; »), ou par filtre (sans_nom, hors_ligne). */
+    internal fun choisirAppareils(hotes: List<JSONObject>, appareil: String, filtre: String): List<JSONObject> {
+        val f = cle(filtre).replace(' ', '_')
+        if (f.contains("sans_nom") || f.contains("inconnu")) return hotes.filter { nomReel(it.optString("primary_name"), macDe(it)).isBlank() }
+        if (f.contains("hors_ligne") || f.contains("inactif") || f.contains("deconnecte")) return hotes.filter { !it.optBoolean("active") }
+        val voulus = appareil.split(Regex("\\s*[;\\n]\\s*")).map { it.trim() }.filter { it.isNotBlank() }
+        return voulus.flatMap { v ->
+            val k = cle(v)
+            hotes.filter { h ->
+                h.optString("id").equals(v, true) || macDe(h).equals(v.replace('-', ':'), true) ||
+                    liste(h.optJSONArray("l3connectivities")).any { it.optString("addr") == v }
+            }.ifEmpty { hotes.filter { cle(it.optString("primary_name")) == k } }
+                .ifEmpty { hotes.filter { k.length >= 3 && cle(it.optString("primary_name")).contains(k) } }
+        }.distinctBy { it.optString("id") }
+    }
+
+    private fun decrire(h: JSONObject): String = (if (h.optBoolean("active")) "🟢 " else "⚪ ") +
+        nomReel(h.optString("primary_name"), macDe(h)).ifBlank { "(sans nom)" } +
+        ipv4(h).let { if (it.isNotBlank()) " — $it" else "" } + macDe(h).let { if (it.isNotBlank()) " · $it" else "" } +
+        h.optString("vendor_name").let { if (it.isNotBlank()) " · $it" else "" }
+
+    /**
+     * Retire des appareils de la liste de la box. Seuls les appareils DÉCONNECTÉS sont retirés (un appareil connecté
+     * réapparaîtrait aussitôt). Si la box refuse la suppression par l'API, l'appareil n'est plus gardé en permanence :
+     * il disparaît de la liste au prochain redémarrage de la box.
+     */
+    private suspend fun supprimerAppareils(app: JarvisApp, a: JSONObject, confirm: suspend (String, Boolean) -> Boolean): String {
+        val io = kotlinx.coroutines.Dispatchers.IO
+        val tous = kotlinx.coroutines.withContext(io) { avecSession(app) { s -> hotes(app, s) } }
+        val vises = choisirAppareils(tous, a.optString("appareil").ifBlank { a.optString("ip").ifBlank { a.optString("mac") } }, a.optString("filtre"))
+        if (vises.isEmpty()) return if (a.optString("filtre").isNotBlank()) "✅ Aucun appareil à retirer (${a.optString("filtre").replace('_', ' ')}) dans la liste de la box."
+            else "❌ Freebox : aucun appareil « ${a.optString("appareil")} » dans la liste de la box. Dis « liste les appareils de la box » pour voir les noms."
+        val (connectes, cibles) = vises.partition { it.optBoolean("active") }
+        if (cibles.isEmpty()) return "ℹ️ ${connectes.size} appareil(s) visé(s), mais connecté(s) en ce moment : la box le(s) remettrait aussitôt dans la liste.\n" +
+            connectes.take(20).joinToString("\n") { decrire(it) } + "\nDéconnecte-le(s) d'abord, puis redemande."
+        val liste = cibles.take(40).joinToString("\n") { decrire(it) } + (if (cibles.size > 40) "\n… et ${cibles.size - 40} autre(s)" else "")
+        if (!confirm("Freebox : retirer ${cibles.size} appareil(s) déconnecté(s) de la liste de la box ?\n$liste", true)) return "Annulé : aucun appareil retiré."
+        val (supprimes, masques, erreurs) = kotlinx.coroutines.withContext(io) {
+            avecSession(app) { s ->
+                val sup = mutableListOf<JSONObject>(); val mas = mutableListOf<JSONObject>(); val err = mutableListOf<String>()
+                var deleteRefuse = false
+                for (h in cibles) {
+                    val chemin = "lan/browser/pub/" + java.net.URLEncoder.encode(h.optString("id"), "UTF-8").replace("+", "%20").replace("%3A", ":") + "/"
+                    if (!deleteRefuse) {
+                        val r = runCatching { requete(app, chemin, s, "DELETE") }.getOrNull()
+                        val j = r?.let { runCatching { JSONObject(String(it.octets, Charsets.UTF_8)) }.getOrNull() }
+                        if (j?.optBoolean("success") == true) { sup += h; continue }
+                        // Méthode inconnue de cette version de Freebox OS : on passe à « ne plus garder en permanence ».
+                        if (r == null || r.code in setOf(404, 405, 501) || j?.optString("error_code").orEmpty() in setOf("invalid_api", "invalid_request", "not_found", "nodev", "noent")) deleteRefuse = true
+                        else { err += "${nomReel(h.optString("primary_name"), macDe(h)).ifBlank { macDe(h) }} : ${j?.optString("msg").orEmpty().ifBlank { "HTTP ${r.code}" }}"; continue }
+                    }
+                    runCatching { json(app, chemin, s, "PUT", JSONObject().put("id", h.optString("id")).put("persistent", false)) }
+                        .onSuccess { mas += h }.onFailure { err += "${nomReel(h.optString("primary_name"), macDe(h)).ifBlank { macDe(h) }} : ${it.message}" }
+                }
+                Triple(sup.toList(), mas.toList(), err.toList())
+            }
+        }
+        return buildString {
+            if (supprimes.isNotEmpty()) append("🗑️ ${supprimes.size} appareil(s) retiré(s) de la liste de la box.")
+            if (masques.isNotEmpty()) append((if (isNotEmpty()) "\n" else "") + "🧹 ${masques.size} appareil(s) ne sont plus gardés par la box : ta version de Freebox OS ne permet pas de les effacer tout de suite par l'API, " +
+                "ils disparaîtront de la liste au prochain redémarrage de la box (dis « redémarre la Freebox » si tu veux le faire maintenant).")
+            if (connectes.isNotEmpty()) append("\nℹ️ ${connectes.size} appareil(s) connecté(s) laissé(s) en place.")
+            if (erreurs.isNotEmpty()) append("\n⚠️ Échecs :\n" + erreurs.take(10).joinToString("\n") { "- $it" })
+        }
     }
 
     // ------------------------------------------------------------------ disque dur de la box (droit « explorer »)
@@ -949,12 +1053,24 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
             }
         }
         "appareils" -> {
-            val h = hotes(app, s).sortedWith(compareByDescending<JSONObject> { it.optBoolean("active") }.thenBy { it.optString("primary_name").lowercase() })
+            val tous = hotes(app, s)
+            val h = (if (a.optString("filtre").isNotBlank()) choisirAppareils(tous, "", a.optString("filtre")) else tous)
+                .sortedWith(compareByDescending<JSONObject> { it.optBoolean("active") }.thenBy { it.optString("primary_name").lowercase() })
             val actifs = h.count { it.optBoolean("active") }
-            "🖧 $actifs appareil(s) connecté(s) sur ${h.size} connus :\n" + h.take(60).joinToString("\n") {
-                (if (it.optBoolean("active")) "🟢 " else "⚪ ") + it.optString("primary_name").ifBlank { "(sans nom)" } +
-                    ipv4(it).let { ip -> if (ip.isNotBlank()) " — $ip" else "" } + it.optString("vendor_name").let { v -> if (v.isNotBlank()) " · $v" else "" }
-            }
+            val sansNom = tous.count { nomReel(it.optString("primary_name"), macDe(it)).isBlank() && !it.optBoolean("active") }
+            "🖧 $actifs appareil(s) connecté(s) sur ${h.size} ${if (a.optString("filtre").isNotBlank()) "trouvés (${a.optString("filtre").replace('_', ' ')})" else "connus"} :\n" + h.take(80).joinToString("\n") { decrire(it) } +
+                (if (h.size > 80) "\n… et ${h.size - 80} autre(s)" else "") +
+                (if (sansNom > 0 && a.optString("filtre").isBlank()) "\n\n💡 $sansNom appareil(s) déconnecté(s) sans nom : dis « supprime les appareils sans nom de la box » pour nettoyer la liste." else "")
+        }
+        "renommer_appareil", "nommer_appareil" -> {
+            val nouveau = a.optString("nouveau_nom").ifBlank { a.optString("nom") }.trim()
+            require(nouveau.isNotBlank()) { "précise le nouveau nom (nouveau_nom)." }
+            val l = choisirAppareils(hotes(app, s), a.optString("appareil").ifBlank { a.optString("ip").ifBlank { a.optString("mac") } }, "")
+            require(l.isNotEmpty()) { "aucun appareil « ${a.optString("appareil")} » dans la liste de la box." }
+            require(l.size == 1) { "plusieurs appareils correspondent : ${l.take(8).joinToString(" ; ") { decrire(it) }}. Précise l'IP ou la MAC." }
+            val h = l.first()
+            json(app, "lan/browser/pub/" + h.optString("id") + "/", s, "PUT", JSONObject().put("id", h.optString("id")).put("primary_name", nouveau))
+            "✏️ Appareil renommé : ${nomReel(h.optString("primary_name"), macDe(h)).ifBlank { "(sans nom)" }} → « $nouveau »" + ipv4(h).let { if (it.isNotBlank()) " ($it)" else "" } + "."
         }
         "redirections" -> {
             val r = liste(json(app, "fw/redir/", s))

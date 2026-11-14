@@ -50,7 +50,7 @@ import fr.dd.jarvis.societe.core.*
 import java.time.LocalDate
 import androidx.compose.ui.platform.LocalView
 
-private val SUBS = listOf("Résumé", "Clients", "Interventions", "Devis", "Factures", "Équipe", "Fiches de paie", "Réglages")
+private val SUBS = listOf("Résumé", "Clients", "Interventions", "Devis", "Factures", "Équipe", "Fiches de paie", "Bulletins générés", "Réglages")
 
 @Composable
 fun SocieteScreen(app: JarvisApp) {
@@ -58,7 +58,7 @@ fun SocieteScreen(app: JarvisApp) {
     // Réaligne la liste Devis/Factures sur le coffre à chaque ouverture de l'onglet : un document
     // supprimé directement dans Obsidian (hors JARVIS) ne prévient sinon personne, et la liste ici
     // restait périmée tant que l'app n'était pas relancée.
-    LaunchedEffect(Unit) { withContext(Dispatchers.Default) { app.societe.synchroniserAvecCoffre() } }
+    LaunchedEffect(Unit) { withContext(Dispatchers.Default) { app.societe.synchroniserAvecCoffre(); runCatching { app.societe.synchroniserBulletins() } } }
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             SUBS.forEachIndexed { i, t -> HudChip(t, selected = i == sub) { sub = i } }
@@ -70,7 +70,8 @@ fun SocieteScreen(app: JarvisApp) {
             3 -> DocsTab(app, "devis")
             4 -> DocsTab(app, "facture")
             5 -> EquipeTab(app)
-            6 -> FichesPaieTab(app)
+            6 -> FichesPaieTab(app) { sub = 7 }
+            7 -> BulletinsTab(app)
             else -> ReglagesTab(app)
         }
     }
@@ -256,9 +257,21 @@ private fun ResumeTab(app: JarvisApp) {
                 Spacer(Modifier.height(6.dp))
                 Text("💰 Réserve bénéfices : ${euro(b.total)}" + (if (d.societe.reservePct > 0) " (${nombre(d.societe.reservePct)} % du HT encaissé)" else " — non configurée"), color = HudText, fontSize = 13.sp)
                 if (d.societe.reservePct > 0) {
-                    Text("   Dirigeant : ${euro(b.dirigeant)}" + b.salaries.joinToString("") { " · ${it.first.nom} : ${euro(it.second)}" }, color = HudDim, fontSize = 12.sp)
+                    if (b.selonSalaires) Text("   Selon les salaires " + (if (b.brutEstime) "prévus" else "versés") + " : " + b.parPersonne.joinToString(" · ") { "${it.first.nom} ${euro(it.third)}" }, color = HudDim, fontSize = 12.sp)
+                    else Text("   Dirigeant : ${euro(b.dirigeant)}" + b.salaries.joinToString("") { " · ${it.first.nom} : ${euro(it.second)}" }, color = HudDim, fontSize = 12.sp)
                 }
             }
+        }
+        item {
+            val res = remember(d) { runCatching { fr.dd.jarvis.societe.core.Resultat.bilan(d, annee) }.getOrNull() }
+            var detail by remember { mutableStateOf<String?>(null) }
+            if (res != null) HudPanel(Modifier.fillMaxWidth(), title = "Résultat et dividende $annee", onClick = { detail = app.societe.resultatTexte(annee) }) {
+                Text("Encaissé HT : ${euro(res.caHt)} · salaires : − ${euro(res.salaires.cout)}" + (if (res.charges > 0) " · charges : − ${euro(res.charges)}" else ""), color = HudText, fontSize = 13.sp)
+                Text("Reste à la société : ${euro(res.avantImpot)}" + (if (res.soumisIs) " · bénéfice net : ${euro(res.net)}" else ""), color = HudText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                if (res.soumisIs) Text("💶 Dividende possible : ${euro(res.dividendeBrut)} brut (${euro(res.dividendeNet)} net)", color = HudText, fontSize = 13.sp)
+                Text("Touche pour le détail et la projection au 31/12.", color = HudDim, fontSize = 11.sp)
+            }
+            detail?.let { md -> Dialogue("Résultat $annee", { detail = null }) { MarkdownText(md) } }
         }
         item {
             HudPanel(Modifier.fillMaxWidth(), title = "Avec JARVIS") {
@@ -521,6 +534,8 @@ private fun ClientForm(initial: Client?, onClose: () -> Unit, onSave: (Client) -
     var depuis by remember { mutableStateOf(initial?.depuis?.ifBlank { null } ?: LocalDate.now().year.toString()) }
     var notes by remember { mutableStateOf(initial?.notes ?: "") }
     var pro by remember { mutableStateOf(initial?.type == "professionnel") }
+    var siren by remember { mutableStateOf(initial?.siren ?: "") }
+    var tvaCli by remember { mutableStateOf(initial?.tvaNum ?: "") }
     val sites = remember {
         androidx.compose.runtime.mutableStateListOf<SiteDraft>().also { l ->
             initial?.sites?.forEach { l += SiteDraft(it.id, it.nom, it.adresse, if (it.kwc > 0) nombre(it.kwc) else "", it.miseEnService, it.onduleur, if (it.nbPanneaux > 0) it.nbPanneaux.toString() else "", it.notes, gpsTexte(it)) }
@@ -557,6 +572,7 @@ private fun ClientForm(initial: Client?, onClose: () -> Unit, onSave: (Client) -
                     initial?.id ?: java.util.UUID.randomUUID().toString().take(8), nom.trim(), if (pro) "professionnel" else "particulier",
                     contact = contact, tel = tel, email = email, adresse = adresse, sites = newSites,
                     depuis = if (depuis.matches(Regex("\\d{4}"))) "$depuis-01-01" else depuis, notes = notes,
+                    siren = if (pro) siren.trim() else "", tvaNum = if (pro) tvaCli.trim().uppercase() else "",
                     distanceKm = initial?.distanceKm, distanceDureeMin = initial?.distanceDureeMin, distanceCle = initial?.distanceCle ?: ""
                 ))
             }
@@ -571,6 +587,10 @@ private fun ClientForm(initial: Client?, onClose: () -> Unit, onSave: (Client) -
         HudTextField(tel, { tel = it }, Modifier.fillMaxWidth(), label = "Téléphone")
         HudTextField(email, { email = it }, Modifier.fillMaxWidth(), label = "Email")
         HudTextField(adresse, { adresse = it }, Modifier.fillMaxWidth(), label = "Adresse")
+        if (pro) {
+            HudTextField(siren, { siren = it }, Modifier.fillMaxWidth(), label = "SIREN du client (sur ses factures)")
+            HudTextField(tvaCli, { tvaCli = it }, Modifier.fillMaxWidth(), label = "N° de TVA intracommunautaire du client")
+        }
         HudTextField(depuis, { depuis = it }, Modifier.fillMaxWidth(), label = "Client depuis (année ou aaaa-mm-jj)")
         HudTextField(notes, { notes = it }, Modifier.fillMaxWidth(), label = "Notes", singleLine = false)
         Text("Installations", color = LocalAccent.current, fontWeight = FontWeight.Bold, fontSize = 13.sp)
@@ -616,6 +636,8 @@ private fun DocsTab(app: JarvisApp, type: String) {
     var creating by remember { mutableStateOf(false) }
     var info by remember { mutableStateOf("") }
     var confirmSuppr by remember { mutableStateOf<String?>(null) }
+    var repartition by remember { mutableStateOf<String?>(null) }
+    var lot by remember { mutableStateOf<String?>(null) }   // "annuler" | "supprimer" : tous les documents de l'onglet
     val scope = rememberCoroutineScope()
     val list = d.docs.filter { it.type == type }.sortedByDescending { it.numero }
 
@@ -632,6 +654,12 @@ private fun DocsTab(app: JarvisApp, type: String) {
         }
         if (info.isNotBlank()) item { Text(info, color = LocalAccent.current, fontSize = 12.sp) }
         if (list.isEmpty()) item { Text("Aucun document.", color = HudDim, fontSize = 13.sp) }
+        if (list.size > 1) item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (list.any { it.statut !in setOf("annulee", "refuse", "facture") }) HudButton(if (type == "devis") "🚫 Tout refuser" else "🚫 Tout annuler") { lot = "annuler" }
+                HudButton("🗑 Tout supprimer") { lot = "supprimer" }
+            }
+        }
         items(list, key = { it.numero }) { x ->
             HudPanel(Modifier.fillMaxWidth(), onClick = { selected = x.numero }) {
                 Text("${x.numero} — ${d.client(x.clientId)?.nom.orEmpty()}", color = HudText, fontWeight = FontWeight.Bold, fontSize = 14.sp)
@@ -639,6 +667,8 @@ private fun DocsTab(app: JarvisApp, type: String) {
             }
         }
     }
+
+    repartition?.let { md -> Dialogue("Facture payée", { repartition = null }) { MarkdownText(md) } }
 
     selected?.let { num ->
         val x = d.doc(num)
@@ -655,11 +685,26 @@ private fun DocsTab(app: JarvisApp, type: String) {
                     Action("Payée") {
                         val r = svc.marquerPayee(x.numero, "")
                         info = "✅ Payée" + (r?.second?.let { " · réserve ${euro(it.montant)}" } ?: ""); selected = null
+                        repartition = runCatching { svc.repartitionPaiement(x.numero) }.getOrNull()?.takeIf { it.isNotBlank() }
                     }
                 if (x.statut in setOf("brouillon", "envoye", "accepte", "a_payer")) Action("✎ Modifier") { editingDoc = x.numero; selected = null }
                 if (x.statut != "annulee" && x.statut != "refuse" && x.statut != "facture") Action("Annuler") { svc.annuler(x.numero); selected = null }
                 Action("🗑 Supprimer") { confirmSuppr = x.numero; selected = null }
             }) { MarkdownText(md) }
+        }
+    }
+
+    lot?.let { action ->
+        val cibles = if (action == "supprimer") list else list.filter { it.statut !in setOf("annulee", "refuse", "facture") }
+        Dialogue("${if (action == "supprimer") "Supprimer" else if (type == "devis") "Refuser" else "Annuler"} ${cibles.size} ${if (type == "devis") "devis" else "facture(s)"} ?", { lot = null }, actions = {
+            Action("Confirmer") {
+                val faits = cibles.count { x -> if (action == "supprimer") svc.supprimerDocument(x.numero) != null else svc.annuler(x.numero) != null }
+                info = (if (action == "supprimer") "🗑️ $faits document(s) supprimé(s)." else "🚫 $faits document(s) annulé(s) (numéros conservés).") + " Résultat et réserve recalculés."
+                lot = null
+            }
+        }) {
+            Text(cibles.joinToString("\n") { "• ${it.numero} — ${d.client(it.clientId)?.nom.orEmpty()} · ${euro(d.totaux(it).ttc)} TTC" }, color = HudText, fontSize = 13.sp)
+            if (action == "supprimer" && type == "facture") Text("⚠️ Suppression définitive (PDF et notes compris). Une facture déjà envoyée devrait plutôt être annulée : la numérotation doit rester continue.", color = Color(0xFFFF4D6D), fontSize = 12.sp)
         }
     }
 
@@ -898,7 +943,7 @@ private fun EquipeTab(app: JarvisApp) {
 // ---------------------------------------------------------------------- Fiches de paie (création d'un bulletin pour un mois)
 
 @Composable
-private fun FichesPaieTab(app: JarvisApp) {
+private fun FichesPaieTab(app: JarvisApp, onVoirBulletins: () -> Unit) {
     val svc = app.societe
     val d = svc.data
     var empId by remember { mutableStateOf(d.employes.firstOrNull()?.id) }
@@ -908,13 +953,16 @@ private fun FichesPaieTab(app: JarvisApp) {
     var primes by remember { mutableStateOf("0") }
     var bulletin by remember { mutableStateOf<String?>(null) }
     var erreur by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
     fun n(t: String) = t.replace(',', '.').trim().toDoubleOrNull()
     val e = d.employes.firstOrNull { it.id == empId }
+    val activite = LocalContext.current
+    val existant = d.bulletins.firstOrNull { it.employeId == empId && it.mois == mois }
 
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             HudPanel(Modifier.fillMaxWidth(), title = "Création d'une fiche de paie") {
-                Text("⚠️ Estimation simplifiée (taux standards, modifiables dans Réglages). À faire valider par un expert-comptable ou un logiciel de paie.", color = HudDim, fontSize = 12.sp)
+                Text("📡 Cotisations calculées par le moteur officiel de l'URSSAF (taux, plafonds, réduction générale à jour) quand le téléphone a Internet ; sinon estimation locale. À faire valider par un expert-comptable ou un logiciel de paie.", color = HudDim, fontSize = 12.sp)
             }
         }
         if (d.employes.isEmpty()) {
@@ -948,26 +996,112 @@ private fun FichesPaieTab(app: JarvisApp) {
                     Spacer(Modifier.height(6.dp))
                     HudTextField(primes, { primes = it; bulletin = null }, Modifier.fillMaxWidth(), label = "Primes du mois (€, optionnel)")
                     if (erreur.isNotBlank()) { Spacer(Modifier.height(6.dp)); Text(erreur, color = Color(0xFFFF4D6D), fontSize = 12.sp) }
+                    if (existant != null && bulletin == null) { Spacer(Modifier.height(6.dp)); Text("⚠️ Un bulletin existe déjà pour ${e.nom} en ${Rendu.moisLabel(mois)} : le générer à nouveau le remplacera (l'ancien est supprimé, fichiers compris).", color = Color(0xFFFFB020), fontSize = 12.sp) }
                     Spacer(Modifier.height(8.dp))
-                    HudButton("Générer la fiche de paie") {
+                    HudButton(if (existant != null) "Refaire la fiche de paie" else "Générer la fiche de paie") {
                         if (!Regex("\\d{4}-\\d{2}").matches(mois)) { erreur = "Mois invalide (format aaaa-mm)."; return@HudButton }
                         if (mode != 0 && n(saisie) == null) { erreur = "Renseigne une valeur valide."; return@HudButton }
                         erreur = ""
                         val heuresEff = if (mode == 1) n(saisie) else null
                         val netV = if (mode == 2) n(saisie) else null
-                        bulletin = svc.bulletin(e, mois, n(primes) ?: 0.0, heuresEff, netV).first
+                        erreur = "⏳ Calcul des cotisations avec le moteur officiel de l'URSSAF…"
+                        scope.launch {
+                            bulletin = withContext(Dispatchers.IO) { runCatching { svc.bulletin(e, mois, n(primes) ?: 0.0, heuresEff, netV).first }.getOrElse { "❌ ${it.message}" } }
+                            erreur = ""
+                        }
                     }
                 }
             }
             bulletin?.let { md ->
                 item {
                     HudPanel(Modifier.fillMaxWidth(), title = "Bulletin généré") {
+                        val ref = svc.data.bulletins.firstOrNull { it.employeId == empId && it.mois == mois }
+                        if (ref != null) {
+                            Text("✅ Enregistré en PDF (avec le logo) : retrouve-le à tout moment dans « Bulletins générés ».", color = HudDim, fontSize = 12.sp)
+                            Spacer(Modifier.height(6.dp))
+                            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                HudButton("🖨 Imprimer") { erreur = svc.imprimerBulletin(activite, ref) }
+                                HudButton("📄 Ouvrir le PDF") { erreur = svc.ouvrirBulletin(ref) }
+                                HudButton("📤 Partager") { svc.partagerBulletin(ref) }
+                                HudButton("📚 Bulletins") { onVoirBulletins() }
+                            }
+                            Spacer(Modifier.height(8.dp))
+                        }
                         MarkdownText(md)
-                        Spacer(Modifier.height(8.dp))
-                        HudButton("Partager en PDF") { svc.partagerPdf("Bulletin $mois", md) }
                     }
                 }
             }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------- Bulletins générés (consulter, imprimer, supprimer)
+
+@Composable
+private fun BulletinsTab(app: JarvisApp) {
+    val svc = app.societe
+    var tick by remember { mutableIntStateOf(0) }
+    val tous = remember(tick, svc.data.bulletins.size) { svc.bulletins() }
+    var filtreEmp by remember { mutableStateOf<String?>(null) }
+    var filtreAnnee by remember { mutableStateOf<String?>(null) }
+    var voir by remember { mutableStateOf<BulletinRef?>(null) }
+    var supprimer by remember { mutableStateOf<List<BulletinRef>?>(null) }
+    var info by remember { mutableStateOf("") }
+    val activite = LocalContext.current
+    val annees = tous.map { it.mois.take(4) }.distinct()
+    val liste = tous.filter { (filtreEmp == null || it.employeId == filtreEmp) && (filtreAnnee == null || it.mois.startsWith(filtreAnnee!!)) }
+
+    LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item {
+            HudPanel(Modifier.fillMaxWidth(), title = "Bulletins générés") {
+                Text("Chaque fiche de paie est enregistrée en PDF (logo et mentions de la société) : ouvre-la, imprime-la ou partage-la. " +
+                    "Supprimer un bulletin le retire aussi des salaires versés, du résultat et de la réserve. Pour corriger un bulletin, refais-le dans « Fiches de paie » : il remplace l'ancien.",
+                    color = HudDim, fontSize = 12.sp)
+            }
+        }
+        if (tous.isNotEmpty()) item {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    HudChip("Tous", filtreEmp == null) { filtreEmp = null }
+                    tous.map { it.employeId to svc.nomBulletin(it).substringAfter(' ') }.distinctBy { it.first }.forEach { (id, nom) -> HudChip(nom, filtreEmp == id) { filtreEmp = id } }
+                }
+                if (annees.size > 1) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    HudChip("Toutes années", filtreAnnee == null) { filtreAnnee = null }
+                    annees.forEach { a -> HudChip(a, filtreAnnee == a) { filtreAnnee = a } }
+                }
+            }
+        }
+        if (info.isNotBlank()) item { Text(info, color = LocalAccent.current, fontSize = 12.sp) }
+        if (liste.isEmpty()) item { Text("Aucun bulletin enregistré. Crée-en un dans « Fiches de paie » ou dis « fais la fiche de paie de novembre ».", color = HudDim, fontSize = 13.sp) }
+        items(liste, key = { it.id }) { r ->
+            HudPanel(Modifier.fillMaxWidth(), onClick = { voir = r }) {
+                Text("🧾 ${Rendu.moisLabel(r.mois).replaceFirstChar { it.uppercase() }} — ${svc.nomBulletin(r).substringAfter(' ')}", color = HudText, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text("Brut ${euro(r.brut)} · net payé ${euro(r.netAPayer)} · coût employeur ${euro(r.coutEmployeur)}" + (if (r.creeLe.isNotBlank()) " · fait le ${r.creeLe}" else ""), color = HudDim, fontSize = 12.sp)
+                Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Action("📄 PDF") { info = svc.ouvrirBulletin(r) }
+                    Action("🖨 Imprimer") { info = svc.imprimerBulletin(activite, r) }
+                    Action("📤 Partager") { svc.partagerBulletin(r) }
+                    Action("🗑 Supprimer") { supprimer = listOf(r) }
+                }
+            }
+        }
+        if (liste.size > 1) item {
+            HudButton("🗑 Supprimer les ${liste.size} bulletins affichés") { supprimer = liste }
+        }
+    }
+
+    voir?.let { r ->
+        Dialogue(svc.nomBulletin(r), { voir = null }, actions = {
+            Action("🖨 Imprimer") { info = svc.imprimerBulletin(activite, r) }
+            Action("📤 Partager") { svc.partagerBulletin(r) }
+        }) { if (r.md.isNotBlank()) MarkdownText(r.md) else Text("Contenu non conservé (bulletin ancien) : refais-le dans « Fiches de paie » pour le régénérer.", color = HudDim, fontSize = 13.sp) }
+    }
+    supprimer?.let { l ->
+        Dialogue("Supprimer ${l.size} bulletin(s) ?", { supprimer = null }, actions = {
+            Action("Supprimer définitivement") { info = svc.supprimerBulletins(l); supprimer = null; tick++ }
+        }) {
+            Text(l.joinToString("\n") { "• " + svc.nomBulletin(it) }, color = HudText, fontSize = 13.sp)
+            Text("Les PDF et notes du coffre sont effacés, et les montants retirés des salaires versés, du résultat et de la réserve.", color = HudDim, fontSize = 12.sp)
         }
     }
 }
@@ -1045,8 +1179,17 @@ private fun ReglagesTab(app: JarvisApp) {
     var delai by remember { mutableStateOf(s.delaiPaiementJours.toString()) }
     var validite by remember { mutableStateOf(s.validiteDevisJours.toString()) }
     var mentions by remember { mutableStateOf(s.mentions) }
+    var rcs by remember { mutableStateOf(s.rcs) }
+    var ape by remember { mutableStateOf(s.codeApe) }
+    var convention by remember { mutableStateOf(s.conventionCollective) }
+    var urssafOrg by remember { mutableStateOf(s.urssaf) }
+    var estimer by remember { mutableStateOf(s.estimerSalaires) }
     var reserve by remember { mutableStateOf(nombre(s.reservePct)) }
     var partDir by remember { mutableStateOf(nombre(s.partDirigeantPct)) }
+    var chargesMois by remember { mutableStateOf(if (s.chargesMensuelles > 0) nombre(s.chargesMensuelles) else "") }
+    var capital by remember { mutableStateOf(if (s.capitalSocial > 0) nombre(s.capitalSocial) else "") }
+    var reserveLegale by remember { mutableStateOf(if (s.reserveLegaleCumulee > 0) nombre(s.reserveLegaleCumulee) else "") }
+    var distribution by remember { mutableStateOf(nombre(s.distributionPct)) }
     var saved by remember { mutableStateOf("") }
     fun num(t: String) = t.replace(',', '.').trim().toDoubleOrNull()
 
@@ -1101,6 +1244,8 @@ private fun ReglagesTab(app: JarvisApp) {
                     HudTextField(forme, { forme = it }, Modifier.fillMaxWidth(), label = "Forme (EURL, SASU, micro…)")
                     HudTextField(siret, { siret = it }, Modifier.fillMaxWidth(), label = "SIRET")
                     HudTextField(tvaNum, { tvaNum = it }, Modifier.fillMaxWidth(), label = "N° TVA intracommunautaire")
+                    HudTextField(rcs, { rcs = it }, Modifier.fillMaxWidth(), label = "Immatriculation (ex. RCS Dijon 123 456 789)")
+                    HudTextField(ape, { ape = it }, Modifier.fillMaxWidth(), label = "Code APE / NAF (ex. 4321A)")
                     HudTextField(adresse, { adresse = it }, Modifier.fillMaxWidth(), label = "Adresse du siège (départ des déplacements)")
                     HudTextField(tel, { tel = it }, Modifier.fillMaxWidth(), label = "Téléphone")
                     HudTextField(email, { email = it }, Modifier.fillMaxWidth(), label = "Email")
@@ -1118,9 +1263,22 @@ private fun ReglagesTab(app: JarvisApp) {
                     if (tarifsTtc) Text("Les prix que tu saisis pour les tarifs (ci-dessous) sont compris comme TTC et convertis en HT automatiquement selon la TVA.", color = HudDim, fontSize = 11.sp)
                     HudTextField(delai, { delai = it }, Modifier.fillMaxWidth(), label = "Délai de paiement (jours)")
                     HudTextField(validite, { validite = it }, Modifier.fillMaxWidth(), label = "Validité des devis (jours)")
-                    HudTextField(mentions, { mentions = it }, Modifier.fillMaxWidth(), label = "Mentions légales (assurance, RCS…)", singleLine = false)
+                    HudTextField(mentions, { mentions = it }, Modifier.fillMaxWidth(), label = "Mentions complémentaires (assurance décennale…)", singleLine = false)
+                    Text("🧾 Bulletins de paie :", color = HudDim, fontSize = 11.sp)
+                    HudTextField(convention, { convention = it }, Modifier.fillMaxWidth(), label = "Convention collective (ex. Bâtiment ouvriers, IDCC 1597)")
+                    HudTextField(urssafOrg, { urssafOrg = it }, Modifier.fillMaxWidth(), label = "Organisme des cotisations (ex. URSSAF Bourgogne-Franche-Comté)")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        HudChip("Salaires = bulletins enregistrés", !estimer) { estimer = false }
+                        HudChip("Estimer les mois sans bulletin", estimer) { estimer = true }
+                    }
                     HudTextField(reserve, { reserve = it }, Modifier.fillMaxWidth(), label = "Réserve bénéfices (% du HT encaissé)")
                     HudTextField(partDir, { partDir = it }, Modifier.fillMaxWidth(), label = "Part dirigeant de la réserve (%)")
+                    Text("📊 Résultat et dividende — recalculés à chaque facture payée (salaires versés, charges, impôt sur les sociétés, réserve légale) :", color = HudDim, fontSize = 11.sp)
+                    HudTextField(chargesMois, { chargesMois = it }, Modifier.fillMaxWidth(), label = "Charges fixes par mois hors salaires (€)")
+                    HudTextField(capital, { capital = it }, Modifier.fillMaxWidth(), label = "Capital social (€)")
+                    HudTextField(reserveLegale, { reserveLegale = it }, Modifier.fillMaxWidth(), label = "Réserve légale déjà constituée (€)")
+                    HudTextField(distribution, { distribution = it }, Modifier.fillMaxWidth(), label = "Part du bénéfice versée en dividende (%)")
+                    BaremesReglages(app)
                 }
             }
         }
@@ -1171,14 +1329,18 @@ private fun ReglagesTab(app: JarvisApp) {
                             franchiseTva = franchise, tvaDefaut = num(tva) ?: 20.0, tarifsSaisisTtc = tarifsTtc,
                             delaiPaiementJours = delai.toIntOrNull() ?: 30, validiteDevisJours = validite.toIntOrNull() ?: 30,
                             mentions = mentions, reservePct = (num(reserve) ?: 0.0).coerceIn(0.0, 100.0),
-                            partDirigeantPct = (num(partDir) ?: 50.0).coerceIn(0.0, 100.0)
+                            rcs = rcs.trim(), codeApe = ape.trim().uppercase().replace(" ", ""), conventionCollective = convention.trim(),
+                            urssaf = urssafOrg.trim(), estimerSalaires = estimer,
+                            partDirigeantPct = (num(partDir) ?: 50.0).coerceIn(0.0, 100.0),
+                            chargesMensuelles = (num(chargesMois) ?: 0.0).coerceAtLeast(0.0), capitalSocial = (num(capital) ?: 0.0).coerceAtLeast(0.0),
+                            reserveLegaleCumulee = (num(reserveLegale) ?: 0.0).coerceAtLeast(0.0), distributionPct = (num(distribution) ?: 100.0).coerceIn(0.0, 100.0)
                         ),
                         regles = Regles(
                             Pricing.parserSeuils(fid), Pricing.parserSeuils(vol), cumul, num(rmax) ?: 0.0,
                             it.regles.remiseSurDeplacement, num(kmPrix) ?: 0.0, num(kmGratuit) ?: 0.0, num(depMin) ?: 0.0, ar
                         ),
                         paie = it.paie.copy(
-                            cadre = cadre, plafondSecu = num(plafondSecu) ?: 3925.0,
+                            cadre = cadre, plafondSecu = num(plafondSecu) ?: 4005.0,
                             tauxAtmp = num(tauxAtmp) ?: 1.2, tauxFormationPct = num(tauxFormation) ?: 0.55
                         )
                     )
@@ -1339,4 +1501,30 @@ private fun partagerDiagnosticClient(
         addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     context.startActivity(android.content.Intent.createChooser(partage, "Partager le diagnostic JARVIS"))
+}
+
+/** Barèmes officiels (URSSAF) : date de la dernière vérification, valeurs, mise à jour immédiate, application automatique. */
+@Composable
+private fun BaremesReglages(app: JarvisApp) {
+    val svc = app.societe
+    val scope = rememberCoroutineScope()
+    var tick by remember { mutableStateOf(0) }
+    var message by remember { mutableStateOf("") }
+    val b = remember(tick) { svc.data.baremes }
+    val auto = remember(tick) { svc.data.societe.baremesAuto }
+    Spacer(Modifier.height(6.dp))
+    Text("📡 Barèmes officiels (URSSAF) — vérifiés automatiquement chaque semaine", color = HudText, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+    Text(if (b.valide()) "Relevés le ${b.dateMaj} : plafond Sécu ${euro(b.pmss)} · IS ${nombre(b.isTauxReduit)} % jusqu'à ${euro(b.isPlafondReduit)} puis ${nombre(b.isTauxNormal)} % · dividendes ${nombre(b.pfuPct)} %"
+        else "Pas encore relevés (il faut Internet).", color = HudDim, fontSize = 11.sp)
+    if (b.erreur.isNotBlank()) Text("⚠️ ${b.erreur}", color = HudDim, fontSize = 11.sp)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        HudChip("Appliquer automatiquement", auto) {
+            svc.repo.update { it.copy(societe = it.societe.copy(baremesAuto = !auto)) }; tick++
+        }
+        HudButton("Vérifier maintenant") {
+            message = "⏳ Interrogation de l'URSSAF…"
+            scope.launch { message = withContext(Dispatchers.IO) { runCatching { svc.actualiserBaremes().substringBefore("\n\n# ") }.getOrElse { "❌ ${it.message}" } }; tick++ }
+        }
+    }
+    if (message.isNotBlank()) Text(message.replace("**", ""), color = LocalAccent.current, fontSize = 11.sp)
 }

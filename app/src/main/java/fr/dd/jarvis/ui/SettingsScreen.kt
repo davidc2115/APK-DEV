@@ -98,6 +98,42 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 HudTextField(store.userName.value, { store.userName.set(it) }, label = "Ton prénom (pour les salutations)")
             }
         },
+        VoletReglages("general", "batterie", "Mode de fonctionnement Jarvis", "performance equilibré équilibre economie energie cpu processeur ram ressources vitesse") {
+            PerformancePanel(app)
+        },
+        VoletReglages("general", "rappels", "Sonnerie des rappels", "rappel sonnerie tonalite notification choisir tester vibration") {
+            var actualisationSonnerie by remember { mutableIntStateOf(0) }
+            val choisirSonnerie = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { resultat ->
+                if (resultat.resultCode == android.app.Activity.RESULT_OK) {
+                    val uri = resultat.data?.getParcelableExtra<Uri>(android.media.RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
+                    fr.dd.jarvis.device.Rappels.definirSonnerie(ctx, uri)
+                    actualisationSonnerie++
+                }
+            }
+            HudPanel(Modifier.fillMaxWidth(), title = "⏰ Sonnerie des rappels") {
+                val sonnerieAffichee = remember(actualisationSonnerie) { fr.dd.jarvis.device.Rappels.nomSonnerie(ctx) }
+                Text("Sonnerie actuelle : " + sonnerieAffichee, color = HudText, fontSize = 12.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HudButton("Choisir une sonnerie", filled = true) {
+                        val intent = Intent(android.media.RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+                            putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_TYPE, android.media.RingtoneManager.TYPE_NOTIFICATION)
+                            putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_TITLE, "Sonnerie des rappels JARVIS")
+                            putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
+                            putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_DEFAULT_URI,
+                                android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION))
+                            putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
+                            putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, fr.dd.jarvis.device.Rappels.sonnerieUri(ctx))
+                        }
+                        choisirSonnerie.launch(intent)
+                    }
+                    HudButton("Tester") {
+                        fr.dd.jarvis.device.Rappels.testerSonnerie(ctx)
+                        actualisationSonnerie++
+                    }
+                }
+                Text("Le choix est enregistré pour les prochains rappels. Android conserve aussi ses propres réglages de volume, de mode silencieux et d'autorisation des notifications.", color = HudDim, fontSize = 11.sp)
+            }
+        },
         VoletReglages("general", "apparence", "Mode présence", "presence dragon plein ecran charge horloge") {
             HudPanel(Modifier.fillMaxWidth(), title = "🐉 Mode présence (plein écran)") {
                 HudChip(if (store.presenceAuto.value) "🐉 Mode présence automatique : oui" else "Mode présence automatique : non", store.presenceAuto.value) { store.presenceAuto.set(!store.presenceAuto.value) }
@@ -330,7 +366,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     }
                 },
                 onTest = { app.llm.testGeminiKeys() },
-                modelLabel = "Modèle Gemini", model = store.geminiModel.value, onModel = { store.geminiModel.set(it) },
+                modelLabel = "Modèle Gemini", model = store.geminiModel.value, onModel = { store.geminiModel.set(it.trim().removePrefix("models/")) },
                 onListModels = { app.llm.listGeminiModels() }
             )
         },
@@ -460,6 +496,17 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 }
                 if (vitesse.isNotBlank()) Text(vitesse, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
                 Spacer(Modifier.height(8.dp))
+                Text("IA du moteur Hermès", color = HudDim, fontSize = 12.sp)
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("gemini" to "Gemini d'abord (précis, recommandé)", "groq" to "Groq d'abord (compacté)").forEach { (id, nom) ->
+                        HudChip(nom, selected = store.relaisHermes.value == id) { store.relaisHermes.set(id) }
+                    }
+                }
+                Text("Gemini reçoit toute la demande (consignes, mémoire, notes, outils) en un appel ; Groq, limité à quelques milliers de jetons par minute, " +
+                    "ne reçoit qu'une version raccourcie et fait attendre quand son quota est atteint. Chacun sert de secours à l'autre." +
+                    (if (app.llm.fournisseurHermes.isNotBlank()) " Dernier tour : ${app.llm.fournisseurHermes}." else ""),
+                    color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+                Spacer(Modifier.height(8.dp))
                 Text("Répartition des demandes", color = HudDim, fontSize = 12.sp)
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf("tout" to "Hermès pour tout (recommandé)", "auto" to "Jarvis d'abord", "off" to "Jarvis seul").forEach { (id, nom) ->
@@ -468,10 +515,10 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 }
                 Text(
                     when (store.hermesMode.value) {
-                        "tout" -> "Toutes les demandes passent par Hermès (réponses marquées 🪽) : mémoire longue, notes, skills et plugins, " +
-                            "confie les actions du téléphone à l'agent Jarvis, le travail lourd à ses sous-agents Gemini et Groq, et crée tes automatismes. " +
-                            "Seules les commandes instantanées du téléphone (lampe torche, volume, Wi-Fi, Bluetooth, lecture/pause) sont exécutées directement, sans IA. " +
-                            "Si Hermès est hors ligne, Jarvis répond à sa place et le signale (⚠️)."
+                        "tout" -> "Hermès répond aux questions, recherches, rédactions, automatismes et au serveur (réponses marquées 🪽) : mémoire longue, notes, skills et plugins, " +
+                            "sous-agents Gemini et Groq. Les ACTIONS (téléphone, appels, SMS, mails, agenda, rappels, maison, Plex, Freebox, société, fichiers…) sont faites " +
+                            "directement par Jarvis quand « Actions par Jarvis » est activé — les plus courantes sans IA du tout — ; s'il n'y arrive pas, Hermès prend le relais. " +
+                            "Si Hermès est hors ligne, Jarvis répond à sa place et le signale (⚠️). Demande « que sais-tu faire ? » pour la liste complète."
                         "off" -> "Jarvis répond uniquement avec sa partie rapide ; le moteur approfondi (Hermès) n'est pas utilisé."
                         else -> "Jarvis et Hermès ne forment qu'un seul assistant : une voix, une conversation, une mémoire. " +
                             "Jarvis répond tout de suite avec sa partie rapide ; si ce n'est pas suffisant (pas d'outil, rien trouvé, information manquante, erreur), " +
@@ -480,10 +527,10 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     },
                     color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp)
                 )
-                if (store.hermesMode.value == "tout") {
+                if (store.hermesMode.value != "off") {
                     Spacer(Modifier.height(6.dp))
-                    HudChip(if (store.hermesRapide.value) "⚡ Réponses rapides : oui" else "Réponses rapides : non", store.hermesRapide.value) { store.hermesRapide.set(!store.hermesRapide.value) }
-                    Text("Commandes simples (appel, SMS, musique, lumières, chauffage, agenda, rappel…) faites directement par Jarvis, en un seul appel d'IA ; Hermès prend le relais s'il n'y arrive pas.",
+                    HudChip(if (store.hermesRapide.value) "⚡ Actions par Jarvis : oui" else "Actions par Jarvis : non", store.hermesRapide.value) { store.hermesRapide.set(!store.hermesRapide.value) }
+                    Text("Actions (téléphone, appels, SMS, mails, agenda, rappels, maison, Plex, société, fichiers…) faites directement par Jarvis, sans passer par Hermès ; Hermès prend le relais s'il n'y arrive pas.",
                         color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
                 }
                 Spacer(Modifier.height(8.dp))
@@ -739,6 +786,23 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 Text("Couper la parole : si tu reparles pendant que JARVIS répond, il se tait et t'écoute. Mode duplex (haut-parleur du téléphone seulement) : sa voix passe en mode « appel » le temps de la réponse, pour que l'annulation d'écho du téléphone ne confonde pas sa voix avec la tienne — la coupure est bien plus fiable. Le volume suit alors celui des appels ; désactive-le si la voix te semble trop faible.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
                 Spacer(Modifier.height(6.dp))
                 HudChip(if (store.muteBeeps.value) "🔇 Bips coupés pendant l'écoute" else "Bips actifs", store.muteBeeps.value) { store.muteBeeps.set(!store.muteBeeps.value) }
+                // Journal de l'écoute : qui a détecté « Jarvis », qui a bipé, qui a ouvert le micro.
+                var journal by remember { mutableStateOf<String?>(null) }
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    HudChip(if (journal == null) "🔎 Journal de l'écoute" else "Masquer le journal", journal != null) {
+                        journal = if (journal == null) fr.dd.jarvis.voice.JournalVoix.texte() else null
+                    }
+                    if (journal != null) {
+                        HudChip("Copier", false) {
+                            runCatching { (ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                                .setPrimaryClip(android.content.ClipData.newPlainText("Journal écoute JARVIS", journal)) }
+                        }
+                        HudChip("Effacer", false) { fr.dd.jarvis.voice.JournalVoix.vider(); journal = fr.dd.jarvis.voice.JournalVoix.texte() }
+                    }
+                }
+                journal?.let { Text(it, color = HudDim, fontSize = 10.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, modifier = Modifier.padding(top = 4.dp)) }
+                if (journal != null) Text("Reproduis le problème (dis « Jarvis »…), rouvre ce journal et envoie-le : chaque bip y est noté avec le système qui l'a joué.", color = HudDim, fontSize = 11.sp)
             }
         },
         VoletReglages("voix", "voix", "Voix de JARVIS", "voix naturelle gemini personnage android tts homme femme") {
@@ -1008,6 +1072,30 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     "Les commandes shell demandent toujours une confirmation, quel que soit ce réglage.",
                     color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp)
                 )
+                // « Toujours autoriser » : actions qui ne demandent plus de confirmation (révocables une par une).
+                var autorisees by remember { mutableStateOf(fr.dd.jarvis.device.Autorisations.permanentes(app)) }
+                Spacer(Modifier.height(8.dp))
+                Text("✅ Toujours autorisé (choisi avec « Toujours » sur l'écran de confirmation) :", color = HudText, fontSize = 12.sp)
+                if (autorisees.isEmpty()) Text("Rien pour l'instant : chaque action sensible demande confirmation.", color = HudDim, fontSize = 11.sp)
+                autorisees.forEach { cle ->
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
+                        Text("• " + fr.dd.jarvis.device.Autorisations.libelle(cle), color = HudText, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                        HudButton("Retirer") { fr.dd.jarvis.device.Autorisations.retirer(app, cle); autorisees = fr.dd.jarvis.device.Autorisations.permanentes(app) }
+                    }
+                }
+                Text("Les suppressions, effacements définitifs, déverrouillages et paiements restent toujours confirmés.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                // « Toujours pour cette commande » : commandes précises (même outil, mêmes réglages).
+                var commandes by remember { mutableStateOf(fr.dd.jarvis.device.Autorisations.commandes(app)) }
+                Spacer(Modifier.height(8.dp))
+                Text("✅ Commandes précises autorisées (« Toujours pour cette commande ») :", color = HudText, fontSize = 12.sp)
+                if (commandes.isEmpty()) Text("Aucune.", color = HudDim, fontSize = 11.sp)
+                commandes.forEach { (cle, libelle, _) ->
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
+                        Text("• $libelle", color = HudText, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                        HudButton("Retirer") { fr.dd.jarvis.device.Autorisations.retirerCommande(app, cle); commandes = fr.dd.jarvis.device.Autorisations.commandes(app) }
+                    }
+                }
+                Text("Une commande précise peut aussi être une suppression : seule cette même commande, avec les mêmes réglages, passe sans question. Déverrouillage, paiement et secrets restent toujours confirmés.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
             }
         },
         VoletReglages("telephone", "applis", "Applications par défaut", "applications defaut itineraire musique waze maps") {
@@ -1384,7 +1472,9 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 }
             }
         },
-        VoletReglages("agents", "modes", "Modes automatiques", "modes automatiques voiture chantier nuit maison") {
+        VoletReglages("agents", "modes", "Modes", "modes a la demande creer modifier supprimer mode cinema nuit vacances automatiques voiture chantier maison") {
+            fr.dd.jarvis.ui.SystemesPanel(app, onAsk)
+            Spacer(Modifier.height(10.dp))
             HudPanel(Modifier.fillMaxWidth(), title = "🌙 Modes automatiques") {
                 Text("JARVIS adapte ses réponses, sa voix et ses notifications : 🚗 voiture (Android Auto), 👷 chantier (à moins de 250 m d'une installation cliente), 🌙 nuit, 🏠 maison (au siège).", color = HudDim, fontSize = 11.sp)
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { store.modesAuto.set(!store.modesAuto.value) }) {
@@ -1434,6 +1524,9 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 }
                 Text("Suppressions, envois de mails et SMS, paiements, redémarrages : après ton « oui », JARVIS demande ton empreinte. À la voix, ces actions ne passent que si le téléphone est déverrouillé.", color = HudDim, fontSize = 11.sp)
             }
+        },
+        VoletReglages("securite", "systemes", "Systèmes et modes", "systeme securite mode telephone securise maison securisee alarme camera mms deverrouillage voix code") {
+            fr.dd.jarvis.ui.SystemesPanel(app, onAsk)
         },
         VoletReglages("securite", "coffre", "Coffre-fort", "coffre-fort serveur sauvegarde societe donnees salaries recuperation") {
             fr.dd.jarvis.ui.CoffrePanel(app)
@@ -1504,7 +1597,6 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 AgentStatusRow("Gemini · " + store.geminiModel.value, store.geminiKeys.isNotEmpty(), "${store.geminiKeys.size} clé(s)")
                 AgentStatusRow("OpenAI · " + store.openaiModel.value, store.openaiKeys.isNotEmpty(), "${store.openaiKeys.size} clé(s)")
                 AgentStatusRow("Cloudflare Workers AI", store.cfAccounts.isNotEmpty(), "${store.cfAccounts.size} compte(s)")
-                AgentStatusRow("Ollama · serveur de la maison (secours)", fr.dd.jarvis.ai.Ollama.configure(app), if (fr.dd.jarvis.ai.Ollama.configure(app)) fr.dd.jarvis.ai.Ollama.etat else "désactivé ou sans adresse")
                 AgentStatusRow("fal.ai · vidéo", store.falApiKey.value.isNotBlank(), if (store.falApiKey.value.isNotBlank()) "clé configurée" else "non configuré")
                 AgentStatusRow("Hugging Face", store.huggingFaceToken.value.isNotBlank(), if (store.huggingFaceToken.value.isNotBlank()) "jeton configuré" else "non configuré")
                 val external = store.externalProvidersConfigured()
@@ -1828,6 +1920,10 @@ private fun ServeurPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvi
         Text("Home Assistant", color = HudText, fontSize = 13.sp)
         HudTextField(store.haUrl.value, { store.haUrl.set(it) }, Modifier.fillMaxWidth(), label = "Adresse (ex. http://192.168.1.20:8123)")
         Spacer(Modifier.height(6.dp))
+        HudTextField(store.haUrlDistant.value, { store.haUrlDistant.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Adresse hors de la maison (ex. https://xxx.ui.nabu.casa, optionnel)")
+        Text("JARVIS parle toujours directement à Home Assistant avec le jeton : adresse locale à la maison, adresse extérieure dehors " +
+            "(ou celle ouverte depuis l'onglet Wi-Fi). Le serveur SSH n'est utilisé que si tu parles du « serveur ».", color = HudDim, fontSize = 11.sp)
+        Spacer(Modifier.height(6.dp))
         HudTextField(store.haToken.value, { store.haToken.set(it) }, Modifier.fillMaxWidth(), label = "Jeton d'accès longue durée (profil HA)", password = true)
         Spacer(Modifier.height(10.dp))
         Text("Serveur SSH", color = HudText, fontSize = 13.sp)
@@ -1863,22 +1959,6 @@ private fun ServeurPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvi
         Spacer(Modifier.height(6.dp))
         HudTextField(store.ghToken.value, { store.ghToken.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Jeton GitHub (optionnel : dépôts privés, plus de requêtes)", password = true)
         Spacer(Modifier.height(10.dp))
-        Text("Ollama — IA locale de secours (serveur de la maison)", color = HudText, fontSize = 13.sp)
-        Text("Utilisée quand Groq, Gemini et Cloudflare ne répondent plus (quotas, pas d'internet) et proposée à Hermès comme sous-agent « jarvis-ollama ». Adresse vide = le serveur SSH ci-dessus, port 11434 ; si Ollama n'écoute que sur le serveur lui-même, Jarvis passe par un tunnel SSH.", color = HudDim, fontSize = 11.sp)
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { store.ollamaActif.set(!store.ollamaActif.value) }) {
-            Text((if (store.ollamaActif.value) "✅ " else "⬜ ") + "Utiliser Ollama en secours", color = HudText, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
-        }
-        HudTextField(store.ollamaUrl.value, { store.ollamaUrl.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Adresse d'Ollama (vide = serveur SSH:11434, ex. 192.168.1.30:11434)")
-        Spacer(Modifier.height(6.dp))
-        HudTextField(store.ollamaModele.value, { store.ollamaModele.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Modèle (vide = choix automatique, ex. qwen2.5:1.5b)")
-        Spacer(Modifier.height(6.dp))
-        HudButton(if (busy) "Test…" else "Tester Ollama", Modifier.fillMaxWidth(), enabled = !busy && fr.dd.jarvis.ai.Ollama.configure(app)) {
-            scope.launch {
-                busy = true
-                msg = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { fr.dd.jarvis.ai.Ollama.tester(app) }.getOrElse { "❌ Ollama : ${it.message}" } }
-                busy = false
-            }
-        }
         Spacer(Modifier.height(8.dp))
         Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             HudButton(if (busy) "Test…" else "Tester HA", enabled = !busy && fr.dd.jarvis.ai.Serveur.haConfigure(app)) {

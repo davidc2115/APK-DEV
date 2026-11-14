@@ -2,6 +2,10 @@ package fr.dd.jarvis.device
 
 import fr.dd.jarvis.JarvisApp
 import fr.dd.jarvis.societe.core.normaliser
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 
 /**
  * Notes de l'utilisateur utiles pour LA demande en cours, injectées en tête de réflexion des deux cerveaux :
@@ -47,7 +51,7 @@ object NotesPertinentes {
 
     /** Bloc à placer dans le prompt (vide s'il n'y a rien d'utile). */
     suspend fun pour(app: JarvisApp, demande: String): String = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-        kotlinx.coroutines.withTimeoutOrNull(2500) { calculer(app, demande) }.orEmpty()
+        kotlinx.coroutines.withTimeoutOrNull(1200) { calculer(app, demande) }.orEmpty()
     }
 
     private suspend fun calculer(app: JarvisApp, demande: String): String {
@@ -77,8 +81,16 @@ object NotesPertinentes {
         }
         // 3. Notes Obsidian dont le titre correspond (index du coffre, lecture des 2 meilleures seulement).
         runCatching {
-            val candidats = mots.filter { it.length >= 4 }.sortedByDescending { it.length }.take(4)
-                .flatMap { m -> runCatching { app.knowledgeRepository.searchNodes(m, 15) }.getOrDefault(emptyList()) }
+            // Les recherches de titres sont indépendantes : les lancer en parallèle évite d'additionner
+            // quatre latences d'index Obsidian sur chaque demande spécialisée.
+            val recherches = coroutineScope {
+                mots.filter { it.length >= 4 }.sortedByDescending { it.length }.take(4).map { mot ->
+                    async(Dispatchers.IO) {
+                        runCatching { app.knowledgeRepository.searchNodes(mot, 15) }.getOrDefault(emptyList())
+                    }
+                }.awaitAll()
+            }
+            val candidats = recherches.flatten()
                 .filter { it.sourcePath.endsWith(".md", true) && !it.sourcePath.contains("Mémoire JARVIS") && !it.sourcePath.contains("Mémoire Hermès") && !it.sourcePath.contains(Carnet.DOSSIER) }
                 .distinctBy { it.sourcePath }
                 .map { it to score(it.title, mots) }.filter { it.second > 0 }.sortedByDescending { it.second }.take(2)

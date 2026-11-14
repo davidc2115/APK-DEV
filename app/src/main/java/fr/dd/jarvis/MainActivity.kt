@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.Hub
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -125,6 +126,20 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        // Retour dans JARVIS : la confirmation en attente s'affiche dans l'application, la fenêtre flottante disparaît.
+        fr.dd.jarvis.service.ConfirmationNotification.appVisible = true
+        fr.dd.jarvis.service.ConfirmationNotification.annuler(applicationContext)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Sortie de JARVIS avec une confirmation en attente : elle passe en fenêtre flottante (ou notification).
+        fr.dd.jarvis.service.ConfirmationNotification.appVisible = false
+        vm.pendingConfirm?.let { fr.dd.jarvis.service.ConfirmationNotification.afficher(applicationContext, it) }
+    }
+
     override fun onResume() {
         super.onResume()
         appliquerModePresenceVerrouillage(
@@ -143,6 +158,20 @@ class MainActivity : ComponentActivity() {
 
 
     /** Réponse à une confirmation depuis la bannière système, même si une autre application était affichée. */
+    /** « Jarvis, déverrouille » (voix vérifiée) sans code enregistré : réveille l'écran et affiche empreinte / visage / code. */
+    private fun handleDeverrouiller(i: android.content.Intent?) {
+        if (i?.action != fr.dd.jarvis.securite.TelephoneSecurise.ACTION_DEVERROUILLER) return
+        i.action = null
+        if (android.os.Build.VERSION.SDK_INT >= 27) {
+            setShowWhenLocked(true); setTurnScreenOn(true)
+            (getSystemService(KEYGUARD_SERVICE) as android.app.KeyguardManager).requestDismissKeyguard(this, object : android.app.KeyguardManager.KeyguardDismissCallback() {
+                override fun onDismissSucceeded() { setShowWhenLocked(false) }
+                override fun onDismissCancelled() { setShowWhenLocked(false) }
+                override fun onDismissError() { setShowWhenLocked(false) }
+            })
+        }
+    }
+
     private fun handleConfirmation(i: android.content.Intent?) {
         if (i?.action != fr.dd.jarvis.service.ConfirmationNotification.ACTION) return
         vm.answerConfirm(i.getBooleanExtra(fr.dd.jarvis.service.ConfirmationNotification.EXTRA_OK, false))
@@ -173,6 +202,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        handleDeverrouiller(intent)
         handleConfirmation(intent)
         handleListen(intent)
         handleSharedVideo(intent)
@@ -233,6 +263,7 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
         )
         val app = application as JarvisApp
+        handleDeverrouiller(intent)
         handleConfirmation(intent)
         if (app.store.wakeOn.value && !fr.dd.jarvis.service.JarvisService.running &&
             checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -270,6 +301,7 @@ private val tabs = listOf(
     Tab("Contacts", Icons.Filled.Contacts),
     Tab("Société", Icons.Filled.Business),
     Tab("Graphe", Icons.Filled.Hub),
+    Tab("Wi-Fi", Icons.Filled.Wifi),
     Tab("Réglages", Icons.Filled.Settings)
 )
 
@@ -278,6 +310,8 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
                  demandeExterne: androidx.compose.runtime.MutableState<String> = androidx.compose.runtime.mutableStateOf("")) {
     val ctx = LocalContext.current
     val accent = LocalAccent.current
+    // Une seule fenêtre de confirmation, visible quel que soit l'onglet (la fenêtre flottante ne sert qu'hors de JARVIS).
+    fr.dd.jarvis.ui.ConfirmationJarvis(vm)
     // Android 13+ bloque toutes les notifications tant que l'autorisation runtime
     // n'a pas été accordée. Sans cette demande, minuteurs et chronomètre pouvaient
     // être lancés en interne tout en restant totalement invisibles.
@@ -303,7 +337,13 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
     }
     androidx.activity.compose.BackHandler(enabled = terrain.isNotEmpty()) { terrain = "" }
     LaunchedEffect(terrainDemande.value) {
-        if (terrainDemande.value.isNotBlank()) { terrain = terrainDemande.value; tab = 0; terrainDemande.value = "" }
+        if (terrainDemande.value.isNotBlank()) {
+            val t = terrainDemande.value
+            // « wifi », « wifi_lies » : l'onglet Wi-Fi (et son sous-onglet « Liés à Jarvis »).
+            if (t.startsWith("wifi")) { terrain = ""; tab = 7; fr.dd.jarvis.ui.OngletWifi.lies.value = t == "wifi_lies" }
+            else { terrain = t; tab = 0 }
+            terrainDemande.value = ""
+        }
     }
     LaunchedEffect(demandeExterne.value) {
         if (demandeExterne.value.isNotBlank()) { vm.send(demandeExterne.value); terrain = ""; tab = 1; demandeExterne.value = "" }
@@ -364,6 +404,7 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
                 4 -> ContactsScreen(app)
                 5 -> SocieteScreen(app)
                 6 -> GraphScreen(app)
+                7 -> fr.dd.jarvis.ui.AppareilsWifiScreen(app, demander)
                 else -> SettingsScreen(app) { vm.send(it) }
             }
         }

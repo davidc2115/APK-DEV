@@ -19,13 +19,54 @@ object Rendu {
         mapOf(
             "societe_nom" to nom, "societe_forme" to forme, "societe_adresse" to adresse, "societe_tel" to tel,
             "societe_email" to email, "societe_siret" to siret, "societe_tva" to tvaNum, "societe_iban" to iban,
-            "societe_bic" to bic, "societe_mentions" to mentions
+            "societe_bic" to bic, "societe_mentions" to mentions,
+            "societe_rcs" to rcs, "societe_ape" to codeApe, "societe_convention" to conventionCollective,
+            "societe_capital" to (if (capitalSocial > 0) euro(capitalSocial) else ""),
+            "societe_forme_capital" to formeCapital(d.societe), "societe_identite" to identiteLegale(d)
         )
     }
 
-    fun conditions(d: SocieteData, doc: Doc): String =
-        if (doc.type == "devis") "Devis valable ${d.societe.validiteDevisJours} jours. Règlement à ${d.societe.delaiPaiementJours} jours à réception de facture."
-        else "Paiement à ${d.societe.delaiPaiementJours} jours. En cas de retard : pénalités au taux de trois fois le taux d'intérêt légal et indemnité forfaitaire de recouvrement de 40 €. Pas d'escompte pour paiement anticipé."
+    /** « SAS au capital de 1 000 € » (ou la forme seule). */
+    fun formeCapital(s: Societe): String = listOf(s.forme.trim(), if (s.capitalSocial > 0) "au capital de ${euro(s.capitalSocial)}" else "")
+        .filter { it.isNotBlank() }.joinToString(" ")
+
+    /** Mentions légales de la société en une ligne (pied de page de tous ses documents). */
+    fun identiteLegale(d: SocieteData): String = with(d.societe) {
+        listOf(
+            listOf(nom.trim(), formeCapital(this)).filter { it.isNotBlank() }.joinToString(", "),
+            adresse.trim(),
+            if (siret.isNotBlank()) "SIRET $siret" else "",
+            rcs.trim(),
+            if (codeApe.isNotBlank()) "APE $codeApe" else "",
+            if (tvaNum.isNotBlank()) "TVA $tvaNum" else ""
+        ).filter { it.isNotBlank() }.joinToString(" · ").takeIf { nom.isNotBlank() } ?: ""
+    }
+
+    fun conditions(d: SocieteData, doc: Doc): String {
+        val s = d.societe
+        if (doc.type == "devis") return "Devis gratuit, valable ${s.validiteDevisJours} jours à compter de sa date d'émission. " +
+            "Règlement à ${s.delaiPaiementJours} jours à réception de la facture."
+        val pro = d.client(doc.clientId)?.type == "professionnel"
+        val echeance = if (doc.echeance.isNotBlank()) " (au plus tard le ${dateFr(doc.echeance)})" else ""
+        return "Paiement à ${s.delaiPaiementJours} jours$echeance. " +
+            (if (pro) "En cas de retard de paiement : pénalités au taux de trois fois le taux d'intérêt légal, exigibles dès le lendemain de l'échéance, " +
+                "et indemnité forfaitaire pour frais de recouvrement de 40 € (articles L441-10 et D441-5 du Code de commerce)."
+            else "En cas de retard de paiement : pénalités au taux d'intérêt légal en vigueur.") +
+            " Pas d'escompte pour paiement anticipé."
+    }
+
+    /** Bloc « émetteur | client » ligne par ligne (les lignes vides des deux côtés sont omises). */
+    private fun entete(d: SocieteData, c: Client?): List<Map<String, String>> {
+        val s = d.societe
+        val g = listOf("**${s.nom}**", formeCapital(s), s.adresse, if (s.siret.isNotBlank()) "SIRET : ${s.siret}" else "", s.rcs,
+            if (s.codeApe.isNotBlank()) "Code APE : ${s.codeApe}" else "", if (s.tvaNum.isNotBlank()) "TVA intracommunautaire : ${s.tvaNum}" else "",
+            listOf(if (s.tel.isNotBlank()) "Tél. ${s.tel}" else "", s.email).filter { it.isNotBlank() }.joinToString(" · ")).filter { it.isNotBlank() && it != "****" }
+        val dr = if (c == null) emptyList() else listOf("**${c.nom}**", if (c.contact.isNotBlank()) "À l'attention de ${c.contact}" else "", c.adresse,
+            if (c.siren.isNotBlank()) "SIREN : ${c.siren}" else "", if (c.tvaNum.isNotBlank()) "TVA intracommunautaire : ${c.tvaNum}" else "",
+            listOf(if (c.tel.isNotBlank()) "Tél. ${c.tel}" else "", c.email).filter { it.isNotBlank() }.joinToString(" · ")).filter { it.isNotBlank() }
+        val n = maxOf(g.size, dr.size)
+        return (0 until n).map { i -> mapOf("gauche" to g.getOrElse(i) { "" }, "droite" to dr.getOrElse(i) { "" }) }
+    }
 
     fun docCtx(d: SocieteData, doc: Doc): Ctx {
         val c = d.client(doc.clientId)
@@ -48,7 +89,15 @@ object Rendu {
             "remise_info" to doc.remiseInfo,
             "tva_mention" to (if (franchise) "TVA non applicable, art. 293 B du CGI." else ""),
             "notes" to doc.notes, "conditions" to conditions(d, doc),
-            "signature" to (if (doc.type == "devis") "1" else "")
+            "signature" to (if (doc.type == "devis") "1" else ""),
+            "type_label_maj" to (if (doc.type == "devis") "DEVIS" else "FACTURE"),
+            "date_prestation" to dateFr(doc.datePrestation.ifBlank { doc.date }),
+            "nature" to "Prestation de services (maintenance et entretien d'installations photovoltaïques)",
+            "client_siren" to (c?.siren ?: ""), "client_tva" to (c?.tvaNum ?: ""), "client_type" to (c?.type ?: ""),
+            "client_tel" to (c?.tel ?: ""), "client_email" to (c?.email ?: ""),
+            "facture" to (if (doc.type == "facture") "1" else ""), "devis" to (if (doc.type == "devis") "1" else ""),
+            "net_a_payer" to euro(t.ttc),
+            "mode_paiement" to doc.modePaiement, "paye_le" to (if (doc.payeLe.isBlank()) "" else dateFr(doc.payeLe))
         )
         val lignes = doc.lignes.map {
             mapOf(
@@ -56,13 +105,14 @@ object Rendu {
                 "qte" to nombre(it.qte), "unite" to it.unite,
                 "pu_ht" to euro(it.puHt),
                 "remise" to (if (it.remisePct > 0) "${nombre(it.remisePct)} %" else "–"),
+                "tva" to (if (franchise) "–" else "${nombre(it.tva)} %"),
                 "total_ht" to euro(Pricing.totalLigne(it))
             )
         }
         val tva = if (franchise) emptyList() else t.tvaParTaux.map { (taux, base, m) ->
             mapOf("taux" to nombre(taux), "base" to euro(base), "montant" to euro(m))
         }
-        return Ctx(vars, mapOf("lignes" to lignes, "tva_lignes" to tva))
+        return Ctx(vars, mapOf("lignes" to lignes, "tva_lignes" to tva, "entete" to entete(d, c)))
     }
 
     /** Coordonnées GPS d'une installation au format Google Maps (vides si inconnues). */
@@ -135,8 +185,8 @@ object Rendu {
             "taux_pas" to nombre(b.tauxPas), "pas" to euro(b.pas), "net_a_payer" to euro(b.netAPayer),
             "net_a_payer_num" to num(b.netAPayer),
             "charges_patronales" to euro(b.totalChargesPatronales), "cout_employeur" to euro(b.coutEmployeur),
-            "avertissement" to AVERTISSEMENT_PAIE
-        )
+            "avertissement" to b.source.ifBlank { AVERTISSEMENT_PAIE }
+        ) + bulletinPro(d, b)
         val lignes = b.lignes.map {
             mapOf(
                 "libelle" to it.libelle, "base" to euro(it.base),
@@ -150,7 +200,83 @@ object Rendu {
                 "montant_pat" to (if (it.montantPatronal > 0) euro(it.montantPatronal) else "—")
             )
         }
-        return Ctx(vars, mapOf("cotisations" to lignes))
+        return Ctx(vars, mapOf("cotisations" to lignes, "rubriques" to rubriques(b), "entete" to entetePaie(d, b)))
+    }
+
+    /** Rubriques du bulletin clarifié (arrêté du 25 février 2016), dans l'ordre officiel. */
+    private val RUBRIQUES = listOf(
+        "SANTÉ", "ACCIDENTS DU TRAVAIL - MALADIES PROFESSIONNELLES", "RETRAITE", "FAMILLE", "ASSURANCE CHÔMAGE",
+        "AUTRES CONTRIBUTIONS DUES PAR L'EMPLOYEUR", "CSG / CRDS", "EXONÉRATIONS, ÉCRÊTEMENTS ET ALLÈGEMENTS DE COTISATIONS"
+    )
+
+    internal fun rubrique(libelle: String): Int {
+        val n = normaliser(libelle)
+        return when {
+            Regex("reduction|exoneration|allegement|ecretement").containsMatchIn(n) -> 7
+            n.startsWith("csg") -> 6
+            Regex("accident").containsMatchIn(n) -> 1
+            Regex("chomage|\\bags\\b|apec").containsMatchIn(n) -> 4
+            Regex("retraite|vieillesse|agirc|\\bceg\\b|\\bcet\\b").containsMatchIn(n) -> 2
+            Regex("famil").containsMatchIn(n) -> 3
+            Regex("sante|maladie|prevoyance|mutuelle|deces").containsMatchIn(n) -> 0
+            else -> 5
+        }
+    }
+
+    private fun montant(x: Double) = when { x > 0 -> euro(x); x < 0 -> "- " + euro(-x); else -> "" }
+
+    fun rubriques(b: Bulletin): List<Map<String, String>> {
+        val out = mutableListOf<Map<String, String>>()
+        b.lignes.filter { it.montantSalarial != 0.0 || it.montantPatronal != 0.0 }.groupBy { rubrique(it.libelle) }.toSortedMap().forEach { (k, ls) ->
+            out += mapOf("libelle" to "**${RUBRIQUES[k]}**", "base" to "", "taux_sal" to "", "montant_sal" to "", "taux_pat" to "", "montant_pat" to "")
+            ls.forEach {
+                out += mapOf(
+                    "libelle" to it.libelle, "base" to (if (it.base > 0) euro(it.base) else ""),
+                    "taux_sal" to (if (it.tauxSalarial > 0) nombre(it.tauxSalarial) + " %" else ""),
+                    "montant_sal" to montant(it.montantSalarial),
+                    "taux_pat" to (if (it.tauxPatronal > 0) nombre(it.tauxPatronal) + " %" else ""),
+                    "montant_pat" to montant(it.montantPatronal)
+                )
+            }
+        }
+        return out
+    }
+
+    /** Bloc « employeur | salarié » du bulletin. */
+    private fun entetePaie(d: SocieteData, b: Bulletin): List<Map<String, String>> {
+        val s = d.societe; val e = b.employe
+        val g = listOf("**${s.nom}**", formeCapital(s), s.adresse, if (s.siret.isNotBlank()) "SIRET : ${s.siret}" else "",
+            if (s.codeApe.isNotBlank()) "Code APE : ${s.codeApe}" else "", "Cotisations versées à : ${s.urssaf.ifBlank { "URSSAF" }}",
+            "Convention collective : ${s.conventionCollective.ifBlank { "aucune" }}").filter { it.isNotBlank() && it != "****" }
+        val statut = (if (e.statut == "dirigeant") "Dirigeant assimilé salarié" else "Salarié") + (if (d.paie.cadre) " · cadre" else " · non cadre")
+        val dr = listOf("**${e.nom}**", "Emploi : ${e.poste.ifBlank { "—" }}", "Statut : $statut",
+            if (e.dateEntree.isNotBlank()) "Entrée le : ${dateFr(e.dateEntree)}" else "",
+            "Durée du travail : ${nombre(e.heuresHebdo)} h/semaine (${nombre(b.heuresContrat)} h/mois)",
+            "Taux horaire : ${euro(b.tauxHoraire)}").filter { it.isNotBlank() }
+        val n = maxOf(g.size, dr.size)
+        return (0 until n).map { i -> mapOf("gauche" to g.getOrElse(i) { "" }, "droite" to dr.getOrElse(i) { "" }) }
+    }
+
+    /** Variables du bulletin « comme un cabinet comptable » : période, paiement, net imposable / social, cumuls de l'année. */
+    private fun bulletinPro(d: SocieteData, b: Bulletin): Map<String, String> {
+        val ym = runCatching { java.time.YearMonth.parse(b.mois) }.getOrNull()
+        val debut = ym?.atDay(1)?.toString() ?: ""; val fin = ym?.atEndOfMonth()?.toString() ?: ""
+        val imposable = b.netImposable.takeIf { it > 0 } ?: b.netAvantImpot
+        val annee = b.mois.take(4)
+        val precedents = d.bulletins.filter { it.employeId == b.employe.id && it.mois.startsWith(annee) && it.mois < b.mois }
+        val h25 = round2(b.tauxHoraire * 1.25); val h50 = round2(b.tauxHoraire * 1.5)
+        return mapOf(
+            "periode_debut" to dateFr(debut), "periode_fin" to dateFr(fin), "date_paiement" to dateFr(fin), "annee" to annee,
+            "net_imposable" to euro(imposable), "net_social" to euro(b.netSocial.takeIf { it > 0 } ?: b.netAvantImpot),
+            "taux_sup25" to euro(h25), "montant_sup25" to (if (b.heuresSup25 > 0) euro(round2(h25 * b.heuresSup25)) else ""),
+            "taux_sup50" to euro(h50), "montant_sup50" to (if (b.heuresSup50 > 0) euro(round2(h50 * b.heuresSup50)) else ""),
+            "allegements" to (if (b.allegements > 0) euro(b.allegements) else ""),
+            "cumul_brut" to euro(round2(precedents.sumOf { it.brut } + b.brut)),
+            "cumul_imposable" to euro(round2(precedents.sumOf { it.netImposable.takeIf { x -> x > 0 } ?: it.netAPayer } + imposable)),
+            "cumul_heures" to nombre(round2(precedents.sumOf { it.heures } + b.heuresEffectuees)),
+            "cumul_cout" to euro(round2(precedents.sumOf { it.coutEmployeur } + b.coutEmployeur)),
+            "statut_cadre" to (if (d.paie.cadre) "cadre" else "non cadre")
+        )
     }
 
     fun rendreDoc(d: SocieteData, doc: Doc) = Templates.render(d.modele(doc.type), docCtx(d, doc))

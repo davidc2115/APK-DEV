@@ -31,8 +31,8 @@ data class OngletReglages(val id: String, val icone: String, val nom: String, va
 
 /** Organisation des Réglages : 10 onglets, chacun découpé en sous-onglets (un sujet par page). */
 val ONGLETS_REGLAGES = listOf(
-    OngletReglages("general", "⚙️", "Général", "Apparence, batterie et vitesse, autorisations Android.",
-        listOf("apparence" to "🎨 Apparence", "batterie" to "🔋 Batterie & vitesse", "autorisations" to "🔐 Autorisations")),
+    OngletReglages("general", "⚙️", "Général", "Apparence, modes de fonctionnement, sonnerie des rappels et autorisations Android.",
+        listOf("apparence" to "🎨 Apparence", "batterie" to "⚡ Fonctionnement", "rappels" to "⏰ Rappels", "autorisations" to "🔐 Autorisations")),
     OngletReglages("ia", "🧠", "IA", "Clés et modèles d'IA, Hermès, mémoire, images et vidéos.",
         listOf("cles" to "🔑 Clés & modèles", "hermes" to "🪽 Hermès", "extensions" to "🧩 Extensions", "memoire" to "🧠 Mémoire", "medias" to "🖼️ Images & vidéo")),
     OngletReglages("voix", "🎙️", "Voix", "Écoute « Jarvis », conversation à la voix, voix de JARVIS, annonces.",
@@ -45,8 +45,8 @@ val ONGLETS_REGLAGES = listOf(
         listOf("serveur" to "🖥️ Serveur & domotique", "box" to "📶 Box Internet", "imprimante" to "🖨️ Imprimante")),
     OngletReglages("agents", "🤖", "Agents", "Agents autonomes, routines, assistant proactif, modes automatiques.",
         listOf("agents" to "🤖 Agents autonomes", "routines" to "⚙️ Routines", "proactif" to "🌅 Assistant proactif", "modes" to "🌙 Modes", "metier" to "☀️ Métier PV")),
-    OngletReglages("securite", "🛡️", "Sécurité", "Anti-vol, empreinte vocale, confirmations, coffre-fort de la société.",
-        listOf("antivol" to "🚨 Anti-vol", "empreinte" to "🎤 Empreinte vocale", "confirmations" to "🔒 Confirmations", "coffre" to "🗄️ Coffre-fort")),
+    OngletReglages("securite", "🛡️", "Sécurité", "Systèmes de sécurité, anti-vol, empreinte vocale, confirmations, coffre-fort de la société.",
+        listOf("systemes" to "🛡️ Systèmes", "antivol" to "🚨 Anti-vol", "empreinte" to "🎤 Empreinte vocale", "confirmations" to "🔒 Confirmations", "coffre" to "🗄️ Coffre-fort")),
     OngletReglages("diagnostic", "📊", "Diagnostic", "État du téléphone et des moteurs d'IA.",
         listOf("telephone" to "📱 Téléphone", "moteurs" to "🧠 Moteurs IA")),
     OngletReglages("fichiers", "📁", "Fichiers", "Bibliothèque des fichiers créés et reçus par JARVIS.", emptyList()),
@@ -140,37 +140,37 @@ private fun SousOnglet(nom: String, choisi: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** Réglages « Batterie & vitesse » : économie d'énergie et réglages qui jouent sur la rapidité des réponses. */
+/** Réglages du mode de fonctionnement interne de JARVIS. */
 @Composable
 fun PerformancePanel(app: JarvisApp) {
     val store = app.store
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    HudPanel(Modifier.fillMaxWidth(), title = "🔋 Batterie & vitesse") {
+    HudPanel(Modifier.fillMaxWidth(), title = "⚡ Mode de fonctionnement de JARVIS") {
         Text("État : " + fr.dd.jarvis.device.Energie.libelle(app), color = HudText, fontSize = 13.sp)
         Spacer(Modifier.height(6.dp))
-        Text("Économie d'énergie", color = HudText, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        Text("Choisis comment JARVIS utilise les ressources disponibles :", color = HudDim, fontSize = 12.sp)
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf("auto" to "Automatique (recommandé)", "performance" to "⚡ Performance", "eco" to "🔋 Économie").forEach { (id, nom) ->
-                HudChip(nom, store.modeEnergie.value == id) { store.modeEnergie.set(id); fr.dd.jarvis.device.Energie.maj(ctx) }
+            listOf("performance" to "⚡ Performance", "balanced" to "⚖️ Équilibré", "eco" to "🔋 Économie").forEach { (id, nom) ->
+                HudChip(nom, store.modeEnergie.value == id || (id == "balanced" && store.modeEnergie.value == "auto")) {
+                    store.modeEnergie.set(id); fr.dd.jarvis.device.Energie.appliquerMode(ctx)
+                }
             }
         }
         Text(
             when (store.modeEnergie.value) {
-                "performance" -> "Jamais d'économie : animations fluides et synchronisations normales, même batterie faible."
-                "eco" -> "Économie permanente : animations ralenties, relevés et synchronisations de fond espacés. Toutes les fonctions restent disponibles."
-                else -> "Économie automatique quand l'économiseur de batterie d'Android est activé ou sous ${fr.dd.jarvis.device.Energie.SEUIL_BATTERIE} % hors charge : animations ralenties, relevés et synchronisations de fond espacés."
+                "performance" -> "Priorité à la réactivité : JARVIS évite de ralentir ses propres traitements, favorise les tâches simultanées et réduit les attentes internes. Android garde toutefois le contrôle du CPU, de la RAM et de la température."
+                "eco" -> "Réduit les tâches secondaires, les synchronisations et les vérifications de fond. Les opérations lourdes sont différées autant que possible. L'écoute, les commandes vocales, les rappels et la réception des demandes restent actifs."
+                else -> "Adaptation automatique : JARVIS ajuste ses travaux selon la batterie, l'économiseur Android et la température du téléphone. Il accélère lorsque les ressources sont disponibles et ralentit si le téléphone est sollicité."
             }, color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
-        Text("Toujours appliqué : dragon animé à 20-30 images/s au lieu de 60-120, verrou de veille seulement pendant une conversation, " +
-            "écoute « Jarvis » économe (Voix › Écoute), synchronisation du coffre-fort toutes les heures (et à chaque modification), " +
-            "relecture du coffre Obsidian au démarrage au plus toutes les 6 h.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+        Text("L'écoute vocale et la réception des demandes restent prioritaires dans les trois modes. Le mode Performance ne peut pas forcer Android à déverrouiller les fréquences CPU ou réserver la RAM ; il évite simplement les limitations volontaires de JARVIS.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
         HudDivider()
         Text("Vitesse des réponses", color = HudText, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 6.dp))
-        HudChip(if (store.hermesRapide.value) "⚡ Réponses rapides : oui" else "Réponses rapides : non", store.hermesRapide.value) {
+        HudChip(if (store.hermesRapide.value) "⚡ Actions par Jarvis : oui" else "Actions par Jarvis : non", store.hermesRapide.value) {
             store.hermesRapide.set(!store.hermesRapide.value)
         }
-        Text("Avec « Hermès pour tout », les commandes simples (appel, SMS, musique, lumières, chauffage, agenda, rappel…) sont faites " +
-            "directement par Jarvis en un seul appel d'IA ; si Jarvis n'y arrive pas, Hermès prend le relais tout seul. Les demandes " +
-            "complexes, les automatismes et les recherches passent toujours par Hermès.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+        Text("Les actions (téléphone, appels, SMS, mails, agenda, rappels, alarmes, maison, Plex, Freebox, société, fichiers, notes…) " +
+            "sont faites directement par Jarvis — sans IA du tout pour les plus courantes — ; si Jarvis n'y arrive pas, Hermès prend le relais tout seul. " +
+            "Les questions, recherches sur internet, rédactions, automatismes et le serveur passent par Hermès.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
         Spacer(Modifier.height(6.dp))
         HudChip(if (store.analyseGemini.value) "🔍 Analyse Gemini avant de répondre : oui" else "Analyse Gemini avant de répondre : non", store.analyseGemini.value) {
             store.analyseGemini.set(!store.analyseGemini.value)

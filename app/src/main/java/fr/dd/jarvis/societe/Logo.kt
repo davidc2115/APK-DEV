@@ -27,5 +27,14 @@ object Logo {
 
     fun supprimer(ctx: Context) = fichier(ctx).delete()
 
+    /** PNG du logo (documents Word de la société) et ses dimensions en pixels. */
+    fun png(ctx: Context): Triple<ByteArray, Int, Int>? {
+        val f = fichier(ctx).takeIf { it.isFile } ?: return null
+        val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(f.absolutePath, o)
+        if (o.outWidth <= 0 || o.outHeight <= 0) return null
+        return Triple(f.readBytes(), o.outWidth, o.outHeight)
+    }
+
     fun bitmap(ctx: Context): Bitmap? = if (existe(ctx)) runCatching { BitmapFactory.decodeFile(fichier(ctx).absolutePath) }.getOrNull() else null
 }

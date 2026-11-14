@@ -442,7 +442,7 @@ class SocieteService(
         val base = "${i.date} ${i.id}"
         val md = markdownIntervention(client, site, i)
         val note = obsidian.saveIn(dossier, base, md)
-        val pdf = runCatching { obsidian.saveBytes(dossier, "$base.pdf", PdfExporter.toPdf(md, Logo.bitmap(ctx), rapport = true) { imageRapport(it) }, "application/pdf") }
+        val pdf = runCatching { obsidian.saveBytes(dossier, "$base.pdf", pdfSociete(md, rapport = true) { imageRapport(it) }, "application/pdf") }
             .getOrElse { "PDF non généré (${it.message})" }
         return note to pdf
     }
@@ -532,12 +532,20 @@ class SocieteService(
         val client = data.client(doc.clientId)?.nom.orEmpty()
         val base = "${doc.numero} ${client}".trim()
         val loc = obsidian.saveIn(dossier, base, md)
-        runCatching { obsidian.saveBytes(dossier, "$base.pdf", PdfExporter.toPdf(md, Logo.bitmap(ctx)), "application/pdf") }
+        runCatching { obsidian.saveBytes(dossier, "$base.pdf", pdfSociete(md), "application/pdf") }
         return loc
     }
 
     /** PDF du document (devis/facture), avec le logo s'il y en a un — utilisé pour l'envoyer en pièce jointe par email. */
-    fun pdfBytes(doc: Doc): ByteArray = PdfExporter.toPdf(Rendu.rendreDoc(data, doc), Logo.bitmap(ctx))
+    fun pdfBytes(doc: Doc): ByteArray = pdfSociete(Rendu.rendreDoc(data, doc))
+
+    /**
+     * PDF d'un document DE LA SOCIÉTÉ : logo en tête et mentions légales (raison sociale, capital, siège, SIRET, RCS,
+     * TVA) en pied de chaque page, avec la pagination. Réservé aux documents de la société — les autres fichiers créés
+     * par JARVIS (coloriages, notes, documents personnels…) n'ont ni logo ni pied de page.
+     */
+    fun pdfSociete(md: String, rapport: Boolean = false, images: (String) -> android.graphics.Bitmap? = { null }): ByteArray =
+        PdfExporter.toPdf(md, Logo.bitmap(ctx), rapport, images, pied = Rendu.identiteLegale(data).ifBlank { null })
 
     fun exporterClient(c: Client): Pair<String, String> {
         val md = Rendu.rendreClient(data, c)
@@ -545,18 +553,170 @@ class SocieteService(
     }
 
     fun bulletin(e: Employe, mois: String, primes: Double, heuresEffectuees: Double? = null, netVerse: Double? = null): Pair<String, String> {
-        val b = Paie.bulletin(e, data.paie, mois, primes, heuresEffectuees, netVerse)
-        val md = Rendu.rendreBulletin(data, b)
-        repo.update { d ->
-            d.copy(bulletins = d.bulletins.filterNot { it.employeId == e.id && it.mois == mois } +
-                BulletinRef(newId(), e.id, mois, b.brut, b.netAPayer, b.coutEmployeur))
-        }
+        val local = Paie.bulletin(e, data.paie, mois, primes, heuresEffectuees, netVerse)
+        // Cotisations officielles de l'URSSAF (taux, plafonds et réduction générale à jour) ; hors ligne : calcul local.
+        val b = if (Urssaf.horsRegimeGeneral(data, e)) local else runCatching {
+            BaremesCalcul.bulletinOfficiel(local, Urssaf.montantsPaie(data, e, local.brut), data.baremes.pmss.takeIf { it > 0 } ?: data.paie.plafondSecu, LocalDate.now().toString())
+        }.getOrElse { local.copy(source = Paie.AVERTISSEMENT + " (Calcul local : le service officiel de l'URSSAF n'a pas répondu — ${it.message?.take(80) ?: "hors ligne"}.)") }
+        // Un bulletin refait pour le même mois remplace l'ancien (ses cumuls ne doivent pas le compter).
+        data.bulletins.filter { it.employeId == e.id && it.mois == mois }.forEach { File(dossierPaie(), "${it.id}.pdf").delete() }
+        val md = Rendu.rendreBulletin(data.copy(bulletins = data.bulletins.filterNot { it.employeId == e.id && it.mois == mois }), b)
+        val ref = BulletinRef(newId(), e.id, mois, b.brut, b.netAPayer, b.coutEmployeur, nomEmploye = e.nom,
+            netImposable = b.netImposable, heures = b.heuresEffectuees,
+            creeLe = java.time.LocalDateTime.now().toString().take(16).replace('T', ' '), md = md)
+        repo.update { d -> d.copy(bulletins = d.bulletins.filterNot { it.employeId == e.id && it.mois == mois } + ref) }
+        // Fichier PDF imprimable : copie privée (aperçu, impression, partage depuis l'appli) + coffre « Société/Paie ».
+        val pdf = pdfSociete(md)
+        runCatching { File(dossierPaie(), "${ref.id}.pdf").writeBytes(pdf) }
         val loc = obsidian.saveIn("Société/Paie", "$mois ${e.nom}", md)
-        runCatching { obsidian.saveBytes("Société/Paie", "$mois ${e.nom}.pdf", PdfExporter.toPdf(md), "application/pdf") }
+        runCatching { obsidian.saveBytes("Société/Paie", "$mois ${e.nom}.pdf", pdf, "application/pdf") }
         return md to loc
     }
 
-    fun bilan(annee: Int) = Reserve.bilan(annee, data.provisions, data.employes, data.bulletins, data.societe.partDirigeantPct)
+    // ------------------------------------------------------------------ bulletins générés : fichiers, impression, suppression
+
+    private fun dossierPaie() = File(ctx.filesDir, "societe/paie").apply { mkdirs() }
+
+    /** « 2026-11 Jean Dupont » : nom des fichiers du bulletin (nom du salarié au moment du bulletin). */
+    fun nomBulletin(r: BulletinRef) = "${r.mois} ${r.nomEmploye.ifBlank { data.employes.firstOrNull { it.id == r.employeId }?.nom ?: "Salarié" }}"
+
+    /** Bulletins enregistrés, du plus récent au plus ancien. */
+    fun bulletins(): List<BulletinRef> = data.bulletins.sortedWith(compareByDescending<BulletinRef> { it.mois }.thenBy { nomBulletin(it) })
+
+    /** Fichier PDF du bulletin (régénéré depuis son contenu enregistré s'il manque). */
+    fun fichierBulletin(r: BulletinRef): File? {
+        val f = File(dossierPaie(), "${r.id}.pdf")
+        if (!f.isFile && r.md.isNotBlank()) runCatching { f.writeBytes(pdfSociete(r.md)) }
+        return f.takeIf { it.isFile }
+    }
+
+    private fun uri(f: File) = FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f)
+
+    /** Ouvre le PDF du bulletin dans le lecteur PDF du téléphone. */
+    fun ouvrirBulletin(r: BulletinRef): String {
+        val f = fichierBulletin(r) ?: return "PDF introuvable pour ${nomBulletin(r)} (bulletin trop ancien : refais-le pour le régénérer)."
+        val i = Intent(Intent.ACTION_VIEW).setDataAndType(uri(f), "application/pdf")
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching { ctx.startActivity(i); "" }.getOrElse { "Aucune application ne sait ouvrir les PDF : utilise « Partager » ou « Imprimer »." }
+    }
+
+    fun partagerBulletin(r: BulletinRef) {
+        val f = fichierBulletin(r) ?: return
+        val i = Intent(Intent.ACTION_SEND).apply { type = "application/pdf"; putExtra(Intent.EXTRA_STREAM, uri(f)); putExtra(Intent.EXTRA_SUBJECT, "Bulletin de paie ${nomBulletin(r)}"); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+        ctx.startActivity(Intent.createChooser(i, "Partager le bulletin").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    /** Impression (service d'impression d'Android : imprimante Wi-Fi, PDF…). [activite] : l'écran affiché. */
+    fun imprimerBulletin(activite: android.content.Context, r: BulletinRef): String {
+        val f = fichierBulletin(r) ?: return "PDF introuvable."
+        return PdfExporter.imprimer(activite, f, "Bulletin de paie ${nomBulletin(r)}")
+    }
+
+    /**
+     * Supprime des bulletins (erreur à refaire, ou suppression simple) : ils disparaissent de la base, de leurs fichiers
+     * (PDF privé, note et PDF du coffre) ET des calculs — salaires versés, résultat, réserve, cumuls.
+     */
+    fun supprimerBulletins(cibles: List<BulletinRef>): String {
+        if (cibles.isEmpty()) return "Aucun bulletin ne correspond."
+        val ids = cibles.map { it.id }.toSet()
+        repo.update { d -> d.copy(bulletins = d.bulletins.filterNot { it.id in ids }) }
+        val restes = cibles.filter { c -> data.bulletins.any { it.id == c.id } }
+        var fichiers = 0
+        cibles.forEach { r ->
+            File(dossierPaie(), "${r.id}.pdf").delete()
+            val nom = nomBulletin(r)
+            if (runCatching { obsidian.supprimer("Société/Paie", nom) }.getOrDefault(false)) fichiers++
+            runCatching { obsidian.supprimerFichier("Société/Paie", "$nom.pdf") }
+        }
+        if (restes.isNotEmpty()) return "❌ ${restes.size} bulletin(s) toujours présents après la suppression."
+        return "🗑️ ${cibles.size} bulletin(s) supprimé(s) : " + cibles.joinToString(", ") { nomBulletin(it) } +
+            ". Les salaires versés, le résultat et la réserve sont recalculés sans eux."
+    }
+
+    /**
+     * Bulletins dont la note a été effacée du coffre en dehors de JARVIS (ou depuis un autre appareil) : retirés aussi de
+     * la base, donc des salaires versés et du résultat. Sans effet si le coffre n'est pas lisible (on ne retire rien).
+     */
+    fun synchroniserBulletins() {
+        if (data.bulletins.isEmpty()) return
+        val notes = runCatching { obsidian.listNotes("Société") }.getOrDefault(emptyList())
+        if (notes.isEmpty()) return
+        val presents = notes.filter { it.startsWith("Société/Paie/") }.map { normaliser(it.substringAfterLast('/').removeSuffix(".md")) }.toSet()
+        val disparus = data.bulletins.filter { normaliser(nomBulletin(it)) !in presents }
+        if (disparus.isEmpty()) return
+        val ids = disparus.map { it.id }.toSet()
+        repo.update { d -> d.copy(bulletins = d.bulletins.filterNot { it.id in ids }) }
+        disparus.forEach { File(dossierPaie(), "${it.id}.pdf").delete() }
+    }
+
+    fun bilan(annee: Int) = Reserve.bilan(annee, data.provisions, data.employes, data.bulletins, data.societe.partDirigeantPct, data.societe.reserveSelonSalaires)
+
+    // ------------------------------------------------------------------ barèmes officiels (URSSAF), mis à jour automatiquement
+
+    /**
+     * Relève les barèmes officiels (plafond de la Sécurité sociale, SMIC, IS, prélèvement forfaitaire, coût de chaque
+     * salarié) et les applique si la mise à jour automatique est active. Renvoie le compte rendu (changements en tête).
+     */
+    fun actualiserBaremes(): String {
+        val avant = data.baremes
+        val nouveaux = try { Urssaf.baremes() } catch (e: Exception) {
+            repo.update { d -> d.copy(baremes = d.baremes.copy(erreur = "${LocalDate.now()} : ${e.message ?: e.javaClass.simpleName}".take(200))) }
+            return "❌ Mise à jour des barèmes impossible (service URSSAF injoignable ou réponse inattendue) : ${e.message}. Les valeurs actuelles sont conservées."
+        }
+        val couts = runCatching { Urssaf.couts(data) }.getOrDefault(avant.couts)
+        val changements = BaremesCalcul.changements(avant, nouveaux)
+        val b = nouveaux.copy(couts = couts, changements = changements.ifEmpty { avant.changements })
+        repo.update { d -> BaremesCalcul.appliquer(d, b) }
+        return baremesTexte(if (changements.isEmpty()) "✅ Barèmes vérifiés : aucune valeur n'a changé." else "📈 **Nouvelles valeurs officielles appliquées :**\n" + changements.joinToString("\n") { "- $it" })
+    }
+
+    fun baremesTexte(entete: String = ""): String {
+        val b = data.baremes; val s = data.societe
+        return buildString {
+            if (entete.isNotBlank()) append(entete).append("\n\n")
+            append("# 📡 Barèmes officiels (URSSAF)\n")
+            if (!b.valide()) append("Pas encore relevés : ils le seront automatiquement dès que le téléphone aura Internet (ou dis « mets à jour les barèmes »).\n")
+            else {
+                append("Relevés le ${b.dateMaj} — ${b.source}. Vérification automatique chaque semaine${if (s.baremesAuto) ", valeurs appliquées automatiquement" else " (application automatique désactivée)"}.\n\n")
+                append("- Plafond mensuel de la Sécurité sociale : ${euro(b.pmss)}\n")
+                if (b.smicHoraire > 0) append("- SMIC horaire brut : ${euro(b.smicHoraire)}\n")
+                append("- Impôt sur les sociétés : ${nombre(b.isTauxReduit)} % jusqu'à ${euro(b.isPlafondReduit)} de bénéfice, ${nombre(b.isTauxNormal)} % au-delà\n")
+                append("- Prélèvement forfaitaire sur les dividendes : ${nombre(b.pfuPct)} % (dont ${nombre(b.prelevementsSociauxPct)} % de prélèvements sociaux)\n")
+                if (b.couts.isNotEmpty()) {
+                    append("- Coût mensuel officiel de chaque salarié (cotisations, réduction générale comprises) :\n")
+                    b.couts.forEach { (id, c) -> append("  - ${data.employes.firstOrNull { it.id == id }?.nom ?: id} : brut ${euro(c.brut)} → net ${euro(c.netAvantImpot)}, coût ${euro(c.cout)}\n") }
+                }
+                if (b.changements.isNotEmpty()) append("\nDerniers changements : ${b.changements.joinToString(" ; ")}\n")
+            }
+            if (b.erreur.isNotBlank()) append("\n⚠️ Dernière tentative échouée : ${b.erreur}\n")
+            append("\nLes fiches de paie utilisent le moteur de calcul officiel de l'URSSAF (cotisations, retraite, réduction générale…) dès que le téléphone a Internet.")
+        }
+    }
+
+    // ------------------------------------------------------------------ résultat, bénéfice et dividende
+
+    /** Résultat de l'année à date (+ projection au 31/12), en Markdown. */
+    fun resultatTexte(annee: Int = LocalDate.now().year): String {
+        val d = data
+        val arrete = if (annee < LocalDate.now().year) LocalDate.of(annee, 12, 31) else LocalDate.now()
+        return Resultat.texte(Resultat.bilan(d, annee, arrete), if (annee == LocalDate.now().year) Resultat.projection(d, annee, arrete) else null, d.societe)
+    }
+
+    /**
+     * Facture encaissée : répartition de cette facture (salaires et charges couverts, impôt, réserve légale, dividende) et
+     * mise à jour automatique de la note « Société/Finances/Résultat <année> » du coffre.
+     */
+    fun repartitionPaiement(numero: String): String {
+        val d = data
+        val f = d.doc(numero)?.takeIf { it.type == "facture" && it.statut == "payee" } ?: return ""
+        val annee = runCatching { LocalDate.parse(f.payeLe.ifBlank { f.date }).year }.getOrDefault(LocalDate.now().year)
+        val part = Resultat.partFacture(d, f)
+        val b = Resultat.bilan(d, annee, if (annee < LocalDate.now().year) LocalDate.of(annee, 12, 31) else LocalDate.now())
+        runCatching { obsidian.saveIn("Société/Finances", "Résultat $annee", resultatTexte(annee)) }
+        return Resultat.texteFacture(part, d.societe) + "\n📊 **Cumul $annee** : reste à la société avant impôt ${euro(b.avantImpot)}" +
+            (if (b.soumisIs) " · bénéfice net ${euro(b.net)} · dividende possible ${euro(b.dividendeBrut)} brut (${euro(b.dividendeNet)} net)" else "") +
+            "\n_Détail et projection : « résultat de la société » (note « Société/Finances/Résultat $annee »)._"
+    }
 
     fun bilanTexte(annee: Int): String {
         val b = bilan(annee)
@@ -567,8 +727,14 @@ class SocieteService(
             append("Mise de côté : **${nombre(s.reservePct)} %** du HT de chaque facture encaissée.\n\n")
             append("- Factures encaissées concernées : ${b.nbFactures}\n")
             append("- **Total réservé : ${euro(b.total)}**\n")
-            append("- Part dirigeant (${nombre(s.partDirigeantPct)} %) : ${euro(b.dirigeant)}\n")
-            if (b.salaries.isNotEmpty()) {
+            if (b.selonSalaires) {
+                append("- Répartition automatique selon les salaires ${if (b.brutEstime) "prévus au contrat (aucun bulletin cette année)" else "bruts versés en $annee"} :\n")
+                b.parPersonne.forEach { (e, brut, part) ->
+                    append("  - ${e.nom}${if (e.statut == "dirigeant") " (dirigeant)" else ""} : **${euro(part)}** — ${nombre(if (b.parPersonne.sumOf { it.second } > 0) brut * 100 / b.parPersonne.sumOf { it.second } else 0.0)} % des salaires (${euro(brut)} brut)\n")
+                }
+                if (b.nonAffecte > 0.01) append("- Non affecté (arrondis) : ${euro(b.nonAffecte)}\n")
+            } else append("- Part dirigeant (${nombre(s.partDirigeantPct)} %) : ${euro(b.dirigeant)}\n")
+            if (!b.selonSalaires && b.salaries.isNotEmpty()) {
                 append("- Part salariés (${nombre(100 - s.partDirigeantPct)} %, au prorata du brut) :\n")
                 b.salaries.forEach { (e, m) -> append("  - ${e.nom} : ${euro(m)}\n") }
             } else if (b.nonAffecte > 0) append("- Part non affectée (aucun salarié) : ${euro(b.nonAffecte)}\n")
@@ -578,10 +744,11 @@ class SocieteService(
 
     // ------------------------------------------------------------------ partage PDF
 
-    fun partagerPdf(nom: String, markdown: String, avecLogo: Boolean = false) {
+    /** Partage le PDF d'un document de la société (logo et mentions légales compris). */
+    fun partagerPdf(nom: String, markdown: String, avecLogo: Boolean = true) {
         val dir = File(ctx.cacheDir, "share").apply { mkdirs() }
         val f = File(dir, nom.replace(Regex("[\\\\/:*?\"<>|]"), "_") + ".pdf")
-        f.writeBytes(PdfExporter.toPdf(markdown, if (avecLogo) Logo.bitmap(ctx) else null))
+        f.writeBytes(if (avecLogo) pdfSociete(markdown) else PdfExporter.toPdf(markdown))
         val uri = FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f)
         val i = Intent(Intent.ACTION_SEND).apply {
             type = "application/pdf"

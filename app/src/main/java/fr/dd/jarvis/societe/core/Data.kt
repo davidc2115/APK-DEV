@@ -16,7 +16,8 @@ data class SocieteData(
     val provisions: List<Provision> = emptyList(),
     val bulletins: List<BulletinRef> = emptyList(),
     val modeles: Map<String, String> = emptyMap(),        // présentations personnalisées (devis, facture, client, paie, planning, rapport)
-    val modelesPrec: Map<String, String> = emptyMap()     // version précédente (pour annuler)
+    val modelesPrec: Map<String, String> = emptyMap(),    // version précédente (pour annuler)
+    val baremes: Baremes = Baremes()                      // barèmes officiels relevés automatiquement (URSSAF)
 ) {
     fun modele(type: String): String = modeles[type] ?: Templates.defaut(type)
 

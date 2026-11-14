@@ -11,9 +11,9 @@ import org.json.JSONObject
 
 /**
  * Façade des fournisseurs, chacun avec plusieurs clés en rotation :
- *  - cerveau (conversation + outils) : Ollama de la maison → Groq → Gemini → Cloudflare ;
- *  - agents (planning, mails, contacts) : Ollama → Gemini → Groq → Cloudflare.
- * Ollama est prioritaire lorsqu'il est réellement configuré ; les fournisseurs cloud restent les secours.
+ *  - cerveau (conversation + outils) : Groq → Gemini → Cloudflare ;
+ *  - agents (planning, mails, contacts) : Gemini → Groq → Cloudflare.
+ * L'Ollama du serveur de la maison n'est plus utilisé (ni en premier, ni en secours).
  * Une clé qui atteint son quota est mise en pause le temps indiqué par le fournisseur ; quand toutes les clés d'un
  * fournisseur sont en pause, on passe immédiatement au suivant.
  */
@@ -30,6 +30,11 @@ class Llm(private val store: Store) {
     val gemini = GeminiClient(geminiRing) { store.geminiModel.value }
     /** Relais du cerveau (appel d'outils) quand TOUTES les clés Groq sont épuisées : mêmes clés que les agents. */
     val geminiChat = GeminiChatClient(geminiRing) { store.geminiModel.value }
+
+    init {
+        // Refus de localisation de Google : relais possible par la passerelle IA des comptes Cloudflare.
+        GeminiPasserelle.comptes = { store.cfAccounts.toList() }
+    }
     /** Dernier recours en ligne du cerveau, après Groq puis Gemini. */
     val cloudflare = CloudflareChatClient({ store.cfAccounts.toList() }) { store.cfChatModel.value }
 
@@ -49,7 +54,7 @@ class Llm(private val store: Store) {
             " · Cloudflare $c compte(s)" + (cloudflare.etat().second.takeIf { it > 0 }?.let { " ($it en pause)" } ?: "") +
             groqRing.refuseesMasquees().takeIf { it.isNotEmpty() }?.let { "\n⚠️ Clé(s) Groq refusée(s) par Groq (invalides ou révoquées) : ${it.joinToString(", ")} — remplace-les" } .orEmpty() +
             geminiRing.refuseesMasquees().takeIf { it.isNotEmpty() }?.let { "\n⚠️ Clé(s) Gemini refusée(s) : ${it.joinToString(", ")}" }.orEmpty() +
-            "\nOrdre : Ollama (si actif) → Groq → Gemini → OpenAI → Cloudflare" +
+            "\nOrdre : Groq → Gemini → OpenAI → Cloudflare" +
             (if (dernierRelais > 0 && System.currentTimeMillis() - dernierRelais < 3_600_000L) " · dernier relais : $dernierFournisseur à " +
                 java.text.SimpleDateFormat("HH:mm", java.util.Locale.FRANCE).format(java.util.Date(dernierRelais)) else "")
     }
@@ -59,25 +64,22 @@ class Llm(private val store: Store) {
     var lastError: String = ""
 
     /** Agent : Gemini d'abord (clés en rotation), puis Groq en secours. Échoue avec un message lisible. */
+    /** Longue rédaction (site web, document complet) : Gemini avec une grande sortie, sinon la chaîne habituelle. */
+    suspend fun redigerLong(system: String, user: String): String {
+        if (geminiRing.count() > 0) runCatching { return gemini.generateLong(system, user).ifBlank { throw IllegalStateException("réponse vide") } }
+            .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+        return agent(system, user)
+    }
+
     suspend fun agent(system: String, user: String): String {
         val errors = mutableListOf<String>()
-        // Les tâches courtes (analyse de brief vidéo, résumé, rédaction simple…) passent d'abord
-        // par le serveur Ollama de l'utilisateur : aucune consommation Gemini/Groq si le modèle local répond.
-        val local = Ollama.app
-        if (local != null && Ollama.configure(local)) {
-            try {
-                return withContext(Dispatchers.IO) {
-                    Ollama.generer(local, system, user).ifBlank { throw IllegalStateException("réponse locale vide") }
-                }
-            } catch (e: CancellationException) { throw e }
-            catch (e: Exception) { errors += "Ollama : " + (e.message ?: e.javaClass.simpleName).take(160) }
-        }
         if (geminiRing.count() > 0) {
             try {
                 return try {
                     gemini.generate(system, user)
                 } catch (e: ApiException) {
-                    if (e.code == 404 && autoFixGemini()) gemini.generate(system, user) else throw e
+                    // Le modèle choisi dans les Réglages n'est plus remplacé d'office : le repli se fait appel par appel.
+                    throw e
                 }.ifBlank { throw IllegalStateException("réponse vide") }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -123,24 +125,8 @@ class Llm(private val store: Store) {
     /** Appel du cerveau ; si le modèle n'existe plus (404), choisit automatiquement un modèle disponible.
      *  [forceText] = interdit explicitement un appel d'outil ce tour-ci (reprise après un échec), en gardant les outils
      *  visibles pour le modèle plutôt que de les retirer (ce qui provoquait une erreur Groq, cf. Clients.kt). */
-    suspend fun groqChat(messages: org.json.JSONArray, tools: org.json.JSONArray?, forceText: Boolean = false): org.json.JSONObject = try {
+    suspend fun groqChat(messages: org.json.JSONArray, tools: org.json.JSONArray?, forceText: Boolean = false): org.json.JSONObject =
         groqChatEnLigne(messages, tools, forceText)
-    } catch (e: CancellationException) { throw e } catch (e: Exception) {
-        // Groq, puis Cloudflare, ont échoué (quotas, panne, pas d'internet) : Ollama du serveur de la maison en tout dernier
-        // recours, avec la requête compactée à sa mesure. S'il échoue aussi, on remonte l'erreur d'origine (plus parlante).
-        secoursOllama(e) { app ->
-            val (msgs, outils) = fr.dd.jarvis.hermes.RelaisGroq.reduire(messages, if (forceText) null else tools, Ollama.NIVEAU)
-            Ollama.chat(app, msgs, outils)
-        }
-    }
-
-    /** Exécute [f] sur Ollama s'il est configuré ; sinon (ou en cas d'échec) relance [origine]. */
-    private suspend fun <T> secoursOllama(origine: Exception, f: (fr.dd.jarvis.JarvisApp) -> T): T {
-        val app = Ollama.app
-        if (app == null || !Ollama.configure(app)) throw origine
-        return try { withContext(Dispatchers.IO) { f(app) } }
-        catch (e: CancellationException) { throw e } catch (e: Exception) { throw origine }
-    }
 
     private suspend fun groqChatEnLigne(messages: org.json.JSONArray, tools: org.json.JSONArray?, forceText: Boolean): org.json.JSONObject {
         val erreurGroq = try {
@@ -151,14 +137,14 @@ class Llm(private val store: Store) {
     }
 
     private suspend fun groqSeul(messages: org.json.JSONArray, tools: org.json.JSONArray?, forceText: Boolean): org.json.JSONObject = try {
-        groq.chat(messages, tools, 1800, forceText)
+        groq.chat(messages, tools, 900, forceText)
     } catch (e: ApiException) {
         when {
             e.code == 404 && autoFixGroq() -> groq.chat(messages, tools, 1800, forceText)
             // 413 : requête trop grosse pour la limite de jetons/minute du modèle → on compacte (historique, résultats d'outils, schéma) et on réessaie.
             e.code == 413 || (e.code == 429 && (e.message ?: "").contains("tokens per minute", true) && (e.message ?: "").contains("Requested")) -> {
-                try { groq.chat(compacter(messages, 1), compacterSchema(tools, 1), 1000, forceText) }
-                catch (e2: ApiException) { if (e2.code == 413) groq.chat(compacter(messages, 2), compacterSchema(tools, 2), 700, forceText) else throw e2 }
+                try { groq.chat(compacter(messages, 1), compacterSchema(tools, 1), 700, forceText) }
+                catch (e2: ApiException) { if (e2.code == 413) groq.chat(compacter(messages, 2), compacterSchema(tools, 2), 500, forceText) else throw e2 }
             }
             else -> throw e
         }
@@ -166,15 +152,18 @@ class Llm(private val store: Store) {
 
     /**
      * Relais quand Groq ne répond plus : Gemini (format OpenAI avec outils, clés en rotation) puis Cloudflare (comptes
-     * en rotation). [cloudflareCompact] : requête déjà réduite pour Cloudflare (contexte plus court) ; sinon l'originale.
+     * en rotation). [cloudflareCompact] : requête déjà réduite réutilisée pour Gemini puis Cloudflare ; sinon l'originale.
      * Si tout échoue, on remonte l'erreur Groq d'origine, complétée des autres.
      */
     suspend fun relaisApresGroq(messages: org.json.JSONArray, tools: org.json.JSONArray?, forceText: Boolean, origine: Exception,
-                                cloudflareCompact: Pair<org.json.JSONArray, org.json.JSONArray?>? = null): org.json.JSONObject {
+                                cloudflareCompact: Pair<org.json.JSONArray, org.json.JSONArray?>? = null, sansGemini: Boolean = false): org.json.JSONObject {
         val erreurs = mutableListOf("Groq : " + (origine.message ?: origine.javaClass.simpleName).take(140))
-        if (geminiChat.disponible()) {
+        if (sansGemini) erreurs += "Gemini : déjà essayé en premier"
+        if (geminiChat.disponible() && !sansGemini) {
             try {
-                return geminiChat.chat(messages, tools, 1800, forceText).also { noterRelais("Gemini") }
+                // Dans le relais Hermes, réutilise la version compactée : Gemini ne doit pas recevoir un prompt géant après l'échec Groq.
+                val (messagesGemini, outilsGemini) = cloudflareCompact ?: (messages to tools)
+                return geminiChat.chat(messagesGemini, outilsGemini, 1200, forceText).also { noterRelais("Gemini") }
             } catch (e: CancellationException) { throw e } catch (e: Exception) {
                 erreurs += "Gemini : " + (e.message ?: e.javaClass.simpleName).take(140)
             }
@@ -199,6 +188,11 @@ class Llm(private val store: Store) {
     }
 
     private fun noterRelais(qui: String) { dernierFournisseur = "$qui (relais)"; dernierRelais = System.currentTimeMillis() }
+
+    /** Fournisseur qui a répondu au dernier tour du moteur Hermès (affiché dans le diagnostic). */
+    @Volatile var fournisseurHermes: String = ""
+        private set
+    fun noterFournisseurHermes(qui: String) { fournisseurHermes = qui }
 
     private fun compacter(messages: org.json.JSONArray, niveau: Int): org.json.JSONArray {
         val sys = if (niveau == 1) 5000 else 2800
@@ -285,11 +279,36 @@ class Llm(private val store: Store) {
 
     suspend fun testGeminiKeys(): List<String> = store.geminiKeys.toList().map { k ->
         if (KeyRing.estCleOpenAi(k)) return@map mask(k) + " : ⚠️ CLÉ OPENAI — non envoyée à Gemini"
-        mask(k) + " : " + try {
-            val t0 = System.currentTimeMillis(); gemini.ping(k); "✅ OK (${System.currentTimeMillis() - t0} ms)"
-        } catch (e: Exception) {
-            "❌ " + (e.message ?: "erreur").take(90)
+        mask(k) + " : " + testerGemini(k)
+    }
+
+    /** Test d'une clé Gemini sur le point d'accès du chat (celui de Jarvis et d'Hermès) ; succès = clé réhabilitée. */
+    /**
+     * Test d'une clé Gemini par CHAQUE voie (API native, compatible OpenAI avec Bearer ou en-tête), pour savoir laquelle
+     * marche : les clés « AQ. » d'AI Studio passent par l'API native ; un refus de localisation sur toutes les voies vient
+     * de l'adresse IP (la passerelle Cloudflare est alors essayée si un compte Cloudflare est enregistré).
+     */
+    private suspend fun testerGemini(k: String): String = try {
+        val t0 = System.currentTimeMillis()
+        val essais = geminiChat.diagnostic(k)
+        val ok = essais.filter { it.second == null }.map { it.first }
+        val modele = GeminiModeles.pour(k, store.geminiModel.value.ifBlank { "gemini-2.5-flash" }.removePrefix("models/"))
+        val detail = essais.joinToString(" · ") { (v, e) -> v.libelle + " " + (if (e == null) "✅" else "❌ ${e.code}") }
+        if (ok.isNotEmpty()) {
+            geminiRing.effacer(k)
+            "✅ OK (${System.currentTimeMillis() - t0} ms, $detail)" + (if (modele != store.geminiModel.value.trim().removePrefix("models/")) " — modèle « ${store.geminiModel.value} » non ouvert à cette clé : « $modele » utilisé à la place" else " — modèle « $modele »") +
+                (if (GeminiPasserelle.etat.startsWith("passerelle Cloudflare OK")) " — par la passerelle Cloudflare (Google refuse l'adresse du téléphone)" else "")
+        } else {
+            val e = essais.first { it.second != null }.second!!
+            val localisation = essais.all { Http.refusLocalisation(it.second?.message.orEmpty()) }
+            "❌ " + KeyRing.motif(e.code, e.message.orEmpty()) + " ($detail)" + when {
+                localisation && GeminiPasserelle.disponible() -> " → Google refuse l'adresse IP de cette connexion (pas la clé) sur toutes les voies, et la passerelle Cloudflare n'a pas pris le relais : ${GeminiPasserelle.etat.ifBlank { "pas de réponse" }}."
+                localisation -> " → Google refuse l'adresse IP de cette connexion (pas la clé) sur toutes les voies. Ajoute un compte Cloudflare (Réglages › IA › Cloudflare, jeton avec les droits « AI Gateway ») : Jarvis fera passer Gemini par ta passerelle Cloudflare. En attendant, il se replie sur ses autres IA (Groq…)."
+                else -> ""
+            }
         }
+    } catch (e: Exception) {
+        "❌ " + (e.message ?: "erreur").take(120)
     }
 
 
@@ -301,8 +320,8 @@ class Llm(private val store: Store) {
     suspend fun testerClesApi(fournisseurRaw: String = "tous"): String {
         val alias = mapOf("all" to "tous", "tout" to "tous", "toutes" to "tous", "google" to "gemini", "hf" to "huggingface", "hugging face" to "huggingface", "cloudflare workers ai" to "cloudflare", "workers ai" to "cloudflare", "z.ai" to "zai")
         val fournisseur = alias[fournisseurRaw.trim().lowercase()] ?: fournisseurRaw.trim().lowercase().ifBlank { "tous" }
-        val connus = setOf("tous", "groq", "gemini", "openai", "cloudflare", "zai", "openrouter", "nvidia", "mistral", "huggingface", "ollama")
-        if (fournisseur !in connus) return "Fournisseur inconnu. Choix : tous, Groq, Gemini, Cloudflare, Z.ai, OpenRouter, NVIDIA, Mistral, Hugging Face ou Ollama."
+        val connus = setOf("tous", "groq", "gemini", "openai", "cloudflare", "zai", "openrouter", "nvidia", "mistral", "huggingface")
+        if (fournisseur !in connus) return "Fournisseur inconnu. Choix : tous, Groq, Gemini, Cloudflare, Z.ai, OpenRouter, NVIDIA, Mistral ou Hugging Face."
 
         val resultats = mutableListOf<Pair<Boolean, String>>()
         suspend fun verifier(label: String, action: suspend () -> String) {
@@ -343,17 +362,9 @@ class Llm(private val store: Store) {
                     resultats.add(false to "Gemini #${i + 1} (${mask(key)}) — ⚠️ FORMAT OPENAI : clé conservée, exclue des appels Gemini")
                     continue
                 }
-                verifier("Gemini #${i + 1} (${mask(key)})") {
-                    val modele = store.geminiModel.value
-                    try {
-                        gemini.ping(key)
-                        "✅ VALIDÉ — clé, modèle « $modele » et appel de test acceptés"
-                    } catch (e: ApiException) {
-                        if (e.code != 400 && e.code != 404) throw e
-                        val modeles = gemini.listModels(key)
-                        "⚠️ CLÉ ACCEPTÉE — ${modeles.size} modèles accessibles, mais le modèle configuré « $modele » est refusé"
-                    }
-                }
+                // Point d'accès réellement utilisé par Jarvis et Hermès ; le motif exact de Google est affiché en cas d'échec.
+                val r = testerGemini(key)
+                resultats.add(r.startsWith("✅") to "Gemini #${i + 1} (${mask(key)}) — " + r.replace("✅ OK", "✅ VALIDÉ"))
             }
         }
 
@@ -400,14 +411,6 @@ class Llm(private val store: Store) {
                     "✅ VALIDÉ — clé et accès API acceptés"
                 }
             }
-        }
-
-        // Ollama du serveur de la maison (secours local) : testé s'il est activé et qu'une adresse est connue.
-        val app = Ollama.app
-        if ((fournisseur == "tous" || fournisseur == "ollama") && app != null && Ollama.configure(app)) {
-            val debut = System.currentTimeMillis()
-            val t = withContext(Dispatchers.IO) { runCatching { Ollama.tester(app) }.getOrElse { "❌ Ollama : ${it.message}" } }
-            resultats.add(t.startsWith("✅") to "$t (${System.currentTimeMillis() - debut} ms)")
         }
 
         if (resultats.isEmpty()) {

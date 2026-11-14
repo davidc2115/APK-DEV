@@ -28,7 +28,9 @@ class Brain(
     suspend fun reply(history: List<ChatMsg>, pourHermes: Boolean = false, onTexte: ((String) -> Unit)? = null, onStatus: (String) -> Unit): String {
         // L'avatar montre que JARVIS réfléchit tant que la réponse se prépare.
         fr.dd.jarvis.voice.Presence.debutReflexion()
-        try { return replyInterne(history, pourHermes, onTexte, onStatus) } finally { fr.dd.jarvis.voice.Presence.finReflexion() }
+        // « Recommence / reprends là où tu en étais » après une demande interrompue (délai, coupure) : elle est relancée.
+        val h = runCatching { fr.dd.jarvis.hermes.Reprise.reecrire(app, history) }.getOrNull()?.also { onStatus("🔁 Reprise de la demande interrompue…") } ?: history
+        try { return replyInterne(h, pourHermes, onTexte, onStatus) } finally { fr.dd.jarvis.voice.Presence.finReflexion() }
     }
 
     private suspend fun replyInterne(history: List<ChatMsg>, pourHermes: Boolean, onTexte: ((String) -> Unit)?, onStatus: (String) -> Unit): String {
@@ -43,6 +45,14 @@ class Brain(
                 fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS
                 onStatus(if (r.startsWith("# ⏰") || r.startsWith("Rien de programmé")) "⏰ Rappels et automatisations" else "📝 Carnet de notes")
                 return r
+            }
+        }
+        // Musique (« reprends la musique », « pause », « chanson suivante »…) : réflexe immédiat, sans IA ni Hermès.
+        if (!pourHermes) history.lastOrNull()?.takeIf { it.fromUser }?.let { m ->
+            fr.dd.jarvis.device.CommandeMedia.intention(m.text) { fr.dd.jarvis.device.CommandeMedia.musiqueOuverte(app) }?.let { a ->
+                fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS
+                onStatus("🎵 Musique")
+                return fr.dd.jarvis.device.CommandeMedia.executer(app, a, app.enVoiture)
             }
         }
         // Routine déclenchée par une phrase (« Jarvis, je pars ») : toutes ses actions d'un coup.
@@ -77,25 +87,49 @@ class Brain(
         onStatus("💬 …")
         val ctx = runCatching { fr.dd.jarvis.device.Contexte.actuel(app) }.getOrNull()
         val maintenant = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("EEEE d MMMM yyyy, HH'h'mm", java.util.Locale.FRENCH))
+        val memoirePartagee = (runCatching { fr.dd.jarvis.device.Faits.bloc(app) }.getOrDefault("") + runCatching { app.memo.pourPrompt() }.getOrDefault("") +
+            runCatching { app.memo.hermesPourPrompt() }.getOrDefault("")).take(3000)
         val sys = "Tu es JARVIS, l'assistant personnel de ${userName().ifBlank { "l'utilisateur" }}, qui te tutoie. C'est un moment de conversation détendue : " +
             "réponds naturellement en français, chaleureux et vivant, avec une pointe d'humour quand ça s'y prête, en une à trois phrases courtes, " +
-            "comme un ami attentionné ; relance parfois par une question. Pas de liste, pas de titre, pas d'emoji en excès. " +
+            "comme un ami attentionné ; relance parfois par une question. Pas de liste, pas de titre, pas d'emoji en excès. Garde le fil de la conversation et utilise la mémoire partagée sans la réciter. " +
             "Tu n'as consulté ni son agenda, ni ses mails, ni ses appareils : n'invente aucun fait sur sa journée ; s'il veut une info précise, propose de vérifier. " +
-            "Nous sommes le $maintenant." + (ctx?.let { " Contexte : ${it.mode.libelle}." } ?: "")
+            "Nous sommes le $maintenant." + (ctx?.let { " Contexte : ${it.mode.libelle}." } ?: "") + (if (memoirePartagee.isNotBlank()) "\n\nMémoire partagée Jarvis/Hermès : $memoirePartagee" else "")
         val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", sys))
         history.takeLast(10).filter { it.text.isNotBlank() }.forEach { m ->
             msgs.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(1200)))
         }
-        return try {
-            app.llm.groqChat(msgs, null, forceText = true).optString("content").trim().takeIf { it.isNotBlank() }
-        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { null }
+        // Gemini Nano/AICore est un accélérateur facultatif réservé au bavardage.
+        // S'il n'est pas déjà prêt ou ne répond pas très vite, on conserve exactement le chemin cloud actuel.
+        val promptNano = buildString {
+            append(sys)
+            append("\n\nHistorique récent :\n")
+            history.takeLast(10).filter { it.text.isNotBlank() }.forEach { m ->
+                append(if (m.fromUser) "Utilisateur : " else "Jarvis : ")
+                append(m.text.take(350))
+                append('\n')
+            }
+            append("\nRéponds au dernier message de l'utilisateur.")
+        }.take(6500)
+        GeminiNanoLocal.repondre(promptNano)?.let { return it }
+        // Le bavardage ne doit jamais attendre toute la chaîne de secours réseau : Nano (1,6 s),
+        // puis au plus 3 s pour Groq / ses relais. Ensuite, réponse locale immédiate.
+        val cloud = kotlinx.coroutines.withTimeoutOrNull(3_000L) {
+            try {
+                app.llm.groqChat(msgs, null, forceText = true).optString("content").trim().takeIf { it.isNotBlank() }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
+        }
+        // Dernier recours strictement local : ne jamais laisser un bavardage simple tomber dans la chaîne Hermès.
+        return cloud ?: "Ça va bien, merci ! Et toi, comment se passe ta journée ?"
     }
 
-    private fun escaladePossible(pourHermes: Boolean, suivi: Suivi) = !pourHermes && !suivi.hermesEssaye &&
+    // En voiture, pas de relais automatique vers Hermès (jusqu'à 35 s d'attente de plus au volant) : Jarvis répond.
+    private fun escaladePossible(pourHermes: Boolean, suivi: Suivi) = !pourHermes && !suivi.hermesEssaye && !app.enVoiture &&
         app.store.hermesMode.value in setOf("auto", "tout") && !fr.dd.jarvis.hermes.Hermes.degrade()
 
     private suspend fun repondre(history: List<ChatMsg>, pourHermes: Boolean, onStatus: (String) -> Unit, suivi: Suivi, onTexte: ((String) -> Unit)? = null): String {
-        val recent = history.takeLast(4).filter { it.fromUser }.joinToString(" ") { it.text }
+        // Sujet en cours inclus : une suite (« du coup regarde directement sur la Freebox ») garde les outils et consignes de ce sujet.
+        val recent = history.takeLast(4).filter { it.fromUser }.joinToString(" ") { it.text } +
+            FilConversation.sujet(history).let { if (it.isBlank()) "" else " " + it.take(1500) }
         val societeOn = fr.dd.jarvis.societe.SocieteTools.concerned(recent)
         val planningClientsSync = Regex("(planning|agenda).{0,100}(fiche|client)|(fiche|client).{0,100}(planning|agenda)", RegexOption.IGNORE_CASE).containsMatchIn(recent) &&
             Regex("analys|ajout|compl[eé]t|rendez|enregistr|synchron|mettre à jour", RegexOption.IGNORE_CASE).containsMatchIn(recent)
@@ -113,14 +147,141 @@ class Brain(
         // adressée nommément à Hermès.
         val multi = fr.dd.jarvis.hermes.Routeur.multiEtapes(texteUser)
         val reflexes = pourHermes || !fr.dd.jarvis.hermes.Routeur.pourHermesSeul(texteUser)
+        // Suite qui renvoie à l'échange précédent (« ça », « du coup », « directement »…) : les réflexes qui ne lisent que la
+        // dernière phrase la comprendraient de travers ; elle va aux cerveaux, qui ont l'historique et le fil.
+        val suite = !pourHermes && FilConversation.renvoie(texteUser) && FilConversation.fil(history)?.let { FilConversation.estSuite(it) } == true
         fun reflexe(r: String) = r.also { if (!pourHermes) fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS }
+        // Changement de profil énergétique : commande locale immédiate, sans appel à Groq/Gemini/Hermès.
+        // Les trois profils sont persistés puis leurs planificateurs sont recalculés immédiatement.
+        if (!pourHermes) {
+            // « Que sais-tu faire ? », « liste tous tes outils », « que sais-tu faire avec les mails ? » : la liste
+            // complète, tirée du catalogue des capacités (sans IA).
+            Capacites.demande(texteUser)?.let { d ->
+                onStatus("🧰 Ce que je sais faire…")
+                return reflexe(Capacites.repondre(app, d, tools.schemaAll()))
+            }
+            // « Quels appareils contrôles-tu ? » : appareils liés à Jarvis, en local et à distance.
+            if (Regex("\\b(quels?|quelles?|liste|montre|donne)\\b.{0,30}\\b(appareils?|equipements?|services?)\\b.{0,30}\\b(controles?|pilotes?|geres?|lies?|associes?|relies?)\\b|\\bappareils? (lies|associes|relies) (a|avec) (toi|jarvis)\\b")
+                    .containsMatchIn(fr.dd.jarvis.societe.core.normaliser(texteUser)) && !Regex("\\b(box|freebox|wi ?fi|reseau)\\b.{0,20}\\b(connectes?)\\b").containsMatchIn(fr.dd.jarvis.societe.core.normaliser(texteUser))) {
+                onStatus("🔗 Appareils liés…")
+                return reflexe(AppareilsLies.texte(app))
+            }
+            // Plusieurs actions simples dans la même phrase (« passe Jarvis en mode économie et le téléphone aussi »,
+            // « allume la torche et mets en vibreur ») : toutes exécutées ici, sans IA ni Hermès.
+            if (!fr.dd.jarvis.hermes.Routeur.orchestrationOuNomme(texteUser)) actionsCombinees(texteUser, onStatus)?.let { return reflexe(it) }
+            val demandeMode = fr.dd.jarvis.societe.core.normaliser(texteUser)
+            val commandeMode = Regex("\\b(passe|passer|mets|mettre|active|activer|bascule|choisis|choisir|regle|regler)\\b.{0,35}\\b(mode\\s*)?(eco(nomie)?|economique|haute\\s+performance|performance|equilibre|balanced)\\b").containsMatchIn(demandeMode)
+            // Mode du TÉLÉPHONE (économiseur de batterie / équilibré / performance) : distinct du mode de Jarvis, réglé par le système.
+            val cibleTelephone = Regex("\\b(telephone|smartphone|portable|mobile|xiaomi|redmi|hyperos|economiseur|batterie du tel\\w*|mode (d )?alimentation)\\b").containsMatchIn(demandeMode)
+            val cibleJarvis = Regex("\\b(jarvis|application|appli|app|assistant)\\b").containsMatchIn(demandeMode)
+            val commandeTelephone = cibleTelephone && !cibleJarvis && (commandeMode ||
+                Regex("\\b(active|desactive|coupe|enleve|retire|allume|eteins|mets|passe)\\b.{0,25}\\beconomiseur\\b|\\b(quel|dans quel) mode\\b.{0,30}\\b(telephone|portable|smartphone)\\b|\\bmode (du|de mon) (telephone|portable|smartphone)\\b").containsMatchIn(demandeMode))
+            if (fr.dd.jarvis.securite.TelephoneSecurise.estDemande(texteUser)) {
+                return reflexe(when {
+                    !fr.dd.jarvis.securite.TelephoneSecurise.verrouille(app) -> "🔓 Le téléphone est déjà déverrouillé."
+                    fr.dd.jarvis.service.JarvisService.deverrouiller() -> "🎤 Je vérifie ta voix : dis « Jarvis, c'est bien moi »."
+                    else -> { fr.dd.jarvis.securite.TelephoneSecurise.afficherDeverrouillage(app)
+                        "🔓 J'affiche le déverrouillage (empreinte, visage ou code). Pour déverrouiller à la voix, active l'écoute « Jarvis » (le téléphone vérifie alors ta voix)." }
+                })
+            }
+            // Factures / devis (payée, envoyée, acceptée…) : directement dans la base Société du TÉLÉPHONE (le coffre du
+            // serveur n'est qu'une copie synchronisée après chaque modification) — jamais par SSH ni par Hermès.
+            // Mails : trier (règle : non lus par défaut ; « tous » pour cette fois), changer la règle, marquer lus / traités.
+            MailCommandes.intention(texteUser)?.let { (outil, args) ->
+                onStatus("📧 Mails…")
+                return reflexe(tools.execute(outil, args).text)
+            }
+            // Mode sonore du téléphone (ne pas déranger, vibreur, sonnerie + vibreur) : immédiat, sans IA.
+            fr.dd.jarvis.device.ModeSonore.intention(texteUser)?.let { mode -> return reflexe(fr.dd.jarvis.device.ModeSonore.appliquer(app, mode)) }
+            // « Où est Angeline ? » : position donnée par Home Assistant (person.* / device_tracker.*), jamais par SSH.
+            if (PersonneOu.personne(texteUser) != null) {
+                onStatus("📍 Position…")
+                runCatching { PersonneOu.repondre(app, texteUser) }.getOrNull()?.let { return reflexe(it) }
+            }
+            // Annuler / supprimer des factures ou devis (une, plusieurs, toutes), gérer les fiches de paie : même chose.
+            runCatching { fr.dd.jarvis.societe.SocieteTools.intentionGestion(app.societe.data, texteUser) }.getOrNull()?.let { (outil, args) ->
+                onStatus("🧾 Société…")
+                return reflexe(tools.execute(outil, args).text)
+            }
+            runCatching { fr.dd.jarvis.societe.SocieteTools.intentionDocument(app.societe.data, texteUser) }.getOrNull()?.let { args ->
+                args.optString("question").takeIf { it.isNotBlank() }?.let { return reflexe(it) }
+                onStatus("🧾 Société : ${args.optString("numero")}…")
+                return reflexe(tools.execute("document_action", args).text)
+            }
+            // Accès à distance d'un appareil du Wi-Fi : bail fixe + redirection Freebox + adresse publique, par l'outil dédié.
+            fr.dd.jarvis.ai.AccesDistant.intention(app, texteUser)?.let { args ->
+                onStatus("🌍 Accès à distance…")
+                return reflexe(tools.execute("appareil_acces_distant", args).text)
+            }
+            // Plex (lancer un film sur la télé, pause, reprise…) : directement par l'API de Plex, sans Home Assistant ni Hermès.
+            if (app.store.plexToken.value.isNotBlank()) PlexTools.intention(texteUser)?.let { (outil, args) ->
+                // « Lance X sur la télé » sans le mot film / série : seulement si X est bien dans la bibliothèque Plex.
+                val ok = args.optString("verifier") != "oui" || runCatching {
+                    val t = fr.dd.jarvis.societe.core.normaliser(args.optString("titre"))
+                    Plex.rechercher(app, args.optString("titre"), 5).any { fr.dd.jarvis.societe.core.normaliser(it.optString("title")).let { x -> x == t || (t.length >= 4 && x.contains(t)) } }
+                }.getOrDefault(false)
+                if (ok) {
+                    onStatus("🎬 Plex…")
+                    args.remove("verifier")
+                    return reflexe(tools.execute(outil, args).text)
+                }
+            }
+            // Sites web : créés, retrouvés, publiés et modifiés par l'outil dédié (jamais « à la main » par une IA).
+            SitesWebTools.intention(app, texteUser)?.let { args ->
+                onStatus("🌐 Site web…")
+                return reflexe(tools.execute("site_web", args).text)
+            }
+            fr.dd.jarvis.securite.Systemes.intention(app, texteUser)?.let { args ->
+                onStatus("🧩 " + when (args.optString("action")) { "creer" -> "Création du mode…"; "modifier" -> "Modification du mode…"; "supprimer" -> "Suppression du mode…"; else -> "Mes modes…" })
+                return reflexe(tools.execute("modes_jarvis", args).text)
+            }
+            val modeTel = if (commandeTelephone && !Regex("securis").containsMatchIn(demandeMode)) fr.dd.jarvis.device.ModeTelephone.lire(texteUser) else null
+            if (modeTel != null) {
+                onStatus("📱 Réglage du mode du téléphone…")
+                return reflexe(fr.dd.jarvis.device.ModeTelephone.appliquer(app, modeTel))
+            }
+            // Réponse à « Quel mode veux-tu activer : … ? » posée juste avant.
+            history.dropLast(1).lastOrNull { !it.fromUser }?.text?.takeIf { it.startsWith("Quel mode veux-tu ") }?.let { q ->
+                fr.dd.jarvis.securite.Systemes.choix(app, texteUser)?.let { s ->
+                    val activer = q.startsWith("Quel mode veux-tu activer")
+                    return reflexe(tools.execute("modes_jarvis", org.json.JSONObject().put("action", if (activer) "activer" else "desactiver").put("nom", s.nom)).text)
+                }
+            }
+            fr.dd.jarvis.securite.Systemes.parPhrase(app, texteUser)?.let { (s, activer) ->
+                onStatus(if (activer) "🛡️ Activation de « ${s.nom} »…" else "🛡️ Désactivation de « ${s.nom} »…")
+                return reflexe(tools.execute("modes_jarvis", org.json.JSONObject().put("action", if (activer) "activer" else "desactiver").put("nom", s.nom)).text)
+            }
+            fr.dd.jarvis.securite.Systemes.ambigus(app, texteUser)?.let { (noms, activer) ->
+                return reflexe("Quel mode veux-tu ${if (activer) "activer" else "désactiver"} : ${noms.joinToString(" ou ") { "« $it »" }} ?")
+            }
+            // Actions courantes reconnues sans IA (alarme, minuteur, appel, SMS, appli, météo, planning, rappel…).
+            CommandesDirectes.intention(texteUser)?.let { i ->
+                onStatus(i.statut)
+                executerDirecte(i)?.let { return reflexe(it) }
+            }
+            // Lumières, volets, prises, télé : Home Assistant directement quand l'appareil est trouvé sans ambiguïté.
+            if (DomotiqueDirecte.commande(fr.dd.jarvis.societe.core.normaliser(texteUser)) != null) {
+                onStatus("🏠 Maison…")
+                runCatching { DomotiqueDirecte.executer(app, tools, texteUser) }.getOrNull()?.let { return reflexe(it) }
+            }
+            if (commandeMode && !cibleTelephone) {
+                onStatus("⚙️ Changement du mode énergétique…")
+                return reflexe(appliquerModeJarvis(modeEnergieDans(demandeMode) ?: "equilibre"))
+            }
+        }
         // Une procédure qu'Hermès a apprise (skill ajouté) passe avant les raccourcis de Jarvis sur le même sujet.
         val competence = if (pourHermes || app.store.hermesMode.value == "off") null
             else runCatching { fr.dd.jarvis.hermes.Routeur.competence(texteUser, app.memo.skillsHermes()) }.getOrNull()
         // Mode « Hermès pour tout » : seules les commandes instantanées du téléphone (sans IA) passent avant Hermès ;
         // tout le reste (fichiers, Freebox, vidéos, position, installations…) est traité par Hermès avec les outils de Jarvis.
-        val toutHermes = !pourHermes && app.store.hermesMode.value == "tout" && !app.enVoiture && !fr.dd.jarvis.hermes.Hermes.degrade() &&
-            !(app.store.hermesRapide.value && fr.dd.jarvis.hermes.Routeur.commandeSimple(texteUser))
+        // En mode normal (« auto »), Hermès reste le cerveau principal : Nano ne traite que le bavardage
+        // et les réflexes sans IA restent instantanés. Les traitements directs (Freebox, fichiers, etc.)
+        // ne doivent pas intercepter une demande avant Hermès. « Hermès rapide » conserve l'exception
+        // explicite pour les commandes simples du téléphone.
+        // Les traitements directs (position, recherche de fichiers, Freebox, vidéo…) sont des actions de Jarvis : ils
+        // passent avant Hermès, sauf en mode « Hermès pour tout » avec « Actions par Jarvis » désactivé.
+        val toutHermes = !pourHermes && app.store.hermesMode.value == "tout" && !app.store.hermesRapide.value &&
+            !app.enVoiture && !fr.dd.jarvis.hermes.Hermes.degrade()
         if (reflexes) {
             if (!multi) commandeImmediate(texteUser, onStatus)?.let { return reflexe(it) }
         }
@@ -128,22 +289,27 @@ class Brain(
             positionDirecte(dernier, history, onStatus)?.let { return reflexe(it) }
             if (competence == null) {
                 rangementDirect(history, onStatus)?.let { return reflexe(it) }
-                if (!multi) rechercheDirecte(texteUser, onStatus)?.let { return reflexe(it) }
-                if (!multi) freeboxDirect(texteUser, onStatus)?.let { return reflexe(it) }
+                if (!multi && !suite) rechercheDirecte(texteUser, onStatus)?.let { return reflexe(it) }
+                if (!multi && !suite) freeboxDirect(texteUser, onStatus)?.let { return reflexe(it) }
                 if (!multi) videoDirecte(history, onStatus)?.let { return reflexe(it) }
-                if (!multi) installationDirecte(texteUser, onStatus)?.let { return reflexe(it) }
+                if (!multi && !suite) installationDirecte(texteUser, onStatus)?.let { return reflexe(it) }
             }
         }
         // Conversation simple (« salut », « comment ça va ? », « merci ») : réponse immédiate, un seul appel d'IA, sans outils ni Hermès.
-        if (!pourHermes && !multi && fr.dd.jarvis.hermes.Routeur.bavardage(texteUser)) {
-            conversationRapide(history, onStatus)?.let { return reflexe(it) }
+        // Le bavardage utilisateur est prioritaire sur le mode « Hermès pour tout » :
+        // une conversation sociale ne doit jamais être escaladée vers Hermès.
+        val reponsePrecedente = history.dropLastWhile { it.fromUser }.lastOrNull()?.text
+        if (!multi && (fr.dd.jarvis.hermes.Routeur.bavardage(texteUser) || (!suite && fr.dd.jarvis.hermes.Routeur.suiteBavardage(texteUser, reponsePrecedente)))) {
+            val reponse = conversationRapide(history, onStatus) ?: "Ça va bien, merci ! Et toi, comment se passe ta journée ?"
+            fr.dd.jarvis.hermes.Routeur.marquerBavardage()
+            return reflexe(reponse)
         }
         // Hermès, cerveau principal (mode « tout » : toutes les autres demandes ; mode « auto » : les tâches complexes).
         // S'il est indisponible, Jarvis reprend la main avec ses outils.
         if (!pourHermes) {
             val precedent = history.dropLastWhile { it.fromUser }.lastOrNull()?.text
             val choix = fr.dd.jarvis.hermes.Routeur.choisir(app, texteUser, precedent)
-            if (choix.cible == fr.dd.jarvis.hermes.Routeur.Cible.JARVIS && app.store.hermesMode.value == "tout" && fr.dd.jarvis.hermes.Hermes.degrade()) suivi.hermesIndisponible = true
+            if (choix.cible == fr.dd.jarvis.hermes.Routeur.Cible.JARVIS && app.store.hermesMode.value in setOf("auto", "demande", "tout") && fr.dd.jarvis.hermes.Hermes.degrade()) suivi.hermesIndisponible = true
             if (choix.cible == fr.dd.jarvis.hermes.Routeur.Cible.HERMES) {
                 suivi.hermesEssaye = true
                 val r = fr.dd.jarvis.hermes.Hermes.repondre(app, history, tools, userName(), onStatus, onTexte = onTexte)
@@ -164,7 +330,11 @@ class Brain(
         val sansAnalyse = pourHermes || fr.dd.jarvis.hermes.Routeur.commandeSimple(texteUser)
         // Notes pertinentes et analyse de la demande EN MÊME TEMPS (avant : l'une après l'autre, jusqu'à 2,5 s de perdues).
         val (notesUtiles, plan) = kotlinx.coroutines.coroutineScope {
-            val notes = async(kotlinx.coroutines.Dispatchers.IO) { runCatching { fr.dd.jarvis.device.NotesPertinentes.pour(app, texteUser) }.getOrDefault("") }
+            // En voiture : on n'attend pas plus d'une demi-seconde les notes (chaque seconde compte au volant).
+            val notes = async(kotlinx.coroutines.Dispatchers.IO) { runCatching {
+                if (app.enVoiture) kotlinx.coroutines.withTimeoutOrNull(500) { fr.dd.jarvis.device.NotesPertinentes.pour(app, texteUser) }.orEmpty()
+                else fr.dd.jarvis.device.NotesPertinentes.pour(app, texteUser)
+            }.getOrDefault("") }
             val analyse = async {
                 // L'analyse Gemini n'est utile que pour une vraie orchestration multiétape.
                 // Pour une demande simple, schemaFor() sélectionne localement les outils : un appel IA complet économisé.
@@ -219,7 +389,9 @@ class Brain(
             // Partie stable d'abord (mise en cache par le fournisseur), puis le contexte propre à la demande.
             Prompts.brain(userName(), avecDate = false) + (if (societeNeeded) "\n\n" + fr.dd.jarvis.societe.SocieteTools.PROMPT else "") +
                 app.memo.pourPrompt() + app.memo.hermesPourPrompt() + app.memo.capacitesPourPrompt() + notesUtiles +
+                runCatching { fr.dd.jarvis.device.Faits.bloc(app) }.getOrDefault("").let { if (it.isBlank()) "" else "\n\n$it" } +
                 (if (plan != null && plan.note.isNotBlank()) "\n\nAnalyse préalable de la demande (Gemini) — suis ce plan, avec les outils fournis : ${plan.note}" else "") +
+                runCatching { fr.dd.jarvis.hermes.ServeurInventaire.bloc(app, texteUser) }.getOrDefault("") +
                 runCatching { fr.dd.jarvis.device.Contexte.consigne(fr.dd.jarvis.device.Contexte.actuel(app)) }.getOrDefault("") +
                 "\n\nDate et heure actuelles : ${Prompts.now()}."))
         // Réduction de tokens sans perte de précision : seuls les derniers échanges (où un détail précis — liste de fichiers,
@@ -229,13 +401,25 @@ class Brain(
         // entier, à chaque nouveau tour, le texte complet d'une réponse déjà ancienne et déjà traitée.
         // Les 3 derniers messages restent complets pour préserver les détails opérationnels.
         // Les 7 précédents servent uniquement à garder le fil et sont plafonnés à 1600 caractères.
-        val recentHistory = history.takeLast(10)
+        // La dernière demande porte le fil de la conversation (sujet en cours) quand elle prolonge l'échange.
+        val recentHistory = (if (pourHermes) history else FilConversation.historiqueEnrichi(history)).takeLast(10)
         recentHistory.forEachIndexed { idx, m ->
             val cap = if (recentHistory.size - 1 - idx < 3) 12000 else 1600
             messages.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(cap)))
         }
 
-        repeat(6) {
+        // Budget d'orchestration élargi : chaque cycle peut consulter des outils, vérifier leur résultat,
+        // corriger une action ou poursuivre le plan. Les demandes complexes ne doivent plus s'arrêter après
+        // seulement 7 à 12 cycles. Le mode économie reste plus sobre, sans couper les tâches ni l'écoute.
+        val modeRessources = app.store.modeEnergie.value
+        val toursMax = when {
+            fr.dd.jarvis.hermes.Routeur.commandeSimple(texteUser) -> 3
+            modeRessources == "performance" -> if (multi) 24 else 12
+            modeRessources == "eco" -> if (multi) 12 else 7
+            multi -> 18
+            else -> 10
+        }
+        repeat(toursMax) {
             val msg = try {
                 llm.groqChat(messages, schemaFinal)
             } catch (e: ApiException) {
@@ -293,7 +477,19 @@ class Brain(
             if (direct.isNotEmpty()) return direct.toString().trim()
             onStatus("Réflexion…")
         }
-        return "Je n'ai pas réussi à terminer cette opération."
+        // Dernière passe sans nouvel outil : restitue les résultats réellement obtenus plutôt qu'un échec générique.
+        // Les outils ont déjà disposé du budget complet ci-dessus ; cette synthèse ne doit rien inventer ni prétendre
+        // qu'une action non confirmée a réussi.
+        val synthese = JSONArray()
+        for (i in 0 until messages.length()) synthese.put(messages.get(i))
+        synthese.put(JSONObject().put("role", "system").put("content",
+            "Tu as atteint le budget d'étapes disponible. Fais maintenant un bilan précis à partir des résultats d'outils présents dans l'historique. N'invente aucun résultat. Distingue ce qui est confirmé, ce qui reste à faire et l'erreur exacte éventuelle. Ne prétends pas qu'une action non confirmée a réussi."))
+        val dernierTour = try { llm.groqChat(synthese, JSONArray(), forceText = true) }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (_: Exception) { null }
+        return dernierTour?.optString("content")?.trim()?.takeIf { it.isNotBlank() }
+            ?: "La demande a atteint la limite d'étapes disponible. Je n'ai pas de confirmation suffisante pour annoncer sa réussite ; les résultats déjà obtenus restent dans le suivi."
+
     }
 
     /**
@@ -450,6 +646,75 @@ class Brain(
      * lampe torche, volume et luminosité chiffrés, Wi-Fi, Bluetooth, lecture/pause/suivant/précédent, verrouillage,
      * capture d'écran. Les confirmations habituelles (Wi-Fi coupé, verrouillage…) restent demandées par l'outil.
      */
+    /** Mode de fonctionnement de JARVIS (économie / équilibré / performance) : réglé tout de suite, sans IA. */
+    private fun appliquerModeJarvis(mode: String): String {
+        val m = when (mode) { "economie", "eco" -> "eco"; "performance" -> "performance"; else -> "balanced" }
+        app.store.modeEnergie.set(m)
+        fr.dd.jarvis.device.Energie.appliquerMode(app)
+        return when (m) {
+            "eco" -> "🔋 Jarvis en mode économie : les tâches secondaires sont réduites, l'écoute et les commandes restent disponibles."
+            "performance" -> "⚡ Jarvis en mode haute performance : réactivité maximale, dans les limites imposées par Android."
+            else -> "⚖️ Jarvis en mode équilibré : son activité s'adapte à la batterie, à la température et à la mémoire."
+        }
+    }
+
+    /**
+     * Plusieurs actions simples dans une même phrase : chacune reconnue SANS IA (modes de Jarvis et du téléphone, mode
+     * sonore, lampe, Wi-Fi, volume, musique…), puis toutes exécutées dans l'ordre. Si une seule partie n'est pas
+     * reconnue, rien n'est exécuté et la phrase suit le chemin habituel.
+     */
+    private suspend fun actionsCombinees(texte: String, onStatus: (String) -> Unit): String? {
+        val brut = texte.trim().replace(Regex("^(jarvis|ok|alors)[ ,]+", RegexOption.IGNORE_CASE), "")
+        val parties = decouperActions(brut)
+        if (parties.size !in 2..5) return null
+        val modeGlobal = modeEnergieDans(fr.dd.jarvis.societe.core.normaliser(brut))
+        val actions = parties.map { p -> actionLocale(p, modeGlobal) ?: return null }
+        onStatus("⚡ ${actions.size} actions…")
+        return actions.map { a -> runCatching { a() }.getOrElse { "❌ ${it.message}" } }.joinToString("\n")
+    }
+
+    /** Action locale reconnue dans une partie de phrase (rien n'est exécuté ici). */
+    private fun actionLocale(partie: String, modeGlobal: String?): (suspend () -> String)? {
+        val n = fr.dd.jarvis.societe.core.normaliser(partie)
+        fr.dd.jarvis.device.ModeSonore.intention(partie)?.let { m -> return { fr.dd.jarvis.device.ModeSonore.appliquer(app, m) } }
+        val jarvis = Regex("\\b(jarvis|application|appli|app|assistant|toi)\\b").containsMatchIn(n)
+        val telephone = Regex("\\b(telephone|smartphone|portable|mobile|tel|xiaomi|redmi|economiseur)\\b").containsMatchIn(n)
+        val parleMode = Regex("\\bmode\\b|\\beco(nomie)?\\b|economiseur|performance|equilibre").containsMatchIn(n)
+        if ((jarvis || telephone) && (parleMode || modeGlobal != null)) {
+            val m = modeEnergieDans(n) ?: modeGlobal ?: return null
+            return when {
+                telephone && !jarvis -> ({ fr.dd.jarvis.device.ModeTelephone.appliquer(app, m) })
+                jarvis && !telephone -> ({ appliquerModeJarvis(m) })
+                else -> null
+            }
+        }
+        actionImmediate(partie)?.let { (outil, action, valeur) ->
+            return { tools.execute(outil, if (outil == "controle_media") JSONObject().put("action", action) else JSONObject().put("action", action).put("value", valeur)).text }
+        }
+        fr.dd.jarvis.device.CommandeMedia.intention(partie) { fr.dd.jarvis.device.CommandeMedia.musiqueOuverte(app) }?.let { a ->
+            return { fr.dd.jarvis.device.CommandeMedia.executer(app, a, app.enVoiture) }
+        }
+        // Actions courantes sans texte libre (un SMS ou un rappel ne se découpe jamais sur « et »).
+        CommandesDirectes.intention(partie)?.takeIf { !it.texteLibre }?.let { i ->
+            return { executerDirecte(i) ?: "❓ Application « ${i.appli} » introuvable sur le téléphone." }
+        }
+        if (DomotiqueDirecte.commande(n) != null) return {
+            runCatching { DomotiqueDirecte.executer(app, tools, partie) }.getOrNull() ?: "❓ Je n'ai pas trouvé sans ambiguïté l'appareil de « $partie » dans Home Assistant."
+        }
+        return null
+    }
+
+    /** Exécute une action reconnue par [CommandesDirectes] ; null si l'application demandée n'est pas installée. */
+    private suspend fun executerDirecte(i: CommandesDirectes.Intention): String? {
+        i.local?.let { return CommandesDirectes.local(app, it) }
+        val outil = i.outil ?: return null
+        if (i.appli != null) {
+            val (_, nom) = CommandesDirectes.appliInstallee(app, i.appli) ?: return null
+            return tools.execute(outil, JSONObject(i.args.toString()).put("value", nom)).text
+        }
+        return tools.execute(outil, i.args).text
+    }
+
     private suspend fun commandeImmediate(texte: String, onStatus: (String) -> Unit): String? {
         val (outil, action, valeur) = actionImmediate(texte) ?: return null
         val args = if (outil == "controle_media") JSONObject().put("action", action) else JSONObject().put("action", action).put("value", valeur)
@@ -509,6 +774,21 @@ class Brain(
             val coupe = Regex("\\b(desactive|desactiver|coupe|couper|arrete|eteins|stoppe)\\b").containsMatchIn(n)
             val serveur = when { n.contains("openvpn") -> "openvpn_routed"; n.contains("ipsec") -> "ipsec"; n.contains("pptp") -> "pptp"; else -> "" }
             val args = JSONObject()
+            // Appareils de la box : « supprime les appareils sans nom de la box », « retire les appareils hors ligne »,
+            // « liste les appareils sans nom ».
+            val appareils = Regex("\\b(appareils?|peripheriques?|equipements?|hotes?|machines?)\\b|\\bsans nom\\b").containsMatchIn(n) && !Regex("\\b(fichiers?|dossiers?|disques?|telechargements?)\\b").containsMatchIn(n)
+            if (box && appareils) {
+                val filtre = when {
+                    Regex("\\bsans nom|\\binconnus?\\b|\\bnon nommes?\\b|\\banonymes?\\b").containsMatchIn(n) -> "sans_nom"
+                    Regex("\\bhors ligne|\\bdeconnectes?\\b|\\binactifs?\\b|\\bqui ne sont (plus|pas) connectes\\b|\\banciens?\\b").containsMatchIn(n) -> "hors_ligne"
+                    else -> ""
+                }
+                if (Regex("\\b(supprim\\w*|efface\\w*|retire\\w*|enleve\\w*|oublie\\w*|nettoie\\w*|vire\\w*|vide\\w*)\\b").containsMatchIn(n)) {
+                    if (filtre.isBlank()) return null // appareil nommé : le cerveau le retrouve et appelle supprimer_appareil
+                    return "supprimer_appareil" to args.put("action", "supprimer_appareil").put("filtre", filtre)
+                }
+                if (filtre.isNotBlank() && Regex("\\b(liste|montre|affiche|quels?|combien|donne|voir)\\b").containsMatchIn(n)) return "appareils" to args.put("action", "appareils").put("filtre", filtre)
+            }
             // Disque dur de la box : « se connecter au disque », « dossier téléchargements », « mes films sur la box »…
             // Une MODIFICATION de fichiers (renommer, déplacer, supprimer, copier, envoyer, créer…) n'est jamais un simple
             // listage : elle part au cerveau, qui utilise les actions de fichiers de l'outil freebox.
@@ -561,6 +841,19 @@ class Brain(
             val avecClient = candidats.filter { (c, _) -> dans(c) }
             return avecClient.singleOrNull()
         }
+
+        /** « économie » / « performance » / « equilibre » nommé dans la phrase (normalisée), ou null. */
+        internal fun modeEnergieDans(n: String): String? = when {
+            Regex("\\b(eco|economie|economique|economiseur|basse consommation)\\b").containsMatchIn(n) -> "economie"
+            Regex("\\b(haute\\s+)?performances?\\b|\\bturbo\\b").containsMatchIn(n) -> "performance"
+            Regex("\\b(equilibre|normal|standard|balanced)\\b").containsMatchIn(n) -> "equilibre"
+            else -> null
+        }
+
+        /** Parties d'une phrase à plusieurs actions (« … et … », « … puis … », « …, … »). */
+        internal fun decouperActions(texte: String): List<String> =
+            texte.split(Regex("\\s*(?:[,;]|\\bet (?:aussi |puis |ensuite )?|\\bpuis\\b|\\bensuite\\b|\\bet\\b)\\s*", RegexOption.IGNORE_CASE))
+                .map { it.trim().trimEnd('.', '!', '?') }.filter { it.isNotBlank() }
 
         /** Commande immédiate reconnue sans modèle : (outil, action, valeur), ou null. */
         internal fun actionImmediate(texte: String): Triple<String, String, String>? {

@@ -18,14 +18,21 @@ data class ToolResult(val text: String, val direct: Boolean = false)
 
 class ToolBox(
     private val app: JarvisApp,
-    private val confirm: suspend (String, Boolean) -> Boolean
+    private val confirmBrut: suspend (String, Boolean) -> Boolean
 ) {
+    /** Confirmation avec « Toujours autoriser » : une action déjà autorisée pour toujours (par type d'outil) ne redemande rien. */
+    private val confirm: suspend (String, Boolean) -> Boolean = { q, force ->
+        val outil = kotlin.coroutines.coroutineContext[fr.dd.jarvis.device.Autorisations.OutilEnCours]
+        fr.dd.jarvis.device.Autorisations.confirmer(app, outil, q) { confirmBrut(q, force) }
+    }
     private val societe = SocieteTools(app, confirm)
     private val serveur = ServeurTools(app, confirm)
     private val discord = DiscordTools(app, confirm)
     private val tiktok = TikTokTools(app, confirm)
     private val musique = MusicTools(app)
     private val plex = PlexTools(app, confirm)
+    private val serveurAdmin = ServeurAdminTools(app, confirm)
+    private val sitesWeb = SitesWebTools(app, confirm)
     private val store get() = app.store
     private val llm get() = app.llm
 
@@ -64,9 +71,9 @@ class ToolBox(
                 "start" to prop("Début, yyyy-MM-dd'T'HH:mm (heure locale)."),
                 "end" to prop("Fin, yyyy-MM-dd'T'HH:mm. Par défaut début + 1 h."),
                 "calendar" to prop("Nom de l'agenda (optionnel)."),
-                "location" to prop("Adresse ou coordonnées du lieu (optionnel) : géocode le point. Google Agenda reçoit uniquement un lien GPS cliquable dans le champ Lieu ; l’adresse postale reste dans la description."),
+                "location" to prop("Adresse ou coordonnées du lieu (optionnel) : géocode le point. Le champ Lieu reçoit uniquement les coordonnées GPS brutes « latitude, longitude », sans aucun lien ; l’adresse postale reste dans la description."),
                 "description" to prop("Notes (optionnel)."),
-                "client" to prop("Nom exact ou distinctif d’une fiche client Société : utilise l’adresse et le GPS de la bonne installation. Le champ Lieu Google Agenda ne doit contenir que le lien GPS cliquable ; l’adresse complète reste dans la description."),
+                "client" to prop("Nom exact ou distinctif d’une fiche client Société : utilise l’adresse et le GPS de la bonne installation. Le champ Lieu ne contient que les coordonnées GPS brutes « latitude, longitude », sans aucun lien ; l’adresse complète reste dans la description."),
                 "installation" to prop("Nom de l’installation du client si plusieurs ; optionnel.")
             ), listOf("title", "start")))
         put(tool("update_event", "Modifie un rendez-vous existant (identifiant visible dans le planning : #id).",
@@ -75,8 +82,17 @@ class ToolBox(
                 "title" to prop("Nouveau titre (optionnel)."),
                 "start" to prop("Nouveau début yyyy-MM-dd'T'HH:mm (optionnel)."),
                 "end" to prop("Nouvelle fin (optionnel)."),
-                "location" to prop("Nouvelle adresse ou coordonnées (optionnel) : géocode le point ; le champ Lieu Google Agenda reçoit uniquement le lien GPS cliquable et l’adresse reste dans la description.")
+                "location" to prop("Nouvelle adresse ou coordonnées (optionnel) : géocode le point ; le champ Lieu reçoit uniquement les coordonnées GPS brutes « latitude, longitude », sans aucun lien et l’adresse reste dans la description.")
             ), listOf("event_id")))
+        put(tool("agenda_lieu_gps", "Remplace le LIEU (adresse) d'un ou plusieurs rendez-vous du planning par ses COORDONNÉES GPS BRUTES « latitude, longitude », sans aucun lien Waze ni Google Maps (« mets les coordonnées GPS du rendez-vous chez X », « remplace l'adresse de mon rdv de demain par les coordonnées GPS »). Géocode l'adresse (ou prend le GPS de l'installation client si le rendez-vous la désigne), garde l'adresse d'origine en texte dans la description. Ne pilote pas l'écran.",
+            mapOf(
+                "event_id" to prop("Identifiant #id du rendez-vous (optionnel)."),
+                "recherche" to prop("Mots du titre, du lieu ou du client pour trouver le rendez-vous (optionnel)."),
+                "date" to prop("Jour, yyyy-MM-dd (optionnel ; par défaut aujourd'hui, ou les 30 prochains jours si « recherche » est donnée)."),
+                "jours" to prop("Nombre de jours à parcourir à partir de la date (optionnel)."),
+                "tous" to prop("true pour convertir TOUS les rendez-vous trouvés (sinon Jarvis demande lequel s'il y en a plusieurs)."),
+                "forcer" to prop("true pour accepter un point approximatif (centre de la commune) quand l'adresse exacte est introuvable.")
+            )))
         put(tool("set_event_color", "Change la couleur d'un rendez-vous (synchronisée avec Google Agenda). Identifiant #id visible dans le planning ; sinon cherche par titre.",
             mapOf(
                 "event_id" to prop("Identifiant(s) numérique(s), séparés par des virgules (optionnel)."),
@@ -114,26 +130,37 @@ class ToolBox(
                 "message_id" to prop("Identifiant exact fourni par rechercher_mails."),
                 "texte" to prop("Texte complet de la réponse.")
             ), listOf("compte", "message_id", "texte")))
-        put(tool("trier_mails", "Analyse les derniers mails, les classe dans les libellés de l'utilisateur (Facebook, Super U/…, Impôts, Pubs, Réseaux sociaux, Banque et crédit, Maison, Enfants, Santé, Achats et livraisons, Comptes et sécurité, Administratif, Travail, Personnel) et peut les ranger dans Gmail. Pour TOUTE la boîte, utilise grand_menage_mails.",
+        put(tool("trier_mails", "Analyse les mails, les classe dans les libellés de l'utilisateur (Facebook, Super U/…, Impôts, Pubs, Réseaux sociaux, Banque et crédit, Maison, Enfants, Santé, Achats et livraisons, Comptes et sécurité, Administratif, Travail, Personnel) et peut les ranger dans Gmail. Applique la RÈGLE enregistrée (par défaut : seulement les NON LUS) ; « trie tous mes mails » = statut tous pour CETTE fois (la règle ne change pas). Pour changer la règle durablement : regler_tri_mails. Pour TOUTE la boîte d'un coup : grand_menage_mails.",
             mapOf(
                 "compte" to prop("Compte mail précis (adresse ou partie), même s'il est désactivé. Vide = comptes actifs seulement."),
                 "count" to prop("Nombre de mails à trier (5 à 500). Par défaut 100 ; mets 300-500 pour « toute la boîte »."),
                 "unread_only" to prop("« true » pour ne trier que les non lus."),
+                "statut" to prop("lus | non_lus | tous : pour CE tri seulement (la règle enregistrée ne change pas, sauf enregistrer=true). Vide = règle enregistrée."),
+                "enregistrer" to prop("« true » si l'utilisateur veut que ce statut devienne la règle (« désormais », « à partir de maintenant »)."),
                 "toute_la_boite" to prop("« true » pour inclure aussi les mails déjà archivés (pas seulement la boîte de réception) : utile pour (re)trier tout un compte."),
                 "ranger" to prop("« true » pour appliquer les libellés dans Gmail. Un re-tri remplace les anciens libellés de catégorie par les bons."),
                 "archiver" to prop("« true » pour aussi retirer de la boîte de réception les mails rangés (ils restent dans leur libellé).")
             )))
+        put(tool("regler_tri_mails", "Modifie à la demande la règle persistante du tri des emails (« désormais trie… », « change la règle du tri »). Par défaut seuls les emails NON LUS sont triés. Valeurs : non_lus (ne trie que les non lus), lus (ne touche jamais aux non lus), tous (lus et non lus). Elle s'applique à tous les tris (automatiques et « trie mes mails ») jusqu'au prochain changement, jamais au grand ménage explicite.",
+            mapOf("statut" to prop("lus | non_lus | tous : nouvelle règle à enregistrer."),
+                "action" to prop("definir | voir ; défaut définir si statut fourni, sinon voir."))))
         put(tool("changer_voix", "Change la voix de JARVIS (personnage) : homme, femme, jeune, âgé(e), grave, douce, IA/robot, narrateur, animatrice radio, murmure, Jarvis (par défaut), ou un nom de voix Gemini (Kore, Puck…). Sans précision : liste les voix.",
             mapOf("voix" to prop("Description de la voix voulue, ex. « femme âgée », « jeune homme », « robot », « par défaut ». Vide = lister."),
                 "description" to prop("Facultatif : description libre (âge, ton, accent) pour une voix sur mesure, ex. « homme de 60 ans avec un accent du Sud »."))))
-        put(tool("routines", "Routines de JARVIS (plusieurs actions d'un coup) : lister, lancer, creer/modifier, supprimer. Déclencheurs : phrase (« je pars »), depart_maison, arrivee_maison, arrivee_chantier, depart_chantier, voiture (connexion Android Auto), heure (+ jours : tous, semaine, weekend). Les actions sont des demandes en français que JARVIS exécutera dans l'ordre.",
-            mapOf("action" to prop("lister | lancer | creer | supprimer | activer | desactiver"),
-                "nom" to prop("Nom de la routine (ex. « Je pars »)."),
-                "declencheur" to prop("creer : phrase | depart_maison | arrivee_maison | arrivee_chantier | depart_chantier | voiture | heure"),
-                "phrases" to prop("creer, déclencheur phrase : phrases qui la lancent, séparées par « ; » (ex. « je pars ; on y va »)."),
-                "heure" to prop("creer, déclencheur heure : HH:MM."),
-                "jours" to prop("creer, déclencheur heure : tous | semaine | weekend."),
-                "actions" to prop("creer : actions séparées par « ; » ou des retours à la ligne, ex. « éteins les lumières ; lance ma playlist ; envoie un SMS à Thomas : je pars ».")),
+        put(tool("routines", "Gestion complète des routines JARVIS : lister, consulter, lancer, créer, modifier partiellement ou complètement, activer/désactiver et supprimer. Toute modification conserve les paramètres non mentionnés. Permet de changer le déclencheur, les phrases, l'heure, les jours, le nom et les actions ; ajouter/retirer/remplacer une action sans réécrire les autres.",
+            mapOf("action" to prop("lister | consulter | lancer | creer | modifier | supprimer | activer | desactiver"),
+                "nom" to prop("Nom actuel ou distinctif de la routine à consulter/modifier/lancer/supprimer ; pour créer, nom de la nouvelle routine."),
+                "nouveau_nom" to prop("Nouveau nom de la routine (optionnel, modification uniquement)."),
+                "declencheur" to prop("Nouveau déclencheur : phrase | depart_maison | arrivee_maison | arrivee_chantier | depart_chantier | voiture | heure. Non fourni = inchangé."),
+                "phrases" to prop("Nouvelles phrases de déclenchement, séparées par « ; ». Non fourni = inchangé."),
+                "heure" to prop("Nouvelle heure HH:MM pour un déclencheur heure. Non fourni = inchangée."),
+                "jours" to prop("Nouveaux jours : tous | semaine | weekend. Non fourni = inchangé."),
+                "actions" to prop("Remplace toute la liste d'actions si fourni explicitement ; actions séparées par « ; » ou retours à la ligne."),
+                "ajouter_action" to prop("Ajoute une ou plusieurs actions sans toucher aux autres (séparées par « ; »)."),
+                "retirer_action" to prop("Retire une action existante (texte exact ou distinctif). Si plusieurs correspondent, demande une précision."),
+                "ancienne_action" to prop("Action actuelle à remplacer (texte exact ou distinctif)."),
+                "nouvelle_action" to prop("Nouvelle formulation de l'action indiquée par ancienne_action."),
+                "active" to prop("true ou false pour modifier l'état sans changer le reste.")),
             listOf("action")))
         put(tool("journal_de_bord", "Journal de bord (note Obsidian « Journal/… ») : jour = journal d'une journée (rendez-vous, interventions, devis/factures/paiements, km estimés, demandes à JARVIS, résumé) ; semaine = bilan de la semaine.",
             mapOf("periode" to prop("jour (défaut) | semaine"), "date" to prop("Date yyyy-MM-dd (défaut : aujourd'hui)."))))
@@ -159,13 +186,20 @@ class ToolBox(
                 "restants" to prop("« true » (défaut) pour ne garder que les rendez-vous restants aujourd'hui, « false » pour toute la journée."),
                 "calendar" to prop("Nom d'un agenda précis (optionnel).")
             )))
-        put(tool("marquer_mails_traites", "Marque des mails comme traités OU simplement comme lus (« marque comme lu ») : ils sont d'abord triés automatiquement dans leur libellé (catégorie/expéditeur, toutes les newsletters dans un seul libellé), puis marqués lus (+ libellé Traité si traités), archivés si demandé. Compte Google requis.",
+        put(tool("marquer_mails_traites", "Marque des mails comme LUS, NON LUS ou TRAITÉS (lus + libellé « Traité ») : TOUS (toute la boîte de réception, sans limite de nombre) ou seulement ceux demandés (expéditeur, mots, libellé/catégorie, période, identifiants). Une seule confirmation. Compte Google requis.",
             mapOf(
-                "traite" to prop("« false » si l'utilisateur demande seulement de marquer comme LU (pas de libellé Traité). Par défaut true."),
-                "compte" to prop("Compte mail précis (adresse ou partie), même s'il est désactivé. Vide = comptes actifs seulement."),
-                "recherche" to prop("Texte à retrouver dans l'expéditeur ou l'objet. Vide ou « tous » = tous les mails récents non lus."),
-                "count" to prop("Nombre de mails récents à considérer (5 à 60). Par défaut 30."),
-                "archiver" to prop("Par défaut : traités → rangés dans leur libellé (retirés de la boîte de réception) ; lus → restent dans la boîte. « false » / « true » pour forcer.")
+                "action" to prop("lu | non_lu | traite (défaut : traite ; « marque comme lu » = lu)."),
+                "traite" to prop("Ancien paramètre : « false » = action lu."),
+                "tous" to prop("« true » : tous les mails concernés de la boîte de réception (sinon les filtres ci-dessous ; sans filtre = tous)."),
+                "expediteur" to prop("Expéditeur (nom, adresse ou domaine)."),
+                "recherche" to prop("Mots à retrouver dans l'expéditeur ou l'objet (ou requête Gmail : from:, subject:, older_than:…)."),
+                "libelle" to prop("Libellé / catégorie de l'utilisateur, ex. « Pubs », « Impôts », « Super U/Tickets de caisse »."),
+                "depuis" to prop("Date de début aaaa-mm-jj (optionnel)."),
+                "avant" to prop("Date de fin aaaa-mm-jj (optionnel)."),
+                "ids" to prop("Identifiants exacts (rechercher_mails), séparés par des virgules."),
+                "compte" to prop("Compte mail précis (adresse ou partie). Vide = comptes actifs."),
+                "partout" to prop("« true » : aussi les mails archivés (pas seulement la boîte de réception)."),
+                "archiver" to prop("« true » pour aussi retirer de la boîte de réception (ils restent dans leurs libellés). Par défaut non.")
             )))
         put(tool("lire_sms", "Lit les SMS récents (reçus et envoyés).",
             mapOf(
@@ -255,6 +289,7 @@ class ToolBox(
                 "contenu" to prop("Contenu du fichier (voir la description). Pour vcf : texte vCard, ou « tous »."), "titre" to prop("Titre du document (optionnel)."),
                 "feuille" to prop("Nom de la feuille Excel (optionnel)."), "recherche" to prop("vcf : filtre sur le nom des contacts à exporter (optionnel)."),
                 "inclure" to prop("zip : noms des fichiers déjà créés à inclure, séparés par des virgules."),
+                "pour_la_societe" to prop("« oui » si le document est fait POUR LA SOCIÉTÉ (courrier, attestation, rapport, offre, document client…) : PDF et Word reçoivent alors le logo et les mentions légales de la société et sont rangés dans Société/Documents. « non » pour tout autre fichier (personnel, coloriage, liste…), qui reste sans logo. Les devis, factures, fiches de paie et rapports d'intervention ont leurs propres outils."),
                 "images" to prop("Pour format=pdf uniquement : noms de fichiers d'images déjà générées par generer_image (ex. img_20261031_120000_123.png, visibles dans jarvis-img: des résultats précédents), séparés par une virgule ou un retour à la ligne — une par page, dans l'ordre. Ajoute une légende par image avec « nomFichier.png::légende ». Si tu ne connais pas les noms exacts, mets « dernieres » (10 dernières), « dernieres:N » ou « toutes » plutôt que de deviner, ou appelle d'abord fichiers_generes.")),
             listOf("nom", "format")))
         put(tool("fichiers_generes", "Liste les fichiers déjà créés par JARVIS (images de generer_image, documents de creer_fichier), les plus récents en premier, avec leur nom exact. À utiliser dès que l'utilisateur fait référence à une image ou un fichier déjà généré sans te redonner son nom exact, avant de dire que tu ne le retrouves pas.",
@@ -307,6 +342,7 @@ class ToolBox(
         put(tool("jouer_musique", "Lance la lecture d'un titre, artiste ou playlist dans une application de musique du téléphone, en arrière-plan. Si l'application n'est pas précisée et qu'aucune n'est mémorisée et qu'il y en a plusieurs d'installées, l'outil demande laquelle (liste réelle) : repose alors la question à l'utilisateur (et s'il veut « toujours » ou « une seule fois »), puis rappelle l'outil.",
             mapOf("requete" to prop("Titre, artiste ou style à écouter."), "appli" to prop("Nom exact d'une application RENVOYÉE PAR applis_musique ou déjà mémorisée (jamais une application supposée sans l'avoir vérifiée)."), "toujours" to prop("« true » pour toujours utiliser cette application pour la musique."))))
         put(tool("controle_media", "Contrôle la lecture en cours : play, pause, next, previous, stop.", mapOf("action" to prop("play | pause | next | previous | stop")), listOf("action")))
+        put(tool("mode_sonore", "Mode sonore du téléphone : ne pas déranger (NPD / silencieux), vibreur, sonnerie (sonnerie + vibreur), ou l'état actuel.", mapOf("mode" to prop("npd | npd_off | vibreur | sonnerie | etat")), listOf("mode")))
         put(tool("naviguer", "OBLIGATOIRE pour toute demande de lancement/démarrage d’un itinéraire GPS vers une adresse ou un lieu : transmet la destination à Waze, Google Maps ou l’application choisie afin de démarrer le guidage, pas seulement d’ouvrir sa page d’accueil. Si l’application n’est pas précisée et qu’aucune n’est mémorisée, demande laquelle (Waze / Google Maps…) et si le choix doit être conservé (« toujours ») ou ponctuel (« une seule fois »), puis rappelle l’outil.",
             mapOf("destination" to prop("Adresse ou lieu."), "mode" to prop("voiture (défaut), marche ou velo"),
                 "appli" to prop("Application : Waze, Google Maps, ou autre (optionnel)."),
@@ -338,6 +374,10 @@ class ToolBox(
             mapOf("name" to prop("Nom du contact à supprimer.")), listOf("name")))
         put(tool("lire_notifications", "Lit les notifications récentes du téléphone (WhatsApp, SMS, mails, banque…). Nécessite l'accès aux notifications.",
             mapOf("count" to prop("Nombre maximum (1 à 40). Par défaut 15."), "appli" to prop("Filtrer par application (optionnel)."), "minutes" to prop("Seulement celles des N dernières minutes (optionnel)."))))
+        put(tool("memoire_faits", "Mémoire FIABLE des faits durables de l'utilisateur, toujours connus et appliqués par les outils : lieu (domicile, travail… → adresse), surnom (un autre nom donné à un serveur ou salon Discord, une personne, un appareil, un lieu → son nom exact), fait (clé → valeur). À utiliser dès que l'utilisateur dit « retiens / souviens-toi / prends note » d'une adresse, d'un surnom ou d'une information à réutiliser. action=voir (défaut) | lieu | surnom | fait | oublier.",
+            mapOf("action" to prop("voir | lieu | surnom | fait | oublier"), "nom" to prop("lieu : domicile, travail ou autre nom ; surnom : le surnom ; fait : la clé ; oublier : ce qu'il faut oublier."),
+                "valeur" to prop("lieu : adresse ; surnom : ce qu'il désigne (nom exact) ; fait : la valeur."),
+                "domaine" to prop("surnom : discord_serveur | discord_salon | contact | appareil | lieu | autre."))))
         put(tool("memoire_ajouter", "Enregistre une consigne durable de l'utilisateur dans la note Obsidian « Mémoire JARVIS » (remplace la consigne du même sujet).",
             mapOf(
                 "sujet" to prop("contacts (fiches contact) | briefing (point du matin) | planning | mails | societe | general"),
@@ -401,6 +441,29 @@ class ToolBox(
         put(tool("hermes_deleguer", "Confie à Hermès (agent autonome : recherche web, analyse, rédaction, code, tâches en plusieurs étapes, automatismes, serveur/SSH, ses notes, skills, plugins et sa mémoire long terme) une tâche que tes outils ne couvrent pas, ou une information que tu n'as pas (identifiants, réglages, historique). À utiliser plutôt que de répondre « je ne peux pas » ou de redemander une information à l'utilisateur. Décris la tâche complète et le résultat attendu.",
             mapOf("tache" to prop("La tâche détaillée, avec tout le contexte utile.")), listOf("tache")))
         put(tool("ma_position", "Donne la position GPS actuelle du téléphone (fix frais, format Google Maps) et l'ADRESSE PRÉCISE correspondante (numéro, rue, code postal, ville). Pour enregistrer cette position sur une fiche client, utilise client_ecrire avec site_gps = « ma position » (et site_adresse = « ma position » pour l'adresse)."))
+        put(tool("jarvis_reglages", "Lit les RÉGLAGES de Jarvis (jamais de secret) : serveur Debian SSH (adresses locale et distante, utilisateur, port, connexion actuelle locale ou à distance), Home Assistant (adresse de l'instance, dossier de configuration), Plex, bot Discord, Freebox, imprimante, modèles d'IA. À utiliser AU LIEU de demander ces informations à l'utilisateur.",
+            emptyMap()))
+        put(tool("modes_jarvis", "MODES de JARVIS créés, modifiés, activés, désactivés et supprimés par simple demande : n'importe quel mode décrit en français (« crée un mode cinéma qui ferme les volets du salon, baisse les lumières à 20 % et met le téléphone en ne pas déranger », « crée un mode vacances… », « dans le mode nuit, ajoute l'extinction de la lumière du couloir ») — Jarvis le compose lui-même avec les vrais appareils de Home Assistant ; ainsi que les modèles de sécurité « téléphone sécurisé » (veille + verrouillage, déverrouillage par la voix du propriétaire) et « maison sécurisée » (serrures, volets, alarme ; détection de personne → photos des caméras → notification Home Assistant avec image + MMS aux numéros). Pour créer ou modifier, passe simplement la demande de l'utilisateur dans « description » (création) ou « consigne » (modification). Ne demande JAMAIS un code (écran, alarme) dans la conversation : il se saisit dans Réglages › Sécurité › Systèmes.",
+            mapOf(
+                "action" to prop("lister | creer | consulter | activer | desactiver | modifier | supprimer"),
+                "nom" to prop("Nom du mode (« mode cinéma », « maison sécurisée », « téléphone sécurisé »…)."),
+                "description" to prop("Création : la demande de l'utilisateur, en français, décrivant ce que le mode doit faire (étapes, appareils, phrases, détection, destinataires)."),
+                "consigne" to prop("Modification : ce qu'il faut changer, en français (« enlève la fermeture des volets », « ajoute la lumière du couloir », « renomme-le mode film »…)."),
+                "modele" to prop("Création d'un modèle prêt à l'emploi : telephone_securise | maison_securisee (sinon laisser vide)."),
+                "destinataires" to prop("Numéros ou contacts recevant les photos par MMS, séparés par « ; ». Préfixe « - » pour retirer (« -Marie »)."),
+                "cameras" to prop("Entités camera.* à photographier, séparées par « ; » (préfixe « - » pour retirer)."),
+                "capteurs" to prop("Entités binary_sensor.* de détection de personne / mouvement (préfixe « - » pour retirer)."),
+                "notifier" to prop("Services notify.mobile_app_* des téléphones (appli Home Assistant) à prévenir (préfixe « - » pour retirer)."),
+                "sirenes" to prop("Entités siren.* (préfixe « - » pour retirer)."),
+                "etapes_activation" to prop("Étapes à ajouter à l'activation, séparées par « ; » : « ha:domaine.service:entite1,entite2 », « telephone:verrouiller », « sms:texte », ou une demande en français. Préfixe « - » pour retirer une étape (texte ou service)."),
+                "etapes_desactivation" to prop("Même format, pour la désactivation."),
+                "phrases_activation" to prop("Phrases qui activent le système, séparées par « ; » (préfixe « - » pour retirer)."),
+                "phrases_desactivation" to prop("Phrases qui le désactivent (préfixe « - » pour retirer)."),
+                "options" to prop("Réglages « cle=oui|non » séparés par « ; » : sirene_detection, notifications_ha, mms."),
+                "nouveau_nom" to prop("Nouveau nom (modifier).")
+            ), listOf("action")))
+        put(tool("telephone_mode_energie", "Règle UNIQUEMENT le MODE D'ALIMENTATION (batterie) DU TÉLÉPHONE : économie d'énergie (économiseur de batterie), équilibré ou performance — directement par le système, sans piloter l'écran ; « etat » indique le mode actuel. Pour TOUT AUTRE mode (téléphone sécurisé, maison sécurisée, cinéma, nuit, vacances…), utilise modes_jarvis. À ne pas confondre non plus avec le mode de fonctionnement de l'application Jarvis.",
+            mapOf("mode" to prop("economie, equilibre, performance ou etat.")), listOf("mode")))
         put(tool("phone_health_report", "Produit un diagnostic local en lecture seule du téléphone : batterie, température, stockage, RAM, réseau, Shizuku, accessibilité, notifications, alarmes exactes, optimisation batterie, service vocal et présence d'un rapport de plantage. N'affiche aucune donnée personnelle ni aucun secret.", mapOf("detail" to prop("Optionnel : bref, complet (défaut) ou historique des mesures locales."))))
         put(tool("phone_action", "Agit sur le téléphone et pilote les applications Android réellement installées. Actions : list_apps (inventaire réel), open_app, open_url, volume, wifi_on, wifi_off, wifi_connect (ouvre les réglages Wi-Fi), bluetooth_on, bluetooth_off, bluetooth_pair (ouvre les réglages Bluetooth), data_on, data_off, brightness, torch_on, torch_off, call, back, home, recents, notifications, quick_settings, lock, screenshot, read_screen, click_text, click_best_match (sélection sémantique du meilleur élément visible), type_text, scroll_down, scroll_up, tap, inspect_screen et watch_screen (arbre détaillé + journal des changements d'applications, fenêtres, clics, défilements et modifications d'interface observés en arrière-plan). Pour une tâche dans une application : list_apps si le nom est incertain, open_app, inspect_screen, interaction par étapes, puis inspect_screen/watch_screen pour vérifier et récupérer les événements récents. Le journal est alimenté en temps réel par Android lorsque l'accessibilité est active ; il ne conserve pas le texte saisi ni le contenu privé des événements. L'accessibilité JARVIS doit être active pour lire et manipuler l'interface. Les champs sécurisés, écrans protégés, validations Android et confirmations sensibles restent sous le contrôle du système ou de l'utilisateur.",
             mapOf(
@@ -428,11 +491,19 @@ class ToolBox(
         val dis = DiscordTools.concerned(recentUserText); val tik = TikTokTools.concerned(recentUserText)
         val mus = MusicTools.concerned(recentUserText)
         val plx = PlexTools.concerned(recentUserText)
-        if (!soc && !srv && !dis && !tik && !mus && !plx) return schema
+        val adm = ServeurAdminTools.concerned(recentUserText)
+        val web = SitesWebTools.concerned(recentUserText)
+        if (!soc && !srv && !dis && !tik && !mus && !plx && !adm && !web) return schema
         return JSONArray().also { out ->
             for (i in 0 until schema.length()) out.put(schema.get(i))
             if (soc) societe.schema.forEach { out.put(it) }
-            if (srv) serveur.schema.forEach { out.put(it) }
+            // SSH et commandes du serveur : seulement pour une demande qui concerne le serveur — « où est Angeline »,
+            // « allume le salon » passent par Home Assistant (API), pas par une commande SSH.
+            val ssh = adm || fr.dd.jarvis.hermes.ServeurInventaire.serveurDemande(recentUserText)
+            fun serveurSeul(o: JSONObject) = o.optJSONObject("function")?.optString("name").orEmpty().let { it.startsWith("ssh_") || it.startsWith("serveur_") }
+            if (srv) serveur.schema.forEach { if (ssh || !serveurSeul(it)) out.put(it) }
+            if (ssh && (srv || adm)) serveurAdmin.schema.forEach { out.put(it) }
+            if (web) sitesWeb.schema.forEach { out.put(it) }
             if (dis) discord.schema.forEach { out.put(it) }
             if (tik) tiktok.schema.forEach { out.put(it) }
             if (mus) musique.schema.forEach { out.put(it) }
@@ -444,6 +515,8 @@ class ToolBox(
         for (i in 0 until schema.length()) out.put(schema.get(i))
         societe.schema.forEach { out.put(it) }
         serveur.schema.forEach { out.put(it) }
+        serveurAdmin.schema.forEach { out.put(it) }
+        sitesWeb.schema.forEach { out.put(it) }
         discord.schema.forEach { out.put(it) }
         tiktok.schema.forEach { out.put(it) }
         musique.schema.forEach { out.put(it) }
@@ -478,7 +551,20 @@ class ToolBox(
 
     // ------------------------------------------------------------------ exécution
 
-    suspend fun execute(name: String, a: JSONObject): ToolResult { return when (name) {
+    /** Exécute un outil ; les surnoms et lieux mémorisés (« les potes », « la maison »…) sont d'abord remplacés par leur cible. */
+    suspend fun execute(name: String, a0: JSONObject): ToolResult {
+        val a = runCatching { fr.dd.jarvis.device.Faits.appliquer(app, name, a0) }.getOrDefault(a0)
+        return kotlinx.coroutines.withContext(fr.dd.jarvis.device.Autorisations.OutilEnCours(name.removePrefix("mcp_jarvis_"), fr.dd.jarvis.device.Autorisations.canonique(a))) { executerOutil(name, a) }
+    }
+
+    private suspend fun executerOutil(name: String, a: JSONObject): ToolResult { return when (name) {
+        "memoire_faits" -> ToolResult(when (a.optString("action").lowercase()) {
+            "lieu" -> fr.dd.jarvis.device.Faits.definirLieu(app, a.optString("nom"), a.optString("valeur")).ifBlank { "Indique « nom » (domicile, travail…) et « valeur » (adresse)." }
+            "surnom" -> fr.dd.jarvis.device.Faits.definirSurnom(app, a.optString("nom"), a.optString("valeur"), a.optString("domaine")).ifBlank { "Indique « nom » (le surnom) et « valeur » (ce qu'il désigne, nom exact)." }
+            "fait" -> fr.dd.jarvis.device.Faits.definirFait(app, a.optString("nom"), a.optString("valeur")).ifBlank { "Indique « nom » et « valeur »." }
+            "oublier" -> if (fr.dd.jarvis.device.Faits.oublier(app, a.optString("nom"))) "🗑️ « ${a.optString("nom")} » oublié." else "Rien de mémorisé sous « ${a.optString("nom")} »."
+            else -> fr.dd.jarvis.device.Faits.texte(app)
+        })
         "configurer_fournisseur_ia" -> {
             val provider = a.optString("fournisseur").trim().lowercase()
             val key = a.optString("cle_api").trim()
@@ -506,6 +592,14 @@ class ToolBox(
         "analyser_planning_clients" -> analyserPlanningClients(a)
         "create_event" -> createEvent(a)
         "update_event" -> updateEvent(a)
+        "agenda_lieu_gps" -> ToolResult(fr.dd.jarvis.device.AgendaGps.convertir(app,
+            a.optString("event_id").trim().removePrefix("#").toLongOrNull(), a.optString("recherche").trim(),
+            runCatching { java.time.LocalDate.parse(a.optString("date").trim().take(10)) }.getOrNull(),
+            a.optString("jours").trim().toIntOrNull(), a.optString("tous").trim().lowercase() in setOf("true", "oui", "1"),
+            a.optString("forcer").trim().lowercase() in setOf("true", "oui", "1")) { texte -> confirm(texte, false) })
+        "modes_jarvis", "systeme_securite" -> systemeSecurite(a)
+        "jarvis_reglages" -> ToolResult(reglagesJarvis())
+        "telephone_mode_energie" -> ToolResult(fr.dd.jarvis.device.ModeTelephone.appliquer(app, a.optString("mode").ifBlank { "etat" }))
         "delete_event" -> deleteEvent(a)
         "set_event_color" -> setEventColor(a)
         "set_calendar_color" -> setCalendarColor(a)
@@ -514,6 +608,7 @@ class ToolBox(
         "summarize_mails" -> summarizeMails(a)
         "morning_briefing" -> ToolResult(briefing(), direct = true)
         "trier_mails" -> trierMails(a)
+        "regler_tri_mails" -> reglerTriMails(a)
         "mail_compte" -> mailCompte(a)
         "mail_envoyer" -> mailEnvoyer(a)
         "marquer_mails_traites" -> marquerTraites(a)
@@ -875,7 +970,11 @@ class ToolBox(
                 } else ToolResult(r, direct = true)
             }
         }
-        "controle_media" -> ToolResult(app.phone.mediaKey(a.optString("action")))
+        "mode_sonore" -> ToolResult(fr.dd.jarvis.device.ModeSonore.appliquer(app, a.optString("mode").trim().lowercase().let { m ->
+            when { m.startsWith("npd_off") || m.contains("off") || m.contains("desactiv") -> "npd_off"; m.contains("npd") || m.contains("deranger") || m.contains("silen") -> "npd"
+                m.contains("vibr") -> "vibreur"; m.contains("sonn") || m.contains("normal") -> "sonnerie"; else -> "etat" } }), direct = true)
+        "controle_media" -> ToolResult(fr.dd.jarvis.device.CommandeMedia.depuisOutil(a.optString("action"))?.let { fr.dd.jarvis.device.CommandeMedia.executer(app, it, app.enVoiture) }
+            ?: app.phone.mediaKey(a.optString("action")))
         "naviguer" -> {
             // En voiture : Android Auto lance son propre GPS (Waze / Maps de la voiture), sans question ni écran du téléphone.
             if (app.enVoiture && a.optString("destination").isNotBlank()) {
@@ -1019,7 +1118,8 @@ class ToolBox(
             }
         }, direct = true)
         "tache_terminer" -> ToolResult(app.tasks.complete(a.optString("id")))
-        "memoire_ajouter" -> ToolResult("✅ Consigne « ${a.optString("sujet")} » enregistrée (" + app.memo.set(a.optString("sujet"), a.optString("texte")) + ").")
+        "memoire_ajouter" -> ToolResult("✅ Consigne « ${a.optString("sujet")} » enregistrée (" + app.memo.set(a.optString("sujet"), a.optString("texte")) + ")." +
+            runCatching { fr.dd.jarvis.device.Faits.apprendre(app, a.optString("sujet") + " : " + a.optString("texte")) }.getOrDefault(emptyList()).let { r -> if (r.isEmpty()) "" else "\nMémoire fiable : " + r.joinToString(" ; ") })
         "memoire_apprendre" -> ToolResult(app.memo.apprendre(a.optString("sujet"), a.optString("preference"), a.optString("preuve")))
         "memoire_apprentissages" -> ToolResult(app.memo.apprentissagesEnCours(), direct = true)
         "agents_centre" -> agentsCentre(a)
@@ -1115,6 +1215,8 @@ class ToolBox(
         }
         in SocieteTools.NAMES -> societe.execute(name, a)
         in ServeurTools.NAMES -> serveur.execute(name, a)
+        in ServeurAdminTools.NAMES -> serveurAdmin.execute(name, a)
+        in SitesWebTools.NAMES -> sitesWeb.execute(name, a)
         in DiscordTools.NAMES -> discord.execute(name, a)
         in TikTokTools.NAMES -> tiktok.execute(name, a)
         in MusicTools.NAMES -> musique.execute(name, a)
@@ -1673,9 +1775,9 @@ class ToolBox(
         } else if (address.isNotBlank()) {
             position = fr.dd.jarvis.societe.Geo.localiser(address)
         }
-        // Google Agenda : le champ Lieu ne contient que le lien GPS ; l’adresse postale reste dans la description.
+        // Champ Lieu : uniquement le point GPS « lat, lon » (Waze et Google Maps) ; l’adresse postale reste dans la description.
         val point = position?.takeIf { it.precision.rang >= fr.dd.jarvis.societe.Geo.Precision.LIEU_DIT.rang }?.point
-        if (point != null) location = fr.dd.jarvis.societe.Geo.lienGoogleMaps(point)
+        if (point != null) location = fr.dd.jarvis.device.AgendaGps.lieu(point)
         val details = buildList {
             if (clientLabel.isNotBlank()) add("Client : $clientLabel")
             if (siteLabel.isNotBlank()) add("Installation : $siteLabel")
@@ -1685,7 +1787,7 @@ class ToolBox(
         description = listOf(description, details.joinToString("\n")).filter { it.isNotBlank() }.joinToString("\n")
         val id = app.calendar.create(cal.id, title, start, end, location, description)
         return if (id != null) ToolResult("Événement « $title » créé le $start dans « ${app.calendar.displayName(cal)} » (#$id)." +
-            if (point != null) " Le champ Lieu contient uniquement le lien GPS cliquable ; l’adresse est dans la description."
+            if (point != null) " Le champ Lieu contient uniquement les coordonnées GPS ${fr.dd.jarvis.device.AgendaGps.lieu(point)} ; l’adresse est dans la description."
             else if (address.isNotBlank()) " Adresse conservée dans la description ; aucun point GPS assez précis n’a été trouvé, le champ Lieu reste vide."
             else "")
         else ToolResult("Échec de la création.")
@@ -1700,10 +1802,9 @@ class ToolBox(
         if (rawAddress != null) {
             val position = fr.dd.jarvis.societe.Geo.localiser(rawAddress)
             val point = position?.takeIf { it.precision.rang >= fr.dd.jarvis.societe.Geo.Precision.LIEU_DIT.rang }?.point
-            gpsLocation = point?.let { fr.dd.jarvis.societe.Geo.lienGoogleMaps(it) } ?: ""
-            val lines = old.description.lines().filterNot { it.trim().startsWith("Adresse :", true) || it.trim().startsWith("Point GPS non trouvé", true) }
-            newDescription = (lines + "Adresse : $rawAddress" + if (point == null) "Point GPS non trouvé avec une précision suffisante : le champ Lieu reste vide." else "")
-                .filter { it.isNotBlank() }.joinToString("\n")
+            gpsLocation = point?.let { fr.dd.jarvis.device.AgendaGps.lieu(it) } ?: ""
+            newDescription = fr.dd.jarvis.device.AgendaGps.description(old.description, rawAddress) +
+                if (point == null) "\nPoint GPS non trouvé avec une précision suffisante : le champ Lieu reste vide." else ""
         }
         val ok = app.calendar.update(
             id,
@@ -1715,7 +1816,7 @@ class ToolBox(
         )
         return ToolResult(if (ok) "Événement #$id modifié." + if (rawAddress != null) {
             if (gpsLocation.isNullOrBlank()) " Adresse conservée dans la description ; aucun point GPS assez précis n’a été trouvé, le champ Lieu est vidé."
-            else " Le champ Lieu contient uniquement le lien GPS cliquable ; l’adresse est dans la description."
+            else " Le champ Lieu contient uniquement les coordonnées GPS $gpsLocation ; l’adresse est dans la description."
         } else "" else "Rien à modifier ou événement introuvable.")
     }
 
@@ -1808,67 +1909,138 @@ class ToolBox(
         }
     }
 
+    /**
+     * Marque des mails comme lus, non lus ou traités (lus + libellé « Traité ») : tous ceux de la boîte de réception ou
+     * seulement ceux demandés, par une recherche Gmail (aucune limite de nombre, modification par lots de 1000).
+     */
     private suspend fun marquerTraites(a: JSONObject): ToolResult {
         if (store.gmailAccounts.isEmpty()) return ToolResult("Marquer comme traité ou lu demande un compte Google connecté (Réglages › Comptes › Mails).")
-        val count = (a.optString("count").toIntOrNull() ?: 30).coerceIn(5, 60)
-        val q = a.optString("recherche").trim().lowercase().let { if (it == "tous" || it == "tout") "" else it }
-        val traite = !a.optString("traite").equals("false", true)
-        val mails = try { app.mail.fetchRecent(count, q.isBlank(), a.optString("compte"), full = true) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
-            return ToolResult("❌ Impossible de lire les mails : ${e.message}")
+        val action = fr.dd.jarvis.societe.core.normaliser(a.optString("action")).let { x ->
+            when {
+                x.startsWith("non") -> "non_lu"
+                x.startsWith("lu") || a.optString("traite").equals("false", true) -> "lu"
+                else -> "traite"
+            }
         }
-        val cibles = mails.filter { m -> m.id.isNotBlank() && store.gmailAccounts.any { it.equals(m.account, true) } &&
-            (q.isBlank() || m.from.lowercase().contains(q) || m.fromAddr.contains(q) || m.subject.lowercase().contains(q)) }
-        if (cibles.isEmpty()) return ToolResult("Aucun mail correspondant.")
-        // « Traité » = rangé dans son libellé (hors de la boîte de réception), sauf demande contraire ; « lu » reste dans la boîte.
-        val archiver = a.optString("archiver").let { if (it.isBlank()) traite else it.equals("true", true) }
-        val quoi = if (traite) "traités" else "lus"
-        if (!confirm("Ranger dans leur libellé et marquer ${cibles.size} mail(s) comme $quoi" + (if (archiver) " et les archiver" else "") + " ?\n\n" + cibles.take(8).joinToString("\n") { "• ${it.from} — ${it.subject}" }, false))
-            return ToolResult("Refusé par l'utilisateur.")
-        // 1) Tri automatique : chaque mail rejoint son libellé (catégorie/expéditeur ; les newsletters dans un seul libellé).
-        val tri = try {
-            val classes = fr.dd.jarvis.ai.MailTri.classer(app, cibles)
-            val n = fr.dd.jarvis.ai.MailTri.ranger(app, classes, archiver)
-            "📂 $n rangé(s) : " + classes.groupingBy { it.label }.eachCount().entries.sortedByDescending { it.value }
-                .joinToString(", ") { "${it.key}${if (it.value > 1) " ×${it.value}" else ""}" }
-        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { "⚠️ Tri dans les libellés impossible : ${e.message}" }
-        // 2) Marquage lu / traité.
-        return try {
-            val n = fr.dd.jarvis.device.GmailApi.marquerTraites(app, cibles.groupBy({ it.account }, { it.id }), archiver, traite)
-            val detail = listOfNotNull(if (traite) "lus + libellé Traité" else null, if (archiver) "archivés" else null)
-            ToolResult("✅ $n mail(s) marqués comme $quoi" + (if (detail.isEmpty()) "" else " (" + detail.joinToString(", ") + ")") + ".\n$tri")
-        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { ToolResult("❌ ${e.message}\n$tri") }
+        val q = MailCommandes.requeteGmail(action, a, store.mailLabelPrefix.value)
+        val ids = a.optString("ids").split(Regex("[,;\\s]+")).map { it.trim() }.filter { it.isNotBlank() }
+        val filtreCompte = a.optString("compte").trim().lowercase()
+        val comptes = store.gmailAccounts.filter { if (filtreCompte.isBlank()) store.mailActive(it) else it.lowercase().contains(filtreCompte) }
+        if (comptes.isEmpty()) return ToolResult("Aucun compte Google ne correspond à « ${a.optString("compte")} ».", direct = true)
+        // 1) Ce qui est concerné, compte par compte.
+        val cibles = mutableMapOf<String, Pair<String, List<String>>>()   // compte → (jeton, ids)
+        val erreurs = mutableListOf<String>()
+        for (c in comptes) runCatching {
+            val token = fr.dd.jarvis.device.GmailApi.jeton(app, c)
+            val l = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { if (ids.isNotEmpty()) ids else fr.dd.jarvis.device.GmailApi.idsRecherche(token, q, 20_000) }
+            if (l.isNotEmpty()) cibles[c] = token to l
+        }.onFailure { erreurs += "$c : ${it.message}" }
+        val total = cibles.values.sumOf { it.second.size }
+        val quoi = when (action) { "lu" -> "lus"; "non_lu" -> "non lus"; else -> "traités (lus + libellé « Traité »)" }
+        if (total == 0) return ToolResult("📭 Aucun mail à marquer comme $quoi" + (if (erreurs.isEmpty()) "." else " — " + erreurs.joinToString("; ")), direct = true)
+        val archiver = a.optString("archiver").equals("true", true)
+        if (!confirm("Marquer $total mail(s) comme $quoi" + (if (archiver) " et les retirer de la boîte de réception" else "") + " ?\n" +
+                cibles.entries.joinToString("\n") { "• ${it.key} : ${it.value.second.size}" } + "\n(recherche : $q)", false))
+            return ToolResult("Rien n'a été modifié.", direct = true)
+        // 2) Marquage par lots.
+        var faits = 0
+        for ((c, v) in cibles) runCatching {
+            val (token, l) = v
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val traiteId = if (action == "traite") fr.dd.jarvis.device.GmailApi.libelleEnCouleur(token, fr.dd.jarvis.device.GmailApi.tousLesLibelles(token), store.mailLabelPrefix.value + "Traité") else null
+                val ajouter = listOfNotNull(traiteId) + (if (action == "non_lu") listOf("UNREAD") else emptyList())
+                val retirer = (if (action == "non_lu") emptyList() else listOf("UNREAD")) + (if (archiver) listOf("INBOX") else emptyList())
+                fr.dd.jarvis.device.GmailApi.modifierLot(token, l, ajouter, retirer)
+            }
+            faits += v.second.size
+        }.onFailure { erreurs += "$c : ${it.message}" }
+        return ToolResult("✅ $faits mail(s) marqués comme $quoi" + (if (archiver) ", retirés de la boîte de réception" else "") + "." +
+            (if (erreurs.isEmpty()) "" else "\n⚠️ " + erreurs.joinToString("\n⚠️ ")), direct = true)
     }
 
     private suspend fun routines(a: JSONObject): ToolResult {
         val R = fr.dd.jarvis.device.Routines
         val l = R.liste(app)
         val nom = a.optString("nom").trim()
-        fun trouver() = l.firstOrNull { R.norm(it.nom) == R.norm(nom) } ?: l.firstOrNull { nom.isNotBlank() && R.norm(it.nom).contains(R.norm(nom)) }
+        fun trouver() = l.firstOrNull { R.norm(it.nom) == R.norm(nom) }
+            ?: l.firstOrNull { nom.isNotBlank() && R.norm(it.nom).contains(R.norm(nom)) }
         fun decoupe(t: String) = t.split(Regex("\\s*(;|\\n)\\s*")).map { it.trim() }.filter { it.isNotBlank() }
+        fun actionUnique(actions: List<String>, cible: String): Int? {
+            val q = R.norm(cible)
+            val matches = actions.indices.filter { i -> R.norm(actions[i]) == q || (q.isNotBlank() && R.norm(actions[i]).contains(q)) }
+            return if (matches.size == 1) matches.single() else null
+        }
         return when (a.optString("action").trim().lowercase()) {
             "lister", "" -> ToolResult(R.presenter(l), direct = true)
-            "lancer" -> trouver()?.let { ToolResult(R.executer(app, it, tools = this)) } ?: ToolResult("Aucune routine « $nom ». " + R.presenter(l))
+            "consulter" -> trouver()?.let { ToolResult(R.presenter(listOf(it)), direct = true) }
+                ?: ToolResult("Aucune routine « $nom ». " + R.presenter(l), direct = true)
+            "lancer" -> trouver()?.let { ToolResult(R.executer(app, it, tools = this)) }
+                ?: ToolResult("Aucune routine « $nom ». " + R.presenter(l))
             "supprimer" -> trouver()?.let { r ->
-                if (!confirm("Supprimer la routine « ${r.nom} » ?", false)) ToolResult("Annulé.") else { R.supprimer(app, r.id); ToolResult("🗑️ Routine « ${r.nom} » supprimée.") }
+                if (!confirm("Supprimer la routine « ${r.nom} » ?", false)) ToolResult("Annulé.")
+                else { R.supprimer(app, r.id); ToolResult("🗑️ Routine « ${r.nom} » supprimée.") }
             } ?: ToolResult("Aucune routine « $nom ».")
             "activer", "desactiver" -> trouver()?.let { r ->
-                R.ajouterOuModifier(app, r.copy(active = a.optString("action").startsWith("act", true)))
-                ToolResult("Routine « ${r.nom} » ${if (a.optString("action").startsWith("act", true)) "activée" else "désactivée"}.")
+                val active = a.optString("action").equals("activer", true)
+                R.ajouterOuModifier(app, r.copy(active = active))
+                ToolResult("Routine « ${r.nom} » ${if (active) "activée" else "désactivée"}.")
             } ?: ToolResult("Aucune routine « $nom ».")
-            "creer", "modifier" -> {
+            "creer" -> {
                 if (nom.isBlank()) return ToolResult("Donne un nom à la routine.")
-                val existante = trouver()
-                val decl = a.optString("declencheur").trim().ifBlank { existante?.declencheur ?: "phrase" }
+                if (trouver() != null) return ToolResult("La routine « $nom » existe déjà. Utilise modifier pour la changer.")
+                val decl = a.optString("declencheur").trim().ifBlank { "phrase" }
                 if (decl !in R.DECLENCHEURS) return ToolResult("Déclencheur inconnu « $decl » : ${R.DECLENCHEURS.keys.joinToString(", ")}.")
-                val actions = decoupe(a.optString("actions")).ifEmpty { existante?.actions.orEmpty() }
+                val actions = decoupe(a.optString("actions"))
                 if (actions.isEmpty()) return ToolResult("Précise les actions de la routine (séparées par « ; »).")
-                val phrases = decoupe(a.optString("phrases")).ifEmpty { existante?.phrases ?: listOf(nom) }
-                val r = fr.dd.jarvis.device.Routine(existante?.id ?: R.nouvelId(nom), nom, decl, if (decl == "phrase") phrases else emptyList(),
-                    a.optString("heure").trim().ifBlank { existante?.heure.orEmpty() }, a.optString("jours").trim().ifBlank { existante?.jours ?: "tous" }, actions, true)
+                val phrases = decoupe(a.optString("phrases")).ifEmpty { listOf(nom) }
+                val heure = a.optString("heure").trim()
+                if (decl == "heure" && heure.isBlank()) return ToolResult("Précise l'heure de déclenchement (HH:MM).")
+                val r = fr.dd.jarvis.device.Routine(R.nouvelId(nom), nom, decl, if (decl == "phrase") phrases else emptyList(),
+                    heure, a.optString("jours").trim().ifBlank { "tous" }, actions, true)
                 R.ajouterOuModifier(app, r)
-                ToolResult("✅ Routine enregistrée :\n" + R.presenter(listOf(r)), direct = true)
+                ToolResult("✅ Routine créée :\n" + R.presenter(listOf(r)), direct = true)
             }
-            else -> ToolResult("Action inconnue : lister, lancer, creer, supprimer, activer, desactiver.")
+            "modifier" -> {
+                val existante = trouver() ?: return ToolResult("Je ne trouve pas la routine « $nom ». Voici les routines disponibles :\n" + R.presenter(l), direct = true)
+                val nouveauNom = a.optString("nouveau_nom").trim().ifBlank { existante.nom }
+                if (l.any { it.id != existante.id && R.norm(it.nom) == R.norm(nouveauNom) })
+                    return ToolResult("Une autre routine porte déjà le nom « $nouveauNom ».")
+                val decl = a.optString("declencheur").trim().ifBlank { existante.declencheur }
+                if (decl !in R.DECLENCHEURS) return ToolResult("Déclencheur inconnu « $decl » : ${R.DECLENCHEURS.keys.joinToString(", ")}.")
+                var actions = if (a.has("actions") && !a.isNull("actions")) decoupe(a.optString("actions")) else existante.actions
+                if (a.has("ajouter_action") && !a.isNull("ajouter_action")) {
+                    val ajouts = decoupe(a.optString("ajouter_action"))
+                    if (ajouts.isNotEmpty()) actions = actions + ajouts.filter { ajout -> actions.none { R.norm(it) == R.norm(ajout) } }
+                }
+                val retirer = a.optString("retirer_action").trim()
+                if (retirer.isNotBlank()) {
+                    val idx = actionUnique(actions, retirer)
+                        ?: return ToolResult(if (actions.none { R.norm(it).contains(R.norm(retirer)) }) "Action « $retirer » introuvable dans « ${existante.nom} »."
+                            else "Plusieurs actions correspondent à « $retirer ». Précise laquelle.")
+                    actions = actions.toMutableList().also { it.removeAt(idx) }
+                }
+                val ancienne = a.optString("ancienne_action").trim()
+                val nouvelle = a.optString("nouvelle_action").trim()
+                if (ancienne.isNotBlank() || nouvelle.isNotBlank()) {
+                    if (ancienne.isBlank() || nouvelle.isBlank()) return ToolResult("Pour remplacer une action, précise ancienne_action et nouvelle_action.")
+                    val idx = actionUnique(actions, ancienne)
+                        ?: return ToolResult(if (actions.none { R.norm(it).contains(R.norm(ancienne)) }) "Action « $ancienne » introuvable."
+                            else "Plusieurs actions correspondent à « $ancienne ». Précise laquelle.")
+                    actions = actions.toMutableList().also { it[idx] = nouvelle }
+                }
+                if (actions.isEmpty()) return ToolResult("Une routine doit conserver au moins une action. Ajoute une action ou supprime la routine.")
+                val phrases = if (a.has("phrases") && !a.isNull("phrases")) decoupe(a.optString("phrases")) else existante.phrases
+                val heure = a.optString("heure").trim().ifBlank { existante.heure }
+                if (decl == "heure" && heure.isBlank()) return ToolResult("Précise l'heure de déclenchement (HH:MM).")
+                val jours = a.optString("jours").trim().ifBlank { existante.jours }
+                val active = if (a.has("active") && !a.isNull("active")) a.optString("active").trim().lowercase() !in setOf("false", "non", "0", "désactivée", "desactivee") else existante.active
+                val r = existante.copy(nom = nouveauNom, declencheur = decl,
+                    phrases = if (decl == "phrase") phrases.ifEmpty { listOf(nouveauNom) } else emptyList(),
+                    heure = heure, jours = jours, actions = actions, active = active)
+                R.ajouterOuModifier(app, r)
+                ToolResult("✅ Routine modifiée en conservant tous les paramètres non concernés :\n" + R.presenter(listOf(r)), direct = true)
+            }
+            else -> ToolResult("Action inconnue : lister, consulter, lancer, creer, modifier, supprimer, activer, desactiver.")
         }
     }
 
@@ -1914,15 +2086,39 @@ class ToolBox(
         return ToolResult("🎙️ Voix changée : ${p.libelle}. Je parle maintenant avec cette voix.")
     }
 
+    private fun reglerTriMails(a: JSONObject): ToolResult {
+        val statut = a.optString("statut").trim().lowercase().replace(' ', '_').let { if (it == "non_lu") "non_lus" else if (it == "lu") "lus" else it }
+        if (statut.isBlank() || a.optString("action").equals("voir", true)) {
+            val actuel = store.mailTriStatut.value
+            val libelle = when (actuel) { "non_lus" -> "uniquement les non lus"; "tous" -> "lus et non lus"; else -> "uniquement les lus" }
+            return ToolResult("📧 Règle actuelle du tri : $libelle. Pour la changer : « désormais trie tous les mails », « désormais trie seulement les non lus » (ou « … seulement les lus »). « Trie tous mes mails » ne vaut que pour une fois.", direct = true)
+        }
+        if (statut !in setOf("lus", "non_lus", "tous"))
+            return ToolResult("Règle inconnue. Utilise « lus », « non_lus » ou « tous ».")
+        store.mailTriStatut.set(statut)
+        val libelle = when (statut) { "non_lus" -> "uniquement les non lus"; "tous" -> "les lus et les non lus"; else -> "uniquement les lus" }
+        return ToolResult("✅ Règle de tri enregistrée : $libelle. Elle s'applique à tous les tris (automatiques et « trie mes mails »), jusqu'à ce que tu me demandes de la modifier. Le grand ménage reste indépendant.", direct = true)
+    }
+
     private suspend fun trierMails(a: JSONObject): ToolResult {
         if (!store.mailConfigured()) return ToolResult("Les mails ne sont pas configurés (Réglages › Comptes › Mails).")
         val count = (a.optString("count").toIntOrNull() ?: 100).coerceIn(5, 500)
-        val mails = try {
-            app.mail.fetchRecent(count, a.optString("unread_only").equals("true", true), a.optString("compte"), full = true, everywhere = a.optString("toute_la_boite").equals("true", true))
+        val demandeStatut = a.optString("statut").trim().lowercase().replace(' ', '_').replace("non_lu", "non_lus").replace("non_luss", "non_lus")
+        // « Trie tous mes mails » vaut pour CE tri ; la règle enregistrée ne change que sur demande explicite.
+        val statut = when {
+            demandeStatut in setOf("lus", "non_lus", "tous") -> demandeStatut.also { if (a.optString("enregistrer").equals("true", true)) store.mailTriStatut.set(it) }
+            a.optString("unread_only").equals("true", true) -> "non_lus"
+            else -> store.mailTriStatut.value.takeIf { it in setOf("lus", "non_lus", "tous") } ?: "non_lus"
+        }
+        // En mode « lus », on lit une fenêtre plus large pour ne pas laisser les non lus récents masquer les lus.
+        val limiteLecture = if (statut == "lus") (count * 5).coerceAtMost(500) else count
+        val mailsBruts = try {
+            app.mail.fetchRecent(limiteLecture, statut == "non_lus", a.optString("compte"), full = true, everywhere = a.optString("toute_la_boite").equals("true", true))
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
             return ToolResult("❌ Impossible de lire les mails : ${e.message}", direct = true)
         }
-        if (mails.isEmpty()) return ToolResult("📭 Aucun mail à trier.", direct = true)
+        val mails = mailsBruts.filter { when (statut) { "lus" -> !it.unread; "non_lus" -> it.unread; else -> true } }.take(count)
+        if (mails.isEmpty()) return ToolResult(if (statut == "lus") "📭 Aucun email déjà lu à trier. Les non lus ont été laissés intacts." else "📭 Aucun mail correspondant à la règle de tri.", direct = true)
         val classes = try {
             fr.dd.jarvis.ai.MailTri.classer(app, mails)
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
@@ -2145,6 +2341,158 @@ class ToolBox(
             return ToolResult("Action refusée par l'utilisateur.")
         }
         return ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.perform(action, value) })
+    }
+
+    /** Réglages utiles à l'IA, sans aucun mot de passe, clé ni jeton. */
+    private fun reglagesJarvis(): String {
+        val st = app.store
+        val l = mutableListOf("# ⚙️ Réglages de Jarvis (sans secret)")
+        l += fr.dd.jarvis.hermes.ServeurInventaire.reglages(app).ifBlank { "- Serveur / Home Assistant : non configurés (Réglages › Maison › Serveur)." }
+        if (st.sshHost.value.isNotBlank()) l += "- Adresse locale relevée du serveur : ${st.serveurIpLocale.value.ifBlank { "pas encore relevée" }}"
+        l += "- Freebox : " + if (st.freeboxAppToken.value.isNotBlank()) "associée à Jarvis (outil freebox)" else "non associée"
+        if (st.printerHost.value.isNotBlank()) l += "- Imprimante : ${st.printerName.value.ifBlank { st.printerHost.value }} (${st.printerHost.value})"
+        l += "- IA : Gemini « ${st.geminiModel.value} » (${st.geminiKeys.size} clé(s)), Groq « ${st.groqModel.value} » (${st.groqKeys.size} clé(s)) ; moteur Hermès : ${st.relaisHermes.value} d'abord"
+        l += "- Déverrouillage à la voix : " + (if (runCatching { st.codeDeverrouillage.value }.getOrDefault("").let { it.startsWith("schema:") }) "schéma enregistré"
+            else if (runCatching { st.codeDeverrouillage.value }.getOrDefault("").isNotBlank()) "code enregistré" else "aucun code ni schéma") +
+            " ; empreinte vocale " + (if (fr.dd.jarvis.voice.EmpreinteVocale.prete(app)) "prête" else "non enregistrée")
+        return l.joinToString("\n")
+    }
+
+    /** Systèmes de JARVIS (téléphone sécurisé, maison sécurisée, personnalisés) : tout se règle à la demande. */
+    private suspend fun systemeSecurite(a: JSONObject): ToolResult {
+        val action = fr.dd.jarvis.societe.core.normaliser(a.optString("action")).replace(' ', '_')
+        val nom = a.optString("nom").trim()
+        fun liste(cle: String) = a.optString(cle).split(';', '\n').map { it.trim() }.filter { it.isNotBlank() }
+        /** Ajouts et retraits (« -x ») appliqués à une liste existante. */
+        fun maj(l: List<String>, cle: String, normaliser: (String) -> String = { it }): List<String> {
+            var r = l
+            for (x in liste(cle)) {
+                if (x.startsWith("-")) { val v = normaliser(x.drop(1).trim()); r = r.filterNot { fr.dd.jarvis.securite.Systemes.norm(it) == fr.dd.jarvis.securite.Systemes.norm(v) || fr.dd.jarvis.securite.Systemes.norm(it).contains(fr.dd.jarvis.securite.Systemes.norm(v)) } }
+                else { val v = normaliser(x); if (r.none { fr.dd.jarvis.securite.Systemes.norm(it) == fr.dd.jarvis.securite.Systemes.norm(v) }) r = r + v }
+            }
+            return r
+        }
+        fun etape(x: String): fr.dd.jarvis.securite.Systemes.Etape {
+            val p = x.split(':', limit = 3).map { it.trim() }
+            return when (p[0].lowercase()) {
+                "ha" -> fr.dd.jarvis.securite.Systemes.Etape("ha", p.getOrElse(1) { "" }, p.getOrElse(2) { "" }.split(',').map { it.trim() }.filter { it.isNotBlank() })
+                "telephone" -> fr.dd.jarvis.securite.Systemes.Etape("telephone", p.getOrElse(1) { "verrouiller" })
+                "sms" -> fr.dd.jarvis.securite.Systemes.Etape("message", texte = x.substringAfter(':').trim())
+                else -> fr.dd.jarvis.securite.Systemes.Etape("jarvis", texte = x)
+            }
+        }
+        fun majEtapes(l: List<fr.dd.jarvis.securite.Systemes.Etape>, cle: String): List<fr.dd.jarvis.securite.Systemes.Etape> {
+            var r = l
+            for (x in liste(cle)) {
+                if (x.startsWith("-")) { val v = fr.dd.jarvis.securite.Systemes.norm(x.drop(1)); r = r.filterNot { e -> fr.dd.jarvis.securite.Systemes.norm(e.cible + " " + e.texte + " " + fr.dd.jarvis.securite.Systemes.libelle(e)).contains(v) } }
+                else r = r + etape(x)
+            }
+            return r
+        }
+        fun oui(v: String) = fr.dd.jarvis.securite.Systemes.norm(v) in setOf("oui", "true", "1", "on", "active")
+        return when (action) {
+            "lister", "liste" -> ToolResult(fr.dd.jarvis.securite.Systemes.presenterTous(app))
+            "installer", "creer", "ajouter", "nouveau" -> {
+                val description = a.optString("description").trim().ifBlank { a.optString("consigne").trim() }
+                val modele = a.optString("modele").trim().ifBlank {
+                    val n = fr.dd.jarvis.securite.Systemes.norm(nom + " " + description)
+                    when {
+                        Regex("(telephone|portable) securise").containsMatchIn(n) -> "telephone_securise"
+                        Regex("(maison|domicile) securisee").containsMatchIn(n) -> "maison_securisee"
+                        else -> "personnalise"
+                    }
+                }
+                if (modele == "personnalise") {
+                    if (description.isBlank() && nom.isBlank()) return ToolResult("Que doit faire ce mode ? Décris-le (appareils, actions, phrases pour l'activer).")
+                    val (s, remarques) = try { fr.dd.jarvis.securite.Systemes.composer(app, description.ifBlank { "Crée le $nom" } + (if (nom.isNotBlank()) " (nom : $nom)" else ""), null) }
+                        catch (e: Exception) { return ToolResult("❌ Mode non créé : ${e.message?.take(200)}") }
+                    val (s2, noteHa) = runCatching { fr.dd.jarvis.securite.Systemes.synchroniserHa(app, s) }.getOrElse { s to "⚠️ Automatisation Home Assistant non créée : ${it.message?.take(160)}" }
+                    fr.dd.jarvis.securite.Systemes.sauver(app, s2)
+                    return ToolResult("✅ Mode créé.\n" + listOf(remarques, noteHa).filter { it.isNotBlank() }.joinToString("\n") + "\n\n" + fr.dd.jarvis.securite.Systemes.presenter(s2) +
+                        "\n\nDis « active le mode ${s2.nom.lowercase().removePrefix("mode ")} » pour le lancer, ou demande-moi n'importe quelle modification.")
+                }
+                var (s, note) = when (modele) {
+                    "telephone_securise" -> fr.dd.jarvis.securite.Systemes.nouveauTelephone() to "Ta voix sera vérifiée (empreinte vocale) avant chaque déverrouillage."
+                    "maison_securisee" -> try { fr.dd.jarvis.securite.Systemes.nouvelleMaison(app, nom.ifBlank { "Maison sécurisée" }) } catch (e: Exception) {
+                        // Home Assistant injoignable : le mode est quand même installé, ses appareils seront ajoutés quand il répondra.
+                        fr.dd.jarvis.securite.Systemes.Systeme(id = "maison_securisee", nom = nom.ifBlank { "Maison sécurisée" }, modele = "maison_securisee",
+                            phrasesActiver = listOf("active le mode maison securisee", "securise la maison", "active la maison securisee"),
+                            phrasesDesactiver = listOf("desactive le mode maison securisee", "desactive la maison securisee")) to
+                            "⚠️ Home Assistant ne répond pas (${e.message?.take(160)}) : mode installé sans appareils. Quand Home Assistant fonctionnera, dis « réinstalle le mode maison sécurisée » pour qu'il retrouve serrures, volets, alarme, caméras et capteurs." }
+                    else -> fr.dd.jarvis.securite.Systemes.Systeme(id = fr.dd.jarvis.securite.Systemes.norm(nom.ifBlank { "Système" }).replace(' ', '_').take(30), nom = nom.ifBlank { "Système" }, viaHa = false, viaMms = false) to ""
+                }
+                fr.dd.jarvis.securite.Systemes.trouver(app, s.nom)?.takeIf { it.id == s.id }?.let { ancien ->
+                    // Réinstallation : on garde ce que l'utilisateur a déjà réglé.
+                    s = s.copy(destinataires = ancien.destinataires.ifEmpty { s.destinataires }, actif = ancien.actif, automationHa = ancien.automationHa)
+                }
+                s = s.copy(destinataires = maj(s.destinataires, "destinataires"), cameras = maj(s.cameras, "cameras"), capteurs = maj(s.capteurs, "capteurs"),
+                    notifierHa = maj(s.notifierHa, "notifier") { if (it.startsWith("notify.")) it else "notify.$it" }, sirenes = maj(s.sirenes, "sirenes"),
+                    activation = majEtapes(s.activation, "etapes_activation"), desactivation = majEtapes(s.desactivation, "etapes_desactivation"),
+                    phrasesActiver = maj(s.phrasesActiver, "phrases_activation"), phrasesDesactiver = maj(s.phrasesDesactiver, "phrases_desactivation"))
+                val (s2, noteHa) = runCatching { fr.dd.jarvis.securite.Systemes.synchroniserHa(app, s) }.getOrElse { s to "⚠️ Automatisation Home Assistant non créée : ${it.message?.take(160)}" }
+                fr.dd.jarvis.securite.Systemes.sauver(app, s2)
+                val manque = buildList {
+                    if (modele == "telephone_securise" && !fr.dd.jarvis.voice.EmpreinteVocale.prete(app)) add("🎤 Enregistre ton empreinte vocale (Réglages › Sécurité › Empreinte vocale) : sans elle, pas de déverrouillage à la voix.")
+                    if (modele == "telephone_securise" && runCatching { app.store.codeDeverrouillage.value }.getOrDefault("").isBlank()) add("🔢 Saisis le code de l'écran dans Réglages › Sécurité › Systèmes pour un déverrouillage complet à la voix (sinon il restera l'empreinte digitale).")
+                    if (modele == "maison_securisee" && s2.destinataires.isEmpty()) add("📱 Dis-moi à quels numéros envoyer les photos par MMS (« ajoute le numéro de Marie au mode maison sécurisée »).")
+                }
+                if (a.optBoolean("activer_apres")) return ToolResult(fr.dd.jarvis.securite.Systemes.activer(app, s2, this) +
+                    (if (manque.isNotEmpty()) "\n\nÀ faire :\n" + manque.joinToString("\n") { "- $it" } else ""))
+                ToolResult("✅ Système installé.\n" + listOf(note, noteHa).filter { it.isNotBlank() }.joinToString("\n") + "\n\n" + fr.dd.jarvis.securite.Systemes.presenter(s2) +
+                    (if (manque.isNotEmpty()) "\n\nÀ faire :\n" + manque.joinToString("\n") { "- $it" } else ""))
+            }
+            "consulter", "voir" -> ToolResult(fr.dd.jarvis.securite.Systemes.trouver(app, nom)?.let { fr.dd.jarvis.securite.Systemes.presenter(it) } ?: fr.dd.jarvis.securite.Systemes.presenterTous(app))
+            "activer" -> {
+                val s = fr.dd.jarvis.securite.Systemes.trouver(app, nom) ?: return ToolResult("Mode « $nom » introuvable.\n" + fr.dd.jarvis.securite.Systemes.presenterTous(app))
+                ToolResult(fr.dd.jarvis.securite.Systemes.activer(app, s, this))
+            }
+            "desactiver" -> {
+                val s = fr.dd.jarvis.securite.Systemes.trouver(app, nom) ?: return ToolResult("Mode « $nom » introuvable.\n" + fr.dd.jarvis.securite.Systemes.presenterTous(app))
+                if (s.securite && !confirm("${fr.dd.jarvis.securite.Systemes.QUESTION} « ${s.nom} » ?", true)) return ToolResult("Désactivation refusée : « ${s.nom} » reste actif.")
+                ToolResult(fr.dd.jarvis.securite.Systemes.desactiver(app, s, this))
+            }
+            "supprimer" -> {
+                val s = fr.dd.jarvis.securite.Systemes.trouver(app, nom) ?: return ToolResult("Mode « $nom » introuvable.")
+                if (!confirm(if (s.securite) "${fr.dd.jarvis.securite.Systemes.QUESTION} « ${s.nom} » et le supprimer ?" else "Supprimer le mode « ${s.nom} » ?", s.securite)) return ToolResult("Suppression annulée.")
+                if (s.actif) fr.dd.jarvis.securite.Systemes.desactiver(app, s, this)
+                if (s.automationHa.isNotBlank()) runCatching { fr.dd.jarvis.ai.Serveur.ha(app, "POST", "/api/services/automation/turn_off", JSONObject().put("entity_id", s.automationHa)) }
+                fr.dd.jarvis.securite.Systemes.retirer(app, s.id)
+                ToolResult("🗑️ Système « ${s.nom} » supprimé." + if (s.automationHa.isNotBlank()) " (Son automatisation Home Assistant ${s.automationHa} est désactivée ; supprime-la dans Home Assistant si tu n'en veux plus.)" else "")
+            }
+            "modifier", "configurer", "regler" -> {
+                var s = fr.dd.jarvis.securite.Systemes.trouver(app, nom) ?: return ToolResult("Mode « $nom » introuvable.\n" + fr.dd.jarvis.securite.Systemes.presenterTous(app))
+                val avant = s
+                val consigne = a.optString("consigne").trim().ifBlank { a.optString("description").trim() }
+                var remarques = ""
+                if (consigne.isNotBlank()) {
+                    val r = try { fr.dd.jarvis.securite.Systemes.composer(app, consigne, s) } catch (e: Exception) { return ToolResult("❌ Modification non faite : ${e.message?.take(200)}") }
+                    s = r.first.copy(id = s.id, modele = s.modele, actif = s.actif, automationHa = s.automationHa, viaHa = s.viaHa, viaMms = s.viaMms, activeLe = s.activeLe)
+                    remarques = r.second
+                }
+                s = s.copy(nom = a.optString("nouveau_nom").trim().ifBlank { s.nom },
+                    destinataires = maj(s.destinataires, "destinataires"), cameras = maj(s.cameras, "cameras"), capteurs = maj(s.capteurs, "capteurs"),
+                    notifierHa = maj(s.notifierHa, "notifier") { if (it.startsWith("notify.")) it else "notify.$it" }, sirenes = maj(s.sirenes, "sirenes"),
+                    activation = majEtapes(s.activation, "etapes_activation"), desactivation = majEtapes(s.desactivation, "etapes_desactivation"),
+                    phrasesActiver = maj(s.phrasesActiver, "phrases_activation"), phrasesDesactiver = maj(s.phrasesDesactiver, "phrases_desactivation"))
+                for (o in liste("options")) {
+                    val (k, v) = o.split('=', limit = 2).map { it.trim() }.let { (it.getOrElse(0) { "" }) to (it.getOrElse(1) { "oui" }) }
+                    when (fr.dd.jarvis.securite.Systemes.norm(k).replace(' ', '_')) {
+                        "sirene_detection", "sirene" -> s = s.copy(sireneSurDetection = oui(v))
+                        "notifications_ha", "via_ha", "ha" -> s = s.copy(viaHa = oui(v))
+                        "mms", "via_mms" -> s = s.copy(viaMms = oui(v))
+                    }
+                }
+                val noteHa = if (s.capteurs != avant.capteurs || s.cameras != avant.cameras || s.notifierHa != avant.notifierHa || s.sirenes != avant.sirenes ||
+                    s.sireneSurDetection != avant.sireneSurDetection || s.viaHa != avant.viaHa || s.nom != avant.nom)
+                    runCatching { fr.dd.jarvis.securite.Systemes.synchroniserHa(app, s) }.getOrElse { s to "⚠️ Automatisation Home Assistant non mise à jour : ${it.message?.take(160)}" }.let { (n, t) -> s = n; t } else ""
+                fr.dd.jarvis.securite.Systemes.sauver(app, s)
+                fr.dd.jarvis.securite.SurveillanceMaison.actualiser(app)
+                ToolResult("✅ « ${s.nom} » mis à jour." + (if (remarques.isNotBlank()) "\n$remarques" else "") + (if (noteHa.isNotBlank()) "\n$noteHa" else "") +
+                    (if (s.actif && (s.activation != avant.activation)) "\nLe mode est actif : ses nouvelles étapes s'appliqueront à la prochaine activation." else "") +
+                    "\n\n" + fr.dd.jarvis.securite.Systemes.presenter(s))
+            }
+            else -> ToolResult("Action inconnue « ${a.optString("action")} ». Choix : lister, creer, consulter, activer, desactiver, modifier, supprimer.")
+        }
     }
 
     private suspend fun runShell(a: JSONObject): ToolResult {

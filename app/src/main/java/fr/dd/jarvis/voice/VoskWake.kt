@@ -84,8 +84,10 @@ class PorcupineWake(private val ctx: Context, private val accessKey: String, pri
                     .setKeyword(ai.picovoice.porcupine.Porcupine.BuiltInKeyword.JARVIS)
                     .setSensitivity(sensibilite())
                     .setErrorCallback { onPanne() }
-                    .build(ctx, ai.picovoice.porcupine.PorcupineManagerCallback { onWake() })
+                    .build(ctx, ai.picovoice.porcupine.PorcupineManagerCallback { JournalVoix.noter("Porcupine", "« Jarvis » détecté"); onWake() })
             }
+            // Redémarrage : on arrête d'abord l'écoute en cours (jamais deux enregistrements du micro en parallèle).
+            runCatching { mgr?.stop() }
             mgr?.start(); true
         } catch (e: Throwable) {
             error = e.message ?: e.javaClass.simpleName
@@ -122,6 +124,8 @@ class VoskWake(private val ctx: Context, private val econome: Boolean = true, pr
             "yes", "no", "okay", "hey", "alexa", "google", "[unk]"
         )
         internal fun contientJarvis(texte: String) = Regex("\\bjarvis\\b").containsMatchIn(texte)
+        /** Boucles d'écoute économe encore vivantes (micro tenu), toutes instances confondues : jamais plus d'une. */
+        internal val vivantes = java.util.concurrent.atomic.AtomicInteger(0)
 
         /**
          * Vrai si la phrase reconnue commence par « jarvis » (1er mot, ou 2e après un bruit / un « hey »), avec une
@@ -143,6 +147,10 @@ class VoskWake(private val ctx: Context, private val econome: Boolean = true, pr
     override fun start(): Boolean {
         if (!VoskModel.ready(ctx)) return false
         stop()   // jamais deux écoutes en parallèle sur le micro
+        // L'ancienne boucle n'a pas encore rendu le micro (modèle encore en train de décoder) : on ne superpose pas une
+        // deuxième écoute — c'étaient deux détecteurs qui entendaient « Jarvis » en même temps (bips en double).
+        // Le service réessaie un peu plus tard.
+        if (vivantes.get() > 0) return false
         return try {
             LibVosk.setLogLevel(LogLevel.WARNINGS)
             if (model == null) model = Model(VoskModel.dir(ctx).absolutePath)
@@ -161,7 +169,7 @@ class VoskWake(private val ctx: Context, private val econome: Boolean = true, pr
                     private fun check(j: String?) {
                         if (fired || j == null) return
                         try {
-                            if (estReveil(org.json.JSONObject(j).optJSONArray("result"), seuil())) { fired = true; onWake() }
+                            if (estReveil(org.json.JSONObject(j).optJSONArray("result"), seuil())) { fired = true; JournalVoix.noter("Vosk", "« Jarvis » détecté"); onWake() }
                         } catch (_: Throwable) {}
                     }
                     override fun onPartialResult(hypothesis: String?) {}
@@ -185,7 +193,7 @@ class VoskWake(private val ctx: Context, private val econome: Boolean = true, pr
     private fun verifier(j: String?) {
         if (fired || j == null) return
         try {
-            if (estReveil(org.json.JSONObject(j).optJSONArray("result"), seuil())) { fired = true; onWake() }
+            if (estReveil(org.json.JSONObject(j).optJSONArray("result"), seuil())) { fired = true; JournalVoix.noter("Vosk", "« Jarvis » détecté"); onWake() }
         } catch (_: Throwable) {}
     }
 
@@ -211,7 +219,8 @@ class VoskWake(private val ctx: Context, private val econome: Boolean = true, pr
             try { ar.startRecording() } catch (_: Throwable) { ar.release(); return false }
             if (ar.recordingState != android.media.AudioRecord.RECORDSTATE_RECORDING) { ar.release(); return false }
             micro = ar
-            fil = Thread({ boucle(ar, taille) }, "jarvis-ecoute").apply { isDaemon = true; start() }
+            vivantes.incrementAndGet()
+            fil = Thread({ try { boucle(ar, taille) } finally { vivantes.decrementAndGet() } }, "jarvis-ecoute").apply { isDaemon = true; start() }
             return true
         }
 
@@ -252,8 +261,9 @@ class VoskWake(private val ctx: Context, private val econome: Boolean = true, pr
 
         fun arreter() {
             actif = false
-            // Attend la libération du micro (au plus une trame) : la reconnaissance de la demande va le reprendre.
-            fil?.let { if (it !== Thread.currentThread()) runCatching { it.join(400) } }
+            // Attend la libération du micro : la reconnaissance de la demande va le reprendre (au plus 1,2 s si le
+            // modèle finit de décoder une phrase).
+            fil?.let { if (it !== Thread.currentThread()) runCatching { it.join(1200) } }
         }
     }
 

@@ -25,8 +25,25 @@ data class Societe(
     val delaiPaiementJours: Int = 30,
     val validiteDevisJours: Int = 30,
     val mentions: String = "",           // mentions légales complémentaires (assurance décennale, etc.)
+    val rcs: String = "",                // immatriculation : « RCS Dijon 123 456 789 » (ou RM pour un artisan)
+    val codeApe: String = "",            // code APE / NAF, ex. 4321A
+    val conventionCollective: String = "", // convention collective appliquée (bulletins de paie), ex. « Bâtiment ouvriers (IDCC 1597) »
+    val urssaf: String = "",             // organisme de recouvrement des cotisations (bulletins), ex. « URSSAF Bourgogne-Franche-Comté »
+    val estimerSalaires: Boolean = false, // compter au résultat les mois sans bulletin (estimés d'après le contrat) — sinon : seuls les bulletins enregistrés
     val reservePct: Double = 0.0,        // % du HT de chaque facture encaissée mis de côté (réserve bénéfices)
     val partDirigeantPct: Double = 50.0,
+    val reserveSelonSalaires: Boolean = true,  // réserve répartie entre dirigeant(s) et salariés au prorata des salaires versés
+    // Résultat et dividende (recalculés à chaque facture encaissée, voir Resultat.kt)
+    val chargesMensuelles: Double = 0.0,  // charges fixes hors salaires : loyer, assurance, comptable, véhicule…
+    val capitalSocial: Double = 0.0,
+    val reserveLegaleCumulee: Double = 0.0, // réserve légale déjà constituée les années précédentes
+    val distributionPct: Double = 100.0,  // part du bénéfice distribuable versée en dividende (le reste reste dans la société)
+    val soumisIs: Boolean? = null,        // null : déduit de la forme (micro / EI → impôt sur le revenu)
+    val isTauxReduit: Double = 15.0,
+    val isPlafondReduit: Double = 42_500.0,
+    val isTauxNormal: Double = 25.0,
+    val pfuPct: Double = 31.4,             // prélèvement forfaitaire unique 2026 : 12,8 % + 18,6 %
+    val baremesAuto: Boolean = true,       // barèmes officiels (URSSAF) appliqués automatiquement à chaque mise à jour
     val kmlCouleurParticulier: String = "#20A45A",
     val kmlCouleurProfessionnel: String = "#2878D0",
     val kmlCouleurSiege: String = "#FF9800"
@@ -114,6 +131,8 @@ data class Client(
     val sites: List<Site> = emptyList(),
     val depuis: String = "",                         // yyyy-MM-dd : début de la relation (ancienneté)
     val notes: String = "",
+    val siren: String = "",                          // client professionnel : SIREN (mention obligatoire sur ses factures)
+    val tvaNum: String = "",                         // client professionnel : n° de TVA intracommunautaire
     /** Distance routière aller depuis le siège, mise en cache par adresse. */
     val distanceKm: Double? = null,
     val distanceDureeMin: Double? = null,
@@ -146,7 +165,8 @@ data class Doc(
     val payeLe: String = "",
     val modePaiement: String = "",
     val remiseInfo: String = "",
-    val distanceKm: Double? = null
+    val distanceKm: Double? = null,
+    val datePrestation: String = ""                  // date (ou période) de la prestation ; vide = date du document
 )
 
 @Serializable
@@ -165,7 +185,7 @@ data class Employe(
 @Serializable
 data class ConfigPaie(
     val cadre: Boolean = false,                      // régime cadre (AGIRC-ARRCO + APEC/CET) ou non-cadre
-    val plafondSecu: Double = 3925.0,                // plafond mensuel de la Sécurité sociale (PMSS) — à vérifier chaque année
+    val plafondSecu: Double = 4005.0,                // plafond mensuel de la Sécurité sociale (PMSS 2026) — mis à jour automatiquement (URSSAF)
     val tauxAtmp: Double = 1.2,                      // taux accident du travail / maladies professionnelles (patronal, dépend de l'activité)
     val tauxFormationPct: Double = 0.55,             // contribution formation professionnelle (patronal)
     val tauxTaxeApprentissagePct: Double = 0.68,     // taxe d'apprentissage (patronal)
@@ -194,5 +214,10 @@ data class BulletinRef(
     val mois: String,                                // yyyy-MM
     val brut: Double,
     val netAPayer: Double,
-    val coutEmployeur: Double
+    val coutEmployeur: Double,
+    val nomEmploye: String = "",                     // conservé si l'employé est retiré ensuite
+    val netImposable: Double = 0.0,
+    val heures: Double = 0.0,
+    val creeLe: String = "",                         // yyyy-MM-dd HH:mm
+    val md: String = ""                              // bulletin complet (Markdown) : réaffichage, réimpression, PDF régénéré
 )

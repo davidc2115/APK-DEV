@@ -32,11 +32,18 @@ object AgentsScheduler {
     fun apply(ctx: Context, store: Store) {
         val wm = WorkManager.getInstance(ctx)
         // Le centre de surveillance conserve son historique même lorsque les agents IA sont suspendus.
-        val healthReq = PeriodicWorkRequestBuilder<PhoneHealthWorker>(30, TimeUnit.MINUTES).build()
-        wm.enqueueUniquePeriodicWork("phone_health", ExistingPeriodicWorkPolicy.KEEP, healthReq)
+        val mode = store.modeEnergie.value
+        val adaptation = mode != "performance" && fr.dd.jarvis.device.Energie.economie
+        val healthMinutes = when (mode) { "performance" -> 15L; "eco" -> 90L; else -> if (adaptation) 60L else 30L }
+        val healthReq = PeriodicWorkRequestBuilder<PhoneHealthWorker>(healthMinutes, TimeUnit.MINUTES).build()
+        wm.enqueueUniquePeriodicWork("phone_health", ExistingPeriodicWorkPolicy.UPDATE, healthReq)
         if (!store.agentsOn.value) { wm.cancelUniqueWork(NAME); return }
-        val req = PeriodicWorkRequestBuilder<AgentsWorker>(store.agentMinutes.value.coerceAtLeast(15).toLong(), TimeUnit.MINUTES)
-            .build()
+        val agentMinutes = when (mode) {
+            "performance" -> 15L
+            "eco" -> maxOf(60L, store.agentMinutes.value.toLong())
+            else -> if (adaptation) maxOf(45L, store.agentMinutes.value.toLong()) else store.agentMinutes.value.coerceAtLeast(15).toLong()
+        }
+        val req = PeriodicWorkRequestBuilder<AgentsWorker>(agentMinutes, TimeUnit.MINUTES).build()
         // Les contrôles locaux (batterie, stockage, tâches, factures) doivent aussi tourner hors connexion.
         wm.enqueueUniquePeriodicWork(NAME, ExistingPeriodicWorkPolicy.UPDATE, req)
     }
@@ -88,6 +95,9 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
     private fun writeSet(n: String, s: Set<String>) = runCatching { seenFile(n).writeText(s.toList().takeLast(600).joinToString("\n")) }
 
     private fun alert(id: Int, titre: String, texte: String): Boolean {
+        // Arrivée de mails / SMS / messages : Android affiche déjà ses notifications, Jarvis n'en ajoute plus.
+        // Le résumé reste dans le journal des agents (et Jarvis le donne quand on le lui demande).
+        if (id == 2001 || id == 2003) { journal.append("- $titre (sans notification Jarvis)\n"); return true }
         if (android.os.Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             journal.append("- ⚠️ Alerte « $titre » non publiée : autorisation de notifications Android absente.\n")
             return false

@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit
 /** Génération vidéo de secours : Gemini Omni (si quota disponible), puis Dreamina/BytePlus. */
 object VideoProviderGen {
     private val http = OkHttpClient.Builder().connectTimeout(25, TimeUnit.SECONDS).readTimeout(45, TimeUnit.SECONDS).callTimeout(55, TimeUnit.SECONDS).build()
-    private val geminiHttp = OkHttpClient.Builder()
+    private val geminiHttp = OkHttpClient.Builder().dns(Http.dnsGoogle).connectionPool(Http.poolGoogle).addInterceptor(Http.relocalisation)
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(7, TimeUnit.MINUTES)
         .callTimeout(8, TimeUnit.MINUTES)

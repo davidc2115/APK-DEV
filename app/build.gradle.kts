@@ -3,6 +3,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.serialization")
     id("org.jetbrains.kotlin.kapt")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
@@ -44,15 +45,9 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-    }
     buildFeatures {
         compose = true
         buildConfig = true
-    }
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.14"
     }
     packaging {
         resources {
@@ -66,6 +61,12 @@ android {
             )
             pickFirsts += setOf("META-INF/mailcap", "META-INF/mimetypes.default")
         }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
 
@@ -94,6 +95,8 @@ dependencies {
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     implementation("androidx.work:work-runtime-ktx:2.9.0")
     implementation("com.google.android.gms:play-services-auth:21.2.0")
+    // Gemini Nano sur l’appareil via Android AICore.
+    implementation("com.google.mlkit:genai-prompt:1.0.0-beta4")
 
     // ADB intégré (Débogage sans fil) : droits « adb » sans installer Shizuku
     // Bibliothèques natives alignées sur 16 Ko (Android 15+/16 avec pages de 16 Ko : pas de mode de compatibilité ni
@@ -127,7 +130,7 @@ dependencies {
     implementation("androidx.media3:media3-common:1.4.1")
 
     // Index local du graphe de connaissances (les fichiers Markdown restent les sources de vérité)
-    implementation("androidx.room:room-runtime:2.6.1")
-    implementation("androidx.room:room-ktx:2.6.1")
-    kapt("androidx.room:room-compiler:2.6.1")
+    implementation("androidx.room:room-runtime:2.8.5")
+    implementation("androidx.room:room-ktx:2.8.5")
+    kapt("androidx.room:room-compiler:2.8.5")
 }

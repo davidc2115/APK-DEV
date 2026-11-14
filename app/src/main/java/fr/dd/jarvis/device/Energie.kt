@@ -1,11 +1,13 @@
 package fr.dd.jarvis.device
 
+import android.app.ActivityManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
 import android.os.PowerManager
+import android.os.Build
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -13,11 +15,11 @@ import fr.dd.jarvis.JarvisApp
 
 /**
  * Économie d'énergie de JARVIS. Trois réglages (Réglages › Général › Batterie & vitesse) :
- *  - « auto » (défaut) : économie dès que l'économiseur de batterie d'Android est actif, ou sous 20 % hors charge ;
- *  - « performance » : jamais d'économie ;
- *  - « eco » : toujours en économie.
- * En économie : animations ralenties, synchronisations et relevés de fond espacés. Les fonctions restent toutes là
- * (écoute « Jarvis », rappels, anti-vol, agents) : seules les dépenses invisibles sont réduites.
+ *  - « performance » : privilégie la réactivité et les traitements internes ;
+ *  - « balanced » (défaut, et ancien « auto ») : adapte l'activité à la batterie et à l'état énergétique Android ;
+ *  - « eco » : réduit les travaux secondaires, sans désactiver l'écoute ni les commandes.
+ * Android conserve la maîtrise des fréquences CPU, de la RAM et des limites thermiques : JARVIS optimise uniquement
+ * ses propres tâches et ne tente jamais de contourner le système.
  */
 object Energie {
     const val SEUIL_BATTERIE = 20
@@ -31,18 +33,23 @@ object Energie {
         private set
     var economiseurAndroid by mutableStateOf(false)
         private set
+    var contrainteThermique by mutableStateOf(false)
+        private set
+    var ramLibrePct by mutableStateOf(-1)
+        private set
 
     @Volatile private var suivi = false
 
     /** Décision pure (testable). */
-    internal fun decider(mode: String, economiseur: Boolean, niveau: Int, charge: Boolean): Boolean = when (mode) {
+    internal fun decider(mode: String, economiseur: Boolean, niveau: Int, charge: Boolean, thermique: Boolean = false, memoireFaible: Boolean = false): Boolean = when (mode) {
         "performance" -> false
         "eco" -> true
-        else -> economiseur || (!charge && niveau in 0..SEUIL_BATTERIE)
+        else -> economiseur || thermique || memoireFaible || (!charge && niveau in 0..SEUIL_BATTERIE)
     }
 
     fun maj(ctx: Context, intentBatterie: Intent? = null) {
         val app = ctx.applicationContext as? JarvisApp ?: return
+        val ancienneEconomie = economie
         val i = intentBatterie ?: runCatching { ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED)) }.getOrNull()
         if (i != null) {
             val niveau = i.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
@@ -51,8 +58,21 @@ object Energie {
             val statut = i.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
             enCharge = statut == BatteryManager.BATTERY_STATUS_CHARGING || statut == BatteryManager.BATTERY_STATUS_FULL
         }
-        economiseurAndroid = runCatching { (ctx.getSystemService(Context.POWER_SERVICE) as PowerManager).isPowerSaveMode }.getOrDefault(false)
-        economie = decider(app.store.modeEnergie.value, economiseurAndroid, batterie, enCharge)
+        val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
+        economiseurAndroid = runCatching { pm.isPowerSaveMode }.getOrDefault(false)
+        contrainteThermique = if (Build.VERSION.SDK_INT >= 29) runCatching {
+            pm.currentThermalStatus >= PowerManager.THERMAL_STATUS_MODERATE
+        }.getOrDefault(false) else false
+        val memoire = ActivityManager.MemoryInfo()
+        runCatching { (ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).getMemoryInfo(memoire) }
+        ramLibrePct = if (memoire.totalMem > 0L) (memoire.availMem * 100L / memoire.totalMem).toInt() else -1
+        val pressionMemoire = ramLibrePct in 0..12
+        economie = decider(app.store.modeEnergie.value, economiseurAndroid, batterie, enCharge, contrainteThermique, pressionMemoire)
+        if (ancienneEconomie != economie) {
+            runCatching { fr.dd.jarvis.work.AgentsScheduler.apply(ctx, app.store) }
+            runCatching { fr.dd.jarvis.work.ReseauScheduler.apply(ctx, app.store) }
+            runCatching { fr.dd.jarvis.work.VeilleWorker.planifier(ctx) }
+        }
     }
 
     /** Suit la batterie et l'économiseur d'Android (appelé au démarrage de l'appli, sans coût : diffusions système). */
@@ -77,14 +97,25 @@ object Energie {
         }
     }
 
+    /** Applique le profil aux travaux périodiques JARVIS sans toucher aux réglages énergétiques Android. */
+    fun appliquerMode(ctx: Context) {
+        val app = ctx.applicationContext as? JarvisApp ?: return
+        maj(ctx)
+        runCatching { fr.dd.jarvis.work.AgentsScheduler.apply(ctx, app.store) }
+        runCatching { fr.dd.jarvis.work.ReseauScheduler.apply(ctx, app.store) }
+        runCatching { fr.dd.jarvis.work.VeilleWorker.planifier(ctx) }
+    }
+
     /** Hors interface (workers) : état à jour sans dépendre du suivi. */
     fun economieMaintenant(ctx: Context): Boolean { maj(ctx); return economie }
 
     fun libelle(app: JarvisApp): String = when {
-        app.store.modeEnergie.value == "performance" -> "⚡ Performance : aucune économie"
-        economie && app.store.modeEnergie.value == "eco" -> "🔋 Économie forcée"
-        economie && economiseurAndroid -> "🔋 Économie (économiseur de batterie d'Android actif)"
-        economie -> "🔋 Économie (batterie à $batterie %, hors charge)"
-        else -> "✅ Normal" + (if (batterie >= 0) " · batterie $batterie %" + (if (enCharge) " en charge" else "") else "")
+        app.store.modeEnergie.value == "performance" -> "⚡ Performance · priorité à la réactivité"
+        app.store.modeEnergie.value == "eco" -> "🔋 Économie · tâches secondaires réduites"
+        economie && contrainteThermique -> "🌡️ Équilibré · activité réduite pour la température"
+        economie && ramLibrePct in 0..12 -> "🧠 Équilibré · pression mémoire détectée"
+        economie && economiseurAndroid -> "🔋 Équilibré · économiseur Android actif"
+        economie -> "🔋 Équilibré · batterie à $batterie %"
+        else -> "⚖️ Équilibré · ressources disponibles" + (if (batterie >= 0) " · batterie $batterie %" + (if (enCharge) " en charge" else "") else "")
     }
 }

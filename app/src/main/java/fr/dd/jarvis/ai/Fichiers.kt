@@ -70,7 +70,11 @@ object Fichiers {
     }
 
     // ------------------------------------------------------------------ DOCX
-    private fun docx(md: String): ByteArray {
+    /**
+     * [logo] (PNG, largeur, hauteur en px) : en tête du document ; [pied] : mentions légales en pied de page.
+     * Réservés aux documents DE LA SOCIÉTÉ (voir [creer]).
+     */
+    internal fun docx(md: String, logo: Triple<ByteArray, Int, Int>? = null, pied: String = ""): ByteArray {
         fun run(t: String, gras: Boolean = false, taille: Int = 22) = "<w:r><w:rPr>" + (if (gras) "<w:b/>" else "") + "<w:sz w:val=\"$taille\"/></w:rPr><w:t xml:space=\"preserve\">${esc(sansMd(t))}</w:t></w:r>"
         val body = StringBuilder()
         blocs(md).forEach { b ->
@@ -92,12 +96,37 @@ object Fichiers {
                 else -> body.append("<w:p>${run(b.texte)}</w:p>")
             }
         }
-        val ns = "xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\""
-        return zip(listOf(
-            "[Content_Types].xml" to ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/></Types>").toByteArray(),
+        val ns = "xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" " +
+            "xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" " +
+            "xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\""
+        // Logo : image en ligne de 4 cm de large au plus (2,3 cm de haut), proportions conservées (unités EMU).
+        val image = logo?.let { (_, w, h) ->
+            val ratio = minOf(1_440_000.0 / w, 828_000.0 / h)
+            val cx = (w * ratio).toLong(); val cy = (h * ratio).toLong()
+            "<w:p><w:pPr><w:spacing w:after=\"200\"/></w:pPr><w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"$cx\" cy=\"$cy\"/>" +
+                "<wp:docPr id=\"1\" name=\"Logo\"/><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic>" +
+                "<pic:nvPicPr><pic:cNvPr id=\"0\" name=\"logo.png\"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed=\"rIdLogo\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>" +
+                "<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"$cx\" cy=\"$cy\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"
+        } ?: ""
+        val avecPied = pied.isNotBlank()
+        val types = "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/>" +
+            (if (logo != null) "<Default Extension=\"png\" ContentType=\"image/png\"/>" else "") +
+            "<Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>" +
+            (if (avecPied) "<Override PartName=\"/word/footer1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml\"/>" else "")
+        val rels = (if (logo != null) "<Relationship Id=\"rIdLogo\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"media/logo.png\"/>" else "") +
+            (if (avecPied) "<Relationship Id=\"rIdPied\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer\" Target=\"footer1.xml\"/>" else "")
+        val entrees = mutableListOf(
+            "[Content_Types].xml" to ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">$types</Types>").toByteArray(),
             "_rels/.rels" to ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/></Relationships>").toByteArray(),
-            "word/document.xml" to ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><w:document $ns><w:body>$body<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/><w:pgMar w:top=\"1134\" w:right=\"1134\" w:bottom=\"1134\" w:left=\"1134\" w:header=\"708\" w:footer=\"708\" w:gutter=\"0\"/></w:sectPr></w:body></w:document>").toByteArray()
-        ))
+            "word/document.xml" to ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><w:document $ns><w:body>$image$body<w:sectPr>" +
+                (if (avecPied) "<w:footerReference w:type=\"default\" r:id=\"rIdPied\"/>" else "") +
+                "<w:pgSz w:w=\"11906\" w:h=\"16838\"/><w:pgMar w:top=\"1134\" w:right=\"1134\" w:bottom=\"1134\" w:left=\"1134\" w:header=\"708\" w:footer=\"708\" w:gutter=\"0\"/></w:sectPr></w:body></w:document>").toByteArray()
+        )
+        if (rels.isNotBlank()) entrees += "word/_rels/document.xml.rels" to ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">$rels</Relationships>").toByteArray()
+        if (logo != null) entrees += "word/media/logo.png" to logo.first
+        if (avecPied) entrees += "word/footer1.xml" to ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><w:ftr xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">" +
+            "<w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:rPr><w:color w:val=\"666666\"/><w:sz w:val=\"14\"/></w:rPr><w:t xml:space=\"preserve\">${esc(pied)}</w:t></w:r></w:p></w:ftr>").toByteArray()
+        return zip(entrees)
     }
 
     // ------------------------------------------------------------------ XLSX
@@ -254,6 +283,21 @@ object Fichiers {
 
     fun mimeDe(nom: String) = mime(nom.substringAfterLast('.', "").lowercase())
 
+    /**
+     * Document DE LA SOCIÉTÉ ? Paramètre « pour_la_societe » (oui / non) ; à défaut, seulement si le nom de la société ou
+     * son SIRET figure dans le nom, le titre ou le contenu. Les autres fichiers (coloriages, notes perso…) restent neutres.
+     */
+    internal fun pourLaSociete(app: JarvisApp, a: JSONObject): Boolean {
+        val choix = fr.dd.jarvis.societe.core.normaliser(a.optString("pour_la_societe"))
+        if (choix in setOf("oui", "true", "1", "societe", "yes")) return app.societe.data.societe.nom.isNotBlank() || fr.dd.jarvis.societe.Logo.existe(app)
+        if (choix in setOf("non", "false", "0", "no")) return false
+        val s = app.societe.data.societe
+        val texte = fr.dd.jarvis.societe.core.normaliser(a.optString("nom") + " " + a.optString("titre") + " " + a.optString("contenu").take(4000))
+        val nom = fr.dd.jarvis.societe.core.normaliser(s.nom)
+        return (nom.length >= 4 && Regex("\\b${Regex.escape(nom)}\\b").containsMatchIn(texte)) ||
+            (s.siret.filter { it.isDigit() }.length >= 9 && a.optString("contenu").filter { it.isDigit() }.contains(s.siret.filter { it.isDigit() }))
+    }
+
     /** Crée le fichier ; retourne la ligne Markdown à afficher (lien « jarvis-file: »). */
     fun creer(app: JarvisApp, a: JSONObject): String {
         val format = a.optString("format").trim().lowercase().removePrefix(".").ifBlank { a.optString("nom").substringAfterLast('.', "txt").lowercase() }
@@ -261,10 +305,18 @@ object Fichiers {
         val contenu = a.optString("contenu")
         val titre = a.optString("titre")
         val ext = when (format) { "doc", "word" -> "docx"; "excel", "xls" -> "xlsx"; "vcard" -> "vcf"; "markdown" -> "md"; "texte", "text" -> "txt"; else -> format }
+        // Documents de la société : logo en tête + mentions légales en pied de page (PDF et Word), rangés dans Société/Documents.
+        val societe = ext in setOf("pdf", "docx") && runCatching { pourLaSociete(app, a) }.getOrDefault(false)
         val bytes: ByteArray = when (ext) {
-            "docx" -> docx((if (titre.isNotBlank()) "# $titre\n\n" else "") + contenu)
+            "docx" -> if (societe) docx((if (titre.isNotBlank()) "# $titre\n\n" else "") + contenu, fr.dd.jarvis.societe.Logo.png(app),
+                fr.dd.jarvis.societe.core.Rendu.identiteLegale(app.societe.data)) else docx((if (titre.isNotBlank()) "# $titre\n\n" else "") + contenu)
             "xlsx" -> xlsx(contenu, a.optString("feuille"))
-            "pdf" -> pdf(contenu, titre, images(app, a.optString("images")))
+            "pdf" -> if (societe) {
+                val imgs = images(app, a.optString("images"))
+                val md = (if (titre.isNotBlank()) "# $titre\n\n" else "") + contenu +
+                    imgs.mapIndexed { i, (legende, _) -> "\n\n![[image-$i]]" + (if (legende.isNotBlank()) "\n$legende" else "") }.joinToString("")
+                app.societe.pdfSociete(md) { n -> n.removePrefix("image-").toIntOrNull()?.let { i -> imgs.getOrNull(i)?.second }?.let { b -> BitmapFactory.decodeByteArray(b, 0, b.size) } }
+            } else pdf(contenu, titre, images(app, a.optString("images")))
             "vcf" -> (if (contenu.isBlank() || contenu.trim().lowercase() in setOf("tous", "tout")) vcfContacts(app, a.optString("recherche")) else contenu).toByteArray()
             "csv" -> tableau(contenu).joinToString("\r\n") { r -> r.joinToString(";") { c -> if (c.contains(';') || c.contains('"') || c.contains('\n')) "\"" + c.replace("\"", "\"\"") + "\"" else c } }.let { "\uFEFF$it".toByteArray() }
             "html", "htm" -> (if (contenu.trimStart().startsWith("<")) contenu else {
@@ -294,11 +346,11 @@ object Fichiers {
         // Copie privée pour l’aperçu et le partage depuis le chat ; destination durable dans le coffre choisi.
         // Ne jamais créer de dossier public dans Téléchargements.
         File(dossier(app), nom).writeBytes(bytes)
-        val emplacement = app.obsidian.saveBytes("JARVIS/Documents", nom, bytes, mime(ext))
+        val emplacement = app.obsidian.saveBytes(if (societe) "Société/Documents" else "JARVIS/Documents", nom, bytes, mime(ext))
         val ko = (bytes.size + 512) / 1024
         val demandees = a.optString("images").split(Regex("[,\\n]")).map { it.trim() }.filter { it.isNotBlank() }
         val manquantes = if (ext == "pdf" && demandees.isNotEmpty()) demandees.size - images(app, a.optString("images")).size else 0
-        return "[📎 $nom ($ko Ko)](jarvis-file:$nom)\n📂 Enregistré : $emplacement" +
+        return "[📎 $nom ($ko Ko)](jarvis-file:$nom)\n📂 Enregistré : $emplacement" + (if (societe) "\n🏢 Document de la société : logo et mentions légales ajoutés." else "") +
             (if (manquantes > 0) "\n⚠️ $manquantes image(s) demandée(s) introuvable(s) (vérifie les noms de fichiers générés par generer_image)." else "")
     }
 }

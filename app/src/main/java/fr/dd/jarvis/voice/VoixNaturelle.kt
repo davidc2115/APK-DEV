@@ -128,7 +128,7 @@ object VoixNaturelle {
     private val MODELES = listOf("gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts", "gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts")
     private val JSON = "application/json; charset=utf-8".toMediaType()
 
-    private val http = OkHttpClient.Builder().connectTimeout(6, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).callTimeout(25, TimeUnit.SECONDS).build()
+    private val http = OkHttpClient.Builder().dns(fr.dd.jarvis.ai.Http.dnsGoogle).connectionPool(fr.dd.jarvis.ai.Http.poolGoogle).addInterceptor(fr.dd.jarvis.ai.Http.relocalisation).connectTimeout(6, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).callTimeout(25, TimeUnit.SECONDS).build()
 
     @Volatile private var indisponibleJusqua = 0L
     @Volatile var raison = ""
@@ -214,11 +214,10 @@ object VoixNaturelle {
 
     private fun post(url: String, cle: String, corps: JSONObject): JSONObject {
         val req = Request.Builder().url(url).header("x-goog-api-key", cle).post(corps.toString().toRequestBody(JSON)).build()
-        http.newCall(req).execute().use { r ->
-            val t = r.body?.string().orEmpty()
-            if (!r.isSuccessful) throw Echec(r.code, runCatching { JSONObject(t).optJSONObject("error")?.optString("message") }.getOrNull().orEmpty().ifBlank { "HTTP ${r.code}" })
-            return JSONObject(t)
-        }
+        // Refus de localisation de Google : même relais par la passerelle Cloudflare que le reste de Gemini.
+        val (code, t) = fr.dd.jarvis.ai.GeminiPasserelle.executer(http, req)
+        if (code !in 200..299) throw Echec(code, runCatching { JSONObject(t).optJSONObject("error")?.optString("message") }.getOrNull().orEmpty().ifBlank { "HTTP $code" })
+        return JSONObject(t)
     }
 
     private fun interactions(cle: String, modele: String, texte: String, voix: String, style: String): Audio {

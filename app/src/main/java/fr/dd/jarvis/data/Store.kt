@@ -156,6 +156,8 @@ class Store(context: Context) {
     // ---- Serveur personnel : SSH + Home Assistant
     val haUrl = SPref("haUrl", "")
     val haToken = SPref("haToken", "")
+    /** Adresse de Home Assistant depuis l'extérieur (Nabu Casa, DuckDNS, port ouvert…) : utilisée hors de la maison. */
+    val haUrlDistant = SPref("haUrlDistant", "")
     val haDir = SPref("haDir", "")
     val sshHost = SPref("sshHost", "")
     val sshPort = SPref("sshPort", "22")
@@ -165,10 +167,29 @@ class Store(context: Context) {
     val sshFp = SPref("sshFp", "")
     /** Jeton Plex Media Server : toujours conservé dans le stockage chiffré du Keystore. */
     val plexToken = SecretPref("plexToken")
+    /** Noms donnés aux lecteurs Plex (« télé du salon » → identifiant du lecteur), en JSON. */
+    val plexAlias = SPref("plexAlias", "{}")
+    /** Actions autorisées une fois pour toutes (« Toujours autoriser »), par type d'outil (JSON). */
+    val autorisationsPermanentes = SPref("autorisationsPermanentes", "[]")
+    /** Commandes précises autorisées une fois pour toutes (« Toujours pour cette commande ») : même outil, mêmes arguments (JSON). */
+    val autorisationsCommandes = SPref("autorisationsCommandes", "[]")
     val ghToken = SPref("ghToken", "")
     val scanAuto = BPref("scanAuto", true)
     val sshHostDistant = SPref("sshHostDistant", "")
     val sshPortDistant = SPref("sshPortDistant", "")
+    /** Dernier relevé SSH des services du serveur (Docker, systemd, pm2…) et sa date (ms) : fiche « infrastructure » d'Hermès. */
+    /** Code de l'écran de verrouillage (déverrouillage à la voix du mode « téléphone sécurisé ») et code de l'alarme
+     *  Home Assistant : uniquement dans le stockage chiffré, jamais dans la conversation. */
+    val codeDeverrouillage = SecretPref("codeDeverrouillage")
+    val codeAlarmeHa = SecretPref("codeAlarmeHa")
+    /** Clé de chiffrement des sauvegardes Home Assistant (restauration d'une sauvegarde chiffrée par SSH). */
+    val cleSauvegardeHa = SecretPref("cleSauvegardeHa")
+    val serveurServices = SPref("serveurServices", "")
+    val serveurServicesLe = SPref("serveurServicesLe", "0")
+    /** Adresse du serveur sur le réseau de la maison (relevée par SSH) : connexion locale automatique à la maison. */
+    val serveurIpLocale = SPref("serveurIpLocale", "")
+    /** Position réelle de la grille du schéma sur l'écran de verrouillage (« gauche,haut,droite,bas »), relevée automatiquement. */
+    val schemaGrille = SPref("schemaGrille", "")
     // ---- Box internet (disque dur USB)
     val boxHost = SPref("boxHost", "")
     val boxProto = SPref("boxProto", "smb")
@@ -373,11 +394,14 @@ class Store(context: Context) {
 
     // ---- Batterie & vitesse
     /** Économie d'énergie : « auto » (économiseur Android ou batterie < 20 %), « performance », « eco ». */
-    val modeEnergie = SPref("modeEnergie", "auto")
+    val modeEnergie = SPref("modeEnergie", "balanced")
     /** Écoute « Jarvis » économe : le détecteur hors-ligne ne travaille que quand il y a du son (pas pendant le silence). */
     val ecouteEconome = BPref("ecouteEconome", true)
     /** Mode « Hermès pour tout » : les commandes simples (appel, SMS, musique, domotique, agenda…) restent à Jarvis, plus rapide. */
     val hermesRapide = BPref("hermesRapide", true)
+    /** IA du moteur Hermès (via le relais Jarvis) : « gemini » = Gemini d'abord, requête complète (précis, sans attente de
+     *  quota) puis Groq compacté en secours ; « groq » = Groq d'abord (requêtes compactées), comme avant. */
+    val relaisHermes = SPref("relaisHermes", "gemini")
     /** Derniers passages des travaux lourds du démarrage (index du graphe, contrôle des documents), en ms. */
     val grapheIndexeLe = SPref("grapheIndexeLe", "")
     val docsVerifiesLe = SPref("docsVerifiesLe", "")
@@ -513,6 +537,10 @@ class Store(context: Context) {
 
     /** Préfixe des libellés Gmail créés par JARVIS (vide = « Urgent », « Clients »… sans « JARVIS/ » devant). */
     val mailLabelPrefix = SPref("mailLabelPrefix", "")
+    /** Règle persistante du tri automatique : lus (défaut), non_lus ou tous. Le grand ménage l’ignore volontairement. */
+    val mailTriStatut = SPref("mailTriStatut", "non_lus")
+    /** Passage unique à la règle « non lus seulement » (demande de l'utilisateur, nov. 2026). */
+    val mailTriNonLusApplique = BPref("mailTriNonLusApplique", false)
 
     fun mailConfigured() = gmailAccounts.isNotEmpty() || mailHost.value.isNotBlank() && mailUser.value.isNotBlank() && mailPass.value.isNotBlank()
 
@@ -541,6 +569,8 @@ class Store(context: Context) {
     val hermesCle = SPref("hermesCle", "")
     val mcpJeton = SPref("mcpJeton", "")
     val hermesInstalle = BPref("hermesInstalle", false)
+    /** Version de configuration Hermès déjà poussée dans Termux ; une version plus récente déclenche une resynchronisation unique. */
+    val hermesConfigVersion = IPref("hermesConfigVersion", 0)
 
     // ---- Briefing du matin
     val briefingOn = BPref("briefingOn", false)

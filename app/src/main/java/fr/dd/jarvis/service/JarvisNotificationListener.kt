@@ -35,6 +35,9 @@ class JarvisNotificationListener : NotificationListenerService() {
             enLecture.isNotEmpty()
         }.getOrDefault(false)
 
+        /** « Mets en pause » demandé pendant la conversation : la musique ne doit PAS repartir à la fin de la conversation. */
+        @Synchronized fun oublierPauseVoix() { sessionsPauseesPourVoix = emptyList() }
+
         /** Reprend uniquement les sessions que Jarvis avait mises en pause et qui sont toujours en pause. */
         @Synchronized fun reprendreMediaApresVoix() {
             val sessions = sessionsPauseesPourVoix
@@ -117,9 +120,12 @@ class JarvisNotificationListener : NotificationListenerService() {
                 if (!identite.isNullOrBlank()) titre = "$identite · $titre".trim(' ', '·')
                 else if (titre.isBlank()) titre = "Appel entrant"
             }
+            val message = estMessage(sbn.packageName) || n.category == Notification.CATEGORY_MESSAGE
+            // Seules les notifications d'appels manqués sont masquées. La notification d'appel entrant
+            // reste visible pour ne jamais gêner l'écran permettant de répondre.
+            val appelManque = n.category == Notification.CATEGORY_MISSED_CALL
             add(Item(sbn.packageName, label, titre, texte, sbn.postTime))
             sauver(applicationContext)
-            val message = estMessage(sbn.packageName) || n.category == Notification.CATEGORY_MESSAGE
             val mail = estMail(sbn.packageName)
             // Jarvis ne republie plus de notification pour les SMS, mails et appels : celles d'Android suffisent.
             // Il les garde en mémoire pour les lire, les résumer, les annoncer à voix haute et alimenter ses agents.
@@ -135,6 +141,8 @@ class JarvisNotificationListener : NotificationListenerService() {
             runCatching {
                 fr.dd.jarvis.device.Annonces.traiter(applicationContext, applicationContext as fr.dd.jarvis.JarvisApp, sbn.key + sbn.postTime, sbn.packageName, label, n.category, titre, texte)
             }
+            // Les notifications d'Android (SMS, mails, appels, appels manqués) restent affichées : Jarvis les garde seulement
+            // en mémoire pour les lire, les résumer et les annoncer — il n'en retire plus aucune (sauf commande anti-vol).
         } catch (_: Throwable) {
         }
     }

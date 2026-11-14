@@ -14,7 +14,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
     companion object {
         val KEYWORDS = Regex("home ?assistant|domotique|\\bha\\b|hacs|int[ée]gration|entit[ée]s?\\b|helper|\\baides?\\b|ssh|serveur|server|yaml|docker|lumi[èe]re|volet|thermostat|automatisation|automation|sc[èe]ne\\b|configuration\\.yaml|debian|raspberry|esphome|zigbee|mqtt|capteur|\\bprise\\b|interrupteur|box|livebox|freebox|bbox|vpn|wireguard|openvpn|redirection|\\bnat\\b|dmz|dhcp|disque|nas|\\bftp\\b|\\bsmb\\b|r[ée]seau|wifi|wi-fi|imprim|scann|\\bip\\b|adresse ip|github|\\bgit\\b|canon|epson|brother|\\bhp\\b|appareils?\\b|script|\\bcode\\b|ping|port|volume|\\bson\\b|t[ée]l[ée]\\b|t[ée]l[ée]vision|\\btv\\b|chauffage|climatisation|temp[ée]rature|consigne|po[êe]le|poil|degr[ée]s|granul[ée]s|pellet|chaudi[èe]re|radiateur|thermique|climate|media_player|lecteur multim[ée]dia|localis|o[uù] (est|se trouve)|position d|luminosit[ée]|store\\b|persienne|\\ballume\\b|allumer|[ée]teins?\\b|[ée]teindre", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
-        val NAMES = setOf("ha_entites", "ha_position", "ha_etat", "ha_service", "ha_config", "ha_dashboard", "ha_admin", "ssh_commande", "ssh_fichier", "serveur_diagnostic", "serveur_scan_ports", "routeur_diagnostiquer", "reseau_infos", "reseau_scanner", "appareil_sonder", "appareil_page", "imprimantes_trouver", "imprimer", "ssh_script", "github", "appareils_liste", "appareil_nommer", "ip_publique", "box_disque", "freebox")
+        val NAMES = setOf("ha_entites", "ha_position", "ha_etat", "ha_service", "ha_config", "ha_dashboard", "ha_admin", "ssh_commande", "ssh_fichier", "serveur_diagnostic", "serveur_scan_ports", "routeur_diagnostiquer", "reseau_infos", "reseau_scanner", "appareil_sonder", "appareil_page", "imprimantes_trouver", "imprimer", "ssh_script", "github", "appareils_liste", "appareil_nommer", "ip_publique", "box_disque", "freebox", "appareil_acces_distant")
     }
 
     private fun prop(d: String) = JSONObject().put("type", "string").put("description", d)
@@ -25,12 +25,12 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
     }
 
     val schema: List<JSONObject> = listOf(
-        tool("ha_entites", "Home Assistant : liste/recherche les appareils et capteurs (lumières, volets, températures…) avec leur état. La liste est paginée : si total > affichées, rappelle l'outil avec le décalage suivant pour parcourir toutes les entités.",
+        tool("ha_entites", "Home Assistant (INSTANCE, par son API — adresse et jeton des Réglages, sans SSH) : liste/recherche les appareils et capteurs (lumières, volets, températures…) avec leur état. La liste est paginée : si total > affichées, rappelle l'outil avec le décalage suivant pour parcourir toutes les entités.",
             mapOf("recherche" to prop("Mot du nom ou de l'identifiant (optionnel)."), "domaine" to prop("light, switch, sensor, climate, cover, automation… (optionnel)."), "decalage" to prop("Index de départ (0 par défaut ; utiliser affichées comme prochain décalage)."), "limite" to prop("Nombre d'entités à afficher (défaut 100, maximum 250)."))),
-        tool("ha_etat", "Home Assistant : état détaillé d'une entité.", mapOf("entity_id" to prop("ex. light.salon")), listOf("entity_id")),
+        tool("ha_etat", "Home Assistant (INSTANCE, par son API — adresse et jeton des Réglages, sans SSH) : état détaillé d'une entité.", mapOf("entity_id" to prop("ex. light.salon")), listOf("entity_id")),
         tool("ha_position", "Home Assistant : OÙ EST une personne (entités person / device_tracker) — zone, adresse précise, coordonnées GPS, précision, fraîcheur, distance et lien de carte. À utiliser pour toute question « où est X », « localisation de X ». Si la position est inconnue, le dire tel quel.",
             mapOf("personne" to prop("Prénom ou nom de la personne (vide = toutes les personnes suivies).")), emptyList()),
-        tool("ha_service", "Home Assistant : exécute réellement une commande sur un appareil. Pour un poêle/thermostat : climate.set_temperature avec donnees {temperature: 20}, climate.set_hvac_mode si pris en charge. Pour une télévision/lecteur : media_player.turn_on, media_player.turn_off, media_player.volume_set avec {volume_level: 0.35}, media_player.volume_up, media_player.volume_down, media_player.media_play_pause, media_player.select_source avec {source: \"…\"}. Pour une lumière : light.turn_on/off. Cherche d'abord l'identifiant exact avec ha_entites, puis utilise ha_etat pour connaître les attributs et capacités. N'annonce jamais le succès avant le résultat de l'appel.",
+        tool("ha_service", "Home Assistant (INSTANCE, par son API — adresse et jeton des Réglages, sans SSH) : exécute réellement une commande sur un appareil. Pour un poêle/thermostat : climate.set_temperature avec donnees {temperature: 20}, climate.set_hvac_mode si pris en charge. Pour une télévision/lecteur : media_player.turn_on, media_player.turn_off, media_player.volume_set avec {volume_level: 0.35}, media_player.volume_up, media_player.volume_down, media_player.media_play_pause, media_player.select_source avec {source: \"…\"}. Pour une lumière : light.turn_on/off. Cherche d'abord l'identifiant exact avec ha_entites, puis utilise ha_etat pour connaître les attributs et capacités. N'annonce jamais le succès avant le résultat de l'appel.",
             mapOf("domaine" to prop("Domaine HA exact : climate, media_player, light, switch, cover, automation, scene, script…"), "service" to prop("Service HA exact : set_temperature, turn_on, turn_off, volume_set, volume_up, volume_down, select_source, media_play_pause…"),
                 "entity_id" to prop("Identifiant exact de l'entité, ex. climate.poele ou media_player.television."), "donnees" to JSONObject().put("type", "object").put("description", "Objet JSON de paramètres du service. Exemples : {temperature: 20}, {volume_level: 0.35}, {source: \"HDMI 1\"}. Laisser vide si aucun paramètre n'est nécessaire.")), listOf("domaine", "service")),
         tool("ha_config", "Home Assistant : configuration complète sur le serveur (fichiers YAML dans le dossier de config : configuration.yaml, automations.yaml, scripts.yaml, scenes.yaml, secrets.yaml, packages/…). Actions : lister | lire | ecrire (sauvegarde auto + validation, restauration si invalide) | sauvegardes | restaurer | valider | recharger | redemarrer | journal (erreurs). Toujours lire le fichier avant de le modifier et réécrire le fichier ENTIER.",
@@ -72,10 +72,27 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
             mapOf("commande" to prop("Commande shell."), "delai" to prop("Délai maximal en secondes (défaut 60)."),
                 "hote" to prop("Autre machine à joindre en SSH (IP/nom) au lieu du serveur des Réglages (optionnel)."), "utilisateur" to prop("Utilisateur de cette autre machine."),
                 "mot_de_passe" to prop("Mot de passe de cette autre machine."), "port" to prop("Port SSH (défaut 22)."), "via_serveur" to prop("« oui » : joindre cette machine DU RÉSEAU LOCAL à travers le serveur Debian (connexion à distance).")), listOf("commande")),
-        tool("ssh_fichier", "Serveur SSH : lit, écrit (sauvegarde auto) ou liste des fichiers du serveur.",
-            mapOf("action" to prop("lire | ecrire | lister"), "chemin" to prop("Chemin absolu sur le serveur."), "contenu" to prop("ecrire : contenu complet.")), listOf("action", "chemin")),
+        tool("appareil_acces_distant", "Réseau de la maison : rend un appareil du Wi-Fi (caméra, NAS, Home Assistant, Plex, imprimante, PC…) joignable DEPUIS INTERNET, automatiquement — réserve son adresse IP (bail DHCP fixe), choisit un port externe libre, crée la redirection sur la Freebox, relève l'IP publique et retient l'adresse obtenue. action=ouvrir (défaut) | fermer | inventaire (analyse le Wi-Fi et met à jour l'onglet Appareils Wi-Fi).",
+            mapOf("action" to prop("ouvrir | fermer | inventaire"), "appareil" to prop("Nom donné, nom réseau ou IP de l'appareil."), "port" to prop("Port du service sur l'appareil (optionnel : service principal détecté).")), listOf()),
+        tool("ssh_fichier", "Serveur Debian (SSH) : LIRE, CHERCHER, MODIFIER, CRÉER ou RÉÉCRIRE un fichier du serveur — ou d'un conteneur Docker du serveur (paramètre conteneur). " +
+            "C'est LE moyen de modifier un fichier du serveur (les outils de fichiers natifs d'Hermès agissent sur le téléphone). Actions : " +
+            "lire (lignes numérotées ; debut/fin pour un long fichier) | chercher (motif → lignes numérotées) | remplacer (ancien → nouveau : passage exact recopié SANS numéros ; tout=oui pour toutes les occurrences) | " +
+            "inserer (contenu après la ligne contenant « apres », avant celle contenant « avant », ou à la ligne n° « ligne ») | ajouter (contenu en fin de fichier) | " +
+            "remplacer_lignes (debut, fin, contenu) | supprimer_lignes (debut, fin) | ecrire (contenu COMPLET : crée ou réécrit tout le fichier) | restaurer (remet la dernière sauvegarde) | lister (dossier). " +
+            "Pour changer quelques lignes, préfère remplacer / remplacer_lignes à ecrire. Sauvegarde automatique avant chaque modification, droits conservés (sudo si nécessaire), contenu vérifié après écriture ; « ~ » = dossier de l'utilisateur SSH.",
+            mapOf("action" to prop("lire | chercher | remplacer | inserer | ajouter | remplacer_lignes | supprimer_lignes | ecrire | restaurer | lister"),
+                "chemin" to prop("Chemin du fichier (ou du dossier pour lister) : absolu, ou relatif / « ~/… » depuis le dossier de l'utilisateur SSH ; dans le conteneur si « conteneur » est donné."),
+                "contenu" to prop("ecrire : contenu complet ; inserer / ajouter / remplacer_lignes : lignes à mettre."),
+                "ancien" to prop("remplacer : passage exact actuel (une ou plusieurs lignes)."), "nouveau" to prop("remplacer : nouveau passage (vide = supprimer le passage)."),
+                "tout" to prop("remplacer : « oui » pour remplacer toutes les occurrences."),
+                "apres" to prop("inserer : texte d'une ligne repère (insertion après elle)."), "avant" to prop("inserer : texte d'une ligne repère (insertion avant elle)."),
+                "ligne" to prop("inserer : numéro de ligne où insérer."), "debut" to prop("lire / remplacer_lignes / supprimer_lignes : première ligne."),
+                "fin" to prop("lire / remplacer_lignes / supprimer_lignes : dernière ligne."), "motif" to prop("chercher : texte à trouver (sans tenir compte des majuscules)."),
+                "conteneur" to prop("Nom du conteneur Docker (ex. homeassistant) pour un fichier À L'INTÉRIEUR du conteneur ; vide = fichier du serveur lui-même.")),
+            listOf("action", "chemin")),
         tool("ssh_script", "Serveur SSH : envoie et exécute un script complet (bash ou python3, plusieurs lignes) sur le serveur Debian ; sert à installer, configurer, récupérer des données (git clone, curl…), automatiser.",
-            mapOf("code" to prop("Code du script (plusieurs lignes)."), "langage" to prop("bash (défaut) ou python3."), "delai" to prop("Délai maximal en secondes (défaut 120).")), listOf("code")),
+            mapOf("code" to prop("Code du script (plusieurs lignes)."), "langage" to prop("bash (défaut) ou python3."), "delai" to prop("Délai maximal en secondes (défaut 120 ; au-delà de 15 min, utilise serveur_tache)."),
+                "root" to prop("« oui » : exécuter tout le script en root (automatique si le script contient sudo).")), listOf("code")),
         tool("github", "GitHub (public, ou privé avec un jeton enregistré dans Réglages › Maison › Serveur) : lit un fichier, liste un dossier, derniers commits, dernière version (release), infos ou recherche de dépôts. Si le jeton a les droits d'écriture (« repo » / « Contents: Read and write »), peut aussi CRÉER ou MODIFIER un fichier directement sur GitHub (action=ecrire), ou COPIER un fichier d'un chemin/dépôt vers un autre (action=copier) — sans passer par le serveur SSH ni un clone local.",
             mapOf("action" to prop("fichier | liste | commits | release | depot | recherche | ecrire | copier"), "depot" to prop("owner/repo (ex. home-assistant/core), ou mots de la recherche."), "chemin" to prop("Chemin du fichier ou dossier (chemin SOURCE pour « copier »)."), "ref" to prop("Branche, tag ou commit à lire (optionnel)."),
                 "contenu" to prop("ecrire : contenu complet du fichier à écrire."), "message" to prop("ecrire/copier : message de commit (optionnel)."), "branche" to prop("ecrire/copier : branche de destination (optionnel, défaut : branche par défaut du dépôt)."),
@@ -95,7 +112,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
         tool("appareils_liste", "Réseau : liste les appareils enregistrés lors des analyses (IP, nom, type, ports, dernière vue) et les IP publiques vues.", emptyMap()),
         tool("appareil_nommer", "Mémoire réseau : attribue un nom humain à une adresse IP (ex. « Imprimante Canon bureau », « Freebox », « NAS Debian »). Le nom est conservé lors des prochains scans ; si le scan connaît l'adresse MAC, Jarvis rattache automatiquement le même appareil à sa nouvelle IP DHCP et conserve l'ancien IP dans l'historique. Peut aussi créer une fiche d'identification avant le prochain scan.", mapOf("ip" to prop("Adresse IPv4 privée actuelle de l'appareil."), "nom" to prop("Nom clair à mémoriser pour cet appareil.")), listOf("ip", "nom")),
         tool("ip_publique", "Réseau : détecte l'adresse IP publique actuelle (téléphone et, si SSH configuré, serveur) et l'enregistre pour une connexion à distance ; signale si elle a changé.", emptyMap()),
-        tool("freebox", "Freebox : PILOTAGE COMPLET de la Freebox via Freebox OS, avec les droits accordés à JARVIS dans Freebox OS (Gestion des accès › Applications). Lire : fichiers (contenu du DISQUE DUR de la box : paramètre chemin, ex. « Téléchargements » ou « Vidéos/Films » ; vide = liste des disques), telechargements (gestionnaire de téléchargements de la box), etat (connexion, débits, IP publique), appareils (appareils connectés au réseau — PAS le disque), redirections (ports), vpn (serveurs VPN et état), vpn_utilisateurs, wifi, dmz, baux_dhcp (IP réservées), appels (journal de la ligne fixe), droits. Modifier (confirmation demandée) : ajouter_redirection, supprimer_redirection, activer_redirection, desactiver_redirection, activer_vpn, desactiver_vpn, ajouter_vpn_utilisateur, supprimer_vpn_utilisateur, config_vpn (génère le fichier WireGuard/OpenVPN à importer), wifi_activer, wifi_desactiver, dmz (etat=activer + appareil/ip, ou etat=desactiver), ajouter_bail, redemarrer. FICHIERS DU DISQUE DE LA BOX (sans SMB/FTP) : chercher_fichier (nom), renommer (chemin + nouveau_nom), deplacer / copier (chemin — plusieurs séparés par « ; », jokers « Téléchargements/*.mkv » acceptés — + destination, dossier créé s'il manque), supprimer_fichier (chemin, confirmation), creer_dossier (chemin), envoyer_fichier (fichier du téléphone + destination), recuperer_fichier (chemin → copie sur le téléphone), lire_fichier (fichier texte), diagnostic (si un disque paraît vide ou inaccessible : renvoie les réponses brutes de la box — montre-les telles quelles à l'utilisateur, n'invente pas de cause matérielle). Utilise CET outil pour toute demande sur la Freebox : ne réponds jamais que tu ne peux pas la configurer.",
+        tool("freebox", "Freebox : PILOTAGE COMPLET de la Freebox via Freebox OS, avec les droits accordés à JARVIS dans Freebox OS (Gestion des accès › Applications). Lire : fichiers (contenu du DISQUE DUR de la box : paramètre chemin, ex. « Téléchargements » ou « Vidéos/Films » ; vide = liste des disques), telechargements (gestionnaire de téléchargements de la box), etat (connexion, débits, IP publique), appareils (appareils connectés au réseau et connus de la box — PAS le disque ; filtre=sans_nom|hors_ligne), redirections (ports), vpn (serveurs VPN et état), vpn_utilisateurs, wifi, dmz, baux_dhcp (IP réservées), appels (journal de la ligne fixe), droits. Modifier (confirmation demandée) : ajouter_redirection, supprimer_redirection, activer_redirection, desactiver_redirection, activer_vpn, desactiver_vpn, ajouter_vpn_utilisateur, supprimer_vpn_utilisateur, config_vpn (génère le fichier WireGuard/OpenVPN à importer), wifi_activer, wifi_desactiver, dmz (etat=activer + appareil/ip, ou etat=desactiver), ajouter_bail, redemarrer, supprimer_appareil (retire de la liste des appareils de la box : appareil = nom, IP, MAC ou identifiant — plusieurs séparés par « ; » —, ou filtre = sans_nom | hors_ligne pour tous ceux-là ; seuls les appareils déconnectés sont retirés), renommer_appareil (appareil + nouveau_nom). FICHIERS DU DISQUE DE LA BOX (sans SMB/FTP) : chercher_fichier (nom), renommer (chemin + nouveau_nom), deplacer / copier (chemin — plusieurs séparés par « ; », jokers « Téléchargements/*.mkv » acceptés — + destination, dossier créé s'il manque), supprimer_fichier (chemin, confirmation), creer_dossier (chemin), envoyer_fichier (fichier du téléphone + destination), recuperer_fichier (chemin → copie sur le téléphone), lire_fichier (fichier texte), diagnostic (si un disque paraît vide ou inaccessible : renvoie les réponses brutes de la box — montre-les telles quelles à l'utilisateur, n'invente pas de cause matérielle). Utilise CET outil pour toute demande sur la Freebox : ne réponds jamais que tu ne peux pas la configurer.",
             mapOf("action" to prop("Une des actions listées (ex. fichiers, telechargements, redirections, ajouter_redirection, vpn, activer_vpn, config_vpn)."),
                 "chemin" to prop("Disque de la box : dossier à lister, ou fichier/dossier visé (renommer, deplacer, copier, supprimer_fichier, recuperer_fichier, lire_fichier, creer_dossier). Nom approximatif accepté (ex. Téléchargements, Vidéos/Films, Téléchargements/film.mkv, Téléchargements/*.mkv)."),
                 "destination" to prop("deplacer / copier / envoyer_fichier : dossier de destination sur la box (créé s'il n'existe pas)."),
@@ -117,7 +134,8 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 "mot_de_passe" to prop("Mot de passe VPN (8 à 32 caractères ; généré si absent)."),
                 "mac" to prop("Adresse MAC (bail DHCP)."),
                 "etat" to prop("dmz : activer ou desactiver."),
-                "nombre" to prop("appels : nombre d'appels à afficher (défaut 15).")), listOf("action")),
+                "nombre" to prop("appels : nombre d'appels à afficher (défaut 15)."),
+                "filtre" to prop("appareils / supprimer_appareil : sans_nom (appareils sans nom) ou hors_ligne (tous les appareils déconnectés).")), listOf("action")),
         tool("box_disque", "Box internet : accède au disque dur branché sur la box (Freebox associée : par Freebox OS, sans réglage ; autres box : SMB ou FTP, selon Réglages › Maison › Box Internet) : liste les partages et dossiers, lit un fichier texte, le télécharge dans l'appli, y envoie un fichier créé par JARVIS, crée un dossier, supprime, renomme ou déplace un fichier/dossier (utile pour réorganiser une bibliothèque de films/séries pour Plex, par exemple), ou lance directement la lecture d'une vidéo dans le lecteur vidéo du téléphone (aucune app spécifique requise, pas de téléchargement).",
             mapOf("action" to prop("partages | lister | lire | telecharger | envoyer | supprimer | dossier | renommer | deplacer | lire_telephone"), "chemin" to prop("Chemin sur la box : partage/dossier/fichier (ex. « Disque dur/Photos/2026 »). Pour renommer/deplacer : le chemin ACTUEL (source)."), "fichier" to prop("envoyer : nom du fichier créé par JARVIS à copier sur la box. renommer/deplacer : le NOUVEAU chemin complet sur la box (ex. « Disque dur/Films/Dirty Dancing (1987).avi »).")), listOf("action")),
         tool("serveur_diagnostic", "Diagnostic rapide du serveur : charge, mémoire, disque, conteneurs Docker et derniers logs de Home Assistant.", emptyMap()),
@@ -133,6 +151,62 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
     suspend fun execute(name: String, a: JSONObject): ToolResult = withContext(Dispatchers.IO) {
         try { run(name, a) } catch (e: kotlinx.coroutines.CancellationException) { throw e }
         catch (e: Exception) { ToolResult("❌ ${e.message ?: e.javaClass.simpleName}") }
+    }
+
+    /** ssh_fichier : lecture, recherche, modifications ciblées, réécriture et restauration (serveur ou conteneur Docker). */
+    private suspend fun sshFichier(a: JSONObject): ToolResult {
+        val ct = a.optString("conteneur").trim()
+        val p = a.optString("chemin").trim().let { if (ct.isBlank() && it.isNotBlank()) Serveur.absolu(app, it) else it }
+        if (p.isBlank()) return ToolResult("Indique « chemin » (fichier, ou dossier pour lister).")
+        val ou = if (ct.isBlank()) "sur le serveur" else "dans le conteneur $ct"
+        fun nombre(k: String) = a.optString(k).trim().toIntOrNull()
+        val action = fr.dd.jarvis.societe.core.normaliser(a.optString("action")).replace(' ', '_')
+        val lecture = setOf("lire", "chercher", "lister")
+        if (action in lecture) return when (action) {
+            "lister" -> ToolResult("📁 $p ($ou)\n```\n" + FichiersServeur.lister(app, p, ct) + "\n```")
+            "chercher" -> ToolResult("🔎 $p ($ou)\n```\n" + FichiersServeur.chercher(FichiersServeur.lire(app, p, ct), a.optString("motif").ifBlank { a.optString("ancien") }) + "\n```")
+            else -> ToolResult("📄 $p ($ou) " + FichiersServeur.numeroter(FichiersServeur.lire(app, p, ct), nombre("debut"), nombre("fin")).let { t ->
+                t.substringBefore('\n') + "\n```\n" + t.substringAfter('\n', "") + "\n```" })
+        }
+        // Modifications : version actuelle (vide pour un nouveau fichier), changement appliqué ici, puis écriture vérifiée.
+        val actuel: String? = if (action == "ecrire") runCatching { FichiersServeur.lire(app, p, ct) }.getOrNull()
+            else if (action == "restaurer") null
+            else runCatching { FichiersServeur.lire(app, p, ct) }.getOrElse { e ->
+                if (action in setOf("ajouter", "inserer") && (e.message ?: "").contains("introuvable", true)) "" else throw e
+            }
+        val avant = actuel.orEmpty()
+        val (apres, resume) = when (action) {
+            "ecrire" -> {
+                if (!a.has("contenu")) return ToolResult("Indique « contenu » (contenu complet du fichier).")
+                a.optString("contenu") to (if (actuel == null) "fichier créé" else "fichier réécrit")
+            }
+            "remplacer" -> FichiersServeur.remplacer(avant, a.optString("ancien"), a.optString("nouveau"), a.optString("tout").lowercase() in setOf("oui", "true", "1")).let { it.texte to it.resume }
+            "inserer" -> FichiersServeur.inserer(avant, a.optString("contenu"), a.optString("apres").ifBlank { null }, a.optString("avant").ifBlank { null }, nombre("ligne")).let { it.texte to it.resume }
+            "ajouter" -> FichiersServeur.ajouter(avant, a.optString("contenu")).let { it.texte to it.resume }
+            "remplacer_lignes" -> {
+                val d = nombre("debut") ?: return ToolResult("Indique « debut » (et « fin »).")
+                FichiersServeur.remplacerLignes(avant, d, nombre("fin") ?: d, a.optString("contenu")).let { it.texte to it.resume }
+            }
+            "supprimer_lignes" -> {
+                val d = nombre("debut") ?: return ToolResult("Indique « debut » (et « fin »).")
+                FichiersServeur.supprimerLignes(avant, d, nombre("fin") ?: d).let { it.texte to it.resume }
+            }
+            "restaurer" -> {
+                val bak = FichiersServeur.derniereSauvegarde(app, p, ct) ?: return ToolResult("Aucune sauvegarde « .jarvis-bak-… » de $p $ou.")
+                val courant = runCatching { FichiersServeur.lire(app, p, ct) }.getOrDefault("")
+                val ancienne = FichiersServeur.lire(app, bak, ct)
+                if (!confirm("Restaurer $p $ou depuis $bak ?\n\n" + FichiersServeur.difference(courant, ancienne, 20).take(900), true)) return ToolResult("Refusé par l'utilisateur.")
+                val b2 = FichiersServeur.ecrire(app, p, ancienne, ct)
+                return ToolResult("✅ $p restauré depuis $bak." + (b2?.let { " Version remplacée sauvegardée : $it" } ?: ""))
+            }
+            else -> return ToolResult("Action inconnue : lire, chercher, remplacer, inserer, ajouter, remplacer_lignes, supprimer_lignes, ecrire, restaurer, lister.")
+        }
+        if (actuel != null && apres == actuel) return ToolResult("Aucun changement : $p ($ou) contient déjà exactement ce contenu.")
+        val diff = if (actuel == null) "(nouveau fichier, ${apres.lines().size} lignes)" else FichiersServeur.difference(avant, apres)
+        if (!confirm("Modifier $p $ou ($resume) ?\n\n" + diff.take(900), true)) return ToolResult("Refusé par l'utilisateur : $p n'a pas été modifié.")
+        val bak = FichiersServeur.ecrire(app, p, apres, ct)
+        return ToolResult("✅ $p modifié $ou : $resume ; contenu vérifié après écriture." + (bak?.let { "\nSauvegarde de l'ancienne version : $it (action=restaurer pour revenir en arrière)." } ?: "") +
+            "\n```diff\n" + diff.take(3500) + "\n```")
     }
 
     private suspend fun run(name: String, a: JSONObject): ToolResult {
@@ -170,21 +244,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 if ((Serveur.dangereuse(cmd) || cible != null) && !confirm("Exécuter sur ${cible?.hote ?: app.store.sshHost.value} :\n\n$cmd", true)) return ToolResult("Refusé par l'utilisateur.")
                 ToolResult("```\n" + sortie(Serveur.exec(app, cmd, (a.optString("delai").toIntOrNull() ?: 60).coerceIn(5, 600), cible)) + "\n```")
             }
-            "ssh_fichier" -> {
-                ssh()
-                val p = a.optString("chemin").trim()
-                when (a.optString("action").lowercase()) {
-                    "lire" -> ToolResult("```\n" + Serveur.lire(app, p).take(9000) + "\n```")
-                    "lister" -> ToolResult("```\n" + Serveur.lister(app, p) + "\n```")
-                    "ecrire" -> {
-                        val c = a.optString("contenu")
-                        if (!confirm("Écrire le fichier $p sur le serveur (${c.length} caractères, sauvegarde automatique) ?", true)) return ToolResult("Refusé par l'utilisateur.")
-                        val bak = Serveur.ecrire(app, p, c)
-                        ToolResult("✅ $p écrit." + (bak?.let { " Sauvegarde : $it" } ?: ""))
-                    }
-                    else -> ToolResult("Action inconnue (lire, ecrire, lister).")
-                }
-            }
+            "ssh_fichier" -> { ssh(); sshFichier(a) }
             "serveur_diagnostic" -> {
                 ssh()
                 val r = Serveur.exec(app, "uptime; echo; free -h | head -2; echo; df -h / | tail -1; echo; docker ps -a --format 'table {{.Names}}\\t{{.Status}}\\t{{.Image}}' 2>&1 | head -20; echo; n=\$(docker ps -a --format '{{.Names}}\\t{{.Image}}' 2>/dev/null | grep -i home-assistant | head -1 | cut -f1); [ -n \"\$n\" ] && { echo \"== logs \$n ==\"; docker logs --tail 25 \$n 2>&1; }; echo; echo \"== Home Assistant (local, port 8123) ==\"; curl -s -o /dev/null -m 5 -w 'HTTP %{http_code} en %{time_total}s\\n' http://localhost:8123/ 2>&1 || echo \"injoignable en local sur le serveur (curl a échoué)\"", 60)
@@ -225,7 +285,9 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 if (!confirm("Exécuter ce script ${if (py) "Python" else "bash"} sur le serveur ${app.store.sshHost.value} ?\n\n" + code.take(900), true)) return ToolResult("Refusé par l'utilisateur.")
                 val f = "/tmp/jarvis_script_${System.currentTimeMillis()}" + if (py) ".py" else ".sh"
                 Serveur.envoyerOctets(app, f, (if (py) code else "set -e\n$code").toByteArray())
-                val r = Serveur.exec(app, "${if (py) "python3" else "bash"} $f; c=\$?; rm -f $f; exit \$c", (a.optString("delai").toIntOrNull() ?: 120).coerceIn(10, 900))
+                // Script avec sudo (ou root demandé) : tout le script tourne en root, ses « sudo » internes passent sans mot de passe.
+                val root = a.optString("root").lowercase() in setOf("oui", "true", "1") || Regex("\\bsudo\\b").containsMatchIn(code)
+                val r = Serveur.exec(app, (if (root) "sudo " else "") + "${if (py) "python3" else "bash"} $f; c=\$?; rm -f $f; exit \$c", (a.optString("delai").toIntOrNull() ?: 120).coerceIn(10, 900))
                 ToolResult("```\n" + sortie(r) + "\n```")
             }
             "github" -> {
@@ -238,6 +300,11 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 } else ToolResult(github(a))
             }
             "appareils_liste" -> ToolResult(Registre.liste(app), direct = true)
+            "appareil_acces_distant" -> when (a.optString("action").lowercase()) {
+                "inventaire", "analyser", "scanner" -> ToolResult(AccesDistant.inventorier(app) + "\n\n" + Registre.liste(app), direct = true)
+                "fermer", "supprimer" -> ToolResult(AccesDistant.fermer(app, a.optString("appareil"), a.optString("port").toIntOrNull(), confirm))
+                else -> ToolResult(AccesDistant.configurer(app, a.optString("appareil"), a.optString("port").filter { it.isDigit() }.toIntOrNull(), confirm))
+            }
             "appareil_nommer" -> {
                 val ip = a.optString("ip").trim()
                 val nom = a.optString("nom").trim()

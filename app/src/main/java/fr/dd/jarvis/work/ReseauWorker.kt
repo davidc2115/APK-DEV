@@ -19,8 +19,14 @@ object ReseauScheduler {
     fun apply(ctx: Context, store: fr.dd.jarvis.data.Store) {
         val wm = WorkManager.getInstance(ctx)
         if (!store.scanAuto.value) { wm.cancelUniqueWork("reseau_auto"); return }
-        wm.enqueueUniquePeriodicWork("reseau_auto", ExistingPeriodicWorkPolicy.KEEP,
-            PeriodicWorkRequestBuilder<ReseauWorker>(60, TimeUnit.MINUTES).setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.UNMETERED).build()).build())
+        val adaptation = store.modeEnergie.value != "performance" && fr.dd.jarvis.device.Energie.economie
+        val intervalle = when (store.modeEnergie.value) {
+            "performance" -> 30L
+            "eco" -> 360L
+            else -> if (adaptation) 180L else 60L
+        }
+        wm.enqueueUniquePeriodicWork("reseau_auto", ExistingPeriodicWorkPolicy.UPDATE,
+            PeriodicWorkRequestBuilder<ReseauWorker>(intervalle, TimeUnit.MINUTES).setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.UNMETERED).build()).build())
     }
 
     /** À chaque connexion à un Wi-Fi : analyse (au plus une fois toutes les 20 minutes). */
@@ -43,7 +49,9 @@ class ReseauWorker(private val ctx: Context, params: WorkerParameters) : Corouti
         val i = Reseau.infos(app)
         if (i != null && i.wifi) {
             runCatching { neufs += Registre.appareils(app, Reseau.scanner(app), "Wi-Fi ${i.ip.substringBeforeLast('.')}.x") }
-            runCatching { Reseau.ippPublique().takeIf { it.isNotBlank() }?.let { Registre.ipPublique(app, it, "Wi-Fi ${i.ip.substringBeforeLast('.')}.x") } }
+            // Liste de la Freebox (noms, MAC des appareils discrets que l'analyse ne voit pas toujours) : onglet Wi-Fi complet.
+            runCatching { fr.dd.jarvis.ai.FreeboxOs.appareilsReseau(app)?.let { neufs += Registre.appareils(app, it, "Wi-Fi ${i.ip.substringBeforeLast('.')}.x") } }
+            runCatching { (fr.dd.jarvis.ai.FreeboxOs.ipPublique(app) ?: Reseau.ippPublique()).takeIf { it.isNotBlank() }?.let { Registre.ipPublique(app, it, "Wi-Fi ${i.ip.substringBeforeLast('.')}.x") } }
         }
         if (Serveur.sshConfigure(app)) runCatching { neufs += Registre.appareils(app, Serveur.scanReseau(app), "Réseau du serveur") }
         if (neufs > 0 && avant > 0 && ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED || (neufs > 0 && avant > 0 && android.os.Build.VERSION.SDK_INT < 33)) {

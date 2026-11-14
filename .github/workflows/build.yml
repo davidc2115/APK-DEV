@@ -2,7 +2,7 @@ name: Build APK
 
 on:
   push:
-    branches: [main, master, feat/jarvis-plex-presence-discord]
+    branches: [main, master, feat/jarvis-plex-presence-discord, feature/gemini-nano-local-smalltalk]
   pull_request:
     branches: [main]
   workflow_dispatch:

@@ -56,8 +56,13 @@ object Serveur {
         val local = st.sshHost.value.trim() to (st.sshPort.value.toIntOrNull() ?: 22)
         val distant = st.sshHostDistant.value.trim().takeIf { it.isNotBlank() }?.let { it to (st.sshPortDistant.value.toIntOrNull() ?: local.second) }
         // Bonne adresse d'abord : hors du réseau de la maison, on ne perd plus 6 s à attendre l'adresse locale.
-        val ordre = if (distant == null) listOf(local) else if (distantDabord(local.first)) listOf(distant, local) else listOf(local, distant)
+        var ordre = if (distant == null) listOf(local) else if (distantDabord(local.first)) listOf(distant, local) else listOf(local, distant)
+        // À la maison avec une adresse PUBLIQUE dans les Réglages : l'adresse locale relevée du serveur passe en premier
+        // (beaucoup de box ne savent pas « revenir » vers leur propre IP publique depuis le réseau local).
+        val lan = st.serveurIpLocale.value.trim().takeIf { ipPrivee(it) && ordre.none { o -> o.first == it } }
+        if (lan != null && telephoneSurReseau(lan)) ordre = (listOf(lan to local.second, lan to 22).distinct() + ordre).distinct()
         var erreur: Exception? = null
+        val essais = mutableListOf<String>()
         for ((i, cibleAdr) in ordre.withIndex()) {
             val s = jsch.getSession(st.sshUser.value.trim(), cibleAdr.first, cibleAdr.second)
             // Si une ancienne clé privée est encore renseignée, ne pas empêcher le repli sur le mot de passe.
@@ -73,6 +78,7 @@ object Serveur {
                 s.connect(if (i < ordre.size - 1) 5000 else 12000)
             } catch (e: Exception) {
                 runCatching { s.disconnect() }
+                essais += "${cibleAdr.first}:${cibleAdr.second} → ${expliquer(e, cibleAdr.first, cibleAdr.second)}"
                 erreur = e
                 continue
             }
@@ -87,7 +93,38 @@ object Serveur {
             }
             return s
         }
+        if (essais.size > 1) throw IllegalStateException("Connexion SSH impossible par toutes les adresses connues : " + essais.joinToString(" ; "), erreur)
         throw erreur ?: IllegalStateException("Connexion SSH impossible")
+    }
+
+    /** Le téléphone est-il sur le même réseau local que [ipServeur] (même préfixe /24) ? */
+    fun telephoneSurReseau(ipServeur: String): Boolean {
+        val prefixe = ipServeur.substringBeforeLast('.') + "."
+        return adressesTelephone().any { it.second.startsWith(prefixe) }
+    }
+
+    /** Adresses IPv4 du téléphone : (interface, adresse). wlan = Wi-Fi ; rmnet / ccmni = données mobiles. */
+    fun adressesTelephone(): List<Pair<String, String>> = runCatching {
+        java.net.NetworkInterface.getNetworkInterfaces().toList().filter { it.isUp && !it.isLoopback }
+            .flatMap { n -> n.inetAddresses.toList().filterIsInstance<java.net.Inet4Address>().map { n.name to it.hostAddress.orEmpty() } }
+    }.getOrDefault(emptyList())
+
+    /** Situation réseau en clair : à la maison (connexion locale) ou dehors (connexion à distance), et par quelle adresse. */
+    fun situation(app: JarvisApp): String {
+        val st = app.store
+        val lan = listOf(st.sshHost.value.trim(), st.serveurIpLocale.value.trim()).firstOrNull { ipPrivee(it) }
+        val tel = adressesTelephone()
+        val wifi = tel.firstOrNull { it.first.startsWith("wlan") }?.second
+        val mobile = tel.any { Regex("^(rmnet|ccmni|pdp|seth|v4-rmnet)").containsMatchIn(it.first) }
+        val distant = st.sshHostDistant.value.trim().ifBlank { st.sshHost.value.trim().takeIf { !ipPrivee(it) }.orEmpty() }
+        val ou = when {
+            lan != null && telephoneSurReseau(lan) -> "🏠 téléphone sur le réseau de la maison (Wi-Fi $wifi) → connexion LOCALE au serveur ($lan)"
+            lan == null -> "réseau du téléphone : ${if (wifi != null) "Wi-Fi $wifi" else if (mobile) "données mobiles" else "inconnu"} (adresse locale du serveur pas encore relevée)"
+            else -> "🌍 téléphone HORS du réseau de la maison (${if (wifi != null) "autre Wi-Fi $wifi" else "données mobiles"}) → connexion À DISTANCE" +
+                (if (distant.isNotBlank()) " par $distant" else " : aucune adresse distante dans les Réglages")
+        }
+        val d = derniereAdresse?.let { (adr, quand) -> " · dernière connexion SSH réussie par $adr il y a ${(System.currentTimeMillis() - quand) / 60_000} min" }.orEmpty()
+        return ou + d
     }
 
     /** Adresse qui a fonctionné en dernier (et quand). */
@@ -201,13 +238,33 @@ object Serveur {
                 if (!Regex("session is down|channel is not opened|not connected|socket|closed", RegexOption.IGNORE_CASE).containsMatchIn(e.message.orEmpty())) throw e
                 f(sessionPrincipale(app))
             }
-        } catch (e: Exception) { throw IllegalStateException(expliquer(e, hote, port), e) }
+        } catch (e: Exception) {
+            val detail = if (e is IllegalStateException && e.message?.startsWith("Connexion SSH impossible par") == true) e.message!! else expliquer(e, hote, port)
+            // Les identifiants SONT dans Jarvis : l'IA ne doit pas les redemander mais traiter le problème de connexion.
+            throw IllegalStateException("$detail (Identifiants SSH bien enregistrés dans Jarvis — ne pas les redemander ; ${situation(app)}.)", e)
+        }
+    }
+
+    /**
+     * Commande avec « sudo » : TOUTE la commande passe en root en une seule fois (`sudo -S bash -c '…'`, mot de passe
+     * envoyé une fois sur l'entrée standard). Avant, chaque « sudo » d'une même ligne redemandait le mot de passe
+     * (sans terminal) et seule la première partie s'exécutait. Testable.
+     */
+    internal fun commandeSudo(commande: String, root: Boolean): String {
+        if (!Regex("\\bsudo\\b").containsMatchIn(commande)) return commande
+        // « sudo -n » ne demande jamais de mot de passe : commande laissée telle quelle (ex. relevé des services).
+        if (Regex("\\bsudo\\s+-n\\b").containsMatchIn(commande)) return commande
+        // « sudo -u autre … » : on garde chaque sudo tel quel (mot de passe lu par le premier).
+        if (Regex("\\bsudo\\s+(-[A-Za-z]+\\s+)*-u\\b").containsMatchIn(commande)) return commande.replace(Regex("\\bsudo\\s+(?!-S)"), "sudo -S -p '' ")
+        val sans = commande.replace(Regex("\\bsudo\\s+(-[A-Za-z]+\\s+(''\\s+)?)*"), "")
+        // HOME de l'utilisateur conservé : « ~ » et les chemins relatifs à son dossier restent les mêmes qu'avant.
+        return if (root) sans else "sudo -S -p '' env HOME=\"\$HOME\" bash -c " + q(sans)
     }
 
     /** Exécute une commande ; « sudo » utilise le mot de passe enregistré. Retourne (code de sortie, sortie). */
     fun exec(app: JarvisApp, commande: String, timeoutS: Int = 60, cible: Cible? = null): Pair<Int, String> = session(app, cible) { s ->
-        val sudo = commande.contains("sudo ")
-        val cmd = if (sudo) commande.replace(Regex("\\bsudo\\s+(?!-S)"), "sudo -S -p '' ") else commande
+        val sudo = Regex("\\bsudo\\b").containsMatchIn(commande)
+        val cmd = commandeSudo(commande, (cible?.user ?: app.store.sshUser.value).trim() == "root")
         val ch = s.openChannel("exec") as ChannelExec
         ch.setCommand("export LANG=C.UTF-8; $cmd")
         val out = ByteArrayOutputStream()
@@ -228,39 +285,108 @@ object Serveur {
         code to out.toString("UTF-8")
     }
 
-    fun lire(app: JarvisApp, chemin: String, max: Int = 400_000): String = session(app) { s ->
+    @Volatile private var maisonCache: Pair<String, String>? = null
+
+    /** Dossier personnel de l'utilisateur SSH sur le serveur ($HOME). */
+    fun maison(app: JarvisApp): String {
+        val cle = app.store.sshUser.value.trim() + "@" + app.store.sshHost.value.trim()
+        maisonCache?.takeIf { it.first == cle }?.let { return it.second }
+        val h = exec(app, "printf '%s' \"\$HOME\"", 20).second.trim().lines().lastOrNull()?.trim().orEmpty()
+            .takeIf { it.startsWith("/") } ?: (if (app.store.sshUser.value.trim() == "root") "/root" else "/home/" + app.store.sshUser.value.trim())
+        maisonCache = cle to h
+        return h
+    }
+
+    /** Chemin absolu sur le serveur : « ~ », « ~/… » et les chemins relatifs partent du dossier personnel de l'utilisateur SSH
+     *  (SFTP et les commandes entre guillemets ne développent pas « ~ » : sans ça, l'écriture visait un dossier « ~ » inexistant). */
+    fun absolu(app: JarvisApp, chemin: String): String {
+        val c = chemin.trim().removeSurrounding("\"").removeSurrounding("'").trim()
+        if (c.startsWith("/")) return c
+        val home = maison(app).trimEnd('/')
+        return when {
+            c.isEmpty() || c == "~" -> home
+            c.startsWith("~/") -> home + c.substring(1)
+            c.startsWith("\$HOME/") -> home + c.removePrefix("\$HOME")
+            else -> home + "/" + c.removePrefix("./")
+        }
+    }
+
+    /** Commande essayée d'abord avec les droits de l'utilisateur, puis avec sudo (jamais les deux mélangés). */
+    private fun essayer(app: JarvisApp, cmd: String, delai: Int = 60): Pair<Int, String> =
+        exec(app, cmd, delai).takeIf { it.first == 0 } ?: exec(app, "sudo $cmd", delai)
+
+    fun lire(app: JarvisApp, chemin0: String, max: Int = 400_000): String {
+        val chemin = absolu(app, chemin0)
+        return session(app) { s ->
+            val c = s.openChannel("sftp") as ChannelSftp; c.connect(10000)
+            try {
+                val st = c.stat(chemin)
+                if (st.isDir) throw IllegalStateException("$chemin est un dossier : utilise action=lister.")
+                if (st.size > max) throw IllegalStateException("Fichier trop gros (${st.size / 1024} Ko).")
+                c.get(chemin).use { String(it.readBytes(), Charsets.UTF_8) }
+            } catch (e: com.jcraft.jsch.SftpException) {
+                when (e.id) {
+                    ChannelSftp.SSH_FX_PERMISSION_DENIED -> null
+                    ChannelSftp.SSH_FX_NO_SUCH_FILE -> throw IllegalStateException("Fichier introuvable sur le serveur : $chemin")
+                    else -> throw e
+                }
+            } finally { c.disconnect() }
+        } ?: exec(app, "sudo cat " + q(chemin)).let { (code, out) ->
+            if (code != 0) throw IllegalStateException("Lecture de $chemin refusée : ${out.trim().take(200)}")
+            out
+        }
+    }
+
+    /** Contenu binaire d'un fichier du serveur (SFTP ; fichier protégé : lu en root, transmis en base64). */
+    fun lireOctets(app: JarvisApp, chemin: String, max: Long = 50_000_000L): ByteArray = session(app) { s ->
         val c = s.openChannel("sftp") as ChannelSftp; c.connect(10000)
         try {
             val st = c.stat(chemin)
-            if (st.size > max) throw IllegalStateException("Fichier trop gros (${st.size / 1024} Ko).")
-            c.get(chemin).use { String(it.readBytes(), Charsets.UTF_8) }
+            if (st.size > max) throw IllegalStateException("Fichier trop gros (${st.size / 1_048_576} Mo, limite ${max / 1_048_576} Mo).")
+            c.get(chemin).use { it.readBytes() }
         } catch (e: com.jcraft.jsch.SftpException) {
-            if (e.id == ChannelSftp.SSH_FX_PERMISSION_DENIED) null else throw e
+            if (e.id == ChannelSftp.SSH_FX_PERMISSION_DENIED) null else throw IllegalStateException("Fichier introuvable : $chemin")
         } finally { c.disconnect() }
-    } ?: exec(app, "sudo cat " + q(chemin)).second
+    } ?: exec(app, "sudo base64 -w0 " + q(chemin), 300).let { (code, out) ->
+        if (code != 0) throw IllegalStateException("Lecture refusée : ${out.take(200)}")
+        android.util.Base64.decode(out.trim().lines().last(), android.util.Base64.DEFAULT)
+    }
 
-    /** Écrit un fichier (sauvegarde .jarvis-bak-… avant écrasement) ; passe par sudo si les droits manquent. */
-    fun ecrire(app: JarvisApp, chemin: String, contenu: String, sauvegarde: Boolean = true): String? {
-        val bak = if (sauvegarde) "$chemin.jarvis-bak-" + java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date()) else null
-        if (bak != null && exec(app, "test -f ${q(chemin)} && (cp -p ${q(chemin)} ${q(bak)} 2>/dev/null || sudo cp -p ${q(chemin)} ${q(bak)})").first != 0) {
-            // fichier inexistant : pas de sauvegarde à faire
+    /**
+     * Écrit un fichier (dossier créé au besoin, sauvegarde « .jarvis-bak-… » de l'ancienne version) et vérifie le contenu
+     * relu. Sans les droits : réécrit en place avec sudo (propriétaire et droits du fichier conservés ; un nouveau fichier
+     * prend le propriétaire de son dossier). Renvoie le chemin de la sauvegarde, ou null si le fichier n'existait pas.
+     */
+    fun ecrire(app: JarvisApp, chemin0: String, contenu: String, sauvegarde: Boolean = true): String? {
+        val chemin = absolu(app, chemin0)
+        val dossier = chemin.substringBeforeLast('/').ifBlank { "/" }
+        if (exec(app, "test -d ${q(dossier)}").first != 0) {
+            val r = essayer(app, "mkdir -p ${q(dossier)}")
+            if (r.first != 0) throw IllegalStateException("Impossible de créer le dossier $dossier : ${r.second.trim().take(200)}")
         }
-        val ok = try {
-            session(app) { s ->
-                val c = s.openChannel("sftp") as ChannelSftp; c.connect(10000)
-                try { c.put(ByteArrayInputStream(contenu.toByteArray()), chemin, ChannelSftp.OVERWRITE); true }
-                catch (e: com.jcraft.jsch.SftpException) { false } finally { c.disconnect() }
-            }
-        } catch (e: Exception) { throw e }
-        if (!ok) {
+        val existe = exec(app, "test -e ${q(chemin)}").first == 0
+        if (existe && exec(app, "test -d ${q(chemin)}").first == 0) throw IllegalStateException("$chemin est un dossier, pas un fichier.")
+        var bak: String? = null
+        if (sauvegarde && existe) {
+            val b = "$chemin.jarvis-bak-" + java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())
+            if (essayer(app, "cp -p ${q(chemin)} ${q(b)}").first == 0) bak = b
+        }
+        val octets = contenu.toByteArray(Charsets.UTF_8)
+        val direct = runCatching { envoyerOctets(app, chemin, octets) }.isSuccess
+        if (!direct) {
             val tmp = "/tmp/jarvis_up_${System.currentTimeMillis()}"
-            session(app) { s ->
-                val c = s.openChannel("sftp") as ChannelSftp; c.connect(10000)
-                try { c.put(ByteArrayInputStream(contenu.toByteArray()), tmp, ChannelSftp.OVERWRITE) } finally { c.disconnect() }
-            }
-            val r = exec(app, "sudo cp ${q(tmp)} ${q(chemin)} && rm -f ${q(tmp)}")
-            if (r.first != 0) throw IllegalStateException("Écriture refusée : ${r.second.take(200)}")
+            envoyerOctets(app, tmp, octets)
+            val r = try {
+                if (existe) exec(app, "sudo tee ${q(chemin)} < ${q(tmp)} > /dev/null")
+                else exec(app, "sudo cp ${q(tmp)} ${q(chemin)} && sudo chown --reference=${q(dossier)} ${q(chemin)} && sudo chmod 644 ${q(chemin)}")
+            } finally { runCatching { exec(app, "rm -f ${q(tmp)}") } }
+            if (r.first != 0) throw IllegalStateException("Écriture de $chemin refusée : ${r.second.trim().take(300)}" +
+                if (app.store.sshPass.value.isBlank() && app.store.sshUser.value.trim() != "root") " (aucun mot de passe sudo enregistré dans Réglages › Maison › Serveur)" else "")
         }
+        // Vérification : le fichier relu doit être exactement celui qui a été écrit.
+        val attendu = java.security.MessageDigest.getInstance("SHA-256").digest(octets).joinToString("") { "%02x".format(it.toInt() and 0xff) }
+        val v = essayer(app, "sha256sum ${q(chemin)}", 30)
+        if (v.first == 0 && !v.second.contains(attendu)) throw IllegalStateException("Vérification échouée : le contenu relu de $chemin ne correspond pas à ce qui a été écrit." + (bak?.let { " Ancienne version : $it" } ?: ""))
         return bak
     }
 
@@ -269,7 +395,11 @@ object Serveur {
         try { c.put(ByteArrayInputStream(octets), chemin, ChannelSftp.OVERWRITE) } finally { c.disconnect() }
     }
 
-    fun lister(app: JarvisApp, dossier: String): String = exec(app, "ls -lAh --time-style=long-iso ${q(dossier)} | head -150").second
+    fun lister(app: JarvisApp, dossier: String): String = absolu(app, dossier).let { d ->
+        exec(app, "ls -lAh --time-style=long-iso ${q(d)} | head -150").let { r ->
+            if (r.first != 0 && r.second.contains("Permission denied", ignoreCase = true)) exec(app, "sudo ls -lAh --time-style=long-iso ${q(d)} | head -150").second else r.second
+        }
+    }
 
     /** Analyse le LAN du serveur Debian : sous-réseaux réellement configurés, table ARP/neigh et ports TCP.
      *  Les appareils sans adresse MAC connue restent visibles dans les résultats. */
@@ -339,12 +469,56 @@ object Serveur {
 
     private fun base(app: JarvisApp) = app.store.haUrl.value.trim().trimEnd('/').let { if (it.startsWith("http")) it else "http://$it" }
 
+    /** Adresse extérieure de Home Assistant : celle des réglages, sinon l'accès à distance ouvert depuis l'onglet Wi-Fi. */
+    private fun haDistant(app: JarvisApp, hoteLocal: String, portLocal: Int): String? {
+        app.store.haUrlDistant.value.trim().trimEnd('/').takeIf { it.isNotBlank() }?.let { return if (it.startsWith("http")) it else "https://$it" }
+        return runCatching {
+            Registre.tous(app).firstOrNull { it.optString("ip") == hoteLocal }?.optJSONArray("distant")?.let { a ->
+                (0 until a.length()).mapNotNull { a.optJSONObject(it) }.firstOrNull { it.optInt("port") == portLocal }?.optString("adresse")?.takeIf { it.startsWith("http") }
+            }
+        }.getOrNull()
+    }
+
+    /** Adresse directe de l'instance Home Assistant (locale à la maison, extérieure dehors), sans tunnel SSH. */
+    fun haBaseDirecte(app: JarvisApp): String {
+        val b = base(app)
+        val u = runCatching { java.net.URI(b) }.getOrNull() ?: return b
+        val hote = u.host.orEmpty()
+        if (!ipPrivee(hote) || telephoneSurReseau(hote)) return b
+        return haDistant(app, hote, if (u.port > 0) u.port else if (u.scheme == "https") 443 else 80) ?: b
+    }
+
+    /**
+     * Adresse effective de l'API Home Assistant : TOUJOURS l'instance elle-même, avec le jeton — adresse locale à la
+     * maison, adresse extérieure dehors (réglage, ou accès ouvert depuis l'onglet Wi-Fi). Le tunnel SSH par le serveur
+     * n'est plus qu'un dernier recours (adresse locale, téléphone dehors, et aucune adresse extérieure connue).
+     */
+    private fun acces(app: JarvisApp): Pair<String, OkHttpClient> {
+        val b = base(app)
+        val u = runCatching { java.net.URI(b) }.getOrNull() ?: return b to http
+        val hote = u.host.orEmpty()
+        if (!ipPrivee(hote) || telephoneSurReseau(hote)) return b to http
+        val portLocal = if (u.port > 0) u.port else if (u.scheme == "https") 443 else 80
+        haDistant(app, hote, portLocal)?.let { return it to http }
+        val estServeur = hote == app.store.sshHost.value.trim() || hote == app.store.serveurIpLocale.value.trim()
+        if (!estServeur || !sshConfigure(app)) return b to http
+        val port = if (u.port > 0) u.port else if (u.scheme == "https") 443 else 80
+        val lp = runCatching { tunnel(app, port) }.getOrElse { return b to http }
+        val client = if (u.scheme == "https") http.newBuilder().hostnameVerifier { _, session ->
+            javax.net.ssl.HttpsURLConnection.getDefaultHostnameVerifier().verify(hote, session) || runCatching {
+                (session.peerCertificates.firstOrNull() as? java.security.cert.X509Certificate)?.subjectAlternativeNames?.any { it.getOrNull(1) == hote } == true
+            }.getOrDefault(false)
+        }.build() else http
+        return "${u.scheme}://127.0.0.1:$lp" + u.path.orEmpty().trimEnd('/') to client
+    }
+
     fun ha(app: JarvisApp, methode: String, chemin: String, corps: JSONObject? = null): String {
         if (!haConfigure(app)) throw IllegalStateException("Home Assistant non configuré (Réglages › Maison › Serveur : adresse et jeton d'accès longue durée).")
-        val b = Request.Builder().url(base(app) + chemin).header("Authorization", "Bearer ${app.store.haToken.value.trim()}")
+        val (adresse, client) = acces(app)
+        val b = Request.Builder().url(adresse + chemin).header("Authorization", "Bearer ${app.store.haToken.value.trim()}")
         if (methode == "POST") b.post((corps?.toString() ?: "{}").toRequestBody("application/json".toMediaType())) else b.get()
         try {
-            http.newCall(b.build()).execute().use { r ->
+            client.newCall(b.build()).execute().use { r ->
                 val t = r.body?.string().orEmpty()
                 if (r.code == 401) throw IllegalStateException("Home Assistant 401 : le jeton est invalide ou expiré. Dans Home Assistant, connecte-toi avec le compte qui possède les droits d'administration, puis crée un nouveau jeton d'accès longue durée dans ton profil et remplace-le dans JARVIS › Réglages › Maison › Serveur.")
                 if (r.code == 403) throw IllegalStateException("Home Assistant 403 — action interdite pour le compte associé au jeton. Ce n'est pas une permission Android/Shizuku : le jeton reprend les droits du compte Home Assistant qui l'a créé. Vérifie que ce compte peut piloter cet appareil et, si nécessaire, crée un nouveau jeton depuis un compte administrateur. Détail HA : ${t.take(500)}")

@@ -39,8 +39,56 @@ class JarvisAccessibilityService : AccessibilityService() {
         super.onDestroy()
     }
 
+    private var dernierReleveSchema = 0L
+
+    /** Grille du schéma affichée à l'écran (écran de verrouillage) : gauche, haut, droite, bas — ou null. */
+    fun grilleSchema(): IntArray? {
+        val racines = runCatching { windows.mapNotNull { it.root } }.getOrDefault(emptyList()) + listOfNotNull(runCatching { rootInActiveWindow }.getOrNull())
+        for (r in racines) {
+            val trouve = chercher(r) { n ->
+                val id = n.viewIdResourceName.orEmpty().lowercase()
+                val cls = n.className?.toString().orEmpty().lowercase()
+                (id.contains("pattern") && !id.contains("text") && !id.contains("title")) || cls.endsWith("lockpatternview") || cls.contains("patternview")
+            }
+            if (trouve != null) {
+                val b = android.graphics.Rect(); trouve.getBoundsInScreen(b)
+                if (b.width() > 200 && b.height() > 200) return intArrayOf(b.left, b.top, b.right, b.bottom)
+            }
+        }
+        return null
+    }
+
+    private fun chercher(n: android.view.accessibility.AccessibilityNodeInfo?, profondeur: Int = 0, test: (android.view.accessibility.AccessibilityNodeInfo) -> Boolean): android.view.accessibility.AccessibilityNodeInfo? {
+        if (n == null || profondeur > 40) return null
+        if (runCatching { test(n) }.getOrDefault(false)) return n
+        for (i in 0 until n.childCount) chercher(runCatching { n.getChild(i) }.getOrNull(), profondeur + 1, test)?.let { return it }
+        return null
+    }
+
+    /**
+     * Trace un geste CONTINU (doigt posé du premier au dernier point, sans le lever) : c'est ce qu'attend la grille du
+     * schéma. [fin] reçoit vrai si Android a exécuté le geste en entier.
+     */
+    fun tracer(points: List<Pair<Float, Float>>, msParSegment: Long = 160, fin: (Boolean) -> Unit = {}): Boolean {
+        if (points.size < 2) return false
+        val path = Path().apply { moveTo(points[0].first, points[0].second); points.drop(1).forEach { (x, y) -> lineTo(x, y) } }
+        val duree = (points.size - 1) * msParSegment + 120
+        return dispatchGesture(GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, duree)).build(),
+            object : GestureResultCallback() {
+                override fun onCompleted(g: GestureDescription?) = fin(true)
+                override fun onCancelled(g: GestureDescription?) = fin(false)
+            }, null)
+    }
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         event ?: return
+        // Écran de verrouillage affiché avec la grille du schéma : sa vraie position est relevée (calibration automatique).
+        if (event.packageName == "com.android.systemui" && System.currentTimeMillis() - dernierReleveSchema > 1500) {
+            dernierReleveSchema = System.currentTimeMillis()
+            runCatching {
+                grilleSchema()?.let { g -> (application as? fr.dd.jarvis.JarvisApp)?.store?.schemaGrille?.let { if (it.value != g.joinToString(",")) it.set(g.joinToString(",")) } }
+            }
+        }
         val pkg = event.packageName?.toString()?.take(120).orEmpty()
         if (pkg.isBlank() || pkg == packageName) return
         val kind = when (event.eventType) {

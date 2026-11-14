@@ -14,27 +14,34 @@ import java.io.InputStream
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.Executors
 
 /**
  * Pont MCP « jarvis » (Streamable HTTP, réponses JSON) : expose à Hermès TOUS les outils de Jarvis (téléphone, agenda,
  * SMS, mails, musique, Obsidian, société, domotique, localisation…). Écoute seulement sur 127.0.0.1 et exige le jeton
- * Bearer écrit dans la configuration d'Hermès : aucune autre app ni machine du réseau ne peut s'en servir.
+ * Bearer distincts : un pour MCP/mémoire, un pour le relais IA. Le serveur reste limité à 127.0.0.1.
  *
  * Il reçoit aussi la progression du script d'installation (POST /progres), lancé en arrière-plan dans Termux.
  */
 object PontMcp {
     const val PORT = 38291
     private const val TAG = "PontMcp"
-    private const val maxOutilsExpose = 24
+    /** Tout le catalogue (≈ 190 outils) : le relais IA de Jarvis ne transmet au modèle que ceux utiles à chaque tour.
+     *  Plafonné à 80 auparavant, ce qui cachait à Hermès les outils SSH, Home Assistant, Plex et Discord (rangés après
+     *  les 107 outils du téléphone) : il tentait alors un « ssh » sans identifiants depuis son terminal. */
+    private const val maxOutilsExpose = 400
     private val pool = Executors.newCachedThreadPool()
     @Volatile private var serveur: ServerSocket? = null
     @Volatile private var fournisseur: Fournisseur? = null
 
     /** Ce que le pont expose : jeton attendu, outils, exécution, réception de la progression. */
     interface Fournisseur {
+        /** Jeton du pont MCP (outils et mémoire). */
         fun jeton(): String
+        /** Jeton distinct du relais IA ; compatibilité pour les fournisseurs de test/anciens. */
+        fun jetonIA(): String = jeton()
         fun outils(): JSONArray
         /** Exécute l'outil : (texte, erreur ?). */
         fun appeler(nom: String, args: JSONObject): Pair<String, Boolean>
@@ -69,11 +76,16 @@ object PontMcp {
 
     fun url() = "http://127.0.0.1:$PORT/mcp"
 
+    /** Dérive un secret dédié du secret Hermès déjà stocké ; aucun nouveau token à saisir ou stocker. */
+    internal fun jetonRelaisIA(cleRacine: String): String {
+        if (cleRacine.isBlank()) return ""
+        val entree = "fr.dd.jarvis/hermes-ai-relay/v1:$cleRacine".toByteArray(Charsets.UTF_8)
+        return MessageDigest.getInstance("SHA-256").digest(entree).joinToString("") { "%02x".format(it.toInt() and 0xff) }
+    }
+
     private class FournisseurJarvis(val app: JarvisApp) : Fournisseur {
         override fun groq(corps: JSONObject) = RelaisGroq.repondre(app, corps)
         override fun groqModeles() = RelaisGroq.modeles(app)
-        override fun ollama(corps: JSONObject) = fr.dd.jarvis.ai.Ollama.relais(app, corps)
-        override fun ollamaModeles() = fr.dd.jarvis.ai.Ollama.modelesJson(app)
         override fun memoireHermes(texte: String) { runCatching { app.memo.majHermes(texte) } }
         override fun memoireJarvis(): String = runCatching { app.memo.pourHermes() }.getOrDefault("")
         override fun capacitesHermes(json: String) { runCatching { app.memo.majCapacitesHermes(json) } }
@@ -95,6 +107,7 @@ object PontMcp {
             runCatching { outils() }
         }
         override fun jeton() = app.store.mcpJeton.value
+        override fun jetonIA() = PontMcp.jetonRelaisIA(app.store.hermesCle.value)
         override fun outils(): JSONArray {
             outilsCache?.let { return JSONArray(it.toString()) }
             return synchronized(this) {
@@ -200,6 +213,8 @@ object PontMcp {
             val titre = args.optString("titre").trim().ifBlank { "JARVIS" }
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 app.chatAjouter(fr.dd.jarvis.ai.ChatMsg(false, "🔔 **$titre**\n\n$message"))
+                // « oui », « vas-y »… en réponse à ce message : à Hermès, qui a mené la tâche.
+                fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.HERMES
             }
             val ok = fr.dd.jarvis.work.SuiviTaches.bloquees(app) == null
             fr.dd.jarvis.work.SuiviTaches.termine(app, 7320 + (System.currentTimeMillis() % 200).toInt() * 2, titre.take(60), message)
@@ -216,12 +231,14 @@ object PontMcp {
 
     @Synchronized fun demarrer(a: JarvisApp): Boolean {
         if (a.store.mcpJeton.value.isBlank()) a.store.mcpJeton.set(UUID.randomUUID().toString().replace("-", ""))
-        if (fournisseur !is FournisseurJarvis) fournisseur = FournisseurJarvis(a)
+        // Le fournisseur et ses catalogues sont conservés tant que le processus Jarvis vit.
+        // Ne relance pas une tâche de préchauffage à chaque message Hermès.
+        val nouveauFournisseur = fournisseur !is FournisseurJarvis
+        if (nouveauFournisseur) fournisseur = FournisseurJarvis(a)
         val ok = ecouter(PORT)
         if (!ok) Log.e(TAG, "Impossible de démarrer le serveur de progression/MCP sur 127.0.0.1:$PORT")
-        // Prépare les schémas hors du thread appelant : la première négociation MCP n'attend pas
-        // la construction du grand catalogue Jarvis.
-        if (ok) pool.execute { runCatching { (fournisseur as? FournisseurJarvis)?.prechaufferCatalogue() } }
+        // Prépare les schémas hors du thread appelant une seule fois, à la création du fournisseur.
+        if (ok && nouveauFournisseur) pool.execute { runCatching { (fournisseur as? FournisseurJarvis)?.prechaufferCatalogue() } }
         return ok && actif()
     }
 
@@ -327,17 +344,27 @@ object PontMcp {
         s.soTimeout = 30_000
         val r = lire(BufferedInputStream(s.getInputStream())) ?: return@use
         val f = fournisseur ?: return@use repondre(s, 404)
-        val jeton = f.jeton()
-        if (jeton.isBlank() || r.entetes["authorization"] != "Bearer $jeton") return@use repondre(s, 401, """{"error":"unauthorized"}""")
+        val chemin = r.chemin.trimEnd('/')
+        // Les routes IA ont leur propre secret ; MCP et mémoire conservent leur jeton historique.
+        val routeIA = chemin == "/ai/health" || chemin.startsWith("/groq/v1/") || chemin.startsWith("/ollama/v1/")
+        val jeton = if (routeIA) f.jetonIA() else f.jeton()
+        val authorization = r.entetes["authorization"].orEmpty()
+        val jetonRecu = if (authorization.startsWith("Bearer ", ignoreCase = true)) authorization.substring(7).trim() else ""
+        if (jeton.isBlank() || jetonRecu != jeton) {
+            val code = if (routeIA) "JARVIS_AI_BRIDGE_AUTH" else "JARVIS_MCP_AUTH"
+            return@use repondre(s, 401, JSONObject().put("error", JSONObject().put("code", code).put("message", "Authentification locale refusée.")).toString())
+        }
         when {
-            r.chemin.trimEnd('/') == "/health" && r.methode == "GET" -> {
+            chemin == "/ai/health" && r.methode == "GET" -> repondre(s, 200, JSONObject()
+                .put("ok", true).put("service", "jarvis-ai-bridge").put("router", "jarvis-central").put("auth", "ok").toString())
+            chemin == "/health" && r.methode == "GET" -> {
                 repondre(s, 200, JSONObject()
                     .put("ok", true)
                     .put("port", PORT)
                     .put("lastProgressAt", dernierSignal)
                     .put("progressCount", progression.size).toString())
             }
-            r.chemin.trimEnd('/') == "/progres" && r.methode == "POST" -> {
+            chemin == "/progres" && r.methode == "POST" -> {
                 val ligne = r.corps.trim().take(300)
                 if (ligne.isEmpty()) {
                     repondre(s, 400, """{"error":"empty_progress"}""")
@@ -348,18 +375,18 @@ object PontMcp {
                 }
             }
             // Mémoire partagée : le hook « jarvis-memoire » d'Hermès envoie la sienne et recopie celle de Jarvis.
-            r.chemin.trimEnd('/') == "/memoire/hermes" && r.methode == "POST" -> { f.memoireHermes(r.corps); repondre(s, 200, """{"ok":true}""") }
-            r.chemin.trimEnd('/') == "/memoire/jarvis" && r.methode == "GET" -> repondre(s, 200, f.memoireJarvis(), type = "text/plain")
-            r.chemin.trimEnd('/') == "/memoire/hermes-capacites" && r.methode == "POST" -> { f.capacitesHermes(r.corps); repondre(s, 200, """{"ok":true}""") }
-            r.chemin.trimEnd('/') == "/groq/v1/models" && r.methode == "GET" -> repondre(s, 200, f.groqModeles())
-            r.chemin.trimEnd('/') == "/groq/v1/chat/completions" && r.methode == "POST" -> {
+            chemin == "/memoire/hermes" && r.methode == "POST" -> { f.memoireHermes(r.corps); repondre(s, 200, """{"ok":true}""") }
+            chemin == "/memoire/jarvis" && r.methode == "GET" -> repondre(s, 200, f.memoireJarvis(), type = "text/plain")
+            chemin == "/memoire/hermes-capacites" && r.methode == "POST" -> { f.capacitesHermes(r.corps); repondre(s, 200, """{"ok":true}""") }
+            chemin == "/groq/v1/models" && r.methode == "GET" -> repondre(s, 200, f.groqModeles())
+            chemin == "/groq/v1/chat/completions" && r.methode == "POST" -> {
                 val corps = runCatching { JSONObject(r.corps) }.getOrElse { return@use repondre(s, 400, """{"error":{"message":"JSON invalide"}}""") }
                 val (code, rep) = f.groq(corps)
                 if (code == 200 && corps.optBoolean("stream", false)) repondre(s, 200, enFlux(JSONObject(rep)), type = "text/event-stream")
                 else repondre(s, code, rep)
             }
-            r.chemin.trimEnd('/') == "/ollama/v1/models" && r.methode == "GET" -> repondre(s, 200, f.ollamaModeles())
-            r.chemin.trimEnd('/') == "/ollama/v1/chat/completions" && r.methode == "POST" -> {
+            chemin == "/ollama/v1/models" && r.methode == "GET" -> repondre(s, 200, f.ollamaModeles())
+            chemin == "/ollama/v1/chat/completions" && r.methode == "POST" -> {
                 val corps = runCatching { JSONObject(r.corps) }.getOrElse { return@use repondre(s, 400, """{"error":{"message":"JSON invalide"}}""") }
                 val (code, rep) = f.ollama(corps)
                 if (code == 200 && corps.optBoolean("stream", false)) repondre(s, 200, enFlux(JSONObject(rep)), type = "text/event-stream")
@@ -416,7 +443,7 @@ object PontMcp {
                     "GPS D’INSTALLATION : opération exclusivement métier et locale à la base Société Jarvis. N’utilise JAMAIS ssh_commande, ssh_fichier, ssh_script, run_shell, Termux, ADB, Shizuku, stockage_telephone, obsidian_fichiers ni un chemin système pour ajouter/modifier ces coordonnées ; le serveur Debian et SSH n’ont aucun rôle dans cette opération. Même si ces outils sont visibles, ignore-les pour toute demande GPS/client/installation. Ne cherche JAMAIS un fichier Markdown, un contact Android ou un chemin Obsidian. Interroge d’abord societe_liste (quoi=clients, filtre sur le nom fourni) pour retrouver le nom exact du client dans la base Société ; si nécessaire, appelle client_fiche pour vérifier le nom exact de l’installation. Ensuite appelle obligatoirement client_ecrire avec nom=nom exact du client, site_nom=nom exact de l’installation et site_gps=coordonnées originales fournies, sans les reformater ni les recalculer. Ne modifie pas l’adresse ni les autres champs. N’annonce la réussite que si client_ecrire confirme l’enregistrement et la relecture du GPS. Si le client ou l’installation reste ambigu, demande uniquement la précision manquante. " +
                     "MUSIQUE : pour rechercher ET lancer un titre, utilise musique_rechercher (requete, application facultative) ; cette fonction utilise le contrôleur multi-applications Android et vérifie la session de lecture. Morphe est pris en charge en plus de Spotify, YouTube Music, Deezer, Amazon Music et VLC. Ne réponds pas « introuvable » avant d'avoir consulté les applications installées et tenté l'application musicale appropriée. " +
                     "IMPORTANT pour les interventions photovoltaïques : les noms exacts des outils MCP sont interventions_liste, intervention_supprimer et intervention_modifier (sans préfixe). Ils sont exposés par le pont local Jarvis. " +
-                    "Si ces outils ne sont pas visibles, utilise tool_search avec les termes exacts interventions_liste et intervention_supprimer ; ne remplace jamais cette recherche par une recherche de PDF dans Obsidian. " +
+                    "Si un outil Jarvis n'est pas dans ta liste, trouve-le avec jarvis_rechercher_outils puis exécute-le avec jarvis_appeler_outil ; ne remplace jamais cette recherche par une recherche de PDF dans Obsidian. " +
                     "SOCIÉTÉ / CLIENTS : la suppression d'une fiche client est une opération autorisée par Jarvis. Si l'utilisateur demande de supprimer un client, utilise client_supprimer ; ne refuse jamais au nom d'une règle générale de conservation et n'invente pas une interdiction. L'outil vérifie les devis/factures liés, demande lui-même une confirmation explicite avant l'action irréversible, supprime la fiche de la base et sa copie Obsidian, puis vérifie le résultat. Si des documents comptables sont liés, explique le blocage précis renvoyé par l'outil ; sinon laisse l'outil exécuter après confirmation. " +
                     "Pour supprimer une intervention, utilise obligatoirement interventions_liste pour obtenir son ID, puis intervention_supprimer avec cet ID et confirmation='oui' après accord explicite. " +
                     "N'utilise jamais les outils génériques du coffre Obsidian pour supprimer une intervention et n'appelle jamais intervention_enregistrer pour simuler une suppression. " +
@@ -462,10 +489,12 @@ object PontMcp {
         }
         // Les outils métier indispensables restent toujours visibles, puis on complète
         // avec les autres outils sans dépasser le budget transmis aux modèles.
-        fonctions.sortBy { f ->
-            val index = prioritaires.indexOf(f.optString("name"))
-            if (index < 0) prioritaires.size else index
+        // Puis les familles serveur / domotique / médias (souvent confondues si elles manquent), puis le reste.
+        fun famille(nom: String) = when {
+            Regex("^(ssh_|serveur_|ha_|plex|discord|github|freebox|box_|reseau_|appareil|ip_publique|ollama)").containsMatchIn(nom) -> 0
+            else -> 1
         }
+        fonctions.sortWith(compareBy({ f -> prioritaires.indexOf(f.optString("name")).let { if (it < 0) prioritaires.size else it } }, { f -> famille(f.optString("name")) }))
         val out = JSONArray()
         // L'équipe d'Hermès : l'agent téléphone (Jarvis) et le canal vers l'utilisateur. Toujours en tête de liste.
         out.put(JSONObject()
@@ -484,7 +513,7 @@ object PontMcp {
                 .put("required", JSONArray().put("message"))))
         out.put(JSONObject()
             .put("name", "jarvis_rechercher_outils")
-            .put("description", "Recherche dans le catalogue complet des outils JARVIS, y compris ceux non affichés dans la liste courte. À utiliser si un outil métier est absent ou pour trouver une fonction par domaine.")
+            .put("description", "Catalogue complet des outils JARVIS (Discord : lire, rechercher, envoyer des messages, salons, rôles ; Plex ; Freebox ; Home Assistant ; société ; mails ; SMS ; agenda ; fichiers ; réseau…), y compris ceux absents de ta liste courte. À utiliser AVANT de dire qu'un outil n'existe pas.")
             .put("inputSchema", JSONObject().put("type", "object").put("properties", JSONObject()
                 .put("requete", JSONObject().put("type", "string").put("description", "Nom ou mots-clés du domaine recherché"))
                 .put("limite", JSONObject().put("type", "integer").put("description", "Nombre maximal de résultats (1 à 20)")))

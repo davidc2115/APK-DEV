@@ -33,6 +33,29 @@ import kotlin.math.sin
  */
 class VoiceManager(private val ctx: Context) {
 
+    companion object {
+        /** Toutes les instances vivantes (service, appli, voiture…) : une seule peut écouter à la fois. */
+        private val instances = java.util.Collections.newSetFromMap(java.util.WeakHashMap<VoiceManager, Boolean>())
+
+        /**
+         * Moteur de reconnaissance à utiliser : jamais celui de JARVIS. Quand JARVIS est l'assistant par défaut, Android
+         * désigne son moteur « factice » comme reconnaissance du système : chaque écoute échouait, était relancée
+         * (bips, délais) puis basculait sur la reconnaissance locale. On vise directement celui de Google.
+         */
+        fun moteur(ctx: Context): android.content.ComponentName? = runCatching {
+            val l = ctx.packageManager.queryIntentServices(Intent(android.speech.RecognitionService.SERVICE_INTERFACE), 0)
+                .map { it.serviceInfo }.filter { it.packageName != ctx.packageName }
+            val choisi = l.firstOrNull { it.packageName == "com.google.android.googlequicksearchbox" }
+                ?: l.firstOrNull { it.packageName == "com.google.android.as" } ?: l.firstOrNull { it.packageName.startsWith("com.google") } ?: l.firstOrNull()
+            choisi?.let { android.content.ComponentName(it.packageName, it.name) }
+        }.getOrNull()
+    }
+
+    /** Nom affiché dans le journal de l'écoute (service, appli, voiture…). */
+    var nom = "voix"
+
+    init { synchronized(instances) { instances.add(this) } }
+
     private val main = Handler(Looper.getMainLooper())
     private val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private var recognizer: SpeechRecognizer? = null
@@ -55,7 +78,8 @@ class VoiceManager(private val ctx: Context) {
     var duplex = true
 
     private var muted = false
-    private val beepStreams = intArrayOf(AudioManager.STREAM_NOTIFICATION, AudioManager.STREAM_SYSTEM, AudioManager.STREAM_MUSIC)
+    // Bips du reconnaisseur de Google : flux système / notification (et accessibilité sur certains téléphones).
+    private val beepStreams = intArrayOf(AudioManager.STREAM_NOTIFICATION, AudioManager.STREAM_SYSTEM, AudioManager.STREAM_ACCESSIBILITY, AudioManager.STREAM_MUSIC)
 
     private fun setMuted(on: Boolean) {
         if (!muteBeeps || muted == on) return
@@ -100,6 +124,19 @@ class VoiceManager(private val ctx: Context) {
     private var parole = false
     /** Numéro de l'écoute en cours : les rappels d'une écoute annulée sont ignorés. */
     private var jeton = 0
+    /** Relance programmée après une erreur passagère : annulée dès que l'écoute est refermée (plus de micro rouvert après la fin). */
+    private var relanceEnAttente: Runnable? = null
+    /** Reconnaisseur réutilisé d'une écoute à l'autre (le recréer à chaque fois faisait répondre « service déconnecté »,
+     *  erreur 11, à la première ouverture : un micro ouvert pour rien, donc un bip de plus). */
+    private var recoCle = ""
+    private var recoCasse = false
+    private var ouvertLe = 0L
+    /** Le micro peut-il s'ouvrir ? (le service se tait pendant une conversation dans l'appli). */
+    var autorise: () -> Boolean = { true }
+    /** La coupure de parole (voix entendue pendant la réponse) est-elle permise en ce moment ? */
+    var coupureAutorisee: () -> Boolean = { true }
+
+    private fun annulerRelance() { relanceEnAttente?.let { main.removeCallbacks(it) }; relanceEnAttente = null }
 
     private val finFenetre = Runnable {
         if (fenetreFin > 0 && !parole) {
@@ -126,29 +163,64 @@ class VoiceManager(private val ctx: Context) {
      */
     fun ecouterConversation(silenceMs: Long) {
         fenetreFin = System.currentTimeMillis() + silenceMs.coerceAtLeast(2000)
+        relancesMuettes = 0
+        relancesApresParole = 0
         demarrer(0)
     }
+
+    /**
+     * Relances du reconnaisseur dans la même fenêtre d'écoute. Chaque relance redémarre le reconnaisseur de Google, qui
+     * joue son propre bip (surtout en Bluetooth / Android Auto, où il n'est pas toujours coupé) : au-delà de 2, on
+     * referme plutôt que d'enchaîner les bips comme si JARVIS se déclenchait plusieurs fois.
+     */
+    private var relancesMuettes = 0
+    private var relancesApresParole = 0
 
     /** [essai] : relances automatiques sur les erreurs transitoires (service vocal déconnecté…), puis repli sur la reconnaissance locale. */
     private fun demarrer(essai: Int) {
         main.post {
+            annulerRelance()
+            if (!autorise()) {
+                JournalVoix.noter(nom, "micro non ouvert : l'appli JARVIS a le micro")
+                fenetreFin = 0; ecoute = false
+                signalerEcoute(false)
+                return@post
+            }
             if (!SpeechRecognizer.isRecognitionAvailable(ctx)) {
                 fenetreFin = 0
                 onFail("Reconnaissance vocale indisponible sur cet appareil (installer / activer Google).")
                 return@post
             }
             stopSpeaking()
+            // Un seul micro pour tout JARVIS : une autre écoute en cours (appli / service) est refermée.
+            synchronized(instances) { instances.filter { it !== this }.toList() }.forEach { it.ceder(nom) }
             main.removeCallbacks(unmuteLater)
             main.removeCallbacks(finFenetre)
             setMuted(true)
-            recognizer?.destroy()
             parole = false
             val moi = ++jeton
+            ecoute = true
             val local = essai >= 2 && Build.VERSION.SDK_INT >= 33 && SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx)
-            val r = if (local) SpeechRecognizer.createOnDeviceSpeechRecognizer(ctx) else SpeechRecognizer.createSpeechRecognizer(ctx)
+            val composant = if (local) null else moteur(ctx)
+            val cle = if (local) "local" else composant?.flattenToString() ?: "defaut"
+            // Reconnaisseur NEUF à chaque écoute : réutilisé (annulé puis relancé), celui de Google (com.google.android.as)
+            // renvoyait souvent « erreur 7 » sur la phrase suivante.
+            val reutilise = false
+            val r = if (reutilise) recognizer!!.also { runCatching { it.cancel() } } else {
+                runCatching { recognizer?.destroy() }
+                when {
+                    local -> SpeechRecognizer.createOnDeviceSpeechRecognizer(ctx)
+                    composant != null -> SpeechRecognizer.createSpeechRecognizer(ctx, composant)
+                    else -> SpeechRecognizer.createSpeechRecognizer(ctx)
+                }.also { recoCle = cle; recoCasse = false }
+            }
+            JournalVoix.noter(nom, "micro ouvert (reconnaissance ${if (local) "locale" else composant?.packageName ?: "par défaut"}${if (essai > 0) ", essai ${essai + 1}" else ""}${if (reutilise) "" else ", nouveau"})")
             recognizer = r
+            ouvertLe = System.currentTimeMillis()
             r.setRecognitionListener(object : RecognitionListener {
-                private fun actif() = moi == jeton
+                /** Un reconnaisseur envoie parfois une 2e erreur après son résultat (ou après une 1re erreur) : ignorée. */
+                private var termine = false
+                private fun actif() = moi == jeton && !termine
                 private fun aParle() { if (!parole) { parole = true; main.removeCallbacks(finFenetre) } }
                 override fun onReadyForSpeech(params: Bundle?) {}
                 override fun onBeginningOfSpeech() { if (actif()) aParle() }
@@ -159,17 +231,31 @@ class VoiceManager(private val ctx: Context) {
 
                 override fun onError(error: Int) {
                     if (!actif()) return
+                    termine = true
+                    JournalVoix.noter(nom, "reconnaissance : erreur $error${if (parole) " (après parole)" else ""}")
+                    ecoute = false
                     main.removeCallbacks(finFenetre)
                     // 11 = service de reconnaissance déconnecté, 5 = erreur client, 10 = trop de requêtes, 8 = occupé : on recrée et on relance
-                    if (error in setOf(11, 5, 10, 8, SpeechRecognizer.ERROR_SERVER) && essai < 3) {
-                        main.postDelayed({ if (moi == jeton) demarrer(essai + 1) }, 500L * (essai + 1))
+                    // (2 essais au plus, espacés : un reconnaisseur recréé trop vite répond « occupé » et rebipe.)
+                    if (error in setOf(11, 5, 10, 8, SpeechRecognizer.ERROR_SERVER)) recoCasse = true
+                    if (error in setOf(11, 5, 10, 8, SpeechRecognizer.ERROR_SERVER) && essai < 2) {
+                        val immediat = !parole && System.currentTimeMillis() - ouvertLe < 600
+                        val relance = Runnable { relanceEnAttente = null; if (moi == jeton) demarrer(essai + 1) }
+                        relanceEnAttente = relance
+                        main.postDelayed(relance, if (immediat && error == 11) 250L else 800L * (essai + 1))
                         return
                     }
                     val silence = error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
-                    if (fenetreFin > 0 && silence && !parole) {
-                        // Le reconnaisseur abandonne avant la fin du délai de conversation : on le relance sans bruit.
-                        if (System.currentTimeMillis() < fenetreFin - 400) { demarrer(0); return }
-                        finirSilence(); return
+                    if (fenetreFin > 0 && silence) {
+                        // Tu as parlé mais rien n'a été compris : une nouvelle écoute complète (8 s au moins), une fois.
+                        if (parole && relancesApresParole++ < 1) {
+                            fenetreFin = maxOf(fenetreFin, System.currentTimeMillis() + 8000)
+                            demarrer(0); return
+                        }
+                        // Rien de compris (silence, bruit, écho de la voix de JARVIS) avant la fin du délai de conversation :
+                        // une relance discrète s'il reste vraiment du temps, sinon la conversation se referme.
+                        if (System.currentTimeMillis() < fenetreFin - 1500 && relancesMuettes++ < 2) { demarrer(0); return }
+                        if (!parole) { finirSilence(); return }
                     }
                     fenetreFin = 0
                     main.postDelayed(unmuteLater, 900)
@@ -186,11 +272,14 @@ class VoiceManager(private val ctx: Context) {
 
                 override fun onResults(results: Bundle?) {
                     if (!actif()) return
+                    termine = true
+                    ecoute = false
+                    JournalVoix.noter(nom, "entendu : « ${results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty().take(240)} »")
                     val entendu = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
                     if (entendu.isNotBlank() && estEcho(entendu)) {
                         // Jarvis s'est réentendu (voix renvoyée par l'autoradio) : on ignore et on continue d'écouter.
                         main.removeCallbacks(finFenetre)
-                        if (fenetreFin > 0 && System.currentTimeMillis() < fenetreFin - 400) { onPartial(""); demarrer(0); return }
+                        if (fenetreFin > 0 && System.currentTimeMillis() < fenetreFin - 400 && relancesMuettes++ < 2) { onPartial(""); demarrer(0); return }
                         fenetreFin = 0
                         main.postDelayed(unmuteLater, 900)
                         signalerEcoute(false)
@@ -231,8 +320,51 @@ class VoiceManager(private val ctx: Context) {
         }
     }
 
+    /** Écoute en cours de cette instance (micro du reconnaisseur ouvert). */
+    @Volatile private var ecoute = false
+
+    /** Une autre partie de JARVIS prend le micro : on referme notre écoute (comme un silence, sans relance). */
+    private fun ceder(a: String) {
+        main.post {
+            if (relanceEnAttente != null) { annulerRelance(); jeton++ }
+            if (!ecoute) return@post
+            ecoute = false
+            JournalVoix.noter(nom, "écoute refermée : le micro passe à « $a »")
+            jeton++
+            fenetreFin = 0
+            main.removeCallbacks(finFenetre)
+            runCatching { recognizer?.cancel() }
+            signalerEcoute(false)
+            onSilence()
+        }
+    }
+
+    /**
+     * Ferme l'écoute pour de bon (retour à l'attente de « Jarvis ») : plus aucun rappel de cette écoute n'est traité et
+     * aucune relance programmée ne rouvrira le micro — sinon il se rouvrait après le bip de fin, pendant que le
+     * détecteur « Jarvis » était réarmé (micro « occupé », bips en plus).
+     */
+    fun fermer() {
+        main.post {
+            annulerRelance()
+            jeton++
+            val etait = ecoute
+            ecoute = false
+            fenetreFin = 0
+            main.removeCallbacks(finFenetre)
+            runCatching { recognizer?.cancel() }
+            if (etait) signalerEcoute(false)
+            main.removeCallbacks(unmuteLater); main.postDelayed(unmuteLater, 900)
+        }
+    }
+
+    /** Coupe la réponse parlée en cours en laissant l'appelant reprendre la main (sa suite est appelée). */
+    fun couperParole() = main.post { paroleEnCours?.arreter(sansSuite = false) }
+
     fun stopListening() {
         main.post {
+            annulerRelance()
+            ecoute = false
             fenetreFin = 0
             main.removeCallbacks(finFenetre)
             recognizer?.stopListening()
@@ -244,6 +376,7 @@ class VoiceManager(private val ctx: Context) {
 
     /** Petit carillon : deux notes montantes (« je t'écoute ») ou descendantes (« fin de la conversation »), puis [puis]. */
     fun carillon(montant: Boolean = true, puis: () -> Unit = {}) {
+        JournalVoix.noter(nom, "bip ${if (montant) "montant (je t'écoute)" else "descendant (fin)"}")
         Thread {
             var piste: AudioTrack? = null
             try {
@@ -489,17 +622,24 @@ class VoiceManager(private val ctx: Context) {
         }
 
         /** Ajoute du texte (morceau de réponse en cours d'écriture). */
-        fun ajouter(texte: String) {
-            if (fini.get() || ferme || texte.isEmpty()) return
+        fun ajouter(texte0: String) {
+            if (fini.get() || ferme || texte0.isEmpty() || finOral) return
+            // Après la marque de fin de la partie dite, le texte n'est plus qu'affiché.
+            val i = texte0.indexOf(TexteParle.FIN_ORAL)
+            val texte = if (i >= 0) { finOral = true; texte0.substring(0, i) } else texte0
+            if (texte.isEmpty()) return
             synchronized(tampon) { recu.append(texte); tampon.append(texte); extraire(attendreBloc = occupe, toutDire = false) }
         }
+
+        @Volatile private var finOral = false
 
         /**
          * Fin du texte. [texteFinal] = réponse complète (si elle diffère de ce qui a été reçu : repli, message
          * d'arrière-plan… on dit ce qui manque, ou la réponse entière si rien n'a été reçu).
          */
-        fun finir(texteFinal: String? = null) {
+        fun finir(texteFinal0: String? = null) {
             if (fini.get()) return
+            val texteFinal = texteFinal0?.let { TexteParle.oral(it) }
             synchronized(tampon) {
                 if (texteFinal != null) {
                     val r = norm(recu.toString()); val f = norm(texteFinal)
@@ -572,7 +712,7 @@ class VoiceManager(private val ctx: Context) {
         private fun voixLancee() {
             Presence.parole(true)
             if (coupe) main.post {
-                if (!fini.get() && barge == null) barge = BargeIn { main.post { if (!fini.get()) arreter(sansSuite = false) } }.also { it.start() }
+                if (!fini.get() && barge == null && coupureAutorisee()) barge = BargeIn { main.post { if (!fini.get() && coupureAutorisee()) { JournalVoix.noter(nom, "coupure de parole : voix entendue pendant la réponse"); arreter(sansSuite = false) } } }.also { it.start() }
             }
         }
 
@@ -689,17 +829,24 @@ class VoiceManager(private val ctx: Context) {
 
         private fun terminerApres() {
             Presence.parole(false); Presence.sousTitre = ""
-            barge?.stop(); barge = null
+            val b = barge; barge = null
             finVoix = System.currentTimeMillis()
-            main.post {
-                if (paroleEnCours === this) paroleEnCours = null
-                sortirModeAppel()
-                if (mediaPauseeParJarvis) fr.dd.jarvis.service.JarvisNotificationListener.reprendreMediaApresVoix()
-                mediaPauseeParJarvis = false
-                // Bluetooth / autoradio : le son sort avec du retard (tampon A2DP + traitement de l'autoradio) ; on
-                // attend que la fin de la phrase soit vraiment jouée avant de rouvrir le micro.
-                if (externe) main.postDelayed({ finVoix = System.currentTimeMillis(); onDone() }, 1000) else onDone()
+            val suite = Runnable {
+                main.post {
+                    if (paroleEnCours === this) paroleEnCours = null
+                    val etaitAppel = appelActif
+                    sortirModeAppel()
+                    if (mediaPauseeParJarvis) fr.dd.jarvis.service.JarvisNotificationListener.reprendreMediaApresVoix()
+                    mediaPauseeParJarvis = false
+                    // UN SEUL micro à la fois : l'écoute de la suite ne s'ouvre qu'une fois le micro de la « coupure de
+                    // parole » rendu et le son revenu du mode appel (annulation d'écho). Avant, la reconnaissance de Google
+                    // démarrait sur un micro encore pris ou en reconfiguration → « erreur 7 (après parole) » puis fin.
+                    // Bluetooth / autoradio : le son sort avec du retard (tampon A2DP) : on attend la fin réelle de la phrase.
+                    val delai = when { externe -> 1000L; etaitAppel -> 600L; b != null -> 300L; else -> 150L }
+                    main.postDelayed({ finVoix = System.currentTimeMillis(); onDone() }, delai)
+                }
             }
+            if (b != null) Thread({ b.stopEtAttendre(700); suite.run() }, "jarvis-fin-voix").start() else suite.run()
         }
     }
 
@@ -712,9 +859,11 @@ class VoiceManager(private val ctx: Context) {
     }
 
     fun release() {
+        synchronized(instances) { instances.remove(this) }
         sessionFin()
         main.post { main.removeCallbacks(unmuteLater); main.removeCallbacks(finFenetre); setMuted(false) }
         main.post {
+            annulerRelance()
             jeton++
             recognizer?.destroy()
             recognizer = null

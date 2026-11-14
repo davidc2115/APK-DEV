@@ -261,8 +261,10 @@ class ConversationVoiture private constructor(private val ctx: CarContext, priva
 
     private fun montrer(e: Etat) {
         if (fermee) return
-        val haut = ecrans.top
-        if (haut is EcranConversation) { haut.remplace = true; ecrans.pop() }
+        // ScreenManager.getTop() lève une NPE lorsque la pile est vide (fermeture/transition Android Auto).
+        // Une lecture protégée évite de faire planter le thread principal pendant une transition de lifecycle.
+        val haut = runCatching { ecrans.top }.getOrNull()
+        if (haut is EcranConversation) { haut.remplace = true; runCatching { ecrans.pop() } }
         ecrans.push(EcranConversation(ctx, this, e))
     }
 
@@ -342,7 +344,12 @@ class ConversationVoiture private constructor(private val ctx: CarContext, priva
 
     /** Appelé quand un écran de conversation disparaît : si on est revenu à l'accueil, la conversation se ferme. */
     fun ecranFerme() {
-        main.post { if (ecrans.top !is EcranConversation) fermer() }
+        main.post {
+            // getTop() n'est pas nullable dans l'API mais peut lancer une NPE si Android Auto
+            // a déjà vidé la pile avant le callback onDestroy.
+            val haut = runCatching { ecrans.top }.getOrNull()
+            if (haut !is EcranConversation) fermer()
+        }
     }
 }
 

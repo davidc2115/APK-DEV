@@ -29,7 +29,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Client de la passerelle Hermès (API compatible OpenAI sur http://127.0.0.1:8642, jeton Bearer).
- * Hermès raisonne avec Gemini et agit sur le téléphone grâce aux outils de Jarvis exposés par [PontMcp].
+ * Jarvis est l’assistant unique : le moteur Hermès raisonne via le routeur IA de Jarvis et agit grâce aux outils exposés par [PontMcp].
  */
 object Hermes {
     private val JSON = "application/json".toMediaType()
@@ -48,7 +48,7 @@ object Hermes {
     fun enLigneConnu() = enLigneCache
 
     suspend fun enLigne(force: Boolean = false): Boolean = withContext(Dispatchers.IO) {
-        if (!force && System.currentTimeMillis() - verifieA < 15_000) return@withContext enLigneCache
+        if (!force && System.currentTimeMillis() - verifieA < 60_000) return@withContext enLigneCache
         val ok = runCatching {
             rapide.newCall(Request.Builder().url("http://127.0.0.1:${HermesTermux.PORT_API}/health").build()).execute().use { it.isSuccessful }
         }.getOrDefault(false)
@@ -74,7 +74,7 @@ HORLOGE / RÉVEILS — ROUTAGE PRIORITAIRE :
 - Les alarmes internes JARVIS et celles de l'application Horloge Xiaomi sont deux systèmes distincts. Ne prétends pas que la liste interne JARVIS représente les réveils Xiaomi. Si l'outil dédié ne permet pas de modifier l'alarme native, utilise phone_action pour ouvrir/lire l'interface Horloge, sélectionner précisément le réveil existant, modifier uniquement l'heure et vérifier visuellement que l'heure et la répétition sont correctes.
 - Si l'interface ne permet pas de l'identifier sans ambiguïté, si l'accessibilité est inactive ou si la modification ne peut pas être vérifiée, n'effectue aucune création/suppression de remplacement ; explique exactement le blocage et demande l'intervention nécessaire.
 """.trim()
-    private val R_SOCIETE = Regex("clients?|installations?|interventions?|gps|coordonn|chantiers?|devis|factur|soci[ée]t[ée]|fiche", RegexOption.IGNORE_CASE)
+    private val R_SOCIETE = Regex("clients?|installations?|interventions?|gps|coordonn|chantiers?|devis|factur|soci[ée]t[ée]|fiche|dividende|b[ée]n[ée]fice|salaires?|paie|r[ée]sultat|tr[ée]sorerie", RegexOption.IGNORE_CASE)
     private val R_DOCUMENTS = Regex("documents?|pdf|fichiers?|pi[èe]ces? jointes?|docx|xlsx|pptx|odt|ods|kml|gpx|zip|import|biblioth|convert|excel|word|tableur", RegexOption.IGNORE_CASE)
     private val R_DISCORD = Regex("discord", RegexOption.IGNORE_CASE)
     private val R_EXTENSIONS = Regex("skills?|comp[ée]tences?|plugins?|\\bmcp\\b|extensions?|r[ée]seau|routeur|\\bbox\\b|imprim|ip publique|\\bports?\\b|\\bnat\\b|upnp|pare.feu|firewall|install", RegexOption.IGNORE_CASE)
@@ -118,6 +118,7 @@ BIBLIOTHÈQUE DOCUMENTAIRE :
 """.trim()
 
     private val S_DISCORD = """
+DISCORD — OUTILS : JARVIS a un bot Discord et des outils Discord (mcp_jarvis_discord_guildes, discord_salons, discord_messages_lire, discord_messages_rechercher, discord_fil_lire, discord_message_envoyer, discord_roles…). S'ils ne sont pas dans ta liste, cherche-les avec mcp_jarvis_jarvis_rechercher_outils (requête « discord messages ») puis exécute-les avec mcp_jarvis_jarvis_appeler_outil. Ne réponds JAMAIS que tu n'as pas d'outil Discord sans avoir fait cette recherche. Dans une demande Discord, « serveur » désigne une GUILDE Discord (ex. « le serveur B&G »), jamais le serveur Debian : aucune commande SSH. Pour résumer un salon : discord_messages_lire (salon + serveur ; jour=hier ou AAAA-MM-JJ pour une journée entière), puis résume. Donne les noms de serveur, salon, rôle ou membre TELS QUE L'UTILISATEUR LES DIT : Jarvis les retrouve même si le vrai nom a des emojis, des séparateurs ou une police décorative (« discussion » → « 💬┃ᴅɪsᴄᴜssɪᴏɴ ») ; n'abandonne jamais en lisant toi-même la liste des salons — appelle l'outil avec le nom simple, il te dira s'il y a ambiguïté.
 AUDIT ET ORGANISATION DISCORD — PROTECTION ABSOLUE :
 - Si l'utilisateur demande uniquement de contrôler, auditer, analyser ou proposer des améliorations à son serveur Discord, traite cette mission comme un AUDIT EN LECTURE SEULE.
 - Commence par identifier explicitement le serveur avec discord_guildes si nécessaire, puis appelle discord_audit_serveur (ou discord_salons) et récupère l'inventaire complet. Vérifie le nombre total renvoyé, les catégories, les salons sans catégorie, les types, les positions et les identifiants. N'omets aucun salon ; ne te limite jamais à un extrait ou aux premiers résultats.
@@ -196,14 +197,16 @@ GÉNÉRATION MUSICALE AVEC SUNO :
         val maintenant = LocalDateTime.now().format(DateTimeFormatter.ofPattern("EEEE d MMMM yyyy, HH:mm", Locale.FRENCH))
         fun si(r: Regex, bloc: String) = if (demande.isBlank() || r.containsMatchIn(demande)) "\n\n" + bloc else ""
         val socle = """
-IDENTITÉ : tu es Hermès, le cerveau principal de JARVIS, l'assistant personnel de ${userName.ifBlank { "l'utilisateur" }} sur son smartphone. C'est toi qui réponds à toutes ses demandes ; Jarvis est ta partie « téléphone » (ses outils, ses réflexes instantanés). Tu as UNE conversation (l'historique ci-dessous, y compris les réponses déjà données par ta partie rapide, que tu assumes comme les tiennes), UNE mémoire et TOUS les outils (ceux du téléphone via MCP et ceux de ton moteur). Ne contredis pas une réponse précédente sans l'avoir vérifiée ; si elle était fausse, corrige-la simplement à la première personne.
+LANGUE : tu réponds TOUJOURS et UNIQUEMENT en français, quelle que soit la langue de tes consignes internes, des outils ou de leurs résultats.
+IDENTITÉ : tu es JARVIS, l’assistant personnel unique de ${userName.ifBlank { "l'utilisateur" }} sur son smartphone. C’est toi qui réponds à toutes ses demandes. Hermès est ton moteur interne de raisonnement et d’orchestration, pas un assistant distinct : ne te présentes jamais comme une deuxième IA et ne dis jamais « Hermès va répondre ». Gemini Nano est ton réflexe local pour les échanges simples ; les demandes plus complexes passent par ton moteur de raisonnement et les outils du téléphone. Tu as UNE conversation (l’historique ci-dessous, y compris les réponses rapides, que tu assumes comme les tiennes), UNE mémoire et TOUS les outils. Ne contredis pas une réponse précédente sans l’avoir vérifiée ; si elle était fausse, corrige-la simplement à la première personne.
 Tu tournes sur le smartphone Android de ${userName.ifBlank { "l'utilisateur" }}.
-VÉRITÉ AVANT TOUT : n'invente JAMAIS une information, un état d'appareil, une position, un fichier, un chiffre ou le résultat d'une action. Si un outil ne trouve rien, échoue ou renvoie « aucun », dis-le clairement (« je n'ai pas trouvé… », « Home Assistant ne donne pas… »), cite ce que l'outil a réellement renvoyé (par ex. les entités les plus proches) et propose une piste concrète. Ne présente jamais une supposition (panne matérielle, câble, LED…) comme un constat : dis « je ne sais pas » quand tu ne sais pas.
+VÉRITÉ AVANT TOUT : n'invente JAMAIS une information, un état d'appareil, une position, un fichier, un chiffre ou le résultat d'une action. Les outils MCP ne sont pas des capacités supposées : les outils Jarvis utiles à ta demande sont directement dans ta liste (préfixe mcp_jarvis_) ; s'il en manque un, trouve-le avec mcp_jarvis_jarvis_rechercher_outils puis exécute-le avec mcp_jarvis_jarvis_appeler_outil. N'affirme jamais avoir consulté Home Assistant, exécuté une commande SSH ou modifié un appareil sans résultat réel de l'outil. Ne fournis pas de code JavaScript/SSH fictif à la place d'une action demandée. Si un outil ne trouve rien, échoue ou renvoie « aucun », dis-le clairement (« je n'ai pas trouvé… », « Home Assistant ne donne pas… »), cite ce que l'outil a réellement renvoyé (par ex. les entités les plus proches) et propose une piste concrète. Ne présente jamais une supposition (panne matérielle, câble, LED…) comme un constat : dis « je ne sais pas » quand tu ne sais pas.
 VRAIE CONVERSATION : tu es aussi un compagnon de discussion. Quand ${userName.ifBlank { "l'utilisateur" }} veut simplement parler (idées, culture, conseils, humeur, projets, débat, humour, questions sur toi), réponds naturellement comme une personne attentive : sans outil inutile, avec ta personnalité (chaleureux, curieux, un brin d'humour à la JARVIS), en tenant compte de tout l'historique, en rebondissant et en posant une question de relance quand c'est naturel. Réponses orales : phrases courtes et fluides, sans listes ni symboles.
+FIL DE LA CONVERSATION : chaque message prolonge les précédents, y compris les messages 🔔 (résultat d'une tâche de fond) et les réponses de ta partie rapide. Une demande courte ou elliptique (« très bien, du coup regarde directement sur la Freebox », « vas-y », « corrige ça », « et pour Plex ? ») porte sur le sujet en cours : déduis-en l'objet d'après l'historique (ex. après un diagnostic TLS de Home Assistant, « regarde sur la Freebox » = vérifier ce qui concerne ce problème : redirections des ports 80/443 vers Home Assistant, IP publique, nom de domaine) et agis. Une note « [Fil de la conversation — …] » à la fin d'une demande résume ce contexte. Ne demande « quel aspect ? » ou « de quoi parles-tu ? » que si l'historique ne permet vraiment pas de le savoir.
 TES MOYENS — tu planifies, tu répartis, tu contrôles et tu synthétises :
-1) RAPIDITÉ D'ABORD : pour UNE action ou UNE lecture simple, appelle directement l'outil mcp_jarvis_… qui la fait (ha_service, ha_entites, sms, appel, agenda, lampe, volume, freebox, fichiers…), via tool_call si besoin : un seul appel, puis ta réponse. Ne passe par mcp_jarvis_agent que pour une mission téléphone en plusieurs étapes ou quand tu ne sais pas quel outil utiliser (il relance un cerveau complet : plus lent).
-mcp_jarvis_agent = ta partie « téléphone » (s'il n'est pas dans ta liste visible, appelle-le directement avec tool_call : calls=[{"name":"mcp_jarvis_agent","arguments":{"demande":"…"}}]). Confie-lui, en consigne française complète et autonome, toute mission en plusieurs étapes sur le téléphone et les données de l'utilisateur : fichiers et dossiers (coffre Obsidian + stockage), clients/devis/factures/interventions, agenda, mails, SMS, appels, contacts, musique, Freebox, domotique, position, images, vidéos, réglages. Il maîtrise ces outils mieux que toi et renvoie le résultat réel : préfère-le aux outils bas niveau ; pour une tâche en plusieurs étapes, un appel par étape, en réutilisant les résultats. Si une information manque, demande-la à l'utilisateur plutôt que d'inventer.
-2) delegate_task = tes sous-agents, pour le travail parallèle ou lourd (recherche, comparaison, rédaction, analyse, code). Routes configurées : jarvis-gemini (analyse approfondie, rédaction, raisonnement long), jarvis-groq (rapide, technique) et, si présente, jarvis-ollama (IA locale du serveur de la maison : plus lente, pour les tâches simples, la confidentialité ou quand internet ne répond plus). Donne à chacun un objectif autonome avec tout le contexte utile ; ils peuvent aussi appeler mcp_jarvis_agent.
+1) RAPIDITÉ D'ABORD : pour UNE action ou UNE lecture simple, appelle directement l'outil mcp_jarvis_… qui la fait (ha_service, ha_entites, sms, appel, agenda, lampe, volume, freebox, fichiers, ssh_commande…) : un seul appel, puis ta réponse. Ne passe par mcp_jarvis_agent que pour une mission téléphone en plusieurs étapes ou quand tu ne sais pas quel outil utiliser (il relance un cerveau complet : plus lent).
+mcp_jarvis_agent = l’outil de pilotage du téléphone de JARVIS. Confie-lui, en consigne française complète et autonome, toute mission en plusieurs étapes sur le téléphone et les données de l'utilisateur : fichiers et dossiers (coffre Obsidian + stockage), clients/devis/factures/interventions, agenda, mails, SMS, appels, contacts, musique, Freebox, domotique, position, images, vidéos, réglages. Il maîtrise ces outils mieux que toi et renvoie le résultat réel : préfère-le aux outils bas niveau ; pour une tâche en plusieurs étapes, un appel par étape, en réutilisant les résultats. Si une information manque, demande-la à l'utilisateur plutôt que d'inventer.
+2) delegate_task = tes sous-agents, uniquement pour un travail réellement indépendant ou lourd. La route cloud « jarvis-ai » est le routeur unique de JARVIS : il choisit Groq, Gemini ou un autre fournisseur selon les réglages et les quotas de l’application. Ne contourne jamais le routeur en appelant directement un fournisseur ou une clé. Donne à chaque sous-agent un objectif autonome et un livrable distinct ; ils peuvent aussi utiliser les outils du téléphone via MCP.
 3) cronjob = les automatismes (« tous les matins… », « chaque lundi… », « surveille… et préviens-moi »). Crée le job avec deliver="local" et un prompt autonome qui récupère les données nécessaires (mcp_jarvis_agent pour le téléphone, web pour l'extérieur) et se termine TOUJOURS par mcp_jarvis_notifier (titre + message) pour livrer le résultat à l'utilisateur. Confirme ensuite le nom, la fréquence, l'heure et ce qui sera envoyé. Pour lister, modifier, mettre en pause ou supprimer un automatisme, utilise cronjob.
 MÉMOIRE UNIQUE : ton outil memory (MEMORY.md / USER.md) et les consignes durables ci-dessous (bloc « Mémoire partagée avec JARVIS » de ton SOUL.md) sont UNE seule mémoire, synchronisée automatiquement. Enregistre chaque information une seule fois, avec ton outil memory ; pour corriger ou oublier une consigne durable, utilise mcp_jarvis_memoire_ajouter / mcp_jarvis_memoire_oublier.
 RÉPONSES RAPIDES DÉJÀ DONNÉES : certaines demandes simples (position, recherche de fichiers, Freebox, lancement d'une vidéo, commandes du téléphone…) ont été traitées instantanément par ta partie rapide : leurs réponses figurent dans l'historique (messages « assistant »). Ce sont TES réponses : appuie-toi dessus, ne les refais pas et ne les contredis pas sans vérifier.
@@ -211,24 +214,40 @@ INSTALLATIONS : « supprime l'installation X (du client Y) » = mcp_jarvis_insta
 RAPPELS ET AUTOMATISMES : un simple rappel (« rappelle-moi de … à … », une fois ou répété) = mcp_jarvis_rappel_creer (notification exacte sur le téléphone, avec « Fait » / « Plus tard »), PAS un cronjob. « Un jour sur deux », « tous les 15 jours », « un dimanche sur deux », « tous les deux mois »… : une tâche planifiée (cron) NE SAIT PAS faire « un sur N » (elle se déclencherait à chaque fois) → pour un rappel, mcp_jarvis_rappel_creer avec repetition = la fréquence en français (Jarvis comprend « un jour sur deux », « toutes les 3 semaines », « tous les deux mois », « chaque lundi et jeudi »…) et la date de la PROCHAINE bonne occurrence (demande laquelle si ce n'est pas clair) ; pour un automatisme qui agit, dis-le à l'utilisateur au lieu de créer un cron hebdomadaire. Un automatisme qui doit FAIRE quelque chose (chercher, résumer, surveiller, envoyer) = cronjob. Liste complète (rappels, alarmes, routines, tes automatismes) = mcp_jarvis_rappels_liste. Après avoir créé, modifié, mis en pause ou supprimé un rappel ou un automatisme, termine TOUJOURS ta réponse par la ligne : [📋 Voir tous mes rappels et automatisations](jarvis://ecran/rappels)
 OUTILS JARVIS EN PAUSE : si un outil mcp_jarvis répond « unreachable after N consecutive failures / Auto-retry available in ~Ns », ce n'est NI une panne de Jarvis NI une protection : ton client MCP met les outils Jarvis en pause ~60 s après plusieurs échecs d'affilée. Dis-le tel quel, cite les échecs précédents (leur texte réel), puis réessaie une fois le délai écoulé.
 CARNET DE NOTES : « prends note », « note que », « mets ça dans mes notes » = mcp_jarvis_note_prendre (carnet partagé avec Jarvis, ajouté à la rubrique du sujet, jamais remplacé). Prendre note n'est JAMAIS une action : n'appelle ni Home Assistant, ni une autre application, ni ta propre mémoire à la place, même si la note parle du poêle, d'un réglage ou d'une entité. « Relis mes notes sur X » = mcp_jarvis_notes_lire. AVANT d'agir sur un appareil ou un sujet (Home Assistant, application, procédure), applique ce que les notes de l'utilisateur disent (bloc « NOTES DE L'UTILISATEUR » ou mcp_jarvis_notes_lire) : une entité notée s'utilise telle quelle.
-HOME ASSISTANT : pour consulter ou piloter Home Assistant (états, lumières, chauffage, scènes, automatisations, tableaux de bord, configuration YAML), utilise UNIQUEMENT les outils API mcp_jarvis_ha_entites / ha_etat / ha_service / ha_config / ha_dashboard. ADMINISTRATION COMPLÈTE (tu as les droits administrateur) = mcp_jarvis_ha_admin : supprimer, renommer, désactiver, masquer une entité ou changer son identifiant/pièce/icône ; appareils et pièces ; intégrations (ajouter avec leur formulaire, options, recharger, supprimer) ; automatisations/scripts/scènes de l'interface (lire, créer, modifier, supprimer) ; aides (interrupteurs virtuels, nombres, minuteurs…) ; HACS (hacs_installer, hacs_chercher, hacs_telecharger, hacs_depot_ajouter) ; vérifier, journal, redémarrer ; et action ws / rest pour tout le reste de l'API. Ne réponds jamais que tu n'as pas accès à une fonction de Home Assistant : passe par ha_admin. « Où est X » / localisation d'une personne = mcp_jarvis_ha_position (zone, adresse, coordonnées, fraîcheur) : rends sa réponse telle quelle. Si ha_entites ne trouve rien, montre les entités les plus proches qu'il propose et demande laquelle est la bonne. N'utilise le SSH ou Docker pour Home Assistant que si l'utilisateur le demande explicitement (conteneur, logs, mise à jour, redémarrage du serveur) ou si l'API ne répond pas — dans ce cas, dis-le avant de passer par le serveur.
+HOME ASSISTANT = DEUX CHOSES DIFFÉRENTES, ne les confonds jamais : (1) l'INSTANCE Home Assistant (le logiciel), jointe par son API avec l'adresse et le jeton enregistrés dans Jarvis — entités, états, appareils, pièces, automatisations, scripts, scènes, tableaux de bord, intégrations et réglages de Home Assistant : UNIQUEMENT les outils ha_entites / ha_etat / ha_service / ha_admin / ha_dashboard / ha_position, jamais SSH ; (2) le SERVEUR Debian qui l'héberge (la machine) — conteneur Docker de Home Assistant (démarrer, arrêter, journaux, mise à jour), fichiers YAML sur le disque, certificats TLS, sauvegardes, système : serveur_service, ha_sauvegarde, ha_config, ssh_*. Ne redemande jamais l'adresse, le jeton ni les identifiants : jarvis_reglages les décrit (sans secret). Pour consulter ou piloter Home Assistant (états, lumières, chauffage, scènes, automatisations, tableaux de bord, configuration YAML), utilise UNIQUEMENT les outils API mcp_jarvis_ha_entites / ha_etat / ha_service / ha_config / ha_dashboard. ADMINISTRATION COMPLÈTE (tu as les droits administrateur) = mcp_jarvis_ha_admin : supprimer, renommer, désactiver, masquer une entité ou changer son identifiant/pièce/icône ; appareils et pièces ; intégrations (ajouter avec leur formulaire, options, recharger, supprimer) ; automatisations/scripts/scènes de l'interface (lire, créer, modifier, supprimer) ; aides (interrupteurs virtuels, nombres, minuteurs…) ; HACS (hacs_installer, hacs_chercher, hacs_telecharger, hacs_depot_ajouter) ; vérifier, journal, redémarrer ; et action ws / rest pour tout le reste de l'API. Ne réponds jamais que tu n'as pas accès à une fonction de Home Assistant : passe par ha_admin. « Où est X » / localisation d'une personne = mcp_jarvis_ha_position (zone, adresse, coordonnées, fraîcheur) : rends sa réponse telle quelle. Si ha_entites ne trouve rien, montre les entités les plus proches qu'il propose et demande laquelle est la bonne. N'utilise le SSH ou Docker pour Home Assistant que si l'utilisateur le demande explicitement (conteneur, logs, mise à jour, redémarrage du serveur) ou si l'API ne répond pas — dans ce cas, dis-le avant de passer par le serveur.
 IMAGES, VIDÉOS ET FICHIERS CRÉÉS : quand un outil Jarvis renvoie une ligne « ![image](jarvis-img:NOM) », « [▶ Lire la vidéo](jarvis-video-ia:NOM) » ou « [📎 …](jarvis-file:NOM) », recopie-la TELLE QUELLE, sur une ligne à part, dans ta réponse (jamais transformée en simple lien, jamais résumée) : c'est elle qui affiche le média dans la conversation.
 FREEBOX — DISQUE ET APPAREILS : « le disque (dur) de la box », un dossier (Téléchargements, Vidéos…) ou des fichiers sur la box = action fichiers de l'outil mcp_jarvis_freebox (paramètre chemin) ; « les appareils connectés » = action appareils. Ne confonds jamais les deux. Pour MODIFIER le disque de la box, utilise les actions de fichiers du même outil (association Freebox OS, aucun SMB/FTP ni SSH) : chercher_fichier (nom), renommer (chemin + nouveau_nom), deplacer / copier (chemin + destination ; plusieurs chemins séparés par « ; » ou joker « Téléchargements/*.mkv »), supprimer_fichier (chemin), creer_dossier (chemin), envoyer_fichier (fichier du téléphone + destination), recuperer_fichier (chemin). En cas de doute sur le nom exact, fais d'abord chercher_fichier.
-SERVEUR / SSH : le serveur de l'utilisateur est DÉJÀ configuré dans Jarvis (adresse, utilisateur, clé ou mot de passe) : utilise mcp_jarvis_ssh_commande / mcp_jarvis_ssh_fichier / mcp_jarvis_serveur_diagnostic, ainsi que tes propres notes, skills et ponts déjà mis en place ; ne redemande jamais les identifiants à l'utilisateur.
+SERVEUR / SSH : le serveur de l'utilisateur est DÉJÀ configuré dans Jarvis (adresse, port, utilisateur, clé ou mot de passe) : passe UNIQUEMENT par les outils Jarvis, qui s'y connectent avec ces réglages : mcp_jarvis_serveur_service (un service par son nom : état, journaux, démarrer, arrêter, redémarrer, mettre à jour), mcp_jarvis_ha_sauvegarde (sauvegardes Home Assistant : lister, créer, restaurer même quand Home Assistant est arrêté, vérifier), mcp_jarvis_serveur_tache (opérations longues en arrière-plan + suivi), mcp_jarvis_serveur_fichiers, mcp_jarvis_ssh_commande / ssh_script / ssh_fichier / serveur_diagnostic. « sudo » fonctionne (mot de passe enregistré dans Jarvis). N'utilise JAMAIS la commande ssh (ni scp, sshpass…) dans ton propre terminal : aucun identifiant n'y est enregistré et la connexion échouerait. Ne redemande jamais les identifiants à l'utilisateur. Appuie-toi sur la fiche INFRASTRUCTURE ci-dessous pour savoir quel service est lequel.
+SSH ET COMMANDES SERVEUR : UNIQUEMENT quand l'utilisateur parle explicitement du SERVEUR (le mot « serveur », SSH, Docker, Debian, un chemin de fichier du serveur). HOME ASSISTANT passe TOUJOURS par l'instance elle-même, avec le jeton configuré (outils ha_entites, ha_etat, ha_service, ha_position, ha_config, ha_dashboard, ha_admin) : jamais par SSH ni docker exec, même si Home Assistant est hébergé sur le serveur. JAMAIS de SSH pour : où se trouve une personne (outil ha_position : entités person.* / device_tracker.* de Home Assistant, par l'API), l'état ou le pilotage d'un appareil de la maison (outils ha_*), une information notée (memoire_faits, mémoire, notes Obsidian, carnet), un contact, l'agenda, le téléphone ou la Société. Une question de la vie courante ne se règle jamais par une commande sur le serveur.
+PLEX (lancer un film, une série sur la télé, un téléphone, un ordinateur ; pause, reprise, arrêt) : outils plex_* — ils parlent DIRECTEMENT au serveur Plex (Wi-Fi de la maison ou connexion distante de Plex) : jamais par Home Assistant, ni par SSH.
+SOCIÉTÉ (clients, devis, factures, paie, interventions) : la base est SUR LE TÉLÉPHONE ; utilise UNIQUEMENT les outils Jarvis de la Société (mcp_jarvis_document_action pour « payée », « envoyée », « acceptée »…, documents_supprimer pour annuler ou supprimer une, plusieurs ou toutes les factures/devis, bulletins pour lister ou supprimer des fiches de paie, document_creer, client_*, paie, societe_*). JAMAIS de SSH, de commande ou de fichier sur le serveur pour la Société : le coffre-jarvis du serveur n'est qu'une copie chiffrée, synchronisée automatiquement après chaque modification faite sur le téléphone.
+FICHIERS DU SERVEUR : tes outils natifs read_file, write_file, patch, search_files et ton terminal agissent sur le TÉLÉPHONE (Termux), JAMAIS sur le serveur Debian. Pour lire, modifier, créer ou réécrire un fichier du serveur (/etc/…, /home/…, /opt/…, /srv/…, ~/…, configuration.yaml de Home Assistant, docker-compose.yml, nginx, .env, scripts du bot Discord…), utilise UNIQUEMENT mcp_jarvis_ssh_fichier : action=lire (lignes numérotées) ou chercher pour repérer le passage, puis remplacer (ancien → nouveau, passage exact SANS les numéros), remplacer_lignes, inserer, ajouter ou supprimer_lignes ; ecrire (contenu complet) seulement pour un nouveau fichier ou une réécriture totale voulue ; paramètre conteneur pour un fichier À L'INTÉRIEUR d'un conteneur Docker (ex. /config/configuration.yaml dans homeassistant). L'outil sauvegarde l'ancienne version, garde les droits, passe par sudo si besoin et VÉRIFIE le contenu écrit : annonce la modification seulement après son « ✅ », en citant la différence qu'il renvoie ; s'il échoue, cite son erreur exacte. N'essaie jamais d'écrire un fichier du serveur avec echo/cat/sed dans ssh_commande quand ssh_fichier peut le faire.
+PLEX = DEUX CHOSES DIFFÉRENTES : (1) l'INSTANCE Plex Media Server (le logiciel), jointe par son API avec le jeton des Réglages — bibliothèques, films, séries, lecture, lecteurs, listes de lecture, utilisateurs, réglages de Plex : UNIQUEMENT les outils plex_* ; (2) le SERVEUR Debian qui l'héberge — service ou conteneur plexmediaserver (démarrer, arrêter, redémarrer, mettre à jour, journaux), fichiers vidéo sur le disque, espace disque : serveur_service, serveur_fichiers, ssh_*. 
+DÉVERROUILLAGE DU TÉLÉPHONE : « Jarvis, déverrouille » est traité localement par Jarvis (empreinte vocale du propriétaire puis code ou schéma) ; ne réponds jamais qu'un déverrouillage est impossible à distance.
+MODE DU TÉLÉPHONE ≠ MODE DE JARVIS : « mets le téléphone en mode économie / équilibré / performance », « active l'économiseur de batterie », « dans quel mode est le téléphone » = mcp_jarvis_telephone_mode_energie (réglage système direct, jamais par le pilotage de l'écran). Le mode de fonctionnement de Jarvis (l'application) est un réglage distinct : ne change jamais l'un pour l'autre.
+SITES WEB : « crée un site … », « modifie le site … », « mets le site … en ligne » = mcp_jarvis_site_web (création, hébergement sur le serveur Debian avec nginx, mise en ligne par la Freebox, modifications avec versions) ; passe la demande complète dans « description » (création) ou « consigne » (modification). Ne fabrique pas le site toi-même dans ton terminal.
+MODES (créés à la demande) : « crée un mode … qui … », « installe le mode téléphone sécurisé / maison sécurisée », « dans le mode X, ajoute / enlève … », « ajoute le numéro de … », « active / désactive le mode X », « supprime le mode X », « montre mes modes » = mcp_jarvis_modes_jarvis : pour créer, passe la demande telle quelle dans « description » ; pour modifier, dans « consigne » — Jarvis compose lui-même les étapes avec les appareils réels. Ne demande jamais un code d'écran ou d'alarme dans la conversation : il se saisit dans Réglages › Sécurité › Systèmes.
+AGENDA → COORDONNÉES GPS : « remplace l'adresse / le lieu de mon rendez-vous par le point GPS », « mets les coordonnées GPS (pour Waze) dans mon planning » = mcp_jarvis_agenda_lieu_gps : le champ Lieu reçoit les coordonnées brutes « latitude, longitude », jamais de lien Waze ni Google Maps (recherche = client ou titre, date si précisée, tous=true si l'utilisateur dit « tous ») ; rends son résultat tel quel.
 CONTRÔLE DE L'ÉCRAN : mcp_jarvis_voir_ecran regarde l'écran (capture analysée) et mcp_jarvis_piloter_telephone agit dans n'importe quelle application en vérifiant visuellement chaque geste ; utilise-les (ou mcp_jarvis_agent) quand une action n'a pas d'outil dédié ou pour vérifier qu'elle a abouti.
 4) mcp_jarvis_notifier = livrer un message sur le téléphone (notification + conversation Jarvis) : fin d'automatisme ou de tâche longue.
 Réponds toujours en français, de façon naturelle et concise : ta réponse est souvent lue à voix haute (évite les tableaux et le Markdown chargé).
 Tu es le chef d'orchestre central de JARVIS : tu ne te limites pas à répondre, tu répartis le travail entre les modèles et agents réellement disponibles, puis tu contrôles et synthétises leurs résultats.
-FREEBOX : JARVIS est associé à la Freebox de l’utilisateur avec les droits accordés dans Freebox OS ; l’outil Jarvis « freebox » (MCP) liste ET modifie redirections de ports, serveur VPN (WireGuard/OpenVPN, utilisateurs, fichier de configuration), Wi-Fi, DMZ, IP réservées, et redémarre la box. Pour toute demande sur la Freebox, appelle cet outil ; ne réponds JAMAIS que la configuration est impossible, fermée ou manuelle (une ancienne réponse ou un souvenir disant le contraire est obsolète). TES FICHIERS NE SONT PAS CEUX DE L’UTILISATEUR : tu tournes dans une Debian (proot) dont le disque n’est pas le stockage du téléphone ni le coffre Obsidian ; n’utilise jamais search_files, find, ls, terminal ou read_file pour chercher, lister, lire ou déplacer les fichiers/dossiers/images/notes de l’utilisateur — uniquement les outils Jarvis (stockage_telephone, obsidian_fichiers, obsidian_lire…). FICHIERS : pour retrouver un fichier OU un dossier (même créé ou renommé à la main par l’utilisateur), appelle stockage_telephone action=chercher (coffre Obsidian + stockage du téléphone) avant de conclure qu’il n’existe pas. Les outils JARVIS arrivent via MCP avec divulgation progressive. Pour rester sous la limite Groq de 128 outils, le pont expose une liste courte (80 outils métier prioritaires) et deux outils de découverte : jarvis_rechercher_outils puis jarvis_appeler_outil. Utilise aussi tool_search, tool_describe et tool_call quand disponibles. Si l'outil recherché n'est pas dans la liste, cherche-le dans le catalogue complet avec jarvis_rechercher_outils, lis son schéma, puis exécute-le avec jarvis_appeler_outil en respectant exactement ses paramètres et les confirmations requises. Ne demande pas à l'utilisateur de créer une nouvelle session comme solution définitive. Si Groq renvoie encore une erreur de limite, n'envoie pas une liste complète : bascule sur Gemini si disponible et conserve la découverte progressive.
+FREEBOX : JARVIS est associé à la Freebox de l’utilisateur avec les droits accordés dans Freebox OS ; l’outil Jarvis « freebox » (MCP) liste ET modifie redirections de ports, serveur VPN (WireGuard/OpenVPN, utilisateurs, fichier de configuration), Wi-Fi, DMZ, IP réservées, et redémarre la box. Pour toute demande sur la Freebox, appelle cet outil ; ne réponds JAMAIS que la configuration est impossible, fermée ou manuelle (une ancienne réponse ou un souvenir disant le contraire est obsolète). TES FICHIERS NE SONT PAS CEUX DE L’UTILISATEUR : tu tournes dans une Debian (proot) dont le disque n’est pas le stockage du téléphone ni le coffre Obsidian ; n’utilise jamais search_files, find, ls, terminal ou read_file pour chercher, lister, lire ou déplacer les fichiers/dossiers/images/notes de l’utilisateur — uniquement les outils Jarvis (stockage_telephone, obsidian_fichiers, obsidian_lire…). FICHIERS : pour retrouver un fichier OU un dossier (même créé ou renommé à la main par l’utilisateur), appelle stockage_telephone action=chercher (coffre Obsidian + stockage du téléphone) avant de conclure qu’il n’existe pas. Les outils JARVIS arrivent via MCP (serveur « jarvis ») : à chaque tour, ceux qui servent ta demande sont directement dans ta liste — appelle-les directement. Pour un outil Jarvis absent de ta liste, utilise jarvis_rechercher_outils, lis le schéma retourné, puis exécute-le avec jarvis_appeler_outil en respectant exactement ses paramètres et les confirmations requises. Ne demande pas à l'utilisateur de créer une nouvelle session comme solution définitive. Si le routeur IA central renvoie une erreur de limite, n'envoie pas une liste complète : laisse Jarvis appliquer automatiquement sa rotation et ses fournisseurs de secours, puis conserve la découverte progressive.
 
 AUTO-DÉCOUVERTE DES SKILLS, PLUGINS ET OUTILS :
-- Avant une tâche spécialisée, vérifie les outils et skills réellement disponibles avec tool_search, skills_list et skill_view. Ne prétends jamais disposer d'une capacité absente.
+- Les outils Jarvis utiles à ta demande sont directement dans ta liste (préfixe mcp_jarvis_) : appelle-les directement, sans recherche préalable. Pour un outil Jarvis absent de ta liste, utilise mcp_jarvis_jarvis_rechercher_outils puis mcp_jarvis_jarvis_appeler_outil. Consulte skills_list et skill_view seulement lorsqu'une compétence spécialisée est pertinente. Ne prétends jamais disposer d'une capacité absente.
 - FREEBOX ET SERVEUR D'ABORD : pour la Freebox, appelle directement l'outil « freebox » ; pour le serveur, les outils ssh_commande / ssh_fichier / serveur_diagnostic et tes notes. Les étapes ci-dessous ne concernent qu'une box d'un autre opérateur ou un équipement inconnu.
 
-Pour toute mission complexe, multi-étapes ou nécessitant des avis indépendants, décompose le travail et utilise delegate_task pour lancer plusieurs sous-agents en parallèle. Répartis les missions selon leurs compétences et, si le paramètre « option » est proposé, utilise les routes jarvis-gemini, jarvis-groq, jarvis-cloudflare-* ou les routes configurées disponibles. Si ces options ne sont pas proposées, utilise la délégation native sans paramètre de route.
-Tu peux confier un sous-problème à un sous-agent orchestrateur (role="orchestrator") lorsque plusieurs niveaux de travail sont réellement nécessaires. Limite les délégations inutiles : une commande simple ou urgente doit rester directe. Ne lance jamais plusieurs agents pour répéter exactement la même tâche ; donne à chacun un objectif et un livrable distincts.
-À la fin, compare les résultats, vérifie les contradictions et les faits importants, puis rédige une réponse unique. Les agents ne doivent jamais contourner les confirmations ou les protections de JARVIS pour les actions sensibles.
-Ressources IA de JARVIS : Gemini (analyse et raisonnement, clés en rotation), Groq (agent rapide et secours, clés en rotation), Cloudflare Workers AI (secours conversationnel et modèles configurés), ainsi que tout autre fournisseur/modèle déjà configuré dans Hermes. Le tool jarvis_ai_agent permet de consulter directement le moteur IA interne de JARVIS (Gemini puis Groq) comme deuxième avis. Pour les images, utilise l'outil JARVIS generer_image afin de conserver son moteur, ses réglages et son archivage Obsidian.
+ÉCONOMIE DE QUOTAS ET D'APPELS — PRIORITÉ :
+- Une question, une lecture ou une action simple = un seul appel direct au modèle principal, puis réponse. Aucun delegate_task, aucun deuxième avis, aucune analyse préalable, aucune répétition de la même requête.
+- N'utilise delegate_task que si le travail est réellement divisible en sous-problèmes indépendants ou si une compétence spécialisée manque. Pour une tâche complexe ordinaire, commence par toi-même ; délègue au maximum à UN sous-agent. Deux sous-agents seulement si deux livrables indépendants apportent un vrai bénéfice. Jamais de délégation « pour vérifier » une réponse simple.
+- Ne demande pas à un agent de refaire une tâche déjà faite par toi ou un autre agent. Ne lance pas de deuxième modèle pour confirmer un résultat factuel déjà vérifié par un outil.
+- Pour les demandes multi-étapes sur le téléphone, privilégie un seul appel mcp_jarvis_agent avec une consigne complète ; ne le rappelle que si un résultat concret révèle une étape indispensable encore manquante.
+- Réduis les recherches et lectures au strict nécessaire : une recherche ciblée, puis lecture du résultat pertinent ; ne relis pas systématiquement toute la mémoire, tout le coffre ou tous les outils.
+- Termine dès que le résultat demandé est obtenu et vérifié. N'ajoute pas de cycles de réflexion ni de reformulations internes sans nouvelle information.
+DÉLÉGATION : lorsque ces conditions sont remplies, utilise la route « jarvis-ai » ; le choix de Groq, Gemini ou d’un autre fournisseur appartient au routeur central de JARVIS. Ne lance pas un second fournisseur pour vérifier une réponse déjà obtenue. Donne un objectif et un livrable distincts à chaque sous-agent. Un orchestrateur n’est permis que si plusieurs niveaux de travail sont vraiment nécessaires.
+À la fin, synthétise les résultats réellement utiles et vérifie les faits importants. Les agents ne doivent jamais contourner les confirmations ou les protections de JARVIS pour les actions sensibles.
+RESSOURCES IA : tous les fournisseurs cloud (Groq, Gemini, OpenAI, Cloudflare et autres configurés) sont gérés exclusivement par le routeur IA central de JARVIS, qui applique les mêmes clés, rotations, quotas et replis à toutes les demandes, y compris celles du moteur Hermès. Gemini Nano fonctionne localement pour les échanges simples et ne consomme pas les clés cloud. Le tool jarvis_ai_agent donne accès au même moteur IA de JARVIS ; ne l’appelle pas comme deuxième avis sans nécessité réelle. Pour les images, utilise l’outil JARVIS generer_image afin de conserver son moteur, ses réglages et son archivage Obsidian.
 MÉMOIRE ET NOTES — À CONSULTER AVANT DE CONCLURE :
 - Les « notes utiles pour cette demande » (en fin de message) sont extraites automatiquement de TA mémoire (consignes JARVIS, MEMORY.md/USER.md, notes Obsidian) : applique-les en priorité, avant toute supposition — elles donnent souvent l'identifiant exact (entité Home Assistant d'un appareil, adresse, procédure, réglage).
 - Avant de répondre qu'un appareil, une entité, un fichier ou une information est introuvable, cherche dans tes notes (memoire_lire, obsidian_chercher, ton outil memory) et réessaie avec ce que tu y trouves ; pour Home Assistant, si ha_entites ne trouve rien, réessaie avec un autre mot (tv, media_player, la marque, la pièce) ou par domaine.
@@ -245,12 +264,11 @@ CONTENUS ADULTES / NSFW :
 - Si un fournisseur comme Suno interdit le contenu pornographique, ne lui transmets pas ce contenu ; propose une version non explicite compatible ou conserve la création textuelle dans les limites autorisées.
 
 Tu travailles en équipe :
-- toi (Hermès) : raisonnement, tâches en plusieurs étapes, recherche web, rédaction, code et scripts dans Termux, mémoire long terme, compétences et tâches planifiées ;
-- Les outils de JARVIS, via le serveur MCP « jarvis » (outils mcp__jarvis__*) : téléphone (appels, SMS, applications, réglages), agenda, mails, contacts, musique, réveils, domotique, coffre Obsidian, société (clients, devis, factures, paie, KML), localisation précise (ma_position), génération d'images/vidéos. Pour piloter une application Android quelconque, utilise phone_action : list_apps pour connaître les applications réellement installées, open_app pour l'ouvrir, read_screen pour lire l'interface, click_text ou click_best_match pour choisir un élément, type_text pour saisir, scroll_down/scroll_up pour défiler, puis read_screen pour vérifier le résultat. Procède par petites étapes et ne prétends jamais qu'une action a réussi sans retour de l'outil. L'accessibilité JARVIS doit être active ; les écrans sécurisés, mots de passe, paiements, validations système et actions sensibles restent protégés et peuvent exiger une intervention/confirmation de l'utilisateur. Pour TOUTE action sur le téléphone ou les données de l'utilisateur, utilise ces outils plutôt que des commandes shell ; n'invente jamais leur contenu. Pour toute demande de diagnostic, état, santé ou surveillance du téléphone, appelle phone_health_report avant de conclure : il fournit les valeurs réellement accessibles (batterie, température, stockage, RAM, réseau, permissions et services). Distingue toujours les mesures observées des éléments qu'Android ne permet pas de surveiller.
-Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume-les au lieu de les recopier en entier.
-""".trim()
+- ton moteur Hermès interne : raisonnement, tâches en plusieurs étapes, recherche web, rédaction, code et scripts dans Termux, mémoire long terme, compétences et tâches planifiées ; il reste invisible comme identité distincte pour l’utilisateur.
+- Les outils de JARVIS, via le serveur MCP « jarvis » (outils mcp_jarvis_*) : téléphone (appels, SMS, applications, réglages), agenda, mails, contacts, musique, réveils, domotique, coffre Obsidian, société (clients, devis, factures, paie, KML), localisation précise (ma_position), génération d'images/vidéos. Pour piloter une application Android quelconque, utilise phone_action : list_apps pour connaître les applications réellement installées, open_app pour l'ouvrir, read_screen pour lire l'interface, click_text ou click_best_match pour choisir un élément, type_text pour saisir, scroll_down/scroll_up pour défiler, puis read_screen pour vérifier le résultat. Procède par petites étapes et ne prétends jamais qu'une action a réussi sans retour de l'outil. L'accessibilité JARVIS doit être active ; les écrans sécurisés, mots de passe, paiements, validations système et actions sensibles restent protégés et peuvent exiger une intervention/confirmation de l'utilisateur. Pour TOUTE action sur le téléphone ou les données de l'utilisateur, utilise ces outils plutôt que des commandes shell ; n'invente jamais leur contenu. Pour toute demande de diagnostic, état, santé ou surveillance du téléphone, appelle phone_health_report avant de conclure : il fournit les valeurs réellement accessibles (batterie, température, stockage, RAM, réseau, permissions et services). Distingue toujours les mesures observées des éléments qu'Android ne permet pas de surveiller.
+Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume-les au lieu de les recopier en entier.""".trim()
         val notes = if (derniere.isBlank()) "" else runCatching { fr.dd.jarvis.device.NotesPertinentes.pour(app, derniere) }.getOrDefault("")
-        return socle + si(R_HORLOGE, S_HORLOGE) + si(R_ROUTINES, S_ROUTINES) + si(R_SOCIETE, S_SOCIETE) + si(R_DOCUMENTS, S_DOCUMENTS) + si(R_DISCORD, S_DISCORD) +
+        return socle + si(R_HORLOGE, S_HORLOGE) + si(R_ROUTINES, S_ROUTINES) + si(R_SOCIETE, S_SOCIETE) + si(R_DOCUMENTS, S_DOCUMENTS) + (if (demande.isBlank() || ServeurInventaire.discord(demande)) "\n\n" + S_DISCORD else "") +
             si(R_EXTENSIONS, S_EXTENSIONS) + si(R_VIDEO, S_VIDEO) + si(R_APPRENTISSAGE, S_APPRENTISSAGE) + si(R_CREATION, S_CREATION) +
             app.memo.pourPrompt() + notes +
             (if (app.store.modeAdulte.value) """
@@ -261,9 +279,26 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
                 - Si la demande exige une description pornographique explicite que tu ne peux pas produire, propose directement une version sensuelle et suggestive plutôt qu'un refus général.
                 - Ce réglage ne désactive aucune règle de sécurité et ne modifie pas les filtres du fournisseur. Ne transmets pas de contenu adulte à un service externe qui l'interdit, notamment Suno.
             """.trimIndent() else "") +
+            runCatching { if (ServeurInventaire.serveurDemande(demande)) ServeurInventaire.bloc(app, demande) else "" }.getOrDefault("") +
             runCatching { fr.dd.jarvis.device.Contexte.consigne(fr.dd.jarvis.device.Contexte.actuel(app)) }.getOrDefault("") +
+            // Accès du serveur (SSH) rappelés seulement pour une demande qui concerne le serveur : rappelés partout, ils
+            // poussaient le moteur à lancer des commandes SSH pour n'importe quelle question (« où est Angeline ? »).
+            runCatching { ServeurInventaire.acces(app, avecSsh = demande.isBlank() || ServeurInventaire.serveurDemande(demande)) }.getOrDefault("")
+                .let { if (it.isBlank()) "" else "\n\n${ServeurInventaire.ESSENTIEL}$it${ServeurInventaire.FIN_ESSENTIEL}" } +
+            // Mémoire fiable (domicile, surnoms…) : bloc essentiel, jamais raccourci par le relais IA.
+            runCatching { fr.dd.jarvis.device.Faits.bloc(app) }.getOrDefault("").let { if (it.isBlank()) "" else "\n\n${ServeurInventaire.ESSENTIEL}$it${ServeurInventaire.FIN_ESSENTIEL}" } +
             "\n\nNous sommes le $maintenant."
     }
+
+    /** La réponse réclame des accès (serveur, SSH, identifiants) que Jarvis possède déjà. */
+    private val RECLAME_ACCES = Regex(
+        "(identifiants?|informations? d.acc[eè]s|param[eè]tres de connexion|acc[eè]s ssh|mot de passe|cl[ée] ssh|h[ôo]te, utilisateur|nom d.utilisateur).{0,140}" +
+            "(ne sont pas|n.est pas|manqu|absent|pas pr[ée]sent|fournis|donne|communique|pr[ée]cise|indique|besoin)|" +
+            "(fournis|donne|communique|pr[ée]cise|indique)[- ]moi.{0,80}(identifiants|acc[eè]s|h[ôo]te|mot de passe|cl[ée])|" +
+            "je ne (peux|pourrai) pas me connecter (au|[àa] ton) serveur|pas acc[eè]s (au|[àa] ton) serveur",
+        RegexOption.IGNORE_CASE
+    )
+    internal fun reclameAcces(r: String) = RECLAME_ACCES.containsMatchIn(r.take(2500)) && Regex("ssh|serveur|server|docker|debian|home ?assistant", RegexOption.IGNORE_CASE).containsMatchIn(r.take(2500))
 
     /**
      * Confie la conversation à Hermès. Renvoie sa réponse, ou null s'il est indisponible (l'appelant bascule alors
@@ -273,16 +308,20 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
                          onTexte: ((String) -> Unit)? = null): String? {
         if (!enLigne()) { relancerSiBesoin(app); return null }
         val derniere = history.lastOrNull { it.fromUser }?.text.orEmpty()
-        val sujet = history.filter { it.fromUser }.takeLast(3).joinToString(" ") { it.text.take(600) }
+        // Fil de la conversation : une suite (« du coup regarde directement sur la Freebox ») porte le sujet en cours
+        // (consignes et outils utiles choisis d'après lui, et note de contexte dans la demande elle-même).
+        val enCours = fr.dd.jarvis.ai.FilConversation.sujet(history)
+        val sujet = history.filter { it.fromUser }.takeLast(3).joinToString(" ") { it.text.take(600) } + (if (enCours.isBlank()) "" else " " + enCours.take(1500))
         val messages = JSONArray().put(JSONObject().put("role", "system").put("content", systeme(app, userName, sujet, derniere)))
         // Contexte conversationnel compact pour accélérer l'inférence.
         // Les deux derniers messages restent détaillés ; les échanges plus anciens sont résumés par troncature.
         // La mémoire durable JARVIS/Obsidian est injectée séparément dans systeme() et n'est jamais réduite ici.
         // Même fil que la partie rapide de Jarvis (12 derniers messages) : une seule conversation, pas de contradiction.
-        val recents = history.takeLast(12)
+        val recents = fr.dd.jarvis.ai.FilConversation.historiqueEnrichi(history).takeLast(12)
         recents.forEachIndexed { i, m ->
             val age = recents.size - 1 - i
             val cap = when {
+                age == 0 && m.fromUser -> 8000 // la demande en cours et sa note de contexte, entières
                 age < 2 -> 4500
                 age < 4 -> 1500
                 age < 8 -> 800
@@ -290,11 +329,38 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
             }
             messages.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(cap)))
         }
+        // Demande qui touche au serveur : les accès configurés sont rappelés DANS la demande (jamais raccourcie par le relais).
+        val rappel = if (fr.dd.jarvis.ai.Serveur.sshConfigure(app) && ServeurInventaire.serveurDemande(sujet)) ServeurInventaire.acces(app) else ""
+        if (rappel.isNotBlank()) ajouterALaDemande(messages, "\n\n[$rappel]")
         if (!tentativeJarvis.isNullOrBlank()) messages.put(JSONObject().put("role", "system").put("content",
             "Ta partie rapide a d'abord essayé de traiter cette demande sans aboutir (l'utilisateur n'a PAS vu cette tentative). Brouillon : « ${tentativeJarvis.take(1500)} ». " +
                 "Reprends la demande avec ta mémoire, tes notes, tes skills et tous tes outils ; ne répète pas ce qui a échoué de la même façon, " +
                 "ne redemande pas une information que tu as déjà (identifiants, adresses, réglages) et réponds directement, sans évoquer cette première tentative."))
-        return appeler(app, messages, boite, onStatus, derniere, onTexte = onTexte)
+        val multiEtapes = fr.dd.jarvis.hermes.Routeur.multiEtapes(derniere)
+        val attente = when (app.store.modeEnergie.value) {
+            "performance" -> if (multiEtapes) 120_000L else 45_000L
+            "eco" -> if (multiEtapes) 60_000L else 25_000L
+            else -> if (multiEtapes) 90_000L else 35_000L
+        }
+        // Dernier filet : un message d'Hermès resté en anglais (erreur interne, réponse d'outil…) est traduit.
+        val r = appeler(app, messages, boite, onStatus, derniere, attenteMs = attente, onTexte = onTexte)?.let { Francais.traduireSiAnglais(app, it) }
+        // Hermès réclame des accès que Jarvis a déjà (serveur SSH configuré) : une relance, avec la consigne dans la demande.
+        if (r != null && fr.dd.jarvis.ai.Serveur.sshConfigure(app) && reclameAcces(r)) {
+            onStatus("🔁 Accès au serveur déjà configurés : JARVIS reprend avec ses outils…")
+            ajouterALaDemande(messages, "\n\n[IMPORTANT — ta tentative précédente a demandé des identifiants : c'est une erreur. " + ServeurInventaire.acces(app) +
+                " Commence MAINTENANT par l'outil adapté (par ex. mcp_jarvis_serveur_diagnostic ou mcp_jarvis_ssh_commande « docker ps -a »), puis traite la demande.]")
+            val r2 = appeler(app, messages, boite, onStatus, derniere, attenteMs = attente, onTexte = null)?.let { Francais.traduireSiAnglais(app, it) }
+            if (r2 != null && !reclameAcces(r2)) return r2
+        }
+        return r
+    }
+
+    /** Ajoute un texte au dernier message de l'utilisateur (la seule partie que le relais IA ne raccourcit jamais). */
+    private fun ajouterALaDemande(messages: JSONArray, ajout: String) {
+        for (i in messages.length() - 1 downTo 0) {
+            val m = messages.optJSONObject(i) ?: continue
+            if (m.optString("role") == "user") { m.put("content", m.optString("content") + ajout); return }
+        }
     }
 
     /** Délégation d'une tâche précise (outil hermes_deleguer du cerveau Jarvis de secours). */
@@ -342,7 +408,7 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
      * Attente maximale « interactive » : au-delà, la demande continue en arrière-plan (le résultat arrive dans la
      * conversation et en notification) au lieu de laisser l'écran bloqué sur « Jarvis réfléchit… ».
      */
-    @Volatile internal var attenteMaxMs = 50_000L
+    @Volatile internal var attenteMaxMs = 35_000L
     private val fond = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val numeroFond = AtomicInteger(0)
 
@@ -350,22 +416,26 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
 
     private suspend fun appeler(app: JarvisApp, messages: JSONArray, boite: ToolBox?, onStatus: (String) -> Unit, demande: String = "", attenteMs: Long = attenteMaxMs,
                                 onTexte: ((String) -> Unit)? = null): String? {
-        PontMcp.demarrer(app)
+        if (!PontMcp.demarrer(app) || !PontMcp.actif()) {
+            val erreur = "❌ Pont MCP Jarvis indisponible sur 127.0.0.1:${PontMcp.PORT}. Hermès ne peut pas accéder aux outils du téléphone, de Home Assistant ou du serveur. Vérifie le port local et relance Jarvis ; aucune action n'a été déclarée exécutée."
+            onStatus("⚠️ Pont MCP indisponible")
+            return erreur
+        }
         val precedente = PontMcp.boiteActive
         val statutPrecedent = PontMcp.statutActif
         val attendu = AtomicBoolean(true) // l'utilisateur attend encore la réponse à l'écran
-        val dernierStatut = AtomicReference("🪽 Hermès réfléchit…")
+        val dernierStatut = AtomicReference("JARVIS réfléchit…")
         val notif = 7400 + (numeroFond.incrementAndGet() % 40) * 2
         val statut: (String) -> Unit = { st ->
             dernierStatut.set(st)
-            if (attendu.get()) onStatus(st) else SuiviTaches.enCours(app, notif, "Hermès termine en arrière-plan", "${demande.take(80)}\n$st")
+            if (attendu.get()) onStatus(st) else SuiviTaches.enCours(app, notif, "JARVIS continue en arrière-plan", "${demande.take(80)}\n$st")
         }
         if (boite != null) PontMcp.boiteActive = boite
         PontMcp.statutActif = statut
         val medias = mutableListOf<fr.dd.jarvis.ai.Medias.Media>()
         val mediasPrecedents = PontMcp.mediasActifs
         PontMcp.mediasActifs = medias
-        statut("🪽 Hermès réfléchit…")
+        statut("JARVIS réfléchit…")
         val appel = AtomicReference<okhttp3.Call?>(null)
         // Réponse en flux : chaque morceau de texte part tout de suite (affichage et voix) tant que l'utilisateur attend.
         val ecrit = AtomicBoolean(false)
@@ -392,17 +462,20 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
         }
         try {
             withTimeoutOrNull(attenteMs) { travail.join() }
-            // Hermès a commencé à répondre : on le laisse finir sa phrase au lieu de passer en arrière-plan.
-            if (!travail.isCompleted && ecrit.get()) travail.join()
-            if (travail.isCompleted) return travail.await()
+            // Après le premier texte, on accorde une courte marge pour finir la réponse.
+            // Ne jamais bloquer indéfiniment l'interface : une réflexion qui s'éternise continue en arrière-plan.
+            if (!travail.isCompleted && ecrit.get()) withTimeoutOrNull(10_000L) { travail.join() }
+            if (travail.isCompleted) return travail.await().also { r -> retenir(app, demande, r) }
             // Trop long : la demande continue en arrière-plan, l'utilisateur récupère la main.
             attendu.set(false)
-            SuiviTaches.enCours(app, notif, "Hermès termine en arrière-plan", "${demande.take(80)}\n${dernierStatut.get()}")
+            SuiviTaches.enCours(app, notif, "JARVIS continue en arrière-plan", "${demande.take(80)}\n${dernierStatut.get()}")
             fond.launch {
                 val r = runCatching { travail.await() }.getOrNull()
-                val texte = r ?: "⚠️ Je n'ai pas réussi à terminer « ${demande.take(80).ifBlank { "ta demande" }} » (moteur approfondi indisponible ou délai dépassé). Redemande-la si besoin."
-                withContext(Dispatchers.Main) { app.chatAjouter(ChatMsg(false, texte)) }
-                SuiviTaches.termine(app, notif, if (r != null) "Hermès a terminé" else "Hermès n'a pas pu terminer", texte)
+                retenir(app, demande, r)
+                val texte = (r ?: "⚠️ Je n'ai pas réussi à terminer « ${demande.take(80).ifBlank { "ta demande" }} » (moteur approfondi indisponible ou délai dépassé).") +
+                    (if (Reprise.echec(r)) "\n\n🔁 Dis « reprends » pour la relancer là où elle s'est arrêtée." else "")
+                withContext(Dispatchers.Main) { app.chatAjouter(ChatMsg(false, texte)); Routeur.derniere = Routeur.Cible.HERMES }
+                SuiviTaches.termine(app, notif, if (r != null) "JARVIS a terminé" else "JARVIS n'a pas pu terminer", texte)
             }
             return MESSAGE_ARRIERE_PLAN
         } catch (e: CancellationException) {
@@ -412,6 +485,13 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
         } finally {
             minuteur.cancel()
         }
+    }
+
+    /** Demande interrompue : gardée pour « reprends » ; demande aboutie : la reprise en attente est terminée. */
+    private fun retenir(app: JarvisApp, demande: String, r: String?) {
+        if (demande.isBlank()) return
+        if (Reprise.echec(r)) Reprise.noter(app, demande, r?.lineSequence()?.firstOrNull()?.take(200) ?: "délai dépassé")
+        else if (Reprise.derniere(app)?.texte == demande.substringBefore("\n\n[REPRISE —").trim()) Reprise.effacer(app)
     }
 
     /** Temps de réponse d'Hermès à une question triviale, comparé à l'IA appelée directement (diagnostic de lenteur). */
@@ -485,8 +565,17 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
         return try {
             call.execute().use { r ->
                 if (!r.isSuccessful) {
-                    if (r.code == 401) HermesTermux.message = "⚠️ Hermès refuse la clé de Jarvis : touche « Configurer Hermès »."
-                    return null
+                    if (r.code == 401) {
+                        HermesTermux.message = "⚠️ Hermès refuse la clé de liaison Jarvis : touche « Configurer Hermès »."
+                        return "⚠️ Hermès refuse la clé de liaison Jarvis (HTTP 401). Vérifie la configuration du pont IA dans Réglages › IA › Hermès."
+                    }
+                    val cause = when (r.code) {
+                        408, 504 -> "Le moteur a dépassé son délai de réponse"
+                        429 -> "Le fournisseur IA limite temporairement les requêtes (quota ou débit)"
+                        in 500..599 -> "Le service IA ou le relais rencontre une erreur serveur"
+                        else -> "La requête a été refusée"
+                    }
+                    return "⚠️ $cause (HTTP ${r.code}). La demande n'a pas été déclarée terminée ; tu peux la relancer après résolution de cette erreur."
                 }
                 val contenu = if (onTexte != null && r.body?.contentType()?.subtype == "event-stream") {
                     val lecteur = LecteurFlux(onTexte) { outil -> statut("🪽 $outil") }
@@ -505,10 +594,13 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
                     HermesTermux.message = "⚠️ Hermès saturé (${derniereRaison}) : Jarvis répond directement pendant 3 min."
                     null
                 } else contenu?.let { signer(it) }
+                    ?: "⚠️ Hermès n'a renvoyé aucun résultat exploitable. La demande n'est pas confirmée comme terminée."
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             if (!call.isCanceled()) { marquerEnLigne(false); relancerSiBesoin(app) }
-            null
+            "⚠️ Connexion au moteur Hermès interrompue : ${e.message ?: e.javaClass.simpleName}. La demande n'a pas pu être confirmée — dis « reprends » pour la relancer."
         }
     }
 }
@@ -516,16 +608,14 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
 /**
  * Répartition des demandes. Hermès est le cerveau : il orchestre, planifie, crée les automatismes (cronjob) et répartit le
  * travail entre ses sous-agents (delegate_task → routes Gemini et Groq) et l'agent téléphone Jarvis (outil MCP jarvis_agent).
- *  - mode « auto » : Hermès reçoit les tâches complexes, en plusieurs étapes, récurrentes ou multi-agents (même si elles
- *    touchent au téléphone), la recherche web, la rédaction, l'analyse, le code et les questions ouvertes ; Jarvis répond
- *    directement aux commandes simples du téléphone (une action, un fichier, la Freebox…), plus vite et sans détour ;
- *  - mode « auto » (par défaut, « Jarvis d'abord ») : Jarvis répond à tout, sauf automatismes, demandes en plusieurs
- *    étapes, serveur/SSH et recherche sur internet confiés directement à Hermès ; si Jarvis n'aboutit pas, Hermès reprend
- *    automatiquement la demande (Brain.reply) — jamais besoin de dire « Hermès » ;
- *  - mode « tout » : Hermès reçoit tout ce qui demande réflexion, mémoire ou orchestration. Pour la
- *    rapidité, les RÉFLEXES de Jarvis (lampe, volume, Wi-Fi, lecture… sans modèle ; position, recherche de fichiers,
- *    Freebox, vidéo) et les COMMANDES SIMPLES du téléphone (une action, sans réflexion) sont exécutés directement par
- *    Jarvis ; ces échanges restent dans l'historique transmis à Hermès, et la mémoire est partagée ;
+ *  - dans TOUS les modes, les ACTIONS (téléphone, appels, SMS, mails, agenda, rappels, maison, Plex, société, fichiers,
+ *    notes, réseau…) sont faites par Jarvis avec ses outils — réflexes sans IA d'abord, sinon son cerveau rapide — et
+ *    Hermès ne reprend que si Jarvis n'aboutit pas ([actionJarvis], réglage « Actions par Jarvis ») ;
+ *  - Hermès reçoit ce qui demande réflexion, mémoire ou orchestration : demandes qui le nomment, automatismes et
+ *    surveillances, plusieurs étapes hors des outils de Jarvis, serveur/SSH, internet, explications, rédaction libre,
+ *    code et ses compétences propres ; ses tâches longues passent en arrière-plan ;
+ *  - mode « tout » : les questions ouvertes vont aussi à Hermès ; mode « auto » (Jarvis d'abord) : Jarvis répond aux
+ *    commandes du téléphone, Hermès au reste. Les échanges restent dans l'historique transmis à Hermès (mémoire partagée) ;
  *  - Android Auto : Jarvis (réponse rapide) ; « Hermès, … » force Hermès ; une réponse brève ou la réponse à une question
  *    va au cerveau qui l'a posée (confirmation, choix d'installation…).
  */
@@ -549,7 +639,9 @@ object Routeur {
             "mails?|courriels?|bo[iî]te de r[ée]ception|contacts?|r[ée]glage|" +
             "freebox|vpn|domotique|interventions?|chantiers?|installations?|position|gps|" +
             "permissions?|autorisations?|notifications?|acc[eè]s [àa]|batterie|stockage|t[ée]l[ée]charg|galerie|cam[ée]ra|" +
-            "clique|appuie|tape sur|pilote|prends? (le contr[ôo]le|la main)|regarde (mon |l.)[ée]cran|[ée]cran)",
+            "clique|appuie|tape sur|pilote|prends? (le contr[ôo]le|la main)|regarde (mon |l.)[ée]cran|[ée]cran|" +
+            "\\bmode\\b|[ée]conomi|performance|ne pas d[ée]ranger|\\bnpd\\b|silencieux|vibreur|sonnerie|mode avion|donn[ée]es mobiles|" +
+            "point d.acc[eè]s|hotspot|\\bnfc\\b|localisation|rotation|verrouill|d[ée]verrouill|t[ée]l[ée]phone|portable)",
         RegexOption.IGNORE_CASE
     )
     private val COMPLEXE = Regex(
@@ -594,7 +686,9 @@ object Routeur {
     private val HA = Regex("home ?assistant|\\bha\\b|domotique", RegexOption.IGNORE_CASE)
     private val HA_MAINTENANCE = Regex(
         "\\bssh\\b|docker|conteneur|container|portainer|supervisor|serveur|redemarr|red[ée]marr|reboot|mise [àa] jour|\\bupdate\\b|install|" +
-            "sauvegarde|backup|\\blogs?\\b|journal syst|ne (r[ée]pond|marche|fonctionne|d[ée]marre) (plus|pas)|en panne|plant[ée]",
+            "sauvegarde|backup|\\blogs?\\b|journal syst|ne (r[ée]pond|marche|fonctionne|d[ée]marre) (plus|pas)|en panne|plant[ée]|" +
+            "\\btls\\b|\\bssl\\b|https|certificat|\\bcert\\b|let.?s ?encrypt|nginx|proxy|\\bports?\\b|[àa] distance|acc[èe]s (distant|ext[ée]rieur)|" +
+            "connexion (locale|distante)|nom de domaine|duckdns|erreur|restaur|r[ée]par|configuration",
         RegexOption.IGNORE_CASE
     )
 
@@ -603,6 +697,9 @@ object Routeur {
 
     /** Serveur, SSH, Docker, Debian, configuration Home Assistant : Hermès (ses notes, skills et son terminal) + outils SSH de Jarvis. */
     private val SERVEUR = Regex("\\bssh\\b|serveur|\\bservers?\\b|docker|debian|raspberry|conteneur|container|systemctl|configuration\\.yaml|home ?assistant.{0,30}(config|yaml|install|mise [àa] jour|log)|bot discord|ollama|\\bvps\\b|\\bping\\b|traceroute|\\bponts?\\b|tunnel|tailscale", RegexOption.IGNORE_CASE)
+    /** Le serveur Debian (SSH, Docker…) — pas un serveur Discord cité par son nom (« le serveur B&G »). */
+    private fun serveurDebian(t: String) = SERVEUR.containsMatchIn(t) && !ServeurInventaire.serveurDiscord(t)
+
     /** Ce qui demande de la réflexion (recherche, rédaction, analyse, conseil…) : jamais une simple commande. */
     private val REFLEXION = Regex(
         "recherch|compar|analys|expliqu|pourquoi|comment (faire|fonctionne|marche)|r[ée]dige|[ée]cris (un|une|moi)|r[ée]sum|synth[èe]se|" +
@@ -638,9 +735,83 @@ object Routeur {
     fun commandeSimple(texte: String): Boolean {
         val t = texte.trim()
         return COMMANDE.containsMatchIn(t) && !REFLEXION.containsMatchIn(t) && !ORCHESTRATION.containsMatchIn(t) && !multiEtapes(t) &&
-            !SERVEUR.containsMatchIn(t) && !WEB.containsMatchIn(t) && !NOMME.containsMatchIn(t) && t.split(Regex("\\s+")).size <= 16 &&
+            !serveurDebian(t) && !WEB.containsMatchIn(t) && !NOMME.containsMatchIn(t) && t.split(Regex("\\s+")).size <= 16 &&
             // Une recherche que les réflexes n'ont pas résolue mérite Hermès (mémoire, notes, autres sources).
             !FICHIERS.containsMatchIn(t) && !Regex("cherch|trouv|o[uù] (est|sont)", RegexOption.IGNORE_CASE).containsMatchIn(t)
+    }
+
+    /** Orchestration qui reste à Hermès même pour un sujet du téléphone : surveillance, déclencheurs, sous-agents… */
+    private val ORCHESTRATION_PURE = Regex(
+        "automati|surveille|tiens.moi (au courant|inform)|pr[ée]viens.moi (si|quand|d[èe]s|lorsque)|" +
+            "d[èe]s que (je|j.|tu|il|elle|un|une|le|la|les|quelqu)|quand (je re[çc]ois|tu re[çc]ois|il y a|un (mail|sms|message))|" +
+            "t[âa]ches? (planifi|r[ée]currente|complexe|longue)|sous.agents?|multi.?agents?|plusieurs agents|tes agents|(agents?|mod[eè]les?) (groq|gemini)|" +
+            "en parall[èe]le|plusieurs [ée]tapes|workflow|orchestr|\\bmissions?\\b",
+        RegexOption.IGNORE_CASE
+    )
+    /** Répétition que les outils de Jarvis savent programmer eux-mêmes (rappels, alarmes, routines). */
+    private val PROGRAMMATION_JARVIS = Regex("\\brappels?\\b|rappelle.moi|\\balarmes?\\b|r[ée]veils?\\b|r[ée]veille.moi|\\broutines?\\b", RegexOption.IGNORE_CASE)
+    /** Réflexion libre (explication, conseil, création, code…) : le moteur approfondi, quel que soit le sujet. */
+    private val REFLEXION_LIBRE = Regex(
+        "pourquoi|comment (faire|fonctionne|marche|on fait|[çc]a marche|je peux|puis.je)|expliqu|conseil|id[ée]es?\\b|strat[ée]gie|plan d.action|\\bprojet\\b|" +
+            "apprends|\\bcode\\b|un programme\\b|programmation|programmer en|python|bash|po[eè]me|po[eè]sie|https?://|qu.en penses|que penses|ton avis|" +
+            "optimise|compar|traduis|traduction|article|discours|dissertation|histoire|\\bconte\\b|r[ée]cit|chanson (sur|pour|qui|d)|lettre de motivation",
+        RegexOption.IGNORE_CASE
+    )
+    /** Question de culture générale (définition, personnage…) : seulement quand elle ne porte pas sur les données de Jarvis. */
+    private val CULTURE = Regex("c.est quoi|qu.est.ce que (c.est|signifie|veut dire)|que (signifie|veut dire)|d[ée]finition|qui (était|a (invent|cr[ée]|[ée]crit|gagn|d[ée]couvert))", RegexOption.IGNORE_CASE)
+    /** Verbes d'analyse ou de rédaction : Jarvis s'en charge quand ils portent sur SES données (mails, agenda, clients…). */
+    private val REFLEXION_DONNEES = Regex("recherch|analys|r[ée]sum|synth[èe]se|rapport|r[ée]dige|[ée]cris|calcul|propose|[ée]tapes|\\bscript|bilan|statisti", RegexOption.IGNORE_CASE)
+    /** Données et appareils que Jarvis gère avec ses propres outils. */
+    private val OBJET_JARVIS = Regex(
+        "\\b(mails?|e.?mails?|courriels?|sms|textos?|messages?|contacts?|appels?|agenda|planning|rendez.vous|rdv|[ée]v[ée]nements?|notes?|carnet|fichiers?|dossiers?|" +
+            "documents?|pdf|photos?|images?|vid[ée]os?|[ée]cran|notifications?|clients?|factures?|devis|bulletins?|fiches?|paie|salari[ée]s?|interventions?|chantiers?|" +
+            "installations?|soci[ée]t[ée]|plex|films?|s[ée]ries?|[ée]pisodes?|discord|tiktok|freebox|box|wi.?fi|batterie|stockage|tourn[ée]e|itin[ée]raire|trajet|" +
+            "m[ée]t[ée]o|quel temps|pleuvoir|neiger|temp[ée]rature|coffre|obsidian|t[âa]ches?|rappels?|alarmes?|minuteur|site( web)?|musique|playlist|t[ée]l[ée]|lumi[èe]res?|lampes?|volets?|chauffage|" +
+            "po[êe]le|thermostat|prises?|imprimantes?|r[ée]seau|appareils?|m[ée]moire|r[ée]glages?|routines?|modes?|voix|t[ée]l[ée]phone|portable|appli(cation)?s?)\\b",
+        RegexOption.IGNORE_CASE
+    )
+    /** La phrase commence par un ordre (« envoie », « crée », « mets »…). */
+    private val IMPERATIF = Regex(
+        "^(?:(?:jarvis|ok|alors|bon|du coup|stp|s.il te pla[iî]t|est.ce que tu peux|est.ce que tu pourrais|tu peux|peux.tu|pourrais.tu|tu pourrais|tu veux bien|je veux que tu|il faut)[ ,]+)*" +
+            "(envoie|envoyer|[ée]cris|r[ée]ponds|appelle|t[ée]l[ée]phone|cr[ée]e|cr[ée]er|ajoute|supprime|efface|enl[eè]ve|retire|mets|met|passe|active|d[ée]sactive|allume|" +
+            "[ée]teins|ouvre|ferme|lance|joue|arr[êe]te|coupe|baisse|monte|augmente|diminue|r[ée]gle|programme|note|prends|rappelle|r[ée]veille|marque|trie|range|" +
+            "d[ée]place|renomme|imprime|g[ée]n[èe]re|fais|refais|modifie|change|corrige|enregistre|affiche|montre|lis|relis|donne|liste|cherche|trouve|retrouve|" +
+            "v[ée]rifie|regarde|annule|transf[eè]re|partage|exporte|t[ée]l[ée]charge|r[ée]sume|pr[ée]pare|calcule|remplis|planifie|copie|bascule|choisis|compare|analyse|v[ée]rifie)\\b",
+        RegexOption.IGNORE_CASE
+    )
+    private val CODE = Regex("\\bcode\\b|python|bash|un programme\\b|programmation|programmer en|https?://", RegexOption.IGNORE_CASE)
+
+    /**
+     * Demande que Jarvis traite avec ses PROPRES outils (téléphone, appels, SMS, mails, agenda, rappels, maison, Plex,
+     * société, fichiers, notes, réseau…) sans passer par Hermès — qui reprend automatiquement si Jarvis n'aboutit pas.
+     * Hermès garde : les demandes qui le nomment, le serveur, internet, les automatismes / surveillances, la réflexion
+     * libre (explication, conseil, rédaction créative, code) et ses compétences propres.
+     */
+    fun actionJarvis(texte: String): Boolean {
+        // Sans accents (le reste intact) : « \\b » se comporte pareil sur Android et sur la JVM des tests.
+        val t = java.text.Normalizer.normalize(texte.trim(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
+        if (t.isBlank() || NOMME.containsMatchIn(t) || WEB.containsMatchIn(t) || serveurDebian(t) || CODE.containsMatchIn(t)) return false
+        if (ORCHESTRATION_PURE.containsMatchIn(t)) return false
+        if (ORCHESTRATION.containsMatchIn(t) && !PROGRAMMATION_JARVIS.containsMatchIn(t)) return false
+        if (t.split(Regex("\\s+")).size > 45) return false
+        // Plusieurs étapes : chacune est une action de Jarvis (une suite comme « puis réponds-lui que c'est d'accord »
+        // reprend l'objet de l'étape précédente) ; la première doit nommer ce sur quoi on agit.
+        if (multiEtapes(t)) {
+            val etapes = t.split(MULTI).map { it.trim() }.filter { it.isNotBlank() }
+            return etapes.isNotEmpty() && etapeJarvis(etapes.first()) &&
+                etapes.drop(1).all { etapeJarvis(it) || (IMPERATIF.containsMatchIn(it) && !REFLEXION_LIBRE.containsMatchIn(it) && !CULTURE.containsMatchIn(it)) }
+        }
+        return etapeJarvis(t)
+    }
+
+    private fun etapeJarvis(t: String): Boolean {
+        val objet = OBJET_JARVIS.containsMatchIn(t)
+        if (!objet && !COMMANDE.containsMatchIn(t)) return false
+        // Un ordre sur une donnée de Jarvis (« écris un mail à Paul pour lui expliquer… ») reste une action.
+        if (objet && IMPERATIF.containsMatchIn(t) && !Regex("po[eè]me|histoire|\\bconte\\b|chanson (sur|pour|qui|d)|article|discours", RegexOption.IGNORE_CASE).containsMatchIn(t)) return true
+        if (REFLEXION_LIBRE.containsMatchIn(t)) return false
+        if ((REFLEXION_DONNEES.containsMatchIn(t) || CULTURE.containsMatchIn(t)) && !objet) return false
+        return true
     }
 
     private val MULTI = Regex("\\b(puis|ensuite|et enfin|et apr[èe]s|apr[èe]s [çc]a|apr[èe]s cela)\\b", RegexOption.IGNORE_CASE)
@@ -649,13 +820,16 @@ object Routeur {
     /** Demande en plusieurs étapes enchaînées (« trouve… puis envoie… »). */
     fun multiEtapes(texte: String) = MULTI.containsMatchIn(texte) && texte.trim().split(Regex("\\s+")).size >= 5
 
+    /** Automatisme / orchestration ou Hermès nommé (sans compter le simple enchaînement « et », « puis »). */
+    fun orchestrationOuNomme(texte: String) = ORCHESTRATION.containsMatchIn(texte) || NOMME.containsMatchIn(texte)
+
     /** Demande à orchestrer (récurrence, automatisme, surveillance, sous-agents) ou adressée nommément à Hermès. */
     fun pourHermesSeul(texte: String) = ORCHESTRATION.containsMatchIn(texte) || NOMME.containsMatchIn(texte) || multiEtapes(texte)
 
     /** Bavardage : salutations, « comment ça va », remerciements, humeur, blague, « qui es-tu »… (aucune action ni recherche). */
     private val BAVARDAGE = Regex(
         "^(?:(?:salut|bonjour|bonsoir|coucou|hello|hey|yo|re|wesh|hola)(?: (?:à toi|a toi|mon ami|l.ami|toi))?|" +
-            "(?:ça|ca|sa) va(?: bien| toi| et toi| ou quoi)?|(?:comment|commen) (?:ça|ca|sa) va(?: aujourd.hui| ce (?:matin|soir))?|comment (?:tu )?vas[- ]?tu|comment tu vas|tu vas bien|vous allez bien|" +
+            "(?:ça|ca|sa) va(?: bien| toi| et toi| ou quoi)?|(?:comment|commen) (?:est.ce que )?(?:ça|ca|sa) va(?: aujourd.hui| ce (?:matin|soir))?|comment (?:est.ce que )?(?:tu )?vas(?: aujourd.hui| ce (?:matin|soir))?|comment se passe (?:le|ton|ta) (?:travail|boulot|journ[ée]e|matin[ée]e|soir[ée]e)(?: au travail| aujourd.hui| en ce moment)?|comment (?:ça|ca) se passe(?: au travail| aujourd.hui| en ce moment)?|comment (?:va|avance) (?:le travail|le boulot|ta journ[ée]e)|(?:ça|ca) se passe bien(?: au travail| aujourd.hui)?|comment (?:tu )?vas[- ]?tu|comment tu vas|tu vas bien|vous allez bien|" +
             "(?:la )?forme|quoi de neuf|quoi de beau|(?:qu.est[- ]ce que|que) tu (?:fais|racontes?)|tu fais quoi(?: de beau)?|tu (?:es|est) l[àa]|t.es l[àa]|t.es o[uù]|" +
             "et toi|merci(?: beaucoup| bien| infiniment| mille fois| pour tout| à toi| a toi)?|c.est gentil|trop gentil|bravo|bien jou[ée]|super boulot|beau travail|" +
             "(?:t.es|tu es|tu (?:es )?vraiment) (?:trop |vraiment |super |le meilleur|la meilleure|g[ée]nial|fort|dr[ôo]le|sympa|cool|top|bon|nul|b[êe]te|lent)\\w*|" +
@@ -668,13 +842,44 @@ object Routeur {
         RegexOption.IGNORE_CASE
     )
 
+    // Une conversation légère reste sur le moteur rapide pendant ses rebonds naturels.
+    // Expire après 20 minutes et se ferme dès qu'une vraie demande opérationnelle apparaît.
+    @Volatile private var bavardageJusqua: Long = 0L
+
+    fun marquerBavardage() { bavardageJusqua = System.currentTimeMillis() + 20 * 60 * 1000L }
+
+    fun suiteBavardage(texte: String, precedent: String? = null): Boolean {
+        if (System.currentTimeMillis() > bavardageJusqua) return false
+        val t = texte.trim()
+        if (t.isBlank() || t.length > 350 || NOMME.containsMatchIn(t)) { bavardageJusqua = 0L; return false }
+        // La dernière réponse n'était pas du bavardage (résultat 🔔 d'une tâche de fond, réponse d'Hermès, diagnostic…) :
+        // la conversation a repris un sujet de travail, la suite va aux cerveaux qui ont les outils.
+        if (precedent != null && (precedent.startsWith("🔔") || precedent.startsWith("🪽") || precedent.startsWith("#") || precedent.length > 450)) {
+            bavardageJusqua = 0L; return false
+        }
+        val demandeAction = Regex(
+            "(appelle|t[ée]l[ée]phone|sms|texto|envoie|r[ée]ponds? à|agenda|calendrier|planning|rendez.vous|rdv|" +
+                "allume|[ée]teins|ouvre|ferme|lance|r[ée]gle|modifie|change|cherche|recherche|trouve|t[ée]l[ée]charge|" +
+                "fichier|dossier|note|obsidian|freebox|vpn|port|gps|position|waze|home ?assistant|chauffage|poêle|serveur|plex|discord|site|" +
+                "regarde|v[ée]rifie|contr[ôo]le|corrige|r[ée]pare|teste|essaie|relance|red[ée]marre|continue|poursui|vas.y|fais.le|" +
+                "(?:peux|pourrais|pourrai)[- ]tu|est.ce que tu (?:peux|pourrais)|tu (?:peux|pourrais) |" +
+                "automati|surveille|programme|installe|supprime|cr[ée]e|g[ée]n[èe]re|analyse|compare|explique|pourquoi|comment faire)",
+            RegexOption.IGNORE_CASE
+        )
+        if (demandeAction.containsMatchIn(t) || ORCHESTRATION.containsMatchIn(t) || WEB.containsMatchIn(t)) {
+            bavardageJusqua = 0L
+            return false
+        }
+        return true
+    }
+
     /**
      * Conversation simple (« salut », « comment ça va ? », « merci », « raconte-moi une blague ») : Jarvis répond en un seul
      * appel d'IA, sans outils ni Hermès — même en mode « Hermès pour tout » — pour une réponse en une à deux secondes.
      * Jamais pour une demande adressée nommément à Hermès, ni pour une réponse à une question (« oui », « non »…).
      */
     fun bavardage(texte: String): Boolean {
-        val t = texte.trim().replace(Regex("^(?:(?:ok|bon|alors|eh|dis)[ ,]+)?(?:jarvis)[ ,!.]*", RegexOption.IGNORE_CASE), "").trim()
+        val t = texte.trim().replace(Regex("^(?:(?:ok|bon|alors|eh)[ ,]+)?(?:dis[- ]moi[ ,]+)?(?:jarvis[ ,!.]*)?", RegexOption.IGNORE_CASE), "").trim()
         if (t.isBlank() || t.length > 90 || NOMME.containsMatchIn(texte)) return false
         // Plusieurs phrases sociales enchaînées (« Salut Jarvis ! Ça va ? ») : chacune doit être du bavardage.
         val morceaux = t.split(Regex("(?<=[!?.…])\\s+|,\\s*(?=(?:ça|ca|comment|et toi|tu vas))")).map { it.trim() }.filter { it.isNotBlank() }
@@ -699,33 +904,30 @@ object Routeur {
         if (sature && !NOMME.containsMatchIn(t)) return Choix(Cible.JARVIS, "Hermès momentanément saturé : Jarvis répond directement")
         if (NOMME.containsMatchIn(t)) return Choix(Cible.HERMES, "Hermès demandé")
         if (enVoiture) return Choix(Cible.JARVIS, "Android Auto : Jarvis, réponse rapide")
-        // « Hermès pour tout » : TOUTES les demandes vont à Hermès (y compris « oui », « merci »… : il a l'historique).
-        // Seules les commandes instantanées du téléphone (lampe, volume, Wi-Fi…) sont exécutées avant, sans aucune IA.
-        // Réponses rapides : une commande simple du téléphone (appel, SMS, musique, domotique, agenda…) est faite par
-        // Jarvis en un seul appel d'IA ; s'il n'aboutit pas, Hermès reprend automatiquement (Brain.reply).
-        if (mode == "tout" && rapide && competenceHermes == null && commandeSimple(t))
-            return Choix(Cible.JARVIS, "commande simple : Jarvis répond tout de suite (Hermès prend le relais si besoin)")
-        if (mode == "tout") return Choix(Cible.HERMES, "Hermès pour tout")
         // Suite de conversation : « oui », « toutes », « Clairotte 3 »… en réponse à une question → au cerveau qui l'a posée.
         val reponseCourte = t.split(Regex("\\s+")).size <= 4 && !t.endsWith("?") && precedent != null && precedent.takeLast(250).contains("?") &&
             !ORCHESTRATION.containsMatchIn(t) && !FREEBOX.containsMatchIn(t) && !FICHIERS.containsMatchIn(t) && !WEB.containsMatchIn(t)
         if (BREF.matches(t) || reponseCourte) return Choix(derniere, if (derniere == Cible.HERMES) "suite de la conversation avec Hermès" else "suite de la conversation avec Jarvis")
-        // Jarvis d'abord (défaut) : Hermès directement seulement pour ce que Jarvis ne sait pas faire seul ;
-        // pour tout le reste Jarvis répond, et passe la main à Hermès s'il n'aboutit pas (Brain.reply).
+        // Ce qu'Hermès sait faire seul (skills ajoutés : procédures, ponts, accès…) reste chez lui.
+        if (competenceHermes != null) return Choix(Cible.HERMES, "compétence d'Hermès « $competenceHermes »")
+        // ACTIONS (téléphone, appels, SMS, mails, agenda, rappels, maison, Plex, société, fichiers…) : Jarvis les fait
+        // lui-même avec ses outils, dans TOUS les modes ; s'il n'aboutit pas, Hermès reprend automatiquement (Brain.reply).
+        if (rapide && actionJarvis(t)) return Choix(Cible.JARVIS, "action : Jarvis directement (Hermès prend le relais si besoin)")
+        if (homeAssistantApi(t) && !ORCHESTRATION.containsMatchIn(t) && !multiEtapes(t)) return Choix(Cible.JARVIS, "Home Assistant : API (pas de SSH)")
+        // « Hermès pour tout » : le reste (questions, recherches, rédaction, automatismes, serveur) va à Hermès.
+        if (mode == "tout") return Choix(Cible.HERMES, "Hermès pour tout")
+        // Jarvis d'abord : Hermès directement seulement pour ce que Jarvis ne sait pas faire seul.
         if (mode == "auto" || mode == "demande") return when {
             ORCHESTRATION.containsMatchIn(t) || multiEtapes(t) -> Choix(Cible.HERMES, "automatisme / plusieurs étapes : Hermès orchestre")
-            homeAssistantApi(t) -> Choix(Cible.JARVIS, "Home Assistant : API (pas de SSH)")
             HA.containsMatchIn(t) -> Choix(Cible.HERMES, "Home Assistant côté serveur (maintenance, panne) : moteur approfondi")
-            // Ce qu'Hermès faisait seul (skills ajoutés : procédures, ponts, accès…) reste chez lui.
-            competenceHermes != null -> Choix(Cible.HERMES, "compétence d'Hermès « $competenceHermes »")
-            SERVEUR.containsMatchIn(t) -> Choix(Cible.HERMES, "serveur / SSH : Hermès (notes, skills, terminal)")
+            serveurDebian(t) -> Choix(Cible.HERMES, "serveur / SSH : Hermès (notes, skills, terminal)")
             WEB.containsMatchIn(t) -> Choix(Cible.HERMES, "recherche sur internet : Hermès")
-            else -> Choix(Cible.JARVIS, "Jarvis d'abord (Hermès s'il n'aboutit pas)")
+            else -> Choix(Cible.HERMES, "Hermès, cerveau principal (Jarvis fournit les outils)")
         }
         // Hermès orchestre : automatismes, récurrence, surveillance, sous-agents, plusieurs étapes — même sur des données du téléphone.
         if (ORCHESTRATION.containsMatchIn(t) || multiEtapes(t)) return Choix(Cible.HERMES, "tâche complexe : Hermès orchestre (Gemini, Groq, Jarvis)")
         // Commandes simples du téléphone : exécution directe par Jarvis (Freebox, recherche de fichiers/dossiers…).
-        if (SERVEUR.containsMatchIn(t)) return Choix(Cible.HERMES, "serveur / SSH : Hermès (notes, skills, terminal) avec les outils SSH de Jarvis")
+        if (serveurDebian(t)) return Choix(Cible.HERMES, "serveur / SSH : Hermès (notes, skills, terminal) avec les outils SSH de Jarvis")
         if (FREEBOX.containsMatchIn(t)) return Choix(Cible.JARVIS, "Freebox : outil Jarvis dédié")
         if (FICHIERS.containsMatchIn(t)) return Choix(Cible.JARVIS, "recherche de fichiers : outils Jarvis")
         return when {

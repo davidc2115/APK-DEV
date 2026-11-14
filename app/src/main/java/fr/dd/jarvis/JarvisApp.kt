@@ -112,6 +112,8 @@ class JarvisApp : Application() {
             store.hermesModeMigre4.set(true)
         }
         fr.dd.jarvis.ai.Ollama.app = this
+        // Noms des serveurs et salons Discord : « le serveur B&G » est reconnu comme Discord (pas le serveur Debian).
+        runCatching { fr.dd.jarvis.ai.DiscordNoms.initialiser(this); fr.dd.jarvis.ai.DiscordNoms.rafraichirSiBesoin(this) }
         llm = Llm(store)
         calendar = CalendarRepo(this, store)
         mail = MailRepo(this, store)
@@ -128,12 +130,18 @@ class JarvisApp : Application() {
             if (graphIndexReport != null) store.grapheIndexeLe.set(System.currentTimeMillis().toString())
         }
         fr.dd.jarvis.device.Energie.suivre(this)
+        fr.dd.jarvis.device.Energie.appliquerMode(this)
         phone = PhoneControl(this)
         memo = fr.dd.jarvis.device.Memo(this, obsidian)
         Thread { runCatching { memo.load() } }.start()
         tasks = fr.dd.jarvis.data.TaskStore(this)
         societe = SocieteService(this, SocieteRepo(this), obsidian)
         fr.dd.jarvis.work.VeilleWorker.planifier(this)
+        fr.dd.jarvis.work.BaremesWorker.planifier(this)
+        // Mémoire fiable : une fois, les notes déjà prises sont relues pour en tirer adresse, surnoms et faits.
+        runCatching { fr.dd.jarvis.device.Faits.rattrapage(this) }
+        // Tri des mails : désormais seuls les NON LUS par défaut (une seule fois ; modifiable ensuite à la demande).
+        if (!store.mailTriNonLusApplique.value) { store.mailTriStatut.set("non_lus"); store.mailTriNonLusApplique.set(true) }
         runCatching { fr.dd.jarvis.coffre.Coffre.planifier(this) }
         // Une fois : les rapports d'intervention existants sont régénérés avec leurs photos dans le PDF.
         if (!store.rapportsV3.value) Thread {
@@ -156,8 +164,30 @@ class JarvisApp : Application() {
             runCatching { fr.dd.jarvis.car.VisibiliteAuto.arreterAncienneReinstallation(this) }
             runCatching { fr.dd.jarvis.car.VisibiliteAuto.appliquerMode(this) }
         }.start()
+        runCatching {
+            val f = android.content.IntentFilter(android.content.Intent.ACTION_USER_PRESENT)
+            val r = object : android.content.BroadcastReceiver() {
+                override fun onReceive(c: android.content.Context, i: android.content.Intent) {
+                    Thread { runCatching {
+                        fr.dd.jarvis.securite.Systemes.liste(this@JarvisApp).filter { it.actif && it.modele == "telephone_securise" }
+                            .forEach { fr.dd.jarvis.securite.Systemes.sauver(this@JarvisApp, it.copy(actif = false)) }
+                    } }.start()
+                }
+            }
+            if (android.os.Build.VERSION.SDK_INT >= 33) registerReceiver(r, f, android.content.Context.RECEIVER_NOT_EXPORTED) else registerReceiver(r, f)
+        }
+        // Surveillance de la maison par le téléphone : reprise après un redémarrage de JARVIS si un système est actif.
+        Thread { runCatching { fr.dd.jarvis.securite.SurveillanceMaison.actualiser(this) } }.start()
         // Pont MCP local (outils de Jarvis pour Hermès) : seulement si Hermès est utilisé.
         if (store.hermesMode.value != "off" && store.hermesInstalle.value) runCatching { fr.dd.jarvis.hermes.PontMcp.demarrer(this) }
+        // Nouvelle configuration Hermès (modèle principal = routeur Jarvis, outils Jarvis visibles directement) :
+        // appliquée une fois automatiquement après la mise à jour, sans attendre un appui sur « Configurer ».
+        if (store.hermesMode.value != "off" && store.hermesInstalle.value &&
+            store.hermesConfigVersion.value < fr.dd.jarvis.hermes.HermesTermux.VERSION_CONFIG) graphScope.launch {
+            kotlinx.coroutines.delay(20_000)
+            val r = kotlinx.coroutines.withContext(Dispatchers.Main) { runCatching { fr.dd.jarvis.hermes.HermesTermux.synchroniserCles(this@JarvisApp) }.getOrDefault("") }
+            if (r.startsWith("⏳")) store.hermesConfigVersion.set(fr.dd.jarvis.hermes.HermesTermux.VERSION_CONFIG)
+        }
         if (store.briefingOn.value) Scheduler.schedule(this, store)
         fr.dd.jarvis.work.AgentsScheduler.apply(this, store)
         fr.dd.jarvis.work.ReseauScheduler.apply(this, store)
