@@ -131,6 +131,23 @@ class VoiceManager(private val ctx: Context) {
     private var recoCle = ""
     private var recoCasse = false
     private var ouvertLe = 0L
+    /** Dernier texte partiel entendu pendant l'écoute en cours (sert si Google répond « rien compris » après la phrase). */
+    private var dernierPartiel = ""
+    /** Moment où le dernier reconnaisseur a été détruit : en recréer un dans la foulée faisait répondre « erreur 11 ». */
+    private var detruitLe = 0L
+
+    /**
+     * Libère le reconnaisseur DÈS que son écoute est finie (résultat ou erreur définitive), pendant que JARVIS répond :
+     * le service vocal de Google a le temps de se détacher. Avant, il était détruit puis recréé dans la même fraction de
+     * seconde à la réouverture du micro → « service déconnecté » (erreur 11) presque à chaque tour de conversation.
+     */
+    private fun liberer() {
+        val r = recognizer ?: return
+        recognizer = null
+        runCatching { r.cancel() }
+        runCatching { r.destroy() }
+        detruitLe = System.currentTimeMillis()
+    }
     /** Le micro peut-il s'ouvrir ? (le service se tait pendant une conversation dans l'appli). */
     var autorise: () -> Boolean = { true }
     /** La coupure de parole (voix entendue pendant la réponse) est-elle permise en ce moment ? */
@@ -180,16 +197,29 @@ class VoiceManager(private val ctx: Context) {
     private fun demarrer(essai: Int) {
         main.post {
             annulerRelance()
+            // Reconnaisseur précédent encore là (écoute annulée) : libéré maintenant, et ouverture 450 ms plus tard.
+            if (recognizer != null) liberer()
+            val attente = 450L - (System.currentTimeMillis() - detruitLe)
+            if (attente > 0) {
+                val r = Runnable { relanceEnAttente = null; ouvrir(essai) }
+                relanceEnAttente = r
+                main.postDelayed(r, attente)
+            } else ouvrir(essai)
+        }
+    }
+
+    private fun ouvrir(essai: Int) {
+        run {
             if (!autorise()) {
                 JournalVoix.noter(nom, "micro non ouvert : l'appli JARVIS a le micro")
                 fenetreFin = 0; ecoute = false
                 signalerEcoute(false)
-                return@post
+                return@run
             }
             if (!SpeechRecognizer.isRecognitionAvailable(ctx)) {
                 fenetreFin = 0
                 onFail("Reconnaissance vocale indisponible sur cet appareil (installer / activer Google).")
-                return@post
+                return@run
             }
             stopSpeaking()
             // Un seul micro pour tout JARVIS : une autre écoute en cours (appli / service) est refermée.
@@ -200,14 +230,15 @@ class VoiceManager(private val ctx: Context) {
             parole = false
             val moi = ++jeton
             ecoute = true
-            val local = essai >= 2 && Build.VERSION.SDK_INT >= 33 && SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx)
+            dernierPartiel = ""
+            val local = essai >= 3 && Build.VERSION.SDK_INT >= 33 && SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx)
             val composant = if (local) null else moteur(ctx)
             val cle = if (local) "local" else composant?.flattenToString() ?: "defaut"
             // Reconnaisseur NEUF à chaque écoute : réutilisé (annulé puis relancé), celui de Google (com.google.android.as)
             // renvoyait souvent « erreur 7 » sur la phrase suivante.
             val reutilise = false
             val r = if (reutilise) recognizer!!.also { runCatching { it.cancel() } } else {
-                runCatching { recognizer?.destroy() }
+                if (recognizer != null) liberer()
                 when {
                     local -> SpeechRecognizer.createOnDeviceSpeechRecognizer(ctx)
                     composant != null -> SpeechRecognizer.createSpeechRecognizer(ctx, composant)
@@ -238,17 +269,30 @@ class VoiceManager(private val ctx: Context) {
                     // 11 = service de reconnaissance déconnecté, 5 = erreur client, 10 = trop de requêtes, 8 = occupé : on recrée et on relance
                     // (2 essais au plus, espacés : un reconnaisseur recréé trop vite répond « occupé » et rebipe.)
                     if (error in setOf(11, 5, 10, 8, SpeechRecognizer.ERROR_SERVER)) recoCasse = true
-                    if (error in setOf(11, 5, 10, 8, SpeechRecognizer.ERROR_SERVER) && essai < 2) {
-                        val immediat = !parole && System.currentTimeMillis() - ouvertLe < 600
+                    // Reconnaisseur libéré tout de suite (le service se détache pendant l'attente avant la relance).
+                    main.post { if (recognizer === r) liberer() }
+                    if (error in setOf(11, 5, 10, 8, SpeechRecognizer.ERROR_SERVER) && essai < 4) {
+                        // « Occupé » (8) : l'écoute précédente n'est pas encore lâchée → plus longue attente. 11 juste après
+                        // l'ouverture : service pas encore prêt → nouvel essai après sa libération (pas de fin de conversation).
+                        val delai = when (error) { 8 -> 900L * (essai + 1); 11 -> if (System.currentTimeMillis() - ouvertLe < 600) 500L else 700L * (essai + 1); else -> 800L * (essai + 1) }
                         val relance = Runnable { relanceEnAttente = null; if (moi == jeton) demarrer(essai + 1) }
                         relanceEnAttente = relance
-                        main.postDelayed(relance, if (immediat && error == 11) 250L else 800L * (essai + 1))
+                        main.postDelayed(relance, delai)
                         return
                     }
                     val silence = error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
+                    // Tu as parlé, Google n'a rien rendu à la fin, mais le texte partiel était là : on le garde.
+                    if (silence && parole && dernierPartiel.isNotBlank() && !estEcho(dernierPartiel)) {
+                        JournalVoix.noter(nom, "entendu (texte partiel conservé) : « ${dernierPartiel.take(240)} »")
+                        fenetreFin = 0
+                        main.postDelayed(unmuteLater, 900)
+                        signalerEcoute(false)
+                        onFinal(dernierPartiel)
+                        return
+                    }
                     if (fenetreFin > 0 && silence) {
                         // Tu as parlé mais rien n'a été compris : une nouvelle écoute complète (8 s au moins), une fois.
-                        if (parole && relancesApresParole++ < 1) {
+                        if (parole && relancesApresParole++ < 2) {
                             fenetreFin = maxOf(fenetreFin, System.currentTimeMillis() + 8000)
                             demarrer(0); return
                         }
@@ -274,6 +318,7 @@ class VoiceManager(private val ctx: Context) {
                     if (!actif()) return
                     termine = true
                     ecoute = false
+                    main.post { if (recognizer === r) liberer() }
                     JournalVoix.noter(nom, "entendu : « ${results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty().take(240)} »")
                     val entendu = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
                     if (entendu.isNotBlank() && estEcho(entendu)) {
@@ -300,7 +345,7 @@ class VoiceManager(private val ctx: Context) {
                     // Un résultat partiel peut être une hallucination sur un bruit ou l'écho du TTS.
                     // Seul onBeginningOfSpeech (détection vocale du moteur) démarre la fenêtre de parole ;
                     // le texte partiel reste affiché sans empêcher la fermeture sur silence.
-                    if (t.isNotBlank() && !estEcho(t)) { Presence.entendu = t; onPartial(t) }
+                    if (t.isNotBlank() && !estEcho(t)) { Presence.entendu = t; dernierPartiel = t; onPartial(t) }
                 }
             })
             val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -333,7 +378,7 @@ class VoiceManager(private val ctx: Context) {
             jeton++
             fenetreFin = 0
             main.removeCallbacks(finFenetre)
-            runCatching { recognizer?.cancel() }
+            liberer()
             signalerEcoute(false)
             onSilence()
         }
@@ -352,7 +397,7 @@ class VoiceManager(private val ctx: Context) {
             ecoute = false
             fenetreFin = 0
             main.removeCallbacks(finFenetre)
-            runCatching { recognizer?.cancel() }
+            liberer()
             if (etait) signalerEcoute(false)
             main.removeCallbacks(unmuteLater); main.postDelayed(unmuteLater, 900)
         }

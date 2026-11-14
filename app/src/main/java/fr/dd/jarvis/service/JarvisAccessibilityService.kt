@@ -69,15 +69,30 @@ class JarvisAccessibilityService : AccessibilityService() {
      * Trace un geste CONTINU (doigt posé du premier au dernier point, sans le lever) : c'est ce qu'attend la grille du
      * schéma. [fin] reçoit vrai si Android a exécuté le geste en entier.
      */
-    fun tracer(points: List<Pair<Float, Float>>, msParSegment: Long = 160, fin: (Boolean) -> Unit = {}): Boolean {
+    fun tracer(points: List<Pair<Float, Float>>, msParSegment: Long = 160, maintienMs: Long = 0, fin: (Boolean) -> Unit = {}): Boolean {
         if (points.size < 2) return false
-        val path = Path().apply { moveTo(points[0].first, points[0].second); points.drop(1).forEach { (x, y) -> lineTo(x, y) } }
+        val rappel = object : GestureResultCallback() {
+            override fun onCompleted(g: GestureDescription?) = fin(true)
+            override fun onCancelled(g: GestureDescription?) = fin(false)
+        }
         val duree = (points.size - 1) * msParSegment + 120
-        return dispatchGesture(GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, duree)).build(),
-            object : GestureResultCallback() {
-                override fun onCompleted(g: GestureDescription?) = fin(true)
+        if (maintienMs > 0 && android.os.Build.VERSION.SDK_INT >= 26) {
+            // Doigt posé sur le premier point un instant (comme un vrai doigt), PUIS tracé sans le lever : certaines grilles
+            // (HyperOS / MIUI) ignorent un tracé qui démarre en mouvement.
+            val (x0, y0) = points[0]
+            val pose = Path().apply { moveTo(x0, y0); lineTo(x0 + 1f, y0 + 1f) }
+            val debut = GestureDescription.StrokeDescription(pose, 0, maintienMs, true)
+            val suite = Path().apply { moveTo(x0 + 1f, y0 + 1f); points.drop(1).forEach { (x, y) -> lineTo(x, y) } }
+            val trace = debut.continueStroke(suite, 0, duree, false)
+            return dispatchGesture(GestureDescription.Builder().addStroke(debut).build(), object : GestureResultCallback() {
+                override fun onCompleted(g: GestureDescription?) {
+                    if (!dispatchGesture(GestureDescription.Builder().addStroke(trace).build(), rappel, null)) fin(false)
+                }
                 override fun onCancelled(g: GestureDescription?) = fin(false)
             }, null)
+        }
+        val path = Path().apply { moveTo(points[0].first, points[0].second); points.drop(1).forEach { (x, y) -> lineTo(x, y) } }
+        return dispatchGesture(GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, duree)).build(), rappel, null)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {

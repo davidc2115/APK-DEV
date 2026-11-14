@@ -27,6 +27,14 @@ object HaSur {
         return r
     }
 
+    /** Commande docker qui doit aller jusqu'au bout (détachée, jamais interrompue), avec sudo si besoin. */
+    fun dockerComplet(app: JarvisApp, cmd: String, delai: Int = 240): Pair<Int, String> {
+        val r = Serveur.execComplet(app, cmd, delai)
+        if (r.first > 0 && Regex("permission denied|docker\\.sock|connect to the docker daemon", RegexOption.IGNORE_CASE).containsMatchIn(r.second))
+            return Serveur.execComplet(app, "sudo $cmd", delai)
+        return r
+    }
+
     data class Conteneur(val nom: String, val config: String, val dossierCompose: String, val serviceCompose: String, val image: String)
 
     @Volatile private var cache: Pair<Long, Conteneur?>? = null
@@ -67,7 +75,7 @@ object HaSur {
         }
         val c = runCatching { conteneur(app) }.getOrNull() ?: return null.also { }
         // Home Assistant ne répond pas : vérification hors ligne, dans le conteneur (code de sortie = nombre d'erreurs).
-        val r = docker(app, "docker exec ${q(c.nom)} python3 -m homeassistant --script check_config -c /config 2>&1 | tail -40; echo \"JARVIS_RC=\${PIPESTATUS[0]}\"", 240)
+        val r = docker(app, "docker exec ${q(c.nom)} python3 -m homeassistant --script check_config -c /config > /tmp/jarvis_ha_check.txt 2>&1; rc=\$?; echo \"JARVIS_RC=\$rc\"; tail -40 /tmp/jarvis_ha_check.txt; rm -f /tmp/jarvis_ha_check.txt; exit \$rc", 240)
         val rc = Regex("JARVIS_RC=(\\d+)").find(r.second)?.groupValues?.get(1)?.toIntOrNull()
         val sortie = r.second.replace(Regex("JARVIS_RC=\\d+"), "").trim()
         return when {
@@ -124,8 +132,8 @@ object HaSur {
         if (!parApi) {
             val c = conteneur(app) ?: return "❌ Ni l'API de Home Assistant ni son conteneur Docker ne sont joignables."
             // Arrêt propre : 2 min accordées (10 s par défaut → base de l'historique endommagée, redémarrage encore plus long).
-            val r = docker(app, "docker restart -t 120 ${q(c.nom)}", 200)
-            if (r.first != 0) return "❌ Redémarrage refusé : ${r.second.take(300)}"
+            val r = dockerComplet(app, "docker restart -t 120 ${q(c.nom)}", 240)
+            if (r.first > 0) return "❌ Redémarrage refusé : ${r.second.take(300)}"
         }
         return "🔁 Redémarrage de Home Assistant" + (if (parApi) " (arrêt propre par Home Assistant lui-même)" else " (arrêt propre du conteneur)") + "…\n" + attendre(app).second
     }
@@ -134,8 +142,8 @@ object HaSur {
     suspend fun demarrer(app: JarvisApp): String {
         val c = conteneur(app, frais = true) ?: return "❌ Conteneur Home Assistant introuvable."
         verifier(app)?.let { return "⛔ Démarrage annulé : configuration refusée par Home Assistant.\n```\n$it\n```" }
-        val r = docker(app, "docker start ${q(c.nom)}", 90)
-        if (r.first != 0) return "❌ ${r.second.take(300)}"
+        val r = dockerComplet(app, "docker start ${q(c.nom)}", 120)
+        if (r.first > 0) return "❌ ${r.second.take(300)}"
         return "▶️ ${c.nom} démarré…\n" + attendre(app).second
     }
 

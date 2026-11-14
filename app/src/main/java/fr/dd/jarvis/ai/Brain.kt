@@ -469,11 +469,14 @@ class Brain(
                 val args = try {
                     JSONObject(fn.optString("arguments", "{}").ifBlank { "{}" })
                 } catch (e: Exception) {
-                    JSONObject()
+                    null
                 }
                 onStatus("⚙️ $name…")
                 val res = try {
-                    if (name in retires) ToolResult(if (name.startsWith("ssh") || name == "serveur_diagnostic") "Pour Home Assistant, utilise l'API (ha_entites, ha_etat, ha_service, ha_config, ha_dashboard, ha_admin), pas le SSH." else "Outil indisponible ici.")
+                    // Arguments illisibles = réponse de l'IA coupée en plein appel : rien n'est exécuté (avant, l'outil
+                    // partait avec des arguments vides ou incomplets — commandes SSH tronquées).
+                    if (args == null) ToolResult("❌ Arguments incomplets ou illisibles (réponse coupée) : l'outil n'a PAS été exécuté. Renvoie l'appel avec des arguments JSON complets.")
+                    else if (name in retires) ToolResult(if (name.startsWith("ssh") || name == "serveur_diagnostic") "Pour Home Assistant, utilise l'API (ha_entites, ha_etat, ha_service, ha_config, ha_dashboard, ha_admin), pas le SSH." else "Outil indisponible ici.")
                     else tools.execute(name, args)
                 } catch (e: ApiException) {
                     ToolResult("Erreur du service IA : ${e.message}")

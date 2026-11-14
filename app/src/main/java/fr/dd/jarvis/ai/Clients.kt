@@ -96,13 +96,23 @@ class GroqClient(private val ring: KeyRing, private val model: () -> String) {
             .header("Authorization", "Bearer $key")
             .post(body.toString().toRequestBody(Http.JSON))
             .build()
-        return client.newCall(req).execute().use { resp ->
+        val m = client.newCall(req).execute().use { resp ->
             val text = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) throw ApiException(resp.code, "Groq ${resp.code} : ${text.take(300)}")
-            val msg = JSONObject(text).getJSONArray("choices").getJSONObject(0).getJSONObject("message")
+            val choix = JSONObject(text).getJSONArray("choices").getJSONObject(0)
+            val msg = choix.getJSONObject("message")
             if (msg.has("content") && !msg.isNull("content")) msg.put("content", nettoyerRaisonnement(msg.optString("content")))
+            if (choix.optString("finish_reason") == "length") msg.put("_coupe", true)
             msg
         }
+        // Réponse coupée par la limite de sortie au milieu d'un appel d'outil (commande, fichier) : jamais exécutée telle
+        // quelle — on redemande avec plus de place, puis on abandonne ce fournisseur si ça ne suffit pas.
+        if (m.optBoolean("_coupe") && (m.optJSONArray("tool_calls")?.length() ?: 0) > 0) {
+            if (maxTokens != 1 && out < 8192) return call(key, messages, tools, maxTokens, client, minOf(out * 2, 8192), forceText)
+            throw ApiException(502, "Groq : réponse coupée au milieu d'un appel d'outil (limite de sortie atteinte)")
+        }
+        m.remove("_coupe")
+        return m
     }
 }
 
@@ -352,7 +362,7 @@ class GeminiChatClient(private val ring: KeyRing, private val model: () -> Strin
     /** Appel par l'API native (generateContent) : messages et outils OpenAI convertis, réponse reconvertie au format OpenAI. */
     private fun callNatif(key: String, mdl: String, messages: JSONArray, tools: JSONArray?, out: Int, forceText: Boolean, reflexionReduite: Boolean): JSONObject {
         val (systeme, contenus) = versNatif(messagesPourGemini(messages))
-        val gen = JSONObject().put("temperature", 0.4).put("maxOutputTokens", out.coerceIn(256, 8192))
+        val gen = JSONObject().put("temperature", 0.4).put("maxOutputTokens", out.coerceIn(256, 16384))
         if (reflexionReduite) when {
             mdl.contains("2.5") && !mdl.contains("pro") -> gen.put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
             mdl.contains("gemini-3") -> gen.put("thinkingConfig", JSONObject().put("thinkingLevel", "low"))
@@ -369,14 +379,21 @@ class GeminiChatClient(private val ring: KeyRing, private val model: () -> Strin
         val (code, text) = GeminiPasserelle.executer(Http.client, req)
         if (code == 400 && reflexionReduite && Regex("think", RegexOption.IGNORE_CASE).containsMatchIn(text)) return callNatif(key, mdl, messages, tools, out, forceText, false)
         if (code !in 200..299) throw ApiException(code, "Gemini $code : ${text.take(300)}")
-        return depuisNatif(text)
+        val m = depuisNatif(text)
+        // Coupé par la limite de sortie pendant un appel d'outil : redemandé avec plus de place, jamais exécuté tronqué.
+        val coupe = runCatching { JSONObject(text).optJSONArray("candidates")?.optJSONObject(0)?.optString("finishReason") == "MAX_TOKENS" }.getOrDefault(false)
+        if (coupe && (m.optJSONArray("tool_calls")?.length() ?: 0) > 0) {
+            if (out < 16384) return callNatif(key, mdl, messages, tools, minOf(out * 2, 16384), forceText, reflexionReduite)
+            throw ApiException(502, "Gemini : réponse coupée au milieu d'un appel d'outil (limite de sortie atteinte)")
+        }
+        return m
     }
 
     private fun call(key: String, mdl: String, messages: JSONArray, tools: JSONArray?, out: Int, forceText: Boolean, reflexionReduite: Boolean, bearer: Boolean): JSONObject {
         val body = JSONObject().put("model", mdl).put("messages", messagesPourGemini(messages)).put("temperature", 0.4)
             // La réflexion de Gemini compte dans les jetons de sortie : marge pour que la réponse ne soit pas coupée.
             // Jusqu'à 8192 : un appel d'outil qui écrit un fichier complet porte tout le fichier dans la sortie.
-            .put("max_tokens", out.coerceIn(256, 8192))
+            .put("max_tokens", out.coerceIn(256, 16384))
         val outils = outilsPourGemini(tools)
         if (outils != null && outils.length() > 0) { body.put("tools", outils); body.put("tool_choice", if (forceText) "none" else "auto") }
         if (reflexionReduite) when {
@@ -392,6 +409,10 @@ class GeminiChatClient(private val ring: KeyRing, private val model: () -> Strin
             .getOrElse { throw ApiException(502, "Gemini : réponse illisible") }
         val msg = racine.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message") ?: throw ApiException(502, "Gemini : réponse vide")
         val appels = msg.optJSONArray("tool_calls")
+        if (racine.optJSONArray("choices")?.optJSONObject(0)?.optString("finish_reason") == "length" && (appels?.length() ?: 0) > 0) {
+            if (out < 16384) return call(key, mdl, messages, tools, minOf(out * 2, 16384), forceText, reflexionReduite, bearer)
+            throw ApiException(502, "Gemini : réponse coupée au milieu d'un appel d'outil (limite de sortie atteinte)")
+        }
         if (appels != null) for (i in 0 until appels.length()) appels.optJSONObject(i)?.let { a ->
             if (a.optString("id").isBlank()) a.put("id", "call_" + System.nanoTime().toString(36) + i)
             if (!a.has("type")) a.put("type", "function")

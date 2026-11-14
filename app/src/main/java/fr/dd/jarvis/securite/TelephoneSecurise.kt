@@ -90,10 +90,66 @@ object TelephoneSecurise {
     private suspend fun tracerAccessibilite(app: JarvisApp, points: List<Int>): Boolean {
         val a = fr.dd.jarvis.service.JarvisAccessibilityService.instance ?: return false
         val g = a.grilleSchema()?.also { app.store.schemaGrille.set(it.joinToString(",")) } ?: grilleEnregistree(app.store.schemaGrille.value) ?: return false
+        return tracerSur(a, points, g, 160, 0)
+    }
+
+    private fun journal(t: String) = runCatching { fr.dd.jarvis.voice.JournalVoix.noter("déverrouillage", t) }
+
+    /** Trace le schéma sur la grille [g] ; vrai si Android a exécuté le geste en entier. */
+    private suspend fun tracerSur(a: fr.dd.jarvis.service.JarvisAccessibilityService, points: List<Int>, g: IntArray, msParSegment: Long, maintienMs: Long): Boolean {
         val pts = points.map { centre(it, g).let { (x, y) -> x.toFloat() to y.toFloat() } }
         val fait = kotlinx.coroutines.CompletableDeferred<Boolean>()
-        val lance = withContext(Dispatchers.Main) { a.tracer(pts) { ok -> fait.complete(ok) } }
-        return lance && (kotlinx.coroutines.withTimeoutOrNull(8000) { fait.await() } ?: false)
+        val lance = withContext(Dispatchers.Main) { a.tracer(pts, msParSegment, maintienMs) { ok -> fait.complete(ok) } }
+        return lance && (kotlinx.coroutines.withTimeoutOrNull(12_000) { fait.await() } ?: false)
+    }
+
+    /** Attend que la grille du schéma soit réellement affichée (lue à l'écran), [ms] au plus. */
+    private suspend fun attendreGrille(a: fr.dd.jarvis.service.JarvisAccessibilityService, ms: Long): IntArray? {
+        val fin = System.currentTimeMillis() + ms
+        while (System.currentTimeMillis() < fin) {
+            withContext(Dispatchers.Main) { runCatching { a.grilleSchema() }.getOrNull() }?.let { return it }
+            delay(250)
+        }
+        return null
+    }
+
+    /**
+     * Déverrouillage par le SCHÉMA, par l'accessibilité (avec ou sans ADB) :
+     * 1) réveil + demande de déverrouillage ; 2) si la grille n'apparaît pas (écran HyperOS / MIUI « glisser vers le haut »),
+     * glissé vers le haut ; 3) attente de la grille RÉELLEMENT affichée ; 4) doigt posé puis tracé continu ; 5) contrôle,
+     * puis un 2e essai plus lent sur la grille relue. Chaque étape est notée dans le journal de la voix (Réglages › Voix).
+     */
+    private suspend fun deverrouillerSchema(app: JarvisApp, points: List<Int>): String? {
+        val a = fr.dd.jarvis.service.JarvisAccessibilityService.instance ?: return null
+        journal("schéma : réveil et affichage du déverrouillage")
+        afficherDeverrouillage(app)
+        var g = attendreGrille(a, 2500)
+        if (g == null) {
+            val m = app.resources.displayMetrics
+            journal("schéma : grille pas encore affichée → glissé vers le haut")
+            withContext(Dispatchers.Main) { a.swipe(m.widthPixels / 2f, m.heightPixels * 0.90f, m.widthPixels / 2f, m.heightPixels * 0.35f, 320) }
+            g = attendreGrille(a, 3000)
+        }
+        val lue = g != null
+        if (g == null) g = grilleEnregistree(app.store.schemaGrille.value)
+        if (g == null) {
+            journal("schéma : grille introuvable à l'écran (aucune position enregistrée)")
+            return "⚠️ Je ne trouve pas la grille du schéma à l'écran. Affiche une fois toi-même l'écran du schéma (JARVIS relève sa position), puis redemande. " +
+                "Vérifie aussi que l'accessibilité de JARVIS est bien active (Réglages Android › Accessibilité › JARVIS)."
+        }
+        app.store.schemaGrille.set(g.joinToString(","))
+        journal("schéma : grille ${if (lue) "lue à l'écran" else "enregistrée (non lue)"} [${g.joinToString(",")}], ${points.size} points")
+        for ((i, reglage) in listOf(220L to 140L, 420L to 260L).withIndex()) {
+            val ok = tracerSur(a, points, g!!, reglage.first, reglage.second)
+            journal("schéma : geste ${if (ok) "exécuté" else "refusé ou interrompu par Android"} (essai ${i + 1})")
+            delay(1500)
+            if (!verrouille(app)) { journal("schéma : téléphone déverrouillé ✓"); return "🔓 Téléphone déverrouillé." }
+            // Après un essai refusé, la grille peut s'être déplacée (message « schéma incorrect ») : relue.
+            g = attendreGrille(a, 1500) ?: g
+        }
+        journal("schéma : toujours verrouillé après 2 essais")
+        return "⚠️ Le schéma a été tracé mais le téléphone est resté verrouillé. Vérifie dans Réglages › Sécurité › Systèmes que le schéma enregistré est " +
+            "EXACTEMENT celui de l'écran (mêmes points, même ordre, même point de départ). Le détail de chaque étape est dans le journal de la voix."
     }
 
     /** Mise en veille + verrouillage. */
@@ -112,14 +168,10 @@ object TelephoneSecurise {
         val code = runCatching { app.store.codeDeverrouillage.value }.getOrDefault("")
         // Schéma sans ADB : l'accessibilité suffit (affichage de la saisie par JARVIS, puis geste continu sur la grille).
         val pointsSchema = schema(code)?.let { fr.dd.jarvis.ui.SchemaDessinLogique.completer(it) }
-        if (pointsSchema != null && !shellPossible(app) && fr.dd.jarvis.service.JarvisAccessibilityService.instance != null) {
-            afficherDeverrouillage(app)
-            delay(1300)
-            val ok = tracerAccessibilite(app, pointsSchema)
-            delay(1200)
-            return@withContext if (!verrouille(app)) "🔓 Téléphone déverrouillé." else if (!ok)
-                "⚠️ Je n'ai pas pu tracer le schéma : affiche une fois l'écran de verrouillage avec la grille du schéma (JARVIS relève alors sa position), puis redemande."
-            else "⚠️ Le schéma tracé n'a pas été accepté : retrace-le dans Réglages › Sécurité › Systèmes (exactement comme sur l'écran de verrouillage)."
+        // Schéma : toujours par l'accessibilité d'abord (même avec ADB/Shizuku : sur HyperOS / MIUI, l'injection « input »
+        // est refusée sans « Débogage USB (paramètres de sécurité) »).
+        if (pointsSchema != null) deverrouillerSchema(app, pointsSchema)?.let { r ->
+            if (!verrouille(app) || !shellPossible(app)) return@withContext r
         }
         if (code.isBlank() || !codeValide(code) || !shellPossible(app)) {
             afficherDeverrouillage(app)
@@ -136,7 +188,7 @@ object TelephoneSecurise {
         val points = schema(code)?.let { fr.dd.jarvis.ui.SchemaDessinLogique.completer(it) }
         if (points != null) {
             // 1) Geste continu par l'accessibilité sur la vraie grille ; 2) repli : commandes « input » sur la grille lue ou relevée.
-            if (!tracerAccessibilite(app, points)) sh(app, traceSchema(points, grilleEnregistree(app.store.schemaGrille.value) ?: grille(app, l, h)))
+            sh(app, traceSchema(points, grilleEnregistree(app.store.schemaGrille.value) ?: grille(app, l, h)))
         }
         else {
             sh(app, "input text '$code'")
@@ -146,7 +198,8 @@ object TelephoneSecurise {
         delay(1500)
         if (!verrouille(app)) "🔓 Téléphone déverrouillé." else {
             afficherDeverrouillage(app)
-            "⚠️ Le ${if (points != null) "schéma" else "code"} n'a pas été accepté (ou l'écran n'a pas répondu) : termine avec ton empreinte ou ton visage, et vérifie-le dans Réglages › Sécurité › Systèmes."
+            "⚠️ Le ${if (points != null) "schéma" else "code"} n'a pas été accepté (ou l'écran n'a pas répondu) : termine avec ton empreinte ou ton visage, et vérifie-le dans Réglages › Sécurité › Systèmes." +
+                (if (points != null) " Sur Xiaomi, l'ADB ne peut toucher l'écran que si « Débogage USB (paramètres de sécurité) » est activé dans les options pour les développeurs." else "")
         }
     }
 

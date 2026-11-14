@@ -157,7 +157,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
 
     private fun sortie(r: Pair<Int, String>, max: Int = 5500): String {
         val t = r.second.trim().ifBlank { "(aucune sortie)" }
-        return (if (t.length > max) "…" + t.takeLast(max) else t) + (if (r.first != 0) "\n[code de sortie ${r.first}]" else "")
+        return (if (t.length > max) "…" + t.takeLast(max) else t) + (if (r.first != 0 && r.first > -2) "\n[code de sortie ${r.first}]" else "")
     }
 
     suspend fun execute(name: String, a: JSONObject): ToolResult = withContext(Dispatchers.IO) {
@@ -278,8 +278,13 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                         else ToolResult(HaSur.mettreAJour(app) { code, nom, root -> ServeurAdminTools(app, confirm).lancerTache(code, nom, root) }, direct = true)
                     }
                 }
+                // Commande coupée (réponse d'IA tronquée) : refusée AVANT toute confirmation ou exécution.
+                Serveur.commandeIncomplete(cmd)?.let { return ToolResult("⛔ Commande incomplète, rien n'a été exécuté : $it. Renvoie la commande COMPLÈTE.") }
                 if ((Serveur.dangereuse(cmd) || cible != null) && !confirm("Exécuter sur ${cible?.hote ?: app.store.sshHost.value} :\n\n$cmd", true)) return ToolResult("Refusé par l'utilisateur.")
-                ToolResult("```\n" + sortie(Serveur.exec(app, cmd, (a.optString("delai").toIntOrNull() ?: 60).coerceIn(5, 600), cible)) + "\n```")
+                val delai = (a.optString("delai").toIntOrNull() ?: 90).coerceIn(5, 900)
+                // Serveur de la maison : exécution vérifiée (syntaxe) et détachée — jamais tuée en plein milieu par un délai.
+                val r = if (cible == null) Serveur.execComplet(app, cmd, delai) else Serveur.exec(app, cmd, delai, cible)
+                ToolResult("```\n" + sortie(r) + "\n```")
             }
             "ssh_fichier" -> { ssh(); sshFichier(a) }
             "serveur_diagnostic" -> {
@@ -319,12 +324,19 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 val code = a.optString("code")
                 if (code.isBlank()) return ToolResult("Script vide.")
                 val py = a.optString("langage").lowercase().startsWith("py")
+                if (!py) Serveur.commandeIncomplete(code)?.let { return ToolResult("⛔ Script incomplet, rien n'a été exécuté : $it. Renvoie le script COMPLET.") }
                 if (!confirm("Exécuter ce script ${if (py) "Python" else "bash"} sur le serveur ${app.store.sshHost.value} ?\n\n" + code.take(900), true)) return ToolResult("Refusé par l'utilisateur.")
-                val f = "/tmp/jarvis_script_${System.currentTimeMillis()}" + if (py) ".py" else ".sh"
-                Serveur.envoyerOctets(app, f, (if (py) code else "set -e\n$code").toByteArray())
                 // Script avec sudo (ou root demandé) : tout le script tourne en root, ses « sudo » internes passent sans mot de passe.
                 val root = a.optString("root").lowercase() in setOf("oui", "true", "1") || Regex("\\bsudo\\b").containsMatchIn(code)
-                val r = Serveur.exec(app, (if (root) "sudo " else "") + "${if (py) "python3" else "bash"} $f; c=\$?; rm -f $f; exit \$c", (a.optString("delai").toIntOrNull() ?: 120).coerceIn(10, 900))
+                val delai = (a.optString("delai").toIntOrNull() ?: 180).coerceIn(10, 900)
+                val r = if (py) {
+                    val f = "/tmp/jarvis_script_${System.currentTimeMillis()}.py"
+                    Serveur.envoyerOctets(app, f, code.toByteArray())
+                    // Script coupé ou mal formé : refusé avant exécution.
+                    val v = Serveur.exec(app, "out=\$(python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' $f 2>&1); echo \"JARVIS_RC=\$?\"; printf '%s' \"\$out\" | tail -3", 20)
+                    if (!v.second.contains("JARVIS_RC=0")) { Serveur.exec(app, "rm -f $f", 10); -3 to "⛔ Script Python incomplet ou mal formé, rien n'a été exécuté :\n" + v.second.replace(Regex("JARVIS_RC=\\d+"), "").trim() }
+                    else Serveur.execComplet(app, (if (root) "sudo " else "") + "python3 $f; c=\$?; rm -f $f; exit \$c", delai, "script Python")
+                } else Serveur.execComplet(app, (if (root && !Regex("\\bsudo\\b").containsMatchIn(code)) "sudo true\n" else "") + "set -e\n$code", delai, "script bash")
                 ToolResult("```\n" + sortie(r) + "\n```")
             }
             "github" -> {

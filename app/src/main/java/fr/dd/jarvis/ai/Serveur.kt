@@ -304,6 +304,78 @@ object Serveur {
         code to out.toString("UTF-8")
     }
 
+    /**
+     * Vérifie qu'une commande / un script bash est COMPLET avant de l'exécuter (guillemet non fermé, bloc if/for sans fin,
+     * « EOF » de fin manquant, ligne coupée après « | » ou « && »…) : une réponse d'IA coupée en plein milieu donnait des
+     * commandes tronquées, exécutées telles quelles. Renvoie null si la commande est complète, sinon l'explication.
+     */
+    internal fun commandeIncomplete(cmd: String): String? {
+        val t = cmd.trimEnd()
+        if (t.isEmpty()) return "commande vide"
+        if (Regex("(\\\\|\\|\\||&&|\\|)$").containsMatchIn(t)) return "la commande s'arrête au milieu (« ${t.takeLast(20)} »)"
+        // Documents « << FIN » : chaque délimiteur doit être refermé par une ligne seule.
+        Regex("(?<!<)<<(?!<)-?\\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?").findAll(t).forEach { m ->
+            val fin = m.groupValues[1]
+            val apres = t.substring(m.range.last + 1)
+            if (!Regex("(?m)^\\s*" + Regex.escape(fin) + "\\s*$").containsMatchIn(apres)) return "le bloc « <<$fin » n'est jamais refermé par une ligne « $fin »"
+        }
+        // Guillemets non refermés, if/for/case sans fin… : vérifiés par « bash -n » sur le serveur (voir syntaxeBash).
+        return null
+    }
+
+    /** Contrôle de syntaxe bash d'un fichier déjà envoyé sur le serveur (null = correct). */
+    private fun syntaxeBash(app: JarvisApp, fichier: String): String? {
+        val r = exec(app, "bash -n ${q(fichier)} 2>&1; echo JARVIS_RC=\$?", 20)
+        val rc = Regex("JARVIS_RC=(\\d+)").find(r.second)?.groupValues?.get(1)?.toIntOrNull() ?: return null
+        val msg = r.second.replace(Regex("JARVIS_RC=\\d+"), "").replace(fichier, "commande").trim()
+        return when {
+            rc != 0 -> msg.ifBlank { "erreur de syntaxe" }.take(400)
+            msg.contains("delimited by end-of-file", true) -> msg.take(400)
+            else -> null
+        }
+    }
+
+    private const val TACHES_CMD = "/tmp/jarvis_taches"
+
+    /**
+     * Exécute une commande qui doit aller JUSQU'AU BOUT (redémarrage, mise à jour, docker compose, apt…) : elle est
+     * vérifiée (complète, syntaxe bash), puis lancée DÉTACHÉE sur le serveur (setsid nohup) — un délai dépassé ou une
+     * coupure réseau ne l'interrompt plus. Avant, au bout du délai la connexion était coupée et la commande tuée en
+     * plein milieu (ex. « docker compose up » arrêté entre la suppression et la recréation du conteneur : Home
+     * Assistant restait arrêté). On attend sa fin jusqu'à [timeoutS] ; au-delà elle CONTINUE et on rend son journal
+     * (code -2). Code -3 : commande refusée car incomplète (rien n'a été exécuté).
+     */
+    fun execComplet(app: JarvisApp, commande: String, timeoutS: Int = 120, nom: String = ""): Pair<Int, String> {
+        commandeIncomplete(commande)?.let { return -3 to "⛔ Commande incomplète, rien n'a été exécuté : $it. Renvoie la commande COMPLÈTE." }
+        val root = Regex("\\bsudo\\b").containsMatchIn(commande) && app.store.sshUser.value.trim() != "root"
+        val script = if (root) commande.replace(Regex("\\bsudo\\s+(-[A-Za-z]+\\s+(''\\s+)?)*"), "") else commande
+        val id = "c" + System.currentTimeMillis().toString(36)
+        val d = TACHES_CMD
+        exec(app, "mkdir -p $d && chmod 1777 $d 2>/dev/null; true", 15)
+        envoyerOctets(app, "$d/$id.sh", script.toByteArray(Charsets.UTF_8))
+        envoyerOctets(app, "$d/$id.nom", (nom.ifBlank { commande.lines().first().take(80) }).toByteArray(Charsets.UTF_8))
+        syntaxeBash(app, "$d/$id.sh")?.let { err ->
+            exec(app, "rm -f $d/$id.sh $d/$id.nom", 10)
+            return -3 to "⛔ Commande mal formée ou coupée, rien n'a été exécuté :\n$err\nRenvoie la commande COMPLÈTE."
+        }
+        val lanceur = "cd ~ 2>/dev/null; chmod 700 $d/$id.sh; setsid nohup bash -c " + q("bash $d/$id.sh > $d/$id.log 2>&1 < /dev/null; echo \$? > $d/$id.rc; rm -f $d/$id.sh") +
+            " > /dev/null 2>&1 < /dev/null & echo JARVIS_LANCE"
+        val l = exec(app, (if (root) "sudo " else "") + lanceur, 25)
+        if (!l.second.contains("JARVIS_LANCE")) return (l.first.takeIf { it != 0 } ?: 1) to "La commande n'a pas pu démarrer : ${l.second.trim().take(300)}"
+        val fin = System.currentTimeMillis() + timeoutS * 1000L
+        var pause = 300L
+        while (System.currentTimeMillis() < fin) {
+            Thread.sleep(pause); pause = (pause * 3 / 2).coerceAtMost(2000)
+            val rc = runCatching { exec(app, "cat $d/$id.rc 2>/dev/null", 10).second.trim() }.getOrDefault("")
+            if (rc.isNotEmpty()) {
+                val log = runCatching { exec(app, "cat $d/$id.log 2>/dev/null | tail -c 60000; rm -f $d/$id.log $d/$id.rc $d/$id.nom", 20).second }.getOrDefault("")
+                return (rc.lines().last().trim().toIntOrNull() ?: 1) to log
+            }
+        }
+        val log = runCatching { exec(app, "tail -c 6000 $d/$id.log 2>/dev/null", 15).second }.getOrDefault("")
+        return -2 to log + "\n[⏳ Toujours en cours sur le serveur après ${timeoutS} s — la commande N'EST PAS interrompue, elle va jusqu'au bout. Suivi : serveur_tache etat id=$id]"
+    }
+
     @Volatile private var maisonCache: Pair<String, String>? = null
 
     /** Dossier personnel de l'utilisateur SSH sur le serveur ($HOME). */

@@ -71,7 +71,7 @@ class ServeurAdminTools(private val app: JarvisApp, private val confirm: suspend
 
     private fun sortie(r: Pair<Int, String>, max: Int = 6000): String {
         val t = r.second.trim().ifBlank { "(aucune sortie)" }
-        return (if (t.length > max) "…" + t.takeLast(max) else t) + (if (r.first != 0) "\n[code de sortie ${r.first}]" else "")
+        return (if (t.length > max) "…" + t.takeLast(max) else t) + (if (r.first != 0 && r.first > -2) "\n[code de sortie ${r.first}]" else "")
     }
 
     /** Droits root possibles sans terminal (mot de passe enregistré, ou compte root). */
@@ -189,7 +189,8 @@ class ServeurAdminTools(private val app: JarvisApp, private val confirm: suspend
                 else -> return ToolResult("Action inconnue.")
             }
         }
-        val r = Serveur.exec(app, cmd, delai)
+        // Actions qui modifient : exécution détachée et vérifiée, jamais interrompue en plein milieu (docker compose, apt…).
+        val r = if (sensible || action in setOf("activer", "desactiver", "mettre_a_jour")) Serveur.execComplet(app, cmd, delai, "${libelleAction(action)} ${c.nom}") else Serveur.exec(app, cmd, delai)
         val autres = if (trouves.size > 1) "\n_(Autres services correspondants : ${trouves.drop(1).joinToString { "${it.nom} (${it.type})" }}.)_" else ""
         return ToolResult("**${c.nom}** (${c.type}) — ${libelleAction(action)}\n```\n" + sortie(r) + "\n```" + autres)
     }

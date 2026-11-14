@@ -24,3 +24,15 @@ class HaSurTest {
         assertTrue(s.contains("Retour à la version précédente"))
     }
 }
+
+class CommandeIncompleteTest {
+    @Test fun detecteLesCommandesCoupees() {
+        org.junit.Assert.assertNull(Serveur.commandeIncomplete("docker restart homeassistant"))
+        org.junit.Assert.assertNull(Serveur.commandeIncomplete("cat <<'EOF' > /config/a.yaml\nname: l'entrée\nEOF\necho ok"))
+        org.junit.Assert.assertNull(Serveur.commandeIncomplete("grep -c x <<< \"abc\""))
+        org.junit.Assert.assertNotNull(Serveur.commandeIncomplete("cd /opt/ha && docker compose pull &&"))
+        org.junit.Assert.assertNotNull(Serveur.commandeIncomplete("docker logs homeassistant |"))
+        org.junit.Assert.assertNotNull(Serveur.commandeIncomplete("cat <<EOF > /config/configuration.yaml\nhomeassistant:\n  name: Maison"))
+        org.junit.Assert.assertNotNull(Serveur.commandeIncomplete("sudo apt-get install -y \\"))
+    }
+}
