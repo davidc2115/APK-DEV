@@ -730,7 +730,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 }
                 Spacer(Modifier.height(8.dp))
                 var picoInput by remember { mutableStateOf(store.picoKey.value) }
-                Text("Le mot « Jarvis » est reconnu hors-ligne par un détecteur gratuit installé automatiquement au premier démarrage de l'écoute (aucune clé nécessaire). Facultatif : une clé Picovoice gratuite (console.picovoice.ai › AccessKey) donne un détecteur encore plus fiable. Le mot d'éveil « Ok Google » lui-même est réservé au système : pour appeler JARVIS comme Google, définis-le en assistant par défaut (bouton ci-dessous) et appelle-le par appui long sur le bouton d'alimentation ou d'accueil.", color = HudDim, fontSize = 12.sp)
+                Text("Le mot « Jarvis » est reconnu hors-ligne par un détecteur gratuit FRANÇAIS installé automatiquement au premier démarrage de l'écoute (aucune clé, aucun compte : « Jarvis » dit à la française). Facultatif : une clé Picovoice (console.picovoice.ai, compte professionnel exigé) utilise leur détecteur à la place. Le mot d'éveil « Ok Google » lui-même est réservé au système : pour appeler JARVIS comme Google, définis-le en assistant par défaut (bouton ci-dessous) et appelle-le par appui long sur le bouton d'alimentation ou d'accueil.", color = HudDim, fontSize = 12.sp)
                 Spacer(Modifier.height(4.dp))
                 HudTextField(picoInput, { picoInput = it }, Modifier.fillMaxWidth(), label = "Clé Picovoice (facultatif)")
                 Spacer(Modifier.height(4.dp))
@@ -749,12 +749,14 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 }
                 Text("Écoute économe (détecteur hors-ligne) : le détecteur ne travaille que lorsqu'il y a du son, pas pendant le silence — beaucoup moins de batterie, surtout la nuit. Si « Jarvis » est moins bien entendu de loin ou avec la télé allumée, désactive-la.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp, bottom = 8.dp))
                 var voskReady by remember { mutableStateOf(fr.dd.jarvis.voice.VoskModel.ready(ctx)) }
+                var voskFr by remember { mutableStateOf(fr.dd.jarvis.voice.VoskModel.francais(ctx)) }
                 var voskMsg by remember { mutableStateOf("") }
-                StatusRow("Détecteur hors-ligne de secours (Vosk)", voskReady)
-                if (!voskReady) HudButton("Télécharger le détecteur (≈ 40 Mo)") {
+                StatusRow(when { voskFr -> "Détecteur hors-ligne « Jarvis » (français)"; voskReady -> "Détecteur hors-ligne (ancien modèle anglais)"; else -> "Détecteur hors-ligne « Jarvis »" }, voskFr)
+                if (!voskFr) HudButton(if (voskReady) "Passer au détecteur français (≈ 41 Mo, bien plus fiable)" else "Télécharger le détecteur (≈ 41 Mo)") {
                     scope.launch {
                         voskMsg = "⏳ Téléchargement…"
                         voskMsg = fr.dd.jarvis.voice.VoskModel.download(ctx) { p -> voskMsg = "⏳ Téléchargement… $p %" }
+                        voskFr = fr.dd.jarvis.voice.VoskModel.francais(ctx)
                         voskReady = fr.dd.jarvis.voice.VoskModel.ready(ctx)
                         if (voskReady && store.wakeOn.value) { fr.dd.jarvis.service.JarvisService.stop(ctx); fr.dd.jarvis.service.JarvisService.start(ctx) }
                     }

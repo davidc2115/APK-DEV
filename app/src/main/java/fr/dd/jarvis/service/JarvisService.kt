@@ -254,12 +254,15 @@ class JarvisService : Service() {
                 }
             }
         }
+        // Modèle français installé : l'ancien modèle anglais (≈ 70 Mo) est supprimé avant d'armer le détecteur.
+        fr.dd.jarvis.voice.VoskModel.nettoyer(this)
         vosk = when {
             app.store.picoKey.value.isNotBlank() -> fr.dd.jarvis.voice.PorcupineWake(this, app.store.picoKey.value) { main.post { onWakeWord() } }
             fr.dd.jarvis.voice.VoskModel.ready(this) -> fr.dd.jarvis.voice.VoskWake(this, app.store.ecouteEconome.value) { main.post { onWakeWord() } }
             else -> null
         }?.also { brancher(it) }
         main.postDelayed(surveillance, 30_000)
+        passerAuFrancais()
         if (vosk == null) {
             // Ni clé Picovoice ni modèle Vosk : on télécharge le détecteur hors-ligne (≈ 40 Mo, une seule fois), toujours SANS écoute en boucle.
             val nm = getSystemService(NotificationManager::class.java)
@@ -414,6 +417,32 @@ class JarvisService : Service() {
     }
 
     private val relance = Runnable { vosk?.let { rearmer(it) } }
+
+    /**
+     * Ancien détecteur anglais en place : le modèle français (« Jarvis » dit à la française bien mieux reconnu) est
+     * téléchargé en arrière-plan, sans notification, puis remplace l'anglais dès que JARVIS est au repos.
+     */
+    private fun passerAuFrancais() {
+        if (fr.dd.jarvis.voice.VoskModel.francais(this) || !fr.dd.jarvis.voice.VoskModel.ready(this)) return
+        scope.launch(Dispatchers.IO) {
+            val msg = fr.dd.jarvis.voice.VoskModel.download(this@JarvisService) { }
+            fr.dd.jarvis.voice.JournalVoix.noter("service", "modèle « Jarvis » français : $msg")
+            if (fr.dd.jarvis.voice.VoskModel.francais(this@JarvisService)) main.post { remplacerParFrancais() }
+        }
+    }
+
+    private fun remplacerParFrancais() {
+        val v = vosk
+        if (!running || v !is fr.dd.jarvis.voice.VoskWake) return
+        // Pas pendant une conversation : on réessaie quand JARVIS est revenu au repos.
+        if (awake || busy || suspenduParAppli) { main.postDelayed({ remplacerParFrancais() }, 20_000); return }
+        main.removeCallbacks(relance)
+        v.release()
+        vosk = fr.dd.jarvis.voice.VoskWake(this, app.store.ecouteEconome.value) { main.post { onWakeWord() } }.also { brancher(it) }
+        fr.dd.jarvis.voice.VoskModel.nettoyer(this)
+        fr.dd.jarvis.voice.JournalVoix.noter("service", "détecteur « Jarvis » passé au modèle français")
+        main.postDelayed({ vosk?.let { rearmer(it) } }, 600)
+    }
     private val finSuspension = Runnable { suspendrePourAppli(false) }
 
     // ---- faux réveils : si « Jarvis » se déclenche tout seul (télé, conversation), le détecteur devient plus strict.
