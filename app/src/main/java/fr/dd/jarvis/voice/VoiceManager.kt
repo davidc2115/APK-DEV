@@ -698,6 +698,13 @@ class VoiceManager(private val ctx: Context) {
     /** Whisper (Groq) transcrit la phrase ; sans réseau ni clé, le texte du modèle hors-ligne est utilisé. */
     private fun transcrireJarvis(moi: Int, f: MicroJarvis.Fin.Phrase) {
         val a = appli()
+        // Réécoute automatique et AUCUN mot sûr pour le modèle hors-ligne : ce n'est pas toi près du téléphone mais la
+        // télé ou des gens autour. Rien n'est envoyé à Whisper ; l'écoute continue ou se referme comme un silence.
+        if (relanceAuto && f.voskActif && f.motsSurs == 0) {
+            JournalVoix.noter(nom, "voix lointaine ignorée (télé, autres personnes)${if (f.texteLocal.isNotBlank()) " : « ${f.texteLocal.take(60)} »" else ""}")
+            livrerJarvis("", "voix lointaine", true, fond = true)
+            return
+        }
         Thread({
             var texte = ""
             var source = "hors-ligne"
@@ -740,16 +747,24 @@ class VoiceManager(private val ctx: Context) {
                 val motsW = texte.split(Regex("\\s+")).count { it.length >= 2 }
                 if (relanceAuto && motsLocaux <= 1 && motsW >= 4) {
                     JournalVoix.noter(nom, "voix lointaine ignorée (télé, autres personnes) : « ${texte.take(90)} »")
-                    texte = ""
+                    main.post { if (moi == jeton) livrerJarvis("", "voix lointaine", true, fond = true) }
+                    return@Thread
                 }
             }
             main.post { if (moi == jeton) livrerJarvis(texte, source, f.dureeMs < 4000) }
         }, "jarvis-whisper").apply { isDaemon = true; start() }
     }
 
-    private fun livrerJarvis(brut: String, source: String, courte: Boolean) {
+    private fun livrerJarvis(brut: String, source: String, courte: Boolean, fond: Boolean = false) {
         val t = listOf(debutPhrase, brut).filter { it.isNotBlank() }.joinToString(" ").trim()
         debutPhrase = ""
+        if (fond && t.isBlank()) {
+            // Personne ne s'adressait à JARVIS : la fenêtre de conversation n'est PAS prolongée ; on écoute jusqu'à sa
+            // fin, puis la conversation se referme d'elle-même (avant : relances sans fin avec la télé allumée).
+            onPartial("")
+            if (fenetreFin > System.currentTimeMillis() + 1500 && relancesMuettes++ < 3) demarrer(0) else finirSilence()
+            return
+        }
         if (t.isBlank()) {
             JournalVoix.noter(nom, "phrase non comprise ($source)")
             if (fenetreFin > 0 && relancesApresParole++ < 2) {

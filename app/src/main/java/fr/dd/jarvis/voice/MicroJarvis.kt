@@ -27,7 +27,9 @@ class MicroJarvis(private val ctx: Context) {
          * Phrase enregistrée (PCM 16 bits 16 kHz petit-boutiste), son texte hors-ligne (peut être vide) et la durée de
          * voix réellement entendue (hors silences) : sous ~¼ s, c'est un bruit, pas une phrase.
          */
-        class Phrase(val pcm: ByteArray, val texteLocal: String, val dureeMs: Long, val voixMs: Int, val voskActif: Boolean = false) : Fin()
+        class Phrase(val pcm: ByteArray, val texteLocal: String, val dureeMs: Long, val voixMs: Int, val voskActif: Boolean = false,
+                     /** Mots reconnus avec assurance (voix proche) ; -1 si inconnu. Les voix lointaines n'en donnent presque pas. */
+                     val motsSurs: Int = -1) : Fin()
         object Silence : Fin()
         object Annulee : Fin()
         class Erreur(val message: String) : Fin()
@@ -79,23 +81,32 @@ class MicroJarvis(private val ctx: Context) {
         val octets = ByteArray(TRAME * 2)
         val lot = ByteArrayOutputStream()      // 100 ms envoyées d'un coup au modèle
         val porte = PorteParole(silenceFin = (pauseMs / 20).coerceIn(40, 200))
+        // Le texte du modèle arrive ~0,3 s après la voix : la pause comptée sur les mots est raccourcie d'autant.
+        val mots = EcouteParMots(pauseTrames = ((pauseMs - 300) / 20).coerceIn(35, 200))
+        val avecModele = VoskModel.francais(ctx)
         val debut = System.currentTimeMillis()
         var debutParole = 0L
         var trames = 0
         var rec: org.vosk.Recognizer? = null
         var envoye = 0                          // octets de [tout] déjà passés au modèle
         val texteFini = StringBuilder()         // morceaux déjà conclus par Vosk
+        val horodatage = ArrayList<MotDate>()   // mots conclus avec leur position dans l'enregistrement
         var partiel = ""
         var affiche = ""
-        var prolongations = 0
         var resultat: Fin = Fin.Silence
 
         fun texte() = listOf(texteFini.toString(), partiel).filter { it.isNotBlank() }.joinToString(" ").trim()
+        fun noterMots(json: String): String {
+            val o = org.json.JSONObject(json)
+            o.optJSONArray("result")?.let { l -> for (i in 0 until l.length()) l.optJSONObject(i)?.let { w ->
+                horodatage += MotDate(w.optString("word"), w.optDouble("start"), w.optDouble("end"), w.optDouble("conf", 1.0)) } }
+            return o.optString("text").trim()
+        }
         fun nourrir(b: ByteArray, len: Int) {
             val v = rec ?: return
             runCatching {
                 if (v.acceptWaveForm(b, len)) {
-                    val t = org.json.JSONObject(v.result).optString("text").trim()
+                    val t = noterMots(v.result)
                     if (t.isNotBlank()) { if (texteFini.isNotEmpty()) texteFini.append(' '); texteFini.append(t) }
                     partiel = ""
                 } else partiel = org.json.JSONObject(v.partialResult).optString("partial").trim()
@@ -103,22 +114,31 @@ class MicroJarvis(private val ctx: Context) {
             val t = texte()
             if (t != affiche) { affiche = t; if (t.isNotBlank()) r.partiel(t) }
         }
+        fun parle() = if (rec != null) mots.parle else porte.parle
         fun phrase(): Fin.Phrase {
-            val f = porte
             val toutes = tout.toByteArray()
-            // Le son d'AVANT ta parole (télé, bruit) n'est pas envoyé : seulement à partir de ~0,4 s avant ton premier mot.
-            val depuis = (f.debut * TRAME * 2).coerceIn(0, toutes.size)
-            val final = rec?.let { v -> runCatching { org.json.JSONObject(v.finalResult).optString("text").trim() }.getOrDefault("") }.orEmpty()
+            var final = ""
+            rec?.let { v ->
+                if (lot.size() > 0) { val b = lot.toByteArray(); lot.reset(); runCatching { v.acceptWaveForm(b, b.size) } }
+                final = runCatching { noterMots(v.finalResult) }.getOrDefault("")
+            }
             val local = listOf(texteFini.toString(), final).filter { it.isNotBlank() }.joinToString(" ").trim().ifBlank { texte() }
-            return Fin.Phrase(toutes.copyOfRange(depuis - depuis % 2, toutes.size), local,
-                if (debutParole > 0) System.currentTimeMillis() - debutParole else 0, f.tramesVoix * 20, rec != null)
+            // Seulement de ~0,4 s avant ton premier mot à ~0,5 s après le dernier (horodatage du modèle) : la télé avant
+            // et après ta phrase n'est plus envoyée à Whisper. Sans horodatage : à partir du début repéré.
+            val (de, a) = EcouteParMots.decoupe(horodatage, toutes.size / 2, TAUX)
+                ?: (if (rec != null && mots.trameDebut > 0) maxOf(0, mots.trameDebut - 60) * TRAME else porte.debut * TRAME) to toutes.size / 2
+            val debutOctet = (de * 2).coerceIn(0, toutes.size); val finOctet = (a * 2).coerceIn(debutOctet, toutes.size)
+            val voixMs = if (horodatage.isNotEmpty()) horodatage.filter { EcouteParMots.reel(it.mot) }.sumOf { ((it.fin - it.debut) * 1000).toInt() } else porte.tramesVoix * 20
+            val surs = if (rec != null) horodatage.count { EcouteParMots.reel(it.mot) && it.conf >= EcouteParMots.CONF_SURE } else -1
+            return Fin.Phrase(toutes.copyOfRange(debutOctet, finOctet), local,
+                if (debutParole > 0) System.currentTimeMillis() - debutParole else 0, voixMs, rec != null, surs)
         }
 
         try {
             while (true) {
-                if (!actif) { resultat = if (garder && porte.parle) phrase() else Fin.Annulee; break }
+                if (!actif) { resultat = if (garder && parle()) phrase() else Fin.Annulee; break }
                 val n = ar.read(buf, 0, buf.size)
-                if (n < 0) { resultat = if (porte.parle) phrase() else Fin.Erreur("micro perdu ($n)"); break }
+                if (n < 0) { resultat = if (parle()) phrase() else Fin.Erreur("micro perdu ($n)"); break }
                 if (n == 0) continue
                 // Fin de la voix de JARVIS encore dans le haut-parleur / l'autoradio : ces premières trames sont ignorées.
                 if (System.currentTimeMillis() - debut < ignorerMs) continue
@@ -130,10 +150,13 @@ class MicroJarvis(private val ctx: Context) {
 
                 // Modèle prêt : reconnaissance en direct (et rattrapage de ce qui a été enregistré avant).
                 if (rec == null) modele?.let { m ->
-                    rec = runCatching { org.vosk.Recognizer(m, TAUX.toFloat()) }.getOrNull()
+                    rec = runCatching { org.vosk.Recognizer(m, TAUX.toFloat()).also { it.setWords(true) } }.getOrNull()
                     val deja = tout.toByteArray()
                     var i = 0
-                    while (i < deja.size) { val k = minOf(6400, deja.size - i); nourrir(deja.copyOfRange(i, i + k), k); i += k }
+                    while (i < deja.size) {
+                        val k = minOf(3200, deja.size - i); nourrir(deja.copyOfRange(i, i + k), k); i += k
+                        mots.trame(affiche, (i / (TRAME * 2)).coerceAtLeast(1))
+                    }
                     envoye = deja.size
                 }
                 if (rec != null && envoye < tout.size()) {
@@ -141,29 +164,94 @@ class MicroJarvis(private val ctx: Context) {
                     if (lot.size() >= 3200) { val b = lot.toByteArray(); lot.reset(); nourrir(b, b.size) }
                 }
 
-                val f = porte
-                var termine = f.trame(rms)
-                if (f.parle && debutParole == 0L) { debutParole = System.currentTimeMillis(); r.debutParole() }
-                // Phrase visiblement inachevée (« envoie un message à… ») : on attend encore un peu sa suite (2 fois au plus).
-                if (termine && prolongations < 2 && VoiceManager.suiteProbable(affiche)) {
-                    prolongations++
-                    f.prolonger(60)
-                    termine = false
+                val termine: Boolean
+                if (rec != null) {
+                    // DÉCISION PAR LES MOTS : la phrase commence au premier vrai mot reconnu et finit quand plus aucun
+                    // mot n'arrive pendant la pause. Le modèle hors-ligne n'entend bien que la voix proche du téléphone :
+                    // la télé ou les gens autour ne la déclenchent pas et ne la prolongent pas (avant : écoute sans fin).
+                    porte.trame(rms)
+                    termine = mots.trame(affiche, trames)
+                } else if (avecModele && System.currentTimeMillis() - debut < 4000) {
+                    // Modèle encore en chargement (première écoute) : on enregistre, la décision viendra des mots.
+                    porte.trame(rms); termine = false
+                } else termine = porte.trame(rms).let { fin ->
+                    // Sans modèle : décision au niveau sonore ; phrase inachevée → on attend sa suite.
+                    if (fin && porte.prolongations < 2 && VoiceManager.suiteProbable(affiche)) { porte.prolonger(60); false } else fin
                 }
+                if (parle() && debutParole == 0L) { debutParole = System.currentTimeMillis(); r.debutParole() }
                 if (termine) { resultat = phrase(); break }
                 val ecoule = System.currentTimeMillis() - debut
-                if (!f.parle && ecoule > attenteMs) { resultat = Fin.Silence; break }
-                // Filet : une phrase de plus de 15 s (télé, radio qui ne s'arrêtent jamais) est conclue.
-                if (debutParole > 0 && System.currentTimeMillis() - debutParole > 15_000) { resultat = phrase(); break }
+                if (!parle() && ecoule > attenteMs) { resultat = Fin.Silence; break }
+                // Filet : 12 s au plus d'une même phrase.
+                if (debutParole > 0 && System.currentTimeMillis() - debutParole > 12_000) { resultat = phrase(); break }
             }
         } catch (e: Throwable) {
-            resultat = if (porte.parle) runCatching { phrase() }.getOrDefault(Fin.Erreur(e.message ?: "erreur micro")) else Fin.Erreur(e.message ?: e.javaClass.simpleName)
+            resultat = if (parle()) runCatching { phrase() }.getOrDefault(Fin.Erreur(e.message ?: "erreur micro")) else Fin.Erreur(e.message ?: e.javaClass.simpleName)
         } finally {
             runCatching { ar.stop() }
             runCatching { ar.release() }
             runCatching { rec?.close() }
         }
         r.fin(resultat)
+    }
+}
+
+/** Mot reconnu par le modèle hors-ligne, avec sa position (secondes depuis le début de l'enregistrement). */
+internal data class MotDate(val mot: String, val debut: Double, val fin: Double, val conf: Double)
+
+/**
+ * Début et fin de ta phrase décidés par les MOTS reconnus en direct (modèle Vosk français), trame par trame (20 ms) :
+ * la phrase commence au premier vrai mot et se termine après [pauseTrames] sans nouveau mot. Une phrase visiblement
+ * inachevée (« envoie un message à… ») attend encore sa suite (2 fois au plus).
+ */
+internal class EcouteParMots(private val pauseTrames: Int) {
+    var parle = false
+        private set
+    /** Trame où le premier vrai mot est apparu. */
+    var trameDebut = 0
+        private set
+    private var derniereActivite = 0
+    private var texte = ""
+    private var prolongations = 0
+    private var n = 0
+
+    /** [trame] : numéro de la trame courante ; vrai quand la phrase est terminée. */
+    fun trame(texteDirect: String, trame: Int): Boolean {
+        n = trame
+        val t = texteDirect.trim()
+        if (t != texte) {
+            texte = t
+            if (motsReels(t) > 0) {
+                derniereActivite = n
+                if (!parle) { parle = true; trameDebut = n }
+            }
+        }
+        if (!parle || n - derniereActivite < pauseTrames) return false
+        if (prolongations < 2 && VoiceManager.suiteProbable(texte)) { prolongations++; derniereActivite = n - pauseTrames + 60; return false }
+        return true
+    }
+
+    companion object {
+        private val REMPLISSAGE = setOf("euh", "heu", "hum", "hm", "mh", "ah", "oh", "eh", "ben", "bah", "hein", "pff", "bon")
+        fun reel(m: String) = m.length >= 2 && m.lowercase() !in REMPLISSAGE
+        fun motsReels(t: String) = t.split(' ').count { reel(it) }
+
+        /**
+         * Morceau à envoyer à Whisper (échantillons [de, a[) : ~0,4 s avant le premier vrai mot, ~0,5 s après le
+         * dernier ; null sans horodatage utilisable.
+         */
+        /** Assurance du modèle au-dessus de laquelle un mot vient d'une voix proche (mesuré : toi ≥ 0,8 à 95 %, télé 30 %). */
+        const val CONF_SURE = 0.7
+
+        fun decoupe(mots: List<MotDate>, total: Int, taux: Int): Pair<Int, Int>? {
+            val tous = mots.filter { reel(it.mot) && it.fin > it.debut }
+            // Les mots sûrs (ta voix) bornent le morceau ; les mots douteux de la télé avant / après sont laissés.
+            val vrais = tous.filter { it.conf >= CONF_SURE }.ifEmpty { tous }
+            if (vrais.isEmpty()) return null
+            val de = ((vrais.minOf { it.debut } - 0.4) * taux).toInt().coerceIn(0, total)
+            val a = ((vrais.maxOf { it.fin } + 0.5) * taux).toInt().coerceIn(de, total)
+            return if (a - de >= taux / 4) de to a else null
+        }
     }
 }
 
@@ -222,6 +310,8 @@ internal class PorteParole(private val silenceFin: Int, private val minimum: Dou
         return silence >= silenceFin
     }
 
+    var prolongations = 0
+        private set
     /** La phrase semble inachevée : on attend encore [trames] trames de silence avant de conclure. */
-    fun prolonger(trames: Int) { silence = (silenceFin - trames).coerceAtMost(silence) }
+    fun prolonger(trames: Int) { prolongations++; silence = (silenceFin - trames).coerceAtMost(silence) }
 }
