@@ -28,6 +28,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -1220,6 +1221,58 @@ private fun ReglagesTab(app: JarvisApp) {
         }
     }
 
+    /** Identité telle qu'affichée à l'ouverture du formulaire. */
+    val vue = remember { s }
+    fun champ(saisi: String, affiche: String, enregistre: String) = if (saisi.trim() == affiche.trim()) enregistre else saisi.trim()
+    /** Enregistre tout le formulaire (identité, réglages, remises, paie) dans la base Société. */
+    fun enregistrer() {
+            svc.repo.update(effacerIdentite = true) {
+                it.copy(
+                    societe = it.societe.copy(
+                        // Seuls les champs modifiés ici remplacent ce qui est enregistré (une identité donnée entre-temps à
+                        // JARVIS dans le chat n'est plus écrasée par un formulaire resté ouvert).
+                        nom = champ(nom, vue.nom, it.societe.nom), forme = champ(forme, vue.forme, it.societe.forme),
+                        siret = champ(siret, vue.siret, it.societe.siret), tvaNum = champ(tvaNum, vue.tvaNum, it.societe.tvaNum),
+                        adresse = champ(adresse, vue.adresse, it.societe.adresse), tel = champ(tel, vue.tel, it.societe.tel),
+                        email = champ(email, vue.email, it.societe.email), iban = champ(iban, vue.iban, it.societe.iban), bic = champ(bic, vue.bic, it.societe.bic),
+                        lat = if (adresse.trim() == it.societe.adresse) it.societe.lat else null,
+                        lon = if (adresse.trim() == it.societe.adresse) it.societe.lon else null,
+                        gpsPrecision = if (adresse.trim() == it.societe.adresse) it.societe.gpsPrecision else "",
+                        franchiseTva = franchise, tvaDefaut = num(tva) ?: 20.0, tarifsSaisisTtc = tarifsTtc,
+                        delaiPaiementJours = delai.toIntOrNull() ?: 30, validiteDevisJours = validite.toIntOrNull() ?: 30,
+                        mentions = mentions, reservePct = (num(reserve) ?: 0.0).coerceIn(0.0, 100.0),
+                        rcs = champ(rcs, vue.rcs, it.societe.rcs), codeApe = champ(ape, vue.codeApe, it.societe.codeApe).uppercase().replace(" ", ""),
+                        conventionCollective = champ(convention, vue.conventionCollective, it.societe.conventionCollective),
+                        urssaf = champ(urssafOrg, vue.urssaf, it.societe.urssaf), estimerSalaires = estimer,
+                        partDirigeantPct = (num(partDir) ?: 50.0).coerceIn(0.0, 100.0),
+                        chargesMensuelles = (num(chargesMois) ?: 0.0).coerceAtLeast(0.0), capitalSocial = (num(capital) ?: 0.0).coerceAtLeast(0.0),
+                        reserveLegaleCumulee = (num(reserveLegale) ?: 0.0).coerceAtLeast(0.0), distributionPct = (num(distribution) ?: 100.0).coerceIn(0.0, 100.0)
+                    ),
+                    regles = Regles(
+                        Pricing.parserSeuils(fid), Pricing.parserSeuils(vol), cumul, num(rmax) ?: 0.0,
+                        it.regles.remiseSurDeplacement, num(kmPrix) ?: 0.0, num(kmGratuit) ?: 0.0, num(depMin) ?: 0.0, ar
+                    ),
+                    paie = it.paie.copy(
+                        cadre = cadre, plafondSecu = num(plafondSecu) ?: 4005.0,
+                        tauxAtmp = num(tauxAtmp) ?: 1.2, tauxFormationPct = num(tauxFormation) ?: 0.55
+                    )
+                )
+            }
+    }
+    // Enregistrement AUTOMATIQUE : avant, il fallait descendre jusqu'au bouton « Enregistrer », tout en bas ; sans lui,
+    // ce qui était tapé (nom, adresse mail…) restait seulement à l'écran et disparaissait au redémarrage de l'appli.
+    var premierPassage by remember { mutableStateOf(true) }
+    var aEnregistrer by remember { mutableStateOf(false) }
+    LaunchedEffect(nom, forme, siret, tvaNum, adresse, tel, email, iban, bic, tva, franchise, tarifsTtc, delai, validite, mentions, rcs, ape,
+        convention, urssafOrg, estimer, reserve, partDir, chargesMois, capital, reserveLegale, distribution,
+        fid, vol, cumul, rmax, kmPrix, kmGratuit, depMin, ar, cadre, plafondSecu, tauxAtmp, tauxFormation) {
+        if (premierPassage) { premierPassage = false; return@LaunchedEffect }
+        aEnregistrer = true
+        kotlinx.coroutines.delay(1200)
+        runCatching { enregistrer() }.onSuccess { aEnregistrer = false; saved = "✅ Enregistré automatiquement" }.onFailure { saved = "❌ ${it.message}" }
+    }
+    DisposableEffect(Unit) { onDispose { if (aEnregistrer) runCatching { enregistrer() } } }
+
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             HudPanel(Modifier.fillMaxWidth(), title = "Logo (devis et factures)") {
@@ -1317,36 +1370,7 @@ private fun ReglagesTab(app: JarvisApp) {
             }
         }
         item {
-            HudButton("Enregistrer", filled = true) {
-                svc.repo.update {
-                    it.copy(
-                        societe = it.societe.copy(
-                            nom = nom.trim(), forme = forme.trim(), siret = siret.trim(), tvaNum = tvaNum.trim(),
-                            adresse = adresse.trim(), tel = tel.trim(), email = email.trim(), iban = iban.trim(), bic = bic.trim(),
-                            lat = if (adresse.trim() == it.societe.adresse) it.societe.lat else null,
-                            lon = if (adresse.trim() == it.societe.adresse) it.societe.lon else null,
-                            gpsPrecision = if (adresse.trim() == it.societe.adresse) it.societe.gpsPrecision else "",
-                            franchiseTva = franchise, tvaDefaut = num(tva) ?: 20.0, tarifsSaisisTtc = tarifsTtc,
-                            delaiPaiementJours = delai.toIntOrNull() ?: 30, validiteDevisJours = validite.toIntOrNull() ?: 30,
-                            mentions = mentions, reservePct = (num(reserve) ?: 0.0).coerceIn(0.0, 100.0),
-                            rcs = rcs.trim(), codeApe = ape.trim().uppercase().replace(" ", ""), conventionCollective = convention.trim(),
-                            urssaf = urssafOrg.trim(), estimerSalaires = estimer,
-                            partDirigeantPct = (num(partDir) ?: 50.0).coerceIn(0.0, 100.0),
-                            chargesMensuelles = (num(chargesMois) ?: 0.0).coerceAtLeast(0.0), capitalSocial = (num(capital) ?: 0.0).coerceAtLeast(0.0),
-                            reserveLegaleCumulee = (num(reserveLegale) ?: 0.0).coerceAtLeast(0.0), distributionPct = (num(distribution) ?: 100.0).coerceIn(0.0, 100.0)
-                        ),
-                        regles = Regles(
-                            Pricing.parserSeuils(fid), Pricing.parserSeuils(vol), cumul, num(rmax) ?: 0.0,
-                            it.regles.remiseSurDeplacement, num(kmPrix) ?: 0.0, num(kmGratuit) ?: 0.0, num(depMin) ?: 0.0, ar
-                        ),
-                        paie = it.paie.copy(
-                            cadre = cadre, plafondSecu = num(plafondSecu) ?: 4005.0,
-                            tauxAtmp = num(tauxAtmp) ?: 1.2, tauxFormationPct = num(tauxFormation) ?: 0.55
-                        )
-                    )
-                }
-                saved = "✅ Enregistré"
-            }
+            HudButton("Enregistrer", filled = true) { enregistrer(); saved = "✅ Enregistré" }
             if (saved.isNotBlank()) Text(saved, color = LocalAccent.current, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
         }
         item {

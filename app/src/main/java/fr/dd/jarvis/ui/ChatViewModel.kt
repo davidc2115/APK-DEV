@@ -127,21 +127,33 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private fun silenceMs() = store.silenceSec.value.coerceIn(3, 30) * 1000L
 
     /** Écoute dans la conversation : se referme seule après « silenceSec » secondes sans parole. */
-    private fun ecouter(delai: Long = silenceMs()) {
+    /** [relance] : réécoute automatique après une réponse (pas l'écoute ouverte en touchant le micro). */
+    private fun ecouter(delai: Long = silenceMs(), relance: Boolean = true) {
         fr.dd.jarvis.ai.Http.prechauffer()
         voice.bargeIn = store.coupeParole.value
         voice.duplex = store.duplex.value
-        voice.ecouterConversation(delai)
+        voice.ecouterConversation(delai, relance)
     }
+    /** Augmente à chaque arrêt par l'utilisateur : une réponse en cours ne rouvre alors plus le micro. */
+    private var arretVoix = 0
     private val stopWords = Regex("^(merci|c'est tout|c est tout|stop|arrete|arrête|termine|terminé|fin|a plus tard|à plus tard|au revoir|laisse tomber|ça suffit|ca suffit)\\b.*", RegexOption.IGNORE_CASE)
 
     fun toggleListening() {
-        if (listening) { voiceSession = false; voice.stopListening() } else {
+        // Conversation en cours (écoute, transcription, réflexion ou réponse parlée) : le bouton ARRÊTE tout — avant, un
+        // appui pendant la réflexion ou la réponse (micro momentanément fermé) relançait une nouvelle écoute.
+        if (listening || voiceSession) {
+            arretVoix++
+            voiceSession = false
+            voice.fermer()
+            voice.stopSpeaking()
+            partial = ""
+            fr.dd.jarvis.voice.JournalVoix.noter("appli", "conversation arrêtée (bouton)")
+        } else {
             status = ""
             voiceSession = true
             incompris = 0
             voice.stopSpeaking()
-            ecouter(maxOf(silenceMs(), 8000L))
+            ecouter(maxOf(silenceMs(), 8000L), relance = false)
         }
     }
 
@@ -171,10 +183,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         // réécoute ; fin automatique après quelques secondes de silence. Autoradio / Bluetooth : réécoute seulement si
         // Jarvis pose une question (sinon il entendrait la radio).
         var finale = ""
+        val arretAuDepart = arretVoix
         val flux = if (!parler) null else voice.parole {
             parle = false
             val externe = voice.sortieExterne() && !finale.trimEnd().endsWith("?")
-            if (conv && (voiceSession || store.conversationMode.value)) { if (externe) voiceSession = false else ecouter() }
+            // Arrêtée par l'utilisateur pendant la réponse : le micro ne se rouvre pas.
+            if (arretVoix == arretAuDepart && conv && (voiceSession || store.conversationMode.value)) { if (externe) voiceSession = false else ecouter() }
         }
         val principal = android.os.Handler(android.os.Looper.getMainLooper())
         viewModelScope.launch {
@@ -199,7 +213,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             if (flux != null) {
                 parle = true
                 flux.finir(reply)
-            } else if (conv && fromVoice) {
+            } else if (conv && fromVoice && arretVoix == arretAuDepart) {
                 ecouter()
             }
         }

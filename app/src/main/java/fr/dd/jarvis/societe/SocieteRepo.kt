@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import fr.dd.jarvis.societe.core.Societe
 import fr.dd.jarvis.societe.core.SocieteData
 import fr.dd.jarvis.societe.core.jsonSociete
 import java.io.File
@@ -15,8 +16,47 @@ class SocieteRepo(ctx: Context) {
     private val file = File(dir, "data.json")
     private val backup = File(dir, "data.json.bak")
 
+    /**
+     * Copie de l'identité de la société (nom, adresse, mail, SIRET…) hors du dossier Société : si la base revient un
+     * jour sans identité (fichier perdu, synchronisation ou restauration d'une vieille copie), elle est reprise d'ici.
+     */
+    private val secours = ctx.applicationContext.getSharedPreferences("societe_identite", Context.MODE_PRIVATE)
+    private val journal = File(ctx.filesDir, "journal-identite-societe.txt")
+
     var data by mutableStateOf(load())
         private set
+
+    private fun noter(t: String) = runCatching {
+        journal.appendText("${java.time.LocalDateTime.now().withNano(0)} $t\n")
+        if (journal.length() > 64_000) journal.writeText(journal.readLines().takeLast(200).joinToString("\n") + "\n")
+    }
+
+    private fun aUneIdentite(s: Societe) = s.nom.isNotBlank() || s.siret.isNotBlank() || s.email.isNotBlank() || s.adresse.isNotBlank()
+
+    private fun garderIdentite(s: Societe) {
+        if (aUneIdentite(s)) runCatching { secours.edit().putString("societe", jsonSociete.encodeToString(Societe.serializer(), s)).apply() }
+    }
+
+    /** Base chargée sans identité alors qu'une identité avait été enregistrée : reprise de la dernière connue. */
+    private fun avecIdentite(d: SocieteData): SocieteData {
+        if (aUneIdentite(d.societe)) return d
+        val copie = secours.getString("societe", null)?.let { runCatching { jsonSociete.decodeFromString(Societe.serializer(), it) }.getOrNull() } ?: return d
+        if (!aUneIdentite(copie)) return d
+        noter("base sans identité au chargement : identité « ${copie.nom} » reprise de la copie de secours")
+        return d.copy(societe = copie)
+    }
+
+    /** Champs d'identité : jamais vidés par une écriture automatique (seulement par toi, dans le formulaire ou le chat). */
+    private fun proteger(avant: Societe, apres: Societe): Societe {
+        fun g(a: String, b: String) = if (a.isNotBlank() && b.isBlank()) a else b
+        val p = apres.copy(nom = g(avant.nom, apres.nom), forme = g(avant.forme, apres.forme), siret = g(avant.siret, apres.siret),
+            tvaNum = g(avant.tvaNum, apres.tvaNum), adresse = g(avant.adresse, apres.adresse), tel = g(avant.tel, apres.tel),
+            email = g(avant.email, apres.email), iban = g(avant.iban, apres.iban), bic = g(avant.bic, apres.bic), rcs = g(avant.rcs, apres.rcs),
+            codeApe = g(avant.codeApe, apres.codeApe), mentions = g(avant.mentions, apres.mentions))
+        if (p != apres) noter("écriture automatique qui vidait l'identité, bloquée (" +
+            Throwable().stackTrace.drop(2).take(4).joinToString(" < ") { "${it.className.substringAfterLast('.')}.${it.methodName}" } + ")")
+        return p
+    }
 
     private fun decode(source: File): SocieteData =
         jsonSociete.decodeFromString(SocieteData.serializer(), source.readText())
@@ -29,7 +69,7 @@ class SocieteRepo(ctx: Context) {
      */
     private fun load(): SocieteData {
         if (file.exists()) {
-            runCatching { return decode(file) }
+            runCatching { return avecIdentite(decode(file)) }
             // Le fichier principal est invalide : le mettre de côté sans toucher à la sauvegarde.
             val damaged = File(dir, "data.corrompu.${System.currentTimeMillis()}.json")
             runCatching { file.copyTo(damaged, overwrite = false) }
@@ -49,12 +89,12 @@ class SocieteRepo(ctx: Context) {
                     }
                     if (decode(file) != restored) throw java.io.IOException("Vérification de restauration impossible.")
                 }
-                return restored
+                return avecIdentite(restored)
             }
         }
 
-        // Aucun fichier exploitable : conserver les fichiers pour diagnostic et démarrer vide.
-        return SocieteData()
+        // Aucun fichier exploitable : conserver les fichiers pour diagnostic et démarrer vide (identité reprise si connue).
+        return avecIdentite(SocieteData())
     }
 
     /**
@@ -69,14 +109,16 @@ class SocieteRepo(ctx: Context) {
         return relu
     }
 
+    /** [effacerIdentite] : écriture voulue par l'utilisateur (formulaire, demande à JARVIS) — un champ peut être vidé. */
     @Synchronized
-    fun update(f: (SocieteData) -> SocieteData) {
+    fun update(effacerIdentite: Boolean = false, f: (SocieteData) -> SocieteData) {
         // Plusieurs écritures peuvent venir de l'écran Société, d'Hermès ou des agents en parallèle.
         // Repartir du dernier fichier validé sous le même verrou évite qu'une mise à jour basée sur
         // un ancien instantané efface les créations ou modifications d'un autre thread.
         val base = load()
         data = base
-        val nouvelle = f(base)
+        val brute = f(base)
+        val nouvelle = if (effacerIdentite) brute else brute.copy(societe = proteger(base.societe, brute.societe))
         val tmp = File(dir, "data.json.tmp")
         val contenu = jsonSociete.encodeToString(SocieteData.serializer(), nouvelle)
         tmp.writeText(contenu)
@@ -95,6 +137,7 @@ class SocieteRepo(ctx: Context) {
         if (jsonSociete.encodeToString(SocieteData.serializer(), relu) != contenu)
             throw java.io.IOException("La base Société n'a pas été enregistrée intégralement.")
         data = relu
+        garderIdentite(relu.societe)
         // Coffre-fort : la modification part vers le serveur dans quelques secondes (si le coffre est configuré).
         runCatching { fr.dd.jarvis.coffre.Coffre.signalerChangement(appCtx) }
         // Copie lisible sur le disque de la Freebox (« JARVIS Société »), si la box est associée.

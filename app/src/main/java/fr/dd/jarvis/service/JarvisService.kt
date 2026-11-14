@@ -245,7 +245,7 @@ class JarvisService : Service() {
             v.onFail = { msg ->
                 failures++
                 when {
-                    confirm != null -> main.postDelayed({ ecouter(8000) }, 400)
+                    confirm != null -> main.postDelayed({ ecouter(8000, relance = false) }, 400)
                     busy -> {}
                     // Phrase entendue mais pas comprise (souvent un bruit ou l'écho de la réponse) : une seule réécoute,
                     // sinon on referme — plus de micro rouvert 3 fois de suite (avec un bip à chaque fois).
@@ -297,11 +297,12 @@ class JarvisService : Service() {
     private fun silenceMs() = app.store.silenceSec.value.coerceIn(3, 30) * 1000L
 
     /** Écoute dans la conversation : se referme seule si personne ne parle dans le délai. */
-    private fun ecouter(delai: Long = silenceMs()) {
+    /** [relance] : réécoute automatique après une réponse (pas juste après « Jarvis » ni après une question posée). */
+    private fun ecouter(delai: Long = silenceMs(), relance: Boolean = true) {
         if (!running || deverrouillage) return
         apresConfirmation?.let { c -> apresConfirmation = null; if (!busy) { process(c); return } }
         if (suspenduParAppli) { awake = false; voice?.sessionFin(); return }   // l'appli a le micro
-        voice?.ecouterConversation(delai)
+        voice?.ecouterConversation(delai, relance)
         fr.dd.jarvis.car.ActiviteVoiture.signaler(fr.dd.jarvis.car.ActiviteVoiture.Etape.ECOUTE)
     }
 
@@ -326,7 +327,7 @@ class JarvisService : Service() {
         }
         if (awake) {
             voice?.stopSpeaking()
-            voice?.carillon(montant = true) { if (awake && !busy) ecouter(maxOf(silenceMs(), 6000L)) }
+            voice?.carillon(montant = true) { if (awake && !busy) ecouter(maxOf(silenceMs(), 6000L), relance = false) }
             return
         }
         dernierReveil = 0L
@@ -492,7 +493,7 @@ class JarvisService : Service() {
         awake = true; echangeReel = false; incompris = 0
         voice?.sessionDebut()
         voice?.stopSpeaking()
-        voice?.carillon(montant = true) { if (awake && !busy) ecouter(maxOf(silenceMs(), 6000L)) }
+        voice?.carillon(montant = true) { if (awake && !busy) ecouter(maxOf(silenceMs(), 6000L), relance = false) }
     }
 
     private val stopRegex = Regex("^(merci|c'est tout|c est tout|stop|arrete|arrête|termine|terminé|fin|a plus tard|à plus tard|au revoir|laisse tomber|ca suffit|ça suffit)\\b.*")
@@ -556,7 +557,7 @@ class JarvisService : Service() {
         val cmd = (if (m != null && m.range.first <= 2) t.substring(m.range.last + 1) else text).trim()
         awake = true
         voice?.sessionDebut()
-        if (cmd.isBlank()) { voice?.carillon(montant = true) { ecouter(maxOf(silenceMs(), 6000L)) }; return }
+        if (cmd.isBlank()) { voice?.carillon(montant = true) { ecouter(maxOf(silenceMs(), 6000L), relance = false) }; return }
         if (stopRegex.matches(norm(cmd))) { awake = false; voice?.speak("D'accord.") { goIdle() }; return }
         process(cmd)
     }
@@ -713,7 +714,7 @@ class JarvisService : Service() {
         confirm = d
         confirmQuestion = question
         val toujours = fr.dd.jarvis.device.Autorisations.clePour(question) != null || fr.dd.jarvis.device.Autorisations.commandePossible(question)
-        withContext(Dispatchers.Main) { voice?.speak(question.take(300) + (if (toujours) " Dis oui, non, ou toujours." else " Dis oui ou non.")) { ecouter(8000) } }
+        withContext(Dispatchers.Main) { voice?.speak(question.take(300) + (if (toujours) " Dis oui, non, ou toujours." else " Dis oui ou non.")) { ecouter(8000, relance = false) } }
         val r = withTimeoutOrNull(25_000) { d.await() } ?: false
         confirm = null
         confirmQuestion = ""

@@ -238,13 +238,16 @@ class VoiceManager(private val ctx: Context) {
     }
 
     /** Écoute simple : une phrase, puis [onFinal] ou [onFail]. */
-    fun startListening() { fenetreFin = 0; limiteFenetre = 0; debutPhrase = ""; demarrer(0) }
+    fun startListening() { fenetreFin = 0; limiteFenetre = 0; debutPhrase = ""; relanceAuto = false; demarrer(0) }
+    /** Écoute rouverte automatiquement après une réponse (et non demandée par « Jarvis » ou le bouton micro). */
+    private var relanceAuto = false
 
     /**
      * Écoute « en conversation » : si l'utilisateur ne commence pas à parler dans [silenceMs], l'écoute s'arrête et
      * [onSilence] est appelé. Si le reconnaisseur d'Android abandonne plus tôt, il est relancé sans bruit jusqu'au délai.
      */
-    fun ecouterConversation(silenceMs: Long) {
+    fun ecouterConversation(silenceMs: Long, relance: Boolean = false) {
+        relanceAuto = relance
         fenetreFin = System.currentTimeMillis() + silenceMs.coerceAtLeast(2000)
         limiteFenetre = fenetreFin + 20_000
         debutPhrase = ""
@@ -726,6 +729,20 @@ class VoiceManager(private val ctx: Context) {
                 }
             }
             if (!whisperOk) texte = if (f.voixMs >= 250 || motsLocaux >= 2) f.texteLocal else ""
+            else if (f.voskActif) {
+                // Recoupement avec le texte hors-ligne (qui n'entend bien que la voix proche du téléphone) : mauvaise
+                // langue, voix d'une autre personne ou de la télé, phrases de la télé collées à ta demande.
+                val (t, note) = accorder(texte, f.texteLocal)
+                if (note != null) JournalVoix.noter(nom, "$note : « ${texte.take(90)} » → « ${t.take(90)} »")
+                texte = t
+                // Réécoute automatique : rien de compris par le modèle hors-ligne mais toute une phrase pour Whisper =
+                // quelqu'un d'autre parlait (télé, personnes autour) ; pas toi qui t'adresses à JARVIS.
+                val motsW = texte.split(Regex("\\s+")).count { it.length >= 2 }
+                if (relanceAuto && motsLocaux <= 1 && motsW >= 4) {
+                    JournalVoix.noter(nom, "voix lointaine ignorée (télé, autres personnes) : « ${texte.take(90)} »")
+                    texte = ""
+                }
+            }
             main.post { if (moi == jeton) livrerJarvis(texte, source, f.dureeMs < 4000) }
         }, "jarvis-whisper").apply { isDaemon = true; start() }
     }
@@ -1339,6 +1356,36 @@ class VoiceManager(private val ctx: Context) {
  * Vrai si [entendu] n'est qu'un morceau de [voix] (ce que Jarvis vient de dire) : au moins 3 mots dont 60 % figurent
  * dans la réponse, ou un fragment (≥ 6 lettres) contenu tel quel dans la réponse.
  */
+/** Texte écrit (en partie) dans un autre alphabet que le français : Whisper s'est trompé de langue. */
+internal fun etranger(t: String): Boolean =
+    t.count { it.isLetter() && !(it in 'a'..'z' || it in 'A'..'Z' || it in "àâäçéèêëîïôöùûüÿœæÀÂÄÇÉÈÊËÎÏÔÖÙÛÜŸŒÆ") } >= 2
+
+/**
+ * Recoupe la transcription de Whisper avec celle du modèle hors-ligne, qui n'entend bien que la voix proche du
+ * téléphone : (texte gardé, note pour le journal ou null).
+ *  - mauvaise langue (« Erumina náðum tors ») → texte hors-ligne ;
+ *  - presque rien en commun → Whisper a transcrit quelqu'un d'autre (télé, personnes autour) → texte hors-ligne ;
+ *  - phrases sans aucun mot commun au début ou à la fin (« Éteins la lampe torche. Ah ouais, c'est vraiment bien »)
+ *    → retirées.
+ */
+internal fun accorder(whisper: String, local: String): Pair<String, String?> {
+    val w = whisper.trim(); val l = local.trim()
+    fun mots(t: String) = fr.dd.jarvis.societe.core.normaliser(t).split(' ').filter { it.length >= 3 }.map { it.take(5) }
+    val ml = mots(l).toSet()
+    if (etranger(w)) return (if (ml.isNotEmpty()) l else "") to "Whisper s'est trompé de langue"
+    if (ml.size < 2 || w.isBlank()) return w to null
+    val enCommun = mots(w).count { it in ml }
+    if (enCommun.toDouble() / ml.size < 0.34) return l to "Whisper a entendu une autre voix"
+    val phrases = w.split(Regex("(?<=[.!?…])\\s+")).filter { it.isNotBlank() }
+    if (phrases.size < 2) return w to null
+    val communs = phrases.map { p -> mots(p).count { it in ml } }
+    var a = 0; var b = phrases.size - 1
+    while (a < b && communs[a] == 0 && mots(phrases[a]).size >= 2) a++
+    while (b > a && communs[b] == 0 && mots(phrases[b]).size >= 2) b--
+    if (a == 0 && b == phrases.size - 1) return w to null
+    return phrases.subList(a, b + 1).joinToString(" ") to "voix autour retirée"
+}
+
 internal fun estEchoDe(entendu: String, voix: String): Boolean {
     fun norm(t: String) = java.text.Normalizer.normalize(t.lowercase(), java.text.Normalizer.Form.NFD)
         .replace(Regex("\\p{M}+"), "").replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()

@@ -556,7 +556,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         a.dbl("pfu_pct")?.let { s = s.copy(pfuPct = it.coerceIn(0.0, 100.0)) }
         if (s == before) return err("Aucune information reconnue à enregistrer.")
         val siegeDeplace = before.adresse != s.adresse || before.lat != s.lat || before.lon != s.lon
-        svc.repo.update { current ->
+        svc.repo.update(effacerIdentite = true) { current ->
             current.copy(
                 societe = s,
                 clients = if (!siegeDeplace) current.clients else current.clients.map { client ->

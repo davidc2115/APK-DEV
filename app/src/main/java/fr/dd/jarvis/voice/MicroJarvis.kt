@@ -27,7 +27,7 @@ class MicroJarvis(private val ctx: Context) {
          * Phrase enregistrée (PCM 16 bits 16 kHz petit-boutiste), son texte hors-ligne (peut être vide) et la durée de
          * voix réellement entendue (hors silences) : sous ~¼ s, c'est un bruit, pas une phrase.
          */
-        class Phrase(val pcm: ByteArray, val texteLocal: String, val dureeMs: Long, val voixMs: Int) : Fin()
+        class Phrase(val pcm: ByteArray, val texteLocal: String, val dureeMs: Long, val voixMs: Int, val voskActif: Boolean = false) : Fin()
         object Silence : Fin()
         object Annulee : Fin()
         class Erreur(val message: String) : Fin()
@@ -111,7 +111,7 @@ class MicroJarvis(private val ctx: Context) {
             val final = rec?.let { v -> runCatching { org.json.JSONObject(v.finalResult).optString("text").trim() }.getOrDefault("") }.orEmpty()
             val local = listOf(texteFini.toString(), final).filter { it.isNotBlank() }.joinToString(" ").trim().ifBlank { texte() }
             return Fin.Phrase(toutes.copyOfRange(depuis - depuis % 2, toutes.size), local,
-                if (debutParole > 0) System.currentTimeMillis() - debutParole else 0, f.tramesVoix * 20)
+                if (debutParole > 0) System.currentTimeMillis() - debutParole else 0, f.tramesVoix * 20, rec != null)
         }
 
         try {
@@ -216,7 +216,8 @@ internal class PorteParole(private val silenceFin: Int, private val minimum: Dou
             return false
         }
         crete = maxOf(rms, crete * 0.998)
-        val voix = rms > maxOf(minimum, fondFige * 2.0, crete * 0.15)
+        // Voix = au moins ~-13 dB sous la crête de TA phrase : les voix plus lointaines (télé, gens autour) n'en sont pas.
+        val voix = rms > maxOf(minimum, fondFige * 2.0, crete * 0.22)
         if (voix) { tramesVoix++; silence = 0 } else silence++
         return silence >= silenceFin
     }
