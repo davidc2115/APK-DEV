@@ -171,6 +171,8 @@ class Store(context: Context) {
     val plexAlias = SPref("plexAlias", "{}")
     /** Actions autorisées une fois pour toutes (« Toujours autoriser »), par type d'outil (JSON). */
     val autorisationsPermanentes = SPref("autorisationsPermanentes", "[]")
+    /** Commandes précises autorisées une fois pour toutes (« Toujours pour cette commande ») : même outil, mêmes arguments (JSON). */
+    val autorisationsCommandes = SPref("autorisationsCommandes", "[]")
     val ghToken = SPref("ghToken", "")
     val scanAuto = BPref("scanAuto", true)
     val sshHostDistant = SPref("sshHostDistant", "")

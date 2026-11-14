@@ -1084,6 +1084,18 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     }
                 }
                 Text("Les suppressions, effacements définitifs, déverrouillages et paiements restent toujours confirmés.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                // « Toujours pour cette commande » : commandes précises (même outil, mêmes réglages).
+                var commandes by remember { mutableStateOf(fr.dd.jarvis.device.Autorisations.commandes(app)) }
+                Spacer(Modifier.height(8.dp))
+                Text("✅ Commandes précises autorisées (« Toujours pour cette commande ») :", color = HudText, fontSize = 12.sp)
+                if (commandes.isEmpty()) Text("Aucune.", color = HudDim, fontSize = 11.sp)
+                commandes.forEach { (cle, libelle, _) ->
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
+                        Text("• $libelle", color = HudText, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                        HudButton("Retirer") { fr.dd.jarvis.device.Autorisations.retirerCommande(app, cle); commandes = fr.dd.jarvis.device.Autorisations.commandes(app) }
+                    }
+                }
+                Text("Une commande précise peut aussi être une suppression : seule cette même commande, avec les mêmes réglages, passe sans question. Déverrouillage, paiement et secrets restent toujours confirmés.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
             }
         },
         VoletReglages("telephone", "applis", "Applications par défaut", "applications defaut itineraire musique waze maps") {

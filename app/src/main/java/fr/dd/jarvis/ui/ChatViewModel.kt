@@ -100,8 +100,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun answerConfirm(ok: Boolean, toujours: Boolean = false) {
+    /** [toujours] : ce type d'action ne sera plus demandé ; [commande] : cette commande précise ne sera plus demandée. */
+    fun answerConfirm(ok: Boolean, toujours: Boolean = false, commande: Boolean = false) {
         if (ok && toujours) pendingConfirm?.let { fr.dd.jarvis.device.Autorisations.toujours(app, it) }
+        if (ok && commande) pendingConfirm?.let { fr.dd.jarvis.device.Autorisations.toujoursCommande(app, it) }
         fr.dd.jarvis.service.ConfirmationNotification.annuler(app)
         confirmDeferred?.complete(ok)
     }

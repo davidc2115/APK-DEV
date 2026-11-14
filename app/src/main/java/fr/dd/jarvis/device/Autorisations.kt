@@ -13,9 +13,33 @@ import kotlin.coroutines.CoroutineContext
  */
 object Autorisations {
     /** Outil en cours d'exécution (porté par la coroutine de l'appel), pour savoir QUOI autoriser. */
-    class OutilEnCours(val nom: String) : AbstractCoroutineContextElement(Cle) {
+    class OutilEnCours(val nom: String, val args: String = "") : AbstractCoroutineContextElement(Cle) {
         companion object Cle : CoroutineContext.Key<OutilEnCours>
     }
+
+    /** Arguments mis en forme stable (clés triées), pour reconnaître exactement la même commande. */
+    internal fun canonique(v: Any?): String = when (v) {
+        is org.json.JSONObject -> v.keys().asSequence().toList().sorted().joinToString(",", "{", "}") { k -> org.json.JSONObject.quote(k) + ":" + canonique(v.opt(k)) }
+        is JSONArray -> (0 until v.length()).joinToString(",", "[", "]") { canonique(v.opt(it)) }
+        is String -> org.json.JSONObject.quote(v.trim())
+        null, org.json.JSONObject.NULL -> "null"
+        else -> v.toString()
+    }
+
+    /** Empreinte d'une commande : outil + arguments exacts. */
+    internal fun empreinte(outil: String, args: String): String {
+        val h = java.security.MessageDigest.getInstance("SHA-256").digest((outil + "|" + args).toByteArray()).joinToString("") { "%02x".format(it) }
+        return outil + "#" + h.take(20)
+    }
+
+    /** Jamais autorisé pour toujours, même pour une seule commande précise : déverrouillage, paiement, secrets, sécurité. */
+    private val CRITIQUE = Regex(
+        "d[ée]verrouill|d[ée]sactiv\\w* (le |la |l.)?(syst[èe]me|alarme|s[ée]curit|anti.?vol)|paiement|virement|payer|mot de passe|cl[ée] api|jeton|token|r[ée]initialis|formater",
+        RegexOption.IGNORE_CASE
+    )
+
+    /** Question affichée → (empreinte, description) de la commande en cours (« Toujours pour cette commande »). */
+    private val commandeEnAttente = ConcurrentHashMap<String, Pair<String, String>>()
 
     private val JAMAIS = Regex(
         "supprim|d[ée]finitiv|irr[ée]versibl|effac|r[ée]initialis|formater|d[ée]verrouill|d[ée]sactiv\\w* (le |la |l.)?(syst[èe]me|alarme|s[ée]curit)|" +
@@ -61,11 +85,54 @@ object Autorisations {
         return true
     }
 
-    /** Confirmation enveloppée : déjà autorisée pour toujours → oui sans rien demander ; sinon question posée avec l'option. */
-    suspend fun confirmer(app: JarvisApp, outil: String?, question: String, demander: suspend () -> Boolean): Boolean {
-        val c = cle(outil, question)
-        if (estPermanente(app, c)) return true
-        if (c != null) enAttente[question] = c
-        return try { demander() } finally { if (c != null) enAttente.remove(question) }
+    // ------------------------------------------------------------------ « Toujours pour cette commande »
+
+    /** Commandes précises autorisées : (empreinte, description, date). */
+    fun commandes(app: JarvisApp): List<Triple<String, String, Long>> = runCatching {
+        JSONArray(app.store.autorisationsCommandes.value).let { a ->
+            (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Triple(it.optString("cle"), it.optString("libelle"), it.optLong("le")) }
+        }
+    }.getOrDefault(emptyList())
+
+    private fun commandeAutorisee(app: JarvisApp, empreinte: String?) = empreinte != null && commandes(app).any { it.first == empreinte }
+
+    fun retirerCommande(app: JarvisApp, empreinte: String) {
+        app.store.autorisationsCommandes.set(JSONArray(commandes(app).filter { it.first != empreinte }.map {
+            org.json.JSONObject().put("cle", it.first).put("libelle", it.second).put("le", it.third) }).toString())
     }
+
+    /** La question affichée peut-elle recevoir « Toujours pour cette commande » ? */
+    fun commandePossible(question: String): Boolean = commandeEnAttente.containsKey(question)
+
+    /** L'utilisateur a choisi « Toujours pour cette commande » : la même commande (même outil, mêmes arguments) ne redemandera plus. */
+    fun toujoursCommande(app: JarvisApp, question: String): Boolean {
+        val (e, libelle) = commandeEnAttente[question] ?: return false
+        if (commandeAutorisee(app, e)) return true
+        val l = commandes(app).map { org.json.JSONObject().put("cle", it.first).put("libelle", it.second).put("le", it.third) } +
+            org.json.JSONObject().put("cle", e).put("libelle", libelle).put("le", System.currentTimeMillis())
+        app.store.autorisationsCommandes.set(JSONArray(l.takeLast(200)).toString())
+        return true
+    }
+
+    /** Description courte d'une commande pour la liste des autorisations (outil + question, sans secret). */
+    private fun decrire(outil: String, question: String): String =
+        libelle(outil) + " — " + question.replace(Regex("\\s+"), " ").take(140)
+
+    /**
+     * Confirmation enveloppée : type d'action ou commande précise déjà autorisés pour toujours → oui sans rien demander ;
+     * sinon la question est posée avec les options « Toujours » (type d'action) et « Toujours pour cette commande ».
+     */
+    suspend fun confirmer(app: JarvisApp, outil: OutilEnCours?, question: String, demander: suspend () -> Boolean): Boolean {
+        val c = cle(outil?.nom, question)
+        if (estPermanente(app, c)) return true
+        val e = outil?.takeIf { it.nom.isNotBlank() && !CRITIQUE.containsMatchIn(question) && !CRITIQUE.containsMatchIn(it.nom) }?.let { empreinte(it.nom, it.args) }
+        if (commandeAutorisee(app, e)) return true
+        if (c != null) enAttente[question] = c
+        if (e != null) commandeEnAttente[question] = e to decrire(outil!!.nom, question)
+        return try { demander() } finally { if (c != null) enAttente.remove(question); if (e != null) commandeEnAttente.remove(question) }
+    }
+
+    /** Ancienne signature (nom d'outil seul). */
+    suspend fun confirmer(app: JarvisApp, outil: String?, question: String, demander: suspend () -> Boolean): Boolean =
+        confirmer(app, outil?.let { OutilEnCours(it) }, question, demander)
 }

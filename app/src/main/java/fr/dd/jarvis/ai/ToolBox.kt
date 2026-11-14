@@ -22,7 +22,7 @@ class ToolBox(
 ) {
     /** Confirmation avec « Toujours autoriser » : une action déjà autorisée pour toujours (par type d'outil) ne redemande rien. */
     private val confirm: suspend (String, Boolean) -> Boolean = { q, force ->
-        val outil = kotlin.coroutines.coroutineContext[fr.dd.jarvis.device.Autorisations.OutilEnCours]?.nom
+        val outil = kotlin.coroutines.coroutineContext[fr.dd.jarvis.device.Autorisations.OutilEnCours]
         fr.dd.jarvis.device.Autorisations.confirmer(app, outil, q) { confirmBrut(q, force) }
     }
     private val societe = SocieteTools(app, confirm)
@@ -554,7 +554,7 @@ class ToolBox(
     /** Exécute un outil ; les surnoms et lieux mémorisés (« les potes », « la maison »…) sont d'abord remplacés par leur cible. */
     suspend fun execute(name: String, a0: JSONObject): ToolResult {
         val a = runCatching { fr.dd.jarvis.device.Faits.appliquer(app, name, a0) }.getOrDefault(a0)
-        return kotlinx.coroutines.withContext(fr.dd.jarvis.device.Autorisations.OutilEnCours(name.removePrefix("mcp_jarvis_"))) { executerOutil(name, a) }
+        return kotlinx.coroutines.withContext(fr.dd.jarvis.device.Autorisations.OutilEnCours(name.removePrefix("mcp_jarvis_"), fr.dd.jarvis.device.Autorisations.canonique(a))) { executerOutil(name, a) }
     }
 
     private suspend fun executerOutil(name: String, a: JSONObject): ToolResult { return when (name) {

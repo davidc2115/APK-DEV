@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.Icon
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -282,29 +283,35 @@ fun ChatScreen(vm: ChatViewModel, store: Store, app: JarvisApp) {
 fun ConfirmationJarvis(vm: ChatViewModel) {
     val accent = LocalAccent.current
     vm.pendingConfirm?.let { question ->
+        val type = fr.dd.jarvis.device.Autorisations.clePour(question)
+        val commande = fr.dd.jarvis.device.Autorisations.commandePossible(question)
         AlertDialog(
             onDismissRequest = { vm.answerConfirm(false) },
             containerColor = Color(0xFF0B1424),
             titleContentColor = accent,
             textContentColor = HudText,
             title = { Text("Confirmation", fontFamily = FontFamily.Monospace) },
+            // Texte défilant à hauteur bornée : les boutons restent toujours visibles, même pour une longue liste.
             text = {
-                Column {
+                Column(Modifier.heightIn(max = 340.dp).verticalScroll(androidx.compose.foundation.rememberScrollState())) {
                     Text(question)
-                    fr.dd.jarvis.device.Autorisations.clePour(question)?.let { cle ->
-                        Text("« Toujours » : « ${fr.dd.jarvis.device.Autorisations.libelle(cle)} » ne sera plus demandé (révocable dans Réglages › Contrôle du téléphone).",
-                            color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
-                    }
+                    if (type != null) Text("« Toujours » : « ${fr.dd.jarvis.device.Autorisations.libelle(type)} » ne sera plus demandé.",
+                        color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
+                    if (commande) Text("« Toujours pour cette commande » : cette même commande (mêmes réglages) ne sera plus demandée ; toute autre le sera encore.",
+                        color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                    if (type != null || commande) Text("Révocable dans Réglages › Contrôle du téléphone.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
                 }
             },
             confirmButton = {
-                Row {
-                    if (fr.dd.jarvis.device.Autorisations.clePour(question) != null)
-                        TextButton({ vm.answerConfirm(true, toujours = true) }) { Text("Toujours", color = accent) }
-                    TextButton({ vm.answerConfirm(true) }) { Text("Autoriser", color = accent) }
+                Column(horizontalAlignment = Alignment.End) {
+                    Row {
+                        TextButton({ vm.answerConfirm(false) }) { Text("Refuser", color = HudDim) }
+                        TextButton({ vm.answerConfirm(true) }) { Text("Autoriser", color = accent) }
+                    }
+                    if (commande) TextButton({ vm.answerConfirm(true, commande = true) }) { Text("Toujours pour cette commande", color = accent) }
+                    if (type != null) TextButton({ vm.answerConfirm(true, toujours = true) }) { Text("Toujours : ${fr.dd.jarvis.device.Autorisations.libelle(type)}", color = accent) }
                 }
-            },
-            dismissButton = { TextButton({ vm.answerConfirm(false) }) { Text("Refuser", color = HudDim) } }
+            }
         )
     }
 }
