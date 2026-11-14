@@ -171,6 +171,40 @@ object Discord {
         val query = "limit=$n" + (after?.let { "&after=$it" } ?: "") + (before?.let { "&before=$it" } ?: "")
         return reqArr(app, "GET", "/channels/$channelId/messages?$query")
     }
+    /** Identifiant Discord (snowflake) correspondant à un instant : sert de curseur « après » / « avant ». */
+    internal fun snowflake(ms: Long): String = ((ms - 1_420_070_400_000L) shl 22).toString()
+
+    /** « hier », « aujourd'hui », « avant-hier », « AAAA-MM-JJ » (+ fin incluse) → (début, fin) en ms, heure locale. */
+    internal fun periode(jour: String, jusquAu: String = "", aujourdhui: java.time.LocalDate = java.time.LocalDate.now(), zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): Pair<Long, Long>? {
+        val j = fr.dd.jarvis.societe.core.normaliser(jour)
+        val debut = when {
+            j.isBlank() -> return null
+            j.contains("avant hier") -> aujourdhui.minusDays(2)
+            j.contains("hier") -> aujourdhui.minusDays(1)
+            j.contains("aujourd") || j == "ce jour" -> aujourdhui
+            else -> runCatching { java.time.LocalDate.parse(jour.trim().take(10)) }.getOrNull() ?: return null
+        }
+        val fin = runCatching { java.time.LocalDate.parse(jusquAu.trim().take(10)) }.getOrNull()?.takeIf { !it.isBefore(debut) } ?: debut
+        return debut.atStartOfDay(zone).toInstant().toEpochMilli() to fin.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+    }
+
+    /** Tous les messages d'une période (500 au plus), du plus ancien au plus récent. */
+    fun messagesPeriode(app: JarvisApp, channelId: String, debut: Long, fin: Long, max: Int = 500): List<JSONObject> {
+        val out = mutableListOf<JSONObject>()
+        var apres = snowflake(debut - 1)
+        val limite = fin
+        while (out.size < max) {
+            val page = messages(app, channelId, 100, apres, "")
+            val l = (0 until page.length()).map { page.getJSONObject(it) }.sortedBy { it.optString("id").toBigInteger() }
+            if (l.isEmpty()) break
+            val dansPeriode = l.filter { m -> runCatching { java.time.Instant.parse(m.optString("timestamp")).toEpochMilli() < limite }.getOrDefault(true) }
+            out += dansPeriode
+            if (dansPeriode.size < l.size || l.size < 100) break
+            apres = l.last().optString("id")
+        }
+        return out.take(max)
+    }
+
     /** Envoie un message ordinaire dans un salon texte. Les mentions globales sont désactivées par défaut. */
     fun envoyerMessage(app: JarvisApp, channelId: String, contenu: String): JSONObject {
         val texte = contenu.trim()
@@ -257,19 +291,61 @@ object Discord {
     }
 
     fun trouverSalon(app: JarvisApp, guildId: String, nom: String): JSONObject? {
-        val n = nom.trim().removePrefix("#").lowercase()
         val arr = salons(app, guildId)
-        for (i in 0 until arr.length()) { val c = arr.getJSONObject(i); if (c.optString("name").lowercase() == n) return c }
-        for (i in 0 until arr.length()) { val c = arr.getJSONObject(i); if (c.optString("name").lowercase().contains(n)) return c }
-        return null
+        return choisir((0 until arr.length()).map { arr.getJSONObject(it) }.filter { it.optInt("type") != 4 }, nom.trim().removePrefix("#"), textesAlias(app))
     }
 
     fun trouverGuilde(app: JarvisApp, nomOuId: String): JSONObject? {
         val arr = guildes(app)
-        if (nomOuId.isBlank()) return if (arr.length() == 1) arr.getJSONObject(0) else null
-        val n = nomOuId.trim().lowercase()
-        for (i in 0 until arr.length()) { val g = arr.getJSONObject(i); if (g.optString("id") == nomOuId.trim() || g.optString("name").lowercase() == n) return g }
-        for (i in 0 until arr.length()) { val g = arr.getJSONObject(i); if (g.optString("name").lowercase().contains(n)) return g }
+        val l = (0 until arr.length()).map { arr.getJSONObject(it) }
+        if (nomOuId.isBlank()) return l.singleOrNull()
+        return choisir(l, nomOuId, textesAlias(app))
+    }
+
+    /** Noms de tous les serveurs (ou salons) disponibles, pour un message d'erreur utile. */
+    fun noms(arr: JSONArray, sansCategories: Boolean = false): String =
+        (0 until arr.length()).map { arr.getJSONObject(it) }.filter { !sansCategories || it.optInt("type") != 4 }.joinToString(", ") { "« ${it.optString("name")} »" }
+
+    /** Textes où l'utilisateur a pu donner un surnom : faits mémorisés, carnet de notes, mémoire de Jarvis et d'Hermès. */
+    private fun textesAlias(app: JarvisApp): List<String> = buildList {
+        runCatching { fr.dd.jarvis.device.Faits.surnoms(app).forEach { add("${it.surnom} = ${it.cible}") } }
+        runCatching { fr.dd.jarvis.device.Carnet.toutes(app).forEach { add(it.sujet + " : " + it.texte) } }
+        runCatching { app.memo.all().forEach { (k, v) -> add("$k : $v") } }
+        runCatching { app.memo.hermes().lines().filter { it.isNotBlank() }.forEach { add(it) } }
+    }
+
+    private fun compact(s: String) = s.replace(Regex("\\bet\\b"), " ").replace(" ", "")
+
+    /** Ressemblance d'une demande avec un nom (normalisés) : sigle (« bag » ↔ « B&G »), lettres, fautes de frappe ou d'écoute. */
+    internal fun ressemblance(demande: String, nom: String): Double {
+        val a = compact(demande); val b = compact(nom)
+        if (a.isBlank() || b.isBlank()) return 0.0
+        if (a == b) return 1.0
+        val sigle = nom.split(' ').filter { it.isNotBlank() && it != "et" }.joinToString("") { it.take(1) }
+        if (sigle.length >= 2 && (a == sigle || a.filter { it !in "aeiouy" } == sigle)) return 0.9
+        return Serveur.similarite(a, b)
+    }
+
+    /**
+     * Serveur ou salon désigné par [demande] : identifiant, nom exact (sans accents, emojis ni séparateurs ; « & » = « et »),
+     * SURNOM donné par l'utilisateur dans ses notes ou sa mémoire (un texte qui cite la demande et un seul des noms),
+     * nom qui contient la demande, puis nom ressemblant (sigle, fautes). Null si rien ou si c'est ambigu.
+     */
+    internal fun choisir(objets: List<JSONObject>, demande: String, alias: List<String>): JSONObject? {
+        val d = demande.trim()
+        if (d.isBlank()) return null
+        objets.firstOrNull { it.optString("id") == d }?.let { return it }
+        val k = DiscordNoms.cle(d)
+        if (k.isBlank()) return null
+        fun nom(o: JSONObject) = DiscordNoms.cle(o.optString("name"))
+        objets.filter { nom(it) == k }.singleOrNull()?.let { return it }
+        objets.filter { compact(nom(it)) == compact(k) }.singleOrNull()?.let { return it }
+        // Surnom noté par l'utilisateur (« le serveur bag c'est … », « B&G = … »).
+        val citent = alias.map { " " + DiscordNoms.cle(it) + " " }.filter { it.contains(" $k ") }
+        objets.filter { o -> val n = nom(o); n.length >= 2 && n != k && citent.any { it.contains(" $n ") } }.singleOrNull()?.let { return it }
+        objets.filter { nom(it).contains(k) || (nom(it).length >= 3 && k.contains(nom(it))) }.singleOrNull()?.let { return it }
+        val proches = objets.map { it to ressemblance(k, nom(it)) }.filter { it.second >= 0.6 }.sortedByDescending { it.second }
+        if (proches.size == 1 || (proches.size > 1 && proches[0].second - proches[1].second >= 0.2)) return proches[0].first
         return null
     }
 }

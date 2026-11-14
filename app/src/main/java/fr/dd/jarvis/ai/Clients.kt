@@ -228,6 +228,21 @@ object GeminiModeles {
 class GeminiChatClient(private val ring: KeyRing, private val model: () -> String) {
     private val url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 
+    /** Façon d'appeler Gemini : API native (generateContent), ou point d'accès compatible OpenAI (Bearer / en-tête Google). */
+    enum class Voie(val libelle: String) { NATIF("API native"), OPENAI_BEARER("compatible OpenAI (Bearer)"), OPENAI_CLE("compatible OpenAI (en-tête)") }
+
+    /** Voie qui a marché en dernier pour chaque clé. */
+    private val voieOk = java.util.concurrent.ConcurrentHashMap<String, Voie>()
+
+    /**
+     * Ordre des voies : celle qui a déjà marché, sinon l'API native d'abord pour les nouvelles clés « AQ. » (clés
+     * d'authentification : le point d'accès compatible OpenAI les refuse ou les traite mal), le compatible OpenAI sinon.
+     */
+    internal fun voies(key: String): List<Voie> {
+        val base = if (key.startsWith("AQ.")) listOf(Voie.NATIF, Voie.OPENAI_CLE, Voie.OPENAI_BEARER) else listOf(Voie.OPENAI_BEARER, Voie.OPENAI_CLE, Voie.NATIF)
+        return voieOk[key]?.let { v -> listOf(v) + (base - v) } ?: base
+    }
+
     fun disponible() = ring.count() > 0
 
     suspend fun chat(messages: JSONArray, tools: JSONArray?, out: Int = 2048, forceText: Boolean = false): JSONObject =
@@ -240,22 +255,68 @@ class GeminiChatClient(private val ring: KeyRing, private val model: () -> Strin
         GeminiModeles.pour(key, model().ifBlank { "gemini-2.5-flash" }.removePrefix("models/"))
     }
 
+    /** Voie retenue pour cette clé (après un appel réussi). */
+    fun voie(key: String): Voie? = voieOk[key]
+
+    /** Test de CHAQUE voie pour une clé : (voie, null si OK sinon l'erreur). */
+    suspend fun diagnostic(key: String): List<Pair<Voie, ApiException?>> = withContext(Dispatchers.IO) {
+        val m = GeminiModeles.pour(key, model().ifBlank { "gemini-2.5-flash" }.removePrefix("models/"))
+        val msg = JSONArray().put(JSONObject().put("role", "user").put("content", "Réponds juste : ok"))
+        Voie.values().map { v -> v to try { essai(v, key, m, msg, null, 256, false); null } catch (e: ApiException) { e } }
+    }
+
+    private fun essai(v: Voie, key: String, mdl: String, messages: JSONArray, tools: JSONArray?, out: Int, forceText: Boolean): JSONObject = when (v) {
+        Voie.NATIF -> callNatif(key, mdl, messages, tools, out, forceText, true)
+        Voie.OPENAI_BEARER -> call(key, mdl, messages, tools, out, forceText, true, true)
+        Voie.OPENAI_CLE -> call(key, mdl, messages, tools, out, forceText, true, false)
+    }
+
     /**
-     * Appel avec ses replis : autre façon de présenter la clé (en-tête Google au lieu de « Bearer ») si Google refuse
-     * l'authentification, puis autre modèle si celui des Réglages n'est pas ouvert à cette clé.
+     * Appel avec ses replis : les autres voies (API native ↔ compatible OpenAI, Bearer ↔ en-tête Google) si Google refuse
+     * l'authentification ou l'adresse, puis un autre modèle si celui des Réglages n'est pas ouvert à cette clé.
      */
     private fun appel(key: String, messages: JSONArray, tools: JSONArray?, out: Int, forceText: Boolean): JSONObject {
         val principal = GeminiModeles.pour(key, model().ifBlank { "gemini-2.5-flash" }.removePrefix("models/"))
-        var erreur: ApiException
-        try { return call(key, principal, messages, tools, out, forceText, true, true) } catch (e: ApiException) { erreur = e }
-        if (erreur.code == 401 || erreur.code == 403) {
-            try { return call(key, principal, messages, tools, out, forceText, true, false) } catch (e: ApiException) { erreur = e }
+        var erreur: ApiException? = null
+        for (v in voies(key)) {
+            try { return essai(v, key, principal, messages, tools, out, forceText).also { voieOk[key] = v } }
+            catch (e: ApiException) {
+                erreur = e
+                val m = e.message.orEmpty()
+                if (GeminiModeles.modeleInaccessible(e.code, m)) {
+                    val autre = GeminiModeles.secours(key, principal) ?: throw e
+                    return essai(v, key, autre, messages, tools, out, forceText).also { voieOk[key] = v }
+                }
+                // Autre voie seulement si c'est la façon d'appeler qui est refusée (authentification, adresse, format).
+                val voieEnCause = e.code in setOf(401, 403) || (e.code == 400 && (Http.refusLocalisation(m) ||
+                    Regex("credential|authenticat|api key|API_KEY|ACCESS_TOKEN|Invalid JSON|Unknown name|Invalid value", RegexOption.IGNORE_CASE).containsMatchIn(m)))
+                if (!voieEnCause) throw e
+            }
         }
-        if (GeminiModeles.modeleInaccessible(erreur.code, erreur.message.orEmpty())) {
-            val autre = GeminiModeles.secours(key, principal) ?: throw erreur
-            return call(key, autre, messages, tools, out, forceText, true, true)
+        throw erreur ?: ApiException(502, "Gemini : aucune voie")
+    }
+
+    /** Appel par l'API native (generateContent) : messages et outils OpenAI convertis, réponse reconvertie au format OpenAI. */
+    private fun callNatif(key: String, mdl: String, messages: JSONArray, tools: JSONArray?, out: Int, forceText: Boolean, reflexionReduite: Boolean): JSONObject {
+        val (systeme, contenus) = versNatif(messagesPourGemini(messages))
+        val gen = JSONObject().put("temperature", 0.4).put("maxOutputTokens", out.coerceIn(256, 8192))
+        if (reflexionReduite) when {
+            mdl.contains("2.5") && !mdl.contains("pro") -> gen.put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
+            mdl.contains("gemini-3") -> gen.put("thinkingConfig", JSONObject().put("thinkingLevel", "low"))
         }
-        throw erreur
+        val body = JSONObject().put("contents", contenus).put("generationConfig", gen)
+        if (systeme.isNotBlank()) body.put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", systeme))))
+        val decl = declarations(outilsPourGemini(tools))
+        if (decl.length() > 0) {
+            body.put("tools", JSONArray().put(JSONObject().put("functionDeclarations", decl)))
+            body.put("toolConfig", JSONObject().put("functionCallingConfig", JSONObject().put("mode", if (forceText) "NONE" else "AUTO")))
+        }
+        val req = Request.Builder().url("https://generativelanguage.googleapis.com/v1beta/models/$mdl:generateContent")
+            .header("x-goog-api-key", key).post(body.toString().toRequestBody(Http.JSON)).build()
+        val (code, text) = GeminiPasserelle.executer(Http.client, req)
+        if (code == 400 && reflexionReduite && Regex("think", RegexOption.IGNORE_CASE).containsMatchIn(text)) return callNatif(key, mdl, messages, tools, out, forceText, false)
+        if (code !in 200..299) throw ApiException(code, "Gemini $code : ${text.take(300)}")
+        return depuisNatif(text)
     }
 
     private fun call(key: String, mdl: String, messages: JSONArray, tools: JSONArray?, out: Int, forceText: Boolean, reflexionReduite: Boolean, bearer: Boolean): JSONObject {
@@ -271,7 +332,7 @@ class GeminiChatClient(private val ring: KeyRing, private val model: () -> Strin
         }
         val req = Request.Builder().url(url).apply { if (bearer) header("Authorization", "Bearer $key") else header("x-goog-api-key", key) }
             .post(body.toString().toRequestBody(Http.JSON)).build()
-        val (code, text) = Http.client.newCall(req).execute().use { it.code to it.body?.string().orEmpty() }
+        val (code, text) = GeminiPasserelle.executer(Http.client, req)
         if (code == 400 && reflexionReduite && Regex("reasoning|think", RegexOption.IGNORE_CASE).containsMatchIn(text)) return call(key, mdl, messages, tools, out, forceText, false, bearer)
         if (code !in 200..299) throw ApiException(code, "Gemini $code : ${text.take(300)}")
         val racine = runCatching { JSONObject(if (text.trimStart().startsWith("[")) JSONArray(text).getJSONObject(0).toString() else text) }
@@ -330,6 +391,95 @@ class GeminiChatClient(private val ring: KeyRing, private val model: () -> Strin
                 out.put(c)
             }
             return out
+        }
+
+        /** Messages OpenAI (déjà nettoyés) → (consigne système, contents de l'API native). */
+        internal fun versNatif(messages: JSONArray): Pair<String, JSONArray> {
+            val systeme = StringBuilder()
+            val contenus = mutableListOf<Pair<String, JSONArray>>()
+            fun ajouter(role: String, part: JSONObject) {
+                val dernier = contenus.lastOrNull()
+                if (dernier != null && dernier.first == role) dernier.second.put(part) else contenus += role to JSONArray().put(part)
+            }
+            for (i in 0 until messages.length()) {
+                val m = messages.optJSONObject(i) ?: continue
+                val texte = m.optString("content")
+                when (m.optString("role")) {
+                    "system" -> if (texte.isNotBlank()) systeme.append(if (systeme.isEmpty()) "" else "\n\n").append(texte)
+                    "assistant" -> {
+                        if (texte.isNotBlank()) ajouter("model", JSONObject().put("text", texte))
+                        m.optJSONArray("tool_calls")?.let { a -> for (j in 0 until a.length()) {
+                            val t = a.optJSONObject(j) ?: continue
+                            val f = t.optJSONObject("function") ?: continue
+                            val args = runCatching { JSONObject(f.optString("arguments").ifBlank { "{}" }) }.getOrDefault(JSONObject())
+                            val part = JSONObject().put("functionCall", JSONObject().put("name", f.optString("name")).put("args", args))
+                            t.optJSONObject("extra_content")?.optJSONObject("google")?.optString("thought_signature")?.takeIf { it.isNotBlank() }?.let { part.put("thoughtSignature", it) }
+                            ajouter("model", part)
+                        } }
+                    }
+                    "tool" -> ajouter("user", JSONObject().put("functionResponse", JSONObject().put("name", m.optString("name").ifBlank { "outil" })
+                        .put("response", JSONObject().put("content", texte.ifBlank { "(vide)" }))))
+                    else -> ajouter("user", JSONObject().put("text", texte.ifBlank { "…" }))
+                }
+            }
+            // La conversation doit commencer par l'utilisateur.
+            if (contenus.firstOrNull()?.first == "model") contenus.add(0, "user" to JSONArray().put(JSONObject().put("text", "(suite de la conversation)")))
+            if (contenus.isEmpty()) contenus += "user" to JSONArray().put(JSONObject().put("text", "…"))
+            return systeme.toString() to JSONArray().also { out -> contenus.forEach { (r, p) -> out.put(JSONObject().put("role", r).put("parts", p)) } }
+        }
+
+        /** Outils OpenAI (nettoyés par [outilsPourGemini]) → functionDeclarations de l'API native (types en MAJUSCULES). */
+        internal fun declarations(outils: JSONArray?): JSONArray {
+            val out = JSONArray()
+            if (outils == null) return out
+            for (i in 0 until outils.length()) {
+                val f = outils.optJSONObject(i)?.optJSONObject("function") ?: continue
+                val d = JSONObject().put("name", f.optString("name")).put("description", f.optString("description"))
+                f.optJSONObject("parameters")?.let { d.put("parameters", schemaNatif(it)) }
+                out.put(d)
+            }
+            return out
+        }
+
+        private val CLES_NATIVES = setOf("type", "format", "description", "nullable", "enum", "items", "properties", "required", "anyOf", "minimum", "maximum", "minItems", "maxItems", "title")
+
+        private fun schemaNatif(o: JSONObject): JSONObject {
+            val c = JSONObject()
+            for (k in o.keys()) {
+                if (k !in CLES_NATIVES) continue
+                when (val v = o.get(k)) {
+                    is JSONObject -> c.put(k, if (k == "properties") JSONObject().also { pr -> v.keys().forEach { n -> v.optJSONObject(n)?.let { pr.put(n, schemaNatif(it)) } } } else schemaNatif(v))
+                    is JSONArray -> c.put(k, JSONArray().also { a -> for (j in 0 until v.length()) a.put((v.opt(j) as? JSONObject)?.let { schemaNatif(it) } ?: v.opt(j).toString()) })
+                    is String -> c.put(k, if (k == "type") v.uppercase() else v)
+                    else -> c.put(k, v)
+                }
+            }
+            if (c.has("enum") && c.optString("type", "STRING") != "STRING") c.remove("enum")
+            if (!c.has("type") && !c.has("anyOf")) c.put("type", if (c.has("properties")) "OBJECT" else "STRING")
+            return c
+        }
+
+        /** Réponse de l'API native → message au format OpenAI (texte, tool_calls avec leur signature de réflexion). */
+        internal fun depuisNatif(texte: String): JSONObject {
+            val racine = runCatching { JSONObject(texte) }.getOrElse { throw ApiException(502, "Gemini : réponse illisible") }
+            val cand = racine.optJSONArray("candidates")?.optJSONObject(0)
+                ?: throw ApiException(502, "Gemini : réponse vide" + (racine.optJSONObject("promptFeedback")?.optString("blockReason")?.takeIf { it.isNotBlank() }?.let { " (bloquée : $it)" } ?: ""))
+            val parts = cand.optJSONObject("content")?.optJSONArray("parts") ?: JSONArray()
+            val sb = StringBuilder()
+            val appels = JSONArray()
+            for (i in 0 until parts.length()) {
+                val p = parts.optJSONObject(i) ?: continue
+                p.optJSONObject("functionCall")?.let { f ->
+                    val appel = JSONObject().put("id", f.optString("id").ifBlank { "call_" + System.nanoTime().toString(36) + i }).put("type", "function")
+                        .put("function", JSONObject().put("name", f.optString("name")).put("arguments", (f.optJSONObject("args") ?: JSONObject()).toString()))
+                    p.optString("thoughtSignature").takeIf { it.isNotBlank() }?.let { appel.put("extra_content", JSONObject().put("google", JSONObject().put("thought_signature", it))) }
+                    appels.put(appel)
+                } ?: run { if (!p.optBoolean("thought")) sb.append(p.optString("text")) }
+            }
+            val msg = JSONObject().put("role", "assistant").put("content", if (sb.isBlank()) JSONObject.NULL else nettoyerRaisonnement(sb.toString()))
+            if (appels.length() > 0) msg.put("tool_calls", appels)
+            if (appels.length() == 0 && sb.isBlank()) throw ApiException(502, "Gemini : réponse vide (${cand.optString("finishReason")})")
+            return msg
         }
 
         private val CLES_REFUSEES = setOf("\$schema", "\$id", "additionalProperties", "strict", "examples", "default", "\$comment", "patternProperties", "unevaluatedProperties")
@@ -416,7 +566,7 @@ class GeminiClient(private val ring: KeyRing, private val model: () -> String) {
         )).put("generationConfig", JSONObject().put("temperature", 0.3).put("maxOutputTokens", 2048))
         val req = Request.Builder().url("https://generativelanguage.googleapis.com/v1beta/models/${model()}:generateContent")
             .header("x-goog-api-key", key).post(body.toString().toRequestBody(Http.JSON)).build()
-        val (code, text) = Http.fast.newCall(req).execute().use { it.code to it.body?.string().orEmpty() }
+        val (code, text) = GeminiPasserelle.executer(Http.fast, req)
         if (code !in 200..299) throw ApiException(code, "Gemini $code : ${text.take(300)}")
         val cands = JSONObject(text).optJSONArray("candidates")
         val parts = cands?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
@@ -447,7 +597,7 @@ class GeminiClient(private val ring: KeyRing, private val model: () -> String) {
         if (system.isNotBlank()) body.put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
         val req = Request.Builder().url("https://generativelanguage.googleapis.com/v1beta/models/${model()}:generateContent")
             .header("x-goog-api-key", key).post(body.toString().toRequestBody(Http.JSON)).build()
-        val (code, text) = Http.client.newCall(req).execute().use { it.code to it.body?.string().orEmpty() }
+        val (code, text) = GeminiPasserelle.executer(Http.client, req)
         if (code == 400 && thinkingOff && text.contains("think", ignoreCase = true)) return callVision(key, system, bytes, mimeType, question, false)
         if (code !in 200..299) throw ApiException(code, "Gemini $code : ${text.take(300)}")
         val parts = JSONObject(text).optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
@@ -497,7 +647,7 @@ class GeminiClient(private val ring: KeyRing, private val model: () -> String) {
             .header("x-goog-api-key", key)
             .post(body.toString().toRequestBody(Http.JSON))
             .build()
-        val (code, text) = client.newCall(req).execute().use { it.code to it.body?.string().orEmpty() }
+        val (code, text) = GeminiPasserelle.executer(client, req)
         // Certains modèles refusent le réglage de réflexion : on réessaie sans.
         if (code == 400 && thinkingOff && text.contains("think", ignoreCase = true)) return call(key, system, user, maxTokens, false, m, plafond, client)
         if (code !in 200..299) throw ApiException(code, "Gemini $code : ${text.take(300)}")

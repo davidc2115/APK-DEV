@@ -30,6 +30,11 @@ class Llm(private val store: Store) {
     val gemini = GeminiClient(geminiRing) { store.geminiModel.value }
     /** Relais du cerveau (appel d'outils) quand TOUTES les clés Groq sont épuisées : mêmes clés que les agents. */
     val geminiChat = GeminiChatClient(geminiRing) { store.geminiModel.value }
+
+    init {
+        // Refus de localisation de Google : relais possible par la passerelle IA des comptes Cloudflare.
+        GeminiPasserelle.comptes = { store.cfAccounts.toList() }
+    }
     /** Dernier recours en ligne du cerveau, après Groq puis Gemini. */
     val cloudflare = CloudflareChatClient({ store.cfAccounts.toList() }) { store.cfChatModel.value }
 
@@ -278,14 +283,30 @@ class Llm(private val store: Store) {
     }
 
     /** Test d'une clé Gemini sur le point d'accès du chat (celui de Jarvis et d'Hermès) ; succès = clé réhabilitée. */
+    /**
+     * Test d'une clé Gemini par CHAQUE voie (API native, compatible OpenAI avec Bearer ou en-tête), pour savoir laquelle
+     * marche : les clés « AQ. » d'AI Studio passent par l'API native ; un refus de localisation sur toutes les voies vient
+     * de l'adresse IP (la passerelle Cloudflare est alors essayée si un compte Cloudflare est enregistré).
+     */
     private suspend fun testerGemini(k: String): String = try {
         val t0 = System.currentTimeMillis()
-        val modele = geminiChat.ping(k)
-        geminiRing.effacer(k)
-        "✅ OK (${System.currentTimeMillis() - t0} ms)" + (if (modele != store.geminiModel.value.trim().removePrefix("models/")) " — modèle « ${store.geminiModel.value} » non ouvert à cette clé : « $modele » utilisé à la place" else " — modèle « $modele »")
-    } catch (e: ApiException) {
-        "❌ " + KeyRing.motif(e.code, e.message.orEmpty()) +
-            (if (Http.refusLocalisation(e.message.orEmpty())) " → Google refuse l'adresse IP de cette connexion (pas la clé), en IPv4 comme en IPv6 : coupe un éventuel VPN, ou essaie l'autre réseau (Wi-Fi ↔ données mobiles). Tant que ça dure, Jarvis se replie sur ses autres IA (Groq…)." else "")
+        val essais = geminiChat.diagnostic(k)
+        val ok = essais.filter { it.second == null }.map { it.first }
+        val modele = GeminiModeles.pour(k, store.geminiModel.value.ifBlank { "gemini-2.5-flash" }.removePrefix("models/"))
+        val detail = essais.joinToString(" · ") { (v, e) -> v.libelle + " " + (if (e == null) "✅" else "❌ ${e.code}") }
+        if (ok.isNotEmpty()) {
+            geminiRing.effacer(k)
+            "✅ OK (${System.currentTimeMillis() - t0} ms, $detail)" + (if (modele != store.geminiModel.value.trim().removePrefix("models/")) " — modèle « ${store.geminiModel.value} » non ouvert à cette clé : « $modele » utilisé à la place" else " — modèle « $modele »") +
+                (if (GeminiPasserelle.etat.startsWith("passerelle Cloudflare OK")) " — par la passerelle Cloudflare (Google refuse l'adresse du téléphone)" else "")
+        } else {
+            val e = essais.first { it.second != null }.second!!
+            val localisation = essais.all { Http.refusLocalisation(it.second?.message.orEmpty()) }
+            "❌ " + KeyRing.motif(e.code, e.message.orEmpty()) + " ($detail)" + when {
+                localisation && GeminiPasserelle.disponible() -> " → Google refuse l'adresse IP de cette connexion (pas la clé) sur toutes les voies, et la passerelle Cloudflare n'a pas pris le relais : ${GeminiPasserelle.etat.ifBlank { "pas de réponse" }}."
+                localisation -> " → Google refuse l'adresse IP de cette connexion (pas la clé) sur toutes les voies. Ajoute un compte Cloudflare (Réglages › IA › Cloudflare, jeton avec les droits « AI Gateway ») : Jarvis fera passer Gemini par ta passerelle Cloudflare. En attendant, il se replie sur ses autres IA (Groq…)."
+                else -> ""
+            }
+        }
     } catch (e: Exception) {
         "❌ " + (e.message ?: "erreur").take(120)
     }

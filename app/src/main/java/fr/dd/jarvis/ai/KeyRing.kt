@@ -52,6 +52,9 @@ object Http {
     /** Ancien nom (clients qui l'utilisent déjà). */
     val dnsGoogleIpv4: okhttp3.Dns get() = dnsGoogle
 
+    /** Envoie la requête et renvoie (code, texte). */
+    fun texte(client: OkHttpClient, req: okhttp3.Request): Pair<Int, String> = client.newCall(req).execute().use { it.code to it.body?.string().orEmpty() }
+
     /** « User location is not supported » : refus lié à l'adresse IP de la connexion, pas à la clé. */
     fun refusLocalisation(message: String) = message.contains("location is not supported", ignoreCase = true)
 
@@ -263,5 +266,54 @@ class KeyRing(private val keys: () -> List<String>) {
             }
         }
         throw last ?: IllegalStateException("Toutes les clés ont échoué")
+    }
+}
+
+
+/**
+ * Relais de Gemini par la passerelle IA de TON compte Cloudflare (AI Gateway, passerelle « default » créée toute seule au
+ * premier appel) : quand Google refuse l'adresse IP du téléphone (« User location is not supported »), la même requête
+ * part de Cloudflare. La clé Gemini reste la tienne ; les comptes sont ceux de Réglages › IA › Cloudflare (ID:jeton —
+ * le jeton doit avoir les droits « AI Gateway » en plus de « Workers AI »).
+ */
+object GeminiPasserelle {
+    /** Comptes Cloudflare « idCompte:jeton » (fournis par l'application au démarrage). */
+    @Volatile var comptes: () -> List<String> = { emptyList() }
+    @Volatile private var directBloqueJusqua = 0L
+    /** Dernier état, pour le test des clés. */
+    @Volatile var etat = ""
+
+    fun disponible() = runCatching { comptes().any { it.contains(':') } }.getOrDefault(false)
+
+    /** Google a refusé l'adresse du téléphone il y a peu : on passe directement par la passerelle (6 h). */
+    fun prioritaire() = System.currentTimeMillis() < directBloqueJusqua && disponible()
+
+    /** https://generativelanguage.googleapis.com/v1beta/… → https://gateway.ai.cloudflare.com/v1/<compte>/default/google-ai-studio/v1beta/… */
+    internal fun url(google: String, compte: String) = "https://gateway.ai.cloudflare.com/v1/$compte/default/google-ai-studio/" + google.substringAfter("googleapis.com/")
+
+    /** Réponse de Google (et pas de la passerelle) : erreur au format Google, ou succès. */
+    private fun deGoogle(code: Int, texte: String) = code in 200..299 || texte.contains("\"status\"")
+
+    /** Envoie la requête (destinée à Google) par la passerelle du premier compte qui l'accepte ; null si aucun. */
+    fun envoyer(client: OkHttpClient, req: okhttp3.Request): Pair<Int, String>? {
+        for (c in runCatching { comptes() }.getOrDefault(emptyList()).filter { it.contains(':') }) {
+            val id = c.substringBefore(':').trim(); val jeton = c.substringAfter(':').trim()
+            val r = req.newBuilder().url(url(req.url.toString(), id)).header("cf-aig-authorization", "Bearer $jeton").build()
+            val res = runCatching { Http.texte(client, r) }.getOrElse { etat = "passerelle injoignable (${it.javaClass.simpleName})"; null } ?: continue
+            if (!deGoogle(res.first, res.second)) { etat = "passerelle Cloudflare refusée (${res.first}) : ajoute les droits « AI Gateway » au jeton"; continue }
+            etat = if (res.first in 200..299) "passerelle Cloudflare OK" else "passerelle Cloudflare : Google répond ${res.first}"
+            return res
+        }
+        return null
+    }
+
+    /** Requête Gemini : directe, puis par la passerelle Cloudflare si Google refuse l'adresse IP du téléphone. */
+    fun executer(client: OkHttpClient, req: okhttp3.Request): Pair<Int, String> {
+        if (prioritaire()) envoyer(client, req)?.takeIf { !(it.first == 400 && Http.refusLocalisation(it.second)) }?.let { return it }
+        val direct = Http.texte(client, req)
+        if (direct.first == 400 && Http.refusLocalisation(direct.second) && disponible()) {
+            envoyer(client, req)?.let { r -> if (r.first in 200..299) directBloqueJusqua = System.currentTimeMillis() + 6 * 3_600_000L; return r }
+        }
+        return direct
     }
 }

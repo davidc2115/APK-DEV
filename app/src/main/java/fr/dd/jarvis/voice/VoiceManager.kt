@@ -164,6 +164,7 @@ class VoiceManager(private val ctx: Context) {
     fun ecouterConversation(silenceMs: Long) {
         fenetreFin = System.currentTimeMillis() + silenceMs.coerceAtLeast(2000)
         relancesMuettes = 0
+        relancesApresParole = 0
         demarrer(0)
     }
 
@@ -173,6 +174,7 @@ class VoiceManager(private val ctx: Context) {
      * referme plutôt que d'enchaîner les bips comme si JARVIS se déclenchait plusieurs fois.
      */
     private var relancesMuettes = 0
+    private var relancesApresParole = 0
 
     /** [essai] : relances automatiques sur les erreurs transitoires (service vocal déconnecté…), puis repli sur la reconnaissance locale. */
     private fun demarrer(essai: Int) {
@@ -201,8 +203,9 @@ class VoiceManager(private val ctx: Context) {
             val local = essai >= 2 && Build.VERSION.SDK_INT >= 33 && SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx)
             val composant = if (local) null else moteur(ctx)
             val cle = if (local) "local" else composant?.flattenToString() ?: "defaut"
-            // Même moteur et aucune erreur : on garde le reconnaisseur (annulé puis relancé) au lieu d'en recréer un.
-            val reutilise = recognizer != null && recoCle == cle && !recoCasse
+            // Reconnaisseur NEUF à chaque écoute : réutilisé (annulé puis relancé), celui de Google (com.google.android.as)
+            // renvoyait souvent « erreur 7 » sur la phrase suivante.
+            val reutilise = false
             val r = if (reutilise) recognizer!!.also { runCatching { it.cancel() } } else {
                 runCatching { recognizer?.destroy() }
                 when {
@@ -244,6 +247,11 @@ class VoiceManager(private val ctx: Context) {
                     }
                     val silence = error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
                     if (fenetreFin > 0 && silence) {
+                        // Tu as parlé mais rien n'a été compris : une nouvelle écoute complète (8 s au moins), une fois.
+                        if (parole && relancesApresParole++ < 1) {
+                            fenetreFin = maxOf(fenetreFin, System.currentTimeMillis() + 8000)
+                            demarrer(0); return
+                        }
                         // Rien de compris (silence, bruit, écho de la voix de JARVIS) avant la fin du délai de conversation :
                         // une relance discrète s'il reste vraiment du temps, sinon la conversation se referme.
                         if (System.currentTimeMillis() < fenetreFin - 1500 && relancesMuettes++ < 2) { demarrer(0); return }
@@ -266,7 +274,7 @@ class VoiceManager(private val ctx: Context) {
                     if (!actif()) return
                     termine = true
                     ecoute = false
-                    JournalVoix.noter(nom, "entendu : « ${results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty().take(60)} »")
+                    JournalVoix.noter(nom, "entendu : « ${results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty().take(240)} »")
                     val entendu = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
                     if (entendu.isNotBlank() && estEcho(entendu)) {
                         // Jarvis s'est réentendu (voix renvoyée par l'autoradio) : on ignore et on continue d'écouter.
@@ -821,17 +829,24 @@ class VoiceManager(private val ctx: Context) {
 
         private fun terminerApres() {
             Presence.parole(false); Presence.sousTitre = ""
-            barge?.stop(); barge = null
+            val b = barge; barge = null
             finVoix = System.currentTimeMillis()
-            main.post {
-                if (paroleEnCours === this) paroleEnCours = null
-                sortirModeAppel()
-                if (mediaPauseeParJarvis) fr.dd.jarvis.service.JarvisNotificationListener.reprendreMediaApresVoix()
-                mediaPauseeParJarvis = false
-                // Bluetooth / autoradio : le son sort avec du retard (tampon A2DP + traitement de l'autoradio) ; on
-                // attend que la fin de la phrase soit vraiment jouée avant de rouvrir le micro.
-                if (externe) main.postDelayed({ finVoix = System.currentTimeMillis(); onDone() }, 1000) else onDone()
+            val suite = Runnable {
+                main.post {
+                    if (paroleEnCours === this) paroleEnCours = null
+                    val etaitAppel = appelActif
+                    sortirModeAppel()
+                    if (mediaPauseeParJarvis) fr.dd.jarvis.service.JarvisNotificationListener.reprendreMediaApresVoix()
+                    mediaPauseeParJarvis = false
+                    // UN SEUL micro à la fois : l'écoute de la suite ne s'ouvre qu'une fois le micro de la « coupure de
+                    // parole » rendu et le son revenu du mode appel (annulation d'écho). Avant, la reconnaissance de Google
+                    // démarrait sur un micro encore pris ou en reconfiguration → « erreur 7 (après parole) » puis fin.
+                    // Bluetooth / autoradio : le son sort avec du retard (tampon A2DP) : on attend la fin réelle de la phrase.
+                    val delai = when { externe -> 1000L; etaitAppel -> 600L; b != null -> 300L; else -> 150L }
+                    main.postDelayed({ finVoix = System.currentTimeMillis(); onDone() }, delai)
+                }
             }
+            if (b != null) Thread({ b.stopEtAttendre(700); suite.run() }, "jarvis-fin-voix").start() else suite.run()
         }
     }
 

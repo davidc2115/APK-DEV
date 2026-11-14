@@ -36,8 +36,9 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si un seul)."))),
         tool("discord_audit_serveur", "AUDIT DISCORD STRICTEMENT EN LECTURE SEULE : récupère l'inventaire complet des salons et catégories avec leurs identifiants, positions, rattachements et sujets. Ne modifie jamais le serveur.",
             mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si un seul)."))),
-        tool("discord_messages_lire", "Discord : lit l’historique récent d’un salon, avec pagination avant/après un message. Lecture seule ; 1 à 100 messages par appel. Peut aussi lire un fil si son ID est fourni et si le bot y a accès.",
-            mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si un seul)."), "salon" to prop("Nom ou ID du salon textuel ou du fil Discord."), "limite" to prop("Nombre de messages à lire, de 1 à 100 (défaut 30)."), "apres_id" to prop("ID du dernier message déjà lu : ne renvoie que les messages plus récents (optionnel)."), "avant_id" to prop("ID du message curseur : récupère les messages plus anciens (optionnel ; ne pas utiliser avec apres_id).")), listOf("salon")),
+        tool("discord_messages_lire", "Discord : lit l’historique d’un salon — les derniers messages (1 à 100, pagination avant/après), ou TOUS ceux d'une journée avec « jour » (hier, aujourd'hui, AAAA-MM-JJ) pour un résumé. Serveur et salon : nom, surnom noté par l'utilisateur ou ID. Lecture seule. Peut aussi lire un fil si son ID est fourni.",
+            mapOf("serveur" to prop("Nom, surnom ou ID du serveur Discord (optionnel si un seul)."), "salon" to prop("Nom ou ID du salon textuel ou du fil Discord."),
+                "jour" to prop("Journée à lire en entier : hier, aujourd'hui, avant-hier, ou AAAA-MM-JJ (optionnel)."), "jusqu_au" to prop("Fin de période AAAA-MM-JJ incluse, avec « jour » comme début (optionnel)."), "limite" to prop("Nombre de messages à lire, de 1 à 100 (défaut 30)."), "apres_id" to prop("ID du dernier message déjà lu : ne renvoie que les messages plus récents (optionnel)."), "avant_id" to prop("ID du message curseur : récupère les messages plus anciens (optionnel ; ne pas utiliser avec apres_id).")), listOf("salon")),
         tool("discord_messages_rechercher", "Discord : recherche un mot ou une expression dans les 100 messages les plus récents d’un salon, avec filtre facultatif par auteur. Lecture seule.",
             mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si un seul)."), "salon" to prop("Nom ou ID du salon."), "recherche" to prop("Mot ou expression à retrouver dans le contenu (facultatif, mais recommandé)."), "auteur" to prop("Nom ou pseudo à filtrer (facultatif).")), listOf("salon")),
         tool("discord_fil_lire", "Discord : lit les messages d’un fil/thread Discord à partir de son ID (lecture seule). Le bot doit avoir accès au fil.",
@@ -76,7 +77,9 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
     private fun guildeObj(a: JSONObject): JSONObject {
         val demande = a.optString("serveur").trim().ifBlank { app.store.discordGuildId.value.trim() }
         return Discord.trouverGuilde(app, demande) ?: throw IllegalStateException(
-            if (demande.isBlank()) "Le bot est présent sur plusieurs serveurs : précise lequel (nom ou ID), ou enregistre un serveur par défaut dans Réglages › Comptes › Discord." else "Serveur « $demande » introuvable parmi ceux où le bot est présent."
+            (if (demande.isBlank()) "Le bot est présent sur plusieurs serveurs : précise lequel (nom ou ID), ou enregistre un serveur par défaut dans Réglages › Comptes › Discord."
+            else "Aucun serveur Discord ne correspond à « $demande » (ni par son nom, ni par un surnom noté).") +
+                " Serveurs où le bot est présent : " + Discord.noms(Discord.guildes(app)) + ". Utilise le nom exact de l'un d'eux ; si l'utilisateur lui donne un surnom, enregistre-le avec memoire_faits (action=surnom, domaine=discord_serveur)."
         )
     }
 
@@ -142,13 +145,15 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             if (cible.isBlank()) return ToolResult(if (estFil) "ID du fil manquant." else "Nom ou ID du salon manquant.")
             val salon = Discord.trouverSalon(app, gid, cible)
                 ?: if (cible.matches(Regex("\\d{17,20}"))) JSONObject().put("id", cible).put("name", if (estFil) "fil $cible" else "salon $cible").put("type", if (estFil) 11 else 0)
-                   else return ToolResult("Salon/fil « $cible » introuvable sur le serveur.")
+                   else return ToolResult("Salon « $cible » introuvable sur « ${g.optString("name")} ». Salons : " + Discord.noms(Discord.salons(app, gid), sansCategories = true) + ".")
             if (salon.optInt("type") !in setOf(0, 5, 10, 11, 12, 15, 16)) return ToolResult("Ce type de salon/fil ne permet pas la lecture de messages.")
             val limite = (a.optString("limite").toIntOrNull() ?: 30).coerceIn(1, 100)
             val apres = a.optString("apres_id").trim()
             val avant = a.optString("avant_id").trim()
-            val arr = Discord.messages(app, salon.getString("id"), if (name == "discord_messages_rechercher") 100 else limite, apres, avant)
-            var messages = (0 until arr.length()).map { arr.getJSONObject(it) }
+            // « Ce qui a été dit hier » : TOUS les messages de la journée (ou de la période), page par page.
+            val periode = Discord.periode(a.optString("jour").ifBlank { a.optString("date") }, a.optString("jusqu_au"))
+            var messages = if (periode != null) Discord.messagesPeriode(app, salon.getString("id"), periode.first, periode.second)
+                else Discord.messages(app, salon.getString("id"), if (name == "discord_messages_rechercher") 100 else limite, apres, avant).let { arr -> (0 until arr.length()).map { arr.getJSONObject(it) } }
             if (name == "discord_messages_rechercher") {
                 val mot = a.optString("recherche").trim()
                 val auteurFiltre = a.optString("auteur").trim()
@@ -159,14 +164,19 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
                 }
             }
             messages = messages.sortedBy { it.optString("id") }
-            if (messages.isEmpty()) return ToolResult(if (name == "discord_messages_rechercher") "Aucun résultat dans les 100 messages récents de #${salon.optString("name")}." else "Aucun message trouvé dans #${salon.optString("name")} / le fil demandé.", direct = true)
+            if (messages.isEmpty()) return ToolResult(when {
+                periode != null -> "Aucun message dans #${salon.optString("name")} (${g.optString("name")}) sur cette période."
+                name == "discord_messages_rechercher" -> "Aucun résultat dans les 100 messages récents de #${salon.optString("name")}."
+                else -> "Aucun message trouvé dans #${salon.optString("name")} / le fil demandé."
+            }, direct = periode == null)
             val lignes = messages.map { m ->
                 val auteur = m.optJSONObject("author")?.optString("global_name").orEmpty().ifBlank { m.optJSONObject("author")?.optString("username").orEmpty().ifBlank { "Utilisateur inconnu" } }
                 val date = runCatching { java.time.Instant.parse(m.optString("timestamp")).atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("dd/MM HH:mm")) }.getOrDefault("")
                 val contenu = m.optString("content").trim().ifBlank { if (m.optJSONArray("attachments")?.length()?.let { it > 0 } == true) "[pièce jointe]" else "[message sans texte — contenu éventuellement masqué par les intents Discord]" }
                 "[$date] **$auteur** : $contenu" + (if (m.optJSONArray("attachments")?.length()?.let { it > 0 } == true) " 📎" else "") + "\n_ID ${m.optString("id")}_"
             }
-            ToolResult("# Messages de #${salon.optString("name")} — ${messages.size} résultat(s)\n" + lignes.joinToString("\n"), direct = true)
+            // Une période (« hier ») sert à résumer : le texte revient au modèle au lieu d'être affiché brut.
+            ToolResult("# Messages de #${salon.optString("name")} (${g.optString("name")}) — ${messages.size} résultat(s)\n" + lignes.joinToString("\n"), direct = periode == null)
         }
         "discord_message_envoyer" -> {
             val g = guildeObj(a)
@@ -174,7 +184,7 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             val gnom = g.optString("name")
             val nomSalon = a.optString("salon").trim()
             val salon = Discord.trouverSalon(app, gid, nomSalon)
-                ?: return ToolResult("Salon « $nomSalon » introuvable sur « $gnom ».")
+                ?: return ToolResult("Salon « $nomSalon » introuvable sur « $gnom ». Salons : " + Discord.noms(Discord.salons(app, gid), sansCategories = true) + ".")
             if (salon.optInt("type") !in setOf(0, 5))
                 return ToolResult("Le salon « ${salon.optString("name")} » n'est pas un salon textuel classique ou d'annonces. Les salons vocaux, forums et catégories ne sont pas pris en charge par cet outil.")
             val message = a.optString("message").trim()

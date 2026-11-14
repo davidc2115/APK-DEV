@@ -214,11 +214,10 @@ object VoixNaturelle {
 
     private fun post(url: String, cle: String, corps: JSONObject): JSONObject {
         val req = Request.Builder().url(url).header("x-goog-api-key", cle).post(corps.toString().toRequestBody(JSON)).build()
-        http.newCall(req).execute().use { r ->
-            val t = r.body?.string().orEmpty()
-            if (!r.isSuccessful) throw Echec(r.code, runCatching { JSONObject(t).optJSONObject("error")?.optString("message") }.getOrNull().orEmpty().ifBlank { "HTTP ${r.code}" })
-            return JSONObject(t)
-        }
+        // Refus de localisation de Google : même relais par la passerelle Cloudflare que le reste de Gemini.
+        val (code, t) = fr.dd.jarvis.ai.GeminiPasserelle.executer(http, req)
+        if (code !in 200..299) throw Echec(code, runCatching { JSONObject(t).optJSONObject("error")?.optString("message") }.getOrNull().orEmpty().ifBlank { "HTTP $code" })
+        return JSONObject(t)
     }
 
     private fun interactions(cle: String, modele: String, texte: String, voix: String, style: String): Audio {

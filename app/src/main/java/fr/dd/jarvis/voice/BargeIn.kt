@@ -107,4 +107,11 @@ class BargeIn(private val onVoix: () -> Unit) {
     }
 
     fun stop() { run = false }
+
+    /** Arrête et attend que le micro soit vraiment rendu (AudioRecord libéré), au plus [ms] millisecondes. */
+    fun stopEtAttendre(ms: Long) {
+        run = false
+        val t = thread ?: return
+        if (t !== Thread.currentThread()) runCatching { t.join(ms) }
+    }
 }
