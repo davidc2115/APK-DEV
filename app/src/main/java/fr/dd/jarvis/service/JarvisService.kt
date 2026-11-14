@@ -295,7 +295,7 @@ class JarvisService : Service() {
 
     /** Écoute dans la conversation : se referme seule si personne ne parle dans le délai. */
     private fun ecouter(delai: Long = silenceMs()) {
-        if (!running) return
+        if (!running || deverrouillage) return
         apresConfirmation?.let { c -> apresConfirmation = null; if (!busy) { process(c); return } }
         if (suspenduParAppli) { awake = false; voice?.sessionFin(); return }   // l'appli a le micro
         voice?.ecouterConversation(delai)
@@ -346,6 +346,7 @@ class JarvisService : Service() {
 
     /** Retour à l'attente du mot « Jarvis » (détecteur hors-ligne s'il est installé, sinon écoute en boucle). */
     private fun goIdle() {
+        if (deverrouillage) return
         apresConfirmation?.let { c -> apresConfirmation = null; if (!busy && running) { awake = true; process(c); return } }
         if (!busy) garderEveille(false)
         fr.dd.jarvis.car.ActiviteVoiture.signaler(fr.dd.jarvis.car.ActiviteVoiture.Etape.FIN)
@@ -469,8 +470,30 @@ class JarvisService : Service() {
 
     /** Nouvelle demande dite pendant une question oui / non : traitée dès que l'échange en cours est terminé. */
     private var apresConfirmation: String? = null
+    /** Numéro de l'échange en cours : une réponse abandonnée (déverrouillage prioritaire) ne parle plus et ne rouvre rien. */
+    @Volatile private var generation = 0
+    /** Déverrouillage à la voix en cours : rien d'autre n'ouvre le micro pendant ce temps (vérification de la voix). */
+    @Volatile private var deverrouillage = false
+
+    private fun journal(t: String) = runCatching { fr.dd.jarvis.voice.JournalVoix.noter("service", t) }
 
     private fun handle(text: String) {
+        // « Jarvis déverrouille » passe AVANT tout (question oui/non en attente, réponse en cours, autre demande) : avant, dit
+        // pendant une question ou pendant que Jarvis répondait, il était pris pour un « non » ou ignoré.
+        run {
+            val tn = norm(text)
+            val sansJ = wakeRegex.find(tn)?.takeIf { it.range.first <= 2 }?.let { tn.substring(it.range.last + 1).trim() } ?: tn
+            if (fr.dd.jarvis.securite.TelephoneSecurise.estDemande(sansJ)) {
+                if (deverrouillage) { journal("déverrouillage déjà en cours : demande ignorée"); return }
+                journal("déverrouillage demandé" + (if (confirm != null) " — question en cours annulée" else "") + (if (busy) " — réponse en cours abandonnée" else ""))
+                generation++
+                confirm?.complete(false); confirm = null
+                apresConfirmation = null
+                voice?.stopSpeaking()
+                awake = true
+                deverrouillerALaVoix(); return
+            }
+        }
         confirm?.let { d ->
             val t = norm(text)
             // « Jarvis » seul pendant la question : on attend la vraie réponse (pas un « non »).
@@ -479,11 +502,12 @@ class JarvisService : Service() {
             // est faite juste après — avant, elle était prise pour un « non » et perdue.
             val reponse = Regex("\\b(oui|ouais|ok|okay|confirme|vas-y|d'accord|yes|allez|non|nan|annule|pas|jamais|toujours|stop)\\b").containsMatchIn(t)
             val sansJarvis = wakeRegex.find(t)?.takeIf { it.range.first <= 2 }?.let { t.substring(it.range.last + 1).trim() } ?: t
-            if (!reponse && sansJarvis.split(' ').count { it.isNotBlank() } >= 1 &&
-                (fr.dd.jarvis.securite.TelephoneSecurise.estDemande(sansJarvis) || sansJarvis.split(' ').size >= 3)) {
+            if (!reponse && sansJarvis.split(' ').size >= 3) {
+                journal("nouvelle demande pendant une question : « ${sansJarvis.take(60)} » (question annulée, demande faite juste après)")
                 apresConfirmation = sansJarvis
                 d.complete(false); return
             }
+            journal("réponse à la question : « ${t.take(40)} »")
             // « Toujours », « toujours autoriser » : oui, et cette action ne sera plus demandée.
             // « Toujours pour cette commande », « toujours celle-ci » : cette commande précise ; « toujours » seul : le type
             // d'action s'il peut l'être, sinon la commande.
@@ -494,7 +518,7 @@ class JarvisService : Service() {
             }
             d.complete(Regex("\\b(oui|ouais|ok|okay|confirme|vas-y|d'accord|yes|allez)\\b").containsMatchIn(t)); return
         }
-        if (busy) return
+        if (busy) { journal("demande ignorée (Jarvis est occupé) : « ${text.take(60)} »"); return }
         val t = norm(text)
         val m = wakeRegex.find(t)
         // Repli sans détecteur : on ignore tout ce qui ne commence pas par Jarvis. (Avec le détecteur, un résultat arrivé
@@ -513,6 +537,7 @@ class JarvisService : Service() {
         fr.dd.jarvis.device.CommandeMedia.intention(cmd) { fr.dd.jarvis.device.CommandeMedia.musiqueOuverte(this) }?.let { musique(cmd, it); return }
         busy = true; echangeReel = true
         garderEveille(true)
+        val gen = ++generation
         scope.launch {
             val app = application as JarvisApp
             app.chatCharger()
@@ -526,10 +551,10 @@ class JarvisService : Service() {
             // téléphone), et Hermès automatiquement quand il le faut (automatismes, serveur, échec de Jarvis…).
             // Voix progressive : Jarvis commence à parler dès la première phrase écrite par Hermès.
             var relancer = true
-            val flux = withContext(Dispatchers.Main) { voice?.parole(700) { busy = false; if (relancer) ecouter() else goIdle() } }
+            val flux = withContext(Dispatchers.Main) { voice?.parole(700) { if (gen == generation) { busy = false; if (relancer) ecouter() else goIdle() } } }
             val reply = try {
                 fr.dd.jarvis.ai.Brain(app.llm, tools, app) { app.store.userName.value }
-                    .reply(app.chat.toList().takeLast(16), onTexte = { d -> flux?.ajouter(d) }) { etat -> android.os.Handler(android.os.Looper.getMainLooper()).post { majNotification(etat) } }
+                    .reply(app.chat.toList().takeLast(16), onTexte = { d -> if (gen == generation) flux?.ajouter(d) }) { etat -> android.os.Handler(android.os.Looper.getMainLooper()).post { majNotification(etat) } }
             } catch (e: CancellationException) { flux?.arreter(sansSuite = true); throw e }
               catch (e: Throwable) { "⚠️ ${e.message ?: e.javaClass.simpleName}" }
             val assistantMessage = ChatMsg(false, reply)
@@ -550,7 +575,8 @@ class JarvisService : Service() {
                 // Autoradio / Bluetooth : on ne rouvre le micro que si Jarvis pose une question — sinon il entendrait la
                 // radio ou la suite de sa propre réponse ; il suffit de redire « Jarvis » pour une nouvelle demande.
                 relancer = awake && (voice?.sortieExterne() != true || reply.trimEnd().endsWith("?"))
-                flux?.finir(reply) ?: run { busy = false }
+                // Échange abandonné entre-temps (déverrouillage prioritaire) : la réponse reste écrite mais n'est pas dite.
+                if (gen != generation) flux?.arreter(sansSuite = true) else flux?.finir(reply) ?: run { busy = false }
             }
         }
     }
@@ -598,8 +624,11 @@ class JarvisService : Service() {
 
     /** Déverrouillage à la voix : seulement si l'empreinte vocale reconnaît le propriétaire. */
     private fun deverrouillerALaVoix() {
+        if (deverrouillage) return
+        deverrouillage = true
         busy = true
         garderEveille(true)
+        voice?.fermer()
         scope.launch {
             val app = application as JarvisApp
             val r = try {
@@ -621,7 +650,7 @@ class JarvisService : Service() {
                 }
             } catch (e: Throwable) { "Déverrouillage impossible : ${e.message ?: e.javaClass.simpleName}" }
             if (r.isNotBlank()) dire(r)
-            withContext(Dispatchers.Main) { busy = false; garderEveille(false); goIdle() }
+            withContext(Dispatchers.Main) { deverrouillage = false; busy = false; garderEveille(false); goIdle() }
         }
     }
 
@@ -635,8 +664,14 @@ class JarvisService : Service() {
     /** Empreinte vocale : fait dire une phrase et vérifie que c'est bien la voix du propriétaire. */
     private suspend fun verifierMaVoix(): Boolean {
         dire("Pour confirmer, dis : ${fr.dd.jarvis.voice.EmpreinteVocale.PHRASE_VERIF}.")
-        val r = fr.dd.jarvis.voice.EmpreinteVocale.verifier(app)
+        var r = fr.dd.jarvis.voice.EmpreinteVocale.verifier(app)
         runCatching { fr.dd.jarvis.voice.JournalVoix.noter("déverrouillage", "empreinte vocale : ${r.message} (score ${"%.2f".format(r.score)}, seuil ${"%.2f".format(r.seuil)})") }
+        // Juste sous le seuil (voix fatiguée, bruit, phrase coupée) : un 2e essai, une seule fois — pas plus, par sécurité.
+        if (!r.ok && r.score > 0f && r.score >= r.seuil - 0.08f) {
+            dire("Presque. Redis : ${fr.dd.jarvis.voice.EmpreinteVocale.PHRASE_VERIF}.")
+            r = fr.dd.jarvis.voice.EmpreinteVocale.verifier(app)
+            runCatching { fr.dd.jarvis.voice.JournalVoix.noter("déverrouillage", "empreinte vocale (2e essai) : ${r.message} (score ${"%.2f".format(r.score)}, seuil ${"%.2f".format(r.seuil)})") }
+        }
         dire(if (r.ok) "Voix reconnue." else "Je ne reconnais pas ta voix (${r.message}) : action annulée. Déverrouille le téléphone pour la faire.")
         return r.ok
     }

@@ -20,9 +20,16 @@ class JarvisSessionService : VoiceInteractionSessionService() {
 }
 
 class JarvisSession(ctx: Context) : VoiceInteractionSession(ctx) {
+    /**
+     * Appui long sur le bouton d'alimentation / l'accueil (JARVIS assistant numérique par défaut) : comme « Jarvis » dit à
+     * voix haute — bip puis écoute de la demande, MÊME écran verrouillé et sans ouvrir l'appli. Repli : l'appli s'ouvre
+     * micro ouvert (écoute « Jarvis » coupée).
+     */
     override fun onShow(args: Bundle?, showFlags: Int) {
         super.onShow(args, showFlags)
-        runCatching {
+        runCatching { fr.dd.jarvis.voice.JournalVoix.noter("assistant", "appel par le geste de l'assistant") }
+        val parLeService = runCatching { fr.dd.jarvis.service.JarvisService.ecouterDepuisVoiture(context) }.getOrDefault(false)
+        if (!parLeService) runCatching {
             context.startActivity(Intent(context, fr.dd.jarvis.MainActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP).putExtra("listen", true))
         }
