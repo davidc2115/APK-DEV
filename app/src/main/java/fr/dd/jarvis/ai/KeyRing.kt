@@ -1,30 +1,92 @@
 package fr.dd.jarvis.ai
 
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.ResponseBody.Companion.toResponseBody
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
 class ApiException(val code: Int, message: String) : Exception(message)
 
 object Http {
+    private fun google(host: String) = host.endsWith("googleapis.com") || host.endsWith(".google.com") || host.endsWith("googleusercontent.com")
+
     /**
-     * Vers les API de Google : IPv4 seulement (IPv6 en repli s'il n'y a aucune adresse IPv4). Google localise mal des
-     * plages IPv6 d'opérateurs (Free, Orange, hébergeurs…) et répond alors « 400 · User location is not supported for
-     * the API use » pour TOUTES les clés Gemini, alors que la France est bien autorisée.
+     * Famille d'adresses utilisée vers les API de Google : 0 = ordre du système, 4 = IPv4, 6 = IPv6. Google localise
+     * mal certaines adresses (IPv6 d'opérateurs, IPv4 partagées des réseaux mobiles…) et répond alors « 400 · User
+     * location is not supported » pour TOUTES les clés Gemini alors que la France est autorisée : [relocalisation]
+     * bascule alors d'elle-même sur l'autre famille et retient celle qui passe (6 h, le temps d'un réseau).
      */
-    val dnsGoogleIpv4: okhttp3.Dns = object : okhttp3.Dns {
+    @Volatile var familleGoogle = 0
+    @Volatile private var familleLe = 0L
+
+    /** Résolution IPv4 par DNS chiffré (réseaux mobiles en IPv6 seul avec traduction 464XLAT : l'IPv4 reste joignable). */
+    private val doh = OkHttpClient.Builder().connectTimeout(3, TimeUnit.SECONDS).readTimeout(3, TimeUnit.SECONDS).build()
+    private val cacheA = java.util.concurrent.ConcurrentHashMap<String, Pair<List<java.net.InetAddress>, Long>>()
+    private fun ipv4ParDoh(host: String): List<java.net.InetAddress> {
+        cacheA[host]?.takeIf { System.currentTimeMillis() - it.second < 10 * 60_000L }?.let { return it.first }
+        for (u in listOf("https://1.1.1.1/dns-query?name=$host&type=A", "https://8.8.8.8/resolve?name=$host&type=A")) {
+            val l = runCatching {
+                doh.newCall(okhttp3.Request.Builder().url(u).header("Accept", "application/dns-json").build()).execute().use { r ->
+                    val a = org.json.JSONObject(r.body?.string().orEmpty()).optJSONArray("Answer") ?: return@use emptyList()
+                    (0 until a.length()).mapNotNull { a.optJSONObject(it) }.filter { it.optInt("type") == 1 }
+                        .mapNotNull { runCatching { java.net.InetAddress.getByName(it.optString("data")) }.getOrNull() }
+                }
+            }.getOrDefault(emptyList())
+            if (l.isNotEmpty()) { cacheA[host] = l to System.currentTimeMillis(); return l }
+        }
+        return emptyList()
+    }
+
+    val dnsGoogle: okhttp3.Dns = object : okhttp3.Dns {
         override fun lookup(hostname: String): List<java.net.InetAddress> {
             val tout = okhttp3.Dns.SYSTEM.lookup(hostname)
-            return if (hostname.endsWith("googleapis.com") || hostname.endsWith(".google.com") || hostname.endsWith("googleusercontent.com"))
-                tout.filterIsInstance<java.net.Inet4Address>().ifEmpty { tout } else tout
+            if (!google(hostname)) return tout
+            if (familleGoogle != 0 && System.currentTimeMillis() - familleLe > 6 * 3_600_000L) familleGoogle = 0
+            return when (familleGoogle) {
+                4 -> tout.filterIsInstance<java.net.Inet4Address>().ifEmpty { ipv4ParDoh(hostname) }.ifEmpty { tout }
+                6 -> tout.filterIsInstance<java.net.Inet6Address>().ifEmpty { tout }
+                else -> tout
+            }
         }
     }
+    /** Ancien nom (clients qui l'utilisent déjà). */
+    val dnsGoogleIpv4: okhttp3.Dns get() = dnsGoogle
 
     /** « User location is not supported » : refus lié à l'adresse IP de la connexion, pas à la clé. */
     fun refusLocalisation(message: String) = message.contains("location is not supported", ignoreCase = true)
 
+    /** Pool de connexions commun aux clients qui parlent à Google (vidé pour changer d'adresse). */
+    val poolGoogle = okhttp3.ConnectionPool()
+
+    /**
+     * Refus de localisation de Google : la même requête est rejouée par l'autre famille d'adresses (IPv4 ↔ IPv6),
+     * sur une connexion neuve ; la famille qui passe est retenue. Si aucune ne passe, la réponse d'origine est rendue.
+     */
+    val relocalisation = okhttp3.Interceptor { chain ->
+        val req = chain.request()
+        val rep = chain.proceed(req)
+        if (rep.code != 400 || !google(req.url.host) || !refusLocalisation(rep.peekBody(16_384).string())) return@Interceptor rep
+        val type = rep.body?.contentType()
+        val texte = rep.body?.string().orEmpty()
+        rep.close()
+        val initiale = rep.newBuilder().body(texte.toResponseBody(type)).build()
+        val depart = familleGoogle
+        for (f in listOf(4, 6, 0).filter { it != depart }) {
+            familleGoogle = f; familleLe = System.currentTimeMillis()
+            poolGoogle.evictAll()
+            val r = try { chain.proceed(req) } catch (e: java.io.IOException) { continue }
+            if (r.code == 400 && refusLocalisation(r.peekBody(16_384).string())) { r.close(); continue }
+            return@Interceptor r
+        }
+        familleGoogle = depart
+        poolGoogle.evictAll()
+        initiale
+    }
+
     val client: OkHttpClient = OkHttpClient.Builder()
-        .dns(dnsGoogleIpv4)
+        .dns(dnsGoogle)
+        .connectionPool(poolGoogle)
+        .addInterceptor(relocalisation)
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(90, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)

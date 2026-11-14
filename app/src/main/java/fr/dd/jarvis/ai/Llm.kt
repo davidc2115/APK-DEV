@@ -285,7 +285,7 @@ class Llm(private val store: Store) {
         "✅ OK (${System.currentTimeMillis() - t0} ms)" + (if (modele != store.geminiModel.value.trim().removePrefix("models/")) " — modèle « ${store.geminiModel.value} » non ouvert à cette clé : « $modele » utilisé à la place" else " — modèle « $modele »")
     } catch (e: ApiException) {
         "❌ " + KeyRing.motif(e.code, e.message.orEmpty()) +
-            (if (Http.refusLocalisation(e.message.orEmpty())) " → Google refuse l'adresse IP de ta connexion (pas la clé) : coupe un éventuel VPN, ou essaie en Wi-Fi puis en données mobiles." else "")
+            (if (Http.refusLocalisation(e.message.orEmpty())) " → Google refuse l'adresse IP de cette connexion (pas la clé), en IPv4 comme en IPv6 : coupe un éventuel VPN, ou essaie l'autre réseau (Wi-Fi ↔ données mobiles). Tant que ça dure, Jarvis se replie sur ses autres IA (Groq…)." else "")
     } catch (e: Exception) {
         "❌ " + (e.message ?: "erreur").take(120)
     }

@@ -130,17 +130,18 @@ class ToolBox(
                 "message_id" to prop("Identifiant exact fourni par rechercher_mails."),
                 "texte" to prop("Texte complet de la réponse.")
             ), listOf("compte", "message_id", "texte")))
-        put(tool("trier_mails", "Analyse les derniers mails, les classe dans les libellés de l'utilisateur (Facebook, Super U/…, Impôts, Pubs, Réseaux sociaux, Banque et crédit, Maison, Enfants, Santé, Achats et livraisons, Comptes et sécurité, Administratif, Travail, Personnel) et peut les ranger dans Gmail. Pour TOUTE la boîte, utilise grand_menage_mails.",
+        put(tool("trier_mails", "Analyse les mails, les classe dans les libellés de l'utilisateur (Facebook, Super U/…, Impôts, Pubs, Réseaux sociaux, Banque et crédit, Maison, Enfants, Santé, Achats et livraisons, Comptes et sécurité, Administratif, Travail, Personnel) et peut les ranger dans Gmail. Applique la RÈGLE enregistrée (par défaut : seulement les NON LUS) ; « trie tous mes mails » = statut tous pour CETTE fois (la règle ne change pas). Pour changer la règle durablement : regler_tri_mails. Pour TOUTE la boîte d'un coup : grand_menage_mails.",
             mapOf(
                 "compte" to prop("Compte mail précis (adresse ou partie), même s'il est désactivé. Vide = comptes actifs seulement."),
                 "count" to prop("Nombre de mails à trier (5 à 500). Par défaut 100 ; mets 300-500 pour « toute la boîte »."),
                 "unread_only" to prop("« true » pour ne trier que les non lus."),
-                "statut" to prop("Règle persistante du tri : lus | non_lus | tous. Si fourni, remplace la règle enregistrée ; sinon applique la règle actuelle."),
+                "statut" to prop("lus | non_lus | tous : pour CE tri seulement (la règle enregistrée ne change pas, sauf enregistrer=true). Vide = règle enregistrée."),
+                "enregistrer" to prop("« true » si l'utilisateur veut que ce statut devienne la règle (« désormais », « à partir de maintenant »)."),
                 "toute_la_boite" to prop("« true » pour inclure aussi les mails déjà archivés (pas seulement la boîte de réception) : utile pour (re)trier tout un compte."),
                 "ranger" to prop("« true » pour appliquer les libellés dans Gmail. Un re-tri remplace les anciens libellés de catégorie par les bons."),
                 "archiver" to prop("« true » pour aussi retirer de la boîte de réception les mails rangés (ils restent dans leur libellé).")
             )))
-        put(tool("regler_tri_mails", "Modifie à la demande la règle persistante du tri automatique des emails. Par défaut seuls les emails déjà lus sont triés. Valeurs : lus (ne touche jamais aux non lus), non_lus (ne trie que les non lus), tous (lus et non lus). Cette règle s'applique à tous les tris automatiques, mais jamais au grand ménage explicite.",
+        put(tool("regler_tri_mails", "Modifie à la demande la règle persistante du tri des emails (« désormais trie… », « change la règle du tri »). Par défaut seuls les emails NON LUS sont triés. Valeurs : non_lus (ne trie que les non lus), lus (ne touche jamais aux non lus), tous (lus et non lus). Elle s'applique à tous les tris (automatiques et « trie mes mails ») jusqu'au prochain changement, jamais au grand ménage explicite.",
             mapOf("statut" to prop("lus | non_lus | tous : nouvelle règle à enregistrer."),
                 "action" to prop("definir | voir ; défaut définir si statut fourni, sinon voir."))))
         put(tool("changer_voix", "Change la voix de JARVIS (personnage) : homme, femme, jeune, âgé(e), grave, douce, IA/robot, narrateur, animatrice radio, murmure, Jarvis (par défaut), ou un nom de voix Gemini (Kore, Puck…). Sans précision : liste les voix.",
@@ -185,13 +186,20 @@ class ToolBox(
                 "restants" to prop("« true » (défaut) pour ne garder que les rendez-vous restants aujourd'hui, « false » pour toute la journée."),
                 "calendar" to prop("Nom d'un agenda précis (optionnel).")
             )))
-        put(tool("marquer_mails_traites", "Marque des mails comme traités OU simplement comme lus (« marque comme lu ») : ils sont d'abord triés automatiquement dans leur libellé (catégorie/expéditeur, toutes les newsletters dans un seul libellé), puis marqués lus (+ libellé Traité si traités), archivés si demandé. Compte Google requis.",
+        put(tool("marquer_mails_traites", "Marque des mails comme LUS, NON LUS ou TRAITÉS (lus + libellé « Traité ») : TOUS (toute la boîte de réception, sans limite de nombre) ou seulement ceux demandés (expéditeur, mots, libellé/catégorie, période, identifiants). Une seule confirmation. Compte Google requis.",
             mapOf(
-                "traite" to prop("« false » si l'utilisateur demande seulement de marquer comme LU (pas de libellé Traité). Par défaut true."),
-                "compte" to prop("Compte mail précis (adresse ou partie), même s'il est désactivé. Vide = comptes actifs seulement."),
-                "recherche" to prop("Texte à retrouver dans l'expéditeur ou l'objet. Vide ou « tous » = tous les mails récents non lus."),
-                "count" to prop("Nombre de mails récents à considérer (5 à 60). Par défaut 30."),
-                "archiver" to prop("Par défaut : traités → rangés dans leur libellé (retirés de la boîte de réception) ; lus → restent dans la boîte. « false » / « true » pour forcer.")
+                "action" to prop("lu | non_lu | traite (défaut : traite ; « marque comme lu » = lu)."),
+                "traite" to prop("Ancien paramètre : « false » = action lu."),
+                "tous" to prop("« true » : tous les mails concernés de la boîte de réception (sinon les filtres ci-dessous ; sans filtre = tous)."),
+                "expediteur" to prop("Expéditeur (nom, adresse ou domaine)."),
+                "recherche" to prop("Mots à retrouver dans l'expéditeur ou l'objet (ou requête Gmail : from:, subject:, older_than:…)."),
+                "libelle" to prop("Libellé / catégorie de l'utilisateur, ex. « Pubs », « Impôts », « Super U/Tickets de caisse »."),
+                "depuis" to prop("Date de début aaaa-mm-jj (optionnel)."),
+                "avant" to prop("Date de fin aaaa-mm-jj (optionnel)."),
+                "ids" to prop("Identifiants exacts (rechercher_mails), séparés par des virgules."),
+                "compte" to prop("Compte mail précis (adresse ou partie). Vide = comptes actifs."),
+                "partout" to prop("« true » : aussi les mails archivés (pas seulement la boîte de réception)."),
+                "archiver" to prop("« true » pour aussi retirer de la boîte de réception (ils restent dans leurs libellés). Par défaut non.")
             )))
         put(tool("lire_sms", "Lit les SMS récents (reçus et envoyés).",
             mapOf(
@@ -1901,43 +1909,53 @@ class ToolBox(
         }
     }
 
+    /**
+     * Marque des mails comme lus, non lus ou traités (lus + libellé « Traité ») : tous ceux de la boîte de réception ou
+     * seulement ceux demandés, par une recherche Gmail (aucune limite de nombre, modification par lots de 1000).
+     */
     private suspend fun marquerTraites(a: JSONObject): ToolResult {
         if (store.gmailAccounts.isEmpty()) return ToolResult("Marquer comme traité ou lu demande un compte Google connecté (Réglages › Comptes › Mails).")
-        val count = (a.optString("count").toIntOrNull() ?: 30).coerceIn(5, 60)
-        val q = a.optString("recherche").trim().lowercase().let { if (it == "tous" || it == "tout") "" else it }
-        val traite = !a.optString("traite").equals("false", true)
-        val mails = try { app.mail.fetchRecent(count, q.isBlank(), a.optString("compte"), full = true) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
-            return ToolResult("❌ Impossible de lire les mails : ${e.message}")
-        }
-        val cibles = mails.filter { m -> m.id.isNotBlank() && store.gmailAccounts.any { it.equals(m.account, true) } &&
-            (q.isBlank() || m.from.lowercase().contains(q) || m.fromAddr.contains(q) || m.subject.lowercase().contains(q)) }
-        if (cibles.isEmpty()) return ToolResult("Aucun mail correspondant.")
-        // « Traité » = rangé dans son libellé (hors de la boîte de réception), sauf demande contraire ; « lu » reste dans la boîte.
-        val archiver = a.optString("archiver").let { if (it.isBlank()) traite else it.equals("true", true) }
-        val quoi = if (traite) "traités" else "lus"
-        if (!confirm("Ranger dans leur libellé et marquer ${cibles.size} mail(s) comme $quoi" + (if (archiver) " et les archiver" else "") + " ?\n\n" + cibles.take(8).joinToString("\n") { "• ${it.from} — ${it.subject}" }, false))
-            return ToolResult("Refusé par l'utilisateur.")
-        // 1) Tri automatique : chaque mail rejoint son libellé (catégorie/expéditeur ; les newsletters dans un seul libellé).
-        val tri = try {
-            val eligiblesTri = cibles.filter { m -> when (store.mailTriStatut.value) {
-                "non_lus" -> m.unread
-                "tous" -> true
-                else -> !m.unread
-            } }
-            if (eligiblesTri.isEmpty()) "📂 Aucun classement automatique : la règle actuelle est « ${store.mailTriStatut.value} » ; le marquage demandé reste effectué."
-            else {
-                val classes = fr.dd.jarvis.ai.MailTri.classer(app, eligiblesTri)
-                val n = fr.dd.jarvis.ai.MailTri.ranger(app, classes, archiver)
-                "📂 $n rangé(s) : " + classes.groupingBy { it.label }.eachCount().entries.sortedByDescending { it.value }
-                    .joinToString(", ") { "${it.key}${if (it.value > 1) " ×${it.value}" else ""}" }
+        val action = fr.dd.jarvis.societe.core.normaliser(a.optString("action")).let { x ->
+            when {
+                x.startsWith("non") -> "non_lu"
+                x.startsWith("lu") || a.optString("traite").equals("false", true) -> "lu"
+                else -> "traite"
             }
-        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { "⚠️ Tri dans les libellés impossible : ${e.message}" }
-        // 2) Marquage lu / traité.
-        return try {
-            val n = fr.dd.jarvis.device.GmailApi.marquerTraites(app, cibles.groupBy({ it.account }, { it.id }), archiver, traite)
-            val detail = listOfNotNull(if (traite) "lus + libellé Traité" else null, if (archiver) "archivés" else null)
-            ToolResult("✅ $n mail(s) marqués comme $quoi" + (if (detail.isEmpty()) "" else " (" + detail.joinToString(", ") + ")") + ".\n$tri")
-        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { ToolResult("❌ ${e.message}\n$tri") }
+        }
+        val q = MailCommandes.requeteGmail(action, a, store.mailLabelPrefix.value)
+        val ids = a.optString("ids").split(Regex("[,;\\s]+")).map { it.trim() }.filter { it.isNotBlank() }
+        val filtreCompte = a.optString("compte").trim().lowercase()
+        val comptes = store.gmailAccounts.filter { if (filtreCompte.isBlank()) store.mailActive(it) else it.lowercase().contains(filtreCompte) }
+        if (comptes.isEmpty()) return ToolResult("Aucun compte Google ne correspond à « ${a.optString("compte")} ».", direct = true)
+        // 1) Ce qui est concerné, compte par compte.
+        val cibles = mutableMapOf<String, Pair<String, List<String>>>()   // compte → (jeton, ids)
+        val erreurs = mutableListOf<String>()
+        for (c in comptes) runCatching {
+            val token = fr.dd.jarvis.device.GmailApi.jeton(app, c)
+            val l = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { if (ids.isNotEmpty()) ids else fr.dd.jarvis.device.GmailApi.idsRecherche(token, q, 20_000) }
+            if (l.isNotEmpty()) cibles[c] = token to l
+        }.onFailure { erreurs += "$c : ${it.message}" }
+        val total = cibles.values.sumOf { it.second.size }
+        val quoi = when (action) { "lu" -> "lus"; "non_lu" -> "non lus"; else -> "traités (lus + libellé « Traité »)" }
+        if (total == 0) return ToolResult("📭 Aucun mail à marquer comme $quoi" + (if (erreurs.isEmpty()) "." else " — " + erreurs.joinToString("; ")), direct = true)
+        val archiver = a.optString("archiver").equals("true", true)
+        if (!confirm("Marquer $total mail(s) comme $quoi" + (if (archiver) " et les retirer de la boîte de réception" else "") + " ?\n" +
+                cibles.entries.joinToString("\n") { "• ${it.key} : ${it.value.second.size}" } + "\n(recherche : $q)", false))
+            return ToolResult("Rien n'a été modifié.", direct = true)
+        // 2) Marquage par lots.
+        var faits = 0
+        for ((c, v) in cibles) runCatching {
+            val (token, l) = v
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val traiteId = if (action == "traite") fr.dd.jarvis.device.GmailApi.libelleEnCouleur(token, fr.dd.jarvis.device.GmailApi.tousLesLibelles(token), store.mailLabelPrefix.value + "Traité") else null
+                val ajouter = listOfNotNull(traiteId) + (if (action == "non_lu") listOf("UNREAD") else emptyList())
+                val retirer = (if (action == "non_lu") emptyList() else listOf("UNREAD")) + (if (archiver) listOf("INBOX") else emptyList())
+                fr.dd.jarvis.device.GmailApi.modifierLot(token, l, ajouter, retirer)
+            }
+            faits += v.second.size
+        }.onFailure { erreurs += "$c : ${it.message}" }
+        return ToolResult("✅ $faits mail(s) marqués comme $quoi" + (if (archiver) ", retirés de la boîte de réception" else "") + "." +
+            (if (erreurs.isEmpty()) "" else "\n⚠️ " + erreurs.joinToString("\n⚠️ ")), direct = true)
     }
 
     private suspend fun routines(a: JSONObject): ToolResult {
@@ -2069,27 +2087,28 @@ class ToolBox(
     }
 
     private fun reglerTriMails(a: JSONObject): ToolResult {
-        val statut = a.optString("statut").trim().lowercase()
+        val statut = a.optString("statut").trim().lowercase().replace(' ', '_').let { if (it == "non_lu") "non_lus" else if (it == "lu") "lus" else it }
         if (statut.isBlank() || a.optString("action").equals("voir", true)) {
             val actuel = store.mailTriStatut.value
             val libelle = when (actuel) { "non_lus" -> "uniquement les non lus"; "tous" -> "lus et non lus"; else -> "uniquement les lus" }
-            return ToolResult("📧 Règle actuelle : $libelle. Tu peux me demander « trie uniquement les lus », « trie uniquement les non lus » ou « trie tous les emails ».", direct = true)
+            return ToolResult("📧 Règle actuelle du tri : $libelle. Pour la changer : « désormais trie tous les mails », « désormais trie seulement les non lus » (ou « … seulement les lus »). « Trie tous mes mails » ne vaut que pour une fois.", direct = true)
         }
         if (statut !in setOf("lus", "non_lus", "tous"))
             return ToolResult("Règle inconnue. Utilise « lus », « non_lus » ou « tous ».")
         store.mailTriStatut.set(statut)
         val libelle = when (statut) { "non_lus" -> "uniquement les non lus"; "tous" -> "les lus et les non lus"; else -> "uniquement les lus" }
-        return ToolResult("✅ Règle de tri enregistrée : $libelle. Elle s'applique à tous les tris automatiques, jusqu'à ce que tu me demandes de la modifier. Le grand ménage reste indépendant.", direct = true)
+        return ToolResult("✅ Règle de tri enregistrée : $libelle. Elle s'applique à tous les tris (automatiques et « trie mes mails »), jusqu'à ce que tu me demandes de la modifier. Le grand ménage reste indépendant.", direct = true)
     }
 
     private suspend fun trierMails(a: JSONObject): ToolResult {
         if (!store.mailConfigured()) return ToolResult("Les mails ne sont pas configurés (Réglages › Comptes › Mails).")
         val count = (a.optString("count").toIntOrNull() ?: 100).coerceIn(5, 500)
-        val demandeStatut = a.optString("statut").trim().lowercase()
+        val demandeStatut = a.optString("statut").trim().lowercase().replace(' ', '_').replace("non_lu", "non_lus").replace("non_luss", "non_lus")
+        // « Trie tous mes mails » vaut pour CE tri ; la règle enregistrée ne change que sur demande explicite.
         val statut = when {
-            demandeStatut in setOf("lus", "non_lus", "tous") -> demandeStatut.also { store.mailTriStatut.set(it) }
+            demandeStatut in setOf("lus", "non_lus", "tous") -> demandeStatut.also { if (a.optString("enregistrer").equals("true", true)) store.mailTriStatut.set(it) }
             a.optString("unread_only").equals("true", true) -> "non_lus"
-            else -> store.mailTriStatut.value.takeIf { it in setOf("lus", "non_lus", "tous") } ?: "lus"
+            else -> store.mailTriStatut.value.takeIf { it in setOf("lus", "non_lus", "tous") } ?: "non_lus"
         }
         // En mode « lus », on lit une fenêtre plus large pour ne pas laisser les non lus récents masquer les lus.
         val limiteLecture = if (statut == "lus") (count * 5).coerceAtMost(500) else count

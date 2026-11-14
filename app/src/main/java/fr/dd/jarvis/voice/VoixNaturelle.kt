@@ -128,7 +128,7 @@ object VoixNaturelle {
     private val MODELES = listOf("gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts", "gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts")
     private val JSON = "application/json; charset=utf-8".toMediaType()
 
-    private val http = OkHttpClient.Builder().dns(fr.dd.jarvis.ai.Http.dnsGoogleIpv4).connectTimeout(6, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).callTimeout(25, TimeUnit.SECONDS).build()
+    private val http = OkHttpClient.Builder().dns(fr.dd.jarvis.ai.Http.dnsGoogle).connectionPool(fr.dd.jarvis.ai.Http.poolGoogle).addInterceptor(fr.dd.jarvis.ai.Http.relocalisation).connectTimeout(6, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).callTimeout(25, TimeUnit.SECONDS).build()
 
     @Volatile private var indisponibleJusqua = 0L
     @Volatile var raison = ""

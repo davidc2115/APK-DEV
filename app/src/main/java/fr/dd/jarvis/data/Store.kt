@@ -536,7 +536,9 @@ class Store(context: Context) {
     /** Préfixe des libellés Gmail créés par JARVIS (vide = « Urgent », « Clients »… sans « JARVIS/ » devant). */
     val mailLabelPrefix = SPref("mailLabelPrefix", "")
     /** Règle persistante du tri automatique : lus (défaut), non_lus ou tous. Le grand ménage l’ignore volontairement. */
-    val mailTriStatut = SPref("mailTriStatut", "lus")
+    val mailTriStatut = SPref("mailTriStatut", "non_lus")
+    /** Passage unique à la règle « non lus seulement » (demande de l'utilisateur, nov. 2026). */
+    val mailTriNonLusApplique = BPref("mailTriNonLusApplique", false)
 
     fun mailConfigured() = gmailAccounts.isNotEmpty() || mailHost.value.isNotBlank() && mailUser.value.isNotBlank() && mailPass.value.isNotBlank()
 

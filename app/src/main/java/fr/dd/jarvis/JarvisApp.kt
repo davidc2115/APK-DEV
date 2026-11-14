@@ -138,6 +138,8 @@ class JarvisApp : Application() {
         fr.dd.jarvis.work.BaremesWorker.planifier(this)
         // Mémoire fiable : une fois, les notes déjà prises sont relues pour en tirer adresse, surnoms et faits.
         runCatching { fr.dd.jarvis.device.Faits.rattrapage(this) }
+        // Tri des mails : désormais seuls les NON LUS par défaut (une seule fois ; modifiable ensuite à la demande).
+        if (!store.mailTriNonLusApplique.value) { store.mailTriStatut.set("non_lus"); store.mailTriNonLusApplique.set(true) }
         runCatching { fr.dd.jarvis.coffre.Coffre.planifier(this) }
         // Une fois : les rapports d'intervention existants sont régénérés avec leurs photos dans le PDF.
         if (!store.rapportsV3.value) Thread {
