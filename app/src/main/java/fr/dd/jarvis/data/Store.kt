@@ -418,6 +418,11 @@ class Store(context: Context) {
     /** Silence (ms) qui marque la fin d'une phrase : en dessous, une pause pour réfléchir ne coupe pas le micro. */
     val pauseFin = IPref("pauseFinMs", 2000)
     /**
+     * Qui écoute tes phrases : « jarvis » = JARVIS tient le micro et décide de la fin de phrase, Whisper (Groq) transcrit,
+     * modèle français hors-ligne en secours ; « google » = reconnaisseur de Google (ancien fonctionnement).
+     */
+    val moteurEcoute = SPref("moteurEcoute", "jarvis")
+    /**
      * Écoute « longue » d'Android 13+ (morceaux rendus à chaque pause). Désactivée par défaut : sur Xiaomi/HyperOS le
      * moteur Google n'y rend AUCUN texte (erreur 7 à chaque phrase). Se désactive d'elle-même si elle échoue.
      */

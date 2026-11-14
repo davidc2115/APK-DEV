@@ -775,6 +775,16 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 }
                 Spacer(Modifier.height(6.dp))
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Écoute", color = HudDim, fontSize = 12.sp)
+                    HudChip("🎙️ JARVIS + Whisper", store.moteurEcoute.value == "jarvis") { store.moteurEcoute.set("jarvis") }
+                    HudChip("Google", store.moteurEcoute.value == "google") { store.moteurEcoute.set("google") }
+                }
+                Text(
+                    if (store.groqKeys.isEmpty()) "Écoute JARVIS : JARVIS tient le micro et décide seul de la fin de ta phrase (jamais pendant que tu parles). Sans clé Groq, le texte vient du modèle français hors-ligne (moins précis) : ajoute une clé Groq pour la transcription Whisper."
+                    else "Écoute JARVIS : JARVIS tient le micro et décide seul de la fin de ta phrase (jamais pendant que tu parles) ; la phrase est transcrite par Whisper (Groq, envoyée en ligne), le modèle français hors-ligne prend le relais sans réseau. « Google » = l'ancien reconnaisseur du téléphone.",
+                    color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                Spacer(Modifier.height(6.dp))
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Fin de phrase", color = HudDim, fontSize = 12.sp)
                     listOf(1500 to "1,5 s", 2000 to "2 s", 3000 to "3 s").forEach { (ms, lib) ->
                         HudChip("$lib de pause", store.pauseFin.value == ms) { store.pauseFin.set(ms) }

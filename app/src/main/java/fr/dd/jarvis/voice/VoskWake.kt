@@ -40,6 +40,19 @@ object VoskModel {
 
     private val verrou = kotlinx.coroutines.sync.Mutex()
 
+    /** Modèles chargés, partagés par tout JARVIS (détecteur « Jarvis » et écoute des phrases) : un seul en mémoire. */
+    private val charges = HashMap<String, Model>()
+
+    /** Modèle actuel (français s'il est là), chargé une fois pour toute la vie de l'appli ; null s'il n'est pas installé. */
+    fun partage(ctx: Context): Model? {
+        if (!ready(ctx)) return null
+        val chemin = dir(ctx).absolutePath
+        synchronized(charges) {
+            charges[chemin]?.let { return it }
+            return runCatching { Model(chemin) }.getOrNull()?.also { charges[chemin] = it }
+        }
+    }
+
     /** Télécharge le modèle français (≈ 41 Mo, une seule fois). Plusieurs demandes en même temps : un seul téléchargement. */
     suspend fun download(ctx: Context, onProgress: (Int) -> Unit): String = verrou.withLock {
         if (francais(ctx)) return@withLock "✅ Détecteur « Jarvis » (français) déjà installé."
@@ -199,7 +212,7 @@ class VoskWake(private val ctx: Context, private val econome: Boolean = true, pr
         if (vivantes.get() > 0) return false
         return try {
             LibVosk.setLogLevel(LogLevel.WARNINGS)
-            if (model == null) model = Model((if (francais) VoskModel.dirFr(ctx) else VoskModel.dirEn(ctx)).absolutePath)
+            if (model == null) model = VoskModel.partage(ctx) ?: return false
             val rec = Recognizer(model, 16000f, (if (francais) GRAMMAIRE_FR else GRAMMAIRE).joinToString(", ", "[", "]") { "\"$it\"" })
             rec.setWords(true)
             fired = false
@@ -313,7 +326,8 @@ class VoskWake(private val ctx: Context, private val econome: Boolean = true, pr
         }
     }
 
-    override fun release() { stop(); try { model?.close() } catch (_: Throwable) {}; model = null }
+    // Le modèle est partagé (écoute des phrases) : il reste chargé.
+    override fun release() { stop(); model = null }
 }
 
 /**

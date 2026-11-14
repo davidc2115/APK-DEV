@@ -61,7 +61,13 @@ object Pcm {
  * Détection de prise de parole puis de fin de phrase, trame par trame (20 ms) : seuil adapté au bruit de fond de la
  * voiture (route, ventilation), la phrase se termine après ~1,1 s de silence.
  */
-class FinDePhrase(plancherInitial: Double, private val minimum: Double = 250.0) {
+class FinDePhrase(
+    plancherInitial: Double,
+    private val minimum: Double = 250.0,
+    /** Trames de 20 ms de silence qui terminent la phrase (55 ≈ 1,1 s). */
+    private val silenceFin: Int = 55,
+    private val ratio: Double = 3.0,
+) {
     private var plancher = max(plancherInitial, 20.0)
     private val voix = BooleanArray(10)
     private var n = 0
@@ -71,20 +77,33 @@ class FinDePhrase(plancherInitial: Double, private val minimum: Double = 250.0) 
     /** Numéro de trame où la parole a commencé (pour couper le silence de tête). */
     var debut = 0
         private set
+    /** Dernière trame jugée « voix ». */
+    var derniereVoix = 0
+        private set
+    /** Nombre de trames jugées « voix » (durée de parole réelle, hors silences). */
+    var tramesVoix = 0
+        private set
 
     /** Ajoute une trame ; vrai quand la phrase est terminée. */
     fun trame(rms: Double): Boolean {
         n++
-        val v = rms > max(minimum, plancher * 3.0)
+        val v = rms > max(minimum, plancher * ratio)
         if (!v) plancher = if (rms < plancher) 0.8 * plancher + 0.2 * rms else 0.995 * plancher + 0.005 * rms
+        else { derniereVoix = n; tramesVoix++ }
         voix[n % voix.size] = v
         if (!parle && voix.count { it } >= 5) { parle = true; debut = max(0, n - 15) }
         if (parle) {
             silence = if (v) 0 else silence + 1
-            if (silence >= 55) return true
+            if (silence >= silenceFin) return true
         }
         return false
     }
+
+    /** Des mots ont été reconnus alors que le niveau sonore n'a pas suffi (voix basse, de loin) : c'est de la parole. */
+    fun forcerParole() { if (!parle) { parle = true; debut = max(0, n - 40); silence = 0 } }
+
+    /** La phrase semble inachevée : on attend encore [trames] trames de silence avant de conclure. */
+    fun prolonger(trames: Int) { silence = (silenceFin - trames).coerceAtMost(silence) }
 }
 
 /** Une phrase dite au micro de la voiture (Android Auto), ou la raison pour laquelle il n'y en a pas. */

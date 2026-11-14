@@ -267,6 +267,8 @@ class VoiceManager(private val ctx: Context) {
             annulerRelance()
             // Reconnaisseur précédent encore là (écoute annulée) : libéré maintenant, et ouverture 450 ms plus tard.
             if (recognizer != null) liberer()
+            // Écoute JARVIS : aucun reconnaisseur de Google à laisser partir, le micro s'ouvre tout de suite.
+            if (ecouteJarvis()) { ouvrir(essai); return@post }
             val attente = 450L - (System.currentTimeMillis() - detruitLe)
             if (attente > 0) {
                 val r = Runnable { relanceEnAttente = null; ouvrir(essai) }
@@ -284,7 +286,7 @@ class VoiceManager(private val ctx: Context) {
                 signalerEcoute(false)
                 return@run
             }
-            if (!SpeechRecognizer.isRecognitionAvailable(ctx)) {
+            if (!ecouteJarvis() && !SpeechRecognizer.isRecognitionAvailable(ctx)) {
                 fenetreFin = 0
                 onFail("Reconnaissance vocale indisponible sur cet appareil (installer / activer Google).")
                 return@run
@@ -301,6 +303,8 @@ class VoiceManager(private val ctx: Context) {
             dernierPartiel = ""
             sonsForts = 0
             debutParoleLe = 0L
+            microJ?.arreter(false); microJ = null
+            if (ecouteJarvis() && ouvrirJarvis(moi)) return@run
             val local = essai >= 3 && Build.VERSION.SDK_INT >= 33 && SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx)
             val composant = if (local) null else moteur(ctx)
             val cle = if (local) "local" else composant?.flattenToString() ?: "defaut"
@@ -608,6 +612,136 @@ class VoiceManager(private val ctx: Context) {
         }
     }
 
+    // ================================================================= écoute JARVIS (micro tenu par JARVIS + Whisper)
+
+    private var microJ: MicroJarvis? = null
+    /** Écoute JARVIS impossible un moment (micro refusé, erreur) : Google prend le relais jusqu'à cette heure. */
+    private var jarvisKoJusqua = 0L
+
+    private fun appli() = ctx.applicationContext as? fr.dd.jarvis.JarvisApp
+
+    /** Écoute JARVIS choisie et possible : Whisper sur Groq, ou à défaut le modèle français hors-ligne. */
+    private fun ecouteJarvis(): Boolean {
+        val a = appli() ?: return false
+        if (a.store.moteurEcoute.value != "jarvis") return false
+        if (System.currentTimeMillis() < jarvisKoJusqua) return false
+        if (ctx.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) return false
+        return a.llm.groq.disponible() || VoskModel.francais(ctx)
+    }
+
+    private fun ouvrirJarvis(moi: Int): Boolean {
+        val m = MicroJarvis(ctx)
+        val maintenant = System.currentTimeMillis()
+        val attente = if (fenetreFin > 0) (fenetreFin - maintenant).coerceAtLeast(1500) else 8000L
+        val pause = pauseFinMs()
+        // Voix de JARVIS à peine terminée : sa fin (retard du Bluetooth / de l'autoradio) n'est pas prise pour toi.
+        val depuisVoix = maintenant - finVoix
+        val ignorer = if (depuisVoix in 0..1500) ((if (sortieExterne()) 700L else 250L) - depuisVoix).coerceAtLeast(0) else 0L
+        val ok = m.demarrer(attente, pause, object : MicroJarvis.Rappels {
+            override fun niveau(db: Float) { main.post { if (moi == jeton) Presence.microDb(db) } }
+            override fun debutParole() { main.post { if (moi == jeton) { parole = true; if (debutParoleLe == 0L) debutParoleLe = System.currentTimeMillis() } } }
+            override fun partiel(texte: String) {
+                main.post { if (moi == jeton && !estEcho(texte)) { dernierPartiel = texte; Presence.entendu = texte; onPartial(listOf(debutPhrase, texte).filter { it.isNotBlank() }.joinToString(" ")) } }
+            }
+            override fun fin(f: MicroJarvis.Fin) { main.post { if (moi == jeton) finJarvis(moi, f) } }
+        }, ignorer)
+        if (!ok) {
+            jarvisKoJusqua = maintenant + 60_000
+            JournalVoix.noter(nom, "micro indisponible pour l'écoute JARVIS : reconnaissance Google pour l'instant")
+            return false
+        }
+        microJ = m
+        setMuted(false)
+        val groq = appli()?.llm?.groq?.disponible() == true
+        JournalVoix.noter(nom, "micro ouvert (écoute JARVIS${if (groq) " + Whisper" else ", hors-ligne"}, fin après ${String.format(Locale.FRANCE, "%.1f", pause / 1000.0)} s de pause)")
+        signalerEcoute(true)
+        return true
+    }
+
+    private fun finJarvis(moi: Int, f: MicroJarvis.Fin) {
+        microJ = null
+        when (f) {
+            // Refermée par fermer() / ceder() / bouton micro sans parole : déjà signalé.
+            is MicroJarvis.Fin.Annulee -> { ecoute = false }
+            is MicroJarvis.Fin.Silence -> {
+                ecoute = false
+                if (livrerDebut()) return
+                JournalVoix.noter(nom, "personne n'a parlé")
+                if (fenetreFin > 0) finirSilence() else { signalerEcoute(false); onFail("") }
+            }
+            is MicroJarvis.Fin.Erreur -> {
+                ecoute = false
+                JournalVoix.noter(nom, "écoute JARVIS : ${f.message} → reconnaissance Google pour 1 min")
+                jarvisKoJusqua = System.currentTimeMillis() + 60_000
+                demarrer(0)
+            }
+            is MicroJarvis.Fin.Phrase -> {
+                ecoute = false
+                signalerEcoute(false)
+                JournalVoix.noter(nom, "phrase enregistrée (${String.format(Locale.FRANCE, "%.1f", f.dureeMs / 1000.0)} s)${if (f.texteLocal.isNotBlank()) " : « ${f.texteLocal.take(120)} »" else ""}")
+                onPartial(listOf(debutPhrase, f.texteLocal).filter { it.isNotBlank() }.joinToString(" ").ifBlank { "…" })
+                transcrireJarvis(moi, f)
+            }
+        }
+    }
+
+    /** Whisper (Groq) transcrit la phrase ; sans réseau ni clé, le texte du modèle hors-ligne est utilisé. */
+    private fun transcrireJarvis(moi: Int, f: MicroJarvis.Fin.Phrase) {
+        val a = appli()
+        Thread({
+            var texte = ""
+            var source = "hors-ligne"
+            var whisperOk = false
+            // Moins de ¼ s de vraie voix (claquement, toux, bruit) : pas d'appel à Whisper, qui « entend » alors des
+            // phrases toutes faites (« Merci. », sous-titres…) — dont « merci », qui fermerait la conversation.
+            val motsLocaux = f.texteLocal.split(Regex("\\s+")).count { it.isNotBlank() }
+            if (a != null && a.llm.groq.disponible() && (f.voixMs >= 250 || motsLocaux >= 2)) {
+                val debut = System.currentTimeMillis()
+                try {
+                    val brut = kotlinx.coroutines.runBlocking { kotlinx.coroutines.withTimeout(10_000) { a.llm.groq.transcrire(fr.dd.jarvis.car.Pcm.wav(f.pcm)) } }
+                    texte = fr.dd.jarvis.car.Pcm.nettoyerTranscription(brut)
+                    // Bruit bref que le modèle hors-ligne n'a pas compris du tout, mais que Whisper « traduit » en un mot
+                    // (« Merci. », « Ah. ») : ignoré.
+                    if (motsLocaux == 0 && VoskModel.francais(ctx) && f.voixMs < 600 && texte.split(' ').size <= 2) {
+                        JournalVoix.noter(nom, "bruit bref ignoré (Whisper : « ${texte.take(40)} »)")
+                        texte = ""
+                    }
+                    whisperOk = true
+                    source = "Whisper ${System.currentTimeMillis() - debut} ms"
+                } catch (e: Throwable) {
+                    JournalVoix.noter(nom, "Whisper indisponible (${(e.message ?: e.javaClass.simpleName).take(90)}) : texte hors-ligne")
+                }
+            }
+            if (!whisperOk) texte = if (f.voixMs >= 250 || motsLocaux >= 2) f.texteLocal else ""
+            main.post { if (moi == jeton) livrerJarvis(texte, source) }
+        }, "jarvis-whisper").apply { isDaemon = true; start() }
+    }
+
+    private fun livrerJarvis(brut: String, source: String) {
+        val t = listOf(debutPhrase, brut).filter { it.isNotBlank() }.joinToString(" ").trim()
+        debutPhrase = ""
+        if (t.isBlank()) {
+            JournalVoix.noter(nom, "phrase non comprise ($source)")
+            if (fenetreFin > 0 && relancesApresParole++ < 2) {
+                fenetreFin = maxOf(fenetreFin, System.currentTimeMillis() + 8000)
+                demarrer(0); return
+            }
+            fenetreFin = 0
+            onFail("")
+            return
+        }
+        if (estEcho(t)) {
+            JournalVoix.noter(nom, "écho de ma propre voix ignoré : « ${t.take(120)} »")
+            if (fenetreFin > 0 && System.currentTimeMillis() < fenetreFin - 400 && relancesMuettes++ < 2) { onPartial(""); demarrer(0); return }
+            fenetreFin = 0
+            onFail("")
+            return
+        }
+        fenetreFin = 0
+        JournalVoix.noter(nom, "entendu ($source) : « ${t.take(240)} »")
+        onFinal(t)
+    }
+
     /** Écoute en cours de cette instance (micro du reconnaisseur ouvert). */
     @Volatile private var ecoute = false
 
@@ -620,6 +754,7 @@ class VoiceManager(private val ctx: Context) {
             debutPhrase = ""
             JournalVoix.noter(nom, "écoute refermée : le micro passe à « $a »")
             jeton++
+            microJ?.arreter(false); microJ = null
             fenetreFin = 0
             main.removeCallbacks(finFenetre)
             liberer()
@@ -638,6 +773,7 @@ class VoiceManager(private val ctx: Context) {
             debutPhrase = ""
             annulerRelance()
             jeton++
+            microJ?.arreter(false); microJ = null
             val etait = ecoute
             ecoute = false
             fenetreFin = 0
@@ -658,6 +794,8 @@ class VoiceManager(private val ctx: Context) {
             fenetreFin = 0
             main.removeCallbacks(finFenetre)
             recognizer?.stopListening()
+            // Écoute JARVIS : ce qui a déjà été dit est gardé et transcrit.
+            microJ?.arreter(true)
             signalerEcoute(false)
         }
     }
