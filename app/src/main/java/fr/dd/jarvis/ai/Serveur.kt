@@ -204,6 +204,25 @@ object Serveur {
 
     fun tunnelOllama(app: JarvisApp, portDistant: Int): Int = tunnel(app, portDistant)
 
+    private val tunnelsLan = java.util.concurrent.ConcurrentHashMap<String, Pair<com.jcraft.jsch.Session, Int>>()
+
+    /**
+     * Tunnel vers un appareil du réseau de la maison ([hote]:[port], ex. l'imprimante 192.168.1.30:80), en passant par le
+     * serveur : depuis n'importe où, l'appareil répond sur 127.0.0.1:<port renvoyé> du téléphone, sans rien ouvrir sur la box.
+     */
+    @Synchronized
+    fun tunnelVers(app: JarvisApp, hote: String, port: Int): Int {
+        val k = "$hote:$port"
+        tunnelsLan[k]?.let { (s, p) -> if (s.isConnected) return p; runCatching { s.disconnect() } }
+        val s = try { ouvrir(app) } catch (e: Exception) {
+            throw IllegalStateException(expliquer(e, app.store.sshHost.value, app.store.sshPort.value.toIntOrNull() ?: 22), e)
+        }
+        runCatching { s.setServerAliveInterval(30_000) }
+        val p = s.setPortForwardingL("127.0.0.1", 0, hote, port)
+        tunnelsLan[k] = s to p
+        return p
+    }
+
     /** Adresse IPv4 du serveur sur le réseau de la maison (192.168.x.x…), lue par SSH. */
     fun ipLocaleServeur(app: JarvisApp): String? = runCatching {
         exec(app, "hostname -I 2>/dev/null; ip -4 -o addr show scope global 2>/dev/null | awk '{print \$4}'", 15).second

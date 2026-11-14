@@ -43,11 +43,21 @@ object AccesDistant {
         if (!i.wifi) return "📶 Le téléphone n'est pas en Wi-Fi : l'inventaire se fait sur le réseau Wi-Fi de la maison."
         val reseau = "Wi-Fi ${i.ip.substringBeforeLast('.')}.x"
         onStatus("📡 Analyse du réseau…")
-        var neufs = runCatching { Registre.appareils(app, Reseau.scanner(app, onStatus), reseau) }.getOrDefault(0)
-        FreeboxOs.appareilsReseau(app)?.let { l -> neufs += runCatching { Registre.appareils(app, l, reseau) }.getOrDefault(0) }
+        val scan = runCatching { Reseau.scanner(app, onStatus) }.getOrDefault(emptyList())
+        // La Freebox sait exactement qui est connecté : elle fait foi. L'analyse du téléphone n'ajoute que les appareils
+        // vraiment identifiés (service ouvert, nom) — plus de dizaines d'« appareils » fantômes.
+        val freebox = FreeboxOs.appareilsReseau(app)
+        val retenus = if (freebox != null) { val actifs = freebox.map { it.ip }.toSet(); scan.filter { it.ip in actifs || !it.faible } } else scan
+        var neufs = runCatching { Registre.appareils(app, retenus, reseau) }.getOrDefault(0)
+        if (freebox != null) neufs += runCatching { Registre.appareils(app, freebox, reseau) }.getOrDefault(0)
+        val oublies = runCatching { Registre.purger(app) }.getOrDefault(0)
         (FreeboxOs.ipPublique(app) ?: Reseau.ippPublique()).takeIf { it.isNotBlank() }?.let { Registre.ipPublique(app, it, reseau) }
-        return "✅ ${Registre.tous(app).count { System.currentTimeMillis() - it.optLong("vu") < 15 * 60_000 }} appareil(s) en ligne sur $reseau" +
-            (if (neufs > 0) " dont $neufs nouveau(x)." else ".")
+        val enLigne = Registre.tous(app).filter { System.currentTimeMillis() - it.optLong("vu") < 15 * 60_000 }
+        val wifi = enLigne.count { it.optString("lien") == "wifi" }; val cable = enLigne.count { it.optString("lien") == "ethernet" }
+        return "✅ ${enLigne.size} appareil(s) connecté(s) sur $reseau" + (if (wifi + cable > 0) " — $wifi en Wi-Fi, $cable par câble" else "") +
+            (if (freebox != null) " (liste de la Freebox)" else " (analyse du téléphone ; associe la Freebox pour une liste exacte)") +
+            (if (neufs > 0) " · $neufs nouveau(x)" else "") + (if (oublies > 0) " · $oublies ancien(s) ou fantôme(s) oublié(s)" else "") + "." +
+            Reseau.diag.lines().firstOrNull { it.startsWith("⚠️") }?.let { "\n$it" }.orEmpty()
     }
 
     /** Port à ouvrir : celui demandé, sinon le service principal de l'appareil (ou null si plusieurs, à demander). */

@@ -499,6 +499,10 @@ class Store(context: Context) {
     val santeDernier = SPref("santeDernier", "")
     val santeQuand = SPref("santeQuand", "0")
 
+    // ---- Wi-Fi : appareils masqués (MAC ou IP) et appareils retirés de la liste « Liés à Jarvis » (identifiants)
+    val appareilsMasques = SPref("appareilsMasques", "[]")
+    val liesMasques = SPref("liesMasques", "[]")
+
     // ---- Actions autorisées sans confirmation : journal (les 200 dernières)
     val journalAutorisations = SPref("journalAutorisations", "[]")
 

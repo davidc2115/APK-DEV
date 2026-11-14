@@ -259,7 +259,8 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
                 val mac = h.optJSONObject("l2ident")?.optString("id").orEmpty()
                 Reseau.Appareil(ipv4(h), h.optString("primary_name"), emptyList(), h.optString("vendor_name"),
                     Reseau.typeDeApp(emptyList(), h.optString("host_type")).let { t -> if (t == "❔ appareil" && h.optString("host_type").isNotBlank()) "📟 ${h.optString("host_type")}" else t },
-                    if (mac.isNotBlank()) "MAC $mac" else "")
+                    if (mac.isNotBlank()) "MAC $mac" else "",
+                    lien = h.optJSONObject("access_point")?.optString("connectivity_type").orEmpty().lowercase())
             }
         } }.getOrNull()
     }

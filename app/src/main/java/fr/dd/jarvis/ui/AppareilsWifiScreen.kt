@@ -58,7 +58,23 @@ fun AppareilsWifiScreen(app: JarvisApp, onDemander: (String) -> Unit) {
 private fun LiesAJarvis(app: JarvisApp, onDemander: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     var tick by remember { mutableIntStateOf(0) }
-    val liens = remember(tick) { fr.dd.jarvis.ai.AppareilsLies.liste(app) }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val liens = remember(tick, app.store.liesMasques.value) { fr.dd.jarvis.ai.AppareilsLies.liste(app) }
+    val retires = remember(tick, app.store.liesMasques.value) { fr.dd.jarvis.ai.AppareilsLies.retires(app) }
+    var voirRetires by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf("") }
+    /** Ouvre l'interface de l'appareil : adresse locale à la maison, adresse publique ou tunnel par le serveur dehors. */
+    fun ouvrir(l: fr.dd.jarvis.ai.AppareilsLies.Lien) {
+        message = "⏳ Connexion à ${l.nom}…"
+        scope.launch {
+            val r = withContext(Dispatchers.IO) { runCatching { fr.dd.jarvis.ai.AppareilsLies.adresseOuverture(app, l) } }
+            r.onSuccess { url ->
+                message = if (url.contains("127.0.0.1")) "🔐 ${l.nom} ouvert par le serveur (tunnel SSH) : $url" else "🔌 ${l.nom} : $url"
+                runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    .onFailure { message = "❌ Aucun navigateur pour ouvrir $url" }
+            }.onFailure { message = "❌ ${it.message}" }
+        }
+    }
     val situation = remember(tick) { runCatching { fr.dd.jarvis.ai.Serveur.situation(app) }.getOrDefault("") }
     // Résultat des tests : clé « id/local » ou « id/distant » → true (répond), false (ne répond pas), null (en cours).
     val tests = remember { androidx.compose.runtime.mutableStateMapOf<String, Boolean?>() }
@@ -71,7 +87,7 @@ private fun LiesAJarvis(app: JarvisApp, onDemander: (String) -> Unit) {
             val travaux = liens.flatMap { l -> listOfNotNull(l.testLocal?.let { "${l.id}/local" to it }, l.testDistant?.let { "${l.id}/distant" to it }) }
             travaux.forEach { (k, _) -> tests[k] = null }
             kotlinx.coroutines.coroutineScope {
-                travaux.forEach { (k, adr) -> launch(Dispatchers.IO) { val ok = fr.dd.jarvis.ai.AppareilsLies.repond(adr); withContext(Dispatchers.Main) { tests[k] = ok } } }
+                travaux.forEach { (k, adr) -> launch(Dispatchers.IO) { val ok = fr.dd.jarvis.ai.AppareilsLies.repond(app, adr); withContext(Dispatchers.Main) { tests[k] = ok } } }
             }
             enTest = false
         }
@@ -91,6 +107,9 @@ private fun LiesAJarvis(app: JarvisApp, onDemander: (String) -> Unit) {
                     HudButton(if (enTest) "Test…" else "🔄 Tester les connexions", Modifier.weight(1f), enabled = !enTest) { tick++; tester() }
                     HudButton("💬 Demander", Modifier.weight(1f)) { onDemander("Quels appareils contrôles-tu, en local et à distance ?") }
                 }
+                Text("🔌 Ouvrir : se connecter directement à l'appareil (sa page de réglages) — à la maison par son adresse locale, dehors par son adresse publique ou, à défaut, par un tunnel sécurisé à travers ton serveur (rien à ouvrir sur la box).",
+                    color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+                if (message.isNotBlank()) Text(message, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
             }
         }
         items(liens, key = { it.id }) { l ->
@@ -100,9 +119,20 @@ private fun LiesAJarvis(app: JarvisApp, onDemander: (String) -> Unit) {
                 Text("🏠 Local : ${l.local}" + pastille("${l.id}/local"), color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
                 Text("🌍 À distance : ${l.distant}" + pastille("${l.id}/distant"), color = HudText, fontSize = 12.sp)
                 if (!l.configure && l.reglage.isNotBlank()) Text("⚙️ ${l.reglage}", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
-                if (l.configure && l.testDistant == null && l.id in setOf("ha")) Row(Modifier.padding(top = 6.dp)) {
-                    HudButton("🌍 Rendre accessible à distance", Modifier.weight(1f)) { onDemander("Rends ${l.nom} accessible à distance") }
+                Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (l.web != null && l.configure) HudButton("🔌 Ouvrir", Modifier.weight(1f)) { ouvrir(l) }
+                    if (l.configure && l.webDistant == null && l.id == "ha") HudButton("🌍 Accès public", Modifier.weight(1f)) { onDemander("Rends ${l.nom} accessible à distance") }
+                    HudButton("🙈 Retirer", Modifier.weight(1f)) { fr.dd.jarvis.ai.AppareilsLies.masquer(app, l.id); tick++ }
                 }
+            }
+        }
+        if (retires.isNotEmpty()) item {
+            HudChip(if (voirRetires) "Masquer les appareils retirés" else "↩️ Appareils retirés de la liste (${retires.size})", voirRetires) { voirRetires = !voirRetires }
+        }
+        if (voirRetires) items(retires, key = { "ret_" + it.id }) { l ->
+            HudPanel(Modifier.fillMaxWidth()) {
+                Text("${l.emoji} ${l.nom}", color = HudDim, fontSize = 13.sp)
+                HudButton("↩️ Remettre dans la liste", Modifier.padding(top = 4.dp)) { fr.dd.jarvis.ai.AppareilsLies.masquer(app, l.id, false); tick++ }
             }
         }
     }
@@ -121,7 +151,9 @@ private fun ReseauWifi(app: JarvisApp, onDemander: (String) -> Unit) {
     var occupe by remember { mutableStateOf(false) }
     var ouvert by remember { mutableStateOf("") }
     var nomEdite by remember { mutableStateOf("") }
-    val appareils = remember(tick) { Registre.tous(app) }
+    val appareils = remember(tick, app.store.appareilsMasques.value) { Registre.tous(app) }
+    val masques = remember(tick, app.store.appareilsMasques.value) { Registre.masquesListe(app) }
+    var voirMasques by remember { mutableStateOf(false) }
     val ipPublique = remember(tick) { Registre.derniereIpPublique(app) }
     val maintenant = System.currentTimeMillis()
 
@@ -150,6 +182,16 @@ private fun ReseauWifi(app: JarvisApp, onDemander: (String) -> Unit) {
                     HudButton("💬 Demander", Modifier.weight(1f)) { onDemander("Quels appareils sont sur mon Wi-Fi et lesquels sont accessibles à distance ?") }
                 }
                 if (etat.isNotBlank()) Text(etat, color = HudText, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+                Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    HudChip("🧹 Oublier les absents") { val n = Registre.purger(app, jours = 1); etat = "🧹 $n appareil(s) absent(s) ou fantôme(s) oublié(s) (les appareils nommés restent)."; tick++ }
+                    if (masques.isNotEmpty()) HudChip(if (voirMasques) "Cacher les masqués" else "🙈 Masqués (${masques.size})", voirMasques) { voirMasques = !voirMasques }
+                }
+            }
+        }
+        if (voirMasques) items(masques, key = { "m" + it.optString("ip") + it.optString("mac") }) { e ->
+            HudPanel(Modifier.fillMaxWidth()) {
+                Text("🙈 " + Registre.nomDe(e) + " · " + e.optString("ip"), color = HudDim, fontSize = 13.sp)
+                HudButton("↩️ Ne plus masquer", Modifier.padding(top = 4.dp)) { Registre.masquer(app, e, false); tick++ }
             }
         }
         val enLigne = appareils.filter { maintenant - it.optLong("vu") < 30 * 60_000 }
@@ -187,6 +229,22 @@ private fun Carte(app: JarvisApp, e: JSONObject, enLigne: Boolean, deplie: Boole
             }
             if (ports.size > 1 && distant.isEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 ports.take(4).forEach { p -> HudChip("${AccesDistant.service(p)}", false) { onDemander("Rends le service ${AccesDistant.service(p)} (port $p) de l'appareil $ip accessible à distance") } }
+            }
+            val ctx = androidx.compose.ui.platform.LocalContext.current
+            val scope = rememberCoroutineScope()
+            val portWeb = listOf(80, 443, 8080, 8443, 8000, 5000, 9000, 8123, 32400).firstOrNull { it in ports }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (portWeb != null) HudButton("🔌 Ouvrir", Modifier.weight(1f)) {
+                    val lien = fr.dd.jarvis.ai.AppareilsLies.Lien("wifi_$ip", "", Registre.nomDe(e), "", "", "", true,
+                        web = "${if (portWeb in setOf(443, 8443)) "https" else "http"}://$ip" + (if (portWeb in setOf(80, 443)) "" else ":$portWeb"),
+                        webDistant = distant.firstOrNull { it.optString("adresse").startsWith("http") }?.optString("adresse"))
+                    scope.launch {
+                        withContext(Dispatchers.IO) { runCatching { fr.dd.jarvis.ai.AppareilsLies.adresseOuverture(app, lien) } }.onSuccess { url ->
+                            runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                        }.onFailure { onDemander("Ouvre l'interface de l'appareil $ip (${Registre.nomDe(e)})") }
+                    }
+                }
+                HudButton("🙈 Masquer", Modifier.weight(1f)) { Registre.masquer(app, e); onMaj() }
             }
         }
     }

@@ -26,7 +26,9 @@ import java.util.concurrent.TimeUnit
 /** Analyse du réseau local (Wi-Fi) : adresses, appareils, ports, services mDNS. Limité aux adresses privées (ton réseau), jamais Internet. */
 object Reseau {
     data class Infos(val ip: String, val prefix: Int, val passerelle: String, val wifi: Boolean)
-    data class Appareil(val ip: String, val nom: String, val ports: List<Int>, val titre: String, val type: String, val info: String = "")
+    /** [faible] : présence déduite seulement d'une réponse ICMP / « connexion refusée » (rien d'identifié) ; [lien] : wifi | ethernet (Freebox). */
+    data class Appareil(val ip: String, val nom: String, val ports: List<Int>, val titre: String, val type: String, val info: String = "",
+                        val faible: Boolean = false, val lien: String = "")
     data class Service(val nom: String, val host: String, val port: Int, val chemin: String, val type: String)
     data class RouteurDiagnostic(val ip: String, val fabricant: String, val modele: String, val services: List<String>)
 
@@ -202,9 +204,16 @@ object Reseau {
         for (ip in (upnp.keys + mdns.keys)) if (!parIp.containsKey(ip) && prive(ip)) parIp[ip] = Appareil(ip, nomHote(ip), emptyList(), "", "❔ appareil")
         diag = "Sous-réseau ${hosts.first().substringBeforeLast('.')}.0/$pref (${hosts.size} adresses testées, liées au Wi-Fi ${if (wifiNet != null) "✔" else "✘ (réseau actif par défaut)"}) · réponses ICMP : ${icmpOk.get()} · TCP : ${tcpOk.get()} · UPnP : ${upnp.size} · mDNS : ${mdns.size}"
         if (trouves.count { it.ip != i.ip } == 0 && upnp.isEmpty() && mdns.isEmpty()) diag += "\n" + diagBlocage(ctx, i)
+        // Le réseau « répond » pour une grande partie des adresses : réponses fantômes (box, répéteur, pare-feu) → on ne
+        // garde que les appareils réellement identifiés (service ouvert, nom, UPnP, mDNS).
+        val faibles = trouves.count { it.faible }
+        if (faibles > maxOf(20, hosts.size / 4)) {
+            diag += "\n⚠️ $faibles adresses « répondent » sans rien d'identifiable : réponses fantômes du réseau, ignorées."
+            trouves.filter { it.faible && it.ip != i.ip && !upnp.containsKey(it.ip) && !mdns.containsKey(it.ip) }.forEach { parIp.remove(it.ip) }
+        }
         parIp.values.map { d ->
             val info = (upnp[d.ip].orEmpty().ifBlank { mdns[d.ip]?.distinct()?.joinToString(", ").orEmpty() }).take(70)
-            d.copy(info = info)
+            d.copy(info = info, faible = d.faible && info.isBlank())
         }.sortedBy { a -> a.ip.split(".").map { it.toInt() }.fold(0L) { acc, x -> acc * 256 + x } }
     }
 
@@ -220,6 +229,9 @@ object Reseau {
         var nb: String? = netbios(ip)
         if (nb != null) vivant = true
         if (!vivant) return null
+        // Preuve forte : un service ouvert ou un nom NetBIOS. Sinon (ICMP ou « refusé » seulement), présence douteuse :
+        // certaines box ou répéteurs répondent pour TOUTES les adresses, d'où des dizaines d'appareils fantômes.
+        val fort = ouverts.isNotEmpty() || (nb != null && nb != "?")
         tcpOk?.incrementAndGet()
         for (p in PORTS) if (p !in ESSENTIELS && p !in RAPIDES && ouvert(ip, p, 250) == 1) ouverts += p
         val web = ouverts.firstOrNull { it in listOf(80, 8080, 443, 8123, 5000, 8000) }
@@ -227,7 +239,7 @@ object Reseau {
         val nom = nomHote(ip).ifBlank { nb?.takeIf { it != "?" }.orEmpty() }
         var type = typeDe(ouverts, titre)
         if (type == "❔ appareil" && ouverts.isEmpty()) type = "📱 appareil mobile/IoT (aucun service réseau ouvert)"
-        return Appareil(ip, nom, ouverts, titre, type)
+        return Appareil(ip, nom, ouverts, titre, type, faible = !fort && nom.isBlank())
     }
 
     /** Sonde un seul appareil (adresse privée uniquement) : ports ouverts, titre de la page web. */

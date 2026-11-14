@@ -14,7 +14,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
     companion object {
         val KEYWORDS = Regex("home ?assistant|domotique|\\bha\\b|hacs|int[ée]gration|entit[ée]s?\\b|helper|\\baides?\\b|ssh|serveur|server|yaml|docker|lumi[èe]re|volet|thermostat|automatisation|automation|sc[èe]ne\\b|configuration\\.yaml|debian|raspberry|esphome|zigbee|mqtt|capteur|\\bprise\\b|interrupteur|box|livebox|freebox|bbox|vpn|wireguard|openvpn|redirection|\\bnat\\b|dmz|dhcp|disque|nas|\\bftp\\b|\\bsmb\\b|r[ée]seau|wifi|wi-fi|imprim|scann|\\bip\\b|adresse ip|github|\\bgit\\b|canon|epson|brother|\\bhp\\b|appareils?\\b|script|\\bcode\\b|ping|port|volume|\\bson\\b|t[ée]l[ée]\\b|t[ée]l[ée]vision|\\btv\\b|chauffage|climatisation|temp[ée]rature|consigne|po[êe]le|poil|degr[ée]s|granul[ée]s|pellet|chaudi[èe]re|radiateur|thermique|climate|media_player|lecteur multim[ée]dia|localis|o[uù] (est|se trouve)|position d|luminosit[ée]|store\\b|persienne|\\ballume\\b|allumer|[ée]teins?\\b|[ée]teindre", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
-        val NAMES = setOf("ha_entites", "ha_position", "ha_etat", "ha_service", "ha_config", "ha_dashboard", "ha_admin", "ssh_commande", "ssh_fichier", "serveur_diagnostic", "serveur_scan_ports", "routeur_diagnostiquer", "reseau_infos", "reseau_scanner", "appareil_sonder", "appareil_page", "imprimantes_trouver", "imprimer", "ssh_script", "github", "appareils_liste", "appareil_nommer", "ip_publique", "box_disque", "freebox", "appareil_acces_distant")
+        val NAMES = setOf("ha_entites", "ha_position", "ha_etat", "ha_service", "ha_config", "ha_dashboard", "ha_admin", "ssh_commande", "ssh_fichier", "serveur_diagnostic", "serveur_scan_ports", "routeur_diagnostiquer", "reseau_infos", "reseau_scanner", "appareil_sonder", "appareil_page", "imprimantes_trouver", "imprimer", "ssh_script", "github", "appareils_liste", "appareil_nommer", "ip_publique", "box_disque", "freebox", "appareil_acces_distant", "appareil_ouvrir", "appareil_masquer")
     }
 
     private fun prop(d: String) = JSONObject().put("type", "string").put("description", d)
@@ -109,6 +109,10 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
         tool("imprimer", "Impression : imprime un fichier créé par JARVIS (PDF, image, texte) ou un texte sur une imprimante réseau (protocole IPP, sans pilote). À distance : via=serveur envoie le travail depuis le serveur Debian vers l'imprimante de son réseau.",
             mapOf("ip" to prop("Adresse de l'imprimante (IP privée ou publique/nom d'hôte si accessible)."), "fichier" to prop("Nom d'un fichier créé par JARVIS (optionnel)."), "texte" to prop("Texte (Markdown) à imprimer (optionnel)."),
                 "titre" to prop("Titre du travail."), "copies" to prop("Nombre de copies (défaut 1)."), "via" to prop("local (défaut) ou serveur.")), listOf("ip")),
+        tool("appareil_ouvrir", "Réseau : se connecte DIRECTEMENT à l'interface (page de réglages) d'un appareil — imprimante, Home Assistant, Plex, Freebox, caméra, NAS… — et l'ouvre sur le téléphone : à la maison par son adresse locale, dehors par son adresse publique ou, à défaut, par un tunnel sécurisé à travers le serveur (rien à ouvrir sur la box).",
+            mapOf("appareil" to prop("Nom (« imprimante », « Plex », « caméra du garage ») ou adresse IP de l'appareil."), "port" to prop("Port de l'interface web (optionnel).")), listOf("appareil")),
+        tool("appareil_masquer", "Réseau : retire un appareil de la liste « Liés à Jarvis » ou de la liste du Wi-Fi pour qu'il ne s'affiche plus (ou le remet avec remettre=oui).",
+            mapOf("appareil" to prop("Nom ou adresse IP de l'appareil."), "remettre" to prop("« oui » pour le réafficher.")), listOf("appareil")),
         tool("appareils_liste", "Réseau : liste les appareils enregistrés lors des analyses (IP, nom, type, ports, dernière vue) et les IP publiques vues.", emptyMap()),
         tool("appareil_nommer", "Mémoire réseau : attribue un nom humain à une adresse IP (ex. « Imprimante Canon bureau », « Freebox », « NAS Debian »). Le nom est conservé lors des prochains scans ; si le scan connaît l'adresse MAC, Jarvis rattache automatiquement le même appareil à sa nouvelle IP DHCP et conserve l'ancien IP dans l'historique. Peut aussi créer une fiche d'identification avant le prochain scan.", mapOf("ip" to prop("Adresse IPv4 privée actuelle de l'appareil."), "nom" to prop("Nom clair à mémoriser pour cet appareil.")), listOf("ip", "nom")),
         tool("ip_publique", "Réseau : détecte l'adresse IP publique actuelle (téléphone et, si SSH configuré, serveur) et l'enregistre pour une connexion à distance ; signale si elle a changé.", emptyMap()),
@@ -438,7 +442,10 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
             }
             "appareil_page" -> {
                 val ip = a.optString("ip").trim(); val port = a.optString("port").toIntOrNull() ?: 80
-                if (a.optString("via").lowercase().startsWith("serv")) {
+                // Dehors : la page est lue depuis le serveur de la maison (le téléphone ne joint pas le réseau local).
+                val parServeur = a.optString("via").lowercase().startsWith("serv") ||
+                    (a.optString("via").isBlank() && Reseau.prive(ip) && Serveur.sshConfigure(app) && !AppareilsLies.aLaMaison(app))
+                if (parServeur) {
                     ssh()
                     if (!Reseau.prive(ip)) return ToolResult("Réseau local uniquement : $ip n'est pas une adresse privée.")
                     val url = (if (port == 443 || port == 8443) "https" else "http") + "://$ip:$port/" + a.optString("chemin").trimStart('/')
@@ -446,7 +453,8 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 } else ToolResult("```\n" + Reseau.lirePage(ip, port, a.optString("chemin")) + "\n```")
             }
             "imprimantes_trouver" -> {
-                val via = a.optString("via").lowercase().let { if (it.startsWith("serv")) "serveur" else "local" }
+                val via = a.optString("via").lowercase().let { v -> if (v.startsWith("serv")) "serveur" else if (v.isBlank() && Serveur.sshConfigure(app) &&
+                    Reseau.prive(a.optString("ip").trim().substringBefore(":")) && !AppareilsLies.aLaMaison(app)) "serveur" else "local" }
                 val ip = a.optString("ip").trim()
                 if (via == "serveur") ssh()
                 Impression.trace = StringBuilder()
@@ -469,6 +477,35 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 sb.append("\n**Détail des essais** :\n```\n${Impression.trace.toString().take(1200).ifBlank { "(aucune tentative)" }}\n```\n")
                 sb.append("\nPistes : imprimante allumée et sur CE Wi-Fi (pas le réseau invité, pas Wi-Fi Direct) ; « isolation des appareils / AP isolation » désactivée sur la box ; IPP activé dans l'interface de l'imprimante (page web, rubrique Réseau/AirPrint/IPP). Tu peux aussi me donner son adresse IP (affichée sur son écran ou dans la page de la box).")
                 ToolResult(sb.toString(), direct = true)
+            }
+            "appareil_ouvrir" -> {
+                val q = a.optString("appareil").trim()
+                val n = fr.dd.jarvis.societe.core.normaliser(q)
+                val lien = AppareilsLies.tousLiens(app).filter { it.web != null }.let { l ->
+                    l.firstOrNull { fr.dd.jarvis.societe.core.normaliser(it.nom) == n || it.web!!.contains("//$q") }
+                        ?: l.firstOrNull { val m = fr.dd.jarvis.societe.core.normaliser(it.nom); n.isNotBlank() && (m.contains(n) || n.contains(m)) }
+                        ?: l.firstOrNull { it.emoji == "🖨️" && Regex("imprim").containsMatchIn(n) }
+                } ?: Registre.trouver(app, q)?.let { e ->
+                    val ip = e.optString("ip")
+                    val ports = e.optJSONArray("ports")?.let { x -> (0 until x.length()).map { x.optInt(it) } }.orEmpty()
+                    val p = a.optString("port").toIntOrNull() ?: listOf(80, 443, 8080, 8443, 8000, 5000, 9000, 8123, 32400).firstOrNull { it in ports } ?: 80
+                    AppareilsLies.Lien("wifi_$ip", "", Registre.nomDe(e), "", "", "", true, web = "${if (p in setOf(443, 8443)) "https" else "http"}://$ip" + (if (p in setOf(80, 443)) "" else ":$p"))
+                } ?: return ToolResult("Appareil « $q » introuvable : analyse le Wi-Fi (onglet Wi-Fi) ou donne son adresse IP.")
+                val url = runCatching { AppareilsLies.adresseOuverture(app, lien) }.getOrElse { return ToolResult("❌ ${it.message}") }
+                runCatching { app.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                ToolResult("🔌 ${lien.nom} : $url" + (if (url.contains("127.0.0.1")) "\n🔐 Connexion par un tunnel sécurisé à travers ton serveur (tu es hors de la maison) : l'adresse reste valable tant que JARVIS est ouvert." else ""))
+            }
+            "appareil_masquer" -> {
+                val q = a.optString("appareil").trim(); val remettre = a.optString("remettre").lowercase() in setOf("oui", "true", "1")
+                val n = fr.dd.jarvis.societe.core.normaliser(q)
+                AppareilsLies.tousLiens(app).firstOrNull { val m = fr.dd.jarvis.societe.core.normaliser(it.nom); m == n || (n.length >= 3 && (m.contains(n) || n.contains(m))) }?.let { l ->
+                    AppareilsLies.masquer(app, l.id, !remettre)
+                    return ToolResult(if (remettre) "↩️ ${l.nom} est de nouveau dans la liste « Liés à Jarvis »." else "🙈 ${l.nom} retiré de la liste « Liés à Jarvis » (Wi-Fi › Liés à Jarvis › Appareils retirés pour le remettre).")
+                }
+                val e = Registre.tous(app, avecMasques = true).firstOrNull { it.optString("ip") == q } ?: Registre.trouver(app, q)
+                    ?: return ToolResult("Appareil « $q » introuvable.")
+                Registre.masquer(app, e, !remettre)
+                ToolResult(if (remettre) "↩️ ${Registre.nomDe(e)} réaffiché dans la liste du Wi-Fi." else "🙈 ${Registre.nomDe(e)} masqué de la liste du Wi-Fi.")
             }
             "imprimer" -> {
                 val via = a.optString("via").lowercase().let { if (it.startsWith("serv")) "serveur" else "local" }

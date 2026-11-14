@@ -88,6 +88,7 @@ object Capacites {
             i("Réseau Wi-Fi : scanner, nommer et examiner les appareils, adresse IP publique", "scanne le réseau|nomme 192.168.1.20 Imprimante bureau", "reseau_scanner,reseau_infos,appareils_liste,appareil_nommer,appareil_sonder,appareil_page,ip_publique,routeur_diagnostiquer"),
             i("Rendre un appareil du Wi-Fi joignable à distance (bail fixe, redirection, adresse publique)", "rends la caméra accessible à distance", "appareil_acces_distant", Voie.REFLEXE),
             i("Appareils liés à Jarvis et comment il les joint, en local et à distance (onglet Wi-Fi › Liés à Jarvis)", "quels appareils contrôles-tu ?", "", Voie.REFLEXE),
+            i("Se connecter directement à un appareil (page de réglages de l'imprimante, Plex, Freebox…), même dehors par un tunnel via le serveur ; retirer un appareil de la liste", "ouvre la page de l'imprimante|retire la caméra de la liste", "appareil_ouvrir,appareil_masquer"),
             i("Imprimantes : trouver, imprimer un document de Jarvis", "trouve les imprimantes|imprime la facture F-2026-012", "imprimantes_trouver,imprimer"),
         )),
         Categorie("societe", "🧾", "Société", r("societe|entreprise|clients?|factures?|devis|paie|bulletins?|salaires?|salaries?|interventions?|chantiers?|installations?|tarifs?|urssaf|site web|site internet|kml|google earth|sauvegardes?|factur x|e reporting"), listOf(

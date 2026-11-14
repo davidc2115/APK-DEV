@@ -73,6 +73,7 @@ object Registre {
             if (d.nom.isNotBlank()) e.put("hote", d.nom)
             if (d.titre.isNotBlank()) e.put("titre", d.titre)
             if (d.info.isNotBlank() && !d.info.startsWith("MAC ")) e.put("info", d.info)
+            if (d.lien.isNotBlank()) e.put("lien", d.lien)
             m.put(cle, e)
         }
         o.put("appareils", m); ecrire(app, o)
@@ -92,10 +93,41 @@ object Registre {
         return true
     }
 
-    /** Tous les appareils enregistrés (copie), les plus récemment vus d'abord. */
-    fun tous(app: JarvisApp): List<JSONObject> {
+    /** Tous les appareils enregistrés (copie), les plus récemment vus d'abord — sans ceux que l'utilisateur a masqués. */
+    fun tous(app: JarvisApp, avecMasques: Boolean = false): List<JSONObject> {
         val m = lire(app).optJSONObject("appareils") ?: return emptyList()
-        return m.keys().asSequence().mapNotNull { m.optJSONObject(it) }.sortedByDescending { it.optLong("vu") }.toList()
+        val caches = if (avecMasques) emptySet() else masques(app)
+        return m.keys().asSequence().mapNotNull { m.optJSONObject(it) }.filter { cleMasque(it) !in caches }.sortedByDescending { it.optLong("vu") }.toList()
+    }
+
+    // ------------------------------------------------------------------ appareils masqués par l'utilisateur
+
+    /** Identifiant stable d'un appareil : son adresse MAC, sinon son IP. */
+    fun cleMasque(e: JSONObject): String = normaliserMac(e.optString("mac")).ifBlank { e.optString("ip") }
+    fun masques(app: JarvisApp): Set<String> = runCatching { JSONArray(app.store.appareilsMasques.value).let { a -> (0 until a.length()).map { a.optString(it) }.toSet() } }.getOrDefault(emptySet())
+    @Synchronized fun masquer(app: JarvisApp, e: JSONObject, oui: Boolean = true) {
+        val k = cleMasque(e); if (k.isBlank()) return
+        app.store.appareilsMasques.set(JSONArray((if (oui) masques(app) + k else masques(app) - k).toList()).toString())
+    }
+    fun masquesListe(app: JarvisApp): List<JSONObject> { val k = masques(app); return tous(app, avecMasques = true).filter { cleMasque(it) in k } }
+
+    /**
+     * Ménage : oublie les appareils absents depuis [jours] jours, et les « fantômes » (ni nom, ni adresse MAC, ni service,
+     * ni accès configuré : réponses parasites d'une ancienne analyse). Les appareils nommés ou ouverts à distance restent.
+     */
+    @Synchronized fun purger(app: JarvisApp, jours: Int = 30, fantomes: Boolean = true): Int {
+        val o = lire(app); val m = o.optJSONObject("appareils") ?: return 0
+        val limite = System.currentTimeMillis() - jours * 86_400_000L
+        val retires = m.keys().asSequence().toList().filter { k ->
+            val e = m.optJSONObject(k) ?: return@filter true
+            val garde = e.optString("alias").isNotBlank() || (e.optJSONArray("distant")?.length() ?: 0) > 0
+            val fantome = e.optString("mac").isBlank() && (e.optJSONArray("ports")?.length() ?: 0) == 0 && e.optString("hote").isBlank() &&
+                e.optString("titre").isBlank() && e.optString("info").isBlank()
+            !garde && (e.optLong("vu") < limite || (fantomes && fantome))
+        }
+        retires.forEach { m.remove(it) }
+        if (retires.isNotEmpty()) { o.put("appareils", m); ecrire(app, o) }
+        return retires.size
     }
 
     fun nomDe(e: JSONObject): String = e.optString("alias").ifBlank { e.optString("hote").ifBlank { e.optString("titre").ifBlank { e.optString("info") } } }.ifBlank { e.optString("ip") }
