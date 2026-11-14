@@ -45,10 +45,9 @@ object Capacites {
             i("Fiches contact dans le coffre Obsidian", "crée la fiche contact de Martin", "create_contact_card,supprimer_contact_card"),
         )),
         Categorie("mails", "📧", "Mails", r("mails?|e ?mails?|courriels?|gmail|boite de reception|boite mail"), listOf(
-            i("Trier les mails dans tes libellés (non lus par défaut, tous sur demande) et changer la règle", "trie mes mails|trie tous mes mails|désormais trie tous les mails", "trier_mails,regler_tri_mails", Voie.REFLEXE),
+            i("Trier les mails LUS dans tes libellés (les non lus restent dans la boîte de réception)", "trie mes mails|range mes mails lus|quelle est la règle du tri", "trier_mails,regler_tri_mails", Voie.REFLEXE),
             i("Marquer comme lus, non lus ou traités : tous, ou seulement certains", "marque tous mes mails comme lus|marque les mails d'Amazon comme traités", "marquer_mails_traites", Voie.REFLEXE),
             i("Résumer, rechercher, répondre dans le fil, envoyer un mail", "résume mes mails|retrouve le mail des impôts|réponds à ce mail…", "summarize_mails,rechercher_mails,repondre_email,mail_envoyer"),
-            i("Grand ménage de toute la boîte Gmail", "fais le grand ménage de ma boîte mail", "grand_menage_mails"),
             i("Comptes mails : lister, activer, désactiver", "désactive le compte pro", "mail_compte"),
         )),
         Categorie("agenda", "📅", "Agenda, rappels et alarmes", r("agenda|planning|rendez vous|rdv|calendrier|rappels?|alarmes?|reveils?|minuteurs?|chrono|taches?|journee|programme"), listOf(

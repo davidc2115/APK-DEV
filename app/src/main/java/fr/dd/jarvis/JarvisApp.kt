@@ -140,8 +140,10 @@ class JarvisApp : Application() {
         fr.dd.jarvis.work.BaremesWorker.planifier(this)
         // Mémoire fiable : une fois, les notes déjà prises sont relues pour en tirer adresse, surnoms et faits.
         runCatching { fr.dd.jarvis.device.Faits.rattrapage(this) }
-        // Tri des mails : désormais seuls les NON LUS par défaut (une seule fois ; modifiable ensuite à la demande).
-        if (!store.mailTriNonLusApplique.value) { store.mailTriStatut.set("non_lus"); store.mailTriNonLusApplique.set(true) }
+        // Tri des mails : seulement les LUS (les non lus restent dans la boîte de réception). Le grand ménage est retiré :
+        // une étape encore programmée est annulée.
+        store.mailTriStatut.set("lus")
+        runCatching { androidx.work.WorkManager.getInstance(this).cancelUniqueWork("grand_menage_mails") }
         runCatching { fr.dd.jarvis.coffre.Coffre.planifier(this) }
         runCatching { fr.dd.jarvis.societe.MiroirFreebox.planifier(this) }
         runCatching { fr.dd.jarvis.coffre.Sauvegardes.planifier(this) }

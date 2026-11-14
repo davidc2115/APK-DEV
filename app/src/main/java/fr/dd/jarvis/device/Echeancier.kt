@@ -121,8 +121,6 @@ object Echeancier {
             }
             if (s.departAlertes.value) l += Element("jarvis", "🚗", "Alerte de départ", "Jarvis · environ 20 min avant chaque rendez-vous avec une adresse (trafic compris)", null, Etat.EVENEMENT, "jarvis:depart")
             if (s.meteoAlertes.value) l += Element("jarvis", "🌦️", "Alertes météo", "Jarvis · la veille au soir et le matin en cas de pluie, gel ou vent fort", null, Etat.EVENEMENT, "jarvis:meteo")
-            val b = runCatching { JSONObject(s.menageBilan.value) }.getOrDefault(JSONObject())
-            if (b.length() > 0 && !b.optBoolean("fini")) l += Element("jarvis", "🧹", "Grand ménage des mails", GrandMenage.etat(app).lines().first(), now, Etat.EN_COURS, "jarvis:menage")
         }
 
         return l.sortedWith(compareBy<Element> { it.etat.ordinal }.thenBy { e -> if (e.etat == Etat.PASSE) -(e.quand ?: 0L) else e.quand ?: Long.MAX_VALUE })

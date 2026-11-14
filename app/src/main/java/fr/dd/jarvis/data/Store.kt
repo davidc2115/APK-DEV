@@ -348,11 +348,6 @@ class Store(context: Context) {
     val poignet = BPref("poignet", false)
     val empreinteVocale = BPref("empreinteVocale", false)
     val empreinteSeuil = SPref("empreinteSeuil", "")
-    // ---- Grand ménage des mails
-    val menageCompte = SPref("menageCompte", "")
-    val menageDemarre = SPref("menageDemarre", "")
-    val menageBilan = SPref("menageBilan", "{}")
-    val menageErreurs = SPref("menageErreurs", "0")
     // ---- Android Auto
     /** Raccourcis de la voiture (une demande par ligne) ; vide = raccourcis par défaut. */
     val raccourcisVoiture = SPref("raccourcisVoiture", "")
@@ -584,8 +579,8 @@ class Store(context: Context) {
 
     /** Préfixe des libellés Gmail créés par JARVIS (vide = « Urgent », « Clients »… sans « JARVIS/ » devant). */
     val mailLabelPrefix = SPref("mailLabelPrefix", "")
-    /** Règle persistante du tri automatique : lus (défaut), non_lus ou tous. Le grand ménage l’ignore volontairement. */
-    val mailTriStatut = SPref("mailTriStatut", "non_lus")
+    /** Règle du tri des mails : toujours « lus » (les non lus ne sont jamais triés). Gardée pour compatibilité. */
+    val mailTriStatut = SPref("mailTriStatut", "lus")
     /** Passage unique à la règle « non lus seulement » (demande de l'utilisateur, nov. 2026). */
     val mailTriNonLusApplique = BPref("mailTriNonLusApplique", false)
 

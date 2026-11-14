@@ -130,18 +130,12 @@ class ToolBox(
                 "message_id" to prop("Identifiant exact fourni par rechercher_mails."),
                 "texte" to prop("Texte complet de la réponse.")
             ), listOf("compte", "message_id", "texte")))
-        put(tool("trier_mails", "Analyse les mails, les classe dans les libellés de l'utilisateur (Facebook, Super U/…, Impôts, Pubs, Réseaux sociaux, Banque et crédit, Maison, Enfants, Santé, Achats et livraisons, Comptes et sécurité, Administratif, Travail, Personnel) et peut les ranger dans Gmail. Applique la RÈGLE enregistrée (par défaut : seulement les NON LUS) ; « trie tous mes mails » = statut tous pour CETTE fois (la règle ne change pas). Pour changer la règle durablement : regler_tri_mails. Pour TOUTE la boîte d'un coup : grand_menage_mails.",
+        put(tool("trier_mails", "TRI DES MAILS LUS : chaque mail déjà lu de la boîte de réception rejoint son libellé (Facebook, Super U/…, Impôts, Pubs, Réseaux sociaux, Banque et crédit, Maison, Enfants, Santé, Achats et livraisons, Comptes et sécurité, Administratif, Travail, Personnel) et sort de la boîte principale. Les mails NON LUS ne sont JAMAIS touchés : ils restent dans la boîte et seront triés une fois lus. « trie mes mails » = cet outil.",
             mapOf(
                 "compte" to prop("Compte mail précis (adresse ou partie), même s'il est désactivé. Vide = comptes actifs seulement."),
-                "count" to prop("Nombre de mails à trier (5 à 500). Par défaut 100 ; mets 300-500 pour « toute la boîte »."),
-                "unread_only" to prop("« true » pour ne trier que les non lus."),
-                "statut" to prop("lus | non_lus | tous : pour CE tri seulement (la règle enregistrée ne change pas, sauf enregistrer=true). Vide = règle enregistrée."),
-                "enregistrer" to prop("« true » si l'utilisateur veut que ce statut devienne la règle (« désormais », « à partir de maintenant »)."),
-                "toute_la_boite" to prop("« true » pour inclure aussi les mails déjà archivés (pas seulement la boîte de réception) : utile pour (re)trier tout un compte."),
-                "ranger" to prop("« true » pour appliquer les libellés dans Gmail. Un re-tri remplace les anciens libellés de catégorie par les bons."),
-                "archiver" to prop("« true » pour aussi retirer de la boîte de réception les mails rangés (ils restent dans leur libellé).")
+                "count" to prop("Nombre maximum de mails LUS à trier (5 à 500). Par défaut 150 ; 500 pour « tous mes mails lus ».")
             )))
-        put(tool("regler_tri_mails", "Modifie à la demande la règle persistante du tri des emails (« désormais trie… », « change la règle du tri »). Par défaut seuls les emails NON LUS sont triés. Valeurs : non_lus (ne trie que les non lus), lus (ne touche jamais aux non lus), tous (lus et non lus). Elle s'applique à tous les tris (automatiques et « trie mes mails ») jusqu'au prochain changement, jamais au grand ménage explicite.",
+        put(tool("regler_tri_mails", "Règle du tri des mails (fixe) : seuls les mails LUS sont triés, les non lus restent dans la boîte de réception. action=voir pour la rappeler.",
             mapOf("statut" to prop("lus | non_lus | tous : nouvelle règle à enregistrer."),
                 "action" to prop("definir | voir ; défaut définir si statut fourni, sinon voir."))))
         put(tool("changer_voix", "Change la voix de JARVIS (personnage) : homme, femme, jeune, âgé(e), grave, douce, IA/robot, narrateur, animatrice radio, murmure, Jarvis (par défaut), ou un nom de voix Gemini (Kore, Puck…). Sans précision : liste les voix.",
@@ -168,8 +162,6 @@ class ToolBox(
             mapOf("rendez_vous" to prop("Titre (ou partie) du rendez-vous ; vide = le prochain avec une adresse."))))
         put(tool("montre", "JARVIS sur la montre connectée (conversation relayée sur la montre : réponse à la voix ou réponses toutes faites) : activer ou desactiver.",
             mapOf("etat" to prop("activer | desactiver")), listOf("etat")))
-        put(tool("grand_menage_mails", "GRAND MÉNAGE de toute la boîte Gmail : chaque mail rangé dans son libellé (organisation de l'utilisateur, en couleur : Facebook, Super U/…, Impôts, Pubs, Réseaux sociaux, Banque et crédit, Maison, Enfants, Santé, Achats et livraisons, Comptes et sécurité, Administratif, Travail, Personnel), marqué lu + Traité et retiré de la boîte de réception ; anciens libellés supprimés. Tourne en arrière-plan (notification de progression). action=lancer ou etat.",
-            mapOf("action" to prop("lancer | etat"), "compte" to prop("Adresse Gmail (vide = le premier compte Google connecté)."))))
         put(tool("tournee_optimisee", "Tournée OPTIMISÉE d'une liste de clients à visiter (sans horaires imposés) : ordre le plus court, trajets, heures d'arrivée, météo et ensoleillement sur chaque installation (utile pour les mesures de production), lien Google Maps de toute la tournée. Pour des rendez-vous déjà fixés dans l'agenda, utilise itineraire.",
             mapOf(
                 "clients" to prop("Clients (ou adresses) à visiter, séparés par des virgules ou « ; »."),
@@ -614,15 +606,6 @@ class ToolBox(
         "mail_envoyer" -> mailEnvoyer(a)
         "marquer_mails_traites" -> marquerTraites(a)
         "changer_voix" -> changerVoix(a)
-        "grand_menage_mails" -> {
-            if (a.optString("action").startsWith("eta", true)) ToolResult(fr.dd.jarvis.device.GrandMenage.etat(app))
-            else {
-                val compte = store.gmailAccounts.firstOrNull { c -> a.optString("compte").isBlank() || c.contains(a.optString("compte").trim(), true) }
-                if (compte == null) ToolResult("Aucun compte Google connecté correspondant (Mails › Connecter mon compte Google).")
-                else if (!confirm("Grand ménage de $compte : TOUS les mails rangés dans leur libellé, marqués lus + Traité et retirés de la boîte de réception ; anciens libellés de Jarvis supprimés. Lancer ?", true)) ToolResult("Annulé.")
-                else { fr.dd.jarvis.device.GrandMenage.lancer(app, compte); ToolResult("🧹 Grand ménage lancé pour $compte : il tourne en arrière-plan (quelques minutes, notification de progression). Demande-moi « où en est le ménage des mails ? » pour le bilan.") }
-            }
-        }
         "routines" -> routines(a)
         "journal_de_bord" -> {
             val d = runCatching { java.time.LocalDate.parse(a.optString("date").trim()) }.getOrDefault(java.time.LocalDate.now())
@@ -2088,58 +2071,23 @@ class ToolBox(
         return ToolResult("🎙️ Voix changée : ${p.libelle}. Je parle maintenant avec cette voix.")
     }
 
-    private fun reglerTriMails(a: JSONObject): ToolResult {
-        val statut = a.optString("statut").trim().lowercase().replace(' ', '_').let { if (it == "non_lu") "non_lus" else if (it == "lu") "lus" else it }
-        if (statut.isBlank() || a.optString("action").equals("voir", true)) {
-            val actuel = store.mailTriStatut.value
-            val libelle = when (actuel) { "non_lus" -> "uniquement les non lus"; "tous" -> "lus et non lus"; else -> "uniquement les lus" }
-            return ToolResult("📧 Règle actuelle du tri : $libelle. Pour la changer : « désormais trie tous les mails », « désormais trie seulement les non lus » (ou « … seulement les lus »). « Trie tous mes mails » ne vaut que pour une fois.", direct = true)
-        }
-        if (statut !in setOf("lus", "non_lus", "tous"))
-            return ToolResult("Règle inconnue. Utilise « lus », « non_lus » ou « tous ».")
-        store.mailTriStatut.set(statut)
-        val libelle = when (statut) { "non_lus" -> "uniquement les non lus"; "tous" -> "les lus et les non lus"; else -> "uniquement les lus" }
-        return ToolResult("✅ Règle de tri enregistrée : $libelle. Elle s'applique à tous les tris (automatiques et « trie mes mails »), jusqu'à ce que tu me demandes de la modifier. Le grand ménage reste indépendant.", direct = true)
-    }
+    /** La règle du tri est fixe : seuls les mails LUS sont triés (demande de l'utilisateur), les non lus jamais. */
+    private fun reglerTriMails(a: JSONObject): ToolResult =
+        ToolResult("📧 Le tri ne concerne que les mails LUS : chacun rejoint son libellé et sort de la boîte principale. Les mails non lus restent dans la boîte de réception, sans être touchés, et seront triés une fois lus.", direct = true)
 
     private suspend fun trierMails(a: JSONObject): ToolResult {
         if (!store.mailConfigured()) return ToolResult("Les mails ne sont pas configurés (Réglages › Comptes › Mails).")
-        val count = (a.optString("count").toIntOrNull() ?: 100).coerceIn(5, 500)
-        val demandeStatut = a.optString("statut").trim().lowercase().replace(' ', '_').replace("non_lu", "non_lus").replace("non_luss", "non_lus")
-        // « Trie tous mes mails » vaut pour CE tri ; la règle enregistrée ne change que sur demande explicite.
-        val statut = when {
-            demandeStatut in setOf("lus", "non_lus", "tous") -> demandeStatut.also { if (a.optString("enregistrer").equals("true", true)) store.mailTriStatut.set(it) }
-            a.optString("unread_only").equals("true", true) -> "non_lus"
-            else -> store.mailTriStatut.value.takeIf { it in setOf("lus", "non_lus", "tous") } ?: "non_lus"
-        }
-        // En mode « lus », on lit une fenêtre plus large pour ne pas laisser les non lus récents masquer les lus.
-        val limiteLecture = if (statut == "lus") (count * 5).coerceAtMost(500) else count
-        val mailsBruts = try {
-            app.mail.fetchRecent(limiteLecture, statut == "non_lus", a.optString("compte"), full = true, everywhere = a.optString("toute_la_boite").equals("true", true))
+        val count = (a.optString("count").toIntOrNull() ?: 150).coerceIn(5, 500)
+        val (classes, ranges) = try {
+            fr.dd.jarvis.ai.MailTri.trierLus(app, count, a.optString("compte").ifBlank { null })
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
-            return ToolResult("❌ Impossible de lire les mails : ${e.message}", direct = true)
+            return ToolResult("❌ Tri des mails impossible : ${e.message}", direct = true)
         }
-        val mails = mailsBruts.filter { when (statut) { "lus" -> !it.unread; "non_lus" -> it.unread; else -> true } }.take(count)
-        if (mails.isEmpty()) return ToolResult(if (statut == "lus") "📭 Aucun email déjà lu à trier. Les non lus ont été laissés intacts." else "📭 Aucun mail correspondant à la règle de tri.", direct = true)
-        val classes = try {
-            fr.dd.jarvis.ai.MailTri.classer(app, mails)
-        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
-            return ToolResult("❌ Tri impossible : ${e.message}\n\n" + app.mail.localList(mails), direct = true)
-        }
-        var note = ""
-        if (a.optString("ranger").equals("true", true)) {
-            if (store.gmailAccounts.isEmpty()) note = "ℹ️ Rangement dans la boîte : disponible avec un compte Google connecté (pas en IMAP)."
-            else {
-                val archiver = a.optString("archiver").equals("true", true)
-                if (!confirm("Ranger ${classes.size} mails dans Gmail avec les libellés Urgent, Clients…" + (if (archiver) " et archiver newsletters/notifications ?" else " ?"), false)) note = "Rangement refusé."
-                else note = try {
-                    "✅ ${fr.dd.jarvis.ai.MailTri.ranger(app, classes, archiver)} mail(s) rangés dans Gmail (dans tes libellés)."
-                } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { "❌ Rangement impossible : ${e.message}" }
-            }
-        }
+        if (classes.isEmpty()) return ToolResult("📭 Aucun mail lu à trier dans la boîte de réception. Les non lus restent en place : ils seront triés une fois lus.", direct = true)
+        val note = if (store.gmailAccounts.isEmpty()) "ℹ️ Rangement dans la boîte : disponible avec un compte Google connecté (pas en IMAP)."
+            else "✅ $ranges mail(s) lus rangés dans tes libellés et sortis de la boîte principale. Les non lus n'ont pas été touchés."
         return ToolResult(fr.dd.jarvis.ai.MailTri.presenter(classes, note), direct = true)
     }
-
 
     private suspend fun rechercherMails(a: JSONObject): ToolResult {
         if (!store.mailConfigured()) return ToolResult("Les comptes mail ne sont pas configurés (Réglages › Comptes › Mails).", direct = true)

@@ -5,9 +5,9 @@ import fr.dd.jarvis.societe.core.normaliser
 import org.json.JSONObject
 
 /**
- * Commandes mails reconnues sans IA : « trie mes mails » (règle enregistrée : non lus par défaut), « trie tous mes
- * mails » (cette fois seulement), « désormais trie aussi les lus » (règle), « marque tous mes mails comme lus »,
- * « marque les pubs comme traitées », « marque les mails d'Amazon comme lus ».
+ * Commandes mails reconnues sans IA : « trie mes mails » (tri des mails LUS seulement : les non lus restent dans la
+ * boîte de réception), « quelle est la règle du tri », « marque tous mes mails comme lus », « marque les pubs comme
+ * traitées », « marque les mails d'Amazon comme lus ».
  */
 object MailCommandes {
     private val MAILS = "(?:e ?)?mails?|courriels?|messages? (?:mail|gmail)|boite (?:mail|de reception)"

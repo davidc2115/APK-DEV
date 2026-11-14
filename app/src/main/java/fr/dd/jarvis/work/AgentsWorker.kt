@@ -120,7 +120,7 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
         val steps = listOf<Pair<String, suspend () -> Unit>>(
             "Mails" to {
                 if (tri || (store.agentMails.value && (only == null || only == "mails"))) {
-                    if (enLigne) mails() else journal.append("- ⏸️ Mails : reportés, connexion Internet indisponible.\n")
+                    if (enLigne) { mails(); mailsLus() } else journal.append("- ⏸️ Mails : reportés, connexion Internet indisponible.\n")
                 }
             },
             "Factures" to { if (store.agentFactures.value && only == null) factures() },
@@ -203,14 +203,19 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
             if (!alert(2001, "📧 ${urgents.size} mail(s) urgent(s)", txt)) peutMarquerCommeTraite = false
             journal.append(urgents.joinToString("") { "  - 🔴 ${it.mail.from} — ${it.mail.subject}\n" })
         }
-        if (store.agentRanger.value && store.gmailAccounts.isNotEmpty()) {
-            runCatching { MailTri.ranger(app, classes, store.agentArchiver.value) }.onSuccess {
-                journal.append("  - 🏷️ $it mail(s) rangés (libellés Urgent, Clients…)\n")
-                // (pas de notification Jarvis par mail rangé : le détail reste dans le journal)
-            }.onFailure { throw it } // Remonter l’échec : les mails restent non traités et seront réessayés au prochain cycle.
-        }
+        // Les NON LUS ne sont jamais rangés : ils restent dans la boîte de réception (seulement signalés s'ils sont urgents).
         if (peutMarquerCommeTraite) writeSet("agent_seen_mails.txt", seen + nouveaux.map { key(it) })
         else journal.append("  - ⏳ Mails conservés pour une nouvelle tentative : alerte urgente non délivrée.\n")
+    }
+
+    /** Tri des mails LUS : ceux que tu as lus depuis le dernier passage rejoignent leur libellé (hors boîte principale). */
+    private suspend fun mailsLus() {
+        if (!store.agentRanger.value || store.gmailAccounts.isEmpty()) return
+        val deja = readSet("agent_tri_lus.txt")
+        val (classes, ranges) = MailTri.trierLus(app, 60, deja = deja)
+        if (classes.isEmpty()) return
+        journal.append("  - 🗂️ $ranges mail(s) lus rangés dans tes libellés\n")
+        writeSet("agent_tri_lus.txt", (deja + classes.map { it.mail.account + it.mail.id }).toList().takeLast(3000).toSet())
     }
 
     // ---------------------------------------------------------------- factures et devis

@@ -34,7 +34,8 @@ data class MailItem(
 class MailRepo(private val ctx: Context, private val store: Store) {
 
     /** [compte] : demande explicite d'un compte (même désactivé) ; sinon seuls les comptes actifs sont lus. */
-    suspend fun fetchRecent(count: Int, unreadOnly: Boolean, compte: String? = null, full: Boolean = false, everywhere: Boolean = false): List<MailItem> {
+    /** [lusSeulement] : seulement les mails déjà lus (tri des mails lus ; les non lus ne sont jamais touchés). */
+    suspend fun fetchRecent(count: Int, unreadOnly: Boolean, compte: String? = null, full: Boolean = false, everywhere: Boolean = false, lusSeulement: Boolean = false): List<MailItem> {
         val q = compte?.trim()?.lowercase().orEmpty()
         if (store.gmailAccounts.isNotEmpty()) {
             val chosen = if (q.isNotEmpty()) store.gmailAccounts.filter { it.lowercase().contains(q) }
@@ -42,10 +43,10 @@ class MailRepo(private val ctx: Context, private val store: Store) {
             if (chosen.isEmpty()) throw IllegalStateException(
                 if (q.isNotEmpty()) "Aucun compte ne correspond à « $compte »." else "Tous les comptes mail sont désactivés (Réglages › Comptes › Mails) : demande un compte précisément pour le lire."
             )
-            return GmailApi.fetchRecent(ctx, chosen, count, unreadOnly, full, everywhere)
+            return GmailApi.fetchRecent(ctx, chosen, count, unreadOnly, full, everywhere, lusSeulement)
         }
         if (q.isEmpty() && !store.mailActive("imap")) throw IllegalStateException("Le compte mail est désactivé (Réglages › Comptes › Mails).")
-        return fetchImap(count, unreadOnly)
+        return fetchImap(if (lusSeulement) count * 3 else count, unreadOnly).let { l -> if (lusSeulement) l.filter { !it.unread }.take(count) else l }
     }
 
     private suspend fun fetchImap(count: Int, unreadOnly: Boolean): List<MailItem> = withContext(Dispatchers.IO) {
