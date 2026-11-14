@@ -71,6 +71,9 @@ kotlin {
 }
 
 dependencies {
+    // Tests unitaires (lancés par GitHub Actions avant chaque construction de l'APK).
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20231013")
     val composeBom = platform("androidx.compose:compose-bom:2024.06.00")
     implementation(composeBom)
 
