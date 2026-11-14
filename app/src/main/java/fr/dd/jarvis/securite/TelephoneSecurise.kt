@@ -46,16 +46,20 @@ object TelephoneSecurise {
      * Grille du schéma à l'écran (gauche, haut, droite, bas) : relevée dans l'interface de l'écran de verrouillage
      * (uiautomator), sinon position habituelle (carré centré dans le bas de l'écran).
      */
-    private fun grille(ctx: Context, l: Int, h: Int): IntArray {
+    private fun grille(ctx: Context, l: Int, h: Int): IntArray? = grilleUiautomator(ctx)?.first
+
+    /** Grille lue par uiautomator (ADB / Shizuku) : voit toute la hiérarchie de l'écran de verrouillage. */
+    private fun grilleUiautomator(ctx: Context): Pair<IntArray, String>? {
         repeat(2) {
             val xml = sh(ctx, "uiautomator dump /sdcard/jarvis_ui.xml >/dev/null 2>&1; cat /sdcard/jarvis_ui.xml; rm -f /sdcard/jarvis_ui.xml")
-            Regex("<node[^>]*resource-id=\"[^\"]*(lockPatternView|lock_pattern|pattern)[^\"]*\"[^>]*bounds=\"\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]\"", RegexOption.IGNORE_CASE)
-                .find(xml)?.let { m -> return intArrayOf(m.groupValues[2].toInt(), m.groupValues[3].toInt(), m.groupValues[4].toInt(), m.groupValues[5].toInt()) }
+            val noeuds = noeudsUiautomator(xml)
+            choisirGrille(noeuds)?.let { return it.first to (it.second + " — uiautomator") }
+            if (noeuds.isNotEmpty()) dernierDump = resumeNoeuds(noeuds)
         }
-        val cote = (l * 0.75).toInt()
-        val cy = (h * 0.66).toInt()
-        return intArrayOf((l - cote) / 2, cy - cote / 2, (l + cote) / 2, cy + cote / 2)
+        return null
     }
+
+    @Volatile private var dernierDump = ""
 
     /** Centre d'un point (1 à 9, 1 = en haut à gauche) dans la grille [g] (gauche, haut, droite, bas). */
     internal fun centre(d: Int, g: IntArray): Pair<Int, Int> {
@@ -78,9 +82,78 @@ object TelephoneSecurise {
         return sb.toString()
     }
 
-    /** Grille relevée (« g,h,d,b ») valide, ou null. */
+    /** Grille relevée (« g,h,d,b ») valide, ou null : à peu près carrée (une grille de schéma l'est toujours). */
     internal fun grilleEnregistree(s: String): IntArray? = s.split(',').mapNotNull { it.trim().toIntOrNull() }.takeIf { it.size == 4 }
-        ?.toIntArray()?.takeIf { it[2] - it[0] > 200 && it[3] - it[1] > 200 }
+        ?.toIntArray()?.takeIf { estGrille(it) }
+
+    private fun estGrille(g: IntArray): Boolean {
+        val w = g[2] - g[0]; val h = g[3] - g[1]
+        return w > 200 && h > 200 && h.toFloat() / w in 0.75f..1.33f
+    }
+
+    /** Élément de l'écran (accessibilité ou uiautomator) : identifiant, classe, description, limites. */
+    data class Noeud(val id: String, val cls: String, val desc: String, val l: Int, val t: Int, val r: Int, val b: Int) {
+        val w get() = r - l
+        val h get() = b - t
+        val cx get() = (l + r) / 2
+        val cy get() = (t + b) / 2
+    }
+
+    private fun motifSchema(n: Noeud): Boolean {
+        val id = n.id.lowercase(); val cls = n.cls.lowercase()
+        return (id.contains("pattern") && !id.contains("text") && !id.contains("title") && !id.contains("message")) ||
+            cls.endsWith("lockpatternview") || cls.contains("patternview")
+    }
+
+    /** Valeurs regroupées à [tol] près : centres des groupes. */
+    private fun groupes(v: List<Int>, tol: Int): List<Int> {
+        val out = mutableListOf<MutableList<Int>>()
+        for (x in v.sorted()) { val g = out.lastOrNull(); if (g != null && x - g.last() <= tol) g += x else out += mutableListOf(x) }
+        return out.map { it.average().toInt() }
+    }
+
+    /**
+     * Grille du schéma à partir des éléments de l'écran : (gauche, haut, droite, bas) et la façon dont elle a été trouvée.
+     *  1) les 9 points eux-mêmes (petits carrés alignés 3 × 3) → position exacte ;
+     *  2) la vue du schéma CARRÉE la plus petite (pas le conteneur plein écran, qui faisait tracer dans le vide) ;
+     *  3) sinon null (on ne devine pas : chaque essai raté compte comme une tentative de déverrouillage).
+     */
+    internal fun choisirGrille(noeuds: List<Noeud>): Pair<IntArray, String>? {
+        val zones = noeuds.filter { motifSchema(it) && it.w > 200 && it.h > 200 }
+        // 1) Points du schéma (descendants des zones du schéma, sinon n'importe où) : 9 petits carrés de même taille.
+        for (zone in zones.sortedBy { it.w.toLong() * it.h } + listOf<Noeud?>(null)) {
+            val dedans = noeuds.filter { n ->
+                n.w in 30..600 && n.h in 30..600 && kotlin.math.abs(n.w - n.h) <= maxOf(n.w, n.h) / 3 &&
+                    (zone == null || (n.l >= zone.l - 5 && n.r <= zone.r + 5 && n.t >= zone.t - 5 && n.b <= zone.b + 5)) && n !== zone
+            }
+            for ((_, memeTaille) in dedans.groupBy { it.w / 20 }) {
+                if (memeTaille.size < 9) continue
+                val xs = groupes(memeTaille.map { it.cx }, memeTaille[0].w / 3)
+                val ys = groupes(memeTaille.map { it.cy }, memeTaille[0].h / 3)
+                if (xs.size == 3 && ys.size == 3) {
+                    val pasX = (xs[2] - xs[0]) / 2; val pasY = (ys[2] - ys[0]) / 2
+                    if (pasX > 40 && pasY > 40) return intArrayOf(xs[0] - pasX / 2, ys[0] - pasY / 2, xs[2] + pasX / 2, ys[2] + pasY / 2) to "les 9 points du schéma"
+                }
+            }
+        }
+        // 2) Vue du schéma à peu près carrée, la plus petite.
+        zones.filter { it.h.toFloat() / it.w in 0.75f..1.33f }.minByOrNull { it.w.toLong() * it.h }?.let { return intArrayOf(it.l, it.t, it.r, it.b) to "vue du schéma (${it.cls.substringAfterLast('.')})" }
+        return null
+    }
+
+    /** Éléments lus dans un fichier uiautomator (dump XML). */
+    internal fun noeudsUiautomator(xml: String): List<Noeud> =
+        Regex("<node\\b[^>]*>").findAll(xml).mapNotNull { m ->
+            val n = m.value
+            fun attr(k: String) = Regex("\\b$k=\"([^\"]*)\"").find(n)?.groupValues?.get(1).orEmpty()
+            val b = Regex("\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]").find(attr("bounds"))?.groupValues ?: return@mapNotNull null
+            Noeud(attr("resource-id"), attr("class"), attr("content-desc").ifBlank { attr("text") }, b[1].toInt(), b[2].toInt(), b[3].toInt(), b[4].toInt())
+        }.toList()
+
+    /** Résumé des éléments de l'écran de verrouillage pour le journal (diagnostic, sans contenu privé). */
+    internal fun resumeNoeuds(noeuds: List<Noeud>): String = noeuds.filter { it.w > 0 && it.h > 0 && (it.id.isNotBlank() || it.cls.isNotBlank()) }
+        .sortedByDescending { if (motifSchema(it)) 1 else 0 }.take(18)
+        .joinToString(" | ") { "${it.cls.substringAfterLast('.')}${it.id.substringAfterLast('/').takeIf { i -> i.isNotBlank() }?.let { i -> "#$i" } ?: ""}[${it.l},${it.t},${it.r},${it.b}]" }
 
     /**
      * Trace le schéma par l'ACCESSIBILITÉ : un seul geste continu, doigt posé du premier au dernier point, sur la grille
@@ -130,10 +203,12 @@ object TelephoneSecurise {
             withContext(Dispatchers.Main) { a.swipe(m.widthPixels / 2f, m.heightPixels * 0.90f, m.widthPixels / 2f, m.heightPixels * 0.35f, 320) }
             g = attendreGrille(a, 3000)
         }
+        // L'accessibilité ne voit pas la vraie grille (seulement le conteneur plein écran) : uiautomator (ADB) la voit.
+        if (g == null && shellPossible(app)) g = grilleUiautomator(app)?.also { journal("schéma : grille trouvée par uiautomator (${it.second})") }?.first
         val lue = g != null
         if (g == null) g = grilleEnregistree(app.store.schemaGrille.value)
         if (g == null) {
-            journal("schéma : grille introuvable à l'écran (aucune position enregistrée)")
+            journal("schéma : grille introuvable — écran vu par l'accessibilité : " + withContext(Dispatchers.Main) { runCatching { resumeNoeuds(a.noeudsEcran()) }.getOrDefault("?") }.take(900))
             return "⚠️ Je ne trouve pas la grille du schéma à l'écran. Affiche une fois toi-même l'écran du schéma (JARVIS relève sa position), puis redemande. " +
                 "Vérifie aussi que l'accessibilité de JARVIS est bien active (Réglages Android › Accessibilité › JARVIS)."
         }
@@ -146,6 +221,7 @@ object TelephoneSecurise {
             if (!verrouille(app)) { journal("schéma : téléphone déverrouillé ✓"); return "🔓 Téléphone déverrouillé." }
             // Après un essai refusé, la grille peut s'être déplacée (message « schéma incorrect ») : relue.
             g = attendreGrille(a, 1500) ?: g
+            if (i == 0) journal("schéma : écran après l'essai 1 — " + withContext(Dispatchers.Main) { runCatching { resumeNoeuds(a.noeudsEcran()) }.getOrDefault("?") }.take(700))
         }
         journal("schéma : toujours verrouillé après 2 essais")
         return "⚠️ Le schéma a été tracé mais le téléphone est resté verrouillé. Vérifie dans Réglages › Sécurité › Systèmes que le schéma enregistré est " +
@@ -188,7 +264,14 @@ object TelephoneSecurise {
         val points = schema(code)?.let { fr.dd.jarvis.ui.SchemaDessinLogique.completer(it) }
         if (points != null) {
             // 1) Geste continu par l'accessibilité sur la vraie grille ; 2) repli : commandes « input » sur la grille lue ou relevée.
-            sh(app, traceSchema(points, grilleEnregistree(app.store.schemaGrille.value) ?: grille(app, l, h)))
+            val g = grille(app, l, h) ?: grilleEnregistree(app.store.schemaGrille.value)
+            if (g == null) {
+                journal("schéma (ADB) : grille introuvable — écran : ${dernierDump.take(900)}")
+                afficherDeverrouillage(app)
+                return@withContext "⚠️ Je ne trouve pas la grille du schéma à l'écran (le détail est dans le journal de la voix) : termine avec ton empreinte ou ton visage."
+            }
+            journal("schéma (ADB) : grille [${g.joinToString(",")}] → tracé par « input »")
+            sh(app, traceSchema(points, g))
         }
         else {
             sh(app, "input text '$code'")

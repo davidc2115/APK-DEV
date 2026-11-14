@@ -42,20 +42,21 @@ class JarvisAccessibilityService : AccessibilityService() {
     private var dernierReleveSchema = 0L
 
     /** Grille du schéma affichée à l'écran (écran de verrouillage) : gauche, haut, droite, bas — ou null. */
-    fun grilleSchema(): IntArray? {
+    fun grilleSchema(): IntArray? = fr.dd.jarvis.securite.TelephoneSecurise.choisirGrille(noeudsEcran())?.first
+
+    /** Tous les éléments visibles (toutes les fenêtres, écran de verrouillage compris), 600 au plus. */
+    fun noeudsEcran(): List<fr.dd.jarvis.securite.TelephoneSecurise.Noeud> {
+        val out = mutableListOf<fr.dd.jarvis.securite.TelephoneSecurise.Noeud>()
         val racines = runCatching { windows.mapNotNull { it.root } }.getOrDefault(emptyList()) + listOfNotNull(runCatching { rootInActiveWindow }.getOrNull())
-        for (r in racines) {
-            val trouve = chercher(r) { n ->
-                val id = n.viewIdResourceName.orEmpty().lowercase()
-                val cls = n.className?.toString().orEmpty().lowercase()
-                (id.contains("pattern") && !id.contains("text") && !id.contains("title")) || cls.endsWith("lockpatternview") || cls.contains("patternview")
-            }
-            if (trouve != null) {
-                val b = android.graphics.Rect(); trouve.getBoundsInScreen(b)
-                if (b.width() > 200 && b.height() > 200) return intArrayOf(b.left, b.top, b.right, b.bottom)
-            }
+        fun parcourir(n: android.view.accessibility.AccessibilityNodeInfo?, p: Int) {
+            if (n == null || p > 40 || out.size >= 600) return
+            val b = android.graphics.Rect(); n.getBoundsInScreen(b)
+            out += fr.dd.jarvis.securite.TelephoneSecurise.Noeud(n.viewIdResourceName.orEmpty(), n.className?.toString().orEmpty(),
+                (n.contentDescription ?: "").toString().take(40), b.left, b.top, b.right, b.bottom)
+            for (i in 0 until n.childCount) parcourir(runCatching { n.getChild(i) }.getOrNull(), p + 1)
         }
-        return null
+        racines.distinct().forEach { parcourir(it, 0) }
+        return out
     }
 
     private fun chercher(n: android.view.accessibility.AccessibilityNodeInfo?, profondeur: Int = 0, test: (android.view.accessibility.AccessibilityNodeInfo) -> Boolean): android.view.accessibility.AccessibilityNodeInfo? {

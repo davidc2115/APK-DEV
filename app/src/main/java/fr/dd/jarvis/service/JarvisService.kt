@@ -296,6 +296,7 @@ class JarvisService : Service() {
     /** Écoute dans la conversation : se referme seule si personne ne parle dans le délai. */
     private fun ecouter(delai: Long = silenceMs()) {
         if (!running) return
+        apresConfirmation?.let { c -> apresConfirmation = null; if (!busy) { process(c); return } }
         if (suspenduParAppli) { awake = false; voice?.sessionFin(); return }   // l'appli a le micro
         voice?.ecouterConversation(delai)
         fr.dd.jarvis.car.ActiviteVoiture.signaler(fr.dd.jarvis.car.ActiviteVoiture.Etape.ECOUTE)
@@ -345,6 +346,7 @@ class JarvisService : Service() {
 
     /** Retour à l'attente du mot « Jarvis » (détecteur hors-ligne s'il est installé, sinon écoute en boucle). */
     private fun goIdle() {
+        apresConfirmation?.let { c -> apresConfirmation = null; if (!busy && running) { awake = true; process(c); return } }
         if (!busy) garderEveille(false)
         fr.dd.jarvis.car.ActiviteVoiture.signaler(fr.dd.jarvis.car.ActiviteVoiture.Etape.FIN)
         awake = false
@@ -465,9 +467,23 @@ class JarvisService : Service() {
 
     private val stopRegex = Regex("^(merci|c'est tout|c est tout|stop|arrete|arrête|termine|terminé|fin|a plus tard|à plus tard|au revoir|laisse tomber|ca suffit|ça suffit)\\b.*")
 
+    /** Nouvelle demande dite pendant une question oui / non : traitée dès que l'échange en cours est terminé. */
+    private var apresConfirmation: String? = null
+
     private fun handle(text: String) {
         confirm?.let { d ->
             val t = norm(text)
+            // « Jarvis » seul pendant la question : on attend la vraie réponse (pas un « non »).
+            if (Regex("^(jarvis|ok jarvis|dis jarvis)\\W*$").matches(t)) { voice?.ecouterConversation(8000); return }
+            // Une NOUVELLE demande à la place de oui / non (« Jarvis déverrouille ») : la question est annulée et la demande
+            // est faite juste après — avant, elle était prise pour un « non » et perdue.
+            val reponse = Regex("\\b(oui|ouais|ok|okay|confirme|vas-y|d'accord|yes|allez|non|nan|annule|pas|jamais|toujours|stop)\\b").containsMatchIn(t)
+            val sansJarvis = wakeRegex.find(t)?.takeIf { it.range.first <= 2 }?.let { t.substring(it.range.last + 1).trim() } ?: t
+            if (!reponse && sansJarvis.split(' ').count { it.isNotBlank() } >= 1 &&
+                (fr.dd.jarvis.securite.TelephoneSecurise.estDemande(sansJarvis) || sansJarvis.split(' ').size >= 3)) {
+                apresConfirmation = sansJarvis
+                d.complete(false); return
+            }
             // « Toujours », « toujours autoriser » : oui, et cette action ne sera plus demandée.
             // « Toujours pour cette commande », « toujours celle-ci » : cette commande précise ; « toujours » seul : le type
             // d'action s'il peut l'être, sinon la commande.
@@ -620,6 +636,7 @@ class JarvisService : Service() {
     private suspend fun verifierMaVoix(): Boolean {
         dire("Pour confirmer, dis : ${fr.dd.jarvis.voice.EmpreinteVocale.PHRASE_VERIF}.")
         val r = fr.dd.jarvis.voice.EmpreinteVocale.verifier(app)
+        runCatching { fr.dd.jarvis.voice.JournalVoix.noter("déverrouillage", "empreinte vocale : ${r.message} (score ${"%.2f".format(r.score)}, seuil ${"%.2f".format(r.seuil)})") }
         dire(if (r.ok) "Voix reconnue." else "Je ne reconnais pas ta voix (${r.message}) : action annulée. Déverrouille le téléphone pour la faire.")
         return r.ok
     }
