@@ -17,6 +17,7 @@ object DomotiqueDirecte {
         "(?:\\s+(?:s il te plait|stp|svp|merci|jarvis))*$")
     private val INTERDIT = Regex("\\b(chauffage|poele|poil|poils|granules?|thermostat|radiateurs?|clim|climatisation|degres?|temperature|portail|garage|portes?|serrure|alarme|camera|cameras|" +
         "four|lave|seche|aspirateur|piscine|arrosage|musique|chanson|film|serie|plex|son|volume|chaine|wifi|bluetooth|torche|telephone|portable|mode|routine|minuteur|alarmes?|vpn|box|freebox|" +
+        "reglages?|parametres?|image|ecran|capture|applis?|application|netflix|youtube|prime|disney|source|hdmi|entree|luminosite|" +
         "et|puis|si|quand|dans|pendant|tous|chaque|demain|ce soir)\\b|\\d")
     private val NOMS = listOf(
         Regex("\\b(lumieres?|lampes?|eclairages?|plafonniers?|led|leds|spots?|ampoules?|lustres?|guirlandes?|veilleuses?|appliques?)\\b") to listOf("light", "switch"),

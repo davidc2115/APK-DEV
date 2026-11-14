@@ -14,7 +14,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
     companion object {
         val KEYWORDS = Regex("home ?assistant|domotique|\\bha\\b|hacs|int[ée]gration|entit[ée]s?\\b|helper|\\baides?\\b|ssh|serveur|server|yaml|docker|lumi[èe]re|volet|thermostat|automatisation|automation|sc[èe]ne\\b|configuration\\.yaml|debian|raspberry|esphome|zigbee|mqtt|capteur|\\bprise\\b|interrupteur|box|livebox|freebox|bbox|vpn|wireguard|openvpn|redirection|\\bnat\\b|dmz|dhcp|disque|nas|\\bftp\\b|\\bsmb\\b|r[ée]seau|wifi|wi-fi|imprim|scann|\\bip\\b|adresse ip|github|\\bgit\\b|canon|epson|brother|\\bhp\\b|appareils?\\b|script|\\bcode\\b|ping|port|volume|\\bson\\b|t[ée]l[ée]\\b|t[ée]l[ée]vision|\\btv\\b|chauffage|climatisation|temp[ée]rature|consigne|po[êe]le|poil|degr[ée]s|granul[ée]s|pellet|chaudi[èe]re|radiateur|thermique|climate|media_player|lecteur multim[ée]dia|localis|o[uù] (est|se trouve)|position d|luminosit[ée]|store\\b|persienne|\\ballume\\b|allumer|[ée]teins?\\b|[ée]teindre", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
-        val NAMES = setOf("ha_entites", "ha_position", "ha_etat", "ha_service", "ha_config", "ha_dashboard", "ha_admin", "ssh_commande", "ssh_fichier", "serveur_diagnostic", "serveur_scan_ports", "routeur_diagnostiquer", "reseau_infos", "reseau_scanner", "appareil_sonder", "appareil_page", "imprimantes_trouver", "imprimer", "ssh_script", "github", "appareils_liste", "appareil_nommer", "ip_publique", "box_disque", "freebox", "appareil_acces_distant", "appareil_ouvrir", "appareil_masquer")
+        val NAMES = setOf("ha_entites", "ha_position", "ha_etat", "ha_service", "ha_config", "ha_dashboard", "ha_admin", "ssh_commande", "ssh_fichier", "serveur_diagnostic", "serveur_scan_ports", "routeur_diagnostiquer", "reseau_infos", "reseau_scanner", "appareil_sonder", "appareil_page", "imprimantes_trouver", "imprimer", "ssh_script", "github", "appareils_liste", "appareil_nommer", "ip_publique", "box_disque", "freebox", "appareil_acces_distant", "appareil_ouvrir", "appareil_masquer", "tele")
     }
 
     private fun prop(d: String) = JSONObject().put("type", "string").put("description", d)
@@ -113,6 +113,14 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
             mapOf("appareil" to prop("Nom (« imprimante », « Plex », « caméra du garage ») ou adresse IP de l'appareil."), "port" to prop("Port de l'interface web (optionnel).")), listOf("appareil")),
         tool("appareil_masquer", "Réseau : retire un appareil de la liste « Liés à Jarvis » ou de la liste du Wi-Fi pour qu'il ne s'affiche plus (ou le remet avec remettre=oui).",
             mapOf("appareil" to prop("Nom ou adresse IP de l'appareil."), "remettre" to prop("« oui » pour le réafficher.")), listOf("appareil")),
+        tool("tele", "Télé : connexion DIRECTE (sans Home Assistant) pour la piloter et changer ses réglages — Android TV / Google TV (Sony Bravia, Philips, TCL, Xiaomi, Chromecast…) par le débogage réseau via le serveur de la maison (marche aussi dehors), et réglages d'image/son des Sony Bravia (API IP). " +
+            "Actions : detecter | configurer (ip, type) | connecter | etat | touche (nom : allumer_eteindre, veille, reveil, accueil, retour, haut, bas, gauche, droite, ok, volume_plus, volume_moins, muet, reglages, source, lecture_pause, chaine_plus, chaine_moins… ; fois) | " +
+            "reglages (page : general, image, son, reseau, bluetooth, applis, date, langue, stockage, accessibilite, a_propos) | appli (nom : YouTube, Netflix, Plex…) | applis | texte | parametre (espace system/secure/global, cle, valeur vide = lire) | capture (écran de la télé dans la conversation) | " +
+            "image (Bravia : quoi = brightness, pictureMode, contrast, color… ; valeur vide = lister) | son (Bravia) | alimentation (allumer / eteindre) | entree (hdmi1, hdmi2, tv) | commande (adb shell brut, confirmation).",
+            mapOf("action" to prop("detecter | configurer | connecter | etat | touche | reglages | appli | applis | texte | parametre | capture | image | son | alimentation | entree | commande"),
+                "nom" to prop("touche, appli ou entrée."), "fois" to prop("touche : nombre d'appuis."), "page" to prop("reglages : page."), "texte" to prop("texte à saisir."),
+                "espace" to prop("parametre : system, secure ou global."), "cle" to prop("parametre / image / son : nom du réglage."), "valeur" to prop("nouvelle valeur (vide = lire)."),
+                "ip" to prop("configurer : adresse IP de la télé."), "type" to prop("configurer : androidtv, bravia, samsung ou lg."), "commande" to prop("commande : commande adb shell.")), listOf("action")),
         tool("appareils_liste", "Réseau : liste les appareils enregistrés lors des analyses (IP, nom, type, ports, dernière vue) et les IP publiques vues.", emptyMap()),
         tool("appareil_nommer", "Mémoire réseau : attribue un nom humain à une adresse IP (ex. « Imprimante Canon bureau », « Freebox », « NAS Debian »). Le nom est conservé lors des prochains scans ; si le scan connaît l'adresse MAC, Jarvis rattache automatiquement le même appareil à sa nouvelle IP DHCP et conserve l'ancien IP dans l'historique. Peut aussi créer une fiche d'identification avant le prochain scan.", mapOf("ip" to prop("Adresse IPv4 privée actuelle de l'appareil."), "nom" to prop("Nom clair à mémoriser pour cet appareil.")), listOf("ip", "nom")),
         tool("ip_publique", "Réseau : détecte l'adresse IP publique actuelle (téléphone et, si SSH configuré, serveur) et l'enregistre pour une connexion à distance ; signale si elle a changé.", emptyMap()),
@@ -478,6 +486,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 sb.append("\nPistes : imprimante allumée et sur CE Wi-Fi (pas le réseau invité, pas Wi-Fi Direct) ; « isolation des appareils / AP isolation » désactivée sur la box ; IPP activé dans l'interface de l'imprimante (page web, rubrique Réseau/AirPrint/IPP). Tu peux aussi me donner son adresse IP (affichée sur son écran ou dans la page de la box).")
                 ToolResult(sb.toString(), direct = true)
             }
+            "tele" -> ToolResult(teleOutil(a), direct = true)
             "appareil_ouvrir" -> {
                 val q = a.optString("appareil").trim()
                 val n = fr.dd.jarvis.societe.core.normaliser(q)
@@ -517,6 +526,52 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
             }
             else -> ToolResult("Outil serveur inconnu.")
         }
+    }
+
+    private suspend fun teleOutil(a: JSONObject): String = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val act = fr.dd.jarvis.societe.core.normaliser(a.optString("action")).replace(' ', '_')
+        if (act == "detecter") {
+            val l = Tele.detecter(app)
+            if (l.size == 1 && !Tele.configuree(app)) { app.store.teleIp.set(l[0].ip); app.store.teleType.set(l[0].type) }
+            return@withContext if (l.isEmpty()) "Aucune télé repérée dans l'inventaire du Wi-Fi : analyse le Wi-Fi (télé allumée), ou donne son adresse IP (tele configurer ip=…)."
+                else "📺 Télé(s) repérée(s) :\n" + l.joinToString("\n") { "• ${it.nom} — ${it.ip} — ${it.raison}" } + (if (Tele.configuree(app)) "\nTélé utilisée : ${Tele.ip(app)} (${Tele.type(app)})." else "")
+        }
+        if (act == "configurer") {
+            val ip = a.optString("ip").trim()
+            require(Reseau.prive(ip.substringBefore(':'))) { "adresse IP locale attendue (ex. 192.168.1.40)." }
+            app.store.teleIp.set(ip); a.optString("type").trim().lowercase().takeIf { it in setOf("androidtv", "bravia", "samsung", "lg") }?.let { app.store.teleType.set(it) }
+            return@withContext "✅ Télé : $ip (${Tele.type(app)}). Dis « connecte la télé » pour l'autoriser."
+        }
+        if (!Tele.configuree(app)) {
+            val l = Tele.detecter(app)
+            if (l.size == 1) { app.store.teleIp.set(l[0].ip); app.store.teleType.set(l[0].type) }
+            else return@withContext "Quelle télé ? " + (if (l.isEmpty()) "Aucune repérée : analyse le Wi-Fi (télé allumée) ou donne son adresse IP." else l.joinToString(", ") { "${it.nom} (${it.ip})" })
+        }
+        val bravia = Tele.type(app) == "bravia" && app.store.teleCle.value.isNotBlank()
+        runCatching {
+            when (act) {
+                "connecter" -> Tele.connecter(app)
+                "etat" -> Tele.etat(app)
+                "touche" -> Tele.touche(app, a.optString("nom"), a.optString("fois").toIntOrNull() ?: 1)
+                "reglages" -> Tele.reglages(app, a.optString("page"))
+                "appli" -> Tele.ouvrirAppli(app, a.optString("nom"))
+                "applis" -> "📺 Applications : " + Tele.applis(app).joinToString(", ")
+                "texte" -> Tele.texte(app, a.optString("texte"))
+                "parametre" -> {
+                    val v = a.optString("valeur").trim().ifBlank { null }
+                    if (v != null && !confirm("Modifier le réglage ${a.optString("espace")}/${a.optString("cle")} de la télé → $v ?", true)) "Refusé."
+                    else Tele.parametre(app, a.optString("espace"), a.optString("cle"), v)
+                }
+                "capture" -> Tele.capture(app)
+                "image", "son" -> if (!bravia) "Réglages d'image/son directs : réservés aux Sony Bravia avec la clé pré-partagée (Réglages › Maison › Télé). Sinon : « ouvre les réglages image de la télé » puis navigue (haut/bas/ok)."
+                    else Tele.braviaReglage(app, a.optString("cle").ifBlank { if (act == "son") "sound" else "" }.let { if (act == "son" && it.isBlank()) "volume" else it }, a.optString("valeur").trim().ifBlank { null })
+                "alimentation" -> { val on = Regex("allum|on|reveil").containsMatchIn(fr.dd.jarvis.societe.core.normaliser(a.optString("nom") + a.optString("valeur")))
+                    if (bravia) Tele.braviaAlimentation(app, on) else Tele.touche(app, if (on) "reveil" else "veille") }
+                "entree" -> if (bravia) Tele.braviaEntree(app, a.optString("nom")) else Tele.touche(app, "source")
+                "commande" -> { val c = a.optString("commande").trim(); if (c.isBlank()) "Commande vide." else if (!confirm("Exécuter sur la télé : $c ?", true)) "Refusé." else Tele.commande(app, c) }
+                else -> "Action inconnue."
+            }
+        }.getOrElse { "❌ ${it.message}" }
     }
 
     private val gh = okhttp3.OkHttpClient.Builder().connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS).readTimeout(30, java.util.concurrent.TimeUnit.SECONDS).build()

@@ -82,12 +82,13 @@ object Capacites {
             i("Modes de Jarvis (cinéma, absence…) qui pilotent plusieurs appareils d'un coup", "crée un mode cinéma qui ferme les volets et baisse la lumière|active le mode absence", "modes_jarvis", Voie.REFLEXE),
             i("Routines déclenchées par une phrase (« Jarvis, je pars »)", "crée une routine je pars|lance la routine du matin", "routines,routine_contextuelle", Voie.REFLEXE),
         )),
-        Categorie("reseau", "🌐", "Box, réseau et impression", r("freebox|box|reseau|wi ?fi|vpn|ports?|redirections?|appareils?|imprim\\w*|ip publique|acces a distance"), listOf(
+        Categorie("reseau", "🌐", "Box, réseau et impression", r("freebox|box|reseau|wi ?fi|vpn|ports?|redirections?|appareils?|imprim\\w*|ip publique|acces a distance|tele|televiseur|bravia"), listOf(
             i("Freebox : état, Wi-Fi, appareils connectés (renommer, supprimer), VPN, redirections, appels, téléchargements, redémarrage", "qui est connecté à la box ?|supprime les appareils sans nom de la box|active le VPN", "freebox", Voie.REFLEXE),
             i("Disque dur de la box : parcourir les fichiers", "montre le dossier Téléchargements de la box", "box_disque", Voie.REFLEXE),
             i("Réseau Wi-Fi : scanner, nommer et examiner les appareils, adresse IP publique", "scanne le réseau|nomme 192.168.1.20 Imprimante bureau", "reseau_scanner,reseau_infos,appareils_liste,appareil_nommer,appareil_sonder,appareil_page,ip_publique,routeur_diagnostiquer"),
             i("Rendre un appareil du Wi-Fi joignable à distance (bail fixe, redirection, adresse publique)", "rends la caméra accessible à distance", "appareil_acces_distant", Voie.REFLEXE),
             i("Appareils liés à Jarvis et comment il les joint, en local et à distance (onglet Wi-Fi › Liés à Jarvis)", "quels appareils contrôles-tu ?", "", Voie.REFLEXE),
+            i("Télé : connexion directe (Android TV / Google TV, Sony Bravia) — touches, applis, réglages, image et son, capture d'écran, même dehors", "ouvre les réglages image de la télé|mets Netflix sur la télé|capture l'écran de la télé", "tele"),
             i("Se connecter directement à un appareil (page de réglages de l'imprimante, Plex, Freebox…), même dehors par un tunnel via le serveur ; retirer un appareil de la liste", "ouvre la page de l'imprimante|retire la caméra de la liste", "appareil_ouvrir,appareil_masquer"),
             i("Imprimantes : trouver, imprimer un document de Jarvis", "trouve les imprimantes|imprime la facture F-2026-012", "imprimantes_trouver,imprimer"),
         )),

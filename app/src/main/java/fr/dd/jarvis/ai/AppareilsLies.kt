@@ -103,6 +103,16 @@ object AppareilsLies {
                 ssh, "Réglages › Maison › Serveur",
                 testLocal = lan?.let { "tcp://$it:$portL" }, testDistant = if (dist.isNotBlank()) "tcp://$dist:$portD" else null)
         }
+        // Télé (connexion directe : débogage réseau par le serveur, API IP des Sony Bravia)
+        if (s.teleIp.value.isNotBlank()) run {
+            val ip = s.teleIp.value.trim().substringBefore(':')
+            val bravia = s.teleType.value == "bravia"
+            l += Lien("tele", "📺", "Télé" + (if (bravia) " (Sony Bravia)" else ""), "touches, applis, réglages, " + (if (bravia) "image et son, " else "") + "capture d'écran — connexion directe",
+                "débogage réseau $ip:5555 (par le serveur)" + (if (bravia) " · API IP http://$ip/sony" else ""),
+                if (ssh) "par le serveur de la maison (tunnel SSH)" else "— (configure l'accès SSH au serveur)", ssh,
+                "Réglages › Maison › Télé", testLocal = "tcp://$ip:5555", testDistant = if (ssh) "tunnel://$ip:5555" else null,
+                web = if (bravia) "http://$ip" else null)
+        }
         // Imprimantes du réseau
         registre.filter { e -> e.optString("type").contains("imprim", true) || e.optJSONArray("ports")?.let { a -> (0 until a.length()).any { a.optInt(it) in setOf(631, 9100) } } == true }
             .take(4).forEach { e ->

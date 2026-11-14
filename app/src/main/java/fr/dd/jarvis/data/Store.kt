@@ -499,6 +499,11 @@ class Store(context: Context) {
     val santeDernier = SPref("santeDernier", "")
     val santeQuand = SPref("santeQuand", "0")
 
+    // ---- Télé : adresse, type (androidtv | bravia | samsung | lg), clé pré-partagée Sony (API IP)
+    val teleIp = SPref("teleIp", "")
+    val teleType = SPref("teleType", "")
+    val teleCle = SecretPref("teleCle")
+
     // ---- Wi-Fi : appareils masqués (MAC ou IP) et appareils retirés de la liste « Liés à Jarvis » (identifiants)
     val appareilsMasques = SPref("appareilsMasques", "[]")
     val liesMasques = SPref("liesMasques", "[]")

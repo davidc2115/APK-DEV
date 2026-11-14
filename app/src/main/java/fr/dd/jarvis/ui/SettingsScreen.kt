@@ -1331,6 +1331,9 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
         VoletReglages("maison", "box", "Disque de la box", "box disque usb smb ftp partage") {
             BoxPanel(store, app)
         },
+        VoletReglages("maison", "tele", "Télé", "tele television tv android tv google tv bravia sony telecommande reglages image son adb") {
+            fr.dd.jarvis.ui.TelePanel(app, onAsk)
+        },
         VoletReglages("maison", "imprimante", "Imprimante", "imprimante impression reseau") {
             ImprimantePanel(store, app)
         },
