@@ -49,6 +49,32 @@ class VoiceManager(private val ctx: Context) {
                 ?: l.firstOrNull { it.packageName == "com.google.android.as" } ?: l.firstOrNull { it.packageName.startsWith("com.google") } ?: l.firstOrNull()
             choisi?.let { android.content.ComponentName(it.packageName, it.name) }
         }.getOrNull()
+
+        /** Le moteur de Google a refusé l'écoute « longue » (par segments) : mode normal jusqu'au prochain démarrage. */
+        @Volatile var segmentKo = false
+
+        /** Mots sur lesquels une phrase française ne se termine presque jamais : Google a coupé à une pause. */
+        private val MOTS_SUITE = setOf(
+            "de", "du", "des", "le", "la", "les", "l", "d", "et", "ou", "ni", "pour", "avec", "sur", "dans", "à", "au", "aux",
+            "en", "que", "qu", "mais", "puis", "ce", "cette", "ces", "cet", "mon", "ma", "mes", "ton", "ta", "tes", "son", "sa",
+            "ses", "notre", "votre", "nos", "vos", "comme", "par", "chez", "sans", "très", "entre", "vers", "contre", "je", "j",
+            "tu", "il", "on", "ils", "me", "te", "se", "vais", "quel", "quelle", "quels", "quelles", "parce", "lorsque",
+            "lorsqu", "puisque", "puisqu", "jusqu", "jusque", "afin",
+        )
+
+        /**
+         * Phrase visiblement inachevée (« lance la création de », « envoie un message à », « allume la lumière et ») :
+         * la suite est attendue au lieu d'envoyer un bout de phrase. Une inversion (« comment vas-tu », « fais-le ») est
+         * une phrase complète.
+         */
+        internal fun suiteProbable(t: String): Boolean {
+            val s = t.trim()
+            if (s.isEmpty()) return false
+            if (s.endsWith(",") || s.endsWith("…") || s.endsWith("...") || s.endsWith("'") || s.endsWith("’")) return true
+            val dernier = s.split(Regex("\\s+")).last()
+            if ('-' in dernier) return false
+            return dernier.lowercase().trim { !it.isLetter() } in MOTS_SUITE
+        }
     }
 
     /** Nom affiché dans le journal de l'écoute (service, appli, voiture…). */
@@ -133,6 +159,32 @@ class VoiceManager(private val ctx: Context) {
     private var ouvertLe = 0L
     /** Dernier texte partiel entendu pendant l'écoute en cours (sert si Google répond « rien compris » après la phrase). */
     private var dernierPartiel = ""
+    /** Dernier moment où le micro a capté une voix (niveau sonore ou texte partiel) : on ne referme jamais pendant que tu parles. */
+    private var dernierSon = 0L
+    private var sonsForts = 0
+    /** Début de phrase gardé quand Google a coupé à une pause (« lance la création de… ») : la suite y est ajoutée. */
+    private var debutPhrase = ""
+    /** La fenêtre d'écoute peut être prolongée tant qu'une voix est captée, mais jamais au-delà (TV, radio…). */
+    private var limiteFenetre = 0L
+    /** Moment où tu as commencé à parler dans l'écoute en cours (0 = pas encore). */
+    private var debutParoleLe = 0L
+
+    /** Silence qui marque la fin d'une phrase (réglage « Pause en fin de phrase »). */
+    private fun pauseFinMs(): Int = ((ctx.applicationContext as? fr.dd.jarvis.JarvisApp)?.store?.pauseFin?.value ?: 1600).coerceIn(800, 4000)
+
+    /** Livre un début de phrase gardé (la suite n'est pas venue) : vrai si quelque chose a été livré. */
+    private fun livrerDebut(): Boolean {
+        val p = debutPhrase.trim()
+        if (p.isEmpty()) return false
+        debutPhrase = ""
+        JournalVoix.noter(nom, "pas de suite : « ${p.take(200)} » envoyé tel quel")
+        fenetreFin = 0
+        main.removeCallbacks(finFenetre)
+        main.postDelayed(unmuteLater, 900)
+        signalerEcoute(false)
+        onFinal(p)
+        return true
+    }
     /** Moment où le dernier reconnaisseur a été détruit : en recréer un dans la foulée faisait répondre « erreur 11 ». */
     private var detruitLe = 0L
 
@@ -155,10 +207,22 @@ class VoiceManager(private val ctx: Context) {
 
     private fun annulerRelance() { relanceEnAttente?.let { main.removeCallbacks(it) }; relanceEnAttente = null }
 
-    private val finFenetre = Runnable {
-        if (fenetreFin > 0 && !parole) {
+    private val finFenetre: Runnable = object : Runnable {
+        override fun run() {
+            if (fenetreFin <= 0 || parole) return
+            // Voix captée il y a moins de 1,5 s (Google n'a pas encore signalé le début de la parole) : on prolonge,
+            // sans dépasser la limite (une télé allumée ne doit pas garder le micro ouvert indéfiniment).
+            val maintenant = System.currentTimeMillis()
+            if (maintenant - dernierSon < 1500 && maintenant < limiteFenetre) {
+                JournalVoix.noter(nom, "voix captée : écoute prolongée")
+                fenetreFin = maintenant + 2500
+                main.postDelayed(this, 2500)
+                return
+            }
             jeton++
-            runCatching { recognizer?.cancel() }
+            ecoute = false
+            liberer()
+            if (livrerDebut()) return
             finirSilence()
         }
     }
@@ -172,7 +236,7 @@ class VoiceManager(private val ctx: Context) {
     }
 
     /** Écoute simple : une phrase, puis [onFinal] ou [onFail]. */
-    fun startListening() { fenetreFin = 0; demarrer(0) }
+    fun startListening() { fenetreFin = 0; limiteFenetre = 0; debutPhrase = ""; demarrer(0) }
 
     /**
      * Écoute « en conversation » : si l'utilisateur ne commence pas à parler dans [silenceMs], l'écoute s'arrête et
@@ -180,6 +244,8 @@ class VoiceManager(private val ctx: Context) {
      */
     fun ecouterConversation(silenceMs: Long) {
         fenetreFin = System.currentTimeMillis() + silenceMs.coerceAtLeast(2000)
+        limiteFenetre = fenetreFin + 20_000
+        debutPhrase = ""
         relancesMuettes = 0
         relancesApresParole = 0
         demarrer(0)
@@ -231,6 +297,8 @@ class VoiceManager(private val ctx: Context) {
             val moi = ++jeton
             ecoute = true
             dernierPartiel = ""
+            sonsForts = 0
+            debutParoleLe = 0L
             val local = essai >= 3 && Build.VERSION.SDK_INT >= 33 && SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx)
             val composant = if (local) null else moteur(ctx)
             val cle = if (local) "local" else composant?.flattenToString() ?: "defaut"
@@ -245,17 +313,97 @@ class VoiceManager(private val ctx: Context) {
                     else -> SpeechRecognizer.createSpeechRecognizer(ctx)
                 }.also { recoCle = cle; recoCasse = false }
             }
-            JournalVoix.noter(nom, "micro ouvert (reconnaissance ${if (local) "locale" else composant?.packageName ?: "par défaut"}${if (essai > 0) ", essai ${essai + 1}" else ""}${if (reutilise) "" else ", nouveau"})")
+            val segmente = !local && !segmentKo && Build.VERSION.SDK_INT >= 33
+            val pauseMs = pauseFinMs().toLong()
+            JournalVoix.noter(nom, "micro ouvert (reconnaissance ${if (local) "locale" else composant?.packageName ?: "par défaut"}${if (essai > 0) ", essai ${essai + 1}" else ""}${if (segmente) ", écoute longue" else ""})")
             recognizer = r
             ouvertLe = System.currentTimeMillis()
-            r.setRecognitionListener(object : RecognitionListener {
+            val ecouteur = object : RecognitionListener {
                 /** Un reconnaisseur envoie parfois une 2e erreur après son résultat (ou après une 1re erreur) : ignorée. */
                 private var termine = false
+                /** Écoute longue : morceaux de phrase déjà reconnus (Google les rend à chaque pause). */
+                private val segments = StringBuilder()
                 private fun actif() = moi == jeton && !termine
-                private fun aParle() { if (!parole) { parole = true; main.removeCallbacks(finFenetre) } }
+                private fun aParle() {
+                    if (debutParoleLe == 0L) debutParoleLe = System.currentTimeMillis()
+                    if (!parole) {
+                        parole = true
+                        main.removeCallbacks(finFenetre)
+                        // Écoute longue : une voix détectée mais jamais transcrite (bruit) ne garde pas le micro ouvert.
+                        if (segmente) main.postDelayed(sansTexte, 6000)
+                    }
+                }
+                /** Texte partiel utilisable (tu as parlé, ce n'est pas l'écho de JARVIS), sans les morceaux déjà rendus. */
+                private fun partielSur() = if (parole && dernierPartiel.isNotBlank() && !estEcho(dernierPartiel)) sansMorceaux(dernierPartiel) else ""
+                /** Certains moteurs rendent en partiel TOUTE la phrase (morceaux déjà reçus compris) : pas de doublon. */
+                private fun sansMorceaux(p: String): String {
+                    val seg = segments.toString().trim()
+                    if (seg.isEmpty()) return p
+                    fun n(x: String) = java.text.Normalizer.normalize(x.lowercase(), java.text.Normalizer.Form.NFD)
+                        .replace(Regex("\\p{M}+"), "").replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
+                    val np = n(p); val ns = n(seg)
+                    if (np == ns || ns.endsWith(np)) return ""
+                    if (!np.startsWith("$ns ")) return p
+                    return p.trim().split(Regex("\\s+")).drop(seg.split(Regex("\\s+")).size).joinToString(" ")
+                }
+                /** Tout ce qui a été dit : début gardé + morceaux reconnus + [suite]. */
+                private fun texte(suite: String = "") =
+                    listOf(debutPhrase, segments.toString(), suite).filter { it.isNotBlank() }.joinToString(" ").replace(Regex("\\s+"), " ").trim()
+
+                /** Phrase terminée : le micro se referme et le texte part. */
+                private fun livrer(t: String, note: String = "entendu") {
+                    termine = true
+                    ecoute = false
+                    debutPhrase = ""
+                    fenetreFin = 0
+                    main.removeCallbacks(finFenetre)
+                    annulerGardes()
+                    main.post { if (recognizer === r) liberer() }
+                    main.postDelayed(unmuteLater, 900)
+                    signalerEcoute(false)
+                    JournalVoix.noter(nom, "$note : « ${t.take(240)} »")
+                    onFinal(t)
+                }
+
+                /** Écoute longue : plus rien depuis la dernière parole (Google n'a pas signalé la fin) → la phrase part. */
+                private val finSegments = Runnable {
+                    if (!actif()) return@Runnable
+                    val t = texte(partielSur())
+                    if (t.isNotBlank()) livrer(t, "fin de phrase")
+                }
+                private fun relancerFinSegments() {
+                    if (!segmente || (segments.isEmpty() && dernierPartiel.isBlank())) return
+                    main.removeCallbacks(finSegments)
+                    main.postDelayed(finSegments, pauseMs + 1500)
+                }
+                /** Écoute longue : voix détectée mais aucun mot reconnu en 6 s → traité comme « rien compris ». */
+                private val sansTexte = Runnable {
+                    if (actif() && segments.isEmpty() && dernierPartiel.isBlank()) { runCatching { r.cancel() }; onError(SpeechRecognizer.ERROR_NO_MATCH) }
+                }
+                /** Écoute longue : filet si Google ne signale jamais la fin (60 s au plus d'un seul tenant). */
+                private val garde = Runnable {
+                    if (!actif()) return@Runnable
+                    val t = texte(partielSur())
+                    if (t.isNotBlank()) livrer(t, "écoute longue arrêtée (60 s)") else { runCatching { r.cancel() }; onError(SpeechRecognizer.ERROR_SPEECH_TIMEOUT) }
+                }
+                /** Écoute longue sans délai de conversation : personne n'a parlé en 8 s → on referme. */
+                private val sansParole = Runnable { if (actif() && !parole) { runCatching { r.cancel() }; onError(SpeechRecognizer.ERROR_SPEECH_TIMEOUT) } }
+                fun armerGarde() {
+                    main.postDelayed(garde, 60_000)
+                    if (fenetreFin <= 0) main.postDelayed(sansParole, 8000)
+                }
+                private fun annulerGardes() { main.removeCallbacks(finSegments); main.removeCallbacks(garde); main.removeCallbacks(sansParole); main.removeCallbacks(sansTexte) }
+
                 override fun onReadyForSpeech(params: Bundle?) {}
                 override fun onBeginningOfSpeech() { if (actif()) aParle() }
-                override fun onRmsChanged(rmsdB: Float) { if (actif()) Presence.microDb(rmsdB) }
+                override fun onRmsChanged(rmsdB: Float) {
+                    if (!actif()) return
+                    Presence.microDb(rmsdB)
+                    // Voix soutenue (plusieurs mesures fortes d'affilée) : tu parles, même si Google ne l'a pas encore dit.
+                    if (rmsdB > 6f) {
+                        if (++sonsForts >= 3) { dernierSon = System.currentTimeMillis(); relancerFinSegments() }
+                    } else sonsForts = 0
+                }
                 override fun onBufferReceived(buffer: ByteArray?) {}
                 override fun onEndOfSpeech() {}
                 override fun onEvent(eventType: Int, params: Bundle?) {}
@@ -266,12 +414,27 @@ class VoiceManager(private val ctx: Context) {
                     JournalVoix.noter(nom, "reconnaissance : erreur $error${if (parole) " (après parole)" else ""}")
                     ecoute = false
                     main.removeCallbacks(finFenetre)
+                    annulerGardes()
+                    // Écoute longue refusée d'emblée par ce moteur (erreur client / langue / support) : mode normal ensuite.
+                    if (segmente && !parole && error in setOf(5, 12, 13, 14) && System.currentTimeMillis() - ouvertLe < 1500) {
+                        segmentKo = true
+                        JournalVoix.noter(nom, "écoute longue non prise en charge par ce moteur : écoute normale")
+                    }
                     // 11 = service de reconnaissance déconnecté, 5 = erreur client, 10 = trop de requêtes, 8 = occupé : on recrée et on relance
                     // (2 essais au plus, espacés : un reconnaisseur recréé trop vite répond « occupé » et rebipe.)
                     if (error in setOf(11, 5, 10, 8, SpeechRecognizer.ERROR_SERVER)) recoCasse = true
                     // Reconnaisseur libéré tout de suite (le service se détache pendant l'attente avant la relance).
                     main.post { if (recognizer === r) liberer() }
                     if (error in setOf(11, 5, 10, 8, SpeechRecognizer.ERROR_SERVER) && essai < 4) {
+                        // Coupure EN PLEIN MILIEU de ta phrase (service déconnecté…) : ce qui a déjà été dit est gardé et la
+                        // suite y sera ajoutée — avant, la relance repartait de zéro et le début de la phrase était perdu.
+                        val dit = texte(partielSur())
+                        if (dit.isNotBlank()) {
+                            debutPhrase = dit
+                            fenetreFin = maxOf(fenetreFin, System.currentTimeMillis() + 4000)
+                            limiteFenetre = maxOf(limiteFenetre, fenetreFin + 8000)
+                            JournalVoix.noter(nom, "début de phrase gardé : « ${dit.take(120)} »")
+                        }
                         // « Occupé » (8) : l'écoute précédente n'est pas encore lâchée → plus longue attente. 11 juste après
                         // l'ouverture : service pas encore prêt → nouvel essai après sa libération (pas de fin de conversation).
                         val delai = when (error) { 8 -> 900L * (essai + 1); 11 -> if (System.currentTimeMillis() - ouvertLe < 600) 500L else 700L * (essai + 1); else -> 800L * (essai + 1) }
@@ -281,13 +444,11 @@ class VoiceManager(private val ctx: Context) {
                         return
                     }
                     val silence = error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
-                    // Tu as parlé, Google n'a rien rendu à la fin, mais le texte partiel était là : on le garde.
-                    if (silence && parole && dernierPartiel.isNotBlank() && !estEcho(dernierPartiel)) {
-                        JournalVoix.noter(nom, "entendu (texte partiel conservé) : « ${dernierPartiel.take(240)} »")
-                        fenetreFin = 0
-                        main.postDelayed(unmuteLater, 900)
-                        signalerEcoute(false)
-                        onFinal(dernierPartiel)
+                    // Quelque chose a déjà été dit (début gardé, morceaux, texte partiel) : rien ne se perd, la phrase part.
+                    val dit = texte(partielSur())
+                    if (dit.isNotBlank() && (silence || debutPhrase.isNotBlank() || segments.isNotBlank())) {
+                        termine = false
+                        livrer(dit, if (debutPhrase.isNotBlank() || segments.isNotBlank()) "entendu (phrase reconstituée)" else "entendu (texte partiel conservé)")
                         return
                     }
                     if (fenetreFin > 0 && silence) {
@@ -316,12 +477,12 @@ class VoiceManager(private val ctx: Context) {
 
                 override fun onResults(results: Bundle?) {
                     if (!actif()) return
-                    termine = true
-                    ecoute = false
-                    main.post { if (recognizer === r) liberer() }
-                    JournalVoix.noter(nom, "entendu : « ${results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty().take(240)} »")
-                    val entendu = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
-                    if (entendu.isNotBlank() && estEcho(entendu)) {
+                    val brut = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
+                    if (brut.isNotBlank() && estEcho(brut) && debutPhrase.isBlank() && segments.isEmpty()) {
+                        termine = true
+                        ecoute = false
+                        main.post { if (recognizer === r) liberer() }
+                        JournalVoix.noter(nom, "écho de ma propre voix ignoré : « ${brut.take(120)} »")
                         // Jarvis s'est réentendu (voix renvoyée par l'autoradio) : on ignore et on continue d'écouter.
                         main.removeCallbacks(finFenetre)
                         if (fenetreFin > 0 && System.currentTimeMillis() < fenetreFin - 400 && relancesMuettes++ < 2) { onPartial(""); demarrer(0); return }
@@ -331,37 +492,108 @@ class VoiceManager(private val ctx: Context) {
                         onFail("")
                         return
                     }
+                    // Moteur qui rend la phrase entière à la fin en plus des morceaux : on ne garde que la phrase entière.
+                    val t = if (segments.isNotEmpty() && sansMorceaux(brut) != brut) {
+                        val reste = sansMorceaux(brut); texte(reste)
+                    } else texte(brut)
+                    // Google coupe souvent à une simple pause (« lance la création de… ») : si la phrase est visiblement
+                    // inachevée, le micro reste ouvert ; la suite est ajoutée, sinon la phrase part telle quelle.
+                    if (brut.isNotBlank() && debutPhrase.isBlank() && suiteProbable(t)) {
+                        termine = true
+                        ecoute = false
+                        main.post { if (recognizer === r) liberer() }
+                        debutPhrase = t
+                        JournalVoix.noter(nom, "phrase inachevée « ${t.take(120)} » : j'écoute la suite")
+                        main.removeCallbacks(finFenetre)
+                        annulerGardes()
+                        fenetreFin = System.currentTimeMillis() + maxOf(2500L, pauseMs + 1500)
+                        limiteFenetre = fenetreFin + 8000
+                        onPartial(t)
+                        demarrer(0)
+                        return
+                    }
+                    if (t.isNotBlank()) { livrer(t); return }
+                    termine = true
+                    ecoute = false
+                    main.post { if (recognizer === r) liberer() }
+                    debutPhrase = ""
                     fenetreFin = 0
                     main.removeCallbacks(finFenetre)
                     main.postDelayed(unmuteLater, 900)
                     signalerEcoute(false)
-                    val t = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
-                    if (t.isNotBlank()) onFinal(t) else onFail("")
+                    onFail("")
                 }
 
                 override fun onPartialResults(partialResults: Bundle?) {
                     if (!actif()) return
                     val t = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
-                    // Un résultat partiel peut être une hallucination sur un bruit ou l'écho du TTS.
-                    // Seul onBeginningOfSpeech (détection vocale du moteur) démarre la fenêtre de parole ;
-                    // le texte partiel reste affiché sans empêcher la fermeture sur silence.
-                    if (t.isNotBlank() && !estEcho(t)) { Presence.entendu = t; dernierPartiel = t; onPartial(t) }
+                    // Un partiel qui n'est pas l'écho de JARVIS = tu parles : la fenêtre de silence ne peut plus refermer
+                    // le micro (avant, seul le signal « début de parole » de Google comptait, et il arrive parfois en retard).
+                    if (t.trim().length >= 2 && !estEcho(t)) {
+                        dernierPartiel = t; dernierSon = System.currentTimeMillis()
+                        aParle()
+                        main.removeCallbacks(sansTexte)
+                        relancerFinSegments()
+                        val vu = texte(sansMorceaux(t))
+                        Presence.entendu = vu
+                        onPartial(vu)
+                    }
                 }
-            })
+
+                /** Écoute longue : un morceau de phrase reconnu à une pause ; le micro reste ouvert pour la suite. */
+                override fun onSegmentResults(segmentResults: Bundle) {
+                    if (!actif()) return
+                    val t = segmentResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty().trim()
+                    if (t.isBlank() || estEcho(t)) return
+                    aParle()
+                    main.removeCallbacks(sansTexte)
+                    if (!segments.endsWith(t)) { if (segments.isNotEmpty()) segments.append(' '); segments.append(t) }
+                    dernierPartiel = ""
+                    dernierSon = System.currentTimeMillis()
+                    relancerFinSegments()
+                    onPartial(texte())
+                }
+
+                /** Écoute longue : Google a entendu le silence de fin de phrase. */
+                override fun onEndOfSegmentedSession() {
+                    if (!actif()) return
+                    val t = texte(partielSur())
+                    if (t.isNotBlank()) {
+                        // Visiblement inachevée malgré la pause : on laisse une chance à la suite.
+                        if (debutPhrase.isBlank() && suiteProbable(t)) {
+                            termine = true; ecoute = false
+                            main.post { if (recognizer === r) liberer() }
+                            annulerGardes()
+                            debutPhrase = t
+                            JournalVoix.noter(nom, "phrase inachevée « ${t.take(120)} » : j'écoute la suite")
+                            fenetreFin = System.currentTimeMillis() + maxOf(2500L, pauseMs + 1500)
+                            limiteFenetre = fenetreFin + 8000
+                            demarrer(0)
+                            return
+                        }
+                        livrer(t)
+                    } else onError(SpeechRecognizer.ERROR_SPEECH_TIMEOUT)
+                }
+            }
+            r.setRecognitionListener(ecouteur)
             val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, "fr-FR")
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
                 // Laisse le temps de réfléchir / faire des pauses avant de considérer la phrase terminée
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1600L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, pauseMs)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, pauseMs * 4 / 5)
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1000L)
+                // Android 13+ : écoute « longue » — Google rend un morceau à chaque pause SANS refermer le micro, et ne
+                // termine qu'après le silence de fin de phrase choisi dans les réglages. Fini les phrases coupées en deux.
+                if (segmente) putExtra(RecognizerIntent.EXTRA_SEGMENTED_SESSION, RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS)
             }
             r.startListening(i)
             signalerEcoute(true)
             val reste = fenetreFin - System.currentTimeMillis()
             if (fenetreFin > 0) main.postDelayed(finFenetre, reste.coerceAtLeast(500))
+            if (segmente) ecouteur.armerGarde()
         }
     }
 
@@ -374,6 +606,7 @@ class VoiceManager(private val ctx: Context) {
             if (relanceEnAttente != null) { annulerRelance(); jeton++ }
             if (!ecoute) return@post
             ecoute = false
+            debutPhrase = ""
             JournalVoix.noter(nom, "écoute refermée : le micro passe à « $a »")
             jeton++
             fenetreFin = 0
@@ -391,6 +624,7 @@ class VoiceManager(private val ctx: Context) {
      */
     fun fermer() {
         main.post {
+            debutPhrase = ""
             annulerRelance()
             jeton++
             val etait = ecoute
@@ -513,7 +747,12 @@ class VoiceManager(private val ctx: Context) {
 
     /** Le texte reconnu reprend la réponse que Jarvis vient de dire (écho de l'autoradio / du haut-parleur). */
     internal fun estEcho(entendu: String): Boolean {
-        if (derniereVoix.isBlank() || System.currentTimeMillis() - finVoix > 20_000) return false
+        if (derniereVoix.isBlank()) return false
+        // Un écho arrive dans les secondes qui suivent la voix de JARVIS (retard du Bluetooth / de l'autoradio compris).
+        // Au-delà, c'est toi qui parles — même si tu reprends ses mots (« oui, crée la facture pour Dupont ») : avant,
+        // ta réponse était jetée comme un écho pendant 20 s et JARVIS « n'entendait pas ».
+        val debut = if (debutParoleLe > 0) debutParoleLe else System.currentTimeMillis()
+        if (debut - finVoix > (if (sortieExterne()) 5000 else 2500)) return false
         return estEchoDe(entendu, derniereVoix)
     }
 
