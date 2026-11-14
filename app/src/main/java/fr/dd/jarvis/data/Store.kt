@@ -416,7 +416,12 @@ class Store(context: Context) {
     /** Couper la parole à JARVIS en reprenant la parole pendant qu'il répond. */
     val coupeParole = BPref("coupeParole", true)
     /** Silence (ms) qui marque la fin d'une phrase : en dessous, une pause pour réfléchir ne coupe pas le micro. */
-    val pauseFin = IPref("pauseFin", 1600)
+    val pauseFin = IPref("pauseFinMs", 2000)
+    /**
+     * Écoute « longue » d'Android 13+ (morceaux rendus à chaque pause). Désactivée par défaut : sur Xiaomi/HyperOS le
+     * moteur Google n'y rend AUCUN texte (erreur 7 à chaque phrase). Se désactive d'elle-même si elle échoue.
+     */
+    val ecouteLongue = BPref("ecouteLongue", false)
     /** Voix en mode « appel » sur le haut-parleur pendant la réponse (annulation d'écho : coupure de parole fiable). */
     val duplex = BPref("duplex", true)
     val muteBeeps = BPref("muteBeeps", true)

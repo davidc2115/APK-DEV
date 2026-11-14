@@ -776,11 +776,17 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 Spacer(Modifier.height(6.dp))
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Fin de phrase", color = HudDim, fontSize = 12.sp)
-                    listOf(1000 to "1 s", 1600 to "1,6 s", 2500 to "2,5 s").forEach { (ms, lib) ->
+                    listOf(1500 to "1,5 s", 2000 to "2 s", 3000 to "3 s").forEach { (ms, lib) ->
                         HudChip("$lib de pause", store.pauseFin.value == ms) { store.pauseFin.set(ms) }
                     }
                 }
-                Text("Pause qui termine ta phrase. Sur Android 13 et plus, JARVIS écoute « en continu » : Google rend chaque morceau à tes pauses sans refermer le micro, et la phrase ne part qu'après ce silence. Une phrase visiblement inachevée (« envoie un message à… ») attend toujours sa suite. Si tu fais de longues pauses pour réfléchir, choisis 2,5 s.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                Text("Pause qui termine ta phrase (demandée à Google, qui la respecte plus ou moins selon les téléphones). Une phrase visiblement inachevée (« envoie un message à… ») attend toujours sa suite, et le micro ne se referme pas tant qu'il entend ta voix. Si tu fais de longues pauses pour réfléchir, choisis 3 s.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                Spacer(Modifier.height(6.dp))
+                HudChip(if (store.ecouteLongue.value) "🧪 Écoute longue : oui" else "🧪 Écoute longue : non", store.ecouteLongue.value) {
+                    store.ecouteLongue.set(!store.ecouteLongue.value)
+                    if (store.ecouteLongue.value) fr.dd.jarvis.voice.VoiceManager.segmentKo = false
+                }
+                Text("Expérimental (Android 13+) : Google rend un morceau de phrase à chaque pause sans refermer le micro. Sur certains téléphones (Xiaomi/HyperOS notamment) le moteur Google n'y rend aucun texte : elle se désactive alors toute seule.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
                 Spacer(Modifier.height(6.dp))
                 Text("Après « Jarvis », tu enchaînes les demandes sans répéter le mot. Quand JARVIS a répondu et que tu ne dis plus rien pendant ce délai, la conversation se referme d'elle-même (petit bip descendant). « Merci » ou « c'est tout » la termine aussi.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
                 Spacer(Modifier.height(6.dp))

@@ -170,7 +170,9 @@ class VoiceManager(private val ctx: Context) {
     private var debutParoleLe = 0L
 
     /** Silence qui marque la fin d'une phrase (réglage « Pause en fin de phrase »). */
-    private fun pauseFinMs(): Int = ((ctx.applicationContext as? fr.dd.jarvis.JarvisApp)?.store?.pauseFin?.value ?: 1600).coerceIn(800, 4000)
+    private fun pauseFinMs(): Int = ((ctx.applicationContext as? fr.dd.jarvis.JarvisApp)?.store?.pauseFin?.value ?: 2000).coerceIn(800, 4000)
+    /** Écoute longue choisie dans les réglages (expérimentale). */
+    private fun ecouteLongueVoulue(): Boolean = (ctx.applicationContext as? fr.dd.jarvis.JarvisApp)?.store?.ecouteLongue?.value == true
 
     /** Livre un début de phrase gardé (la suite n'est pas venue) : vrai si quelque chose a été livré. */
     private fun livrerDebut(): Boolean {
@@ -313,7 +315,7 @@ class VoiceManager(private val ctx: Context) {
                     else -> SpeechRecognizer.createSpeechRecognizer(ctx)
                 }.also { recoCle = cle; recoCasse = false }
             }
-            val segmente = !local && !segmentKo && Build.VERSION.SDK_INT >= 33
+            val segmente = !local && !segmentKo && Build.VERSION.SDK_INT >= 33 && ecouteLongueVoulue()
             val pauseMs = pauseFinMs().toLong()
             JournalVoix.noter(nom, "micro ouvert (reconnaissance ${if (local) "locale" else composant?.packageName ?: "par défaut"}${if (essai > 0) ", essai ${essai + 1}" else ""}${if (segmente) ", écoute longue" else ""})")
             recognizer = r
@@ -444,6 +446,15 @@ class VoiceManager(private val ctx: Context) {
                         return
                     }
                     val silence = error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
+                    // Écoute longue : tu as parlé mais Google n'a rendu AUCUN mot (ni partiel ni morceau) → ce moteur ne la
+                    // gère pas (cas du Xiaomi). Elle est coupée pour de bon et l'écoute repart aussitôt en mode normal.
+                    if (segmente && silence && parole && segments.isEmpty() && dernierPartiel.isBlank() && debutPhrase.isBlank()) {
+                        segmentKo = true
+                        (ctx.applicationContext as? fr.dd.jarvis.JarvisApp)?.store?.ecouteLongue?.set(false)
+                        JournalVoix.noter(nom, "écoute longue : Google ne rend aucun texte sur ce téléphone → désactivée, écoute normale")
+                        demarrer(essai)
+                        return
+                    }
                     // Quelque chose a déjà été dit (début gardé, morceaux, texte partiel) : rien ne se perd, la phrase part.
                     val dit = texte(partielSur())
                     if (dit.isNotBlank() && (silence || debutPhrase.isNotBlank() || segments.isNotBlank())) {
