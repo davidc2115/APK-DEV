@@ -614,6 +614,13 @@ class VoiceManager(private val ctx: Context) {
 
     // ================================================================= écoute JARVIS (micro tenu par JARVIS + Whisper)
 
+    /**
+     * Vocabulaire de JARVIS donné à Whisper (« Jarvis » bien écrit, « monte le son »…). Des mots isolés, jamais des
+     * ordres : sur du bruit, Whisper recopie parfois son indice — une liste de mots est alors repérée et écartée.
+     */
+    private val INDICE_WHISPER = "Jarvis, télé, chaîne, monte, volume, déverrouille, sécurisé, Home Assistant, Hermès, Freebox, salon."
+    private val MOTS_INDICE = INDICE_WHISPER.lowercase().split(Regex("[^\\p{L}]+")).filter { it.length >= 3 }.toSet()
+
     private var microJ: MicroJarvis? = null
     /** Écoute JARVIS impossible un moment (micro refusé, erreur) : Google prend le relais jusqu'à cette heure. */
     private var jarvisKoJusqua = 0L
@@ -698,8 +705,14 @@ class VoiceManager(private val ctx: Context) {
             if (a != null && a.llm.groq.disponible() && (f.voixMs >= 250 || motsLocaux >= 2)) {
                 val debut = System.currentTimeMillis()
                 try {
-                    val brut = kotlinx.coroutines.runBlocking { kotlinx.coroutines.withTimeout(10_000) { a.llm.groq.transcrire(fr.dd.jarvis.car.Pcm.wav(f.pcm)) } }
+                    val brut = kotlinx.coroutines.runBlocking { kotlinx.coroutines.withTimeout(10_000) { a.llm.groq.transcrire(fr.dd.jarvis.car.Pcm.wav(f.pcm), prompt = INDICE_WHISPER) } }
                     texte = fr.dd.jarvis.car.Pcm.nettoyerTranscription(brut)
+                    // Whisper a recopié son indice (bruit) : écarté.
+                    val motsW = texte.lowercase().split(Regex("[^\\p{L}]+")).filter { it.length >= 3 }
+                    if (motsW.size >= 3 && motsW.count { it in MOTS_INDICE } >= motsW.size * 0.7) {
+                        JournalVoix.noter(nom, "texte inventé par Whisper ignoré : « ${texte.take(60)} »")
+                        texte = ""
+                    }
                     // Bruit bref que le modèle hors-ligne n'a pas compris du tout, mais que Whisper « traduit » en un mot
                     // (« Merci. », « Ah. ») : ignoré.
                     if (motsLocaux == 0 && VoskModel.francais(ctx) && f.voixMs < 600 && texte.split(' ').size <= 2) {
@@ -713,11 +726,11 @@ class VoiceManager(private val ctx: Context) {
                 }
             }
             if (!whisperOk) texte = if (f.voixMs >= 250 || motsLocaux >= 2) f.texteLocal else ""
-            main.post { if (moi == jeton) livrerJarvis(texte, source) }
+            main.post { if (moi == jeton) livrerJarvis(texte, source, f.dureeMs < 4000) }
         }, "jarvis-whisper").apply { isDaemon = true; start() }
     }
 
-    private fun livrerJarvis(brut: String, source: String) {
+    private fun livrerJarvis(brut: String, source: String, courte: Boolean) {
         val t = listOf(debutPhrase, brut).filter { it.isNotBlank() }.joinToString(" ").trim()
         debutPhrase = ""
         if (t.isBlank()) {
@@ -730,7 +743,9 @@ class VoiceManager(private val ctx: Context) {
             onFail("")
             return
         }
-        if (estEcho(t)) {
+        // L'écoute JARVIS n'ouvre le micro qu'une fois la voix finie : un écho n'est possible que par le Bluetooth /
+        // l'autoradio (retard), et c'est alors un court morceau au tout début — jamais une phrase de plusieurs secondes.
+        if (courte && sortieExterne() && estEcho(t)) {
             JournalVoix.noter(nom, "écho de ma propre voix ignoré : « ${t.take(120)} »")
             if (fenetreFin > 0 && System.currentTimeMillis() < fenetreFin - 400 && relancesMuettes++ < 2) { onPartial(""); demarrer(0); return }
             fenetreFin = 0
@@ -810,12 +825,15 @@ class VoiceManager(private val ctx: Context) {
             try {
                 val taux = 22050
                 val notes = if (montant) doubleArrayOf(784.0, 1175.0) else doubleArrayOf(988.0, 659.0)
-                val n = (taux * 0.08).toInt()
-                val pcm = ShortArray(n * notes.size)
+                val n = (taux * 0.11).toInt()
+                // Téléphone en veille : la sortie audio met ~0,3 s à se réveiller et avalait tout le bip (0,16 s).
+                // 0,35 s de silence d'abord, puis deux notes un peu plus longues.
+                val avance = (taux * 0.35).toInt()
+                val pcm = ShortArray(avance + n * notes.size + taux / 20)
                 notes.forEachIndexed { k, f ->
                     for (i in 0 until n) {
                         val enveloppe = sin(PI * i / n)
-                        pcm[k * n + i] = (sin(2 * PI * f * i / taux) * enveloppe * 0.2 * Short.MAX_VALUE).toInt().toShort()
+                        pcm[avance + k * n + i] = (sin(2 * PI * f * i / taux) * enveloppe * 0.25 * Short.MAX_VALUE).toInt().toShort()
                     }
                 }
                 piste = AudioTrack.Builder()
@@ -824,7 +842,7 @@ class VoiceManager(private val ctx: Context) {
                     .setTransferMode(AudioTrack.MODE_STATIC).setBufferSizeInBytes(pcm.size * 2).build()
                 piste.write(pcm, 0, pcm.size)
                 piste.play()
-                Thread.sleep(notes.size * 80L + 50)
+                Thread.sleep(pcm.size * 1000L / taux + 30)
             } catch (_: Throwable) {
             } finally {
                 runCatching { piste?.release() }
@@ -1326,8 +1344,10 @@ internal fun estEchoDe(entendu: String, voix: String): Boolean {
         .replace(Regex("\\p{M}+"), "").replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
     val e = norm(entendu); val v = norm(voix)
     if (e.isBlank() || v.isBlank()) return false
-    val motsE = e.split(' ').filter { it.length >= 2 }
+    // « Jarvis » (que tu répètes souvent) et les petits mots ne prouvent rien : seulement les mots distincts qui comptent.
+    val vides = setOf("jarvis", "le", "la", "les", "de", "du", "des", "un", "une", "et", "ou", "a", "au", "en", "je", "tu", "il", "est", "ce", "ca", "oui", "non", "merci")
+    val motsE = e.split(' ').filter { it.length >= 2 && it !in vides }.distinct()
     val motsV = v.split(' ').filter { it.length >= 2 }.toSet()
     if (motsE.size >= 3) return motsE.count { it in motsV } >= kotlin.math.ceil(motsE.size * 0.6)
-    return e.length >= 6 && v.contains(e)
+    return motsE.isNotEmpty() && e.length >= 6 && v.contains(e)
 }

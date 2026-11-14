@@ -28,14 +28,15 @@ class GroqClient(private val ring: KeyRing, private val model: () -> String) {
      * Transcription d'une phrase enregistrée (WAV) avec Whisper sur Groq, en français. Essaie le modèle rapide puis le
      * modèle complet si le premier n'est plus proposé.
      */
-    suspend fun transcrire(wav: ByteArray, langue: String = "fr"): String = ring.run { key ->
+    suspend fun transcrire(wav: ByteArray, langue: String = "fr", prompt: String? = null): String = ring.run { key ->
         withContext(Dispatchers.IO) {
             var derniere: ApiException? = null
             for (modele in listOf("whisper-large-v3-turbo", "whisper-large-v3")) {
                 val corps = okhttp3.MultipartBody.Builder().setType(okhttp3.MultipartBody.FORM)
                     .addFormDataPart("file", "voix.wav", wav.toRequestBody("audio/wav".toMediaType()))
                     .addFormDataPart("model", modele).addFormDataPart("language", langue)
-                    .addFormDataPart("response_format", "json").addFormDataPart("temperature", "0").build()
+                    .addFormDataPart("response_format", "json").addFormDataPart("temperature", "0")
+                    .apply { if (!prompt.isNullOrBlank()) addFormDataPart("prompt", prompt) }.build()
                 val req = Request.Builder().url("https://api.groq.com/openai/v1/audio/transcriptions")
                     .header("Authorization", "Bearer $key").post(corps).build()
                 Http.client.newCall(req).execute().use { r ->

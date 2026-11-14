@@ -5,7 +5,6 @@ import android.content.Context
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
-import fr.dd.jarvis.car.FinDePhrase
 import java.io.ByteArrayOutputStream
 import kotlin.math.log10
 import kotlin.math.max
@@ -79,8 +78,7 @@ class MicroJarvis(private val ctx: Context) {
         val buf = ShortArray(TRAME)
         val octets = ByteArray(TRAME * 2)
         val lot = ByteArrayOutputStream()      // 100 ms envoyées d'un coup au modèle
-        val calibrage = ArrayList<Double>()
-        var fin: FinDePhrase? = null
+        val porte = PorteParole(silenceFin = (pauseMs / 20).coerceIn(40, 200))
         val debut = System.currentTimeMillis()
         var debutParole = 0L
         var trames = 0
@@ -89,7 +87,6 @@ class MicroJarvis(private val ctx: Context) {
         val texteFini = StringBuilder()         // morceaux déjà conclus par Vosk
         var partiel = ""
         var affiche = ""
-        var texteChangeLe = 0L
         var prolongations = 0
         var resultat: Fin = Fin.Silence
 
@@ -104,25 +101,24 @@ class MicroJarvis(private val ctx: Context) {
                 } else partiel = org.json.JSONObject(v.partialResult).optString("partial").trim()
             }
             val t = texte()
-            if (t != affiche) { affiche = t; texteChangeLe = System.currentTimeMillis(); if (t.isNotBlank()) r.partiel(t) }
+            if (t != affiche) { affiche = t; if (t.isNotBlank()) r.partiel(t) }
         }
         fun phrase(): Fin.Phrase {
-            val f = fin
+            val f = porte
             val toutes = tout.toByteArray()
-            // 0,4 s gardées avant le début de la parole (début du premier mot).
-            // (les 8 trames de mesure du bruit de fond précèdent la numérotation de la porte)
-            val depuis = ((max(0, (f?.debut ?: 0) + 8 - 5)) * TRAME * 2).coerceIn(0, toutes.size)
+            // Le son d'AVANT ta parole (télé, bruit) n'est pas envoyé : seulement à partir de ~0,4 s avant ton premier mot.
+            val depuis = (f.debut * TRAME * 2).coerceIn(0, toutes.size)
             val final = rec?.let { v -> runCatching { org.json.JSONObject(v.finalResult).optString("text").trim() }.getOrDefault("") }.orEmpty()
             val local = listOf(texteFini.toString(), final).filter { it.isNotBlank() }.joinToString(" ").trim().ifBlank { texte() }
             return Fin.Phrase(toutes.copyOfRange(depuis - depuis % 2, toutes.size), local,
-                if (debutParole > 0) System.currentTimeMillis() - debutParole else 0, (f?.tramesVoix ?: 0) * 20)
+                if (debutParole > 0) System.currentTimeMillis() - debutParole else 0, f.tramesVoix * 20)
         }
 
         try {
             while (true) {
-                if (!actif) { resultat = if (garder && fin?.parle == true) phrase() else Fin.Annulee; break }
+                if (!actif) { resultat = if (garder && porte.parle) phrase() else Fin.Annulee; break }
                 val n = ar.read(buf, 0, buf.size)
-                if (n < 0) { resultat = if (fin?.parle == true) phrase() else Fin.Erreur("micro perdu ($n)"); break }
+                if (n < 0) { resultat = if (porte.parle) phrase() else Fin.Erreur("micro perdu ($n)"); break }
                 if (n == 0) continue
                 // Fin de la voix de JARVIS encore dans le haut-parleur / l'autoradio : ces premières trames sont ignorées.
                 if (System.currentTimeMillis() - debut < ignorerMs) continue
@@ -145,36 +141,23 @@ class MicroJarvis(private val ctx: Context) {
                     if (lot.size() >= 3200) { val b = lot.toByteArray(); lot.reset(); nourrir(b, b.size) }
                 }
 
-                if (fin == null) {
-                    // 160 ms pour mesurer le bruit de fond de la pièce.
-                    calibrage += rms
-                    if (calibrage.size >= 8) fin = FinDePhrase(calibrage.minOrNull() ?: 100.0, minimum = 150.0, silenceFin = (pauseMs / 20).coerceIn(40, 200), ratio = 2.8)
-                    continue
-                }
-                val f = fin!!
-                // Des mots reconnus alors que le niveau était trop faible pour la porte : c'est bien toi qui parles.
-                if (!f.parle && affiche.replace(Regex("\\b(euh|hum|hein|ah|oh)\\b"), "").isNotBlank()) f.forcerParole()
+                val f = porte
                 var termine = f.trame(rms)
                 if (f.parle && debutParole == 0L) { debutParole = System.currentTimeMillis(); r.debutParole() }
-                if (termine) {
-                    val maintenant = System.currentTimeMillis()
-                    // Les mots changent encore (voix basse que le niveau sonore ne voit pas) ou phrase inachevée : on attend.
-                    val encore = maintenant - texteChangeLe < 700
-                    val inachevee = VoiceManager.suiteProbable(affiche)
-                    if (prolongations < 3 && (encore || (inachevee && prolongations < 2))) {
-                        prolongations++
-                        f.prolonger(if (inachevee) 75 else 35)
-                        termine = false
-                    }
+                // Phrase visiblement inachevée (« envoie un message à… ») : on attend encore un peu sa suite (2 fois au plus).
+                if (termine && prolongations < 2 && VoiceManager.suiteProbable(affiche)) {
+                    prolongations++
+                    f.prolonger(60)
+                    termine = false
                 }
                 if (termine) { resultat = phrase(); break }
                 val ecoule = System.currentTimeMillis() - debut
                 if (!f.parle && ecoule > attenteMs) { resultat = Fin.Silence; break }
-                // Filet : une phrase de plus de 30 s (télé, radio…) est conclue.
-                if (debutParole > 0 && System.currentTimeMillis() - debutParole > 30_000) { resultat = phrase(); break }
+                // Filet : une phrase de plus de 15 s (télé, radio qui ne s'arrêtent jamais) est conclue.
+                if (debutParole > 0 && System.currentTimeMillis() - debutParole > 15_000) { resultat = phrase(); break }
             }
         } catch (e: Throwable) {
-            resultat = if (fin?.parle == true) runCatching { phrase() }.getOrDefault(Fin.Erreur(e.message ?: "erreur micro")) else Fin.Erreur(e.message ?: e.javaClass.simpleName)
+            resultat = if (porte.parle) runCatching { phrase() }.getOrDefault(Fin.Erreur(e.message ?: "erreur micro")) else Fin.Erreur(e.message ?: e.javaClass.simpleName)
         } finally {
             runCatching { ar.stop() }
             runCatching { ar.release() }
@@ -182,4 +165,62 @@ class MicroJarvis(private val ctx: Context) {
         }
         r.fin(resultat)
     }
+}
+
+/**
+ * Début et fin de TA phrase, trame par trame (20 ms), même avec la télé ou la radio allumée :
+ *  - début : un son nettement plus fort (×2,5) que le fond sonore des 1,5 s précédentes (télé comprise) ;
+ *  - fin : [silenceFin] trames sans voix, la « voix » étant jugée par rapport à TON niveau (crête de ta phrase) et
+ *    non plus au calme du début : la télé, bien plus faible que ta voix près du téléphone, compte comme du silence.
+ *    Avant, la télé passait pour de la parole et la phrase ne finissait jamais (25 à 30 s enregistrées).
+ */
+internal class PorteParole(private val silenceFin: Int, private val minimum: Double = 150.0) {
+    private val fond = ArrayDeque<Double>()
+    private val recent = BooleanArray(10)
+    private var n = 0
+    private var silence = 0
+    private var crete = 0.0
+    private var fondFige = 0.0
+    var parle = false
+        private set
+    /** Trame à partir de laquelle la phrase est gardée (~0,4 s avant le premier mot). */
+    var debut = 0
+        private set
+    var tramesVoix = 0
+        private set
+
+    /** Niveau sous lequel se trouvent 20 % des trames récentes : le fond sonore (pauses de la télé comprises). */
+    private fun niveauFond(): Double {
+        if (fond.isEmpty()) return 0.0
+        val tri = fond.sorted()
+        return tri[(tri.size * 0.2).toInt().coerceAtMost(tri.size - 1)]
+    }
+
+    /** Ajoute une trame ; vrai quand la phrase est terminée. */
+    fun trame(rms: Double): Boolean {
+        n++
+        if (!parle) {
+            val v = fond.size >= 8 && rms > maxOf(minimum, niveauFond() * 2.5)
+            recent[n % recent.size] = v
+            if (recent.count { it } >= 5) {
+                parle = true
+                debut = maxOf(0, n - 20)
+                fondFige = niveauFond()
+                crete = rms
+                tramesVoix = 5
+                silence = 0
+                return false
+            }
+            fond.addLast(rms)
+            while (fond.size > 75) fond.removeFirst()
+            return false
+        }
+        crete = maxOf(rms, crete * 0.998)
+        val voix = rms > maxOf(minimum, fondFige * 2.0, crete * 0.15)
+        if (voix) { tramesVoix++; silence = 0 } else silence++
+        return silence >= silenceFin
+    }
+
+    /** La phrase semble inachevée : on attend encore [trames] trames de silence avant de conclure. */
+    fun prolonger(trames: Int) { silence = (silenceFin - trames).coerceAtMost(silence) }
 }
