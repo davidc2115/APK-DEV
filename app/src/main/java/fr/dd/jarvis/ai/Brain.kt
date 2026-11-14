@@ -90,6 +90,8 @@ class Brain(
             else -> "Hermès n'a pas répondu"
         } + " : réponse directe de Jarvis."
         if (!suivi.cerveauJarvis || !escaladePossible(pourHermes, suivi) || !fr.dd.jarvis.hermes.Routeur.jarvisABesoinDHermes(r)) return r
+        // La maison (Home Assistant) reste à JARVIS : jamais confiée à Hermès, même si la première tentative a échoué.
+        if (history.lastOrNull { it.fromUser }?.text?.let { MaisonDirecte.concerne(it) } == true) return r
         onStatus("🪽 Hermès prend le relais…")
         val h = fr.dd.jarvis.hermes.Hermes.repondre(app, history, tools, userName(), onStatus, tentativeJarvis = r, onTexte = onTexte) ?: return r
         fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.HERMES
@@ -268,6 +270,16 @@ class Brain(
             fr.dd.jarvis.securite.Systemes.ambigus(app, texteUser)?.let { (noms, activer) ->
                 return reflexe("Quel mode veux-tu ${if (activer) "activer" else "désactiver"} : ${noms.joinToString(" ou ") { "« $it »" }} ?")
             }
+            // Télé (chaîne, volume, sourdine, pause, source / appli), luminosité, scènes : Home Assistant directement, sans
+            // IA ni Hermès (repli : connexion directe à la télé).
+            if (MaisonDirecte.analyser(texteUser) != null) {
+                onStatus("🏠 Maison…")
+                runCatching { MaisonDirecte.executer(app, texteUser) }.getOrNull()?.let { return reflexe(it) }
+            }
+            if (MaisonDirecte.analyserLumiere(texteUser) != null) {
+                onStatus("🏠 Maison…")
+                runCatching { MaisonDirecte.executerLumiere(app, texteUser) }.getOrNull()?.let { return reflexe(it) }
+            }
             // Actions courantes reconnues sans IA (alarme, minuteur, appel, SMS, appli, météo, planning, rappel…).
             CommandesDirectes.intention(texteUser)?.let { i ->
                 onStatus(i.statut)
@@ -389,7 +401,7 @@ class Brain(
         }
         // Outils retirés : ceux qui renverraient vers Hermès (quand c'est Hermès qui demande), et le SSH pour une demande
         // Home Assistant ordinaire — elle passe par l'API (ha_*) ; si l'API échoue, l'approfondissement prend le relais.
-        val retires = (if (pourHermes) setOf("hermes", "hermes_deleguer", "tache_arriere_plan") else emptySet()) +
+        val retires = (if (pourHermes || MaisonDirecte.concerne(texteUser)) setOf("hermes", "hermes_deleguer", "tache_arriere_plan") else emptySet()) +
             (if (fr.dd.jarvis.hermes.Routeur.homeAssistantApi(texteUser)) setOf("ssh_commande", "ssh_fichier", "ssh_script", "serveur_diagnostic") else emptySet())
         val schemaFinal = if (retires.isEmpty()) schema else JSONArray().also { f ->
             for (i in 0 until schema.length()) {
@@ -717,6 +729,12 @@ class Brain(
         }
         if (DomotiqueDirecte.commande(n) != null) return {
             runCatching { DomotiqueDirecte.executer(app, tools, partie) }.getOrNull() ?: "❓ Je n'ai pas trouvé sans ambiguïté l'appareil de « $partie » dans Home Assistant."
+        }
+        if (MaisonDirecte.analyser(partie) != null) return {
+            runCatching { MaisonDirecte.executer(app, partie) }.getOrNull() ?: "❓ La télé n'a pas pu faire « $partie » (Home Assistant)."
+        }
+        if (MaisonDirecte.analyserLumiere(partie) != null) return {
+            runCatching { MaisonDirecte.executerLumiere(app, partie) }.getOrNull() ?: "❓ Je n'ai pas trouvé sans ambiguïté l'appareil de « $partie » dans Home Assistant."
         }
         return null
     }

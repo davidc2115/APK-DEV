@@ -74,6 +74,21 @@ object DomotiqueDirecte {
         return emptyList()
     }
 
+    /** Entités visées par [c] : notées dans le carnet d'abord, sinon trouvées sans ambiguïté ; null si ambigu / introuvable. */
+    internal fun resoudre(app: JarvisApp, c: Commande, paires: List<Pair<String, String>>): List<String>? {
+        val notees = runCatching { fr.dd.jarvis.device.Carnet.entitesNotees(app, c.cible) }.getOrDefault(emptyList()).map { it.first }
+            .filter { id -> c.domaines.any { id.startsWith("$it.") } && paires.any { it.first == id } }
+        if (notees.size == 1 || (notees.isNotEmpty() && c.pluriel)) return notees
+        val trouves = candidats(paires, c)
+        val exact = trouves.filter { id -> fr.dd.jarvis.societe.core.normaliser(paires.first { it.first == id }.second) == c.cible }
+        return when {
+            trouves.size == 1 -> trouves
+            exact.size == 1 -> exact
+            c.pluriel && trouves.size in 2..8 -> trouves
+            else -> null
+        }
+    }
+
     /** Exécute la commande si l'appareil est trouvé sans ambiguïté ; null sinon (le cerveau reprend, avec ses outils). */
     suspend fun executer(app: JarvisApp, tools: ToolBox, texte: String): String? {
         val c = commande(fr.dd.jarvis.societe.core.normaliser(texte)) ?: return null

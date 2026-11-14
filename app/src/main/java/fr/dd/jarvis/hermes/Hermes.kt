@@ -908,6 +908,10 @@ object Routeur {
         val reponseCourte = t.split(Regex("\\s+")).size <= 4 && !t.endsWith("?") && precedent != null && precedent.takeLast(250).contains("?") &&
             !ORCHESTRATION.containsMatchIn(t) && !FREEBOX.containsMatchIn(t) && !FICHIERS.containsMatchIn(t) && !WEB.containsMatchIn(t)
         if (BREF.matches(t) || reponseCourte) return Choix(derniere, if (derniere == Cible.HERMES) "suite de la conversation avec Hermès" else "suite de la conversation avec Jarvis")
+        // La MAISON (télé, lumières, volets, chauffage, scènes… tout ce qui passe par Home Assistant) : JARVIS et l'API de
+        // Home Assistant directement, dans tous les modes — jamais Hermès (sauf automatisme à orchestrer ou panne du serveur).
+        if (fr.dd.jarvis.ai.MaisonDirecte.concerne(t) && !ORCHESTRATION.containsMatchIn(t) && !serveurDebian(t))
+            return Choix(Cible.JARVIS, "maison : Home Assistant directement")
         // Ce qu'Hermès sait faire seul (skills ajoutés : procédures, ponts, accès…) reste chez lui.
         if (competenceHermes != null) return Choix(Cible.HERMES, "compétence d'Hermès « $competenceHermes »")
         // ACTIONS (téléphone, appels, SMS, mails, agenda, rappels, maison, Plex, société, fichiers…) : Jarvis les fait

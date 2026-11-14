@@ -133,7 +133,13 @@ object Tele {
         shell(app, "pm list packages -3; pm list packages | grep -E 'youtube|netflix|primevideo|disney|plex|canal|molotov|spotify|freebox|tv\\.|launcher'")
             .lines().map { it.removePrefix("package:").trim() }.filter { it.isNotBlank() && (filtre.isBlank() || it.contains(filtre, true)) }.distinct().sorted()
 
-    private val APPLIS_CONNUES = mapOf("youtube" to "com.google.android.youtube.tv", "netflix" to "com.netflix.ninja", "prime video" to "com.amazon.amazonvideo.livingroom",
+    /** Tape un numéro de chaîne sur la télécommande (touches 0 à 9). */
+    fun chiffres(app: JarvisApp, numero: Int): String {
+        shell(app, numero.toString().map { "input keyevent ${7 + (it - '0')}" }.joinToString("; "))
+        return "📺 chaîne $numero ✓"
+    }
+
+    internal val APPLIS_CONNUES = mapOf("youtube" to "com.google.android.youtube.tv", "netflix" to "com.netflix.ninja", "prime video" to "com.amazon.amazonvideo.livingroom",
         "disney" to "com.disney.disneyplus", "plex" to "com.plexapp.android", "canal" to "com.canal.android.canal", "molotov" to "tv.molotov.app", "spotify" to "com.spotify.tv.android",
         "mycanal" to "com.canal.android.canal", "france tv" to "fr.francetv.pluzz", "tf1" to "fr.tf1.mytf1", "arte" to "tv.arte.plus7", "twitch" to "tv.twitch.android.app")
 
