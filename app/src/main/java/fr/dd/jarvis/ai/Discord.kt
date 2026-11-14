@@ -117,8 +117,42 @@ object Discord {
             if (t.equals("toutes_sauf_administrateur", true) || t.equals("tout_sauf_administrateur", true) || t.equals("admin_sans_administrateur", true)) return TOUT_SAUF_ADMINISTRATEUR
             if (t.equals("toutes", true) || t.equals("administrateur", true) || t.equals("admin", true)) return ADMINISTRATOR or TOUT_SAUF_ADMINISTRATEUR
             t.toLongOrNull()?.let { return it }
-            return t.split(",", ";", " ").map { it.trim().lowercase().replace(" ", "_") }.filter { it.isNotBlank() }
-                .fold(0L) { acc, n -> acc or (NOMS[n] ?: 0L) }
+            return t.split(",", ";", "|", "\n").map { it.trim() }.filter { it.isNotBlank() }
+                .fold(0L) { acc, n -> acc or (trouver(n)?.let { NOMS[it] } ?: 0L) }
+        }
+
+        /** Façons courantes de dire une permission → son nom ci-dessus. */
+        private val SYNONYMES = mapOf(
+            "voir|voir le salon|voir les salons|acceder|acces|lire le salon|afficher le salon" to "voir_salon",
+            "ecrire|envoyer|envoyer des messages|envoyer un message|poster|parler dans le salon|ecrire des messages" to "envoyer_messages",
+            "historique|lire l historique|voir l historique|lire les anciens messages|historique des messages" to "historique_messages",
+            "reagir|reactions|reaction" to "ajouter_reactions", "fichiers|pieces jointes|images|joindre" to "joindre_fichiers",
+            "liens|integrer des liens|apercus de liens" to "integrer_liens", "everyone|here|mentionner everyone|mentionner tout le monde" to "mentionner_tout_le_monde",
+            "vocal|rejoindre le vocal|se connecter|connexion vocale" to "se_connecter_vocal", "parler|parler en vocal|micro" to "parler_vocal",
+            "admin|administrateur|tous les droits" to "administrateur", "roles|gerer les roles" to "gerer_roles", "salons|gerer les salons" to "gerer_salons",
+            "serveur|gerer le serveur" to "gerer_serveur", "messages|gerer les messages|supprimer des messages" to "gerer_messages",
+            "expulser|kick" to "expulser_membres", "bannir|ban" to "bannir_membres", "exclure|timeout|mettre en sourdine temporaire|moderer" to "moderer_membres",
+            "muet|rendre muet|mute" to "rendre_muet", "sourd|rendre sourd" to "rendre_sourd", "deplacer|deplacer des membres" to "deplacer_membres",
+            "pseudo|changer son pseudo" to "changer_pseudo", "pseudos|gerer les pseudos" to "gerer_pseudos", "invitations|inviter|creer une invitation" to "creer_invitation",
+            "webhooks" to "gerer_webhooks", "emojis|stickers|emojis et stickers" to "gerer_emojis_stickers", "commandes|commandes slash|utiliser les commandes" to "utiliser_commandes",
+            "evenements|gerer les evenements" to "gerer_evenements", "fils|threads|gerer les fils" to "gerer_fils", "creer des fils|creer un fil" to "creer_fils_publics",
+            "messages dans les fils|ecrire dans les fils" to "messages_fils", "epingler|epingler des messages" to "epingler_messages", "sondages|sondage" to "sondages",
+            "streaming|partage d ecran|video" to "video", "journal d audit|audit" to "voir_journal_audit", "mode lent|slowmode" to "ignorer_mode_lent",
+        ).flatMap { (k, v) -> k.split('|').map { it to v } }.toMap()
+
+        /** Nom de permission compris malgré la formulation (« envoyer des messages », « voir le salon », « Gérer les rôles »…), ou null. */
+        fun trouver(dit: String): String? {
+            val k = DiscordNoms.cle(dit)
+            if (k.isBlank()) return null
+            NOMS.keys.firstOrNull { it == k.replace(' ', '_') || it.replace('_', ' ') == k }?.let { return it }
+            SYNONYMES[k]?.let { return it }
+            SYNONYMES[k.removePrefix("les ").removePrefix("le ").removePrefix("la ")]?.let { return it }
+            // Mots en commun (sans « de », « des », pluriels) : le nom le plus proche, s'il se détache.
+            fun mots(x: String) = x.split(' ', '_').filter { it.length > 2 && it !in setOf("les", "des", "dans", "pour", "the") }.map { it.removeSuffix("s") }.toSet()
+            val m = mots(k)
+            if (m.isEmpty()) return null
+            val scores = NOMS.keys.map { it to (mots(it) intersect m).size }.filter { it.second > 0 }.sortedByDescending { it.second }
+            return scores.firstOrNull()?.takeIf { scores.size == 1 || it.second > scores[1].second }?.first
         }
 
         fun noms(bits: Long): List<String> = NOMS.filter { (bits and it.value) != 0L }.keys.toList()
@@ -283,11 +317,50 @@ object Discord {
     // ------------------------------------------------------------ recherche par nom (pratique pour le langage naturel)
 
     fun trouverRole(app: JarvisApp, guildId: String, nom: String): JSONObject? {
-        val n = nom.trim().removePrefix("@").lowercase()
         val arr = roles(app, guildId)
-        for (i in 0 until arr.length()) { val r = arr.getJSONObject(i); if (r.optString("name").lowercase() == n) return r }
-        for (i in 0 until arr.length()) { val r = arr.getJSONObject(i); if (r.optString("name").lowercase().contains(n)) return r }
-        return null
+        return choisir((0 until arr.length()).map { arr.getJSONObject(it) }, nom.trim().removePrefix("@"), textesAlias(app))
+    }
+
+    /**
+     * Membre désigné par son pseudo, son nom affiché ou son identifiant : recherche de Discord, puis comparaison souple
+     * (emojis, polices décoratives…) sur la liste des membres si le bot y a accès.
+     */
+    fun trouverMembre(app: JarvisApp, guildId: String, nom: String): JSONObject? {
+        val q = nom.trim().removePrefix("@")
+        if (q.isBlank()) return null
+        if (q.matches(Regex("\\d{17,20}"))) runCatching { return membre(app, guildId, q) }
+        val trouves = runCatching { chercherMembres(app, guildId, q) }.getOrNull()
+        if (trouves != null && trouves.length() == 1) return trouves.getJSONObject(0)
+        val candidats = (trouves?.takeIf { it.length() > 1 } ?: runCatching { reqArr(app, "GET", "/guilds/$guildId/members?limit=1000") }.getOrNull())
+            ?.let { a -> (0 until a.length()).map { a.getJSONObject(it) } }.orEmpty()
+        // Chaque membre comparé sous ses trois noms (surnom sur le serveur, nom affiché, nom d'utilisateur).
+        val vues = candidats.flatMap { m ->
+            val u = m.optJSONObject("user") ?: JSONObject()
+            listOf(m.optString("nick"), u.optString("global_name"), u.optString("username")).filter { it.isNotBlank() }.map { JSONObject().put("id", u.optString("id")).put("name", it) to m }
+        }
+        val choisi = choisir(vues.map { it.first }, q, textesAlias(app)) ?: return trouves?.takeIf { it.length() > 0 }?.getJSONObject(0)
+        return vues.first { it.first === choisi }.second
+    }
+
+    /** Salons / rôles dont le nom ressemble à la demande (pour dire lesquels correspondent quand c'est ambigu). */
+    fun proches(arr: JSONArray, demande: String): List<String> {
+        val k = DiscordNoms.cle(demande)
+        if (k.isBlank()) return emptyList()
+        return (0 until arr.length()).map { arr.getJSONObject(it) }.filter { it.optInt("type") != 4 }.map { it.optString("name") }
+            .filter { n -> val c = DiscordNoms.cle(n); c.contains(k) || ressemblance(k, c) >= 0.5 }.take(8)
+    }
+
+    /** Message « introuvable » utile : les candidats proches s'il y en a, sinon tous les noms. */
+    fun introuvable(quoi: String, demande: String, ou: String, arr: JSONArray): String {
+        val p = proches(arr, demande)
+        return if (p.size > 1) "Plusieurs $quoi correspondent à « $demande » sur « $ou » : " + p.joinToString(", ") { "« ${affiche(it)} »" } + ". Précise lequel."
+        else "Aucun $quoi « $demande » sur « $ou ». Disponibles : " + noms(arr, sansCategories = true) + "."
+    }
+
+    /** Nom tel qu'affiché sur Discord, suivi du nom simple quand il diffère (« 💬┃ᴅɪsᴄᴜssɪᴏɴ (discussion) »). */
+    fun affiche(nom: String): String {
+        val simple = DiscordNoms.cle(nom)
+        return if (simple.isBlank() || simple == nom.trim().lowercase()) nom else "$nom ($simple)"
     }
 
     fun trouverSalon(app: JarvisApp, guildId: String, nom: String): JSONObject? {
@@ -304,7 +377,7 @@ object Discord {
 
     /** Noms de tous les serveurs (ou salons) disponibles, pour un message d'erreur utile. */
     fun noms(arr: JSONArray, sansCategories: Boolean = false): String =
-        (0 until arr.length()).map { arr.getJSONObject(it) }.filter { !sansCategories || it.optInt("type") != 4 }.joinToString(", ") { "« ${it.optString("name")} »" }
+        (0 until arr.length()).map { arr.getJSONObject(it) }.filter { !sansCategories || it.optInt("type") != 4 }.joinToString(", ") { "« ${affiche(it.optString("name"))} »" }
 
     /** Textes où l'utilisateur a pu donner un surnom : faits mémorisés, carnet de notes, mémoire de Jarvis et d'Hermès. */
     private fun textesAlias(app: JarvisApp): List<String> = buildList {
@@ -332,7 +405,7 @@ object Discord {
      * nom qui contient la demande, puis nom ressemblant (sigle, fautes). Null si rien ou si c'est ambigu.
      */
     internal fun choisir(objets: List<JSONObject>, demande: String, alias: List<String>): JSONObject? {
-        val d = demande.trim()
+        val d = demande.trim().removePrefix("#").removePrefix("@").trim()
         if (d.isBlank()) return null
         objets.firstOrNull { it.optString("id") == d }?.let { return it }
         val k = DiscordNoms.cle(d)
@@ -343,7 +416,17 @@ object Discord {
         // Surnom noté par l'utilisateur (« le serveur bag c'est … », « B&G = … »).
         val citent = alias.map { " " + DiscordNoms.cle(it) + " " }.filter { it.contains(" $k ") }
         objets.filter { o -> val n = nom(o); n.length >= 2 && n != k && citent.any { it.contains(" $n ") } }.singleOrNull()?.let { return it }
-        objets.filter { nom(it).contains(k) || (nom(it).length >= 3 && k.contains(nom(it))) }.singleOrNull()?.let { return it }
+        // Le nom CONTIENT ce qui est dit (« discussion » → « 💬┃discussion-générale ») : mots entiers d'abord, puis morceaux ;
+        // entre plusieurs, celui qui a le moins de mots en plus — s'il est seul dans ce cas.
+        fun meilleur(l: List<JSONObject>): JSONObject? {
+            if (l.size <= 1) return l.singleOrNull()
+            val tri = l.map { it to nom(it).split(' ').size }.sortedBy { it.second }
+            return if (tri[0].second < tri[1].second) tri[0].first else null
+        }
+        val motsEntiers = objets.filter { " ${nom(it)} ".contains(" $k ") }
+        if (motsEntiers.isNotEmpty()) return meilleur(motsEntiers)
+        val morceaux = objets.filter { nom(it).contains(k) || (nom(it).length >= 3 && k.contains(nom(it))) || compact(nom(it)).contains(compact(k)) }
+        if (morceaux.isNotEmpty()) return meilleur(morceaux)
         val proches = objets.map { it to ressemblance(k, nom(it)) }.filter { it.second >= 0.6 }.sortedByDescending { it.second }
         if (proches.size == 1 || (proches.size > 1 && proches[0].second - proches[1].second >= 0.2)) return proches[0].first
         return null
@@ -361,7 +444,39 @@ object DiscordNoms {
         private set
     private fun fichier(app: JarvisApp) = java.io.File(app.filesDir, "discord_noms.json")
 
-    internal fun cle(s: String) = fr.dd.jarvis.societe.core.normaliser(s.replace("&", " et ").replace(Regex("[-_]"), " "))
+    /**
+     * Nom ramené à des lettres simples pour comparer ce que tu DIS avec le nom affiché sur Discord : emojis, séparateurs
+     * (┃・|-_), accents, polices décoratives (𝐝𝐢𝐬𝐜𝐮𝐬𝐬𝐢𝐨𝐧, ｄｉｓｃｕｓｓｉｏｎ, ⓓⓘⓢ…), petites capitales (ᴅɪsᴄᴜssɪᴏɴ),
+     * lettres-drapeaux et lettres cyrilliques ou grecques qui imitent l'alphabet latin. « & » = « et ».
+     */
+    internal fun cle(s: String): String {
+        val sb = StringBuilder()
+        val t = java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFKD)
+        var i = 0
+        while (i < t.length) {
+            val cp = t.codePointAt(i); i += Character.charCount(cp)
+            val lettre: Char? = when (cp) {
+                in 0x1F1E6..0x1F1FF -> 'a' + (cp - 0x1F1E6)   // lettres-drapeaux 🇦
+                in 0x1F130..0x1F149 -> 'a' + (cp - 0x1F130)   // 🄰
+                in 0x1F150..0x1F169 -> 'a' + (cp - 0x1F150)   // 🅐
+                in 0x1F170..0x1F189 -> 'a' + (cp - 0x1F170)   // 🅰
+                else -> null
+            }
+            if (lettre != null) { sb.append(lettre); continue }
+            val type = Character.getType(cp)
+            if (type == Character.NON_SPACING_MARK.toInt() || type == Character.ENCLOSING_MARK.toInt() || type == Character.FORMAT.toInt()) continue
+            val c = String(Character.toChars(cp)).lowercase()
+            sb.append(SOSIES[c] ?: c)
+        }
+        return sb.toString().replace("&", " et ").replace(Regex("[^a-z0-9]+"), " ").trim()
+    }
+
+    /** Petites capitales et lettres qui imitent l'alphabet latin (polices « stylées » des noms Discord). */
+    private val SOSIES: Map<String, String> = buildMap {
+        "ᴀa ʙb ᴄc ᴅd ᴇe ꜰf ғf ɢg ʜh ɪi ᴊj ᴋk ʟl ᴍm ɴn ᴏo ᴘp ǫq ʀr ꜱs ᴛt ᴜu ᴠv ᴡw ʏy ᴢz ɑa ɡg ıi ȷj ʋv ɯw ŋn".split(' ').forEach { put(it.dropLast(1), it.takeLast(1)) }
+        // Cyrillique et grec qui ressemblent aux lettres latines.
+        "аa вb еe ёe зz иu йu кk мm нh оo рp сc тt уy хx іi їi јj ѕs ԁd ԛq ԝw ӏl ьb αa βb εe ηn ιi κk νv οo ρp τt υu χx ωw".split(' ').forEach { put(it.dropLast(1), it.takeLast(1)) }
+    }
 
     /** À appeler au démarrage : noms relevés lors des visites précédentes. */
     fun initialiser(app: JarvisApp) {
