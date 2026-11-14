@@ -118,6 +118,7 @@ BIBLIOTHÈQUE DOCUMENTAIRE :
 """.trim()
 
     private val S_DISCORD = """
+DISCORD — OUTILS : JARVIS a un bot Discord et des outils Discord (mcp_jarvis_discord_guildes, discord_salons, discord_messages_lire, discord_messages_rechercher, discord_fil_lire, discord_message_envoyer, discord_roles…). S'ils ne sont pas dans ta liste, cherche-les avec mcp_jarvis_jarvis_rechercher_outils (requête « discord messages ») puis exécute-les avec mcp_jarvis_jarvis_appeler_outil. Ne réponds JAMAIS que tu n'as pas d'outil Discord sans avoir fait cette recherche. Dans une demande Discord, « serveur » désigne une GUILDE Discord (ex. « le serveur B&G »), jamais le serveur Debian : aucune commande SSH. Pour résumer un salon : discord_messages_lire (salon + serveur, limite 100), puis résume.
 AUDIT ET ORGANISATION DISCORD — PROTECTION ABSOLUE :
 - Si l'utilisateur demande uniquement de contrôler, auditer, analyser ou proposer des améliorations à son serveur Discord, traite cette mission comme un AUDIT EN LECTURE SEULE.
 - Commence par identifier explicitement le serveur avec discord_guildes si nécessaire, puis appelle discord_audit_serveur (ou discord_salons) et récupère l'inventaire complet. Vérifie le nombre total renvoyé, les catégories, les salons sans catégorie, les types, les positions et les identifiants. N'omets aucun salon ; ne te limite jamais à un extrait ou aux premiers résultats.
@@ -267,7 +268,7 @@ Tu travailles en équipe :
 - Les outils de JARVIS, via le serveur MCP « jarvis » (outils mcp_jarvis_*) : téléphone (appels, SMS, applications, réglages), agenda, mails, contacts, musique, réveils, domotique, coffre Obsidian, société (clients, devis, factures, paie, KML), localisation précise (ma_position), génération d'images/vidéos. Pour piloter une application Android quelconque, utilise phone_action : list_apps pour connaître les applications réellement installées, open_app pour l'ouvrir, read_screen pour lire l'interface, click_text ou click_best_match pour choisir un élément, type_text pour saisir, scroll_down/scroll_up pour défiler, puis read_screen pour vérifier le résultat. Procède par petites étapes et ne prétends jamais qu'une action a réussi sans retour de l'outil. L'accessibilité JARVIS doit être active ; les écrans sécurisés, mots de passe, paiements, validations système et actions sensibles restent protégés et peuvent exiger une intervention/confirmation de l'utilisateur. Pour TOUTE action sur le téléphone ou les données de l'utilisateur, utilise ces outils plutôt que des commandes shell ; n'invente jamais leur contenu. Pour toute demande de diagnostic, état, santé ou surveillance du téléphone, appelle phone_health_report avant de conclure : il fournit les valeurs réellement accessibles (batterie, température, stockage, RAM, réseau, permissions et services). Distingue toujours les mesures observées des éléments qu'Android ne permet pas de surveiller.
 Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume-les au lieu de les recopier en entier.""".trim()
         val notes = if (derniere.isBlank()) "" else runCatching { fr.dd.jarvis.device.NotesPertinentes.pour(app, derniere) }.getOrDefault("")
-        return socle + si(R_HORLOGE, S_HORLOGE) + si(R_ROUTINES, S_ROUTINES) + si(R_SOCIETE, S_SOCIETE) + si(R_DOCUMENTS, S_DOCUMENTS) + si(R_DISCORD, S_DISCORD) +
+        return socle + si(R_HORLOGE, S_HORLOGE) + si(R_ROUTINES, S_ROUTINES) + si(R_SOCIETE, S_SOCIETE) + si(R_DOCUMENTS, S_DOCUMENTS) + (if (demande.isBlank() || ServeurInventaire.discord(demande)) "\n\n" + S_DISCORD else "") +
             si(R_EXTENSIONS, S_EXTENSIONS) + si(R_VIDEO, S_VIDEO) + si(R_APPRENTISSAGE, S_APPRENTISSAGE) + si(R_CREATION, S_CREATION) +
             app.memo.pourPrompt() + notes +
             (if (app.store.modeAdulte.value) """
@@ -607,14 +608,14 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
 /**
  * Répartition des demandes. Hermès est le cerveau : il orchestre, planifie, crée les automatismes (cronjob) et répartit le
  * travail entre ses sous-agents (delegate_task → routes Gemini et Groq) et l'agent téléphone Jarvis (outil MCP jarvis_agent).
- *  - mode « auto » : Hermès est le cerveau principal des demandes qui nécessitent une réponse IA ; Jarvis conserve
- *    les réflexes sans IA et le bavardage rapide (Nano, puis secours cloud borné) ;
- *  - les commandes instantanées du téléphone restent exécutées directement par Jarvis ; les tâches longues d'Hermès
- *    passent en arrière-plan au lieu de bloquer l'interface ;
- *  - mode « tout » : Hermès reçoit tout ce qui demande réflexion, mémoire ou orchestration. Pour la
- *    rapidité, les RÉFLEXES de Jarvis (lampe, volume, Wi-Fi, lecture… sans modèle ; position, recherche de fichiers,
- *    Freebox, vidéo) et les COMMANDES SIMPLES du téléphone (une action, sans réflexion) sont exécutés directement par
- *    Jarvis ; ces échanges restent dans l'historique transmis à Hermès, et la mémoire est partagée ;
+ *  - dans TOUS les modes, les ACTIONS (téléphone, appels, SMS, mails, agenda, rappels, maison, Plex, société, fichiers,
+ *    notes, réseau…) sont faites par Jarvis avec ses outils — réflexes sans IA d'abord, sinon son cerveau rapide — et
+ *    Hermès ne reprend que si Jarvis n'aboutit pas ([actionJarvis], réglage « Actions par Jarvis ») ;
+ *  - Hermès reçoit ce qui demande réflexion, mémoire ou orchestration : demandes qui le nomment, automatismes et
+ *    surveillances, plusieurs étapes hors des outils de Jarvis, serveur/SSH, internet, explications, rédaction libre,
+ *    code et ses compétences propres ; ses tâches longues passent en arrière-plan ;
+ *  - mode « tout » : les questions ouvertes vont aussi à Hermès ; mode « auto » (Jarvis d'abord) : Jarvis répond aux
+ *    commandes du téléphone, Hermès au reste. Les échanges restent dans l'historique transmis à Hermès (mémoire partagée) ;
  *  - Android Auto : Jarvis (réponse rapide) ; « Hermès, … » force Hermès ; une réponse brève ou la réponse à une question
  *    va au cerveau qui l'a posée (confirmation, choix d'installation…).
  */
@@ -696,6 +697,9 @@ object Routeur {
 
     /** Serveur, SSH, Docker, Debian, configuration Home Assistant : Hermès (ses notes, skills et son terminal) + outils SSH de Jarvis. */
     private val SERVEUR = Regex("\\bssh\\b|serveur|\\bservers?\\b|docker|debian|raspberry|conteneur|container|systemctl|configuration\\.yaml|home ?assistant.{0,30}(config|yaml|install|mise [àa] jour|log)|bot discord|ollama|\\bvps\\b|\\bping\\b|traceroute|\\bponts?\\b|tunnel|tailscale", RegexOption.IGNORE_CASE)
+    /** Le serveur Debian (SSH, Docker…) — pas un serveur Discord cité par son nom (« le serveur B&G »). */
+    private fun serveurDebian(t: String) = SERVEUR.containsMatchIn(t) && !ServeurInventaire.serveurDiscord(t)
+
     /** Ce qui demande de la réflexion (recherche, rédaction, analyse, conseil…) : jamais une simple commande. */
     private val REFLEXION = Regex(
         "recherch|compar|analys|expliqu|pourquoi|comment (faire|fonctionne|marche)|r[ée]dige|[ée]cris (un|une|moi)|r[ée]sum|synth[èe]se|" +
@@ -731,9 +735,83 @@ object Routeur {
     fun commandeSimple(texte: String): Boolean {
         val t = texte.trim()
         return COMMANDE.containsMatchIn(t) && !REFLEXION.containsMatchIn(t) && !ORCHESTRATION.containsMatchIn(t) && !multiEtapes(t) &&
-            !SERVEUR.containsMatchIn(t) && !WEB.containsMatchIn(t) && !NOMME.containsMatchIn(t) && t.split(Regex("\\s+")).size <= 16 &&
+            !serveurDebian(t) && !WEB.containsMatchIn(t) && !NOMME.containsMatchIn(t) && t.split(Regex("\\s+")).size <= 16 &&
             // Une recherche que les réflexes n'ont pas résolue mérite Hermès (mémoire, notes, autres sources).
             !FICHIERS.containsMatchIn(t) && !Regex("cherch|trouv|o[uù] (est|sont)", RegexOption.IGNORE_CASE).containsMatchIn(t)
+    }
+
+    /** Orchestration qui reste à Hermès même pour un sujet du téléphone : surveillance, déclencheurs, sous-agents… */
+    private val ORCHESTRATION_PURE = Regex(
+        "automati|surveille|tiens.moi (au courant|inform)|pr[ée]viens.moi (si|quand|d[èe]s|lorsque)|" +
+            "d[èe]s que (je|j.|tu|il|elle|un|une|le|la|les|quelqu)|quand (je re[çc]ois|tu re[çc]ois|il y a|un (mail|sms|message))|" +
+            "t[âa]ches? (planifi|r[ée]currente|complexe|longue)|sous.agents?|multi.?agents?|plusieurs agents|tes agents|(agents?|mod[eè]les?) (groq|gemini)|" +
+            "en parall[èe]le|plusieurs [ée]tapes|workflow|orchestr|\\bmissions?\\b",
+        RegexOption.IGNORE_CASE
+    )
+    /** Répétition que les outils de Jarvis savent programmer eux-mêmes (rappels, alarmes, routines). */
+    private val PROGRAMMATION_JARVIS = Regex("\\brappels?\\b|rappelle.moi|\\balarmes?\\b|r[ée]veils?\\b|r[ée]veille.moi|\\broutines?\\b", RegexOption.IGNORE_CASE)
+    /** Réflexion libre (explication, conseil, création, code…) : le moteur approfondi, quel que soit le sujet. */
+    private val REFLEXION_LIBRE = Regex(
+        "pourquoi|comment (faire|fonctionne|marche|on fait|[çc]a marche|je peux|puis.je)|expliqu|conseil|id[ée]es?\\b|strat[ée]gie|plan d.action|\\bprojet\\b|" +
+            "apprends|\\bcode\\b|un programme\\b|programmation|programmer en|python|bash|po[eè]me|po[eè]sie|https?://|qu.en penses|que penses|ton avis|" +
+            "optimise|compar|traduis|traduction|article|discours|dissertation|histoire|\\bconte\\b|r[ée]cit|chanson (sur|pour|qui|d)|lettre de motivation",
+        RegexOption.IGNORE_CASE
+    )
+    /** Question de culture générale (définition, personnage…) : seulement quand elle ne porte pas sur les données de Jarvis. */
+    private val CULTURE = Regex("c.est quoi|qu.est.ce que (c.est|signifie|veut dire)|que (signifie|veut dire)|d[ée]finition|qui (était|a (invent|cr[ée]|[ée]crit|gagn|d[ée]couvert))", RegexOption.IGNORE_CASE)
+    /** Verbes d'analyse ou de rédaction : Jarvis s'en charge quand ils portent sur SES données (mails, agenda, clients…). */
+    private val REFLEXION_DONNEES = Regex("recherch|analys|r[ée]sum|synth[èe]se|rapport|r[ée]dige|[ée]cris|calcul|propose|[ée]tapes|\\bscript|bilan|statisti", RegexOption.IGNORE_CASE)
+    /** Données et appareils que Jarvis gère avec ses propres outils. */
+    private val OBJET_JARVIS = Regex(
+        "\\b(mails?|e.?mails?|courriels?|sms|textos?|messages?|contacts?|appels?|agenda|planning|rendez.vous|rdv|[ée]v[ée]nements?|notes?|carnet|fichiers?|dossiers?|" +
+            "documents?|pdf|photos?|images?|vid[ée]os?|[ée]cran|notifications?|clients?|factures?|devis|bulletins?|fiches?|paie|salari[ée]s?|interventions?|chantiers?|" +
+            "installations?|soci[ée]t[ée]|plex|films?|s[ée]ries?|[ée]pisodes?|discord|tiktok|freebox|box|wi.?fi|batterie|stockage|tourn[ée]e|itin[ée]raire|trajet|" +
+            "m[ée]t[ée]o|quel temps|pleuvoir|neiger|temp[ée]rature|coffre|obsidian|t[âa]ches?|rappels?|alarmes?|minuteur|site( web)?|musique|playlist|t[ée]l[ée]|lumi[èe]res?|lampes?|volets?|chauffage|" +
+            "po[êe]le|thermostat|prises?|imprimantes?|r[ée]seau|appareils?|m[ée]moire|r[ée]glages?|routines?|modes?|voix|t[ée]l[ée]phone|portable|appli(cation)?s?)\\b",
+        RegexOption.IGNORE_CASE
+    )
+    /** La phrase commence par un ordre (« envoie », « crée », « mets »…). */
+    private val IMPERATIF = Regex(
+        "^(?:(?:jarvis|ok|alors|bon|du coup|stp|s.il te pla[iî]t|est.ce que tu peux|est.ce que tu pourrais|tu peux|peux.tu|pourrais.tu|tu pourrais|tu veux bien|je veux que tu|il faut)[ ,]+)*" +
+            "(envoie|envoyer|[ée]cris|r[ée]ponds|appelle|t[ée]l[ée]phone|cr[ée]e|cr[ée]er|ajoute|supprime|efface|enl[eè]ve|retire|mets|met|passe|active|d[ée]sactive|allume|" +
+            "[ée]teins|ouvre|ferme|lance|joue|arr[êe]te|coupe|baisse|monte|augmente|diminue|r[ée]gle|programme|note|prends|rappelle|r[ée]veille|marque|trie|range|" +
+            "d[ée]place|renomme|imprime|g[ée]n[èe]re|fais|refais|modifie|change|corrige|enregistre|affiche|montre|lis|relis|donne|liste|cherche|trouve|retrouve|" +
+            "v[ée]rifie|regarde|annule|transf[eè]re|partage|exporte|t[ée]l[ée]charge|r[ée]sume|pr[ée]pare|calcule|remplis|planifie|copie|bascule|choisis|compare|analyse|v[ée]rifie)\\b",
+        RegexOption.IGNORE_CASE
+    )
+    private val CODE = Regex("\\bcode\\b|python|bash|un programme\\b|programmation|programmer en|https?://", RegexOption.IGNORE_CASE)
+
+    /**
+     * Demande que Jarvis traite avec ses PROPRES outils (téléphone, appels, SMS, mails, agenda, rappels, maison, Plex,
+     * société, fichiers, notes, réseau…) sans passer par Hermès — qui reprend automatiquement si Jarvis n'aboutit pas.
+     * Hermès garde : les demandes qui le nomment, le serveur, internet, les automatismes / surveillances, la réflexion
+     * libre (explication, conseil, rédaction créative, code) et ses compétences propres.
+     */
+    fun actionJarvis(texte: String): Boolean {
+        // Sans accents (le reste intact) : « \\b » se comporte pareil sur Android et sur la JVM des tests.
+        val t = java.text.Normalizer.normalize(texte.trim(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
+        if (t.isBlank() || NOMME.containsMatchIn(t) || WEB.containsMatchIn(t) || serveurDebian(t) || CODE.containsMatchIn(t)) return false
+        if (ORCHESTRATION_PURE.containsMatchIn(t)) return false
+        if (ORCHESTRATION.containsMatchIn(t) && !PROGRAMMATION_JARVIS.containsMatchIn(t)) return false
+        if (t.split(Regex("\\s+")).size > 45) return false
+        // Plusieurs étapes : chacune est une action de Jarvis (une suite comme « puis réponds-lui que c'est d'accord »
+        // reprend l'objet de l'étape précédente) ; la première doit nommer ce sur quoi on agit.
+        if (multiEtapes(t)) {
+            val etapes = t.split(MULTI).map { it.trim() }.filter { it.isNotBlank() }
+            return etapes.isNotEmpty() && etapeJarvis(etapes.first()) &&
+                etapes.drop(1).all { etapeJarvis(it) || (IMPERATIF.containsMatchIn(it) && !REFLEXION_LIBRE.containsMatchIn(it) && !CULTURE.containsMatchIn(it)) }
+        }
+        return etapeJarvis(t)
+    }
+
+    private fun etapeJarvis(t: String): Boolean {
+        val objet = OBJET_JARVIS.containsMatchIn(t)
+        if (!objet && !COMMANDE.containsMatchIn(t)) return false
+        // Un ordre sur une donnée de Jarvis (« écris un mail à Paul pour lui expliquer… ») reste une action.
+        if (objet && IMPERATIF.containsMatchIn(t) && !Regex("po[eè]me|histoire|\\bconte\\b|chanson (sur|pour|qui|d)|article|discours", RegexOption.IGNORE_CASE).containsMatchIn(t)) return true
+        if (REFLEXION_LIBRE.containsMatchIn(t)) return false
+        if ((REFLEXION_DONNEES.containsMatchIn(t) || CULTURE.containsMatchIn(t)) && !objet) return false
+        return true
     }
 
     private val MULTI = Regex("\\b(puis|ensuite|et enfin|et apr[èe]s|apr[èe]s [çc]a|apr[èe]s cela)\\b", RegexOption.IGNORE_CASE)
@@ -826,36 +904,30 @@ object Routeur {
         if (sature && !NOMME.containsMatchIn(t)) return Choix(Cible.JARVIS, "Hermès momentanément saturé : Jarvis répond directement")
         if (NOMME.containsMatchIn(t)) return Choix(Cible.HERMES, "Hermès demandé")
         if (enVoiture) return Choix(Cible.JARVIS, "Android Auto : Jarvis, réponse rapide")
-        // « Hermès pour tout » : TOUTES les demandes vont à Hermès (y compris « oui », « merci »… : il a l'historique).
-        // Seules les commandes instantanées du téléphone (lampe, volume, Wi-Fi…) sont exécutées avant, sans aucune IA.
-        // Réponses rapides : une commande simple du téléphone (appel, SMS, musique, domotique, agenda…) est faite par
-        // Jarvis en un seul appel d'IA ; s'il n'aboutit pas, Hermès reprend automatiquement (Brain.reply).
-        if (mode == "tout" && rapide && competenceHermes == null && commandeSimple(t))
-            return Choix(Cible.JARVIS, "commande simple : Jarvis répond tout de suite (Hermès prend le relais si besoin)")
-        if (mode == "tout") return Choix(Cible.HERMES, "Hermès pour tout")
         // Suite de conversation : « oui », « toutes », « Clairotte 3 »… en réponse à une question → au cerveau qui l'a posée.
         val reponseCourte = t.split(Regex("\\s+")).size <= 4 && !t.endsWith("?") && precedent != null && precedent.takeLast(250).contains("?") &&
             !ORCHESTRATION.containsMatchIn(t) && !FREEBOX.containsMatchIn(t) && !FICHIERS.containsMatchIn(t) && !WEB.containsMatchIn(t)
         if (BREF.matches(t) || reponseCourte) return Choix(derniere, if (derniere == Cible.HERMES) "suite de la conversation avec Hermès" else "suite de la conversation avec Jarvis")
-        // Jarvis d'abord (défaut) : Hermès directement seulement pour ce que Jarvis ne sait pas faire seul ;
-        // pour tout le reste Jarvis répond, et passe la main à Hermès s'il n'aboutit pas (Brain.reply).
+        // Ce qu'Hermès sait faire seul (skills ajoutés : procédures, ponts, accès…) reste chez lui.
+        if (competenceHermes != null) return Choix(Cible.HERMES, "compétence d'Hermès « $competenceHermes »")
+        // ACTIONS (téléphone, appels, SMS, mails, agenda, rappels, maison, Plex, société, fichiers…) : Jarvis les fait
+        // lui-même avec ses outils, dans TOUS les modes ; s'il n'aboutit pas, Hermès reprend automatiquement (Brain.reply).
+        if (rapide && actionJarvis(t)) return Choix(Cible.JARVIS, "action : Jarvis directement (Hermès prend le relais si besoin)")
+        if (homeAssistantApi(t) && !ORCHESTRATION.containsMatchIn(t) && !multiEtapes(t)) return Choix(Cible.JARVIS, "Home Assistant : API (pas de SSH)")
+        // « Hermès pour tout » : le reste (questions, recherches, rédaction, automatismes, serveur) va à Hermès.
+        if (mode == "tout") return Choix(Cible.HERMES, "Hermès pour tout")
+        // Jarvis d'abord : Hermès directement seulement pour ce que Jarvis ne sait pas faire seul.
         if (mode == "auto" || mode == "demande") return when {
             ORCHESTRATION.containsMatchIn(t) || multiEtapes(t) -> Choix(Cible.HERMES, "automatisme / plusieurs étapes : Hermès orchestre")
-            // Action simple sur le téléphone : Jarvis l'exécute lui-même (un appel d'IA avec ses outils) ; Hermès ne
-            // prend le relais que si Jarvis n'aboutit pas.
-            rapide && competenceHermes == null && commandeSimple(t) -> Choix(Cible.JARVIS, "commande simple du téléphone : Jarvis directement")
-            homeAssistantApi(t) -> Choix(Cible.JARVIS, "Home Assistant : API (pas de SSH)")
             HA.containsMatchIn(t) -> Choix(Cible.HERMES, "Home Assistant côté serveur (maintenance, panne) : moteur approfondi")
-            // Ce qu'Hermès faisait seul (skills ajoutés : procédures, ponts, accès…) reste chez lui.
-            competenceHermes != null -> Choix(Cible.HERMES, "compétence d'Hermès « $competenceHermes »")
-            SERVEUR.containsMatchIn(t) -> Choix(Cible.HERMES, "serveur / SSH : Hermès (notes, skills, terminal)")
+            serveurDebian(t) -> Choix(Cible.HERMES, "serveur / SSH : Hermès (notes, skills, terminal)")
             WEB.containsMatchIn(t) -> Choix(Cible.HERMES, "recherche sur internet : Hermès")
             else -> Choix(Cible.HERMES, "Hermès, cerveau principal (Jarvis fournit les outils)")
         }
         // Hermès orchestre : automatismes, récurrence, surveillance, sous-agents, plusieurs étapes — même sur des données du téléphone.
         if (ORCHESTRATION.containsMatchIn(t) || multiEtapes(t)) return Choix(Cible.HERMES, "tâche complexe : Hermès orchestre (Gemini, Groq, Jarvis)")
         // Commandes simples du téléphone : exécution directe par Jarvis (Freebox, recherche de fichiers/dossiers…).
-        if (SERVEUR.containsMatchIn(t)) return Choix(Cible.HERMES, "serveur / SSH : Hermès (notes, skills, terminal) avec les outils SSH de Jarvis")
+        if (serveurDebian(t)) return Choix(Cible.HERMES, "serveur / SSH : Hermès (notes, skills, terminal) avec les outils SSH de Jarvis")
         if (FREEBOX.containsMatchIn(t)) return Choix(Cible.JARVIS, "Freebox : outil Jarvis dédié")
         if (FICHIERS.containsMatchIn(t)) return Choix(Cible.JARVIS, "recherche de fichiers : outils Jarvis")
         return when {

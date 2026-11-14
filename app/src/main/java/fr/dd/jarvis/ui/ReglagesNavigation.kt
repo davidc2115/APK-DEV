@@ -165,12 +165,12 @@ fun PerformancePanel(app: JarvisApp) {
         Text("L'écoute vocale et la réception des demandes restent prioritaires dans les trois modes. Le mode Performance ne peut pas forcer Android à déverrouiller les fréquences CPU ou réserver la RAM ; il évite simplement les limitations volontaires de JARVIS.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
         HudDivider()
         Text("Vitesse des réponses", color = HudText, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 6.dp))
-        HudChip(if (store.hermesRapide.value) "⚡ Réponses rapides : oui" else "Réponses rapides : non", store.hermesRapide.value) {
+        HudChip(if (store.hermesRapide.value) "⚡ Actions par Jarvis : oui" else "Actions par Jarvis : non", store.hermesRapide.value) {
             store.hermesRapide.set(!store.hermesRapide.value)
         }
-        Text("Avec « Hermès pour tout », les commandes simples (appel, SMS, musique, lumières, chauffage, agenda, rappel…) sont faites " +
-            "directement par Jarvis en un seul appel d'IA ; si Jarvis n'y arrive pas, Hermès prend le relais tout seul. Les demandes " +
-            "complexes, les automatismes et les recherches passent toujours par Hermès.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+        Text("Les actions (téléphone, appels, SMS, mails, agenda, rappels, alarmes, maison, Plex, Freebox, société, fichiers, notes…) " +
+            "sont faites directement par Jarvis — sans IA du tout pour les plus courantes — ; si Jarvis n'y arrive pas, Hermès prend le relais tout seul. " +
+            "Les questions, recherches sur internet, rédactions, automatismes et le serveur passent par Hermès.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
         Spacer(Modifier.height(6.dp))
         HudChip(if (store.analyseGemini.value) "🔍 Analyse Gemini avant de répondre : oui" else "Analyse Gemini avant de répondre : non", store.analyseGemini.value) {
             store.analyseGemini.set(!store.analyseGemini.value)

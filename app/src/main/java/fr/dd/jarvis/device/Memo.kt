@@ -236,6 +236,12 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { it.optString("nom") to it.optString("description") }.filter { it.first.isNotBlank() }
     }.orEmpty()
 
+    /** Connecteurs MCP d'Hermès (noms). */
+    fun connecteursHermes(): List<String> = capacites().optJSONArray("mcp")?.let { a -> (0 until a.length()).map { a.optString(it) }.filter { it.isNotBlank() } }.orEmpty()
+
+    /** Plugins d'Hermès (noms). */
+    fun pluginsHermes(): List<String> = capacites().optJSONArray("plugins")?.let { a -> (0 until a.length()).map { a.optString(it) }.filter { it.isNotBlank() } }.orEmpty()
+
     /** Ce qu'Hermès sait faire en plus, pour le cerveau rapide (qui lui délègue ces demandes). */
     fun capacitesPourPrompt(): String {
         val c = capacites()

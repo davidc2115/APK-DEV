@@ -201,14 +201,15 @@ object RelaisGroq {
     internal fun domaines(demande: String): Set<String> {
         val t = demande.lowercase()
         val out = mutableSetOf<String>()
-        if (Regex("serveur|\\bssh\\b|debian|docker|conteneur|systemctl|\\bservices?\\b|\\bbot\\b|plex|ollama|discord|home ?assistant|\\blogs?\\b|red[ée]marr|\\bapt\\b|mise à jour du serveur").containsMatchIn(t))
+        val discord = ServeurInventaire.discord(demande)
+        if (!ServeurInventaire.serveurDiscord(demande) && Regex("serveur|\\bssh\\b|debian|docker|conteneur|systemctl|\\bservices?\\b|\\bbot\\b|plex|ollama|discord|home ?assistant|\\blogs?\\b|red[ée]marr|\\bapt\\b|mise à jour du serveur").containsMatchIn(t))
             out += listOf("ssh_", "serveur_")
         if (Regex("home ?assistant|domotique|\\bha\\b|lumi[èe]re|volet|chauffage|thermostat|po[êe]le|capteur|entit[ée]|automatisation|sc[èe]ne|prise").containsMatchIn(t)) out += "ha_"
         if (Regex("plex|films?\\b|s[ée]ries? t[ée]l[ée]|biblioth[èe]que (de )?films|playlist|liste de lecture|[ée]pisode|regarder").containsMatchIn(t)) out += "plex"
         if (Regex("r[ée]glages|identifiant|mot de passe|jeton|adresse (du|de mon) serveur|adresse ip|connexion (locale|distante|[àa] distance)|home ?assistant|\\bssh\\b").containsMatchIn(t)) out += "jarvis_reglages"
         if (Regex("site (web|internet)|\\bsite\\b|page web|vitrine|mettre en ligne|mise en ligne|h[ée]berg").containsMatchIn(t)) out += "site_web"
         if (Regex("sauvegarde|restaur|backup|remettre en (service|route)|r[ée]par").containsMatchIn(t)) out += listOf("ha_sauvegarde", "serveur_tache", "serveur_service")
-        if (Regex("discord|\\bbot\\b|salon|serveur discord").containsMatchIn(t)) out += "discord"
+        if (discord || Regex("discord|\\bbot\\b|salon|channel|serveur discord").containsMatchIn(t)) out += "discord"
         if (Regex("dividende|b[ée]n[ée]fice|r[ée]sultat (de la |de ma )?soci[ée]t[ée]|reste (pour|[àa]) la soci[ée]t[ée]|imp[ôo]t sur les soci[ée]t[ée]s|tr[ée]sorerie").containsMatchIn(t)) out += listOf("societe_resultat", "societe_info_set", "reserve_bilan")
         if (Regex("bar[èe]mes?|urssaf|cotisations|s[ée]curit[ée] sociale|\\bsmic\\b|plafond (de la )?s[ée]cu|fiches? de paie|bulletins? de (paie|salaire)").containsMatchIn(t)) out += listOf("societe_baremes", "paie", "employe_ecrire", "bulletins")
         if (Regex("\\bfactures?\\b|\\bdevis\\b").containsMatchIn(t)) out += listOf("document_action", "documents_supprimer", "document_creer", "societe_liste")

@@ -614,17 +614,24 @@ class VoiceManager(private val ctx: Context) {
         }
 
         /** Ajoute du texte (morceau de réponse en cours d'écriture). */
-        fun ajouter(texte: String) {
-            if (fini.get() || ferme || texte.isEmpty()) return
+        fun ajouter(texte0: String) {
+            if (fini.get() || ferme || texte0.isEmpty() || finOral) return
+            // Après la marque de fin de la partie dite, le texte n'est plus qu'affiché.
+            val i = texte0.indexOf(TexteParle.FIN_ORAL)
+            val texte = if (i >= 0) { finOral = true; texte0.substring(0, i) } else texte0
+            if (texte.isEmpty()) return
             synchronized(tampon) { recu.append(texte); tampon.append(texte); extraire(attendreBloc = occupe, toutDire = false) }
         }
+
+        @Volatile private var finOral = false
 
         /**
          * Fin du texte. [texteFinal] = réponse complète (si elle diffère de ce qui a été reçu : repli, message
          * d'arrière-plan… on dit ce qui manque, ou la réponse entière si rien n'a été reçu).
          */
-        fun finir(texteFinal: String? = null) {
+        fun finir(texteFinal0: String? = null) {
             if (fini.get()) return
+            val texteFinal = texteFinal0?.let { TexteParle.oral(it) }
             synchronized(tampon) {
                 if (texteFinal != null) {
                     val r = norm(recu.toString()); val f = norm(texteFinal)

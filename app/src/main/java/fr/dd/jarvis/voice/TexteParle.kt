@@ -23,7 +23,17 @@ object TexteParle {
     private fun casse(mot: String): String =
         mot.split('-').joinToString("-") { p -> p.lowercase().replaceFirstChar { it.titlecase() } }
 
-    fun preparer(t: String): String {
+    /**
+     * Marque de fin de la partie DITE : ce qui suit (liste détaillée…) est seulement affiché, jamais lu à voix haute.
+     * Caractère invisible (séparateur U+2063), sans effet à l'écran.
+     */
+    const val FIN_ORAL = "\u2063"
+
+    /** Partie à dire d'une réponse (avant [FIN_ORAL]). */
+    fun oral(t: String): String = t.substringBefore(FIN_ORAL)
+
+    fun preparer(t0: String): String {
+        val t = oral(t0)
         var s = t
             // Symboles qui seraient retirés plus bas avec les emojis : d'abord en mots.
             .replace(Regex("(?i)\\bn°\\s*"), "numéro ").replace(Regex("(\\d)\\s*°\\s*C\\b"), "$1 degrés").replace(Regex("(\\d)\\s*°"), "$1 degrés")

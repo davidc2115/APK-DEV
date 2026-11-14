@@ -513,7 +513,7 @@ object PontMcp {
                 .put("required", JSONArray().put("message"))))
         out.put(JSONObject()
             .put("name", "jarvis_rechercher_outils")
-            .put("description", "Recherche dans le catalogue complet des outils JARVIS, y compris ceux non affichés dans la liste courte. À utiliser si un outil métier est absent ou pour trouver une fonction par domaine.")
+            .put("description", "Catalogue complet des outils JARVIS (Discord : lire, rechercher, envoyer des messages, salons, rôles ; Plex ; Freebox ; Home Assistant ; société ; mails ; SMS ; agenda ; fichiers ; réseau…), y compris ceux absents de ta liste courte. À utiliser AVANT de dire qu'un outil n'existe pas.")
             .put("inputSchema", JSONObject().put("type", "object").put("properties", JSONObject()
                 .put("requete", JSONObject().put("type", "string").put("description", "Nom ou mots-clés du domaine recherché"))
                 .put("limite", JSONObject().put("type", "integer").put("description", "Nombre maximal de résultats (1 à 20)")))

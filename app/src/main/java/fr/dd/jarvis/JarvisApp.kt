@@ -112,6 +112,8 @@ class JarvisApp : Application() {
             store.hermesModeMigre4.set(true)
         }
         fr.dd.jarvis.ai.Ollama.app = this
+        // Noms des serveurs et salons Discord : « le serveur B&G » est reconnu comme Discord (pas le serveur Debian).
+        runCatching { fr.dd.jarvis.ai.DiscordNoms.initialiser(this); fr.dd.jarvis.ai.DiscordNoms.rafraichirSiBesoin(this) }
         llm = Llm(store)
         calendar = CalendarRepo(this, store)
         mail = MailRepo(this, store)

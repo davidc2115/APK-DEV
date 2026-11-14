@@ -31,13 +31,90 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
+/** Sous-onglet affiché (« Liés à Jarvis » demandé depuis un lien de la conversation). */
+object OngletWifi { val lies = androidx.compose.runtime.mutableStateOf(false) }
+
 /**
- * Onglet « Wi-Fi » : tous les appareils du réseau Wi-Fi (relevés automatiquement à chaque connexion et régulièrement),
- * avec leur nom, leur adresse, leurs services ; un appui pour les nommer et pour les rendre joignables à distance
- * (JARVIS réserve l'IP, ouvre le port sur la Freebox et donne l'adresse publique).
+ * Onglet « Wi-Fi », en deux sous-onglets : « Réseau Wi-Fi » (tous les appareils du réseau) et « Liés à Jarvis » (les
+ * appareils et services que JARVIS pilote, avec la façon de les joindre en local et à distance).
  */
 @Composable
 fun AppareilsWifiScreen(app: JarvisApp, onDemander: (String) -> Unit) {
+    val lies by OngletWifi.lies
+    Column {
+        Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HudChip("📡 Réseau Wi-Fi", !lies) { OngletWifi.lies.value = false }
+            HudChip("🔗 Liés à Jarvis", lies) { OngletWifi.lies.value = true }
+        }
+        if (lies) LiesAJarvis(app, onDemander) else ReseauWifi(app, onDemander)
+    }
+}
+
+/**
+ * Sous-onglet « Liés à Jarvis » : Home Assistant, Plex, Freebox, serveur, imprimantes, appareils ouverts à distance…
+ * avec l'adresse utilisée à la maison (local) et dehors (à distance), et un test de chaque chemin.
+ */
+@Composable
+private fun LiesAJarvis(app: JarvisApp, onDemander: (String) -> Unit) {
+    val scope = rememberCoroutineScope()
+    var tick by remember { mutableIntStateOf(0) }
+    val liens = remember(tick) { fr.dd.jarvis.ai.AppareilsLies.liste(app) }
+    val situation = remember(tick) { runCatching { fr.dd.jarvis.ai.Serveur.situation(app) }.getOrDefault("") }
+    // Résultat des tests : clé « id/local » ou « id/distant » → true (répond), false (ne répond pas), null (en cours).
+    val tests = remember { androidx.compose.runtime.mutableStateMapOf<String, Boolean?>() }
+    var enTest by remember { mutableStateOf(false) }
+
+    fun tester() {
+        if (enTest) return
+        enTest = true; tests.clear()
+        scope.launch {
+            val travaux = liens.flatMap { l -> listOfNotNull(l.testLocal?.let { "${l.id}/local" to it }, l.testDistant?.let { "${l.id}/distant" to it }) }
+            travaux.forEach { (k, _) -> tests[k] = null }
+            kotlinx.coroutines.coroutineScope {
+                travaux.forEach { (k, adr) -> launch(Dispatchers.IO) { val ok = fr.dd.jarvis.ai.AppareilsLies.repond(adr); withContext(Dispatchers.Main) { tests[k] = ok } } }
+            }
+            enTest = false
+        }
+    }
+    LaunchedEffect(Unit) { tester() }
+
+    fun pastille(k: String): String = if (!tests.containsKey(k)) "" else when (tests[k]) { true -> " 🟢"; false -> " 🔴"; null -> " ⏳" }
+
+    LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item {
+            HudPanel(Modifier.fillMaxWidth(), title = "🔗 Appareils liés à Jarvis") {
+                Text("Ce que JARVIS pilote directement, et comment il le joint : 🏠 en local quand le téléphone est sur le Wi-Fi de la maison, " +
+                    "🌍 à distance quand tu es dehors. 🟢 répond · 🔴 ne répond pas d'ici · ⏳ test en cours.", color = HudDim, fontSize = 11.sp)
+                if (situation.isNotBlank()) Text("📍 $situation", color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HudButton(if (enTest) "Test…" else "🔄 Tester les connexions", Modifier.weight(1f), enabled = !enTest) { tick++; tester() }
+                    HudButton("💬 Demander", Modifier.weight(1f)) { onDemander("Quels appareils contrôles-tu, en local et à distance ?") }
+                }
+            }
+        }
+        items(liens, key = { it.id }) { l ->
+            HudPanel(Modifier.fillMaxWidth()) {
+                Text("${l.emoji} ${l.nom}" + (if (!l.configure) " · ⚙️ à configurer" else ""), color = HudText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text(l.role, color = HudDim, fontSize = 11.sp)
+                Text("🏠 Local : ${l.local}" + pastille("${l.id}/local"), color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                Text("🌍 À distance : ${l.distant}" + pastille("${l.id}/distant"), color = HudText, fontSize = 12.sp)
+                if (!l.configure && l.reglage.isNotBlank()) Text("⚙️ ${l.reglage}", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+                if (l.configure && l.testDistant == null && l.id in setOf("ha")) Row(Modifier.padding(top = 6.dp)) {
+                    HudButton("🌍 Rendre accessible à distance", Modifier.weight(1f)) { onDemander("Rends ${l.nom} accessible à distance") }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Sous-onglet « Réseau Wi-Fi » : tous les appareils du réseau Wi-Fi (relevés automatiquement à chaque connexion et
+ * régulièrement), avec leur nom, leur adresse, leurs services ; un appui pour les nommer et pour les rendre joignables
+ * à distance (JARVIS réserve l'IP, ouvre le port sur la Freebox et donne l'adresse publique).
+ */
+@Composable
+private fun ReseauWifi(app: JarvisApp, onDemander: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     var tick by remember { mutableIntStateOf(0) }
     var etat by remember { mutableStateOf("") }

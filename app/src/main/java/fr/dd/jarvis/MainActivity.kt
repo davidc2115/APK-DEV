@@ -337,7 +337,13 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
     }
     androidx.activity.compose.BackHandler(enabled = terrain.isNotEmpty()) { terrain = "" }
     LaunchedEffect(terrainDemande.value) {
-        if (terrainDemande.value.isNotBlank()) { terrain = terrainDemande.value; tab = 0; terrainDemande.value = "" }
+        if (terrainDemande.value.isNotBlank()) {
+            val t = terrainDemande.value
+            // « wifi », « wifi_lies » : l'onglet Wi-Fi (et son sous-onglet « Liés à Jarvis »).
+            if (t.startsWith("wifi")) { terrain = ""; tab = 7; fr.dd.jarvis.ui.OngletWifi.lies.value = t == "wifi_lies" }
+            else { terrain = t; tab = 0 }
+            terrainDemande.value = ""
+        }
     }
     LaunchedEffect(demandeExterne.value) {
         if (demandeExterne.value.isNotBlank()) { vm.send(demandeExterne.value); terrain = ""; tab = 1; demandeExterne.value = "" }

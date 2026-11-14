@@ -154,6 +154,18 @@ class Brain(
         // Changement de profil énergétique : commande locale immédiate, sans appel à Groq/Gemini/Hermès.
         // Les trois profils sont persistés puis leurs planificateurs sont recalculés immédiatement.
         if (!pourHermes) {
+            // « Que sais-tu faire ? », « liste tous tes outils », « que sais-tu faire avec les mails ? » : la liste
+            // complète, tirée du catalogue des capacités (sans IA).
+            Capacites.demande(texteUser)?.let { d ->
+                onStatus("🧰 Ce que je sais faire…")
+                return reflexe(Capacites.repondre(app, d, tools.schemaAll()))
+            }
+            // « Quels appareils contrôles-tu ? » : appareils liés à Jarvis, en local et à distance.
+            if (Regex("\\b(quels?|quelles?|liste|montre|donne)\\b.{0,30}\\b(appareils?|equipements?|services?)\\b.{0,30}\\b(controles?|pilotes?|geres?|lies?|associes?|relies?)\\b|\\bappareils? (lies|associes|relies) (a|avec) (toi|jarvis)\\b")
+                    .containsMatchIn(fr.dd.jarvis.societe.core.normaliser(texteUser)) && !Regex("\\b(box|freebox|wi ?fi|reseau)\\b.{0,20}\\b(connectes?)\\b").containsMatchIn(fr.dd.jarvis.societe.core.normaliser(texteUser))) {
+                onStatus("🔗 Appareils liés…")
+                return reflexe(AppareilsLies.texte(app))
+            }
             // Plusieurs actions simples dans la même phrase (« passe Jarvis en mode économie et le téléphone aussi »,
             // « allume la torche et mets en vibreur ») : toutes exécutées ici, sans IA ni Hermès.
             if (!fr.dd.jarvis.hermes.Routeur.orchestrationOuNomme(texteUser)) actionsCombinees(texteUser, onStatus)?.let { return reflexe(it) }
@@ -242,6 +254,16 @@ class Brain(
             fr.dd.jarvis.securite.Systemes.ambigus(app, texteUser)?.let { (noms, activer) ->
                 return reflexe("Quel mode veux-tu ${if (activer) "activer" else "désactiver"} : ${noms.joinToString(" ou ") { "« $it »" }} ?")
             }
+            // Actions courantes reconnues sans IA (alarme, minuteur, appel, SMS, appli, météo, planning, rappel…).
+            CommandesDirectes.intention(texteUser)?.let { i ->
+                onStatus(i.statut)
+                executerDirecte(i)?.let { return reflexe(it) }
+            }
+            // Lumières, volets, prises, télé : Home Assistant directement quand l'appareil est trouvé sans ambiguïté.
+            if (DomotiqueDirecte.commande(fr.dd.jarvis.societe.core.normaliser(texteUser)) != null) {
+                onStatus("🏠 Maison…")
+                runCatching { DomotiqueDirecte.executer(app, tools, texteUser) }.getOrNull()?.let { return reflexe(it) }
+            }
             if (commandeMode && !cibleTelephone) {
                 onStatus("⚙️ Changement du mode énergétique…")
                 return reflexe(appliquerModeJarvis(modeEnergieDans(demandeMode) ?: "equilibre"))
@@ -256,9 +278,10 @@ class Brain(
         // et les réflexes sans IA restent instantanés. Les traitements directs (Freebox, fichiers, etc.)
         // ne doivent pas intercepter une demande avant Hermès. « Hermès rapide » conserve l'exception
         // explicite pour les commandes simples du téléphone.
-        val toutHermes = !pourHermes && app.store.hermesMode.value in setOf("auto", "demande", "tout") &&
-            !app.enVoiture && !fr.dd.jarvis.hermes.Hermes.degrade() &&
-            !(app.store.hermesRapide.value && fr.dd.jarvis.hermes.Routeur.commandeSimple(texteUser))
+        // Les traitements directs (position, recherche de fichiers, Freebox, vidéo…) sont des actions de Jarvis : ils
+        // passent avant Hermès, sauf en mode « Hermès pour tout » avec « Actions par Jarvis » désactivé.
+        val toutHermes = !pourHermes && app.store.hermesMode.value == "tout" && !app.store.hermesRapide.value &&
+            !app.enVoiture && !fr.dd.jarvis.hermes.Hermes.degrade()
         if (reflexes) {
             if (!multi) commandeImmediate(texteUser, onStatus)?.let { return reflexe(it) }
         }
@@ -671,7 +694,25 @@ class Brain(
         fr.dd.jarvis.device.CommandeMedia.intention(partie) { fr.dd.jarvis.device.CommandeMedia.musiqueOuverte(app) }?.let { a ->
             return { fr.dd.jarvis.device.CommandeMedia.executer(app, a, app.enVoiture) }
         }
+        // Actions courantes sans texte libre (un SMS ou un rappel ne se découpe jamais sur « et »).
+        CommandesDirectes.intention(partie)?.takeIf { !it.texteLibre }?.let { i ->
+            return { executerDirecte(i) ?: "❓ Application « ${i.appli} » introuvable sur le téléphone." }
+        }
+        if (DomotiqueDirecte.commande(n) != null) return {
+            runCatching { DomotiqueDirecte.executer(app, tools, partie) }.getOrNull() ?: "❓ Je n'ai pas trouvé sans ambiguïté l'appareil de « $partie » dans Home Assistant."
+        }
         return null
+    }
+
+    /** Exécute une action reconnue par [CommandesDirectes] ; null si l'application demandée n'est pas installée. */
+    private suspend fun executerDirecte(i: CommandesDirectes.Intention): String? {
+        i.local?.let { return CommandesDirectes.local(app, it) }
+        val outil = i.outil ?: return null
+        if (i.appli != null) {
+            val (_, nom) = CommandesDirectes.appliInstallee(app, i.appli) ?: return null
+            return tools.execute(outil, JSONObject(i.args.toString()).put("value", nom)).text
+        }
+        return tools.execute(outil, i.args).text
     }
 
     private suspend fun commandeImmediate(texte: String, onStatus: (String) -> Unit): String? {
@@ -733,6 +774,21 @@ class Brain(
             val coupe = Regex("\\b(desactive|desactiver|coupe|couper|arrete|eteins|stoppe)\\b").containsMatchIn(n)
             val serveur = when { n.contains("openvpn") -> "openvpn_routed"; n.contains("ipsec") -> "ipsec"; n.contains("pptp") -> "pptp"; else -> "" }
             val args = JSONObject()
+            // Appareils de la box : « supprime les appareils sans nom de la box », « retire les appareils hors ligne »,
+            // « liste les appareils sans nom ».
+            val appareils = Regex("\\b(appareils?|peripheriques?|equipements?|hotes?|machines?)\\b|\\bsans nom\\b").containsMatchIn(n) && !Regex("\\b(fichiers?|dossiers?|disques?|telechargements?)\\b").containsMatchIn(n)
+            if (box && appareils) {
+                val filtre = when {
+                    Regex("\\bsans nom|\\binconnus?\\b|\\bnon nommes?\\b|\\banonymes?\\b").containsMatchIn(n) -> "sans_nom"
+                    Regex("\\bhors ligne|\\bdeconnectes?\\b|\\binactifs?\\b|\\bqui ne sont (plus|pas) connectes\\b|\\banciens?\\b").containsMatchIn(n) -> "hors_ligne"
+                    else -> ""
+                }
+                if (Regex("\\b(supprim\\w*|efface\\w*|retire\\w*|enleve\\w*|oublie\\w*|nettoie\\w*|vire\\w*|vide\\w*)\\b").containsMatchIn(n)) {
+                    if (filtre.isBlank()) return null // appareil nommé : le cerveau le retrouve et appelle supprimer_appareil
+                    return "supprimer_appareil" to args.put("action", "supprimer_appareil").put("filtre", filtre)
+                }
+                if (filtre.isNotBlank() && Regex("\\b(liste|montre|affiche|quels?|combien|donne|voir)\\b").containsMatchIn(n)) return "appareils" to args.put("action", "appareils").put("filtre", filtre)
+            }
             // Disque dur de la box : « se connecter au disque », « dossier téléchargements », « mes films sur la box »…
             // Une MODIFICATION de fichiers (renommer, déplacer, supprimer, copier, envoyer, créer…) n'est jamais un simple
             // listage : elle part au cerveau, qui utilise les actions de fichiers de l'outil freebox.

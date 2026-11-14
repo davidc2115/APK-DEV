@@ -515,10 +515,10 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 }
                 Text(
                     when (store.hermesMode.value) {
-                        "tout" -> "Toutes les demandes passent par Hermès (réponses marquées 🪽) : mémoire longue, notes, skills et plugins, " +
-                            "confie les actions du téléphone à l'agent Jarvis, le travail lourd à ses sous-agents Gemini et Groq, et crée tes automatismes. " +
-                            "Seules les commandes instantanées du téléphone (lampe torche, volume, Wi-Fi, Bluetooth, lecture/pause) sont exécutées directement, sans IA. " +
-                            "Si Hermès est hors ligne, Jarvis répond à sa place et le signale (⚠️)."
+                        "tout" -> "Hermès répond aux questions, recherches, rédactions, automatismes et au serveur (réponses marquées 🪽) : mémoire longue, notes, skills et plugins, " +
+                            "sous-agents Gemini et Groq. Les ACTIONS (téléphone, appels, SMS, mails, agenda, rappels, maison, Plex, Freebox, société, fichiers…) sont faites " +
+                            "directement par Jarvis quand « Actions par Jarvis » est activé — les plus courantes sans IA du tout — ; s'il n'y arrive pas, Hermès prend le relais. " +
+                            "Si Hermès est hors ligne, Jarvis répond à sa place et le signale (⚠️). Demande « que sais-tu faire ? » pour la liste complète."
                         "off" -> "Jarvis répond uniquement avec sa partie rapide ; le moteur approfondi (Hermès) n'est pas utilisé."
                         else -> "Jarvis et Hermès ne forment qu'un seul assistant : une voix, une conversation, une mémoire. " +
                             "Jarvis répond tout de suite avec sa partie rapide ; si ce n'est pas suffisant (pas d'outil, rien trouvé, information manquante, erreur), " +
@@ -527,10 +527,10 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     },
                     color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp)
                 )
-                if (store.hermesMode.value == "tout") {
+                if (store.hermesMode.value != "off") {
                     Spacer(Modifier.height(6.dp))
-                    HudChip(if (store.hermesRapide.value) "⚡ Réponses rapides : oui" else "Réponses rapides : non", store.hermesRapide.value) { store.hermesRapide.set(!store.hermesRapide.value) }
-                    Text("Commandes simples (appel, SMS, musique, lumières, chauffage, agenda, rappel…) faites directement par Jarvis, en un seul appel d'IA ; Hermès prend le relais s'il n'y arrive pas.",
+                    HudChip(if (store.hermesRapide.value) "⚡ Actions par Jarvis : oui" else "Actions par Jarvis : non", store.hermesRapide.value) { store.hermesRapide.set(!store.hermesRapide.value) }
+                    Text("Actions (téléphone, appels, SMS, mails, agenda, rappels, maison, Plex, société, fichiers…) faites directement par Jarvis, sans passer par Hermès ; Hermès prend le relais s'il n'y arrive pas.",
                         color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
                 }
                 Spacer(Modifier.height(8.dp))

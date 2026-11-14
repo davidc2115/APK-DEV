@@ -159,9 +159,9 @@ object Discord {
         }
     }
 
-    fun guildes(app: JarvisApp): JSONArray = reqArr(app, "GET", "/users/@me/guilds")
+    fun guildes(app: JarvisApp): JSONArray = reqArr(app, "GET", "/users/@me/guilds").also { DiscordNoms.retenir(app, it) }
     fun roles(app: JarvisApp, guildId: String): JSONArray = reqArr(app, "GET", "/guilds/$guildId/roles")
-    fun salons(app: JarvisApp, guildId: String): JSONArray = reqArr(app, "GET", "/guilds/$guildId/channels")
+    fun salons(app: JarvisApp, guildId: String): JSONArray = reqArr(app, "GET", "/guilds/$guildId/channels").also { DiscordNoms.retenir(app, it) }
     /** Lit les derniers messages d’un salon. afterId permet de ne récupérer que les messages plus récents. */
     fun messages(app: JarvisApp, channelId: String, limite: Int = 30, afterId: String = "", beforeId: String = ""): JSONArray {
         val n = limite.coerceIn(1, 100)
@@ -272,4 +272,56 @@ object Discord {
         for (i in 0 until arr.length()) { val g = arr.getJSONObject(i); if (g.optString("name").lowercase().contains(n)) return g }
         return null
     }
+}
+
+
+/**
+ * Noms des serveurs (guildes) et salons Discord où le bot est présent, gardés sur le téléphone : une demande qui les cite
+ * (« résume le salon discussion du serveur B&G ») est reconnue comme une demande DISCORD — outils Discord proposés,
+ * jamais le serveur Debian ni SSH — même sans le mot « Discord ».
+ */
+object DiscordNoms {
+    @Volatile var noms: Set<String> = emptySet()
+        private set
+    private fun fichier(app: JarvisApp) = java.io.File(app.filesDir, "discord_noms.json")
+
+    internal fun cle(s: String) = fr.dd.jarvis.societe.core.normaliser(s.replace("&", " et ").replace(Regex("[-_]"), " "))
+
+    /** À appeler au démarrage : noms relevés lors des visites précédentes. */
+    fun initialiser(app: JarvisApp) {
+        noms = runCatching { JSONArray(fichier(app).readText()).let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } }.getOrDefault(emptySet())
+    }
+
+    /** Relevé en arrière-plan (au plus une fois par jour) des serveurs et salons où le bot est présent. */
+    fun rafraichirSiBesoin(app: JarvisApp) {
+        if (!Discord.configure(app)) return
+        val f = fichier(app)
+        if (f.exists() && System.currentTimeMillis() - f.lastModified() < 24 * 3_600_000L) return
+        Thread({
+            runCatching {
+                val g = Discord.guildes(app)
+                for (i in 0 until minOf(g.length(), 10)) runCatching { Discord.salons(app, g.getJSONObject(i).getString("id")) }
+                if (f.exists()) f.setLastModified(System.currentTimeMillis())
+            }
+        }, "jarvis-discord-noms").apply { isDaemon = true }.start()
+    }
+
+    @Synchronized fun retenir(app: JarvisApp, arr: JSONArray) {
+        val nouveaux = (0 until arr.length()).mapNotNull { arr.optJSONObject(it)?.optString("name") }.map { cle(it) }.filter { it.length >= 2 }
+        if (nouveaux.all { it in noms }) return
+        noms = (noms + nouveaux).take(400).toSet()
+        runCatching { fichier(app).writeText(JSONArray(noms.toList()).toString()) }
+    }
+
+    /** La phrase cite-t-elle un serveur ou un salon Discord connu ? (noms courants du quotidien exclus) */
+    fun cite(texte: String, connus: Set<String> = noms): Boolean {
+        if (connus.isEmpty()) return false
+        val t = " " + cle(texte) + " "
+        return connus.any { n ->
+            n !in COURANTS && ((n.length >= 3 && t.contains(" $n ")) || Regex("\\b(serveur|salon|channel|canal) ${Regex.escape(n)}\\b").containsMatchIn(t))
+        }
+    }
+
+    /** Noms de salons trop courants pour désigner Discord à eux seuls (« le salon », « général »…). */
+    private val COURANTS = setOf("general", "salon", "accueil", "bienvenue", "annonces", "regles", "musique", "jeux", "photos", "videos", "vocal", "aide", "discussion", "chat", "infos", "news")
 }

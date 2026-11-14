@@ -41,7 +41,18 @@ object ServeurInventaire {
      * Seulement alors SSH est permis. Home Assistant (entités, personnes, appareils, automatisations) passe toujours par
      * l'instance elle-même (API + jeton), jamais par une commande sur le serveur qui l'héberge.
      */
-    fun serveurDemande(demande: String): Boolean = demande.isNotBlank() && R_SSH_EXPLICITE.containsMatchIn(demande)
+    fun serveurDemande(demande: String): Boolean = demande.isNotBlank() && R_SSH_EXPLICITE.containsMatchIn(demande) && !serveurDiscord(demande)
+
+    /** Ce qui désigne vraiment la machine (et pas un serveur Discord) : SSH, Docker, Debian, redémarrage, journaux… */
+    private val R_MACHINE = Regex(
+        "\\bssh\\b|\\bdocker\\b|\\bdebian\\b|\\bconteneurs?\\b|\\bcontainers?\\b|\\bsystemctl\\b|\\bsudo\\b|\\bvps\\b|\\bterminal\\b|ligne de commande|" +
+            "red[ée]marr|reboot|relanc|\\blogs?\\b|espace disque|plant[ée]|en panne|crash|ne (r[ée]pond|marche|fonctionne|d[ée]marre) (plus|pas)|(?<![\\p{L}])(/etc|/opt|/srv|/var|/home|/root|/usr)/", RegexOption.IGNORE_CASE)
+
+    /** Demande Discord (le mot, ou le nom d'un serveur / salon Discord connu). */
+    fun discord(demande: String): Boolean = Regex("discord|\\bchannels?\\b", RegexOption.IGNORE_CASE).containsMatchIn(demande) || fr.dd.jarvis.ai.DiscordNoms.cite(demande)
+
+    /** « Serveur » désigne ici un serveur DISCORD (guilde) : ni SSH, ni serveur Debian. */
+    fun serveurDiscord(demande: String): Boolean = discord(demande) && !R_MACHINE.containsMatchIn(demande)
 
     /** Bloc à ajouter au prompt d'Hermès (vide si la demande ne concerne pas le serveur ou si rien n'est configuré). */
     suspend fun bloc(app: JarvisApp, demande: String): String {
