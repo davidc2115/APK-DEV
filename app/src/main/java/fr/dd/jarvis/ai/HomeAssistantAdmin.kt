@@ -384,9 +384,14 @@ class HomeAssistantAdmin(
             "redemarrer" -> {
                 val v = rest("POST", "/api/config/core/check_config") as? JSONObject
                 if (v?.optString("result") == "invalid") return "⛔ Configuration invalide, redémarrage annulé : ${v.optString("errors")}"
-                if (!ok("REDÉMARRER Home Assistant (coupure ~1 à 2 min) ?")) return "Annulé."
+                if (!ok("REDÉMARRER Home Assistant (coupure de quelques minutes) ?")) return "Annulé."
                 runCatching { rest("POST", "/api/services/homeassistant/restart") }
-                "🔄 Redémarrage lancé (1 à 2 minutes)."
+                // Attente réelle du retour (le serveur a peu de mémoire : jusqu'à 8 min).
+                val debut = System.currentTimeMillis()
+                kotlinx.coroutines.delay(15_000)
+                while (System.currentTimeMillis() - debut < 480_000 && runCatching { rest("GET", "/api/") }.isFailure) kotlinx.coroutines.delay(6000)
+                if (runCatching { rest("GET", "/api/") }.isSuccess) "✅ Home Assistant redémarré et de nouveau en ligne (au bout de ${(System.currentTimeMillis() - debut) / 1000} s)."
+                else "⚠️ Home Assistant ne répond toujours pas après 8 min : dis « état de Home Assistant » (ha_sauvegarde etat) pour voir ses erreurs."
             }
             // ---- accès brut (tout le reste)
             "ws" -> {

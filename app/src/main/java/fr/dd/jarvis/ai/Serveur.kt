@@ -714,22 +714,10 @@ object Serveur {
         return "✅ $domaine.$service" + (if (entite.isNotBlank()) " → $entite" else "") + " exécuté."
     }
 
-    /** Valide la configuration (API, sinon commande Docker). Retourne null si valide, sinon le message d'erreur. */
-    fun haValider(app: JarvisApp): String? {
-        if (haConfigure(app)) runCatching {
-            val o = JSONObject(ha(app, "POST", "/api/config/core/check_config"))
-            return if (o.optString("result") == "valid") null else "Configuration invalide : " + o.optString("errors", o.toString()).take(900)
-        }
-        if (sshConfigure(app)) {
-            val nom = haConteneur(app) ?: return "Validation impossible (API Home Assistant injoignable et conteneur Docker introuvable)."
-            val r = exec(app, "docker exec $nom python -m homeassistant --script check_config -c /config 2>&1 | tail -40", 120)
-            return if (r.second.contains("Failed config", true) || r.second.contains("error", true) && !r.second.contains("Successful config", true)) "Configuration invalide :\n" + r.second.take(900) else null
-        }
-        return "Validation impossible (ni API, ni SSH)."
-    }
+    /** Valide la configuration (API, sinon vérification dans le conteneur). Retourne null si valide, sinon le message d'erreur. */
+    fun haValider(app: JarvisApp): String? = HaSur.verifier(app)?.let { "Configuration invalide : $it" }
 
-    fun haConteneur(app: JarvisApp): String? =
-        exec(app, "docker ps -a --format '{{.Names}}\t{{.Image}}' | grep -i home-assistant | head -1 | cut -f1").second.trim().ifBlank { null }
+    fun haConteneur(app: JarvisApp): String? = runCatching { HaSur.conteneur(app)?.nom }.getOrNull()
 
     /** Dossier de configuration de Home Assistant sur le serveur (réglage, sinon détection Docker puis emplacements usuels). */
     fun haDossier(app: JarvisApp): String? {

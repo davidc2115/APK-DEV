@@ -225,6 +225,12 @@ object FichiersServeur {
         return if (r.second.contains("JARVIS_SAUVEGARDE")) bak else null
     }
 
+    /** Supprime un fichier (du serveur, ou d'un conteneur) — utilisé pour annuler la création d'un fichier refusé. */
+    fun supprimer(app: JarvisApp, chemin: String, conteneur: String = "") {
+        if (conteneur.isBlank()) { val c = Serveur.absolu(app, chemin); Serveur.exec(app, "rm -f -- ${q(c)} 2>/dev/null || sudo rm -f -- ${q(c)}") }
+        else docker(app, "docker exec ${q(conteneur)} rm -f -- ${q(chemin)}", 30)
+    }
+
     /** Dernière sauvegarde « .jarvis-bak-… » d'un fichier, ou null. */
     fun derniereSauvegarde(app: JarvisApp, chemin: String, conteneur: String = ""): String? {
         val cmd = "ls -1t -- ${q(if (conteneur.isBlank()) Serveur.absolu(app, chemin) else chemin)}.jarvis-bak-* 2>/dev/null | head -1"

@@ -203,10 +203,23 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
         }
         if (actuel != null && apres == actuel) return ToolResult("Aucun changement : $p ($ou) contient déjà exactement ce contenu.")
         val diff = if (actuel == null) "(nouveau fichier, ${apres.lines().size} lignes)" else FichiersServeur.difference(avant, apres)
-        if (!confirm("Modifier $p $ou ($resume) ?\n\n" + diff.take(900), true)) return ToolResult("Refusé par l'utilisateur : $p n'a pas été modifié.")
+        val configHa = runCatching { HaSur.estConfigHa(app, p, ct) }.getOrDefault(false)
+        if (configHa && apres.contains('\t')) return ToolResult("❌ Le YAML de Home Assistant n'accepte pas les tabulations : réécris avec des espaces. $p n'a pas été modifié.")
+        if (!confirm("Modifier $p $ou ($resume) ?" + (if (configHa) " Configuration de Home Assistant : vérifiée après écriture, ancienne version remise si elle est refusée." else "") + "\n\n" + diff.take(900), true))
+            return ToolResult("Refusé par l'utilisateur : $p n'a pas été modifié.")
         val bak = FichiersServeur.ecrire(app, p, apres, ct)
+        // Configuration de Home Assistant : vérifiée tout de suite. Refusée → l'ancienne version revient (sinon Home Assistant
+        // redémarrerait en mode de récupération, entités indisponibles). Acceptée → rechargée à chaud, sans coupure.
+        val suite = if (!configHa) "" else {
+            val err = runCatching { HaSur.verifier(app) }.getOrNull()
+            if (err != null) {
+                runCatching { if (actuel != null) FichiersServeur.ecrire(app, p, actuel, ct) else FichiersServeur.supprimer(app, p, ct) }
+                return ToolResult("⛔ Home Assistant refuse cette modification : l'ancienne version de $p a été remise (rien n'a changé, Home Assistant reste en service).\n```\n$err\n```")
+            }
+            "\n✅ Configuration de Home Assistant valide. " + HaSur.recharger(app) + " Si le changement concerne une intégration non rechargeable, dis « redémarre Home Assistant »."
+        }
         return ToolResult("✅ $p modifié $ou : $resume ; contenu vérifié après écriture." + (bak?.let { "\nSauvegarde de l'ancienne version : $it (action=restaurer pour revenir en arrière)." } ?: "") +
-            "\n```diff\n" + diff.take(3500) + "\n```")
+            suite + "\n```diff\n" + diff.take(3500) + "\n```")
     }
 
     private suspend fun run(name: String, a: JSONObject): ToolResult {
@@ -227,6 +240,8 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 val d = a.optString("domaine").trim(); val s = a.optString("service").trim(); val e = a.optString("entity_id").trim()
                 val sensible = (d in setOf("lock", "alarm_control_panel") || s in setOf("restart", "stop", "unlock", "alarm_disarm", "open_cover") && d != "light") || (d == "homeassistant" && s in setOf("restart", "stop"))
                 if (sensible && !confirm("Home Assistant : exécuter $d.$s ${e}?", true)) return ToolResult("Refusé par l'utilisateur.")
+                // Redémarrage : configuration vérifiée avant, retour en ligne attendu (jamais « redémarré » à l'aveugle).
+                if (d == "homeassistant" && s == "restart") return ToolResult(HaSur.redemarrer(app), direct = true)
                 val data = when (val raw = a.opt("donnees")) {
                     is JSONObject -> JSONObject(raw.toString())
                     is String -> raw.trim().takeIf { it.startsWith("{") }?.let { runCatching { JSONObject(it) }.getOrNull() }
@@ -241,6 +256,16 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 if (cible?.jump == true) ssh()
                 val cmd = a.optString("commande").trim()
                 if (cmd.isBlank()) return ToolResult("Commande vide.")
+                // Redémarrage / mise à jour de Home Assistant « à la main » : remplacés par les versions sûres.
+                if (cible == null) runCatching { HaSur.interception(cmd, HaSur.conteneur(app)?.nom) }.getOrNull()?.let { quoi ->
+                    return if (quoi == "redemarrer") {
+                        if (!confirm("Redémarrer Home Assistant ? (configuration vérifiée avant, arrêt propre, retour en ligne attendu)", true)) ToolResult("Refusé par l'utilisateur.")
+                        else ToolResult(HaSur.redemarrer(app), direct = true)
+                    } else {
+                        if (!confirm("Mettre à jour Home Assistant ? (sauvegarde, contrôle de la place, retour automatique à l'ancienne version si la nouvelle ne démarre pas)", true)) ToolResult("Refusé par l'utilisateur.")
+                        else ToolResult(HaSur.mettreAJour(app) { code, nom, root -> ServeurAdminTools(app, confirm).lancerTache(code, nom, root) }, direct = true)
+                    }
+                }
                 if ((Serveur.dangereuse(cmd) || cible != null) && !confirm("Exécuter sur ${cible?.hote ?: app.store.sshHost.value} :\n\n$cmd", true)) return ToolResult("Refusé par l'utilisateur.")
                 ToolResult("```\n" + sortie(Serveur.exec(app, cmd, (a.optString("delai").toIntOrNull() ?: 60).coerceIn(5, 600), cible)) + "\n```")
             }
@@ -558,11 +583,8 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 return ToolResult("🔄 Rechargement ($d.$s) demandé.")
             }
             "redemarrer" -> {
-                if (!confirm("Redémarrer Home Assistant ?", true)) return ToolResult("Refusé par l'utilisateur.")
-                val err = Serveur.haValider(app)
-                if (err != null) return ToolResult("⛔ Redémarrage annulé : $err")
-                Serveur.ha(app, "POST", "/api/services/homeassistant/restart")
-                return ToolResult("🔁 Redémarrage de Home Assistant lancé (1 à 2 minutes).")
+                if (!confirm("Redémarrer Home Assistant ? (configuration vérifiée avant ; coupure de quelques minutes)", true)) return ToolResult("Refusé par l'utilisateur.")
+                return ToolResult(HaSur.redemarrer(app), direct = true)
             }
             "valider" -> return ToolResult(Serveur.haValider(app)?.let { "❌ $it" } ?: "✅ Configuration valide.")
         }
@@ -583,12 +605,13 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 if (c.contains('\t') && f.endsWith(".yaml") ) return ToolResult("❌ Le YAML n'accepte pas les tabulations : réécris avec des espaces.")
                 if (!confirm("Modifier ${f.removePrefix("$dir/")} dans la configuration Home Assistant (sauvegarde + validation automatiques) ?", true)) return ToolResult("Refusé par l'utilisateur.")
                 val bak = Serveur.ecrire(app, f, if (c.endsWith("\n")) c else c + "\n")
-                val err = if (f.endsWith(".yaml") || f.endsWith(".yml")) Serveur.haValider(app) else null
-                if (err != null && !err.startsWith("Validation impossible")) {
+                val err = if (f.endsWith(".yaml") || f.endsWith(".yml")) HaSur.verifier(app) else null
+                if (err != null) {
                     if (bak != null) Serveur.exec(app, "cp -p ${Serveur.q(bak)} ${Serveur.q(f)} 2>/dev/null || sudo cp -p ${Serveur.q(bak)} ${Serveur.q(f)}")
-                    ToolResult("⛔ Fichier refusé par la validation, ancienne version restaurée.\n$err")
+                    else Serveur.exec(app, "rm -f ${Serveur.q(f)} 2>/dev/null || sudo rm -f ${Serveur.q(f)}")
+                    ToolResult("⛔ Home Assistant refuse ce fichier : ancienne version remise, rien n'a changé.\n```\n$err\n```")
                 } else ToolResult("✅ ${f.removePrefix("$dir/")} enregistré." + (bak?.let { " Sauvegarde : ${it.substringAfterLast('/')}." } ?: "") +
-                    (if (err != null) "\n⚠️ $err" else if (f.endsWith(".yaml")) "\nConfiguration valide — dis « recharge » (ou « redémarre ») pour l'appliquer." else ""))
+                    (if (f.endsWith(".yaml") || f.endsWith(".yml")) "\nConfiguration valide. " + HaSur.recharger(app) + " Si le changement concerne une intégration non rechargeable, dis « redémarre Home Assistant »." else ""))
             }
             "restaurer" -> {
                 val nom = a.optString("contenu").trim().substringAfterLast('/')

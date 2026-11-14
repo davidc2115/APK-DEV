@@ -137,7 +137,16 @@ class ServeurAdminTools(private val app: JarvisApp, private val confirm: suspend
         val n = (a.optString("lignes").toIntOrNull() ?: 80).coerceIn(10, 400)
         val c = trouves.first()
         val sensible = action in setOf("arreter", "redemarrer", "mettre_a_jour", "desactiver", "demarrer")
-        if (sensible && !confirm("${libelleAction(action)} « ${c.nom} » (${c.type}) sur le serveur ?", true)) return ToolResult("Refusé par l'utilisateur.")
+        val estHa = c.type == "docker" && runCatching { HaSur.conteneur(app)?.nom == c.nom }.getOrDefault(false)
+        if (sensible && !confirm("${libelleAction(action)} « ${c.nom} » (${c.type}) sur le serveur ?" + (if (estHa && action != "arreter")
+                " (Home Assistant : configuration vérifiée avant, arrêt propre, retour en ligne attendu" + (if (action == "mettre_a_jour") ", sauvegarde et retour automatique à l'ancienne version si besoin)" else ")") else ""), true))
+            return ToolResult("Refusé par l'utilisateur.")
+        // Home Assistant : opérations sûres (sinon il restait indisponible après un redémarrage ou une mise à jour par SSH).
+        if (estHa) when (action) {
+            "redemarrer" -> return ToolResult(HaSur.redemarrer(app), direct = true)
+            "demarrer" -> return ToolResult(HaSur.demarrer(app), direct = true)
+            "mettre_a_jour" -> return ToolResult(HaSur.mettreAJour(app) { code, nom, root -> lancerTache(code, nom, root) }, direct = true)
+        }
         val nq = q(c.nom)
         val pm2 = "export PATH=\"\$PATH:/usr/local/bin:\$HOME/.npm-global/bin\"; for d in \$HOME/.nvm/versions/node/*/bin; do [ -d \"\$d\" ] && PATH=\"\$PATH:\$d\"; done; "
         val (cmd, delai) = when (c.type) {
@@ -145,8 +154,8 @@ class ServeurAdminTools(private val app: JarvisApp, private val confirm: suspend
                 "etat" -> su("docker ps -a --filter name=^/${c.nom}\$ --format 'table {{.Names}}\\t{{.Status}}\\t{{.Image}}\\t{{.Ports}}'; docker inspect -f 'État : {{.State.Status}} · démarré {{.State.StartedAt}} · redémarrages {{.RestartCount}} · relance auto {{.HostConfig.RestartPolicy.Name}}{{if .State.Health}} · santé {{.State.Health.Status}}{{end}}' $nq; echo; docker logs --tail 15 $nq 2>&1") to 40
                 "logs" -> su("docker logs --tail $n $nq 2>&1") to 40
                 "demarrer" -> su("docker start $nq && sleep 3 && docker ps --filter name=^/${c.nom}\$ --format '{{.Names}} {{.Status}}'") to 90
-                "arreter" -> su("docker stop $nq") to 90
-                "redemarrer" -> su("docker restart $nq && sleep 3 && docker ps --filter name=^/${c.nom}\$ --format '{{.Names}} {{.Status}}'") to 120
+                "arreter" -> su("docker stop -t ${if (estHa) 120 else 30} $nq") to 200
+                "redemarrer" -> su("docker restart -t 30 $nq && sleep 3 && docker ps --filter name=^/${c.nom}\$ --format '{{.Names}} {{.Status}}'") to 120
                 "activer" -> su("docker update --restart unless-stopped $nq") to 30
                 "desactiver" -> su("docker update --restart no $nq") to 30
                 "mettre_a_jour" -> if (c.dossier.isNotBlank() && c.svcCompose.isNotBlank())
