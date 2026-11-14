@@ -67,6 +67,9 @@ object Registre {
             }
             // Une source sans ports ni type précis (liste de la Freebox) n'efface pas ce qu'une analyse a trouvé.
             e.put("ip", d.ip).put("vu", now).put("reseau", reseau)
+            e.remove("absentDepuis")
+            // Ancienne valeur invalide (« inconnue ») : retirée.
+            if (e.has("mac") && normaliserMac(e.optString("mac")).isBlank()) e.remove("mac")
             if (d.ports.isNotEmpty() || !e.has("ports")) e.put("ports", JSONArray(d.ports))
             if (!d.type.startsWith("❔") || e.optString("type").isBlank()) e.put("type", d.type)
             if (mac.isNotBlank()) e.put("mac", mac)
@@ -111,6 +114,20 @@ object Registre {
     }
     fun masquesListe(app: JarvisApp): List<JSONObject> { val k = masques(app); return tous(app, avecMasques = true).filter { cleMasque(it) in k } }
 
+    /** En ligne : vu dans la dernière demi-heure ET pas signalé absent depuis (la Freebox ne le liste plus). */
+    fun enLigne(e: JSONObject, maintenant: Long = System.currentTimeMillis()): Boolean =
+        maintenant - e.optLong("vu") < 30 * 60_000 && !e.has("absentDepuis")
+
+    /** Après un relevé de la Freebox : tout appareil qu'elle ne liste pas (et qui n'a rien répondu) n'est plus « en ligne ». */
+    @Synchronized fun marquerAbsents(app: JarvisApp, presents: Set<String>) {
+        val o = lire(app); val m = o.optJSONObject("appareils") ?: return
+        val now = System.currentTimeMillis(); var change = false
+        m.keys().asSequence().toList().forEach { k -> val e = m.optJSONObject(k) ?: return@forEach
+            if (k !in presents && !e.has("absentDepuis")) { e.put("absentDepuis", now); change = true }
+        }
+        if (change) { o.put("appareils", m); ecrire(app, o) }
+    }
+
     /**
      * Ménage : oublie les appareils absents depuis [jours] jours, et les « fantômes » (ni nom, ni adresse MAC, ni service,
      * ni accès configuré : réponses parasites d'une ancienne analyse). Les appareils nommés ou ouverts à distance restent.
@@ -121,7 +138,7 @@ object Registre {
         val retires = m.keys().asSequence().toList().filter { k ->
             val e = m.optJSONObject(k) ?: return@filter true
             val garde = e.optString("alias").isNotBlank() || (e.optJSONArray("distant")?.length() ?: 0) > 0
-            val fantome = e.optString("mac").isBlank() && (e.optJSONArray("ports")?.length() ?: 0) == 0 && e.optString("hote").isBlank() &&
+            val fantome = normaliserMac(e.optString("mac")).isBlank() && (e.optJSONArray("ports")?.length() ?: 0) == 0 && e.optString("hote").isBlank() &&
                 e.optString("titre").isBlank() && e.optString("info").isBlank()
             !garde && (e.optLong("vu") < limite || (fantomes && fantome))
         }

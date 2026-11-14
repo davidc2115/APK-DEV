@@ -194,7 +194,7 @@ private fun ReseauWifi(app: JarvisApp, onDemander: (String) -> Unit) {
                 HudButton("↩️ Ne plus masquer", Modifier.padding(top = 4.dp)) { Registre.masquer(app, e, false); tick++ }
             }
         }
-        val enLigne = appareils.filter { maintenant - it.optLong("vu") < 30 * 60_000 }
+        val enLigne = appareils.filter { Registre.enLigne(it, maintenant) }
         val autres = appareils - enLigne.toSet()
         if (appareils.isEmpty()) item { Text("Aucun appareil encore relevé : touche « Analyser maintenant » (en Wi-Fi).", color = HudDim, fontSize = 12.sp) }
         if (enLigne.isNotEmpty()) item { Text("🟢 En ligne (${enLigne.size})", color = HudText, fontSize = 13.sp, fontWeight = FontWeight.Bold) }
@@ -215,7 +215,8 @@ private fun Carte(app: JarvisApp, e: JSONObject, enLigne: Boolean, deplie: Boole
     val vu = java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.FRENCH).format(java.util.Date(e.optLong("vu")))
     HudPanel(Modifier.fillMaxWidth(), onClick = onToucher) {
         Text((if (enLigne) "🟢 " else "⚪ ") + Registre.nomDe(e), color = HudText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        Text("$ip · ${e.optString("type")}" + (if (e.optString("mac").isNotBlank()) " · ${e.optString("mac")}" else "") + " · vu le $vu", color = HudDim, fontSize = 11.sp)
+        Text("$ip · ${e.optString("type")}" + (if (e.optString("mac").contains(':')) " · ${e.optString("mac")}" else "") +
+            when (e.optString("lien")) { "wifi" -> " · 📶 Wi-Fi"; "ethernet" -> " · 🔌 câble"; else -> "" } + " · vu le $vu", color = HudDim, fontSize = 11.sp)
         if (ports.isNotEmpty()) Text("Services : " + ports.joinToString { "${AccesDistant.service(it)} ($it)" }, color = HudDim, fontSize = 11.sp)
         distant.forEach { d -> Text("🌍 ${d.optString("service")} : ${d.optString("adresse").ifBlank { "port ${d.optInt("externe")}" }}", color = HudText, fontSize = 12.sp) }
         if (deplie) Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {

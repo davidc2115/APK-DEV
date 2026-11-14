@@ -49,10 +49,14 @@ object AccesDistant {
         val freebox = FreeboxOs.appareilsReseau(app)
         val retenus = if (freebox != null) { val actifs = freebox.map { it.ip }.toSet(); scan.filter { it.ip in actifs || !it.faible } } else scan
         var neufs = runCatching { Registre.appareils(app, retenus, reseau) }.getOrDefault(0)
-        if (freebox != null) neufs += runCatching { Registre.appareils(app, freebox, reseau) }.getOrDefault(0)
+        if (freebox != null) {
+            neufs += runCatching { Registre.appareils(app, freebox, reseau) }.getOrDefault(0)
+            // Tout ce que la Freebox ne liste pas comme connecté (et qui n'a rien répondu de concret) n'est plus « en ligne ».
+            runCatching { Registre.marquerAbsents(app, (freebox.map { it.ip } + retenus.filter { !it.faible }.map { it.ip }).toSet()) }
+        }
         val oublies = runCatching { Registre.purger(app) }.getOrDefault(0)
         (FreeboxOs.ipPublique(app) ?: Reseau.ippPublique()).takeIf { it.isNotBlank() }?.let { Registre.ipPublique(app, it, reseau) }
-        val enLigne = Registre.tous(app).filter { System.currentTimeMillis() - it.optLong("vu") < 15 * 60_000 }
+        val enLigne = Registre.tous(app).filter { Registre.enLigne(it) }
         val wifi = enLigne.count { it.optString("lien") == "wifi" }; val cable = enLigne.count { it.optString("lien") == "ethernet" }
         return "✅ ${enLigne.size} appareil(s) connecté(s) sur $reseau" + (if (wifi + cable > 0) " — $wifi en Wi-Fi, $cable par câble" else "") +
             (if (freebox != null) " (liste de la Freebox)" else " (analyse du téléphone ; associe la Freebox pour une liste exacte)") +

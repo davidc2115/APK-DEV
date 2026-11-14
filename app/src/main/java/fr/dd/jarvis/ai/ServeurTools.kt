@@ -433,9 +433,14 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 }
                 val i = Reseau.infos(app) ?: return ToolResult("Pas de réseau.")
                 if (!i.wifi) return ToolResult("Le téléphone n'est pas connecté au Wi-Fi : je ne peux pas analyser le réseau local.")
-                val liste = Reseau.scanner(app)
+                val brut = Reseau.scanner(app)
+                // La Freebox sait qui est vraiment connecté : elle fait foi (plus d'appareils fantômes).
+                val fbx = FreeboxOs.appareilsReseau(app)
+                val liste = if (fbx == null) brut else { val actifs = fbx.map { it.ip }.toSet()
+                    (brut.filter { it.ip in actifs || !it.faible } + fbx.filter { f -> brut.none { it.ip == f.ip } }).sortedBy { d -> d.ip.split(".").map { it.toIntOrNull() ?: 0 }.fold(0L) { x, y -> x * 256 + y } } }
                 val imps = Reseau.decouvrir(app, listOf("_ipp._tcp", "_printer._tcp"), 3500)
                 val neufs = Registre.appareils(app, liste, "Wi-Fi ${i.ip.substringBeforeLast('.')}.x")
+                if (fbx != null) { Registre.appareils(app, fbx, "Wi-Fi ${i.ip.substringBeforeLast('.')}.x"); Registre.marquerAbsents(app, liste.map { it.ip }.toSet()); Registre.purger(app) }
                 val alias = Registre.alias(app)
                 val pub = Reseau.ippPublique()
                 val chg = if (pub.isNotBlank()) Registre.ipPublique(app, pub, "Wi-Fi ${i.ip.substringBeforeLast('.')}.x") else ""

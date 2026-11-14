@@ -47,13 +47,11 @@ class ReseauWorker(private val ctx: Context, params: WorkerParameters) : Corouti
         val avant = Registre.nombreAppareils(app)
         var neufs = 0
         val i = Reseau.infos(app)
-        if (i != null && i.wifi) {
-            runCatching { neufs += Registre.appareils(app, Reseau.scanner(app), "Wi-Fi ${i.ip.substringBeforeLast('.')}.x") }
-            // Liste de la Freebox (noms, MAC des appareils discrets que l'analyse ne voit pas toujours) : onglet Wi-Fi complet.
-            runCatching { fr.dd.jarvis.ai.FreeboxOs.appareilsReseau(app)?.let { neufs += Registre.appareils(app, it, "Wi-Fi ${i.ip.substringBeforeLast('.')}.x") } }
-            runCatching { (fr.dd.jarvis.ai.FreeboxOs.ipPublique(app) ?: Reseau.ippPublique()).takeIf { it.isNotBlank() }?.let { Registre.ipPublique(app, it, "Wi-Fi ${i.ip.substringBeforeLast('.')}.x") } }
-        }
-        if (Serveur.sshConfigure(app)) runCatching { neufs += Registre.appareils(app, Serveur.scanReseau(app), "Réseau du serveur") }
+        // Même relevé que le bouton « Analyser » : la Freebox fait foi, les réponses fantômes sont écartées, ménage compris.
+        if (i != null && i.wifi) runCatching { fr.dd.jarvis.ai.AccesDistant.inventorier(app) }
+        // Réseau vu du serveur (téléphone dehors) : seulement sans Freebox associée (sinon c'est elle qui fait foi).
+        else if (Serveur.sshConfigure(app) && app.store.freeboxAppToken.value.isBlank()) runCatching { Registre.appareils(app, Serveur.scanReseau(app), "Réseau du serveur") }
+        neufs = (Registre.nombreAppareils(app) - avant).coerceAtLeast(0)
         if (neufs > 0 && avant > 0 && ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED || (neufs > 0 && avant > 0 && android.os.Build.VERSION.SDK_INT < 33)) {
             val n = NotificationCompat.Builder(ctx, JarvisApp.CHANNEL_AGENTS).setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setContentTitle("📡 $neufs nouvel appareil sur ton réseau").setContentText("Enregistré dans la liste des appareils (demande-moi « liste des appareils »).").setAutoCancel(true).build()
