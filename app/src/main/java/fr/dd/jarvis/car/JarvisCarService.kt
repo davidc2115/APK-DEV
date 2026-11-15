@@ -85,6 +85,9 @@ class JarvisCarSession : Session() {
 object NavigationVoiture {
     @Volatile var contexte: CarContext? = null
 
+    /** Contexte voiture dont le MICRO est utilisable (Android Auto assez récent, micro autorisé), sinon null. */
+    fun microVoiture(): CarContext? = contexte?.takeIf { runCatching { voixVoiture(it) }.getOrDefault(false) }
+
     /** Vrai si Android Auto a accepté la demande ; faux s'il faut se rabattre sur le téléphone. */
     suspend fun lancer(destination: String, point: Pair<Double, Double>? = null): Boolean {
         val c = contexte ?: return false

@@ -2,9 +2,13 @@ package fr.dd.jarvis.voice
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import androidx.car.app.CarContext
+import androidx.car.app.media.CarAudioRecord
+import fr.dd.jarvis.car.Pcm
 import java.io.ByteArrayOutputStream
 import kotlin.math.log10
 import kotlin.math.max
@@ -56,26 +60,130 @@ class MicroJarvis(private val ctx: Context) {
     /** Arrête l'écoute : [garderPhrase] = ce qui a déjà été dit est rendu (bouton micro retouché), sinon annulée. */
     fun arreter(garderPhrase: Boolean) { garder = garderPhrase; actif = false }
 
+    /** Micro réellement utilisé par la dernière écoute (pour le journal). */
+    @Volatile var source = "micro du téléphone"
+        private set
+
     /**
      * Ouvre le micro. [attenteMs] : délai pour commencer à parler ; [pauseMs] : silence qui termine la phrase.
+     * [entree] : micro à préférer (casque / voiture Bluetooth dont la liaison mains-libres est ouverte).
+     * [voiture] : Android Auto → micro de la VOITURE (repli sur le téléphone si l'autoradio ne le donne pas).
      * Faux si le micro ne peut pas s'ouvrir (occupé par un appel, refusé…).
      */
-    @SuppressLint("MissingPermission")
-    fun demarrer(attenteMs: Long, pauseMs: Int, r: Rappels, ignorerMs: Long = 0): Boolean {
-        val min = AudioRecord.getMinBufferSize(TAUX, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
-        val ar = try {
-            AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, TAUX, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, max(min, TRAME * 2 * 50))
-        } catch (_: Throwable) { return false }
-        if (ar.state != AudioRecord.STATE_INITIALIZED) { ar.release(); return false }
-        try { ar.startRecording() } catch (_: Throwable) { ar.release(); return false }
-        if (ar.recordingState != AudioRecord.RECORDSTATE_RECORDING) { runCatching { ar.stop() }; ar.release(); return false }
-        // Modèle français chargé à côté (1 à 2 s la toute première fois) : l'enregistrement n'attend pas.
-        if (VoskModel.francais(ctx)) Thread({ modele = runCatching { VoskModel.partage(ctx) }.getOrNull() }, "jarvis-modele").apply { isDaemon = true; start() }
-        Thread({ boucle(ar, attenteMs, pauseMs, r, ignorerMs) }, "jarvis-micro").apply { isDaemon = true; start() }
+    fun demarrer(attenteMs: Long, pauseMs: Int, r: Rappels, ignorerMs: Long = 0,
+                 entree: AudioDeviceInfo? = null, voiture: CarContext? = null): Boolean {
+        if (voiture != null) {
+            // Ouverture et calibrage du micro de la voiture dans le fil du micro (quelques centaines de ms).
+            chargerModele()
+            Thread({
+                val e = runCatching { ouvrirVoiture(voiture) }.getOrNull() ?: ouvrirTelephone(null)
+                if (e == null) r.fin(Fin.Erreur("aucun micro disponible"))
+                else { source = e.nom; boucle(e, attenteMs, pauseMs, r, ignorerMs) }
+            }, "jarvis-micro").apply { isDaemon = true; start() }
+            return true
+        }
+        val e = ouvrirTelephone(entree) ?: return false
+        source = e.nom
+        chargerModele()
+        Thread({ boucle(e, attenteMs, pauseMs, r, ignorerMs) }, "jarvis-micro").apply { isDaemon = true; start() }
         return true
     }
 
-    private fun boucle(ar: AudioRecord, attenteMs: Long, pauseMs: Int, r: Rappels, ignorerMs: Long) {
+    /** Modèle français chargé à côté (1 à 2 s la toute première fois) : l'enregistrement n'attend pas. */
+    private fun chargerModele() {
+        if (VoskModel.francais(ctx)) Thread({ modele = runCatching { VoskModel.partage(ctx) }.getOrNull() }, "jarvis-modele").apply { isDaemon = true; start() }
+    }
+
+    /** Source du son : le micro du téléphone (ou du casque Bluetooth), ou celui de la voiture. */
+    private interface Entree {
+        val nom: String
+        /** Remplit [buf] (PCM 16 bits) ; nombre d'échantillons lus, négatif si le flux est perdu. */
+        fun lire(buf: ShortArray): Int
+        fun fermer()
+    }
+
+    private class EntreeTelephone(private val ar: AudioRecord, override val nom: String) : Entree {
+        override fun lire(buf: ShortArray) = ar.read(buf, 0, buf.size)
+        override fun fermer() { runCatching { ar.stop() }; runCatching { ar.release() } }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun ouvrirTelephone(prefere: AudioDeviceInfo?): Entree? {
+        val min = AudioRecord.getMinBufferSize(TAUX, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+        val ar = try {
+            AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, TAUX, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, max(min, TRAME * 2 * 50))
+        } catch (_: Throwable) { return null }
+        if (ar.state != AudioRecord.STATE_INITIALIZED) { ar.release(); return null }
+        // Casque / voiture Bluetooth : leur micro plutôt que celui du téléphone (posé loin, dans la poche…).
+        val bt = prefere != null && runCatching { ar.setPreferredDevice(prefere) }.getOrDefault(false)
+        try { ar.startRecording() } catch (_: Throwable) { ar.release(); return null }
+        if (ar.recordingState != AudioRecord.RECORDSTATE_RECORDING) { runCatching { ar.stop() }; ar.release(); return null }
+        val nom = if (bt) "micro Bluetooth (${prefere?.productName?.toString()?.trim().orEmpty().ifBlank { "casque" }})" else "micro du téléphone"
+        return EntreeTelephone(ar, nom)
+    }
+
+    /**
+     * Micro de la voiture (Android Auto). L'ordre des octets du flux n'est pas garanti : il est choisi sur les 300
+     * premières ms (le bon est celui où le bruit de fond est faible). Null si l'autoradio ne donne rien (micro refusé,
+     * silence numérique parfait) : l'appelant se rabat sur le téléphone.
+     */
+    private fun ouvrirVoiture(c: CarContext): Entree? {
+        val rec = CarAudioRecord.create(c)
+        rec.startRecording()
+        val e = EntreeVoiture(rec)
+        val fini = java.util.concurrent.atomic.AtomicBoolean(false)
+        // Garde : un autoradio qui n'envoie rien laisserait la lecture bloquée pour toujours.
+        val garde = Thread({ try { Thread.sleep(1500); if (!fini.get()) runCatching { rec.stopRecording() } } catch (_: InterruptedException) { } }, "jarvis-micro-garde")
+        garde.isDaemon = true; garde.start()
+        val ok = runCatching { e.calibrer() }.getOrDefault(false)
+        fini.set(true); garde.interrupt()
+        if (!ok) { e.fermer(); return null }
+        return e
+    }
+
+    private class EntreeVoiture(private val rec: CarAudioRecord) : Entree {
+        override val nom = "micro de la voiture"
+        private val bloc = ByteArray(max(CarAudioRecord.AUDIO_CONTENT_BUFFER_SIZE, TRAME * 2))
+        private var file = ByteArray(TRAME * 2 * 32)
+        private var dispo = 0
+        private var grosBoutiste = false
+
+        private fun remplir(): Int {
+            val n = rec.read(bloc, 0, bloc.size)
+            if (n > 0) {
+                if (dispo + n > file.size) file = file.copyOf(maxOf(file.size * 2, dispo + n))
+                System.arraycopy(bloc, 0, file, dispo, n); dispo += n
+            }
+            return n
+        }
+
+        fun calibrer(): Boolean {
+            val besoin = TRAME * 2 * 15
+            while (dispo < besoin) if (remplir() < 0) return false
+            var le = 0.0; var be = 0.0
+            var i = 0
+            while (i + TRAME * 2 <= besoin) { le += Pcm.rms(file, i, TRAME * 2, false); be += Pcm.rms(file, i, TRAME * 2, true); i += TRAME * 2 }
+            if (le == 0.0 && be == 0.0) return false
+            grosBoutiste = be < le
+            return true
+        }
+
+        override fun lire(buf: ShortArray): Int {
+            while (dispo < 2) { val n = remplir(); if (n < 0) return -1 }
+            val k = minOf(buf.size, dispo / 2)
+            for (j in 0 until k) {
+                val a = file[2 * j].toInt(); val b = file[2 * j + 1].toInt()
+                buf[j] = (if (grosBoutiste) (a shl 8) or (b and 0xFF) else (b shl 8) or (a and 0xFF)).toShort()
+            }
+            val pris = k * 2
+            System.arraycopy(file, pris, file, 0, dispo - pris); dispo -= pris
+            return k
+        }
+
+        override fun fermer() { runCatching { rec.stopRecording() } }
+    }
+
+    private fun boucle(ar: Entree, attenteMs: Long, pauseMs: Int, r: Rappels, ignorerMs: Long) {
         val tout = ByteArrayOutputStream()
         val buf = ShortArray(TRAME)
         val octets = ByteArray(TRAME * 2)
@@ -137,7 +245,7 @@ class MicroJarvis(private val ctx: Context) {
         try {
             while (true) {
                 if (!actif) { resultat = if (garder && parle()) phrase() else Fin.Annulee; break }
-                val n = ar.read(buf, 0, buf.size)
+                val n = ar.lire(buf)
                 if (n < 0) { resultat = if (parle()) phrase() else Fin.Erreur("micro perdu ($n)"); break }
                 if (n == 0) continue
                 // Fin de la voix de JARVIS encore dans le haut-parleur / l'autoradio : ces premières trames sont ignorées.
@@ -191,8 +299,7 @@ class MicroJarvis(private val ctx: Context) {
         } catch (e: Throwable) {
             resultat = if (parle()) runCatching { phrase() }.getOrDefault(Fin.Erreur(e.message ?: "erreur micro")) else Fin.Erreur(e.message ?: e.javaClass.simpleName)
         } finally {
-            runCatching { ar.stop() }
-            runCatching { ar.release() }
+            ar.fermer()
             runCatching { rec?.close() }
         }
         r.fin(resultat)

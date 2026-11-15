@@ -422,6 +422,11 @@ class Store(context: Context) {
      * moteur Google n'y rend AUCUN texte (erreur 7 à chaque phrase). Se désactive d'elle-même si elle échoue.
      */
     val ecouteLongue = BPref("ecouteLongue", false)
+    /**
+     * Casque ou voiture en Bluetooth (sans Android Auto) : JARVIS t'écoute avec LEUR micro (profil mains-libres) et le
+     * bip comme la voix passent par eux pendant la conversation. Désactivé : micro du téléphone, son en A2DP.
+     */
+    val microBluetooth = BPref("microBluetooth", true)
     /** Voix en mode « appel » sur le haut-parleur pendant la réponse (annulation d'écho : coupure de parole fiable). */
     val duplex = BPref("duplex", true)
     val muteBeeps = BPref("muteBeeps", true)

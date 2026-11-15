@@ -53,6 +53,10 @@ class VoiceManager(private val ctx: Context) {
         /** Le moteur de Google a refusé l'écoute « longue » (par segments) : mode normal jusqu'au prochain démarrage. */
         @Volatile var segmentKo = false
 
+        /** Liaison mains-libres ouverte vers un casque / une voiture Bluetooth (micro et son de la conversation) et son auteur. */
+        @Volatile private var microBt: AudioDeviceInfo? = null
+        @Volatile private var microBtPar: VoiceManager? = null
+
         /** Mots sur lesquels une phrase française ne se termine presque jamais : Google a coupé à une pause. */
         private val MOTS_SUITE = setOf(
             "de", "du", "des", "le", "la", "les", "l", "d", "et", "ou", "ni", "pour", "avec", "sur", "dans", "à", "au", "aux",
@@ -647,6 +651,9 @@ class VoiceManager(private val ctx: Context) {
         // Voix de JARVIS à peine terminée : sa fin (retard du Bluetooth / de l'autoradio) n'est pas prise pour toi.
         val depuisVoix = maintenant - finVoix
         val ignorer = if (depuisVoix in 0..1500) ((if (sortieExterne()) 700L else 250L) - depuisVoix).coerceAtLeast(0) else 0L
+        // Android Auto : micro de la VOITURE si JARVIS y est ouvert ; casque / voiture Bluetooth : leur micro.
+        val voiture = if (appli()?.enVoiture == true) fr.dd.jarvis.car.NavigationVoiture.microVoiture() else null
+        val bt = if (voiture == null) entreeBluetooth() else null
         val ok = m.demarrer(attente, pause, object : MicroJarvis.Rappels {
             override fun niveau(db: Float) { main.post { if (moi == jeton) Presence.microDb(db) } }
             override fun debutParole() { main.post { if (moi == jeton) { parole = true; if (debutParoleLe == 0L) debutParoleLe = System.currentTimeMillis() } } }
@@ -654,7 +661,7 @@ class VoiceManager(private val ctx: Context) {
                 main.post { if (moi == jeton && !estEcho(texte)) { dernierPartiel = texte; Presence.entendu = texte; onPartial(listOf(debutPhrase, texte).filter { it.isNotBlank() }.joinToString(" ")) } }
             }
             override fun fin(f: MicroJarvis.Fin) { main.post { if (moi == jeton) finJarvis(moi, f) } }
-        }, ignorer)
+        }, ignorer, entree = bt, voiture = voiture)
         if (!ok) {
             jarvisKoJusqua = maintenant + 60_000
             JournalVoix.noter(nom, "micro indisponible pour l'écoute JARVIS : reconnaissance Google pour l'instant")
@@ -663,7 +670,8 @@ class VoiceManager(private val ctx: Context) {
         microJ = m
         setMuted(false)
         val groq = appli()?.llm?.groq?.disponible() == true
-        JournalVoix.noter(nom, "micro ouvert (écoute JARVIS${if (groq) " + Whisper" else ", hors-ligne"}, fin après ${String.format(Locale.FRANCE, "%.1f", pause / 1000.0)} s de pause)")
+        val quel = if (voiture != null) "micro de la voiture" else m.source
+        JournalVoix.noter(nom, "micro ouvert ($quel, écoute JARVIS${if (groq) " + Whisper" else ", hors-ligne"}, fin après ${String.format(Locale.FRANCE, "%.1f", pause / 1000.0)} s de pause)")
         signalerEcoute(true)
         return true
     }
@@ -849,38 +857,69 @@ class VoiceManager(private val ctx: Context) {
 
     // ============================================================================================ sons
 
-    /** Petit carillon : deux notes montantes (« je t'écoute ») ou descendantes (« fin de la conversation »), puis [puis]. */
+    /** Bip sur le haut-parleur du téléphone (son système de l'assistant). */
+    private val attrBip = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
+
+    /**
+     * Petit carillon : deux notes montantes (« je t'écoute ») ou descendantes (« fin de la conversation »), puis [puis].
+     * Il sort là où sort la voix de JARVIS : haut-parleurs de la voiture (Android Auto), casque / enceinte Bluetooth, ou
+     * liaison mains-libres du casque quand son micro est utilisé.
+     */
     fun carillon(montant: Boolean = true, puis: () -> Unit = {}) {
         JournalVoix.noter(nom, "bip ${if (montant) "montant (je t'écoute)" else "descendant (fin)"}")
-        Thread {
-            var piste: AudioTrack? = null
-            try {
-                val taux = 22050
-                val notes = if (montant) doubleArrayOf(784.0, 1175.0) else doubleArrayOf(988.0, 659.0)
-                val n = (taux * 0.11).toInt()
-                // Téléphone en veille : la sortie audio met ~0,3 s à se réveiller et avalait tout le bip (0,16 s).
-                // 0,35 s de silence d'abord, puis deux notes un peu plus longues.
-                val avance = (taux * 0.35).toInt()
-                val pcm = ShortArray(avance + n * notes.size + taux / 20)
-                notes.forEachIndexed { k, f ->
-                    for (i in 0 until n) {
-                        val enveloppe = sin(PI * i / n)
-                        pcm[avance + k * n + i] = (sin(2 * PI * f * i / taux) * enveloppe * 0.25 * Short.MAX_VALUE).toInt().toShort()
+        // Posté : une conversation qui vient de commencer (sessionDebut, posté juste avant) a déjà demandé le micro Bluetooth.
+        main.post {
+            Thread {
+                var piste: AudioTrack? = null
+                var focusBip: AudioFocusRequest? = null
+                try {
+                    // Micro du casque / de la voiture Bluetooth demandé : le bip attend que la liaison soit prête et passe
+                    // par elle (sinon il partait en A2DP, coupé par le casque au moment où il bascule en mains-libres).
+                    val sco = attendreMicroBluetooth()
+                    val externe = sco || sortieBluetooth()
+                    // Autoradio (Android Auto) et casques A2DP : même usage « média » que la voix de JARVIS. L'usage
+                    // « assistant / son système » n'y était pas toujours transmis : bip muet dans la voiture.
+                    val attrs = when { sco -> attrAppel; externe -> attrBluetooth; else -> attrBip }
+                    val taux = 22050
+                    val notes = if (montant) doubleArrayOf(784.0, 1175.0) else doubleArrayOf(988.0, 659.0)
+                    val n = (taux * 0.11).toInt()
+                    // Sortie en veille : ~0,3 s pour le haut-parleur du téléphone, jusqu'à ~0,7 s pour un lien Bluetooth
+                    // ou le canal média d'Android Auto. Ce silence d'abord, sinon le début du bip est avalé.
+                    val avance = (taux * (if (externe && !sco) 0.8 else 0.35)).toInt()
+                    val amplitude = if (externe) 0.32 else 0.25
+                    val pcm = ShortArray(avance + n * notes.size + taux / 20)
+                    notes.forEachIndexed { k, f ->
+                        for (i in 0 until n) {
+                            val enveloppe = sin(PI * i / n)
+                            pcm[avance + k * n + i] = (sin(2 * PI * f * i / taux) * enveloppe * amplitude * Short.MAX_VALUE).toInt().toShort()
+                        }
                     }
+                    // Hors conversation, la musique de la voiture / du casque baisse le temps du bip (sinon il s'y perd).
+                    if (externe && !sessionActive && Build.VERSION.SDK_INT >= 26) focusBip = runCatching {
+                        AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK).setAudioAttributes(attrs)
+                            .setOnAudioFocusChangeListener({ }, main).build().also { am.requestAudioFocus(it) }
+                    }.getOrNull()
+                    piste = AudioTrack.Builder()
+                        .setAudioAttributes(attrs)
+                        .setAudioFormat(AudioFormat.Builder().setSampleRate(taux).setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
+                        .setTransferMode(AudioTrack.MODE_STATIC).setBufferSizeInBytes(pcm.size * 2).build()
+                    piste.write(pcm, 0, pcm.size)
+                    piste.play()
+                    JournalVoix.noter(nom, "bip joué sur " + when {
+                        sco -> "la liaison mains-libres Bluetooth (${microBt?.productName ?: "casque"})"
+                        appli()?.enVoiture == true -> "les haut-parleurs de la voiture (Android Auto)"
+                        externe -> "la sortie Bluetooth / externe"
+                        else -> "le haut-parleur du téléphone"
+                    })
+                    Thread.sleep(pcm.size * 1000L / taux + 30)
+                } catch (_: Throwable) {
+                } finally {
+                    runCatching { piste?.release() }
+                    focusBip?.let { f -> runCatching { am.abandonAudioFocusRequest(f) } }
                 }
-                piste = AudioTrack.Builder()
-                    .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
-                    .setAudioFormat(AudioFormat.Builder().setSampleRate(taux).setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
-                    .setTransferMode(AudioTrack.MODE_STATIC).setBufferSizeInBytes(pcm.size * 2).build()
-                piste.write(pcm, 0, pcm.size)
-                piste.play()
-                Thread.sleep(pcm.size * 1000L / taux + 30)
-            } catch (_: Throwable) {
-            } finally {
-                runCatching { piste?.release() }
-            }
-            main.post(puis)
-        }.start()
+                main.post(puis)
+            }.start()
+        }
     }
 
     // ============================================================================================ voix de JARVIS
@@ -908,6 +947,8 @@ class VoiceManager(private val ctx: Context) {
     fun sessionDebut() = main.post {
         if (sessionActive) return@post
         sessionActive = true
+        // Casque / voiture Bluetooth : leur micro (liaison mains-libres) pour toute la conversation.
+        ouvrirMicroBluetooth()
         if (Build.VERSION.SDK_INT >= 26) runCatching {
             val demande = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
                 .setAudioAttributes(if (sortieBluetooth()) attrBluetooth else attrAssistant)
@@ -924,6 +965,7 @@ class VoiceManager(private val ctx: Context) {
     fun sessionFin() = main.post {
         if (!sessionActive) return@post
         sessionActive = false
+        fermerMicroBluetooth()
         runCatching { focusSession?.let { am.abandonAudioFocusRequest(it) } }
         focusSession = null
         if (mediaPauseeSession) {
@@ -935,6 +977,96 @@ class VoiceManager(private val ctx: Context) {
 
     /** Vrai si le son sort vers un appareil externe sans annulation d'écho fiable (Bluetooth, autoradio, Android Auto). */
     fun sortieExterne(): Boolean = sortieBluetooth()
+
+    // ------------------------------------------------------------------ micro Bluetooth (casque, voiture sans Android Auto)
+
+    /** Appareil qui joue le son des médias en ce moment (casque, autoradio…), null si inconnu. */
+    private fun sortieMedia(): AudioDeviceInfo? = runCatching {
+        if (Build.VERSION.SDK_INT >= 33) am.getAudioDevicesForAttributes(attrBluetooth).firstOrNull()
+        else am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull {
+            it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || it.type == AudioDeviceInfo.TYPE_BLE_HEADSET || it.type == AudioDeviceInfo.TYPE_BLE_SPEAKER
+        }
+    }.getOrNull()
+
+    /**
+     * Micro Bluetooth à utiliser : celui de l'appareil qui joue DÉJÀ ton son (casque, voiture en Bluetooth sans Android
+     * Auto), par son profil mains-libres. Une montre ou un appareil connecté seulement pour les appels n'est jamais pris.
+     */
+    private fun appareilMicroBluetooth(): AudioDeviceInfo? {
+        if (Build.VERSION.SDK_INT < 31) return null
+        val app = appli() ?: return null
+        if (!app.store.microBluetooth.value || app.enVoiture) return null       // Android Auto : micro de la voiture
+        if (am.mode != AudioManager.MODE_NORMAL) return null                    // appel en cours : on n'y touche pas
+        val sortie = sortieMedia() ?: return null
+        val comm = runCatching { am.availableCommunicationDevices }.getOrNull() ?: return null
+        fun meme(d: AudioDeviceInfo) = (sortie.address.isNotBlank() && d.address == sortie.address) ||
+            (d.productName.toString().isNotBlank() && d.productName.toString() == sortie.productName.toString())
+        return when (sortie.type) {
+            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> comm.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO && meme(it) }
+            AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_BLE_SPEAKER -> comm.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLE_HEADSET && meme(it) }
+            else -> null
+        }
+    }
+
+    private val verifMicroBt = object : Runnable {
+        override fun run() {
+            if (microBtPar !== this@VoiceManager) return
+            // Filet : conversation terminée sans que la liaison ait été rendue.
+            if (!sessionActive) fermerMicroBluetooth() else main.postDelayed(this, 60_000)
+        }
+    }
+
+    /** Début de conversation : ouvre la liaison mains-libres du casque / de la voiture Bluetooth (gardée jusqu'à la fin). */
+    private fun ouvrirMicroBluetooth() {
+        if (Build.VERSION.SDK_INT < 31 || microBt != null) return
+        val d = appareilMicroBluetooth() ?: return
+        if (runCatching { am.setCommunicationDevice(d) }.getOrDefault(false)) {
+            microBt = d; microBtPar = this
+            JournalVoix.noter(nom, "micro Bluetooth demandé : ${d.productName}")
+            main.removeCallbacks(verifMicroBt); main.postDelayed(verifMicroBt, 60_000)
+        } else JournalVoix.noter(nom, "micro Bluetooth refusé par Android : micro du téléphone")
+    }
+
+    private fun fermerMicroBluetooth(force: Boolean = false) {
+        if (Build.VERSION.SDK_INT < 31) return
+        val d = microBt ?: return
+        if (!force && microBtPar !== this) return
+        microBt = null; microBtPar = null
+        main.removeCallbacks(verifMicroBt)
+        runCatching { am.clearCommunicationDevice() }
+        JournalVoix.noter(nom, "micro Bluetooth rendu (${d.productName})")
+    }
+
+    /** Liaison mains-libres vraiment établie : Android ne l'annonce qu'une fois le son et le micro passés par l'appareil. */
+    private fun microBluetoothPret(): Boolean {
+        if (Build.VERSION.SDK_INT < 31) return false
+        val d = microBt ?: return false
+        return runCatching { am.communicationDevice?.type == d.type }.getOrDefault(false)
+    }
+
+    /** Attend (hors fil principal) la liaison ; trop lente → abandon, retour au micro du téléphone et au son A2DP. */
+    private fun attendreMicroBluetooth(maxMs: Long = 2500): Boolean {
+        if (microBt == null) return false
+        val limite = System.currentTimeMillis() + maxMs
+        while (System.currentTimeMillis() < limite) {
+            if (microBluetoothPret()) { Thread.sleep(200); return true }
+            Thread.sleep(50)
+        }
+        JournalVoix.noter(nom, "liaison mains-libres Bluetooth trop lente : micro du téléphone")
+        main.post { fermerMicroBluetooth(force = true) }
+        return false
+    }
+
+    /** Entrée micro Bluetooth à préférer pour l'enregistrement (liaison établie), sinon null. */
+    private fun entreeBluetooth(): AudioDeviceInfo? {
+        if (!microBluetoothPret()) return null
+        val d = microBt ?: return null
+        val type = if (d.type == AudioDeviceInfo.TYPE_BLE_HEADSET) AudioDeviceInfo.TYPE_BLE_HEADSET else AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+        return runCatching {
+            val entrees = am.getDevices(AudioManager.GET_DEVICES_INPUTS).filter { it.type == type }
+            entrees.firstOrNull { d.address.isNotBlank() && it.address == d.address } ?: entrees.firstOrNull()
+        }.getOrNull()
+    }
 
     // ------------------------------------------------------------------ anti-écho (voix de Jarvis réentendue)
 
@@ -1180,7 +1312,8 @@ class VoiceManager(private val ctx: Context) {
             coupe = bargeIn && micOk() && !externe
             val appel = coupe && duplex && hautParleurSeul() && entrerModeAppel()
             // En Bluetooth/A2DP et Android Auto, l'usage MEDIA garantit le routage vers l'autoradio.
-            attrsVoix = when { appel -> attrAppel; externe -> attrBluetooth; else -> attrAssistant }
+            // Micro du casque Bluetooth en service : la voix passe par la même liaison mains-libres (l'A2DP y est suspendu).
+            attrsVoix = when { appel -> attrAppel; microBluetoothPret() -> attrAppel; externe -> attrBluetooth; else -> attrAssistant }
             if (!appel && am.mode == AudioManager.MODE_NORMAL && !sessionActive) demanderFocusReponse(attrsVoix)
             // Hors session : focus + vraie commande PAUSE pour les lecteurs qui ignorent le focus, reprise après la réponse.
             mediaPauseeParJarvis = !sessionActive && externe && fr.dd.jarvis.service.JarvisNotificationListener.pauseMediaPourVoix(ctx)
@@ -1344,6 +1477,7 @@ class VoiceManager(private val ctx: Context) {
     fun release() {
         synchronized(instances) { instances.remove(this) }
         sessionFin()
+        main.post { fermerMicroBluetooth() }
         main.post { main.removeCallbacks(unmuteLater); main.removeCallbacks(finFenetre); setMuted(false) }
         main.post {
             annulerRelance()
