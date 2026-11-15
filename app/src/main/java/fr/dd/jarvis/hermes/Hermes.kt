@@ -891,14 +891,34 @@ object Routeur {
     /** Cerveau qui a traité la dernière demande (pour les réponses brèves de suite de conversation). */
     @Volatile var derniere: Cible = Cible.JARVIS
 
-    fun choisir(app: JarvisApp, texte: String, precedent: String? = null): Choix = choisirSansMemoire(app, texte, precedent).also { derniere = it.cible }
+    /** Conversation sur la MAISON en cours jusqu'à cette heure : les suites (« règle-le avant », « c'est bon ») restent à JARVIS. */
+    @Volatile var maisonJusqua = 0L
+    /** La dernière demande a été traitée comme une demande « maison » : Jarvis ne la confie pas à Hermès, même en cas d'échec. */
+    @Volatile var dernierChoixMaison = false
+
+    /** Une commande de la maison vient d'être faite (réflexe Home Assistant, choix « maison ») : 3 min de suite possible. */
+    fun noterMaison() { maisonJusqua = System.currentTimeMillis() + 180_000; derniere = Cible.JARVIS; dernierChoixMaison = true }
+
+    fun choisir(app: JarvisApp, texte: String, precedent: String? = null): Choix = choisirSansMemoire(app, texte, precedent).also {
+        derniere = it.cible
+        dernierChoixMaison = it.raison.startsWith("maison")
+        if (dernierChoixMaison) maisonJusqua = System.currentTimeMillis() + 180_000
+    }
 
     private fun choisirSansMemoire(app: JarvisApp, texte: String, precedent: String?): Choix =
         decider(app.store.hermesMode.value, app.enVoiture, Hermes.degrade(), texte, precedent,
-            competenceHermes = runCatching { competence(texte, app.memo.skillsHermes()) }.getOrNull(), rapide = app.store.hermesRapide.value)
+            competenceHermes = runCatching { competence(texte, app.memo.skillsHermes()) }.getOrNull(), rapide = app.store.hermesRapide.value,
+            suiteMaison = System.currentTimeMillis() < maisonJusqua)
+
+    /** « Là c'est bon, ça fonctionne », « parfait merci », « nickel » : simple accusé de réception. */
+    private val ACCUSE = Regex("^(?:l[àa] |bon |ok |alors |bah |ben |oui |ah )?(?:c.est bon|[çc]a marche|[çc]a fonctionne|[çc]a va|parfait|super|merci|nickel|top|g[ée]nial|impeccable|d.accord|ok|tr[èe]s bien|cool|excellent)\\b.{0,50}$", RegexOption.IGNORE_CASE)
+    /** Suite d'une demande précédente : pronom ou mot de comparaison (« règle-le avant », « un peu plus », « remets-la »). */
+    private val SUITE = Regex("\\b(le|la|les|l|lui|leur|[çc]a|cela|celle|celui|ceux|y|en|avant|apr[èe]s|plus|moins|encore|pareil|aussi|de nouveau|[àa] nouveau|" +
+        "remets|refais|recommence|relance|annule|arr[êe]te|r[èe]gle|monte|baisse|augmente|diminue|allume|[ée]teins|ouvre|ferme|coupe|passe|mets)\\b", RegexOption.IGNORE_CASE)
 
     /** Décision pure (testable) : mode des réglages, Android Auto, Hermès saturé, demande, message précédent de l'assistant. */
-    internal fun decider(mode: String, enVoiture: Boolean, sature: Boolean, texte: String, precedent: String?, competenceHermes: String? = null, rapide: Boolean = false): Choix {
+    internal fun decider(mode: String, enVoiture: Boolean, sature: Boolean, texte: String, precedent: String?, competenceHermes: String? = null, rapide: Boolean = false,
+                         suiteMaison: Boolean = false): Choix {
         if (mode == "off") return Choix(Cible.JARVIS, "Hermès désactivé dans les réglages")
         val t = texte.trim()
         if (sature && !NOMME.containsMatchIn(t)) return Choix(Cible.JARVIS, "Hermès momentanément saturé : Jarvis répond directement")
@@ -907,6 +927,11 @@ object Routeur {
         // Suite de conversation : « oui », « toutes », « Clairotte 3 »… en réponse à une question → au cerveau qui l'a posée.
         val reponseCourte = t.split(Regex("\\s+")).size <= 4 && !t.endsWith("?") && precedent != null && precedent.takeLast(250).contains("?") &&
             !ORCHESTRATION.containsMatchIn(t) && !FREEBOX.containsMatchIn(t) && !FICHIERS.containsMatchIn(t) && !WEB.containsMatchIn(t)
+        // Suite d'une conversation sur la MAISON (« peux-tu le régler avant ? », « là c'est bon, ça fonctionne ») : JARVIS,
+        // qui a l'historique et l'API de Home Assistant. Avant, ces phrases sans « télé » ni « lumière » partaient chez Hermès.
+        if (suiteMaison && t.split(Regex("\\s+")).size <= 14 && !ORCHESTRATION.containsMatchIn(t) && !WEB.containsMatchIn(t) && !serveurDebian(t) &&
+            (ACCUSE.matches(t) || BREF.matches(t) || reponseCourte || SUITE.containsMatchIn(t)))
+            return Choix(Cible.JARVIS, "maison : suite de la conversation")
         if (BREF.matches(t) || reponseCourte) return Choix(derniere, if (derniere == Cible.HERMES) "suite de la conversation avec Hermès" else "suite de la conversation avec Jarvis")
         // La MAISON (télé, lumières, volets, chauffage, scènes… tout ce qui passe par Home Assistant) : JARVIS et l'API de
         // Home Assistant directement, dans tous les modes — jamais Hermès (sauf automatisme à orchestrer ou panne du serveur).

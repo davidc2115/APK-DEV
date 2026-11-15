@@ -393,7 +393,11 @@ object MaisonDirecte {
         "t[ée]l[ée]\\b|\\btv\\b|t[ée]l[ée]vis|cha[iî]ne|lumi[èe]re|lampe|[ée]clairage|plafonnier|\\bspots?\\b|\\bvolets?\\b|\\bstores?\\b|rideaux?|" +
             "\\bprises?\\b(?! de)|interrupteur|chauffage|po[eê]le|\\bpoils?\\b|granul[ée]s|thermostat|radiateur|\\bclim|ventilateur|\\bvmc\\b|portail|" +
             "porte (du |de )?garage|aspirateur|enceinte|barre de son|sc[èe]ne|ambiance|home ?assistant|domotique|capteur|d[ée]tecteur|" +
-            "temp[ée]rature (du|de la|dans|int[ée]rieure)|humidit[ée]|arrosage|piscine|hdmi|netflix sur|sur la t[ée]l[ée]",
+            "temp[ée]rature (du|de la|dans|int[ée]rieure)|humidit[ée]|arrosage|piscine|hdmi|netflix sur|sur la t[ée]l[ée]|ventilo|" +
+            "production (solaire|photovolta|des panneaux)|panneaux? (solaires?|photovolta)|onduleur|consommation (électrique|electrique|d.[ée]nergie|de la maison)|" +
+            "\\blinky\\b|compteur [ée]lectrique|serrure|sonnette|fen[êe]tres?|porte d.entr[ée]e|portillon|lave.linge|machine [àa] laver|lave.vaisselle|s[èe]che.linge|" +
+            "cong[ée]lateur|frigo|r[ée]frig[ée]rateur|mode (nuit|absence|vacances) de la maison|qui est [àa] la maison|" +
+            "cam[ée]ras? (de|du|devant|dans|[àa]) (la |l.)?(maison|jardin|entr[ée]e|garage|salon|porte|cour)",
         RegexOption.IGNORE_CASE
     )
     private val PAS_MAISON = Regex(

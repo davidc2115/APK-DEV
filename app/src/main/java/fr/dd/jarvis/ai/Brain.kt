@@ -91,7 +91,7 @@ class Brain(
         } + " : réponse directe de Jarvis."
         if (!suivi.cerveauJarvis || !escaladePossible(pourHermes, suivi) || !fr.dd.jarvis.hermes.Routeur.jarvisABesoinDHermes(r)) return r
         // La maison (Home Assistant) reste à JARVIS : jamais confiée à Hermès, même si la première tentative a échoué.
-        if (history.lastOrNull { it.fromUser }?.text?.let { MaisonDirecte.concerne(it) } == true) return r
+        if (fr.dd.jarvis.hermes.Routeur.dernierChoixMaison || history.lastOrNull { it.fromUser }?.text?.let { MaisonDirecte.concerne(it) } == true) return r
         onStatus("🪽 Hermès prend le relais…")
         val h = fr.dd.jarvis.hermes.Hermes.repondre(app, history, tools, userName(), onStatus, tentativeJarvis = r, onTexte = onTexte) ?: return r
         fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.HERMES
@@ -167,6 +167,8 @@ class Brain(
         // dernière phrase la comprendraient de travers ; elle va aux cerveaux, qui ont l'historique et le fil.
         val suite = !pourHermes && FilConversation.renvoie(texteUser) && FilConversation.fil(history)?.let { FilConversation.estSuite(it) } == true
         fun reflexe(r: String) = r.also { if (!pourHermes) fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS }
+        /** Réflexe de la maison (Home Assistant) : la suite de la conversation reste aussi à JARVIS. */
+        fun reflexeMaison(r: String) = reflexe(r).also { if (!pourHermes) fr.dd.jarvis.hermes.Routeur.noterMaison() }
         // Changement de profil énergétique : commande locale immédiate, sans appel à Groq/Gemini/Hermès.
         // Les trois profils sont persistés puis leurs planificateurs sont recalculés immédiatement.
         if (!pourHermes) {
@@ -274,11 +276,11 @@ class Brain(
             // IA ni Hermès (repli : connexion directe à la télé).
             if (MaisonDirecte.analyser(texteUser) != null) {
                 onStatus("🏠 Maison…")
-                runCatching { MaisonDirecte.executer(app, texteUser) }.getOrNull()?.let { return reflexe(it) }
+                runCatching { MaisonDirecte.executer(app, texteUser) }.getOrNull()?.let { return reflexeMaison(it) }
             }
             if (MaisonDirecte.analyserLumiere(texteUser) != null) {
                 onStatus("🏠 Maison…")
-                runCatching { MaisonDirecte.executerLumiere(app, texteUser) }.getOrNull()?.let { return reflexe(it) }
+                runCatching { MaisonDirecte.executerLumiere(app, texteUser) }.getOrNull()?.let { return reflexeMaison(it) }
             }
             // Actions courantes reconnues sans IA (alarme, minuteur, appel, SMS, appli, météo, planning, rappel…).
             CommandesDirectes.intention(texteUser)?.let { i ->
@@ -288,7 +290,7 @@ class Brain(
             // Lumières, volets, prises, télé : Home Assistant directement quand l'appareil est trouvé sans ambiguïté.
             if (DomotiqueDirecte.commande(fr.dd.jarvis.societe.core.normaliser(texteUser)) != null) {
                 onStatus("🏠 Maison…")
-                runCatching { DomotiqueDirecte.executer(app, tools, texteUser) }.getOrNull()?.let { return reflexe(it) }
+                runCatching { DomotiqueDirecte.executer(app, tools, texteUser) }.getOrNull()?.let { return reflexeMaison(it) }
             }
             if (commandeMode && !cibleTelephone) {
                 onStatus("⚙️ Changement du mode énergétique…")
@@ -401,7 +403,7 @@ class Brain(
         }
         // Outils retirés : ceux qui renverraient vers Hermès (quand c'est Hermès qui demande), et le SSH pour une demande
         // Home Assistant ordinaire — elle passe par l'API (ha_*) ; si l'API échoue, l'approfondissement prend le relais.
-        val retires = (if (pourHermes || MaisonDirecte.concerne(texteUser)) setOf("hermes", "hermes_deleguer", "tache_arriere_plan") else emptySet()) +
+        val retires = (if (pourHermes || MaisonDirecte.concerne(texteUser) || (!pourHermes && fr.dd.jarvis.hermes.Routeur.dernierChoixMaison)) setOf("hermes", "hermes_deleguer", "tache_arriere_plan") else emptySet()) +
             (if (fr.dd.jarvis.hermes.Routeur.homeAssistantApi(texteUser)) setOf("ssh_commande", "ssh_fichier", "ssh_script", "serveur_diagnostic") else emptySet())
         val schemaFinal = if (retires.isEmpty()) schema else JSONArray().also { f ->
             for (i in 0 until schema.length()) {
