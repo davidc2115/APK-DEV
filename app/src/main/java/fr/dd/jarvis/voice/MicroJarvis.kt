@@ -169,8 +169,11 @@ class MicroJarvis(private val ctx: Context) {
                     // DÉCISION PAR LES MOTS : la phrase commence au premier vrai mot reconnu et finit quand plus aucun
                     // mot n'arrive pendant la pause. Le modèle hors-ligne n'entend bien que la voix proche du téléphone :
                     // la télé ou les gens autour ne la déclenchent pas et ne la prolongent pas (avant : écoute sans fin).
-                    porte.trame(rms)
-                    termine = mots.trame(affiche, trames)
+                    // …et dès que TA voix s'est tue pendant la pause choisie (niveau sonore jugé par rapport à ta voix),
+                    // sans attendre que le modèle ait fini de réviser son texte : c'était ~1 à 2 s de trop.
+                    val finVoix = porte.trame(rms)
+                    termine = mots.trame(affiche, trames) ||
+                        (mots.parle && porte.parle && finVoix && trames - mots.derniereActivite >= 25 && !VoiceManager.suiteProbable(affiche))
                 } else if (avecModele && System.currentTimeMillis() - debut < 4000) {
                     // Modèle encore en chargement (première écoute) : on enregistre, la décision viendra des mots.
                     porte.trame(rms); termine = false
@@ -210,7 +213,9 @@ internal class EcouteParMots(private val pauseTrames: Int) {
     /** Trame où le premier vrai mot est apparu. */
     var trameDebut = 0
         private set
-    private var derniereActivite = 0
+    /** Trame du dernier changement du texte reconnu. */
+    var derniereActivite = 0
+        private set
     private var texte = ""
     private var prolongations = 0
     private var n = 0

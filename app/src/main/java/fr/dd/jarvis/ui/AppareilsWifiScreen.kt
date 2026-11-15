@@ -79,12 +79,15 @@ private fun LiesAJarvis(app: JarvisApp, onDemander: (String) -> Unit) {
     // Résultat des tests : clé « id/local » ou « id/distant » → true (répond), false (ne répond pas), null (en cours).
     val tests = remember { androidx.compose.runtime.mutableStateMapOf<String, Boolean?>() }
     var enTest by remember { mutableStateOf(false) }
+    /** Téléphone hors du Wi-Fi de la maison : les adresses locales ne peuvent pas répondre, elles ne sont pas testées. */
+    var dehors by remember { mutableStateOf(false) }
 
     fun tester() {
         if (enTest) return
         enTest = true; tests.clear()
         scope.launch {
-            val travaux = liens.flatMap { l -> listOfNotNull(l.testLocal?.let { "${l.id}/local" to it }, l.testDistant?.let { "${l.id}/distant" to it }) }
+            dehors = withContext(Dispatchers.IO) { runCatching { !fr.dd.jarvis.ai.AppareilsLies.aLaMaison(app) }.getOrDefault(false) }
+            val travaux = liens.flatMap { l -> listOfNotNull(l.testLocal?.takeIf { !dehors }?.let { "${l.id}/local" to it }, l.testDistant?.let { "${l.id}/distant" to it }) }
             travaux.forEach { (k, _) -> tests[k] = null }
             kotlinx.coroutines.coroutineScope {
                 travaux.forEach { (k, adr) -> launch(Dispatchers.IO) { val ok = fr.dd.jarvis.ai.AppareilsLies.repond(app, adr); withContext(Dispatchers.Main) { tests[k] = ok } } }
@@ -94,13 +97,15 @@ private fun LiesAJarvis(app: JarvisApp, onDemander: (String) -> Unit) {
     }
     LaunchedEffect(Unit) { tester() }
 
-    fun pastille(k: String): String = if (!tests.containsKey(k)) "" else when (tests[k]) { true -> " 🟢"; false -> " 🔴"; null -> " ⏳" }
+    fun pastille(k: String): String =
+        if (dehors && k.endsWith("/local") && !tests.containsKey(k)) " ⚪ (tu n'es pas à la maison)"
+        else if (!tests.containsKey(k)) "" else when (tests[k]) { true -> " 🟢"; false -> " 🔴"; null -> " ⏳" }
 
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             HudPanel(Modifier.fillMaxWidth(), title = "🔗 Appareils liés à Jarvis") {
                 Text("Ce que JARVIS pilote directement, et comment il le joint : 🏠 en local quand le téléphone est sur le Wi-Fi de la maison, " +
-                    "🌍 à distance quand tu es dehors. 🟢 répond · 🔴 ne répond pas d'ici · ⏳ test en cours.", color = HudDim, fontSize = 11.sp)
+                    "🌍 à distance quand tu es dehors. 🟢 répond · 🔴 ne répond pas d'ici · ⚪ adresse locale non testée hors de la maison · ⏳ test en cours.", color = HudDim, fontSize = 11.sp)
                 if (situation.isNotBlank()) Text("📍 $situation", color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
                 Spacer(Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
