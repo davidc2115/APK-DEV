@@ -394,8 +394,11 @@ object MaisonDirecte {
             "\\bprises?\\b(?! de)|interrupteur|chauffage|po[eê]le|\\bpoils?\\b|granul[ée]s|thermostat|radiateur|\\bclim|ventilateur|\\bvmc\\b|portail|" +
             "porte (du |de )?garage|aspirateur|enceinte|barre de son|sc[èe]ne|ambiance|home ?assistant|domotique|capteur|d[ée]tecteur|" +
             "temp[ée]rature (du|de la|dans|int[ée]rieure)|humidit[ée]|arrosage|piscine|hdmi|netflix sur|sur la t[ée]l[ée]|ventilo|" +
-            "production (solaire|photovolta|des panneaux)|panneaux? (solaires?|photovolta)|onduleur|consommation (électrique|electrique|d.[ée]nergie|de la maison)|" +
-            "\\blinky\\b|compteur [ée]lectrique|serrure|sonnette|fen[êe]tres?|porte d.entr[ée]e|portillon|lave.linge|machine [àa] laver|lave.vaisselle|s[èe]che.linge|" +
+            // Photovoltaïque : seulement CELUI DE LA MAISON (« mes panneaux », « l'onduleur de la maison ») — sinon c'est
+            // peut-être la société (clients, interventions) : voir [SOCIETE].
+            "\\b(mes|nos) (panneaux|onduleurs?|batteries? solaires?|installation solaire)|(production|panneaux?|onduleur|consommation)[^.?!]{0,30}" +
+            "(de la maison|[àa] la maison|chez (moi|nous)|de mon toit|de notre toit|du toit)|\\bmon onduleur|\\bnotre onduleur|" +
+            "\\b(mon|notre) linky|compteur [ée]lectrique de la maison|serrure|sonnette|fen[êe]tres?|porte d.entr[ée]e|portillon|lave.linge|machine [àa] laver|lave.vaisselle|s[èe]che.linge|" +
             "cong[ée]lateur|frigo|r[ée]frig[ée]rateur|mode (nuit|absence|vacances) de la maison|qui est [àa] la maison|" +
             "cam[ée]ras? (de|du|devant|dans|[àa]) (la |l.)?(maison|jardin|entr[ée]e|garage|salon|porte|cour)",
         RegexOption.IGNORE_CASE
@@ -406,6 +409,20 @@ object MaisonDirecte {
         RegexOption.IGNORE_CASE
     )
 
+    /**
+     * La SOCIÉTÉ (maintenance photovoltaïque) : panneaux, onduleurs, production… d'un CLIENT, interventions, devis,
+     * factures, tournées. Ces demandes ne sont jamais traitées comme la maison.
+     */
+    private val SOCIETE = Regex(
+        "\\bclients?\\b|interventions?|\\bdevis\\b|factur|chantiers?|tourn[ée]e|\\bvisites?\\b|maintenance|entretien|\\bcontrats?\\b|rapport|" +
+            "\\bsoci[ée]t[ée]\\b|\\bentreprise\\b|\\bsiret\\b|\\bkwc\\b|\\bdu site\\b|\\bsur site\\b|chez (m\\.?|mme|monsieur|madame|mr)\\b|" +
+            "installations? (de|du|des|chez) (?!la maison|moi|nous)|technicien|d[ée]pannage|garantie|mise en service|onduleur[^.?!]{0,20}\\b(du|de) (m|mme|monsieur|madame|client)",
+        RegexOption.IGNORE_CASE
+    )
+
+    /** Demande qui parle de la société (clients, interventions, devis…) et non de la maison. */
+    fun societe(texte: String): Boolean = SOCIETE.containsMatchIn(texte)
+
     /** Demande qui concerne un appareil de la maison : traitée par JARVIS et Home Assistant, jamais confiée à Hermès. */
-    fun concerne(texte: String): Boolean = MAISON.containsMatchIn(texte) && !PAS_MAISON.containsMatchIn(texte)
+    fun concerne(texte: String): Boolean = MAISON.containsMatchIn(texte) && !PAS_MAISON.containsMatchIn(texte) && !SOCIETE.containsMatchIn(texte)
 }

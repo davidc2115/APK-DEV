@@ -930,6 +930,7 @@ object Routeur {
         // Suite d'une conversation sur la MAISON (« peux-tu le régler avant ? », « là c'est bon, ça fonctionne ») : JARVIS,
         // qui a l'historique et l'API de Home Assistant. Avant, ces phrases sans « télé » ni « lumière » partaient chez Hermès.
         if (suiteMaison && t.split(Regex("\\s+")).size <= 14 && !ORCHESTRATION.containsMatchIn(t) && !WEB.containsMatchIn(t) && !serveurDebian(t) &&
+            !fr.dd.jarvis.ai.MaisonDirecte.societe(t) &&
             (ACCUSE.matches(t) || BREF.matches(t) || reponseCourte || SUITE.containsMatchIn(t)))
             return Choix(Cible.JARVIS, "maison : suite de la conversation")
         if (BREF.matches(t) || reponseCourte) return Choix(derniere, if (derniere == Cible.HERMES) "suite de la conversation avec Hermès" else "suite de la conversation avec Jarvis")

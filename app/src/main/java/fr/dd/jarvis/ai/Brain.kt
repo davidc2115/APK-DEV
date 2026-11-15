@@ -274,11 +274,12 @@ class Brain(
             }
             // Télé (chaîne, volume, sourdine, pause, source / appli), luminosité, scènes : Home Assistant directement, sans
             // IA ni Hermès (repli : connexion directe à la télé).
-            if (MaisonDirecte.analyser(texteUser) != null) {
+            val pourSociete = MaisonDirecte.societe(texteUser)   // panneaux / onduleur d'un client : pas la maison
+            if (!pourSociete && MaisonDirecte.analyser(texteUser) != null) {
                 onStatus("🏠 Maison…")
                 runCatching { MaisonDirecte.executer(app, texteUser) }.getOrNull()?.let { return reflexeMaison(it) }
             }
-            if (MaisonDirecte.analyserLumiere(texteUser) != null) {
+            if (!pourSociete && MaisonDirecte.analyserLumiere(texteUser) != null) {
                 onStatus("🏠 Maison…")
                 runCatching { MaisonDirecte.executerLumiere(app, texteUser) }.getOrNull()?.let { return reflexeMaison(it) }
             }
@@ -288,7 +289,7 @@ class Brain(
                 executerDirecte(i)?.let { return reflexe(it) }
             }
             // Lumières, volets, prises, télé : Home Assistant directement quand l'appareil est trouvé sans ambiguïté.
-            if (DomotiqueDirecte.commande(fr.dd.jarvis.societe.core.normaliser(texteUser)) != null) {
+            if (!pourSociete && DomotiqueDirecte.commande(fr.dd.jarvis.societe.core.normaliser(texteUser)) != null) {
                 onStatus("🏠 Maison…")
                 runCatching { DomotiqueDirecte.executer(app, tools, texteUser) }.getOrNull()?.let { return reflexeMaison(it) }
             }
