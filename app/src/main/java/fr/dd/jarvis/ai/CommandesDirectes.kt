@@ -169,7 +169,11 @@ object CommandesDirectes {
     private val R_TACHES = motif("(?:(?:liste|montre|affiche|donne|lis|quelles sont)(?: moi)? )?(?:mes taches|ma liste de taches|la liste de mes taches|mes taches en cours|mes taches a faire)")
     private val R_RAPPEL = motif("(?:rappelle moi|rappelle nous|fais moi penser|fais nous penser|n oublie pas de me rappeler|pense a me rappeler|tu me rappelleras|tu peux me rappeler|" +
         "(?:mets|met|cree|ajoute|programme|fais)(?: moi)? un rappel|un rappel|rappel) (.+)")
+    // « lance l'itinéraire jusqu'à Dijon », « démarre le trajet vers Lyon », « itinéraire vers Beaune » : avant, sans le mot
+    // « navigation », la demande partait au cerveau, qui calculait le trajet (outil itineraire) sans lancer le guidage.
     private val R_NAV = motif("(?:emmene moi|emmene nous|amene moi|conduis moi|guide moi|guide nous|lance la navigation|demarre la navigation|lance le gps|navigation|navigue|" +
+        "(?:lance|relance|demarre|commence|active|mets|ouvre) (?:l |le |un |mon |la )?(?:itineraire|trajet|guidage|gps|route|navigation)|" +
+        "itineraire(?= (?:vers|jusqu a|jusqu au|jusque|pour|direction|a|au) )|trajet(?= (?:vers|jusqu a|jusqu au|jusque|direction) )|" +
         "(?:lance|ouvre|demarre) (?:waze|google maps|maps))(?: (?:a|au|aux|vers|jusqu a|jusqu au|jusque|pour|en|direction|sur))* (.+)")
     private const val APPLIS_MUSIQUE = "spotify|deezer|youtube music|yt music|apple music|amazon music|youtube"
     private val R_JOUE = listOf(
@@ -357,7 +361,7 @@ object CommandesDirectes {
     private fun navigation(o: String, p: String): Intention? {
         val m = R_NAV.matchEntire(p) ?: return null
         val n = m.n(1)
-        if (n.split(' ').size > 8 || Regex("\\b(rendez vous|rdv|prochain|chantier|client|installation|et|puis)\\b").containsMatchIn(n)) return null
+        if (n.split(' ').size > 8 || Regex("\\b(rendez vous|rdv|prochain|chantier|client|installation|et|puis|tournee|agenda|planning|demain|combien|temps|distance|duree)\\b").containsMatchIn(n)) return null
         // « Chez Martin » : client ou contact à retrouver d'abord — le cerveau s'en charge.
         if (Regex("\\bchez (?!moi\\b)").containsMatchIn(serre(p))) return null
         var dest = m.de(o, 1) ?: return null

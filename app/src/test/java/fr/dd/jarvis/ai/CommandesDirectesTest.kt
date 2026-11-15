@@ -103,6 +103,13 @@ class CommandesDirectesTest {
         i("emmène-moi à la gare de Dijon")!!.let { assertEquals("naviguer", it.outil); assertEquals("la gare de Dijon", it.args.getString("destination")) }
         i("lance Waze vers Beaune")!!.let { assertEquals("Waze", it.args.getString("appli")); assertEquals("Beaune", it.args.getString("destination")) }
         assertNull(i("emmène-moi chez Martin"))
+        // « Lance l'itinéraire jusqu'à … » : le guidage est LANCÉ (avant, seulement calculé).
+        i("Lance l'itinéraire jusqu'à Dijon")!!.let { assertEquals("naviguer", it.outil); assertEquals("Dijon", it.args.getString("destination")) }
+        i("démarre le trajet vers Lyon")!!.let { assertEquals("naviguer", it.outil); assertEquals("Lyon", it.args.getString("destination")) }
+        i("itinéraire vers Beaune avec Waze")!!.let { assertEquals("Beaune", it.args.getString("destination")); assertEquals("Waze", it.args.getString("appli")) }
+        i("lance un itinéraire jusqu'à Chalon-sur-Saône")!!.let { assertEquals("Chalon-sur-Saône", it.args.getString("destination")) }
+        assertNull(i("itinéraire de ma tournée de demain"))
+        assertNull(i("combien de temps de trajet jusqu'à Dijon"))
         i("joue Daft Punk sur Spotify")!!.let { assertEquals("jouer_musique", it.outil); assertEquals("Daft Punk", it.args.getString("requete")); assertEquals("Spotify", it.args.getString("appli")) }
         i("mets la playlist sport")!!.let { assertEquals("playlist sport", it.args.getString("requete")) }
         assertNull(i("mets du chauffage"))

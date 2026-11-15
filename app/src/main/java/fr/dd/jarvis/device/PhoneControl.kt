@@ -109,7 +109,11 @@ class PhoneControl(private val ctx: Context) {
             if (data != null) i.data = Uri.parse(data)
             if (pkg != null) i.setPackage(pkg)
             extras.forEach { (k, v) -> i.putExtra(k, v) }
-            ctx.startActivity(i); ""
+            // Le service d'accessibilité de JARVIS (lié par le système) peut ouvrir une appli même quand JARVIS est en
+            // arrière-plan (Android Auto, écran éteint) ; sinon le démarrage depuis l'arrière-plan est bloqué en silence.
+            val acc = fr.dd.jarvis.service.JarvisAccessibilityService.instance
+            if (acc != null) runCatching { acc.startActivity(i) }.getOrElse { ctx.startActivity(i) } else ctx.startActivity(i)
+            ""
         } catch (e: Exception) { "Lancement impossible : ${e.message}. (Pour lancer des applis quand JARVIS est en arrière-plan : appairer l'ADB intégré ou autoriser l'affichage par-dessus les autres applis.)" }
     }
 

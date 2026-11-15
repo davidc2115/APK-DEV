@@ -966,6 +966,9 @@ class ToolBox(
                 val pt = runCatching { fr.dd.jarvis.societe.Geo.geocode(a.optString("destination")) }.getOrNull()
                 if (fr.dd.jarvis.car.NavigationVoiture.lancer(a.optString("destination"), pt?.let { it.lat to it.lon }))
                     return ToolResult("🧭 Guidage lancé dans Android Auto vers ${a.optString("destination")}.")
+                // JARVIS pas ouvert dans Android Auto : l'appli de navigation du téléphone est lancée (son guidage
+                // s'affiche dans la voiture), avec les coordonnées si l'adresse a été trouvée.
+                fr.dd.jarvis.voice.JournalVoix.noter("voiture", "guidage par le téléphone (JARVIS n'est pas ouvert dans Android Auto)")
             }
             var appli = a.optString("appli").trim()
             val toujours = a.optString("toujours").trim().lowercase() in setOf("true", "oui", "1", "vrai")
