@@ -423,8 +423,9 @@ class Store(context: Context) {
      */
     val ecouteLongue = BPref("ecouteLongue", false)
     /**
-     * Casque ou voiture en Bluetooth (sans Android Auto) : JARVIS t'écoute avec LEUR micro (profil mains-libres) et le
-     * bip comme la voix passent par eux pendant la conversation. Désactivé : micro du téléphone, son en A2DP.
+     * Casque, voiture en Bluetooth ou voiture Android Auto (sa liaison Bluetooth « appels ») : JARVIS t'écoute avec LEUR
+     * micro (profil mains-libres) et le bip comme la voix passent par eux pendant la conversation. Désactivé : micro du
+     * téléphone, son en A2DP / par le canal média d'Android Auto.
      */
     val microBluetooth = BPref("microBluetooth", true)
     /** Voix en mode « appel » sur le haut-parleur pendant la réponse (annulation d'écho : coupure de parole fiable). */

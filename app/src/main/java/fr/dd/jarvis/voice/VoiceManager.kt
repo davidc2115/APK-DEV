@@ -885,7 +885,13 @@ class VoiceManager(private val ctx: Context) {
                     val n = (taux * 0.11).toInt()
                     // Sortie en veille : ~0,3 s pour le haut-parleur du téléphone, jusqu'à ~0,7 s pour un lien Bluetooth
                     // ou le canal média d'Android Auto. Ce silence d'abord, sinon le début du bip est avalé.
-                    val avance = (taux * (if (externe && !sco) 0.8 else 0.35)).toInt()
+                    val voiture = appli()?.enVoiture == true
+                    val avance = (taux * when {
+                        sco -> if (voiture) 0.6 else 0.35          // haut-parleurs « appel » de la voiture : ~0,5 s pour s'ouvrir
+                        voiture -> 1.2                             // canal média d'Android Auto : jusqu'à ~1 s pour s'ouvrir
+                        externe -> 0.8
+                        else -> 0.35
+                    }).toInt()
                     val amplitude = if (externe) 0.32 else 0.25
                     val pcm = ShortArray(avance + n * notes.size + taux / 20)
                     notes.forEachIndexed { k, f ->
@@ -906,7 +912,8 @@ class VoiceManager(private val ctx: Context) {
                     piste.write(pcm, 0, pcm.size)
                     piste.play()
                     JournalVoix.noter(nom, "bip joué sur " + when {
-                        sco -> "la liaison mains-libres Bluetooth (${microBt?.productName ?: "casque"})"
+                        sco -> "la liaison mains-libres Bluetooth (${microBt?.productName ?: "casque"})" +
+                            (if (appli()?.enVoiture == true) " de la voiture, Android Auto" else "")
                         appli()?.enVoiture == true -> "les haut-parleurs de la voiture (Android Auto)"
                         externe -> "la sortie Bluetooth / externe"
                         else -> "le haut-parleur du téléphone"
@@ -989,16 +996,30 @@ class VoiceManager(private val ctx: Context) {
     }.getOrNull()
 
     /**
-     * Micro Bluetooth à utiliser : celui de l'appareil qui joue DÉJÀ ton son (casque, voiture en Bluetooth sans Android
-     * Auto), par son profil mains-libres. Une montre ou un appareil connecté seulement pour les appels n'est jamais pris.
+     * Micro Bluetooth à utiliser, par le profil mains-libres :
+     *  - Android Auto : la VOITURE elle-même. JARVIS y est une appli média (les écrans voiture sont désactivés hors Play
+     *    Store) : Android Auto ne lui prête donc pas le micro de la voiture. Mais la voiture est aussi reliée au téléphone
+     *    en Bluetooth pour les appels : son micro et ses haut-parleurs « téléphone » servent alors à JARVIS, comme pour
+     *    un appel (et comme l'Assistant dans une voiture Bluetooth) ;
+     *  - sinon : l'appareil qui joue DÉJÀ ton son (casque, voiture en Bluetooth seul).
+     * Une montre ou un appareil connecté seulement pour les appels n'est jamais pris.
      */
     private fun appareilMicroBluetooth(): AudioDeviceInfo? {
         if (Build.VERSION.SDK_INT < 31) return null
         val app = appli() ?: return null
-        if (!app.store.microBluetooth.value || app.enVoiture) return null       // Android Auto : micro de la voiture
+        if (!app.store.microBluetooth.value) return null
         if (am.mode != AudioManager.MODE_NORMAL) return null                    // appel en cours : on n'y touche pas
-        val sortie = sortieMedia() ?: return null
         val comm = runCatching { am.availableCommunicationDevices }.getOrNull() ?: return null
+        if (app.enVoiture) {
+            // JARVIS ouvert sur l'écran de la voiture : vrai micro de la voiture par Android Auto (MicroJarvis).
+            if (fr.dd.jarvis.car.NavigationVoiture.microVoiture() != null) return null
+            val montre = Regex("(?i)watch|montre|\\bband\\b|\\bgear\\b")
+            val voiture = comm.filter { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO && !montre.containsMatchIn(it.productName.toString()) }
+            if (voiture.isEmpty()) JournalVoix.noter(nom, "Android Auto : aucune liaison mains-libres Bluetooth avec la voiture " +
+                "(appareils : ${comm.joinToString { "${it.productName}/${it.type}" }}) → micro du téléphone")
+            return voiture.firstOrNull()
+        }
+        val sortie = sortieMedia() ?: return null
         fun meme(d: AudioDeviceInfo) = (sortie.address.isNotBlank() && d.address == sortie.address) ||
             (d.productName.toString().isNotBlank() && d.productName.toString() == sortie.productName.toString())
         return when (sortie.type) {
@@ -1045,8 +1066,10 @@ class VoiceManager(private val ctx: Context) {
     }
 
     /** Attend (hors fil principal) la liaison ; trop lente → abandon, retour au micro du téléphone et au son A2DP. */
-    private fun attendreMicroBluetooth(maxMs: Long = 2500): Boolean {
+    private fun attendreMicroBluetooth(): Boolean {
         if (microBt == null) return false
+        // Une voiture met plus de temps qu'un casque à ouvrir sa liaison « appel » (et à basculer ses haut-parleurs).
+        val maxMs = if (appli()?.enVoiture == true) 4500L else 2500L
         val limite = System.currentTimeMillis() + maxMs
         while (System.currentTimeMillis() < limite) {
             if (microBluetoothPret()) { Thread.sleep(200); return true }
