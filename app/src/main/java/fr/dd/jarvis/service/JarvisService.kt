@@ -581,7 +581,7 @@ class JarvisService : Service() {
             // téléphone), et Hermès automatiquement quand il le faut (automatismes, serveur, échec de Jarvis…).
             // Voix progressive : Jarvis commence à parler dès la première phrase écrite par Hermès.
             var relancer = true
-            val flux = withContext(Dispatchers.Main) { voice?.parole(700) { if (gen == generation) { busy = false; if (relancer) ecouter() else goIdle() } } }
+            val flux = withContext(Dispatchers.Main) { voice?.parole(5000) { if (gen == generation) { busy = false; if (relancer) ecouter() else goIdle() } } }
             val reply = try {
                 fr.dd.jarvis.ai.Brain(app.llm, tools, app) { app.store.userName.value }
                     .reply(app.chat.toList().takeLast(16), onTexte = { d -> if (gen == generation) flux?.ajouter(d) }) { etat -> android.os.Handler(android.os.Looper.getMainLooper()).post { majNotification(etat) } }
