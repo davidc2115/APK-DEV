@@ -284,8 +284,37 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         return mutableListOf<Pair<String, DocumentFile>>().also { walk(r, "", it, limit) }
     }
 
+    /**
+     * Le coffre est lu par le fournisseur de documents d'Android : chaque fichier coûte un aller-retour, et sur le fil
+     * principal l'appli se fige (« JARVIS ne répond pas »). Ces lectures doivent se faire en arrière-plan : un appel
+     * depuis le fil principal est noté (une fois par endroit) dans le journal de la voix, pour retrouver le fautif.
+     */
+    private fun signalerFilPrincipal(quoi: String) {
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) return
+        val appelant = Throwable().stackTrace.drop(2).firstOrNull { !it.className.contains("ObsidianWriter") }
+            ?.let { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" } ?: "?"
+        if (signales.add("$quoi@$appelant")) fr.dd.jarvis.voice.JournalVoix.noter("diagnostic", "⚠️ coffre Obsidian lu sur le fil principal ($quoi, depuis $appelant)")
+    }
+    private val signales = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    /** Contenu des notes (chemin, texte tronqué à 80 Ko), au plus [limite] : à appeler hors du fil principal. */
+    fun parcourirContenus(limite: Int = 1500, action: (String, String) -> Unit) {
+        signalerFilPrincipal("parcourirContenus")
+        if (vaultRoot() != null) {
+            for ((path, f) in allNotes(limite)) {
+                val t = runCatching { ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes().take(80_000).toByteArray().toString(Charsets.UTF_8) } }.getOrNull() ?: continue
+                action(path, t)
+            }
+        } else {
+            localRoot().walkTopDown().filter { it.isFile && it.name.endsWith(".md", true) }.take(limite).forEach { f ->
+                runCatching { f.readText() }.getOrNull()?.let { action(f.relativeTo(localRoot()).path, it) }
+            }
+        }
+    }
+
     /** Notes du coffre (chemins relatifs), éventuellement dans un dossier. */
     fun listNotes(folder: String = ""): List<String> {
+        signalerFilPrincipal("listNotes")
         val f = folder.trim().trim('/')
         val vaultNotes = if (vaultRoot() != null) allNotes().map { it.first } else emptyList()
         val localDir = File(localRoot(), f)
@@ -296,6 +325,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
     /** Recherche texte (nom + contenu). Retourne (chemin, extrait). */
     fun searchNotes(query: String, limit: Int = 12): List<Pair<String, String>> {
+        signalerFilPrincipal("searchNotes")
         val q = query.trim().lowercase()
         if (q.isEmpty()) return emptyList()
         val out = mutableListOf<Pair<String, String>>()
@@ -325,6 +355,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     private fun withMd(path: String) = path.trim().trim('/').let { if (it.endsWith(".md", true)) it else "$it.md" }
 
     fun readNote(path: String): String? {
+        signalerFilPrincipal("readNote")
         val p = withMd(path)
         val v = vaultRoot()
         if (v != null) {

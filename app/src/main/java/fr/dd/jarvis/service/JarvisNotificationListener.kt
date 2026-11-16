@@ -78,7 +78,35 @@ class JarvisNotificationListener : NotificationListenerService() {
         fun estMail(pkg: String) = MAILS.any { pkg.contains(it, true) }
     }
 
-    override fun onListenerConnected() { active = true; recharger(applicationContext) }
+    override fun onListenerConnected() {
+        active = true; recharger(applicationContext)
+        (applicationContext as? fr.dd.jarvis.JarvisApp)?.let { fr.dd.jarvis.device.Telephony.NumerosCoffre.preparer(it) }
+    }
+
+    /**
+     * Qui appelle : recherche (contacts, clients, coffre) HORS du fil principal, 0,4 s d'attente au plus, résultat gardé
+     * 30 min. Une notification d'appel est republiée plusieurs fois (sonnerie, décroché…) : la suivante a le nom.
+     * Avant : la recherche bloquait le fil principal à chaque mise à jour de la notification → « JARVIS ne répond pas ».
+     */
+    private fun identite(app: fr.dd.jarvis.JarvisApp, numero: String): String? {
+        val cle = numero.filter(Char::isDigit).takeLast(9)
+        val maintenant = System.currentTimeMillis()
+        identites[cle]?.takeIf { maintenant - it.second < 30 * 60_000 }?.let { return it.first.ifBlank { null } }
+        val tache = synchronized(enCours) {
+            enCours.getOrPut(cle) {
+                fond.submit<String?> {
+                    val r = runCatching { fr.dd.jarvis.device.Telephony.identifierAppel(app, numero) }.getOrNull()
+                    identites[cle] = r.orEmpty() to System.currentTimeMillis()
+                    synchronized(enCours) { enCours.remove(cle) }
+                    r
+                }
+            }
+        }
+        return runCatching { tache.get(400, java.util.concurrent.TimeUnit.MILLISECONDS) }.getOrNull()
+    }
+    private val identites = java.util.concurrent.ConcurrentHashMap<String, Pair<String, Long>>()
+    private val enCours = HashMap<String, java.util.concurrent.Future<String?>>()
+    private val fond = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "jarvis-qui-appelle").apply { isDaemon = true } }
     override fun onListenerDisconnected() {
         active = false
         runCatching { requestRebind(android.content.ComponentName(this, JarvisNotificationListener::class.java)) }
@@ -116,7 +144,7 @@ class JarvisNotificationListener : NotificationListenerService() {
             if (appel) {
                 val candidat = Regex("(?:\\+?\\d[\\d .()/-]{6,}\\d)").find("$titre $texte")?.value.orEmpty()
                 val app = applicationContext as? fr.dd.jarvis.JarvisApp
-                val identite = if (candidat.isNotBlank() && app != null) runCatching { fr.dd.jarvis.device.Telephony.identifierAppel(app, candidat) }.getOrNull() else null
+                val identite = if (candidat.isNotBlank() && app != null) identite(app, candidat) else null
                 if (!identite.isNullOrBlank()) titre = "$identite · $titre".trim(' ', '·')
                 else if (titre.isBlank()) titre = "Appel entrant"
             }

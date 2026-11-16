@@ -2260,20 +2260,24 @@ class ToolBox(
      * aucun token consommé) ; sinon on met à jour CETTE fiche (même emplacement) au lieu d'en créer une autre.
      */
     suspend fun buildCard(c: fr.dd.jarvis.device.ContactInfo, sousDossier: String = ""): String {
-        val cheminExistant = app.obsidian.ficheExistante("Contacts", c.name)
+        // Coffre lu et écrit en arrière-plan (sur le fil principal, l'écran des contacts se figeait).
+        val io = kotlinx.coroutines.Dispatchers.IO
+        val cheminExistant = kotlinx.coroutines.withContext(io) { app.obsidian.ficheExistante("Contacts", c.name) }
         if (cheminExistant != null) {
-            val contenuActuel = app.obsidian.readNote(cheminExistant)
+            val contenuActuel = kotlinx.coroutines.withContext(io) { app.obsidian.readNote(cheminExistant) }
             if (contenuActuel != null && coordonneesInchangees(contenuActuel, c)) {
                 return "✅ Fiche « ${c.name} » déjà à jour : coffre Obsidian › $cheminExistant\n\n---\n\n$contenuActuel"
             }
         }
         val md = llm.agent(Prompts.CONTACT_CARD + app.memo.pour("contacts", "fiche", "fiches"), "Date du jour : ${LocalDate.now()}\n\n${c.toPrompt()}")
-        val where = if (cheminExistant != null) {
-            // Réécrit la fiche trouvée à son emplacement actuel (même sous-dossier) : jamais de doublon.
-            app.obsidian.writeNote(cheminExistant, md, append = false)
-        } else {
-            val dossier = "Contacts" + sousDossier.trim().trim('/').let { if (it.isBlank()) "" else "/$it" }
-            app.obsidian.saveIn(dossier, c.name, md)
+        val where = kotlinx.coroutines.withContext(io) {
+            if (cheminExistant != null) {
+                // Réécrit la fiche trouvée à son emplacement actuel (même sous-dossier) : jamais de doublon.
+                app.obsidian.writeNote(cheminExistant, md, append = false)
+            } else {
+                val dossier = "Contacts" + sousDossier.trim().trim('/').let { if (it.isBlank()) "" else "/$it" }
+                app.obsidian.saveIn(dossier, c.name, md)
+            }
         }
         return "✅ Fiche « ${c.name} » enregistrée : $where\n\n---\n\n$md"
     }

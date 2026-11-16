@@ -51,18 +51,38 @@ object Telephony {
             }
         }
 
-        // 3) Fiches du coffre Obsidian : on confirme le numéro dans le contenu, pas seulement le nom du fichier.
-        runCatching {
-            app.obsidian.searchNotes(key, 30).forEach { (path, _) ->
-                val note = app.obsidian.readNote(path).orEmpty()
-                val numbers = Regex("""(?:\+?\d[\d .()/-]{6,}\d)""").findAll(note)
-                    .map { it.value.filter(Char::isDigit) }
-                if (numbers.any { it.length >= 8 && it.takeLast(8) == key }) {
-                    matches += "${path.substringAfterLast('/').removeSuffix(".md")} (Obsidian)"
-                }
-            }
-        }
+        // 3) Fiches du coffre Obsidian : numéros relevés dans le CONTENU des notes, par un index tenu en arrière-plan.
+        // Avant : jusqu'à 600 notes relues à chaque notification d'appel, sur le fil principal → JARVIS figé (ANR).
+        NumerosCoffre.chercher(app, key)?.forEach { matches += "$it (Obsidian)" }
         return matches.takeIf { it.isNotEmpty() }?.joinToString(" · ")
+    }
+
+    /** Numéros de téléphone trouvés dans les notes du coffre (8 derniers chiffres → noms des notes), refait au plus tous les 20 min. */
+    object NumerosCoffre {
+        @Volatile private var index: Map<String, List<String>> = emptyMap()
+        @Volatile private var faitLe = 0L
+        private val enCours = java.util.concurrent.atomic.AtomicBoolean(false)
+        private val NUMERO = Regex("""(?:\+?\d[\d .()/-]{6,}\d)""")
+
+        /** Index actuel (jamais de lecture du coffre ici) ; relance sa mise à jour en arrière-plan si besoin. */
+        fun chercher(app: fr.dd.jarvis.JarvisApp, cle: String): List<String>? { preparer(app); return index[cle] }
+
+        fun preparer(app: fr.dd.jarvis.JarvisApp) {
+            if (System.currentTimeMillis() - faitLe < 20 * 60_000 || !enCours.compareAndSet(false, true)) return
+            Thread({
+                try {
+                    val m = HashMap<String, MutableList<String>>()
+                    app.obsidian.parcourirContenus { path, texte ->
+                        val nom = path.substringAfterLast('/').removeSuffix(".md")
+                        NUMERO.findAll(texte).map { it.value.filter(Char::isDigit) }.filter { it.length >= 8 }.map { it.takeLast(8) }.toSet()
+                            .forEach { k -> m.getOrPut(k) { mutableListOf() }.let { if (nom !in it && it.size < 3) it += nom } }
+                    }
+                    index = m; faitLe = System.currentTimeMillis()
+                } catch (_: Throwable) {
+                    faitLe = System.currentTimeMillis() - 15 * 60_000   // nouvel essai dans ~5 min
+                } finally { enCours.set(false) }
+            }, "jarvis-index-numeros").apply { isDaemon = true; priority = Thread.MIN_PRIORITY; start() }
+        }
     }
 
     fun lire(app: fr.dd.jarvis.JarvisApp, count: Int, de: String, nonLus: Boolean): String {
