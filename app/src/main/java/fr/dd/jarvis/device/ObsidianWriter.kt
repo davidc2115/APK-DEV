@@ -301,7 +301,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     fun parcourirContenus(limite: Int = 1500, action: (String, String) -> Unit) {
         signalerFilPrincipal("parcourirContenus")
         if (coffreConfigure()) {
-            val racine = vaultRoot() ?: return
+            if (vaultRoot() == null) return
             for ((path, f) in allNotes(limite)) {
                 val t = runCatching { ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes().take(80_000).toByteArray().toString(Charsets.UTF_8) } }.getOrNull() ?: continue
                 action(path, t)
