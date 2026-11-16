@@ -418,7 +418,12 @@ class JarvisMediaService : MediaBrowserService() {
                 afficher("🎙️ Je t'écoute…", "Parle maintenant", PlaybackState.STATE_PLAYING)
             }
             ActiviteVoiture.Etape.PARTIEL -> if (enCours) afficher("🎙️ « ${e.texte.take(90)} »", "…", PlaybackState.STATE_PLAYING)
-            ActiviteVoiture.Etape.REFLEXION -> if (enCours) afficher("« ${e.question.take(90)} »", "JARVIS réfléchit…", PlaybackState.STATE_BUFFERING)
+            ActiviteVoiture.Etape.REFLEXION -> if (enCours) {
+                // La voix de VoiceManager est progressive : elle peut commencer avant la fin de Brain.reply().
+                // Android Auto coupe sinon le flux tant que la MediaSession reste en BUFFERING. On active donc
+                // la sortie média dès le début du traitement, avant la première syllabe de la réponse.
+                afficher("« ${e.question.take(90)} »", "JARVIS prépare sa réponse…", PlaybackState.STATE_PLAYING)
+            }
             ActiviteVoiture.Etape.REPONSE -> {
                 derniere = propre(e.texte)
                 if (enCours) afficher("« ${e.question.take(70)} »", derniere, PlaybackState.STATE_PLAYING)
