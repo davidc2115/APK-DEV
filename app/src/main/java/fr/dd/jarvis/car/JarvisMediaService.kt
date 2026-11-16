@@ -359,7 +359,7 @@ class JarvisMediaService : MediaBrowserService() {
         .addCustomAction(PlaybackState.CustomAction.Builder(ACT_RELIRE, "Relire la dernière réponse", R.drawable.ic_auto_relire).build())
         .setState(e, PlaybackState.PLAYBACK_POSITION_UNKNOWN, 1f).build()
 
-    private fun meta(titre: String, texte: String, icone: String = "auto_micro") = MediaMetadata.Builder()
+    private fun meta(titre: String, texte: String, icone: String = "dragon_tete") = MediaMetadata.Builder()
         .putString(MediaMetadata.METADATA_KEY_TITLE, titre)
         .putString(MediaMetadata.METADATA_KEY_ARTIST, texte.take(300))
         .putString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE, titre)
@@ -368,7 +368,7 @@ class JarvisMediaService : MediaBrowserService() {
         .putString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI, icone(icone).toString())
         .build()
 
-    private fun afficher(titre: String, texte: String, e: Int, icone: String = "auto_micro") {
+    private fun afficher(titre: String, texte: String, e: Int, icone: String = "dragon_tete") {
         session.setMetadata(meta(titre, texte, icone))
         session.setPlaybackState(etat(e))
     }
