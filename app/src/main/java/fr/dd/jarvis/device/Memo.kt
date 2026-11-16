@@ -188,6 +188,9 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         hermesCache = texte
         runCatching { hermesLocal.writeText(texte) }
         val (notes, profil) = entreesHermes(texte)
+        // La source brute est conservée dans le coffre pour que Jarvis puisse reconstruire
+        // la mémoire d'Hermès après une réinstallation ou une perte du cache privé.
+        runCatching { obsidian.saveIn(FOLDER, "Mémoire Hermès source", texte) }
         val md = "# Mémoire d'Hermès\n\n_Synchronisée automatiquement depuis Hermès (Termux). Pour corriger une information, demande-le à Jarvis ou à Hermès._\n\n" +
             "## Notes d'Hermès\n" + notes.joinToString("\n") { "- " + it.replace("\n", " ") }.ifBlank { "_(vide)_" } +
             "\n\n## Profil de l'utilisateur (vu par Hermès)\n" + profil.joinToString("\n") { "- " + it.replace("\n", " ") }.ifBlank { "_(vide)_" } + "\n"
@@ -195,7 +198,10 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         return true
     }
 
-    fun hermes(): String = hermesCache ?: runCatching { hermesLocal.takeIf { it.exists() }?.readText() }.getOrNull().orEmpty().also { hermesCache = it }
+    fun hermes(): String = hermesCache ?: runCatching {
+        obsidian.read(FOLDER, "Mémoire Hermès source.md")
+            ?: if (!obsidian.coffreConfigure()) hermesLocal.takeIf { it.exists() }?.readText() else null
+    }.getOrNull().orEmpty().also { hermesCache = it }
 
     /** Toutes les entrées de la mémoire d'Hermès (notes puis profil). */
     fun entreesHermesListe(): List<String> = entreesHermes(hermes()).let { (n, p) -> n + p }
@@ -217,13 +223,20 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
 
     @Synchronized
     fun majCapacitesHermes(json: String) {
-        val j = runCatching { org.json.JSONObject(json) }.getOrNull() ?: return
+        val contenu = json.take(60_000)
+        val j = runCatching { org.json.JSONObject(contenu) }.getOrNull() ?: return
         capacitesCache = j
-        runCatching { capacitesLocal.writeText(json.take(60_000)) }
+        runCatching { capacitesLocal.writeText(contenu) }
+        runCatching { obsidian.saveBytes(FOLDER, "Capacités Hermès.json", contenu.toByteArray(), "application/json") }
     }
 
     private fun capacites(): org.json.JSONObject = capacitesCache
-        ?: runCatching { org.json.JSONObject(capacitesLocal.readText()) }.getOrNull()?.also { capacitesCache = it }
+        ?: runCatching {
+            val contenu = obsidian.read(FOLDER, "Capacités Hermès.json")
+                ?: if (!obsidian.coffreConfigure()) capacitesLocal.readText() else null
+            contenu?.let { org.json.JSONObject(it) }
+        }.getOrNull()?.also { capacitesCache = it }
+        ?: org.json.JSONObject()
         ?: org.json.JSONObject()
 
     /** Automatismes (cron) d'Hermès tels que synchronisés par le hook : nom, quand, prochaine, derniere, statut… */
