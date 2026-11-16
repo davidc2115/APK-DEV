@@ -27,8 +27,9 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         candidates.clear()
         // Le coffre choisi est la source unique. La copie privée n'est relue que si aucun
         // coffre n'a été configuré (mode historique / première installation).
-        val source = runCatching { obsidian.read(FOLDER, "Apprentissage en cours.md") }.getOrNull()
-            ?: if (!obsidian.coffreConfigure()) runCatching { habitsFile.takeIf { it.exists() }?.readText() }.getOrNull() else null
+        val source = runCatching {
+            obsidian.lireOuMigrer(FOLDER, "Apprentissage en cours.md", habitsFile.takeIf { it.exists() }?.readText())
+        }.getOrNull()
         val sources = listOfNotNull(source).distinct()
         sources.forEach { raw ->
             runCatching {
@@ -124,8 +125,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         // La copie privée n'est qu'un cache de secours lorsqu'aucun coffre n'a été choisi.
         // Avec un coffre configuré, une note absente/inaccessible ne doit pas être remplacée
         // silencieusement par une ancienne mémoire locale.
-        val md = obsidian.read(FOLDER, FILE)
-            ?: if (!obsidian.coffreConfigure()) local.takeIf { it.exists() }?.readText() else null
+        val md = obsidian.lireOuMigrer(FOLDER, FILE, local.takeIf { it.exists() }?.readText())
         if (md != null) parse(md)
         loadCandidates()
         loaded = true
@@ -199,8 +199,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     }
 
     fun hermes(): String = hermesCache ?: runCatching {
-        obsidian.read(FOLDER, "Mémoire Hermès source.md")
-            ?: if (!obsidian.coffreConfigure()) hermesLocal.takeIf { it.exists() }?.readText() else null
+        obsidian.lireOuMigrer(FOLDER, "Mémoire Hermès source.md", hermesLocal.takeIf { it.exists() }?.readText())
     }.getOrNull().orEmpty().also { hermesCache = it }
 
     /** Toutes les entrées de la mémoire d'Hermès (notes puis profil). */
@@ -232,8 +231,8 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
 
     private fun capacites(): org.json.JSONObject = capacitesCache
         ?: runCatching {
-            val contenu = obsidian.read(FOLDER, "Capacités Hermès.json")
-                ?: if (!obsidian.coffreConfigure()) capacitesLocal.readText() else null
+            val contenu = obsidian.lireOuMigrer(FOLDER, "Capacités Hermès.json",
+                capacitesLocal.takeIf { it.isFile }?.readText(), "application/json")
             contenu?.let { org.json.JSONObject(it) }
         }.getOrNull()?.also { capacitesCache = it }
         ?: org.json.JSONObject()
