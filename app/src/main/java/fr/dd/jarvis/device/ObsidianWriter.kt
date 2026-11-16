@@ -246,6 +246,27 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     /** Le dossier choisi existe et reste accessible en lecture/écriture via l'autorisation Android. */
     fun coffreDisponible(): Boolean = vaultRoot()?.let { it.canRead() && it.canWrite() } == true
 
+    /**
+     * Lit le coffre en priorité. Lors de la première migration seulement, importe une ancienne
+     * copie privée si le coffre est accessible et que la note n'existe pas encore. Un marqueur
+     * empêche de recréer une note que l'utilisateur aurait ensuite supprimée dans Obsidian.
+     */
+    fun lireOuMigrer(folder: String, fileName: String, ancienneCopie: String?, mime: String = "text/markdown"): String? {
+        read(folder, fileName)?.let { return it }
+        if (!coffreConfigure()) return ancienneCopie
+        if (!coffreDisponible()) return null
+        val cle = "$folder/$fileName"
+        val prefs = ctx.getSharedPreferences("obsidian_migrations", Context.MODE_PRIVATE)
+        if (prefs.getBoolean(cle, false)) return null
+        if (ancienneCopie.isNullOrEmpty()) {
+            prefs.edit().putBoolean(cle, true).apply()
+            return null
+        }
+        saveBytes(folder, fileName, ancienneCopie.toByteArray(Charsets.UTF_8), mime)
+        prefs.edit().putBoolean(cle, true).apply()
+        return ancienneCopie
+    }
+
     private fun vaultRoot(): DocumentFile? = store.obsidianUri.value.takeIf { it.isNotBlank() }?.let {
         runCatching { DocumentFile.fromTreeUri(ctx, Uri.parse(it)) }.getOrNull()
     }?.takeIf { it.canRead() }
