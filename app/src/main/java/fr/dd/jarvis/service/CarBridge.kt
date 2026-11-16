@@ -38,6 +38,12 @@ object CarBridge {
      * [silencieux] : mise à jour sans son ni vibration.
      */
     fun post(ctx: Context, texteBrut: String, silencieux: Boolean = false) {
+        val app = ctx.applicationContext as? JarvisApp
+        // En mode voiture, aucune notification de messagerie : Android Auto les réannonçait en plus de la voix de JARVIS.
+        if (app?.enVoiture == true) {
+            runCatching { (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIF_ID) }
+            return
+        }
         // Android Auto lit ce message à voix haute : noms en capitales lus comme des mots, pas de symboles prononcés.
         val texte = fr.dd.jarvis.voice.TexteParle.preparer(texteBrut)
         val me = Person.Builder().setName("Moi").build()
@@ -52,7 +58,6 @@ object CarBridge {
 
         val flagsMut = PendingIntent.FLAG_UPDATE_CURRENT or (if (android.os.Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
         val flagsImm = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        val app = ctx.applicationContext as? JarvisApp
         val remote = RemoteInput.Builder(KEY_TEXT).setLabel("Parle à JARVIS")
             .setChoices(app?.let { Poignet.choix(it).toTypedArray() } ?: emptyArray()).build()
         val replyPi = PendingIntent.getBroadcast(ctx, 11, Intent(ctx, CarReplyReceiver::class.java).setAction(ACTION_REPLY).setPackage(ctx.packageName), flagsMut)
