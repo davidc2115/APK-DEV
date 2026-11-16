@@ -1052,9 +1052,10 @@ class VoiceManager(private val ctx: Context) {
         if (am.mode != AudioManager.MODE_NORMAL) return null                    // appel en cours : on n'y touche pas
         val comm = runCatching { am.availableCommunicationDevices }.getOrNull() ?: return null
         if (app.enVoiture) {
-            // Essai (réglage, désactivé par défaut) : la voiture passe en mode « appel » pendant la conversation, et
-            // certains autoradios remplacent alors le lecteur JARVIS par leur écran d'appel.
-            if (!app.store.microVoitureBt.value) return null
+            // Android Auto média : CarAudioRecord n'est pas accessible sans CarContext (Car App désactivée).
+            // On tente donc automatiquement le profil mains-libres Bluetooth de la voiture, comme pour un casque
+            // Bluetooth. Si aucun périphérique SCO n'est disponible, l'écoute retombe sur le micro du téléphone.
+            // JARVIS ouvert dans une vraie Car App : on conserve prioritairement son micro natif.
             // JARVIS ouvert sur l'écran de la voiture : vrai micro de la voiture par Android Auto (MicroJarvis).
             if (fr.dd.jarvis.car.NavigationVoiture.microVoiture() != null) return null
             val montre = Regex("(?i)watch|montre|\\bband\\b|\\bgear\\b")
