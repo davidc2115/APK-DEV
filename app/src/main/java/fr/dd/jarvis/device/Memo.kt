@@ -122,7 +122,11 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
 
     @Synchronized
     fun load() {
-        val md = obsidian.read(FOLDER, FILE) ?: local.takeIf { it.exists() }?.readText()
+        // La copie privée n'est qu'un cache de secours lorsqu'aucun coffre n'a été choisi.
+        // Avec un coffre configuré, une note absente/inaccessible ne doit pas être remplacée
+        // silencieusement par une ancienne mémoire locale.
+        val md = obsidian.read(FOLDER, FILE)
+            ?: if (!obsidian.coffreConfigure()) local.takeIf { it.exists() }?.readText() else null
         if (md != null) parse(md)
         loadCandidates()
         loaded = true
