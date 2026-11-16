@@ -243,6 +243,9 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     /** Vrai dès qu'un coffre a été explicitement choisi, même si Android a perdu son autorisation SAF. */
     fun coffreConfigure(): Boolean = store.obsidianUri.value.isNotBlank()
 
+    /** Le dossier choisi existe et reste accessible en lecture/écriture via l'autorisation Android. */
+    fun coffreDisponible(): Boolean = vaultRoot()?.let { it.canRead() && it.canWrite() } == true
+
     private fun vaultRoot(): DocumentFile? = store.obsidianUri.value.takeIf { it.isNotBlank() }?.let {
         runCatching { DocumentFile.fromTreeUri(ctx, Uri.parse(it)) }.getOrNull()
     }?.takeIf { it.canRead() }
