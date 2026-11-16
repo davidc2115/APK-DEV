@@ -359,7 +359,7 @@ class JarvisMediaService : MediaBrowserService() {
         .addCustomAction(PlaybackState.CustomAction.Builder(ACT_RELIRE, "Relire la dernière réponse", R.drawable.ic_auto_relire).build())
         .setState(e, PlaybackState.PLAYBACK_POSITION_UNKNOWN, 1f).build()
 
-    private fun meta(titre: String, texte: String, icone: String = "auto_micro") = MediaMetadata.Builder()
+    private fun meta(titre: String, texte: String, icone: String = "dragon_tete") = MediaMetadata.Builder()
         .putString(MediaMetadata.METADATA_KEY_TITLE, titre)
         .putString(MediaMetadata.METADATA_KEY_ARTIST, texte.take(300))
         .putString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE, titre)
@@ -368,7 +368,7 @@ class JarvisMediaService : MediaBrowserService() {
         .putString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI, icone(icone).toString())
         .build()
 
-    private fun afficher(titre: String, texte: String, e: Int, icone: String = "auto_micro") {
+    private fun afficher(titre: String, texte: String, e: Int, icone: String = "dragon_tete") {
         session.setMetadata(meta(titre, texte, icone))
         session.setPlaybackState(etat(e))
     }
@@ -418,7 +418,12 @@ class JarvisMediaService : MediaBrowserService() {
                 afficher("🎙️ Je t'écoute…", "Parle maintenant", PlaybackState.STATE_PLAYING)
             }
             ActiviteVoiture.Etape.PARTIEL -> if (enCours) afficher("🎙️ « ${e.texte.take(90)} »", "…", PlaybackState.STATE_PLAYING)
-            ActiviteVoiture.Etape.REFLEXION -> if (enCours) afficher("« ${e.question.take(90)} »", "JARVIS réfléchit…", PlaybackState.STATE_BUFFERING)
+            ActiviteVoiture.Etape.REFLEXION -> if (enCours) {
+                // La voix de VoiceManager est progressive : elle peut commencer avant la fin de Brain.reply().
+                // Android Auto coupe sinon le flux tant que la MediaSession reste en BUFFERING. On active donc
+                // la sortie média dès le début du traitement, avant la première syllabe de la réponse.
+                afficher("« ${e.question.take(90)} »", "JARVIS prépare sa réponse…", PlaybackState.STATE_PLAYING)
+            }
             ActiviteVoiture.Etape.REPONSE -> {
                 derniere = propre(e.texte)
                 if (enCours) afficher("« ${e.question.take(70)} »", derniere, PlaybackState.STATE_PLAYING)
