@@ -1385,6 +1385,24 @@ class VoiceManager(private val ctx: Context) {
             // Hors session : focus + vraie commande PAUSE pour les lecteurs qui ignorent le focus, reprise après la réponse.
             mediaPauseeParJarvis = !sessionActive && externe && fr.dd.jarvis.service.JarvisNotificationListener.pauseMediaPourVoix(ctx)
             runCatching { tts?.setAudioAttributes(attrsVoix) }
+            // Android Auto / Bluetooth : le focus peut être accordé avant que l'autoradio ait réellement ouvert
+            // son canal de sortie. On envoie un court préambule silencieux sur EXACTEMENT le même flux audio
+            // avant la première syllabe, afin de laisser le haut-parleur se réveiller sans couper le début.
+            if (externe && !sessionActive) runCatching {
+                val taux = 22050
+                val silence = ShortArray(taux * 8 / 10)
+                val warmup = AudioTrack.Builder()
+                    .setAudioAttributes(attrsVoix)
+                    .setAudioFormat(AudioFormat.Builder().setSampleRate(taux).setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
+                    .setTransferMode(AudioTrack.MODE_STATIC)
+                    .setBufferSizeInBytes(silence.size * 2)
+                    .build()
+                try {
+                    warmup.write(silence, 0, silence.size)
+                    warmup.play()
+                    Thread.sleep(850)
+                } finally { warmup.release() }
+            }
             volume = (ctx.applicationContext as? fr.dd.jarvis.JarvisApp)?.let { runCatching { fr.dd.jarvis.device.Contexte.volumeVoix(it) }.getOrDefault(1f) } ?: 1f
             // Voix Android changée dans les réglages : appliquée sans redémarrer.
             // (et personnage de voix : genre, hauteur et débit de la voix Android de repli)
