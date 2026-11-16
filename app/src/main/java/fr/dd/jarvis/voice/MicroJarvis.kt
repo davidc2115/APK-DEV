@@ -118,7 +118,9 @@ class MicroJarvis(private val ctx: Context) {
         val bt = prefere != null && runCatching { ar.setPreferredDevice(prefere) }.getOrDefault(false)
         try { ar.startRecording() } catch (_: Throwable) { ar.release(); return null }
         if (ar.recordingState != AudioRecord.RECORDSTATE_RECORDING) { runCatching { ar.stop() }; ar.release(); return null }
+        val route = runCatching { ar.routedDevice }.getOrNull()
         val nom = if (bt) "micro Bluetooth (${prefere?.productName?.toString()?.trim().orEmpty().ifBlank { "casque" }})" else "micro du téléphone"
+        JournalVoix.noter("micro", "entrée audio : demandé=${prefere?.productName ?: "téléphone"} ; accepté=$bt ; actif=${route?.productName ?: "non publié"}/${route?.type ?: -1}")
         return EntreeTelephone(ar, nom)
     }
 
