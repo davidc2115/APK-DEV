@@ -1271,12 +1271,20 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     store.obsidianUri.set(uri.toString())
                 }
             }
-            HudPanel(Modifier.fillMaxWidth(), title = "Obsidian — fiches contacts") {
+            HudPanel(Modifier.fillMaxWidth(), title = "Obsidian — deuxième cerveau de JARVIS") {
                 Text(
-                    if (store.obsidianUri.value.isBlank()) "Aucun dossier choisi : les fiches sont enregistrées dans le dossier de l'application."
-                    else "Dossier choisi : " + Uri.decode(store.obsidianUri.value).substringAfterLast(":"),
+                    if (store.obsidianUri.value.isBlank()) "Aucun coffre choisi : les notes sont conservées dans l'espace privé de l'application. Choisis ton coffre pour centraliser les notes, la mémoire et les documents."
+                    else "Coffre choisi : " + Uri.decode(store.obsidianUri.value).substringAfterLast(":"),
                     color = HudDim, fontSize = 12.sp
                 )
+                if (store.obsidianUri.value.isNotBlank()) {
+                    Text(
+                        if (app.obsidian.coffreDisponible()) "✓ Coffre accessible en lecture et écriture. Jarvis utilise ce coffre comme source principale."
+                        else "⚠ Coffre sélectionné mais inaccessible. Vérifie l'autorisation Android ; Jarvis ne bascule pas vers une ancienne copie locale.",
+                        color = if (app.obsidian.coffreDisponible()) HudText else HudAccent,
+                        fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp)
+                    )
+                }
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     HudButton("Choisir le coffre Obsidian") { picker.launch(null) }
