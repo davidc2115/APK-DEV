@@ -114,7 +114,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             return runCatching { localFile.delete() && !localFile.exists() }.getOrDefault(false)
         }
         return try {
-            val tree = DocumentFile.fromTreeUri(ctx, Uri.parse(uriStr)) ?: return false
+            val tree = DocumentFile.fromTreeUri(ctx, Uri.parse(uriStr))?.takeIf { it.canWrite() } ?: return false
             var cur: DocumentFile? = tree
             var dossierTrouve = true
             for (part in folder.split('/').filter { it.isNotBlank() }) {
@@ -129,11 +129,8 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                 if (cur?.listFiles()?.any { it.uri == cible.uri } == true) return false
                 supprime = true
             }
-            // Certaines écritures ont été basculées localement lorsque le fournisseur SAF était indisponible.
-            if (localFile.exists()) {
-                if (!runCatching { localFile.delete() && !localFile.exists() }.getOrDefault(false)) return false
-                supprime = true
-            }
+            // Le coffre configuré est la seule destination : ne jamais supprimer une copie locale
+            // homonyme à la place d'un fichier du coffre absent.
             supprime
         } catch (_: Exception) {
             false
@@ -225,23 +222,26 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         val uriStr = store.obsidianUri.value
         try {
             if (uriStr.isNotBlank()) {
-                val tree = DocumentFile.fromTreeUri(ctx, Uri.parse(uriStr))
-                if (tree != null && tree.canRead()) {
-                    var cur: DocumentFile? = tree
-                    for (part in folder.split('/').filter { it.isNotBlank() }) cur = cur?.findFile(part)?.takeIf { it.isDirectory }
-                    val f = cur?.findFile(name)
-                    if (f != null) return ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
-                    return null
-                }
+                // Un coffre choisi reste l'unique source : autorisation perdue ou note absente
+                // ne doivent jamais faire réapparaître une ancienne copie locale.
+                val tree = vaultRoot() ?: return null
+                var cur: DocumentFile? = tree
+                for (part in folder.split('/').filter { it.isNotBlank() })
+                    cur = cur?.trouverLoose(part)?.takeIf { it.isDirectory }
+                val f = cur?.trouverLoose(name)?.takeIf { it.isFile } ?: return null
+                return ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
             }
-            val f = File(File(ctx.getExternalFilesDir(null), folder), name)
-            return if (f.exists()) f.readText() else null
+            val f = File(File(localRoot(), folder), name)
+            return if (f.isFile) f.readText() else null
         } catch (_: Exception) {
             return null
         }
     }
 
     // ------------------------------------------------------------------ lecture / recherche dans le coffre
+
+    /** Vrai dès qu'un coffre a été explicitement choisi, même si Android a perdu son autorisation SAF. */
+    fun coffreConfigure(): Boolean = store.obsidianUri.value.isNotBlank()
 
     private fun vaultRoot(): DocumentFile? = store.obsidianUri.value.takeIf { it.isNotBlank() }?.let {
         runCatching { DocumentFile.fromTreeUri(ctx, Uri.parse(it)) }.getOrNull()
@@ -300,7 +300,8 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     /** Contenu des notes (chemin, texte tronqué à 80 Ko), au plus [limite] : à appeler hors du fil principal. */
     fun parcourirContenus(limite: Int = 1500, action: (String, String) -> Unit) {
         signalerFilPrincipal("parcourirContenus")
-        if (vaultRoot() != null) {
+        if (coffreConfigure()) {
+            val racine = vaultRoot() ?: return
             for ((path, f) in allNotes(limite)) {
                 val t = runCatching { ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes().take(80_000).toByteArray().toString(Charsets.UTF_8) } }.getOrNull() ?: continue
                 action(path, t)
@@ -316,11 +317,14 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     fun listNotes(folder: String = ""): List<String> {
         signalerFilPrincipal("listNotes")
         val f = folder.trim().trim('/')
-        val vaultNotes = if (vaultRoot() != null) allNotes().map { it.first } else emptyList()
+        if (coffreConfigure()) {
+            // Pas de fusion avec les anciennes copies locales : le coffre choisi fait autorité.
+            if (vaultRoot() == null) return emptyList()
+            return allNotes().map { it.first }.filter { f.isEmpty() || it.startsWith("$f/") }.sorted()
+        }
         val localDir = File(localRoot(), f)
-        val localNotes = if (localDir.exists()) localDir.walkTopDown().filter { it.isFile && it.name.endsWith(".md", true) }
-            .map { it.relativeTo(localRoot()).path }.toList() else emptyList()
-        return (vaultNotes.filter { f.isEmpty() || it.startsWith("$f/") } + localNotes).distinct().sorted()
+        return if (localDir.exists()) localDir.walkTopDown().filter { it.isFile && it.name.endsWith(".md", true) }
+            .map { it.relativeTo(localRoot()).path }.sorted().toList() else emptyList()
     }
 
     /** Recherche texte (nom + contenu). Retourne (chemin, extrait). */
@@ -333,9 +337,10 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             val i = txt.lowercase().indexOf(q)
             return if (i < 0) "" else txt.substring(maxOf(0, i - 60), minOf(txt.length, i + 140)).replace(Regex("\\s+"), " ")
         }
-        if (vaultRoot() != null) {
+        if (coffreConfigure()) {
             val notes = allNotes()
-            for ((path, f) in notes) if (path.lowercase().contains(q) && out.size < limit) out += path to ""
+            if (vaultRoot() == null) return emptyList()
+            for ((path, _) in notes) if (path.lowercase().contains(q) && out.size < limit) out += path to ""
             for ((path, f) in notes.take(600)) {
                 if (out.size >= limit) break
                 if (out.any { it.first == path }) continue
@@ -357,17 +362,13 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     fun readNote(path: String): String? {
         signalerFilPrincipal("readNote")
         val p = withMd(path)
-        val v = vaultRoot()
-        if (v != null) {
+        if (coffreConfigure()) {
+            val v = vaultRoot() ?: return null
             var cur: DocumentFile? = v
-            for (part in p.split('/').filter { it.isNotBlank() }) cur = cur?.findFile(part)
-            val f = cur?.takeIf { it.isFile }
-            if (f != null) {
-                val content = runCatching { ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes().toString(Charsets.UTF_8) } }.getOrNull()
-                if (content != null) return content
-            }
+            for (part in p.split('/').filter { it.isNotBlank() }) cur = cur?.trouverLoose(part)
+            val f = cur?.takeIf { it.isFile } ?: return null
+            return runCatching { ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes().toString(Charsets.UTF_8) } }.getOrNull()
         }
-        // saveBytes peut avoir utilisé le stockage local si le coffre SAF était en lecture seule.
         val local = File(localRoot(), p)
         return if (local.isFile) runCatching { local.readText() }.getOrNull() else null
     }
@@ -906,6 +907,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                 val racine = idCoffre() ?: return 0L
                 signatureSaf(v.uri, racine, "", 0) { c, d, t -> mix(c, d, t) }
             }
+            coffreConfigure() -> return 0L // Autorisation perdue : ne pas indexer le stockage local à la place du coffre.
             else -> localRoot().walkTopDown().forEach { f -> mix(f.path, f.lastModified(), if (f.isFile) f.length() else -1) }
         }
         return h
@@ -942,7 +944,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         val v = vaultRoot()
         if (v != null) {
             var cur: DocumentFile? = v
-            for (part in propre.split('/').filter { it.isNotBlank() }) cur = cur?.findFile(part)
+            for (part in propre.split('/').filter { it.isNotBlank() }) cur = cur?.trouverLoose(part)
             uri = cur?.takeIf { it.isFile }?.uri
         }
         if (uri == null) return false
@@ -957,6 +959,9 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
      *  (liens, tags) que pour [limiteLecture] notes, plafonné à [limiteOctets] par note, pour rester fluide. */
     fun graph(limiteNotes: Int = 3000, limiteOctets: Int = 60_000, limitePieces: Int = 3000, limiteLecture: Int = 700): GraphData {
         val v = vaultRoot()
+        // Un coffre choisi mais temporairement inaccessible ne doit jamais faire apparaître le dossier privé
+        // comme s'il s'agissait du coffre : l'Orbe reflète le coffre réel, ou indique qu'il est indisponible.
+        if (coffreConfigure() && v == null) return GraphData(emptyList(), emptyList())
         val direct = fichierCoffre()
         val cheminsPieces = mutableListOf<String>()
         val dossiers = mutableListOf<String>()
