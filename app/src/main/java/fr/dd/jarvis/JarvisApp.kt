@@ -94,6 +94,7 @@ class JarvisApp : Application() {
     override fun onCreate() {
         super.onCreate()
         installCrashReporter()
+        runCatching { noterArretsAnormaux() }
         store = Store(this)
         if (!store.hermesModeMigre.value) {
             if (store.hermesMode.value == "auto") store.hermesMode.set("tout")
@@ -257,6 +258,57 @@ class JarvisApp : Application() {
             }
             previous?.uncaughtException(t, e)
         }
+    }
+
+    /**
+     * Arrêts que le rapporteur ci-dessus ne voit pas : plantage NATIF (Vosk, llama.cpp…), appli figée (ANR), processus
+     * tué par le système (mémoire, ressources). Android les garde en mémoire : relus au démarrage et ajoutés au rapport
+     * de plantage affiché au lancement suivant (bouton « Copier »).
+     */
+    private fun noterArretsAnormaux() {
+        if (Build.VERSION.SDK_INT < 30) return
+        val am = getSystemService(android.app.ActivityManager::class.java) ?: return
+        val prefs = getSharedPreferences("diagnostic_arrets", MODE_PRIVATE)
+        val deja = prefs.getLong("dernier", 0L)
+        // Première lecture (mise à jour) : les arrêts des dernières 48 h, ceux qui ont motivé ce relevé.
+        val depuis = if (deja == 0L) System.currentTimeMillis() - 48 * 3_600_000L else deja
+        val sorties = am.getHistoricalProcessExitReasons(packageName, 0, 16).filter { it.timestamp > depuis }
+        if (sorties.isEmpty()) return
+        prefs.edit().putLong("dernier", sorties.maxOf { it.timestamp }).apply()
+        val graves = sorties.filter { it.reason in setOf(
+            android.app.ApplicationExitInfo.REASON_CRASH_NATIVE, android.app.ApplicationExitInfo.REASON_ANR,
+            android.app.ApplicationExitInfo.REASON_LOW_MEMORY, android.app.ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE,
+            android.app.ApplicationExitInfo.REASON_INITIALIZATION_FAILURE, android.app.ApplicationExitInfo.REASON_CRASH) }
+        if (graves.isEmpty()) return
+        val heure = java.text.SimpleDateFormat("dd/MM HH:mm:ss", java.util.Locale.FRANCE)
+        fun raison(r: Int) = when (r) {
+            android.app.ApplicationExitInfo.REASON_CRASH_NATIVE -> "plantage natif"
+            android.app.ApplicationExitInfo.REASON_ANR -> "appli figée (ANR)"
+            android.app.ApplicationExitInfo.REASON_LOW_MEMORY -> "tuée par le système (mémoire)"
+            android.app.ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> "tuée par le système (ressources)"
+            android.app.ApplicationExitInfo.REASON_INITIALIZATION_FAILURE -> "échec au démarrage"
+            else -> "plantage Java"
+        }
+        val texte = buildString {
+            append("Arrêts anormaux relevés par Android :\n")
+            graves.sortedByDescending { it.timestamp }.forEach { e ->
+                append("\n• ").append(heure.format(java.util.Date(e.timestamp))).append(" — ").append(raison(e.reason))
+                append(" [").append(e.processName).append("]")
+                e.description?.takeIf { it.isNotBlank() }?.let { append(" : ").append(it.take(300)) }
+                append(" (mémoire ").append(e.pss / 1024).append(" Mo)\n")
+                // ANR : début de la pile du fil principal, ce qui le bloquait.
+                if (e.reason == android.app.ApplicationExitInfo.REASON_ANR) runCatching {
+                    e.traceInputStream?.bufferedReader()?.use { r ->
+                        val lignes = r.readLines()
+                        val i = lignes.indexOfFirst { it.startsWith("\"main\"") }
+                        if (i >= 0) lignes.drop(i).take(25).forEach { append("    ").append(it.trim()).append('\n') }
+                    }
+                }
+            }
+        }
+        val f = File(filesDir, CRASH_FILE)
+        // Relevé en tête (visible dans la fenêtre), puis la pile complète du dernier plantage Java s'il y en a une.
+        f.writeText(if (f.exists()) texte + "\n\n" + f.readText().take(8000) else texte)
     }
 
     companion object {

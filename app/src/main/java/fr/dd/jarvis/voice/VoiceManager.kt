@@ -1011,6 +1011,9 @@ class VoiceManager(private val ctx: Context) {
         if (am.mode != AudioManager.MODE_NORMAL) return null                    // appel en cours : on n'y touche pas
         val comm = runCatching { am.availableCommunicationDevices }.getOrNull() ?: return null
         if (app.enVoiture) {
+            // Essai (réglage, désactivé par défaut) : la voiture passe en mode « appel » pendant la conversation, et
+            // certains autoradios remplacent alors le lecteur JARVIS par leur écran d'appel.
+            if (!app.store.microVoitureBt.value) return null
             // JARVIS ouvert sur l'écran de la voiture : vrai micro de la voiture par Android Auto (MicroJarvis).
             if (fr.dd.jarvis.car.NavigationVoiture.microVoiture() != null) return null
             val montre = Regex("(?i)watch|montre|\\bband\\b|\\bgear\\b")

@@ -158,21 +158,33 @@ class VoskWake(private val ctx: Context, private val econome: Boolean = true, pr
     companion object {
         /**
          * Grammaire du modèle français : « jarvis » au milieu des mots les plus courants et de ses quasi-homonymes
-         * (« j'arrive », « service », « gervais », « marvin »…). Un mot qui ressemble sans être « Jarvis » est rangé
-         * ailleurs. Mesuré : 90 % des « Jarvis » détectés, 0 faux réveil sur 300 phrases.
+         * (« j'arrive », « service », « gervais », « marvin », « joris », « janvier »…). Un mot qui ressemble sans être
+         * « Jarvis » est rangé ailleurs. Mesuré (4 voix françaises × 3 débits) : 90 % des « Jarvis » détectés, 0 faux
+         * réveil sur 300 phrases ordinaires, et sur 672 phrases commençant par un prénom ou un mot proche, 0 à 1 faux
+         * réveil au lieu de plusieurs dizaines (« Joris, viens manger », « Jadis… », « Janvier est froid », « Javier arrive »…).
          */
         internal val GRAMMAIRE_FR = listOf(
-            "jarvis", "[unk]", "a", "ai", "aller", "allons", "allume", "appelle", "arrive", "arriver", "as", "au", "aujourd'hui",
-            "avec", "avez", "avis", "avoir", "beau", "bien", "bis", "bonjour", "c'", "canapé", "ce", "charles", "chat", "chien",
-            "d'", "dans", "de", "demain", "des", "deux", "dire", "dis", "dit", "dix", "douce", "du", "elle", "en", "envoie", "es",
-            "est", "et", "facture", "faire", "fait", "ferme", "gagné", "garage", "garde", "gars", "gervais", "harvey", "heure",
-            "hier", "il", "ils", "j'", "j'ai", "j'arrive", "jacques", "jardin", "javel", "je", "l'", "la", "lance", "le", "les",
-            "lumière", "mais", "maison", "marché", "marvin", "matin", "merci", "met", "mets", "mettre", "minutes", "mode",
-            "musique", "ne", "non", "nous", "ok", "on", "ont", "ou", "oui", "ouvre", "où", "par", "paris", "parti", "partie",
-            "pas", "plus", "pour", "qu'", "que", "quel", "quelle", "qui", "radis", "salon", "salut", "savon", "servi", "service",
-            "services", "si", "soir", "sommes", "suis", "sur", "sécurisé", "temps", "tous", "tout", "travail", "trois", "très",
-            "tu", "téléphone", "un", "une", "va", "vais", "vas", "ville", "vin", "vis", "visite", "voir", "voiture", "voix",
-            "vous", "vu", "à", "ça", "éteins", "être",
+            "jarvis", "[unk]", "a", "ai", "aller", "allons", "allume", "appelle", "arrive", "arriver", "as", "au",
+            "aujourd'hui", "avec", "avez", "avis", "avoir", "beau", "bien", "bis", "bonjour", "c'", "canapé", "ce",
+            "charles", "chat", "chien", "d'", "dans", "de", "demain", "des", "deux", "dire", "dis", "dit", "dix", "douce",
+            "du", "elle", "en", "envoie", "es", "est", "et", "facture", "faire", "fait", "ferme", "gagné", "garage",
+            "garde", "gars", "gervais", "harvey", "heure", "hier", "il", "ils", "j'", "j'ai", "j'arrive", "jacques",
+            "jardin", "javel", "je", "l'", "la", "lance", "le", "les", "lumière", "mais", "maison", "marché", "marvin",
+            "matin", "merci", "met", "mets", "mettre", "minutes", "mode", "musique", "ne", "non", "nous", "ok", "on",
+            "ont", "ou", "oui", "ouvre", "où", "par", "paris", "parti", "partie", "pas", "plus", "pour", "qu'", "que",
+            "quel", "quelle", "qui", "radis", "salon", "salut", "savon", "servi", "service", "services", "si", "soir",
+            "sommes", "suis", "sur", "sécurisé", "temps", "tous", "tout", "travail", "trois", "très", "tu", "téléphone",
+            "un", "une", "va", "vais", "vas", "ville", "vin", "vis", "visite", "voir", "voiture", "voix", "vous", "vu",
+            "à", "ça", "éteins", "être",
+            // Prénoms et mots proches de « Jarvis » (Joris, Doris, Javier, Janvier, Charlie, parvis, carvi…) : sans eux,
+            // le modèle, obligé de choisir dans cette liste, les rangeait sous « jarvis » et réveillait JARVIS.
+            "joris", "boris", "doris", "maurice", "morris", "loris", "jadis", "jolis", "joli", "jolie", "charvet", "jarry",
+            "denis", "alexis", "francis", "régis", "clovis", "elvis", "iris", "davis", "lewis", "norris", "harris",
+            "travis", "chris", "louis", "jules", "jamais", "j'avais", "avais", "jeudi", "georges", "gérard", "jérôme",
+            "julie", "josé", "javier", "chorus", "marquis", "narcisse", "idris", "mavis", "jarret", "jarnac", "davy",
+            "jérémy", "joie", "choix", "parvis", "ravis", "ravi", "gravis", "carvi", "marvel", "charly", "charlie",
+            "jasmine", "jason", "jérémie", "jordan", "jonas", "gaspard", "garance", "janis", "anaïs", "kevin", "xavier",
+            "olivier", "cyrus", "yanis", "janvier", "jacky", "gervaise", "servir", "chartres", "jade", "harvard", "larves",
         )
         /** Mots du modèle anglais qui servent de leurres autour de « jarvis » (tous présents dans son vocabulaire). */
         private val GRAMMAIRE = listOf(

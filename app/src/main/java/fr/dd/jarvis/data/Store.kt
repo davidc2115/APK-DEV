@@ -428,6 +428,11 @@ class Store(context: Context) {
      * téléphone, son en A2DP / par le canal média d'Android Auto.
      */
     val microBluetooth = BPref("microBluetooth", true)
+    /**
+     * Android Auto : micro et voix par la liaison Bluetooth « appels » de la voiture. Désactivé par défaut : la voiture
+     * bascule alors en mode « appel » (écran d'appel à la place du lecteur JARVIS sur certains autoradios).
+     */
+    val microVoitureBt = BPref("microVoitureBluetooth", false)
     /** Voix en mode « appel » sur le haut-parleur pendant la réponse (annulation d'écho : coupure de parole fiable). */
     val duplex = BPref("duplex", true)
     val muteBeeps = BPref("muteBeeps", true)

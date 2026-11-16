@@ -801,7 +801,12 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 HudChip(if (store.microBluetooth.value) "🎧 Micro du casque / de la voiture Bluetooth : oui" else "🎧 Micro du casque / de la voiture Bluetooth : non", store.microBluetooth.value) {
                     store.microBluetooth.set(!store.microBluetooth.value)
                 }
-                Text("Casque ou voiture connectés en Bluetooth, et voiture Android Auto (par sa liaison Bluetooth des appels) : pendant la conversation, JARVIS t'écoute avec LEUR micro et le bip comme sa voix passent par eux (qualité « appel »). Désactivé : micro du téléphone.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                Text("Casque ou voiture connectés en Bluetooth (sans Android Auto) : pendant la conversation, JARVIS t'écoute avec LEUR micro et le bip comme sa voix passent par eux (qualité « appel »). Désactivé : micro du téléphone.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                Spacer(Modifier.height(6.dp))
+                HudChip(if (store.microVoitureBt.value) "🧪 Android Auto : micro par le Bluetooth de la voiture : oui" else "🧪 Android Auto : micro par le Bluetooth de la voiture : non", store.microVoitureBt.value) {
+                    store.microVoitureBt.set(!store.microVoitureBt.value)
+                }
+                Text("Essai. JARVIS n'étant qu'une appli média dans Android Auto, la voiture ne lui prête pas son micro. Activé : la voiture passe en mode « appel » pendant la conversation (micro et haut-parleurs de la voiture), mais certains autoradios affichent alors leur écran d'appel à la place du lecteur JARVIS. Sans cet essai : micro du téléphone, ou bouton 🔍/🎤 du lecteur JARVIS (l'Assistant écoute avec le micro de la voiture et transmet ta demande à JARVIS).", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
                 Spacer(Modifier.height(6.dp))
                 Text("Après « Jarvis », tu enchaînes les demandes sans répéter le mot. Quand JARVIS a répondu et que tu ne dis plus rien pendant ce délai, la conversation se referme d'elle-même (petit bip descendant). « Merci » ou « c'est tout » la termine aussi.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
                 Spacer(Modifier.height(6.dp))

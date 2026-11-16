@@ -34,5 +34,7 @@ class VoskReveilTest {
         assertEquals(g.size, g.toSet().size)
         // Quasi-homonymes présents comme leurres (sinon ils réveilleraient JARVIS).
         listOf("j'arrive", "service", "gervais", "marvin", "avis").forEach { assertTrue(it, it in g) }
+        // Prénoms et mots qui réveillaient JARVIS à tort.
+        listOf("joris", "doris", "boris", "jadis", "javier", "janvier", "charlie", "carvi", "parvis").forEach { assertTrue(it, it in g) }
     }
 }
