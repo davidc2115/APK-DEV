@@ -430,11 +430,10 @@ private fun ClientsTab(app: JarvisApp) {
                             svc.repo.update { data -> data.copy(clients = data.clients.filterNot { it.id == client.id }) }
                             if (svc.repo.refresh().client(client.id) != null)
                                 return@runCatching "❌ Échec : ${client.nom} est toujours présent dans la base Société. Aucune suppression n'est confirmée."
-                            val path = "Société/Clients/${client.nom}.md"
-                            val notes = app.obsidian.listNotes("Société/Clients")
-                            if (path in notes) {
+                            val path = app.obsidian.ficheExistante("Société/Clients", client.nom)
+                            if (path != null) {
                                 val deleted = app.obsidian.supprimerNote(path)
-                                val remains = path in app.obsidian.listNotes("Société/Clients")
+                                val remains = app.obsidian.ficheExistante("Société/Clients", client.nom) != null
                                 if (!deleted || remains)
                                     return@runCatching "⚠️ ${client.nom} a été retiré de la base Jarvis, mais sa fiche Obsidian n'a pas pu être supprimée ($path). Vérifie les droits du coffre."
                             }
@@ -494,8 +493,17 @@ private fun ClientsTab(app: JarvisApp) {
                         it.id == c.id && normaliser(it.nom) == normaliser(c.nom)
                     }
                     if (verifie) {
-                        info = "✅ Fiche de ${c.nom} créée et vérifiée dans la base Société."
+                        info = "✅ Fiche de ${c.nom} créée dans la base Société. Synchronisation Obsidian…"
                         creating = false
+                        kmlScope.launch {
+                            val export = withContext(Dispatchers.IO) {
+                                runCatching { svc.exporterClient(svc.repo.refresh().client(c.id) ?: c).second }
+                            }
+                            info = export.fold(
+                                { "✅ Fiche de ${c.nom} créée et synchronisée : $it" },
+                                { "⚠️ Fiche de ${c.nom} créée dans Jarvis, mais export Obsidian impossible : ${it.message ?: it.javaClass.simpleName}" }
+                            )
+                        }
                     } else {
                         info = "❌ L'enregistrement de ${c.nom} n'a pas pu être confirmé après relecture de la base Société. Le formulaire reste ouvert."
                     }
@@ -507,9 +515,21 @@ private fun ClientsTab(app: JarvisApp) {
     }
     editing?.let { e0 ->
         ClientForm(e0, onClose = { editing = null }) { c ->
-            svc.repo.update { d0 -> d0.copy(clients = d0.clients.map { if (it.id == c.id) c else it }) }
-            info = "✅ Fiche de ${c.nom} mise à jour"
-            editing = null
+            try {
+                svc.repo.update { d0 -> d0.copy(clients = d0.clients.map { if (it.id == c.id) c else it }) }
+                val relu = svc.repo.refresh().client(c.id) ?: throw IllegalStateException("Fiche absente après relecture.")
+                info = "✅ Fiche de ${c.nom} mise à jour. Synchronisation Obsidian…"
+                editing = null
+                kmlScope.launch {
+                    val export = withContext(Dispatchers.IO) { runCatching { svc.exporterClient(relu).second } }
+                    info = export.fold(
+                        { "✅ Fiche de ${c.nom} mise à jour et synchronisée : $it" },
+                        { "⚠️ Fiche de ${c.nom} mise à jour dans Jarvis, mais export Obsidian impossible : ${it.message ?: it.javaClass.simpleName}" }
+                    )
+                }
+            } catch (e: Exception) {
+                info = "❌ Mise à jour de ${c.nom} impossible : ${e.message ?: e.javaClass.simpleName}"
+            }
         }
     }
 }
