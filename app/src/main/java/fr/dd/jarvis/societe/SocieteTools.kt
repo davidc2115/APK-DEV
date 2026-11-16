@@ -708,15 +708,14 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         val removed = svc.repo.refresh().clients.none { it.id == cible.id }
         if (!removed) return err("❌ La fiche « ${cible.nom} » est toujours présente après la tentative de suppression. Aucune confirmation de réussite.")
         // La fiche Markdown exportée est une copie de présentation : la retirer aussi si elle existe.
-        val markdownPath = "Société/Clients/${cible.nom}.md"
-        val markdownExists = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            markdownPath in app.obsidian.listNotes("Société/Clients")
+        val markdownPath = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            app.obsidian.ficheExistante("Société/Clients", cible.nom)
         }
-        val markdownDeleted = if (markdownExists) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val markdownDeleted = if (markdownPath != null) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             app.obsidian.supprimerNote(markdownPath)
         } else true
         val markdownStillThere = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            markdownPath in app.obsidian.listNotes("Société/Clients")
+            app.obsidian.ficheExistante("Société/Clients", cible.nom) != null
         }
         return if (markdownDeleted && !markdownStillThere)
             ok("🗑️ Fiche client « ${cible.nom} », ses installations et sa fiche Markdown Obsidian supprimées.")
