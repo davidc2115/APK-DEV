@@ -226,8 +226,10 @@ object VisibiliteAuto {
     fun appliquerMode(ctx: Context) {
         val app = ctx.applicationContext as? JarvisApp ?: return
         val pm = ctx.packageManager
-        // Écrans voiture : avec une vraie marque Play Store (installateur Google), ou si on les force.
-        val voulu = if (app.store.autoEcrans.value || marqueValide(ctx)) android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
+        // Android Auto peut signaler « app owners empty » même si les métadonnées d'installation semblent Play Store.
+        // Ne jamais réactiver Car App sur cette seule base : seul le choix explicite « Écrans voiture » l'autorise.
+        // Par défaut, JARVIS reste présenté via JarvisMediaService (micro, agenda et raccourcis).
+        val voulu = if (app.store.autoEcrans.value) android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
             else android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED
         runCatching {
             if (pm.getComponentEnabledSetting(composantEcrans(ctx)) != voulu)
