@@ -1,0 +1,1 @@
+Temporary build trigger only. Android application source is identical to restored main commit 6848dc8f01769c7dc206bf3eaeeb2c8bea058633.
