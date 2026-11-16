@@ -1388,7 +1388,7 @@ class VoiceManager(private val ctx: Context) {
             // Android Auto / Bluetooth : le focus peut être accordé avant que l'autoradio ait réellement ouvert
             // son canal de sortie. On envoie un court préambule silencieux sur EXACTEMENT le même flux audio
             // avant la première syllabe, afin de laisser le haut-parleur se réveiller sans couper le début.
-            if (externe && !sessionActive) runCatching {
+            if (externe) runCatching {
                 val taux = 22050
                 val silence = ShortArray(taux * 8 / 10)
                 val warmup = AudioTrack.Builder()
