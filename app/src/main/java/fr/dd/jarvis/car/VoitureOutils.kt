@@ -4,6 +4,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.os.Handler
 import android.os.Looper
 import androidx.core.app.NotificationCompat
@@ -32,6 +34,7 @@ import java.util.Locale
 object VoixVoiture {
     private val main = Handler(Looper.getMainLooper())
     private var vm: VoiceManager? = null
+    private var tone: ToneGenerator? = null
 
     private fun voix(ctx: Context): VoiceManager = vm ?: VoiceManager(ctx.applicationContext).also {
         it.bargeIn = false; it.duplex = false; it.nom = "voiture"; vm = it
@@ -39,6 +42,16 @@ object VoixVoiture {
 
     /** Prépare la voix (à l'ouverture de JARVIS dans la voiture) pour que la première phrase parte sans attendre. */
     fun preparer(ctx: Context) { main.post { voix(ctx) } }
+
+    /** Bip bref sur le flux média de la voiture, sans ouvrir de canal mains-libres / mode appel. */
+    fun bipEcoute() {
+        main.post {
+            runCatching { tone?.release() }
+            tone = runCatching { ToneGenerator(AudioManager.STREAM_MUSIC, 65) }.getOrNull()
+            tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 140)
+            main.postDelayed({ runCatching { tone?.release() }; tone = null }, 300)
+        }
+    }
 
     fun parler(ctx: Context, texte: String, puis: () -> Unit = {}) {
         main.post { voix(ctx).speak(texte) { main.post(puis) } }
