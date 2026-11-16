@@ -58,13 +58,24 @@ class JarvisService : Service() {
          */
         fun ecouterDepuisVoiture(ctx: Context): Boolean {
             val s = actuel
-            if (running && s != null) { s.main.post { s.demandeExterne() }; return true }
-            if (!micAccorde(ctx)) return false
+            if (running && s != null) {
+                fr.dd.jarvis.voice.JournalVoix.noter("Android Auto", "demande d'écoute transmise au JarvisService déjà actif")
+                s.main.post { s.demandeExterne() }
+                return true
+            }
+            if (!micAccorde(ctx)) {
+                fr.dd.jarvis.voice.JournalVoix.noter("Android Auto", "demande d'écoute refusée : permission micro absente")
+                return false
+            }
             return try {
                 val i = Intent(ctx, JarvisService::class.java).setAction(ACTION_ECOUTER)
                 if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
+                fr.dd.jarvis.voice.JournalVoix.noter("Android Auto", "démarrage du JarvisService demandé pour ouvrir le micro")
                 true
-            } catch (_: Throwable) { false }
+            } catch (e: Throwable) {
+                fr.dd.jarvis.voice.JournalVoix.noter("Android Auto", "impossible de démarrer le service vocal : ${e.message ?: e.javaClass.simpleName}")
+                false
+            }
         }
 
         /**
@@ -311,7 +322,11 @@ class JarvisService : Service() {
      * d'abord ; s'il est encore en train de traiter une demande, on le signale au lieu d'attendre indéfiniment.
      */
     private fun demandeExterne(essai: Int = 0) {
-        if (!running) return
+        if (!running) {
+            fr.dd.jarvis.voice.JournalVoix.noter("Android Auto", "demande externe perdue : service vocal arrêté")
+            return
+        }
+        if (essai == 0) fr.dd.jarvis.voice.JournalVoix.noter("Android Auto", "demande externe reçue (awake=$awake, busy=$busy, voiture=${app.enVoiture})")
         // La voiture envoie parfois deux fois le même appui (▶ puis « jouer depuis la recherche ») : un seul bip.
         if (essai == 0) {
             val t = System.currentTimeMillis()
