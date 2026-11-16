@@ -25,12 +25,11 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
 
     private fun loadCandidates() {
         candidates.clear()
-        // Obsidian et la copie locale peuvent être momentanément désynchronisés :
-        // fusionner les preuves évite de perdre un apprentissage récent au redémarrage.
-        val sources = listOfNotNull(
-            runCatching { obsidian.read(FOLDER, "Apprentissage en cours.md") }.getOrNull(),
-            runCatching { habitsFile.takeIf { it.exists() }?.readText() }.getOrNull()
-        ).distinct()
+        // Le coffre choisi est la source unique. La copie privée n'est relue que si aucun
+        // coffre n'a été configuré (mode historique / première installation).
+        val source = runCatching { obsidian.read(FOLDER, "Apprentissage en cours.md") }.getOrNull()
+            ?: if (!obsidian.coffreConfigure()) runCatching { habitsFile.takeIf { it.exists() }?.readText() }.getOrNull() else null
+        val sources = listOfNotNull(source).distinct()
         sources.forEach { raw ->
             runCatching {
                 val json = JSONObject(raw)
