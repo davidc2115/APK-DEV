@@ -290,6 +290,11 @@ class VoskWake(private val ctx: Context, private val econome: Boolean = true, pr
             try { ar.startRecording() } catch (_: Throwable) { ar.release(); return false }
             if (ar.recordingState != android.media.AudioRecord.RECORDSTATE_RECORDING) { ar.release(); return false }
             micro = ar
+            // Le mot de réveil reste sur le micro déjà actif du téléphone : ne pas ouvrir HFP en veille,
+            // car cela ferait basculer la musique Bluetooth en qualité « appel ». Le micro BT est ouvert
+            // temporairement après le réveil, pendant la vraie commande.
+            val route = runCatching { ar.routedDevice }.getOrNull()
+            JournalVoix.noter("Vosk", "micro de veille actif : ${route?.productName ?: "micro système"}/${route?.type ?: -1} (Bluetooth mains-libres non forcé en veille)")
             vivantes.incrementAndGet()
             fil = Thread({ try { boucle(ar, taille) } finally { vivantes.decrementAndGet() } }, "jarvis-ecoute").apply { isDaemon = true; start() }
             return true
