@@ -1059,7 +1059,7 @@ class VoiceManager(private val ctx: Context) {
             return null
         }
         val comm = runCatching { am.availableCommunicationDevices }.getOrNull() ?: return null
-        val montre = Regex("(?i)watch|montre|\\\\bband\\\\b|\\\\bgear\\\\b")
+        val montre = Regex("(?i)watch|montre|\\bband\\b|\\bgear\\b")
         val candidats = comm.filter {
             it.type in setOf(AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_BLE_HEADSET) &&
                 !montre.containsMatchIn(it.productName.toString())
