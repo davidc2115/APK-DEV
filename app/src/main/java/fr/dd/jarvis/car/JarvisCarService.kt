@@ -92,14 +92,14 @@ object NavigationVoiture {
     suspend fun lancer(destination: String, point: Pair<Double, Double>? = null): Boolean {
         val c = contexte ?: return false
         if (destination.isBlank() && point == null) return false
-        // Formats documentés par Android Auto : « geo:lat,lon » (point précis : fiche client, GPS) ou « geo:0,0?q=adresse ».
-        val geo = if (point != null) "geo:${point.first},${point.second}" else "geo:0,0?q=" + Uri.encode(destination).replace("%20", "+")
+        // Android Auto reçoit une requête de recherche d'adresse. N'envoie pas seulement geo:lat,lon :
+        // cela ouvre souvent une épingle sur la carte sans lancer le calcul d'itinéraire.
+        val cible = destination.trim().ifBlank { "${point!!.first},${point.second}" }
+        val geo = "geo:0,0?q=" + Uri.encode(cible).replace("%20", "+")
         return withContext(Dispatchers.Main) {
             runCatching { c.startCarApp(Intent(CarContext.ACTION_NAVIGATE).setData(Uri.parse(geo))); true }
-                .recoverCatching {
-                    // Certaines applis de navigation refusent le format avec coordonnées : nouvel essai avec l'adresse seule.
-                    if (point != null) { c.startCarApp(Intent(CarContext.ACTION_NAVIGATE).setData(Uri.parse("geo:0,0?q=" + Uri.encode(destination).replace("%20", "+")))); true } else false
-                }.getOrDefault(false)
+                .onFailure { fr.dd.jarvis.voice.JournalVoix.noter("navigation", "Android Auto a refusé la destination : ${it.message ?: it.javaClass.simpleName}") }
+                .getOrDefault(false)
         }
     }
 }
@@ -212,7 +212,7 @@ class EvenementVoitureScreen(ctx: CarContext, private val e: fr.dd.jarvis.device
         val b = ItemList.Builder()
         val quand = if (e.allDay) "Journée" else "${hm(e.begin)}–${hm(e.end)}"
         if (e.location.isNotBlank()) b.addItem(Row.Builder().setTitle("🧭 Y aller").addText(e.location.take(90))
-            .setOnClickListener { runCatching { carContext.startCarApp(Intent(CarContext.ACTION_NAVIGATE).setData(Uri.parse("geo:0,0?q=" + Uri.encode(e.location)))) } }.build())
+            .setOnClickListener { runCatching { carContext.startCarApp(Intent(CarContext.ACTION_NAVIGATE).setData(Uri.parse("geo:0,0?q=" + Uri.encode(e.location).replace("%20", "+")))) } }.build())
         telephone()?.let { (nom, tel) ->
             b.addItem(Row.Builder().setTitle("📞 Appeler $nom").addText(tel)
                 .setOnClickListener { runCatching { carContext.startCarApp(Intent(Intent.ACTION_DIAL).setData(Uri.parse("tel:$tel"))) } }.build())
@@ -277,7 +277,10 @@ class ConversationVoiture private constructor(private val ctx: CarContext, priva
         VoixVoiture.taire()
         micro?.arreter(); tache?.cancel()
         montrer(Etat.Ecoute)
+        VoixVoiture.bipEcoute()
         tache = scope.launch {
+            // Laisse le bip sortir sur le flux média avant de demander le focus exclusif du micro voiture.
+            kotlinx.coroutines.delay(220)
             val m = MicroVoiture(ctx).also { micro = it }
             val res = withContext(Dispatchers.IO) { m.ecouter(if (premiere) maxOf(silenceMs(), 8000L) else silenceMs()) }
             if (fermee) return@launch
