@@ -25,8 +25,9 @@ object Faits {
     private const val FICHIER_COFFRE = "Mémoire faits source.json"
 
     @Synchronized private fun lire(app: JarvisApp): JSONObject = runCatching {
-        val source = app.obsidian.read("JARVIS", FICHIER_COFFRE)
-            ?: if (!app.obsidian.coffreConfigure()) f(app).takeIf { it.isFile }?.readText() else null
+        val source = app.obsidian.lireOuMigrer(
+            "JARVIS", FICHIER_COFFRE, f(app).takeIf { it.isFile }?.readText(), "application/json"
+        )
         JSONObject(source ?: "{}")
     }.getOrDefault(JSONObject())
 
