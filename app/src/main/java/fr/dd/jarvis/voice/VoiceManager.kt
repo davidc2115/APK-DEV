@@ -395,9 +395,11 @@ class VoiceManager(private val ctx: Context) {
                  * mais n'envoient jamais onResults. En mode conversation, la garde de silence est désactivée
                  * dès que l'utilisateur parle : sans ce repli, le service peut rester en écoute sans fin.
                  */
+                @Volatile private var secoursDemande = false
                 private val secoursFinPartiel = Runnable {
                     if (!actif() || segmente) return@Runnable
                     if (texte(partielSur()).isBlank()) return@Runnable
+                    secoursDemande = true
                     JournalVoix.noter(nom, "partiels reçus sans résultat final : clôture de reconnaissance")
                     runCatching { r.stopListening() }
                     main.postDelayed({
@@ -446,6 +448,16 @@ class VoiceManager(private val ctx: Context) {
 
                 override fun onError(error: Int) {
                     if (!actif()) return
+                    // stopListening() peut être suivi d'un ERROR_NO_MATCH au lieu de onResults.
+                    // Dans ce cas, le dernier partiel constitue déjà une transcription exploitable.
+                    if (secoursDemande) {
+                        val dernier = texte(partielSur())
+                        if (dernier.isNotBlank()) {
+                            JournalVoix.noter(nom, "résultat final absent après clôture : récupération sur erreur")
+                            livrer(dernier, "fin de phrase (secours)")
+                            return
+                        }
+                    }
                     termine = true
                     JournalVoix.noter(nom, "reconnaissance : erreur $error${if (parole) " (après parole)" else ""}")
                     ecoute = false
