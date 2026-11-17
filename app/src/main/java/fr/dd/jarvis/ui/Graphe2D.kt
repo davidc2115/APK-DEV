@@ -150,9 +150,15 @@ fun DialoguesConstellation(
         apercu = withContext(Dispatchers.IO) { runCatching { app.obsidian.readNote(id) }.getOrNull()?.take(3000) ?: "" }
     }
     noteOuverte?.let { id ->
-        val noeud = c?.notesParHub?.values?.flatten()?.firstOrNull { it.id == id }
-        val entrants = c?.tousLiens?.filter { it.vers == id }?.map { it.de.substringAfterLast('/') }.orEmpty()
-        val sortants = c?.tousLiens?.filter { it.de == id }?.map { it.vers.substringAfterLast('/') }.orEmpty()
+        val toutesNotes = c?.arborescence.orEmpty().flatMap { racine ->
+            fun parcourir(n: NoeudDossier): List<ObsidianWriter.GraphNode> =
+                n.notes + n.enfants.flatMap { parcourir(it) }
+            parcourir(racine)
+        }
+        val noeud = toutesNotes.firstOrNull { it.id == id }
+            ?: c?.dossiers?.get("Racine")?.notes?.firstOrNull { it.id == id }
+        val entrants = c?.tousLiens?.filter { it.vers == id }?.map { it.de }.orEmpty()
+        val sortants = c?.tousLiens?.filter { it.de == id }?.map { it.vers }.orEmpty()
         AlertDialog(
             onDismissRequest = { onNote(null) },
             containerColor = Color(0xFF0E0819), titleContentColor = Neon.lavande, textContentColor = Neon.blancViolet,
@@ -160,8 +166,18 @@ fun DialoguesConstellation(
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     Text(noeud?.folder?.ifBlank { "Racine du coffre" } ?: "", color = Neon.violet, fontSize = 11.sp, fontFamily = Neon.serif)
-                    Text("→ Liens entrants (${entrants.size}) : ${entrants.joinToString().ifBlank { "aucun" }}", color = Neon.sousTitre, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
-                    Text("← Liens sortants (${sortants.size}) : ${sortants.joinToString().ifBlank { "aucun" }}", color = Neon.sousTitre, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp, bottom = 8.dp))
+                    Text("→ Liens entrants (${entrants.size})", color = Neon.sousTitre, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+                    if (entrants.isEmpty()) Text("Aucun", color = Neon.sousTitre, fontSize = 11.sp)
+                    entrants.forEach { cible ->
+                        Text("↳ ${cible.substringAfterLast('/')}", color = Neon.lavande, fontSize = 11.sp,
+                            modifier = Modifier.fillMaxWidth().clickable { onNote(cible) }.padding(vertical = 2.dp))
+                    }
+                    Text("← Liens sortants (${sortants.size})", color = Neon.sousTitre, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+                    if (sortants.isEmpty()) Text("Aucun", color = Neon.sousTitre, fontSize = 11.sp)
+                    sortants.forEach { cible ->
+                        Text("↳ ${cible.substringAfterLast('/')}", color = Neon.lavande, fontSize = 11.sp,
+                            modifier = Modifier.fillMaxWidth().clickable { onNote(cible) }.padding(vertical = 2.dp))
+                    }
                     if (apercu == null) CircularProgressIndicator(color = Neon.violet, modifier = Modifier.size(22.dp))
                     else Text(apercu!!.ifBlank { "(note vide ou illisible)" }, fontSize = 12.sp)
                 }
@@ -170,7 +186,21 @@ fun DialoguesConstellation(
         )
     }
     hubListe?.let { cle ->
-        val contenu = c?.dossiers?.get(cle)
+        val contenu = when {
+            cle == "Autres" || cle == "Racine" || cle.isBlank() -> c?.dossiers?.get(cle)
+            else -> c?.arborescence.orEmpty().let { racines ->
+                fun trouver(noeuds: List<NoeudDossier>): NoeudDossier? {
+                    for (n in noeuds) {
+                        if (n.chemin == cle) return n
+                        trouver(n.enfants)?.let { return it }
+                    }
+                    return null
+                }
+                trouver(racines)?.let { n ->
+                    ContenuDossier(n.chemin, n.enfants.map { it.chemin }, n.notes, n.pieces, n.totalRecursif)
+                } ?: c?.dossiers?.get(cle)
+            }
+        }
         val titre = when (cle) { "Racine", "" -> "Coffre"; "Autres" -> "Autres dossiers"; else -> cle.substringAfterLast('/') }
         val parent = if (cle.contains('/')) cle.substringBeforeLast('/') else null
         AlertDialog(
