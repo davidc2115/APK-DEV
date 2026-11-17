@@ -412,6 +412,8 @@ fun ConstellationVue(
             if (dragon != null) dessinerDragon(dragon, outilsDragon, temps, margeHaut = 44.dp.toPx())
             val centre = origine
             val rCentre = c.rayonCerveau * k
+            // Noyau minéral sphérique : l'orbe devient la matière centrale du graphe, pas seulement un cerveau entouré de bulles.
+            dessinerOrbeObsidienne(centre, rCentre * 1.48f, pulse)
             // Grand rayonnement violet autour du cerveau, comme le cœur lumineux de l'image de référence.
             drawCircle(Brush.radialGradient(listOf(Neon.violetVif.copy(alpha = 0.2f * pulse), Neon.violetProfond.copy(alpha = 0.08f), Color.Transparent), centre, rCentre * 4.2f), rCentre * 4.2f, centre)
             val voirDossiers = FiltreGraphe.DOSSIERS in filtres
@@ -667,4 +669,61 @@ private fun LigneLegende(icone: Icone?, texte: String, symbole: String = "") {
 @Composable
 fun IconeCompose(icone: Icone, taille: Dp, couleur: Color = Neon.violet, alpha: Float = 1f) {
     Canvas(Modifier.size(taille)) { dessinerIcone(icone, Offset(size.width / 2f, size.height / 2f), size.minDimension * 0.92f, couleur, alpha) }
+}
+
+
+/**
+ * Coque d'obsidienne polie du graphe 2D : cœur noir profond, reflets froids, veines violettes
+ * et deux orbites fines. Les dossiers et les notes restent dessinés au premier plan.
+ */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.dessinerOrbeObsidienne(
+    centre: Offset, rayon: Float, pulse: Float
+) {
+    drawCircle(
+        Brush.radialGradient(
+            0f to Color(0xFF21132F),
+            0.28f to Color(0xFF100A19),
+            0.72f to Color(0xFF07050C),
+            0.94f to Color(0xFF020106),
+            1f to Color(0xFF000000),
+            center = centre - Offset(rayon * 0.28f, rayon * 0.34f),
+            radius = rayon * 1.35f
+        ),
+        radius = rayon,
+        center = centre
+    )
+    drawCircle(
+        Neon.violetVif.copy(alpha = 0.22f * pulse),
+        radius = rayon * 1.025f,
+        center = centre,
+        style = Stroke(width = max(1.2f, rayon * 0.018f))
+    )
+    drawCircle(
+        Brush.radialGradient(
+            listOf(Color(0xFFB58BEF).copy(alpha = 0.24f), Color.Transparent),
+            center = centre - Offset(rayon * 0.34f, rayon * 0.42f),
+            radius = rayon * 0.52f
+        ),
+        radius = rayon * 0.52f,
+        center = centre - Offset(rayon * 0.34f, rayon * 0.42f)
+    )
+    // Reflets orbitaux très discrets, pour lire le volume sans masquer la matière noire.
+    drawOval(
+        Neon.lavande.copy(alpha = 0.18f * pulse),
+        topLeft = Offset(centre.x - rayon * 1.32f, centre.y - rayon * 0.38f),
+        size = Size(rayon * 2.64f, rayon * 0.76f),
+        style = Stroke(width = max(1f, rayon * 0.012f))
+    )
+    drawOval(
+        Neon.violet.copy(alpha = 0.12f),
+        topLeft = Offset(centre.x - rayon * 0.42f, centre.y - rayon * 1.28f),
+        size = Size(rayon * 0.84f, rayon * 2.56f),
+        style = Stroke(width = max(1f, rayon * 0.01f))
+    )
+    // Fissures minérales, courtes et asymétriques : elles suggèrent l'obsidienne sans surcharger le noyau.
+    val veine = Neon.violetVif.copy(alpha = 0.34f * pulse)
+    drawLine(veine, centre + Offset(-rayon * 0.62f, -rayon * 0.12f), centre + Offset(-rayon * 0.34f, rayon * 0.02f), max(1f, rayon * 0.012f))
+    drawLine(veine.copy(alpha = veine.alpha * 0.72f), centre + Offset(-rayon * 0.34f, rayon * 0.02f), centre + Offset(-rayon * 0.22f, rayon * 0.24f), max(1f, rayon * 0.009f))
+    drawLine(veine.copy(alpha = veine.alpha * 0.7f), centre + Offset(rayon * 0.42f, -rayon * 0.48f), centre + Offset(rayon * 0.24f, -rayon * 0.22f), max(1f, rayon * 0.01f))
+    drawLine(veine.copy(alpha = veine.alpha * 0.65f), centre + Offset(rayon * 0.24f, -rayon * 0.22f), centre + Offset(rayon * 0.48f, rayon * 0.02f), max(1f, rayon * 0.008f))
 }
