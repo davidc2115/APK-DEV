@@ -11,6 +11,8 @@ import java.io.File
  * sinon dans le dossier propre à l'application (Android/data/fr.dd.jarvis/files/<dossier>).
  */
 data class DoublonObsidian(val type: String, val chemins: List<String>, val empreinte: String)
+data class ChangementObsidian(val type: String, val chemin: String)
+data class RapportChangementsObsidian(val referenceInitialisee: Boolean, val changements: List<ChangementObsidian>)
 
 class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
@@ -372,6 +374,66 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                 runCatching { f.readText() }.getOrNull()?.let { action(f.relativeTo(localRoot()).path, it) }
             }
         }
+    }
+
+    private fun instantaneNotes(limite: Int): org.json.JSONObject {
+        if (coffreConfigure() && !coffreDisponible())
+            throw java.io.IOException("Le coffre Obsidian n'est pas accessible en lecture/écriture.")
+        val max = limite.coerceIn(1, 3000)
+        val fichiers = if (coffreConfigure()) {
+            if (vaultRoot() == null) throw java.io.IOException("Autorisation de lecture du coffre perdue.")
+            allNotes(max + 1).also { if (it.size > max) throw java.io.IOException("Le coffre contient plus de $max notes : augmente la limite avant de comparer les versions.") }
+        } else {
+            val localFiles = localRoot().walkTopDown().filter { it.isFile && it.name.endsWith(".md", true) }.take(max + 1).toList()
+            if (localFiles.size > max) throw java.io.IOException("Le dossier local contient plus de $max notes : augmente la limite avant de comparer les versions.")
+            localFiles.map { it.relativeTo(localRoot()).path to it }
+        }
+        val snapshot = org.json.JSONObject()
+        fichiers.forEach { (path, fichier) ->
+            val bytes = if (fichier is DocumentFile) {
+                ctx.contentResolver.openInputStream(fichier.uri)?.use { it.readBytes() }
+                    ?: throw java.io.IOException("Lecture impossible : $path")
+            } else (fichier as File).readBytes()
+            if (bytes.size > 1_000_000) throw java.io.IOException("La note « $path » dépasse 1 Mo. Analyse interrompue sans modifier la référence.")
+            snapshot.put(path, empreinteContenu(bytes.toString(Charsets.UTF_8)))
+        }
+        return snapshot
+    }
+
+    /** Compare les notes à la dernière référence validée. Une analyse ne valide jamais elle-même les changements. */
+    fun analyserModificationsDepuisReference(limite: Int = 1500): RapportChangementsObsidian {
+        signalerFilPrincipal("analyserModificationsDepuisReference")
+        val prefs = ctx.getSharedPreferences("obsidian_sync", Context.MODE_PRIVATE)
+        val courant = instantaneNotes(limite)
+        val baseRaw = prefs.getString("reference", null)
+        if (baseRaw.isNullOrBlank()) {
+            prefs.edit().putString("reference", courant.toString()).remove("en_attente").apply()
+            return RapportChangementsObsidian(true, emptyList())
+        }
+        val base = runCatching { org.json.JSONObject(baseRaw) }.getOrElse {
+            throw java.io.IOException("La référence de synchronisation est illisible. Aucune note n'a été modifiée.")
+        }
+        val changements = mutableListOf<ChangementObsidian>()
+        val clesCourantes = courant.keys().asSequence().toSet()
+        val clesBase = base.keys().asSequence().toSet()
+        (clesCourantes - clesBase).sorted().forEach { changements += ChangementObsidian("ajoutée", it) }
+        (clesBase - clesCourantes).sorted().forEach { changements += ChangementObsidian("supprimée", it) }
+        (clesCourantes intersect clesBase).sorted().forEach { chemin ->
+            if (courant.optString(chemin) != base.optString(chemin))
+                changements += ChangementObsidian("modifiée", chemin)
+        }
+        prefs.edit().putString("en_attente", courant.toString()).apply()
+        return RapportChangementsObsidian(false, changements)
+    }
+
+    /** Valide la référence uniquement si le coffre n'a pas encore changé depuis le dernier rapport. */
+    fun validerReferenceModifications(limite: Int = 1500): Boolean {
+        val prefs = ctx.getSharedPreferences("obsidian_sync", Context.MODE_PRIVATE)
+        val attente = prefs.getString("en_attente", null) ?: return false
+        val courant = instantaneNotes(limite)
+        if (courant.toString() != attente) return false
+        prefs.edit().putString("reference", attente).remove("en_attente").apply()
+        return true
     }
 
     /**
