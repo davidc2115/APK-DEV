@@ -452,14 +452,27 @@ class SocieteService(
         val client = data.client(clientId) ?: return "Client introuvable."
         val site = client.sites.firstOrNull { it.id == siteId } ?: return "Installation introuvable."
         val inter = site.interventions.firstOrNull { it.id == interventionId } ?: return "Intervention introuvable."
-        File(ctx.filesDir, "societe/interventions/$interventionId").apply { mkdirs() }.let { File(it, "signature.png").writeBytes(png) }
-        runCatching { obsidian.saveBytes(dossierIntervention(client, site), "$interventionId-signature.png", png, "image/png") }
-        val maj = inter.copy(signature = "interventions/$interventionId/signature.png")
-        repo.update { d -> d.copy(clients = d.clients.map { c -> if (c.id != clientId) c else c.copy(sites = c.sites.map { s ->
-            if (s.id != siteId) s else s.copy(interventions = s.interventions.map { if (it.id == interventionId) maj else it })
-        }) }) }
-        val (_, pdf) = ecrireRapport(client, site, maj)
-        return "✍️ Signature du client ajoutée au rapport ($pdf)."
+        if (png.isEmpty()) return "Signature vide : aucun fichier enregistré."
+        val nom = "$interventionId-signature.png"
+        val dossierObsidian = dossierIntervention(client, site)
+        // La signature ne devient une donnée de l'intervention qu'après son écriture durable.
+        val emplacement = runCatching { obsidian.saveBytes(dossierObsidian, nom, png, "image/png") }
+            .getOrElse { return "❌ Signature non enregistrée dans Obsidian : ${it.message ?: it.javaClass.simpleName}. L'intervention reste inchangée." }
+        val local = File(ctx.filesDir, "societe/interventions/$interventionId/signature.png")
+        try {
+            local.parentFile?.mkdirs()
+            local.writeBytes(png)
+            val maj = inter.copy(signature = "interventions/$interventionId/signature.png")
+            repo.update { d -> d.copy(clients = d.clients.map { c -> if (c.id != clientId) c else c.copy(sites = c.sites.map { s ->
+                if (s.id != siteId) s else s.copy(interventions = s.interventions.map { if (it.id == interventionId) maj else it })
+            }) }) }
+            val (_, pdf) = runCatching { ecrireRapport(client, site, maj) }
+                .getOrElse { "" to "PDF non généré (${it.message ?: it.javaClass.simpleName})" }
+            return "✍️ Signature du client enregistrée dans $emplacement. $pdf"
+        } catch (e: Exception) {
+            runCatching { local.delete() }
+            return "⚠️ Signature copiée dans Obsidian, mais l'historique Société n'a pas été modifié : ${e.message ?: e.javaClass.simpleName}. Vérifie l'intervention avant de réessayer."
+        }
     }
 
     /** Une fois : régénère les rapports des interventions qui ont des photos (elles n'étaient pas dans les PDF). */
