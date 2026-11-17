@@ -1285,7 +1285,7 @@ data class RapportLiensObsidian(
  */
 object AnalyseLiensObsidian {
     private fun normaliserChemin(value: String): String =
-        java.text.Normalizer.normalize(value.replace('\\\\', '/').trim(), java.text.Normalizer.Form.NFD)
+        java.text.Normalizer.normalize(value.replace('\\', '/').trim(), java.text.Normalizer.Form.NFD)
             .replace(Regex("\\p{M}"), "")
             .lowercase()
             .trim('/')
