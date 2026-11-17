@@ -85,9 +85,20 @@ class DocumentsTest {
         val d = SocieteData(clients = listOf(Client("c1", "Dupont"), Client("c2", "Martin")),
             tarifs = listOf(Tarif("Maintenance", Mode.UNITE, listOf(Tranche(KWC_MAX, 100.0)))))
         val r = SocieteTools.intentionCreationTest(d, "Crée un devis test")!!
-        assertTrue(r.optString("question").contains("Dupont"))
-        assertTrue(r.optString("question").contains("Martin"))
+        assertTrue(r.optString("question").contains("quel client déjà enregistré"))
         assertTrue(!r.has("client"))
+    }
+
+    @Test fun creationTestReutiliseClientDuContexteRecent() {
+        val d = SocieteData(clients = listOf(Client("c1", "Client Test"), Client("c2", "Dupont")),
+            tarifs = listOf(Tarif("Maintenance annuelle", Mode.PAR_KWC, listOf(Tranche(10.0, 120.0)))))
+        val r = SocieteTools.intentionCreationTest(
+            d,
+            "Fais-moi un devis test pour une installation de 5 kWc avec 50 km de déplacement sans dépannage",
+            "Client « Client Test » créé dans Société → Clients"
+        )!!
+        assertEquals("Client Test", r.optString("client"))
+        assertEquals("Maintenance annuelle", r.optString("prestations"))
     }
 
     @Test fun creationTestDemandeUnTarifSiCatalogueAmbigu() {
