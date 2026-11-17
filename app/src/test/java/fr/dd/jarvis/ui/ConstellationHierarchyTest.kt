@@ -54,4 +54,52 @@ class ConstellationHierarchyTest {
         assertEquals(setOf("A", "B", "C"), constellation.arborescence.map { it.chemin }.toSet())
         assertEquals(3, constellation.arborescence.sumOf { it.totalRecursif })
     }
+    @Test fun eviteLesChevauchementsEntreDossiersEtPiecesJointes() {
+        val notes = (1..18).map { n ->
+            ObsidianWriter.GraphNode("Jarvis/Agents/Note$n", "Note$n", "Jarvis/Agents")
+        } + (1..8).map { n ->
+            ObsidianWriter.GraphNode("Société/Clients/Client$n", "Client$n", "Société/Clients")
+        }
+        val pieces = (1..16).map { n ->
+            ObsidianWriter.GraphAttachment("Jarvis/Agents/visuel$n.pdf", "visuel$n.pdf", "PDF")
+        } + listOf(
+            ObsidianWriter.GraphAttachment("capture.png", "capture.png", "IMAGE"),
+            ObsidianWriter.GraphAttachment("rapport.pdf", "rapport.pdf", "PDF")
+        )
+        val data = ObsidianWriter.GraphData(
+            nodes = notes,
+            edges = emptyList(),
+            attachments = pieces,
+            dossiers = listOf("Jarvis", "Jarvis/Agents", "Société", "Société/Clients", "Archives", "Médias")
+        )
+        val c = ConstellationLayout.construire(data)
+        val hubs = c.hubs.filter { it.rayon > 0f }
+
+        for (i in hubs.indices) for (j in i + 1 until hubs.size) {
+            val a = hubs[i]; val b = hubs[j]
+            val distance = kotlin.math.hypot(a.pos.x - b.pos.x, a.pos.y - b.pos.y)
+            assertTrue("Cercles en collision : ${a.titre} / ${b.titre}", distance + 0.5f >= a.rayon + b.rayon + 12f)
+        }
+        for (i in c.etiquettes.indices) {
+            val a = c.etiquettes[i]
+            for (j in i + 1 until c.etiquettes.size) {
+                val b = c.etiquettes[j]
+                val dx = kotlin.math.abs(a.pos.x - b.pos.x)
+                val dy = kotlin.math.abs(a.pos.y - b.pos.y)
+                assertTrue("Étiquettes en collision : ${a.texte} / ${b.texte}",
+                    dx + 0.5f >= (a.w + b.w) / 2f + 12f || dy + 0.5f >= (a.h + b.h) / 2f + 12f)
+            }
+            val coreX = a.pos.x.coerceIn(-a.w / 2f, a.w / 2f)
+            val coreY = a.pos.y.coerceIn(-a.h / 2f, a.h / 2f)
+            assertTrue("Une étiquette recouvre le noyau : ${a.texte}",
+                kotlin.math.hypot(coreX, coreY) + 0.5f >= ConstellationLayout.RAYON_CERVEAU + 18f)
+            for (h in hubs) {
+                val nx = h.pos.x.coerceIn(a.pos.x - a.w / 2f, a.pos.x + a.w / 2f)
+                val ny = h.pos.y.coerceIn(a.pos.y - a.h / 2f, a.pos.y + a.h / 2f)
+                assertTrue("Étiquette et dossier en collision : ${a.texte} / ${h.titre}",
+                    kotlin.math.hypot(nx - h.pos.x, ny - h.pos.y) + 0.5f >= h.rayon + 12f)
+            }
+        }
+    }
+
 }
