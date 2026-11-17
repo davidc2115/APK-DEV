@@ -109,8 +109,8 @@ class PorcupineWake(private val ctx: Context, private val accessKey: String, pri
     override var onPanne: () -> Unit = {}
     override var exigence: Int = 1
         set(v) { if (field != v) { field = v; val actif = mgr != null; release(); if (actif) start() } }
-    /** Sensibilité Porcupine : plus basse = moins de faux réveils (0,6 par défaut, 0,45 puis 0,35 si ça se déclenche tout seul). */
-    private fun sensibilite() = when (exigence) { 1 -> 0.6f; 2 -> 0.45f; else -> 0.35f }
+    /** Sensibilité Porcupine : réglage plus réactif pour les voix basses ; exigence augmente si faux réveils répétés. */
+    private fun sensibilite() = when (exigence) { 1 -> 0.75f; 2 -> 0.45f; else -> 0.35f }
 
     override fun start(): Boolean {
         return try {
@@ -153,7 +153,7 @@ class VoskWake(private val ctx: Context, private val econome: Boolean = true, pr
     @Volatile override var exigence: Int = 1
     /** Modèle français (sinon l'ancien anglais) : grammaire et seuils propres à chacun. */
     private val francais = VoskModel.francais(ctx)
-    private fun seuil() = if (francais) when (exigence) { 1 -> 0.6; 2 -> 0.8; else -> 0.9 } else when (exigence) { 1 -> 0.88; 2 -> 0.93; else -> 0.97 }
+    private fun seuil() = if (francais) when (exigence) { 1 -> 0.48; 2 -> 0.8; else -> 0.9 } else when (exigence) { 1 -> 0.78; 2 -> 0.93; else -> 0.97 }
 
     companion object {
         /**
@@ -370,7 +370,12 @@ internal class PorteVocale {
     private var duree = 0
     private var somme = 0.0
 
-    fun seuil() = maxOf(plancher * 2.0, plancher + 100.0, 150.0)
+    fun seuil() = seuilPourPlancher(plancher)
+
+    companion object {
+        /** Porte plus sensible aux voix faibles, tout en restant relative au bruit ambiant. */
+        internal fun seuilPourPlancher(plancher: Double) = maxOf(plancher * 1.5, plancher + 35.0, 55.0)
+    }
 
     fun trame(rms: Double): Decision {
         if (plancher < 0) plancher = rms.coerceIn(20.0, 2000.0)
