@@ -225,7 +225,7 @@ class ToolBox(
         put(tool("morning_briefing", "Point du jour : planning du jour et mails importants."))
         put(tool("search_contacts", "Cherche des contacts du téléphone (nom, numéro, email, société).",
             mapOf("query" to prop("Texte recherché.")), listOf("query")))
-        put(tool("create_contact", "Crée un contact dans le téléphone.",
+        put(tool("create_contact", "Crée un contact dans le répertoire Android uniquement. Pour un client Société, ne l'utilise pas : client_ecrire crée la fiche unique dans Société/Clients. Ne l'appeler que si l'utilisateur demande explicitement un contact dans le répertoire du téléphone.",
             mapOf(
                 "name" to prop("Nom complet."),
                 "phone" to prop("Téléphone (optionnel)."),
@@ -246,7 +246,7 @@ class ToolBox(
             mapOf("format" to prop("« xx xx xx xx xx » (défaut : 06 12 34 56 78) ou « international » (+33 6 12 34 56 78)."),
                 "supprimer_doublons" to prop("« false » pour garder les doublons ; par défaut true."),
                 "apercu" to prop("« true » pour seulement montrer ce qui changerait, sans rien modifier."))))
-        put(tool("create_contact_card", "Génère la fiche contact complète (Markdown Obsidian) d'un contact et l'enregistre dans le dossier Contacts (ou un sous-dossier). Vérifie déjà seul si une fiche existe pour ce nom (n'importe où sous Contacts) et la met à jour à sa place au lieu d'en créer une deuxième : ne jamais appeler obsidian_lire ou chercher une fiche existante avant, c'est inutile et consomme des tokens pour rien.",
+        put(tool("create_contact_card", "Génère une fiche Obsidian pour un contact personnel dans Contacts. INTERDIT pour un client Société ou son interlocuteur : client_ecrire/client_fiche gèrent la fiche unique dans Société/Clients. Ne l'utiliser que sur demande explicite pour un contact personnel, et jamais après client_ecrire.",
             mapOf("name" to prop("Nom du contact."), "sous_dossier" to prop("Sous-dossier de « Contacts » où ranger la fiche (ex. « Clients », « Fournisseurs », « Famille »). Optionnel : vide = directement dans Contacts.")), listOf("name")))
         put(tool("meteo", "Météo précise (maintenant, prochaines heures, prévisions) à la position du téléphone, ou pour un lieu donné.",
             mapOf("lieu" to prop("Ville ou adresse (optionnel : par défaut la position actuelle du téléphone)."), "jours" to prop("Nombre de jours de prévision (1 à 7). Par défaut 3."))))
@@ -359,6 +359,7 @@ class ToolBox(
             ), listOf("action")))
         put(tool("obsidian_lire", "Lit une note Obsidian par son chemin relatif (ex. Contacts/Dupont.md).", mapOf("chemin" to prop("Chemin de la note.")), listOf("chemin")))
         put(tool("obsidian_lister", "Liste les notes du coffre Obsidian, éventuellement d'un dossier.", mapOf("dossier" to prop("Dossier (optionnel)."))))
+        put(tool("obsidian_synchroniser_index", "Synchronise les index Obsidian : index racine et index par dossier, avec des wikilinks réels vers les notes et pièces jointes. Ne modifie jamais les notes personnelles."))
         put(tool("obsidian_ecrire", "Crée, remplace ou complète une note Obsidian.", mapOf(
             "chemin" to prop("Chemin relatif de la note (ex. JARVIS/Idées.md)."), "contenu" to prop("Contenu Markdown."),
             "ajouter" to prop("« true » pour ajouter à la fin de la note existante au lieu de la remplacer.")), listOf("chemin", "contenu")))
@@ -1083,6 +1084,9 @@ class ToolBox(
         "obsidian_lister" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             val l = app.obsidian.listNotes(a.optString("dossier")); if (l.isEmpty()) "Aucune note." else l.take(120).joinToString("\n") + (if (l.size > 120) "\n… (${l.size} notes)" else "")
         })
+        "obsidian_synchroniser_index" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { app.obsidian.synchroniserIndex() }.getOrElse { "❌ Synchronisation des index impossible : ${it.message ?: it.javaClass.simpleName}" }
+        }, direct = true)
         "obsidian_ecrire" -> {
             val chemin = a.optString("chemin")
             val cheminNormalise = java.text.Normalizer.normalize(chemin, java.text.Normalizer.Form.NFD)
@@ -2330,7 +2334,32 @@ class ToolBox(
         val found = app.contacts.search(a.optString("name"), 5)
         val c = found.firstOrNull { it.name.equals(a.optString("name"), true) } ?: found.firstOrNull()
             ?: return ToolResult("Contact introuvable.")
+        val client = clientSocieteLieAuContact(c)
+        if (client != null) return ToolResult("ℹ️ « ${c.name} » est déjà le contact de la fiche Société « ${client.nom} ». Sa fiche unique est conservée dans Société/Clients ; aucune seconde note ne sera créée dans Contacts.")
         return ToolResult(buildCard(c, a.optString("sous_dossier")), direct = true)
+    }
+
+    /**
+     * Normalisation partagée pour éviter qu'un contact d'un client Société soit aussi exporté comme fiche personnelle.
+     */
+    private fun normaliserNomContactSociete(value: String): String =
+        java.text.Normalizer.normalize(value.trim(), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}+"), "").lowercase().replace(Regex("\\s+"), " ")
+
+    private fun clientSocieteLieAuContact(contact: fr.dd.jarvis.device.ContactInfo): fr.dd.jarvis.societe.core.Client? {
+        val base = app.societe.data
+        val nom = normaliserNomContactSociete(contact.name)
+        val entreprise = normaliserNomContactSociete(contact.company)
+        val raisonSociale = normaliserNomContactSociete(base.societe.nom)
+        return base.clients.firstOrNull { client ->
+            val nomClient = normaliserNomContactSociete(client.nom)
+            val nomContact = normaliserNomContactSociete(client.contact)
+            nom.isNotBlank() && (
+                nom == nomClient ||
+                (nomContact.isNotBlank() && nom == nomContact &&
+                    (entreprise.isBlank() || entreprise == nomClient || entreprise == raisonSociale))
+            )
+        }
     }
 
     /**
@@ -2341,6 +2370,9 @@ class ToolBox(
      * aucun token consommé) ; sinon on met à jour CETTE fiche (même emplacement) au lieu d'en créer une autre.
      */
     suspend fun buildCard(c: fr.dd.jarvis.device.ContactInfo, sousDossier: String = ""): String {
+        clientSocieteLieAuContact(c)?.let { client ->
+            return "ℹ️ « ${c.name} » est déjà le contact de la fiche Société « ${client.nom} ». La fiche unique reste dans Société/Clients ; aucune note n'est créée dans Contacts."
+        }
         // Coffre lu et écrit en arrière-plan (sur le fil principal, l'écran des contacts se figeait).
         val io = kotlinx.coroutines.Dispatchers.IO
         val cheminExistant = kotlinx.coroutines.withContext(io) { app.obsidian.ficheExistante("Contacts", c.name) }
