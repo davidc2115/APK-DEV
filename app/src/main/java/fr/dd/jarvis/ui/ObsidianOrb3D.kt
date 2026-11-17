@@ -103,8 +103,10 @@ private fun versDome(p: Pt, avance: Float = 0f): FloatArray {
     val longitude = atan2(y, x)
     // Chaque rayon conserve une part de la distance réelle au noyau : les éléments éloignés ne sont
     // plus rabattus sur une même couronne, ce qui tassait les dossiers et leurs fichiers.
-    val latitude = (0.18f + distance * 0.055f).coerceIn(0.18f, 1.35f)
-    val rayon = 3.15f + distance * 0.16f + avance
+    val latitude = (0.18f + distance * 0.065f).coerceIn(0.18f, 1.35f)
+    // La croissance radiale plus marquée conserve une vraie marge entre les branches
+    // après projection perspective, notamment sur les écrans portrait étroits.
+    val rayon = 3.15f + distance * 0.22f + avance
     val projection = sin(latitude) * rayon
     return floatArrayOf(
         cos(longitude).toFloat() * projection,
@@ -222,10 +224,10 @@ private fun Orbe3DContenu(
         c.hubs.forEach { h ->
             val base = versDome(h.pos, 0.25f)
             val parent = h.parent?.let { m["hub:$it"] }
-            val ecart = if (parent == null) 0f else 0.48f + (h.niveau - 1).coerceAtLeast(0) * 0.16f
+            val ecart = if (parent == null) 0f else 0.68f + (h.niveau - 1).coerceAtLeast(0) * 0.22f
             val position = if (parent != null) eloignerDuParent(base, parent, ecart) else base
             val ecartFocus = if (hubFocus != null && h.parent != null && dansBranche(h.parent))
-                1.05f + (h.niveau - 1).coerceAtLeast(0) * 0.32f else 0f
+                1.3f + (h.niveau - 1).coerceAtLeast(0) * 0.4f else 0f
             m["hub:${h.cle}"] = if (parent != null && ecartFocus > 0f) eloignerDuParent(position, parent, ecartFocus) else position
         }
 
@@ -235,12 +237,12 @@ private fun Orbe3DContenu(
             val base = versDome(e.pos, 0.12f)
             val parent = c.hub(e.hub)?.takeIf { it.niveau >= 1 }?.let { m["hub:${it.cle}"] }
             val ecart = if (parent != null && (e.type == TypeEtiquette.NOTE || e.type == TypeEtiquette.FICHIER))
-                0.46f + (c.hub(e.hub)?.niveau?.minus(1)?.coerceAtLeast(0) ?: 0) * 0.12f
+                0.66f + (c.hub(e.hub)?.niveau?.minus(1)?.coerceAtLeast(0) ?: 0) * 0.18f
             else 0f
             val position = if (parent != null && ecart > 0f) eloignerDuParent(base, parent, ecart) else base
             val hubContenant = c.hub(e.hub)
             val centreFocus = if (hubFocus != null && dansBranche(e.hub)) hubContenant?.let { m["hub:${it.cle}"] } else null
-            val ecartFocus = if (centreFocus != null) 0.82f + ((hubContenant?.niveau ?: 0).coerceAtLeast(0) * 0.18f) else 0f
+            val ecartFocus = if (centreFocus != null) 1.05f + ((hubContenant?.niveau ?: 0).coerceAtLeast(0) * 0.24f) else 0f
             m[e.id] = if (centreFocus != null) eloignerDuParent(position, centreFocus, ecartFocus) else position
         }
         m
@@ -259,7 +261,7 @@ private fun Orbe3DContenu(
         val h = if (taille.height > 0f) taille.height else 1600f
         val w = if (taille.width > 0f) taille.width else 800f
         val hDispo = (h - 92f * dens).coerceAtLeast(h * 0.6f)
-        val d = max(rayonEnveloppe / (tanY * w / h), rayonEnveloppe / (tanY * hDispo / h)) * 1.06f + 0.6f
+        val d = max(rayonEnveloppe / (tanY * w / h), rayonEnveloppe / (tanY * hDispo / h)) * 1.18f + 0.85f
         d to 0f
     }
 
