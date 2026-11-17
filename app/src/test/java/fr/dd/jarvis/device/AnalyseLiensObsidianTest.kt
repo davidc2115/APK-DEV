@@ -38,6 +38,23 @@ class AnalyseLiensObsidianTest {
     }
 
     @Test
+    fun neSignalePasLindexRacineCommeNoteOrpheline() {
+        val data = ObsidianWriter.GraphData(
+            nodes = listOf(
+                ObsidianWriter.GraphNode("_Jarvis/Index coffre", "Index coffre", "_Jarvis"),
+                ObsidianWriter.GraphNode("Société/Clients/Alpha", "Alpha", "Société/Clients")
+            ),
+            edges = emptyList(),
+            references = emptyList()
+        )
+
+        val audit = AnalyseLiensObsidian.analyser(data)
+
+        assertEquals(listOf("Alpha"), audit.notesSansLienEntrant.map { it.label })
+        assertEquals(listOf("Alpha"), audit.notesOrphelines.map { it.label })
+    }
+
+    @Test
     fun signaleUneAnalysePartielleQuandDesNotesNontPasPuEtreLues() {
         val data = ObsidianWriter.GraphData(
             nodes = listOf(ObsidianWriter.GraphNode("A", "Alpha", "")),
