@@ -383,9 +383,23 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         if (coffreConfigure() && !coffreDisponible())
             throw java.io.IOException("Le coffre Obsidian est configuré mais inaccessible. Vérifie les autorisations Android avant de lancer l'analyse.")
         val notes = mutableListOf<Pair<String, String>>()
-        parcourirContenus(limite.coerceIn(1, 3000)) { path, content ->
-            val normalise = content.replace("\r\n", "\n").replace('\r', '\n').trim()
-            if (normalise.isNotBlank()) notes += path to normalise
+        val maxTailleNote = 1_000_000L
+        if (coffreConfigure()) {
+            val racine = vaultRoot() ?: throw java.io.IOException("Autorisation de lecture du coffre perdue.")
+            allNotes(limite.coerceIn(1, 3000)).forEach { (path, fichier) ->
+                if (fichier.length() > maxTailleNote) return@forEach
+                val contenu = ctx.contentResolver.openInputStream(fichier.uri)?.use { it.readBytes() }?.toString(Charsets.UTF_8)
+                    ?: throw java.io.IOException("Lecture impossible pour la note : $path")
+                val normalise = contenu.replace("\r\n", "\n").replace('\r', '\n').trim()
+                if (normalise.isNotBlank()) notes += path to normalise
+            }
+        } else {
+            localRoot().walkTopDown().filter { it.isFile && it.name.endsWith(".md", true) }
+                .take(limite.coerceIn(1, 3000)).forEach { fichier ->
+                    if (fichier.length() > maxTailleNote) return@forEach
+                    val normalise = fichier.readText().replace("\r\n", "\n").replace('\r', '\n').trim()
+                    if (normalise.isNotBlank()) notes += fichier.relativeTo(localRoot()).path to normalise
+                }
         }
         val groupes = mutableListOf<DoublonObsidian>()
         val contenus = notes.groupBy { (_, body) ->
