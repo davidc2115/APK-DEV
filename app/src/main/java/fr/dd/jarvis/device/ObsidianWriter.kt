@@ -1260,3 +1260,85 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             "intitule", "the", "of", "and")
     }
 }
+
+
+/** Résultat commun de l'audit des liens, utilisé par le graphe et par les réponses de JARVIS. */
+data class RapportLiensObsidian(
+    val liens: List<ObsidianWriter.GraphEdge>,
+    val notesSansLienEntrant: List<ObsidianWriter.GraphNode>,
+    val notesOrphelines: List<ObsidianWriter.GraphNode>,
+    val fichiersOrphelins: List<ObsidianWriter.GraphAttachment>,
+    val referencesNonResolues: List<ObsidianWriter.GraphReference>,
+    val notesLues: Int,
+    val notesCandidates: Int,
+    val analyseComplete: Boolean
+)
+
+/**
+ * Règles uniques de diagnostic : « sans lien entrant » signifie aucune note qui pointe vers cette note ;
+ * « orpheline » signifie aucun lien entrant ni sortant ; une pièce jointe est orpheline si aucun wikilink
+ * du coffre ne la cible. La présence dans un dossier n'est jamais considérée comme un lien.
+ */
+object AnalyseLiensObsidian {
+    private fun normaliserChemin(value: String): String =
+        java.text.Normalizer.normalize(value.replace('\\\\', '/').trim(), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}"), "")
+            .lowercase()
+            .trim('/')
+            .removePrefix("./")
+
+    fun analyser(data: ObsidianWriter.GraphData): RapportLiensObsidian {
+        val ids = data.nodes.filterNot { it.ghost }.map { it.id }.toHashSet()
+        val liens = data.references
+            .filter { it.resolved && it.from in ids && it.to in ids && it.from != it.to }
+            .map { ObsidianWriter.GraphEdge(it.from, it.to) }
+            .distinctBy { it.from to it.to }
+            .ifEmpty { data.edges.filter { it.from in ids && it.to in ids && it.from != it.to }.distinctBy { it.from to it.to } }
+
+        val entrants = liens.groupingBy { it.to }.eachCount()
+        val degres = HashMap<String, Int>()
+        liens.forEach { edge ->
+            degres[edge.from] = (degres[edge.from] ?: 0) + 1
+            degres[edge.to] = (degres[edge.to] ?: 0) + 1
+        }
+        val notes = data.nodes.filterNot { it.ghost }
+        val sansLienEntrant = notes.filter { (entrants[it.id] ?: 0) == 0 }
+            .sortedBy { it.label.lowercase() }
+        val notesOrphelines = notes.filter { (degres[it.id] ?: 0) == 0 }
+            .sortedBy { it.label.lowercase() }
+
+        val piecesLiees = HashSet<String>()
+        val referencesNonResolues = mutableListOf<ObsidianWriter.GraphReference>()
+        for (reference in data.references) {
+            val cible = normaliserChemin(reference.rawTarget)
+            val dossierSource = reference.from.substringBeforeLast('/', "")
+            val cibleRelative = normaliserChemin(if (dossierSource.isBlank()) reference.rawTarget else "$dossierSource/${reference.rawTarget}")
+            val cibleNom = cible.substringAfterLast('/')
+            val correspondantes = data.attachments.filter { piece ->
+                val chemin = normaliserChemin(piece.path)
+                val nom = normaliserChemin(piece.name)
+                if (cible.contains('/')) chemin == cible || chemin == cibleRelative
+                else nom == cibleNom
+            }
+            if (correspondantes.isNotEmpty()) {
+                correspondantes.forEach { piecesLiees += it.path }
+            } else if (!reference.resolved) {
+                referencesNonResolues += reference
+            }
+        }
+        val fichiersOrphelins = data.attachments
+            .filter { it.path !in piecesLiees }
+            .sortedBy { it.path.lowercase() }
+
+        return RapportLiensObsidian(
+            liens = liens,
+            notesSansLienEntrant = sansLienEntrant,
+            notesOrphelines = notesOrphelines,
+            fichiersOrphelins = fichiersOrphelins,
+            referencesNonResolues = referencesNonResolues.distinctBy { it.from to it.rawTarget },
+            notesLues = data.notesLues,
+            notesCandidates = data.notesCandidates,
+            analyseComplete = data.notesLues == data.notesCandidates && !data.limiteNotesAtteinte
+        )
+    }
+}
