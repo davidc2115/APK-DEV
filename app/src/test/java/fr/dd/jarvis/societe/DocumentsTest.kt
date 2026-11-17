@@ -65,6 +65,39 @@ class DocumentsTest {
         assertTrue(Rendu.identiteLegale(d).contains("SIRET 12345678900012"))
     }
 
+    @Test fun creationDocumentTestEstRouteeSansCreerDeClient() {
+        val client = Client("c1", "Client Test")
+        val tarif = Tarif("Maintenance annuelle", Mode.PAR_KWC, listOf(Tranche(10.0, 120.0)))
+        val d = SocieteData(societe = societe, clients = listOf(client), tarifs = listOf(tarif))
+        val a = SocieteTools.intentionCreationTest(d,
+            "Fais-moi un devis test pour une installation de 5 kWc avec 50 km de déplacement sans aucun dépannage")!!
+        assertEquals("devis", a.optString("type"))
+        assertTrue(a.optBoolean("test"))
+        assertEquals("Client Test", a.optString("client"))
+        assertEquals("Maintenance annuelle", a.optString("prestations"))
+        assertEquals(5.0, a.optDouble("kwc"), 0.001)
+        assertEquals(50.0, a.optDouble("distance_km"), 0.001)
+        assertTrue(a.optBoolean("deplacement"))
+    }
+
+    @Test fun creationTestDemandeUnClientSiPlusieurs() {
+        val d = SocieteData(clients = listOf(Client("c1", "Dupont"), Client("c2", "Martin")),
+            tarifs = listOf(Tarif("Maintenance", Mode.UNITE, listOf(Tranche(KWC_MAX, 100.0)))))
+        val r = SocieteTools.intentionCreationTest(d, "Crée un devis test")!!
+        assertTrue(r.optString("question").contains("Dupont"))
+        assertTrue(r.optString("question").contains("Martin"))
+        assertTrue(!r.has("client"))
+    }
+
+    @Test fun creationTestDemandeUnTarifSiCatalogueAmbigu() {
+        val d = SocieteData(clients = listOf(Client("c1", "Client Test")), tarifs = listOf(
+            Tarif("Maintenance", Mode.UNITE, listOf(Tranche(KWC_MAX, 100.0))),
+            Tarif("Contrôle onduleur", Mode.UNITE, listOf(Tranche(KWC_MAX, 80.0)))))
+        val r = SocieteTools.intentionCreationTest(d, "Crée un devis test pour Client Test")!!
+        assertTrue(r.optString("question").contains("Maintenance"))
+        assertTrue(r.optString("question").contains("Contrôle onduleur"))
+    }
+
     @Test fun reflexesGestion() {
         val d = SocieteData(societe = societe, employes = listOf(paul), clients = listOf(Client("c1", "Dupont")),
             docs = listOf(Doc("FAC-2026-0003", "facture", "c1", date = "2026-11-10")))
