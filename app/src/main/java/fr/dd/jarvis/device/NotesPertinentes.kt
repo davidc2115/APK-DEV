@@ -55,7 +55,7 @@ object NotesPertinentes {
 
     /** Bloc à placer dans le prompt (vide s'il n'y a rien d'utile). */
     suspend fun pour(app: JarvisApp, demande: String): String = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-        kotlinx.coroutines.withTimeoutOrNull(1200) { calculer(app, demande) }.orEmpty()
+        kotlinx.coroutines.withTimeoutOrNull(4000) { calculer(app, demande) }.orEmpty()
     }
 
     private suspend fun calculer(app: JarvisApp, demande: String): String {
@@ -83,26 +83,19 @@ object NotesPertinentes {
                 if (s > 0) lignes += s * 2 to "[notes d'Hermès] ${e.replace('\n', ' ').take(400)}"
             }
         }
-        // 3. Notes Obsidian dont le titre correspond (index du coffre, lecture des 2 meilleures seulement).
+        // 3. Recherche Obsidian multi-termes dans les chemins ET le contenu des notes.
+        // Un titre générique ne doit plus empêcher de retrouver une information présente dans le corps.
         runCatching {
-            // Les recherches de titres sont indépendantes : les lancer en parallèle évite d'additionner
-            // quatre latences d'index Obsidian sur chaque demande spécialisée.
-            val recherches = coroutineScope {
-                // Plusieurs formulations équivalentes (domicile/maison/adresse/personnel) doivent
-                // pouvoir retrouver une note dont le titre n'emploie pas exactement les mots prononcés.
-                mots.filter { it.length >= 4 }.sortedByDescending { it.length }.take(8).map { mot ->
-                    async(Dispatchers.IO) {
-                        runCatching { app.knowledgeRepository.searchNodes(mot, 15) }.getOrDefault(emptyList())
-                    }
-                }.awaitAll()
-            }
-            val candidats = recherches.flatten()
-                .filter { it.sourcePath.endsWith(".md", true) && !it.sourcePath.contains("Mémoire JARVIS") && !it.sourcePath.contains("Mémoire Hermès") && !it.sourcePath.contains(Carnet.DOSSIER) }
-                .distinctBy { it.sourcePath }
-                .map { it to score(it.title, mots) }.filter { it.second > 0 }.sortedByDescending { it.second }.take(2)
-            candidats.forEach { (node, s) ->
-                val contenu = app.obsidian.readNote(node.sourcePath).orEmpty()
-                if (contenu.isNotBlank() && score(contenu, mots) >= 1) lignes += s * 2 + 1 to "[note « ${node.sourcePath.removeSuffix(".md")} »] ${extrait(contenu, mots, 700)}"
+            val resultats = app.obsidian.searchNotesAny(
+                queries = mots.filter { it.length >= 3 },
+                limit = 8,
+                maxScan = 1500
+            )
+            resultats.forEach { (chemin, extraitNote) ->
+                val s = score("$chemin $extraitNote", mots)
+                if (s > 0 && extraitNote.isNotBlank()) {
+                    lignes += s * 2 + 2 to "[note « ${chemin.removeSuffix(".md")} »] ${extraitNote.take(900)}"
+                }
             }
         }
         if (lignes.isEmpty()) return ""
