@@ -281,7 +281,7 @@ private fun Orbe3DContenu(
                 .pointerInput(Unit) {
                     detectTransformGestures { _, pan, zoom, _ ->
                         dernierGeste = temps
-                        zoomUser = (zoomUser * zoom).coerceIn(0.6f, 3.2f)
+                        zoomUser = (zoomUser * zoom).coerceIn(0.12f, 8f)
                         // Rotation libre sur les deux axes : chaque axe accepte autant de tours complets que souhaité.
                         // Le modulo conserve une valeur numérique stable sans créer de butée ni de saut visuel.
                         lacetUser = (lacetUser + pan.x * 0.25f) % 360f
