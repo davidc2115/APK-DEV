@@ -749,7 +749,7 @@ object ConstellationLayout {
         // Passe finale de sécurité : la résolution étiquette-étiquette peut déplacer une étiquette
         // vers un cercle traité plus tôt dans la même itération. On rétablit donc la séparation
         // étiquette-cercle après la dernière correction de paires, sans déplacer les hubs.
-        repeat(256) {
+        for (iteration in 0 until 256) {
             var correction = false
             for (i in etiquettes.indices) {
                 for (j in hubs.indices) {
@@ -759,7 +759,7 @@ object ConstellationLayout {
                     }
                 }
             }
-            if (!correction) return@repeat
+            if (!correction) break
         }
 
         for (i in hubs.indices) hubs[i] = hubs[i].copy(pos = Pt(hx[i], hy[i]))
