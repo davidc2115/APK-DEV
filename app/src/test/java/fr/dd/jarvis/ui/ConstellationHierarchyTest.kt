@@ -21,10 +21,12 @@ class ConstellationHierarchyTest {
         )
 
         val constellation = ConstellationLayout.construire(data)
-        val racine = constellation.arborescence.single()
+        val coffre = constellation.arborescence.single()
 
-        assertEquals("Dossier", racine.chemin)
-        var courant = racine.enfants.single { it.chemin == chemins.first() }
+        // La note située à la racine est conservée dans un nœud « Coffre » explicite.
+        assertEquals("", coffre.chemin)
+        assertEquals("Coffre", coffre.nom)
+        var courant = coffre.enfants.single { it.chemin == chemins.first() }
         chemins.drop(1).forEach { chemin ->
             courant = courant.enfants.single { it.chemin == chemin }
         }
