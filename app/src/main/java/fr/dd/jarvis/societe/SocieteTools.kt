@@ -65,7 +65,7 @@ class SocieteTools(
                 else -> null
             }
             if (client == null) {
-                return JSONObject().put("question", "Quel client déjà enregistré dois-je utiliser pour ce document de test ? Donne-moi simplement son nom ; je ne créerai pas de nouveau client.")
+                return JSONObject().put("question", "quel client déjà enregistré dois-je utiliser pour ce document de test ? Donne-moi simplement son nom ; je ne créerai pas de nouveau client.")
             }
             args.put("client", client.nom)
 
