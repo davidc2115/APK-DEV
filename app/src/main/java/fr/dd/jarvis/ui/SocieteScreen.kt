@@ -427,6 +427,11 @@ private fun ClientsTab(app: JarvisApp) {
                                 val numeros = documents.take(8).joinToString(", ") { it.numero }
                                 return@runCatching "⛔ Suppression bloquée : ${client.nom} possède ${documents.size} devis/facture(s) liés ($numeros${if (documents.size > 8) "…" else ""}). Traite ou transfère d'abord ces documents pour préserver l'historique comptable."
                             }
+                            // Si un coffre a été choisi, vérifier ses droits avant toute suppression
+                            // de la base canonique : une permission SAF expirée ne doit pas être
+                            // interprétée comme une fiche Obsidian absente.
+                            if (app.obsidian.coffreConfigure() && !app.obsidian.coffreDisponible())
+                                return@runCatching "⛔ Suppression annulée : le coffre Obsidian sélectionné est inaccessible ou en lecture seule. La fiche Société est conservée."
                             svc.repo.update { data -> data.copy(clients = data.clients.filterNot { it.id == client.id }) }
                             if (svc.repo.refresh().client(client.id) != null)
                                 return@runCatching "❌ Échec : ${client.nom} est toujours présent dans la base Société. Aucune suppression n'est confirmée."
