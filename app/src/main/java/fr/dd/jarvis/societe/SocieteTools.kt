@@ -76,7 +76,7 @@ class SocieteTools(
             // peut être retenu sans interprétation hasardeuse ; plusieurs tarifs nécessitent un choix.
             val tarifs = data.tarifs.filterNot { t ->
                 val nom = normaliser(t.designation)
-                nom.contains("deplacement") || (Regex("\\b(sans|aucun|aucune|pas de)\\s+depannage\\b").containsMatchIn(n) && nom.contains("depannage"))
+                nom.contains("deplacement") || (Regex("\\b(sans|aucun|aucune|pas de)(?:\\s+aucun(?:e)?|\\s+de)?\\s+depannage\\b").containsMatchIn(n) && nom.contains("depannage"))
             }
             val tarifCite = tarifs.filter { t ->
                 val nom = normaliser(t.designation)
