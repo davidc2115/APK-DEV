@@ -248,6 +248,27 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     /** Le dossier choisi existe et reste accessible en lecture/écriture via l'autorisation Android. */
     fun coffreDisponible(): Boolean = vaultRoot()?.let { it.canRead() && it.canWrite() } == true
 
+    /** Test réel lecture/écriture/suppression dans le coffre, avec un fichier temporaire immédiatement retiré. */
+    fun testerAccesComplet(): Boolean {
+        val root = vaultRoot() ?: return false
+        if (!root.canRead() || !root.canWrite()) return false
+        val nom = "JARVIS-controle-acces-${System.nanoTime()}.tmp"
+        val probe = runCatching { root.createFile("application/octet-stream", nom) }.getOrNull() ?: return false
+        return try {
+            val attendu = "JARVIS-OBSIDIAN-ACCESS".toByteArray(Charsets.UTF_8)
+            ctx.contentResolver.openOutputStream(probe.uri, "wt")?.use { it.write(attendu); it.flush() }
+                ?: throw java.io.IOException("Écriture refusée")
+            val relu = ctx.contentResolver.openInputStream(probe.uri)?.use { it.readBytes() }
+                ?: throw java.io.IOException("Lecture refusée")
+            if (!relu.contentEquals(attendu)) throw java.io.IOException("Vérification du contenu échouée")
+            if (!probe.delete()) throw java.io.IOException("Le fichier de contrôle n'a pas pu être supprimé")
+            true
+        } catch (_: Exception) {
+            runCatching { probe.delete() }
+            false
+        }
+    }
+
     /**
      * Lit le coffre en priorité. Lors de la première migration seulement, importe une ancienne
      * copie privée si le coffre est accessible et que la note n'existe pas encore. Un marqueur
