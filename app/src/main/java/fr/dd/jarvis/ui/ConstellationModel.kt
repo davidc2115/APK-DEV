@@ -137,7 +137,7 @@ object ConstellationLayout {
     const val RAYON_HUB = 46f
     const val H_ETIQUETTE = 24f
     private const val MAX_HUBS_DOSSIER = 9
-    private const val MAX_SOUS_DOSSIERS = 6
+    private const val MAX_SOUS_DOSSIERS = 8
     private const val MAX_TAGS = 6
     /** Hauteur d'une étiquette de fichier en bout de branche, et pas vertical entre deux. */
     private const val H_FEUILLE = 21f
@@ -197,7 +197,7 @@ object ConstellationLayout {
      */
     private class Rangee(val sous: Hub?, val tete: Etiquette?, val enfants: List<Rangee> = emptyList(), val feuille: Boolean = false) {
         val hauteur: Float by lazy {
-            if (sous != null) max(2 * sous.rayon + 28f, enfants.sumOf { it.hauteur.toDouble() }.toFloat() + 12f)
+            if (sous != null) max(2 * sous.rayon + 40f, enfants.sumOf { it.hauteur.toDouble() }.toFloat() + 24f)
             else if (feuille) PAS_FEUILLE else H_ETIQUETTE + 9f
         }
     }
@@ -338,8 +338,8 @@ object ConstellationLayout {
                 sd.forEach { enfants += rangeeDossier(it, d, niveau + 1) }
                 if (cd.sousDossiers.size > sd.size) enfants += Rangee(null, plus(d, d, cd.sousDossiers.size - sd.size, "dossiers", feuille = true), feuille = true)
                 val fichiers = cd.notes.sortedWith(parDegre).map { etiquetteNote(it, d, true) } + cd.pieces.map { etiquettePiece(it, d, true) }
-                fichiers.take(6).forEach { enfants += Rangee(null, it, feuille = true) }
-                if (fichiers.size > 6) enfants += Rangee(null, plus(d, d, fichiers.size - 6, "autres", feuille = true), feuille = true)
+                fichiers.take(10).forEach { enfants += Rangee(null, it, feuille = true) }
+                if (fichiers.size > 10) enfants += Rangee(null, plus(d, d, fichiers.size - 10, "autres", feuille = true), feuille = true)
             }
             return Rangee(sous, null, enfants)
         }
@@ -352,9 +352,9 @@ object ConstellationLayout {
             val branches = c.sousDossiers.take(MAX_SOUS_DOSSIERS)
             branches.forEach { d -> rangees += rangeeDossier(d, cat, 1, cat == "Autres") }
             if (c.sousDossiers.size > branches.size) rangees += Rangee(null, plus(cat, c.chemin, c.sousDossiers.size - branches.size, "dossiers"))
-            val nbRacine = if (branches.isEmpty()) 5 else 3
+            val nbRacine = if (branches.isEmpty()) 8 else 6
             val fichiersRacine = c.notes.sortedWith(parDegre).map { etiquetteNote(it, cat, false) } + c.pieces.map { etiquettePiece(it, cat, false) }
-            fichiersRacine.take(nbRacine).forEach { rangees += Rangee(null, it) }
+            fichiersRacine.take(nbRacine).forEach { rangees += Rangee(null, it, feuille = true) }
             if (fichiersRacine.size > nbRacine) rangees += Rangee(null, plus(cat, c.chemin, fichiersRacine.size - nbRacine, "autres"))
             rangeesParCat[cat] = rangees
         }
@@ -368,8 +368,8 @@ object ConstellationLayout {
             val hauteur = if (rs.isEmpty()) 0f else rs.sumOf { it.hauteur.toDouble() }.toFloat()
             max(hauteur, 2 * RAYON_HUB + 40f)
         }
-        val rx = 128f
-        val ry = max(340f + min(m, 7) * 14f, poids.sum() / 2.3f)
+        val rx = 166f
+        val ry = max(390f + min(m, 7) * 18f, poids.sum() / 2.0f)
         val emplacements = positionsSurArc(m, rx, ry)
         val ordreEmplacements = emplacements.indices.sortedBy { i -> abs(emplacements[i].x) / rx + (emplacements[i].y + ry) / ry * 0.01f }
         // Emplacement de chaque catégorie, puis espacement pondéré par la taille réelle de chaque groupe.
@@ -516,27 +516,54 @@ object ConstellationLayout {
             val hauteur = rs.sumOf { it.hauteur.toDouble() }.toFloat()
             // Hub du haut : les branches montent un peu (elles ne doivent pas redescendre vers le cerveau).
             var y = hub.pos.y - hauteur / 2f - (if (!cote && hub.pos.y < 0) hauteur * 0.25f else 0f)
-            for (r in rs) {
-                placer(r, hub.pos.x, hub.rayon, y + r.hauteur / 2f, sx, hubs, out)
+            for ((index, r) in rs.withIndex()) {
+                val cy = y + r.hauteur / 2f
+                if (estFichierEnEclat(r)) placerEclat(r, hub.pos.x, hub.rayon, cy, sx, index, rs.size, out)
+                else placer(r, hub.pos.x, hub.rayon, cy, sx, hubs, out)
                 y += r.hauteur
             }
         }
         return hubs to out
     }
 
+    private fun estFichierEnEclat(r: Rangee): Boolean =
+        r.feuille && r.tete?.type in setOf(TypeEtiquette.NOTE, TypeEtiquette.FICHIER)
+
+    /**
+     * Les fichiers s'épanouissent en éventail autour du dossier : une demi-orbite de fragments,
+     * au lieu d'une colonne compacte. L'ordre reste stable et chaque étiquette reste sélectionnable.
+     */
+    private fun placerEclat(
+        r: Rangee, xParent: Float, rParent: Float, cy: Float, sx: Float,
+        index: Int, count: Int, out: MutableList<Etiquette>
+    ) {
+        val e = r.tete ?: return
+        val t = if (count <= 1) 0.5f else index / (count - 1f)
+        val angle = -1.12f + t * 2.24f
+        val rayon = 88f + count.coerceAtMost(10) * 6f
+        val x = xParent + sx * (rParent + 34f + cos(angle) * rayon + e.w * 0.16f)
+        val y = cy + sin(angle) * rayon
+        out += e.copy(pos = Pt(x, y))
+    }
+
     /** Pose une rangée à droite (sx = 1) ou à gauche (sx = -1) de son parent, puis ses enfants un cran plus loin. */
     private fun placer(r: Rangee, xParent: Float, rParent: Float, cy: Float, sx: Float, hubs: MutableList<Hub>, out: MutableList<Etiquette>) {
         if (r.sous != null) {
-            val sous = r.sous.copy(pos = Pt(xParent + sx * (rParent + 30f + r.sous.rayon), cy))
+            val sous = r.sous.copy(pos = Pt(xParent + sx * (rParent + 48f + r.sous.rayon), cy))
             hubs += sous
             val total = r.enfants.sumOf { it.hauteur.toDouble() }.toFloat()
             var y = cy - total / 2f
-            for (e in r.enfants) {
-                placer(e, sous.pos.x, sous.rayon, y + e.hauteur / 2f, sx, hubs, out)
+            for ((index, e) in r.enfants.withIndex()) {
+                val cy = y + e.hauteur / 2f
+                val fichiers = r.enfants.count { estFichierEnEclat(it) }
+                if (estFichierEnEclat(e)) {
+                    val rang = r.enfants.take(index).count { estFichierEnEclat(it) }
+                    placerEclat(e, sous.pos.x, sous.rayon, cy, sx, rang, fichiers, out)
+                } else placer(e, sous.pos.x, sous.rayon, cy, sx, hubs, out)
                 y += e.hauteur
             }
         } else if (r.tete != null) {
-            out += r.tete.copy(pos = Pt(xParent + sx * (rParent + (if (r.feuille) 26f else 24f) + r.tete.w / 2f), cy))
+            out += r.tete.copy(pos = Pt(xParent + sx * (rParent + (if (r.feuille) 38f else 34f) + r.tete.w / 2f), cy))
         }
     }
 
