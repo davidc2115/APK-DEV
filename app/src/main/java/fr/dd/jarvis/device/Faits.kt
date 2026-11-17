@@ -22,10 +22,21 @@ object Faits {
     data class Surnom(val surnom: String, val cible: String, val domaine: String)
 
     private fun f(app: JarvisApp) = File(app.filesDir, "faits.json")
-    @Synchronized private fun lire(app: JarvisApp): JSONObject = runCatching { JSONObject(f(app).readText()) }.getOrDefault(JSONObject())
+    private const val FICHIER_COFFRE = "Mémoire faits source.json"
+
+    @Synchronized private fun lire(app: JarvisApp): JSONObject = runCatching {
+        val source = app.obsidian.lireOuMigrer(
+            "JARVIS", FICHIER_COFFRE, f(app).takeIf { it.isFile }?.readText(), "application/json"
+        )
+        JSONObject(source ?: "{}")
+    }.getOrDefault(JSONObject())
+
     @Synchronized private fun ecrire(app: JarvisApp, o: JSONObject) {
-        runCatching { f(app).writeText(o.toString(2)) }
-        // Copie lisible dans Obsidian (JARVIS/Mémoire — faits.md).
+        val json = o.toString(2)
+        runCatching { f(app).writeText(json) }
+        // Le JSON structuré est la source relisible ; le Markdown est sa version humaine.
+        runCatching { app.obsidian.saveBytes("JARVIS", FICHIER_COFFRE, json.toByteArray(), "application/json") }
+            .onFailure { fr.dd.jarvis.voice.JournalVoix.noter("diagnostic", "⚠️ Mémoire durable non synchronisée dans Obsidian : ${it.message ?: it.javaClass.simpleName}") }
         runCatching { app.obsidian.saveIn("JARVIS", "Mémoire — faits", markdown(o)) }
     }
 
@@ -225,7 +236,7 @@ object Faits {
                 runCatching { app.memo.all().values.toList() }.getOrDefault(emptyList())
             textes.forEach { runCatching { extraireRapide(app, it) } }
             textes.joinToString("\n---\n").chunked(1800).take(6).forEach { runCatching { extraireIa(app, it) } }
-            synchronized(this@Faits) { val o = lire(app); o.put("rattrapage_fait", true); runCatching { f(app).writeText(o.toString(2)) } }
+            synchronized(this@Faits) { val o = lire(app); o.put("rattrapage_fait", true); ecrire(app, o) }
         }
     }
 }

@@ -17,6 +17,9 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     private val habitsFile get() = File(ctx.filesDir, "habits-learning.json")
     private val candidates = linkedMapOf<String, MutableSet<String>>()
     @Volatile private var loaded = false
+    private var empreinteCoffreMemoire: String? = null
+    private var empreinteEtatCharge: String? = null
+    @Volatile private var conflitMemoireExterne = false
 
     private val sensitivePattern = Regex(
         "\\b(sant[eé]|m[eé]dical|maladie|diagnostic|m[eé]dicament|banque|bancaire|carte bancaire|mot de passe|password|secret|cl[eé] api|token|religion|politique|orientation sexuelle|sexualit[eé]|syndicat)\\b",
@@ -25,12 +28,12 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
 
     private fun loadCandidates() {
         candidates.clear()
-        // Obsidian et la copie locale peuvent être momentanément désynchronisés :
-        // fusionner les preuves évite de perdre un apprentissage récent au redémarrage.
-        val sources = listOfNotNull(
-            runCatching { obsidian.read(FOLDER, "Apprentissage en cours.md") }.getOrNull(),
-            runCatching { habitsFile.takeIf { it.exists() }?.readText() }.getOrNull()
-        ).distinct()
+        // Le coffre choisi est la source unique. La copie privée n'est relue que si aucun
+        // coffre n'a été configuré (mode historique / première installation).
+        val source = runCatching {
+            obsidian.lireOuMigrer(FOLDER, "Apprentissage en cours.md", habitsFile.takeIf { it.exists() }?.readText())
+        }.getOrNull()
+        val sources = listOfNotNull(source).distinct()
         sources.forEach { raw ->
             runCatching {
                 val json = JSONObject(raw)
@@ -122,8 +125,16 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
 
     @Synchronized
     fun load() {
-        val md = obsidian.read(FOLDER, FILE) ?: local.takeIf { it.exists() }?.readText()
+        // La copie privée n'est qu'un cache de secours lorsqu'aucun coffre n'a été choisi.
+        // Avec un coffre configuré, une note absente/inaccessible ne doit pas être remplacée
+        // silencieusement par une ancienne mémoire locale.
+        val md = obsidian.lireOuMigrer(FOLDER, FILE, local.takeIf { it.exists() }?.readText())
         if (md != null) parse(md)
+        empreinteCoffreMemoire = if (obsidian.coffreConfigure()) runCatching {
+            obsidian.readNoteStrict("$FOLDER/$FILE")?.let(obsidian::empreinteContenu)
+        }.getOrNull() else null
+        empreinteEtatCharge = obsidian.empreinteContenu(render())
+        conflitMemoireExterne = false
         loadCandidates()
         loaded = true
     }
@@ -131,11 +142,62 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     @Synchronized
     private fun ensure() { if (!loaded) load() }
 
+    // Relecture légère du coffre : les modifications faites directement dans Obsidian
+    // deviennent visibles sans redémarrer Jarvis. Le délai évite une lecture SAF à chaque prompt.
+    @Volatile private var derniereRelectureCoffre = 0L
+    @Synchronized
+    private fun rafraichirDepuisCoffreSiNecessaire() {
+        if (!obsidian.coffreConfigure()) return
+        // SAF peut être lent : ne jamais ouvrir de document Obsidian depuis le thread UI.
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) return
+        val maintenant = android.os.SystemClock.elapsedRealtime()
+        if (maintenant - derniereRelectureCoffre < 30_000L) return
+        derniereRelectureCoffre = maintenant
+        if (!obsidian.coffreDisponible()) return
+
+        // Une suppression externe ou une erreur de lecture ne vide jamais le cache.
+        // Si Jarvis a des changements locaux non enregistrés, il ne remplace pas ceux-ci par la version distante.
+        val distant = runCatching { obsidian.readNoteStrict("$FOLDER/$FILE") }.getOrElse { return }
+        val empreinteDistante = distant?.let(obsidian::empreinteContenu)
+        if (empreinteDistante != empreinteCoffreMemoire) {
+            val etatLocal = obsidian.empreinteContenu(render())
+            if (etatLocal != empreinteEtatCharge) {
+                conflitMemoireExterne = true
+                return
+            }
+            if (distant == null) {
+                conflitMemoireExterne = true
+                return
+            }
+            parse(distant)
+            empreinteCoffreMemoire = empreinteDistante
+            empreinteEtatCharge = obsidian.empreinteContenu(render())
+            conflitMemoireExterne = false
+        }
+        runCatching { loadCandidates() }
+
+        runCatching { obsidian.read(FOLDER, "Mémoire Hermès source.md") }.getOrNull()?.let { brut ->
+            if (brut != hermesCache) hermesCache = brut
+        }
+        runCatching { obsidian.read(FOLDER, "Capacités Hermès.json") }.getOrNull()?.let { brut ->
+            runCatching { org.json.JSONObject(brut) }.getOrNull()?.let { capacitesCache = it }
+        }
+    }
+
     @Synchronized
     private fun persist(): String {
         val md = render()
+        val emplacement = if (obsidian.coffreConfigure()) {
+            val hash = obsidian.ecrireSiInchange("$FOLDER/$FILE", md, empreinteCoffreMemoire)
+            empreinteCoffreMemoire = hash
+            conflitMemoireExterne = false
+            "coffre Obsidian › $FOLDER › $FILE"
+        } else {
+            obsidian.saveIn(FOLDER, FILE.removeSuffix(".md"), md)
+        }
         runCatching { local.writeText(md) }
-        return obsidian.saveIn(FOLDER, FILE.removeSuffix(".md"), md)
+        empreinteEtatCharge = obsidian.empreinteContenu(md)
+        return emplacement
     }
 
     @Synchronized
@@ -185,6 +247,9 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         hermesCache = texte
         runCatching { hermesLocal.writeText(texte) }
         val (notes, profil) = entreesHermes(texte)
+        // La source brute est conservée dans le coffre pour que Jarvis puisse reconstruire
+        // la mémoire d'Hermès après une réinstallation ou une perte du cache privé.
+        runCatching { obsidian.saveIn(FOLDER, "Mémoire Hermès source", texte) }
         val md = "# Mémoire d'Hermès\n\n_Synchronisée automatiquement depuis Hermès (Termux). Pour corriger une information, demande-le à Jarvis ou à Hermès._\n\n" +
             "## Notes d'Hermès\n" + notes.joinToString("\n") { "- " + it.replace("\n", " ") }.ifBlank { "_(vide)_" } +
             "\n\n## Profil de l'utilisateur (vu par Hermès)\n" + profil.joinToString("\n") { "- " + it.replace("\n", " ") }.ifBlank { "_(vide)_" } + "\n"
@@ -192,13 +257,16 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         return true
     }
 
-    fun hermes(): String = hermesCache ?: runCatching { hermesLocal.takeIf { it.exists() }?.readText() }.getOrNull().orEmpty().also { hermesCache = it }
+    fun hermes(): String = hermesCache ?: runCatching {
+        obsidian.lireOuMigrer(FOLDER, "Mémoire Hermès source.md", hermesLocal.takeIf { it.exists() }?.readText())
+    }.getOrNull().orEmpty().also { hermesCache = it }
 
     /** Toutes les entrées de la mémoire d'Hermès (notes puis profil). */
     fun entreesHermesListe(): List<String> = entreesHermes(hermes()).let { (n, p) -> n + p }
 
     /** Section « mémoire d'Hermès » pour le cerveau de Jarvis : en entier si elle est courte, sinon le profil seul. */
     fun hermesPourPrompt(): String {
+        rafraichirDepuisCoffreSiNecessaire()
         val (notes, profil) = entreesHermes(hermes())
         if (notes.isEmpty() && profil.isEmpty()) return ""
         val tout = (notes + profil).joinToString("\n") { "- " + it.replace("\n", " ").take(500) }
@@ -214,13 +282,19 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
 
     @Synchronized
     fun majCapacitesHermes(json: String) {
-        val j = runCatching { org.json.JSONObject(json) }.getOrNull() ?: return
+        val contenu = json.take(60_000)
+        val j = runCatching { org.json.JSONObject(contenu) }.getOrNull() ?: return
         capacitesCache = j
-        runCatching { capacitesLocal.writeText(json.take(60_000)) }
+        runCatching { capacitesLocal.writeText(contenu) }
+        runCatching { obsidian.saveBytes(FOLDER, "Capacités Hermès.json", contenu.toByteArray(), "application/json") }
     }
 
     private fun capacites(): org.json.JSONObject = capacitesCache
-        ?: runCatching { org.json.JSONObject(capacitesLocal.readText()) }.getOrNull()?.also { capacitesCache = it }
+        ?: runCatching {
+            val contenu = obsidian.lireOuMigrer(FOLDER, "Capacités Hermès.json",
+                capacitesLocal.takeIf { it.isFile }?.readText(), "application/json")
+            contenu?.let { org.json.JSONObject(it) }
+        }.getOrNull()?.also { capacitesCache = it }
         ?: org.json.JSONObject()
 
     /** Automatismes (cron) d'Hermès tels que synchronisés par le hook : nom, quand, prochaine, derniere, statut… */
@@ -262,6 +336,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     /** Mémoire de Jarvis telle qu'Hermès la recopie dans son SOUL.md (bloc géré, chargé à chaque session). */
     fun pourHermes(): String {
         ensure()
+        rafraichirDepuisCoffreSiNecessaire()
         val identite = "## Identité\nDans cette installation, tu es Hermès, le cerveau principal de JARVIS, l'assistant personnel de l'utilisateur sur son téléphone : " +
             "tu réponds à toutes ses demandes, avec les outils du téléphone (Jarvis) et une seule mémoire partagée.\n\n"
         if (items.isEmpty()) return identite.trim()
@@ -278,6 +353,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     @Synchronized
     fun pourPrompt(): String {
         ensure()
+        rafraichirDepuisCoffreSiNecessaire()
         if (items.isEmpty()) return ""
         val complet = toutes()
         if (complet.length <= 1800) return complet
