@@ -835,7 +835,7 @@ object Routeur {
             "(?:la )?forme|quoi de neuf|quoi de beau|(?:qu.est[- ]ce que|que) tu (?:fais|racontes?)|tu fais quoi(?: de beau)?|tu (?:es|est) l[àa]|t.es l[àa]|t.es o[uù]|" +
             "on (?:peut|pourrait) (?:simplement )?(?:discuter|parler)|j.ai envie de (?:discuter|parler)|j.aimerais (?:bien )?(?:discuter|parler)(?: un peu)?(?: avec toi)?|je (?:voudrais|veux|souhaiterais) (?:discuter|parler) avec toi|parlons(?: un peu)?|discutons(?: un peu)?|" +
             "(?:comment|alors) (?:s.est pass[ée]e?|[çc]a s.est pass[ée]) ta journ[ée]e|comment vont (?:tes|les) (?:enfants|parents|proches)|tu as (?:des )?enfants|as tu des enfants|comment va ta famille|" +
-            "(?:qu.en penses[- ]tu|tu en penses quoi|tu penses quoi de|que penses[- ]tu de|tu crois que|tu aimes|tu pr[ée]f[èe]res)|raconte[- ]moi (?:ta journ[ée]e|quelque chose|un peu|ce que tu)|parle[- ]moi de|" +
+            "(?:qu.en penses[- ]tu|tu en penses quoi|tu penses quoi de(?: .+)?|que penses[- ]tu de(?: .+)?|tu crois que|tu aimes|tu pr[ée]f[èe]res)|raconte[- ]moi (?:ta journ[ée]e|quelque chose|un peu|ce que tu)|parle[- ]moi de|" +
             "et toi|merci(?: beaucoup| bien| infiniment| mille fois| pour tout| à toi| a toi)?|c.est gentil|trop gentil|bravo|bien jou[ée]|super boulot|beau travail|" +
             "(?:t.es|tu es|tu (?:es )?vraiment) (?:trop |vraiment |super |le meilleur|la meilleure|g[ée]nial|fort|dr[ôo]le|sympa|cool|top|bon|nul|b[êe]te|lent)\\w*|" +
             "je t.aime(?: bien)?|tu me manques|raconte[- ]?moi (?:une |un )?(?:blague|histoire dr[ôo]le|anecdote)|(?:une |dis[- ]moi une |fais[- ]moi une )blague|fais[- ]moi rire|" +
