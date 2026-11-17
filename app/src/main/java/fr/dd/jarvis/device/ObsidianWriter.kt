@@ -464,6 +464,39 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
     private fun withMd(path: String) = path.trim().trim('/').let { if (it.endsWith(".md", true)) it else "$it.md" }
 
+    /** Lecture stricte : null signifie réellement absent ; une perte d'accès ou une erreur de lecture lève une exception. */
+    fun readNoteStrict(path: String): String? {
+        signalerFilPrincipal("readNoteStrict")
+        val p = withMd(path)
+        if (coffreConfigure()) {
+            if (vaultRoot() == null) throw java.io.IOException("Le coffre Obsidian n'est plus accessible.")
+            val f = trouver(p) ?: return null
+            if (!f.isFile) return null
+            return ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
+                ?: throw java.io.IOException("Impossible de lire la note Obsidian : $p")
+        }
+        val local = File(localRoot(), p)
+        if (!local.exists()) return null
+        if (!local.isFile) return null
+        return try { local.readText() } catch (e: Exception) {
+            throw java.io.IOException("Impossible de lire la note locale : $p", e)
+        }
+    }
+
+    fun empreinteContenu(contenu: String): String =
+        java.security.MessageDigest.getInstance("SHA-256").digest(contenu.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+
+    /** Écrit seulement si la version distante correspond toujours à celle qui a été lue. */
+    fun ecrireSiInchange(path: String, contenu: String, empreinteAttendue: String?): String {
+        val distant = readNoteStrict(path)
+        val empreinteDistante = distant?.let(::empreinteContenu)
+        if (empreinteDistante != empreinteAttendue)
+            throw java.io.IOException("Conflit Obsidian : « $path » a été modifiée dans le coffre depuis sa dernière lecture. Aucune donnée n'a été écrasée. Relis la note et réessaie.")
+        writeNote(path, contenu, false)
+        return empreinteContenu(contenu)
+    }
+
     fun readNote(path: String): String? {
         signalerFilPrincipal("readNote")
         val p = withMd(path)
