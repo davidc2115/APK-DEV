@@ -1,6 +1,7 @@
 package fr.dd.jarvis.ui
 
 import fr.dd.jarvis.device.ObsidianWriter
+import fr.dd.jarvis.device.AnalyseLiensObsidian
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -208,10 +209,9 @@ object ConstellationLayout {
     fun construire(data: ObsidianWriter.GraphData, depliesDemandes: Set<String>? = null): Constellation {
         val notes = data.nodes.filterNot { it.ghost }
         val ids = notes.map { it.id }.toHashSet()
-        // Liens réels orientés entre notes existantes (les cibles absentes ne deviennent pas des nœuds).
-        val liensTous = data.references.filter { it.resolved && it.from in ids && it.to in ids && it.from != it.to }
-            .map { LienReel(it.from, it.to) }.distinct()
-            .ifEmpty { data.edges.filter { it.from in ids && it.to in ids && it.from != it.to }.map { LienReel(it.from, it.to) } }
+        // Le graphe et l'audit de JARVIS partagent strictement les mêmes règles de résolution des liens.
+        val auditLiens = AnalyseLiensObsidian.analyser(data)
+        val liensTous = auditLiens.liens.map { LienReel(it.from, it.to) }
         val entrants = HashMap<String, Int>(); val sortants = HashMap<String, Int>()
         liensTous.forEach { entrants[it.vers] = (entrants[it.vers] ?: 0) + 1; sortants[it.de] = (sortants[it.de] ?: 0) + 1 }
         val degre = { id: String -> (entrants[id] ?: 0) + (sortants[id] ?: 0) }
@@ -432,11 +432,11 @@ object ConstellationLayout {
         val liens = liensTous.filter { it.de in notesAffichees && it.vers in notesAffichees }
 
         // ---- panneaux
-        val sansEntrant = notes.filter { (entrants[it.id] ?: 0) == 0 }.sortedBy { it.label.lowercase() }.map { it.label }
-        val toutesCibles = data.references.map { it.rawTarget.substringAfterLast('/').lowercase() }.toHashSet()
-        val piecesOrphelines = pieces.filter { it.name.lowercase() !in toutesCibles && it.path.lowercase() !in toutesCibles }.map { it.name }
-        val notesOrphelines = notes.filter { degre(it.id) == 0 }.map { it.label }
-        val orphelins = (notesOrphelines.sortedBy { it.lowercase() } + piecesOrphelines.sortedBy { it.lowercase() })
+        val sansEntrant = auditLiens.notesSansLienEntrant.map { it.label }
+        val orphelins = (
+            auditLiens.notesOrphelines.map { it.label } +
+                auditLiens.fichiersOrphelins.map { it.name }
+            ).sortedBy { it.lowercase() }
 
         // ---- bornes (cerveau, hubs avec leur texte, étiquettes)
         var minX = -RAYON_CERVEAU; var maxX = RAYON_CERVEAU; var minY = -RAYON_CERVEAU; var maxY = RAYON_CERVEAU + 30f
