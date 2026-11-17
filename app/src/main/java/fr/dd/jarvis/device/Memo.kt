@@ -234,6 +234,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
 
     /** Section « mémoire d'Hermès » pour le cerveau de Jarvis : en entier si elle est courte, sinon le profil seul. */
     fun hermesPourPrompt(): String {
+        rafraichirDepuisCoffreSiNecessaire()
         val (notes, profil) = entreesHermes(hermes())
         if (notes.isEmpty() && profil.isEmpty()) return ""
         val tout = (notes + profil).joinToString("\n") { "- " + it.replace("\n", " ").take(500) }
