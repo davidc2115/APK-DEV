@@ -155,7 +155,7 @@ class JarvisCarScreen(ctx: CarContext) : Screen(ctx) {
         derniere?.let { m ->
             val propre = m.text.replace(Regex("[#*_`>|]+"), "").replace(Regex("\\s+"), " ").trim()
             liste.addItem(Row.Builder().setTitle("🔊 Dernière réponse").addText(propre.take(120))
-                .setOnClickListener { VoixVoiture.parler(carContext, propre.take(1500)) }.build())
+                .setOnClickListener { VoixVoiture.parler(carContext, propre) }.build())
         }
         return ListTemplate.Builder().setTitle("JARVIS · ${fr.dd.jarvis.voice.VoixNaturelle.personnage(app).icone}")
             .setHeaderAction(Action.APP_ICON).setSingleList(liste.build()).build()
@@ -320,7 +320,7 @@ class ConversationVoiture private constructor(private val ctx: CarContext, priva
         app.chatAjouter(assistantMessage)
         montrer(Etat.Reponse(texte, propre))
         // Réponse lue, puis on réécoute : on enchaîne sans retoucher l'écran ; silence → fin.
-        parler(propre.take(1500)) { ecouter() }
+        parler(propre) { ecouter() }
     }
 
     /** JARVIS parle avec SA voix (personnage choisi, voix naturelle Gemini ou voix Android du même genre). */
@@ -423,7 +423,7 @@ class ReponseTexteScreen(ctx: CarContext, private val question: String) : Screen
             app.chatAjouter(assistantMessage)
             texte = propre
             invalidate()
-            VoixVoiture.parler(carContext, propre.take(1500))
+            VoixVoiture.parler(carContext, propre)
         }
     }
 
@@ -431,7 +431,7 @@ class ReponseTexteScreen(ctx: CarContext, private val question: String) : Screen
         val t = texte
         return if (t == null) MessageTemplate.Builder("« ${question.take(160)} »").setTitle("JARVIS").setHeaderAction(Action.BACK).setLoading(true).build()
         else MessageTemplate.Builder(t.take(450)).setTitle("JARVIS").setHeaderAction(Action.BACK)
-            .addAction(Action.Builder().setTitle("🔊 Relire").setOnClickListener { VoixVoiture.parler(carContext, t.take(1500)) }.build())
+            .addAction(Action.Builder().setTitle("🔊 Relire").setOnClickListener { VoixVoiture.parler(carContext, t) }.build())
             .addAction(Action.Builder().setTitle("🎤 Parler").setOnClickListener {
                 VoixVoiture.taire()
                 if (voixVoiture(carContext)) ConversationVoiture.ouvrir(carContext, screenManager)
