@@ -507,22 +507,28 @@ object ConstellationLayout {
         if (rangees.isEmpty()) return emptyList<Hub>() to emptyList()
         val hubs = mutableListOf<Hub>()
         val out = mutableListOf<Etiquette>()
+
+        // Tous les fichiers d'un même dossier partagent une seule explosion circulaire.
+        // Ils ne sont surtout pas répartis entre les colonnes gauche/droite des sous-dossiers.
+        val fichiers = rangees.filter { estFichierEnEclat(it) }
+        fichiers.forEachIndexed { index, r ->
+            placerEclat(r, hub.pos.x, hub.rayon, hub.pos.y, 1f, index, fichiers.size, out)
+        }
+
+        val branches = rangees.filterNot { estFichierEnEclat(it) }
         val cote = abs(hub.pos.x) > 60f
         val colonnes: List<Pair<Float, List<Rangee>>> =
-            if (cote) listOf((if (hub.pos.x > 0) 1f else -1f) to rangees)
-            else listOf(-1f to rangees.filterIndexed { i, _ -> i % 2 == 0 }, 1f to rangees.filterIndexed { i, _ -> i % 2 == 1 })
+            if (cote) listOf((if (hub.pos.x > 0) 1f else -1f) to branches)
+            else listOf(-1f to branches.filterIndexed { i, _ -> i % 2 == 0 }, 1f to branches.filterIndexed { i, _ -> i % 2 == 1 })
         for ((sx, rs) in colonnes) {
             if (rs.isEmpty()) continue
             val hauteur = rs.sumOf { it.hauteur.toDouble() }.toFloat()
             // Hub du haut : les branches montent un peu (elles ne doivent pas redescendre vers le cerveau).
-            var y = hub.pos.y - hauteur / 2f - (if (!cote && hub.pos.y < 0) hauteur * 0.25f else 0f)
-            for ((index, r) in rs.withIndex()) {
+            val y0 = hub.pos.y - hauteur / 2f - (if (!cote && hub.pos.y < 0) hauteur * 0.25f else 0f)
+            var y = y0
+            for (r in rs) {
                 val cy = y + r.hauteur / 2f
-                if (estFichierEnEclat(r)) {
-                    val rang = rs.take(index).count { estFichierEnEclat(it) }
-                    val nombre = rs.count { estFichierEnEclat(it) }
-                    placerEclat(r, hub.pos.x, hub.rayon, hub.pos.y, sx, rang, nombre, out)
-                } else placer(r, hub.pos.x, hub.rayon, cy, sx, hubs, out)
+                placer(r, hub.pos.x, hub.rayon, cy, sx, hubs, out)
                 y += r.hauteur
             }
         }
