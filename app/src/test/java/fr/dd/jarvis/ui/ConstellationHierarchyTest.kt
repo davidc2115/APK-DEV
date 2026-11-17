@@ -26,8 +26,8 @@ class ConstellationHierarchyTest {
         // La note située à la racine est conservée dans un nœud « Coffre » explicite.
         assertEquals("", coffre.chemin)
         assertEquals("Coffre", coffre.nom)
-        var courant = coffre.enfants.single { it.chemin == chemins.first() }
-        chemins.drop(1).forEach { chemin ->
+        var courant = coffre.enfants.single { it.chemin == "Dossier" }
+        chemins.forEach { chemin ->
             courant = courant.enfants.single { it.chemin == chemin }
         }
         assertEquals(12, courant.profondeur)
