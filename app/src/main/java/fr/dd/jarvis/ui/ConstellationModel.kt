@@ -746,6 +746,22 @@ object ConstellationLayout {
             if (!bouge) break
         }
 
+        // Passe finale de sécurité : la résolution étiquette-étiquette peut déplacer une étiquette
+        // vers un cercle traité plus tôt dans la même itération. On rétablit donc la séparation
+        // étiquette-cercle après la dernière correction de paires, sans déplacer les hubs.
+        repeat(256) {
+            var correction = false
+            for (i in etiquettes.indices) {
+                for (j in hubs.indices) {
+                    val r = hubs[j].rayon
+                    if (r > 0f && pousserEtiquetteHorsCercle(i, Pt(hx[j], hy[j]), r + marge + 1f)) {
+                        correction = true
+                    }
+                }
+            }
+            if (!correction) return@repeat
+        }
+
         for (i in hubs.indices) hubs[i] = hubs[i].copy(pos = Pt(hx[i], hy[i]))
         for (i in etiquettes.indices) etiquettes[i] = etiquettes[i].copy(pos = Pt(ex[i], ey[i]))
     }
