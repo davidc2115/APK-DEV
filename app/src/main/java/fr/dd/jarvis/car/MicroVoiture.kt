@@ -130,7 +130,7 @@ class MicroVoiture(private val ctx: CarContext) {
         private set
 
     /** Bloquant : à appeler hors du fil principal. [attenteMs] = délai pour commencer à parler. */
-    fun ecouter(attenteMs: Long, maxMs: Long = 15_000): Ecoute {
+    fun ecouter(attenteMs: Long, maxMs: Long = 45_000): Ecoute {
         val am = ctx.getSystemService(AudioManager::class.java)
         var voiture: CarAudioRecord? = null
         var erreurVoiture = "micro voiture indisponible"
