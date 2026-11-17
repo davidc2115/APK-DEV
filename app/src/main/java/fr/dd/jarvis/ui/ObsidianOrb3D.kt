@@ -185,13 +185,42 @@ private fun Orbe3DContenu(
     var dernierGeste by remember { mutableFloatStateOf(-100f) }
     val surface = remember { arrayOfNulls<OrbeSurface>(1) }
 
-    // Positions 3D de chaque élément de la constellation (hubs un peu en avant du dôme, étiquettes dessus).
+    // Positions 3D hiérarchiques : on ajoute un vrai dégagement spatial entre chaque parent
+    // et ses enfants, sans modifier la constellation 2D ni les collisions déjà résolues.
     val pos3d = remember(c) {
         val m = HashMap<String, FloatArray>()
-        c.hubs.forEach { m["hub:${it.cle}"] = versDome(it.pos, 0.25f) }
-        // Chaque dossier et chaque fichier garde sa vraie profondeur sur la coque sphérique.
-        // Ne pas rabattre les fichiers sur le plan du dossier : cela annulait l'effet de volume.
-        c.etiquettes.forEach { e -> m[e.id] = versDome(e.pos, 0.12f) }
+
+        fun eloignerDuParent(point: FloatArray, parent: FloatArray, ecart: Float): FloatArray {
+            val dx = point[0] - parent[0]
+            val dy = point[1] - parent[1]
+            val dz = point[2] - parent[2]
+            val longueur = kotlin.math.sqrt(dx * dx + dy * dy + dz * dz).coerceAtLeast(0.0001f)
+            return floatArrayOf(
+                point[0] + dx / longueur * ecart,
+                point[1] + dy / longueur * ecart,
+                point[2] + dz / longueur * ecart
+            )
+        }
+
+        // Les catégories racines gardent leur position. Chaque sous-dossier est légèrement
+        // repoussé de son parent ; l'écart augmente doucement avec la profondeur.
+        c.hubs.forEach { h ->
+            val base = versDome(h.pos, 0.25f)
+            val parent = h.parent?.let { m["hub:$it"] }
+            val ecart = if (parent == null) 0f else 0.48f + (h.niveau - 1).coerceAtLeast(0) * 0.16f
+            m["hub:${h.cle}"] = if (parent != null) eloignerDuParent(base, parent, ecart) else base
+        }
+
+        // Les notes et pièces jointes d'un sous-dossier sont elles aussi décalées vers l'extérieur
+        // par rapport au cercle qui les contient, pour former une branche lisible et aérée.
+        c.etiquettes.forEach { e ->
+            val base = versDome(e.pos, 0.12f)
+            val parent = c.hub(e.hub)?.takeIf { it.niveau >= 1 }?.let { m["hub:${it.cle}"] }
+            val ecart = if (parent != null && (e.type == TypeEtiquette.NOTE || e.type == TypeEtiquette.FICHIER))
+                0.46f + (c.hub(e.hub)?.niveau?.minus(1)?.coerceAtLeast(0) ?: 0) * 0.12f
+            else 0f
+            m[e.id] = if (parent != null && ecart > 0f) eloignerDuParent(base, parent, ecart) else base
+        }
         m
     }
     // Recul de caméra : toute la constellation tient dans l'écran (portrait) au zoom 1.
@@ -200,8 +229,10 @@ private fun Orbe3DContenu(
     val (distanceAuto, decalageAuto) = remember(c, taille, dens) {
         // La coque des dossiers est désormais une sphère de rayon constant : le cadrage se calcule
         // sur son enveloppe 3D, et non plus sur l'ancien grand rectangle de la constellation 2D.
-        val distanceMax = ((c.hubs.map { it.pos.len() } + c.etiquettes.map { it.pos.len() }).maxOrNull() ?: 0f) / DP_PAR_UNITE
-        val rayonEnveloppe = max(4.25f, 3.15f + distanceMax * 0.16f + 0.95f)
+        val rayonMax3d = pos3d.values.maxOfOrNull { p ->
+            kotlin.math.sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2])
+        } ?: 0f
+        val rayonEnveloppe = max(4.25f, rayonMax3d + 0.95f)
         val tanY = tan(Math.toRadians(FOV_Y / 2.0)).toFloat()
         val h = if (taille.height > 0f) taille.height else 1600f
         val w = if (taille.width > 0f) taille.width else 800f
