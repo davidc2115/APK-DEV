@@ -68,7 +68,8 @@ class DocumentsTest {
     @Test fun creationDocumentTestEstRouteeSansCreerDeClient() {
         val client = Client("c1", "Client Test")
         val tarif = Tarif("Maintenance annuelle", Mode.PAR_KWC, listOf(Tranche(10.0, 120.0)))
-        val d = SocieteData(societe = societe, clients = listOf(client), tarifs = listOf(tarif))
+        val depannage = Tarif("Dépannage", Mode.UNITE, listOf(Tranche(KWC_MAX, 90.0)))
+        val d = SocieteData(societe = societe, clients = listOf(client), tarifs = listOf(tarif, depannage))
         val a = SocieteTools.intentionCreationTest(d,
             "Fais-moi un devis test pour une installation de 5 kWc avec 50 km de déplacement sans aucun dépannage")!!
         assertEquals("devis", a.optString("type"))
