@@ -359,9 +359,12 @@ class Brain(
         val sansAnalyse = pourHermes || fr.dd.jarvis.hermes.Routeur.commandeSimple(texteUser)
         // Notes pertinentes et analyse de la demande EN MÊME TEMPS (avant : l'une après l'autre, jusqu'à 2,5 s de perdues).
         val (notesUtiles, plan) = kotlinx.coroutines.coroutineScope {
-            // En voiture : on n'attend pas plus d'une demi-seconde les notes (chaque seconde compte au volant).
+            // En voiture, les commandes simples restent rapides. Pour retrouver une adresse personnelle
+            // avant un guidage, on laisse au coffre Obsidian le temps de répondre (1,2 s max côté NotesPertinentes).
+            val adresseDomicile = Regex("domicile|chez\\s+moi|ma\\s+maison|mon\\s+adresse|adresse\\s+personnelle|rentrer\\s+chez", RegexOption.IGNORE_CASE).containsMatchIn(texteUser)
             val notes = async(kotlinx.coroutines.Dispatchers.IO) { runCatching {
-                if (app.enVoiture) kotlinx.coroutines.withTimeoutOrNull(500) { fr.dd.jarvis.device.NotesPertinentes.pour(app, texteUser) }.orEmpty()
+                if (app.enVoiture && !adresseDomicile)
+                    kotlinx.coroutines.withTimeoutOrNull(500) { fr.dd.jarvis.device.NotesPertinentes.pour(app, texteUser) }.orEmpty()
                 else fr.dd.jarvis.device.NotesPertinentes.pour(app, texteUser)
             }.getOrDefault("") }
             val analyse = async {
@@ -380,7 +383,10 @@ class Brain(
         // Domotique (chauffage, télé, lumières, volets…) : toujours de quoi relire les notes, trouver l'entité ET agir.
         val domotique = pilotageChauffage || (Regex("t[ée]l[ée]|\\btv\\b|t[ée]l[ée]vis|volume|lumi[èe]re|lampe|volet|store|prise|home ?assistant|domotique|enceinte", RegexOption.IGNORE_CASE).containsMatchIn(recent) &&
             ACTION_DOMOTIQUE.containsMatchIn(recent))
-        val indispensables = if (domotique) listOf("notes_lire", "obsidian_chercher", "obsidian_lire", "ha_entites", "ha_etat", "ha_service") else emptyList()
+        val rechercheAdresseDomicile = Regex("domicile|chez\\s+moi|ma\\s+maison|mon\\s+adresse|adresse\\s+personnelle|rentrer\\s+chez", RegexOption.IGNORE_CASE).containsMatchIn(recent)
+        val navigationDomicile = rechercheAdresseDomicile && Regex("navig|itin[eé]raire|gps|guidage|emm[eè]ne|conduis|rentre", RegexOption.IGNORE_CASE).containsMatchIn(recent)
+        val indispensables = (if (domotique) listOf("notes_lire", "obsidian_chercher", "obsidian_lire", "ha_entites", "ha_etat", "ha_service") else emptyList()) +
+            (if (rechercheAdresseDomicile) listOf("notes_lire", "obsidian_chercher", "obsidian_lire") else emptyList())
         if (plan != null && plan.outils.isNotEmpty()) {
             val reglageDirect = Regex("r[eé]glage|param[eè]tre|mode conversation|[eé]coute continue|annonce vocale|r[eé]ponse vocale|confirmation|agent autonome|bips|analyse gemini|gemini|agents? autonomes?|notifications banni[eè]re", RegexOption.IGNORE_CASE).containsMatchIn(recent)
             val keep = (plan.outils + indispensables + (if (reglageDirect) listOf("reglage_jarvis") else emptyList()) + (if (planningClientsSync) listOf("analyser_planning_clients") else emptyList()) + listOf("memoire_ajouter", "memoire_apprendre", "memoire_apprentissages", "memoire_lire", "memoire_oublier", "note_prendre", "notes_lire", "rappel_creer", "rappels_liste") + (if (societeOn || planningClientsSync) fr.dd.jarvis.societe.SocieteTools.NAMES else emptySet<String>()) +
