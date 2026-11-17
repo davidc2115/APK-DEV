@@ -487,41 +487,63 @@ class SocieteService(
             site.nom.replace(Regex("[\\\\/:*?\"<>|]"), "_")
         val existantes = if (avant) intervention.photosAvant else intervention.photosApres
         val ajoutees = mutableListOf<String>()
+        val echecs = mutableListOf<String>()
         var totalOctets = 0L
-        uris.take(10).forEach { uri ->
+        uris.take(10).forEachIndexed { index, uri ->
+            var fichierLocal: File? = null
             runCatching {
                 val mime = ctx.contentResolver.getType(uri) ?: "image/jpeg"
-                if (!mime.startsWith("image/")) return@runCatching
+                require(mime.startsWith("image/")) { "format non image" }
+                val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: throw java.io.IOException("lecture impossible")
+                require(bytes.isNotEmpty() && bytes.size <= 15 * 1024 * 1024) { "taille invalide (15 Mo maximum)" }
+                require(totalOctets + bytes.size <= 40L * 1024 * 1024) { "limite de 40 Mo par ajout dépassée" }
                 val extension = when (mime.lowercase()) {
                     "image/png" -> "png"
                     "image/webp" -> "webp"
                     "image/heic", "image/heif" -> "heic"
                     else -> "jpg"
                 }
-                val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@runCatching
-                if (bytes.isEmpty() || bytes.size > 15 * 1024 * 1024) return@runCatching
-                totalOctets += bytes.size
-                if (totalOctets > 40L * 1024 * 1024) return@runCatching
                 val numero = existantes.size + ajoutees.size + 1
                 val nom = (if (avant) "avant" else "apres") + "-%02d.%s".format(numero, extension)
-                File(dossierLocal, nom).writeBytes(bytes)
-                val relatif = "interventions/$interventionId/$nom"
-                ajoutees += relatif
+                val destination = File(dossierLocal, nom)
+                // Copie privée uniquement pour l'aperçu et l'intégration dans le PDF.
+                destination.writeBytes(bytes)
+                fichierLocal = destination
+                // Une photo n'entre dans l'historique qu'après confirmation de son écriture durable.
                 obsidian.saveBytes(dossierObsidian, "$interventionId-$nom", bytes, mime)
+                ajoutees += "interventions/$interventionId/$nom"
+                totalOctets += bytes.size
+            }.onFailure { erreur ->
+                fichierLocal?.let { runCatching { it.delete() } }
+                echecs += "Photo ${index + 1} : ${erreur.message ?: erreur.javaClass.simpleName}"
             }
         }
-        if (ajoutees.isEmpty()) return "Aucune image exploitable. Formats image uniquement, 15 Mo maximum par photo et 40 Mo par ajout."
+        if (ajoutees.isEmpty()) {
+            val detail = echecs.firstOrNull()?.let { " $it" }.orEmpty()
+            return "Aucune photo n'a été ajoutée. Le coffre Obsidian doit être accessible en écriture.$detail"
+        }
         val maj = intervention.copy(
             photosAvant = if (avant) intervention.photosAvant + ajoutees else intervention.photosAvant,
             photosApres = if (avant) intervention.photosApres else intervention.photosApres + ajoutees
         )
-        repo.update { d -> d.copy(clients = d.clients.map { c ->
-            if (c.id != clientId) c else c.copy(sites = c.sites.map { s ->
-                if (s.id != siteId) s else s.copy(interventions = s.interventions.map { i -> if (i.id == interventionId) maj else i })
-            })
-        }) }
-        val (emplacement, _) = ecrireRapport(client, site, maj)
-        return "${ajoutees.size} photo(s) ${if (avant) "avant" else "après"} ajoutée(s). Note mise à jour : $emplacement"
+        try {
+            repo.update { d -> d.copy(clients = d.clients.map { c ->
+                if (c.id != clientId) c else c.copy(sites = c.sites.map { s ->
+                    if (s.id != siteId) s else s.copy(interventions = s.interventions.map { i -> if (i.id == interventionId) maj else i })
+                })
+            }) }
+        } catch (e: Exception) {
+            ajoutees.forEach { rel -> runCatching { File(ctx.filesDir, "societe/$rel").delete() } }
+            return "❌ Photos copiées dans le coffre, mais l'historique n'a pas pu être enregistré : ${e.message ?: e.javaClass.simpleName}. Aucune photo n'est annoncée comme ajoutée."
+        }
+        val (emplacement, pdf) = runCatching { ecrireRapport(client, site, maj) }
+            .getOrElse { "Note non générée : ${it.message ?: it.javaClass.simpleName}" to "PDF non généré" }
+        return buildString {
+            append("${ajoutees.size} photo(s) ${if (avant) "avant" else "après"} ajoutée(s). Note : $emplacement")
+            if (pdf.startsWith("PDF non généré")) append("\n⚠️ $pdf")
+            if (echecs.isNotEmpty()) append("\n⚠️ Certaines photos n'ont pas été ajoutées : " + echecs.joinToString(" ; "))
+        }
     }
 
     // ------------------------------------------------------------------ export (Obsidian + PDF)
