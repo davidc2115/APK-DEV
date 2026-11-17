@@ -367,8 +367,10 @@ object ConstellationLayout {
             val hauteur = if (rs.isEmpty()) 0f else rs.sumOf { it.hauteur.toDouble() }.toFloat()
             max(hauteur, 2 * RAYON_HUB + 40f)
         }
-        val rx = 190f
-        val ry = max(430f + min(m, 7) * 22f, poids.sum() / 1.9f)
+        // Le Graphe 2D doit rester compact : le calcul précédent additionnait presque
+        // toute la hauteur des branches sur l'ellipse, ce qui étirait l'orbe à l'excès.
+        val rx = 148f
+        val ry = max(310f + min(m, 7) * 15f, poids.sum() / 3.4f)
         val emplacements = positionsSurArc(m, rx, ry)
         val ordreEmplacements = emplacements.indices.sortedBy { i -> abs(emplacements[i].x) / rx + (emplacements[i].y + ry) / ry * 0.01f }
         // Emplacement de chaque catégorie, puis espacement pondéré par la taille réelle de chaque groupe.
