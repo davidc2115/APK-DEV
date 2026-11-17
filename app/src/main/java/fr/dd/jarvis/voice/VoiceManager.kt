@@ -998,13 +998,11 @@ class VoiceManager(private val ctx: Context) {
     }.getOrNull()
 
     /**
-     * Micro Bluetooth à utiliser, par le profil mains-libres :
-     *  - Android Auto : la VOITURE elle-même. JARVIS y est une appli média (les écrans voiture sont désactivés hors Play
-     *    Store) : Android Auto ne lui prête donc pas le micro de la voiture. Mais la voiture est aussi reliée au téléphone
-     *    en Bluetooth pour les appels : son micro et ses haut-parleurs « téléphone » servent alors à JARVIS, comme pour
-     *    un appel (et comme l'Assistant dans une voiture Bluetooth) ;
-     *  - sinon : l'appareil qui joue DÉJÀ ton son (casque, voiture en Bluetooth seul).
-     * Une montre ou un appareil connecté seulement pour les appels n'est jamais pris.
+     * Micro Bluetooth à utiliser via le profil mains-libres, uniquement hors Android Auto :
+     *  - casque / voiture Bluetooth seule : micro du même appareil que la sortie média ;
+     *  - Android Auto : pas de bascule HFP/SCO. Elle déclenche l'écran et le routage « appel » de
+     *    certains autoradios ; le mode média garde la sortie de projection et utilise le micro non-SCO.
+     * Le micro CarAudioRecord reste réservé au mode Car App lorsqu'il est disponible.
      */
     private fun appareilMicroBluetooth(): AudioDeviceInfo? {
         if (Build.VERSION.SDK_INT < 31) return null
@@ -1039,7 +1037,7 @@ class VoiceManager(private val ctx: Context) {
         }
     }
 
-    /** Début de conversation : ouvre la liaison mains-libres du casque / de la voiture Bluetooth (gardée jusqu'à la fin). */
+    /** Début de conversation : ouvre la liaison mains-libres d'un casque / d'une voiture Bluetooth hors Android Auto. */
     private fun ouvrirMicroBluetooth() {
         if (Build.VERSION.SDK_INT < 31 || microBt != null) return
         val d = appareilMicroBluetooth() ?: return
