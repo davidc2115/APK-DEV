@@ -392,8 +392,7 @@ class Brain(
         // Domotique (chauffage, télé, lumières, volets…) : toujours de quoi relire les notes, trouver l'entité ET agir.
         val domotique = pilotageChauffage || (Regex("t[ée]l[ée]|\\btv\\b|t[ée]l[ée]vis|volume|lumi[èe]re|lampe|volet|store|prise|home ?assistant|domotique|enceinte", RegexOption.IGNORE_CASE).containsMatchIn(recent) &&
             ACTION_DOMOTIQUE.containsMatchIn(recent))
-        val rechercheAdresseDomicile = Regex("domicile|chez\\s+moi|ma\\s+maison|mon\\s+adresse|adresse\\s+personnelle|rentrer\\s+chez", RegexOption.IGNORE_CASE).containsMatchIn(recent)
-        val rechercheNotesExplicite = Regex("notes?|obsidian|m[eé]moire|souviens|rappelles|retrouve|rappelle|mon|ma|mes|chez\\s+moi|personnel|personnelle|coordonn[eé]es", RegexOption.IGNORE_CASE).containsMatchIn(recent)
+        val rechercheNotesExplicite = Regex("notes?|obsidian|m[eé]moire|souviens|rappelles|retrouve|rappelle|\\bmon\\b|\\bma\\b|\\bmes\\b|chez\\s+moi|personnel|personnelle|coordonn[eé]es|j'avais|d[eé]j[aà]|parl[eé]", RegexOption.IGNORE_CASE).containsMatchIn(recent)
         val indispensables = (if (domotique) listOf("notes_lire", "obsidian_chercher", "obsidian_lire", "ha_entites", "ha_etat", "ha_service") else emptyList()) +
             (if (rechercheNotesExplicite) listOf("notes_lire", "obsidian_chercher", "obsidian_lire", "memoire_lire") else emptyList())
         if (plan != null && plan.outils.isNotEmpty()) {
