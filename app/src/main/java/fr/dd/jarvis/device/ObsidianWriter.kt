@@ -18,6 +18,7 @@ data class RapportChangementsObsidian(val referenceInitialisee: Boolean, val cha
 class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
     private val indexSyncEnCours = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val indexSyncDemandee = java.util.concurrent.atomic.AtomicBoolean(false)
     private val indexRootPath = "_Jarvis/Index coffre.md"
     private val indexDossiersDir = "_Jarvis/Index dossiers"
     private val indexMarker = "<!-- JARVIS_GENERATED_INDEX_V1 -->"
@@ -118,7 +119,10 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     }
 
     fun synchroniserIndex(): String {
-        if (!indexSyncEnCours.compareAndSet(false, true)) return "Synchronisation des index déjà en cours."
+        if (!indexSyncEnCours.compareAndSet(false, true)) {
+            indexSyncDemandee.set(true)
+            return "Synchronisation des index déjà en cours ; une nouvelle passe sera lancée après."
+        }
         try {
             if (!coffreConfigure()) throw java.io.IOException("Aucun coffre Obsidian n'est configuré dans les réglages.")
             if (!coffreLisible() || !coffreDisponible()) throw java.io.IOException("Le coffre Obsidian configuré est inaccessible ou en lecture seule.")
@@ -170,13 +174,18 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             return "Index Obsidian synchronisés : $pages page(s), ${fichiers.size} fichiers/notes reliés, $nettoyes ancien(s) index supprimé(s)."
         } finally {
             indexSyncEnCours.set(false)
+            if (indexSyncDemandee.getAndSet(false)) synchroniserIndexSilencieusement()
         }
     }
 
     fun programmerSynchronisationIndex() = synchroniserIndexSilencieusement()
 
     private fun synchroniserIndexSilencieusement() {
-        if (!coffreConfigure() || indexSyncEnCours.get()) return
+        if (!coffreConfigure()) return
+        if (indexSyncEnCours.get()) {
+            indexSyncDemandee.set(true)
+            return
+        }
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
             runCatching { synchroniserIndex() }.onFailure {
                 fr.dd.jarvis.voice.JournalVoix.noter("diagnostic", "Synchronisation des index Obsidian impossible : ${it.message ?: it.javaClass.simpleName}")
