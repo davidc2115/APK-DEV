@@ -21,6 +21,7 @@ import kotlin.math.sin
  * jointe fictif. Un coffre de 8 notes donne un graphe de 8 notes.
  *
  * Coordonnées « monde » en dp à l'échelle 1, centre du cerveau en (0,0), pensées pour un écran portrait.
+ * L'arbre [NoeudDossier] conserve l'intégralité de la hiérarchie ; les hubs/étiquettes ne sont qu'une projection visuelle navigable.
  */
 
 enum class Icone { CERVEAU, DOSSIER, PERSONNE, TRAVAIL, RECHERCHE, ARCHIVE, TROMBONE, JOURNAL, SOLEIL, ETOILE, ETIQUETTE, IMAGE, VIDEO, AUDIO, PDF, NOTE, FICHIER }
