@@ -384,7 +384,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             throw java.io.IOException("Le coffre Obsidian est configuré mais inaccessible. Vérifie les autorisations Android avant de lancer l'analyse.")
         val notes = mutableListOf<Pair<String, String>>()
         parcourirContenus(limite.coerceIn(1, 3000)) { path, content ->
-            val normalise = content.replace("\\r\\n", "\\n").replace('\\r', '\\n').trim()
+            val normalise = content.replace("\r\n", "\n").replace('\r', '\n').trim()
             if (normalise.isNotBlank()) notes += path to normalise
         }
         val groupes = mutableListOf<DoublonObsidian>()
