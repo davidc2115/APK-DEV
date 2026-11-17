@@ -37,7 +37,7 @@ class SocieteTools(
          * de clients ou un récapitulatif Société. Ne crée jamais de client et ne touche jamais aux documents comptables.
          * Si le client ou la prestation ne sont pas déterminables sans ambiguïté, renvoie une question ciblée.
          */
-        fun intentionCreationTest(data: fr.dd.jarvis.societe.core.SocieteData, texte: String): JSONObject? {
+        fun intentionCreationTest(data: fr.dd.jarvis.societe.core.SocieteData, texte: String, contexte: String = ""): JSONObject? {
             val n = normaliser(texte)
             val test = Regex("\\b(test|simulation|exemple)\\b").containsMatchIn(n)
             val facture = Regex("\\bfactures?\\b").containsMatchIn(n)
@@ -49,15 +49,23 @@ class SocieteTools(
                 val nom = normaliser(c.nom)
                 nom.length >= 3 && n.contains(nom)
             }
+            // Si le nom a été donné au tour précédent (ex. « Client Test » vient d'être créé),
+            // réutilise ce client depuis les derniers échanges au lieu de repartir sur la liste Société.
+            val contexteNormalise = normaliser(contexte)
+            val clientsDuContexte = if (clientsCites.isEmpty()) data.clients.filter { c ->
+                val nom = normaliser(c.nom)
+                nom.length >= 3 && contexteNormalise.contains(nom)
+            } else emptyList()
             val client = when {
                 clientsCites.size == 1 -> clientsCites.first()
                 clientsCites.size > 1 -> null
+                clientsDuContexte.size == 1 -> clientsDuContexte.first()
+                clientsDuContexte.size > 1 -> null
                 data.clients.size == 1 -> data.clients.first()
                 else -> null
             }
             if (client == null) {
-                val choix = data.clients.take(12).joinToString(" ; ") { it.nom }.ifBlank { "aucun client enregistré" }
-                return JSONObject().put("question", "Pour créer ce document de test sans créer de nouveau client, quel client existant dois-je utiliser ? Clients disponibles : $choix.")
+                return JSONObject().put("question", "Quel client déjà enregistré dois-je utiliser pour ce document de test ? Donne-moi simplement son nom ; je ne créerai pas de nouveau client.")
             }
             args.put("client", client.nom)
 
