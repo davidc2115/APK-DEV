@@ -116,3 +116,15 @@ La navigation principale actuelle de Jarvis est conservée dans un premier temps
 | 8 — Optimisation | Batterie, mémoire, fluidité, reprise et erreurs | Tests sur appareil Android |
 
 **Règle de livraison :** une phase est annoncée terminée uniquement lorsque ses fichiers, ses changements et son résultat de compilation ou de test sont vérifiés. Aucune compilation n'est déclarée réussie sur la seule base d'un commit GitHub.
+
+## 11. Évolution du modèle hiérarchique — 17 novembre 2026
+
+La branche `feat/obsidian-orbe-hierarchy-2026-11-17` ajoute au modèle de constellation un arbre métier complet `NoeudDossier`, construit depuis les chemins réellement présents dans le coffre :
+- chemin relatif stable, nom, parent et profondeur ;
+- sous-dossiers récursifs sans limite métier codée dans l'arbre ;
+- notes Markdown et pièces jointes directement contenues dans chaque dossier ;
+- total récursif calculé depuis les éléments indexés.
+
+Cette arborescence complète est séparée de la mise en page `Hub` / `Etiquette`. Les plafonds d'affichage existants restent provisoirement en place afin de préserver les performances et le rendu actuel ; ils ne doivent plus être interprétés comme une troncature des données métier. Les liens wikilinks directionnels continuent d'être conservés dans `tousLiens`.
+
+**À terminer avant livraison :** connecter la navigation des cercles et des éléments « +N » à cette arborescence complète, rendre les listes de dossiers paginées/recherchables, puis vérifier les liens transversaux dans la vue. Aucun changement du moteur OpenGL, des shaders, du serpent animé, des anneaux ou des animations n'est prévu.
