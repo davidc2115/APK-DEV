@@ -213,7 +213,7 @@ fun DialoguesConstellation(
                     if (parent != null) Text("◂ ${parent.substringAfterLast('/')}", color = Neon.sousTitre, fontSize = 13.sp, fontFamily = Neon.serif,
                         modifier = Modifier.fillMaxWidth().clickable { onHubListe(parent) }.padding(vertical = 6.dp))
                     contenu?.sousDossiers?.forEach { d ->
-                        Text("📁 ${d.substringAfterLast('/')}  (${c.dossiers[d]?.total ?: 0})", fontSize = 13.sp, fontFamily = Neon.serif, color = Neon.lavande,
+                        Text("📁 ${d.substringAfterLast('/')}  (${c?.dossiers?.get(d)?.total ?: 0})", fontSize = 13.sp, fontFamily = Neon.serif, color = Neon.lavande,
                             modifier = Modifier.fillMaxWidth().clickable { onHubListe(d) }.padding(vertical = 6.dp))
                     }
                     contenu?.notes?.forEach { n ->
