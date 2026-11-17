@@ -343,7 +343,7 @@ class ToolBox(
         put(tool("appli_par_defaut", "Définit (ou efface) l'application utilisée par défaut pour un type de demande.",
             mapOf("type" to prop("navigation | musique"), "appli" to prop("Nom de l'application, ou « aucune » pour redemander à chaque fois.")), listOf("type", "appli")))
         put(tool("obsidian_chercher", "Cherche du texte dans les notes du coffre Obsidian (noms et contenu).", mapOf("requete" to prop("Texte recherché.")), listOf("requete")))
-        put(tool("obsidian_analyser_liens", "Audit réel du graphe Obsidian : liste les notes sans lien entrant, les notes totalement orphelines (aucun lien entrant ni sortant), les pièces jointes non référencées par un wikilink et les liens [[...]] introuvables. Analyse le contenu des notes, pas seulement leur présence dans un dossier. OBLIGATOIRE pour toute demande de fichiers orphelins, mentions non liées, notes sans backlinks ou inventaire des relations du coffre.", mapOf("limite" to prop("Nombre maximal de notes à analyser (1 à 3000, défaut 3000)."))))
+        put(tool("obsidian_analyser_liens", "Audit des wikilinks Obsidian : liste les notes sans lien entrant, les notes sans lien entrant ni sortant, les pièces jointes non référencées et les liens [[...]] introuvables. IMPORTANT : ce diagnostic mesure les liens entre notes, pas le classement dans les dossiers. Une note ou pièce jointe présente dans l'arborescence n'est PAS un fichier perdu ou détaché. Explique toujours cette différence. OBLIGATOIRE pour toute demande sur les liens, backlinks ou références du coffre.", mapOf("limite" to prop("Nombre maximal de notes à analyser (1 à 3000, défaut 3000)."))))
         put(tool("obsidian_doublons", "Analyse le coffre Obsidian en lecture seule pour détecter les notes au contenu strictement identique et les notes de même nom dans plusieurs dossiers. Ne supprime rien : présente les chemins et demande à l'utilisateur quelle copie conserver ; toute suppression passe ensuite par obsidian_supprimer avec confirmation explicite.", mapOf("limite" to prop("Nombre maximal de notes à analyser (1 à 3000, défaut 1500)."))))
         put(tool("obsidian_synchroniser", "Compare le coffre Obsidian à la dernière référence validée et signale les notes ajoutées, modifiées ou supprimées. N’importe rien et n’écrase rien automatiquement. Après vérification, action valider confirme uniquement la nouvelle référence.", mapOf("action" to prop("analyser | valider (défaut : analyser)."), "limite" to prop("Nombre maximal de notes à comparer (1 à 3000, défaut 1500)."))))
         put(tool("obsidian_fichiers", "Gère les dossiers et fichiers DU COFFRE OBSIDIAN configuré dans les Réglages (jamais le stockage du téléphone) : lister un dossier, CHERCHER des fichiers/dossiers par nom ou sujet dans tout le coffre, créer un dossier ou sous-dossier, déplacer des notes / images / fichiers / dossiers vers un dossier du coffre (créé au besoin), renommer. Les chemins peuvent être approximatifs (majuscules, accents, singulier/pluriel : « Jarvis/image » trouve « JARVIS/Images »), et un dossier comme « images/Coloriages » est créé DANS le dossier « Images » existant du coffre plutôt qu'à côté. Les images générées par JARVIS sont dans « JARVIS/Images » (référence jarvis-img:NOM) et se retrouvent aussi par leur description (en anglais, ex. « coloring firefighter »). Pour déplacer les dernières images générées : chemins = « dernieres_images:N ». En cas de doute sur un emplacement, commence par chercher ou lister.",
@@ -1057,11 +1057,11 @@ class ToolBox(
                     if (audit.notesSansLienEntrant.isEmpty()) append("\nAucune.")
                     else audit.notesSansLienEntrant.take(200).forEach { append("\n- ${it.id}.md") }
                     if (audit.notesSansLienEntrant.size > 200) append("\n… ${audit.notesSansLienEntrant.size - 200} autre(s).")
-                    append("\n\nNOTES TOTALEMENT ORPHELINES — aucun lien entrant ni sortant (${audit.notesOrphelines.size})")
+                    append("\n\nNOTES SANS LIEN ENTRANT NI SORTANT DANS LE GRAPHE OBSIDIAN (${audit.notesOrphelines.size})")
                     if (audit.notesOrphelines.isEmpty()) append("\nAucune.")
                     else audit.notesOrphelines.take(200).forEach { append("\n- ${it.id}.md") }
                     if (audit.notesOrphelines.size > 200) append("\n… ${audit.notesOrphelines.size - 200} autre(s).")
-                    append("\n\nPIÈCES JOINTES NON RÉFÉRENCÉES (${audit.fichiersOrphelins.size})")
+                    append("\n\nPIÈCES JOINTES SANS WIKILINK (${audit.fichiersOrphelins.size})")
                     if (audit.fichiersOrphelins.isEmpty()) append("\nAucune.")
                     else audit.fichiersOrphelins.take(200).forEach { append("\n- ${it.path}") }
                     if (audit.fichiersOrphelins.size > 200) append("\n… ${audit.fichiersOrphelins.size - 200} autre(s).")
@@ -1069,7 +1069,7 @@ class ToolBox(
                     if (audit.referencesNonResolues.isEmpty()) append("\nAucun.")
                     else audit.referencesNonResolues.take(200).forEach { append("\n- ${it.from}.md → [[${it.rawTarget}]]") }
                     if (audit.referencesNonResolues.size > 200) append("\n… ${audit.referencesNonResolues.size - 200} autre(s).")
-                    append("\n\nImportant : un fichier rangé dans un dossier n'est pas automatiquement lié à une note ; le classement et les wikilinks sont deux choses différentes.")
+                    append("\n\nImportant : ces résultats ne sont pas des fichiers perdus. Ils peuvent tous être correctement rangés dans leurs dossiers. Ici, « sans lien » signifie uniquement qu’aucun wikilink Obsidian ne les relie à une autre note.")
                 }
             } catch (e: Exception) {
                 "❌ Analyse des liens Obsidian impossible : ${e.message ?: e.javaClass.simpleName}"
