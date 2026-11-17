@@ -383,7 +383,7 @@ class JarvisMediaService : MediaBrowserService() {
     /** Lit [texte] avec la voix de JARVIS et l'affiche. */
     private fun lire(titre: String, texte: String, icone: String = "auto_micro") {
         afficher(titre, texte, PlaybackState.STATE_PLAYING, icone)
-        VoixVoiture.parler(this, texte.take(1500)) { session.setPlaybackState(etat(PlaybackState.STATE_PAUSED)) }
+        VoixVoiture.parler(this, texte) { session.setPlaybackState(etat(PlaybackState.STATE_PAUSED)) }
     }
 
     /** 🎙️ : JARVIS ouvre le micro (bip, puis ta demande) ; l'écran de lecture suit la conversation. */
