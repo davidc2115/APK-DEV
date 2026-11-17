@@ -310,7 +310,9 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         val p = withMd(chemin)
         val folder = p.substringBeforeLast('/', "")
         val name = p.substringAfterLast('/')
-        return supprimerFichier(folder, name)
+        val supprime = supprimerFichier(folder, name)
+        if (supprime) synchroniserIndexSilencieusement()
+        return supprime
     }
 
     /** Relit une note du coffre Obsidian (ou du dossier de l'application) ; null si introuvable. */
@@ -1008,7 +1010,11 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     }
 
     /** Crée un dossier du coffre (sous-dossiers compris) s'il n'existe pas. */
-    fun creerDossier(chemin: String): String = "coffre › " + creerDossierChemin(chemin).replace("/", " › ")
+    fun creerDossier(chemin: String): String {
+        val dossier = creerDossierChemin(chemin)
+        synchroniserIndexSilencieusement()
+        return "coffre › " + dossier.replace("/", " › ")
+    }
 
     /** Déplace une note, une image, un fichier ou un dossier du coffre dans [dossierCible] (créé au besoin). */
     fun deplacer(source: String, dossierCible: String): String {
