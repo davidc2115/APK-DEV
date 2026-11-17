@@ -600,8 +600,8 @@ fun ConstellationVue(
             horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Bottom
         ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                PanneauListe("Fichiers orphelins", "Toucher un élément pour l’ouvrir", Icone.FICHIER, Color(0xFFFF6B5C), c.orphelins, orphelinsOuvert, { s -> if (s.endsWith(".md", true)) onNote(s.removeSuffix(".md")) else onFichier(s) }) { orphelinsOuvert = !orphelinsOuvert }
-                PanneauListe("Mentions non liées", "Toucher une note pour la lire", Icone.ETOILE, Color(0xFFFFC14D), c.sansLienEntrant, mentionsOuvert, { s -> onNote(s.removeSuffix(".md")) }) { mentionsOuvert = !mentionsOuvert }
+                PanneauListe("Fichiers sans lien Obsidian", "Toujours rangés dans leur dossier · toucher pour ouvrir", Icone.FICHIER, Color(0xFFFF6B5C), c.orphelins, orphelinsOuvert, { s -> if (s.endsWith(".md", true)) onNote(s.removeSuffix(".md")) else onFichier(s) }) { orphelinsOuvert = !orphelinsOuvert }
+                PanneauListe("Notes sans lien entrant", "Aucune autre note ne les cite · toucher pour lire", Icone.ETOILE, Color(0xFFFFC14D), c.sansLienEntrant, mentionsOuvert, { s -> onNote(s.removeSuffix(".md")) }) { mentionsOuvert = !mentionsOuvert }
             }
             Panneau(Modifier.widthIn(max = 150.dp), onClick = { legendeOuverte = !legendeOuverte }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
