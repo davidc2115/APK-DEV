@@ -105,11 +105,20 @@ class Brain(
         val maintenant = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("EEEE d MMMM yyyy, HH'h'mm", java.util.Locale.FRENCH))
         val memoirePartagee = (runCatching { fr.dd.jarvis.device.Faits.bloc(app) }.getOrDefault("") + runCatching { app.memo.pourPrompt() }.getOrDefault("") +
             runCatching { app.memo.hermesPourPrompt() }.getOrDefault("")).take(3000)
+        // Même une demande formulée comme une conversation peut porter sur un fait personnel mémorisé.
+        // Dans ce cas, on consulte aussi Obsidian au lieu de répondre avec le seul historique récent.
+        val demandeMemoire = history.lastOrNull { it.fromUser }?.text.orEmpty()
+        val contexteNotes = if (Regex("mon|ma|mes|chez\\s+moi|tu\\s+te\\s+(souviens|rappelles)|tu\\s+sais|je\\s+t'avais\\s+dit|j'avais\\s+not[eé]|retrouve|rappelle[- ]moi|mes\\s+infos", RegexOption.IGNORE_CASE).containsMatchIn(demandeMemoire)) {
+            val demandeEtContexte = history.takeLast(6).filter { it.fromUser }.joinToString(" ") { it.text }
+            kotlinx.coroutines.withTimeoutOrNull(2200) { fr.dd.jarvis.device.NotesPertinentes.pour(app, demandeEtContexte) }.orEmpty()
+        } else ""
         val sys = "Tu es JARVIS, l'assistant personnel de ${userName().ifBlank { "l'utilisateur" }}, qui te tutoie. C'est un moment de conversation détendue : " +
             "réponds naturellement en français, chaleureux et vivant, avec une pointe d'humour quand ça s'y prête, en une à trois phrases courtes, " +
             "comme un ami attentionné ; relance parfois par une question. Pas de liste, pas de titre, pas d'emoji en excès. Garde le fil de la conversation et utilise la mémoire partagée sans la réciter. " +
             "Tu n'as consulté ni son agenda, ni ses mails, ni ses appareils : n'invente aucun fait sur sa journée ; s'il veut une info précise, propose de vérifier. " +
-            "Nous sommes le $maintenant." + (ctx?.let { " Contexte : ${it.mode.libelle}." } ?: "") + (if (memoirePartagee.isNotBlank()) "\n\nMémoire partagée Jarvis/Hermès : $memoirePartagee" else "")
+            "Nous sommes le $maintenant." + (ctx?.let { " Contexte : ${it.mode.libelle}." } ?: "") +
+            (if (memoirePartagee.isNotBlank()) "\n\nMémoire partagée Jarvis/Hermès : $memoirePartagee" else "") +
+            (if (contexteNotes.isNotBlank()) "\n\nNOTES DE L'UTILISATEUR RETROUVÉES DANS OBSIDIAN : applique ces informations comme source prioritaire et n'affirme pas qu'elles sont absentes : $contexteNotes" else "")
         val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", sys))
         history.takeLast(10).filter { it.text.isNotBlank() }.forEach { m ->
             msgs.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(1200)))
@@ -357,15 +366,15 @@ class Brain(
         onStatus("🧠 Analyse de la demande…")
         val all = tools.schemaAll()
         val sansAnalyse = pourHermes || fr.dd.jarvis.hermes.Routeur.commandeSimple(texteUser)
-        // Notes pertinentes et analyse de la demande EN MÊME TEMPS (avant : l'une après l'autre, jusqu'à 2,5 s de perdues).
+        // Notes pertinentes et analyse de la demande EN MÊME TEMPS.
+        // La recherche est identique sur téléphone et en voiture ; seul le délai maximal est légèrement adapté
+        // au contexte de conduite, sans couper les demandes de notes à 500 ms.
         val (notesUtiles, plan) = kotlinx.coroutines.coroutineScope {
-            // En voiture, les commandes simples restent rapides. Pour retrouver une adresse personnelle
-            // avant un guidage, on laisse au coffre Obsidian le temps de répondre (1,2 s max côté NotesPertinentes).
-            val adresseDomicile = Regex("domicile|chez\\s+moi|ma\\s+maison|mon\\s+adresse|adresse\\s+personnelle|rentrer\\s+chez", RegexOption.IGNORE_CASE).containsMatchIn(texteUser)
             val notes = async(kotlinx.coroutines.Dispatchers.IO) { runCatching {
-                if (app.enVoiture && !adresseDomicile)
-                    kotlinx.coroutines.withTimeoutOrNull(500) { fr.dd.jarvis.device.NotesPertinentes.pour(app, texteUser) }.orEmpty()
-                else fr.dd.jarvis.device.NotesPertinentes.pour(app, texteUser)
+                val demandeEtContexte = history.takeLast(6).filter { it.fromUser }.joinToString(" ") { it.text } + " " + FilConversation.sujet(history)
+                if (app.enVoiture)
+                    kotlinx.coroutines.withTimeoutOrNull(2500) { fr.dd.jarvis.device.NotesPertinentes.pour(app, demandeEtContexte) }.orEmpty()
+                else fr.dd.jarvis.device.NotesPertinentes.pour(app, demandeEtContexte)
             }.getOrDefault("") }
             val analyse = async {
                 // L'analyse Gemini n'est utile que pour une vraie orchestration multiétape.
@@ -384,8 +393,9 @@ class Brain(
         val domotique = pilotageChauffage || (Regex("t[ée]l[ée]|\\btv\\b|t[ée]l[ée]vis|volume|lumi[èe]re|lampe|volet|store|prise|home ?assistant|domotique|enceinte", RegexOption.IGNORE_CASE).containsMatchIn(recent) &&
             ACTION_DOMOTIQUE.containsMatchIn(recent))
         val rechercheAdresseDomicile = Regex("domicile|chez\\s+moi|ma\\s+maison|mon\\s+adresse|adresse\\s+personnelle|rentrer\\s+chez", RegexOption.IGNORE_CASE).containsMatchIn(recent)
+        val rechercheNotesExplicite = Regex("notes?|obsidian|m[eé]moire|souviens|rappelles|retrouve|rappelle|mon|ma|mes|chez\\s+moi|personnel|personnelle|coordonn[eé]es", RegexOption.IGNORE_CASE).containsMatchIn(recent)
         val indispensables = (if (domotique) listOf("notes_lire", "obsidian_chercher", "obsidian_lire", "ha_entites", "ha_etat", "ha_service") else emptyList()) +
-            (if (rechercheAdresseDomicile) listOf("notes_lire", "obsidian_chercher", "obsidian_lire") else emptyList())
+            (if (rechercheNotesExplicite) listOf("notes_lire", "obsidian_chercher", "obsidian_lire", "memoire_lire") else emptyList())
         if (plan != null && plan.outils.isNotEmpty()) {
             val reglageDirect = Regex("r[eé]glage|param[eè]tre|mode conversation|[eé]coute continue|annonce vocale|r[eé]ponse vocale|confirmation|agent autonome|bips|analyse gemini|gemini|agents? autonomes?|notifications banni[eè]re", RegexOption.IGNORE_CASE).containsMatchIn(recent)
             val keep = (plan.outils + indispensables + (if (reglageDirect) listOf("reglage_jarvis") else emptyList()) + (if (planningClientsSync) listOf("analyser_planning_clients") else emptyList()) + listOf("memoire_ajouter", "memoire_apprendre", "memoire_apprentissages", "memoire_lire", "memoire_oublier", "note_prendre", "notes_lire", "rappel_creer", "rappels_liste") + (if (societeOn || planningClientsSync) fr.dd.jarvis.societe.SocieteTools.NAMES else emptySet<String>()) +
