@@ -99,7 +99,7 @@ class Brain(
     }
 
     /** Réponse de conversation : prompt court, 10 derniers messages, aucun outil (Groq → Gemini → Cloudflare). */
-    private suspend fun conversationRapide(history: List<ChatMsg>, onStatus: (String) -> Unit): String? {
+    private suspend fun conversationRapide(history: List<ChatMsg>, onStatus: (String) -> Unit, onTexte: ((String) -> Unit)?): String? {
         onStatus("💬 …")
         val ctx = runCatching { fr.dd.jarvis.device.Contexte.actuel(app) }.getOrNull()
         val maintenant = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("EEEE d MMMM yyyy, HH'h'mm", java.util.Locale.FRENCH))
@@ -112,10 +112,12 @@ class Brain(
             val demandeEtContexte = history.takeLast(6).filter { it.fromUser }.joinToString(" ") { it.text }
             kotlinx.coroutines.withTimeoutOrNull(2200) { fr.dd.jarvis.device.NotesPertinentes.pour(app, demandeEtContexte) }.orEmpty()
         } else ""
-        val sys = "Tu es JARVIS, l'assistant personnel de ${userName().ifBlank { "l'utilisateur" }}, qui te tutoie. C'est un moment de conversation détendue : " +
-            "réponds naturellement en français, chaleureux et vivant, avec une pointe d'humour quand ça s'y prête, en une à trois phrases courtes, " +
-            "comme un ami attentionné ; relance parfois par une question. Pas de liste, pas de titre, pas d'emoji en excès. Garde le fil de la conversation et utilise la mémoire partagée sans la réciter. " +
-            "Tu n'as consulté ni son agenda, ni ses mails, ni ses appareils : n'invente aucun fait sur sa journée ; s'il veut une info précise, propose de vérifier. " +
+        val sys = "Tu es JARVIS, l'assistant personnel de ${userName().ifBlank { "l'utilisateur" }}, qui te tutoie. C'est une vraie conversation libre, pas une séance de commandes : " +
+            "réponds avec naturel, chaleur, spontanéité et une pointe d'humour quand elle convient. Tu peux parler de la famille, des enfants, du travail, des passions, des idées, des souvenirs racontés par l'utilisateur, de ses joies et de ses soucis. " +
+            "Écoute ce qu'il raconte, réagis au détail important, rebondis sur ce qu'il vient de dire et pose une seule question de relance quand cela vient naturellement ; ne transforme pas chaque réponse en interrogatoire. " +
+            "Accepte les phrases familières, les hésitations, les messages longs et les changements de sujet. Évite les formules répétitives, les réponses automatiques du type « et toi ? » à chaque tour, les listes et les titres. " +
+            "Appuie-toi sur l'historique et la mémoire partagée sans réciter les souvenirs. N'invente jamais de nouvelles personnelles : si l'utilisateur te demande si tu as des enfants ou une vie humaine, réponds honnêtement que tu es une IA, puis poursuis l'échange avec tact. " +
+            "Ne prétends pas connaître la journée ou la famille de l'utilisateur si cela n'a pas été partagé. Tu n'as consulté ni son agenda, ni ses mails, ni ses appareils ; propose de vérifier uniquement s'il demande un fait précis. " +
             "Nous sommes le $maintenant." + (ctx?.let { " Contexte : ${it.mode.libelle}." } ?: "") +
             (if (memoirePartagee.isNotBlank()) "\n\nMémoire partagée Jarvis/Hermès : $memoirePartagee" else "") +
             (if (contexteNotes.isNotBlank()) "\n\nNOTES DE L'UTILISATEUR RETROUVÉES DANS OBSIDIAN : applique ces informations comme source prioritaire et n'affirme pas qu'elles sont absentes : $contexteNotes" else "")
@@ -135,16 +137,28 @@ class Brain(
             }
             append("\nRéponds au dernier message de l'utilisateur.")
         }.take(6500)
-        GeminiNanoLocal.repondre(promptNano)?.let { return it }
-        // Le bavardage ne doit jamais attendre toute la chaîne de secours réseau : Nano (1,6 s),
-        // puis au plus 3 s pour Groq / ses relais. Ensuite, réponse locale immédiate.
-        val cloud = kotlinx.coroutines.withTimeoutOrNull(3_000L) {
+        GeminiNanoLocal.repondre(promptNano, onTexte)?.let { return it }
+        // Si Nano n'est pas disponible, un seul appel cloud rapide (Groq puis ses relais configurés).
+        val cloud = kotlinx.coroutines.withTimeoutOrNull(3_500L) {
             try {
                 app.llm.groqChat(msgs, null, forceText = true).optString("content").trim().takeIf { it.isNotBlank() }
             } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
         }
-        // Dernier recours strictement local : ne jamais laisser un bavardage simple tomber dans la chaîne Hermès.
-        return cloud ?: "Ça va bien, merci ! Et toi, comment se passe ta journée ?"
+        if (!cloud.isNullOrBlank()) {
+            onTexte?.invoke(cloud)
+            return cloud
+        }
+        // Dernier recours local et cohérent avec le dernier message, sans basculer dans une longue chaîne Hermès.
+        val dernier = history.lastOrNull { it.fromUser }?.text.orEmpty()
+        val secours = when {
+            Regex("enfant|famille|maison", RegexOption.IGNORE_CASE).containsMatchIn(dernier) ->
+                "Je t'écoute. Raconte-moi, comment ça se passe en ce moment à la maison ?"
+            Regex("fatigu|stress|difficile|triste|pas bien", RegexOption.IGNORE_CASE).containsMatchIn(dernier) ->
+                "Je suis là, prends ton temps. Qu'est-ce qui te pèse le plus en ce moment ?"
+            else -> "Je suis là, on peut prendre le temps de discuter. Qu'est-ce que tu as en tête ?"
+        }
+        onTexte?.invoke(secours)
+        return secours
     }
 
     // En voiture, pas de relais automatique vers Hermès (jusqu'à 35 s d'attente de plus au volant) : Jarvis répond.
@@ -338,7 +352,7 @@ class Brain(
         // une conversation sociale ne doit jamais être escaladée vers Hermès.
         val reponsePrecedente = history.dropLastWhile { it.fromUser }.lastOrNull()?.text
         if (!multi && (fr.dd.jarvis.hermes.Routeur.bavardage(texteUser) || (!suite && fr.dd.jarvis.hermes.Routeur.suiteBavardage(texteUser, reponsePrecedente)))) {
-            val reponse = conversationRapide(history, onStatus) ?: "Ça va bien, merci ! Et toi, comment se passe ta journée ?"
+            val reponse = conversationRapide(history, onStatus, onTexte) ?: "Je suis là, on peut discuter."
             fr.dd.jarvis.hermes.Routeur.marquerBavardage()
             return reflexe(reponse)
         }
