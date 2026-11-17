@@ -1024,8 +1024,8 @@ class ToolBox(
         })
         "obsidian_doublons" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             try {
-                if (app.obsidian.coffreConfigure() && !app.obsidian.coffreDisponible())
-                    return@withContext "⚠️ Le coffre Obsidian n'est pas accessible en lecture/écriture. Aucune analyse ni suppression effectuée. Vérifie l'autorisation Android dans les Réglages."
+                if (app.obsidian.coffreConfigure() && !app.obsidian.coffreLisible())
+                    return@withContext "⚠️ Le coffre Obsidian n'est pas accessible en lecture. Aucune analyse ni suppression effectuée. Vérifie l'autorisation Android dans les Réglages."
                 val notes = app.obsidian.analyserDoublons(a.optString("limite").toIntOrNull() ?: 1500)
                 if (notes.isEmpty()) "✅ Analyse terminée : aucun doublon exact ni nom de note répété détecté."
                 else buildString {
