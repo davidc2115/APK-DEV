@@ -17,6 +17,9 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     private val habitsFile get() = File(ctx.filesDir, "habits-learning.json")
     private val candidates = linkedMapOf<String, MutableSet<String>>()
     @Volatile private var loaded = false
+    private var empreinteCoffreMemoire: String? = null
+    private var empreinteEtatCharge: String? = null
+    @Volatile private var conflitMemoireExterne = false
 
     private val sensitivePattern = Regex(
         "\\b(sant[eé]|m[eé]dical|maladie|diagnostic|m[eé]dicament|banque|bancaire|carte bancaire|mot de passe|password|secret|cl[eé] api|token|religion|politique|orientation sexuelle|sexualit[eé]|syndicat)\\b",
@@ -127,6 +130,11 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         // silencieusement par une ancienne mémoire locale.
         val md = obsidian.lireOuMigrer(FOLDER, FILE, local.takeIf { it.exists() }?.readText())
         if (md != null) parse(md)
+        empreinteCoffreMemoire = if (obsidian.coffreConfigure()) runCatching {
+            obsidian.readNoteStrict("$FOLDER/$FILE")?.let(obsidian::empreinteContenu)
+        }.getOrNull() else null
+        empreinteEtatCharge = obsidian.empreinteContenu(render())
+        conflitMemoireExterne = false
         loadCandidates()
         loaded = true
     }
@@ -147,10 +155,25 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         derniereRelectureCoffre = maintenant
         if (!obsidian.coffreDisponible()) return
 
-        // Une note absente ou une erreur de lecture ne vide jamais la mémoire en cache.
-        // En revanche, une note lisible remplace bien les rubriques en mémoire, y compris
-        // lorsqu'une rubrique a été supprimée manuellement dans Obsidian.
-        runCatching { obsidian.read(FOLDER, FILE) }.getOrNull()?.let { parse(it) }
+        // Une suppression externe ou une erreur de lecture ne vide jamais le cache.
+        // Si Jarvis a des changements locaux non enregistrés, il ne remplace pas ceux-ci par la version distante.
+        val distant = runCatching { obsidian.readNoteStrict("$FOLDER/$FILE") }.getOrElse { return }
+        val empreinteDistante = distant?.let(obsidian::empreinteContenu)
+        if (empreinteDistante != empreinteCoffreMemoire) {
+            val etatLocal = obsidian.empreinteContenu(render())
+            if (etatLocal != empreinteEtatCharge) {
+                conflitMemoireExterne = true
+                return
+            }
+            if (distant == null) {
+                conflitMemoireExterne = true
+                return
+            }
+            parse(distant)
+            empreinteCoffreMemoire = empreinteDistante
+            empreinteEtatCharge = obsidian.empreinteContenu(render())
+            conflitMemoireExterne = false
+        }
         runCatching { loadCandidates() }
 
         runCatching { obsidian.read(FOLDER, "Mémoire Hermès source.md") }.getOrNull()?.let { brut ->
@@ -164,8 +187,17 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     @Synchronized
     private fun persist(): String {
         val md = render()
+        val emplacement = if (obsidian.coffreConfigure()) {
+            val hash = obsidian.ecrireSiInchange("$FOLDER/$FILE", md, empreinteCoffreMemoire)
+            empreinteCoffreMemoire = hash
+            conflitMemoireExterne = false
+            "coffre Obsidian › $FOLDER › $FILE"
+        } else {
+            obsidian.saveIn(FOLDER, FILE.removeSuffix(".md"), md)
+        }
         runCatching { local.writeText(md) }
-        return obsidian.saveIn(FOLDER, FILE.removeSuffix(".md"), md)
+        empreinteEtatCharge = obsidian.empreinteContenu(md)
+        return emplacement
     }
 
     @Synchronized
