@@ -1141,7 +1141,9 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         /** Nombre de notes candidates dans la limite du parcours. */
         val notesCandidates: Int = nodes.size,
         /** Vrai si la limite de parcours a été atteinte : le coffre peut contenir davantage de notes. */
-        val limiteNotesAtteinte: Boolean = false
+        val limiteNotesAtteinte: Boolean = false,
+        /** Vrai si le parcours a atteint la limite de pièces jointes : leur audit ne serait pas exhaustif. */
+        val limitePiecesAtteinte: Boolean = false
     )
 
     // #tag Obsidian : précédé d'un début de ligne ou d'un blanc, commence par une lettre (exclut « # Titre » et les
@@ -1385,7 +1387,8 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             nodes = nodesById.values.toList(), edges = edges, references = references, tags = tagsParNote,
             attachments = pieces, dossiers = dossiers.map { it.replace(File.separatorChar, '/') },
             notesLues = notesLues, notesCandidates = fichiers.size,
-            limiteNotesAtteinte = fichiers.size >= limiteNotes
+            limiteNotesAtteinte = fichiers.size >= limiteNotes,
+            limitePiecesAtteinte = cheminsPieces.size >= limitePieces
         )
     }
 
@@ -1466,7 +1469,8 @@ object AnalyseLiensObsidian {
         // L'index racine est le point d'entrée canonique du coffre : il n'a volontairement pas de parent.
         val notes = data.nodes.filterNot { it.ghost }
         val racineIndexId = "_Jarvis/Index coffre"
-        val analyseComplete = data.notesLues == data.notesCandidates && !data.limiteNotesAtteinte
+        val analyseComplete = data.notesLues == data.notesCandidates &&
+            !data.limiteNotesAtteinte && !data.limitePiecesAtteinte
         // Une note non lue peut contenir un lien entrant vers n'importe quelle autre note.
         // En analyse partielle, ne jamais présenter une note ou pièce jointe comme orpheline.
         val sansLienEntrant = if (analyseComplete) notes
