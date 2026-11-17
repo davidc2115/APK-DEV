@@ -7,6 +7,7 @@ import android.opengl.Matrix
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -293,6 +295,29 @@ private fun Orbe3DContenu(
         }
         DisposableEffect(Unit) {
             onDispose { runCatching { surface[0]?.onPause() } }
+        }
+        // Accès direct aux éléments sans lien, également disponible dans l'orbe 3D.
+        Column(
+            Modifier.align(Alignment.BottomStart).padding(8.dp)
+                .widthIn(max = 224.dp)
+                .background(Color(0xE5090612), RoundedCornerShape(12.dp))
+                .border(1.dp, Neon.violet.copy(alpha = 0.8f), RoundedCornerShape(12.dp))
+                .padding(horizontal = 9.dp, vertical = 7.dp)
+        ) {
+            Text("Fichiers orphelins · ${c.orphelins.size}", color = Neon.blancViolet, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            c.orphelins.take(3).forEach { chemin ->
+                Text("↳ $chemin", color = Neon.lavande, fontSize = 10.sp, maxLines = 1,
+                    modifier = Modifier.fillMaxWidth().clickable {
+                        if (chemin.endsWith(".md", true)) onNote(chemin.removeSuffix(".md")) else onFichier(chemin)
+                    }.padding(vertical = 2.dp))
+            }
+            if (c.orphelins.size > 3) Text("+${c.orphelins.size - 3} autres", color = Neon.sousTitre, fontSize = 9.sp)
+            Text("Mentions non liées · ${c.sansLienEntrant.size}", color = Neon.blancViolet, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 5.dp))
+            c.sansLienEntrant.take(2).forEach { id ->
+                Text("↳ ${id.substringAfterLast('/')}", color = Neon.lavande, fontSize = 10.sp, maxLines = 1,
+                    modifier = Modifier.fillMaxWidth().clickable { onNote(id.removeSuffix(".md")) }.padding(vertical = 2.dp))
+            }
+            if (c.sansLienEntrant.size > 2) Text("+${c.sansLienEntrant.size - 2} autres", color = Neon.sousTitre, fontSize = 9.sp)
         }
         val zones = remember { HashMap<String, Rect>() }
         Canvas(
