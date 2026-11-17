@@ -33,6 +33,10 @@ object NotesPertinentes {
         setOf("box", "freebox", "routeur"),
         setOf("serveur", "debian", "ssh"),
         setOf("musique", "spotify", "deezer", "chanson"),
+        // Adresse personnelle : « chez moi », « mon domicile » et « ma maison » désignent la même note.
+        setOf("domicile", "maison", "habitation", "residence", "home", "chezmoi", "logement"),
+        setOf("adresse", "coordonnees", "postal", "localisation", "domicile"),
+        setOf("personnel", "personnelle", "profil", "identite", "coordonnees", "adresse"),
     )
 
     /** Mots significatifs de la demande (+ synonymes). « son » seul est trop ambigu : gardé seulement avec « volume ». */
@@ -84,7 +88,9 @@ object NotesPertinentes {
             // Les recherches de titres sont indépendantes : les lancer en parallèle évite d'additionner
             // quatre latences d'index Obsidian sur chaque demande spécialisée.
             val recherches = coroutineScope {
-                mots.filter { it.length >= 4 }.sortedByDescending { it.length }.take(4).map { mot ->
+                // Plusieurs formulations équivalentes (domicile/maison/adresse/personnel) doivent
+                // pouvoir retrouver une note dont le titre n'emploie pas exactement les mots prononcés.
+                mots.filter { it.length >= 4 }.sortedByDescending { it.length }.take(8).map { mot ->
                     async(Dispatchers.IO) {
                         runCatching { app.knowledgeRepository.searchNodes(mot, 15) }.getOrDefault(emptyList())
                     }
