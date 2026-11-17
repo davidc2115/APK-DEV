@@ -189,7 +189,6 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             }
             ecrireIndexGenere(indexRootPath, racine)
             pages++
-            val attendus = indexParDossier.values.toSet() + indexRootPath
             // Migration non destructive : seuls les anciens fichiers portant notre marqueur sont supprimés.
             // Les éventuelles notes personnelles présentes dans _Jarvis sont conservées.
             val anciens = elements.filter { !it.second && estAncienIndexGenere(it.first) }
