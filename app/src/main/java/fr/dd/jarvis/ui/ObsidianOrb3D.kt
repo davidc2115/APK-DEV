@@ -123,13 +123,11 @@ private class Camera3D {
     /** Décalage vertical de l'image (en coordonnées normalisées) : recentre la constellation entre l'en-tête et le
      *  bas de l'écran sans déplacer le centre de rotation (la sphère). */
     @Volatile var decalageNdcY = 0f
-    @Volatile var focusNdcX = 0f
-    @Volatile var focusNdcY = 0f
 
     fun projection(largeur: Float, hauteur: Float): FloatArray {
         val p = FloatArray(16); val t = FloatArray(16); val out = FloatArray(16)
         Matrix.perspectiveM(p, 0, FOV_Y, largeur / max(hauteur, 1f), 0.1f, max(10000f, distance * 4f + 100f))
-        Matrix.setIdentityM(t, 0); t[12] = focusNdcX; t[13] = decalageNdcY + focusNdcY
+        Matrix.setIdentityM(t, 0); t[13] = decalageNdcY
         Matrix.multiplyMM(out, 0, t, 0, p, 0)
         return out
     }
@@ -250,7 +248,7 @@ private fun Orbe3DContenu(
     // Recul de caméra : toute la constellation tient dans l'écran (portrait) au zoom 1.
     // La zone utile exclut l'en-tête (~64 dp) et la consigne du bas (~28 dp) ; l'image est recentrée sur la
     // constellation (et non sur la sphère) par un décalage vertical de la projection.
-    val (distanceAuto, decalageAuto) = remember(c, taille, dens) {
+    val (distanceAuto, _) = remember(c, taille, dens) {
         // La coque des dossiers est désormais une sphère de rayon constant : le cadrage se calcule
         // sur son enveloppe 3D, et non plus sur l'ancien grand rectangle de la constellation 2D.
         val rayonMax3d = pos3d.values.maxOfOrNull { p ->
@@ -262,8 +260,7 @@ private fun Orbe3DContenu(
         val w = if (taille.width > 0f) taille.width else 800f
         val hDispo = (h - 92f * dens).coerceAtLeast(h * 0.6f)
         val d = max(rayonEnveloppe / (tanY * w / h), rayonEnveloppe / (tanY * hDispo / h)) * 1.06f + 0.6f
-        val cibleNdc = 1f - 2f * (64f * dens + hDispo / 2f) / h
-        d to cibleNdc
+        d to 0f
     }
 
     // Horloge d'animation : balancement doux de la caméra quand l'utilisateur ne touche pas l'écran.
@@ -299,27 +296,6 @@ private fun Orbe3DContenu(
         DisposableEffect(Unit) {
             onDispose { runCatching { surface[0]?.onPause() } }
         }
-        // Accès direct aux éléments sans lien, également disponible dans l'orbe 3D.
-        Column(
-            Modifier.align(Alignment.BottomStart).padding(8.dp)
-                .widthIn(max = 224.dp).heightIn(max = 220.dp).verticalScroll(rememberScrollState())
-                .background(Color(0xE5090612), RoundedCornerShape(12.dp))
-                .border(1.dp, Neon.violet.copy(alpha = 0.8f), RoundedCornerShape(12.dp))
-                .padding(horizontal = 9.dp, vertical = 7.dp)
-        ) {
-            Text("Fichiers orphelins · ${c.orphelins.size}", color = Neon.blancViolet, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-            c.orphelins.forEach { chemin ->
-                Text("↳ $chemin", color = Neon.lavande, fontSize = 10.sp, maxLines = 1,
-                    modifier = Modifier.fillMaxWidth().clickable {
-                        if (chemin.endsWith(".md", true)) onNote(chemin.removeSuffix(".md")) else onFichier(chemin)
-                    }.padding(vertical = 2.dp))
-            }
-            Text("Mentions non liées · ${c.sansLienEntrant.size}", color = Neon.blancViolet, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 5.dp))
-            c.sansLienEntrant.forEach { id ->
-                Text("↳ ${id.substringAfterLast('/')}", color = Neon.lavande, fontSize = 10.sp, maxLines = 1,
-                    modifier = Modifier.fillMaxWidth().clickable { onNote(id.removeSuffix(".md")) }.padding(vertical = 2.dp))
-            }
-        }
         val zones = remember { HashMap<String, Rect>() }
         Canvas(
             Modifier.fillMaxSize()
@@ -334,18 +310,7 @@ private fun Orbe3DContenu(
                             if (cible != null) {
                                 val cle = cible.key.removePrefix("hub:")
                                 hubFocus = cle
-                                // Le dossier visé est recentré dans la fenêtre avant d'agrandir sa branche.
-                                pos3d["hub:$cle"]?.let { point ->
-                                    camera.zoom = zoomUser
-                                    val mvp = FloatArray(16); val mv = FloatArray(16)
-                                    camera.matrices(size.width.toFloat(), size.height.toFloat(), mvp, mv)
-                                    projeter(mvp, mv, point, size.width.toFloat(), size.height.toFloat(), camera.zoom)?.let { p ->
-                                        val ndcX = p.ecran.x / size.width.toFloat() * 2f - 1f
-                                        val ndcY = 1f - p.ecran.y / size.height.toFloat() * 2f
-                                        camera.focusNdcX -= ndcX
-                                        camera.focusNdcY -= ndcY
-                                    }
-                                }
+                                // Le zoom dégage la branche sans déplacer le cerveau : le noyau reste fixe au centre.
                             }
                         } else if (zoom < 0.985f && zoomUser < 0.92f) {
                             hubFocus = null
