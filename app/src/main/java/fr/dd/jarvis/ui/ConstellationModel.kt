@@ -139,9 +139,9 @@ object ConstellationLayout {
     private const val MAX_HUBS_DOSSIER = 9
     private const val MAX_SOUS_DOSSIERS = 8
     private const val MAX_TAGS = 6
-    /** Hauteur d'une étiquette de fichier en bout de branche, et pas vertical entre deux. */
-    private const val H_FEUILLE = 21f
-    private const val PAS_FEUILLE = 25f
+    /** Hauteur réservée à un fragment de fichier autour du dossier parent. */
+    private const val H_FEUILLE = 24f
+    private const val PAS_FEUILLE = 44f
     private const val PAS = H_ETIQUETTE + 9f
 
     /** Largeur estimée d'une étiquette (police serif ~11sp) : icône + texte + marges. */
@@ -197,7 +197,7 @@ object ConstellationLayout {
      */
     private class Rangee(val sous: Hub?, val tete: Etiquette?, val enfants: List<Rangee> = emptyList(), val feuille: Boolean = false) {
         val hauteur: Float by lazy {
-            if (sous != null) max(2 * sous.rayon + 40f, enfants.sumOf { it.hauteur.toDouble() }.toFloat() + 24f)
+            if (sous != null) max(2 * sous.rayon + 68f, enfants.sumOf { it.hauteur.toDouble() }.toFloat() + 48f)
             else if (feuille) PAS_FEUILLE else H_ETIQUETTE + 9f
         }
     }
@@ -325,7 +325,7 @@ object ConstellationLayout {
             return if (nd > 0) "${pluriel(nd, "dossier", "dossiers")} · $tot" else pluriel(tot, "fichier", "fichiers")
         }
 
-        /** Dossier en cercle ; déplié : ses sous-dossiers (cercles, récursivement) puis ses fichiers (liste). */
+        /** Dossier en cercle ; déplié : ses sous-dossiers en branches et ses fichiers en fragments orbitaux. */
         fun rangeeDossier(d: String, parent: String, niveau: Int, fige: Boolean = false): Rangee {
             val cd = dossiers[d]
             val depliable = cd != null && (cd.sousDossiers.isNotEmpty() || cd.notes.isNotEmpty() || cd.pieces.isNotEmpty())
@@ -368,8 +368,8 @@ object ConstellationLayout {
             val hauteur = if (rs.isEmpty()) 0f else rs.sumOf { it.hauteur.toDouble() }.toFloat()
             max(hauteur, 2 * RAYON_HUB + 40f)
         }
-        val rx = 166f
-        val ry = max(390f + min(m, 7) * 18f, poids.sum() / 2.0f)
+        val rx = 190f
+        val ry = max(430f + min(m, 7) * 22f, poids.sum() / 1.9f)
         val emplacements = positionsSurArc(m, rx, ry)
         val ordreEmplacements = emplacements.indices.sortedBy { i -> abs(emplacements[i].x) / rx + (emplacements[i].y + ry) / ry * 0.01f }
         // Emplacement de chaque catégorie, puis espacement pondéré par la taille réelle de chaque groupe.
@@ -541,10 +541,13 @@ object ConstellationLayout {
         index: Int, count: Int, out: MutableList<Etiquette>
     ) {
         val e = r.tete ?: return
-        val t = if (count <= 1) 0.5f else index / (count - 1f)
-        val angle = -1.12f + t * 2.24f
-        val rayon = 88f + count.coerceAtMost(10) * 6f
-        val x = xParent + sx * (rParent + 34f + cos(angle) * rayon + e.w * 0.16f)
+        // Spirale à angle d'or : les fragments occupent tout le tour du dossier, sans colonne verticale.
+        // Un second anneau s'ouvre automatiquement si le nombre d'éléments augmente.
+        val couche = index / 8
+        val rang = index % 8
+        val angle = -PI_F / 2f + rang * 2.3999632f + couche * 0.31f
+        val rayon = rParent + 82f + couche * 48f + max(e.w, e.h) * 0.08f
+        val x = xParent + cos(angle) * rayon
         val y = cy + sin(angle) * rayon
         out += e.copy(pos = Pt(x, y))
     }
@@ -552,7 +555,7 @@ object ConstellationLayout {
     /** Pose une rangée à droite (sx = 1) ou à gauche (sx = -1) de son parent, puis ses enfants un cran plus loin. */
     private fun placer(r: Rangee, xParent: Float, rParent: Float, cy: Float, sx: Float, hubs: MutableList<Hub>, out: MutableList<Etiquette>) {
         if (r.sous != null) {
-            val sous = r.sous.copy(pos = Pt(xParent + sx * (rParent + 48f + r.sous.rayon), cy))
+            val sous = r.sous.copy(pos = Pt(xParent + sx * (rParent + 78f + r.sous.rayon), cy))
             hubs += sous
             val total = r.enfants.sumOf { it.hauteur.toDouble() }.toFloat()
             var y = cy - total / 2f
@@ -566,7 +569,7 @@ object ConstellationLayout {
                 y += e.hauteur
             }
         } else if (r.tete != null) {
-            out += r.tete.copy(pos = Pt(xParent + sx * (rParent + (if (r.feuille) 38f else 34f) + r.tete.w / 2f), cy))
+            out += r.tete.copy(pos = Pt(xParent + sx * (rParent + (if (r.feuille) 54f else 46f) + r.tete.w / 2f), cy))
         }
     }
 
