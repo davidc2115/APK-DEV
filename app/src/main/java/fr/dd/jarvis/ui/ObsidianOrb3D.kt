@@ -75,7 +75,7 @@ fun ObsidianOrb3D(app: JarvisApp, enTete: @Composable () -> Unit = {}) {
     var hubListe by remember { mutableStateOf<String?>(null) }
     val c = constellationDe(etat)
     if (c == null) ChargementEnCours(etat.erreur, enTete)
-    else Orbe3DVue(c, enTete, onNote = { noteOuverte = it }, onHub = { cle -> if (c.hub(cle)?.type != TypeHub.PIECES && c.hub(cle)?.type != TypeHub.TAGS) hubListe = cle },
+    else Orbe3DVue(c, { AgentsHermesButton(app); enTete() }, onNote = { noteOuverte = it }, onHub = { cle -> if (c.hub(cle)?.type != TypeHub.PIECES && c.hub(cle)?.type != TypeHub.TAGS) hubListe = cle },
         onFichier = { chemin -> app.obsidian.ouvrirFichier(chemin) },
         onBasculer = { chemin -> etat.deplies = ConstellationLayout.basculer(c.deplies, chemin) })
     DialoguesConstellation(app, c, noteOuverte, { noteOuverte = it }, hubListe, { hubListe = it })
