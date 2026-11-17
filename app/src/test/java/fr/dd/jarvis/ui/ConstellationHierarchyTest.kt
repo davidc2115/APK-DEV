@@ -55,6 +55,25 @@ class ConstellationHierarchyTest {
         assertEquals(setOf("A", "B", "C"), constellation.arborescence.map { it.chemin }.toSet())
         assertEquals(3, constellation.arborescence.sumOf { it.totalRecursif })
     }
+    @Test fun regroupeLesDossiersRacineQuiOntLeMemeNomAffiche() {
+        val data = ObsidianWriter.GraphData(
+            nodes = listOf(
+                ObsidianWriter.GraphNode("Jarvis/NoteA", "NoteA", "Jarvis"),
+                ObsidianWriter.GraphNode("Jarvis /NoteB", "NoteB", "Jarvis ")
+            ),
+            edges = emptyList(),
+            dossiers = listOf("Jarvis", "Jarvis ")
+        )
+
+        val constellation = ConstellationLayout.construire(data)
+        val hubsJarvis = constellation.hubs.filter { it.type == TypeHub.DOSSIER && it.titre == "Jarvis" }
+
+        // Un seul cercle visible, mais les deux chemins physiques restent présents dans l'arborescence.
+        assertEquals(1, hubsJarvis.size)
+        assertEquals(2, hubsJarvis.single().compte)
+        assertEquals(setOf("Jarvis", "Jarvis "), constellation.arborescence.map { it.chemin }.toSet())
+    }
+
     @Test fun eviteLesChevauchementsEntreDossiersEtPiecesJointes() {
         val notes = (1..18).map { n ->
             ObsidianWriter.GraphNode("Jarvis/Agents/Note$n", "Note$n", "Jarvis/Agents")
