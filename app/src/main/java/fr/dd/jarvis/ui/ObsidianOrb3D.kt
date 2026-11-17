@@ -250,7 +250,7 @@ private fun Orbe3DContenu(
     // Recul de caméra : toute la constellation tient dans l'écran (portrait) au zoom 1.
     // La zone utile exclut l'en-tête (~64 dp) et la consigne du bas (~28 dp) ; l'image est recentrée sur la
     // constellation (et non sur la sphère) par un décalage vertical de la projection.
-    val (distanceAuto, _) = remember(c, taille, dens) {
+    val (distanceAuto, _) = remember(c, taille, dens, hubFocus) {
         // La coque des dossiers est désormais une sphère de rayon constant : le cadrage se calcule
         // sur son enveloppe 3D, et non plus sur l'ancien grand rectangle de la constellation 2D.
         val rayonMax3d = pos3d.values.maxOfOrNull { p ->
