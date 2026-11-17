@@ -653,7 +653,7 @@ class ToolBox(
             )
         }
         "tournee_optimisee" -> {
-            val liste = a.optString("clients").split(Regex("\\s*[,;\\n]\\s*")).filter { it.isNotBlank() }
+            val liste = a.optString("clients").split(Regex("\\s*[,;\n]\\s*")).filter { it.isNotBlank() }
             if (liste.isEmpty()) return ToolResult("Indique les clients à visiter (paramètre clients). Pour les rendez-vous de l'agenda, utilise itineraire.")
             val txt = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 fr.dd.jarvis.societe.Trajet.optimisee(app, liste,
@@ -1050,26 +1050,26 @@ class ToolBox(
                 val donnees = o.graph(limiteNotes = limite, limiteLecture = limite)
                 val audit = fr.dd.jarvis.device.AnalyseLiensObsidian.analyser(donnees)
                 buildString {
-                    append("🔎 AUDIT DES LIENS OBSIDIAN\\n")
-                    append("${audit.notesLues}/${audit.notesCandidates} notes lues ; ${audit.liens.size} liens internes résolus ; ${donnees.attachments.size} pièces jointes analysées.\\n")
-                    if (!audit.analyseComplete) append("⚠️ Analyse partielle : certaines notes n'ont pas pu être lues ou la limite de ${limite} notes a été atteinte. Les listes ci-dessous ne constituent pas un inventaire exhaustif.\\n")
-                    append("\\nNOTES SANS LIEN ENTRANT (${audit.notesSansLienEntrant.size})")
-                    if (audit.notesSansLienEntrant.isEmpty()) append("\\nAucune.")
-                    else audit.notesSansLienEntrant.take(200).forEach { append("\\n- ${it.id}.md") }
-                    if (audit.notesSansLienEntrant.size > 200) append("\\n… ${audit.notesSansLienEntrant.size - 200} autre(s).")
-                    append("\\n\\nNOTES TOTALEMENT ORPHELINES — aucun lien entrant ni sortant (${audit.notesOrphelines.size})")
-                    if (audit.notesOrphelines.isEmpty()) append("\\nAucune.")
-                    else audit.notesOrphelines.take(200).forEach { append("\\n- ${it.id}.md") }
-                    if (audit.notesOrphelines.size > 200) append("\\n… ${audit.notesOrphelines.size - 200} autre(s).")
-                    append("\\n\\nPIÈCES JOINTES NON RÉFÉRENCÉES (${audit.fichiersOrphelins.size})")
-                    if (audit.fichiersOrphelins.isEmpty()) append("\\nAucune.")
-                    else audit.fichiersOrphelins.take(200).forEach { append("\\n- ${it.path}") }
-                    if (audit.fichiersOrphelins.size > 200) append("\\n… ${audit.fichiersOrphelins.size - 200} autre(s).")
-                    append("\\n\\nLIENS WIKILINKS INTROUVABLES (${audit.referencesNonResolues.size})")
-                    if (audit.referencesNonResolues.isEmpty()) append("\\nAucun.")
-                    else audit.referencesNonResolues.take(200).forEach { append("\\n- ${it.from}.md → [[${it.rawTarget}]]") }
-                    if (audit.referencesNonResolues.size > 200) append("\\n… ${audit.referencesNonResolues.size - 200} autre(s).")
-                    append("\\n\\nImportant : un fichier rangé dans un dossier n'est pas automatiquement lié à une note ; le classement et les wikilinks sont deux choses différentes.")
+                    append("🔎 AUDIT DES LIENS OBSIDIAN\n")
+                    append("${audit.notesLues}/${audit.notesCandidates} notes lues ; ${audit.liens.size} liens internes résolus ; ${donnees.attachments.size} pièces jointes analysées.\n")
+                    if (!audit.analyseComplete) append("⚠️ Analyse partielle : certaines notes n'ont pas pu être lues ou la limite de ${limite} notes a été atteinte. Les listes ci-dessous ne constituent pas un inventaire exhaustif.\n")
+                    append("\nNOTES SANS LIEN ENTRANT (${audit.notesSansLienEntrant.size})")
+                    if (audit.notesSansLienEntrant.isEmpty()) append("\nAucune.")
+                    else audit.notesSansLienEntrant.take(200).forEach { append("\n- ${it.id}.md") }
+                    if (audit.notesSansLienEntrant.size > 200) append("\n… ${audit.notesSansLienEntrant.size - 200} autre(s).")
+                    append("\n\nNOTES TOTALEMENT ORPHELINES — aucun lien entrant ni sortant (${audit.notesOrphelines.size})")
+                    if (audit.notesOrphelines.isEmpty()) append("\nAucune.")
+                    else audit.notesOrphelines.take(200).forEach { append("\n- ${it.id}.md") }
+                    if (audit.notesOrphelines.size > 200) append("\n… ${audit.notesOrphelines.size - 200} autre(s).")
+                    append("\n\nPIÈCES JOINTES NON RÉFÉRENCÉES (${audit.fichiersOrphelins.size})")
+                    if (audit.fichiersOrphelins.isEmpty()) append("\nAucune.")
+                    else audit.fichiersOrphelins.take(200).forEach { append("\n- ${it.path}") }
+                    if (audit.fichiersOrphelins.size > 200) append("\n… ${audit.fichiersOrphelins.size - 200} autre(s).")
+                    append("\n\nLIENS WIKILINKS INTROUVABLES (${audit.referencesNonResolues.size})")
+                    if (audit.referencesNonResolues.isEmpty()) append("\nAucun.")
+                    else audit.referencesNonResolues.take(200).forEach { append("\n- ${it.from}.md → [[${it.rawTarget}]]") }
+                    if (audit.referencesNonResolues.size > 200) append("\n… ${audit.referencesNonResolues.size - 200} autre(s).")
+                    append("\n\nImportant : un fichier rangé dans un dossier n'est pas automatiquement lié à une note ; le classement et les wikilinks sont deux choses différentes.")
                 }
             } catch (e: Exception) {
                 "❌ Analyse des liens Obsidian impossible : ${e.message ?: e.javaClass.simpleName}"
@@ -2033,7 +2033,7 @@ class ToolBox(
         val nom = a.optString("nom").trim()
         fun trouver() = l.firstOrNull { R.norm(it.nom) == R.norm(nom) }
             ?: l.firstOrNull { nom.isNotBlank() && R.norm(it.nom).contains(R.norm(nom)) }
-        fun decoupe(t: String) = t.split(Regex("\\s*(;|\\n)\\s*")).map { it.trim() }.filter { it.isNotBlank() }
+        fun decoupe(t: String) = t.split(Regex("\\s*(;|\n)\\s*")).map { it.trim() }.filter { it.isNotBlank() }
         fun actionUnique(actions: List<String>, cible: String): Int? {
             val q = R.norm(cible)
             val matches = actions.indices.filter { i -> R.norm(actions[i]) == q || (q.isNotBlank() && R.norm(actions[i]).contains(q)) }
