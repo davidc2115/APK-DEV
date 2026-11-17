@@ -192,6 +192,16 @@ class Brain(
         fun reflexe(r: String) = r.also { if (!pourHermes) fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS }
         /** Réflexe de la maison (Home Assistant) : la suite de la conversation reste aussi à JARVIS. */
         fun reflexeMaison(r: String) = reflexe(r).also { if (!pourHermes) fr.dd.jarvis.hermes.Routeur.noterMaison() }
+        // Les devis/factures de test sont exécutés localement, même si la demande est routée vers Hermès.
+        // Le nom du client peut provenir des derniers échanges (ex. juste après sa création).
+        val contexteRecentSociete = history.takeLast(6).joinToString(" ") { it.text }
+        runCatching {
+            fr.dd.jarvis.societe.SocieteTools.intentionCreationTest(app.societe.data, texteUser, contexteRecentSociete)
+        }.getOrNull()?.let { args ->
+            args.optString("question").takeIf { it.isNotBlank() }?.let { return reflexe(it) }
+            onStatus("🧾 Création du document de test…")
+            return reflexe(tools.execute("document_creer", args).text)
+        }
         // Changement de profil énergétique : commande locale immédiate, sans appel à Groq/Gemini/Hermès.
         // Les trois profils sont persistés puis leurs planificateurs sont recalculés immédiatement.
         if (!pourHermes) {
@@ -238,13 +248,6 @@ class Brain(
             if (PersonneOu.personne(texteUser) != null) {
                 onStatus("📍 Position…")
                 runCatching { PersonneOu.repondre(app, texteUser) }.getOrNull()?.let { return reflexe(it) }
-            }
-            // Création des devis/factures de TEST : exécution locale déterministe, sans laisser le modèle
-            // répondre par une simple liste de clients ou un récapitulatif de la société.
-            runCatching { fr.dd.jarvis.societe.SocieteTools.intentionCreationTest(app.societe.data, texteUser) }.getOrNull()?.let { args ->
-                args.optString("question").takeIf { it.isNotBlank() }?.let { return reflexe(it) }
-                onStatus("🧾 Création du document de test…")
-                return reflexe(tools.execute("document_creer", args).text)
             }
             // Annuler / supprimer des factures ou devis (une, plusieurs, toutes), gérer les fiches de paie : même chose.
             runCatching { fr.dd.jarvis.societe.SocieteTools.intentionGestion(app.societe.data, texteUser) }.getOrNull()?.let { (outil, args) ->
