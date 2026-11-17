@@ -238,7 +238,7 @@ class ConversationVoiture private constructor(private val ctx: CarContext, priva
     sealed class Etat {
         object Ecoute : Etat()
         class Reflexion(val question: String) : Etat()
-        class Reponse(val question: String, val texte: String) : Etat()
+        class Reponse(val question: String, val texte: String, val sourceMicro: String) : Etat()
         class Fin(val texte: String) : Etat()
     }
 
@@ -285,14 +285,17 @@ class ConversationVoiture private constructor(private val ctx: CarContext, priva
                 is Ecoute.Annulee -> return@launch
                 is Ecoute.Silence -> { terminer("Conversation terminée."); return@launch }
                 is Ecoute.Erreur -> { terminer("Micro indisponible (voiture et téléphone) : ${res.message}"); return@launch }
-                is Ecoute.Phrase -> traiter(res.pcm)
+                is Ecoute.Phrase -> {
+                    val source = if (m.telephone) "Micro téléphone" + (m.diagnosticVoiture?.let { " (voiture : $it)" } ?: "") else "Micro voiture Android Auto"
+                    traiter(res.pcm, source)
+                }
             }
         }
     }
 
-    private suspend fun traiter(pcm: ByteArray) {
+    private suspend fun traiter(pcm: ByteArray, sourceMicro: String) {
         if (!app.llm.groq.disponible()) { terminer("Ajoute une clé Groq dans JARVIS (Réglages) : elle sert aussi à la dictée en voiture."); return }
-        montrer(Etat.Reflexion(""))
+        montrer(Etat.Reflexion("$sourceMicro · transcription"))
         val texte = try {
             Pcm.nettoyerTranscription(withContext(Dispatchers.IO) { app.llm.groq.transcrire(Pcm.wav(pcm)) })
         } catch (e: Throwable) { terminer("Transcription impossible : ${e.message?.take(120) ?: e.javaClass.simpleName}"); return }
@@ -318,7 +321,7 @@ class ConversationVoiture private constructor(private val ctx: CarContext, priva
         val assistantMessage = ChatMsg(false, propre)
         CarBridge.ajouter(assistantMessage)
         app.chatAjouter(assistantMessage)
-        montrer(Etat.Reponse(texte, propre))
+        montrer(Etat.Reponse(texte, propre, sourceMicro))
         // Réponse lue, puis on réécoute : on enchaîne sans retoucher l'écran ; silence → fin.
         parler(propre) { ecouter() }
     }
@@ -374,7 +377,7 @@ class EcranConversation(ctx: CarContext, private val conv: ConversationVoiture, 
                 .setHeaderAction(Action.BACK).addAction(terminer).build()
             is ConversationVoiture.Etat.Reflexion -> MessageTemplate.Builder(if (etat.question.isBlank()) "…" else "« ${etat.question.take(160)} »")
                 .setTitle("JARVIS").setHeaderAction(Action.BACK).setLoading(true).build()
-            is ConversationVoiture.Etat.Reponse -> MessageTemplate.Builder(etat.texte.take(450)).setTitle("« ${etat.question.take(60)} »")
+            is ConversationVoiture.Etat.Reponse -> MessageTemplate.Builder(etat.texte.take(450)).setTitle("${etat.sourceMicro} · « ${etat.question.take(45)} »")
                 .setHeaderAction(Action.BACK).addAction(parler).addAction(terminer).build()
             is ConversationVoiture.Etat.Fin -> MessageTemplate.Builder(etat.texte).setTitle("JARVIS")
                 .setHeaderAction(Action.BACK)
