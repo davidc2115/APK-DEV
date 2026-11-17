@@ -89,7 +89,7 @@ object NotesPertinentes {
             val resultats = app.obsidian.searchNotesAny(
                 queries = mots.filter { it.length >= 3 },
                 limit = 8,
-                maxScan = 1500
+                maxScan = 2000
             )
             resultats.forEach { (chemin, extraitNote) ->
                 val s = score("$chemin $extraitNote", mots)
