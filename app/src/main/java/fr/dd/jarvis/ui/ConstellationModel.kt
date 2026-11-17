@@ -296,7 +296,8 @@ object ConstellationLayout {
 
         fun etiquetteNote(n: ObsidianWriter.GraphNode, hub: String, feuille: Boolean): Etiquette {
             val t = court(n.label, if (feuille) 18 else 20)
-            val e = if (feuille) 0.9f else 1f            return Etiquette("note:${n.id}", t, Icone.NOTE, TypeEtiquette.NOTE, hub, noteId = n.id, pos = Pt(0f, 0f),
+            val e = if (feuille) 0.9f else 1f
+            return Etiquette("note:${n.id}", t, Icone.NOTE, TypeEtiquette.NOTE, hub, noteId = n.id, pos = Pt(0f, 0f),
                 w = largeurEtiquette(t) * e, h = if (feuille) H_FEUILLE else H_ETIQUETTE, echelle = e)
         }
         fun etiquettePiece(a: ObsidianWriter.GraphAttachment, hub: String, feuille: Boolean): Etiquette {
