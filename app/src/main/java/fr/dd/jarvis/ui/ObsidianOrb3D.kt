@@ -314,8 +314,6 @@ private fun Orbe3DContenu(
                             }
                         } else if (zoom < 0.985f && zoomUser < 0.92f) {
                             hubFocus = null
-                            camera.focusNdcX = 0f
-                            camera.focusNdcY = 0f
                         }
                         // Rotation libre sur les deux axes : chaque axe accepte autant de tours complets que souhaité.
                         // Le modulo conserve une valeur numérique stable sans créer de butée ni de saut visuel.
