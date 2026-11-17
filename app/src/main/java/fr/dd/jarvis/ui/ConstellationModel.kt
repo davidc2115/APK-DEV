@@ -678,7 +678,8 @@ object ConstellationLayout {
             val d = hypot(dx, dy)
             if (d >= rayon) return false
             val dir = if (d > 1e-3f) Pt(dx / d, dy / d) else direction(ex[i] - centre.x, ey[i] - centre.y, i, i + 97)
-            val pousser = rayon - d + 1f
+            val demiLargeur = abs(dir.x) * e.w / 2f + abs(dir.y) * e.h / 2f
+            val pousser = rayon - d + (if (d < 1e-3f) demiLargeur else 0f) + 1f
             ex[i] += dir.x * pousser
             ey[i] += dir.y * pousser
             return true
