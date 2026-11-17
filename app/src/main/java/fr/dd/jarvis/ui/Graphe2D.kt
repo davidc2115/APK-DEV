@@ -599,8 +599,8 @@ fun ConstellationVue(
             horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Bottom
         ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                PanneauListe("Fichiers orphelins", "Sans lien depuis le graphe", Icone.FICHIER, Color(0xFFFF6B5C), c.orphelins, orphelinsOuvert) { orphelinsOuvert = !orphelinsOuvert }
-                PanneauListe("Mentions non liées", "Notes sans lien entrant", Icone.ETOILE, Color(0xFFFFC14D), c.sansLienEntrant, mentionsOuvert) { mentionsOuvert = !mentionsOuvert }
+                PanneauListe("Fichiers orphelins", "Toucher un élément pour l’ouvrir", Icone.FICHIER, Color(0xFFFF6B5C), c.orphelins, orphelinsOuvert, { s -> if (s.endsWith(".md", true)) onNote(s.removeSuffix(".md")) else onFichier(s) }) { orphelinsOuvert = !orphelinsOuvert }
+                PanneauListe("Mentions non liées", "Toucher une note pour la lire", Icone.ETOILE, Color(0xFFFFC14D), c.sansLienEntrant, mentionsOuvert, { s -> onNote(s.removeSuffix(".md")) }) { mentionsOuvert = !mentionsOuvert }
             }
             Panneau(Modifier.widthIn(max = 150.dp), onClick = { legendeOuverte = !legendeOuverte }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -651,7 +651,7 @@ private fun Panneau(modifier: Modifier = Modifier, onClick: (() -> Unit)? = null
 }
 
 @Composable
-private fun PanneauListe(titre: String, sousTitre: String, icone: Icone, puce: Color, items: List<String>, ouvert: Boolean, basculer: () -> Unit) {
+private fun PanneauListe(titre: String, sousTitre: String, icone: Icone, puce: Color, items: List<String>, ouvert: Boolean, onItem: (String) -> Unit = {}, basculer: () -> Unit) {
     Panneau(Modifier.fillMaxWidth(), onClick = basculer) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconeCompose(icone, 14.dp, if (icone == Icone.ETOILE) Color(0xFFFFC14D) else Color(0xFFFF6B5C))
@@ -666,7 +666,7 @@ private fun PanneauListe(titre: String, sousTitre: String, icone: Icone, puce: C
             items.take(4).forEach { s ->
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 3.dp)) {
                     Box(Modifier.size(6.dp).background(puce, CircleShape))
-                    Text(s, color = Neon.blancViolet, fontSize = 11.sp, fontFamily = Neon.serif, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 6.dp))
+                    Text(s, color = Neon.blancViolet, fontSize = 11.sp, fontFamily = Neon.serif, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 6.dp).clickable { onItem(s) })
                 }
             }
             if (items.size > 4) Text("+${items.size - 4} autres", color = Neon.sousTitre, fontSize = 10.sp, fontFamily = Neon.serif, modifier = Modifier.padding(top = 2.dp))
