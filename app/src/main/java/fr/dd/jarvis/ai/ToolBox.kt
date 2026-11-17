@@ -343,6 +343,7 @@ class ToolBox(
         put(tool("appli_par_defaut", "Définit (ou efface) l'application utilisée par défaut pour un type de demande.",
             mapOf("type" to prop("navigation | musique"), "appli" to prop("Nom de l'application, ou « aucune » pour redemander à chaque fois.")), listOf("type", "appli")))
         put(tool("obsidian_chercher", "Cherche du texte dans les notes du coffre Obsidian (noms et contenu).", mapOf("requete" to prop("Texte recherché.")), listOf("requete")))
+        put(tool("obsidian_doublons", "Analyse le coffre Obsidian en lecture seule pour détecter les notes au contenu strictement identique et les notes de même nom dans plusieurs dossiers. Ne supprime rien : présente les chemins et demande à l'utilisateur quelle copie conserver ; toute suppression passe ensuite par obsidian_supprimer avec confirmation explicite.", mapOf("limite" to prop("Nombre maximal de notes à analyser (1 à 3000, défaut 1500)."))))
         put(tool("obsidian_fichiers", "Gère les dossiers et fichiers DU COFFRE OBSIDIAN configuré dans les Réglages (jamais le stockage du téléphone) : lister un dossier, CHERCHER des fichiers/dossiers par nom ou sujet dans tout le coffre, créer un dossier ou sous-dossier, déplacer des notes / images / fichiers / dossiers vers un dossier du coffre (créé au besoin), renommer. Les chemins peuvent être approximatifs (majuscules, accents, singulier/pluriel : « Jarvis/image » trouve « JARVIS/Images »), et un dossier comme « images/Coloriages » est créé DANS le dossier « Images » existant du coffre plutôt qu'à côté. Les images générées par JARVIS sont dans « JARVIS/Images » (référence jarvis-img:NOM) et se retrouvent aussi par leur description (en anglais, ex. « coloring firefighter »). Pour déplacer les dernières images générées : chemins = « dernieres_images:N ». En cas de doute sur un emplacement, commence par chercher ou lister.",
             mapOf(
                 "action" to prop("lister | chercher | dossier | deplacer | trier | renommer. « trier » range d'un coup TOUS les fichiers dont le NOM contient des mots (motif) dans un dossier : utilise-le dès que l'utilisateur parle de fichiers « nommés / qui contiennent / qui comportent X » — ne demande JAMAIS les noms exacts."),
@@ -994,6 +995,22 @@ class ToolBox(
             if (ap.lowercase() in setOf("aucune", "aucun", "rien", "demander", "")) { app.store.setAppPref(t, null); ToolResult("Plus d'application par défaut pour « $t » : je te demanderai à chaque fois.") }
             else { app.store.setAppPref(t, ap); ToolResult("✅ $ap sera toujours utilisée pour « $t ».") }
         }
+        "obsidian_doublons" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                if (app.obsidian.coffreConfigure() && !app.obsidian.coffreDisponible())
+                    return@withContext "⚠️ Le coffre Obsidian n'est pas accessible en lecture/écriture. Aucune analyse ni suppression effectuée. Vérifie l'autorisation Android dans les Réglages."
+                val notes = app.obsidian.analyserDoublons(a.optString("limite").toIntOrNull() ?: 1500)
+                if (notes.isEmpty()) "✅ Analyse terminée : aucun doublon exact ni nom de note répété détecté."
+                else buildString {
+                    append("🔎 ${notes.size} groupe(s) de doublons détecté(s) :")
+                    notes.forEachIndexed { index, groupe ->
+                        append("\n\n${index + 1}. ${groupe.type} (${groupe.chemins.size} notes)")
+                        groupe.chemins.forEach { append("\n- ${it}") }
+                    }
+                    append("\n\nAucune note n'a été supprimée. Dis-moi quel chemin tu souhaites conserver et quelle copie supprimer ; je demanderai confirmation avant chaque suppression.")
+                }
+            } catch (e: Exception) { "❌ Analyse Obsidian impossible : ${e.message ?: e.javaClass.simpleName}" }
+        })
         "obsidian_chercher" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             val r = app.obsidian.searchNotes(a.optString("requete"))
             if (r.isEmpty()) "Aucune note ne contient « ${a.optString("requete")} »." else r.joinToString("\n") { "- ${it.first}" + (if (it.second.isNotBlank()) " : …${it.second}…" else "") }
