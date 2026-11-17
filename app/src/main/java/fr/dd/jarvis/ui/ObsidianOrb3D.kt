@@ -198,17 +198,17 @@ private fun Orbe3DContenu(
     // Recul de caméra : toute la constellation tient dans l'écran (portrait) au zoom 1.
     // La zone utile exclut l'en-tête (~64 dp) et la consigne du bas (~28 dp) ; l'image est recentrée sur la
     // constellation (et non sur la sphère) par un décalage vertical de la projection.
-    val (distanceAuto, decalageAuto) = remember(c, taille) {
-        val hx = max(abs(c.minX), abs(c.maxX)) / DP_PAR_UNITE + 0.4f
-        val haut = -c.minY / DP_PAR_UNITE; val bas = -c.maxY / DP_PAR_UNITE
-        val cy = (haut + bas) / 2f; val hy = (haut - bas) / 2f + 0.4f
+    val (distanceAuto, decalageAuto) = remember(taille, dens) {
+        // La coque des dossiers est désormais une sphère de rayon constant : le cadrage se calcule
+        // sur son enveloppe 3D, et non plus sur l'ancien grand rectangle de la constellation 2D.
+        val rayonEnveloppe = 3.15f + 0.65f
         val tanY = tan(Math.toRadians(FOV_Y / 2.0)).toFloat()
         val h = if (taille.height > 0f) taille.height else 1600f
         val w = if (taille.width > 0f) taille.width else 800f
         val hDispo = (h - 92f * dens).coerceAtLeast(h * 0.6f)
-        val d = max(hx / (tanY * w / h), hy / (tanY * hDispo / h)) * 1.06f + 0.6f
+        val d = max(rayonEnveloppe / (tanY * w / h), rayonEnveloppe / (tanY * hDispo / h)) * 1.06f + 0.6f
         val cibleNdc = 1f - 2f * (64f * dens + hDispo / 2f) / h
-        d to (cibleNdc - cy / (tanY * d))
+        d to cibleNdc
     }
 
     // Horloge d'animation : balancement doux de la caméra quand l'utilisateur ne touche pas l'écran.
@@ -451,6 +451,9 @@ private class OrbeRenderer(private val camera: Camera3D) : GLSurfaceView.Rendere
     private var nbSphere = 0
     private var etoiles: FloatBuffer? = null
     private var nbEtoiles = 0
+    /** Éclats cristallins projetés autour de la sphère, comme une matière qui rayonne de son cœur. */
+    private var eclats: FloatBuffer? = null
+    private var nbEclats = 0
     private var anneaux: FloatBuffer? = null
     private var nbAnneau = 0
     private var largeur = 1f
@@ -485,6 +488,23 @@ private class OrbeRenderer(private val camera: Camera3D) : GLSurfaceView.Rendere
                 e[i * 4] = s * cos(t) * rad; e[i * 4 + 1] = u * rad; e[i * 4 + 2] = s * sin(t) * rad; e[i * 4 + 3] = r.nextFloat()
             }
             etoiles = tampon(e); nbEtoiles = 420
+
+            // Éclats de matière autour de l'orbe : distribution sphérique irrégulière, dense près de la
+            // surface puis éparse vers l'extérieur pour évoquer une explosion cristalline figée en orbite.
+            val aleaEclats = Random(73)
+            val pointsEclats = FloatArray(260 * 4)
+            for (i in 0 until 260) {
+                val u = aleaEclats.nextFloat() * 2f - 1f
+                val t = aleaEclats.nextFloat() * 2f * PI.toFloat()
+                val radial = kotlin.math.sqrt(1f - u * u)
+                val r = 1.10f + aleaEclats.nextFloat().pow(1.7f) * 1.05f
+                pointsEclats[i * 4] = radial * cos(t) * r
+                pointsEclats[i * 4 + 1] = u * r
+                pointsEclats[i * 4 + 2] = radial * sin(t) * r
+                pointsEclats[i * 4 + 3] = 0.28f + aleaEclats.nextFloat() * 0.72f
+            }
+            eclats = tampon(pointsEclats); nbEclats = 260
+
             // Deux anneaux orbitaux autour de la sphère (cercles inclinés), en points serrés pour un trait lumineux.
             val n = 360
             val a = FloatArray(n * 2 * 4)
@@ -574,10 +594,14 @@ private class OrbeRenderer(private val camera: Camera3D) : GLSurfaceView.Rendere
         GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, nbSphere)
         GLES20.glDisableVertexAttribArray(aPos); GLES20.glDisableVertexAttribArray(aNor)
 
-        // Anneaux orbitaux : testés en profondeur (la sphère cache la partie arrière), sans écrire la profondeur.
+        // Éclats violets en suspension : le test de profondeur conserve leur volume et masque ceux derrière
+        // l'obsidienne, tandis que le mélange additif leur donne un éclat minéral.
         GLES20.glEnable(GLES20.GL_BLEND)
         GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE)
         GLES20.glDepthMask(false)
+        dessinerPoints(eclats, nbEclats, mvp, 3.0f, 0.48f, 0.16f, 0.92f, 0.78f)
+
+        // Anneaux orbitaux : testés en profondeur (la sphère cache la partie arrière), sans écrire la profondeur.
         dessinerPoints(anneaux, nbAnneau, mvp, 3.2f, 0.72f, 0.45f, 1f, 0.55f)
         GLES20.glDepthMask(true)
         GLES20.glDisable(GLES20.GL_BLEND)
