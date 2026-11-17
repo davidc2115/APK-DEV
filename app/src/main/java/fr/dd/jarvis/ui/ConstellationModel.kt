@@ -98,7 +98,6 @@ data class NoeudDossier(
     val notes: List<ObsidianWriter.GraphNode>,
     val pieces: List<ObsidianWriter.GraphAttachment>,
     val totalRecursif: Int)
-
 /** Vrai lien [[wikilink]] orienté entre deux notes affichées. */
 data class LienReel(val de: String, val vers: String)
 
@@ -197,8 +196,7 @@ object ConstellationLayout {
     private class Rangee(val sous: Hub?, val tete: Etiquette?, val enfants: List<Rangee> = emptyList(), val feuille: Boolean = false) {
         val hauteur: Float by lazy {
             if (sous != null) max(2 * sous.rayon + 68f, enfants.sumOf { it.hauteur.toDouble() }.toFloat() + 48f)            else if (feuille) PAS_FEUILLE else H_ETIQUETTE + 9f
-        }
-    }
+        }    }
 
     /** Déplie [chemin] s'il est replié, le replie (avec tout ce qu'il contient) s'il est déplié. */
     fun basculer(deplies: Set<String>, chemin: String): Set<String> =
@@ -295,10 +293,10 @@ object ConstellationLayout {
 
         fun etiquetteNote(n: ObsidianWriter.GraphNode, hub: String, feuille: Boolean): Etiquette {
             val t = court(n.label, if (feuille) 18 else 20)
-            val e = if (feuille) 0.9f else 1f            return Etiquette("note:${n.id}", t, Icone.NOTE, TypeEtiquette.NOTE, hub, noteId = n.id, pos = Pt(0f, 0f),
+            val e = if (feuille) 0.9f else 1f
+            return Etiquette("note:${n.id}", t, Icone.NOTE, TypeEtiquette.NOTE, hub, noteId = n.id, pos = Pt(0f, 0f),
                 w = largeurEtiquette(t) * e, h = if (feuille) H_FEUILLE else H_ETIQUETTE, echelle = e)
-        }
-        fun etiquettePiece(a: ObsidianWriter.GraphAttachment, hub: String, feuille: Boolean): Etiquette {
+        }        fun etiquettePiece(a: ObsidianWriter.GraphAttachment, hub: String, feuille: Boolean): Etiquette {
             val t = court(a.name, if (feuille) 18 else 20)
             val e = if (feuille) 0.9f else 1f
             return Etiquette("fichier:${a.path}", t, iconePiece(a.kind), TypeEtiquette.FICHIER, hub, pos = Pt(0f, 0f),
@@ -394,11 +392,11 @@ object ConstellationLayout {
             }
             else if (hub.type == TypeHub.PIECES) {
                 val items = ordreTypes.map { kind ->
-                    val t = "${libellePiece(kind)} · ${piecesParType[kind]!!.size}"                    Etiquette("piece:$kind", t, iconePiece(kind), TypeEtiquette.PIECE, hub.cle, pos = hub.pos, w = largeurEtiquette(t), h = H_ETIQUETTE)
+                    val t = "${libellePiece(kind)} · ${piecesParType[kind]!!.size}"
+                    Etiquette("piece:$kind", t, iconePiece(kind), TypeEtiquette.PIECE, hub.cle, pos = hub.pos, w = largeurEtiquette(t), h = H_ETIQUETTE)
                 }
                 etiquettes += placerAutourDuHub(hub, items)
-            }
-        }
+            }        }
 
         // ---- tags : grappe de pastilles sous le cerveau, avec une petite étiquette « Tags » en dessous
         if (tagsAffiches.isNotEmpty()) {
@@ -497,8 +495,7 @@ object ConstellationLayout {
     /**
      * Branches d'une catégorie : chaque rangée (un sous-dossier en cercle, ou un fichier de la racine) est posée à côté
      * du hub, vers l'extérieur ; les fichiers d'un sous-dossier déplié prolongent sa branche un cran plus loin.
-     * Hub sur le côté : une colonne ; hub du haut ou du bas : deux colonnes, une de chaque côté.
-     */
+     * Hub sur le côté : une colonne ; hub du haut ou du bas : deux colonnes, une de chaque côté.     */
     private fun placerBranches(hub: Hub, rangees: List<Rangee>): Pair<List<Hub>, List<Etiquette>> {
         if (rangees.isEmpty()) return emptyList<Hub>() to emptyList()
         val hubs = mutableListOf<Hub>()
@@ -592,13 +589,13 @@ object ConstellationLayout {
             val p = Pt(cos(t).toFloat() * rx, sin(t).toFloat() * ry)
             longueurs[i] = longueurs[i - 1] + (p - prec).len(); prec = p
         }
-        val total = longueurs[pas]        val fractions = if (m == 2) listOf(0.25f, 0.75f) else List(m) { (it + 0.5f) / m }
+        val total = longueurs[pas]
+        val fractions = if (m == 2) listOf(0.25f, 0.75f) else List(m) { (it + 0.5f) / m }
         return fractions.map { f ->
             val cible = f * total
             var i = longueurs.indexOfFirst { it >= cible }.coerceAtLeast(0)
             if (i > pas) i = pas
-            val t = debut + (fin - debut) * i / pas
-            Pt(cos(t).toFloat() * rx, sin(t).toFloat() * ry)
+            val t = debut + (fin - debut) * i / pas            Pt(cos(t).toFloat() * rx, sin(t).toFloat() * ry)
         }
     }
 
@@ -698,66 +695,3 @@ object ConstellationLayout {
                     }
                 }
             }
-
-            // 2) Cercles contre le noyau et étiquettes contre le noyau / chaque cercle.
-            for (i in hubs.indices) {
-                val r = hubs[i].rayon
-                if (r <= 0f) continue
-                val dir = direction(hx[i], hy[i], i, i + 211)
-                val d = hypot(hx[i], hy[i])
-                val penetration = rayonNoyau + r + marge - d
-                if (penetration > 0f) {
-                    hx[i] += dir.x * penetration
-                    hy[i] += dir.y * penetration
-                    bouge = true
-                }
-            }
-            for (i in etiquettes.indices) {
-                if (pousserEtiquetteHorsCercle(i, Pt(0f, 0f), rayonNoyau)) bouge = true
-                for (j in hubs.indices) {
-                    val r = hubs[j].rayon
-                    if (r > 0f && pousserEtiquetteHorsCercle(i, Pt(hx[j], hy[j]), r + marge)) bouge = true
-                }
-            }
-
-            // 3) Étiquettes entre elles (rectangles, et non simples points).
-            for (i in etiquettes.indices) for (j in i + 1 until etiquettes.size) {
-                val a = etiquettes[i]; val b = etiquettes[j]
-                val dx = ex[j] - ex[i]; val dy = ey[j] - ey[i]
-                val px = (a.w + b.w) / 2f + marge - abs(dx)
-                val py = (a.h + b.h) / 2f + marge - abs(dy)
-                if (px > 0f && py > 0f) {
-                    bouge = true
-                    if (py < px) {
-                        val s = if (dy >= 0f) 1f else -1f
-                        ey[i] -= s * py * 0.5f; ey[j] += s * py * 0.5f
-                    } else {
-                        val s = if (dx >= 0f) 1f else -1f
-                        ex[i] -= s * px * 0.5f; ex[j] += s * px * 0.5f
-                    }
-                }
-            }
-
-            if (!bouge) break
-        }
-
-        for (i in hubs.indices) hubs[i] = hubs[i].copy(pos = Pt(hx[i], hy[i]))
-        for (i in etiquettes.indices) etiquettes[i] = etiquettes[i].copy(pos = Pt(ex[i], ey[i]))
-    }
-
-    /** Point d'ancrage d'une flèche sur le bord d'une étiquette, du côté d'où vient le trait. */
-    fun bordEtiquette(e: Etiquette, depuis: Pt): Pt {
-        val d = depuis - e.pos
-        if (abs(d.x) < 1e-3f && abs(d.y) < 1e-3f) return e.pos
-        val tx = if (abs(d.x) > 1e-3f) (e.w / 2f) / abs(d.x) else Float.MAX_VALUE
-        val ty = if (abs(d.y) > 1e-3f) (e.h / 2f) / abs(d.y) else Float.MAX_VALUE
-        val t = min(tx, ty)
-        return Pt(e.pos.x + d.x * t, e.pos.y + d.y * t)
-    }
-
-    /** Point sur le cercle d'un hub en direction de [vers]. */
-    fun bordCercle(c: Pt, r: Float, vers: Pt): Pt {
-        val d = (vers - c).norm()
-        return c + d * r
-    }
-}
