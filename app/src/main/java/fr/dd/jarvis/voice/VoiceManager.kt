@@ -1221,7 +1221,8 @@ class VoiceManager(private val ctx: Context) {
      * [onDone] est appelé (l'appelant relance alors l'écoute : la demande est captée).
      */
     fun speak(text: String, onDone: () -> Unit = {}) {
-        parole(onDone = onDone).apply { ajouter(text); finir() }
+        // Android Auto doit lire toute la réponse : la limite courte de la voix du téléphone ne s'applique pas en voiture.
+        parole(limite = if (sortieVoitureForcee) Int.MAX_VALUE else 3500, onDone = onDone).apply { ajouter(text); finir() }
     }
 
     /**
