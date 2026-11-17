@@ -384,7 +384,6 @@ class Brain(
         val domotique = pilotageChauffage || (Regex("t[ée]l[ée]|\\btv\\b|t[ée]l[ée]vis|volume|lumi[èe]re|lampe|volet|store|prise|home ?assistant|domotique|enceinte", RegexOption.IGNORE_CASE).containsMatchIn(recent) &&
             ACTION_DOMOTIQUE.containsMatchIn(recent))
         val rechercheAdresseDomicile = Regex("domicile|chez\\s+moi|ma\\s+maison|mon\\s+adresse|adresse\\s+personnelle|rentrer\\s+chez", RegexOption.IGNORE_CASE).containsMatchIn(recent)
-        val navigationDomicile = rechercheAdresseDomicile && Regex("navig|itin[eé]raire|gps|guidage|emm[eè]ne|conduis|rentre", RegexOption.IGNORE_CASE).containsMatchIn(recent)
         val indispensables = (if (domotique) listOf("notes_lire", "obsidian_chercher", "obsidian_lire", "ha_entites", "ha_etat", "ha_service") else emptyList()) +
             (if (rechercheAdresseDomicile) listOf("notes_lire", "obsidian_chercher", "obsidian_lire") else emptyList())
         if (plan != null && plan.outils.isNotEmpty()) {
