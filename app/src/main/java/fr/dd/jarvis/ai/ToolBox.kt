@@ -287,6 +287,8 @@ class ToolBox(
             listOf("nom", "format")))
         put(tool("fichiers_generes", "Liste les fichiers déjà créés par JARVIS (images de generer_image, documents de creer_fichier), les plus récents en premier, avec leur nom exact. À utiliser dès que l'utilisateur fait référence à une image ou un fichier déjà généré sans te redonner son nom exact, avant de dire que tu ne le retrouves pas.",
             mapOf("quoi" to prop("images, fichiers (documents) ou tous (par défaut)."), "max" to prop("Nombre maximum à lister (par défaut 20).")), listOf()))
+        put(tool("renommer_fichier", "Renomme un fichier DÉJÀ EXISTANT dans le coffre Obsidian configuré (et sa copie privée éventuelle). Outil obligatoire pour « renomme ce fichier/image » : ne crée aucun dossier, ne recrée pas le fichier avec creer_fichier et ne fais pas de copie. Si le nom est ambigu, demande le chemin exact. Vérifie le résultat avant de confirmer.",
+            mapOf("ancien" to prop("Nom exact retourné par fichiers_generes, ou chemin complet dans le coffre."), "nouveau" to prop("Nouveau nom souhaité ; l'extension existante est conservée si elle n'est pas fournie.")), listOf("ancien", "nouveau")))
         put(tool("documents_lister", "Liste les documents importés dans la bibliothèque privée de JARVIS, avec leurs noms exacts.", mapOf()))
         put(tool("document_lire", "Extrait le texte d'un document importé pour l'analyser, le résumer, le convertir ou réutiliser son contenu. Extrait toutes les pages des PDF texte ; pour un PDF scanné, utilise document_analyser afin de lancer l'OCR visuel page par page.", mapOf("nom" to prop("Nom exact du fichier affiché dans la bibliothèque documentaire.")), listOf("nom")))
         put(tool("document_analyser", "Analyse les documents importés : PDF, Word, Excel, PowerPoint, texte, images et vidéos. Pour les documents bureautiques, restitue les titres, tableaux, feuilles et diapositives.", mapOf("nom" to prop("Nom exact du fichier importé."), "question" to prop("Question ou objectif d'analyse.")), listOf("nom")))
@@ -783,6 +785,10 @@ class ToolBox(
         }
         "creer_fichier" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { fr.dd.jarvis.ai.Fichiers.creer(app, a) }.getOrElse { "❌ Création impossible : ${it.message}" } }, direct = true)
         "fichiers_generes" -> ToolResult(fr.dd.jarvis.ai.Fichiers.lister(app, a.optString("quoi"), a.optString("max").toIntOrNull() ?: 20))
+        "renommer_fichier" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { fr.dd.jarvis.ai.Fichiers.renommer(app, a.optString("ancien"), a.optString("nouveau")) }
+                .getOrElse { "❌ Renommage impossible : \${it.message ?: it.javaClass.simpleName}" }
+        }, direct = true)
         "documents_lister" -> ToolResult(fr.dd.jarvis.ai.DocumentStore.list(app))
         "document_lire" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.ai.DocumentStore.extract(app, a.optString("nom")) }, direct = true)
         "document_analyser" -> try {
