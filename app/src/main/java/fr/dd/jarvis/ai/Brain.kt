@@ -239,6 +239,13 @@ class Brain(
                 onStatus("📍 Position…")
                 runCatching { PersonneOu.repondre(app, texteUser) }.getOrNull()?.let { return reflexe(it) }
             }
+            // Création des devis/factures de TEST : exécution locale déterministe, sans laisser le modèle
+            // répondre par une simple liste de clients ou un récapitulatif de la société.
+            runCatching { fr.dd.jarvis.societe.SocieteTools.intentionCreationTest(app.societe.data, texteUser) }.getOrNull()?.let { args ->
+                args.optString("question").takeIf { it.isNotBlank() }?.let { return reflexe(it) }
+                onStatus("🧾 Création du document de test…")
+                return reflexe(tools.execute("document_creer", args).text)
+            }
             // Annuler / supprimer des factures ou devis (une, plusieurs, toutes), gérer les fiches de paie : même chose.
             runCatching { fr.dd.jarvis.societe.SocieteTools.intentionGestion(app.societe.data, texteUser) }.getOrNull()?.let { (outil, args) ->
                 onStatus("🧾 Société…")
