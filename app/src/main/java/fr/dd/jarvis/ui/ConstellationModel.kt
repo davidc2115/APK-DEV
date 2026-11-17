@@ -259,24 +259,48 @@ object ConstellationLayout {
                 (notesDe[""]?.size ?: 0) + (piecesDe[""]?.size ?: 0) + arborescenceComplete.sumOf { it.totalRecursif }))
         else arborescenceComplete
 
-        // ---- catégories = dossiers racine (les plus remplis d'abord ; au-delà de MAX, regroupés dans « Autres »)
+        // ---- catégories = dossiers racine. Les variantes d'un même nom (espaces/casse)
+        // sont présentées sous un seul hub, sans déplacer ni supprimer les dossiers physiques.
         val racines = enfantsDe[""].orEmpty().sortedWith(parTaille).toMutableList()
-        val categories = mutableListOf<String>()
-        if ((notesDe[""]?.size ?: 0) + (piecesDe[""]?.size ?: 0) > 0) racines += "Racine"
-        racines.sortWith(compareByDescending<String> { if (it == "Racine") (notesDe[""]?.size ?: 0) + (piecesDe[""]?.size ?: 0) else total(it) }.thenBy { it.lowercase() })
-        categories += racines.take(MAX_HUBS_DOSSIER)
-        val regroupees = racines.drop(MAX_HUBS_DOSSIER)
+        val groupesRacines = racines.groupBy { it.substringAfterLast('/').trim().lowercase() }
+        val racinesParCategorie = LinkedHashMap<String, List<String>>()
+        groupesRacines.values.forEach { groupe ->
+            val tries = groupe.sortedWith(parTaille)
+            val cle = if (tries.size == 1) tries.first() else nom(tries.first()).trim()
+            racinesParCategorie[cle] = tries
+            if (tries.size > 1) {
+                dossiers[cle] = ContenuDossier(
+                    cle,
+                    tries.flatMap { dossiers[it]?.sousDossiers.orEmpty() }.distinct(),
+                    tries.flatMap { dossiers[it]?.notes.orEmpty() },
+                    tries.flatMap { dossiers[it]?.pieces.orEmpty() },
+                    tries.sumOf { total(it) }
+                )
+            }
+        }
+        val racinesAffichees = racinesParCategorie.keys.toMutableList()
+        if ((notesDe[""]?.size ?: 0) + (piecesDe[""]?.size ?: 0) > 0) {
+            racinesAffichees += "Racine"
+            racinesParCategorie["Racine"] = emptyList()
+        }
+        racinesAffichees.sortWith(compareByDescending<String> {
+            if (it == "Racine") (notesDe[""]?.size ?: 0) + (piecesDe[""]?.size ?: 0)
+            else racinesParCategorie[it].orEmpty().sumOf { chemin -> total(chemin) }
+        }.thenBy { it.lowercase() })
+        val categories = racinesAffichees.take(MAX_HUBS_DOSSIER).toMutableList()
+        val regroupees = racinesAffichees.drop(MAX_HUBS_DOSSIER)
         if (regroupees.isNotEmpty()) {
             categories += "Autres"
-            dossiers["Autres"] = ContenuDossier("Autres", regroupees.filter { it != "Racine" }, emptyList(), emptyList(), regroupees.sumOf { if (it == "Racine") 0 else total(it) })
+            val cheminsAutres = regroupees.filter { it != "Racine" }.flatMap { racinesParCategorie[it].orEmpty() }
+            dossiers["Autres"] = ContenuDossier("Autres", cheminsAutres, emptyList(), emptyList(), cheminsAutres.sumOf { total(it) })
         }
         dossiers["Racine"] = ContenuDossier("Racine", emptyList(), notesDe[""].orEmpty().sortedBy { it.label.lowercase() }, piecesDe[""].orEmpty(), (notesDe[""]?.size ?: 0) + (piecesDe[""]?.size ?: 0))
         val notesParHub = LinkedHashMap<String, List<ObsidianWriter.GraphNode>>()
         categories.forEach { cat ->
             notesParHub[cat] = when (cat) {
                 "Racine" -> notesDe[""].orEmpty()
-                "Autres" -> regroupees.filter { it != "Racine" }.flatMap { notesRecursives(it) }
-                else -> notesRecursives(cat)
+                "Autres" -> regroupees.filter { it != "Racine" }.flatMap { racinesParCategorie[it].orEmpty().flatMap { chemin -> notesRecursives(chemin) } }
+                else -> racinesParCategorie[cat].orEmpty().flatMap { chemin -> notesRecursives(chemin) }
             }
         }
 
