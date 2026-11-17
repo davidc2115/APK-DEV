@@ -585,7 +585,7 @@ class SocieteService(
     fun exporterClient(c: Client): Pair<String, String> {
         val md = Rendu.rendreClient(data, c)
         val emplacement = obsidian.saveIn("Société/Clients", c.nom, md)
-        runCatching { obsidian.synchroniserIndex() }
+        obsidian.programmerSynchronisationIndex()
         return md to emplacement
     }
 
