@@ -76,6 +76,9 @@ object PontMcp {
 
     fun url() = "http://127.0.0.1:$PORT/mcp"
 
+    /** État réel du pont MCP local, sans lancer ni redémarrer le serveur. */
+    fun enService(): Boolean = serveur?.isClosed == false && fournisseur != null
+
     /** Dérive un secret dédié du secret Hermès déjà stocké ; aucun nouveau token à saisir ou stocker. */
     internal fun jetonRelaisIA(cleRacine: String): String {
         if (cleRacine.isBlank()) return ""
