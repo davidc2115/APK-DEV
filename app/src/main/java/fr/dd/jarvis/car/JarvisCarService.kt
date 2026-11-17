@@ -92,14 +92,23 @@ object NavigationVoiture {
     suspend fun lancer(destination: String, point: Pair<Double, Double>? = null): Boolean {
         val c = contexte ?: return false
         if (destination.isBlank() && point == null) return false
-        // Formats documentés par Android Auto : « geo:lat,lon » (point précis : fiche client, GPS) ou « geo:0,0?q=adresse ».
-        val geo = if (point != null) "geo:${point.first},${point.second}" else "geo:0,0?q=" + Uri.encode(destination)
+
+        // Pour une destination formulée en texte, envoyer d'abord la requête de recherche complète.
+        // Le format geo:lat,lon seul peut simplement centrer la carte sur un repère sans préparer
+        // l'itinéraire. Android Auto documente explicitement geo:0,0?q=adresse pour la navigation.
+        val recherche = destination.takeIf { it.isNotBlank() }
+            ?.let { Uri.parse("geo:0,0?q=" + Uri.encode(it)) }
+        val coordonnees = point?.let { Uri.parse("geo:${it.first},${it.second}") }
+        val tentatives = listOfNotNull(recherche, coordonnees).distinct()
+
         return withContext(Dispatchers.Main) {
-            runCatching { c.startCarApp(Intent(CarContext.ACTION_NAVIGATE).setData(Uri.parse(geo))); true }
-                .recoverCatching {
-                    // Certaines applis de navigation refusent le format avec coordonnées : nouvel essai avec l'adresse seule.
-                    if (point != null) { c.startCarApp(Intent(CarContext.ACTION_NAVIGATE).setData(Uri.parse("geo:0,0?q=" + Uri.encode(destination)))); true } else false
-                }.getOrDefault(false)
+            for (uri in tentatives) {
+                val accepte = runCatching {
+                    c.startCarApp(Intent(CarContext.ACTION_NAVIGATE).setData(uri))
+                }.isSuccess
+                if (accepte) return@withContext true
+            }
+            false
         }
     }
 }
