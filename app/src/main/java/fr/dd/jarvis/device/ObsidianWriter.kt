@@ -239,6 +239,49 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         }
     }
 
+    /** Renomme un fichier existant dans le coffre sélectionné ; aucun dossier ni nouveau fichier n'est créé. */
+    fun renommerFichier(cheminOuNom: String, nouveauNomBrut: String): String {
+        val query = cheminOuNom.trim().trim('/')
+        if (query.isBlank()) throw java.io.IOException("Indique le nom exact du fichier à renommer.")
+        val entries = toutLister(20_000).filter { !it.second }
+        val candidats = entries.filter { (path, _) ->
+            if ('/' in query) path.equals(query, true) else path.substringAfterLast('/').equals(query, true)
+        }
+        if (candidats.isEmpty()) throw java.io.IOException("Fichier introuvable dans le coffre : $query")
+        if (candidats.size > 1) throw java.io.IOException("Plusieurs fichiers portent ce nom : " + candidats.joinToString { it.first } + ". Précise le chemin complet.")
+        val oldPath = candidats.single().first
+        val oldName = oldPath.substringAfterLast('/')
+        val requested = safe(nouveauNomBrut.substringBeforeLast('.', nouveauNomBrut).trim(), "Fichier")
+        val extension = oldName.substringAfterLast('.', "").takeIf { it.isNotBlank() }
+        val suppliedExt = nouveauNomBrut.substringAfterLast('.', "").takeIf { it.isNotBlank() && nouveauNomBrut.contains('.') }
+        val newName = if (suppliedExt != null) "$requested.\${safe(suppliedExt, "")}" else if (extension != null) "$requested.$extension" else requested
+        if (newName.equals(oldName, true)) return oldPath
+        val parentPath = oldPath.substringBeforeLast('/', "")
+        val uriStr = store.obsidianUri.value
+        if (uriStr.isBlank()) {
+            val parent = File(localRoot(), parentPath)
+            val source = File(parent, oldName)
+            val target = File(parent, newName)
+            if (!source.isFile) throw java.io.IOException("Fichier source introuvable : $oldPath")
+            if (target.exists()) throw java.io.IOException("Un fichier nommé $newName existe déjà dans ce dossier.")
+            if (!source.renameTo(target) || !target.isFile || source.exists())
+                throw java.io.IOException("Android n'a pas confirmé le renommage de $oldPath.")
+        } else {
+            val tree = vaultRoot()?.takeIf { it.canWrite() } ?: throw java.io.IOException("Le coffre Obsidian configuré est inaccessible ou en lecture seule.")
+            var parent: DocumentFile? = tree
+            for (part in parentPath.split('/').filter { it.isNotBlank() })
+                parent = parent?.trouverLoose(part)?.takeIf { it.isDirectory }
+            val dir = parent ?: throw java.io.IOException("Dossier source introuvable : $parentPath")
+            val source = dir.trouverLoose(oldName)?.takeIf { it.isFile } ?: throw java.io.IOException("Fichier source introuvable : $oldPath")
+            if (dir.trouverLoose(newName) != null) throw java.io.IOException("Un fichier nommé $newName existe déjà dans ce dossier.")
+            if (!source.renameTo(newName)) throw java.io.IOException("Le fournisseur Android a refusé le renommage de $oldPath.")
+            if (dir.trouverLoose(newName) == null || dir.trouverLoose(oldName) != null)
+                throw java.io.IOException("Le renommage n'a pas pu être vérifié dans le coffre.")
+        }
+        synchroniserIndexSilencieusement()
+        return if (parentPath.isBlank()) newName else "$parentPath/$newName"
+    }
+
     /**
      * Supprime un fichier (coffre Obsidian ou dossier de l'application). Ne lève pas d'exception si absent.
      * Retourne vrai si un fichier a réellement été supprimé (jamais vrai en cas d'échec silencieux :
