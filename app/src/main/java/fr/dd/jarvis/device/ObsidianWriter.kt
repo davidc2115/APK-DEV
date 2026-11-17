@@ -1018,7 +1018,13 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         /** Pièces jointes réellement présentes dans le coffre (aucune n'est inventée). */
         val attachments: List<GraphAttachment> = emptyList(),
         /** Tous les dossiers du coffre (chemins relatifs), y compris les dossiers encore vides. */
-        val dossiers: List<String> = emptyList()
+        val dossiers: List<String> = emptyList(),
+        /** Nombre de notes dont le contenu a réellement été lu pour analyser les liens. */
+        val notesLues: Int = nodes.size,
+        /** Nombre de notes candidates dans la limite du parcours. */
+        val notesCandidates: Int = nodes.size,
+        /** Vrai si la limite de parcours a été atteinte : le coffre peut contenir davantage de notes. */
+        val limiteNotesAtteinte: Boolean = false
     )
 
     private val lienRegex = Regex("\\[\\[([^\\]|#]+)")
@@ -1167,7 +1173,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     /** Construit le graphe (nœuds = notes du coffre, arêtes = liens « [[...]] », dossiers, pièces jointes) pour l'Orbe
      *  et le Graphe. Toutes les notes et tous les dossiers sont relevés (jusqu'à [limiteNotes]) ; le contenu n'est lu
      *  (liens, tags) que pour [limiteLecture] notes, plafonné à [limiteOctets] par note, pour rester fluide. */
-    fun graph(limiteNotes: Int = 3000, limiteOctets: Int = 60_000, limitePieces: Int = 3000, limiteLecture: Int = 700): GraphData {
+    fun graph(limiteNotes: Int = 3000, limiteOctets: Int = 60_000, limitePieces: Int = 3000, limiteLecture: Int = 3000): GraphData {
         val v = vaultRoot()
         // Un coffre choisi mais temporairement inaccessible ne doit jamais faire apparaître le dossier privé
         // comme s'il s'agissait du coffre : l'Orbe reflète le coffre réel, ou indique qu'il est indisponible.
@@ -1209,9 +1215,11 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         val references = mutableListOf<GraphReference>()
         val vusReferences = HashSet<Pair<String, String>>()
         val vusEdges = HashSet<Pair<String, String>>()
+        var notesLues = 0
         for ((chemin, lire) in fichiers.take(limiteLecture)) {
             val fromId = idOf(chemin)
             val texte = lire() ?: continue
+            notesLues++
             runCatching { extraireTags(texte) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { tagsParNote[fromId] = it }
             for (m in lienRegex.findAll(texte)) {
                 val cible = m.groupValues[1].trim().trim('/')
@@ -1238,7 +1246,12 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                 if (vusEdges.add(cle)) edges += GraphEdge(fromId, toId)
             }
         }
-        return GraphData(nodesById.values.toList(), edges, references, tagsParNote, pieces, dossiers.map { it.replace(File.separatorChar, '/') })
+        return GraphData(
+            nodes = nodesById.values.toList(), edges = edges, references = references, tags = tagsParNote,
+            attachments = pieces, dossiers = dossiers.map { it.replace(File.separatorChar, '/') },
+            notesLues = notesLues, notesCandidates = fichiers.size,
+            limiteNotesAtteinte = fichiers.size >= limiteNotes
+        )
     }
 
     private companion object {
