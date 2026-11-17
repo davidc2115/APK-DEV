@@ -96,8 +96,10 @@ private fun versDome(p: Pt, avance: Float = 0f): FloatArray {
     val y = -p.y / DP_PAR_UNITE
     val distance = hypot(x, y)
     val longitude = atan2(y, x)
-    val latitude = (0.18f + distance * 0.16f).coerceIn(0.18f, 2.78f)
-    val rayon = 3.15f + avance
+    // On conserve les éléments sur l'hémisphère visible : l'ancienne latitude saturait à l'arrière
+    // et projetait les dossiers éloignés presque au même endroit.
+    val latitude = (0.16f + distance * 0.10f).coerceIn(0.16f, 1.42f)
+    val rayon = 3.55f + avance
     val projection = sin(latitude) * rayon
     return floatArrayOf(
         cos(longitude).toFloat() * projection,
@@ -187,14 +189,9 @@ private fun Orbe3DContenu(
     val pos3d = remember(c) {
         val m = HashMap<String, FloatArray>()
         c.hubs.forEach { m["hub:${it.cle}"] = versDome(it.pos, 0.25f) }
-        // Les branches (sous-dossiers et leurs fichiers) restent presque à la profondeur de leur hub : sinon le dôme
-        // les fait reculer et se tasser les unes sur les autres en bout de branche.
-        c.etiquettes.forEach { e ->
-            val p = versDome(e.pos, 0.12f)
-            val h = c.hub(e.hub)
-            if (h != null && h.type == TypeHub.DOSSIER) p[2] = max(p[2], versDome(h.pos, 0.12f)[2] - 0.12f)
-            m[e.id] = p
-        }
+        // Chaque dossier et chaque fichier garde sa vraie profondeur sur la coque sphérique.
+        // Ne pas rabattre les fichiers sur le plan du dossier : cela annulait l'effet de volume.
+        c.etiquettes.forEach { e -> m[e.id] = versDome(e.pos, 0.12f) }
         m
     }
     // Recul de caméra : toute la constellation tient dans l'écran (portrait) au zoom 1.
@@ -203,7 +200,7 @@ private fun Orbe3DContenu(
     val (distanceAuto, decalageAuto) = remember(taille, dens) {
         // La coque des dossiers est désormais une sphère de rayon constant : le cadrage se calcule
         // sur son enveloppe 3D, et non plus sur l'ancien grand rectangle de la constellation 2D.
-        val rayonEnveloppe = 3.15f + 0.65f
+        val rayonEnveloppe = 3.55f + 0.70f
         val tanY = tan(Math.toRadians(FOV_Y / 2.0)).toFloat()
         val h = if (taille.height > 0f) taille.height else 1600f
         val w = if (taille.width > 0f) taille.width else 800f
