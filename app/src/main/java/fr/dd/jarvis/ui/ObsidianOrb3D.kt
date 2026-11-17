@@ -354,7 +354,7 @@ private fun Orbe3DContenu(
             camera.tangage = -8f + tangageUser + calme * 5f * sin(temps * 0.15f)
             camera.zoom = zoomUser
             camera.distance = distanceAuto
-            camera.decalageNdcY = decalageAuto
+            camera.decalageNdcY = 0f // Le cerveau reste aligné sur le centre de l'écran.
             camera.tempsCoeur = temps
             val mvp = FloatArray(16); val mv = FloatArray(16)
             camera.matrices(size.width, size.height, mvp, mv)
