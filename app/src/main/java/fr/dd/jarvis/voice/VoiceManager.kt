@@ -106,6 +106,8 @@ class VoiceManager(private val ctx: Context) {
     var bargeIn = true
     /** Sur le haut-parleur du téléphone : voix en mode « appel » pendant la réponse (annulation d'écho → coupure fiable). */
     var duplex = true
+    /** Force le routage média vers la sortie voiture quand la voix est pilotée par l'interface Android Auto. */
+    @Volatile var sortieVoitureForcee = false
 
     private var muted = false
     // Bips du reconnaisseur de Google : flux système / notification (et accessibilité sur certains téléphones).
@@ -1143,7 +1145,7 @@ class VoiceManager(private val ctx: Context) {
             AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
             AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_BLE_SPEAKER
         )
-        return (ctx.applicationContext as? fr.dd.jarvis.JarvisApp)?.enVoiture == true ||
+        return sortieVoitureForcee || (ctx.applicationContext as? fr.dd.jarvis.JarvisApp)?.enVoiture == true ||
             runCatching { am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { it.type in types } }.getOrDefault(false)
     }
 
