@@ -355,6 +355,8 @@ internal class PorteVocale {
         const val MAINTIEN = 12         // 1,2 s de calme avant de refermer
         const val DUREE_MAX = 80        // 8 s de son continu au plus
 
+        internal fun seuilPourPlancher(plancher: Double) = maxOf(plancher * 1.5, plancher + 35.0, 55.0)
+
         fun rms(b: ShortArray, n: Int): Double {
             var somme = 0.0
             for (i in 0 until n) { val v = b[i].toDouble(); somme += v * v }
@@ -372,10 +374,6 @@ internal class PorteVocale {
 
     fun seuil() = seuilPourPlancher(plancher)
 
-    companion object {
-        /** Porte plus sensible aux voix faibles, tout en restant relative au bruit ambiant. */
-        internal fun seuilPourPlancher(plancher: Double) = maxOf(plancher * 1.5, plancher + 35.0, 55.0)
-    }
 
     fun trame(rms: Double): Decision {
         if (plancher < 0) plancher = rms.coerceIn(20.0, 2000.0)
