@@ -633,7 +633,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                 .flatMap { it.split(' ') }
                 .filter { it.length >= 3 }
                 .distinct()
-                .take(16)
+                .take(24)
             if (termes.isEmpty()) return@withContext emptyList()
 
             val fichiers: List<Pair<String, DocumentFile>> = if (coffreConfigure()) {
@@ -651,6 +651,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             for ((index, entree) in fichiers.withIndex()) {
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 val (path, fichier) = entree
+                if (path.startsWith("_Jarvis/Index coffre", ignoreCase = true) || path.startsWith("_Jarvis/Index dossiers/", ignoreCase = true)) continue
                 val contenu = runCatching {
                     if (coffreConfigure()) {
                         ctx.contentResolver.openInputStream(fichier.uri)?.use {
