@@ -243,7 +243,7 @@ fun GrapheCerveau2D(app: JarvisApp, enTete: @Composable () -> Unit = {}) {
     val c = constellationDe(etat)
     if (c == null) ChargementEnCours(etat.erreur, enTete)
     else ConstellationVue(
-        c = c, enTete = enTete,
+        c = c, enTete = { AgentsHermesButton(app); enTete() },
         onNote = { noteOuverte = it },
         onBasculer = { chemin -> etat.deplies = ConstellationLayout.basculer(c.deplies, chemin) },
         onHub = { cle -> if (c.hub(cle)?.type != TypeHub.PIECES && c.hub(cle)?.type != TypeHub.TAGS) hubListe = cle },
