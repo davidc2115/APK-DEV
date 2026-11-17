@@ -1281,7 +1281,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     Text(
                         if (app.obsidian.coffreDisponible()) "✓ Coffre accessible en lecture et écriture. Jarvis utilise ce coffre comme source principale."
                         else "⚠ Coffre sélectionné mais inaccessible. Vérifie l'autorisation Android ; Jarvis ne bascule pas vers une ancienne copie locale.",
-                        color = if (app.obsidian.coffreDisponible()) HudText else HudAccent,
+                        color = if (app.obsidian.coffreDisponible()) HudText else Color(0xFFFF6B6B),
                         fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp)
                     )
                 }
