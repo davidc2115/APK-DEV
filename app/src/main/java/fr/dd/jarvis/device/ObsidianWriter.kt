@@ -254,7 +254,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         val requested = safe(nouveauNomBrut.substringBeforeLast('.', nouveauNomBrut).trim(), "Fichier")
         val extension = oldName.substringAfterLast('.', "").takeIf { it.isNotBlank() }
         val suppliedExt = nouveauNomBrut.substringAfterLast('.', "").takeIf { it.isNotBlank() && nouveauNomBrut.contains('.') }
-        val newName = if (suppliedExt != null) "$requested.\${safe(suppliedExt, "")}" else if (extension != null) "$requested.$extension" else requested
+        val newName = if (suppliedExt != null) "$requested.${safe(suppliedExt, "")}" else if (extension != null) "$requested.$extension" else requested
         if (newName.equals(oldName, true)) return oldPath
         val parentPath = oldPath.substringBeforeLast('/', "")
         val uriStr = store.obsidianUri.value
