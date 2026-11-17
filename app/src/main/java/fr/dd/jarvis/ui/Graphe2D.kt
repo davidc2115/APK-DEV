@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -652,7 +653,7 @@ private fun Panneau(modifier: Modifier = Modifier, onClick: (() -> Unit)? = null
 
 @Composable
 private fun PanneauListe(titre: String, sousTitre: String, icone: Icone, puce: Color, items: List<String>, ouvert: Boolean, onItem: (String) -> Unit = {}, basculer: () -> Unit) {
-    Panneau(Modifier.fillMaxWidth(), onClick = basculer) {
+    Panneau(Modifier.fillMaxWidth().heightIn(max = 180.dp).verticalScroll(rememberScrollState()), onClick = basculer) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconeCompose(icone, 14.dp, if (icone == Icone.ETOILE) Color(0xFFFFC14D) else Color(0xFFFF6B5C))
             Column(Modifier.padding(start = 6.dp).weight(1f)) {
@@ -663,13 +664,12 @@ private fun PanneauListe(titre: String, sousTitre: String, icone: Icone, puce: C
         }
         if (ouvert) {
             if (items.isEmpty()) Text("Aucun", color = Neon.sousTitre, fontSize = 11.sp, fontFamily = Neon.serif, modifier = Modifier.padding(top = 3.dp))
-            items.take(4).forEach { s ->
+            items.forEach { s ->
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 3.dp)) {
                     Box(Modifier.size(6.dp).background(puce, CircleShape))
                     Text(s, color = Neon.blancViolet, fontSize = 11.sp, fontFamily = Neon.serif, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 6.dp).clickable { onItem(s) })
                 }
             }
-            if (items.size > 4) Text("+${items.size - 4} autres", color = Neon.sousTitre, fontSize = 10.sp, fontFamily = Neon.serif, modifier = Modifier.padding(top = 2.dp))
         }
     }
 }
