@@ -365,7 +365,7 @@ fun ConstellationVue(
                 .pointerInput(c) {
                     detectTransformGestures { _, pan, zoom, _ ->
                         // Zoom autour du centre de l'écran : le déplacement suit le même facteur.
-                        val z = (zoomUser * zoom).coerceIn(0.12f, 12f) / zoomUser
+                        val z = (zoomUser * zoom).coerceIn(0.015f, 18f) / zoomUser
                         zoomUser *= z
                         panUser = panUser * z + pan
                     }
@@ -437,6 +437,9 @@ fun ConstellationVue(
                 hubActif != null -> if (h.cle == hubActif) 1f else 0.45f
                 else -> 1f
             }
+            // Niveau de détail progressif : loin, uniquement des points ; en approchant, les noms apparaissent.
+            val detailTexte = ((zoomUser - 0.28f) / 0.62f).coerceIn(0f, 1f)
+            val vuePoints = zoomUser <= 0.28f
 
             // 1. Toile d'énergie cerveau → hubs.
             dessinerToile(centre, rCentre, hubsAnneau.map { ecran(it.pos) to it.rayon * k }, k, pulse)
@@ -500,8 +503,14 @@ fun ConstellationVue(
                 if (!hubVisible(h)) continue
                 if (h.type == TypeHub.TAGS) dessinerHubTags(h, ecran(h.pos), k, mesureur, fontScale)
                 else {
-                    dessinerHub(h, ecran(h.pos), h.rayon * k, mesureur, fontScale, alphaHub(h), actif = h.cle == hubActif, pulse = pulse)
-                    if (h.depliable) dessinerBadgeDepli(ecran(Pt(h.pos.x, h.pos.y + h.rayon * 1.02f)), max(h.rayon * 0.22f, 7f) * k, h.deplie, alphaHub(h))
+                    val point = ecran(h.pos)
+                    if (vuePoints) {
+                        val rayonPoint = (2.1f + h.niveau.coerceAtMost(3) * 0.35f) * dens
+                        drawCircle(Neon.violetVif.copy(alpha = alphaHub(h)), rayonPoint, point)
+                    } else {
+                        dessinerHub(h, point, h.rayon * k, mesureur, fontScale, alphaHub(h) * detailTexte, actif = h.cle == hubActif, pulse = pulse)
+                        if (h.depliable && detailTexte > 0.55f) dessinerBadgeDepli(ecran(Pt(h.pos.x, h.pos.y + h.rayon * 1.02f)), max(h.rayon * 0.22f, 7f) * k, h.deplie, alphaHub(h) * detailTexte)
+                    }
                 }
             }
             zonesEtiquettes.clear()
@@ -511,7 +520,15 @@ fun ConstellationVue(
                 if (e.type == TypeEtiquette.TAG && !voirTags) continue
                 val a = alphaEtiquette(e)
                 val sur = (e.noteId != null && (e.noteId == noteActive || (requete.isNotBlank() && e.noteId in idsCorrespondants))) || (e.tag != null && e.tag == tagActif)
-                zonesEtiquettes[e.id] = dessinerEtiquette(e, ecran(e.pos), k, mesureur, fontScale, a, sur, taillePxMin = 8.5f * dens)
+                val point = ecran(e.pos)
+                if (vuePoints) {
+                    val rayonPoint = 1.45f * dens
+                    drawCircle(Neon.lavande.copy(alpha = a), rayonPoint, point)
+                    val hit = 5f * dens
+                    zonesEtiquettes[e.id] = Rect(point - Offset(hit, hit), Size(hit * 2f, hit * 2f))
+                } else {
+                    zonesEtiquettes[e.id] = dessinerEtiquette(e, point, k, mesureur, fontScale, a * detailTexte, sur, taillePxMin = 8.5f * dens)
+                }
             }
         }
 
