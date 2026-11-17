@@ -296,7 +296,7 @@ private fun Orbe3DContenu(
         Canvas(
             Modifier.fillMaxSize()
                 .pointerInput(Unit) {
-                    detectTransformGestures { _, pan, zoom, _ ->
+                    detectTransformGestures { centroid, pan, zoom, _ ->
                         dernierGeste = temps
                         zoomUser = (zoomUser * zoom).coerceIn(0.015f, 12f)
                         if (zoom > 1.015f) {
