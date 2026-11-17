@@ -704,6 +704,12 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         }
         if (!confirm("Supprimer définitivement la fiche client « ${cible.nom} » et ses ${cible.sites.size} installation(s) de la base Société ? Cette action est irréversible.", true))
             return err("Suppression refusée. La fiche « ${cible.nom} » est conservée.")
+        // Un coffre configuré mais inaccessible ne doit jamais être pris pour une fiche absente.
+        val coffrePret = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            !app.obsidian.coffreConfigure() || app.obsidian.coffreDisponible()
+        }
+        if (!coffrePret)
+            return err("⛔ Suppression annulée : le coffre Obsidian sélectionné est inaccessible ou en lecture seule. La fiche Société est conservée.")
         svc.repo.update { data -> data.copy(clients = data.clients.filterNot { it.id == cible.id }) }
         val removed = svc.repo.refresh().clients.none { it.id == cible.id }
         if (!removed) return err("❌ La fiche « ${cible.nom} » est toujours présente après la tentative de suppression. Aucune confirmation de réussite.")
