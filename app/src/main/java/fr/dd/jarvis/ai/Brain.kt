@@ -194,10 +194,16 @@ class Brain(
         fun reflexeMaison(r: String) = reflexe(r).also { if (!pourHermes) fr.dd.jarvis.hermes.Routeur.noterMaison() }
         // Les devis/factures de test sont exécutés localement, même si la demande est routée vers Hermès.
         // Le nom du client peut provenir des derniers échanges (ex. juste après sa création).
-        val contexteRecentSociete = history.takeLast(6).joinToString(" ") { it.text }
-        runCatching {
-            fr.dd.jarvis.societe.SocieteTools.intentionCreationTest(app.societe.data, texteUser, contexteRecentSociete)
-        }.getOrNull()?.let { args ->
+        val demandeDocumentTest = Regex("\\b(test|simulation|exemple)\\b").containsMatchIn(fr.dd.jarvis.societe.core.normaliser(texteUser)) &&
+            Regex("\\b(devis|facture)\\b").containsMatchIn(fr.dd.jarvis.societe.core.normaliser(texteUser))
+        if (demandeDocumentTest) {
+            // On ne laisse jamais le modèle remplacer cette action par une simple liste ou un résumé Société.
+            val contexteRecentSociete = history.dropLast(1).lastOrNull { !it.fromUser }?.text.orEmpty()
+            val args = runCatching {
+                fr.dd.jarvis.societe.SocieteTools.intentionCreationTest(app.societe.data, texteUser, contexteRecentSociete)
+            }.getOrElse { e ->
+                return reflexe("❌ Je n'ai pas pu préparer le document de test : ${e.message ?: e.javaClass.simpleName}")
+            } ?: return reflexe("Je reconnais la demande de document de test, mais je n'ai pas pu déterminer les éléments nécessaires. Indique le client existant et la prestation du catalogue à utiliser.")
             args.optString("question").takeIf { it.isNotBlank() }?.let { return reflexe(it) }
             onStatus("🧾 Création du document de test…")
             return reflexe(tools.execute("document_creer", args).text)
