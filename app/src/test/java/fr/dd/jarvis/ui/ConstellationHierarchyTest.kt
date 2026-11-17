@@ -90,8 +90,10 @@ class ConstellationHierarchyTest {
                 assertTrue("Étiquettes en collision : ${a.texte} / ${b.texte}",
                     dx + 0.5f >= (a.w + b.w) / 2f + 12f || dy + 0.5f >= (a.h + b.h) / 2f + 12f)
             }
-            val coreX = a.pos.x.coerceIn(-a.w / 2f, a.w / 2f)
-            val coreY = a.pos.y.coerceIn(-a.h / 2f, a.h / 2f)
+            // Distance du centre du noyau (0,0) au rectangle de l'étiquette.
+            // Le point doit être projeté dans les bornes du rectangle, pas l'inverse.
+            val coreX = 0f.coerceIn(a.pos.x - a.w / 2f, a.pos.x + a.w / 2f)
+            val coreY = 0f.coerceIn(a.pos.y - a.h / 2f, a.pos.y + a.h / 2f)
             assertTrue("Une étiquette recouvre le noyau : ${a.texte}",
                 kotlin.math.hypot(coreX, coreY) + 0.5f >= ConstellationLayout.RAYON_CERVEAU + 18f)
             for (h in hubs) {
