@@ -86,6 +86,22 @@ class AnalyseLiensObsidianTest {
     }
 
     @Test
+    fun neDeclarePasDeFichiersOrphelinsQuandLaLimiteDePiecesEstAtteinte() {
+        val data = ObsidianWriter.GraphData(
+            nodes = listOf(ObsidianWriter.GraphNode("A", "Alpha", "")),
+            edges = emptyList(),
+            notesLues = 1,
+            notesCandidates = 1,
+            limitePiecesAtteinte = true
+        )
+
+        val audit = AnalyseLiensObsidian.analyser(data)
+
+        assertTrue(!audit.analyseComplete)
+        assertTrue(audit.fichiersOrphelins.isEmpty())
+    }
+
+    @Test
     fun signaleUneAnalysePartielleQuandDesNotesNontPasPuEtreLues() {
         val data = ObsidianWriter.GraphData(
             nodes = listOf(ObsidianWriter.GraphNode("A", "Alpha", "")),
