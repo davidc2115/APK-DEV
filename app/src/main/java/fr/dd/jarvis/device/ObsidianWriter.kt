@@ -10,6 +10,8 @@ import java.io.File
  * Écrit les fichiers dans le dossier Obsidian choisi (sélecteur Android, sous-dossiers créés au besoin),
  * sinon dans le dossier propre à l'application (Android/data/fr.dd.jarvis/files/<dossier>).
  */
+data class DoublonObsidian(val type: String, val chemins: List<String>, val empreinte: String)
+
 class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
     private fun safe(name: String, def: String) =
@@ -349,6 +351,36 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                 runCatching { f.readText() }.getOrNull()?.let { action(f.relativeTo(localRoot()).path, it) }
             }
         }
+    }
+
+    /**
+     * Repère les doublons exacts de contenu et les notes qui portent le même nom dans des dossiers différents.
+     * Le scan est en lecture seule, borné et doit être exécuté hors du fil principal.
+     */
+    fun analyserDoublons(limite: Int = 1500): List<DoublonObsidian> {
+        signalerFilPrincipal("analyserDoublons")
+        if (coffreConfigure() && !coffreDisponible())
+            throw java.io.IOException("Le coffre Obsidian est configuré mais inaccessible. Vérifie les autorisations Android avant de lancer l'analyse.")
+        val notes = mutableListOf<Pair<String, String>>()
+        parcourirContenus(limite.coerceIn(1, 3000)) { path, content ->
+            val normalise = content.replace("\\r\\n", "\\n").replace('\\r', '\\n').trim()
+            if (normalise.isNotBlank()) notes += path to normalise
+        }
+        val groupes = mutableListOf<DoublonObsidian>()
+        val contenus = notes.groupBy { (_, body) ->
+            val digest = java.security.MessageDigest.getInstance("SHA-256").digest(body.toByteArray(Charsets.UTF_8))
+            digest.joinToString("") { "%02x".format(it) }
+        }
+        contenus.filterValues { it.size > 1 }.forEach { (hash, entries) ->
+            groupes += DoublonObsidian("contenu identique", entries.map { it.first }.sorted(), hash.take(12))
+        }
+        val noms = notes.groupBy { (path, _) -> normaliseNom(path.substringAfterLast('/').removeSuffix(".md")) }
+        noms.filter { (key, entries) -> key.isNotBlank() && entries.size > 1 }.forEach { (key, entries) ->
+            val paths = entries.map { it.first }.distinct().sorted()
+            if (paths.size > 1 && groupes.none { it.chemins.containsAll(paths) && it.chemins.size == paths.size })
+                groupes += DoublonObsidian("même nom, contenu à comparer", paths, key)
+        }
+        return groupes.sortedWith(compareBy<DoublonObsidian> { if (it.type == "contenu identique") 0 else 1 }.thenBy { it.chemins.firstOrNull().orEmpty() })
     }
 
     /** Notes du coffre (chemins relatifs), éventuellement dans un dossier. */
