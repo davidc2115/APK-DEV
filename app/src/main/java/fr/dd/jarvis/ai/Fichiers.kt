@@ -298,6 +298,23 @@ object Fichiers {
             (s.siret.filter { it.isDigit() }.length >= 9 && a.optString("contenu").filter { it.isDigit() }.contains(s.siret.filter { it.isDigit() }))
     }
 
+    /** Renomme le fichier existant dans le coffre et sa copie privée éventuelle, sans créer de dossier. */
+    fun renommer(app: JarvisApp, ancien: String, nouveau: String): String {
+        val source = ancien.trim().substringAfterLast('/')
+        if (source.isBlank() || nouveau.isBlank()) throw IllegalArgumentException("Indique le nom actuel et le nouveau nom.")
+        val chemin = app.obsidian.renommerFichier(ancien, nouveau)
+        val oldName = source
+        val ext = oldName.substringAfterLast('.', "")
+        val newBase = nouveau.substringBeforeLast('.', nouveau).replace(Regex("[\\\\/:*?""<>|]"), "_")
+        val newName = if (nouveau.contains('.')) nouveau.replace(Regex("[\\\\/:*?""<>|]"), "_") else if (ext.isNotBlank()) "$newBase.$ext" else newBase
+        listOf(File(app.filesDir, "images"), dossier(app), dossierVideos(app)).forEach { dir ->
+            val from = File(dir, oldName)
+            val to = File(dir, newName)
+            if (from.isFile && !to.exists()) runCatching { from.renameTo(to) }
+        }
+        return "✅ Fichier renommé : $chemin"
+    }
+
     /** Crée le fichier ; retourne la ligne Markdown à afficher (lien « jarvis-file: »). */
     fun creer(app: JarvisApp, a: JSONObject): String {
         val format = a.optString("format").trim().lowercase().removePrefix(".").ifBlank { a.optString("nom").substringAfterLast('.', "txt").lowercase() }
