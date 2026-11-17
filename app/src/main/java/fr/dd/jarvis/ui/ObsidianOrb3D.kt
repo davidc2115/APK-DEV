@@ -200,7 +200,7 @@ private fun Orbe3DContenu(
     val (distanceAuto, decalageAuto) = remember(c, taille, dens) {
         // La coque des dossiers est désormais une sphère de rayon constant : le cadrage se calcule
         // sur son enveloppe 3D, et non plus sur l'ancien grand rectangle de la constellation 2D.
-        val distanceMax = (c.hubs.map { it.pos.len() } + c.etiquettes.map { it.pos.len() }).maxOrNull().orZero() / DP_PAR_UNITE
+        val distanceMax = ((c.hubs.map { it.pos.len() } + c.etiquettes.map { it.pos.len() }).maxOrNull() ?: 0f) / DP_PAR_UNITE
         val rayonEnveloppe = max(4.25f, 3.15f + distanceMax * 0.16f + 0.95f)
         val tanY = tan(Math.toRadians(FOV_Y / 2.0)).toFloat()
         val h = if (taille.height > 0f) taille.height else 1600f
