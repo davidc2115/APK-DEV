@@ -613,6 +613,75 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             .map { it.relativeTo(localRoot()).path }.sorted().toList() else emptyList()
     }
 
+    /**
+     * Recherche multi-termes dans les noms ET le contenu du coffre, en un seul parcours.
+     * Contrairement à searchNotes(query), cette méthode ne dépend pas d'une phrase exacte :
+     * elle classe les notes selon le nombre de termes retrouvés et favorise le chemin/titre.
+     * Le parcours est borné et annulable pour rester utilisable depuis la recherche de contexte.
+     */
+    suspend fun searchNotesAny(queries: Collection<String>, limit: Int = 10, maxScan: Int = 1500): List<Pair<String, String>> =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val normaliserRecherche: (String) -> String = { value ->
+                java.text.Normalizer.normalize(value, java.text.Normalizer.Form.NFD)
+                    .replace(Regex("\\p{M}"), "")
+                    .lowercase(java.util.Locale.ROOT)
+                    .replace(Regex("[^a-z0-9]+"), " ")
+                    .trim()
+            }
+            val termes = queries.map(normaliserRecherche)
+                .flatMap { it.split(' ') }
+                .filter { it.length >= 3 }
+                .distinct()
+                .take(16)
+            if (termes.isEmpty()) return@withContext emptyList()
+
+            val fichiers: List<Pair<String, DocumentFile>> = if (coffreConfigure()) {
+                if (vaultRoot() == null) return@withContext emptyList()
+                allNotes(maxScan.coerceIn(1, 2500))
+            } else {
+                localRoot().walkTopDown()
+                    .filter { it.isFile && it.name.endsWith(".md", true) }
+                    .take(maxScan.coerceIn(1, 2500))
+                    .map { it.relativeTo(localRoot()).path to DocumentFile.fromFile(it) }
+                    .toList()
+            }
+
+            val resultats = mutableListOf<Triple<String, Int, String>>()
+            for ((index, entree) in fichiers.withIndex()) {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                val (path, fichier) = entree
+                val contenu = runCatching {
+                    if (coffreConfigure()) {
+                        ctx.contentResolver.openInputStream(fichier.uri)?.use {
+                            it.readBytes().take(80_000).toByteArray().toString(Charsets.UTF_8)
+                        }
+                    } else {
+                        fichier.uri.path?.let { java.io.File(it).takeIf { file -> file.isFile }?.readText() }
+                    }
+                }.getOrNull().orEmpty()
+                val cheminNormalise = normaliserRecherche(path)
+                val corpsNormalise = normaliserRecherche(contenu)
+                val dansChemin = termes.filter { cheminNormalise.contains(it) }
+                val dansCorps = termes.filter { corpsNormalise.contains(it) }
+                val score = dansChemin.size * 3 + dansCorps.size
+                if (score > 0) {
+                    val lignes = contenu.lineSequence().map { it.trim() }
+                        .filter { ligne ->
+                            val n = normaliserRecherche(ligne)
+                            n.isNotBlank() && termes.any { n.contains(it) }
+                        }
+                        .take(5).toList()
+                    val extrait = (if (lignes.isNotEmpty()) lignes.joinToString(" · ") else contenu.lineSequence().take(5).joinToString(" · "))
+                        .replace(Regex("\\s+"), " ").take(900)
+                    resultats += Triple(path, score, extrait)
+                }
+            }
+            resultats.sortedWith(compareByDescending<Triple<String, Int, String>> { it.second }
+                .thenBy { it.first.lowercase(java.util.Locale.ROOT) })
+                .take(limit.coerceIn(1, 30))
+                .map { it.first to it.third }
+        }
+
     /** Recherche texte (nom + contenu). Retourne (chemin, extrait). */
     fun searchNotes(query: String, limit: Int = 12): List<Pair<String, String>> {
         signalerFilPrincipal("searchNotes")
