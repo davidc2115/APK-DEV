@@ -134,6 +134,33 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     @Synchronized
     private fun ensure() { if (!loaded) load() }
 
+    // Relecture légère du coffre : les modifications faites directement dans Obsidian
+    // deviennent visibles sans redémarrer Jarvis. Le délai évite une lecture SAF à chaque prompt.
+    @Volatile private var derniereRelectureCoffre = 0L
+    @Synchronized
+    private fun rafraichirDepuisCoffreSiNecessaire() {
+        if (!obsidian.coffreConfigure()) return
+        // SAF peut être lent : ne jamais ouvrir de document Obsidian depuis le thread UI.
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) return
+        val maintenant = android.os.SystemClock.elapsedRealtime()
+        if (maintenant - derniereRelectureCoffre < 30_000L) return
+        derniereRelectureCoffre = maintenant
+        if (!obsidian.coffreDisponible()) return
+
+        // Une note absente ou une erreur de lecture ne vide jamais la mémoire en cache.
+        // En revanche, une note lisible remplace bien les rubriques en mémoire, y compris
+        // lorsqu'une rubrique a été supprimée manuellement dans Obsidian.
+        runCatching { obsidian.read(FOLDER, FILE) }.getOrNull()?.let { parse(it) }
+        runCatching { loadCandidates() }
+
+        runCatching { obsidian.read(FOLDER, "Mémoire Hermès source.md") }.getOrNull()?.let { brut ->
+            if (brut != hermesCache) hermesCache = brut
+        }
+        runCatching { obsidian.read(FOLDER, "Capacités Hermès.json") }.getOrNull()?.let { brut ->
+            runCatching { org.json.JSONObject(brut) }.getOrNull()?.let { capacitesCache = it }
+        }
+    }
+
     @Synchronized
     private fun persist(): String {
         val md = render()
@@ -276,6 +303,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     /** Mémoire de Jarvis telle qu'Hermès la recopie dans son SOUL.md (bloc géré, chargé à chaque session). */
     fun pourHermes(): String {
         ensure()
+        rafraichirDepuisCoffreSiNecessaire()
         val identite = "## Identité\nDans cette installation, tu es Hermès, le cerveau principal de JARVIS, l'assistant personnel de l'utilisateur sur son téléphone : " +
             "tu réponds à toutes ses demandes, avec les outils du téléphone (Jarvis) et une seule mémoire partagée.\n\n"
         if (items.isEmpty()) return identite.trim()
@@ -292,6 +320,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     @Synchronized
     fun pourPrompt(): String {
         ensure()
+        rafraichirDepuisCoffreSiNecessaire()
         if (items.isEmpty()) return ""
         val complet = toutes()
         if (complet.length <= 1800) return complet
