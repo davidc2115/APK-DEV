@@ -6,6 +6,7 @@ import androidx.documentfile.provider.DocumentFile
 import fr.dd.jarvis.data.Store
 import java.io.File
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.ensureActive
 
 /**
  * Écrit les fichiers dans le dossier Obsidian choisi (sélecteur Android, sous-dossiers créés au besoin),
@@ -619,7 +620,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
      * elle classe les notes selon le nombre de termes retrouvés et favorise le chemin/titre.
      * Le parcours est borné et annulable pour rester utilisable depuis la recherche de contexte.
      */
-    suspend fun searchNotesAny(queries: Collection<String>, limit: Int = 10, maxScan: Int = 1500): List<Pair<String, String>> =
+    suspend fun searchNotesAny(queries: Collection<String>, limit: Int = 10, maxScan: Int = 2000): List<Pair<String, String>> =
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             val normaliserRecherche: (String) -> String = { value ->
                 java.text.Normalizer.normalize(value, java.text.Normalizer.Form.NFD)
