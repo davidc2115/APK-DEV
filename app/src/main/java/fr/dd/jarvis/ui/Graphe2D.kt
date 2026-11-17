@@ -100,12 +100,20 @@ fun rememberConstellation(app: JarvisApp): ChargementConstellation {
         etat.enCours = true
         val r = withContext(Dispatchers.IO) {
             runCatching {
+                // Les index générés sont la table des matières réelle du coffre. Les synchroniser
+                // avant de calculer les liens entrants afin que les notes et pièces jointes soient
+                // effectivement référencées dans le graphe, pas seulement comptées comme orphelines.
+                val sync = runCatching { app.obsidian.synchroniserIndex() }
                 etat.signature = runCatching { app.obsidian.signature() }.getOrDefault(0L)
-                app.obsidian.graph()
+                val graph = app.obsidian.graph()
+                graph to sync.exceptionOrNull()?.message
             }
         }
         etat.enCours = false
-        r.onSuccess { etat.donnees = it }.onFailure { etat.erreur = it.message ?: it.javaClass.simpleName }
+        r.onSuccess { (graph, syncError) ->
+            etat.donnees = graph
+            if (syncError != null) etat.erreur = "Indexation non actualisée : $syncError"
+        }.onFailure { etat.erreur = it.message ?: it.javaClass.simpleName }
     }
     LaunchedEffect(Unit) {
         while (true) {
