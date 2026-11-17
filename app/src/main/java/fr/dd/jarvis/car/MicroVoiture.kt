@@ -137,11 +137,11 @@ class MicroVoiture(private val ctx: CarContext) {
         try {
             // CarAudioRecord fournit du PCM audio/l16 à 16 kHz, par blocs de 512 octets maximum.
             voiture = try { CarAudioRecord.create(ctx) } catch (e: Throwable) {
-                erreurVoiture = "création CarAudioRecord : \${e.message ?: e.javaClass.simpleName}"
+                erreurVoiture = "création CarAudioRecord : ${e.message ?: e.javaClass.simpleName}"
                 null
             }
-            if (voiture != null) {
-                val record = voiture
+            val record = voiture
+            if (record != null) {
                 val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
                     .setAudioAttributes(AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
@@ -158,7 +158,7 @@ class MicroVoiture(private val ctx: CarContext) {
                             boucle(attenteMs, maxMs, CarAudioRecord.AUDIO_CONTENT_BUFFER_SIZE,
                                 ordreOctetsForce = true) { b -> record.read(b, 0, minOf(b.size, CarAudioRecord.AUDIO_CONTENT_BUFFER_SIZE)) }
                         } catch (e: Throwable) {
-                            erreurVoiture = "lecture micro voiture : \${e.message ?: e.javaClass.simpleName}"
+                            erreurVoiture = "lecture micro voiture : ${e.message ?: e.javaClass.simpleName}"
                             null
                         } finally { runCatching { record.stopRecording() } }
                         if (r != null && r !is Ecoute.Erreur) {
