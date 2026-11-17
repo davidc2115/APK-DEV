@@ -427,11 +427,18 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     }
 
     /** Valide la référence uniquement si le coffre n'a pas encore changé depuis le dernier rapport. */
+    private fun memesEmpreintes(a: org.json.JSONObject, b: org.json.JSONObject): Boolean {
+        val ak = a.keys().asSequence().toSet()
+        val bk = b.keys().asSequence().toSet()
+        return ak == bk && ak.all { a.optString(it) == b.optString(it) }
+    }
+
     fun validerReferenceModifications(limite: Int = 1500): Boolean {
         val prefs = ctx.getSharedPreferences("obsidian_sync", Context.MODE_PRIVATE)
         val attente = prefs.getString("en_attente", null) ?: return false
         val courant = instantaneNotes(limite)
-        if (courant.toString() != attente) return false
+        val attendu = runCatching { org.json.JSONObject(attente) }.getOrNull() ?: return false
+        if (!memesEmpreintes(courant, attendu)) return false
         prefs.edit().putString("reference", attente).remove("en_attente").apply()
         return true
     }
