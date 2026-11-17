@@ -118,11 +118,13 @@ private class Camera3D {
     /** Décalage vertical de l'image (en coordonnées normalisées) : recentre la constellation entre l'en-tête et le
      *  bas de l'écran sans déplacer le centre de rotation (la sphère). */
     @Volatile var decalageNdcY = 0f
+    @Volatile var focusNdcX = 0f
+    @Volatile var focusNdcY = 0f
 
     fun projection(largeur: Float, hauteur: Float): FloatArray {
         val p = FloatArray(16); val t = FloatArray(16); val out = FloatArray(16)
         Matrix.perspectiveM(p, 0, FOV_Y, largeur / max(hauteur, 1f), 0.1f, 10000f)
-        Matrix.setIdentityM(t, 0); t[13] = decalageNdcY
+        Matrix.setIdentityM(t, 0); t[12] = focusNdcX; t[13] = decalageNdcY + focusNdcY
         Matrix.multiplyMM(out, 0, t, 0, p, 0)
         return out
     }
@@ -303,9 +305,26 @@ private fun Orbe3DContenu(
                             val cible = zones.entries.firstOrNull { (id, rect) ->
                                 id.startsWith("hub:") && rect.inflate(20f * dens).contains(centroid)
                             }
-                            if (cible != null) hubFocus = cible.key.removePrefix("hub:")
+                            if (cible != null) {
+                                val cle = cible.key.removePrefix("hub:")
+                                hubFocus = cle
+                                // Le dossier visé est recentré dans la fenêtre avant d'agrandir sa branche.
+                                pos3d["hub:$cle"]?.let { point ->
+                                    camera.zoom = zoomUser
+                                    val mvp = FloatArray(16); val mv = FloatArray(16)
+                                    camera.matrices(size.width.toFloat(), size.height.toFloat(), mvp, mv)
+                                    projeter(mvp, mv, point, size.width.toFloat(), size.height.toFloat(), camera.zoom)?.let { p ->
+                                        val ndcX = p.ecran.x / size.width.toFloat() * 2f - 1f
+                                        val ndcY = 1f - p.ecran.y / size.height.toFloat() * 2f
+                                        camera.focusNdcX -= ndcX
+                                        camera.focusNdcY -= ndcY
+                                    }
+                                }
+                            }
                         } else if (zoom < 0.985f && zoomUser < 0.92f) {
                             hubFocus = null
+                            camera.focusNdcX = 0f
+                            camera.focusNdcY = 0f
                         }
                         // Rotation libre sur les deux axes : chaque axe accepte autant de tours complets que souhaité.
                         // Le modulo conserve une valeur numérique stable sans créer de butée ni de saut visuel.
