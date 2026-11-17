@@ -87,6 +87,18 @@ data class ContenuDossier(
     val total: Int
 )
 
+/** Arbre complet du coffre : chaque dossier réel est conservé, même si l'orbe n'en affiche qu'une partie à la fois. */
+data class NoeudDossier(
+    val chemin: String,
+    val nom: String,
+    val parent: String?,
+    val profondeur: Int,
+    val enfants: List<NoeudDossier>,
+    val notes: List<ObsidianWriter.GraphNode>,
+    val pieces: List<ObsidianWriter.GraphAttachment>,
+    val totalRecursif: Int
+)
+
 /** Vrai lien [[wikilink]] orienté entre deux notes affichées. */
 data class LienReel(val de: String, val vers: String)
 
@@ -103,6 +115,8 @@ data class Constellation(
     val notesParHub: Map<String, List<ObsidianWriter.GraphNode>>,
     /** Arborescence réelle : chemin de dossier ("" = racine, "Autres" = catégories regroupées) → contenu. */
     val dossiers: Map<String, ContenuDossier>,
+    /** Hiérarchie complète non tronquée, indépendante de la quantité de cercles affichés simultanément. */
+    val arborescence: List<NoeudDossier>,
     /** Dossiers dépliés dans cette mise en page (catégories et sous-dossiers). */
     val deplies: Set<String>,
     val tagsParNote: Map<String, List<String>>,
@@ -223,6 +237,27 @@ object ConstellationLayout {
                 notesDe[d].orEmpty().sortedBy { it.label.lowercase() }, piecesDe[d].orEmpty().sortedBy { it.name.lowercase() }, total(d))
         }
         fun notesRecursives(d: String): List<ObsidianWriter.GraphNode> = notesDe[d].orEmpty() + enfantsDe[d].orEmpty().flatMap { notesRecursives(it) }
+
+        // Arbre métier complet : aucun regroupement « Autres », aucune limite de profondeur ou de nombre
+        // d'enfants dans les données. La mise en page 3D reste libre de n'afficher que la branche ouverte.
+        fun construireNoeudDossier(d: String, profondeur: Int): NoeudDossier = NoeudDossier(
+            chemin = d,
+            nom = nom(d),
+            parent = d.substringBeforeLast('/', "").ifBlank { null },
+            profondeur = profondeur,
+            enfants = enfantsDe[d].orEmpty().sortedWith(parTaille).map { construireNoeudDossier(it, profondeur + 1) },
+            notes = notesDe[d].orEmpty().sortedBy { it.label.lowercase() },
+            pieces = piecesDe[d].orEmpty().sortedBy { it.name.lowercase() },
+            totalRecursif = total(d)
+        )
+        val arborescenceComplete = enfantsDe[""].orEmpty().sortedWith(parTaille)
+            .map { construireNoeudDossier(it, 0) }
+        val racineComplete = if (notesDe[""].orEmpty().isNotEmpty() || piecesDe[""].orEmpty().isNotEmpty())
+            listOf(NoeudDossier("", "Coffre", null, 0, arborescenceComplete,
+                notesDe[""].orEmpty().sortedBy { it.label.lowercase() },
+                piecesDe[""].orEmpty().sortedBy { it.name.lowercase() },
+                (notesDe[""]?.size ?: 0) + (piecesDe[""]?.size ?: 0) + arborescenceComplete.sumOf { it.totalRecursif }))
+        else arborescenceComplete
 
         // ---- catégories = dossiers racine (les plus remplis d'abord ; au-delà de MAX, regroupés dans « Autres »)
         val racines = enfantsDe[""].orEmpty().sortedWith(parTaille).toMutableList()
@@ -417,7 +452,7 @@ object ConstellationLayout {
         return Constellation(
             hubs = hubs, etiquettes = etiquettes, liens = liens, tousLiens = liensTous,
             sansLienEntrant = sansEntrant, orphelins = orphelins,
-            notesParHub = notesParHub, dossiers = dossiers, deplies = deplies, tagsParNote = data.tags.filterKeys { it in ids },
+            notesParHub = notesParHub, dossiers = dossiers, arborescence = racineComplete, deplies = deplies, tagsParNote = data.tags.filterKeys { it in ids },
             totalNotes = notes.size, totalLiens = liensTous.size, totalTags = compteTags.size, totalPieces = pieces.size,
             rayonCerveau = RAYON_CERVEAU,
             minX = minX, minY = minY, maxX = maxX, maxY = maxY
