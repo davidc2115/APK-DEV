@@ -833,6 +833,9 @@ object Routeur {
         "^(?:(?:salut|bonjour|bonsoir|coucou|hello|hey|yo|re|wesh|hola)(?: (?:à toi|a toi|mon ami|l.ami|toi))?|" +
             "(?:ça|ca|sa) va(?: bien| toi| et toi| ou quoi)?|(?:comment|commen) (?:est.ce que )?(?:ça|ca|sa) va(?: aujourd.hui| ce (?:matin|soir))?|comment (?:est.ce que )?(?:tu )?vas(?: aujourd.hui| ce (?:matin|soir))?|comment se passe (?:le|ton|ta) (?:travail|boulot|journ[ée]e|matin[ée]e|soir[ée]e)(?: au travail| aujourd.hui| en ce moment)?|comment (?:ça|ca) se passe(?: au travail| aujourd.hui| en ce moment)?|comment (?:va|avance) (?:le travail|le boulot|ta journ[ée]e)|(?:ça|ca) se passe bien(?: au travail| aujourd.hui)?|comment (?:tu )?vas[- ]?tu|comment tu vas|tu vas bien|vous allez bien|" +
             "(?:la )?forme|quoi de neuf|quoi de beau|(?:qu.est[- ]ce que|que) tu (?:fais|racontes?)|tu fais quoi(?: de beau)?|tu (?:es|est) l[àa]|t.es l[àa]|t.es o[uù]|" +
+            "on (?:peut|pourrait) (?:simplement )?(?:discuter|parler)|j.ai envie de (?:discuter|parler)|je (?:voudrais|veux|souhaiterais) (?:discuter|parler) avec toi|parlons(?: un peu)?|discutons(?: un peu)?|" +
+            "(?:comment|alors) (?:s.est pass[ée]e?|[çc]a s.est pass[ée]) ta journ[ée]e|comment vont (?:tes|les) (?:enfants|parents|proches)|tu as (?:des )?enfants|as tu des enfants|comment va ta famille|" +
+            "(?:qu.en penses[- ]tu|tu en penses quoi|tu penses quoi de|que penses[- ]tu de|tu crois que|tu aimes|tu pr[ée]f[èe]res)|raconte[- ]moi (?:ta journ[ée]e|quelque chose|un peu|ce que tu)|parle[- ]moi de|" +
             "et toi|merci(?: beaucoup| bien| infiniment| mille fois| pour tout| à toi| a toi)?|c.est gentil|trop gentil|bravo|bien jou[ée]|super boulot|beau travail|" +
             "(?:t.es|tu es|tu (?:es )?vraiment) (?:trop |vraiment |super |le meilleur|la meilleure|g[ée]nial|fort|dr[ôo]le|sympa|cool|top|bon|nul|b[êe]te|lent)\\w*|" +
             "je t.aime(?: bien)?|tu me manques|raconte[- ]?moi (?:une |un )?(?:blague|histoire dr[ôo]le|anecdote)|(?:une |dis[- ]moi une |fais[- ]moi une )blague|fais[- ]moi rire|" +
@@ -865,7 +868,7 @@ object Routeur {
                 "fichier|dossier|note|obsidian|freebox|vpn|port|gps|position|waze|home ?assistant|chauffage|poêle|serveur|plex|discord|site|" +
                 "regarde|v[ée]rifie|contr[ôo]le|corrige|r[ée]pare|teste|essaie|relance|red[ée]marre|continue|poursui|vas.y|fais.le|" +
                 "(?:peux|pourrais|pourrai)[- ]tu|est.ce que tu (?:peux|pourrais)|tu (?:peux|pourrais) |" +
-                "automati|surveille|programme|installe|supprime|cr[ée]e|g[ée]n[èe]re|analyse|compare|explique|pourquoi|comment faire)",
+                "automati|surveille|programme|installe|supprime|cr[ée]e|g[ée]n[èe]re|analyse|compare|comment faire)",
             RegexOption.IGNORE_CASE
         )
         if (demandeAction.containsMatchIn(t) || ORCHESTRATION.containsMatchIn(t) || WEB.containsMatchIn(t)) {
@@ -882,7 +885,7 @@ object Routeur {
      */
     fun bavardage(texte: String): Boolean {
         val t = texte.trim().replace(Regex("^(?:(?:ok|bon|alors|eh)[ ,]+)?(?:dis[- ]moi[ ,]+)?(?:jarvis[ ,!.]*)?", RegexOption.IGNORE_CASE), "").trim()
-        if (t.isBlank() || t.length > 90 || NOMME.containsMatchIn(texte)) return false
+        if (t.isBlank() || t.length > 240 || NOMME.containsMatchIn(texte) || WEB.containsMatchIn(t)) return false
         // Plusieurs phrases sociales enchaînées (« Salut Jarvis ! Ça va ? ») : chacune doit être du bavardage.
         val morceaux = t.split(Regex("(?<=[!?.…])\\s+|,\\s*(?=(?:ça|ca|comment|et toi|tu vas))")).map { it.trim() }.filter { it.isNotBlank() }
         return morceaux.isNotEmpty() && morceaux.all { BAVARDAGE.matches(it) }
