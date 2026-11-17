@@ -787,7 +787,7 @@ class ToolBox(
         "fichiers_generes" -> ToolResult(fr.dd.jarvis.ai.Fichiers.lister(app, a.optString("quoi"), a.optString("max").toIntOrNull() ?: 20))
         "renommer_fichier" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             runCatching { fr.dd.jarvis.ai.Fichiers.renommer(app, a.optString("ancien"), a.optString("nouveau")) }
-                .getOrElse { "❌ Renommage impossible : \${it.message ?: it.javaClass.simpleName}" }
+                .getOrElse { "❌ Renommage impossible : ${it.message ?: it.javaClass.simpleName}" }
         }, direct = true)
         "documents_lister" -> ToolResult(fr.dd.jarvis.ai.DocumentStore.list(app))
         "document_lire" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.ai.DocumentStore.extract(app, a.optString("nom")) }, direct = true)
