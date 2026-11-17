@@ -121,7 +121,7 @@ private class Camera3D {
 
     fun projection(largeur: Float, hauteur: Float): FloatArray {
         val p = FloatArray(16); val t = FloatArray(16); val out = FloatArray(16)
-        Matrix.perspectiveM(p, 0, FOV_Y, largeur / max(hauteur, 1f), 0.1f, 60f)
+        Matrix.perspectiveM(p, 0, FOV_Y, largeur / max(hauteur, 1f), 0.1f, 10000f)
         Matrix.setIdentityM(t, 0); t[13] = decalageNdcY
         Matrix.multiplyMM(out, 0, t, 0, p, 0)
         return out
@@ -182,13 +182,23 @@ private fun Orbe3DContenu(
     var lacetUser by remember { mutableFloatStateOf(0f) }
     var tangageUser by remember { mutableFloatStateOf(0f) }
     var zoomUser by remember { mutableFloatStateOf(1f) }
+    // Le pincement démarré sur un dossier active son mode focus et dégage uniquement sa branche.
+    var hubFocus by remember { mutableStateOf<String?>(null) }
     var dernierGeste by remember { mutableFloatStateOf(-100f) }
     val surface = remember { arrayOfNulls<OrbeSurface>(1) }
 
     // Positions 3D hiérarchiques : on ajoute un vrai dégagement spatial entre chaque parent
     // et ses enfants, sans modifier la constellation 2D ni les collisions déjà résolues.
-    val pos3d = remember(c) {
+    val pos3d = remember(c, hubFocus) {
         val m = HashMap<String, FloatArray>()
+        fun dansBranche(cle: String): Boolean {
+            var courant = c.hub(cle)
+            while (courant != null) {
+                if (courant.cle == hubFocus) return true
+                courant = courant.parent?.let { c.hub(it) }
+            }
+            return false
+        }
 
         fun eloignerDuParent(point: FloatArray, parent: FloatArray, ecart: Float): FloatArray {
             val dx = point[0] - parent[0]
@@ -208,7 +218,10 @@ private fun Orbe3DContenu(
             val base = versDome(h.pos, 0.25f)
             val parent = h.parent?.let { m["hub:$it"] }
             val ecart = if (parent == null) 0f else 0.48f + (h.niveau - 1).coerceAtLeast(0) * 0.16f
-            m["hub:${h.cle}"] = if (parent != null) eloignerDuParent(base, parent, ecart) else base
+            val position = if (parent != null) eloignerDuParent(base, parent, ecart) else base
+            val ecartFocus = if (hubFocus != null && h.parent != null && dansBranche(h.parent))
+                1.05f + (h.niveau - 1).coerceAtLeast(0) * 0.32f else 0f
+            m["hub:${h.cle}"] = if (parent != null && ecartFocus > 0f) eloignerDuParent(position, parent, ecartFocus) else position
         }
 
         // Les notes et pièces jointes d'un sous-dossier sont elles aussi décalées vers l'extérieur
@@ -219,7 +232,11 @@ private fun Orbe3DContenu(
             val ecart = if (parent != null && (e.type == TypeEtiquette.NOTE || e.type == TypeEtiquette.FICHIER))
                 0.46f + (c.hub(e.hub)?.niveau?.minus(1)?.coerceAtLeast(0) ?: 0) * 0.12f
             else 0f
-            m[e.id] = if (parent != null && ecart > 0f) eloignerDuParent(base, parent, ecart) else base
+            val position = if (parent != null && ecart > 0f) eloignerDuParent(base, parent, ecart) else base
+            val hubContenant = c.hub(e.hub)
+            val centreFocus = if (hubFocus != null && dansBranche(e.hub)) hubContenant?.let { m["hub:${it.cle}"] } else null
+            val ecartFocus = if (centreFocus != null) 0.82f + ((hubContenant?.niveau ?: 0).coerceAtLeast(0) * 0.18f) else 0f
+            m[e.id] = if (centreFocus != null) eloignerDuParent(position, centreFocus, ecartFocus) else position
         }
         m
     }
@@ -281,7 +298,15 @@ private fun Orbe3DContenu(
                 .pointerInput(Unit) {
                     detectTransformGestures { _, pan, zoom, _ ->
                         dernierGeste = temps
-                        zoomUser = (zoomUser * zoom).coerceIn(0.12f, 8f)
+                        zoomUser = (zoomUser * zoom).coerceIn(0.015f, 12f)
+                        if (zoom > 1.015f) {
+                            val cible = zones.entries.firstOrNull { (id, rect) ->
+                                id.startsWith("hub:") && rect.inflate(20f * dens).contains(centroid)
+                            }
+                            if (cible != null) hubFocus = cible.key.removePrefix("hub:")
+                        } else if (zoom < 0.985f && zoomUser < 0.92f) {
+                            hubFocus = null
+                        }
                         // Rotation libre sur les deux axes : chaque axe accepte autant de tours complets que souhaité.
                         // Le modulo conserve une valeur numérique stable sans créer de butée ni de saut visuel.
                         lacetUser = (lacetUser + pan.x * 0.25f) % 360f
