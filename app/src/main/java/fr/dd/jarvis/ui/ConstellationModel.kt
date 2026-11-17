@@ -649,54 +649,106 @@ object ConstellationLayout {
         }
     }
 
-    /** Écarte les étiquettes qui se chevauchent entre elles, ou qui recouvrent un hub ou le cerveau. */
-    private fun relacher(etiquettes: MutableList<Etiquette>, hubs: List<Hub>) {
-        if (etiquettes.isEmpty()) return
-        val xs = FloatArray(etiquettes.size) { etiquettes[it].pos.x }
-        val ys = FloatArray(etiquettes.size) { etiquettes[it].pos.y }
-        val fixes = BooleanArray(etiquettes.size) { etiquettes[it].type == TypeEtiquette.TAG }
-        val marge = 6f
-        repeat(120) {
+    /**
+     * Résolution globale des collisions de la scène : cercles de dossiers entre eux, étiquettes entre elles,
+     * étiquettes contre dossiers et noyau central. Les positions sont corrigées ensemble afin qu'un dossier
+     * « Jarvis » ne puisse pas recouvrir le hub des pièces jointes, même si le coffre évolue.
+     *
+     * Les liens restent cohérents : ils sont recalculés à partir des positions finales des hubs et étiquettes.
+     */
+    private fun relacher(etiquettes: MutableList<Etiquette>, hubs: MutableList<Hub>) {
+        val hx = FloatArray(hubs.size) { hubs[it].pos.x }
+        val hy = FloatArray(hubs.size) { hubs[it].pos.y }
+        val ex = FloatArray(etiquettes.size) { etiquettes[it].pos.x }
+        val ey = FloatArray(etiquettes.size) { etiquettes[it].pos.y }
+        val marge = 12f
+        val rayonNoyau = RAYON_CERVEAU + 18f
+
+        fun direction(dx: Float, dy: Float, i: Int, j: Int): Pt {
+            val d = hypot(dx, dy)
+            if (d > 1e-3f) return Pt(dx / d, dy / d)
+            val a = ((i + 1) * 17 + (j + 1) * 31) * 0.173f
+            return Pt(cos(a), sin(a))
+        }
+        fun pousserEtiquetteHorsCercle(i: Int, centre: Pt, rayon: Float): Boolean {
+            val e = etiquettes[i]
+            val nx = centre.x.coerceIn(ex[i] - e.w / 2f, ex[i] + e.w / 2f)
+            val ny = centre.y.coerceIn(ey[i] - e.h / 2f, ey[i] + e.h / 2f)
+            val dx = nx - centre.x; val dy = ny - centre.y
+            val d = hypot(dx, dy)
+            if (d >= rayon) return false
+            val dir = if (d > 1e-3f) Pt(dx / d, dy / d) else direction(ex[i] - centre.x, ey[i] - centre.y, i, i + 97)
+            val pousser = rayon - d + 1f
+            ex[i] += dir.x * pousser
+            ey[i] += dir.y * pousser
+            return true
+        }
+
+        for (iteration in 0 until 240) {
             var bouge = false
+
+            // 1) Cercles de dossiers / sous-dossiers / pièces jointes entre eux.
+            for (i in hubs.indices) {
+                if (hubs[i].rayon <= 0f) continue
+                for (j in i + 1 until hubs.size) {
+                    if (hubs[j].rayon <= 0f) continue
+                    val dx = hx[j] - hx[i]; val dy = hy[j] - hy[i]
+                    val dir = direction(dx, dy, i, j)
+                    val distance = hypot(dx, dy)
+                    val penetration = hubs[i].rayon + hubs[j].rayon + marge - distance
+                    if (penetration > 0f) {
+                        val demi = penetration * 0.5f
+                        hx[i] -= dir.x * demi; hy[i] -= dir.y * demi
+                        hx[j] += dir.x * demi; hy[j] += dir.y * demi
+                        bouge = true
+                    }
+                }
+            }
+
+            // 2) Cercles contre le noyau et étiquettes contre le noyau / chaque cercle.
+            for (i in hubs.indices) {
+                val r = hubs[i].rayon
+                if (r <= 0f) continue
+                val dir = direction(hx[i], hy[i], i, i + 211)
+                val d = hypot(hx[i], hy[i])
+                val penetration = rayonNoyau + r + marge - d
+                if (penetration > 0f) {
+                    hx[i] += dir.x * penetration
+                    hy[i] += dir.y * penetration
+                    bouge = true
+                }
+            }
+            for (i in etiquettes.indices) {
+                if (pousserEtiquetteHorsCercle(i, Pt(0f, 0f), rayonNoyau)) bouge = true
+                for (j in hubs.indices) {
+                    val r = hubs[j].rayon
+                    if (r > 0f && pousserEtiquetteHorsCercle(i, Pt(hx[j], hy[j]), r + marge)) bouge = true
+                }
+            }
+
+            // 3) Étiquettes entre elles (rectangles, et non simples points).
             for (i in etiquettes.indices) for (j in i + 1 until etiquettes.size) {
                 val a = etiquettes[i]; val b = etiquettes[j]
-                val dx = xs[j] - xs[i]; val dy = ys[j] - ys[i]
+                val dx = ex[j] - ex[i]; val dy = ey[j] - ey[i]
                 val px = (a.w + b.w) / 2f + marge - abs(dx)
                 val py = (a.h + b.h) / 2f + marge - abs(dy)
-                if (px > 0 && py > 0) {
+                if (px > 0f && py > 0f) {
                     bouge = true
-                    val fi = if (fixes[i]) 0f else if (fixes[j]) 1f else 0.5f
-                    val fj = 1f - fi
                     if (py < px) {
-                        val s = if (dy >= 0) 1f else -1f
-                        ys[i] -= s * py * fi; ys[j] += s * py * fj
+                        val s = if (dy >= 0f) 1f else -1f
+                        ey[i] -= s * py * 0.5f; ey[j] += s * py * 0.5f
                     } else {
-                        val s = if (dx >= 0) 1f else -1f
-                        xs[i] -= s * px * fi; xs[j] += s * px * fj
+                        val s = if (dx >= 0f) 1f else -1f
+                        ex[i] -= s * px * 0.5f; ex[j] += s * px * 0.5f
                     }
                 }
             }
-            // Obstacles fixes : cerveau et hubs (cercles), plus leur texte sous l'icône.
-            val obstacles = hubs.filter { it.rayon > 0f }.map { it.pos to it.rayon + 8f } + (Pt(0f, 0f) to RAYON_CERVEAU + 10f)
-            for (i in etiquettes.indices) {
-                if (fixes[i]) continue
-                val e = etiquettes[i]
-                for ((c, r) in obstacles) {
-                    // Point du rectangle le plus proche du centre du cercle.
-                    val nx = c.x.coerceIn(xs[i] - e.w / 2f, xs[i] + e.w / 2f)
-                    val ny = c.y.coerceIn(ys[i] - e.h / 2f, ys[i] + e.h / 2f)
-                    val d = hypot(nx - c.x, ny - c.y)
-                    if (d < r) {
-                        bouge = true
-                        val dir = if (d > 1e-3f) Pt((nx - c.x) / d, (ny - c.y) / d) else Pt(xs[i] - c.x, ys[i] - c.y).norm()
-                        val push = r - d + 1f
-                        xs[i] += dir.x * push; ys[i] += dir.y * push
-                    }
-                }
-            }
-            if (!bouge) return@repeat
+
+            if (!bouge) break
         }
-        for (i in etiquettes.indices) etiquettes[i] = etiquettes[i].copy(pos = Pt(xs[i], ys[i]))
+
+        for (i in hubs.indices) hubs[i] = hubs[i].copy(pos = Pt(hx[i], hy[i]))
+        for (i in etiquettes.indices) etiquettes[i] = etiquettes[i].copy(pos = Pt(ex[i], ey[i]))
     }
 
     /** Point d'ancrage d'une flèche sur le bord d'une étiquette, du côté d'où vient le trait. */
