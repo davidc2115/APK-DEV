@@ -250,6 +250,9 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     /** Le dossier choisi existe et reste accessible en lecture/écriture via l'autorisation Android. */
     fun coffreDisponible(): Boolean = vaultRoot()?.let { it.canRead() && it.canWrite() } == true
 
+    /** Un coffre en lecture seule reste analysable ; seules les écritures exigent canWrite(). */
+    fun coffreLisible(): Boolean = vaultRoot()?.canRead() == true
+
     /** Test réel lecture/écriture/suppression dans le coffre, avec un fichier temporaire immédiatement retiré. */
     fun testerAccesComplet(): Boolean {
         val root = vaultRoot() ?: return false
@@ -377,8 +380,8 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     }
 
     private fun instantaneNotes(limite: Int): org.json.JSONObject {
-        if (coffreConfigure() && !coffreDisponible())
-            throw java.io.IOException("Le coffre Obsidian n'est pas accessible en lecture/écriture.")
+        if (coffreConfigure() && !coffreLisible())
+            throw java.io.IOException("Le coffre Obsidian n'est pas accessible en lecture.")
         val max = limite.coerceIn(1, 3000)
         val fichiers = if (coffreConfigure()) {
             if (vaultRoot() == null) throw java.io.IOException("Autorisation de lecture du coffre perdue.")
@@ -449,8 +452,8 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
      */
     fun analyserDoublons(limite: Int = 1500): List<DoublonObsidian> {
         signalerFilPrincipal("analyserDoublons")
-        if (coffreConfigure() && !coffreDisponible())
-            throw java.io.IOException("Le coffre Obsidian est configuré mais inaccessible. Vérifie les autorisations Android avant de lancer l'analyse.")
+        if (coffreConfigure() && !coffreLisible())
+            throw java.io.IOException("Le coffre Obsidian est configuré mais illisible. Vérifie les autorisations Android avant de lancer l'analyse.")
         val notes = mutableListOf<Pair<String, String>>()
         val maxTailleNote = 1_000_000L
         if (coffreConfigure()) {
