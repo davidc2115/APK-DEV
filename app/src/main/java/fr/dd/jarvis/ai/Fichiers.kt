@@ -305,8 +305,8 @@ object Fichiers {
         val chemin = app.obsidian.renommerFichier(ancien, nouveau)
         val oldName = source
         val ext = oldName.substringAfterLast('.', "")
-        val newBase = nouveau.substringBeforeLast('.', nouveau).replace(Regex("[\\\\/:*?""<>|]"), "_")
-        val newName = if (nouveau.contains('.')) nouveau.replace(Regex("[\\\\/:*?""<>|]"), "_") else if (ext.isNotBlank()) "$newBase.$ext" else newBase
+        val newBase = nouveau.substringBeforeLast('.', nouveau).replace(Regex("[\\\\/:*?<>|]"), "_")
+        val newName = if (nouveau.contains('.')) nouveau.replace(Regex("[\\\\/:*?<>|]"), "_") else if (ext.isNotBlank()) "$newBase.$ext" else newBase
         listOf(File(app.filesDir, "images"), dossier(app), dossierVideos(app)).forEach { dir ->
             val from = File(dir, oldName)
             val to = File(dir, newName)
