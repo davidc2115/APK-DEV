@@ -55,6 +55,37 @@ class AnalyseLiensObsidianTest {
     }
 
     @Test
+    fun reconnaitLesWikilinksLesLiensMarkdownEtLesEmbeds() {
+        val cibles = ExtracteurLiensObsidian.extraire(
+            """[[Dossiers/Note]] [rapport](Dossiers/rapport.pdf) ![photo](<Images/photo du site.png>) [site](https://example.com)"""
+        )
+
+        assertEquals(
+            listOf("Dossiers/Note", "Dossiers/rapport.pdf", "Images/photo du site.png"),
+            cibles
+        )
+    }
+
+    @Test
+    fun neDeclarePasDeFauxOrphelinsQuandLeScanEstPartiel() {
+        val data = ObsidianWriter.GraphData(
+            nodes = listOf(ObsidianWriter.GraphNode("A", "Alpha", "")),
+            edges = emptyList(),
+            attachments = listOf(ObsidianWriter.GraphAttachment("Images/photo.png", "photo.png", "IMAGE")),
+            notesLues = 0,
+            notesCandidates = 1,
+            limiteNotesAtteinte = false
+        )
+
+        val audit = AnalyseLiensObsidian.analyser(data)
+
+        assertTrue(!audit.analyseComplete)
+        assertTrue(audit.notesSansLienEntrant.isEmpty())
+        assertTrue(audit.notesOrphelines.isEmpty())
+        assertTrue(audit.fichiersOrphelins.isEmpty())
+    }
+
+    @Test
     fun signaleUneAnalysePartielleQuandDesNotesNontPasPuEtreLues() {
         val data = ObsidianWriter.GraphData(
             nodes = listOf(ObsidianWriter.GraphNode("A", "Alpha", "")),
