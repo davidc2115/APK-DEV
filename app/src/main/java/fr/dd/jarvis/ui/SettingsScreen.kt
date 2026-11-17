@@ -1279,7 +1279,6 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     color = HudDim, fontSize = 12.sp
                 )
                 if (store.obsidianUri.value.isNotBlank()) {
-                    val accesOk = etatAccesObsidian ?: false
                     Text(
                         when (etatAccesObsidian) {
                             true -> "✓ Test réussi : coffre accessible en lecture et écriture. Jarvis peut lire, rechercher et enregistrer."
@@ -1293,7 +1292,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                         HudButton("Tester l'accès") {
                             scope.launch {
                                 etatAccesObsidian = runCatching {
-                                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.obsidian.coffreDisponible() }
+                                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.obsidian.testerAccesComplet() }
                                 }.getOrDefault(false)
                             }
                         }
