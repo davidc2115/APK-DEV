@@ -432,10 +432,10 @@ object ConstellationLayout {
         val liens = liensTous.filter { it.de in notesAffichees && it.vers in notesAffichees }
 
         // ---- panneaux
-        val sansEntrant = auditLiens.notesSansLienEntrant.map { it.label }
+        val sansEntrant = auditLiens.notesSansLienEntrant.map { "${it.id}.md" }
         val orphelins = (
-            auditLiens.notesOrphelines.map { it.label } +
-                auditLiens.fichiersOrphelins.map { it.name }
+            auditLiens.notesOrphelines.map { "${it.id}.md" } +
+                auditLiens.fichiersOrphelins.map { it.path }
             ).sortedBy { it.lowercase() }
 
         // ---- bornes (cerveau, hubs avec leur texte, étiquettes)
