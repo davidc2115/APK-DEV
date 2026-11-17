@@ -1157,34 +1157,61 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
 
     private suspend fun documentCreer(a: JSONObject): ToolResult {
         val type = if (a.s("type").lowercase().startsWith("f")) "facture" else "devis"
+        val test = a.bool("test") == true
         val (client, e) = clientParNom(a.s("client"))
         if (client == null) return err(e!!)
         val refSite = a.s("installation")
-        var site: Site? = siteDe(client, refSite)
-        if (site == null && client.sites.size > 1) return err("Ce client a plusieurs installations (${client.sites.joinToString { it.nom }}). Laquelle ?")
+        val siteTrouve = if (refSite.isBlank()) client.sites.singleOrNull() else siteDe(client, refSite)
+        if (!test && siteTrouve == null && client.sites.size > 1)
+            return err("Ce client a plusieurs installations (\${client.sites.joinToString { it.nom }}). Laquelle ?")
         val kwcArg = a.dbl("kwc")
-        val cur: Site? = site
-        if (kwcArg != null && (cur == null || cur.kwc <= 0)) site = (cur ?: Site(svc.newId(), refSite.ifBlank { "Installation" }, client.adresse)).copy(kwc = kwcArg)
-        val siteFinal: Site? = site
-        val kwc = siteFinal?.kwc ?: 0.0
-
+        val siteBase = siteTrouve ?: if (test && (kwcArg != null || refSite.isNotBlank())) Site(svc.newId(), refSite.ifBlank { "Installation de test" }, client.adresse) else null
+        val siteFinal = if (test && siteBase != null && kwcArg != null) siteBase.copy(kwc = kwcArg)
+            else if (siteBase != null && kwcArg != null && siteBase.kwc <= 0) siteBase.copy(kwc = kwcArg) else siteBase
+        val kwc = siteFinal?.kwc ?: kwcArg ?: 0.0
         val prestations = mutableListOf<Triple<Tarif, Double, Double>>()
         for (part in a.s("prestations").split(';', '\n').map { it.trim() }.filter { it.isNotEmpty() }) {
             val idx = part.lastIndexOf(':')
             val qte = if (idx > 0) part.substring(idx + 1).replace(',', '.').trim().toDoubleOrNull() else null
             val nom = if (qte != null) part.substring(0, idx) else part
             val t = Pricing.trouverTarif(d.tarifs, nom)
-                ?: return err("Aucun tarif ne correspond à « ${nom.trim()} ». Tarifs enregistrés : " + (d.tarifs.joinToString { it.designation }.ifBlank { "aucun (utiliser tarif_set)" }))
+                ?: return err("Aucun tarif ne correspond à « \${nom.trim()} ». Tarifs enregistrés : " + d.tarifs.joinToString { it.designation }.ifBlank { "aucun (utiliser tarif_set)" })
             prestations += Triple(t, qte ?: 1.0, kwc)
         }
         val libres = mutableListOf<Ligne>()
         for (part in a.s("lignes_libres").split(';', '\n').map { it.trim() }.filter { it.isNotEmpty() }) {
             val bits = part.split(':').map { it.trim() }
             val pu = bits.getOrNull(2)?.replace(',', '.')?.toDoubleOrNull() ?: return err("Ligne libre illisible : « $part » (désignation:quantité:prix HT).")
-            libres += Ligne(bits[0], bits[1].replace(',', '.').toDoubleOrNull() ?: 1.0, "", pu, tva = d.societe.tvaDefaut)
+            libres += Ligne(bits[0], bits.getOrNull(1)?.replace(',', '.')?.toDoubleOrNull() ?: 1.0, "", pu, tva = d.societe.tvaDefaut)
         }
-        if (type == "facture" && !confirm("Créer la facture pour ${client.nom} ? (numéro définitif, non supprimable)", false)) return err("Création de la facture refusée par l'utilisateur.")
-
+        if (type == "facture" && !test && !confirm("Créer la facture pour \${client.nom} ? (numéro définitif, non supprimable)", false))
+            return err("Création de la facture refusée par l'utilisateur.")
+        if (test) {
+            val remise = a.dbl("remise_pct")?.let { Remise(it, "remise de test explicitement demandée") } ?: Remise(0.0, "")
+            val distance = if (a.bool("deplacement") == false) null else a.dbl("distance_km")?.takeIf { it > 0 }
+            val (lignes, avertissements) = Pricing.construireLignes(prestations, remise.pct, distance, d.regles, d.societe.tvaDefaut, d.societe.franchiseTva)
+            val toutes = lignes + libres.map { it.copy(remisePct = remise.pct, tva = if (d.societe.franchiseTva) 0.0 else it.tva) }
+            if (toutes.isEmpty()) return err("Aucune ligne à facturer pour ce test. Vérifie les tarifs et la puissance kWc.")
+            val now = LocalDate.now()
+            val tempClient = client.copy(sites = if (siteFinal == null) client.sites else client.sites.filterNot { it.id == siteFinal.id } + siteFinal)
+            val dTest = d.copy(clients = d.clients.filterNot { it.id == client.id } + tempClient)
+            val numero = "TEST-\${if (type == "devis") "DEV" else "FAC"}-\${java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))}"
+            val mention = "DOCUMENT DE TEST — SANS VALEUR COMMERCIALE OU COMPTABLE"
+            val doc = Doc(numero, type, tempClient.id, siteFinal?.id ?: "", now.toString(),
+                now.plusDays(if (type == "devis") d.societe.validiteDevisJours.toLong() else d.societe.delaiPaiementJours.toLong()).toString(),
+                toutes, notes = listOf(mention, a.s("notes")).filter { it.isNotBlank() }.joinToString("\n"),
+                statut = "brouillon", remiseInfo = if (remise.pct > 0) "\${nombre(remise.pct)} % — \${remise.detail}" else "", distanceKm = distance)
+            val md = "# ⚠️ $mention\n\n" + Rendu.rendreDoc(dTest, doc)
+            return try {
+                val folder = "Société/Tests"
+                val nom = "\${numero} \${client.nom}".replace('/', '-')
+                val emplacement = app.obsidian.saveIn(folder, nom, md)
+                app.obsidian.saveBytes(folder, "$nom.pdf", svc.pdfSociete(md), "application/pdf")
+                ok("🧪 \${if (type == "devis") "Devis" else "Facture"} de test **$numero** créé(e) — \${euro(dTest.totaux(doc).ttc)} TTC\n⚠️ $mention\n📁 $emplacement\n" +
+                    (if (distance != null && !Pricing.deplacementConfigure(d.regles)) "⚠️ Distance de \${nombre(distance)} km indiquée, mais aucun tarif de déplacement n’est configuré : aucun frais n’a été ajouté.\n" else "") +
+                    (if (avertissements.isNotEmpty()) avertissements.joinToString("\n") { "⚠️ $it" } + "\n" else "") + "\n---\n\n$md")
+            } catch (ex: Exception) { err("Création du document de test impossible : \${ex.message ?: ex.javaClass.simpleName}") }
+        }
         val clientEff = if (siteFinal != null && client.sites.none { it.id == siteFinal.id }) client.copy(sites = client.sites + siteFinal).also { c2 ->
             svc.repo.update { it.copy(clients = it.clients.map { x -> if (x.id == c2.id) c2 else x }) }
         } else client
@@ -1192,12 +1219,10 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         return try {
             val r = svc.creerDocument(type, clientEff, siteFinal, prestations, libres, a.bool("deplacement"), remisePct, a.s("notes"))
             val md = Rendu.rendreDoc(d, r.doc)
-            ok("✅ ${if (type == "devis") "Devis" else "Facture"} **${r.doc.numero}** créé(e) — ${euro(d.totaux(r.doc).ttc)} TTC\n📁 ${r.emplacement}\n" +
-                (if (remisePct != null) "⚠️ Remise manuelle appliquée : ${nombre(remisePct)} % (demandée dans l'appel de l'outil, pas calculée automatiquement)\n" else "") +
+            ok("✅ \${if (type == "devis") "Devis" else "Facture"} **\${r.doc.numero}** créé(e) — \${euro(d.totaux(r.doc).ttc)} TTC\n📁 \${r.emplacement}\n" +
+                (if (remisePct != null) "⚠️ Remise manuelle appliquée : \${nombre(remisePct)} %\n" else "") +
                 (if (r.avertissements.isNotEmpty()) r.avertissements.joinToString("\n") { "⚠️ $it" } + "\n" else "") + "\n---\n\n$md")
-        } catch (ex: IllegalArgumentException) {
-            err(ex.message ?: "Création impossible.")
-        }
+        } catch (ex: IllegalArgumentException) { err(ex.message ?: "Création impossible.") }
     }
 
     private suspend fun documentAction(a: JSONObject): ToolResult {
