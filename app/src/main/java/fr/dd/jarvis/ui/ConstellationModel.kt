@@ -469,21 +469,22 @@ object ConstellationLayout {
         if (m <= 2) return positionsSurArc(m, rx, ry)
         val egales = positionsSurArc(m, rx, ry)
         // Ordre des emplacements le long de l'arc (de gauche à droite en passant par le haut) = ordre angulaire.
-        val ordre = egales.indices.sortedBy { i -> val a = atan2(egales[i].y, egales[i].x); if (a > 0.5f) a - 2 * PI_F else a }
+        val ordre = egales.indices.sortedBy { i ->
+            (atan2(egales[i].y, egales[i].x) + 2f * PI_F) % (2f * PI_F)
+        }
         val w = ordre.map { poids[it].coerceAtLeast(1f) }
         val total = w.sum()
         val fractions = FloatArray(m)
         var cumul = 0f
         ordre.forEachIndexed { k, i -> fractions[i] = (cumul + w[k] / 2f) / total; cumul += w[k] }
-        // Recale pour que les deux extrêmes restent aux bouts de l'arc (comme la répartition régulière).
-        val f0 = fractions[ordre.first()]; val f1 = fractions[ordre.last()]
-        return List(m) { i -> pointSurArc((fractions[i] - f0) / (f1 - f0).coerceAtLeast(1e-3f), rx, ry) }
+        // Chaque catégorie occupe le centre de son secteur sur 360°, pondéré par la taille de sa branche.
+        return List(m) { i -> pointSurArc(fractions[i], rx, ry) }
     }
 
     private const val PI_F = Math.PI.toFloat()
 
     private fun pointSurArc(f: Float, rx: Float, ry: Float): Pt {
-        val debut = Math.toRadians(172.0); val fin = Math.toRadians(368.0)
+        val debut = -Math.PI / 2.0; val fin = 3.0 * Math.PI / 2.0
         val pas = 600
         val longueurs = FloatArray(pas + 1)
         var prec = Pt(cos(debut).toFloat() * rx, sin(debut).toFloat() * ry)
@@ -597,7 +598,7 @@ object ConstellationLayout {
             longueurs[i] = longueurs[i - 1] + (p - prec).len(); prec = p
         }
         val total = longueurs[pas]
-        val fractions = if (m == 2) listOf(0.27f, 0.73f) else List(m) { it / (m - 1f) }
+        val fractions = if (m == 2) listOf(0.25f, 0.75f) else List(m) { (it + 0.5f) / m }
         return fractions.map { f ->
             val cible = f * total
             var i = longueurs.indexOfFirst { it >= cible }.coerceAtLeast(0)
