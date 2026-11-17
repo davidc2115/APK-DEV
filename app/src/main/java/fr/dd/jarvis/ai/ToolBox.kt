@@ -1058,7 +1058,7 @@ class ToolBox(
                     append("🔎 AUDIT DES LIENS OBSIDIAN\n")
                     append("Index : $synchronisationIndex\n")
                     append("${audit.notesLues}/${audit.notesCandidates} notes lues ; ${audit.liens.size} liens internes résolus ; ${donnees.attachments.size} pièces jointes analysées.\n")
-                    if (!audit.analyseComplete) append("⚠️ Analyse partielle : certaines notes n'ont pas pu être lues ou la limite de ${limite} notes a été atteinte. Les listes ci-dessous ne constituent pas un inventaire exhaustif.\n")
+                    if (!audit.analyseComplete) append("⚠️ Analyse partielle : certaines notes n'ont pas pu être lues, ou la limite de notes/pièces jointes a été atteinte. Les éléments sans lien ne peuvent pas être déclarés orphelins de façon fiable.\n")
                     append("\nNOTES SANS LIEN ENTRANT (${audit.notesSansLienEntrant.size})")
                     if (!audit.analyseComplete) append("\nIndéterminé : analyse complète nécessaire.")
                     else if (audit.notesSansLienEntrant.isEmpty()) append("\nAucune.")
