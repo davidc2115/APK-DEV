@@ -518,8 +518,11 @@ object ConstellationLayout {
             var y = hub.pos.y - hauteur / 2f - (if (!cote && hub.pos.y < 0) hauteur * 0.25f else 0f)
             for ((index, r) in rs.withIndex()) {
                 val cy = y + r.hauteur / 2f
-                if (estFichierEnEclat(r)) placerEclat(r, hub.pos.x, hub.rayon, cy, sx, index, rs.size, out)
-                else placer(r, hub.pos.x, hub.rayon, cy, sx, hubs, out)
+                if (estFichierEnEclat(r)) {
+                    val rang = rs.take(index).count { estFichierEnEclat(it) }
+                    val nombre = rs.count { estFichierEnEclat(it) }
+                    placerEclat(r, hub.pos.x, hub.rayon, hub.pos.y, sx, rang, nombre, out)
+                } else placer(r, hub.pos.x, hub.rayon, cy, sx, hubs, out)
                 y += r.hauteur
             }
         }
@@ -527,7 +530,7 @@ object ConstellationLayout {
     }
 
     private fun estFichierEnEclat(r: Rangee): Boolean =
-        r.feuille && r.tete?.type in setOf(TypeEtiquette.NOTE, TypeEtiquette.FICHIER)
+        r.feuille && (r.tete?.type == TypeEtiquette.NOTE || r.tete?.type == TypeEtiquette.FICHIER)
 
     /**
      * Les fichiers s'épanouissent en éventail autour du dossier : une demi-orbite de fragments,
@@ -558,7 +561,7 @@ object ConstellationLayout {
                 val fichiers = r.enfants.count { estFichierEnEclat(it) }
                 if (estFichierEnEclat(e)) {
                     val rang = r.enfants.take(index).count { estFichierEnEclat(it) }
-                    placerEclat(e, sous.pos.x, sous.rayon, cy, sx, rang, fichiers, out)
+                    placerEclat(e, sous.pos.x, sous.rayon, sous.pos.y, sx, rang, fichiers, out)
                 } else placer(e, sous.pos.x, sous.rayon, cy, sx, hubs, out)
                 y += e.hauteur
             }
