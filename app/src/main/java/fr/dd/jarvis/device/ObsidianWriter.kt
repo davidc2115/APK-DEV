@@ -1206,10 +1206,11 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             nodesById[id] = GraphNode(id, labelOf(chemin), folderOf(chemin))
         }
 
-        // Pour retrouver une cible « [[Nom]] » même sans chemin complet : on indexe aussi par simple nom de fichier.
-        val parIdMinuscule = nodesById.keys.associateBy { it.lowercase() }
+        // Résolution robuste des wikilinks : chemin depuis la racine OU relatif au dossier de la note,
+        // puis nom simple uniquement s'il est unique (évite de relier silencieusement le mauvais doublon).
+        val parIdNormalise = nodesById.keys.associateBy { normaliseNom(it) }
         val parNom = HashMap<String, MutableList<String>>()
-        for (id in nodesById.keys) parNom.getOrPut(id.substringAfterLast('/').lowercase()) { mutableListOf() }.add(id)
+        for (id in nodesById.keys) parNom.getOrPut(normaliseNom(id.substringAfterLast('/'))) { mutableListOf() }.add(id)
 
         val edges = mutableListOf<GraphEdge>()
         val references = mutableListOf<GraphReference>()
@@ -1225,8 +1226,11 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                 val cible = m.groupValues[1].trim().trim('/')
                 if (cible.isBlank()) continue
                 val cibleNorm = cible.removeSuffix(".md").removeSuffix(".MD")
-                val toId = parIdMinuscule[cibleNorm.lowercase()]
-                    ?: parNom[cibleNorm.substringAfterLast('/').lowercase()]?.firstOrNull()
+                val dossierSource = fromId.substringBeforeLast('/', "")
+                val candidats = listOf(cibleNorm, if (dossierSource.isBlank()) cibleNorm else "$dossierSource/$cibleNorm")
+                    .distinct()
+                val toId = candidats.firstNotNullOfOrNull { parIdNormalise[normaliseNom(it)] }
+                    ?: parNom[normaliseNom(cibleNorm.substringAfterLast('/'))]?.singleOrNull()
                     ?: cibleNorm
                 if (fromId == toId) continue
 
