@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import fr.dd.jarvis.data.Store
 import java.io.File
+import kotlinx.coroutines.launch
 
 /**
  * Écrit les fichiers dans le dossier Obsidian choisi (sélecteur Android, sous-dossiers créés au besoin),
@@ -172,10 +173,14 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         }
     }
 
+    fun programmerSynchronisationIndex() = synchroniserIndexSilencieusement()
+
     private fun synchroniserIndexSilencieusement() {
         if (!coffreConfigure() || indexSyncEnCours.get()) return
-        runCatching { synchroniserIndex() }.onFailure {
-            fr.dd.jarvis.voice.JournalVoix.noter("diagnostic", "Synchronisation des index Obsidian impossible : ${it.message ?: it.javaClass.simpleName}")
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            runCatching { synchroniserIndex() }.onFailure {
+                fr.dd.jarvis.voice.JournalVoix.noter("diagnostic", "Synchronisation des index Obsidian impossible : ${it.message ?: it.javaClass.simpleName}")
+            }
         }
     }
 
