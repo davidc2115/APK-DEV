@@ -76,6 +76,13 @@ enum class FiltreGraphe(val libelle: String, val icone: Icone) {
 }
 
 /** Charge le coffre réel et construit la constellation (partagé par la vue 2D et l'Orbe 3D). */
+private object CacheConstellation {
+    @Volatile var donnees: ObsidianWriter.GraphData? = null
+    @Volatile var signature: Long = 0L
+    @Volatile var actualiseeA: Long = 0L
+}
+
+/** État partagé entre l'Orbe 3D et le graphe 2D. */
 class ChargementConstellation {
     /** Données réelles du coffre ; la mise en page dépend en plus des dossiers dépliés (voir [constellationDe]). */
     var donnees by mutableStateOf<ObsidianWriter.GraphData?>(null)
@@ -89,35 +96,54 @@ class ChargementConstellation {
 }
 
 /**
- * Charge le coffre et construit la constellation, puis SURVEILLE le coffre : dès qu'un dossier, une catégorie ou un
- * fichier est ajouté, supprimé, renommé ou modifié (dans Obsidian ou par JARVIS), la vue se reconstruit d'elle-même.
+ * Réutilise immédiatement la dernière constellation connue, puis vérifie et actualise le coffre en arrière-plan.
+ * La synchronisation des index et le parcours SAF ne bloquent donc plus chaque réouverture de l'Orbe/du graphe.
  */
 @Composable
 fun rememberConstellation(app: JarvisApp): ChargementConstellation {
-    val etat = remember { ChargementConstellation() }
+    val etat = remember {
+        ChargementConstellation().also { cache ->
+            CacheConstellation.donnees?.let { cache.donnees = it }
+            cache.signature = CacheConstellation.signature
+        }
+    }
     LaunchedEffect(etat.version) {
+        val maintenant = System.currentTimeMillis()
+        val cacheDisponible = etat.donnees != null
+        val cacheRecent = cacheDisponible && maintenant - CacheConstellation.actualiseeA < 20_000L
+        // Sur une réouverture rapide, l'écran est déjà alimenté par le cache : inutile de refaire
+        // synchronisation + signature + lecture complète du coffre.
+        if (cacheRecent) return@LaunchedEffect
+
         etat.erreur = null
         etat.enCours = true
         val r = withContext(Dispatchers.IO) {
             runCatching {
-                // Les index générés sont la table des matières réelle du coffre. Les synchroniser
-                // avant de calculer les liens entrants afin que les notes et pièces jointes soient
-                // effectivement référencées dans le graphe, pas seulement comptées comme orphelines.
+                // Les index restent synchronisés lors d'un vrai rafraîchissement, mais jamais sur le
+                // chemin critique d'une réouverture servie par le cache.
                 val sync = runCatching { app.obsidian.synchroniserIndex() }
-                etat.signature = runCatching { app.obsidian.signature() }.getOrDefault(0L)
+                val signature = runCatching { app.obsidian.signature() }.getOrDefault(0L)
                 val graph = app.obsidian.graph()
-                graph to sync.exceptionOrNull()?.message
+                Triple(graph, signature, sync.exceptionOrNull()?.message)
             }
         }
         etat.enCours = false
-        r.onSuccess { (graph, syncError) ->
+        r.onSuccess { (graph, signature, syncError) ->
             etat.donnees = graph
+            etat.signature = signature
+            CacheConstellation.donnees = graph
+            CacheConstellation.signature = signature
+            CacheConstellation.actualiseeA = System.currentTimeMillis()
             if (syncError != null) etat.erreur = "Indexation non actualisée : $syncError"
-        }.onFailure { etat.erreur = it.message ?: it.javaClass.simpleName }
+        }.onFailure {
+            etat.erreur = it.message ?: it.javaClass.simpleName
+        }
     }
     LaunchedEffect(Unit) {
         while (true) {
-            kotlinx.coroutines.delay(5000)
+            // Le contrôle d'empreinte SAF est lui-même un parcours complet : 15 s suffisent pour
+            // détecter les changements sans le relancer inutilement toutes les 5 secondes.
+            kotlinx.coroutines.delay(15_000)
             if (etat.enCours || etat.signature == 0L) continue
             val s = withContext(Dispatchers.IO) { runCatching { app.obsidian.signature() }.getOrNull() } ?: continue
             if (s != etat.signature && !etat.enCours) etat.version++
