@@ -90,9 +90,16 @@ class SocieteTools(
                 val nom = normaliser(t.designation)
                 nom.length >= 3 && n.contains(nom)
             }
+            val tarifsInstallation = if (Regex("\\b(installation|installer|pose|panneaux?|photovolta[iï]que)\\b").containsMatchIn(n))
+                tarifs.filter { t ->
+                    val nom = normaliser(t.designation)
+                    listOf("installation", "pose", "panneau", "photovolta").any { nom.contains(it) }
+                } else emptyList()
             val tarif = when {
                 tarifCite.size == 1 -> tarifCite.first()
                 tarifCite.size > 1 -> null
+                tarifsInstallation.size == 1 -> tarifsInstallation.first()
+                tarifsInstallation.size > 1 -> null
                 tarifs.size == 1 -> tarifs.first()
                 else -> null
             }
