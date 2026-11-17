@@ -20,8 +20,12 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
     private val indexSyncEnCours = java.util.concurrent.atomic.AtomicBoolean(false)
     private val indexSyncDemandee = java.util.concurrent.atomic.AtomicBoolean(false)
-    private val indexRootPath = "_Jarvis/Index coffre.md"
-    private val indexDossiersDir = "_Jarvis/Index dossiers"
+    // Un seul espace Jarvis dans le coffre : index automatiques et productions (vidéos, médias…) partagent la même racine.
+    private val indexRootPath = "Jarvis/Index coffre.md"
+    private val indexDossiersDir = "Jarvis/Index dossiers"
+    private val legacyIndexRootDir = "_Jarvis"
+    private val legacyIndexRootPath = "$legacyIndexRootDir/Index coffre.md"
+    private val legacyIndexDossiersDir = "$legacyIndexRootDir/Index dossiers"
     private val indexMarker = "<!-- JARVIS_GENERATED_INDEX_V1 -->"
 
     private fun safe(name: String, def: String) =
@@ -104,7 +108,23 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             .take(12).joinToString("") { "%02x".format(it) }
 
     private fun estIndexGenere(path: String): Boolean =
-        path == indexRootPath || path.startsWith("$indexDossiersDir/")
+        path == indexRootPath || path.startsWith("$indexDossiersDir/") ||
+            path == legacyIndexRootPath || path.startsWith("$legacyIndexDossiersDir/")
+
+    private fun estAncienIndexGenere(path: String): Boolean =
+        path == legacyIndexRootPath || path.startsWith("$legacyIndexDossiersDir/")
+
+    /** Supprime uniquement un dossier devenu vide après migration des index générés. */
+    private fun supprimerDossierVide(path: String) {
+        val racine = vaultRoot() ?: return
+        val parties = path.split('/').filter { it.isNotBlank() }
+        var parent = racine
+        for (part in parties.dropLast(1)) {
+            parent = parent.trouverLoose(part)?.takeIf { it.isDirectory } ?: return
+        }
+        val dossier = parent.trouverLoose(parties.last())?.takeIf { it.isDirectory } ?: return
+        if (dossier.listFiles().isEmpty()) runCatching { dossier.delete() }
+    }
 
     private fun cibleWiki(path: String): String {
         val cible = if (path.endsWith(".md", true)) path.substring(0, path.length - 3) else path
@@ -129,8 +149,12 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             if (!coffreLisible() || !coffreDisponible()) throw java.io.IOException("Le coffre Obsidian configuré est inaccessible ou en lecture seule.")
             val elements = toutLister(20_000)
             if (elements.size >= 20_000) throw java.io.IOException("Le coffre dépasse la limite de 20 000 éléments ; indexation interrompue pour éviter un index incomplet.")
-            val dossiers = elements.filter { it.second && it.first != indexDossiersDir && !it.first.startsWith("$indexDossiersDir/") }
-                .map { it.first.trim('/') }.filter { it.isNotBlank() }.distinct().sorted()
+            val dossiers = elements.filter {
+                it.second &&
+                    it.first != indexDossiersDir && !it.first.startsWith("$indexDossiersDir/") &&
+                    it.first != legacyIndexDossiersDir && !it.first.startsWith("$legacyIndexDossiersDir/") &&
+                    it.first != legacyIndexRootDir
+            }.map { it.first.trim('/') }.filter { it.isNotBlank() }.distinct().sorted()
             val fichiers = elements.filter { !it.second && !estIndexGenere(it.first) }.map { it.first }.distinct().sorted()
             val indexParDossier = dossiers.associateWith { "$indexDossiersDir/${hashIndex(it)}.md" }
             fun parent(path: String) = path.substringBeforeLast('/', "")
@@ -166,13 +190,17 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             ecrireIndexGenere(indexRootPath, racine)
             pages++
             val attendus = indexParDossier.values.toSet() + indexRootPath
-            val anciens = elements.filter { !it.second && estIndexGenere(it.first) && it.first !in attendus }
+            // Migration non destructive : seuls les anciens fichiers portant notre marqueur sont supprimés.
+            // Les éventuelles notes personnelles présentes dans _Jarvis sont conservées.
+            val anciens = elements.filter { !it.second && estAncienIndexGenere(it.first) }
             var nettoyes = 0
             for ((path, _) in anciens) {
                 val contenu = readNoteStrict(path)
-                if (contenu?.contains(indexMarker) == true && supprimerNote(path)) nettoyes++
+                if (contenu?.contains(indexMarker) == true && supprimerFichier(path.substringBeforeLast('/', ""), path.substringAfterLast('/'))) nettoyes++
             }
-            return "Index Obsidian synchronisés : $pages page(s), ${fichiers.size} fichiers/notes reliés, $nettoyes ancien(s) index supprimé(s)."
+            supprimerDossierVide(legacyIndexDossiersDir)
+            supprimerDossierVide(legacyIndexRootDir)
+            return "Index Obsidian synchronisés : $pages page(s), ${fichiers.size} fichiers/notes reliés, $nettoyes ancien(s) index déplacé(s) depuis _Jarvis."
         } finally {
             indexSyncEnCours.set(false)
             if (indexSyncDemandee.getAndSet(false)) synchroniserIndexSilencieusement()
