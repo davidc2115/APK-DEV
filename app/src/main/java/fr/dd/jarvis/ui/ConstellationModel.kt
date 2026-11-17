@@ -746,20 +746,55 @@ object ConstellationLayout {
             if (!bouge) break
         }
 
-        // Passe finale de sécurité : la résolution étiquette-étiquette peut déplacer une étiquette
-        // vers un cercle traité plus tôt dans la même itération. On rétablit donc la séparation
-        // étiquette-cercle après la dernière correction de paires, sans déplacer les hubs.
-        for (iteration in 0 until 256) {
-            var correction = false
-            for (i in etiquettes.indices) {
-                for (j in hubs.indices) {
-                    val r = hubs[j].rayon
-                    if (r > 0f && pousserEtiquetteHorsCercle(i, Pt(hx[j], hy[j]), r + marge + 1f)) {
-                        correction = true
+        // Placement final déterministe des étiquettes.
+        // Une simple poussée successive peut osciller entre deux cercles voisins : une étiquette
+        // sortie de Jarvis peut alors rentrer dans Société, puis revenir dans Jarvis. On cherche
+        // donc, pour chaque étiquette, la position libre la plus proche de sa position résolue,
+        // en tenant compte simultanément du noyau, de tous les hubs et des étiquettes déjà posées.
+        fun positionLibre(i: Int, x: Float, y: Float): Boolean {
+            val e = etiquettes[i]
+            val coreX = 0f.coerceIn(x - e.w / 2f, x + e.w / 2f)
+            val coreY = 0f.coerceIn(y - e.h / 2f, y + e.h / 2f)
+            if (hypot(coreX, coreY) < rayonNoyau + 0.5f) return false
+
+            for (j in hubs.indices) {
+                val r = hubs[j].rayon
+                if (r <= 0f) continue
+                val nx = hx[j].coerceIn(x - e.w / 2f, x + e.w / 2f)
+                val ny = hy[j].coerceIn(y - e.h / 2f, y + e.h / 2f)
+                if (hypot(nx - hx[j], ny - hy[j]) < r + marge + 0.5f) return false
+            }
+
+            for (j in 0 until i) {
+                val autre = etiquettes[j]
+                val dx = abs(x - ex[j])
+                val dy = abs(y - ey[j])
+                if (dx < (e.w + autre.w) / 2f + marge + 0.5f &&
+                    dy < (e.h + autre.h) / 2f + marge + 0.5f) return false
+            }
+            return true
+        }
+
+        for (i in etiquettes.indices) {
+            if (positionLibre(i, ex[i], ey[i])) continue
+            val origineX = ex[i]
+            val origineY = ey[i]
+            var rayonRecherche = 14f
+            var trouve = false
+            while (!trouve) {
+                for (directionIndex in 0 until 48) {
+                    val angle = 2f * PI_F * directionIndex / 48f
+                    val x = origineX + cos(angle) * rayonRecherche
+                    val y = origineY + sin(angle) * rayonRecherche
+                    if (positionLibre(i, x, y)) {
+                        ex[i] = x
+                        ey[i] = y
+                        trouve = true
+                        break
                     }
                 }
+                rayonRecherche += 14f
             }
-            if (!correction) break
         }
 
         for (i in hubs.indices) hubs[i] = hubs[i].copy(pos = Pt(hx[i], hy[i]))
