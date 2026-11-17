@@ -50,6 +50,7 @@ import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.max
@@ -99,9 +100,9 @@ private fun versDome(p: Pt, avance: Float = 0f): FloatArray {
     val rayon = 3.15f + avance
     val projection = sin(latitude) * rayon
     return floatArrayOf(
-        cos(longitude) * projection,
-        sin(longitude) * projection,
-        cos(latitude) * rayon
+        cos(longitude).toFloat() * projection,
+        sin(longitude).toFloat() * projection,
+        cos(latitude).toFloat() * rayon
     )
 }
 
