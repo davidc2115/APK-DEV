@@ -685,27 +685,55 @@ private class OrbeRenderer(private val camera: Camera3D) : GLSurfaceView.Rendere
                 return mix(mix(mix(h31(i), h31(i + vec3(1.0, 0.0, 0.0)), f.x), mix(h31(i + vec3(0.0, 1.0, 0.0)), h31(i + vec3(1.0, 1.0, 0.0)), f.x), f.y),
                            mix(mix(h31(i + vec3(0.0, 0.0, 1.0)), h31(i + vec3(1.0, 0.0, 1.0)), f.x), mix(h31(i + vec3(0.0, 1.0, 1.0)), h31(i + vec3(1.0, 1.0, 1.0)), f.x), f.y), f.z);
             }
-            float fbm(vec3 p) { float v = 0.0; float a = 0.5; for (int i = 0; i < 4; i++) { v += bruit(p) * a; p *= 2.03; a *= 0.5; } return v; }
+            float fbm(vec3 p) {
+                float v = 0.0; float a = 0.5;
+                for (int i = 0; i < 4; i++) { v += bruit(p) * a; p *= 2.03; a *= 0.5; }
+                return v;
+            }
             void main() {
                 vec3 n = normalize(vNormale);
                 vec3 vue = normalize(uOeil - vMonde);
-                vec3 l1 = normalize(vec3(-0.6, 0.75, 0.9));
-                vec3 l2 = normalize(vec3(0.8, -0.3, 0.5));
+                vec3 l1 = normalize(vec3(-0.62, 0.72, 0.92));
+                vec3 l2 = normalize(vec3(0.82, -0.28, 0.48));
+                vec3 l3 = normalize(vec3(-0.18, -0.78, 0.58));
                 float diff = max(dot(n, l1), 0.0);
-                float spec = pow(max(dot(reflect(-l1, n), vue), 0.0), 60.0);
-                float spec2 = pow(max(dot(reflect(-l2, n), vue), 0.0), 24.0);
-                float fres = pow(1.0 - max(dot(n, vue), 0.0), 2.6);
-                float deform = fbm(vLocal * 3.2 + vec3(0.0, uTemps * 0.05, 0.0));
-                float fissure = abs(fbm(vLocal * 6.5 + deform * 2.4) - 0.5);
-                float veines = 1.0 - smoothstep(0.008, 0.045, fissure);
-                float grain = fbm(vLocal * 22.0);
-                vec3 base = vec3(0.012, 0.008, 0.022) + grain * vec3(0.02, 0.012, 0.035);
-                vec3 couleur = base * (0.45 + 0.55 * diff);
-                couleur += vec3(0.34, 0.1, 0.7) * veines * (0.35 + 0.5 * deform);
-                couleur += vec3(0.45, 0.22, 0.85) * fres * 0.85;
-                couleur += vec3(0.85, 0.7, 1.0) * spec * 0.9 + vec3(0.55, 0.3, 1.0) * spec2 * 0.35;
-                gl_FragColor = vec4(couleur, 1.0);
+                float diff2 = max(dot(n, l2), 0.0);
+                float fres = pow(1.0 - max(dot(n, vue), 0.0), 3.0);
+
+                // Nuages minéraux profonds : la surface reste noire, jamais plastique.
+                float nuage = fbm(vLocal * 4.2 + vec3(0.0, uTemps * 0.018, 0.0));
+                float grain = fbm(vLocal * 24.0);
+                float strates = 0.5 + 0.5 * sin(vLocal.y * 19.0 + nuage * 7.0 + vLocal.x * 5.0);
+                vec3 base = vec3(0.0045, 0.0055, 0.012)
+                          + nuage * vec3(0.010, 0.008, 0.020)
+                          + grain * vec3(0.0035, 0.004, 0.009);
+                base += strates * vec3(0.002, 0.0015, 0.006);
+
+                // Fissures cristallines violettes, fines et irrégulières, incrustées dans la pierre.
+                float deformation = fbm(vLocal * 3.1 + vec3(uTemps * 0.012, 0.0, 0.0));
+                float champFissure = abs(fbm(vLocal * 7.4 + deformation * 2.1) - 0.5);
+                float fissures = 1.0 - smoothstep(0.012, 0.038, champFissure);
+                float filaments = 1.0 - smoothstep(0.006, 0.018,
+                    abs(fbm(vLocal * 13.0 + vec3(0.0, deformation, 0.0)) - 0.5));
+                float veines = clamp(fissures * 0.78 + filaments * 0.22, 0.0, 1.0);
+                vec3 pierre = base * (0.32 + 0.68 * diff + 0.12 * diff2);
+                pierre += vec3(0.19, 0.045, 0.42) * veines * (0.32 + 0.42 * nuage);
+
+                // Reflets en couches : reflet large, poli, puis éclat presque miroir.
+                float refletLarge = pow(max(dot(reflect(-l1, n), vue), 0.0), 12.0);
+                float refletPoli = pow(max(dot(reflect(-l2, n), vue), 0.0), 42.0);
+                float eclatMiroir = pow(max(dot(reflect(-l1, n), vue), 0.0), 118.0);
+                float refletSecondaire = pow(max(dot(reflect(-l3, n), vue), 0.0), 26.0);
+                pierre += vec3(0.16, 0.12, 0.24) * refletLarge;
+                pierre += vec3(0.25, 0.15, 0.42) * refletPoli;
+                pierre += vec3(0.78, 0.72, 0.95) * eclatMiroir * 0.82;
+                pierre += vec3(0.12, 0.045, 0.28) * refletSecondaire;
+
+                // Liseré violet discret pour souligner le volume sphérique.
+                pierre += vec3(0.20, 0.075, 0.42) * fres * 0.48;
+                pierre += vec3(0.055, 0.018, 0.12) * fres * fres * 0.8;
+                gl_FragColor = vec4(clamp(pierre, 0.0, 1.0), 1.0);
             }
-        """
+        """""
     }
 }
