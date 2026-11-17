@@ -83,11 +83,25 @@ fun ObsidianOrb3D(app: JarvisApp, enTete: @Composable () -> Unit = {}) {
 private const val DP_PAR_UNITE = 64f
 private const val FOV_Y = 40f
 
-/** Position 3D d'un point de la mise en page 2D : dôme qui s'éloigne vers les bords (y écran vers le bas → y monde vers le haut). */
+/**
+ * Projection de la constellation sur une coque planétaire 3D.
+ * La distance au noyau devient une latitude et l'angle de la mise en page devient une longitude :
+ * les dossiers et sous-dossiers se répartissent donc autour de la sphère au lieu de rester sur un dôme plat.
+ * Le léger décalage [avance] permet de garder les cercles enfants juste devant leur parent.
+ */
 private fun versDome(p: Pt, avance: Float = 0f): FloatArray {
-    val x = p.x / DP_PAR_UNITE; val y = -p.y / DP_PAR_UNITE
-    val z = -(x * x + y * y) * 0.045f + avance
-    return floatArrayOf(x, y, z)
+    val x = p.x / DP_PAR_UNITE
+    val y = -p.y / DP_PAR_UNITE
+    val distance = hypot(x, y)
+    val longitude = atan2(y, x)
+    val latitude = (0.18f + distance * 0.16f).coerceIn(0.18f, 2.78f)
+    val rayon = 3.15f + avance
+    val projection = sin(latitude) * rayon
+    return floatArrayOf(
+        cos(longitude) * projection,
+        sin(longitude) * projection,
+        cos(latitude) * rayon
+    )
 }
 
 /** Caméra partagée entre la couche Compose et le rendu OpenGL (mêmes matrices des deux côtés). */
@@ -237,8 +251,10 @@ private fun Orbe3DContenu(
                     detectTransformGestures { _, pan, zoom, _ ->
                         dernierGeste = temps
                         zoomUser = (zoomUser * zoom).coerceIn(0.6f, 3.2f)
-                        lacetUser = (lacetUser + pan.x * 0.25f).coerceIn(-75f, 75f)
-                        tangageUser = (tangageUser + pan.y * 0.2f).coerceIn(-60f, 60f)
+                        // Rotation planétaire continue : le tour complet est possible sans buter sur une limite.
+                        lacetUser = (lacetUser + pan.x * 0.25f) % 360f
+                        // On évite seulement le retournement exact aux pôles, qui rendrait les contrôles ambigus.
+                        tangageUser = (tangageUser + pan.y * 0.2f).coerceIn(-85f, 85f)
                     }
                 }
                 .pointerInput(c) {
@@ -271,7 +287,7 @@ private fun Orbe3DContenu(
             // chaque image, l'écran n'est pas recomposé 60 fois par seconde.
             val calme = (temps - dernierGeste).coerceIn(0f, 4f) / 4f
             camera.lacet = lacetUser + calme * 18f * sin(temps * 0.22f)
-            camera.tangage = (-8f + tangageUser + calme * 5f * sin(temps * 0.15f)).coerceIn(-75f, 75f)
+            camera.tangage = (-8f + tangageUser + calme * 5f * sin(temps * 0.15f)).coerceIn(-88f, 88f)
             camera.zoom = zoomUser
             camera.distance = distanceAuto
             camera.decalageNdcY = decalageAuto
@@ -400,7 +416,7 @@ private fun Orbe3DContenu(
             enTete()
         }
         Text(
-            "Glisser pour tourner · pincer pour zoomer · toucher une note",
+            "Glisser pour orbiter à 360° · pincer pour zoomer · toucher une note",
             color = Neon.sousTitre.copy(alpha = 0.7f), fontSize = 10.sp, fontFamily = Neon.serif,
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp)
         )
