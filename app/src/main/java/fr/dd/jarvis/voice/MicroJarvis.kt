@@ -189,8 +189,8 @@ class MicroJarvis(private val ctx: Context) {
         val octets = ByteArray(TRAME * 2)
         val lot = ByteArrayOutputStream()      // 100 ms envoyées d'un coup au modèle
         val porte = PorteParole(silenceFin = (pauseMs / 20).coerceIn(40, 200))
-        // Le texte du modèle arrive ~0,3 s après la voix : la pause comptée sur les mots est raccourcie d'autant.
-        val mots = EcouteParMots(pauseTrames = ((pauseMs - 300) / 20).coerceIn(35, 200))
+        // Le délai choisi est appliqué intégralement : le retard de Vosk ne doit pas raccourcir la pause demandée.
+        val mots = EcouteParMots(pauseTrames = (pauseMs / 20).coerceIn(40, 200))
         val avecModele = VoskModel.francais(ctx)
         val debut = System.currentTimeMillis()
         var debutParole = 0L
@@ -280,8 +280,10 @@ class MicroJarvis(private val ctx: Context) {
                     // …et dès que TA voix s'est tue pendant la pause choisie (niveau sonore jugé par rapport à ta voix),
                     // sans attendre que le modèle ait fini de réviser son texte : c'était ~1 à 2 s de trop.
                     val finVoix = porte.trame(rms)
-                    termine = mots.trame(affiche, trames) ||
-                        (mots.parle && porte.parle && finVoix && trames - mots.derniereActivite >= 25 && !VoiceManager.suiteProbable(affiche))
+                    val finMots = mots.trame(affiche, trames)
+                    // Les deux détecteurs doivent confirmer la fin quand le niveau sonore a repéré la voix.
+                    // Avant, le « OU » et son filet fixe de 500 ms court-circuitaient le délai choisi.
+                    termine = EcouteParMots.finPhrase(finMots, porte.parle, finVoix)
                 } else if (avecModele && System.currentTimeMillis() - debut < 4000) {
                     // Modèle encore en chargement (première écoute) : on enregistre, la décision viendra des mots.
                     porte.trame(rms); termine = false
@@ -347,6 +349,10 @@ internal class EcouteParMots(private val pauseTrames: Int) {
         private val REMPLISSAGE = setOf("euh", "heu", "hum", "hm", "mh", "ah", "oh", "eh", "ben", "bah", "hein", "pff", "bon")
         fun reel(m: String) = m.length >= 2 && m.lowercase() !in REMPLISSAGE
         fun motsReels(t: String) = t.split(' ').count { reel(it) }
+
+        /** La fin des mots ne suffit pas si le détecteur sonore entend encore la voix. */
+        internal fun finPhrase(finMots: Boolean, porteParle: Boolean, finVoix: Boolean): Boolean =
+            finMots && (!porteParle || finVoix)
 
         /**
          * Morceau à envoyer à Whisper (échantillons [de, a[) : ~0,4 s avant le premier vrai mot, ~0,5 s après le
