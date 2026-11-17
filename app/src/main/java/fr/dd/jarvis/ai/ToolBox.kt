@@ -1047,11 +1047,16 @@ class ToolBox(
                     return@withContext "⚠️ Le coffre Obsidian configuré n'est pas accessible en lecture. Aucun diagnostic n'a été inventé : vérifie l'autorisation Android dans les Réglages."
                 if (!o.coffreConfigure())
                     return@withContext "⚠️ Aucun coffre Obsidian n'est configuré. Je ne peux pas présenter le stockage privé de JARVIS comme s'il s'agissait de ton coffre."
+                // Avant l'audit, actualiser les index générés : chaque note et pièce jointe doit
+                // avoir un point d'entrée par son index de dossier, sans modifier les notes sources.
+                val synchronisationIndex = runCatching { o.synchroniserIndex() }
+                    .getOrElse { "Index non actualisés : ${it.message ?: it.javaClass.simpleName}" }
                 val limite = a.optString("limite").toIntOrNull()?.coerceIn(1, 3000) ?: 3000
                 val donnees = o.graph(limiteNotes = limite, limiteLecture = limite)
                 val audit = fr.dd.jarvis.device.AnalyseLiensObsidian.analyser(donnees)
                 buildString {
                     append("🔎 AUDIT DES LIENS OBSIDIAN\n")
+                    append("Index : $synchronisationIndex\n")
                     append("${audit.notesLues}/${audit.notesCandidates} notes lues ; ${audit.liens.size} liens internes résolus ; ${donnees.attachments.size} pièces jointes analysées.\n")
                     if (!audit.analyseComplete) append("⚠️ Analyse partielle : certaines notes n'ont pas pu être lues ou la limite de ${limite} notes a été atteinte. Les listes ci-dessous ne constituent pas un inventaire exhaustif.\n")
                     append("\nNOTES SANS LIEN ENTRANT (${audit.notesSansLienEntrant.size})")
@@ -1062,15 +1067,15 @@ class ToolBox(
                     if (audit.notesOrphelines.isEmpty()) append("\nAucune.")
                     else audit.notesOrphelines.take(200).forEach { append("\n- ${it.id}.md") }
                     if (audit.notesOrphelines.size > 200) append("\n… ${audit.notesOrphelines.size - 200} autre(s).")
-                    append("\n\nPIÈCES JOINTES SANS WIKILINK (${audit.fichiersOrphelins.size})")
+                    append("\n\nPIÈCES JOINTES SANS LIEN INTERNE (${audit.fichiersOrphelins.size})")
                     if (audit.fichiersOrphelins.isEmpty()) append("\nAucune.")
                     else audit.fichiersOrphelins.take(200).forEach { append("\n- ${it.path}") }
                     if (audit.fichiersOrphelins.size > 200) append("\n… ${audit.fichiersOrphelins.size - 200} autre(s).")
-                    append("\n\nLIENS WIKILINKS INTROUVABLES (${audit.referencesNonResolues.size})")
+                    append("\n\nLIENS OBSIDIAN / MARKDOWN INTROUVABLES (${audit.referencesNonResolues.size})")
                     if (audit.referencesNonResolues.isEmpty()) append("\nAucun.")
                     else audit.referencesNonResolues.take(200).forEach { append("\n- ${it.from}.md → [[${it.rawTarget}]]") }
                     if (audit.referencesNonResolues.size > 200) append("\n… ${audit.referencesNonResolues.size - 200} autre(s).")
-                    append("\n\nImportant : ces résultats ne sont pas des fichiers perdus. Ils peuvent tous être correctement rangés dans leurs dossiers. Ici, « sans lien » signifie uniquement qu’aucun wikilink Obsidian ne les relie à une autre note.")
+                    append("\n\nImportant : les liens Obsidian [[...]], les liens Markdown [texte](chemin) et les images intégrées sont pris en compte. Les dossiers ne comptent pas comme des liens ; un élément peut être bien rangé tout en restant sans référence depuis une note.")
                 }
             } catch (e: Exception) {
                 "❌ Analyse des liens Obsidian impossible : ${e.message ?: e.javaClass.simpleName}"
