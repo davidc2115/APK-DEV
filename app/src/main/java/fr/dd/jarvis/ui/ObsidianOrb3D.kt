@@ -96,10 +96,10 @@ private fun versDome(p: Pt, avance: Float = 0f): FloatArray {
     val y = -p.y / DP_PAR_UNITE
     val distance = hypot(x, y)
     val longitude = atan2(y, x)
-    // On conserve les éléments sur l'hémisphère visible : l'ancienne latitude saturait à l'arrière
-    // et projetait les dossiers éloignés presque au même endroit.
-    val latitude = (0.16f + distance * 0.10f).coerceIn(0.16f, 1.42f)
-    val rayon = 3.55f + avance
+    // Chaque rayon conserve une part de la distance réelle au noyau : les éléments éloignés ne sont
+    // plus rabattus sur une même couronne, ce qui tassait les dossiers et leurs fichiers.
+    val latitude = (0.18f + distance * 0.055f).coerceIn(0.18f, 1.35f)
+    val rayon = 3.15f + distance * 0.16f + avance
     val projection = sin(latitude) * rayon
     return floatArrayOf(
         cos(longitude).toFloat() * projection,
@@ -197,10 +197,11 @@ private fun Orbe3DContenu(
     // Recul de caméra : toute la constellation tient dans l'écran (portrait) au zoom 1.
     // La zone utile exclut l'en-tête (~64 dp) et la consigne du bas (~28 dp) ; l'image est recentrée sur la
     // constellation (et non sur la sphère) par un décalage vertical de la projection.
-    val (distanceAuto, decalageAuto) = remember(taille, dens) {
+    val (distanceAuto, decalageAuto) = remember(c, taille, dens) {
         // La coque des dossiers est désormais une sphère de rayon constant : le cadrage se calcule
         // sur son enveloppe 3D, et non plus sur l'ancien grand rectangle de la constellation 2D.
-        val rayonEnveloppe = 3.55f + 0.70f
+        val distanceMax = (c.hubs.map { it.pos.len() } + c.etiquettes.map { it.pos.len() }).maxOrNull().orZero() / DP_PAR_UNITE
+        val rayonEnveloppe = max(4.25f, 3.15f + distanceMax * 0.16f + 0.95f)
         val tanY = tan(Math.toRadians(FOV_Y / 2.0)).toFloat()
         val h = if (taille.height > 0f) taille.height else 1600f
         val w = if (taille.width > 0f) taille.width else 800f
@@ -250,10 +251,10 @@ private fun Orbe3DContenu(
                     detectTransformGestures { _, pan, zoom, _ ->
                         dernierGeste = temps
                         zoomUser = (zoomUser * zoom).coerceIn(0.6f, 3.2f)
-                        // Rotation planétaire continue : le tour complet est possible sans buter sur une limite.
+                        // Rotation libre sur les deux axes : chaque axe accepte autant de tours complets que souhaité.
+                        // Le modulo conserve une valeur numérique stable sans créer de butée ni de saut visuel.
                         lacetUser = (lacetUser + pan.x * 0.25f) % 360f
-                        // On évite seulement le retournement exact aux pôles, qui rendrait les contrôles ambigus.
-                        tangageUser = (tangageUser + pan.y * 0.2f).coerceIn(-85f, 85f)
+                        tangageUser = (tangageUser + pan.y * 0.2f) % 360f
                     }
                 }
                 .pointerInput(c) {
@@ -286,7 +287,7 @@ private fun Orbe3DContenu(
             // chaque image, l'écran n'est pas recomposé 60 fois par seconde.
             val calme = (temps - dernierGeste).coerceIn(0f, 4f) / 4f
             camera.lacet = lacetUser + calme * 18f * sin(temps * 0.22f)
-            camera.tangage = (-8f + tangageUser + calme * 5f * sin(temps * 0.15f)).coerceIn(-88f, 88f)
+            camera.tangage = -8f + tangageUser + calme * 5f * sin(temps * 0.15f)
             camera.zoom = zoomUser
             camera.distance = distanceAuto
             camera.decalageNdcY = decalageAuto
@@ -415,7 +416,7 @@ private fun Orbe3DContenu(
             enTete()
         }
         Text(
-            "Glisser pour orbiter à 360° · pincer pour zoomer · toucher une note",
+            "Glisser dans toutes les directions · rotations 360° sans limite · pincer pour zoomer",
             color = Neon.sousTitre.copy(alpha = 0.7f), fontSize = 10.sp, fontFamily = Neon.serif,
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp)
         )
