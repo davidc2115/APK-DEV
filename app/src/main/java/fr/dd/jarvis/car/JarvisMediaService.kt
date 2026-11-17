@@ -176,7 +176,7 @@ class JarvisMediaService : MediaBrowserService() {
     private fun enfants(parentId: String): MutableList<MediaBrowser.MediaItem> = when {
         // Onglets (Android Auto affiche en onglets les dossiers de la racine).
         parentId == RACINE -> mutableListOf(
-            element(ONGLET_JARVIS, "JARVIS", icone = "auto_onglet_micro", dossier = true, style = GRILLE),
+            element(ONGLET_JARVIS, "JARVIS", icone = "dragon_tete", dossier = true, style = GRILLE),
             element(ONGLET_AGENDA, "Aujourd'hui", icone = "auto_onglet_agenda", dossier = true),
             element(ONGLET_RACCOURCIS, "Raccourcis", icone = "auto_onglet_eclair", dossier = true),
         )
