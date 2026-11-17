@@ -41,7 +41,7 @@ object ConversationAuto {
 
     private suspend fun parler(app: JarvisApp, texte: String) {
         withTimeoutOrNull(90_000) {
-            suspendCancellableCoroutine { c -> VoixVoiture.parler(app, texte.take(1500)) { if (c.isActive) c.resume(Unit) } }
+            suspendCancellableCoroutine { c -> VoixVoiture.parler(app, texte) { if (c.isActive) c.resume(Unit) } }
         }
     }
 
