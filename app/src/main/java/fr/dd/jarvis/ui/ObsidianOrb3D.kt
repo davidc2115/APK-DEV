@@ -222,27 +222,27 @@ private fun Orbe3DContenu(
         // Les catégories racines gardent leur position. Chaque sous-dossier est légèrement
         // repoussé de son parent ; l'écart augmente doucement avec la profondeur.
         c.hubs.forEach { h ->
-            val base = versDome(h.pos, 0.25f)
+            val base = versDome(Pt(h.pos.x * 1.32f, h.pos.y * 1.32f), 0.25f)
             val parent = h.parent?.let { m["hub:$it"] }
-            val ecart = if (parent == null) 0f else 0.68f + (h.niveau - 1).coerceAtLeast(0) * 0.22f
+            val ecart = if (parent == null) 0f else 1.05f + (h.niveau - 1).coerceAtLeast(0) * 0.30f
             val position = if (parent != null) eloignerDuParent(base, parent, ecart) else base
             val ecartFocus = if (hubFocus != null && h.parent != null && dansBranche(h.parent))
-                1.3f + (h.niveau - 1).coerceAtLeast(0) * 0.4f else 0f
+                1.65f + (h.niveau - 1).coerceAtLeast(0) * 0.48f else 0f
             m["hub:${h.cle}"] = if (parent != null && ecartFocus > 0f) eloignerDuParent(position, parent, ecartFocus) else position
         }
 
         // Les notes et pièces jointes d'un sous-dossier sont elles aussi décalées vers l'extérieur
         // par rapport au cercle qui les contient, pour former une branche lisible et aérée.
         c.etiquettes.forEach { e ->
-            val base = versDome(e.pos, 0.12f)
+            val base = versDome(Pt(e.pos.x * 1.32f, e.pos.y * 1.32f), 0.12f)
             val parent = c.hub(e.hub)?.takeIf { it.niveau >= 1 }?.let { m["hub:${it.cle}"] }
             val ecart = if (parent != null && (e.type == TypeEtiquette.NOTE || e.type == TypeEtiquette.FICHIER))
-                0.66f + (c.hub(e.hub)?.niveau?.minus(1)?.coerceAtLeast(0) ?: 0) * 0.18f
+                0.98f + (c.hub(e.hub)?.niveau?.minus(1)?.coerceAtLeast(0) ?: 0) * 0.24f
             else 0f
             val position = if (parent != null && ecart > 0f) eloignerDuParent(base, parent, ecart) else base
             val hubContenant = c.hub(e.hub)
             val centreFocus = if (hubFocus != null && dansBranche(e.hub)) hubContenant?.let { m["hub:${it.cle}"] } else null
-            val ecartFocus = if (centreFocus != null) 1.05f + ((hubContenant?.niveau ?: 0).coerceAtLeast(0) * 0.24f) else 0f
+            val ecartFocus = if (centreFocus != null) 1.45f + ((hubContenant?.niveau ?: 0).coerceAtLeast(0) * 0.32f) else 0f
             m[e.id] = if (centreFocus != null) eloignerDuParent(position, centreFocus, ecartFocus) else position
         }
         m
