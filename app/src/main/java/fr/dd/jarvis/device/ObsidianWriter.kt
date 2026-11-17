@@ -1403,8 +1403,8 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
  * Les URL externes et les ancres seules ne sont pas des fichiers du coffre.
  */
 internal object ExtracteurLiensObsidian {
-    private val wikilink = Regex("""\\[\\[([^\\]|#]+)""")
-    private val markdown = Regex("""!?\\[[^\\]]*]\\((?:<([^>]+)>|([^)]*))\\)""")
+    private val wikilink = Regex("""\[\[([^\]|#]+)""")
+    private val markdown = Regex("""!?\[[^\]]*]\((?:<([^>]+)>|([^)]*))\)""")
 
     fun extraire(texte: String): List<String> {
         val resultat = LinkedHashSet<String>()
@@ -1414,7 +1414,7 @@ internal object ExtracteurLiensObsidian {
         markdown.findAll(texte).forEach { match ->
             var cible = (match.groups[1]?.value ?: match.groups[2]?.value.orEmpty()).trim()
             if (cible.startsWith("<") && cible.endsWith(">")) cible = cible.substring(1, cible.length - 1)
-            cible = cible.replace(Regex("""\\s+["'][^"']*["']\\s*$"""), "").trim()
+            cible = cible.replace(Regex("""\s+["'][^"']*["']\s*$"""), "").trim()
             cible = cible.substringBefore('#').substringBefore('?').trim()
             if (cible.isBlank() || cible.startsWith("//")) return@forEach
             if (Regex("""^[A-Za-z][A-Za-z0-9+.-]*:""").containsMatchIn(cible)) return@forEach
