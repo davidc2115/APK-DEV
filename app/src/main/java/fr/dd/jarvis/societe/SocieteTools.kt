@@ -33,6 +33,72 @@ class SocieteTools(
         fun concerned(text: String) = KEYWORDS.containsMatchIn(text)
 
         /**
+         * Création déterministe des devis/factures de TEST : empêche le modèle de répondre par une simple liste
+         * de clients ou un récapitulatif Société. Ne crée jamais de client et ne touche jamais aux documents comptables.
+         * Si le client ou la prestation ne sont pas déterminables sans ambiguïté, renvoie une question ciblée.
+         */
+        fun intentionCreationTest(data: fr.dd.jarvis.societe.core.SocieteData, texte: String): JSONObject? {
+            val n = normaliser(texte)
+            val test = Regex("\\b(test|simulation|exemple)\\b").containsMatchIn(n)
+            val facture = Regex("\\bfactures?\\b").containsMatchIn(n)
+            val devis = Regex("\\bdevis\\b").containsMatchIn(n)
+            if (!test || (!facture && !devis)) return null
+
+            val args = JSONObject().put("type", if (facture) "facture" else "devis").put("test", true)
+            val clientsCites = data.clients.filter { c ->
+                val nom = normaliser(c.nom)
+                nom.length >= 3 && n.contains(nom)
+            }
+            val client = when {
+                clientsCites.size == 1 -> clientsCites.first()
+                clientsCites.size > 1 -> null
+                data.clients.size == 1 -> data.clients.first()
+                else -> null
+            }
+            if (client == null) {
+                val choix = data.clients.take(12).joinToString(" ; ") { it.nom }.ifBlank { "aucun client enregistré" }
+                return JSONObject().put("question", "Pour créer ce document de test sans créer de nouveau client, quel client existant dois-je utiliser ? Clients disponibles : $choix.")
+            }
+            args.put("client", client.nom)
+
+            val kwc = Regex("\\b(\\d+(?:[.,]\\d+)?)\\s*k\\s*w\\s*c\\b", RegexOption.IGNORE_CASE)
+                .find(n)?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull()
+            if (kwc != null) args.put("kwc", kwc)
+            if (Regex("\\binstallation\\b").containsMatchIn(n)) args.put("installation", if (kwc != null) "Installation de test ${nombre(kwc)} kWc" else "Installation de test")
+
+            val km = Regex("\\b(\\d+(?:[.,]\\d+)?)\\s*km\\b", RegexOption.IGNORE_CASE)
+                .find(n)?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull()
+            val sansDeplacement = Regex("\\b(sans|aucun|aucune|pas de)\\s+(deplacement|trajet)\\b").containsMatchIn(n)
+            if (km != null) args.put("distance_km", km)
+            args.put("deplacement", !sansDeplacement && km != null)
+
+            // Priorité à une prestation explicitement citée. Sinon, un seul tarif non lié au dépannage/déplacement
+            // peut être retenu sans interprétation hasardeuse ; plusieurs tarifs nécessitent un choix.
+            val tarifs = data.tarifs.filterNot { t ->
+                val nom = normaliser(t.designation)
+                nom.contains("deplacement") || (Regex("\\b(sans|aucun|aucune|pas de)\\s+depannage\\b").containsMatchIn(n) && nom.contains("depannage"))
+            }
+            val tarifCite = tarifs.filter { t ->
+                val nom = normaliser(t.designation)
+                nom.length >= 3 && n.contains(nom)
+            }
+            val tarif = when {
+                tarifCite.size == 1 -> tarifCite.first()
+                tarifCite.size > 1 -> null
+                tarifs.size == 1 -> tarifs.first()
+                else -> null
+            }
+            if (tarif == null) {
+                val choix = tarifs.take(12).joinToString(" ; ") { it.designation }.ifBlank { "aucun tarif enregistré" }
+                val question = if (tarifCite.size > 1) "Plusieurs prestations correspondent : $choix. Laquelle dois-je mettre sur le document de test ?"
+                    else "Quel tarif/prestation du catalogue dois-je utiliser pour ce document de test ? Tarifs disponibles : $choix."
+                return JSONObject().put("question", question)
+            }
+            args.put("prestations", tarif.designation)
+            return args
+        }
+
+        /**
          * « Marque la facture FAC-2026-0003 comme payée », « Dupont a payé sa facture (par virement) », « le devis 12 est
          * accepté », « facture de Martin envoyée » : arguments de document_action, exécutés DIRECTEMENT dans la base Société
          * du téléphone (jamais par le serveur), ou une question si plusieurs documents correspondent ; null sinon.
