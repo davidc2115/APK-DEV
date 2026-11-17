@@ -1060,15 +1060,18 @@ class ToolBox(
                     append("${audit.notesLues}/${audit.notesCandidates} notes lues ; ${audit.liens.size} liens internes résolus ; ${donnees.attachments.size} pièces jointes analysées.\n")
                     if (!audit.analyseComplete) append("⚠️ Analyse partielle : certaines notes n'ont pas pu être lues ou la limite de ${limite} notes a été atteinte. Les listes ci-dessous ne constituent pas un inventaire exhaustif.\n")
                     append("\nNOTES SANS LIEN ENTRANT (${audit.notesSansLienEntrant.size})")
-                    if (audit.notesSansLienEntrant.isEmpty()) append("\nAucune.")
+                    if (!audit.analyseComplete) append("\nIndéterminé : analyse complète nécessaire.")
+                    else if (audit.notesSansLienEntrant.isEmpty()) append("\nAucune.")
                     else audit.notesSansLienEntrant.take(200).forEach { append("\n- ${it.id}.md") }
                     if (audit.notesSansLienEntrant.size > 200) append("\n… ${audit.notesSansLienEntrant.size - 200} autre(s).")
                     append("\n\nNOTES SANS LIEN ENTRANT NI SORTANT DANS LE GRAPHE OBSIDIAN (${audit.notesOrphelines.size})")
-                    if (audit.notesOrphelines.isEmpty()) append("\nAucune.")
+                    if (!audit.analyseComplete) append("\nIndéterminé : analyse complète nécessaire.")
+                    else if (audit.notesOrphelines.isEmpty()) append("\nAucune.")
                     else audit.notesOrphelines.take(200).forEach { append("\n- ${it.id}.md") }
                     if (audit.notesOrphelines.size > 200) append("\n… ${audit.notesOrphelines.size - 200} autre(s).")
                     append("\n\nPIÈCES JOINTES SANS LIEN INTERNE (${audit.fichiersOrphelins.size})")
-                    if (audit.fichiersOrphelins.isEmpty()) append("\nAucune.")
+                    if (!audit.analyseComplete) append("\nIndéterminé : analyse complète nécessaire.")
+                    else if (audit.fichiersOrphelins.isEmpty()) append("\nAucune.")
                     else audit.fichiersOrphelins.take(200).forEach { append("\n- ${it.path}") }
                     if (audit.fichiersOrphelins.size > 200) append("\n… ${audit.fichiersOrphelins.size - 200} autre(s).")
                     append("\n\nLIENS OBSIDIAN / MARKDOWN INTROUVABLES (${audit.referencesNonResolues.size})")
