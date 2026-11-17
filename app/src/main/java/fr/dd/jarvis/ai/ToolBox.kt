@@ -2292,8 +2292,10 @@ class ToolBox(
 
     private suspend fun createContact(a: JSONObject): ToolResult {
         if (!app.contacts.hasPermission()) return ToolResult("Permission contacts manquante.")
-        val name = a.optString("name")
+        val name = a.optString("name").trim()
         if (name.isBlank()) return ToolResult("Nom manquant.")
+        val client = clientSocieteLieAuContact(name, a.optString("company"))
+        if (client != null) return ToolResult("ℹ️ « $name » est déjà enregistré comme client/interlocuteur de Société « ${client.nom} ». Je n'ajoute pas de doublon au répertoire Android ; la fiche unique reste dans Société/Clients.")
         app.contacts.create(name, a.optString("phone"), a.optString("email"), a.optString("company"), a.optString("note"))
         return ToolResult("Contact « $name » créé.")
     }
@@ -2346,21 +2348,24 @@ class ToolBox(
         java.text.Normalizer.normalize(value.trim(), java.text.Normalizer.Form.NFD)
             .replace(Regex("\\p{M}+"), "").lowercase().replace(Regex("\\s+"), " ")
 
-    private fun clientSocieteLieAuContact(contact: fr.dd.jarvis.device.ContactInfo): fr.dd.jarvis.societe.core.Client? {
+    private fun clientSocieteLieAuContact(nomContact: String, entrepriseContact: String = ""): fr.dd.jarvis.societe.core.Client? {
         val base = app.societe.data
-        val nom = normaliserNomContactSociete(contact.name)
-        val entreprise = normaliserNomContactSociete(contact.company)
+        val nom = normaliserNomContactSociete(nomContact)
+        val entreprise = normaliserNomContactSociete(entrepriseContact)
         val raisonSociale = normaliserNomContactSociete(base.societe.nom)
         return base.clients.firstOrNull { client ->
             val nomClient = normaliserNomContactSociete(client.nom)
-            val nomContact = normaliserNomContactSociete(client.contact)
+            val nomPersonne = normaliserNomContactSociete(client.contact)
             nom.isNotBlank() && (
                 nom == nomClient ||
-                (nomContact.isNotBlank() && nom == nomContact &&
+                (nomPersonne.isNotBlank() && nom == nomPersonne &&
                     (entreprise.isBlank() || entreprise == nomClient || entreprise == raisonSociale))
             )
         }
     }
+
+    private fun clientSocieteLieAuContact(contact: fr.dd.jarvis.device.ContactInfo) =
+        clientSocieteLieAuContact(contact.name, contact.company)
 
     /**
      * Génère la fiche via l'agent Contacts puis l'écrit dans le dossier Obsidian (Contacts, ou un sous-dossier).
