@@ -70,7 +70,7 @@ class ConstellationHierarchyTest {
 
         // Un seul cercle visible, mais les deux chemins physiques restent présents dans l'arborescence.
         assertEquals(1, hubsJarvis.size)
-        assertEquals(2, hubsJarvis.single().compte)
+        assertEquals(2, hubsJarvis.single().total)
         assertEquals(setOf("Jarvis", "Jarvis "), constellation.arborescence.map { it.chemin }.toSet())
     }
 
