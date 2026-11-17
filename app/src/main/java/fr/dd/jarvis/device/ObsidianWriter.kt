@@ -1144,7 +1144,6 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         val limiteNotesAtteinte: Boolean = false
     )
 
-    private val lienRegex = Regex("\\[\\[([^\\]|#]+)")
     // #tag Obsidian : précédé d'un début de ligne ou d'un blanc, commence par une lettre (exclut « # Titre » et les
     // couleurs « #FF00AA » qui commencent souvent par un chiffre), lettres/chiffres/_/-// ensuite.
     private val tagRegex = Regex("(?:^|(?<=\\s))#(\\p{L}[\\p{L}\\p{N}_/-]*)")
@@ -1334,24 +1333,41 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         val vusReferences = HashSet<Pair<String, String>>()
         val vusEdges = HashSet<Pair<String, String>>()
         var notesLues = 0
+        fun normaliserSegments(path: String): String {
+            val morceaux = mutableListOf<String>()
+            path.replace('\\', '/').split('/').forEach { morceau ->
+                when (morceau) {
+                    "", "." -> Unit
+                    ".." -> if (morceaux.isNotEmpty()) morceaux.removeAt(morceaux.lastIndex)
+                    else -> morceaux += morceau
+                }
+            }
+            return morceaux.joinToString("/")
+        }
         for ((chemin, lire) in fichiers.take(limiteLecture)) {
             val fromId = idOf(chemin)
             val texte = lire() ?: continue
             notesLues++
             runCatching { extraireTags(texte) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { tagsParNote[fromId] = it }
-            for (m in lienRegex.findAll(texte)) {
-                val cible = m.groupValues[1].trim().trim('/')
+            for (cibleBrute in ExtracteurLiensObsidian.extraire(texte)) {
+                val cible = cibleBrute.trim().trim('/')
                 if (cible.isBlank()) continue
-                val cibleNorm = cible.removeSuffix(".md").removeSuffix(".MD")
+                val cibleNorm = cible.replace(Regex("(?i)\\.md$"), "")
                 val dossierSource = fromId.substringBeforeLast('/', "")
-                val candidats = listOf(cibleNorm, if (dossierSource.isBlank()) cibleNorm else "$dossierSource/$cibleNorm")
-                    .distinct()
+                val relative = normaliserSegments(if (dossierSource.isBlank()) cibleNorm else "$dossierSource/$cibleNorm")
+                val racine = normaliserSegments(cibleNorm)
+                // Les noms simples sont d'abord recherchés à côté de la note ; les chemins explicites
+                // sont résolus depuis la racine, avec repli sur le chemin relatif.
+                val candidats = if (cibleNorm.contains('/') && !cibleNorm.startsWith("../"))
+                    listOf(racine, relative).distinct()
+                else listOf(relative, racine).distinct()
                 val toId = candidats.firstNotNullOfOrNull { parIdNormalise[normaliseNom(it)] }
                     ?: parNom[normaliseNom(cibleNorm.substringAfterLast('/'))]?.singleOrNull()
-                    ?: cibleNorm
+                    ?: (candidats.firstOrNull() ?: cibleNorm)
                 if (fromId == toId) continue
 
-                // Une relation est toujours orientée depuis la note qui contient le wikilink.
+                // Une relation est toujours orientée depuis la note qui contient le lien,
+                // qu'il soit un wikilink Obsidian ou un lien Markdown standard.
                 if (vusReferences.add(fromId to toId)) {
                     references += GraphReference(
                         from = fromId,
@@ -1361,8 +1377,6 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                     )
                 }
 
-                // Conservation temporaire du format d'arêtes utilisé par l'ancienne vue 2D.
-                // La nouvelle indexation Room consomme exclusivement references, sans perdre le sens du lien.
                 val cle = if (fromId < toId) fromId to toId else toId to fromId
                 if (vusEdges.add(cle)) edges += GraphEdge(fromId, toId)
             }
@@ -1382,6 +1396,33 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     }
 }
 
+
+/**
+ * Extrait les cibles des liens réellement présents dans une note Obsidian.
+ * Prend en charge les wikilinks, les liens Markdown et les embeds Markdown.
+ * Les URL externes et les ancres seules ne sont pas des fichiers du coffre.
+ */
+internal object ExtracteurLiensObsidian {
+    private val wikilink = Regex("""\\[\\[([^\\]|#]+)""")
+    private val markdown = Regex("""!?\\[[^\\]]*]\\((?:<([^>]+)>|([^)]*))\\)""")
+
+    fun extraire(texte: String): List<String> {
+        val resultat = LinkedHashSet<String>()
+        wikilink.findAll(texte).forEach { match ->
+            match.groupValues[1].trim().takeIf { it.isNotBlank() }?.let(resultat::add)
+        }
+        markdown.findAll(texte).forEach { match ->
+            var cible = (match.groups[1]?.value ?: match.groups[2]?.value.orEmpty()).trim()
+            if (cible.startsWith("<") && cible.endsWith(">")) cible = cible.substring(1, cible.length - 1)
+            cible = cible.replace(Regex("""\\s+["'][^"']*["']\\s*$"""), "").trim()
+            cible = cible.substringBefore('#').substringBefore('?').trim()
+            if (cible.isBlank() || cible.startsWith("//")) return@forEach
+            if (Regex("""^[A-Za-z][A-Za-z0-9+.-]*:""").containsMatchIn(cible)) return@forEach
+            resultat.add(java.net.URLDecoder.decode(cible, Charsets.UTF_8.name()))
+        }
+        return resultat.toList()
+    }
+}
 
 /** Résultat commun de l'audit des liens, utilisé par le graphe et par les réponses de JARVIS. */
 data class RapportLiensObsidian(
@@ -1425,10 +1466,15 @@ object AnalyseLiensObsidian {
         // L'index racine est le point d'entrée canonique du coffre : il n'a volontairement pas de parent.
         val notes = data.nodes.filterNot { it.ghost }
         val racineIndexId = "_Jarvis/Index coffre"
-        val sansLienEntrant = notes.filter { it.id != racineIndexId && (entrants[it.id] ?: 0) == 0 }
-            .sortedBy { it.label.lowercase() }
-        val notesOrphelines = notes.filter { it.id != racineIndexId && (degres[it.id] ?: 0) == 0 }
-            .sortedBy { it.label.lowercase() }
+        val analyseComplete = data.notesLues == data.notesCandidates && !data.limiteNotesAtteinte
+        // Une note non lue peut contenir un lien entrant vers n'importe quelle autre note.
+        // En analyse partielle, ne jamais présenter une note ou pièce jointe comme orpheline.
+        val sansLienEntrant = if (analyseComplete) notes
+            .filter { it.id != racineIndexId && (entrants[it.id] ?: 0) == 0 }
+            .sortedBy { it.label.lowercase() } else emptyList()
+        val notesOrphelines = if (analyseComplete) notes
+            .filter { it.id != racineIndexId && (degres[it.id] ?: 0) == 0 }
+            .sortedBy { it.label.lowercase() } else emptyList()
 
         val piecesLiees = HashSet<String>()
         val referencesNonResolues = mutableListOf<ObsidianWriter.GraphReference>()
@@ -1454,9 +1500,9 @@ object AnalyseLiensObsidian {
                 referencesNonResolues += reference
             }
         }
-        val fichiersOrphelins = data.attachments
+        val fichiersOrphelins = if (analyseComplete) data.attachments
             .filter { it.path !in piecesLiees }
-            .sortedBy { it.path.lowercase() }
+            .sortedBy { it.path.lowercase() } else emptyList()
 
         return RapportLiensObsidian(
             liens = liens,
@@ -1466,7 +1512,7 @@ object AnalyseLiensObsidian {
             referencesNonResolues = referencesNonResolues.distinctBy { it.from to it.rawTarget },
             notesLues = data.notesLues,
             notesCandidates = data.notesCandidates,
-            analyseComplete = data.notesLues == data.notesCandidates && !data.limiteNotesAtteinte
+            analyseComplete = analyseComplete
         )
     }
 }
