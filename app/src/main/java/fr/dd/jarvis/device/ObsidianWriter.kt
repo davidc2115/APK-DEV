@@ -385,7 +385,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         val notes = mutableListOf<Pair<String, String>>()
         val maxTailleNote = 1_000_000L
         if (coffreConfigure()) {
-            val racine = vaultRoot() ?: throw java.io.IOException("Autorisation de lecture du coffre perdue.")
+            if (vaultRoot() == null) throw java.io.IOException("Autorisation de lecture du coffre perdue.")
             allNotes(limite.coerceIn(1, 3000)).forEach { (path, fichier) ->
                 if (fichier.length() > maxTailleNote) return@forEach
                 val contenu = ctx.contentResolver.openInputStream(fichier.uri)?.use { it.readBytes() }?.toString(Charsets.UTF_8)
