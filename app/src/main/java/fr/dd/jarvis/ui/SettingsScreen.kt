@@ -1299,6 +1299,9 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                         HudButton("Contrôler les doublons") {
                             onAsk("Analyse les doublons de mon coffre Obsidian : recherche les notes au contenu identique et celles qui portent le même nom. Ne supprime rien, présente-moi les chemins et attends mon choix.")
                         }
+                        HudButton("Vérifier les modifications") {
+                            onAsk("Contrôle les notes de mon coffre Obsidian par rapport à la dernière référence validée. Signale les notes ajoutées, modifiées ou supprimées, sans rien importer ni écraser.")
+                        }
                     }
                 }
                 Spacer(Modifier.height(8.dp))
