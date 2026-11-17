@@ -1317,12 +1317,17 @@ object AnalyseLiensObsidian {
             val cible = normaliserChemin(reference.rawTarget)
             val dossierSource = reference.from.substringBeforeLast('/', "")
             val cibleRelative = normaliserChemin(if (dossierSource.isBlank()) reference.rawTarget else "$dossierSource/${reference.rawTarget}")
-            val cibleNom = cible.substringAfterLast('/')
-            val correspondantes = data.attachments.filter { piece ->
-                val chemin = normaliserChemin(piece.path)
-                val nom = normaliserChemin(piece.name)
-                if (cible.contains('/')) chemin == cible || chemin == cibleRelative
-                else nom == cibleNom
+            val correspondantes = if (cible.contains('/')) {
+                data.attachments.filter { piece ->
+                    val chemin = normaliserChemin(piece.path)
+                    chemin == cible || chemin == cibleRelative
+                }
+            } else {
+                // Pour un nom simple, priorité au fichier du dossier de la note ; sinon on ne résout
+                // que si le nom est unique dans tout le coffre (jamais tous les doublons à la fois).
+                val locale = data.attachments.filter { normaliserChemin(it.path) == cibleRelative }
+                if (locale.isNotEmpty()) locale
+                else data.attachments.filter { normaliserChemin(it.name) == cible }.singleOrNull()?.let(::listOf).orEmpty()
             }
             if (correspondantes.isNotEmpty()) {
                 correspondantes.forEach { piecesLiees += it.path }
