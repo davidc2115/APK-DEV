@@ -262,7 +262,21 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             prefs.edit().putBoolean(cle, true).apply()
             return null
         }
-        saveBytes(folder, fileName, ancienneCopie.toByteArray(Charsets.UTF_8), mime)
+        // Une migration ne doit jamais faire échouer le chargement de Jarvis si le fournisseur SAF
+        // refuse finalement l'écriture. Le marqueur n'est posé qu'après une écriture confirmée :
+        // l'utilisateur pourra réessayer après avoir rétabli les droits du coffre.
+        val migration = runCatching {
+            saveBytes(folder, fileName, ancienneCopie.toByteArray(Charsets.UTF_8), mime)
+        }
+        if (migration.isFailure) {
+            runCatching {
+                fr.dd.jarvis.voice.JournalVoix.noter(
+                    "diagnostic",
+                    "⚠️ Migration Obsidian différée pour $fileName : ${migration.exceptionOrNull()?.message ?: "écriture refusée"}"
+                )
+            }
+            return null
+        }
         prefs.edit().putBoolean(cle, true).apply()
         return ancienneCopie
     }
