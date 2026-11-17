@@ -123,7 +123,7 @@ private class Camera3D {
 
     fun projection(largeur: Float, hauteur: Float): FloatArray {
         val p = FloatArray(16); val t = FloatArray(16); val out = FloatArray(16)
-        Matrix.perspectiveM(p, 0, FOV_Y, largeur / max(hauteur, 1f), 0.1f, 10000f)
+        Matrix.perspectiveM(p, 0, FOV_Y, largeur / max(hauteur, 1f), 0.1f, max(10000f, distance * 4f + 100f))
         Matrix.setIdentityM(t, 0); t[12] = focusNdcX; t[13] = decalageNdcY + focusNdcY
         Matrix.multiplyMM(out, 0, t, 0, p, 0)
         return out
