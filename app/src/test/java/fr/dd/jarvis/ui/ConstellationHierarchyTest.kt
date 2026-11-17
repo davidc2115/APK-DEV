@@ -24,7 +24,7 @@ class ConstellationHierarchyTest {
         val racine = constellation.arborescence.single()
 
         assertEquals("Dossier", racine.chemin)
-        var courant = racine
+        var courant = racine.enfants.single { it.chemin == chemins.first() }
         chemins.drop(1).forEach { chemin ->
             courant = courant.enfants.single { it.chemin == chemin }
         }
