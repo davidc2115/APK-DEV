@@ -97,8 +97,7 @@ data class NoeudDossier(
     val enfants: List<NoeudDossier>,
     val notes: List<ObsidianWriter.GraphNode>,
     val pieces: List<ObsidianWriter.GraphAttachment>,
-    val totalRecursif: Int
-)
+    val totalRecursif: Int)
 
 /** Vrai lien [[wikilink]] orienté entre deux notes affichées. */
 data class LienReel(val de: String, val vers: String)
@@ -197,8 +196,7 @@ object ConstellationLayout {
      */
     private class Rangee(val sous: Hub?, val tete: Etiquette?, val enfants: List<Rangee> = emptyList(), val feuille: Boolean = false) {
         val hauteur: Float by lazy {
-            if (sous != null) max(2 * sous.rayon + 68f, enfants.sumOf { it.hauteur.toDouble() }.toFloat() + 48f)
-            else if (feuille) PAS_FEUILLE else H_ETIQUETTE + 9f
+            if (sous != null) max(2 * sous.rayon + 68f, enfants.sumOf { it.hauteur.toDouble() }.toFloat() + 48f)            else if (feuille) PAS_FEUILLE else H_ETIQUETTE + 9f
         }
     }
 
@@ -297,8 +295,7 @@ object ConstellationLayout {
 
         fun etiquetteNote(n: ObsidianWriter.GraphNode, hub: String, feuille: Boolean): Etiquette {
             val t = court(n.label, if (feuille) 18 else 20)
-            val e = if (feuille) 0.9f else 1f
-            return Etiquette("note:${n.id}", t, Icone.NOTE, TypeEtiquette.NOTE, hub, noteId = n.id, pos = Pt(0f, 0f),
+            val e = if (feuille) 0.9f else 1f            return Etiquette("note:${n.id}", t, Icone.NOTE, TypeEtiquette.NOTE, hub, noteId = n.id, pos = Pt(0f, 0f),
                 w = largeurEtiquette(t) * e, h = if (feuille) H_FEUILLE else H_ETIQUETTE, echelle = e)
         }
         fun etiquettePiece(a: ObsidianWriter.GraphAttachment, hub: String, feuille: Boolean): Etiquette {
@@ -397,8 +394,7 @@ object ConstellationLayout {
             }
             else if (hub.type == TypeHub.PIECES) {
                 val items = ordreTypes.map { kind ->
-                    val t = "${libellePiece(kind)} · ${piecesParType[kind]!!.size}"
-                    Etiquette("piece:$kind", t, iconePiece(kind), TypeEtiquette.PIECE, hub.cle, pos = hub.pos, w = largeurEtiquette(t), h = H_ETIQUETTE)
+                    val t = "${libellePiece(kind)} · ${piecesParType[kind]!!.size}"                    Etiquette("piece:$kind", t, iconePiece(kind), TypeEtiquette.PIECE, hub.cle, pos = hub.pos, w = largeurEtiquette(t), h = H_ETIQUETTE)
                 }
                 etiquettes += placerAutourDuHub(hub, items)
             }
@@ -498,7 +494,6 @@ object ConstellationLayout {
         val t = debut + (fin - debut) * i / pas
         return Pt(cos(t).toFloat() * rx, sin(t).toFloat() * ry)
     }
-
     /**
      * Branches d'une catégorie : chaque rangée (un sous-dossier en cercle, ou un fichier de la racine) est posée à côté
      * du hub, vers l'extérieur ; les fichiers d'un sous-dossier déplié prolongent sa branche un cran plus loin.
@@ -597,8 +592,7 @@ object ConstellationLayout {
             val p = Pt(cos(t).toFloat() * rx, sin(t).toFloat() * ry)
             longueurs[i] = longueurs[i - 1] + (p - prec).len(); prec = p
         }
-        val total = longueurs[pas]
-        val fractions = if (m == 2) listOf(0.25f, 0.75f) else List(m) { (it + 0.5f) / m }
+        val total = longueurs[pas]        val fractions = if (m == 2) listOf(0.25f, 0.75f) else List(m) { (it + 0.5f) / m }
         return fractions.map { f ->
             val cible = f * total
             var i = longueurs.indexOfFirst { it >= cible }.coerceAtLeast(0)
@@ -685,7 +679,7 @@ object ConstellationLayout {
             return true
         }
 
-        for (iteration in 0 until 240) {
+        for (iteration in 0 until 1200) {
             var bouge = false
 
             // 1) Cercles de dossiers / sous-dossiers / pièces jointes entre eux.
@@ -697,8 +691,7 @@ object ConstellationLayout {
                     val dir = direction(dx, dy, i, j)
                     val distance = hypot(dx, dy)
                     val penetration = hubs[i].rayon + hubs[j].rayon + marge - distance
-                    if (penetration > 0f) {
-                        val demi = penetration * 0.5f
+                    if (penetration > 0f) {                        val demi = penetration * 0.5f
                         hx[i] -= dir.x * demi; hy[i] -= dir.y * demi
                         hx[j] += dir.x * demi; hy[j] += dir.y * demi
                         bouge = true
