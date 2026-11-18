@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="oval">
+            <gradient android:type="radial" android:gradientRadius="220dp"
+                android:centerX="50%" android:centerY="46%"
+                android:startColor="#FF8B55FF" android:centerColor="#FF392078"
+                android:endColor="#FF090718" />
+            <stroke android:width="2dp" android:color="#FFB88CFF" />
+        </shape>
+    </item>
+    <item android:inset="7dp">
+        <shape android:shape="oval">
+            <gradient android:angle="45" android:startColor="#663B1C78" android:endColor="#00200B3D" />
+            <stroke android:width="1dp" android:color="#66D8B8FF" />
+        </shape>
+    </item>
+    <item android:width="180dp" android:height="180dp" android:gravity="center">
+        <bitmap android:src="@drawable/dragon_tete" android:gravity="center" />
+    </item>
+</layer-list>
