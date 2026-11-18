@@ -361,7 +361,7 @@ class JarvisMediaService : MediaBrowserService() {
         // JARVIS n'est pas un lecteur audio : publier PLAYING faisait renvoyer PAUSE par Android Auto,
         // dont le callback coupait aussitôt le micro. Pendant l'écoute, on garde une session « en pause »
         // avec une commande PLAY explicite ; STOP reste disponible pour terminer la conversation.
-        .setActions(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_STOP or
+        .setActions(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_STOP or
             PlaybackState.ACTION_PLAY_FROM_MEDIA_ID or PlaybackState.ACTION_PLAY_FROM_SEARCH or
             PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS)
         .addCustomAction(PlaybackState.CustomAction.Builder(ACT_PARLER, "Parler à JARVIS", R.drawable.ic_auto_micro).build())
@@ -549,9 +549,11 @@ class JarvisMediaService : MediaBrowserService() {
             // parfois PAUSE juste après PLAY parce que l'état avait été publié comme PLAYING : cela
             // interrompait le micro avant même le bip. L'arrêt vocal explicite passe par onStop().
             if (demandeEnCours || enCours) {
-                JournalVoix.noter("android-auto", "PAUSE système ignoré pendant l'ouverture / l'écoute vocale")
-                session.setPlaybackState(etat(PlaybackState.STATE_PAUSED))
-                return
+                JournalVoix.noter("android-auto", "PAUSE utilisateur : interruption de la réponse / écoute")
+                VoixVoiture.taire()
+                JarvisService.interrompreDepuisVoiture()
+                enCours = false; demandeEnCours = false; piloteJusqua = 0L
+                veille?.cancel(); derniereFin = SystemClock.elapsedRealtime()
             }
             session.setPlaybackState(etat(PlaybackState.STATE_PAUSED))
         }
