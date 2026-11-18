@@ -14,6 +14,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import androidx.compose.runtime.mutableStateOf
 import androidx.core.app.NotificationCompat
 import fr.dd.jarvis.JarvisApp
 import fr.dd.jarvis.ai.Brain
@@ -35,6 +36,8 @@ class JarvisService : Service() {
 
     companion object {
         @Volatile var running = false
+        /** État commun de la conversation déclenchée par le Wake Word ou Android Auto, observable par l'accueil Compose. */
+        val conversationActive = mutableStateOf(false)
         const val ACTION_STOP = "fr.dd.jarvis.WAKE_STOP"
         const val ACTION_RELANCER = "fr.dd.jarvis.WAKE_RELANCER"
         /** Android Auto (appli média) : « Parler à JARVIS » → écoute immédiate, comme si on avait dit « Jarvis ». */
@@ -99,6 +102,16 @@ class JarvisService : Service() {
         fun interrompreDepuisVoiture() {
             val s = actuel ?: return
             s.main.post { s.interrompre() }
+        }
+
+        /** Le bouton STOP de l'accueil peut arrêter la session lancée hors du ChatViewModel (Wake Word / Android Auto). */
+        fun arreterConversationDepuisAppli() {
+            val s = actuel ?: return
+            s.main.post {
+                s.voice?.stopSpeaking()
+                s.voice?.fermer()
+                s.interrompre()
+            }
         }
 
         private fun micAccorde(ctx: Context) = ctx.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
@@ -357,6 +370,7 @@ class JarvisService : Service() {
         apresConfirmation?.let { c -> apresConfirmation = null; if (!busy && running) { awake = true; process(c); return } }
         if (!busy) garderEveille(false)
         fr.dd.jarvis.car.ActiviteVoiture.signaler(fr.dd.jarvis.car.ActiviteVoiture.Etape.FIN)
+        conversationActive.value = false
         awake = false
         incompris = 0
         finLe = System.currentTimeMillis()
@@ -482,6 +496,7 @@ class JarvisService : Service() {
         fr.dd.jarvis.voice.JournalVoix.noter("service", if (refus == null) "réveil accepté" else "réveil ignoré : $refus")
         if (refus != null) return
         dernierReveil = maintenant
+        conversationActive.value = true
         garderEveille(true)
         // Connexion à l'IA préparée pendant que tu parles (évite la poignée de main TLS au moment de la demande).
         fr.dd.jarvis.ai.Http.prechauffer()
@@ -778,6 +793,7 @@ class JarvisService : Service() {
 
     override fun onDestroy() {
         running = false
+        conversationActive.value = false
         if (actuel === this) actuel = null
         main.removeCallbacks(surveillance)
         main.removeCallbacks(relance)
