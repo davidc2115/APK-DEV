@@ -150,9 +150,12 @@ class JarvisMediaService : MediaBrowserService() {
         // Reprise de « la dernière écoute » (système) : rien à reprendre, JARVIS ne joue pas de musique lui-même.
         // « Reprendre » : la carte média d'Android Auto (à côté du GPS en grand) affiche le dernier élément joué avec ▶.
         // On lui donne « 🎙️ Parler à JARVIS » : la carte devient un bouton micro au lieu des seules suggestions.
-        if (rootHints?.getBoolean(BrowserRoot.EXTRA_RECENT) == true)
-            return if (clientPackageName in VOITURE || clientPackageName == packageName)
-                BrowserRoot(RECENT, Bundle().apply { putBoolean(BrowserRoot.EXTRA_RECENT, true) }) else BrowserRoot(VIDE, extras)
+        if (rootHints?.getBoolean(BrowserRoot.EXTRA_RECENT) == true) {
+            // Android Auto redemande parfois la dernière source à la reconnexion et ouvre directement sa carte
+            // « Bonne route ». Pour JARVIS, revenir systématiquement à la racine avec les trois onglets.
+            return if (clientPackageName in VOITURE || clientPackageName == packageName) BrowserRoot(RACINE, extras)
+            else BrowserRoot(VIDE, extras)
+        }
         // Carte « Pour vous » d'Android Auto : remplie par l'appli Google avec des éléments JOUABLES (les onglets n'en ont pas).
         if (clientPackageName == APPLI_GOOGLE || rootHints?.getBoolean(BrowserRoot.EXTRA_SUGGESTED) == true) return BrowserRoot(SUGGESTIONS, extras)
         return BrowserRoot(RACINE, extras)
@@ -187,13 +190,13 @@ class JarvisMediaService : MediaBrowserService() {
     private fun enfants(parentId: String): MutableList<MediaBrowser.MediaItem> = when {
         // Onglets (Android Auto affiche en onglets les dossiers de la racine).
         parentId == RACINE -> mutableListOf(
-            element(ONGLET_JARVIS, "JARVIS · JÖRMUNGAND", "Assistant vocal", "dragon_tete", dossier = true, style = GRILLE),
+            element(ONGLET_JARVIS, "JARVIS", "Assistant vocal", "dragon_tete", dossier = true, style = GRILLE),
             element(ONGLET_AGENDA, "Aujourd'hui", icone = "auto_onglet_agenda", dossier = true),
             element(ONGLET_RACCOURCIS, "Raccourcis", icone = "auto_onglet_eclair", dossier = true),
         )
         parentId == SUGGESTIONS -> suggestions()
         parentId == RECENT -> mutableListOf(element(PARLER, "🎙️ Parler à JARVIS", prochainResume(), "auto_micro"))
-        parentId == ONGLET_JARVIS -> mutableListOf(element(PARLER, "Parler à JARVIS", "JÖRMUNGAND · Touche pour ouvrir le micro", "auto_micro"))
+        parentId == ONGLET_JARVIS -> mutableListOf(element(PARLER, "Parler à JARVIS", "Touche la tête du dragon pour parler", "dragon_tete"))
         parentId == ONGLET_AGENDA -> agenda(LocalDate.now(), "aujourd'hui").apply {
             val demain = evenements(LocalDate.now().plusDays(1))
             add(element(DEMAIN, "📅 Demain", if (demain.isEmpty()) "Aucun rendez-vous" else "${demain.size} rendez-vous", "auto_agenda", dossier = true))
