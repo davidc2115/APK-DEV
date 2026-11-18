@@ -348,11 +348,16 @@ class JarvisService : Service() {
             derniereDemandeExterne = t
         }
         if (busy) {
+            // Un nouvel appui explicite sur Play depuis la voiture signifie « interrompre et m'écouter »,
+            // jamais « attendre la réponse précédente ». L'ancien flux est invalidé avant d'ouvrir le micro.
+            journal("nouvel appui Play pendant un traitement : demande précédente interrompue")
+            generation++
             voice?.stopSpeaking()
-            if (essai < 6) main.postDelayed({ demandeExterne(essai + 1) }, 500)
-            else fr.dd.jarvis.car.ActiviteVoiture.signaler(fr.dd.jarvis.car.ActiviteVoiture.Etape.ECHEC,
-                texte = "Je termine ta demande précédente, réessaie dans un instant.")
-            return
+            voice?.fermer()
+            voice?.sessionFin()
+            busy = false
+            awake = false
+            garderEveille(false)
         }
         if (awake) {
             voice?.stopSpeaking()
@@ -365,8 +370,17 @@ class JarvisService : Service() {
 
     /** Pause demandée par la voiture : on coupe la voix et on referme la conversation (sans toucher à une demande en cours). */
     private fun interrompre() {
+        // Pause et STOP doivent aussi libérer l'état busy : arrêter seulement le TTS laissait le traitement
+        // marqué « en cours », puis chaque Play répétait « je traite ta demande précédente ».
+        generation++
+        fr.dd.jarvis.car.ConversationAuto.arreter()
         voice?.stopSpeaking()
-        if (awake && !busy) { voice?.fermer(); finConversation() }
+        voice?.fermer()
+        voice?.sessionFin()
+        awake = false
+        busy = false
+        garderEveille(false)
+        goIdle()
     }
 
     /** Conversation en cours (écoute, réflexion, réponse) : le téléphone ne doit pas s'endormir au milieu (10 min au plus). */
