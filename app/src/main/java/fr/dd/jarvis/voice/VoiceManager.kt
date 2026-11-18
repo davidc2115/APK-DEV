@@ -887,7 +887,9 @@ class VoiceManager(private val ctx: Context) {
                     val n = (taux * 0.11).toInt()
                     // Sortie en veille : ~0,3 s pour le haut-parleur du téléphone, jusqu'à ~0,7 s pour un lien Bluetooth
                     // ou le canal média d'Android Auto. Ce silence d'abord, sinon le début du bip est avalé.
-                    val voiture = appli()?.enVoiture == true
+                    // Le mode voiture peut être signalé après l'appui Play d'Android Auto.
+                    // sortieVoitureForcee est activé par le service dès la réception de cette action.
+                    val voiture = sortieVoitureForcee || appli()?.enVoiture == true
                     val avance = (taux * when {
                         sco -> if (voiture) 0.6 else 0.35          // haut-parleurs « appel » de la voiture : ~0,5 s pour s'ouvrir
                         voiture -> 1.2                             // canal média d'Android Auto : jusqu'à ~1 s pour s'ouvrir
