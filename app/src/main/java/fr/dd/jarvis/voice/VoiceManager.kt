@@ -894,7 +894,7 @@ class VoiceManager(private val ctx: Context) {
                     }
                     // ToneGenerator est plus fiable que l'AudioTrack statique sur certaines ROM : il utilise
                     // directement le flux média du téléphone / de la projection et ne dépend pas d'un buffer PCM.
-                    val stream = if (sco) AudioManager.STREAM_VOICE_CALL else AudioManager.STREAM_MUSIC
+                    val stream = when { sco -> AudioManager.STREAM_VOICE_CALL; voiture || sortieBluetooth() -> AudioManager.STREAM_MUSIC; else -> AudioManager.STREAM_NOTIFICATION }
                     tonalite = ToneGenerator(stream, 85)
                     val premier = if (montant) ToneGenerator.TONE_PROP_BEEP else ToneGenerator.TONE_PROP_ACK
                     val second = if (montant) ToneGenerator.TONE_PROP_ACK else ToneGenerator.TONE_PROP_BEEP
