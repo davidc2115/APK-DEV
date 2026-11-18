@@ -486,6 +486,16 @@ class JarvisService : Service() {
         // Connexion à l'IA préparée pendant que tu parles (évite la poignée de main TLS au moment de la demande).
         fr.dd.jarvis.ai.Http.prechauffer()
         vosk?.stop()
+        // Si le CarContext est arrivé après le démarrage du service, préparer Vosk/CarAudioRecord pour le prochain réveil.
+        if (app.enVoiture && fr.dd.jarvis.car.NavigationVoiture.contexte != null &&
+            fr.dd.jarvis.voice.VoskModel.ready(this) && vosk !is fr.dd.jarvis.voice.VoskWake) {
+            val ancien = vosk
+            ancien?.release()
+            vosk = fr.dd.jarvis.voice.VoskWake(this, app.store.ecouteEconome.value) {
+                main.post { onWakeWord() }
+            }.also { brancher(it) }
+            fr.dd.jarvis.voice.JournalVoix.noter("service", "détecteur prêt pour le micro Android Auto au prochain réveil")
+        }
         // En voiture (JARVIS ouvert dans Android Auto) : micro de la VOITURE et haut-parleurs de la voiture, GPS toujours affiché.
         if (fr.dd.jarvis.car.ConversationAuto.possible(app)) {
             awake = true; busy = true; echangeReel = true
@@ -734,9 +744,27 @@ class JarvisService : Service() {
      * Android peut « faire taire » le micro d'une appli en arrière-plan (le service tourne mais n'entend plus rien).
      * Si cela dure, on prévient avec une notification qui relance l'écoute d'un toucher.
      */
+    /** Dès que la session Android Auto fournit son CarContext, bascule Porcupine (micro téléphone)
+     * vers Vosk/CarAudioRecord pour que le mot de réveil puisse aussi être entendu par le micro de la voiture. */
+    private fun activerDetecteurVoitureSiDisponible() {
+        if (!app.enVoiture || fr.dd.jarvis.car.NavigationVoiture.contexte == null ||
+            !fr.dd.jarvis.voice.VoskModel.ready(this) || vosk is fr.dd.jarvis.voice.VoskWake) return
+        if (awake || busy || suspenduParAppli) return
+        val ancien = vosk ?: return
+        ancien.stop()
+        ancien.release()
+        val nouveau = fr.dd.jarvis.voice.VoskWake(this, app.store.ecouteEconome.value) {
+            main.post { onWakeWord() }
+        }.also { brancher(it) }
+        vosk = nouveau
+        fr.dd.jarvis.voice.JournalVoix.noter("service", "micro Android Auto disponible : détecteur basculé vers CarAudioRecord")
+        rearmer(nouveau)
+    }
+
     private val surveillance = object : Runnable {
         override fun run() {
             if (!running) return
+            activerDetecteurVoitureSiDisponible()
             if (Build.VERSION.SDK_INT >= 29 && !awake && !busy && vosk != null) {
                 val am = getSystemService(AUDIO_SERVICE) as AudioManager
                 val silencieux = runCatching { am.activeRecordingConfigurations.any { it.isClientSilenced } }.getOrDefault(false)
