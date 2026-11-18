@@ -1343,7 +1343,9 @@ class VoiceManager(private val ctx: Context) {
             if (sansSuite) {
                 main.post {
                     sortirModeAppel()
-                    if (mediaPauseeParJarvis) fr.dd.jarvis.service.JarvisNotificationListener.reprendreMediaApresVoix()
+                    val commandeMediaEnAttente = apresParole.isNotEmpty()
+                    if (mediaPauseeParJarvis && !commandeMediaEnAttente) fr.dd.jarvis.service.JarvisNotificationListener.reprendreMediaApresVoix()
+                    else if (commandeMediaEnAttente) fr.dd.jarvis.service.JarvisNotificationListener.oublierPauseVoix()
                     mediaPauseeParJarvis = false
                 }
             } else terminerApres()
