@@ -88,15 +88,29 @@ class BargeInVoiture(private val contexte: androidx.car.app.CarContext, private 
         thread = Thread {
             var record: androidx.car.app.media.CarAudioRecord? = null
             try {
-                val r = androidx.car.app.media.CarAudioRecord.create(contexte) ?: return@Thread
+                JournalVoix.noter("voix", "barge-in Android Auto : ouverture CarAudioRecord")
+                val r = androidx.car.app.media.CarAudioRecord.create(contexte)
+                    ?: throw IllegalStateException("CarAudioRecord indisponible (contexte ou autorisation Android Auto)")
                 record = r
                 r.startRecording()
+                JournalVoix.noter("voix", "barge-in Android Auto : micro voiture démarré")
                 val buf = ByteArray(androidx.car.app.media.CarAudioRecord.AUDIO_CONTENT_BUFFER_SIZE)
-                val detecteur = DetecteurParole()
+                // Le niveau du micro d'autoradio est souvent nettement plus faible que celui du téléphone.
+                // Seuil plus bas, mais validation sur plusieurs trames et contrôle du taux de passage par zéro conservés.
+                val detecteur = DetecteurParole(echauffement = 12, minimum = 260.0, ratioBruit = 2.2, ratioEcho = 1.35, fenetre = 12, requis = 8)
+                var derniereMesure = 0L
                 while (run) {
                     val n = r.read(buf, 0, buf.size)
-                    if (n <= 0) { if (n < 0) break; continue }
+                    if (n <= 0) {
+                        if (n < 0) throw IllegalStateException("lecture CarAudioRecord : $n")
+                        continue
+                    }
                     val rms = fr.dd.jarvis.car.Pcm.rms(buf, 0, n, true)
+                    val maintenant = System.currentTimeMillis()
+                    if (maintenant - derniereMesure >= 1500) {
+                        JournalVoix.noter("voix", "barge-in Android Auto : niveau micro voiture RMS=${rms.toInt()}")
+                        derniereMesure = maintenant
+                    }
                     var passages = 0
                     var precedent = 0
                     var echantillons = 0
@@ -109,9 +123,11 @@ class BargeInVoiture(private val contexte: androidx.car.app.CarContext, private 
                     val zcr = if (echantillons == 0) 0.0 else passages.toDouble() / echantillons
                     if (detecteur.trame(rms, zcr)) { run = false; onVoix(); break }
                 }
-            } catch (_: Throwable) {
+            } catch (e: Throwable) {
+                JournalVoix.noter("voix", "barge-in Android Auto indisponible : ${e.message ?: e.javaClass.simpleName}")
             } finally {
                 runCatching { record?.stopRecording() }
+                JournalVoix.noter("voix", "barge-in Android Auto arrêté")
             }
         }.also { it.isDaemon = true; it.name = "jarvis-bargein-voiture"; it.start() }
     }
