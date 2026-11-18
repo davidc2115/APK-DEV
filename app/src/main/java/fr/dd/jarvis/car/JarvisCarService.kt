@@ -97,12 +97,15 @@ object NavigationVoiture {
         val coord = point ?: return false
         if (coord.first == 0.0 && coord.second == 0.0) return false
 
-        // Android Auto documente geo:latitude,longitude comme destination de navigation.
-        val coordonnees = Uri.parse("geo:${coord.first},${coord.second}")
-        val tentatives = listOf(coordonnees)
+        // Android Auto accepte geo:latitude,longitude ; ajouter aussi q= avec le libellé évite que certains hôtes
+        // ouvrent seulement la carte sans sélectionner réellement la destination.
+        val coordonnees = listOf(
+            Uri.parse("geo:${coord.first},${coord.second}?q=${coord.first},${coord.second}(${Uri.encode(destination)})"),
+            Uri.parse("geo:${coord.first},${coord.second}")
+        )
 
         return withContext(Dispatchers.Main) {
-            for (uri in tentatives) {
+            for (uri in coordonnees) {
                 val erreur = runCatching {
                     c.startCarApp(Intent(CarContext.ACTION_NAVIGATE).setData(uri))
                 }.exceptionOrNull()
