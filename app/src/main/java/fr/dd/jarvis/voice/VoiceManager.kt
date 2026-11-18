@@ -1406,13 +1406,13 @@ class VoiceManager(private val ctx: Context) {
 
         private fun jouer(a: VoixNaturelle.Audio) {
             val canal = if (a.canaux == 2) AudioFormat.CHANNEL_OUT_STEREO else AudioFormat.CHANNEL_OUT_MONO
+            val voiture = sortieVoitureForcee || appli()?.enVoiture == true
             if (piste == null || formatPiste != a.frequence to a.canaux) {
                 vider()
                 val min = AudioTrack.getMinBufferSize(a.frequence, canal, AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(4096)
                 piste = AudioTrack.Builder().setAudioAttributes(attrsVoix)
                     .setAudioFormat(AudioFormat.Builder().setSampleRate(a.frequence).setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(canal).build())
                     .setTransferMode(AudioTrack.MODE_STREAM).setBufferSizeInBytes(min * 4).build()
-                val voiture = sortieVoitureForcee || appli()?.enVoiture == true
                 if (voiture && Build.VERSION.SDK_INT >= 33) {
                     val sortie = runCatching { am.getAudioDevicesForAttributes(attrsVoix).firstOrNull() }.getOrNull()
                     if (sortie != null) runCatching { piste?.preferredDevice = sortie }
