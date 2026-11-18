@@ -394,6 +394,7 @@ class JarvisMediaService : MediaBrowserService() {
     /** 🎙️ : JARVIS ouvre le micro (bip, puis ta demande) ; l'écran de lecture suit la conversation. */
     private fun parler() {
         dernierParler = SystemClock.elapsedRealtime()
+        JournalVoix.noter("android-auto", "demande d'écoute depuis la carte média")
         VoixVoiture.taire()
         piloteJusqua = SystemClock.elapsedRealtime() + 8000
         // PLAYING garde la carte de conversation visible pendant l'ouverture du micro ;
@@ -515,14 +516,11 @@ class JarvisMediaService : MediaBrowserService() {
          */
         override fun onPlay() {
             val t = SystemClock.elapsedRealtime()
-            // Android Auto peut transmettre ▶ avant que l'état app.enVoiture soit rafraîchi.
-            // La MediaSession n'est exposée qu'aux clients autorisés (dont Android Auto) :
-            // ne pas bloquer l'action sur ce booléen parfois en retard.
-            // L'action Play est explicite dans l'onglet JARVIS : ne pas la confondre avec l'autoplay
-            // de connexion, qui empêchait aussi le premier appui utilisateur de lancer l'écoute.
-            if (t - derniereFin < 1_200 || t - dernierParler < 1_200) {
-                session.setPlaybackState(etat(PlaybackState.STATE_PAUSED)); return
-            }
+            // Android Auto peut répéter ▶ ou le transmettre juste après la fin de la réponse.
+            // Ne jamais rétablir PAUSED ici : cela annulait visuellement le premier appui et pouvait
+            // masquer la session qui venait d'être ouverte.
+            if (enCours || t - dernierParler < 700) return
+            JournalVoix.noter("android-auto", "MediaSession onPlay reçu")
             parler()
         }
 
