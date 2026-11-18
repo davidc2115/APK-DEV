@@ -452,14 +452,27 @@ class SocieteService(
         val client = data.client(clientId) ?: return "Client introuvable."
         val site = client.sites.firstOrNull { it.id == siteId } ?: return "Installation introuvable."
         val inter = site.interventions.firstOrNull { it.id == interventionId } ?: return "Intervention introuvable."
-        File(ctx.filesDir, "societe/interventions/$interventionId").apply { mkdirs() }.let { File(it, "signature.png").writeBytes(png) }
-        runCatching { obsidian.saveBytes(dossierIntervention(client, site), "$interventionId-signature.png", png, "image/png") }
-        val maj = inter.copy(signature = "interventions/$interventionId/signature.png")
-        repo.update { d -> d.copy(clients = d.clients.map { c -> if (c.id != clientId) c else c.copy(sites = c.sites.map { s ->
-            if (s.id != siteId) s else s.copy(interventions = s.interventions.map { if (it.id == interventionId) maj else it })
-        }) }) }
-        val (_, pdf) = ecrireRapport(client, site, maj)
-        return "✍️ Signature du client ajoutée au rapport ($pdf)."
+        if (png.isEmpty()) return "Signature vide : aucun fichier enregistré."
+        val nom = "$interventionId-signature.png"
+        val dossierObsidian = dossierIntervention(client, site)
+        // La signature ne devient une donnée de l'intervention qu'après son écriture durable.
+        val emplacement = runCatching { obsidian.saveBytes(dossierObsidian, nom, png, "image/png") }
+            .getOrElse { return "❌ Signature non enregistrée dans Obsidian : ${it.message ?: it.javaClass.simpleName}. L'intervention reste inchangée." }
+        val local = File(ctx.filesDir, "societe/interventions/$interventionId/signature.png")
+        try {
+            local.parentFile?.mkdirs()
+            local.writeBytes(png)
+            val maj = inter.copy(signature = "interventions/$interventionId/signature.png")
+            repo.update { d -> d.copy(clients = d.clients.map { c -> if (c.id != clientId) c else c.copy(sites = c.sites.map { s ->
+                if (s.id != siteId) s else s.copy(interventions = s.interventions.map { if (it.id == interventionId) maj else it })
+            }) }) }
+            val (_, pdf) = runCatching { ecrireRapport(client, site, maj) }
+                .getOrElse { "" to "PDF non généré (${it.message ?: it.javaClass.simpleName})" }
+            return "✍️ Signature du client enregistrée dans $emplacement. $pdf"
+        } catch (e: Exception) {
+            runCatching { local.delete() }
+            return "⚠️ Signature copiée dans Obsidian, mais l'historique Société n'a pas été modifié : ${e.message ?: e.javaClass.simpleName}. Vérifie l'intervention avant de réessayer."
+        }
     }
 
     /** Une fois : régénère les rapports des interventions qui ont des photos (elles n'étaient pas dans les PDF). */
@@ -487,41 +500,63 @@ class SocieteService(
             site.nom.replace(Regex("[\\\\/:*?\"<>|]"), "_")
         val existantes = if (avant) intervention.photosAvant else intervention.photosApres
         val ajoutees = mutableListOf<String>()
+        val echecs = mutableListOf<String>()
         var totalOctets = 0L
-        uris.take(10).forEach { uri ->
+        uris.take(10).forEachIndexed { index, uri ->
+            var fichierLocal: File? = null
             runCatching {
                 val mime = ctx.contentResolver.getType(uri) ?: "image/jpeg"
-                if (!mime.startsWith("image/")) return@runCatching
+                require(mime.startsWith("image/")) { "format non image" }
+                val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: throw java.io.IOException("lecture impossible")
+                require(bytes.isNotEmpty() && bytes.size <= 15 * 1024 * 1024) { "taille invalide (15 Mo maximum)" }
+                require(totalOctets + bytes.size <= 40L * 1024 * 1024) { "limite de 40 Mo par ajout dépassée" }
                 val extension = when (mime.lowercase()) {
                     "image/png" -> "png"
                     "image/webp" -> "webp"
                     "image/heic", "image/heif" -> "heic"
                     else -> "jpg"
                 }
-                val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@runCatching
-                if (bytes.isEmpty() || bytes.size > 15 * 1024 * 1024) return@runCatching
-                totalOctets += bytes.size
-                if (totalOctets > 40L * 1024 * 1024) return@runCatching
                 val numero = existantes.size + ajoutees.size + 1
                 val nom = (if (avant) "avant" else "apres") + "-%02d.%s".format(numero, extension)
-                File(dossierLocal, nom).writeBytes(bytes)
-                val relatif = "interventions/$interventionId/$nom"
-                ajoutees += relatif
+                val destination = File(dossierLocal, nom)
+                // Copie privée uniquement pour l'aperçu et l'intégration dans le PDF.
+                destination.writeBytes(bytes)
+                fichierLocal = destination
+                // Une photo n'entre dans l'historique qu'après confirmation de son écriture durable.
                 obsidian.saveBytes(dossierObsidian, "$interventionId-$nom", bytes, mime)
+                ajoutees += "interventions/$interventionId/$nom"
+                totalOctets += bytes.size
+            }.onFailure { erreur ->
+                fichierLocal?.let { runCatching { it.delete() } }
+                echecs += "Photo ${index + 1} : ${erreur.message ?: erreur.javaClass.simpleName}"
             }
         }
-        if (ajoutees.isEmpty()) return "Aucune image exploitable. Formats image uniquement, 15 Mo maximum par photo et 40 Mo par ajout."
+        if (ajoutees.isEmpty()) {
+            val detail = echecs.firstOrNull()?.let { " $it" }.orEmpty()
+            return "Aucune photo n'a été ajoutée. Le coffre Obsidian doit être accessible en écriture.$detail"
+        }
         val maj = intervention.copy(
             photosAvant = if (avant) intervention.photosAvant + ajoutees else intervention.photosAvant,
             photosApres = if (avant) intervention.photosApres else intervention.photosApres + ajoutees
         )
-        repo.update { d -> d.copy(clients = d.clients.map { c ->
-            if (c.id != clientId) c else c.copy(sites = c.sites.map { s ->
-                if (s.id != siteId) s else s.copy(interventions = s.interventions.map { i -> if (i.id == interventionId) maj else i })
-            })
-        }) }
-        val (emplacement, _) = ecrireRapport(client, site, maj)
-        return "${ajoutees.size} photo(s) ${if (avant) "avant" else "après"} ajoutée(s). Note mise à jour : $emplacement"
+        try {
+            repo.update { d -> d.copy(clients = d.clients.map { c ->
+                if (c.id != clientId) c else c.copy(sites = c.sites.map { s ->
+                    if (s.id != siteId) s else s.copy(interventions = s.interventions.map { i -> if (i.id == interventionId) maj else i })
+                })
+            }) }
+        } catch (e: Exception) {
+            ajoutees.forEach { rel -> runCatching { File(ctx.filesDir, "societe/$rel").delete() } }
+            return "❌ Photos copiées dans le coffre, mais l'historique n'a pas pu être enregistré : ${e.message ?: e.javaClass.simpleName}. Aucune photo n'est annoncée comme ajoutée."
+        }
+        val (emplacement, pdf) = runCatching { ecrireRapport(client, site, maj) }
+            .getOrElse { "Note non générée : ${it.message ?: it.javaClass.simpleName}" to "PDF non généré" }
+        return buildString {
+            append("${ajoutees.size} photo(s) ${if (avant) "avant" else "après"} ajoutée(s). Note : $emplacement")
+            if (pdf.startsWith("PDF non généré")) append("\n⚠️ $pdf")
+            if (echecs.isNotEmpty()) append("\n⚠️ Certaines photos n'ont pas été ajoutées : " + echecs.joinToString(" ; "))
+        }
     }
 
     // ------------------------------------------------------------------ export (Obsidian + PDF)
@@ -549,7 +584,9 @@ class SocieteService(
 
     fun exporterClient(c: Client): Pair<String, String> {
         val md = Rendu.rendreClient(data, c)
-        return md to obsidian.saveIn("Société/Clients", c.nom, md)
+        val emplacement = obsidian.saveIn("Société/Clients", c.nom, md)
+        obsidian.programmerSynchronisationIndex()
+        return md to emplacement
     }
 
     fun bulletin(e: Employe, mois: String, primes: Double, heuresEffectuees: Double? = null, netVerse: Double? = null): Pair<String, String> {

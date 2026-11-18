@@ -25,6 +25,13 @@ class CommandeMediaTest {
         cas.forEach { (t, a) -> assertEquals(t, a, i(t)) }
     }
 
+    @Test fun lancementSansLecteurPasseParLeDemarrageDApplication() {
+        listOf("lance la musique", "mets de la musique", "reprends la musique").forEach { demande ->
+            assertEquals(demande, null, i(demande, ouverte = false))
+        }
+        assertEquals(Action.PLAY, i("lance la musique", ouverte = true))
+    }
+
     @Test fun ignorees() {
         listOf("continue", "suivant" to false, "reprends depuis le début" to false, "mets la musique de Daft Punk", "mets le volume à 50",
             "baisse le son de la télé", "mets la vidéo en pause", "coupe le son", "envoie un SMS à Marie", "stop",

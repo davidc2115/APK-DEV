@@ -5,12 +5,28 @@ import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import fr.dd.jarvis.data.Store
 import java.io.File
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.ensureActive
 
 /**
  * Écrit les fichiers dans le dossier Obsidian choisi (sélecteur Android, sous-dossiers créés au besoin),
  * sinon dans le dossier propre à l'application (Android/data/fr.dd.jarvis/files/<dossier>).
  */
+data class DoublonObsidian(val type: String, val chemins: List<String>, val empreinte: String)
+data class ChangementObsidian(val type: String, val chemin: String)
+data class RapportChangementsObsidian(val referenceInitialisee: Boolean, val changements: List<ChangementObsidian>)
+
 class ObsidianWriter(private val ctx: Context, private val store: Store) {
+
+    private val indexSyncEnCours = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val indexSyncDemandee = java.util.concurrent.atomic.AtomicBoolean(false)
+    // Un seul espace Jarvis dans le coffre : index automatiques et productions (vidéos, médias…) partagent la même racine.
+    private val indexRootPath = "Jarvis/Index coffre.md"
+    private val indexDossiersDir = "Jarvis/Index dossiers"
+    private val legacyIndexRootDir = "_Jarvis"
+    private val legacyIndexRootPath = "$legacyIndexRootDir/Index coffre.md"
+    private val legacyIndexDossiersDir = "$legacyIndexRootDir/Index dossiers"
+    private val indexMarker = "<!-- JARVIS_GENERATED_INDEX_V1 -->"
 
     private fun safe(name: String, def: String) =
         name.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim().ifBlank { def }
@@ -56,7 +72,8 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             val dir = subDir(tree, folder)
             if (!dir.isDirectory || !dir.canWrite())
                 throw java.io.IOException("Impossible d'accéder au dossier Obsidian demandé : $folder")
-            val target = dir.trouverLoose(name) ?: dir.createFile(mime, name)
+            val existant = dir.trouverLoose(name)
+            val target = existant ?: dir.createFile(mime, name)
                 ?: throw java.io.IOException("Impossible de créer $name dans Obsidian/$folder.")
             val written = ctx.contentResolver.openOutputStream(target.uri, "wt")
                 ?: throw java.io.IOException("Android n'a pas ouvert le fichier Obsidian : $name.")
@@ -64,6 +81,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             val size = runCatching { ctx.contentResolver.openFileDescriptor(target.uri, "r")?.use { it.statSize } ?: -1L }.getOrDefault(-1L)
             if (size >= 0L && size != bytes.size.toLong())
                 throw java.io.IOException("Écriture Obsidian incomplète pour $name ($size/${bytes.size} octets).")
+            if (existant == null) synchroniserIndexSilencieusement()
             return "coffre Obsidian › ${folder.replace("/", " › ")} › $name"
         }
         val dir = File(ctx.getExternalFilesDir(null), folder).apply {
@@ -71,9 +89,11 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             if (!isDirectory || !canWrite()) throw java.io.IOException("Dossier local non accessible en écriture : $absolutePath")
         }
         val target = File(dir, name)
+        val nouveau = !target.exists()
         target.writeBytes(bytes)
         if (!target.isFile || target.length() != bytes.size.toLong())
             throw java.io.IOException("Vérification de l'écriture locale échouée : ${target.absolutePath}")
+        if (nouveau) synchroniserIndexSilencieusement()
         return "${target.absolutePath} (coffre Obsidian non configuré)"
     }
 
@@ -81,6 +101,125 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         saveBytes(folder, safe(baseName, "Fiche") + ".md", markdown.toByteArray(), "text/markdown")
 
     fun save(fileBaseName: String, markdown: String): String = saveIn("Contacts", fileBaseName, markdown)
+
+    private fun hashIndex(path: String): String =
+        java.security.MessageDigest.getInstance("SHA-256")
+            .digest(path.toByteArray(Charsets.UTF_8))
+            .take(12).joinToString("") { "%02x".format(it) }
+
+    private fun estIndexGenere(path: String): Boolean =
+        path == indexRootPath || path.startsWith("$indexDossiersDir/") ||
+            path == legacyIndexRootPath || path.startsWith("$legacyIndexDossiersDir/")
+
+    private fun estAncienIndexGenere(path: String): Boolean =
+        path == legacyIndexRootPath || path.startsWith("$legacyIndexDossiersDir/")
+
+    /** Supprime uniquement un dossier devenu vide après migration des index générés. */
+    private fun supprimerDossierVide(path: String) {
+        val racine = vaultRoot() ?: return
+        val parties = path.split('/').filter { it.isNotBlank() }
+        var parent = racine
+        for (part in parties.dropLast(1)) {
+            parent = parent.trouverLoose(part)?.takeIf { it.isDirectory } ?: return
+        }
+        val dossier = parent.trouverLoose(parties.last())?.takeIf { it.isDirectory } ?: return
+        if (dossier.listFiles().isEmpty()) runCatching { dossier.delete() }
+    }
+
+    private fun cibleWiki(path: String): String {
+        val cible = if (path.endsWith(".md", true)) path.substring(0, path.length - 3) else path
+        val label = path.substringAfterLast('/').let { if (it.endsWith(".md", true)) it.dropLast(3) else it }
+        return "[[$cible|$label]]"
+    }
+
+    private fun ecrireIndexGenere(path: String, contenu: String) {
+        val actuel = readNoteStrict(path)
+        if (actuel != null && !actuel.contains(indexMarker))
+            throw java.io.IOException("Le chemin réservé à l'index existe déjà comme note personnelle : $path. Aucune note n'a été écrasée.")
+        if (actuel != contenu) writeNote(path, contenu, append = false)
+    }
+
+    fun synchroniserIndex(): String {
+        if (!indexSyncEnCours.compareAndSet(false, true)) {
+            indexSyncDemandee.set(true)
+            return "Synchronisation des index déjà en cours ; une nouvelle passe sera lancée après."
+        }
+        try {
+            if (!coffreConfigure()) throw java.io.IOException("Aucun coffre Obsidian n'est configuré dans les réglages.")
+            if (!coffreLisible() || !coffreDisponible()) throw java.io.IOException("Le coffre Obsidian configuré est inaccessible ou en lecture seule.")
+            val elements = toutLister(20_000)
+            if (elements.size >= 20_000) throw java.io.IOException("Le coffre dépasse la limite de 20 000 éléments ; indexation interrompue pour éviter un index incomplet.")
+            val dossiers = elements.filter {
+                it.second &&
+                    it.first != indexDossiersDir && !it.first.startsWith("$indexDossiersDir/") &&
+                    it.first != legacyIndexDossiersDir && !it.first.startsWith("$legacyIndexDossiersDir/") &&
+                    it.first != legacyIndexRootDir
+            }.map { it.first.trim('/') }.filter { it.isNotBlank() }.distinct().sorted()
+            val fichiers = elements.filter { !it.second && !estIndexGenere(it.first) }.map { it.first }.distinct().sorted()
+            val indexParDossier = dossiers.associateWith { "$indexDossiersDir/${hashIndex(it)}.md" }
+            fun parent(path: String) = path.substringBeforeLast('/', "")
+            fun directFiles(folder: String) = fichiers.filter { parent(it) == folder }
+            fun childFolders(folder: String) = dossiers.filter { parent(it) == folder }
+            fun section(titre: String, lignes: List<String>) = if (lignes.isEmpty()) "" else
+                "## $titre\n" + lignes.joinToString("\n") + "\n\n"
+            var pages = 0
+            for (folder in dossiers) {
+                val sousDossiers = childFolders(folder).map { "- ${cibleWiki(indexParDossier.getValue(it))}" }
+                val fichiersDirects = directFiles(folder).map { "- ${cibleWiki(it)}" }
+                val parentPath = parent(folder)
+                val retour = if (parentPath.isBlank()) "- ${cibleWiki(indexRootPath)}" else
+                    "- ${cibleWiki(indexParDossier.getValue(parentPath))}"
+                val contenu = buildString {
+                    append(indexMarker).append("\n# ").append(folder.substringAfterLast('/')).append("\n\n")
+                    append("> Index automatique du dossier « ").append(folder).append(" ». Les notes sources ne sont pas modifiées.\n\n")
+                    append(section("Dossier parent", listOf(retour)))
+                    append(section("Sous-dossiers", sousDossiers))
+                    append(section("Notes et fichiers", fichiersDirects))
+                }
+                ecrireIndexGenere(indexParDossier.getValue(folder), contenu)
+                pages++
+            }
+            val racineFolders = dossiers.filter { parent(it).isBlank() }.map { "- ${cibleWiki(indexParDossier.getValue(it))}" }
+            val racineFiles = directFiles("").map { "- ${cibleWiki(it)}" }
+            val racine = buildString {
+                append(indexMarker).append("\n# Index du coffre Obsidian\n\n")
+                append("> Point d'entrée généré par Jarvis. Chaque dossier, note et pièce jointe est relié par un wikilink réel.\n\n")
+                append(section("Dossiers", racineFolders))
+                append(section("Notes et fichiers à la racine", racineFiles))
+            }
+            ecrireIndexGenere(indexRootPath, racine)
+            pages++
+            // Migration non destructive : seuls les anciens fichiers portant notre marqueur sont supprimés.
+            // Les éventuelles notes personnelles présentes dans _Jarvis sont conservées.
+            val anciens = elements.filter { !it.second && estAncienIndexGenere(it.first) }
+            var nettoyes = 0
+            for ((path, _) in anciens) {
+                val contenu = readNoteStrict(path)
+                if (contenu?.contains(indexMarker) == true && supprimerFichier(path.substringBeforeLast('/', ""), path.substringAfterLast('/'))) nettoyes++
+            }
+            supprimerDossierVide(legacyIndexDossiersDir)
+            supprimerDossierVide(legacyIndexRootDir)
+            return "Index Obsidian synchronisés : $pages page(s), ${fichiers.size} fichiers/notes reliés, $nettoyes ancien(s) index déplacé(s) depuis _Jarvis."
+        } finally {
+            indexSyncEnCours.set(false)
+            if (indexSyncDemandee.getAndSet(false)) synchroniserIndexSilencieusement()
+        }
+    }
+
+    fun programmerSynchronisationIndex() = synchroniserIndexSilencieusement()
+
+    private fun synchroniserIndexSilencieusement() {
+        if (!coffreConfigure()) return
+        if (indexSyncEnCours.get()) {
+            indexSyncDemandee.set(true)
+            return
+        }
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            runCatching { synchroniserIndex() }.onFailure {
+                fr.dd.jarvis.voice.JournalVoix.noter("diagnostic", "Synchronisation des index Obsidian impossible : ${it.message ?: it.javaClass.simpleName}")
+            }
+        }
+    }
 
     private fun normaliseNom(s: String): String =
         java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFD)
@@ -100,6 +239,49 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         }
     }
 
+    /** Renomme un fichier existant dans le coffre sélectionné ; aucun dossier ni nouveau fichier n'est créé. */
+    fun renommerFichier(cheminOuNom: String, nouveauNomBrut: String): String {
+        val query = cheminOuNom.trim().trim('/')
+        if (query.isBlank()) throw java.io.IOException("Indique le nom exact du fichier à renommer.")
+        val entries = toutLister(20_000).filter { !it.second }
+        val candidats = entries.filter { (path, _) ->
+            if ('/' in query) path.equals(query, true) else path.substringAfterLast('/').equals(query, true)
+        }
+        if (candidats.isEmpty()) throw java.io.IOException("Fichier introuvable dans le coffre : $query")
+        if (candidats.size > 1) throw java.io.IOException("Plusieurs fichiers portent ce nom : " + candidats.joinToString { it.first } + ". Précise le chemin complet.")
+        val oldPath = candidats.single().first
+        val oldName = oldPath.substringAfterLast('/')
+        val requested = safe(nouveauNomBrut.substringBeforeLast('.', nouveauNomBrut).trim(), "Fichier")
+        val extension = oldName.substringAfterLast('.', "").takeIf { it.isNotBlank() }
+        val suppliedExt = nouveauNomBrut.substringAfterLast('.', "").takeIf { it.isNotBlank() && nouveauNomBrut.contains('.') }
+        val newName = if (suppliedExt != null) "$requested.${safe(suppliedExt, "")}" else if (extension != null) "$requested.$extension" else requested
+        if (newName.equals(oldName, true)) return oldPath
+        val parentPath = oldPath.substringBeforeLast('/', "")
+        val uriStr = store.obsidianUri.value
+        if (uriStr.isBlank()) {
+            val parent = File(localRoot(), parentPath)
+            val source = File(parent, oldName)
+            val target = File(parent, newName)
+            if (!source.isFile) throw java.io.IOException("Fichier source introuvable : $oldPath")
+            if (target.exists()) throw java.io.IOException("Un fichier nommé $newName existe déjà dans ce dossier.")
+            if (!source.renameTo(target) || !target.isFile || source.exists())
+                throw java.io.IOException("Android n'a pas confirmé le renommage de $oldPath.")
+        } else {
+            val tree = vaultRoot()?.takeIf { it.canWrite() } ?: throw java.io.IOException("Le coffre Obsidian configuré est inaccessible ou en lecture seule.")
+            var parent: DocumentFile? = tree
+            for (part in parentPath.split('/').filter { it.isNotBlank() })
+                parent = parent?.trouverLoose(part)?.takeIf { it.isDirectory }
+            val dir = parent ?: throw java.io.IOException("Dossier source introuvable : $parentPath")
+            val source = dir.trouverLoose(oldName)?.takeIf { it.isFile } ?: throw java.io.IOException("Fichier source introuvable : $oldPath")
+            if (dir.trouverLoose(newName) != null) throw java.io.IOException("Un fichier nommé $newName existe déjà dans ce dossier.")
+            if (!source.renameTo(newName)) throw java.io.IOException("Le fournisseur Android a refusé le renommage de $oldPath.")
+            if (dir.trouverLoose(newName) == null || dir.trouverLoose(oldName) != null)
+                throw java.io.IOException("Le renommage n'a pas pu être vérifié dans le coffre.")
+        }
+        synchroniserIndexSilencieusement()
+        return if (parentPath.isBlank()) newName else "$parentPath/$newName"
+    }
+
     /**
      * Supprime un fichier (coffre Obsidian ou dossier de l'application). Ne lève pas d'exception si absent.
      * Retourne vrai si un fichier a réellement été supprimé (jamais vrai en cas d'échec silencieux :
@@ -114,7 +296,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             return runCatching { localFile.delete() && !localFile.exists() }.getOrDefault(false)
         }
         return try {
-            val tree = DocumentFile.fromTreeUri(ctx, Uri.parse(uriStr)) ?: return false
+            val tree = DocumentFile.fromTreeUri(ctx, Uri.parse(uriStr))?.takeIf { it.canWrite() } ?: return false
             var cur: DocumentFile? = tree
             var dossierTrouve = true
             for (part in folder.split('/').filter { it.isNotBlank() }) {
@@ -129,11 +311,8 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                 if (cur?.listFiles()?.any { it.uri == cible.uri } == true) return false
                 supprime = true
             }
-            // Certaines écritures ont été basculées localement lorsque le fournisseur SAF était indisponible.
-            if (localFile.exists()) {
-                if (!runCatching { localFile.delete() && !localFile.exists() }.getOrDefault(false)) return false
-                supprime = true
-            }
+            // Le coffre configuré est la seule destination : ne jamais supprimer une copie locale
+            // homonyme à la place d'un fichier du coffre absent.
             supprime
         } catch (_: Exception) {
             false
@@ -216,7 +395,9 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         val p = withMd(chemin)
         val folder = p.substringBeforeLast('/', "")
         val name = p.substringAfterLast('/')
-        return supprimerFichier(folder, name)
+        val supprime = supprimerFichier(folder, name)
+        if (supprime) synchroniserIndexSilencieusement()
+        return supprime
     }
 
     /** Relit une note du coffre Obsidian (ou du dossier de l'application) ; null si introuvable. */
@@ -225,23 +406,88 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         val uriStr = store.obsidianUri.value
         try {
             if (uriStr.isNotBlank()) {
-                val tree = DocumentFile.fromTreeUri(ctx, Uri.parse(uriStr))
-                if (tree != null && tree.canRead()) {
-                    var cur: DocumentFile? = tree
-                    for (part in folder.split('/').filter { it.isNotBlank() }) cur = cur?.findFile(part)?.takeIf { it.isDirectory }
-                    val f = cur?.findFile(name)
-                    if (f != null) return ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
-                    return null
-                }
+                // Un coffre choisi reste l'unique source : autorisation perdue ou note absente
+                // ne doivent jamais faire réapparaître une ancienne copie locale.
+                val tree = vaultRoot() ?: return null
+                var cur: DocumentFile? = tree
+                for (part in folder.split('/').filter { it.isNotBlank() })
+                    cur = cur?.trouverLoose(part)?.takeIf { it.isDirectory }
+                val f = cur?.trouverLoose(name)?.takeIf { it.isFile } ?: return null
+                return ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
             }
-            val f = File(File(ctx.getExternalFilesDir(null), folder), name)
-            return if (f.exists()) f.readText() else null
+            val f = File(File(localRoot(), folder), name)
+            return if (f.isFile) f.readText() else null
         } catch (_: Exception) {
             return null
         }
     }
 
     // ------------------------------------------------------------------ lecture / recherche dans le coffre
+
+    /** Vrai dès qu'un coffre a été explicitement choisi, même si Android a perdu son autorisation SAF. */
+    fun coffreConfigure(): Boolean = store.obsidianUri.value.isNotBlank()
+
+    /** Le dossier choisi existe et reste accessible en lecture/écriture via l'autorisation Android. */
+    fun coffreDisponible(): Boolean = vaultRoot()?.let { it.canRead() && it.canWrite() } == true
+
+    /** Un coffre en lecture seule reste analysable ; seules les écritures exigent canWrite(). */
+    fun coffreLisible(): Boolean = vaultRoot()?.canRead() == true
+
+    /** Test réel lecture/écriture/suppression dans le coffre, avec un fichier temporaire immédiatement retiré. */
+    fun testerAccesComplet(): Boolean {
+        val root = vaultRoot() ?: return false
+        if (!root.canRead() || !root.canWrite()) return false
+        val nom = "JARVIS-controle-acces-${System.nanoTime()}.tmp"
+        val probe = runCatching { root.createFile("application/octet-stream", nom) }.getOrNull() ?: return false
+        return try {
+            val attendu = "JARVIS-OBSIDIAN-ACCESS".toByteArray(Charsets.UTF_8)
+            ctx.contentResolver.openOutputStream(probe.uri, "wt")?.use { it.write(attendu); it.flush() }
+                ?: throw java.io.IOException("Écriture refusée")
+            val relu = ctx.contentResolver.openInputStream(probe.uri)?.use { it.readBytes() }
+                ?: throw java.io.IOException("Lecture refusée")
+            if (!relu.contentEquals(attendu)) throw java.io.IOException("Vérification du contenu échouée")
+            if (!probe.delete()) throw java.io.IOException("Le fichier de contrôle n'a pas pu être supprimé")
+            true
+        } catch (_: Exception) {
+            runCatching { probe.delete() }
+            false
+        }
+    }
+
+    /**
+     * Lit le coffre en priorité. Lors de la première migration seulement, importe une ancienne
+     * copie privée si le coffre est accessible et que la note n'existe pas encore. Un marqueur
+     * empêche de recréer une note que l'utilisateur aurait ensuite supprimée dans Obsidian.
+     */
+    fun lireOuMigrer(folder: String, fileName: String, ancienneCopie: String?, mime: String = "text/markdown"): String? {
+        read(folder, fileName)?.let { return it }
+        if (!coffreConfigure()) return ancienneCopie
+        if (!coffreDisponible()) return null
+        val cle = "$folder/$fileName"
+        val prefs = ctx.getSharedPreferences("obsidian_migrations", Context.MODE_PRIVATE)
+        if (prefs.getBoolean(cle, false)) return null
+        if (ancienneCopie.isNullOrEmpty()) {
+            prefs.edit().putBoolean(cle, true).apply()
+            return null
+        }
+        // Une migration ne doit jamais faire échouer le chargement de Jarvis si le fournisseur SAF
+        // refuse finalement l'écriture. Le marqueur n'est posé qu'après une écriture confirmée :
+        // l'utilisateur pourra réessayer après avoir rétabli les droits du coffre.
+        val migration = runCatching {
+            saveBytes(folder, fileName, ancienneCopie.toByteArray(Charsets.UTF_8), mime)
+        }
+        if (migration.isFailure) {
+            runCatching {
+                fr.dd.jarvis.voice.JournalVoix.noter(
+                    "diagnostic",
+                    "⚠️ Migration Obsidian différée pour $fileName : ${migration.exceptionOrNull()?.message ?: "écriture refusée"}"
+                )
+            }
+            return null
+        }
+        prefs.edit().putBoolean(cle, true).apply()
+        return ancienneCopie
+    }
 
     private fun vaultRoot(): DocumentFile? = store.obsidianUri.value.takeIf { it.isNotBlank() }?.let {
         runCatching { DocumentFile.fromTreeUri(ctx, Uri.parse(it)) }.getOrNull()
@@ -300,7 +546,8 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     /** Contenu des notes (chemin, texte tronqué à 80 Ko), au plus [limite] : à appeler hors du fil principal. */
     fun parcourirContenus(limite: Int = 1500, action: (String, String) -> Unit) {
         signalerFilPrincipal("parcourirContenus")
-        if (vaultRoot() != null) {
+        if (coffreConfigure()) {
+            if (vaultRoot() == null) return
             for ((path, f) in allNotes(limite)) {
                 val t = runCatching { ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes().take(80_000).toByteArray().toString(Charsets.UTF_8) } }.getOrNull() ?: continue
                 action(path, t)
@@ -312,16 +559,200 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         }
     }
 
+    private fun instantaneNotes(limite: Int): org.json.JSONObject {
+        if (coffreConfigure() && !coffreLisible())
+            throw java.io.IOException("Le coffre Obsidian n'est pas accessible en lecture.")
+        val max = limite.coerceIn(1, 3000)
+        val fichiers = if (coffreConfigure()) {
+            if (vaultRoot() == null) throw java.io.IOException("Autorisation de lecture du coffre perdue.")
+            allNotes(max + 1).also { if (it.size > max) throw java.io.IOException("Le coffre contient plus de $max notes : augmente la limite avant de comparer les versions.") }
+        } else {
+            val localFiles = localRoot().walkTopDown().filter { it.isFile && it.name.endsWith(".md", true) }.take(max + 1).toList()
+            if (localFiles.size > max) throw java.io.IOException("Le dossier local contient plus de $max notes : augmente la limite avant de comparer les versions.")
+            localFiles.map { it.relativeTo(localRoot()).path to it }
+        }
+        val snapshot = org.json.JSONObject()
+        fichiers.forEach { (path, fichier) ->
+            val bytes = if (fichier is DocumentFile) {
+                ctx.contentResolver.openInputStream(fichier.uri)?.use { it.readBytes() }
+                    ?: throw java.io.IOException("Lecture impossible : $path")
+            } else (fichier as File).readBytes()
+            if (bytes.size > 1_000_000) throw java.io.IOException("La note « $path » dépasse 1 Mo. Analyse interrompue sans modifier la référence.")
+            snapshot.put(path, empreinteContenu(bytes.toString(Charsets.UTF_8)))
+        }
+        return snapshot
+    }
+
+    /** Compare les notes à la dernière référence validée. Une analyse ne valide jamais elle-même les changements. */
+    fun analyserModificationsDepuisReference(limite: Int = 1500): RapportChangementsObsidian {
+        signalerFilPrincipal("analyserModificationsDepuisReference")
+        val prefs = ctx.getSharedPreferences("obsidian_sync", Context.MODE_PRIVATE)
+        val courant = instantaneNotes(limite)
+        val baseRaw = prefs.getString("reference", null)
+        if (baseRaw.isNullOrBlank()) {
+            prefs.edit().putString("reference", courant.toString()).remove("en_attente").apply()
+            return RapportChangementsObsidian(true, emptyList())
+        }
+        val base = runCatching { org.json.JSONObject(baseRaw) }.getOrElse {
+            throw java.io.IOException("La référence de synchronisation est illisible. Aucune note n'a été modifiée.")
+        }
+        val changements = mutableListOf<ChangementObsidian>()
+        val clesCourantes = courant.keys().asSequence().toSet()
+        val clesBase = base.keys().asSequence().toSet()
+        (clesCourantes - clesBase).sorted().forEach { changements += ChangementObsidian("ajoutée", it) }
+        (clesBase - clesCourantes).sorted().forEach { changements += ChangementObsidian("supprimée", it) }
+        (clesCourantes intersect clesBase).sorted().forEach { chemin ->
+            if (courant.optString(chemin) != base.optString(chemin))
+                changements += ChangementObsidian("modifiée", chemin)
+        }
+        prefs.edit().putString("en_attente", courant.toString()).apply()
+        return RapportChangementsObsidian(false, changements)
+    }
+
+    /** Valide la référence uniquement si le coffre n'a pas encore changé depuis le dernier rapport. */
+    private fun memesEmpreintes(a: org.json.JSONObject, b: org.json.JSONObject): Boolean {
+        val ak = a.keys().asSequence().toSet()
+        val bk = b.keys().asSequence().toSet()
+        return ak == bk && ak.all { a.optString(it) == b.optString(it) }
+    }
+
+    fun validerReferenceModifications(limite: Int = 1500): Boolean {
+        val prefs = ctx.getSharedPreferences("obsidian_sync", Context.MODE_PRIVATE)
+        val attente = prefs.getString("en_attente", null) ?: return false
+        val courant = instantaneNotes(limite)
+        val attendu = runCatching { org.json.JSONObject(attente) }.getOrNull() ?: return false
+        if (!memesEmpreintes(courant, attendu)) return false
+        prefs.edit().putString("reference", attente).remove("en_attente").apply()
+        return true
+    }
+
+    /**
+     * Repère les doublons exacts de contenu et les notes qui portent le même nom dans des dossiers différents.
+     * Le scan est en lecture seule, borné et doit être exécuté hors du fil principal.
+     */
+    fun analyserDoublons(limite: Int = 1500): List<DoublonObsidian> {
+        signalerFilPrincipal("analyserDoublons")
+        if (coffreConfigure() && !coffreLisible())
+            throw java.io.IOException("Le coffre Obsidian est configuré mais illisible. Vérifie les autorisations Android avant de lancer l'analyse.")
+        val notes = mutableListOf<Pair<String, String>>()
+        val maxTailleNote = 1_000_000L
+        if (coffreConfigure()) {
+            if (vaultRoot() == null) throw java.io.IOException("Autorisation de lecture du coffre perdue.")
+            allNotes(limite.coerceIn(1, 3000)).forEach { (path, fichier) ->
+                if (fichier.length() > maxTailleNote) return@forEach
+                val contenu = ctx.contentResolver.openInputStream(fichier.uri)?.use { it.readBytes() }?.toString(Charsets.UTF_8)
+                    ?: throw java.io.IOException("Lecture impossible pour la note : $path")
+                val normalise = contenu.replace("\r\n", "\n").replace('\r', '\n').trim()
+                if (normalise.isNotBlank()) notes += path to normalise
+            }
+        } else {
+            localRoot().walkTopDown().filter { it.isFile && it.name.endsWith(".md", true) }
+                .take(limite.coerceIn(1, 3000)).forEach { fichier ->
+                    if (fichier.length() > maxTailleNote) return@forEach
+                    val normalise = fichier.readText().replace("\r\n", "\n").replace('\r', '\n').trim()
+                    if (normalise.isNotBlank()) notes += fichier.relativeTo(localRoot()).path to normalise
+                }
+        }
+        val groupes = mutableListOf<DoublonObsidian>()
+        val contenus = notes.groupBy { (_, body) ->
+            val digest = java.security.MessageDigest.getInstance("SHA-256").digest(body.toByteArray(Charsets.UTF_8))
+            digest.joinToString("") { "%02x".format(it) }
+        }
+        contenus.filterValues { it.size > 1 }.forEach { (hash, entries) ->
+            groupes += DoublonObsidian("contenu identique", entries.map { it.first }.sorted(), hash.take(12))
+        }
+        val noms = notes.groupBy { (path, _) -> normaliseNom(path.substringAfterLast('/').removeSuffix(".md")) }
+        noms.filter { (key, entries) -> key.isNotBlank() && entries.size > 1 }.forEach { (key, entries) ->
+            val paths = entries.map { it.first }.distinct().sorted()
+            if (paths.size > 1 && groupes.none { it.chemins.containsAll(paths) && it.chemins.size == paths.size })
+                groupes += DoublonObsidian("même nom, contenu à comparer", paths, key)
+        }
+        return groupes.sortedWith(compareBy<DoublonObsidian> { if (it.type == "contenu identique") 0 else 1 }.thenBy { it.chemins.firstOrNull().orEmpty() })
+    }
+
     /** Notes du coffre (chemins relatifs), éventuellement dans un dossier. */
     fun listNotes(folder: String = ""): List<String> {
         signalerFilPrincipal("listNotes")
         val f = folder.trim().trim('/')
-        val vaultNotes = if (vaultRoot() != null) allNotes().map { it.first } else emptyList()
+        if (coffreConfigure()) {
+            // Pas de fusion avec les anciennes copies locales : le coffre choisi fait autorité.
+            if (vaultRoot() == null) return emptyList()
+            return allNotes().map { it.first }.filter { f.isEmpty() || it.startsWith("$f/") }.sorted()
+        }
         val localDir = File(localRoot(), f)
-        val localNotes = if (localDir.exists()) localDir.walkTopDown().filter { it.isFile && it.name.endsWith(".md", true) }
-            .map { it.relativeTo(localRoot()).path }.toList() else emptyList()
-        return (vaultNotes.filter { f.isEmpty() || it.startsWith("$f/") } + localNotes).distinct().sorted()
+        return if (localDir.exists()) localDir.walkTopDown().filter { it.isFile && it.name.endsWith(".md", true) }
+            .map { it.relativeTo(localRoot()).path }.sorted().toList() else emptyList()
     }
+
+    /**
+     * Recherche multi-termes dans les noms ET le contenu du coffre, en un seul parcours.
+     * Contrairement à searchNotes(query), cette méthode ne dépend pas d'une phrase exacte :
+     * elle classe les notes selon le nombre de termes retrouvés et favorise le chemin/titre.
+     * Le parcours est borné et annulable pour rester utilisable depuis la recherche de contexte.
+     */
+    suspend fun searchNotesAny(queries: Collection<String>, limit: Int = 10, maxScan: Int = 2000): List<Pair<String, String>> =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val normaliserRecherche: (String) -> String = { value ->
+                java.text.Normalizer.normalize(value, java.text.Normalizer.Form.NFD)
+                    .replace(Regex("\\p{M}"), "")
+                    .lowercase(java.util.Locale.ROOT)
+                    .replace(Regex("[^a-z0-9]+"), " ")
+                    .trim()
+            }
+            val termes = queries.map(normaliserRecherche)
+                .flatMap { it.split(' ') }
+                .filter { it.length >= 3 }
+                .distinct()
+                .take(24)
+            if (termes.isEmpty()) return@withContext emptyList()
+
+            val fichiers: List<Pair<String, DocumentFile>> = if (coffreConfigure()) {
+                if (vaultRoot() == null) return@withContext emptyList()
+                allNotes(maxScan.coerceIn(1, 2500))
+            } else {
+                localRoot().walkTopDown()
+                    .filter { it.isFile && it.name.endsWith(".md", true) }
+                    .take(maxScan.coerceIn(1, 2500))
+                    .map { it.relativeTo(localRoot()).path to DocumentFile.fromFile(it) }
+                    .toList()
+            }
+
+            val resultats = mutableListOf<Triple<String, Int, String>>()
+            for ((index, entree) in fichiers.withIndex()) {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                val (path, fichier) = entree
+                if (path.startsWith("_Jarvis/Index coffre", ignoreCase = true) || path.startsWith("_Jarvis/Index dossiers/", ignoreCase = true)) continue
+                val contenu = runCatching {
+                    if (coffreConfigure()) {
+                        ctx.contentResolver.openInputStream(fichier.uri)?.use {
+                            it.readBytes().take(80_000).toByteArray().toString(Charsets.UTF_8)
+                        }
+                    } else {
+                        fichier.uri.path?.let { java.io.File(it).takeIf { file -> file.isFile }?.readText() }
+                    }
+                }.getOrNull().orEmpty()
+                val cheminNormalise = normaliserRecherche(path)
+                val corpsNormalise = normaliserRecherche(contenu)
+                val dansChemin = termes.filter { cheminNormalise.contains(it) }
+                val dansCorps = termes.filter { corpsNormalise.contains(it) }
+                val score = dansChemin.size * 3 + dansCorps.size
+                if (score > 0) {
+                    val lignes = contenu.lineSequence().map { it.trim() }
+                        .filter { ligne ->
+                            val n = normaliserRecherche(ligne)
+                            n.isNotBlank() && termes.any { n.contains(it) }
+                        }
+                        .take(5).toList()
+                    val extrait = (if (lignes.isNotEmpty()) lignes.joinToString(" · ") else contenu.lineSequence().take(5).joinToString(" · "))
+                        .replace(Regex("\\s+"), " ").take(900)
+                    resultats += Triple(path, score, extrait)
+                }
+            }
+            resultats.sortedWith(compareByDescending<Triple<String, Int, String>> { it.second }
+                .thenBy { it.first.lowercase(java.util.Locale.ROOT) })
+                .take(limit.coerceIn(1, 30))
+                .map { it.first to it.third }
+        }
 
     /** Recherche texte (nom + contenu). Retourne (chemin, extrait). */
     fun searchNotes(query: String, limit: Int = 12): List<Pair<String, String>> {
@@ -333,9 +764,10 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             val i = txt.lowercase().indexOf(q)
             return if (i < 0) "" else txt.substring(maxOf(0, i - 60), minOf(txt.length, i + 140)).replace(Regex("\\s+"), " ")
         }
-        if (vaultRoot() != null) {
+        if (coffreConfigure()) {
             val notes = allNotes()
-            for ((path, f) in notes) if (path.lowercase().contains(q) && out.size < limit) out += path to ""
+            if (vaultRoot() == null) return emptyList()
+            for ((path, _) in notes) if (path.lowercase().contains(q) && out.size < limit) out += path to ""
             for ((path, f) in notes.take(600)) {
                 if (out.size >= limit) break
                 if (out.any { it.first == path }) continue
@@ -354,20 +786,49 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
     private fun withMd(path: String) = path.trim().trim('/').let { if (it.endsWith(".md", true)) it else "$it.md" }
 
+    /** Lecture stricte : null signifie réellement absent ; une perte d'accès ou une erreur de lecture lève une exception. */
+    fun readNoteStrict(path: String): String? {
+        signalerFilPrincipal("readNoteStrict")
+        val p = withMd(path)
+        if (coffreConfigure()) {
+            if (vaultRoot() == null) throw java.io.IOException("Le coffre Obsidian n'est plus accessible.")
+            val f = trouver(p) ?: return null
+            if (!f.isFile) return null
+            return ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
+                ?: throw java.io.IOException("Impossible de lire la note Obsidian : $p")
+        }
+        val local = File(localRoot(), p)
+        if (!local.exists()) return null
+        if (!local.isFile) return null
+        return try { local.readText() } catch (e: Exception) {
+            throw java.io.IOException("Impossible de lire la note locale : $p", e)
+        }
+    }
+
+    fun empreinteContenu(contenu: String): String =
+        java.security.MessageDigest.getInstance("SHA-256").digest(contenu.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+
+    /** Écrit seulement si la version distante correspond toujours à celle qui a été lue. */
+    fun ecrireSiInchange(path: String, contenu: String, empreinteAttendue: String?): String {
+        val distant = readNoteStrict(path)
+        val empreinteDistante = distant?.let(::empreinteContenu)
+        if (empreinteDistante != empreinteAttendue)
+            throw java.io.IOException("Conflit Obsidian : « $path » a été modifiée dans le coffre depuis sa dernière lecture. Aucune donnée n'a été écrasée. Relis la note et réessaie.")
+        writeNote(path, contenu, false)
+        return empreinteContenu(contenu)
+    }
+
     fun readNote(path: String): String? {
         signalerFilPrincipal("readNote")
         val p = withMd(path)
-        val v = vaultRoot()
-        if (v != null) {
+        if (coffreConfigure()) {
+            val v = vaultRoot() ?: return null
             var cur: DocumentFile? = v
-            for (part in p.split('/').filter { it.isNotBlank() }) cur = cur?.findFile(part)
-            val f = cur?.takeIf { it.isFile }
-            if (f != null) {
-                val content = runCatching { ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes().toString(Charsets.UTF_8) } }.getOrNull()
-                if (content != null) return content
-            }
+            for (part in p.split('/').filter { it.isNotBlank() }) cur = cur?.trouverLoose(part)
+            val f = cur?.takeIf { it.isFile } ?: return null
+            return runCatching { ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes().toString(Charsets.UTF_8) } }.getOrNull()
         }
-        // saveBytes peut avoir utilisé le stockage local si le coffre SAF était en lecture seule.
         val local = File(localRoot(), p)
         return if (local.isFile) runCatching { local.readText() }.getOrNull() else null
     }
@@ -704,7 +1165,11 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     }
 
     /** Crée un dossier du coffre (sous-dossiers compris) s'il n'existe pas. */
-    fun creerDossier(chemin: String): String = "coffre › " + creerDossierChemin(chemin).replace("/", " › ")
+    fun creerDossier(chemin: String): String {
+        val dossier = creerDossierChemin(chemin)
+        synchroniserIndexSilencieusement()
+        return "coffre › " + dossier.replace("/", " › ")
+    }
 
     /** Déplace une note, une image, un fichier ou un dossier du coffre dans [dossierCible] (créé au besoin). */
     fun deplacer(source: String, dossierCible: String): String {
@@ -719,6 +1184,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             if (cible.canonicalPath == f.canonicalPath) return "${f.name} est déjà dans coffre › ${dest.replace("/", " › ")}"
             if (cible.exists()) throw IllegalStateException("« ${f.name} » existe déjà dans $dest")
             if (!f.renameTo(cible)) { f.copyRecursively(cible); f.deleteRecursively() }
+            synchroniserIndexSilencieusement()
             return "${f.name} → coffre › ${dest.replace("/", " › ")}"
         }
         val tree = vaultRoot()?.takeIf { it.canWrite() } ?: throw IllegalStateException("Coffre Obsidian non choisi ou en lecture seule (Réglages).")
@@ -737,6 +1203,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                 ?: throw IllegalStateException("Lecture de « $nom » impossible.")
             f.delete()
         }
+        synchroniserIndexSilencieusement()
         return "$nom → coffre › ${dest.replace("/", " › ").ifBlank { "racine" }}"
     }
 
@@ -750,11 +1217,13 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             val cible = File(f.parentFile, n)
             if (cible.exists()) throw IllegalStateException("« $n » existe déjà.")
             if (!f.renameTo(cible)) throw IllegalStateException("Renommage refusé.")
+            synchroniserIndexSilencieusement()
             return "${f.name} → $n"
         }
         val f = trouver(c) ?: throw IllegalArgumentException("Introuvable dans le coffre : $c")
         val ancien = f.name
         if (!f.renameTo(n)) throw IllegalStateException("Renommage refusé par le stockage.")
+        synchroniserIndexSilencieusement()
         return "$ancien → $n"
     }
 
@@ -807,10 +1276,17 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         /** Pièces jointes réellement présentes dans le coffre (aucune n'est inventée). */
         val attachments: List<GraphAttachment> = emptyList(),
         /** Tous les dossiers du coffre (chemins relatifs), y compris les dossiers encore vides. */
-        val dossiers: List<String> = emptyList()
+        val dossiers: List<String> = emptyList(),
+        /** Nombre de notes dont le contenu a réellement été lu pour analyser les liens. */
+        val notesLues: Int = nodes.size,
+        /** Nombre de notes candidates dans la limite du parcours. */
+        val notesCandidates: Int = nodes.size,
+        /** Vrai si la limite de parcours a été atteinte : le coffre peut contenir davantage de notes. */
+        val limiteNotesAtteinte: Boolean = false,
+        /** Vrai si le parcours a atteint la limite de pièces jointes : leur audit ne serait pas exhaustif. */
+        val limitePiecesAtteinte: Boolean = false
     )
 
-    private val lienRegex = Regex("\\[\\[([^\\]|#]+)")
     // #tag Obsidian : précédé d'un début de ligne ou d'un blanc, commence par une lettre (exclut « # Titre » et les
     // couleurs « #FF00AA » qui commencent souvent par un chiffre), lettres/chiffres/_/-// ensuite.
     private val tagRegex = Regex("(?:^|(?<=\\s))#(\\p{L}[\\p{L}\\p{N}_/-]*)")
@@ -906,6 +1382,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                 val racine = idCoffre() ?: return 0L
                 signatureSaf(v.uri, racine, "", 0) { c, d, t -> mix(c, d, t) }
             }
+            coffreConfigure() -> return 0L // Autorisation perdue : ne pas indexer le stockage local à la place du coffre.
             else -> localRoot().walkTopDown().forEach { f -> mix(f.path, f.lastModified(), if (f.isFile) f.length() else -1) }
         }
         return h
@@ -942,7 +1419,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         val v = vaultRoot()
         if (v != null) {
             var cur: DocumentFile? = v
-            for (part in propre.split('/').filter { it.isNotBlank() }) cur = cur?.findFile(part)
+            for (part in propre.split('/').filter { it.isNotBlank() }) cur = cur?.trouverLoose(part)
             uri = cur?.takeIf { it.isFile }?.uri
         }
         if (uri == null) return false
@@ -955,8 +1432,11 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     /** Construit le graphe (nœuds = notes du coffre, arêtes = liens « [[...]] », dossiers, pièces jointes) pour l'Orbe
      *  et le Graphe. Toutes les notes et tous les dossiers sont relevés (jusqu'à [limiteNotes]) ; le contenu n'est lu
      *  (liens, tags) que pour [limiteLecture] notes, plafonné à [limiteOctets] par note, pour rester fluide. */
-    fun graph(limiteNotes: Int = 3000, limiteOctets: Int = 60_000, limitePieces: Int = 3000, limiteLecture: Int = 700): GraphData {
+    fun graph(limiteNotes: Int = 3000, limiteOctets: Int = 60_000, limitePieces: Int = 3000, limiteLecture: Int = 3000): GraphData {
         val v = vaultRoot()
+        // Un coffre choisi mais temporairement inaccessible ne doit jamais faire apparaître le dossier privé
+        // comme s'il s'agissait du coffre : l'Orbe reflète le coffre réel, ou indique qu'il est indisponible.
+        if (coffreConfigure() && v == null) return GraphData(emptyList(), emptyList())
         val direct = fichierCoffre()
         val cheminsPieces = mutableListOf<String>()
         val dossiers = mutableListOf<String>()
@@ -985,29 +1465,52 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             nodesById[id] = GraphNode(id, labelOf(chemin), folderOf(chemin))
         }
 
-        // Pour retrouver une cible « [[Nom]] » même sans chemin complet : on indexe aussi par simple nom de fichier.
-        val parIdMinuscule = nodesById.keys.associateBy { it.lowercase() }
+        // Résolution robuste des wikilinks : chemin depuis la racine OU relatif au dossier de la note,
+        // puis nom simple uniquement s'il est unique (évite de relier silencieusement le mauvais doublon).
+        val parIdNormalise = nodesById.keys.associateBy { normaliseNom(it) }
         val parNom = HashMap<String, MutableList<String>>()
-        for (id in nodesById.keys) parNom.getOrPut(id.substringAfterLast('/').lowercase()) { mutableListOf() }.add(id)
+        for (id in nodesById.keys) parNom.getOrPut(normaliseNom(id.substringAfterLast('/'))) { mutableListOf() }.add(id)
 
         val edges = mutableListOf<GraphEdge>()
         val references = mutableListOf<GraphReference>()
         val vusReferences = HashSet<Pair<String, String>>()
         val vusEdges = HashSet<Pair<String, String>>()
+        var notesLues = 0
+        fun normaliserSegments(path: String): String {
+            val morceaux = mutableListOf<String>()
+            path.replace('\\', '/').split('/').forEach { morceau ->
+                when (morceau) {
+                    "", "." -> Unit
+                    ".." -> if (morceaux.isNotEmpty()) morceaux.removeAt(morceaux.lastIndex)
+                    else -> morceaux += morceau
+                }
+            }
+            return morceaux.joinToString("/")
+        }
         for ((chemin, lire) in fichiers.take(limiteLecture)) {
             val fromId = idOf(chemin)
             val texte = lire() ?: continue
+            notesLues++
             runCatching { extraireTags(texte) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { tagsParNote[fromId] = it }
-            for (m in lienRegex.findAll(texte)) {
-                val cible = m.groupValues[1].trim().trim('/')
+            for (cibleBrute in ExtracteurLiensObsidian.extraire(texte)) {
+                val cible = cibleBrute.trim().trim('/')
                 if (cible.isBlank()) continue
-                val cibleNorm = cible.removeSuffix(".md").removeSuffix(".MD")
-                val toId = parIdMinuscule[cibleNorm.lowercase()]
-                    ?: parNom[cibleNorm.substringAfterLast('/').lowercase()]?.firstOrNull()
-                    ?: cibleNorm
+                val cibleNorm = cible.replace(Regex("(?i)\\.md$"), "")
+                val dossierSource = fromId.substringBeforeLast('/', "")
+                val relative = normaliserSegments(if (dossierSource.isBlank()) cibleNorm else "$dossierSource/$cibleNorm")
+                val racine = normaliserSegments(cibleNorm)
+                // Les noms simples sont d'abord recherchés à côté de la note ; les chemins explicites
+                // sont résolus depuis la racine, avec repli sur le chemin relatif.
+                val candidats = if (cibleNorm.contains('/') && !cibleNorm.startsWith("../"))
+                    listOf(racine, relative).distinct()
+                else listOf(relative, racine).distinct()
+                val toId = candidats.firstNotNullOfOrNull { parIdNormalise[normaliseNom(it)] }
+                    ?: parNom[normaliseNom(cibleNorm.substringAfterLast('/'))]?.singleOrNull()
+                    ?: (candidats.firstOrNull() ?: cibleNorm)
                 if (fromId == toId) continue
 
-                // Une relation est toujours orientée depuis la note qui contient le wikilink.
+                // Une relation est toujours orientée depuis la note qui contient le lien,
+                // qu'il soit un wikilink Obsidian ou un lien Markdown standard.
                 if (vusReferences.add(fromId to toId)) {
                     references += GraphReference(
                         from = fromId,
@@ -1017,18 +1520,144 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                     )
                 }
 
-                // Conservation temporaire du format d'arêtes utilisé par l'ancienne vue 2D.
-                // La nouvelle indexation Room consomme exclusivement references, sans perdre le sens du lien.
                 val cle = if (fromId < toId) fromId to toId else toId to fromId
                 if (vusEdges.add(cle)) edges += GraphEdge(fromId, toId)
             }
         }
-        return GraphData(nodesById.values.toList(), edges, references, tagsParNote, pieces, dossiers.map { it.replace(File.separatorChar, '/') })
+        return GraphData(
+            nodes = nodesById.values.toList(), edges = edges, references = references, tags = tagsParNote,
+            attachments = pieces, dossiers = dossiers.map { it.replace(File.separatorChar, '/') },
+            notesLues = notesLues, notesCandidates = fichiers.size,
+            limiteNotesAtteinte = fichiers.size >= limiteNotes,
+            limitePiecesAtteinte = cheminsPieces.size >= limitePieces
+        )
     }
 
     private companion object {
         val MOTS_VIDES = setOf("le", "la", "les", "un", "une", "des", "du", "de", "d", "l", "et", "ou", "a", "au", "aux", "en", "dans", "leur", "nom",
             "fichier", "fichiers", "image", "images", "dossier", "dossiers", "sous", "mon", "ma", "mes", "nomme", "nommes", "nommee", "appele", "appelee",
             "intitule", "the", "of", "and")
+    }
+}
+
+
+/**
+ * Extrait les cibles des liens réellement présents dans une note Obsidian.
+ * Prend en charge les wikilinks, les liens Markdown et les embeds Markdown.
+ * Les URL externes et les ancres seules ne sont pas des fichiers du coffre.
+ */
+internal object ExtracteurLiensObsidian {
+    private val wikilink = Regex("""\[\[([^\]|#]+)""")
+    private val markdown = Regex("""!?\[[^\]]*]\((?:<([^>]+)>|([^)]*))\)""")
+
+    fun extraire(texte: String): List<String> {
+        val resultat = LinkedHashSet<String>()
+        wikilink.findAll(texte).forEach { match ->
+            match.groupValues[1].trim().takeIf { it.isNotBlank() }?.let(resultat::add)
+        }
+        markdown.findAll(texte).forEach { match ->
+            var cible = (match.groups[1]?.value ?: match.groups[2]?.value.orEmpty()).trim()
+            if (cible.startsWith("<") && cible.endsWith(">")) cible = cible.substring(1, cible.length - 1)
+            cible = cible.replace(Regex("""\s+["'][^"']*["']\s*$"""), "").trim()
+            cible = cible.substringBefore('#').substringBefore('?').trim()
+            if (cible.isBlank() || cible.startsWith("//")) return@forEach
+            if (Regex("""^[A-Za-z][A-Za-z0-9+.-]*:""").containsMatchIn(cible)) return@forEach
+            resultat.add(java.net.URLDecoder.decode(cible, Charsets.UTF_8.name()))
+        }
+        return resultat.toList()
+    }
+}
+
+/** Résultat commun de l'audit des liens, utilisé par le graphe et par les réponses de JARVIS. */
+data class RapportLiensObsidian(
+    val liens: List<ObsidianWriter.GraphEdge>,
+    val notesSansLienEntrant: List<ObsidianWriter.GraphNode>,
+    val notesOrphelines: List<ObsidianWriter.GraphNode>,
+    val fichiersOrphelins: List<ObsidianWriter.GraphAttachment>,
+    val referencesNonResolues: List<ObsidianWriter.GraphReference>,
+    val notesLues: Int,
+    val notesCandidates: Int,
+    val analyseComplete: Boolean
+)
+
+/**
+ * Règles uniques de diagnostic : « sans lien entrant » signifie aucune note qui pointe vers cette note ;
+ * « orpheline » signifie aucun lien entrant ni sortant ; une pièce jointe est orpheline si aucun wikilink
+ * du coffre ne la cible. La présence dans un dossier n'est jamais considérée comme un lien.
+ */
+object AnalyseLiensObsidian {
+    private fun normaliserChemin(value: String): String =
+        java.text.Normalizer.normalize(value.replace('\\', '/').trim(), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}"), "")
+            .lowercase()
+            .trim('/')
+            .removePrefix("./")
+
+    fun analyser(data: ObsidianWriter.GraphData): RapportLiensObsidian {
+        val ids = data.nodes.filterNot { it.ghost }.map { it.id }.toHashSet()
+        val liens = data.references
+            .filter { it.resolved && it.from in ids && it.to in ids && it.from != it.to }
+            .map { ObsidianWriter.GraphEdge(it.from, it.to) }
+            .distinctBy { it.from to it.to }
+            .ifEmpty { data.edges.filter { it.from in ids && it.to in ids && it.from != it.to }.distinctBy { it.from to it.to } }
+
+        val entrants = liens.groupingBy { it.to }.eachCount()
+        val degres = HashMap<String, Int>()
+        liens.forEach { edge ->
+            degres[edge.from] = (degres[edge.from] ?: 0) + 1
+            degres[edge.to] = (degres[edge.to] ?: 0) + 1
+        }
+        // L'index racine est le point d'entrée canonique du coffre : il n'a volontairement pas de parent.
+        val notes = data.nodes.filterNot { it.ghost }
+        val racineIndexId = "_Jarvis/Index coffre"
+        val analyseComplete = data.notesLues == data.notesCandidates &&
+            !data.limiteNotesAtteinte && !data.limitePiecesAtteinte
+        // Une note non lue peut contenir un lien entrant vers n'importe quelle autre note.
+        // En analyse partielle, ne jamais présenter une note ou pièce jointe comme orpheline.
+        val sansLienEntrant = if (analyseComplete) notes
+            .filter { it.id != racineIndexId && (entrants[it.id] ?: 0) == 0 }
+            .sortedBy { it.label.lowercase() } else emptyList()
+        val notesOrphelines = if (analyseComplete) notes
+            .filter { it.id != racineIndexId && (degres[it.id] ?: 0) == 0 }
+            .sortedBy { it.label.lowercase() } else emptyList()
+
+        val piecesLiees = HashSet<String>()
+        val referencesNonResolues = mutableListOf<ObsidianWriter.GraphReference>()
+        for (reference in data.references) {
+            val cible = normaliserChemin(reference.rawTarget)
+            val dossierSource = reference.from.substringBeforeLast('/', "")
+            val cibleRelative = normaliserChemin(if (dossierSource.isBlank()) reference.rawTarget else "$dossierSource/${reference.rawTarget}")
+            val correspondantes = if (cible.contains('/')) {
+                data.attachments.filter { piece ->
+                    val chemin = normaliserChemin(piece.path)
+                    chemin == cible || chemin == cibleRelative
+                }
+            } else {
+                // Pour un nom simple, priorité au fichier du dossier de la note ; sinon on ne résout
+                // que si le nom est unique dans tout le coffre (jamais tous les doublons à la fois).
+                val locale = data.attachments.filter { normaliserChemin(it.path) == cibleRelative }
+                if (locale.isNotEmpty()) locale
+                else data.attachments.filter { normaliserChemin(it.name) == cible }.singleOrNull()?.let(::listOf).orEmpty()
+            }
+            if (correspondantes.isNotEmpty()) {
+                correspondantes.forEach { piecesLiees += it.path }
+            } else if (!reference.resolved) {
+                referencesNonResolues += reference
+            }
+        }
+        val fichiersOrphelins = if (analyseComplete) data.attachments
+            .filter { it.path !in piecesLiees }
+            .sortedBy { it.path.lowercase() } else emptyList()
+
+        return RapportLiensObsidian(
+            liens = liens,
+            notesSansLienEntrant = sansLienEntrant,
+            notesOrphelines = notesOrphelines,
+            fichiersOrphelins = fichiersOrphelins,
+            referencesNonResolues = referencesNonResolues.distinctBy { it.from to it.rawTarget },
+            notesLues = data.notesLues,
+            notesCandidates = data.notesCandidates,
+            analyseComplete = analyseComplete
+        )
     }
 }

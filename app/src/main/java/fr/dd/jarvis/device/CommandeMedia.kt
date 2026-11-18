@@ -59,7 +59,7 @@ object CommandeMedia {
                 else -> Action.PLAY
             }
         }
-        return when {
+        val action = when {
             R_RESTART.matches(n) -> Action.RESTART
             R_PAUSE.matches(n) -> Action.PAUSE
             R_NEXT.matches(n) -> Action.NEXT
@@ -70,6 +70,11 @@ object CommandeMedia {
             R_INFO.matches(n) -> Action.INFO
             else -> null
         }
+        // « Lance de la musique » sans lecteur déjà ouvert n'est pas un simple bouton PLAY :
+        // laisser Brain/jouer_musique choisir et démarrer une vraie application musicale.
+        // Le raccourci PLAY reste instantané dès qu'une session musicale existe (même en pause).
+        if (action == Action.PLAY && !musiqueOuverte()) return null
+        return action
     }
 
     /** Correspondance avec les actions de l'outil controle_media (play, pause, next, previous…). */

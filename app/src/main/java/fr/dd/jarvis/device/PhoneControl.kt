@@ -477,7 +477,12 @@ class PhoneControl(private val ctx: Context) {
         if (a.contains("waze")) {
             val uri = if (point != null) "waze://?ll=${point.first},${point.second}&navigate=yes" else "waze://?q=" + Uri.encode(dest) + "&navigate=yes"
             val r = start(Intent.ACTION_VIEW, uri, "com.waze")
-            return r.ifBlank { "🧭 Waze : navigation vers $dest lancée." }
+            if (r.isBlank()) return "🧭 Waze : navigation vers $dest lancée."
+            // Si Waze refuse son deep-link (version, résolution d'activité ou démarrage en arrière-plan),
+            // ne laisse pas l'itinéraire bloqué : essaie le schéma de guidage natif de Google Maps.
+            val maps = start(Intent.ACTION_VIEW, "google.navigation:q=" + Uri.encode(dest) + "&mode=$m", "com.google.android.apps.maps")
+            return if (maps.isBlank()) "🧭 Google Maps : navigation vers $dest lancée (repli après échec de Waze)."
+                else "❌ Navigation impossible : Waze ($r) ; Google Maps ($maps)."
         }
         if (a.isNotBlank() && !a.contains("google") && !a.contains("maps")) {
             val (pkg, label) = findPackage(a) ?: return "Application « $appli » introuvable."

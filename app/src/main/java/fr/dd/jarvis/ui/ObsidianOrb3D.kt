@@ -7,6 +7,7 @@ import android.opengl.Matrix
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
@@ -16,6 +17,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -50,9 +55,11 @@ import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.max
+import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.tan
 import kotlin.random.Random
@@ -73,7 +80,7 @@ fun ObsidianOrb3D(app: JarvisApp, enTete: @Composable () -> Unit = {}) {
     var hubListe by remember { mutableStateOf<String?>(null) }
     val c = constellationDe(etat)
     if (c == null) ChargementEnCours(etat.erreur, enTete)
-    else Orbe3DVue(c, enTete, onNote = { noteOuverte = it }, onHub = { cle -> if (c.hub(cle)?.type != TypeHub.PIECES && c.hub(cle)?.type != TypeHub.TAGS) hubListe = cle },
+    else Orbe3DVue(c, { AgentsHermesButton(app); enTete() }, onNote = { noteOuverte = it }, onHub = { cle -> if (c.hub(cle)?.type != TypeHub.PIECES && c.hub(cle)?.type != TypeHub.TAGS) hubListe = cle },
         onFichier = { chemin -> app.obsidian.ouvrirFichier(chemin) },
         onBasculer = { chemin -> etat.deplies = ConstellationLayout.basculer(c.deplies, chemin) })
     DialoguesConstellation(app, c, noteOuverte, { noteOuverte = it }, hubListe, { hubListe = it })
@@ -83,11 +90,29 @@ fun ObsidianOrb3D(app: JarvisApp, enTete: @Composable () -> Unit = {}) {
 private const val DP_PAR_UNITE = 64f
 private const val FOV_Y = 40f
 
-/** Position 3D d'un point de la mise en page 2D : dôme qui s'éloigne vers les bords (y écran vers le bas → y monde vers le haut). */
+/**
+ * Projection de la constellation sur une coque planétaire 3D.
+ * La distance au noyau devient une latitude et l'angle de la mise en page devient une longitude :
+ * les dossiers et sous-dossiers se répartissent donc autour de la sphère au lieu de rester sur un dôme plat.
+ * Le léger décalage [avance] permet de garder les cercles enfants juste devant leur parent.
+ */
 private fun versDome(p: Pt, avance: Float = 0f): FloatArray {
-    val x = p.x / DP_PAR_UNITE; val y = -p.y / DP_PAR_UNITE
-    val z = -(x * x + y * y) * 0.045f + avance
-    return floatArrayOf(x, y, z)
+    val x = p.x / DP_PAR_UNITE
+    val y = -p.y / DP_PAR_UNITE
+    val distance = hypot(x, y)
+    val longitude = atan2(y, x)
+    // Chaque rayon conserve une part de la distance réelle au noyau : les éléments éloignés ne sont
+    // plus rabattus sur une même couronne, ce qui tassait les dossiers et leurs fichiers.
+    val latitude = (0.18f + distance * 0.065f).coerceIn(0.18f, 1.35f)
+    // La croissance radiale plus marquée conserve une vraie marge entre les branches
+    // après projection perspective, notamment sur les écrans portrait étroits.
+    val rayon = 3.15f + distance * 0.22f + avance
+    val projection = sin(latitude) * rayon
+    return floatArrayOf(
+        cos(longitude).toFloat() * projection,
+        sin(longitude).toFloat() * projection,
+        cos(latitude).toFloat() * rayon
+    )
 }
 
 /** Caméra partagée entre la couche Compose et le rendu OpenGL (mêmes matrices des deux côtés). */
@@ -103,7 +128,7 @@ private class Camera3D {
 
     fun projection(largeur: Float, hauteur: Float): FloatArray {
         val p = FloatArray(16); val t = FloatArray(16); val out = FloatArray(16)
-        Matrix.perspectiveM(p, 0, FOV_Y, largeur / max(hauteur, 1f), 0.1f, 60f)
+        Matrix.perspectiveM(p, 0, FOV_Y, largeur / max(hauteur, 1f), 0.1f, max(10000f, distance * 4f + 100f))
         Matrix.setIdentityM(t, 0); t[13] = decalageNdcY
         Matrix.multiplyMM(out, 0, t, 0, p, 0)
         return out
@@ -164,37 +189,80 @@ private fun Orbe3DContenu(
     var lacetUser by remember { mutableFloatStateOf(0f) }
     var tangageUser by remember { mutableFloatStateOf(0f) }
     var zoomUser by remember { mutableFloatStateOf(1f) }
+    // Le pincement démarré sur un dossier active son mode focus et dégage uniquement sa branche.
+    var hubFocus by remember { mutableStateOf<String?>(null) }
     var dernierGeste by remember { mutableFloatStateOf(-100f) }
     val surface = remember { arrayOfNulls<OrbeSurface>(1) }
 
-    // Positions 3D de chaque élément de la constellation (hubs un peu en avant du dôme, étiquettes dessus).
-    val pos3d = remember(c) {
+    // Positions 3D hiérarchiques : on ajoute un vrai dégagement spatial entre chaque parent
+    // et ses enfants, sans modifier la constellation 2D ni les collisions déjà résolues.
+    val pos3d = remember(c, hubFocus) {
         val m = HashMap<String, FloatArray>()
-        c.hubs.forEach { m["hub:${it.cle}"] = versDome(it.pos, 0.25f) }
-        // Les branches (sous-dossiers et leurs fichiers) restent presque à la profondeur de leur hub : sinon le dôme
-        // les fait reculer et se tasser les unes sur les autres en bout de branche.
+        fun dansBranche(cle: String): Boolean {
+            var courant = c.hub(cle)
+            while (courant != null) {
+                if (courant.cle == hubFocus) return true
+                courant = courant.parent?.let { c.hub(it) }
+            }
+            return false
+        }
+
+        fun eloignerDuParent(point: FloatArray, parent: FloatArray, ecart: Float): FloatArray {
+            val dx = point[0] - parent[0]
+            val dy = point[1] - parent[1]
+            val dz = point[2] - parent[2]
+            val longueur = kotlin.math.sqrt(dx * dx + dy * dy + dz * dz).coerceAtLeast(0.0001f)
+            return floatArrayOf(
+                point[0] + dx / longueur * ecart,
+                point[1] + dy / longueur * ecart,
+                point[2] + dz / longueur * ecart
+            )
+        }
+
+        // Les catégories racines gardent leur position. Chaque sous-dossier est légèrement
+        // repoussé de son parent ; l'écart augmente doucement avec la profondeur.
+        c.hubs.forEach { h ->
+            val base = versDome(Pt(h.pos.x * 1.32f, h.pos.y * 1.32f), 0.25f)
+            val parent = h.parent?.let { m["hub:$it"] }
+            val ecart = if (parent == null) 0f else 1.05f + (h.niveau - 1).coerceAtLeast(0) * 0.30f
+            val position = if (parent != null) eloignerDuParent(base, parent, ecart) else base
+            val ecartFocus = if (hubFocus != null && h.parent != null && dansBranche(h.parent))
+                1.65f + (h.niveau - 1).coerceAtLeast(0) * 0.48f else 0f
+            m["hub:${h.cle}"] = if (parent != null && ecartFocus > 0f) eloignerDuParent(position, parent, ecartFocus) else position
+        }
+
+        // Les notes et pièces jointes d'un sous-dossier sont elles aussi décalées vers l'extérieur
+        // par rapport au cercle qui les contient, pour former une branche lisible et aérée.
         c.etiquettes.forEach { e ->
-            val p = versDome(e.pos, 0.12f)
-            val h = c.hub(e.hub)
-            if (h != null && h.type == TypeHub.DOSSIER) p[2] = max(p[2], versDome(h.pos, 0.12f)[2] - 0.12f)
-            m[e.id] = p
+            val base = versDome(Pt(e.pos.x * 1.32f, e.pos.y * 1.32f), 0.12f)
+            val parent = c.hub(e.hub)?.takeIf { it.niveau >= 1 }?.let { m["hub:${it.cle}"] }
+            val ecart = if (parent != null && (e.type == TypeEtiquette.NOTE || e.type == TypeEtiquette.FICHIER))
+                0.98f + (c.hub(e.hub)?.niveau?.minus(1)?.coerceAtLeast(0) ?: 0) * 0.24f
+            else 0f
+            val position = if (parent != null && ecart > 0f) eloignerDuParent(base, parent, ecart) else base
+            val hubContenant = c.hub(e.hub)
+            val centreFocus = if (hubFocus != null && dansBranche(e.hub)) hubContenant?.let { m["hub:${it.cle}"] } else null
+            val ecartFocus = if (centreFocus != null) 1.45f + ((hubContenant?.niveau ?: 0).coerceAtLeast(0) * 0.32f) else 0f
+            m[e.id] = if (centreFocus != null) eloignerDuParent(position, centreFocus, ecartFocus) else position
         }
         m
     }
     // Recul de caméra : toute la constellation tient dans l'écran (portrait) au zoom 1.
     // La zone utile exclut l'en-tête (~64 dp) et la consigne du bas (~28 dp) ; l'image est recentrée sur la
     // constellation (et non sur la sphère) par un décalage vertical de la projection.
-    val (distanceAuto, decalageAuto) = remember(c, taille) {
-        val hx = max(abs(c.minX), abs(c.maxX)) / DP_PAR_UNITE + 0.4f
-        val haut = -c.minY / DP_PAR_UNITE; val bas = -c.maxY / DP_PAR_UNITE
-        val cy = (haut + bas) / 2f; val hy = (haut - bas) / 2f + 0.4f
+    val (distanceAuto, _) = remember(c, taille, dens, hubFocus) {
+        // La coque des dossiers est désormais une sphère de rayon constant : le cadrage se calcule
+        // sur son enveloppe 3D, et non plus sur l'ancien grand rectangle de la constellation 2D.
+        val rayonMax3d = pos3d.values.maxOfOrNull { p ->
+            kotlin.math.sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2])
+        } ?: 0f
+        val rayonEnveloppe = max(4.25f, rayonMax3d + 0.95f)
         val tanY = tan(Math.toRadians(FOV_Y / 2.0)).toFloat()
         val h = if (taille.height > 0f) taille.height else 1600f
         val w = if (taille.width > 0f) taille.width else 800f
         val hDispo = (h - 92f * dens).coerceAtLeast(h * 0.6f)
-        val d = max(hx / (tanY * w / h), hy / (tanY * hDispo / h)) * 1.06f + 0.6f
-        val cibleNdc = 1f - 2f * (64f * dens + hDispo / 2f) / h
-        d to (cibleNdc - cy / (tanY * d))
+        val d = max(rayonEnveloppe / (tanY * w / h), rayonEnveloppe / (tanY * hDispo / h)) * 1.18f + 0.85f
+        d to 0f
     }
 
     // Horloge d'animation : balancement doux de la caméra quand l'utilisateur ne touche pas l'écran.
@@ -234,11 +302,25 @@ private fun Orbe3DContenu(
         Canvas(
             Modifier.fillMaxSize()
                 .pointerInput(Unit) {
-                    detectTransformGestures { _, pan, zoom, _ ->
+                    detectTransformGestures { centroid, pan, zoom, _ ->
                         dernierGeste = temps
-                        zoomUser = (zoomUser * zoom).coerceIn(0.6f, 3.2f)
-                        lacetUser = (lacetUser + pan.x * 0.25f).coerceIn(-75f, 75f)
-                        tangageUser = (tangageUser + pan.y * 0.2f).coerceIn(-60f, 60f)
+                        zoomUser = (zoomUser * zoom).coerceIn(0.015f, 12f)
+                        if (zoom > 1.015f) {
+                            val cible = zones.entries.firstOrNull { (id, rect) ->
+                                id.startsWith("hub:") && rect.inflate(20f * dens).contains(centroid)
+                            }
+                            if (cible != null) {
+                                val cle = cible.key.removePrefix("hub:")
+                                hubFocus = cle
+                                // Le zoom dégage la branche sans déplacer le cerveau : le noyau reste fixe au centre.
+                            }
+                        } else if (zoom < 0.985f && zoomUser < 0.92f) {
+                            hubFocus = null
+                        }
+                        // Rotation libre sur les deux axes : chaque axe accepte autant de tours complets que souhaité.
+                        // Le modulo conserve une valeur numérique stable sans créer de butée ni de saut visuel.
+                        lacetUser = (lacetUser + pan.x * 0.25f) % 360f
+                        tangageUser = (tangageUser + pan.y * 0.2f) % 360f
                     }
                 }
                 .pointerInput(c) {
@@ -271,10 +353,10 @@ private fun Orbe3DContenu(
             // chaque image, l'écran n'est pas recomposé 60 fois par seconde.
             val calme = (temps - dernierGeste).coerceIn(0f, 4f) / 4f
             camera.lacet = lacetUser + calme * 18f * sin(temps * 0.22f)
-            camera.tangage = (-8f + tangageUser + calme * 5f * sin(temps * 0.15f)).coerceIn(-75f, 75f)
+            camera.tangage = -8f + tangageUser + calme * 5f * sin(temps * 0.15f)
             camera.zoom = zoomUser
             camera.distance = distanceAuto
-            camera.decalageNdcY = decalageAuto
+            camera.decalageNdcY = 0f // Le cerveau reste aligné sur le centre de l'écran.
             camera.tempsCoeur = temps
             val mvp = FloatArray(16); val mv = FloatArray(16)
             camera.matrices(size.width, size.height, mvp, mv)
@@ -400,7 +482,7 @@ private fun Orbe3DContenu(
             enTete()
         }
         Text(
-            "Glisser pour tourner · pincer pour zoomer · toucher une note",
+            "Glisser dans toutes les directions · rotations 360° sans limite · pincer pour zoomer",
             color = Neon.sousTitre.copy(alpha = 0.7f), fontSize = 10.sp, fontFamily = Neon.serif,
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp)
         )
@@ -435,6 +517,9 @@ private class OrbeRenderer(private val camera: Camera3D) : GLSurfaceView.Rendere
     private var nbSphere = 0
     private var etoiles: FloatBuffer? = null
     private var nbEtoiles = 0
+    /** Éclats cristallins projetés autour de la sphère, comme une matière qui rayonne de son cœur. */
+    private var eclats: FloatBuffer? = null
+    private var nbEclats = 0
     private var anneaux: FloatBuffer? = null
     private var nbAnneau = 0
     private var largeur = 1f
@@ -469,6 +554,23 @@ private class OrbeRenderer(private val camera: Camera3D) : GLSurfaceView.Rendere
                 e[i * 4] = s * cos(t) * rad; e[i * 4 + 1] = u * rad; e[i * 4 + 2] = s * sin(t) * rad; e[i * 4 + 3] = r.nextFloat()
             }
             etoiles = tampon(e); nbEtoiles = 420
+
+            // Éclats de matière autour de l'orbe : distribution sphérique irrégulière, dense près de la
+            // surface puis éparse vers l'extérieur pour évoquer une explosion cristalline figée en orbite.
+            val aleaEclats = Random(73)
+            val pointsEclats = FloatArray(260 * 4)
+            for (i in 0 until 260) {
+                val u = aleaEclats.nextFloat() * 2f - 1f
+                val t = aleaEclats.nextFloat() * 2f * PI.toFloat()
+                val radial = kotlin.math.sqrt(1f - u * u)
+                val r = 1.10f + aleaEclats.nextFloat().pow(1.7f) * 1.05f
+                pointsEclats[i * 4] = radial * cos(t) * r
+                pointsEclats[i * 4 + 1] = u * r
+                pointsEclats[i * 4 + 2] = radial * sin(t) * r
+                pointsEclats[i * 4 + 3] = 0.28f + aleaEclats.nextFloat() * 0.72f
+            }
+            eclats = tampon(pointsEclats); nbEclats = 260
+
             // Deux anneaux orbitaux autour de la sphère (cercles inclinés), en points serrés pour un trait lumineux.
             val n = 360
             val a = FloatArray(n * 2 * 4)
@@ -558,10 +660,14 @@ private class OrbeRenderer(private val camera: Camera3D) : GLSurfaceView.Rendere
         GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, nbSphere)
         GLES20.glDisableVertexAttribArray(aPos); GLES20.glDisableVertexAttribArray(aNor)
 
-        // Anneaux orbitaux : testés en profondeur (la sphère cache la partie arrière), sans écrire la profondeur.
+        // Éclats violets en suspension : le test de profondeur conserve leur volume et masque ceux derrière
+        // l'obsidienne, tandis que le mélange additif leur donne un éclat minéral.
         GLES20.glEnable(GLES20.GL_BLEND)
         GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE)
         GLES20.glDepthMask(false)
+        dessinerPoints(eclats, nbEclats, mvp, 3.0f, 0.48f, 0.16f, 0.92f, 0.78f)
+
+        // Anneaux orbitaux : testés en profondeur (la sphère cache la partie arrière), sans écrire la profondeur.
         dessinerPoints(anneaux, nbAnneau, mvp, 3.2f, 0.72f, 0.45f, 1f, 0.55f)
         GLES20.glDepthMask(true)
         GLES20.glDisable(GLES20.GL_BLEND)
@@ -685,27 +791,55 @@ private class OrbeRenderer(private val camera: Camera3D) : GLSurfaceView.Rendere
                 return mix(mix(mix(h31(i), h31(i + vec3(1.0, 0.0, 0.0)), f.x), mix(h31(i + vec3(0.0, 1.0, 0.0)), h31(i + vec3(1.0, 1.0, 0.0)), f.x), f.y),
                            mix(mix(h31(i + vec3(0.0, 0.0, 1.0)), h31(i + vec3(1.0, 0.0, 1.0)), f.x), mix(h31(i + vec3(0.0, 1.0, 1.0)), h31(i + vec3(1.0, 1.0, 1.0)), f.x), f.y), f.z);
             }
-            float fbm(vec3 p) { float v = 0.0; float a = 0.5; for (int i = 0; i < 4; i++) { v += bruit(p) * a; p *= 2.03; a *= 0.5; } return v; }
+            float fbm(vec3 p) {
+                float v = 0.0; float a = 0.5;
+                for (int i = 0; i < 4; i++) { v += bruit(p) * a; p *= 2.03; a *= 0.5; }
+                return v;
+            }
             void main() {
                 vec3 n = normalize(vNormale);
                 vec3 vue = normalize(uOeil - vMonde);
-                vec3 l1 = normalize(vec3(-0.6, 0.75, 0.9));
-                vec3 l2 = normalize(vec3(0.8, -0.3, 0.5));
+                vec3 l1 = normalize(vec3(-0.62, 0.72, 0.92));
+                vec3 l2 = normalize(vec3(0.82, -0.28, 0.48));
+                vec3 l3 = normalize(vec3(-0.18, -0.78, 0.58));
                 float diff = max(dot(n, l1), 0.0);
-                float spec = pow(max(dot(reflect(-l1, n), vue), 0.0), 60.0);
-                float spec2 = pow(max(dot(reflect(-l2, n), vue), 0.0), 24.0);
-                float fres = pow(1.0 - max(dot(n, vue), 0.0), 2.6);
-                float deform = fbm(vLocal * 3.2 + vec3(0.0, uTemps * 0.05, 0.0));
-                float fissure = abs(fbm(vLocal * 6.5 + deform * 2.4) - 0.5);
-                float veines = 1.0 - smoothstep(0.008, 0.045, fissure);
-                float grain = fbm(vLocal * 22.0);
-                vec3 base = vec3(0.012, 0.008, 0.022) + grain * vec3(0.02, 0.012, 0.035);
-                vec3 couleur = base * (0.45 + 0.55 * diff);
-                couleur += vec3(0.34, 0.1, 0.7) * veines * (0.35 + 0.5 * deform);
-                couleur += vec3(0.45, 0.22, 0.85) * fres * 0.85;
-                couleur += vec3(0.85, 0.7, 1.0) * spec * 0.9 + vec3(0.55, 0.3, 1.0) * spec2 * 0.35;
-                gl_FragColor = vec4(couleur, 1.0);
+                float diff2 = max(dot(n, l2), 0.0);
+                float fres = pow(1.0 - max(dot(n, vue), 0.0), 3.0);
+
+                // Nuages minéraux profonds : la surface reste noire, jamais plastique.
+                float nuage = fbm(vLocal * 4.2 + vec3(0.0, uTemps * 0.018, 0.0));
+                float grain = fbm(vLocal * 24.0);
+                float strates = 0.5 + 0.5 * sin(vLocal.y * 19.0 + nuage * 7.0 + vLocal.x * 5.0);
+                vec3 base = vec3(0.0045, 0.0055, 0.012)
+                          + nuage * vec3(0.010, 0.008, 0.020)
+                          + grain * vec3(0.0035, 0.004, 0.009);
+                base += strates * vec3(0.002, 0.0015, 0.006);
+
+                // Fissures cristallines violettes, fines et irrégulières, incrustées dans la pierre.
+                float deformation = fbm(vLocal * 3.1 + vec3(uTemps * 0.012, 0.0, 0.0));
+                float champFissure = abs(fbm(vLocal * 7.4 + deformation * 2.1) - 0.5);
+                float fissures = 1.0 - smoothstep(0.012, 0.038, champFissure);
+                float filaments = 1.0 - smoothstep(0.006, 0.018,
+                    abs(fbm(vLocal * 13.0 + vec3(0.0, deformation, 0.0)) - 0.5));
+                float veines = clamp(fissures * 0.78 + filaments * 0.22, 0.0, 1.0);
+                vec3 pierre = base * (0.32 + 0.68 * diff + 0.12 * diff2);
+                pierre += vec3(0.19, 0.045, 0.42) * veines * (0.32 + 0.42 * nuage);
+
+                // Reflets en couches : reflet large, poli, puis éclat presque miroir.
+                float refletLarge = pow(max(dot(reflect(-l1, n), vue), 0.0), 12.0);
+                float refletPoli = pow(max(dot(reflect(-l2, n), vue), 0.0), 42.0);
+                float eclatMiroir = pow(max(dot(reflect(-l1, n), vue), 0.0), 118.0);
+                float refletSecondaire = pow(max(dot(reflect(-l3, n), vue), 0.0), 26.0);
+                pierre += vec3(0.16, 0.12, 0.24) * refletLarge;
+                pierre += vec3(0.25, 0.15, 0.42) * refletPoli;
+                pierre += vec3(0.78, 0.72, 0.95) * eclatMiroir * 0.82;
+                pierre += vec3(0.12, 0.045, 0.28) * refletSecondaire;
+
+                // Liseré violet discret pour souligner le volume sphérique.
+                pierre += vec3(0.20, 0.075, 0.42) * fres * 0.48;
+                pierre += vec3(0.055, 0.018, 0.12) * fres * fres * 0.8;
+                gl_FragColor = vec4(clamp(pierre, 0.0, 1.0), 1.0);
             }
-        """
+        """""
     }
 }

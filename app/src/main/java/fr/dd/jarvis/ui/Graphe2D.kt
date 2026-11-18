@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -75,6 +76,13 @@ enum class FiltreGraphe(val libelle: String, val icone: Icone) {
 }
 
 /** Charge le coffre réel et construit la constellation (partagé par la vue 2D et l'Orbe 3D). */
+private object CacheConstellation {
+    @Volatile var donnees: ObsidianWriter.GraphData? = null
+    @Volatile var signature: Long = 0L
+    @Volatile var actualiseeA: Long = 0L
+}
+
+/** État partagé entre l'Orbe 3D et le graphe 2D. */
 class ChargementConstellation {
     /** Données réelles du coffre ; la mise en page dépend en plus des dossiers dépliés (voir [constellationDe]). */
     var donnees by mutableStateOf<ObsidianWriter.GraphData?>(null)
@@ -88,27 +96,54 @@ class ChargementConstellation {
 }
 
 /**
- * Charge le coffre et construit la constellation, puis SURVEILLE le coffre : dès qu'un dossier, une catégorie ou un
- * fichier est ajouté, supprimé, renommé ou modifié (dans Obsidian ou par JARVIS), la vue se reconstruit d'elle-même.
+ * Réutilise immédiatement la dernière constellation connue, puis vérifie et actualise le coffre en arrière-plan.
+ * La synchronisation des index et le parcours SAF ne bloquent donc plus chaque réouverture de l'Orbe/du graphe.
  */
 @Composable
 fun rememberConstellation(app: JarvisApp): ChargementConstellation {
-    val etat = remember { ChargementConstellation() }
+    val etat = remember {
+        ChargementConstellation().also { cache ->
+            CacheConstellation.donnees?.let { cache.donnees = it }
+            cache.signature = CacheConstellation.signature
+        }
+    }
     LaunchedEffect(etat.version) {
+        val maintenant = System.currentTimeMillis()
+        val cacheDisponible = etat.donnees != null
+        val cacheRecent = cacheDisponible && maintenant - CacheConstellation.actualiseeA < 20_000L
+        // Sur une réouverture rapide, l'écran est déjà alimenté par le cache : inutile de refaire
+        // synchronisation + signature + lecture complète du coffre.
+        if (cacheRecent) return@LaunchedEffect
+
         etat.erreur = null
         etat.enCours = true
         val r = withContext(Dispatchers.IO) {
             runCatching {
-                etat.signature = runCatching { app.obsidian.signature() }.getOrDefault(0L)
-                app.obsidian.graph()
+                // Les index restent synchronisés lors d'un vrai rafraîchissement, mais jamais sur le
+                // chemin critique d'une réouverture servie par le cache.
+                val sync = runCatching { app.obsidian.synchroniserIndex() }
+                val signature = runCatching { app.obsidian.signature() }.getOrDefault(0L)
+                val graph = app.obsidian.graph()
+                Triple(graph, signature, sync.exceptionOrNull()?.message)
             }
         }
         etat.enCours = false
-        r.onSuccess { etat.donnees = it }.onFailure { etat.erreur = it.message ?: it.javaClass.simpleName }
+        r.onSuccess { (graph, signature, syncError) ->
+            etat.donnees = graph
+            etat.signature = signature
+            CacheConstellation.donnees = graph
+            CacheConstellation.signature = signature
+            CacheConstellation.actualiseeA = System.currentTimeMillis()
+            if (syncError != null) etat.erreur = "Indexation non actualisée : $syncError"
+        }.onFailure {
+            etat.erreur = it.message ?: it.javaClass.simpleName
+        }
     }
     LaunchedEffect(Unit) {
         while (true) {
-            kotlinx.coroutines.delay(5000)
+            // Le contrôle d'empreinte SAF est lui-même un parcours complet : 15 s suffisent pour
+            // détecter les changements sans le relancer inutilement toutes les 5 secondes.
+            kotlinx.coroutines.delay(15_000)
             if (etat.enCours || etat.signature == 0L) continue
             val s = withContext(Dispatchers.IO) { runCatching { app.obsidian.signature() }.getOrNull() } ?: continue
             if (s != etat.signature && !etat.enCours) etat.version++
@@ -150,9 +185,15 @@ fun DialoguesConstellation(
         apercu = withContext(Dispatchers.IO) { runCatching { app.obsidian.readNote(id) }.getOrNull()?.take(3000) ?: "" }
     }
     noteOuverte?.let { id ->
-        val noeud = c?.notesParHub?.values?.flatten()?.firstOrNull { it.id == id }
-        val entrants = c?.tousLiens?.filter { it.vers == id }?.map { it.de.substringAfterLast('/') }.orEmpty()
-        val sortants = c?.tousLiens?.filter { it.de == id }?.map { it.vers.substringAfterLast('/') }.orEmpty()
+        val toutesNotes = c?.arborescence.orEmpty().flatMap { racine ->
+            fun parcourir(n: NoeudDossier): List<ObsidianWriter.GraphNode> =
+                n.notes + n.enfants.flatMap { parcourir(it) }
+            parcourir(racine)
+        }
+        val noeud = toutesNotes.firstOrNull { it.id == id }
+            ?: c?.dossiers?.get("Racine")?.notes?.firstOrNull { it.id == id }
+        val entrants = c?.tousLiens?.filter { it.vers == id }?.map { it.de }.orEmpty()
+        val sortants = c?.tousLiens?.filter { it.de == id }?.map { it.vers }.orEmpty()
         AlertDialog(
             onDismissRequest = { onNote(null) },
             containerColor = Color(0xFF0E0819), titleContentColor = Neon.lavande, textContentColor = Neon.blancViolet,
@@ -160,8 +201,18 @@ fun DialoguesConstellation(
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     Text(noeud?.folder?.ifBlank { "Racine du coffre" } ?: "", color = Neon.violet, fontSize = 11.sp, fontFamily = Neon.serif)
-                    Text("→ Liens entrants (${entrants.size}) : ${entrants.joinToString().ifBlank { "aucun" }}", color = Neon.sousTitre, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
-                    Text("← Liens sortants (${sortants.size}) : ${sortants.joinToString().ifBlank { "aucun" }}", color = Neon.sousTitre, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp, bottom = 8.dp))
+                    Text("→ Liens entrants (${entrants.size})", color = Neon.sousTitre, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+                    if (entrants.isEmpty()) Text("Aucun", color = Neon.sousTitre, fontSize = 11.sp)
+                    entrants.forEach { cible ->
+                        Text("↳ ${cible.substringAfterLast('/')}", color = Neon.lavande, fontSize = 11.sp,
+                            modifier = Modifier.fillMaxWidth().clickable { onNote(cible) }.padding(vertical = 2.dp))
+                    }
+                    Text("← Liens sortants (${sortants.size})", color = Neon.sousTitre, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+                    if (sortants.isEmpty()) Text("Aucun", color = Neon.sousTitre, fontSize = 11.sp)
+                    sortants.forEach { cible ->
+                        Text("↳ ${cible.substringAfterLast('/')}", color = Neon.lavande, fontSize = 11.sp,
+                            modifier = Modifier.fillMaxWidth().clickable { onNote(cible) }.padding(vertical = 2.dp))
+                    }
                     if (apercu == null) CircularProgressIndicator(color = Neon.violet, modifier = Modifier.size(22.dp))
                     else Text(apercu!!.ifBlank { "(note vide ou illisible)" }, fontSize = 12.sp)
                 }
@@ -170,7 +221,21 @@ fun DialoguesConstellation(
         )
     }
     hubListe?.let { cle ->
-        val contenu = c?.dossiers?.get(cle)
+        val contenu = when {
+            cle == "Autres" || cle == "Racine" || cle.isBlank() -> c?.dossiers?.get(cle)
+            else -> c?.arborescence.orEmpty().let { racines ->
+                fun trouver(noeuds: List<NoeudDossier>): NoeudDossier? {
+                    for (n in noeuds) {
+                        if (n.chemin == cle) return n
+                        trouver(n.enfants)?.let { return it }
+                    }
+                    return null
+                }
+                trouver(racines)?.let { n ->
+                    ContenuDossier(n.chemin, n.enfants.map { it.chemin }, n.notes, n.pieces, n.totalRecursif)
+                } ?: c?.dossiers?.get(cle)
+            }
+        }
         val titre = when (cle) { "Racine", "" -> "Coffre"; "Autres" -> "Autres dossiers"; else -> cle.substringAfterLast('/') }
         val parent = if (cle.contains('/')) cle.substringBeforeLast('/') else null
         AlertDialog(
@@ -183,7 +248,7 @@ fun DialoguesConstellation(
                     if (parent != null) Text("◂ ${parent.substringAfterLast('/')}", color = Neon.sousTitre, fontSize = 13.sp, fontFamily = Neon.serif,
                         modifier = Modifier.fillMaxWidth().clickable { onHubListe(parent) }.padding(vertical = 6.dp))
                     contenu?.sousDossiers?.forEach { d ->
-                        Text("📁 ${d.substringAfterLast('/')}  (${c.dossiers[d]?.total ?: 0})", fontSize = 13.sp, fontFamily = Neon.serif, color = Neon.lavande,
+                        Text("📁 ${d.substringAfterLast('/')}  (${c?.dossiers?.get(d)?.total ?: 0})", fontSize = 13.sp, fontFamily = Neon.serif, color = Neon.lavande,
                             modifier = Modifier.fillMaxWidth().clickable { onHubListe(d) }.padding(vertical = 6.dp))
                     }
                     contenu?.notes?.forEach { n ->
@@ -213,7 +278,7 @@ fun GrapheCerveau2D(app: JarvisApp, enTete: @Composable () -> Unit = {}) {
     val c = constellationDe(etat)
     if (c == null) ChargementEnCours(etat.erreur, enTete)
     else ConstellationVue(
-        c = c, enTete = enTete,
+        c = c, enTete = { AgentsHermesButton(app); enTete() },
         onNote = { noteOuverte = it },
         onBasculer = { chemin -> etat.deplies = ConstellationLayout.basculer(c.deplies, chemin) },
         onHub = { cle -> if (c.hub(cle)?.type != TypeHub.PIECES && c.hub(cle)?.type != TypeHub.TAGS) hubListe = cle },
@@ -335,7 +400,7 @@ fun ConstellationVue(
                 .pointerInput(c) {
                     detectTransformGestures { _, pan, zoom, _ ->
                         // Zoom autour du centre de l'écran : le déplacement suit le même facteur.
-                        val z = (zoomUser * zoom).coerceIn(0.6f, 5f) / zoomUser
+                        val z = (zoomUser * zoom).coerceIn(0.015f, 18f) / zoomUser
                         zoomUser *= z
                         panUser = panUser * z + pan
                     }
@@ -382,6 +447,8 @@ fun ConstellationVue(
             if (dragon != null) dessinerDragon(dragon, outilsDragon, temps, margeHaut = 44.dp.toPx())
             val centre = origine
             val rCentre = c.rayonCerveau * k
+            // Noyau minéral sphérique : l'orbe devient la matière centrale du graphe, pas seulement un cerveau entouré de bulles.
+            dessinerOrbeObsidienne(centre, rCentre * 1.48f, pulse)
             // Grand rayonnement violet autour du cerveau, comme le cœur lumineux de l'image de référence.
             drawCircle(Brush.radialGradient(listOf(Neon.violetVif.copy(alpha = 0.2f * pulse), Neon.violetProfond.copy(alpha = 0.08f), Color.Transparent), centre, rCentre * 4.2f), rCentre * 4.2f, centre)
             val voirDossiers = FiltreGraphe.DOSSIERS in filtres
@@ -405,6 +472,9 @@ fun ConstellationVue(
                 hubActif != null -> if (h.cle == hubActif) 1f else 0.45f
                 else -> 1f
             }
+            // Niveau de détail progressif : loin, uniquement des points ; en approchant, les noms apparaissent.
+            val detailTexte = ((zoomUser - 0.28f) / 0.62f).coerceIn(0f, 1f)
+            val vuePoints = zoomUser <= 0.28f
 
             // 1. Toile d'énergie cerveau → hubs.
             dessinerToile(centre, rCentre, hubsAnneau.map { ecran(it.pos) to it.rayon * k }, k, pulse)
@@ -468,8 +538,14 @@ fun ConstellationVue(
                 if (!hubVisible(h)) continue
                 if (h.type == TypeHub.TAGS) dessinerHubTags(h, ecran(h.pos), k, mesureur, fontScale)
                 else {
-                    dessinerHub(h, ecran(h.pos), h.rayon * k, mesureur, fontScale, alphaHub(h), actif = h.cle == hubActif, pulse = pulse)
-                    if (h.depliable) dessinerBadgeDepli(ecran(Pt(h.pos.x, h.pos.y + h.rayon * 1.02f)), max(h.rayon * 0.22f, 7f) * k, h.deplie, alphaHub(h))
+                    val point = ecran(h.pos)
+                    if (vuePoints) {
+                        val rayonPoint = (2.1f + h.niveau.coerceAtMost(3) * 0.35f) * dens
+                        drawCircle(Neon.violetVif.copy(alpha = alphaHub(h)), rayonPoint, point)
+                    } else {
+                        dessinerHub(h, point, h.rayon * k, mesureur, fontScale, alphaHub(h) * detailTexte, actif = h.cle == hubActif, pulse = pulse)
+                        if (h.depliable && detailTexte > 0.55f) dessinerBadgeDepli(ecran(Pt(h.pos.x, h.pos.y + h.rayon * 1.02f)), max(h.rayon * 0.22f, 7f) * k, h.deplie, alphaHub(h) * detailTexte)
+                    }
                 }
             }
             zonesEtiquettes.clear()
@@ -479,7 +555,15 @@ fun ConstellationVue(
                 if (e.type == TypeEtiquette.TAG && !voirTags) continue
                 val a = alphaEtiquette(e)
                 val sur = (e.noteId != null && (e.noteId == noteActive || (requete.isNotBlank() && e.noteId in idsCorrespondants))) || (e.tag != null && e.tag == tagActif)
-                zonesEtiquettes[e.id] = dessinerEtiquette(e, ecran(e.pos), k, mesureur, fontScale, a, sur, taillePxMin = 8.5f * dens)
+                val point = ecran(e.pos)
+                if (vuePoints) {
+                    val rayonPoint = 1.45f * dens
+                    drawCircle(Neon.lavande.copy(alpha = a), rayonPoint, point)
+                    val hit = 5f * dens
+                    zonesEtiquettes[e.id] = Rect(point - Offset(hit, hit), Size(hit * 2f, hit * 2f))
+                } else {
+                    zonesEtiquettes[e.id] = dessinerEtiquette(e, point, k, mesureur, fontScale, a * detailTexte, sur, taillePxMin = 8.5f * dens)
+                }
             }
         }
 
@@ -550,8 +634,8 @@ fun ConstellationVue(
             horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Bottom
         ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                PanneauListe("Fichiers orphelins", "Sans lien depuis le graphe", Icone.FICHIER, Color(0xFFFF6B5C), c.orphelins, orphelinsOuvert) { orphelinsOuvert = !orphelinsOuvert }
-                PanneauListe("Mentions non liées", "Notes sans lien entrant", Icone.ETOILE, Color(0xFFFFC14D), c.sansLienEntrant, mentionsOuvert) { mentionsOuvert = !mentionsOuvert }
+                PanneauListe("Fichiers sans lien Obsidian", "Toujours rangés dans leur dossier · toucher pour ouvrir", Icone.FICHIER, Color(0xFFFF6B5C), c.orphelins, orphelinsOuvert, { s -> if (s.endsWith(".md", true)) onNote(s.removeSuffix(".md")) else onFichier(s) }) { orphelinsOuvert = !orphelinsOuvert }
+                PanneauListe("Notes sans lien entrant", "Aucune autre note ne les cite · toucher pour lire", Icone.ETOILE, Color(0xFFFFC14D), c.sansLienEntrant, mentionsOuvert, { s -> onNote(s.removeSuffix(".md")) }) { mentionsOuvert = !mentionsOuvert }
             }
             Panneau(Modifier.widthIn(max = 150.dp), onClick = { legendeOuverte = !legendeOuverte }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -602,8 +686,8 @@ private fun Panneau(modifier: Modifier = Modifier, onClick: (() -> Unit)? = null
 }
 
 @Composable
-private fun PanneauListe(titre: String, sousTitre: String, icone: Icone, puce: Color, items: List<String>, ouvert: Boolean, basculer: () -> Unit) {
-    Panneau(Modifier.fillMaxWidth(), onClick = basculer) {
+private fun PanneauListe(titre: String, sousTitre: String, icone: Icone, puce: Color, items: List<String>, ouvert: Boolean, onItem: (String) -> Unit = {}, basculer: () -> Unit) {
+    Panneau(Modifier.fillMaxWidth().heightIn(max = 180.dp).verticalScroll(rememberScrollState()), onClick = basculer) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconeCompose(icone, 14.dp, if (icone == Icone.ETOILE) Color(0xFFFFC14D) else Color(0xFFFF6B5C))
             Column(Modifier.padding(start = 6.dp).weight(1f)) {
@@ -614,13 +698,12 @@ private fun PanneauListe(titre: String, sousTitre: String, icone: Icone, puce: C
         }
         if (ouvert) {
             if (items.isEmpty()) Text("Aucun", color = Neon.sousTitre, fontSize = 11.sp, fontFamily = Neon.serif, modifier = Modifier.padding(top = 3.dp))
-            items.take(4).forEach { s ->
+            items.forEach { s ->
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 3.dp)) {
                     Box(Modifier.size(6.dp).background(puce, CircleShape))
-                    Text(s, color = Neon.blancViolet, fontSize = 11.sp, fontFamily = Neon.serif, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 6.dp))
+                    Text(s, color = Neon.blancViolet, fontSize = 11.sp, fontFamily = Neon.serif, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 6.dp).clickable { onItem(s) })
                 }
             }
-            if (items.size > 4) Text("+${items.size - 4} autres", color = Neon.sousTitre, fontSize = 10.sp, fontFamily = Neon.serif, modifier = Modifier.padding(top = 2.dp))
         }
     }
 }
@@ -637,4 +720,61 @@ private fun LigneLegende(icone: Icone?, texte: String, symbole: String = "") {
 @Composable
 fun IconeCompose(icone: Icone, taille: Dp, couleur: Color = Neon.violet, alpha: Float = 1f) {
     Canvas(Modifier.size(taille)) { dessinerIcone(icone, Offset(size.width / 2f, size.height / 2f), size.minDimension * 0.92f, couleur, alpha) }
+}
+
+
+/**
+ * Coque d'obsidienne polie du graphe 2D : cœur noir profond, reflets froids, veines violettes
+ * et deux orbites fines. Les dossiers et les notes restent dessinés au premier plan.
+ */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.dessinerOrbeObsidienne(
+    centre: Offset, rayon: Float, pulse: Float
+) {
+    drawCircle(
+        Brush.radialGradient(
+            0f to Color(0xFF21132F),
+            0.28f to Color(0xFF100A19),
+            0.72f to Color(0xFF07050C),
+            0.94f to Color(0xFF020106),
+            1f to Color(0xFF000000),
+            center = centre - Offset(rayon * 0.28f, rayon * 0.34f),
+            radius = rayon * 1.35f
+        ),
+        radius = rayon,
+        center = centre
+    )
+    drawCircle(
+        Neon.violetVif.copy(alpha = 0.22f * pulse),
+        radius = rayon * 1.025f,
+        center = centre,
+        style = Stroke(width = max(1.2f, rayon * 0.018f))
+    )
+    drawCircle(
+        Brush.radialGradient(
+            listOf(Color(0xFFB58BEF).copy(alpha = 0.24f), Color.Transparent),
+            center = centre - Offset(rayon * 0.34f, rayon * 0.42f),
+            radius = rayon * 0.52f
+        ),
+        radius = rayon * 0.52f,
+        center = centre - Offset(rayon * 0.34f, rayon * 0.42f)
+    )
+    // Reflets orbitaux très discrets, pour lire le volume sans masquer la matière noire.
+    drawOval(
+        Neon.lavande.copy(alpha = 0.18f * pulse),
+        topLeft = Offset(centre.x - rayon * 1.32f, centre.y - rayon * 0.38f),
+        size = Size(rayon * 2.64f, rayon * 0.76f),
+        style = Stroke(width = max(1f, rayon * 0.012f))
+    )
+    drawOval(
+        Neon.violet.copy(alpha = 0.12f),
+        topLeft = Offset(centre.x - rayon * 0.42f, centre.y - rayon * 1.28f),
+        size = Size(rayon * 0.84f, rayon * 2.56f),
+        style = Stroke(width = max(1f, rayon * 0.01f))
+    )
+    // Fissures minérales, courtes et asymétriques : elles suggèrent l'obsidienne sans surcharger le noyau.
+    val veine = Neon.violetVif.copy(alpha = 0.34f * pulse)
+    drawLine(veine, centre + Offset(-rayon * 0.62f, -rayon * 0.12f), centre + Offset(-rayon * 0.34f, rayon * 0.02f), max(1f, rayon * 0.012f))
+    drawLine(veine.copy(alpha = veine.alpha * 0.72f), centre + Offset(-rayon * 0.34f, rayon * 0.02f), centre + Offset(-rayon * 0.22f, rayon * 0.24f), max(1f, rayon * 0.009f))
+    drawLine(veine.copy(alpha = veine.alpha * 0.7f), centre + Offset(rayon * 0.42f, -rayon * 0.48f), centre + Offset(rayon * 0.24f, -rayon * 0.22f), max(1f, rayon * 0.01f))
+    drawLine(veine.copy(alpha = veine.alpha * 0.65f), centre + Offset(rayon * 0.24f, -rayon * 0.22f), centre + Offset(rayon * 0.48f, rayon * 0.02f), max(1f, rayon * 0.008f))
 }

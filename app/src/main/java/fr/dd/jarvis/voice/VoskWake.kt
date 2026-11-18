@@ -1,6 +1,7 @@
 package fr.dd.jarvis.voice
 
 import android.content.Context
+import androidx.car.app.media.CarAudioRecord
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -109,8 +110,8 @@ class PorcupineWake(private val ctx: Context, private val accessKey: String, pri
     override var onPanne: () -> Unit = {}
     override var exigence: Int = 1
         set(v) { if (field != v) { field = v; val actif = mgr != null; release(); if (actif) start() } }
-    /** Sensibilité Porcupine : plus basse = moins de faux réveils (0,6 par défaut, 0,45 puis 0,35 si ça se déclenche tout seul). */
-    private fun sensibilite() = when (exigence) { 1 -> 0.6f; 2 -> 0.45f; else -> 0.35f }
+    /** Sensibilité Porcupine : réglage plus réactif pour les voix basses ; exigence augmente si faux réveils répétés. */
+    private fun sensibilite() = when (exigence) { 1 -> 0.75f; 2 -> 0.45f; else -> 0.35f }
 
     override fun start(): Boolean {
         return try {
@@ -153,7 +154,7 @@ class VoskWake(private val ctx: Context, private val econome: Boolean = true, pr
     @Volatile override var exigence: Int = 1
     /** Modèle français (sinon l'ancien anglais) : grammaire et seuils propres à chacun. */
     private val francais = VoskModel.francais(ctx)
-    private fun seuil() = if (francais) when (exigence) { 1 -> 0.6; 2 -> 0.8; else -> 0.9 } else when (exigence) { 1 -> 0.88; 2 -> 0.93; else -> 0.97 }
+    private fun seuil() = if (francais) when (exigence) { 1 -> 0.48; 2 -> 0.8; else -> 0.9 } else when (exigence) { 1 -> 0.78; 2 -> 0.93; else -> 0.97 }
 
     companion object {
         /**
@@ -278,9 +279,40 @@ class VoskWake(private val ctx: Context, private val econome: Boolean = true, pr
         private var fil: Thread? = null
         private var micro: android.media.AudioRecord? = null
 
+        @Volatile private var microVoiture: CarAudioRecord? = null
+
         @android.annotation.SuppressLint("MissingPermission")
         fun demarrer(): Boolean {
             val taille = 1600   // 0,1 s à 16 kHz
+            // Android Auto fournit son propre flux micro via CarAudioRecord. On le privilégie uniquement
+            // lorsque la session voiture est réellement active. Aucun focus audio exclusif permanent :
+            // le détecteur doit pouvoir attendre « Jarvis » sans arrêter la musique.
+            val carContext = runCatching {
+                val app = ctx.applicationContext as? fr.dd.jarvis.JarvisApp
+                if (app?.enVoiture == true) fr.dd.jarvis.car.NavigationVoiture.contexte else null
+            }.getOrNull()
+            if (carContext != null) {
+                val record = runCatching { CarAudioRecord.create(carContext) }.getOrNull() ?: return false
+                return try {
+                    record.startRecording()
+                    microVoiture = record
+                    vivantes.incrementAndGet()
+                    fil = Thread({
+                        try { boucleVoiture(record) }
+                        finally {
+                            runCatching { record.stopRecording() }
+                            if (microVoiture === record) microVoiture = null
+                            vivantes.decrementAndGet()
+                        }
+                    }, "jarvis-ecoute-voiture").apply { isDaemon = true; start() }
+                    true
+                } catch (_: Throwable) {
+                    runCatching { record.stopRecording() }
+                    microVoiture = null
+                    false
+                }
+            }
+
             val min = android.media.AudioRecord.getMinBufferSize(16000, android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT)
             val ar = try {
                 android.media.AudioRecord(android.media.MediaRecorder.AudioSource.VOICE_RECOGNITION, 16000,
@@ -293,6 +325,42 @@ class VoskWake(private val ctx: Context, private val econome: Boolean = true, pr
             vivantes.incrementAndGet()
             fil = Thread({ try { boucle(ar, taille) } finally { vivantes.decrementAndGet() } }, "jarvis-ecoute").apply { isDaemon = true; start() }
             return true
+        }
+
+        /** Flux Android Auto audio/l16 (PCM 16 bits big-endian), converti vers les trames Vosk. */
+        private fun boucleVoiture(record: CarAudioRecord) {
+            val porte = PorteVocale()
+            val avant = ArrayDeque<ShortArray>()
+            val octets = ByteArray(CarAudioRecord.AUDIO_CONTENT_BUFFER_SIZE)
+            var panne = false
+            try {
+                while (actif) {
+                    val n = record.read(octets, 0, octets.size)
+                    if (n < 0) { panne = actif; break }
+                    if (n < 2) continue
+                    val count = n / 2
+                    val buf = ShortArray(count) { i ->
+                        (((octets[i * 2].toInt() shl 8) or (octets[i * 2 + 1].toInt() and 0xFF))).toShort()
+                    }
+                    when (porte.trame(PorteVocale.rms(buf, count))) {
+                        PorteVocale.Decision.IGNORER -> { avant.addLast(buf); while (avant.size > PorteVocale.PRE_ROULEMENT) avant.removeFirst() }
+                        PorteVocale.Decision.OUVRIR -> {
+                            avant.forEach { if (rec.acceptWaveForm(it, it.size)) verifier(rec.result) }
+                            avant.clear()
+                            if (rec.acceptWaveForm(buf, count)) verifier(rec.result)
+                        }
+                        PorteVocale.Decision.CONTINUER -> if (rec.acceptWaveForm(buf, count)) verifier(rec.result)
+                        PorteVocale.Decision.FERMER -> {
+                            rec.acceptWaveForm(buf, count)
+                            verifier(rec.finalResult)
+                            rec.reset()
+                        }
+                    }
+                    if (fired) break
+                }
+            } catch (_: Throwable) { panne = actif }
+            finally { runCatching { record.stopRecording() }; runCatching { rec.close() } }
+            if (panne && actif) onPanne()
         }
 
         private fun boucle(ar: android.media.AudioRecord, taille: Int) {
@@ -332,8 +400,10 @@ class VoskWake(private val ctx: Context, private val econome: Boolean = true, pr
 
         fun arreter() {
             actif = false
-            // Attend la libération du micro : la reconnaissance de la demande va le reprendre (au plus 1,2 s si le
-            // modèle finit de décoder une phrase).
+            // Débloque immédiatement read() sur CarAudioRecord : aucun flux micro ne doit survivre
+            // au mot d'éveil / à la fin de l'écoute, sinon il monopoliserait le micro voiture.
+            runCatching { microVoiture?.stopRecording() }
+            // Attend la libération du micro avant d'ouvrir celui de la conversation.
             fil?.let { if (it !== Thread.currentThread()) runCatching { it.join(1200) } }
         }
     }
@@ -355,6 +425,8 @@ internal class PorteVocale {
         const val MAINTIEN = 12         // 1,2 s de calme avant de refermer
         const val DUREE_MAX = 80        // 8 s de son continu au plus
 
+        internal fun seuilPourPlancher(plancher: Double) = maxOf(plancher * 1.5, plancher + 35.0, 55.0)
+
         fun rms(b: ShortArray, n: Int): Double {
             var somme = 0.0
             for (i in 0 until n) { val v = b[i].toDouble(); somme += v * v }
@@ -370,7 +442,8 @@ internal class PorteVocale {
     private var duree = 0
     private var somme = 0.0
 
-    fun seuil() = maxOf(plancher * 2.0, plancher + 100.0, 150.0)
+    fun seuil() = seuilPourPlancher(plancher)
+
 
     fun trame(rms: Double): Decision {
         if (plancher < 0) plancher = rms.coerceIn(20.0, 2000.0)

@@ -225,7 +225,7 @@ class ToolBox(
         put(tool("morning_briefing", "Point du jour : planning du jour et mails importants."))
         put(tool("search_contacts", "Cherche des contacts du téléphone (nom, numéro, email, société).",
             mapOf("query" to prop("Texte recherché.")), listOf("query")))
-        put(tool("create_contact", "Crée un contact dans le téléphone.",
+        put(tool("create_contact", "Crée un contact dans le répertoire Android uniquement. Pour un client Société, ne l'utilise pas : client_ecrire crée la fiche unique dans Société/Clients. Ne l'appeler que si l'utilisateur demande explicitement un contact dans le répertoire du téléphone.",
             mapOf(
                 "name" to prop("Nom complet."),
                 "phone" to prop("Téléphone (optionnel)."),
@@ -246,7 +246,7 @@ class ToolBox(
             mapOf("format" to prop("« xx xx xx xx xx » (défaut : 06 12 34 56 78) ou « international » (+33 6 12 34 56 78)."),
                 "supprimer_doublons" to prop("« false » pour garder les doublons ; par défaut true."),
                 "apercu" to prop("« true » pour seulement montrer ce qui changerait, sans rien modifier."))))
-        put(tool("create_contact_card", "Génère la fiche contact complète (Markdown Obsidian) d'un contact et l'enregistre dans le dossier Contacts (ou un sous-dossier). Vérifie déjà seul si une fiche existe pour ce nom (n'importe où sous Contacts) et la met à jour à sa place au lieu d'en créer une deuxième : ne jamais appeler obsidian_lire ou chercher une fiche existante avant, c'est inutile et consomme des tokens pour rien.",
+        put(tool("create_contact_card", "Génère une fiche Obsidian pour un contact personnel dans Contacts. INTERDIT pour un client Société ou son interlocuteur : client_ecrire/client_fiche gèrent la fiche unique dans Société/Clients. Ne l'utiliser que sur demande explicite pour un contact personnel, et jamais après client_ecrire.",
             mapOf("name" to prop("Nom du contact."), "sous_dossier" to prop("Sous-dossier de « Contacts » où ranger la fiche (ex. « Clients », « Fournisseurs », « Famille »). Optionnel : vide = directement dans Contacts.")), listOf("name")))
         put(tool("meteo", "Météo précise (maintenant, prochaines heures, prévisions) à la position du téléphone, ou pour un lieu donné.",
             mapOf("lieu" to prop("Ville ou adresse (optionnel : par défaut la position actuelle du téléphone)."), "jours" to prop("Nombre de jours de prévision (1 à 7). Par défaut 3."))))
@@ -287,6 +287,8 @@ class ToolBox(
             listOf("nom", "format")))
         put(tool("fichiers_generes", "Liste les fichiers déjà créés par JARVIS (images de generer_image, documents de creer_fichier), les plus récents en premier, avec leur nom exact. À utiliser dès que l'utilisateur fait référence à une image ou un fichier déjà généré sans te redonner son nom exact, avant de dire que tu ne le retrouves pas.",
             mapOf("quoi" to prop("images, fichiers (documents) ou tous (par défaut)."), "max" to prop("Nombre maximum à lister (par défaut 20).")), listOf()))
+        put(tool("renommer_fichier", "Renomme un fichier DÉJÀ EXISTANT dans le coffre Obsidian configuré (et sa copie privée éventuelle). Outil obligatoire pour « renomme ce fichier/image » : ne crée aucun dossier, ne recrée pas le fichier avec creer_fichier et ne fais pas de copie. Si le nom est ambigu, demande le chemin exact. Vérifie le résultat avant de confirmer.",
+            mapOf("ancien" to prop("Nom exact retourné par fichiers_generes, ou chemin complet dans le coffre."), "nouveau" to prop("Nouveau nom souhaité ; l'extension existante est conservée si elle n'est pas fournie.")), listOf("ancien", "nouveau")))
         put(tool("documents_lister", "Liste les documents importés dans la bibliothèque privée de JARVIS, avec leurs noms exacts.", mapOf()))
         put(tool("document_lire", "Extrait le texte d'un document importé pour l'analyser, le résumer, le convertir ou réutiliser son contenu. Extrait toutes les pages des PDF texte ; pour un PDF scanné, utilise document_analyser afin de lancer l'OCR visuel page par page.", mapOf("nom" to prop("Nom exact du fichier affiché dans la bibliothèque documentaire.")), listOf("nom")))
         put(tool("document_analyser", "Analyse les documents importés : PDF, Word, Excel, PowerPoint, texte, images et vidéos. Pour les documents bureautiques, restitue les titres, tableaux, feuilles et diapositives.", mapOf("nom" to prop("Nom exact du fichier importé."), "question" to prop("Question ou objectif d'analyse.")), listOf("nom")))
@@ -343,6 +345,9 @@ class ToolBox(
         put(tool("appli_par_defaut", "Définit (ou efface) l'application utilisée par défaut pour un type de demande.",
             mapOf("type" to prop("navigation | musique"), "appli" to prop("Nom de l'application, ou « aucune » pour redemander à chaque fois.")), listOf("type", "appli")))
         put(tool("obsidian_chercher", "Cherche du texte dans les notes du coffre Obsidian (noms et contenu).", mapOf("requete" to prop("Texte recherché.")), listOf("requete")))
+        put(tool("obsidian_analyser_liens", "Audit des wikilinks Obsidian : liste les notes sans lien entrant, les notes sans lien entrant ni sortant, les pièces jointes non référencées et les liens [[...]] introuvables. IMPORTANT : ce diagnostic mesure les liens entre notes, pas le classement dans les dossiers. Une note ou pièce jointe présente dans l'arborescence n'est PAS un fichier perdu ou détaché. Explique toujours cette différence. OBLIGATOIRE pour toute demande sur les liens, backlinks ou références du coffre.", mapOf("limite" to prop("Nombre maximal de notes à analyser (1 à 3000, défaut 3000)."))))
+        put(tool("obsidian_doublons", "Analyse le coffre Obsidian en lecture seule pour détecter les notes au contenu strictement identique et les notes de même nom dans plusieurs dossiers. Ne supprime rien : présente les chemins et demande à l'utilisateur quelle copie conserver ; toute suppression passe ensuite par obsidian_supprimer avec confirmation explicite.", mapOf("limite" to prop("Nombre maximal de notes à analyser (1 à 3000, défaut 1500)."))))
+        put(tool("obsidian_synchroniser", "Compare le coffre Obsidian à la dernière référence validée et signale les notes ajoutées, modifiées ou supprimées. N’importe rien et n’écrase rien automatiquement. Après vérification, action valider confirme uniquement la nouvelle référence.", mapOf("action" to prop("analyser | valider (défaut : analyser)."), "limite" to prop("Nombre maximal de notes à comparer (1 à 3000, défaut 1500)."))))
         put(tool("obsidian_fichiers", "Gère les dossiers et fichiers DU COFFRE OBSIDIAN configuré dans les Réglages (jamais le stockage du téléphone) : lister un dossier, CHERCHER des fichiers/dossiers par nom ou sujet dans tout le coffre, créer un dossier ou sous-dossier, déplacer des notes / images / fichiers / dossiers vers un dossier du coffre (créé au besoin), renommer. Les chemins peuvent être approximatifs (majuscules, accents, singulier/pluriel : « Jarvis/image » trouve « JARVIS/Images »), et un dossier comme « images/Coloriages » est créé DANS le dossier « Images » existant du coffre plutôt qu'à côté. Les images générées par JARVIS sont dans « JARVIS/Images » (référence jarvis-img:NOM) et se retrouvent aussi par leur description (en anglais, ex. « coloring firefighter »). Pour déplacer les dernières images générées : chemins = « dernieres_images:N ». En cas de doute sur un emplacement, commence par chercher ou lister.",
             mapOf(
                 "action" to prop("lister | chercher | dossier | deplacer | trier | renommer. « trier » range d'un coup TOUS les fichiers dont le NOM contient des mots (motif) dans un dossier : utilise-le dès que l'utilisateur parle de fichiers « nommés / qui contiennent / qui comportent X » — ne demande JAMAIS les noms exacts."),
@@ -356,6 +361,7 @@ class ToolBox(
             ), listOf("action")))
         put(tool("obsidian_lire", "Lit une note Obsidian par son chemin relatif (ex. Contacts/Dupont.md).", mapOf("chemin" to prop("Chemin de la note.")), listOf("chemin")))
         put(tool("obsidian_lister", "Liste les notes du coffre Obsidian, éventuellement d'un dossier.", mapOf("dossier" to prop("Dossier (optionnel)."))))
+        put(tool("obsidian_synchroniser_index", "Synchronise les index Obsidian : index racine et index par dossier, avec des wikilinks réels vers les notes et pièces jointes. Ne modifie jamais les notes personnelles."))
         put(tool("obsidian_ecrire", "Crée, remplace ou complète une note Obsidian.", mapOf(
             "chemin" to prop("Chemin relatif de la note (ex. JARVIS/Idées.md)."), "contenu" to prop("Contenu Markdown."),
             "ajouter" to prop("« true » pour ajouter à la fin de la note existante au lieu de la remplacer.")), listOf("chemin", "contenu")))
@@ -650,7 +656,7 @@ class ToolBox(
             )
         }
         "tournee_optimisee" -> {
-            val liste = a.optString("clients").split(Regex("\\s*[,;\\n]\\s*")).filter { it.isNotBlank() }
+            val liste = a.optString("clients").split(Regex("\\s*[,;\n]\\s*")).filter { it.isNotBlank() }
             if (liste.isEmpty()) return ToolResult("Indique les clients à visiter (paramètre clients). Pour les rendez-vous de l'agenda, utilise itineraire.")
             val txt = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 fr.dd.jarvis.societe.Trajet.optimisee(app, liste,
@@ -779,6 +785,10 @@ class ToolBox(
         }
         "creer_fichier" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { fr.dd.jarvis.ai.Fichiers.creer(app, a) }.getOrElse { "❌ Création impossible : ${it.message}" } }, direct = true)
         "fichiers_generes" -> ToolResult(fr.dd.jarvis.ai.Fichiers.lister(app, a.optString("quoi"), a.optString("max").toIntOrNull() ?: 20))
+        "renommer_fichier" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { fr.dd.jarvis.ai.Fichiers.renommer(app, a.optString("ancien"), a.optString("nouveau")) }
+                .getOrElse { "❌ Renommage impossible : ${it.message ?: it.javaClass.simpleName}" }
+        }, direct = true)
         "documents_lister" -> ToolResult(fr.dd.jarvis.ai.DocumentStore.list(app))
         "document_lire" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.ai.DocumentStore.extract(app, a.optString("nom")) }, direct = true)
         "document_analyser" -> try {
@@ -961,31 +971,35 @@ class ToolBox(
         "controle_media" -> ToolResult(fr.dd.jarvis.device.CommandeMedia.depuisOutil(a.optString("action"))?.let { fr.dd.jarvis.device.CommandeMedia.executer(app, it, app.enVoiture) }
             ?: app.phone.mediaKey(a.optString("action")))
         "naviguer" -> {
-            // En voiture : Android Auto lance son propre GPS (Waze / Maps de la voiture), sans question ni écran du téléphone.
-            if (app.enVoiture && a.optString("destination").isNotBlank()) {
-                val pt = runCatching { fr.dd.jarvis.societe.Geo.geocode(a.optString("destination")) }.getOrNull()
-                if (fr.dd.jarvis.car.NavigationVoiture.lancer(a.optString("destination"), pt?.let { it.lat to it.lon }))
-                    return ToolResult("🧭 Guidage lancé dans Android Auto vers ${a.optString("destination")}.")
-                // JARVIS pas ouvert dans Android Auto : l'appli de navigation du téléphone est lancée (son guidage
-                // s'affiche dans la voiture), avec les coordonnées si l'adresse a été trouvée.
-                fr.dd.jarvis.voice.JournalVoix.noter("voiture", "guidage par le téléphone (JARVIS n'est pas ouvert dans Android Auto)")
-            }
+            // Depuis Android Auto, demander d'abord au système voiture de lancer réellement le guidage projeté.
+            // Le lancement direct sur le téléphone reste le repli si aucun contexte voiture n'est actif ou si l'hôte refuse.
+            val contexteVoiture = fr.dd.jarvis.car.NavigationVoiture.contexte != null
+            val enVoiture = app.enVoiture || contexteVoiture
             var appli = a.optString("appli").trim()
             val toujours = a.optString("toujours").trim().lowercase() in setOf("true", "oui", "1", "vrai")
             if (appli.isBlank()) appli = app.store.appPrefs["navigation"].orEmpty()
             val dispo = app.phone.navApps().keys
-            // En voiture, pas de question : Waze s'il est installé (c'est le GPS d'Android Auto le plus courant).
-            if (appli.isBlank() && app.enVoiture) appli = dispo.firstOrNull { it.contains("Waze") } ?: dispo.firstOrNull().orEmpty()
+            if (appli.isBlank() && enVoiture) appli = dispo.firstOrNull { it.contains("Waze", ignoreCase = true) } ?: dispo.firstOrNull().orEmpty()
             if (appli.isBlank() && dispo.size > 1)
-                ToolResult("CHOIX_REQUIS : demande à l'utilisateur avec quelle application lancer l'itinéraire (${dispo.joinToString(" ou ")}) et s'il veut la garder toujours ou une seule fois, puis rappelle naviguer avec appli et toujours.")
+                ToolResult("CHOIX_REQUIS : demande à l'utilisateur avec quelle application lancer l'itinéraire (${dispo.joinToString(" ou ")}) et s'il veut la garder toujours ou ponctuellement, puis rappelle naviguer avec appli et toujours.")
             else {
                 if (appli.isBlank()) appli = dispo.firstOrNull().orEmpty()
                 if (toujours && a.optString("appli").isNotBlank()) app.store.setAppPref("navigation", a.optString("appli").trim())
-                val pt = if (appli.lowercase().contains("waze") || !appli.lowercase().contains("google")) runCatching { fr.dd.jarvis.societe.Geo.geocode(a.optString("destination")) }.getOrNull() else null
-                ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    app.phone.navigate(a.optString("destination"), a.optString("mode"), appli, pt?.let { it.lat to it.lon }) +
-                        (if (toujours && a.optString("appli").isNotBlank()) " (${a.optString("appli")} mémorisé pour les itinéraires)" else "")
-                })
+                val pt = runCatching { fr.dd.jarvis.societe.Geo.geocode(a.optString("destination")) }.getOrNull()
+                val destination = a.optString("destination")
+                val mode = a.optString("mode")
+                val resultat = if (contexteVoiture) {
+                    val lance = runCatching {
+                        fr.dd.jarvis.car.NavigationVoiture.lancer(destination, pt?.let { it.lat to it.lon })
+                    }.getOrDefault(false)
+                    if (lance) "🧭 Guidage lancé dans Android Auto vers $destination"
+                    else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        app.phone.navigate(destination, mode, appli, pt?.let { it.lat to it.lon })
+                    }
+                } else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    app.phone.navigate(destination, mode, appli, pt?.let { it.lat to it.lon })
+                }
+                ToolResult(resultat + (if (toujours && a.optString("appli").isNotBlank()) " (${a.optString("appli")} mémorisé pour les itinéraires)" else ""))
             }
         }
         "appli_par_defaut" -> {
@@ -994,6 +1008,92 @@ class ToolBox(
             if (ap.lowercase() in setOf("aucune", "aucun", "rien", "demander", "")) { app.store.setAppPref(t, null); ToolResult("Plus d'application par défaut pour « $t » : je te demanderai à chaque fois.") }
             else { app.store.setAppPref(t, ap); ToolResult("✅ $ap sera toujours utilisée pour « $t ».") }
         }
+        "obsidian_synchroniser" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val limite = a.optString("limite").toIntOrNull() ?: 1500
+                when (a.optString("action", "analyser").lowercase()) {
+                    "valider" -> {
+                        if (!confirm("Valider la nouvelle référence Obsidian après vérification des notes ajoutées, modifiées ou supprimées ?", true))
+                            "Validation annulée. La référence précédente est conservée."
+                        else if (app.obsidian.validerReferenceModifications(limite))
+                            "✅ Référence Obsidian mise à jour. Les changements examinés ne seront plus signalés au prochain contrôle."
+                        else "⚠️ Le coffre a changé depuis le dernier rapport, ou aucune analyse n'est en attente. Relance d'abord l'analyse ; aucune référence n'a été modifiée."
+                    }
+                    else -> {
+                        val rapport = app.obsidian.analyserModificationsDepuisReference(limite)
+                        when {
+                            rapport.referenceInitialisee -> "📚 Référence initialisée sur le coffre actuel. Au prochain contrôle, je pourrai repérer les notes ajoutées, modifiées ou supprimées depuis cet instant."
+                            rapport.changements.isEmpty() -> "✅ Aucun changement détecté depuis la dernière référence validée."
+                            else -> buildString {
+                                append("🔎 ${rapport.changements.size} changement(s) détecté(s) depuis la dernière référence :")
+                                rapport.changements.forEach { append("\n- ${it.type} : ${it.chemin}") }
+                                append("\n\nJe n'ai rien importé ni écrasé. Je peux lire les notes modifiées pour te proposer une mise à jour ciblée. Une fois le contrôle terminé, demande-moi de valider cette référence.")
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) { "❌ Contrôle de synchronisation impossible : ${e.message ?: e.javaClass.simpleName}" }
+        })
+        "obsidian_doublons" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                if (app.obsidian.coffreConfigure() && !app.obsidian.coffreLisible())
+                    return@withContext "⚠️ Le coffre Obsidian n'est pas accessible en lecture. Aucune analyse ni suppression effectuée. Vérifie l'autorisation Android dans les Réglages."
+                val notes = app.obsidian.analyserDoublons(a.optString("limite").toIntOrNull() ?: 1500)
+                if (notes.isEmpty()) "✅ Analyse terminée : aucun doublon exact ni nom de note répété détecté."
+                else buildString {
+                    append("🔎 ${notes.size} groupe(s) de doublons détecté(s) :")
+                    notes.forEachIndexed { index, groupe ->
+                        append("\n\n${index + 1}. ${groupe.type} (${groupe.chemins.size} notes)")
+                        groupe.chemins.forEach { append("\n- ${it}") }
+                    }
+                    append("\n\nAucune note n'a été supprimée. Dis-moi quel chemin tu souhaites conserver et quelle copie supprimer ; je demanderai confirmation avant chaque suppression.")
+                }
+            } catch (e: Exception) { "❌ Analyse Obsidian impossible : ${e.message ?: e.javaClass.simpleName}" }
+        })
+        "obsidian_analyser_liens" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val o = app.obsidian
+                if (o.coffreConfigure() && !o.coffreLisible())
+                    return@withContext "⚠️ Le coffre Obsidian configuré n'est pas accessible en lecture. Aucun diagnostic n'a été inventé : vérifie l'autorisation Android dans les Réglages."
+                if (!o.coffreConfigure())
+                    return@withContext "⚠️ Aucun coffre Obsidian n'est configuré. Je ne peux pas présenter le stockage privé de JARVIS comme s'il s'agissait de ton coffre."
+                // Avant l'audit, actualiser les index générés : chaque note et pièce jointe doit
+                // avoir un point d'entrée par son index de dossier, sans modifier les notes sources.
+                val synchronisationIndex = runCatching { o.synchroniserIndex() }
+                    .getOrElse { "Index non actualisés : ${it.message ?: it.javaClass.simpleName}" }
+                val limite = a.optString("limite").toIntOrNull()?.coerceIn(1, 3000) ?: 3000
+                val donnees = o.graph(limiteNotes = limite, limiteLecture = limite)
+                val audit = fr.dd.jarvis.device.AnalyseLiensObsidian.analyser(donnees)
+                buildString {
+                    append("🔎 AUDIT DES LIENS OBSIDIAN\n")
+                    append("Index : $synchronisationIndex\n")
+                    append("${audit.notesLues}/${audit.notesCandidates} notes lues ; ${audit.liens.size} liens internes résolus ; ${donnees.attachments.size} pièces jointes analysées.\n")
+                    if (!audit.analyseComplete) append("⚠️ Analyse partielle : certaines notes n'ont pas pu être lues, ou la limite de notes/pièces jointes a été atteinte. Les éléments sans lien ne peuvent pas être déclarés orphelins de façon fiable.\n")
+                    append("\nNOTES SANS LIEN ENTRANT (${audit.notesSansLienEntrant.size})")
+                    if (!audit.analyseComplete) append("\nIndéterminé : analyse complète nécessaire.")
+                    else if (audit.notesSansLienEntrant.isEmpty()) append("\nAucune.")
+                    else audit.notesSansLienEntrant.take(200).forEach { append("\n- ${it.id}.md") }
+                    if (audit.notesSansLienEntrant.size > 200) append("\n… ${audit.notesSansLienEntrant.size - 200} autre(s).")
+                    append("\n\nNOTES SANS LIEN ENTRANT NI SORTANT DANS LE GRAPHE OBSIDIAN (${audit.notesOrphelines.size})")
+                    if (!audit.analyseComplete) append("\nIndéterminé : analyse complète nécessaire.")
+                    else if (audit.notesOrphelines.isEmpty()) append("\nAucune.")
+                    else audit.notesOrphelines.take(200).forEach { append("\n- ${it.id}.md") }
+                    if (audit.notesOrphelines.size > 200) append("\n… ${audit.notesOrphelines.size - 200} autre(s).")
+                    append("\n\nPIÈCES JOINTES SANS LIEN INTERNE (${audit.fichiersOrphelins.size})")
+                    if (!audit.analyseComplete) append("\nIndéterminé : analyse complète nécessaire.")
+                    else if (audit.fichiersOrphelins.isEmpty()) append("\nAucune.")
+                    else audit.fichiersOrphelins.take(200).forEach { append("\n- ${it.path}") }
+                    if (audit.fichiersOrphelins.size > 200) append("\n… ${audit.fichiersOrphelins.size - 200} autre(s).")
+                    append("\n\nLIENS OBSIDIAN / MARKDOWN INTROUVABLES (${audit.referencesNonResolues.size})")
+                    if (audit.referencesNonResolues.isEmpty()) append("\nAucun.")
+                    else audit.referencesNonResolues.take(200).forEach { append("\n- ${it.from}.md → [[${it.rawTarget}]]") }
+                    if (audit.referencesNonResolues.size > 200) append("\n… ${audit.referencesNonResolues.size - 200} autre(s).")
+                    append("\n\nImportant : les liens Obsidian [[...]], les liens Markdown [texte](chemin) et les images intégrées sont pris en compte. Les dossiers ne comptent pas comme des liens ; un élément peut être bien rangé tout en restant sans référence depuis une note.")
+                }
+            } catch (e: Exception) {
+                "❌ Analyse des liens Obsidian impossible : ${e.message ?: e.javaClass.simpleName}"
+            }
+        })
         "obsidian_chercher" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             val r = app.obsidian.searchNotes(a.optString("requete"))
             if (r.isEmpty()) "Aucune note ne contient « ${a.optString("requete")} »." else r.joinToString("\n") { "- ${it.first}" + (if (it.second.isNotBlank()) " : …${it.second}…" else "") }
@@ -1002,6 +1102,9 @@ class ToolBox(
         "obsidian_lister" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             val l = app.obsidian.listNotes(a.optString("dossier")); if (l.isEmpty()) "Aucune note." else l.take(120).joinToString("\n") + (if (l.size > 120) "\n… (${l.size} notes)" else "")
         })
+        "obsidian_synchroniser_index" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { app.obsidian.synchroniserIndex() }.getOrElse { "❌ Synchronisation des index impossible : ${it.message ?: it.javaClass.simpleName}" }
+        }, direct = true)
         "obsidian_ecrire" -> {
             val chemin = a.optString("chemin")
             val cheminNormalise = java.text.Normalizer.normalize(chemin, java.text.Normalizer.Form.NFD)
@@ -1952,7 +2055,7 @@ class ToolBox(
         val nom = a.optString("nom").trim()
         fun trouver() = l.firstOrNull { R.norm(it.nom) == R.norm(nom) }
             ?: l.firstOrNull { nom.isNotBlank() && R.norm(it.nom).contains(R.norm(nom)) }
-        fun decoupe(t: String) = t.split(Regex("\\s*(;|\\n)\\s*")).map { it.trim() }.filter { it.isNotBlank() }
+        fun decoupe(t: String) = t.split(Regex("\\s*(;|\n)\\s*")).map { it.trim() }.filter { it.isNotBlank() }
         fun actionUnique(actions: List<String>, cible: String): Int? {
             val q = R.norm(cible)
             val matches = actions.indices.filter { i -> R.norm(actions[i]) == q || (q.isNotBlank() && R.norm(actions[i]).contains(q)) }
@@ -2207,8 +2310,10 @@ class ToolBox(
 
     private suspend fun createContact(a: JSONObject): ToolResult {
         if (!app.contacts.hasPermission()) return ToolResult("Permission contacts manquante.")
-        val name = a.optString("name")
+        val name = a.optString("name").trim()
         if (name.isBlank()) return ToolResult("Nom manquant.")
+        val client = clientSocieteLieAuContact(name, a.optString("company"))
+        if (client != null) return ToolResult("ℹ️ « $name » est déjà enregistré comme client/interlocuteur de Société « ${client.nom} ». Je n'ajoute pas de doublon au répertoire Android ; la fiche unique reste dans Société/Clients.")
         app.contacts.create(name, a.optString("phone"), a.optString("email"), a.optString("company"), a.optString("note"))
         return ToolResult("Contact « $name » créé.")
     }
@@ -2249,8 +2354,36 @@ class ToolBox(
         val found = app.contacts.search(a.optString("name"), 5)
         val c = found.firstOrNull { it.name.equals(a.optString("name"), true) } ?: found.firstOrNull()
             ?: return ToolResult("Contact introuvable.")
+        val client = clientSocieteLieAuContact(c)
+        if (client != null) return ToolResult("ℹ️ « ${c.name} » est déjà le contact de la fiche Société « ${client.nom} ». Sa fiche unique est conservée dans Société/Clients ; aucune seconde note ne sera créée dans Contacts.")
         return ToolResult(buildCard(c, a.optString("sous_dossier")), direct = true)
     }
+
+    /**
+     * Normalisation partagée pour éviter qu'un contact d'un client Société soit aussi exporté comme fiche personnelle.
+     */
+    private fun normaliserNomContactSociete(value: String): String =
+        java.text.Normalizer.normalize(value.trim(), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}+"), "").lowercase().replace(Regex("\\s+"), " ")
+
+    private fun clientSocieteLieAuContact(nomContact: String, entrepriseContact: String = ""): fr.dd.jarvis.societe.core.Client? {
+        val base = app.societe.data
+        val nom = normaliserNomContactSociete(nomContact)
+        val entreprise = normaliserNomContactSociete(entrepriseContact)
+        val raisonSociale = normaliserNomContactSociete(base.societe.nom)
+        return base.clients.firstOrNull { client ->
+            val nomClient = normaliserNomContactSociete(client.nom)
+            val nomPersonne = normaliserNomContactSociete(client.contact)
+            nom.isNotBlank() && (
+                nom == nomClient ||
+                (nomPersonne.isNotBlank() && nom == nomPersonne &&
+                    (entreprise.isBlank() || entreprise == nomClient || entreprise == raisonSociale))
+            )
+        }
+    }
+
+    private fun clientSocieteLieAuContact(contact: fr.dd.jarvis.device.ContactInfo) =
+        clientSocieteLieAuContact(contact.name, contact.company)
 
     /**
      * Génère la fiche via l'agent Contacts puis l'écrit dans le dossier Obsidian (Contacts, ou un sous-dossier).
@@ -2260,6 +2393,9 @@ class ToolBox(
      * aucun token consommé) ; sinon on met à jour CETTE fiche (même emplacement) au lieu d'en créer une autre.
      */
     suspend fun buildCard(c: fr.dd.jarvis.device.ContactInfo, sousDossier: String = ""): String {
+        clientSocieteLieAuContact(c)?.let { client ->
+            return "ℹ️ « ${c.name} » est déjà le contact de la fiche Société « ${client.nom} ». La fiche unique reste dans Société/Clients ; aucune note n'est créée dans Contacts."
+        }
         // Coffre lu et écrit en arrière-plan (sur le fil principal, l'écran des contacts se figeait).
         val io = kotlinx.coroutines.Dispatchers.IO
         val cheminExistant = kotlinx.coroutines.withContext(io) { app.obsidian.ficheExistante("Contacts", c.name) }

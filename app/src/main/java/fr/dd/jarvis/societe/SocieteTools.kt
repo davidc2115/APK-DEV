@@ -33,6 +33,87 @@ class SocieteTools(
         fun concerned(text: String) = KEYWORDS.containsMatchIn(text)
 
         /**
+         * Création déterministe des devis/factures de TEST : empêche le modèle de répondre par une simple liste
+         * de clients ou un récapitulatif Société. Ne crée jamais de client et ne touche jamais aux documents comptables.
+         * Si le client ou la prestation ne sont pas déterminables sans ambiguïté, renvoie une question ciblée.
+         */
+        fun intentionCreationTest(data: fr.dd.jarvis.societe.core.SocieteData, texte: String, contexte: String = ""): JSONObject? {
+            val n = normaliser(texte)
+            val test = Regex("\\b(test|simulation|exemple)\\b").containsMatchIn(n)
+            val facture = Regex("\\bfactures?\\b").containsMatchIn(n)
+            val devis = Regex("\\bdevis\\b").containsMatchIn(n)
+            if (!test || (!facture && !devis)) return null
+
+            val args = JSONObject().put("type", if (facture) "facture" else "devis").put("test", true)
+            val clientsCites = data.clients.filter { c ->
+                val nom = normaliser(c.nom)
+                nom.length >= 3 && n.contains(nom)
+            }
+            // Si le nom a été donné au tour précédent (ex. « Client Test » vient d'être créé),
+            // réutilise ce client depuis les derniers échanges au lieu de repartir sur la liste Société.
+            val contexteNormalise = normaliser(contexte)
+            val clientsDuContexte = if (clientsCites.isEmpty()) data.clients.filter { c ->
+                val nom = normaliser(c.nom)
+                nom.length >= 3 && contexteNormalise.contains(nom)
+            } else emptyList()
+            val client = when {
+                clientsCites.size == 1 -> clientsCites.first()
+                clientsCites.size > 1 -> null
+                clientsDuContexte.size == 1 -> clientsDuContexte.first()
+                clientsDuContexte.size > 1 -> null
+                data.clients.size == 1 -> data.clients.first()
+                else -> null
+            }
+            if (client == null) {
+                return JSONObject().put("question", "quel client déjà enregistré dois-je utiliser pour ce document de test ? Donne-moi simplement son nom ; je ne créerai pas de nouveau client.")
+            }
+            args.put("client", client.nom)
+
+            val kwc = Regex("\\b(\\d+(?:[.,]\\d+)?)\\s*k\\s*w\\s*c\\b", RegexOption.IGNORE_CASE)
+                .find(n)?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull()
+            if (kwc != null) args.put("kwc", kwc)
+            if (Regex("\\binstallation\\b").containsMatchIn(n)) args.put("installation", if (kwc != null) "Installation de test ${nombre(kwc)} kWc" else "Installation de test")
+
+            val km = Regex("\\b(\\d+(?:[.,]\\d+)?)\\s*km\\b", RegexOption.IGNORE_CASE)
+                .find(n)?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull()
+            val sansDeplacement = Regex("\\b(sans|aucun|aucune|pas de)\\s+(deplacement|trajet)\\b").containsMatchIn(n)
+            if (km != null) args.put("distance_km", km)
+            args.put("deplacement", !sansDeplacement && km != null)
+
+            // Priorité à une prestation explicitement citée. Sinon, un seul tarif non lié au dépannage/déplacement
+            // peut être retenu sans interprétation hasardeuse ; plusieurs tarifs nécessitent un choix.
+            val tarifs = data.tarifs.filterNot { t ->
+                val nom = normaliser(t.designation)
+                nom.contains("deplacement") || (Regex("\\b(sans|aucun|aucune|pas de)(?:\\s+aucun(?:e)?|\\s+de)?\\s+depannage\\b").containsMatchIn(n) && nom.contains("depannage"))
+            }
+            val tarifCite = tarifs.filter { t ->
+                val nom = normaliser(t.designation)
+                nom.length >= 3 && n.contains(nom)
+            }
+            val tarifsInstallation = if (Regex("\\b(installation|installer|pose|panneaux?|photovolta[iï]que)\\b").containsMatchIn(n))
+                tarifs.filter { t ->
+                    val nom = normaliser(t.designation)
+                    listOf("installation", "pose", "panneau", "photovolta").any { nom.contains(it) }
+                } else emptyList()
+            val tarif = when {
+                tarifCite.size == 1 -> tarifCite.first()
+                tarifCite.size > 1 -> null
+                tarifsInstallation.size == 1 -> tarifsInstallation.first()
+                tarifsInstallation.size > 1 -> null
+                tarifs.size == 1 -> tarifs.first()
+                else -> null
+            }
+            if (tarif == null) {
+                val choix = tarifs.take(12).joinToString(" ; ") { it.designation }.ifBlank { "aucun tarif enregistré" }
+                val question = if (tarifCite.size > 1) "Plusieurs prestations correspondent : $choix. Laquelle dois-je mettre sur le document de test ?"
+                    else "Quel tarif/prestation du catalogue dois-je utiliser pour ce document de test ? Tarifs disponibles : $choix."
+                return JSONObject().put("question", question)
+            }
+            args.put("prestations", tarif.designation)
+            return args
+        }
+
+        /**
          * « Marque la facture FAC-2026-0003 comme payée », « Dupont a payé sa facture (par virement) », « le devis 12 est
          * accepté », « facture de Martin envoyée » : arguments de document_action, exécutés DIRECTEMENT dans la base Société
          * du téléphone (jamais par le serveur), ou une question si plusieurs documents correspondent ; null sinon.
@@ -141,7 +222,7 @@ class SocieteTools(
 
         val PROMPT = """
 Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu disposes d'outils pour : enregistrer les informations de l'entreprise (siège, SIRET, IBAN, TVA…), les tarifs par puissance (kWc), les règles de remise (fidélité, nombre d'installations) et de déplacement, les clients et leurs installations, créer des devis et factures, convertir un devis en facture, marquer une facture payée (mise en réserve), produire des bulletins de paie, le bilan de la réserve, et modifier la présentation des documents.
-- CRÉATION / MODIFICATION D'UN CLIENT : utilise TOUJOURS l'outil natif client_ecrire en premier pour enregistrer le client dans la base Société de JARVIS. N'utilise JAMAIS une écriture Markdown, obsidian_fichiers, stockage_telephone ou un autre outil de fichiers pour simuler la création d'un client. client_ecrire enregistre la fiche dans Société → Clients et exporte ensuite sa copie Markdown dans « Société/Clients ». N'appelle client_fiche qu'après la confirmation de client_ecrire, uniquement pour afficher/régénérer la fiche. Si client_ecrire renvoie une erreur, arrête-toi, explique l'erreur et ne crée aucun fichier de remplacement. N'annonce jamais la création si l'outil ne l'a pas confirmée.
+- CRÉATION / MODIFICATION D'UN CLIENT : utilise TOUJOURS l'outil natif client_ecrire en premier pour enregistrer le client dans la base Société de JARVIS. N'utilise JAMAIS une écriture Markdown, obsidian_fichiers, stockage_telephone ou un autre outil de fichiers pour simuler la création d'un client. client_ecrire enregistre la fiche unique dans Société → Clients et exporte sa copie Markdown dans « Société/Clients ». Le champ contact, le téléphone et l'email restent dans cette fiche : ne crée JAMAIS une seconde fiche dans « Contacts » et n'appelle ni create_contact ni create_contact_card pour le même client/interlocuteur, sauf demande explicite distincte d'ajout au répertoire Android. N'appelle client_fiche qu'après la confirmation de client_ecrire, uniquement pour afficher/régénérer la fiche. Si client_ecrire renvoie une erreur, arrête-toi, explique l'erreur et ne crée aucun fichier de remplacement. N'annonce jamais la création si l'outil ne l'a pas confirmée.
 - Quand l'utilisateur donne un tarif, une règle ou une information sur la société, enregistre-la immédiatement avec l'outil adapté : c'est ainsi que tu la gardes en mémoire.
 - Ne calcule jamais un montant toi-même : les outils font tous les calculs (tarif par puissance, remises, déplacement, TVA).
 - Quand l’utilisateur demande de supprimer une fiche client, utilise client_supprimer (jamais client_ecrire). Ne dis que la fiche est supprimée que si l’outil confirme sa disparition. Si des devis/factures y sont liés, explique que la suppression est bloquée pour préserver l’historique.
@@ -158,7 +239,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
 - Pour consulter l'historique en vue d'une suppression, appelle interventions_liste sans installation : l'outil liste toutes les installations du client, chaque intervention et son ID exact. Présente ensuite les fiches avec leur installation et demande à l'utilisateur de choisir si sa demande est ambiguë. Pour enregistrer ou modifier une intervention, demande l'installation exacte si le client en possède plusieurs. N'utilise jamais une correspondance partielle ambiguë.
 - Pour corriger ou compléter une intervention existante, utilise intervention_modifier avec le client, l’installation et l’identifiant retourné par interventions_liste. Les champs omis restent inchangés ; « effacer » vide explicitement un champ. La fiche Jarvis, la note Obsidian et le PDF sont actualisés ensemble. Ne crée pas une nouvelle intervention pour une simple correction.
 - Pour supprimer une intervention en double ou erronée, consulte d’abord interventions_liste, identifie exactement la bonne fiche par son ID et utilise intervention_supprimer. L’outil demande une confirmation explicite avant suppression et retire la fiche de Jarvis, le rapport Obsidian/PDF et les photos associées si elles sont accessibles. Ne supprime jamais une intervention sur la seule base d’une date ou d’un intitulé ambigu.
-- Pour un devis ou une facture, identifie le client et l'installation (client_ecrire si le client n'existe pas encore). Si une information indispensable manque (client, prestation), demande-la en une phrase.
+- DEVIS / FACTURES DE TEST : si l’utilisateur dit « test », « simulation » ou « exemple », appelle document_creer avec test=true. Le client doit déjà exister : ne crée JAMAIS de client et n’appelle jamais client_ecrire. L’installation et la puissance du test sont temporaires : ne modifie pas la fiche. Passe distance_km si une distance est donnée (ex. 50 km), deplacement=true sauf demande contraire. N’ajoute aucun dépannage s’il n’est pas demandé. Le document est isolé dans Société/Tests, marqué « DOCUMENT DE TEST — SANS VALEUR COMMERCIALE OU COMPTABLE », sans numéro officiel ni écriture dans la base comptable. Pour un document réel seulement, identifie le client et l’installation ; demande confirmation avant de créer un client absent.
 - Le texte renvoyé par les outils société est déjà mis en forme et affiché tel quel : ne le répète pas.
 - ANNULER / SUPPRIMER des factures ou devis (un, plusieurs, ceux d'un client, ou TOUS) : documents_supprimer (une seule confirmation pour le lot). Tu disposes de cet outil : ne dis jamais qu'aucun outil ne permet de supprimer ou d'annuler une facture.
 - FICHES DE PAIE déjà générées (lister, afficher, supprimer) : bulletins. Pour refaire un bulletin faux, rappelle paie pour le même mois (il remplace l'ancien). Chaque bulletin est enregistré en PDF imprimable (Société › Bulletins).
@@ -306,13 +387,15 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "installation" to prop("Nom (ou adresse) de l'installation à supprimer.")
         ), listOf("client", "installation")),
         tool("client_supprimer", "Supprime définitivement TOUTE une fiche client (pour retirer une seule installation, utilise installation_supprimer) de la base Société après confirmation. Refuse la suppression si des devis ou factures sont encore liés afin de préserver l’historique comptable.", mapOf("nom" to prop("Nom exact du client à supprimer.")), listOf("nom")),
-        tool("document_creer", "Crée un devis ou une facture (tarifs, remises et déplacement calculés automatiquement), l'enregistre en Markdown et PDF dans Obsidian.", mapOf(
-            "type" to prop("devis | facture"), "client" to prop("Nom du client."), "installation" to prop("Nom ou adresse de l'installation (optionnel si une seule)."),
-            "prestations" to prop("Prestations du catalogue de tarifs : « Maintenance annuelle; Contrôle onduleur:2 » (nom[:quantité], séparées par « ; »)."),
+        tool("document_creer", "Crée un devis ou une facture réelle, ou un document de TEST isolé sans numéro comptable ni écriture dans la base.", mapOf(
+            "type" to prop("devis | facture"), "client" to prop("Nom exact d’un client déjà enregistré. En test, ne jamais créer ni modifier le client."), "installation" to prop("Installation exacte ; libellé temporaire autorisé en test."),
+            "prestations" to prop("Prestations du catalogue : « Maintenance annuelle; Contrôle onduleur:2 » (nom[:quantité]). Ne pas ajouter de dépannage s’il n’est pas demandé."),
             "lignes_libres" to prop("Lignes hors catalogue : « Fusible 32A:2:35.50; Câble:1:120 » (désignation:quantité:prix HT unitaire)."),
-            "kwc" to prop("Puissance en kWc si l'installation n'est pas enregistrée."),
-            "deplacement" to prop("« false » pour ne pas facturer de déplacement (par défaut : calculé depuis le siège)."),
-            "remise_pct" to prop("Remise exceptionnelle en %, UNIQUEMENT si l'utilisateur a explicitement demandé un pourcentage de remise précis. Ne JAMAIS calculer ou deviner ce pourcentage toi-même pour faire correspondre un montant total désiré (ex. « un devis de 400 € tout compris ») : laisse ce champ vide et affiche le vrai total calculé par l'outil, déplacement inclus, même s'il diffère du montant que l'utilisateur avait en tête — il peut ensuite ajuster manuellement si besoin. Vide = remise automatique (fidélité/volume) selon les règles enregistrées."),
+            "kwc" to prop("Puissance en kWc ; en test, remplace temporairement la puissance sans modifier la fiche client."),
+            "deplacement" to prop("false pour aucun déplacement ; sinon déplacement selon les règles enregistrées."),
+            "distance_km" to prop("Distance aller exacte donnée par l’utilisateur (ex. 50), prioritaire sur le calcul d’itinéraire en mode test."),
+            "test" to prop("true pour une simulation isolée dans Société/Tests, marquée sans valeur commerciale/comptable, sans numéro officiel ni modification de la base."),
+            "remise_pct" to prop("Remise exceptionnelle uniquement si explicitement demandée. En test, aucune remise automatique."),
             "notes" to prop("Notes à afficher sur le document.")
         ), listOf("type", "client", "prestations")),
         tool("document_action", "Agit sur un devis ou une facture existant.", mapOf(
@@ -704,19 +787,24 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         }
         if (!confirm("Supprimer définitivement la fiche client « ${cible.nom} » et ses ${cible.sites.size} installation(s) de la base Société ? Cette action est irréversible.", true))
             return err("Suppression refusée. La fiche « ${cible.nom} » est conservée.")
+        // Un coffre configuré mais inaccessible ne doit jamais être pris pour une fiche absente.
+        val coffrePret = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            !app.obsidian.coffreConfigure() || app.obsidian.coffreDisponible()
+        }
+        if (!coffrePret)
+            return err("⛔ Suppression annulée : le coffre Obsidian sélectionné est inaccessible ou en lecture seule. La fiche Société est conservée.")
         svc.repo.update { data -> data.copy(clients = data.clients.filterNot { it.id == cible.id }) }
         val removed = svc.repo.refresh().clients.none { it.id == cible.id }
         if (!removed) return err("❌ La fiche « ${cible.nom} » est toujours présente après la tentative de suppression. Aucune confirmation de réussite.")
         // La fiche Markdown exportée est une copie de présentation : la retirer aussi si elle existe.
-        val markdownPath = "Société/Clients/${cible.nom}.md"
-        val markdownExists = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            markdownPath in app.obsidian.listNotes("Société/Clients")
+        val markdownPath = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            app.obsidian.ficheExistante("Société/Clients", cible.nom)
         }
-        val markdownDeleted = if (markdownExists) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val markdownDeleted = if (markdownPath != null) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             app.obsidian.supprimerNote(markdownPath)
         } else true
         val markdownStillThere = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            markdownPath in app.obsidian.listNotes("Société/Clients")
+            app.obsidian.ficheExistante("Société/Clients", cible.nom) != null
         }
         return if (markdownDeleted && !markdownStillThere)
             ok("🗑️ Fiche client « ${cible.nom} », ses installations et sa fiche Markdown Obsidian supprimées.")
@@ -1150,34 +1238,61 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
 
     private suspend fun documentCreer(a: JSONObject): ToolResult {
         val type = if (a.s("type").lowercase().startsWith("f")) "facture" else "devis"
+        val test = a.bool("test") == true
         val (client, e) = clientParNom(a.s("client"))
         if (client == null) return err(e!!)
         val refSite = a.s("installation")
-        var site: Site? = siteDe(client, refSite)
-        if (site == null && client.sites.size > 1) return err("Ce client a plusieurs installations (${client.sites.joinToString { it.nom }}). Laquelle ?")
+        val siteTrouve = if (refSite.isBlank()) client.sites.singleOrNull() else siteDe(client, refSite)
+        if (!test && siteTrouve == null && client.sites.size > 1)
+            return err("Ce client a plusieurs installations (${client.sites.joinToString { it.nom }}). Laquelle ?")
         val kwcArg = a.dbl("kwc")
-        val cur: Site? = site
-        if (kwcArg != null && (cur == null || cur.kwc <= 0)) site = (cur ?: Site(svc.newId(), refSite.ifBlank { "Installation" }, client.adresse)).copy(kwc = kwcArg)
-        val siteFinal: Site? = site
-        val kwc = siteFinal?.kwc ?: 0.0
-
+        val siteBase = siteTrouve ?: if (test && (kwcArg != null || refSite.isNotBlank())) Site(svc.newId(), refSite.ifBlank { "Installation de test" }, client.adresse) else null
+        val siteFinal = if (test && siteBase != null && kwcArg != null) siteBase.copy(kwc = kwcArg)
+            else if (siteBase != null && kwcArg != null && siteBase.kwc <= 0) siteBase.copy(kwc = kwcArg) else siteBase
+        val kwc = siteFinal?.kwc ?: kwcArg ?: 0.0
         val prestations = mutableListOf<Triple<Tarif, Double, Double>>()
         for (part in a.s("prestations").split(';', '\n').map { it.trim() }.filter { it.isNotEmpty() }) {
             val idx = part.lastIndexOf(':')
             val qte = if (idx > 0) part.substring(idx + 1).replace(',', '.').trim().toDoubleOrNull() else null
             val nom = if (qte != null) part.substring(0, idx) else part
             val t = Pricing.trouverTarif(d.tarifs, nom)
-                ?: return err("Aucun tarif ne correspond à « ${nom.trim()} ». Tarifs enregistrés : " + (d.tarifs.joinToString { it.designation }.ifBlank { "aucun (utiliser tarif_set)" }))
+                ?: return err("Aucun tarif ne correspond à « ${nom.trim()} ». Tarifs enregistrés : " + d.tarifs.joinToString { it.designation }.ifBlank { "aucun (utiliser tarif_set)" })
             prestations += Triple(t, qte ?: 1.0, kwc)
         }
         val libres = mutableListOf<Ligne>()
         for (part in a.s("lignes_libres").split(';', '\n').map { it.trim() }.filter { it.isNotEmpty() }) {
             val bits = part.split(':').map { it.trim() }
             val pu = bits.getOrNull(2)?.replace(',', '.')?.toDoubleOrNull() ?: return err("Ligne libre illisible : « $part » (désignation:quantité:prix HT).")
-            libres += Ligne(bits[0], bits[1].replace(',', '.').toDoubleOrNull() ?: 1.0, "", pu, tva = d.societe.tvaDefaut)
+            libres += Ligne(bits[0], bits.getOrNull(1)?.replace(',', '.')?.toDoubleOrNull() ?: 1.0, "", pu, tva = d.societe.tvaDefaut)
         }
-        if (type == "facture" && !confirm("Créer la facture pour ${client.nom} ? (numéro définitif, non supprimable)", false)) return err("Création de la facture refusée par l'utilisateur.")
-
+        if (type == "facture" && !test && !confirm("Créer la facture pour ${client.nom} ? (numéro définitif, non supprimable)", false))
+            return err("Création de la facture refusée par l'utilisateur.")
+        if (test) {
+            val remise = a.dbl("remise_pct")?.let { Remise(it, "remise de test explicitement demandée") } ?: Remise(0.0, "")
+            val distance = if (a.bool("deplacement") == false) null else a.dbl("distance_km")?.takeIf { it > 0 }
+            val (lignes, avertissements) = Pricing.construireLignes(prestations, remise.pct, distance, d.regles, d.societe.tvaDefaut, d.societe.franchiseTva)
+            val toutes = lignes + libres.map { it.copy(remisePct = remise.pct, tva = if (d.societe.franchiseTva) 0.0 else it.tva) }
+            if (toutes.isEmpty()) return err("Aucune ligne à facturer pour ce test. Vérifie les tarifs et la puissance kWc.")
+            val now = LocalDate.now()
+            val tempClient = client.copy(sites = if (siteFinal == null) client.sites else client.sites.filterNot { it.id == siteFinal.id } + siteFinal)
+            val dTest = d.copy(clients = d.clients.filterNot { it.id == client.id } + tempClient)
+            val numero = "TEST-${if (type == "devis") "DEV" else "FAC"}-${java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))}"
+            val mention = "DOCUMENT DE TEST — SANS VALEUR COMMERCIALE OU COMPTABLE"
+            val doc = Doc(numero, type, tempClient.id, siteFinal?.id ?: "", now.toString(),
+                now.plusDays(if (type == "devis") d.societe.validiteDevisJours.toLong() else d.societe.delaiPaiementJours.toLong()).toString(),
+                toutes, notes = listOf(mention, a.s("notes")).filter { it.isNotBlank() }.joinToString("\n"),
+                statut = "brouillon", remiseInfo = if (remise.pct > 0) "${nombre(remise.pct)} % — ${remise.detail}" else "", distanceKm = distance)
+            val md = "# ⚠️ $mention\n\n" + Rendu.rendreDoc(dTest, doc)
+            return try {
+                val folder = "Société/Tests"
+                val nom = "${numero} ${client.nom}".replace('/', '-')
+                val emplacement = app.obsidian.saveIn(folder, nom, md)
+                app.obsidian.saveBytes(folder, "$nom.pdf", svc.pdfSociete(md), "application/pdf")
+                ok("🧪 ${if (type == "devis") "Devis" else "Facture"} de test **$numero** créé(e) — ${euro(dTest.totaux(doc).ttc)} TTC\n⚠️ $mention\n📁 $emplacement\n" +
+                    (if (distance != null && !Pricing.deplacementConfigure(d.regles)) "⚠️ Distance de ${nombre(distance)} km indiquée, mais aucun tarif de déplacement n’est configuré : aucun frais n’a été ajouté.\n" else "") +
+                    (if (avertissements.isNotEmpty()) avertissements.joinToString("\n") { "⚠️ $it" } + "\n" else "") + "\n---\n\n$md")
+            } catch (ex: Exception) { err("Création du document de test impossible : ${ex.message ?: ex.javaClass.simpleName}") }
+        }
         val clientEff = if (siteFinal != null && client.sites.none { it.id == siteFinal.id }) client.copy(sites = client.sites + siteFinal).also { c2 ->
             svc.repo.update { it.copy(clients = it.clients.map { x -> if (x.id == c2.id) c2 else x }) }
         } else client
@@ -1186,11 +1301,9 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             val r = svc.creerDocument(type, clientEff, siteFinal, prestations, libres, a.bool("deplacement"), remisePct, a.s("notes"))
             val md = Rendu.rendreDoc(d, r.doc)
             ok("✅ ${if (type == "devis") "Devis" else "Facture"} **${r.doc.numero}** créé(e) — ${euro(d.totaux(r.doc).ttc)} TTC\n📁 ${r.emplacement}\n" +
-                (if (remisePct != null) "⚠️ Remise manuelle appliquée : ${nombre(remisePct)} % (demandée dans l'appel de l'outil, pas calculée automatiquement)\n" else "") +
+                (if (remisePct != null) "⚠️ Remise manuelle appliquée : ${nombre(remisePct)} %\n" else "") +
                 (if (r.avertissements.isNotEmpty()) r.avertissements.joinToString("\n") { "⚠️ $it" } + "\n" else "") + "\n---\n\n$md")
-        } catch (ex: IllegalArgumentException) {
-            err(ex.message ?: "Création impossible.")
-        }
+        } catch (ex: IllegalArgumentException) { err(ex.message ?: "Création impossible.") }
     }
 
     private suspend fun documentAction(a: JSONObject): ToolResult {

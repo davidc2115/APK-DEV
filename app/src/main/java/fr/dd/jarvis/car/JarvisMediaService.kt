@@ -1,5 +1,6 @@
 package fr.dd.jarvis.car
 
+import android.graphics.BitmapFactory
 import android.media.MediaDescription
 import android.media.MediaMetadata
 import android.media.browse.MediaBrowser
@@ -19,6 +20,7 @@ import fr.dd.jarvis.device.EventInfo
 import fr.dd.jarvis.device.PhoneControl
 import fr.dd.jarvis.service.CarBridge
 import fr.dd.jarvis.service.JarvisService
+import fr.dd.jarvis.voice.JournalVoix
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -67,6 +69,7 @@ class JarvisMediaService : MediaBrowserService() {
         private const val ACT_WAZE = "fr.dd.jarvis.auto.WAZE"
         private const val ACT_RELIRE = "fr.dd.jarvis.auto.RELIRE"
         private const val STYLE_JOUABLE = "android.media.browse.CONTENT_STYLE_PLAYABLE_HINT"
+        private const val STYLE_SINGLE_ITEM = "android.media.browse.CONTENT_STYLE_SINGLE_ITEM"
         private const val STYLE_DOSSIER = "android.media.browse.CONTENT_STYLE_BROWSABLE_HINT"
         private const val LISTE = 1
         private const val GRILLE = 2
@@ -88,11 +91,16 @@ class JarvisMediaService : MediaBrowserService() {
     @Volatile private var derniere = ""
     /** Conversation lancée depuis la voiture : l'écran de lecture suit l'écoute de JARVIS. */
     private var enCours = false
+    /** Appui Play accepté, avant le premier événement ECOUTE du service vocal. */
+    private var demandeEnCours = false
     private var piloteJusqua = 0L
     private var veille: Job? = null
     /** Fin de la dernière écoute / dernier appui micro : un ▶ envoyé juste après par la voiture n'est pas un vrai appui. */
     private var derniereFin = 0L
     private var dernierParler = 0L
+    /** Android Auto envoie parfois un PLAY automatique à la connexion : il ne doit pas ouvrir le micro. */
+    private var ignorerPremierPlayConnexion = true
+    private var ignorerPauseJusqua = 0L
     private val abonne: (ActiviteVoiture.Evt) -> Unit = { surActivite(it) }
 
     override fun onCreate() {
@@ -143,9 +151,12 @@ class JarvisMediaService : MediaBrowserService() {
         // Reprise de « la dernière écoute » (système) : rien à reprendre, JARVIS ne joue pas de musique lui-même.
         // « Reprendre » : la carte média d'Android Auto (à côté du GPS en grand) affiche le dernier élément joué avec ▶.
         // On lui donne « 🎙️ Parler à JARVIS » : la carte devient un bouton micro au lieu des seules suggestions.
-        if (rootHints?.getBoolean(BrowserRoot.EXTRA_RECENT) == true)
-            return if (clientPackageName in VOITURE || clientPackageName == packageName)
-                BrowserRoot(RECENT, Bundle().apply { putBoolean(BrowserRoot.EXTRA_RECENT, true) }) else BrowserRoot(VIDE, extras)
+        if (rootHints?.getBoolean(BrowserRoot.EXTRA_RECENT) == true) {
+            // Android Auto redemande parfois la dernière source à la reconnexion et ouvre directement sa carte
+            // « Bonne route ». Pour JARVIS, revenir systématiquement à la racine avec les trois onglets.
+            return if (clientPackageName in VOITURE || clientPackageName == packageName) BrowserRoot(RACINE, extras)
+            else BrowserRoot(VIDE, extras)
+        }
         // Carte « Pour vous » d'Android Auto : remplie par l'appli Google avec des éléments JOUABLES (les onglets n'en ont pas).
         if (clientPackageName == APPLI_GOOGLE || rootHints?.getBoolean(BrowserRoot.EXTRA_SUGGESTED) == true) return BrowserRoot(SUGGESTIONS, extras)
         return BrowserRoot(RACINE, extras)
@@ -153,11 +164,27 @@ class JarvisMediaService : MediaBrowserService() {
 
     private fun icone(nom: String): Uri = Uri.parse("android.resource://$packageName/drawable/$nom")
 
+    // Android Auto n'affiche pas toujours correctement les URI android.resource pointant vers
+    // des drawables XML/PNG. Pour les deux visuels du dragon, fournir directement le Bitmap
+    // dans MediaDescription : c'est le format artwork le plus fiable pour les tuiles voiture.
+    private val artworkDragon by lazy {
+        mapOf(
+            "dragon_tete" to BitmapFactory.decodeResource(resources, R.drawable.dragon_tete),
+            "auto_dragon_accueil" to BitmapFactory.decodeResource(resources, R.drawable.auto_dragon_accueil)
+        )
+    }
+
     private fun element(id: String, titre: String, sousTitre: String = "", icone: String = "auto_micro",
                         dossier: Boolean = false, style: Int? = null): MediaBrowser.MediaItem {
-        val d = MediaDescription.Builder().setMediaId(id).setTitle(titre).setIconUri(icone(icone))
+        val d = MediaDescription.Builder().setMediaId(id).setTitle(titre)
+        val artwork = artworkDragon[icone]
+        if (artwork != null) d.setIconBitmap(artwork) else d.setIconUri(icone(icone))
         if (sousTitre.isNotBlank()) d.setSubtitle(sousTitre)
-        if (style != null) d.setExtras(Bundle().apply { putInt(STYLE_JOUABLE, style) })
+        if (style != null || id == ONGLET_JARVIS) d.setExtras(Bundle().apply {
+            if (style != null) putInt(STYLE_JOUABLE, style)
+            // Indique à Android Auto le style de rendu de l'onglet JARVIS lui-même.
+            if (id == ONGLET_JARVIS) putInt(STYLE_SINGLE_ITEM, 4)
+        })
         return MediaBrowser.MediaItem(d.build(), if (dossier) MediaBrowser.MediaItem.FLAG_BROWSABLE else MediaBrowser.MediaItem.FLAG_PLAYABLE)
     }
 
@@ -176,13 +203,13 @@ class JarvisMediaService : MediaBrowserService() {
     private fun enfants(parentId: String): MutableList<MediaBrowser.MediaItem> = when {
         // Onglets (Android Auto affiche en onglets les dossiers de la racine).
         parentId == RACINE -> mutableListOf(
-            element(ONGLET_JARVIS, "JARVIS", icone = "auto_onglet_micro", dossier = true, style = GRILLE),
+            element(ONGLET_JARVIS, "JARVIS", "Assistant vocal", "dragon_tete", dossier = true, style = GRILLE),
             element(ONGLET_AGENDA, "Aujourd'hui", icone = "auto_onglet_agenda", dossier = true),
             element(ONGLET_RACCOURCIS, "Raccourcis", icone = "auto_onglet_eclair", dossier = true),
         )
         parentId == SUGGESTIONS -> suggestions()
         parentId == RECENT -> mutableListOf(element(PARLER, "🎙️ Parler à JARVIS", prochainResume(), "auto_micro"))
-        parentId == ONGLET_JARVIS -> mutableListOf(element(PARLER, "Parler à JARVIS", "Touche, attends le bip et parle", "auto_micro"))
+        parentId == ONGLET_JARVIS -> mutableListOf(element(PARLER, "Parler à JARVIS", "Appuie pour parler", "auto_dragon_accueil"))
         parentId == ONGLET_AGENDA -> agenda(LocalDate.now(), "aujourd'hui").apply {
             val demain = evenements(LocalDate.now().plusDays(1))
             add(element(DEMAIN, "📅 Demain", if (demain.isEmpty()) "Aucun rendez-vous" else "${demain.size} rendez-vous", "auto_agenda", dossier = true))
@@ -350,16 +377,18 @@ class JarvisMediaService : MediaBrowserService() {
     // ------------------------------------------------------------------------------------------------ lecture / écran
 
     private fun etat(e: Int) = PlaybackState.Builder()
-        .setActions(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE or
-            PlaybackState.ACTION_STOP or PlaybackState.ACTION_PLAY_FROM_MEDIA_ID or PlaybackState.ACTION_PLAY_FROM_SEARCH or
-            // ⏭ / ⏮ (écran ou volant) quand JARVIS est la source affichée : transmis à l'appli de musique.
+        // JARVIS n'est pas un lecteur audio : publier PLAYING faisait renvoyer PAUSE par Android Auto,
+        // dont le callback coupait aussitôt le micro. Pendant l'écoute, on garde une session « en pause »
+        // avec une commande PLAY explicite ; STOP reste disponible pour terminer la conversation.
+        .setActions(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_STOP or
+            PlaybackState.ACTION_PLAY_FROM_MEDIA_ID or PlaybackState.ACTION_PLAY_FROM_SEARCH or
             PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS)
         .addCustomAction(PlaybackState.CustomAction.Builder(ACT_PARLER, "Parler à JARVIS", R.drawable.ic_auto_micro).build())
         .addCustomAction(PlaybackState.CustomAction.Builder(ACT_WAZE, "Prochain rendez-vous dans Waze", R.drawable.ic_auto_route).build())
         .addCustomAction(PlaybackState.CustomAction.Builder(ACT_RELIRE, "Relire la dernière réponse", R.drawable.ic_auto_relire).build())
         .setState(e, PlaybackState.PLAYBACK_POSITION_UNKNOWN, 1f).build()
 
-    private fun meta(titre: String, texte: String, icone: String = "auto_micro") = MediaMetadata.Builder()
+    private fun meta(titre: String, texte: String, icone: String = "dragon_tete") = MediaMetadata.Builder()
         .putString(MediaMetadata.METADATA_KEY_TITLE, titre)
         .putString(MediaMetadata.METADATA_KEY_ARTIST, texte.take(300))
         .putString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE, titre)
@@ -368,7 +397,7 @@ class JarvisMediaService : MediaBrowserService() {
         .putString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI, icone(icone).toString())
         .build()
 
-    private fun afficher(titre: String, texte: String, e: Int, icone: String = "auto_micro") {
+    private fun afficher(titre: String, texte: String, e: Int, icone: String = "dragon_tete") {
         session.setMetadata(meta(titre, texte, icone))
         session.setPlaybackState(etat(e))
     }
@@ -381,18 +410,29 @@ class JarvisMediaService : MediaBrowserService() {
     }
 
     /** Lit [texte] avec la voix de JARVIS et l'affiche. */
-    private fun lire(titre: String, texte: String, icone: String = "auto_micro") {
+    private fun lire(titre: String, texte: String, icone: String = "dragon_tete") {
         afficher(titre, texte, PlaybackState.STATE_PLAYING, icone)
-        VoixVoiture.parler(this, texte.take(1500)) { session.setPlaybackState(etat(PlaybackState.STATE_PAUSED)) }
+        VoixVoiture.parler(this, texte) { session.setPlaybackState(etat(PlaybackState.STATE_PAUSED)) }
     }
 
     /** 🎙️ : JARVIS ouvre le micro (bip, puis ta demande) ; l'écran de lecture suit la conversation. */
     private fun parler() {
-        dernierParler = SystemClock.elapsedRealtime()
+        val maintenant = SystemClock.elapsedRealtime()
+        if (demandeEnCours || enCours || maintenant - dernierParler < 900) {
+            JournalVoix.noter("android-auto", "appui Play ignoré : demande déjà en cours")
+            return
+        }
+        dernierParler = maintenant
+        ignorerPauseJusqua = maintenant + 700
+        demandeEnCours = true
+        JournalVoix.noter("android-auto", "demande d'écoute depuis la carte média")
         VoixVoiture.taire()
         piloteJusqua = SystemClock.elapsedRealtime() + 8000
-        afficher("🎙️ Je t'écoute…", "Parle après le bip", PlaybackState.STATE_BUFFERING)
+        // PLAYING garde la carte de conversation visible pendant l'ouverture du micro ;
+        // BUFFERING était interprété comme un chargement média et masquait parfois l'état d'écoute.
+        afficher("🎙️ Je t'écoute…", "Ouverture du micro — parle après le bip", PlaybackState.STATE_PAUSED)
         if (!JarvisService.ecouterDepuisVoiture(this)) {
+            demandeEnCours = false
             echec("Micro indisponible : autorise le micro et active l'écoute « Jarvis » dans JARVIS. Tu peux aussi toucher la loupe pour dicter.")
             return
         }
@@ -405,26 +445,33 @@ class JarvisMediaService : MediaBrowserService() {
     }
 
     private fun echec(texte: String) {
-        enCours = false; piloteJusqua = 0L; veille?.cancel(); derniereFin = SystemClock.elapsedRealtime()
+        enCours = false; demandeEnCours = false; piloteJusqua = 0L; veille?.cancel(); derniereFin = SystemClock.elapsedRealtime()
         lire("🎙️ JARVIS", texte)
     }
 
     /** Suit l'écoute de JARVIS (service « Jarvis ») pendant une conversation lancée depuis la voiture. */
     private fun surActivite(e: ActiviteVoiture.Evt) {
-        val pilote = enCours || SystemClock.elapsedRealtime() < piloteJusqua
+        // Un réveil par le mot « Jarvis » est déclenché par le service téléphone, pas par ce MediaSession.
+        // En projection, on doit tout de même refléter son état dans la carte Android Auto.
+        val pilote = enCours || SystemClock.elapsedRealtime() < piloteJusqua ||
+            app.enVoiture || NavigationVoiture.contexte != null
         when (e.etape) {
             ActiviteVoiture.Etape.ECOUTE -> if (pilote) {
-                enCours = true; veille?.cancel()
+                enCours = true; demandeEnCours = true; veille?.cancel()
                 afficher("🎙️ Je t'écoute…", "Parle maintenant", PlaybackState.STATE_PLAYING)
             }
-            ActiviteVoiture.Etape.PARTIEL -> if (enCours) afficher("🎙️ « ${e.texte.take(90)} »", "…", PlaybackState.STATE_PLAYING)
-            ActiviteVoiture.Etape.REFLEXION -> if (enCours) afficher("« ${e.question.take(90)} »", "JARVIS réfléchit…", PlaybackState.STATE_BUFFERING)
+            ActiviteVoiture.Etape.PARTIEL -> if (enCours) afficher("JARVIS", "Écoute en cours…", PlaybackState.STATE_PLAYING)
+            ActiviteVoiture.Etape.REFLEXION -> if (enCours) {
+                // La voix est diffusée progressivement : Android Auto coupe sinon le flux si la MediaSession
+                // reste en BUFFERING pendant que le téléphone a déjà commencé à parler.
+                afficher("JARVIS", "Traitement de la demande…", PlaybackState.STATE_PLAYING)
+            }
             ActiviteVoiture.Etape.REPONSE -> {
                 derniere = propre(e.texte)
-                if (enCours) afficher("« ${e.question.take(70)} »", derniere, PlaybackState.STATE_PLAYING)
+                if (enCours) afficher("JARVIS", derniere, PlaybackState.STATE_PLAYING)
             }
             ActiviteVoiture.Etape.FIN -> if (enCours) {
-                enCours = false; derniereFin = SystemClock.elapsedRealtime()
+                enCours = false; demandeEnCours = false; derniereFin = SystemClock.elapsedRealtime()
                 session.setPlaybackState(etat(PlaybackState.STATE_PAUSED))
             }
             ActiviteVoiture.Etape.ECHEC -> if (pilote) echec(e.texte)
@@ -434,7 +481,7 @@ class JarvisMediaService : MediaBrowserService() {
     /** Raccourci ou phrase dictée à l'Assistant (« Ok Google, … sur JARVIS ») : JARVIS répond à voix haute. */
     private fun demander(demande: String) {
         if (demande.isBlank()) return
-        afficher("« $demande »", "JARVIS réfléchit…", PlaybackState.STATE_BUFFERING)
+        afficher("JARVIS", "Traitement de la demande…", PlaybackState.STATE_BUFFERING)
         portee.launch {
             val question = ChatMsg(true, demande)
             app.chatCharger()
@@ -448,7 +495,7 @@ class JarvisMediaService : MediaBrowserService() {
             val reponse = ChatMsg(false, p)
             CarBridge.ajouter(reponse); app.chatAjouter(reponse)
             derniere = p
-            lire("« $demande »", p)
+            lire("JARVIS", p)
             notifyChildrenChanged(ONGLET_RACCOURCIS)
         }
     }
@@ -456,12 +503,6 @@ class JarvisMediaService : MediaBrowserService() {
     private fun relire() {
         val d = derniereReponse()
         if (d.isNotBlank()) lire("🔁 Dernière réponse", d, "auto_relire") else lire("JARVIS", "Pas encore de réponse à relire.", "auto_relire")
-    }
-
-    /** Lecture relancée toute seule par Android Auto au branchement (« démarrer la musique automatiquement ») : ignorée. */
-    private fun autoDemarrage(): Boolean {
-        val t = SystemClock.elapsedRealtime()
-        return t - app.voitureDepuis < 12_000
     }
 
     private inner class Rappels : MediaSession.Callback() {
@@ -473,9 +514,12 @@ class JarvisMediaService : MediaBrowserService() {
         override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
             val id = mediaId.orEmpty()
             when {
-                id == PARLER -> if (autoDemarrage()) session.setPlaybackState(etat(PlaybackState.STATE_PAUSED)) else parler()
+                id == PARLER -> parler()
                 id == RELIRE -> relire()
                 id == MUSIQUE -> {
+                    // La musique prend immédiatement la main : arrêter toute voix / écoute JARVIS avant PLAY.
+                    VoixVoiture.taire()
+                    JarvisService.interrompreDepuisVoiture()
                     // N'importe quelle appli de musique (Spotify, YT Music, Deezer…) : sa session, jamais celle de JARVIS.
                     val r = fr.dd.jarvis.device.CommandeMedia.executer(this@JarvisMediaService, fr.dd.jarvis.device.CommandeMedia.Action.PLAY, voiture = true)
                     if (!r.startsWith("▶️")) lire("🎵 Musique", r, "auto_musique")
@@ -507,9 +551,18 @@ class JarvisMediaService : MediaBrowserService() {
          */
         override fun onPlay() {
             val t = SystemClock.elapsedRealtime()
-            if (autoDemarrage() || !app.enVoiture || t - derniereFin < 5_000 || t - dernierParler < 5_000) {
-                session.setPlaybackState(etat(PlaybackState.STATE_PAUSED)); return
+            // Android Auto peut répéter ▶ ou le transmettre juste après la fin de la réponse.
+            // Ne jamais rétablir PAUSED ici : cela annulait visuellement le premier appui et pouvait
+            // masquer la session qui venait d'être ouverte.
+            if (demandeEnCours || enCours || t - dernierParler < 900) return
+            if (ignorerPremierPlayConnexion && t - creeLe < 3000L) {
+                ignorerPremierPlayConnexion = false
+                JournalVoix.noter("android-auto", "PLAY automatique de connexion ignoré : accueil conservé, micro fermé")
+                session.setPlaybackState(etat(PlaybackState.STATE_PAUSED))
+                return
             }
+            ignorerPremierPlayConnexion = false
+            JournalVoix.noter("android-auto", "MediaSession onPlay reçu")
             parler()
         }
 
@@ -522,14 +575,24 @@ class JarvisMediaService : MediaBrowserService() {
         }
 
         override fun onPause() {
-            VoixVoiture.taire(); JarvisService.interrompreDepuisVoiture()
-            enCours = false; piloteJusqua = 0L; veille?.cancel(); derniereFin = SystemClock.elapsedRealtime()
+            // Ignorer le PAUSE technique renvoyé par certains autoradios juste après PLAY.
+            if (SystemClock.elapsedRealtime() < ignorerPauseJusqua) {
+                JournalVoix.noter("android-auto", "PAUSE technique ignoré pendant l'ouverture du micro")
+                return
+            }
+            if (demandeEnCours || enCours) {
+                JournalVoix.noter("android-auto", "PAUSE utilisateur : interruption de la réponse / écoute")
+                VoixVoiture.taire()
+                JarvisService.interrompreDepuisVoiture()
+                enCours = false; demandeEnCours = false; piloteJusqua = 0L
+                veille?.cancel(); derniereFin = SystemClock.elapsedRealtime()
+            }
             session.setPlaybackState(etat(PlaybackState.STATE_PAUSED))
         }
 
         override fun onStop() {
             VoixVoiture.taire(); JarvisService.interrompreDepuisVoiture()
-            enCours = false; piloteJusqua = 0L; veille?.cancel()
+            enCours = false; demandeEnCours = false; piloteJusqua = 0L; veille?.cancel()
             session.setPlaybackState(etat(PlaybackState.STATE_STOPPED))
         }
     }

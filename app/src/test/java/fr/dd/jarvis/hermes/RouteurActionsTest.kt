@@ -24,6 +24,26 @@ class RouteurActionsTest {
             assertEquals(t, Routeur.Cible.HERMES, cible(t))
     }
 
+    @Test fun conversationNaturelleEtendue() {
+        for (t in listOf(
+            "J'aimerais discuter un peu avec toi",
+            "On peut simplement parler",
+            "Comment s'est passée ta journée ?",
+            "Comment vont tes enfants ?",
+            "Tu penses quoi de cette idée ?",
+            "Raconte-moi ta journée"
+        )) assertTrue("$t doit rester une conversation", Routeur.bavardage(t))
+
+        assertFalse(Routeur.bavardage("Cherche le dossier client Martin"))
+        assertFalse(Routeur.bavardage("Recherche les dernières actualités"))
+    }
+
+    @Test fun conversationLibreGardeLesRebondissements() {
+        Routeur.marquerBavardage()
+        assertTrue(Routeur.suiteBavardage("J'ai eu une journée assez difficile aujourd'hui."))
+        assertFalse(Routeur.suiteBavardage("Cherche le dossier de Martin"))
+    }
+
     @Test fun serveurDiscordPasSsh() {
         assertTrue(ServeurInventaire.serveurDemande("montre l'espace disque du serveur"))
         assertFalse(ServeurInventaire.serveurDemande("résume les messages du serveur discord B&G"))

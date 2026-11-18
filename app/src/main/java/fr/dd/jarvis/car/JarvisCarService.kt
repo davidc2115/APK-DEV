@@ -91,15 +91,33 @@ object NavigationVoiture {
     /** Vrai si Android Auto a accepté la demande ; faux s'il faut se rabattre sur le téléphone. */
     suspend fun lancer(destination: String, point: Pair<Double, Double>? = null): Boolean {
         val c = contexte ?: return false
-        if (destination.isBlank() && point == null) return false
-        // Formats documentés par Android Auto : « geo:lat,lon » (point précis : fiche client, GPS) ou « geo:0,0?q=adresse ».
-        val geo = if (point != null) "geo:${point.first},${point.second}" else "geo:0,0?q=" + Uri.encode(destination)
+        if (destination.isBlank()) return false
+        if (point != null && (point.first == 0.0 && point.second == 0.0)) return false
+
+        // geo:0,0?q=adresse est le format de repli Android Auto quand le géocodage GPS n'a pas fourni
+        // de coordonnées. Les deux variantes sont tentées car les hôtes voiture ne traitent pas tous
+        // de la même façon la requête q= et les coordonnées explicites.
+        val encoded = Uri.encode(destination)
+        val coordonnees = if (point != null) listOf(
+            Uri.parse("geo:${point.first},${point.second}?q=${point.first},${point.second}(${encoded})"),
+            Uri.parse("geo:${point.first},${point.second}")
+        ) else listOf(
+            Uri.parse("geo:0,0?q=$encoded"),
+            Uri.parse("geo:0,0?q=$encoded&mode=d")
+        )
+
         return withContext(Dispatchers.Main) {
-            runCatching { c.startCarApp(Intent(CarContext.ACTION_NAVIGATE).setData(Uri.parse(geo))); true }
-                .recoverCatching {
-                    // Certaines applis de navigation refusent le format avec coordonnées : nouvel essai avec l'adresse seule.
-                    if (point != null) { c.startCarApp(Intent(CarContext.ACTION_NAVIGATE).setData(Uri.parse("geo:0,0?q=" + Uri.encode(destination)))); true } else false
-                }.getOrDefault(false)
+            for (uri in coordonnees) {
+                val erreur = runCatching {
+                    c.startCarApp(Intent(CarContext.ACTION_NAVIGATE).setData(uri))
+                }.exceptionOrNull()
+                if (erreur == null) {
+                    fr.dd.jarvis.voice.JournalVoix.noter("navigation", "ACTION_NAVIGATE transmis à Android Auto : $uri")
+                    return@withContext true
+                }
+                fr.dd.jarvis.voice.JournalVoix.noter("navigation", "ACTION_NAVIGATE refusé ($uri) : ${erreur.message ?: erreur.javaClass.simpleName}")
+            }
+            false
         }
     }
 }
@@ -155,7 +173,7 @@ class JarvisCarScreen(ctx: CarContext) : Screen(ctx) {
         derniere?.let { m ->
             val propre = m.text.replace(Regex("[#*_`>|]+"), "").replace(Regex("\\s+"), " ").trim()
             liste.addItem(Row.Builder().setTitle("🔊 Dernière réponse").addText(propre.take(120))
-                .setOnClickListener { VoixVoiture.parler(carContext, propre.take(1500)) }.build())
+                .setOnClickListener { VoixVoiture.parler(carContext, propre) }.build())
         }
         return ListTemplate.Builder().setTitle("JARVIS · ${fr.dd.jarvis.voice.VoixNaturelle.personnage(app).icone}")
             .setHeaderAction(Action.APP_ICON).setSingleList(liste.build()).build()
@@ -238,7 +256,7 @@ class ConversationVoiture private constructor(private val ctx: CarContext, priva
     sealed class Etat {
         object Ecoute : Etat()
         class Reflexion(val question: String) : Etat()
-        class Reponse(val question: String, val texte: String) : Etat()
+        class Reponse(val question: String, val texte: String, val sourceMicro: String) : Etat()
         class Fin(val texte: String) : Etat()
     }
 
@@ -285,14 +303,17 @@ class ConversationVoiture private constructor(private val ctx: CarContext, priva
                 is Ecoute.Annulee -> return@launch
                 is Ecoute.Silence -> { terminer("Conversation terminée."); return@launch }
                 is Ecoute.Erreur -> { terminer("Micro indisponible (voiture et téléphone) : ${res.message}"); return@launch }
-                is Ecoute.Phrase -> traiter(res.pcm)
+                is Ecoute.Phrase -> {
+                    val source = if (m.telephone) "Micro téléphone" + (m.diagnosticVoiture?.let { " (voiture : $it)" } ?: "") else "Micro voiture Android Auto"
+                    traiter(res.pcm, source)
+                }
             }
         }
     }
 
-    private suspend fun traiter(pcm: ByteArray) {
+    private suspend fun traiter(pcm: ByteArray, sourceMicro: String) {
         if (!app.llm.groq.disponible()) { terminer("Ajoute une clé Groq dans JARVIS (Réglages) : elle sert aussi à la dictée en voiture."); return }
-        montrer(Etat.Reflexion(""))
+        montrer(Etat.Reflexion("$sourceMicro · transcription"))
         val texte = try {
             Pcm.nettoyerTranscription(withContext(Dispatchers.IO) { app.llm.groq.transcrire(Pcm.wav(pcm)) })
         } catch (e: Throwable) { terminer("Transcription impossible : ${e.message?.take(120) ?: e.javaClass.simpleName}"); return }
@@ -318,9 +339,9 @@ class ConversationVoiture private constructor(private val ctx: CarContext, priva
         val assistantMessage = ChatMsg(false, propre)
         CarBridge.ajouter(assistantMessage)
         app.chatAjouter(assistantMessage)
-        montrer(Etat.Reponse(texte, propre))
+        montrer(Etat.Reponse(texte, propre, sourceMicro))
         // Réponse lue, puis on réécoute : on enchaîne sans retoucher l'écran ; silence → fin.
-        parler(propre.take(1500)) { ecouter() }
+        parler(propre) { ecouter() }
     }
 
     /** JARVIS parle avec SA voix (personnage choisi, voix naturelle Gemini ou voix Android du même genre). */
@@ -374,7 +395,7 @@ class EcranConversation(ctx: CarContext, private val conv: ConversationVoiture, 
                 .setHeaderAction(Action.BACK).addAction(terminer).build()
             is ConversationVoiture.Etat.Reflexion -> MessageTemplate.Builder(if (etat.question.isBlank()) "…" else "« ${etat.question.take(160)} »")
                 .setTitle("JARVIS").setHeaderAction(Action.BACK).setLoading(true).build()
-            is ConversationVoiture.Etat.Reponse -> MessageTemplate.Builder(etat.texte.take(450)).setTitle("« ${etat.question.take(60)} »")
+            is ConversationVoiture.Etat.Reponse -> MessageTemplate.Builder(etat.texte.take(450)).setTitle("${etat.sourceMicro} · « ${etat.question.take(45)} »")
                 .setHeaderAction(Action.BACK).addAction(parler).addAction(terminer).build()
             is ConversationVoiture.Etat.Fin -> MessageTemplate.Builder(etat.texte).setTitle("JARVIS")
                 .setHeaderAction(Action.BACK)
@@ -423,7 +444,7 @@ class ReponseTexteScreen(ctx: CarContext, private val question: String) : Screen
             app.chatAjouter(assistantMessage)
             texte = propre
             invalidate()
-            VoixVoiture.parler(carContext, propre.take(1500))
+            VoixVoiture.parler(carContext, propre)
         }
     }
 
@@ -431,7 +452,7 @@ class ReponseTexteScreen(ctx: CarContext, private val question: String) : Screen
         val t = texte
         return if (t == null) MessageTemplate.Builder("« ${question.take(160)} »").setTitle("JARVIS").setHeaderAction(Action.BACK).setLoading(true).build()
         else MessageTemplate.Builder(t.take(450)).setTitle("JARVIS").setHeaderAction(Action.BACK)
-            .addAction(Action.Builder().setTitle("🔊 Relire").setOnClickListener { VoixVoiture.parler(carContext, t.take(1500)) }.build())
+            .addAction(Action.Builder().setTitle("🔊 Relire").setOnClickListener { VoixVoiture.parler(carContext, t) }.build())
             .addAction(Action.Builder().setTitle("🎤 Parler").setOnClickListener {
                 VoixVoiture.taire()
                 if (voixVoiture(carContext)) ConversationVoiture.ouvrir(carContext, screenManager)

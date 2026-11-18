@@ -14,6 +14,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import androidx.compose.runtime.mutableStateOf
 import androidx.core.app.NotificationCompat
 import fr.dd.jarvis.JarvisApp
 import fr.dd.jarvis.ai.Brain
@@ -35,6 +36,8 @@ class JarvisService : Service() {
 
     companion object {
         @Volatile var running = false
+        /** État commun de la conversation déclenchée par le Wake Word ou Android Auto, observable par l'accueil Compose. */
+        val conversationActive = mutableStateOf(false)
         const val ACTION_STOP = "fr.dd.jarvis.WAKE_STOP"
         const val ACTION_RELANCER = "fr.dd.jarvis.WAKE_RELANCER"
         /** Android Auto (appli média) : « Parler à JARVIS » → écoute immédiate, comme si on avait dit « Jarvis ». */
@@ -99,6 +102,22 @@ class JarvisService : Service() {
         fun interrompreDepuisVoiture() {
             val s = actuel ?: return
             s.main.post { s.interrompre() }
+        }
+
+        /** Le bouton STOP de l'accueil peut arrêter la session lancée hors du ChatViewModel (Wake Word / Android Auto). */
+        fun arreterConversationDepuisAppli() {
+            val s = actuel ?: return
+            s.main.post {
+                fr.dd.jarvis.car.ConversationAuto.arreter()
+                // Invalide aussi une réponse IA déjà lancée : elle ne doit pas rouvrir le micro après STOP.
+                s.generation++
+                s.voice?.stopSpeaking()
+                s.voice?.fermer()
+                s.voice?.sessionFin()
+                s.awake = false
+                s.busy = false
+                s.goIdle()
+            }
         }
 
         private fun micAccorde(ctx: Context) = ctx.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
@@ -312,6 +331,16 @@ class JarvisService : Service() {
      */
     private fun demandeExterne(essai: Int = 0) {
         if (!running) return
+        // Le service publie running avant la fin de son initialisation : attendre le moteur vocal plutôt que perdre le Play.
+        if (voice == null) {
+            if (essai < 12) main.postDelayed({ demandeExterne(essai + 1) }, 300)
+            else fr.dd.jarvis.car.ActiviteVoiture.signaler(fr.dd.jarvis.car.ActiviteVoiture.Etape.ECHEC,
+                texte = "Le moteur vocal n'est pas encore prêt. Réessaie dans un instant.")
+            return
+        }
+        // Le bouton Play d'Android Auto peut arriver avant que JarvisApp.enVoiture soit actualisé.
+        // Force le routage média voiture pour le bip et la voix de cette session, même si le booléen est en retard.
+        voice?.sortieVoitureForcee = true
         // La voiture envoie parfois deux fois le même appui (▶ puis « jouer depuis la recherche ») : un seul bip.
         if (essai == 0) {
             val t = System.currentTimeMillis()
@@ -319,11 +348,16 @@ class JarvisService : Service() {
             derniereDemandeExterne = t
         }
         if (busy) {
+            // Un nouvel appui explicite sur Play depuis la voiture signifie « interrompre et m'écouter »,
+            // jamais « attendre la réponse précédente ». L'ancien flux est invalidé avant d'ouvrir le micro.
+            journal("nouvel appui Play pendant un traitement : demande précédente interrompue")
+            generation++
             voice?.stopSpeaking()
-            if (essai < 6) main.postDelayed({ demandeExterne(essai + 1) }, 500)
-            else fr.dd.jarvis.car.ActiviteVoiture.signaler(fr.dd.jarvis.car.ActiviteVoiture.Etape.ECHEC,
-                texte = "Je termine ta demande précédente, réessaie dans un instant.")
-            return
+            voice?.fermer()
+            voice?.sessionFin()
+            busy = false
+            awake = false
+            garderEveille(false)
         }
         if (awake) {
             voice?.stopSpeaking()
@@ -331,13 +365,22 @@ class JarvisService : Service() {
             return
         }
         dernierReveil = 0L
-        onWakeWord()
+        onWakeWord(depuisMediaAndroidAuto = true)
     }
 
     /** Pause demandée par la voiture : on coupe la voix et on referme la conversation (sans toucher à une demande en cours). */
     private fun interrompre() {
+        // Pause et STOP doivent aussi libérer l'état busy : arrêter seulement le TTS laissait le traitement
+        // marqué « en cours », puis chaque Play répétait « je traite ta demande précédente ».
+        generation++
+        fr.dd.jarvis.car.ConversationAuto.arreter()
         voice?.stopSpeaking()
-        if (awake && !busy) { voice?.fermer(); finConversation() }
+        voice?.fermer()
+        voice?.sessionFin()
+        awake = false
+        busy = false
+        garderEveille(false)
+        goIdle()
     }
 
     /** Conversation en cours (écoute, réflexion, réponse) : le téléphone ne doit pas s'endormir au milieu (10 min au plus). */
@@ -354,12 +397,15 @@ class JarvisService : Service() {
         apresConfirmation?.let { c -> apresConfirmation = null; if (!busy && running) { awake = true; process(c); return } }
         if (!busy) garderEveille(false)
         fr.dd.jarvis.car.ActiviteVoiture.signaler(fr.dd.jarvis.car.ActiviteVoiture.Etape.FIN)
+        conversationActive.value = false
         awake = false
         incompris = 0
         finLe = System.currentTimeMillis()
         voice?.sessionFin()
         // Fermeture définitive de l'écoute : aucune relance du reconnaisseur ne rouvrira le micro après le bip de fin.
         voice?.fermer()
+        // Le routage forcé ne doit pas déborder sur une utilisation ultérieure du téléphone.
+        voice?.sortieVoitureForcee = false
         if (suspenduParAppli) return
         if (vosk != null) {
             // Laisse retomber l'écho de la voix de JARVIS (ou du bip) avant de réarmer l'écoute du mot « Jarvis »,
@@ -463,26 +509,51 @@ class JarvisService : Service() {
     private var dernierReveil = 0L
 
     /** « Jarvis » entendu : bip montant puis écoute immédiate de la demande (plus de « Oui ? » parlé qui fait attendre). */
-    private fun onWakeWord() {
+    private fun onWakeWord(depuisMediaAndroidAuto: Boolean = false) {
         val maintenant = System.currentTimeMillis()
         val refus = when {
             !running -> "service arrêté"
             awake -> "conversation déjà en cours"
             busy -> "demande en cours de traitement"
             suspenduParAppli -> "l'appli a le micro"
-            maintenant - dernierReveil < 2500 -> "2e détection en moins de 2,5 s (écho)"   // écho du bip / de la voix de JARVIS
-            dernierReveil != 0L && maintenant - finLe < 1500 -> "juste après la fin d'une réponse (écho)"
+            !depuisMediaAndroidAuto && maintenant - dernierReveil < 2500 -> "2e détection en moins de 2,5 s (écho)"   // écho du bip / de la voix de JARVIS
+            !depuisMediaAndroidAuto && dernierReveil != 0L && maintenant - finLe < 1500 -> "juste après la fin d'une réponse (écho)"
             else -> null
         }
         fr.dd.jarvis.voice.JournalVoix.noter("service", if (refus == null) "réveil accepté" else "réveil ignoré : $refus")
-        if (refus != null) return
+        if (refus != null) {
+            if (depuisMediaAndroidAuto) fr.dd.jarvis.car.ActiviteVoiture.signaler(
+                fr.dd.jarvis.car.ActiviteVoiture.Etape.ECHEC,
+                texte = when (refus) {
+                    "l'appli a le micro" -> "Le micro est déjà utilisé par JARVIS sur le téléphone. Ferme cette écoute puis réessaie depuis Android Auto."
+                    "conversation déjà en cours" -> "Une conversation JARVIS est déjà ouverte. Appuie sur Play après sa fermeture."
+                    "demande en cours de traitement" -> "JARVIS termine encore la demande précédente. Réessaie dans un instant."
+                    else -> "Le service vocal refuse l'ouverture du micro : $refus."
+                })
+            return
+        }
         dernierReveil = maintenant
+        conversationActive.value = true
         garderEveille(true)
         // Connexion à l'IA préparée pendant que tu parles (évite la poignée de main TLS au moment de la demande).
         fr.dd.jarvis.ai.Http.prechauffer()
         vosk?.stop()
+        // Si le CarContext est arrivé après le démarrage du service, préparer Vosk/CarAudioRecord pour le prochain réveil.
+        if (app.enVoiture && fr.dd.jarvis.car.NavigationVoiture.contexte != null &&
+            fr.dd.jarvis.voice.VoskModel.ready(this) && vosk !is fr.dd.jarvis.voice.VoskWake) {
+            val ancien = vosk
+            ancien?.release()
+            vosk = fr.dd.jarvis.voice.VoskWake(this, app.store.ecouteEconome.value) {
+                main.post { onWakeWord() }
+            }.also { brancher(it) }
+            fr.dd.jarvis.voice.JournalVoix.noter("service", "détecteur prêt pour le micro Android Auto au prochain réveil")
+        }
         // En voiture (JARVIS ouvert dans Android Auto) : micro de la VOITURE et haut-parleurs de la voiture, GPS toujours affiché.
-        if (fr.dd.jarvis.car.ConversationAuto.possible(app)) {
+        // Le bouton Play de la carte média doit utiliser le même moteur de reconnaissance du téléphone
+        // que le parcours vocal déjà fonctionnel. ConversationAuto/MicroVoiture est réservé au Wake Word
+        // quand le contexte CarContext est réellement disponible : son chemin direct Groq échouait ici
+        // sans ouvrir le reconnaisseur standard ni son retour d'état.
+        if (!depuisMediaAndroidAuto && fr.dd.jarvis.car.ConversationAuto.possible(app)) {
             awake = true; busy = true; echangeReel = true
             voice?.stopSpeaking()
             voice?.carillon(montant = true) {
@@ -604,7 +675,10 @@ class JarvisService : Service() {
                 // referme après quelques secondes de silence.
                 // Autoradio / Bluetooth : on ne rouvre le micro que si Jarvis pose une question — sinon il entendrait la
                 // radio ou la suite de sa propre réponse ; il suffit de redire « Jarvis » pour une nouvelle demande.
-                relancer = awake && (voice?.sortieExterne() != true || reply.trimEnd().endsWith("?"))
+                // Android Auto : conversation mains-libres continue après chaque réponse.
+                // Le filtrage anti-écho de VoiceManager protège la réécoute des haut-parleurs de la voiture.
+                // Bluetooth seul conserve l'ancien comportement prudent, sauf si JARVIS pose une question.
+                relancer = false
                 // Échange abandonné entre-temps (déverrouillage prioritaire) : la réponse reste écrite mais n'est pas dite.
                 if (gen != generation) flux?.arreter(sansSuite = true) else flux?.finir(reply) ?: run { busy = false }
             }
@@ -616,9 +690,25 @@ class JarvisService : Service() {
      * suffit) — la musique ne se fait plus couper par la réponse de JARVIS. « Pause » : la musique mise en pause pour
      * l'écoute ne repart pas à la fin. Lecture / suivant / précédent : envoyés une fois le micro et la voix libérés.
      */
-    private fun musique(cmd: String, a: fr.dd.jarvis.device.CommandeMedia.Action) {
+    private fun musique(cmd: String, a: fr.dd.jarvis.device.CommandeMedia.Action, apresAttente: Boolean = false) {
         val app = application as JarvisApp
+        if (!apresAttente && a != fr.dd.jarvis.device.CommandeMedia.Action.INFO) {
+            // Ne jamais lancer le lecteur sous la dernière phrase de JARVIS. On attend la fin réelle
+            // du tampon audio Android Auto (y compris le délai A2DP), puis on exécute la commande.
+            if (voice != null) voice?.apresFinParole { musique(cmd, a, apresAttente = true) }
+            else musique(cmd, a, apresAttente = true)
+            return
+        }
         val info = a == fr.dd.jarvis.device.CommandeMedia.Action.INFO
+        if (!info) {
+            // Une commande média est prioritaire sur la réponse parlée et sur sa réécoute différée.
+            // Invalider le flux IA en cours évite qu'un ancien callback reprenne la parole après le démarrage musical.
+            generation++
+            voice?.stopSpeaking()
+            voice?.fermer()
+            busy = false
+            garderEveille(false)
+        }
         fun noter(rep: String) {
             app.chatAjouter(ChatMsg(true, cmd)); app.chatAjouter(ChatMsg(false, rep))
             if (app.enVoiture) { CarBridge.ajouter(ChatMsg(true, cmd)); CarBridge.ajouter(ChatMsg(false, rep)) }
@@ -729,9 +819,27 @@ class JarvisService : Service() {
      * Android peut « faire taire » le micro d'une appli en arrière-plan (le service tourne mais n'entend plus rien).
      * Si cela dure, on prévient avec une notification qui relance l'écoute d'un toucher.
      */
+    /** Dès que la session Android Auto fournit son CarContext, bascule Porcupine (micro téléphone)
+     * vers Vosk/CarAudioRecord pour que le mot de réveil puisse aussi être entendu par le micro de la voiture. */
+    private fun activerDetecteurVoitureSiDisponible() {
+        if (!app.enVoiture || fr.dd.jarvis.car.NavigationVoiture.contexte == null ||
+            !fr.dd.jarvis.voice.VoskModel.ready(this) || vosk is fr.dd.jarvis.voice.VoskWake) return
+        if (awake || busy || suspenduParAppli) return
+        val ancien = vosk ?: return
+        ancien.stop()
+        ancien.release()
+        val nouveau = fr.dd.jarvis.voice.VoskWake(this, app.store.ecouteEconome.value) {
+            main.post { onWakeWord() }
+        }.also { brancher(it) }
+        vosk = nouveau
+        fr.dd.jarvis.voice.JournalVoix.noter("service", "micro Android Auto disponible : détecteur basculé vers CarAudioRecord")
+        rearmer(nouveau)
+    }
+
     private val surveillance = object : Runnable {
         override fun run() {
             if (!running) return
+            activerDetecteurVoitureSiDisponible()
             if (Build.VERSION.SDK_INT >= 29 && !awake && !busy && vosk != null) {
                 val am = getSystemService(AUDIO_SERVICE) as AudioManager
                 val silencieux = runCatching { am.activeRecordingConfigurations.any { it.isClientSilenced } }.getOrDefault(false)
@@ -745,6 +853,7 @@ class JarvisService : Service() {
 
     override fun onDestroy() {
         running = false
+        conversationActive.value = false
         if (actuel === this) actuel = null
         main.removeCallbacks(surveillance)
         main.removeCallbacks(relance)

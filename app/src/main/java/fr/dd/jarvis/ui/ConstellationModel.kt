@@ -1,6 +1,7 @@
 package fr.dd.jarvis.ui
 
 import fr.dd.jarvis.device.ObsidianWriter
+import fr.dd.jarvis.device.AnalyseLiensObsidian
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -21,6 +22,7 @@ import kotlin.math.sin
  * jointe fictif. Un coffre de 8 notes donne un graphe de 8 notes.
  *
  * Coordonnées « monde » en dp à l'échelle 1, centre du cerveau en (0,0), pensées pour un écran portrait.
+ * L'arbre [NoeudDossier] conserve l'intégralité de la hiérarchie ; les hubs/étiquettes ne sont qu'une projection visuelle navigable.
  */
 
 enum class Icone { CERVEAU, DOSSIER, PERSONNE, TRAVAIL, RECHERCHE, ARCHIVE, TROMBONE, JOURNAL, SOLEIL, ETOILE, ETIQUETTE, IMAGE, VIDEO, AUDIO, PDF, NOTE, FICHIER }
@@ -87,6 +89,17 @@ data class ContenuDossier(
     val total: Int
 )
 
+/** Arbre complet du coffre : chaque dossier réel est conservé, même si l'orbe n'en affiche qu'une partie à la fois. */
+data class NoeudDossier(
+    val chemin: String,
+    val nom: String,
+    val parent: String?,
+    val profondeur: Int,
+    val enfants: List<NoeudDossier>,
+    val notes: List<ObsidianWriter.GraphNode>,
+    val pieces: List<ObsidianWriter.GraphAttachment>,
+    val totalRecursif: Int)
+
 /** Vrai lien [[wikilink]] orienté entre deux notes affichées. */
 data class LienReel(val de: String, val vers: String)
 
@@ -103,6 +116,8 @@ data class Constellation(
     val notesParHub: Map<String, List<ObsidianWriter.GraphNode>>,
     /** Arborescence réelle : chemin de dossier ("" = racine, "Autres" = catégories regroupées) → contenu. */
     val dossiers: Map<String, ContenuDossier>,
+    /** Hiérarchie complète non tronquée, indépendante de la quantité de cercles affichés simultanément. */
+    val arborescence: List<NoeudDossier>,
     /** Dossiers dépliés dans cette mise en page (catégories et sous-dossiers). */
     val deplies: Set<String>,
     val tagsParNote: Map<String, List<String>>,
@@ -122,11 +137,11 @@ object ConstellationLayout {
     const val RAYON_HUB = 46f
     const val H_ETIQUETTE = 24f
     private const val MAX_HUBS_DOSSIER = 9
-    private const val MAX_SOUS_DOSSIERS = 6
+    private const val MAX_SOUS_DOSSIERS = 8
     private const val MAX_TAGS = 6
-    /** Hauteur d'une étiquette de fichier en bout de branche, et pas vertical entre deux. */
-    private const val H_FEUILLE = 21f
-    private const val PAS_FEUILLE = 25f
+    /** Hauteur réservée à un fragment de fichier autour du dossier parent. */
+    private const val H_FEUILLE = 24f
+    private const val PAS_FEUILLE = 44f
     private const val PAS = H_ETIQUETTE + 9f
 
     /** Largeur estimée d'une étiquette (police serif ~11sp) : icône + texte + marges. */
@@ -182,8 +197,8 @@ object ConstellationLayout {
      */
     private class Rangee(val sous: Hub?, val tete: Etiquette?, val enfants: List<Rangee> = emptyList(), val feuille: Boolean = false) {
         val hauteur: Float by lazy {
-            if (sous != null) max(2 * sous.rayon + 28f, enfants.sumOf { it.hauteur.toDouble() }.toFloat() + 12f)
-            else if (feuille) PAS_FEUILLE else H_ETIQUETTE + 9f
+            if (sous != null) max(2 * sous.rayon + 68f, enfants.sumOf { it.hauteur.toDouble() }.toFloat() + 48f)
+                else if (feuille) PAS_FEUILLE else H_ETIQUETTE + 9f
         }
     }
 
@@ -194,10 +209,9 @@ object ConstellationLayout {
     fun construire(data: ObsidianWriter.GraphData, depliesDemandes: Set<String>? = null): Constellation {
         val notes = data.nodes.filterNot { it.ghost }
         val ids = notes.map { it.id }.toHashSet()
-        // Liens réels orientés entre notes existantes (les cibles absentes ne deviennent pas des nœuds).
-        val liensTous = data.references.filter { it.resolved && it.from in ids && it.to in ids && it.from != it.to }
-            .map { LienReel(it.from, it.to) }.distinct()
-            .ifEmpty { data.edges.filter { it.from in ids && it.to in ids && it.from != it.to }.map { LienReel(it.from, it.to) } }
+        // Le graphe et l'audit de JARVIS partagent strictement les mêmes règles de résolution des liens.
+        val auditLiens = AnalyseLiensObsidian.analyser(data)
+        val liensTous = auditLiens.liens.map { LienReel(it.from, it.to) }
         val entrants = HashMap<String, Int>(); val sortants = HashMap<String, Int>()
         liensTous.forEach { entrants[it.vers] = (entrants[it.vers] ?: 0) + 1; sortants[it.de] = (sortants[it.de] ?: 0) + 1 }
         val degre = { id: String -> (entrants[id] ?: 0) + (sortants[id] ?: 0) }
@@ -224,24 +238,69 @@ object ConstellationLayout {
         }
         fun notesRecursives(d: String): List<ObsidianWriter.GraphNode> = notesDe[d].orEmpty() + enfantsDe[d].orEmpty().flatMap { notesRecursives(it) }
 
-        // ---- catégories = dossiers racine (les plus remplis d'abord ; au-delà de MAX, regroupés dans « Autres »)
+        // Arbre métier complet : aucun regroupement « Autres », aucune limite de profondeur ou de nombre
+        // d'enfants dans les données. La mise en page 3D reste libre de n'afficher que la branche ouverte.
+        fun construireNoeudDossier(d: String, profondeur: Int): NoeudDossier = NoeudDossier(
+            chemin = d,
+            nom = nom(d),
+            parent = d.substringBeforeLast('/', "").ifBlank { null },
+            profondeur = profondeur,
+            enfants = enfantsDe[d].orEmpty().sortedWith(parTaille).map { construireNoeudDossier(it, profondeur + 1) },
+            notes = notesDe[d].orEmpty().sortedBy { it.label.lowercase() },
+            pieces = piecesDe[d].orEmpty().sortedBy { it.name.lowercase() },
+            totalRecursif = total(d)
+        )
+        val arborescenceComplete = enfantsDe[""].orEmpty().sortedWith(parTaille)
+            .map { construireNoeudDossier(it, 0) }
+        val racineComplete = if (notesDe[""].orEmpty().isNotEmpty() || piecesDe[""].orEmpty().isNotEmpty())
+            listOf(NoeudDossier("", "Coffre", null, 0, arborescenceComplete,
+                notesDe[""].orEmpty().sortedBy { it.label.lowercase() },
+                piecesDe[""].orEmpty().sortedBy { it.name.lowercase() },
+                (notesDe[""]?.size ?: 0) + (piecesDe[""]?.size ?: 0) + arborescenceComplete.sumOf { it.totalRecursif }))
+        else arborescenceComplete
+
+        // ---- catégories = dossiers racine. Les variantes d'un même nom (espaces/casse)
+        // sont présentées sous un seul hub, sans déplacer ni supprimer les dossiers physiques.
         val racines = enfantsDe[""].orEmpty().sortedWith(parTaille).toMutableList()
-        val categories = mutableListOf<String>()
-        if ((notesDe[""]?.size ?: 0) + (piecesDe[""]?.size ?: 0) > 0) racines += "Racine"
-        racines.sortWith(compareByDescending<String> { if (it == "Racine") (notesDe[""]?.size ?: 0) + (piecesDe[""]?.size ?: 0) else total(it) }.thenBy { it.lowercase() })
-        categories += racines.take(MAX_HUBS_DOSSIER)
-        val regroupees = racines.drop(MAX_HUBS_DOSSIER)
+        val groupesRacines = racines.groupBy { it.substringAfterLast('/').trim().lowercase() }
+        val racinesParCategorie = LinkedHashMap<String, List<String>>()
+        groupesRacines.values.forEach { groupe ->
+            val tries = groupe.sortedWith(parTaille)
+            val cle = if (tries.size == 1) tries.first() else nom(tries.first()).trim()
+            racinesParCategorie[cle] = tries
+            if (tries.size > 1) {
+                dossiers[cle] = ContenuDossier(
+                    cle,
+                    tries.flatMap { dossiers[it]?.sousDossiers.orEmpty() }.distinct(),
+                    tries.flatMap { dossiers[it]?.notes.orEmpty() },
+                    tries.flatMap { dossiers[it]?.pieces.orEmpty() },
+                    tries.sumOf { total(it) }
+                )
+            }
+        }
+        val racinesAffichees = racinesParCategorie.keys.toMutableList()
+        if ((notesDe[""]?.size ?: 0) + (piecesDe[""]?.size ?: 0) > 0) {
+            racinesAffichees += "Racine"
+            racinesParCategorie["Racine"] = emptyList()
+        }
+        racinesAffichees.sortWith(compareByDescending<String> {
+            if (it == "Racine") (notesDe[""]?.size ?: 0) + (piecesDe[""]?.size ?: 0)
+            else racinesParCategorie[it].orEmpty().sumOf { chemin -> total(chemin) }
+        }.thenBy { it.lowercase() })
+        val categories = racinesAffichees.take(MAX_HUBS_DOSSIER).toMutableList()
+        val regroupees = racinesAffichees.drop(MAX_HUBS_DOSSIER)
         if (regroupees.isNotEmpty()) {
             categories += "Autres"
-            dossiers["Autres"] = ContenuDossier("Autres", regroupees.filter { it != "Racine" }, emptyList(), emptyList(), regroupees.sumOf { if (it == "Racine") 0 else total(it) })
+            val cheminsAutres = regroupees.filter { it != "Racine" }.flatMap { racinesParCategorie[it].orEmpty() }
+            dossiers["Autres"] = ContenuDossier("Autres", cheminsAutres, emptyList(), emptyList(), cheminsAutres.sumOf { total(it) })
         }
         dossiers["Racine"] = ContenuDossier("Racine", emptyList(), notesDe[""].orEmpty().sortedBy { it.label.lowercase() }, piecesDe[""].orEmpty(), (notesDe[""]?.size ?: 0) + (piecesDe[""]?.size ?: 0))
         val notesParHub = LinkedHashMap<String, List<ObsidianWriter.GraphNode>>()
         categories.forEach { cat ->
             notesParHub[cat] = when (cat) {
                 "Racine" -> notesDe[""].orEmpty()
-                "Autres" -> regroupees.filter { it != "Racine" }.flatMap { notesRecursives(it) }
-                else -> notesRecursives(cat)
+                "Autres" -> regroupees.filter { it != "Racine" }.flatMap { racinesParCategorie[it].orEmpty().flatMap { chemin -> notesRecursives(chemin) } }
+                else -> racinesParCategorie[cat].orEmpty().flatMap { chemin -> notesRecursives(chemin) }
             }
         }
 
@@ -289,7 +348,7 @@ object ConstellationLayout {
             return if (nd > 0) "${pluriel(nd, "dossier", "dossiers")} · $tot" else pluriel(tot, "fichier", "fichiers")
         }
 
-        /** Dossier en cercle ; déplié : ses sous-dossiers (cercles, récursivement) puis ses fichiers (liste). */
+        /** Dossier en cercle ; déplié : ses sous-dossiers en branches et ses fichiers en fragments orbitaux. */
         fun rangeeDossier(d: String, parent: String, niveau: Int, fige: Boolean = false): Rangee {
             val cd = dossiers[d]
             val depliable = cd != null && (cd.sousDossiers.isNotEmpty() || cd.notes.isNotEmpty() || cd.pieces.isNotEmpty())
@@ -302,8 +361,8 @@ object ConstellationLayout {
                 sd.forEach { enfants += rangeeDossier(it, d, niveau + 1) }
                 if (cd.sousDossiers.size > sd.size) enfants += Rangee(null, plus(d, d, cd.sousDossiers.size - sd.size, "dossiers", feuille = true), feuille = true)
                 val fichiers = cd.notes.sortedWith(parDegre).map { etiquetteNote(it, d, true) } + cd.pieces.map { etiquettePiece(it, d, true) }
-                fichiers.take(6).forEach { enfants += Rangee(null, it, feuille = true) }
-                if (fichiers.size > 6) enfants += Rangee(null, plus(d, d, fichiers.size - 6, "autres", feuille = true), feuille = true)
+                fichiers.take(10).forEach { enfants += Rangee(null, it, feuille = true) }
+                if (fichiers.size > 10) enfants += Rangee(null, plus(d, d, fichiers.size - 10, "autres", feuille = true), feuille = true)
             }
             return Rangee(sous, null, enfants)
         }
@@ -316,9 +375,9 @@ object ConstellationLayout {
             val branches = c.sousDossiers.take(MAX_SOUS_DOSSIERS)
             branches.forEach { d -> rangees += rangeeDossier(d, cat, 1, cat == "Autres") }
             if (c.sousDossiers.size > branches.size) rangees += Rangee(null, plus(cat, c.chemin, c.sousDossiers.size - branches.size, "dossiers"))
-            val nbRacine = if (branches.isEmpty()) 5 else 3
+            val nbRacine = if (branches.isEmpty()) 8 else 6
             val fichiersRacine = c.notes.sortedWith(parDegre).map { etiquetteNote(it, cat, false) } + c.pieces.map { etiquettePiece(it, cat, false) }
-            fichiersRacine.take(nbRacine).forEach { rangees += Rangee(null, it) }
+            fichiersRacine.take(nbRacine).forEach { rangees += Rangee(null, it, feuille = true) }
             if (fichiersRacine.size > nbRacine) rangees += Rangee(null, plus(cat, c.chemin, fichiersRacine.size - nbRacine, "autres"))
             rangeesParCat[cat] = rangees
         }
@@ -332,8 +391,10 @@ object ConstellationLayout {
             val hauteur = if (rs.isEmpty()) 0f else rs.sumOf { it.hauteur.toDouble() }.toFloat()
             max(hauteur, 2 * RAYON_HUB + 40f)
         }
-        val rx = 128f
-        val ry = max(340f + min(m, 7) * 14f, poids.sum() / 2.3f)
+        // Le Graphe 2D doit rester compact : le calcul précédent additionnait presque
+        // toute la hauteur des branches sur l'ellipse, ce qui étirait l'orbe à l'excès.
+        val rx = 148f
+        val ry = max(310f + min(m, 7) * 15f, poids.sum() / 3.4f)
         val emplacements = positionsSurArc(m, rx, ry)
         val ordreEmplacements = emplacements.indices.sortedBy { i -> abs(emplacements[i].x) / rx + (emplacements[i].y + ry) / ry * 0.01f }
         // Emplacement de chaque catégorie, puis espacement pondéré par la taille réelle de chaque groupe.
@@ -397,11 +458,11 @@ object ConstellationLayout {
         val liens = liensTous.filter { it.de in notesAffichees && it.vers in notesAffichees }
 
         // ---- panneaux
-        val sansEntrant = notes.filter { (entrants[it.id] ?: 0) == 0 }.sortedBy { it.label.lowercase() }.map { it.label }
-        val toutesCibles = data.references.map { it.rawTarget.substringAfterLast('/').lowercase() }.toHashSet()
-        val piecesOrphelines = pieces.filter { it.name.lowercase() !in toutesCibles && it.path.lowercase() !in toutesCibles }.map { it.name }
-        val notesOrphelines = notes.filter { degre(it.id) == 0 }.map { it.label }
-        val orphelins = (notesOrphelines.sortedBy { it.lowercase() } + piecesOrphelines.sortedBy { it.lowercase() })
+        val sansEntrant = auditLiens.notesSansLienEntrant.map { "${it.id}.md" }
+        val orphelins = (
+            auditLiens.notesOrphelines.map { "${it.id}.md" } +
+                auditLiens.fichiersOrphelins.map { it.path }
+            ).sortedBy { it.lowercase() }
 
         // ---- bornes (cerveau, hubs avec leur texte, étiquettes)
         var minX = -RAYON_CERVEAU; var maxX = RAYON_CERVEAU; var minY = -RAYON_CERVEAU; var maxY = RAYON_CERVEAU + 30f
@@ -417,7 +478,7 @@ object ConstellationLayout {
         return Constellation(
             hubs = hubs, etiquettes = etiquettes, liens = liens, tousLiens = liensTous,
             sansLienEntrant = sansEntrant, orphelins = orphelins,
-            notesParHub = notesParHub, dossiers = dossiers, deplies = deplies, tagsParNote = data.tags.filterKeys { it in ids },
+            notesParHub = notesParHub, dossiers = dossiers, arborescence = racineComplete, deplies = deplies, tagsParNote = data.tags.filterKeys { it in ids },
             totalNotes = notes.size, totalLiens = liensTous.size, totalTags = compteTags.size, totalPieces = pieces.size,
             rayonCerveau = RAYON_CERVEAU,
             minX = minX, minY = minY, maxX = maxX, maxY = maxY
@@ -433,21 +494,22 @@ object ConstellationLayout {
         if (m <= 2) return positionsSurArc(m, rx, ry)
         val egales = positionsSurArc(m, rx, ry)
         // Ordre des emplacements le long de l'arc (de gauche à droite en passant par le haut) = ordre angulaire.
-        val ordre = egales.indices.sortedBy { i -> val a = atan2(egales[i].y, egales[i].x); if (a > 0.5f) a - 2 * PI_F else a }
+        val ordre = egales.indices.sortedBy { i ->
+            (atan2(egales[i].y, egales[i].x) + 2f * PI_F) % (2f * PI_F)
+        }
         val w = ordre.map { poids[it].coerceAtLeast(1f) }
         val total = w.sum()
         val fractions = FloatArray(m)
         var cumul = 0f
         ordre.forEachIndexed { k, i -> fractions[i] = (cumul + w[k] / 2f) / total; cumul += w[k] }
-        // Recale pour que les deux extrêmes restent aux bouts de l'arc (comme la répartition régulière).
-        val f0 = fractions[ordre.first()]; val f1 = fractions[ordre.last()]
-        return List(m) { i -> pointSurArc((fractions[i] - f0) / (f1 - f0).coerceAtLeast(1e-3f), rx, ry) }
+        // Chaque catégorie occupe le centre de son secteur sur 360°, pondéré par la taille de sa branche.
+        return List(m) { i -> pointSurArc(fractions[i], rx, ry) }
     }
 
     private const val PI_F = Math.PI.toFloat()
 
     private fun pointSurArc(f: Float, rx: Float, ry: Float): Pt {
-        val debut = Math.toRadians(172.0); val fin = Math.toRadians(368.0)
+        val debut = -Math.PI / 2.0; val fin = 3.0 * Math.PI / 2.0
         val pas = 600
         val longueurs = FloatArray(pas + 1)
         var prec = Pt(cos(debut).toFloat() * rx, sin(debut).toFloat() * ry)
@@ -461,7 +523,6 @@ object ConstellationLayout {
         val t = debut + (fin - debut) * i / pas
         return Pt(cos(t).toFloat() * rx, sin(t).toFloat() * ry)
     }
-
     /**
      * Branches d'une catégorie : chaque rangée (un sous-dossier en cercle, ou un fichier de la racine) est posée à côté
      * du hub, vers l'extérieur ; les fichiers d'un sous-dossier déplié prolongent sa branche un cran plus loin.
@@ -471,36 +532,75 @@ object ConstellationLayout {
         if (rangees.isEmpty()) return emptyList<Hub>() to emptyList()
         val hubs = mutableListOf<Hub>()
         val out = mutableListOf<Etiquette>()
+
+        // Tous les fichiers d'un même dossier partagent une seule explosion circulaire.
+        // Ils ne sont surtout pas répartis entre les colonnes gauche/droite des sous-dossiers.
+        val fichiers = rangees.filter { estFichierEnEclat(it) }
+        fichiers.forEachIndexed { index, r ->
+            placerEclat(r, hub.pos.x, hub.rayon, hub.pos.y, 1f, index, fichiers.size, out)
+        }
+
+        val branches = rangees.filterNot { estFichierEnEclat(it) }
         val cote = abs(hub.pos.x) > 60f
         val colonnes: List<Pair<Float, List<Rangee>>> =
-            if (cote) listOf((if (hub.pos.x > 0) 1f else -1f) to rangees)
-            else listOf(-1f to rangees.filterIndexed { i, _ -> i % 2 == 0 }, 1f to rangees.filterIndexed { i, _ -> i % 2 == 1 })
+            if (cote) listOf((if (hub.pos.x > 0) 1f else -1f) to branches)
+            else listOf(-1f to branches.filterIndexed { i, _ -> i % 2 == 0 }, 1f to branches.filterIndexed { i, _ -> i % 2 == 1 })
         for ((sx, rs) in colonnes) {
             if (rs.isEmpty()) continue
             val hauteur = rs.sumOf { it.hauteur.toDouble() }.toFloat()
             // Hub du haut : les branches montent un peu (elles ne doivent pas redescendre vers le cerveau).
-            var y = hub.pos.y - hauteur / 2f - (if (!cote && hub.pos.y < 0) hauteur * 0.25f else 0f)
+            val y0 = hub.pos.y - hauteur / 2f - (if (!cote && hub.pos.y < 0) hauteur * 0.25f else 0f)
+            var y = y0
             for (r in rs) {
-                placer(r, hub.pos.x, hub.rayon, y + r.hauteur / 2f, sx, hubs, out)
+                val cy = y + r.hauteur / 2f
+                placer(r, hub.pos.x, hub.rayon, cy, sx, hubs, out)
                 y += r.hauteur
             }
         }
         return hubs to out
     }
 
+    private fun estFichierEnEclat(r: Rangee): Boolean =
+        r.feuille && (r.tete?.type == TypeEtiquette.NOTE || r.tete?.type == TypeEtiquette.FICHIER)
+
+    /**
+     * Les fichiers s'épanouissent en éventail autour du dossier : une demi-orbite de fragments,
+     * au lieu d'une colonne compacte. L'ordre reste stable et chaque étiquette reste sélectionnable.
+     */
+    private fun placerEclat(
+        r: Rangee, xParent: Float, rParent: Float, cy: Float, sx: Float,
+        index: Int, count: Int, out: MutableList<Etiquette>
+    ) {
+        val e = r.tete ?: return
+        // Spirale à angle d'or : les fragments occupent tout le tour du dossier, sans colonne verticale.
+        // Un second anneau s'ouvre automatiquement si le nombre d'éléments augmente.
+        val couche = index / 8
+        val rang = index % 8
+        val angle = -PI_F / 2f + rang * 2.3999632f + couche * 0.31f
+        val rayon = rParent + 82f + couche * 48f + max(e.w, e.h) * 0.08f
+        val x = xParent + cos(angle) * rayon
+        val y = cy + sin(angle) * rayon
+        out += e.copy(pos = Pt(x, y))
+    }
+
     /** Pose une rangée à droite (sx = 1) ou à gauche (sx = -1) de son parent, puis ses enfants un cran plus loin. */
     private fun placer(r: Rangee, xParent: Float, rParent: Float, cy: Float, sx: Float, hubs: MutableList<Hub>, out: MutableList<Etiquette>) {
         if (r.sous != null) {
-            val sous = r.sous.copy(pos = Pt(xParent + sx * (rParent + 30f + r.sous.rayon), cy))
+            val sous = r.sous.copy(pos = Pt(xParent + sx * (rParent + 78f + r.sous.rayon), cy))
             hubs += sous
             val total = r.enfants.sumOf { it.hauteur.toDouble() }.toFloat()
             var y = cy - total / 2f
-            for (e in r.enfants) {
-                placer(e, sous.pos.x, sous.rayon, y + e.hauteur / 2f, sx, hubs, out)
+            for ((index, e) in r.enfants.withIndex()) {
+                val cy = y + e.hauteur / 2f
+                val fichiers = r.enfants.count { estFichierEnEclat(it) }
+                if (estFichierEnEclat(e)) {
+                    val rang = r.enfants.take(index).count { estFichierEnEclat(it) }
+                    placerEclat(e, sous.pos.x, sous.rayon, sous.pos.y, sx, rang, fichiers, out)
+                } else placer(e, sous.pos.x, sous.rayon, cy, sx, hubs, out)
                 y += e.hauteur
             }
         } else if (r.tete != null) {
-            out += r.tete.copy(pos = Pt(xParent + sx * (rParent + (if (r.feuille) 26f else 24f) + r.tete.w / 2f), cy))
+            out += r.tete.copy(pos = Pt(xParent + sx * (rParent + (if (r.feuille) 54f else 46f) + r.tete.w / 2f), cy))
         }
     }
 
@@ -522,7 +622,7 @@ object ConstellationLayout {
             longueurs[i] = longueurs[i - 1] + (p - prec).len(); prec = p
         }
         val total = longueurs[pas]
-        val fractions = if (m == 2) listOf(0.27f, 0.73f) else List(m) { it / (m - 1f) }
+        val fractions = if (m == 2) listOf(0.25f, 0.75f) else List(m) { (it + 0.5f) / m }
         return fractions.map { f ->
             val cible = f * total
             var i = longueurs.indexOfFirst { it >= cible }.coerceAtLeast(0)
@@ -573,54 +673,158 @@ object ConstellationLayout {
         }
     }
 
-    /** Écarte les étiquettes qui se chevauchent entre elles, ou qui recouvrent un hub ou le cerveau. */
-    private fun relacher(etiquettes: MutableList<Etiquette>, hubs: List<Hub>) {
-        if (etiquettes.isEmpty()) return
-        val xs = FloatArray(etiquettes.size) { etiquettes[it].pos.x }
-        val ys = FloatArray(etiquettes.size) { etiquettes[it].pos.y }
-        val fixes = BooleanArray(etiquettes.size) { etiquettes[it].type == TypeEtiquette.TAG }
-        val marge = 6f
-        repeat(120) {
+    /**
+     * Résolution globale des collisions de la scène : cercles de dossiers entre eux, étiquettes entre elles,
+     * étiquettes contre dossiers et noyau central. Les positions sont corrigées ensemble afin qu'un dossier
+     * « Jarvis » ne puisse pas recouvrir le hub des pièces jointes, même si le coffre évolue.
+     *
+     * Les liens restent cohérents : ils sont recalculés à partir des positions finales des hubs et étiquettes.
+     */
+    private fun relacher(etiquettes: MutableList<Etiquette>, hubs: MutableList<Hub>) {
+        val hx = FloatArray(hubs.size) { hubs[it].pos.x }
+        val hy = FloatArray(hubs.size) { hubs[it].pos.y }
+        val ex = FloatArray(etiquettes.size) { etiquettes[it].pos.x }
+        val ey = FloatArray(etiquettes.size) { etiquettes[it].pos.y }
+        val marge = 12f
+        val rayonNoyau = RAYON_CERVEAU + 18f
+
+        fun direction(dx: Float, dy: Float, i: Int, j: Int): Pt {
+            val d = hypot(dx, dy)
+            if (d > 1e-3f) return Pt(dx / d, dy / d)
+            val a = ((i + 1) * 17 + (j + 1) * 31) * 0.173f
+            return Pt(cos(a), sin(a))
+        }
+        fun pousserEtiquetteHorsCercle(i: Int, centre: Pt, rayon: Float): Boolean {
+            val e = etiquettes[i]
+            val nx = centre.x.coerceIn(ex[i] - e.w / 2f, ex[i] + e.w / 2f)
+            val ny = centre.y.coerceIn(ey[i] - e.h / 2f, ey[i] + e.h / 2f)
+            val dx = nx - centre.x; val dy = ny - centre.y
+            val d = hypot(dx, dy)
+            if (d >= rayon) return false
+            val dir = if (d > 1e-3f) Pt(dx / d, dy / d) else direction(ex[i] - centre.x, ey[i] - centre.y, i, i + 97)
+            val demiLargeur = abs(dir.x) * e.w / 2f + abs(dir.y) * e.h / 2f
+            val pousser = rayon - d + (if (d < 1e-3f) demiLargeur else 0f) + 1f
+            ex[i] += dir.x * pousser
+            ey[i] += dir.y * pousser
+            return true
+        }
+
+        for (iteration in 0 until 1200) {
             var bouge = false
+
+            // 1) Cercles de dossiers / sous-dossiers / pièces jointes entre eux.
+            for (i in hubs.indices) {
+                if (hubs[i].rayon <= 0f) continue
+                for (j in i + 1 until hubs.size) {
+                    if (hubs[j].rayon <= 0f) continue
+                    val dx = hx[j] - hx[i]; val dy = hy[j] - hy[i]
+                    val dir = direction(dx, dy, i, j)
+                    val distance = hypot(dx, dy)
+                    val penetration = hubs[i].rayon + hubs[j].rayon + marge - distance
+                    if (penetration > 0f) {
+                        val demi = penetration * 0.5f
+                        hx[i] -= dir.x * demi; hy[i] -= dir.y * demi
+                        hx[j] += dir.x * demi; hy[j] += dir.y * demi
+                        bouge = true
+                    }
+                }
+            }
+
+            // 2) Cercles contre le noyau et étiquettes contre le noyau / chaque cercle.
+            for (i in hubs.indices) {
+                val r = hubs[i].rayon
+                if (r <= 0f) continue
+                val dir = direction(hx[i], hy[i], i, i + 211)
+                val d = hypot(hx[i], hy[i])
+                val penetration = rayonNoyau + r + marge - d
+                if (penetration > 0f) {
+                    hx[i] += dir.x * penetration
+                    hy[i] += dir.y * penetration
+                    bouge = true
+                }
+            }
+            for (i in etiquettes.indices) {
+                if (pousserEtiquetteHorsCercle(i, Pt(0f, 0f), rayonNoyau)) bouge = true
+                for (j in hubs.indices) {
+                    val r = hubs[j].rayon
+                    if (r > 0f && pousserEtiquetteHorsCercle(i, Pt(hx[j], hy[j]), r + marge)) bouge = true
+                }
+            }
+
+            // 3) Étiquettes entre elles (rectangles, et non simples points).
             for (i in etiquettes.indices) for (j in i + 1 until etiquettes.size) {
                 val a = etiquettes[i]; val b = etiquettes[j]
-                val dx = xs[j] - xs[i]; val dy = ys[j] - ys[i]
+                val dx = ex[j] - ex[i]; val dy = ey[j] - ey[i]
                 val px = (a.w + b.w) / 2f + marge - abs(dx)
                 val py = (a.h + b.h) / 2f + marge - abs(dy)
-                if (px > 0 && py > 0) {
+                if (px > 0f && py > 0f) {
                     bouge = true
-                    val fi = if (fixes[i]) 0f else if (fixes[j]) 1f else 0.5f
-                    val fj = 1f - fi
                     if (py < px) {
-                        val s = if (dy >= 0) 1f else -1f
-                        ys[i] -= s * py * fi; ys[j] += s * py * fj
+                        val s = if (dy >= 0f) 1f else -1f
+                        ey[i] -= s * py * 0.5f; ey[j] += s * py * 0.5f
                     } else {
-                        val s = if (dx >= 0) 1f else -1f
-                        xs[i] -= s * px * fi; xs[j] += s * px * fj
+                        val s = if (dx >= 0f) 1f else -1f
+                        ex[i] -= s * px * 0.5f; ex[j] += s * px * 0.5f
                     }
                 }
             }
-            // Obstacles fixes : cerveau et hubs (cercles), plus leur texte sous l'icône.
-            val obstacles = hubs.filter { it.rayon > 0f }.map { it.pos to it.rayon + 8f } + (Pt(0f, 0f) to RAYON_CERVEAU + 10f)
-            for (i in etiquettes.indices) {
-                if (fixes[i]) continue
-                val e = etiquettes[i]
-                for ((c, r) in obstacles) {
-                    // Point du rectangle le plus proche du centre du cercle.
-                    val nx = c.x.coerceIn(xs[i] - e.w / 2f, xs[i] + e.w / 2f)
-                    val ny = c.y.coerceIn(ys[i] - e.h / 2f, ys[i] + e.h / 2f)
-                    val d = hypot(nx - c.x, ny - c.y)
-                    if (d < r) {
-                        bouge = true
-                        val dir = if (d > 1e-3f) Pt((nx - c.x) / d, (ny - c.y) / d) else Pt(xs[i] - c.x, ys[i] - c.y).norm()
-                        val push = r - d + 1f
-                        xs[i] += dir.x * push; ys[i] += dir.y * push
-                    }
-                }
-            }
-            if (!bouge) return@repeat
+
+            if (!bouge) break
         }
-        for (i in etiquettes.indices) etiquettes[i] = etiquettes[i].copy(pos = Pt(xs[i], ys[i]))
+
+        // Placement final déterministe des étiquettes.
+        // Une simple poussée successive peut osciller entre deux cercles voisins : une étiquette
+        // sortie de Jarvis peut alors rentrer dans Société, puis revenir dans Jarvis. On cherche
+        // donc, pour chaque étiquette, la position libre la plus proche de sa position résolue,
+        // en tenant compte simultanément du noyau, de tous les hubs et des étiquettes déjà posées.
+        fun positionLibre(i: Int, x: Float, y: Float): Boolean {
+            val e = etiquettes[i]
+            val coreX = 0f.coerceIn(x - e.w / 2f, x + e.w / 2f)
+            val coreY = 0f.coerceIn(y - e.h / 2f, y + e.h / 2f)
+            if (hypot(coreX, coreY) < rayonNoyau + 0.5f) return false
+
+            for (j in hubs.indices) {
+                val r = hubs[j].rayon
+                if (r <= 0f) continue
+                val nx = hx[j].coerceIn(x - e.w / 2f, x + e.w / 2f)
+                val ny = hy[j].coerceIn(y - e.h / 2f, y + e.h / 2f)
+                if (hypot(nx - hx[j], ny - hy[j]) < r + marge + 0.5f) return false
+            }
+
+            for (j in 0 until i) {
+                val autre = etiquettes[j]
+                val dx = abs(x - ex[j])
+                val dy = abs(y - ey[j])
+                if (dx < (e.w + autre.w) / 2f + marge + 0.5f &&
+                    dy < (e.h + autre.h) / 2f + marge + 0.5f) return false
+            }
+            return true
+        }
+
+        for (i in etiquettes.indices) {
+            if (positionLibre(i, ex[i], ey[i])) continue
+            val origineX = ex[i]
+            val origineY = ey[i]
+            var rayonRecherche = 14f
+            var trouve = false
+            while (!trouve) {
+                for (directionIndex in 0 until 48) {
+                    val angle = 2f * PI_F * directionIndex / 48f
+                    val x = origineX + cos(angle) * rayonRecherche
+                    val y = origineY + sin(angle) * rayonRecherche
+                    if (positionLibre(i, x, y)) {
+                        ex[i] = x
+                        ey[i] = y
+                        trouve = true
+                        break
+                    }
+                }
+                rayonRecherche += 14f
+            }
+        }
+
+        for (i in hubs.indices) hubs[i] = hubs[i].copy(pos = Pt(hx[i], hy[i]))
+        for (i in etiquettes.indices) etiquettes[i] = etiquettes[i].copy(pos = Pt(ex[i], ey[i]))
     }
 
     /** Point d'ancrage d'une flèche sur le bord d'une étiquette, du côté d'où vient le trait. */

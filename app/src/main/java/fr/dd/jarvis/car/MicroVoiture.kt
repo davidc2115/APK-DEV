@@ -125,30 +125,59 @@ class MicroVoiture(private val ctx: CarContext) {
     /** Vrai si la dernière écoute a utilisé le micro du téléphone (repli). */
     @Volatile var telephone = false
         private set
+    /** Motif du repli, affiché dans la conversation pour savoir quel micro a réellement servi. */
+    @Volatile var diagnosticVoiture: String? = null
+        private set
 
     /** Bloquant : à appeler hors du fil principal. [attenteMs] = délai pour commencer à parler. */
-    fun ecouter(attenteMs: Long, maxMs: Long = 15_000): Ecoute {
+    fun ecouter(attenteMs: Long, maxMs: Long = 45_000): Ecoute {
         val am = ctx.getSystemService(AudioManager::class.java)
-        val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
-            .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
-            .build()
-        runCatching { am.requestAudioFocus(focus) }
+        var voiture: CarAudioRecord? = null
+        var erreurVoiture = "micro voiture indisponible"
         try {
-            // 1) Micro de la voiture (Android Auto le transmet au téléphone).
-            val voiture = runCatching { CarAudioRecord.create(ctx) }.getOrNull()
-            if (voiture != null) {
-                val r = runCatching {
-                    voiture.startRecording()
-                    try { boucle(attenteMs, maxMs, maxOf(CarAudioRecord.AUDIO_CONTENT_BUFFER_SIZE, Pcm.TRAME)) { b -> voiture.read(b, 0, b.size) } }
-                    finally { runCatching { voiture.stopRecording() } }
-                }.getOrNull()
-                if (r != null && r !is Ecoute.Erreur) { telephone = false; return r }
+            // CarAudioRecord fournit du PCM audio/l16 à 16 kHz, par blocs de 512 octets maximum.
+            voiture = try { CarAudioRecord.create(ctx) } catch (e: Throwable) {
+                erreurVoiture = "création CarAudioRecord : ${e.message ?: e.javaClass.simpleName}"
+                null
             }
-            // 2) Repli : micro du téléphone.
+            val record = voiture
+            if (record != null) {
+                val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
+                    .setAudioAttributes(AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                    .setOnAudioFocusChangeListener { state ->
+                        if (state == AudioManager.AUDIOFOCUS_LOSS) runCatching { record.stopRecording() }
+                    }
+                    .build()
+                val obtenu = runCatching { am.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED }.getOrDefault(false)
+                if (obtenu) {
+                    try {
+                        val r = try {
+                            record.startRecording()
+                            boucle(attenteMs, maxMs, CarAudioRecord.AUDIO_CONTENT_BUFFER_SIZE,
+                                ordreOctetsForce = true) { b -> record.read(b, 0, minOf(b.size, CarAudioRecord.AUDIO_CONTENT_BUFFER_SIZE)) }
+                        } catch (e: Throwable) {
+                            erreurVoiture = "lecture micro voiture : ${e.message ?: e.javaClass.simpleName}"
+                            null
+                        } finally { runCatching { record.stopRecording() } }
+                        if (r != null && r !is Ecoute.Erreur) {
+                            telephone = false
+                            diagnosticVoiture = null
+                            return r
+                        }
+                        if (r is Ecoute.Erreur) erreurVoiture = r.message
+                    } finally { runCatching { am.abandonAudioFocusRequest(focus) } }
+                } else {
+                    erreurVoiture = "priorité audio refusée par Android Auto"
+                }
+            }
+            // Repli explicite : la cause reste visible au lieu de masquer l'échec du micro voiture.
             telephone = true
+            diagnosticVoiture = erreurVoiture
             return telephone(attenteMs, maxMs)
         } finally {
-            runCatching { am.abandonAudioFocusRequest(focus) }
+            if (voiture == null) telephone = true
         }
     }
 
@@ -168,9 +197,9 @@ class MicroVoiture(private val ctx: CarContext) {
     }
 
     /** Lit le flux jusqu'à la fin de la phrase (ou le silence). [lire] remplit le tampon et renvoie le nombre d'octets. */
-    private fun boucle(attenteMs: Long, maxMs: Long, taille: Int, lire: (ByteArray) -> Int): Ecoute {
+    private fun boucle(attenteMs: Long, maxMs: Long, taille: Int, ordreOctetsForce: Boolean? = null, lire: (ByteArray) -> Int): Ecoute {
         val tout = ByteArrayOutputStream()
-        var grosBoutiste: Boolean? = null
+        var grosBoutiste: Boolean? = ordreOctetsForce
         var fin: FinDePhrase? = null
         val calLE = ArrayList<Double>(); val calBE = ArrayList<Double>()
         val debut = System.currentTimeMillis()
@@ -191,13 +220,13 @@ class MicroVoiture(private val ctx: CarContext) {
                 rempli += k; i += k
                 if (rempli < Pcm.TRAME) break
                 rempli = 0
-                if (grosBoutiste == null) {
-                    // L'ordre des octets du flux n'est pas garanti : le bon est celui où le bruit de fond est faible.
+                if (fin == null) {
+                    // audio/l16 (CarAudioRecord) est big-endian ; AudioRecord téléphone est little-endian.
+                    // On ne devine l'ordre que pour une source dont le format n'est pas spécifié.
                     calLE += Pcm.rms(trame, 0, Pcm.TRAME, false); calBE += Pcm.rms(trame, 0, Pcm.TRAME, true)
                     if (calLE.size >= 15) {
-                        // Silence numérique parfait : aucun vrai micro ne donne ça (micro refusé par l'hôte) → repli.
                         if (calLE.sum() == 0.0 && calBE.sum() == 0.0) return Ecoute.Erreur("micro muet")
-                        val be = calBE.sum() < calLE.sum()
+                        val be = ordreOctetsForce ?: (calBE.sum() < calLE.sum())
                         grosBoutiste = be
                         fin = FinDePhrase((if (be) calBE else calLE).minOrNull() ?: 100.0)
                     }
