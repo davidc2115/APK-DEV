@@ -19,6 +19,7 @@ import fr.dd.jarvis.device.EventInfo
 import fr.dd.jarvis.device.PhoneControl
 import fr.dd.jarvis.service.CarBridge
 import fr.dd.jarvis.service.JarvisService
+import fr.dd.jarvis.voice.JournalVoix
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
