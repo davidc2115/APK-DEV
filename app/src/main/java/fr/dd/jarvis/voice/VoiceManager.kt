@@ -860,7 +860,7 @@ class VoiceManager(private val ctx: Context) {
     // ============================================================================================ sons
 
     /** Bip sur le haut-parleur du téléphone (son système de l'assistant). */
-    private val attrBip = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
+    private val attrBip = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
 
     /**
      * Petit carillon : deux notes montantes (« je t'écoute ») ou descendantes (« fin de la conversation »), puis [puis].
