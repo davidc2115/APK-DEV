@@ -921,6 +921,14 @@ class VoiceManager(private val ctx: Context) {
 
     private var barge: DetecteurCoupure? = null
     @Volatile private var paroleEnCours: Parole? = null
+    /** Actions différées (ex. relancer la musique) exécutées après la fin audio réelle de la réponse. */
+    private val apresParole = java.util.concurrent.CopyOnWriteArrayList<() -> Unit>()
+
+    fun apresFinParole(action: () -> Unit) {
+        main.post {
+            if (paroleEnCours != null) apresParole.add(action) else action()
+        }
+    }
     private var appelActif = false
     private var focus: AudioFocusRequest? = null
     private var focusLegacy = false
@@ -1529,7 +1537,13 @@ class VoiceManager(private val ctx: Context) {
                     // démarrait sur un micro encore pris ou en reconfiguration → « erreur 7 (après parole) » puis fin.
                     // Bluetooth / autoradio : le son sort avec du retard (tampon A2DP) : on attend la fin réelle de la phrase.
                     val delai = when { externe -> 1000L; etaitAppel -> 600L; b != null -> 300L; else -> 150L }
-                    main.postDelayed({ finVoix = System.currentTimeMillis(); onDone() }, delai)
+                    main.postDelayed({
+                        finVoix = System.currentTimeMillis()
+                        val actions = apresParole.toList()
+                        apresParole.clear()
+                        actions.forEach { runCatching { it() } }
+                        onDone()
+                    }, delai)
                 }
             }
             if (b != null) Thread({ b.stopEtAttendre(700); suite.run() }, "jarvis-fin-voix").start() else suite.run()
