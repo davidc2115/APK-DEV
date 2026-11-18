@@ -69,6 +69,20 @@ class Brain(
                 return fr.dd.jarvis.device.CommandeMedia.executer(app, a, app.enVoiture)
             }
         }
+        // Guidage vers le domicile : résolution déterministe du lieu mémorisé avant l'appel au modèle.
+        // Évite qu'une reformulation de « chez moi / mon domicile » soit prise pour une adresse inconnue.
+        if (!pourHermes) history.lastOrNull()?.takeIf { it.fromUser }?.let { m ->
+            val n = fr.dd.jarvis.societe.core.normaliser(m.text)
+            val demandeGuidage = Regex("\\b(guide|guides|guider|emmene|emmenes|ramene|ramenes|conduis|itineraire|navigue|rentre|retourne)\\b").containsMatchIn(n) ||
+                Regex("\\b(aller|va)\\s+(chez|a la|a mon|a ma)\\b").containsMatchIn(n)
+            val demandeDomicile = Regex("\\b(chez moi|chez nous|mon domicile|ma maison|a la maison|au domicile|mon adresse)\\b").containsMatchIn(n)
+            if (demandeGuidage && demandeDomicile) {
+                if (fr.dd.jarvis.device.Faits.lieux(app)["domicile"].isNullOrBlank())
+                    return "Je n'ai pas d'adresse de domicile enregistrée dans ma mémoire des lieux. Je ne lance pas un guidage vers une adresse supposée."
+                onStatus("🧭 Guidage vers ton domicile…")
+                return tools.execute("naviguer", JSONObject().put("destination", "domicile")).text
+            }
+        }
         // Routine déclenchée par une phrase (« Jarvis, je pars ») : toutes ses actions d'un coup.
         if (!pourHermes) history.lastOrNull()?.takeIf { it.fromUser }?.let { m ->
             fr.dd.jarvis.device.Routines.parPhrase(app, m.text)?.let { r ->
