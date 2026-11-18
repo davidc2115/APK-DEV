@@ -1,5 +1,7 @@
 package fr.dd.jarvis.car
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.media.MediaDescription
 import android.media.MediaMetadata
 import android.media.browse.MediaBrowser
@@ -163,9 +165,21 @@ class JarvisMediaService : MediaBrowserService() {
 
     private fun icone(nom: String): Uri = Uri.parse("android.resource://$packageName/drawable/$nom")
 
+    // Android Auto n'affiche pas toujours correctement les URI android.resource pointant vers
+    // des drawables XML/PNG. Pour les deux visuels du dragon, fournir directement le Bitmap
+    // dans MediaDescription : c'est le format artwork le plus fiable pour les tuiles voiture.
+    private val artworkDragon by lazy {
+        mapOf(
+            "dragon_tete" to BitmapFactory.decodeResource(resources, R.drawable.dragon_tete),
+            "auto_dragon_accueil" to BitmapFactory.decodeResource(resources, R.drawable.auto_dragon_accueil)
+        )
+    }
+
     private fun element(id: String, titre: String, sousTitre: String = "", icone: String = "auto_micro",
                         dossier: Boolean = false, style: Int? = null): MediaBrowser.MediaItem {
-        val d = MediaDescription.Builder().setMediaId(id).setTitle(titre).setIconUri(icone(icone))
+        val d = MediaDescription.Builder().setMediaId(id).setTitle(titre)
+        val artwork = artworkDragon[icone]
+        if (artwork != null) d.setIconBitmap(artwork) else d.setIconUri(icone(icone))
         if (sousTitre.isNotBlank()) d.setSubtitle(sousTitre)
         if (style != null || id == ONGLET_JARVIS) d.setExtras(Bundle().apply {
             if (style != null) putInt(STYLE_JOUABLE, style)
