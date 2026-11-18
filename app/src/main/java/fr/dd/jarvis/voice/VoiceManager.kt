@@ -916,7 +916,7 @@ class VoiceManager(private val ctx: Context) {
 
     // ============================================================================================ voix de JARVIS
 
-    private var barge: BargeIn? = null
+    private var barge: DetecteurCoupure? = null
     @Volatile private var paroleEnCours: Parole? = null
     private var appelActif = false
     private var focus: AudioFocusRequest? = null
@@ -1347,7 +1347,26 @@ class VoiceManager(private val ctx: Context) {
         private fun voixLancee() {
             Presence.parole(true)
             if (coupe) main.post {
-                if (!fini.get() && barge == null && coupureAutorisee()) barge = BargeIn { main.post { if (!fini.get() && coupureAutorisee()) { JournalVoix.noter(nom, "coupure de parole : voix entendue pendant la réponse"); arreter(sansSuite = false) } } }.also { it.start() }
+                if (!fini.get() && barge == null && coupureAutorisee()) {
+                    val interrompre = {
+                        main.post {
+                            if (!fini.get() && coupureAutorisee()) {
+                                JournalVoix.noter(nom, "coupure de parole : voix entendue au micro pendant la réponse")
+                                arreter(sansSuite = false)
+                            }
+                        }
+                    }
+                    // En projection, le micro du téléphone n'entend pas nécessairement la voix dans l'habitacle :
+                    // écouter CarAudioRecord (micro de la voiture) pendant la synthèse, comme pour la dictée.
+                    val car = if (sortieVoitureForcee) fr.dd.jarvis.car.NavigationVoiture.contexte else null
+                    barge = if (car != null) BargeInVoiture(car, interrompre).also {
+                        JournalVoix.noter(nom, "coupure de parole branchée sur le micro Android Auto")
+                        it.start()
+                    } else BargeIn(interrompre).also {
+                        JournalVoix.noter(nom, "coupure de parole branchée sur le micro du téléphone")
+                        it.start()
+                    }
+                }
             }
         }
 
