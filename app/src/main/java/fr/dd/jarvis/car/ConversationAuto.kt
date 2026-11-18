@@ -26,7 +26,11 @@ object ConversationAuto {
     @Volatile private var enCours = false
     private val arret = Regex("^(merci|c'est tout|c est tout|stop|arrete|termine|fin|au revoir|laisse tomber|ca suffit)\\b.*")
 
-    fun possible(app: JarvisApp): Boolean = app.enVoiture && !enCours && NavigationVoiture.contexte != null &&
+    fun possible(app: JarvisApp): Boolean = app.enVoiture && !enCours &&
+        // La présence d'un CarContext ne garantit pas que le micro de projection soit réellement accessible.
+        // Si Android Auto ne fournit pas CarAudioRecord, on garde le chemin micro téléphone au lieu d'ouvrir
+        // une conversation voiture vouée à échouer sans écouter.
+        NavigationVoiture.microVoiture() != null &&
         runCatching { app.llm.groq.disponible() }.getOrDefault(false)
 
     /** Lance la conversation ; [fin] est appelé (fil principal) quand elle se termine, quelle qu'en soit la raison. */
