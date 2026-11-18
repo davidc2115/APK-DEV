@@ -664,7 +664,7 @@ class JarvisService : Service() {
                 // Android Auto : conversation mains-libres continue après chaque réponse.
                 // Le filtrage anti-écho de VoiceManager protège la réécoute des haut-parleurs de la voiture.
                 // Bluetooth seul conserve l'ancien comportement prudent, sauf si JARVIS pose une question.
-                relancer = awake && (voice?.sortieVoitureForcee == true || app.enVoiture || voice?.sortieExterne() != true || reply.trimEnd().endsWith("?"))
+                relancer = false
                 // Échange abandonné entre-temps (déverrouillage prioritaire) : la réponse reste écrite mais n'est pas dite.
                 if (gen != generation) flux?.arreter(sansSuite = true) else flux?.finir(reply) ?: run { busy = false }
             }
