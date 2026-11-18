@@ -312,6 +312,9 @@ class JarvisService : Service() {
      */
     private fun demandeExterne(essai: Int = 0) {
         if (!running) return
+        // Le bouton Play d'Android Auto peut arriver avant que JarvisApp.enVoiture soit actualisé.
+        // Force le routage média voiture pour le bip et la voix de cette session, même si le booléen est en retard.
+        voice?.sortieVoitureForcee = true
         // La voiture envoie parfois deux fois le même appui (▶ puis « jouer depuis la recherche ») : un seul bip.
         if (essai == 0) {
             val t = System.currentTimeMillis()
