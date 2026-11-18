@@ -91,17 +91,19 @@ object NavigationVoiture {
     /** Vrai si Android Auto a accepté la demande ; faux s'il faut se rabattre sur le téléphone. */
     suspend fun lancer(destination: String, point: Pair<Double, Double>? = null): Boolean {
         val c = contexte ?: return false
-        // Sans coordonnées vérifiées, ACTION_NAVIGATE avec geo:0,0?q= peut seulement ouvrir une recherche
-        // et l'hôte peut accepter l'intent sans démarrer le guidage. Dans ce cas, laisser ToolBox lancer
-        // Waze / Google Maps directement avec l'adresse plutôt que d'annoncer un faux démarrage.
-        val coord = point ?: return false
-        if (coord.first == 0.0 && coord.second == 0.0) return false
+        if (destination.isBlank()) return false
+        if (point != null && (point.first == 0.0 && point.second == 0.0)) return false
 
-        // Android Auto accepte geo:latitude,longitude ; ajouter aussi q= avec le libellé évite que certains hôtes
-        // ouvrent seulement la carte sans sélectionner réellement la destination.
-        val coordonnees = listOf(
-            Uri.parse("geo:${coord.first},${coord.second}?q=${coord.first},${coord.second}(${Uri.encode(destination)})"),
-            Uri.parse("geo:${coord.first},${coord.second}")
+        // geo:0,0?q=adresse est le format de repli Android Auto quand le géocodage GPS n'a pas fourni
+        // de coordonnées. Les deux variantes sont tentées car les hôtes voiture ne traitent pas tous
+        // de la même façon la requête q= et les coordonnées explicites.
+        val encoded = Uri.encode(destination)
+        val coordonnees = if (point != null) listOf(
+            Uri.parse("geo:${point.first},${point.second}?q=${point.first},${point.second}(${encoded})"),
+            Uri.parse("geo:${point.first},${point.second}")
+        ) else listOf(
+            Uri.parse("geo:0,0?q=$encoded"),
+            Uri.parse("geo:0,0?q=$encoded&mode=d")
         )
 
         return withContext(Dispatchers.Main) {
@@ -110,7 +112,7 @@ object NavigationVoiture {
                     c.startCarApp(Intent(CarContext.ACTION_NAVIGATE).setData(uri))
                 }.exceptionOrNull()
                 if (erreur == null) {
-                    fr.dd.jarvis.voice.JournalVoix.noter("navigation", "ACTION_NAVIGATE accepté par Android Auto : $uri")
+                    fr.dd.jarvis.voice.JournalVoix.noter("navigation", "ACTION_NAVIGATE transmis à Android Auto : $uri")
                     return@withContext true
                 }
                 fr.dd.jarvis.voice.JournalVoix.noter("navigation", "ACTION_NAVIGATE refusé ($uri) : ${erreur.message ?: erreur.javaClass.simpleName}")
