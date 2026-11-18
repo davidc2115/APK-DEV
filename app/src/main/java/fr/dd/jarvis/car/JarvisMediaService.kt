@@ -422,7 +422,7 @@ class JarvisMediaService : MediaBrowserService() {
                 enCours = true; veille?.cancel()
                 afficher("🎙️ Je t'écoute…", "Parle maintenant", PlaybackState.STATE_PLAYING)
             }
-            ActiviteVoiture.Etape.PARTIEL -> if (enCours) afficher("🎙️ « ${e.texte.take(90)} »", "…", PlaybackState.STATE_PLAYING)
+            ActiviteVoiture.Etape.PARTIEL -> if (enCours) afficher("JARVIS", "Écoute en cours…", PlaybackState.STATE_PLAYING)
             ActiviteVoiture.Etape.REFLEXION -> if (enCours) afficher("JARVIS", "Traitement de la demande…", PlaybackState.STATE_BUFFERING)
             ActiviteVoiture.Etape.REPONSE -> {
                 derniere = propre(e.texte)
