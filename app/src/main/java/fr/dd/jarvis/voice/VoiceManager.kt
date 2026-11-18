@@ -1436,6 +1436,7 @@ class VoiceManager(private val ctx: Context) {
                         if (nSilence <= 0) break
                         offset += nSilence
                     }
+                    ecrits += offset / (2L * a.canaux)
                     JournalVoix.noter(nom, "pré-ouverture sortie voiture : ${offset / (a.frequence * 2L * a.canaux / 1000L).coerceAtLeast(1)} ms")
                 }
                 voixLancee()
