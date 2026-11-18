@@ -1328,7 +1328,7 @@ class VoiceManager(private val ctx: Context) {
             // Sur l'autoradio / un casque Bluetooth, le micro entend la voix de Jarvis sans annulation d'écho : la « coupure
             // en reprenant la parole » se déclencherait sur sa propre voix. Elle reste active sur le téléphone seul.
             externe = sortieBluetooth()
-            coupe = bargeIn && micOk() && !externe
+            coupe = bargeIn && micOk() && (!externe || sortieVoitureForcee)
             val appel = coupe && duplex && hautParleurSeul() && entrerModeAppel()
             // En Bluetooth/A2DP et Android Auto, l'usage MEDIA garantit le routage vers l'autoradio.
             // Micro du casque Bluetooth en service : la voix passe par la même liaison mains-libres (l'A2DP y est suspendu).
