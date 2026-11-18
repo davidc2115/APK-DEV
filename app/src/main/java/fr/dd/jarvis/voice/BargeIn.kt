@@ -71,7 +71,60 @@ class DetecteurParole(
  * Micro en mode communication (annulation d'écho et réduction de bruit du téléphone) ; à démarrer quand la voix de
  * JARVIS commence réellement (les 400 premières ms servent à mesurer son écho).
  */
-class BargeIn(private val onVoix: () -> Unit) {
+interface DetecteurCoupure {
+    fun start()
+    fun stop()
+    fun stopEtAttendre(ms: Long)
+}
+
+/** Micro Android Auto réel : CarAudioRecord utilise le microphone de l'autoradio, pas celui du téléphone. */
+class BargeInVoiture(private val contexte: androidx.car.app.CarContext, private val onVoix: () -> Unit) : DetecteurCoupure {
+    @Volatile private var run = false
+    private var thread: Thread? = null
+
+    override fun start() {
+        if (run) return
+        run = true
+        thread = Thread {
+            var record: androidx.car.app.media.CarAudioRecord? = null
+            try {
+                record = androidx.car.app.media.CarAudioRecord.create(contexte)
+                record.startRecording()
+                val buf = ByteArray(androidx.car.app.media.CarAudioRecord.AUDIO_CONTENT_BUFFER_SIZE)
+                val detecteur = DetecteurParole()
+                while (run) {
+                    val n = record.read(buf, 0, buf.size)
+                    if (n <= 0) { if (n < 0) break; continue }
+                    val rms = fr.dd.jarvis.car.Pcm.rms(buf, 0, n, true)
+                    var passages = 0
+                    var precedent = 0
+                    var echantillons = 0
+                    var i = 0
+                    while (i + 1 < n) {
+                        val v = ((buf[i].toInt() shl 8) or (buf[i + 1].toInt() and 0xFF)).toShort().toInt()
+                        if (echantillons > 0 && (v >= 0) != (precedent >= 0)) passages++
+                        precedent = v; echantillons++; i += 2
+                    }
+                    val zcr = if (echantillons == 0) 0.0 else passages.toDouble() / echantillons
+                    if (detecteur.trame(rms, zcr)) { run = false; onVoix(); break }
+                }
+            } catch (_: Throwable) {
+            } finally {
+                runCatching { record?.stopRecording() }
+            }
+        }.also { it.isDaemon = true; it.name = "jarvis-bargein-voiture"; it.start() }
+    }
+
+    override fun stop() { run = false }
+
+    override fun stopEtAttendre(ms: Long) {
+        run = false
+        val t = thread ?: return
+        if (t !== Thread.currentThread()) runCatching { t.join(ms) }
+    }
+}
+
+class BargeIn(private val onVoix: () -> Unit) : DetecteurCoupure {
     @Volatile private var run = false
     private var thread: Thread? = null
 
@@ -109,7 +162,7 @@ class BargeIn(private val onVoix: () -> Unit) {
     fun stop() { run = false }
 
     /** Arrête et attend que le micro soit vraiment rendu (AudioRecord libéré), au plus [ms] millisecondes. */
-    fun stopEtAttendre(ms: Long) {
+    override fun stopEtAttendre(ms: Long) {
         run = false
         val t = thread ?: return
         if (t !== Thread.currentThread()) runCatching { t.join(ms) }
