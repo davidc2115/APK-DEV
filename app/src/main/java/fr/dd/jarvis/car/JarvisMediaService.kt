@@ -181,7 +181,7 @@ class JarvisMediaService : MediaBrowserService() {
     private fun enfants(parentId: String): MutableList<MediaBrowser.MediaItem> = when {
         // Onglets (Android Auto affiche en onglets les dossiers de la racine).
         parentId == RACINE -> mutableListOf(
-            element(ONGLET_JARVIS, "JARVIS", icone = "ic_auto_dragon", dossier = true, style = GRILLE),
+            element(ONGLET_JARVIS, "JARVIS", icone = "dragon_tete", dossier = true, style = GRILLE),
             element(ONGLET_AGENDA, "Aujourd'hui", icone = "auto_onglet_agenda", dossier = true),
             element(ONGLET_RACCOURCIS, "Raccourcis", icone = "auto_onglet_eclair", dossier = true),
         )
@@ -364,7 +364,7 @@ class JarvisMediaService : MediaBrowserService() {
         .addCustomAction(PlaybackState.CustomAction.Builder(ACT_RELIRE, "Relire la dernière réponse", R.drawable.ic_auto_relire).build())
         .setState(e, PlaybackState.PLAYBACK_POSITION_UNKNOWN, 1f).build()
 
-    private fun meta(titre: String, texte: String, icone: String = "auto_micro") = MediaMetadata.Builder()
+    private fun meta(titre: String, texte: String, icone: String = "dragon_tete") = MediaMetadata.Builder()
         .putString(MediaMetadata.METADATA_KEY_TITLE, titre)
         .putString(MediaMetadata.METADATA_KEY_ARTIST, texte.take(300))
         .putString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE, titre)
@@ -373,7 +373,7 @@ class JarvisMediaService : MediaBrowserService() {
         .putString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI, icone(icone).toString())
         .build()
 
-    private fun afficher(titre: String, texte: String, e: Int, icone: String = "auto_micro") {
+    private fun afficher(titre: String, texte: String, e: Int, icone: String = "dragon_tete") {
         session.setMetadata(meta(titre, texte, icone))
         session.setPlaybackState(etat(e))
     }
@@ -423,7 +423,11 @@ class JarvisMediaService : MediaBrowserService() {
                 afficher("🎙️ Je t'écoute…", "Parle maintenant", PlaybackState.STATE_PLAYING)
             }
             ActiviteVoiture.Etape.PARTIEL -> if (enCours) afficher("JARVIS", "Écoute en cours…", PlaybackState.STATE_PLAYING)
-            ActiviteVoiture.Etape.REFLEXION -> if (enCours) afficher("JARVIS", "Traitement de la demande…", PlaybackState.STATE_BUFFERING)
+            ActiviteVoiture.Etape.REFLEXION -> if (enCours) {
+                // La voix est diffusée progressivement : Android Auto coupe sinon le flux si la MediaSession
+                // reste en BUFFERING pendant que le téléphone a déjà commencé à parler.
+                afficher("JARVIS", "Traitement de la demande…", PlaybackState.STATE_PLAYING)
+            }
             ActiviteVoiture.Etape.REPONSE -> {
                 derniere = propre(e.texte)
                 if (enCours) afficher("JARVIS", derniere, PlaybackState.STATE_PLAYING)
