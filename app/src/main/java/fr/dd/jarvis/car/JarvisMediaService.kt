@@ -89,8 +89,7 @@ class JarvisMediaService : MediaBrowserService() {
     // Android Auto reçoit directement les bitmaps pour éviter les problèmes de rendu des URI de ressources.
     private val artworkDragon by lazy {
         mapOf(
-            "dragon_tete" to BitmapFactory.decodeResource(resources, R.drawable.dragon_tete),
-            "auto_dragon_accueil" to BitmapFactory.decodeResource(resources, R.drawable.auto_dragon_accueil)
+            "dragon_tete" to BitmapFactory.decodeResource(resources, R.drawable.dragon_tete)
         )
     }
     private val creeLe = SystemClock.elapsedRealtime()
