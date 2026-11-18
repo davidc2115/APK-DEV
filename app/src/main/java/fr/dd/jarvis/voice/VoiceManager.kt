@@ -1490,6 +1490,11 @@ class VoiceManager(private val ctx: Context) {
             val debutSim = System.nanoTime()
             Presence.brancher { Presence.simule((System.nanoTime() - debutSim) / 1e9) }
             val params = if (volume < 1f) Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, volume) } else null
+            // Même avec la voix Android de secours, l'autoradio doit avoir le temps de réouvrir son canal
+            // de projection avant le premier phonème (sinon les premières syllabes disparaissent).
+            if (sortieVoitureForcee || appli()?.enVoiture == true) {
+                runCatching { t.playSilentUtterance(900L, TextToSpeech.QUEUE_ADD, "jarvis-auto-warmup-$id") }
+            }
             val ok = runCatching { t.speak(morceau, TextToSpeech.QUEUE_ADD, params, id) }.getOrDefault(TextToSpeech.ERROR)
             if (ok == TextToSpeech.ERROR) { finsAndroid.remove(id); debutsAndroid.remove(id); return }
             latch.await(15_000L + morceau.length * 120L, java.util.concurrent.TimeUnit.MILLISECONDS)
