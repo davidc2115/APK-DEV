@@ -516,7 +516,10 @@ class JarvisMediaService : MediaBrowserService() {
          */
         override fun onPlay() {
             val t = SystemClock.elapsedRealtime()
-            if (autoDemarrage() || !app.enVoiture || t - derniereFin < 5_000 || t - dernierParler < 5_000) {
+            // Android Auto peut transmettre ▶ avant que l'état app.enVoiture soit rafraîchi.
+            // La MediaSession n'est exposée qu'aux clients autorisés (dont Android Auto) :
+            // ne pas bloquer l'action sur ce booléen parfois en retard.
+            if (autoDemarrage() || t - derniereFin < 5_000 || t - dernierParler < 5_000) {
                 session.setPlaybackState(etat(PlaybackState.STATE_PAUSED)); return
             }
             parler()
