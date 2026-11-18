@@ -196,7 +196,7 @@ class JarvisMediaService : MediaBrowserService() {
         )
         parentId == SUGGESTIONS -> suggestions()
         parentId == RECENT -> mutableListOf(element(PARLER, "🎙️ Parler à JARVIS", prochainResume(), "auto_micro"))
-        parentId == ONGLET_JARVIS -> mutableListOf(element(PARLER, "Parler à JARVIS", "Touche la tête du dragon pour parler", "dragon_tete"))
+        parentId == ONGLET_JARVIS -> mutableListOf(element(PARLER, "Parler à JARVIS", "Appuie pour parler", "auto_dragon_accueil"))
         parentId == ONGLET_AGENDA -> agenda(LocalDate.now(), "aujourd'hui").apply {
             val demain = evenements(LocalDate.now().plusDays(1))
             add(element(DEMAIN, "📅 Demain", if (demain.isEmpty()) "Aucun rendez-vous" else "${demain.size} rendez-vous", "auto_agenda", dossier = true))
