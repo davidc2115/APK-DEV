@@ -8,7 +8,6 @@ import android.media.AudioFocusRequest
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
-import android.media.ToneGenerator
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -872,7 +871,7 @@ class VoiceManager(private val ctx: Context) {
         JournalVoix.noter(nom, "bip ${if (montant) "montant (je t'écoute)" else "descendant (fin)"}")
         main.post {
             Thread {
-                var tonalite: ToneGenerator? = null
+                var pisteBip: AudioTrack? = null
                 var focusBip: AudioFocusRequest? = null
                 try {
                     // Android Auto utilise son canal média : ne jamais tenter d'ouvrir le profil mains-libres SCO ici.
@@ -895,21 +894,39 @@ class VoiceManager(private val ctx: Context) {
                                 .also { am.requestAudioFocus(it) }
                         }.getOrNull()
                     }
-                    // ToneGenerator est plus fiable que l'AudioTrack statique sur certaines ROM : il utilise
-                    // directement le flux média du téléphone / de la projection et ne dépend pas d'un buffer PCM.
-                    val stream = when { sco -> AudioManager.STREAM_VOICE_CALL; voiture || sortieBluetooth() -> AudioManager.STREAM_MUSIC; else -> AudioManager.STREAM_NOTIFICATION }
-                    tonalite = ToneGenerator(stream, 85)
-                    val premier = if (montant) ToneGenerator.TONE_PROP_BEEP else ToneGenerator.TONE_PROP_ACK
-                    val second = if (montant) ToneGenerator.TONE_PROP_ACK else ToneGenerator.TONE_PROP_BEEP
-                    if (!tonalite.startTone(premier, 130)) error("ToneGenerator n'a pas démarré le premier bip")
-                    Thread.sleep(170)
-                    if (!tonalite.startTone(second, 160)) error("ToneGenerator n'a pas démarré le second bip")
-                    Thread.sleep(210)
-                    JournalVoix.noter(nom, "bip diffusé sur ${if (voiture) "le flux média Android Auto" else if (sco) "la liaison mains-libres" else if (externe) "la sortie externe" else "le téléphone"}")
+                    // AudioTrack avec les mêmes AudioAttributes MEDIA que la voix projetée : ToneGenerator/STREAM_MUSIC
+                    // reste parfois local au téléphone et son bip n'est pas transmis à Android Auto.
+                    val taux = 44100
+                    val duree1 = 150
+                    val pause = 55
+                    val duree2 = 170
+                    val total = taux * (duree1 + pause + duree2) / 1000
+                    val pcm = ShortArray(total)
+                    val f1 = if (montant) 880.0 else 660.0
+                    val f2 = if (montant) 1046.5 else 523.25
+                    for (i in pcm.indices) {
+                        val ms = i * 1000 / taux
+                        val freq = when { ms < duree1 -> f1; ms < duree1 + pause -> 0.0; else -> f2 }
+                        if (freq > 0.0) {
+                            val t = if (ms < duree1) ms else ms - duree1 - pause
+                            val enveloppe = minOf(1.0, t / 8.0, (if (ms < duree1) duree1 - ms else duree2 - t) / 12.0).coerceAtLeast(0.0)
+                            pcm[i] = (sin(2.0 * PI * freq * i / taux) * 10500.0 * enveloppe).toInt().toShort()
+                        }
+                    }
+                    val format = AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(taux).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build()
+                    pisteBip = AudioTrack.Builder().setAudioAttributes(attrs).setAudioFormat(format)
+                        .setBufferSizeInBytes(pcm.size * 2).setTransferMode(AudioTrack.MODE_STATIC).build()
+                    val ecrits = pisteBip!!.write(pcm, 0, pcm.size)
+                    if (ecrits != pcm.size) error("bip incomplet : ${ecrits}/${pcm.size} échantillons")
+                    pisteBip!!.setVolume(0.9f)
+                    pisteBip!!.play()
+                    Thread.sleep((duree1 + pause + duree2 + 80).toLong())
+                    JournalVoix.noter(nom, "bip AudioTrack diffusé sur ${if (voiture) "Android Auto (MEDIA)" else if (sco) "la liaison mains-libres" else if (externe) "la sortie externe" else "le téléphone"}")
                 } catch (e: Throwable) {
                     JournalVoix.noter(nom, "échec lecture bip : ${e.message ?: e.javaClass.simpleName}")
                 } finally {
-                    runCatching { tonalite?.release() }
+                    runCatching { pisteBip?.pause(); pisteBip?.flush(); pisteBip?.release() }
                     focusBip?.let { f -> runCatching { am.abandonAudioFocusRequest(f) } }
                 }
                 main.post(puis)
