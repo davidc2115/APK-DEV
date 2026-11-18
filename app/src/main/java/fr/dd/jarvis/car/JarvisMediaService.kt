@@ -161,7 +161,7 @@ class JarvisMediaService : MediaBrowserService() {
         if (style != null || id == ONGLET_JARVIS) d.setExtras(Bundle().apply {
             if (style != null) putInt(STYLE_JOUABLE, style)
             // Indique à Android Auto le style de rendu de l'onglet JARVIS lui-même.
-            if (id == ONGLET_JARVIS) putInt(STYLE_SINGLE_ITEM, GRILLE)
+            if (id == ONGLET_JARVIS) putInt(STYLE_SINGLE_ITEM, 4)
         })
         return MediaBrowser.MediaItem(d.build(), if (dossier) MediaBrowser.MediaItem.FLAG_BROWSABLE else MediaBrowser.MediaItem.FLAG_PLAYABLE)
     }
