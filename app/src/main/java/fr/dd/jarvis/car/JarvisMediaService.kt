@@ -97,6 +97,8 @@ class JarvisMediaService : MediaBrowserService() {
     /** Fin de la dernière écoute / dernier appui micro : un ▶ envoyé juste après par la voiture n'est pas un vrai appui. */
     private var derniereFin = 0L
     private var dernierParler = 0L
+    /** Android Auto envoie parfois un PLAY automatique à la connexion : il ne doit pas ouvrir le micro. */
+    private var ignorerPremierPlayConnexion = true
     private var ignorerPauseJusqua = 0L
     private val abonne: (ActiviteVoiture.Evt) -> Unit = { surActivite(it) }
 
@@ -185,13 +187,13 @@ class JarvisMediaService : MediaBrowserService() {
     private fun enfants(parentId: String): MutableList<MediaBrowser.MediaItem> = when {
         // Onglets (Android Auto affiche en onglets les dossiers de la racine).
         parentId == RACINE -> mutableListOf(
-            element(ONGLET_JARVIS, "JARVIS", icone = "dragon_tete", dossier = true, style = GRILLE),
+            element(ONGLET_JARVIS, "JARVIS · JÖRMUNGAND", "Assistant vocal", "dragon_tete", dossier = true, style = GRILLE),
             element(ONGLET_AGENDA, "Aujourd'hui", icone = "auto_onglet_agenda", dossier = true),
             element(ONGLET_RACCOURCIS, "Raccourcis", icone = "auto_onglet_eclair", dossier = true),
         )
         parentId == SUGGESTIONS -> suggestions()
         parentId == RECENT -> mutableListOf(element(PARLER, "🎙️ Parler à JARVIS", prochainResume(), "auto_micro"))
-        parentId == ONGLET_JARVIS -> mutableListOf(element(PARLER, "Parler à JARVIS", "Touche, attends le bip et parle", "auto_micro"))
+        parentId == ONGLET_JARVIS -> mutableListOf(element(PARLER, "Parler à JARVIS", "JÖRMUNGAND · Touche pour ouvrir le micro", "auto_micro"))
         parentId == ONGLET_AGENDA -> agenda(LocalDate.now(), "aujourd'hui").apply {
             val demain = evenements(LocalDate.now().plusDays(1))
             add(element(DEMAIN, "📅 Demain", if (demain.isEmpty()) "Aucun rendez-vous" else "${demain.size} rendez-vous", "auto_agenda", dossier = true))
@@ -537,6 +539,13 @@ class JarvisMediaService : MediaBrowserService() {
             // Ne jamais rétablir PAUSED ici : cela annulait visuellement le premier appui et pouvait
             // masquer la session qui venait d'être ouverte.
             if (demandeEnCours || enCours || t - dernierParler < 900) return
+            if (ignorerPremierPlayConnexion && t - creeLe < 3000L) {
+                ignorerPremierPlayConnexion = false
+                JournalVoix.noter("android-auto", "PLAY automatique de connexion ignoré : accueil conservé, micro fermé")
+                session.setPlaybackState(etat(PlaybackState.STATE_PAUSED))
+                return
+            }
+            ignorerPremierPlayConnexion = false
             JournalVoix.noter("android-auto", "MediaSession onPlay reçu")
             parler()
         }
