@@ -499,6 +499,9 @@ class JarvisMediaService : MediaBrowserService() {
                 id == PARLER -> parler()
                 id == RELIRE -> relire()
                 id == MUSIQUE -> {
+                    // La musique prend immédiatement la main : arrêter toute voix / écoute JARVIS avant PLAY.
+                    VoixVoiture.taire()
+                    JarvisService.interrompreDepuisVoiture()
                     // N'importe quelle appli de musique (Spotify, YT Music, Deezer…) : sa session, jamais celle de JARVIS.
                     val r = fr.dd.jarvis.device.CommandeMedia.executer(this@JarvisMediaService, fr.dd.jarvis.device.CommandeMedia.Action.PLAY, voiture = true)
                     if (!r.startsWith("▶️")) lire("🎵 Musique", r, "auto_musique")
