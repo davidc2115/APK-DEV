@@ -971,26 +971,35 @@ class ToolBox(
         "controle_media" -> ToolResult(fr.dd.jarvis.device.CommandeMedia.depuisOutil(a.optString("action"))?.let { fr.dd.jarvis.device.CommandeMedia.executer(app, it, app.enVoiture) }
             ?: app.phone.mediaKey(a.optString("action")))
         "naviguer" -> {
-            // Android Auto : le bouton Play ouvre le micro ; la commande reconnue doit ensuite lancer
-            // directement l'application GPS du téléphone. Android Auto projette alors son guidage.
-            // ACTION_NAVIGATE via CarContext pouvait être accepté sans démarrer réellement l'itinéraire.
-            val enVoiture = app.enVoiture || fr.dd.jarvis.car.NavigationVoiture.contexte != null
+            // Depuis Android Auto, demander d'abord au système voiture de lancer réellement le guidage projeté.
+            // Le lancement direct sur le téléphone reste le repli si aucun contexte voiture n'est actif ou si l'hôte refuse.
+            val contexteVoiture = fr.dd.jarvis.car.NavigationVoiture.contexte != null
+            val enVoiture = app.enVoiture || contexteVoiture
             var appli = a.optString("appli").trim()
             val toujours = a.optString("toujours").trim().lowercase() in setOf("true", "oui", "1", "vrai")
             if (appli.isBlank()) appli = app.store.appPrefs["navigation"].orEmpty()
             val dispo = app.phone.navApps().keys
-            // En voiture, choix automatique : Waze en priorité, sinon le premier GPS installé.
             if (appli.isBlank() && enVoiture) appli = dispo.firstOrNull { it.contains("Waze", ignoreCase = true) } ?: dispo.firstOrNull().orEmpty()
             if (appli.isBlank() && dispo.size > 1)
                 ToolResult("CHOIX_REQUIS : demande à l'utilisateur avec quelle application lancer l'itinéraire (${dispo.joinToString(" ou ")}) et s'il veut la garder toujours ou ponctuellement, puis rappelle naviguer avec appli et toujours.")
             else {
                 if (appli.isBlank()) appli = dispo.firstOrNull().orEmpty()
                 if (toujours && a.optString("appli").isNotBlank()) app.store.setAppPref("navigation", a.optString("appli").trim())
-                val pt = if (appli.lowercase().contains("waze") || !appli.lowercase().contains("google")) runCatching { fr.dd.jarvis.societe.Geo.geocode(a.optString("destination")) }.getOrNull() else null
-                ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    app.phone.navigate(a.optString("destination"), a.optString("mode"), appli, pt?.let { it.lat to it.lon }) +
-                        (if (toujours && a.optString("appli").isNotBlank()) " (${a.optString("appli")} mémorisé pour les itinéraires)" else "")
-                })
+                val pt = runCatching { fr.dd.jarvis.societe.Geo.geocode(a.optString("destination")) }.getOrNull()
+                val destination = a.optString("destination")
+                val mode = a.optString("mode")
+                val resultat = if (contexteVoiture) {
+                    val lance = runCatching {
+                        fr.dd.jarvis.car.NavigationVoiture.lancer(destination, pt?.let { it.lat to it.lon })
+                    }.getOrDefault(false)
+                    if (lance) "🧭 Guidage lancé dans Android Auto vers $destination"
+                    else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        app.phone.navigate(destination, mode, appli, pt?.let { it.lat to it.lon })
+                    }
+                } else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    app.phone.navigate(destination, mode, appli, pt?.let { it.lat to it.lon })
+                }
+                ToolResult(resultat + (if (toujours && a.optString("appli").isNotBlank()) " (${a.optString("appli")} mémorisé pour les itinéraires)" else ""))
             }
         }
         "appli_par_defaut" -> {
