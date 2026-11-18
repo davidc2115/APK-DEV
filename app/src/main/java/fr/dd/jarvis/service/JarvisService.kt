@@ -108,6 +108,7 @@ class JarvisService : Service() {
         fun arreterConversationDepuisAppli() {
             val s = actuel ?: return
             s.main.post {
+                fr.dd.jarvis.car.ConversationAuto.arreter()
                 s.voice?.stopSpeaking()
                 s.voice?.fermer()
                 s.interrompre()
