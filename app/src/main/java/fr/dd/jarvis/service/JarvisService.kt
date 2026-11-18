@@ -353,7 +353,7 @@ class JarvisService : Service() {
             return
         }
         dernierReveil = 0L
-        onWakeWord()
+        onWakeWord(depuisMediaAndroidAuto = true)
     }
 
     /** Pause demandée par la voiture : on coupe la voix et on referme la conversation (sans toucher à une demande en cours). */
@@ -488,7 +488,7 @@ class JarvisService : Service() {
     private var dernierReveil = 0L
 
     /** « Jarvis » entendu : bip montant puis écoute immédiate de la demande (plus de « Oui ? » parlé qui fait attendre). */
-    private fun onWakeWord() {
+    private fun onWakeWord(depuisMediaAndroidAuto: Boolean = false) {
         val maintenant = System.currentTimeMillis()
         val refus = when {
             !running -> "service arrêté"
@@ -518,7 +518,11 @@ class JarvisService : Service() {
             fr.dd.jarvis.voice.JournalVoix.noter("service", "détecteur prêt pour le micro Android Auto au prochain réveil")
         }
         // En voiture (JARVIS ouvert dans Android Auto) : micro de la VOITURE et haut-parleurs de la voiture, GPS toujours affiché.
-        if (fr.dd.jarvis.car.ConversationAuto.possible(app)) {
+        // Le bouton Play de la carte média doit utiliser le même moteur de reconnaissance du téléphone
+        // que le parcours vocal déjà fonctionnel. ConversationAuto/MicroVoiture est réservé au Wake Word
+        // quand le contexte CarContext est réellement disponible : son chemin direct Groq échouait ici
+        // sans ouvrir le reconnaisseur standard ni son retour d'état.
+        if (!depuisMediaAndroidAuto && fr.dd.jarvis.car.ConversationAuto.possible(app)) {
             awake = true; busy = true; echangeReel = true
             voice?.stopSpeaking()
             voice?.carillon(montant = true) {
