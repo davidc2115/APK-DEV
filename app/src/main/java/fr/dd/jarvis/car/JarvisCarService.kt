@@ -91,16 +91,15 @@ object NavigationVoiture {
     /** Vrai si Android Auto a accepté la demande ; faux s'il faut se rabattre sur le téléphone. */
     suspend fun lancer(destination: String, point: Pair<Double, Double>? = null): Boolean {
         val c = contexte ?: return false
-        if (destination.isBlank() && point == null) return false
+        // Sans coordonnées vérifiées, ACTION_NAVIGATE avec geo:0,0?q= peut seulement ouvrir une recherche
+        // et l'hôte peut accepter l'intent sans démarrer le guidage. Dans ce cas, laisser ToolBox lancer
+        // Waze / Google Maps directement avec l'adresse plutôt que d'annoncer un faux démarrage.
+        val coord = point ?: return false
+        if (destination.isBlank() && (coord.first == 0.0 || coord.second == 0.0)) return false
 
-        // Si le géocodage a fourni des coordonnées, les envoyer EN PREMIER : Android Auto traite
-        // geo:latitude,longitude comme une vraie destination de navigation. Une recherche geo:0,0?q=
-        // peut être acceptée par l'hôte tout en ne faisant qu'afficher des résultats, sans démarrer le GPS.
-        // La recherche textuelle reste le repli si aucune coordonnée fiable n'est disponible ou acceptée.
-        val coordonnees = point?.let { Uri.parse("geo:${it.first},${it.second}") }
-        val recherche = destination.takeIf { it.isNotBlank() }
-            ?.let { Uri.parse("geo:0,0?q=" + Uri.encode(it).replace("%20", "+")) }
-        val tentatives = listOfNotNull(coordonnees, recherche).distinct()
+        // Android Auto documente geo:latitude,longitude comme destination de navigation.
+        val coordonnees = Uri.parse("geo:${coord.first},${coord.second}")
+        val tentatives = listOf(coordonnees)
 
         return withContext(Dispatchers.Main) {
             for (uri in tentatives) {
