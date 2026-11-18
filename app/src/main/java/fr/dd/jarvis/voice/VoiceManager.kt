@@ -969,12 +969,24 @@ class VoiceManager(private val ctx: Context) {
         // Casque / voiture Bluetooth : leur micro (liaison mains-libres) pour toute la conversation.
         ouvrirMicroBluetooth()
         if (Build.VERSION.SDK_INT >= 26) runCatching {
+            val attrs = if (sortieBluetooth()) attrBluetooth else attrAssistant
             val demande = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
-                .setAudioAttributes(if (sortieBluetooth()) attrBluetooth else attrAssistant)
+                .setAudioAttributes(attrs)
                 .setOnAudioFocusChangeListener(focusSessionListener, main)
                 .setAcceptsDelayedFocusGain(false).setWillPauseWhenDucked(true).build()
             focusSession = demande
-            am.requestAudioFocus(demande)
+            val resultat = am.requestAudioFocus(demande)
+            JournalVoix.noter(nom, "focus audio conversation : $resultat")
+            if (resultat != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+                // Certaines ROM / Android Auto refusent EXCLUSIVE mais accordent MAY_DUCK :
+                // le bip et la voix doivent tout de même pouvoir sortir sur le canal média voiture.
+                val secours = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                    .setAudioAttributes(attrs)
+                    .setOnAudioFocusChangeListener(focusSessionListener, main)
+                    .setAcceptsDelayedFocusGain(false).build()
+                if (am.requestAudioFocus(secours) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) focusSession = secours
+                JournalVoix.noter(nom, "focus audio de secours : ${if (focusSession === secours) "accordé" else "refusé"}")
+            }
         }
         // Certains lecteurs (et autoradios) ignorent le focus : vraie commande PAUSE, reprise ciblée en fin de session.
         mediaPauseeSession = fr.dd.jarvis.service.JarvisNotificationListener.pauseMediaPourVoix(ctx)
