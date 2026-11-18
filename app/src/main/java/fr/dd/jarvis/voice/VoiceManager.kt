@@ -1348,13 +1348,14 @@ class VoiceManager(private val ctx: Context) {
             Presence.parole(true)
             if (coupe) main.post {
                 if (!fini.get() && barge == null && coupureAutorisee()) {
-                    val interrompre = {
+                    val interrompre: () -> Unit = {
                         main.post {
                             if (!fini.get() && coupureAutorisee()) {
                                 JournalVoix.noter(nom, "coupure de parole : voix entendue au micro pendant la réponse")
                                 arreter(sansSuite = false)
                             }
                         }
+                        Unit
                     }
                     // En projection, le micro du téléphone n'entend pas nécessairement la voix dans l'habitacle :
                     // écouter CarAudioRecord (micro de la voiture) pendant la synthèse, comme pour la dictée.
