@@ -363,6 +363,8 @@ class JarvisService : Service() {
         voice?.sessionFin()
         // Fermeture définitive de l'écoute : aucune relance du reconnaisseur ne rouvrira le micro après le bip de fin.
         voice?.fermer()
+        // Le routage forcé ne doit pas déborder sur une utilisation ultérieure du téléphone.
+        voice?.sortieVoitureForcee = false
         if (suspenduParAppli) return
         if (vosk != null) {
             // Laisse retomber l'écho de la voix de JARVIS (ou du bip) avant de réarmer l'écoute du mot « Jarvis »,
