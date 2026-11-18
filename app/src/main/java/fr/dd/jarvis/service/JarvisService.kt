@@ -661,7 +661,10 @@ class JarvisService : Service() {
                 // referme après quelques secondes de silence.
                 // Autoradio / Bluetooth : on ne rouvre le micro que si Jarvis pose une question — sinon il entendrait la
                 // radio ou la suite de sa propre réponse ; il suffit de redire « Jarvis » pour une nouvelle demande.
-                relancer = awake && (voice?.sortieExterne() != true || reply.trimEnd().endsWith("?"))
+                // Android Auto : conversation mains-libres continue après chaque réponse.
+                // Le filtrage anti-écho de VoiceManager protège la réécoute des haut-parleurs de la voiture.
+                // Bluetooth seul conserve l'ancien comportement prudent, sauf si JARVIS pose une question.
+                relancer = awake && (app.enVoiture || voice?.sortieExterne() != true || reply.trimEnd().endsWith("?"))
                 // Échange abandonné entre-temps (déverrouillage prioritaire) : la réponse reste écrite mais n'est pas dite.
                 if (gen != generation) flux?.arreter(sansSuite = true) else flux?.finir(reply) ?: run { busy = false }
             }
@@ -676,6 +679,15 @@ class JarvisService : Service() {
     private fun musique(cmd: String, a: fr.dd.jarvis.device.CommandeMedia.Action) {
         val app = application as JarvisApp
         val info = a == fr.dd.jarvis.device.CommandeMedia.Action.INFO
+        if (!info) {
+            // Une commande média est prioritaire sur la réponse parlée et sur sa réécoute différée.
+            // Invalider le flux IA en cours évite qu'un ancien callback reprenne la parole après le démarrage musical.
+            generation++
+            voice?.stopSpeaking()
+            voice?.fermer()
+            busy = false
+            garderEveille(false)
+        }
         fun noter(rep: String) {
             app.chatAjouter(ChatMsg(true, cmd)); app.chatAjouter(ChatMsg(false, rep))
             if (app.enVoiture) { CarBridge.ajouter(ChatMsg(true, cmd)); CarBridge.ajouter(ChatMsg(false, rep)) }
