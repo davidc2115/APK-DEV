@@ -6,12 +6,12 @@ Cette évolution est additive et progressive. Le fonctionnement existant reste l
 
 Aucune mise à niveau majeure de Kotlin, AGP, Gradle, Compose ou des API audio/voiture ne doit être mélangée à une correction fonctionnelle. Chaque groupe de changements doit être isolé, compilé et testé avant le suivant.
 
-## Changements de dépendances de cette première étape
+## Décision sur WorkManager
 
-- WorkManager : `2.9.0` → `2.12.0`.
-  - Version stable officielle.
-  - La documentation Android indique `compileSdk >= 33` et `minSdk 24`; le projet est en `compileSdk 35` et `minSdk 26`.
-  - Aucun changement de logique de planification n'est inclus dans cette étape.
+- WorkManager reste en version `2.9.0` dans cette étape.
+- La tentative de passage à `2.12.0` a été refusée par le contrôle de métadonnées Android : cette version exige Android Gradle Plugin (AGP) `8.6.0` minimum, tandis que le dépôt utilise AGP `8.5.2`.
+- Pour ne pas imposer une migration de la chaîne de build dans un lot de faible risque, la dépendance a été remise en `2.9.0`.
+- Une montée vers WorkManager 2.12.x pourra être réévaluée dans une PR séparée après migration et validation de l'AGP.
 
 ## Mises à niveau volontairement différées
 
