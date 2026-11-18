@@ -109,9 +109,14 @@ class JarvisService : Service() {
             val s = actuel ?: return
             s.main.post {
                 fr.dd.jarvis.car.ConversationAuto.arreter()
+                // Invalide aussi une réponse IA déjà lancée : elle ne doit pas rouvrir le micro après STOP.
+                s.generation++
                 s.voice?.stopSpeaking()
                 s.voice?.fermer()
-                s.interrompre()
+                s.voice?.sessionFin()
+                s.awake = false
+                s.busy = false
+                s.goIdle()
             }
         }
 
