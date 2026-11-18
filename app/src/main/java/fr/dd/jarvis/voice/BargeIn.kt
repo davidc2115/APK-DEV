@@ -129,7 +129,7 @@ class BargeIn(private val onVoix: () -> Unit) : DetecteurCoupure {
     private var thread: Thread? = null
 
     @SuppressLint("MissingPermission")
-    fun start() {
+    override fun start() {
         if (run) return
         run = true
         thread = Thread {
@@ -159,7 +159,7 @@ class BargeIn(private val onVoix: () -> Unit) : DetecteurCoupure {
         }.also { it.isDaemon = true; it.start() }
     }
 
-    fun stop() { run = false }
+    override fun stop() { run = false }
 
     /** Arrête et attend que le micro soit vraiment rendu (AudioRecord libéré), au plus [ms] millisecondes. */
     override fun stopEtAttendre(ms: Long) {
