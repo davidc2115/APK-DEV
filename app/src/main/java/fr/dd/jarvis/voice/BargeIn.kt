@@ -95,9 +95,10 @@ class BargeInVoiture(private val contexte: androidx.car.app.CarContext, private 
                 r.startRecording()
                 JournalVoix.noter("voix", "barge-in Android Auto : micro voiture démarré")
                 val buf = ByteArray(androidx.car.app.media.CarAudioRecord.AUDIO_CONTENT_BUFFER_SIZE)
-                // Le niveau du micro d'autoradio est souvent nettement plus faible que celui du téléphone.
-                // Seuil plus bas, mais validation sur plusieurs trames et contrôle du taux de passage par zéro conservés.
-                val detecteur = DetecteurParole(echauffement = 12, minimum = 260.0, ratioBruit = 2.2, ratioEcho = 1.35, fenetre = 12, requis = 8)
+                // Le micro de l'autoradio récupère aussi le son des haut-parleurs. On mesure donc plus longtemps
+                // l'écho de la voix de JARVIS, puis on exige une voix nettement au-dessus de cet écho et persistante.
+                // Cela évite que la propre phrase de JARVIS déclenche le barge-in et se coupe elle-même.
+                val detecteur = DetecteurParole(echauffement = 36, minimum = 380.0, ratioBruit = 2.8, ratioEcho = 2.6, fenetre = 20, requis = 15)
                 var derniereMesure = 0L
                 while (run) {
                     val n = r.read(buf, 0, buf.size)
