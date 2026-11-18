@@ -396,7 +396,9 @@ class JarvisMediaService : MediaBrowserService() {
         dernierParler = SystemClock.elapsedRealtime()
         VoixVoiture.taire()
         piloteJusqua = SystemClock.elapsedRealtime() + 8000
-        afficher("🎙️ Je t'écoute…", "Parle après le bip", PlaybackState.STATE_BUFFERING)
+        // PLAYING garde la carte de conversation visible pendant l'ouverture du micro ;
+        // BUFFERING était interprété comme un chargement média et masquait parfois l'état d'écoute.
+        afficher("🎙️ Je t'écoute…", "Parle après le bip", PlaybackState.STATE_PLAYING)
         if (!JarvisService.ecouterDepuisVoiture(this)) {
             echec("Micro indisponible : autorise le micro et active l'écoute « Jarvis » dans JARVIS. Tu peux aussi toucher la loupe pour dicter.")
             return
@@ -416,7 +418,10 @@ class JarvisMediaService : MediaBrowserService() {
 
     /** Suit l'écoute de JARVIS (service « Jarvis ») pendant une conversation lancée depuis la voiture. */
     private fun surActivite(e: ActiviteVoiture.Evt) {
-        val pilote = enCours || SystemClock.elapsedRealtime() < piloteJusqua
+        // Un réveil par le mot « Jarvis » est déclenché par le service téléphone, pas par ce MediaSession.
+        // En projection, on doit tout de même refléter son état dans la carte Android Auto.
+        val pilote = enCours || SystemClock.elapsedRealtime() < piloteJusqua ||
+            app.enVoiture || NavigationVoiture.contexte != null
         when (e.etape) {
             ActiviteVoiture.Etape.ECOUTE -> if (pilote) {
                 enCours = true; veille?.cancel()
@@ -467,12 +472,6 @@ class JarvisMediaService : MediaBrowserService() {
         if (d.isNotBlank()) lire("🔁 Dernière réponse", d, "auto_relire") else lire("JARVIS", "Pas encore de réponse à relire.", "auto_relire")
     }
 
-    /** Lecture relancée toute seule par Android Auto au branchement (« démarrer la musique automatiquement ») : ignorée. */
-    private fun autoDemarrage(): Boolean {
-        val t = SystemClock.elapsedRealtime()
-        return t - app.voitureDepuis < 12_000
-    }
-
     private inner class Rappels : MediaSession.Callback() {
         override fun onPlayFromSearch(query: String?, extras: Bundle?) {
             val q = query.orEmpty().trim()
@@ -482,7 +481,7 @@ class JarvisMediaService : MediaBrowserService() {
         override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
             val id = mediaId.orEmpty()
             when {
-                id == PARLER -> if (autoDemarrage()) session.setPlaybackState(etat(PlaybackState.STATE_PAUSED)) else parler()
+                id == PARLER -> parler()
                 id == RELIRE -> relire()
                 id == MUSIQUE -> {
                     // N'importe quelle appli de musique (Spotify, YT Music, Deezer…) : sa session, jamais celle de JARVIS.
@@ -519,7 +518,9 @@ class JarvisMediaService : MediaBrowserService() {
             // Android Auto peut transmettre ▶ avant que l'état app.enVoiture soit rafraîchi.
             // La MediaSession n'est exposée qu'aux clients autorisés (dont Android Auto) :
             // ne pas bloquer l'action sur ce booléen parfois en retard.
-            if (autoDemarrage() || t - derniereFin < 5_000 || t - dernierParler < 5_000) {
+            // L'action Play est explicite dans l'onglet JARVIS : ne pas la confondre avec l'autoplay
+            // de connexion, qui empêchait aussi le premier appui utilisateur de lancer l'écoute.
+            if (t - derniereFin < 1_200 || t - dernierParler < 1_200) {
                 session.setPlaybackState(etat(PlaybackState.STATE_PAUSED)); return
             }
             parler()
