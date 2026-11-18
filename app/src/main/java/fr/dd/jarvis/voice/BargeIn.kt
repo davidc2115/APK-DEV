@@ -98,7 +98,7 @@ class BargeInVoiture(private val contexte: androidx.car.app.CarContext, private 
                 // Le micro de l'autoradio récupère aussi le son des haut-parleurs. On mesure donc plus longtemps
                 // l'écho de la voix de JARVIS, puis on exige une voix nettement au-dessus de cet écho et persistante.
                 // Cela évite que la propre phrase de JARVIS déclenche le barge-in et se coupe elle-même.
-                val detecteur = DetecteurParole(echauffement = 36, minimum = 380.0, ratioBruit = 2.8, ratioEcho = 2.6, fenetre = 20, requis = 15)
+                val detecteur = DetecteurParole(echauffement = 100, minimum = 620.0, ratioBruit = 4.0, ratioEcho = 4.2, fenetre = 30, requis = 25)
                 var derniereMesure = 0L
                 while (run) {
                     val n = r.read(buf, 0, buf.size)
