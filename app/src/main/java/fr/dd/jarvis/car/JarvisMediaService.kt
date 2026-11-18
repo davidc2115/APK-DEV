@@ -440,15 +440,15 @@ class JarvisMediaService : MediaBrowserService() {
                 enCours = true; demandeEnCours = true; veille?.cancel()
                 afficher("🎙️ Je t'écoute…", "Parle maintenant", PlaybackState.STATE_PAUSED)
             }
-            ActiviteVoiture.Etape.PARTIEL -> if (enCours) afficher("JARVIS", "Écoute en cours…", PlaybackState.STATE_PLAYING)
+            ActiviteVoiture.Etape.PARTIEL -> if (enCours) afficher("JARVIS", "Écoute en cours…", PlaybackState.STATE_PAUSED)
             ActiviteVoiture.Etape.REFLEXION -> if (enCours) {
                 // La voix est diffusée progressivement : Android Auto coupe sinon le flux si la MediaSession
                 // reste en BUFFERING pendant que le téléphone a déjà commencé à parler.
-                afficher("JARVIS", "Traitement de la demande…", PlaybackState.STATE_PLAYING)
+                afficher("JARVIS", "Traitement de la demande…", PlaybackState.STATE_PAUSED)
             }
             ActiviteVoiture.Etape.REPONSE -> {
                 derniere = propre(e.texte)
-                if (enCours) afficher("JARVIS", derniere, PlaybackState.STATE_PLAYING)
+                if (enCours) afficher("JARVIS", derniere, PlaybackState.STATE_PAUSED)
             }
             ActiviteVoiture.Etape.FIN -> if (enCours) {
                 enCours = false; demandeEnCours = false; derniereFin = SystemClock.elapsedRealtime()
