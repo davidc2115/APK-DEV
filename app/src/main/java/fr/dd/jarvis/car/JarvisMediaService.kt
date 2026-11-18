@@ -1,5 +1,6 @@
 package fr.dd.jarvis.car
 
+import android.graphics.BitmapFactory
 import android.media.MediaDescription
 import android.media.MediaMetadata
 import android.media.browse.MediaBrowser
@@ -156,6 +157,11 @@ class JarvisMediaService : MediaBrowserService() {
     private fun element(id: String, titre: String, sousTitre: String = "", icone: String = "auto_micro",
                         dossier: Boolean = false, style: Int? = null): MediaBrowser.MediaItem {
         val d = MediaDescription.Builder().setMediaId(id).setTitle(titre).setIconUri(icone(icone))
+        // Android Auto ignore parfois l'URI android.resource des dossiers (onglets) et affiche son icône générique.
+        // Fournir aussi le bitmap réel pour l'onglet JARVIS garantit l'affichage de la tête du dragon.
+        if (icone == "dragon_tete") runCatching {
+            BitmapFactory.decodeResource(resources, R.drawable.dragon_tete)?.let { d.setIconBitmap(it) }
+        }
         if (sousTitre.isNotBlank()) d.setSubtitle(sousTitre)
         if (style != null) d.setExtras(Bundle().apply { putInt(STYLE_JOUABLE, style) })
         return MediaBrowser.MediaItem(d.build(), if (dossier) MediaBrowser.MediaItem.FLAG_BROWSABLE else MediaBrowser.MediaItem.FLAG_PLAYABLE)
