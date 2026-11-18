@@ -97,6 +97,7 @@ class JarvisMediaService : MediaBrowserService() {
     /** Fin de la dernière écoute / dernier appui micro : un ▶ envoyé juste après par la voiture n'est pas un vrai appui. */
     private var derniereFin = 0L
     private var dernierParler = 0L
+    private var ignorerPauseJusqua = 0L
     private val abonne: (ActiviteVoiture.Evt) -> Unit = { surActivite(it) }
 
     override fun onCreate() {
@@ -404,6 +405,7 @@ class JarvisMediaService : MediaBrowserService() {
             return
         }
         dernierParler = maintenant
+        ignorerPauseJusqua = maintenant + 700
         demandeEnCours = true
         JournalVoix.noter("android-auto", "demande d'écoute depuis la carte média")
         VoixVoiture.taire()
@@ -438,17 +440,17 @@ class JarvisMediaService : MediaBrowserService() {
         when (e.etape) {
             ActiviteVoiture.Etape.ECOUTE -> if (pilote) {
                 enCours = true; demandeEnCours = true; veille?.cancel()
-                afficher("🎙️ Je t'écoute…", "Parle maintenant", PlaybackState.STATE_PAUSED)
+                afficher("🎙️ Je t'écoute…", "Parle maintenant", PlaybackState.STATE_PLAYING)
             }
-            ActiviteVoiture.Etape.PARTIEL -> if (enCours) afficher("JARVIS", "Écoute en cours…", PlaybackState.STATE_PAUSED)
+            ActiviteVoiture.Etape.PARTIEL -> if (enCours) afficher("JARVIS", "Écoute en cours…", PlaybackState.STATE_PLAYING)
             ActiviteVoiture.Etape.REFLEXION -> if (enCours) {
                 // La voix est diffusée progressivement : Android Auto coupe sinon le flux si la MediaSession
                 // reste en BUFFERING pendant que le téléphone a déjà commencé à parler.
-                afficher("JARVIS", "Traitement de la demande…", PlaybackState.STATE_PAUSED)
+                afficher("JARVIS", "Traitement de la demande…", PlaybackState.STATE_PLAYING)
             }
             ActiviteVoiture.Etape.REPONSE -> {
                 derniere = propre(e.texte)
-                if (enCours) afficher("JARVIS", derniere, PlaybackState.STATE_PAUSED)
+                if (enCours) afficher("JARVIS", derniere, PlaybackState.STATE_PLAYING)
             }
             ActiviteVoiture.Etape.FIN -> if (enCours) {
                 enCours = false; demandeEnCours = false; derniereFin = SystemClock.elapsedRealtime()
@@ -545,9 +547,11 @@ class JarvisMediaService : MediaBrowserService() {
         }
 
         override fun onPause() {
-            // Une MediaSession JARVIS n'a aucun flux musical à mettre en pause. Android Auto envoyait
-            // parfois PAUSE juste après PLAY parce que l'état avait été publié comme PLAYING : cela
-            // interrompait le micro avant même le bip. L'arrêt vocal explicite passe par onStop().
+            // Ignorer le PAUSE technique renvoyé par certains autoradios juste après PLAY.
+            if (SystemClock.elapsedRealtime() < ignorerPauseJusqua) {
+                JournalVoix.noter("android-auto", "PAUSE technique ignoré pendant l'ouverture du micro")
+                return
+            }
             if (demandeEnCours || enCours) {
                 JournalVoix.noter("android-auto", "PAUSE utilisateur : interruption de la réponse / écoute")
                 VoixVoiture.taire()
