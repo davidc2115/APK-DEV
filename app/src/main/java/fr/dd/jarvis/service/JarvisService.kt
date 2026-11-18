@@ -690,8 +690,14 @@ class JarvisService : Service() {
      * suffit) — la musique ne se fait plus couper par la réponse de JARVIS. « Pause » : la musique mise en pause pour
      * l'écoute ne repart pas à la fin. Lecture / suivant / précédent : envoyés une fois le micro et la voix libérés.
      */
-    private fun musique(cmd: String, a: fr.dd.jarvis.device.CommandeMedia.Action) {
+    private fun musique(cmd: String, a: fr.dd.jarvis.device.CommandeMedia.Action, apresAttente: Boolean = false) {
         val app = application as JarvisApp
+        if (!apresAttente && a != fr.dd.jarvis.device.CommandeMedia.Action.INFO) {
+            // Ne jamais lancer le lecteur sous la dernière phrase de JARVIS. On attend la fin réelle
+            // du tampon audio Android Auto (y compris le délai A2DP), puis on exécute la commande.
+            voice?.apresFinParole { musique(cmd, a, apresAttente = true) }
+            return
+        }
         val info = a == fr.dd.jarvis.device.CommandeMedia.Action.INFO
         if (!info) {
             // Une commande média est prioritaire sur la réponse parlée et sur sa réécoute différée.
