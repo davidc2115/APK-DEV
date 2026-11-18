@@ -93,20 +93,25 @@ object NavigationVoiture {
         val c = contexte ?: return false
         if (destination.isBlank() && point == null) return false
 
-        // Pour une destination formulée en texte, envoyer d'abord la requête de recherche complète.
-        // Le format geo:lat,lon seul peut simplement centrer la carte sur un repère sans préparer
-        // l'itinéraire. Android Auto documente explicitement geo:0,0?q=adresse pour la navigation.
-        val recherche = destination.takeIf { it.isNotBlank() }
-            ?.let { Uri.parse("geo:0,0?q=" + Uri.encode(it)) }
+        // Si le géocodage a fourni des coordonnées, les envoyer EN PREMIER : Android Auto traite
+        // geo:latitude,longitude comme une vraie destination de navigation. Une recherche geo:0,0?q=
+        // peut être acceptée par l'hôte tout en ne faisant qu'afficher des résultats, sans démarrer le GPS.
+        // La recherche textuelle reste le repli si aucune coordonnée fiable n'est disponible ou acceptée.
         val coordonnees = point?.let { Uri.parse("geo:${it.first},${it.second}") }
-        val tentatives = listOfNotNull(recherche, coordonnees).distinct()
+        val recherche = destination.takeIf { it.isNotBlank() }
+            ?.let { Uri.parse("geo:0,0?q=" + Uri.encode(it).replace("%20", "+")) }
+        val tentatives = listOfNotNull(coordonnees, recherche).distinct()
 
         return withContext(Dispatchers.Main) {
             for (uri in tentatives) {
-                val accepte = runCatching {
+                val erreur = runCatching {
                     c.startCarApp(Intent(CarContext.ACTION_NAVIGATE).setData(uri))
-                }.isSuccess
-                if (accepte) return@withContext true
+                }.exceptionOrNull()
+                if (erreur == null) {
+                    fr.dd.jarvis.voice.JournalVoix.noter("navigation", "ACTION_NAVIGATE accepté par Android Auto : $uri")
+                    return@withContext true
+                }
+                fr.dd.jarvis.voice.JournalVoix.noter("navigation", "ACTION_NAVIGATE refusé ($uri) : ${erreur.message ?: erreur.javaClass.simpleName}")
             }
             false
         }
