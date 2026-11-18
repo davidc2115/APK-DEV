@@ -930,7 +930,8 @@ class VoiceManager(private val ctx: Context) {
                         else -> "le haut-parleur du téléphone"
                     })
                     Thread.sleep(pcm.size * 1000L / taux + 30)
-                } catch (_: Throwable) {
+                } catch (e: Throwable) {
+                    JournalVoix.noter(nom, "échec lecture bip : ${e.message ?: e.javaClass.simpleName}")
                 } finally {
                     runCatching { piste?.release() }
                     focusBip?.let { f -> runCatching { am.abandonAudioFocusRequest(f) } }
