@@ -1,6 +1,5 @@
 package fr.dd.jarvis.car
 
-import android.graphics.BitmapFactory
 import android.media.MediaDescription
 import android.media.MediaMetadata
 import android.media.browse.MediaBrowser
@@ -68,6 +67,7 @@ class JarvisMediaService : MediaBrowserService() {
         private const val ACT_WAZE = "fr.dd.jarvis.auto.WAZE"
         private const val ACT_RELIRE = "fr.dd.jarvis.auto.RELIRE"
         private const val STYLE_JOUABLE = "android.media.browse.CONTENT_STYLE_PLAYABLE_HINT"
+        private const val STYLE_SINGLE_ITEM = "android.media.browse.CONTENT_STYLE_SINGLE_ITEM"
         private const val STYLE_DOSSIER = "android.media.browse.CONTENT_STYLE_BROWSABLE_HINT"
         private const val LISTE = 1
         private const val GRILLE = 2
@@ -157,13 +157,12 @@ class JarvisMediaService : MediaBrowserService() {
     private fun element(id: String, titre: String, sousTitre: String = "", icone: String = "auto_micro",
                         dossier: Boolean = false, style: Int? = null): MediaBrowser.MediaItem {
         val d = MediaDescription.Builder().setMediaId(id).setTitle(titre).setIconUri(icone(icone))
-        // Android Auto ignore parfois l'URI android.resource des dossiers (onglets) et affiche son icône générique.
-        // Fournir aussi le bitmap réel pour l'onglet JARVIS garantit l'affichage de la tête du dragon.
-        if (icone == "dragon_tete") runCatching {
-            BitmapFactory.decodeResource(resources, R.drawable.dragon_tete)?.let { d.setIconBitmap(it) }
-        }
         if (sousTitre.isNotBlank()) d.setSubtitle(sousTitre)
-        if (style != null) d.setExtras(Bundle().apply { putInt(STYLE_JOUABLE, style) })
+        if (style != null || id == ONGLET_JARVIS) d.setExtras(Bundle().apply {
+            if (style != null) putInt(STYLE_JOUABLE, style)
+            // Indique à Android Auto le style de rendu de l'onglet JARVIS lui-même.
+            if (id == ONGLET_JARVIS) putInt(STYLE_SINGLE_ITEM, GRILLE)
+        })
         return MediaBrowser.MediaItem(d.build(), if (dossier) MediaBrowser.MediaItem.FLAG_BROWSABLE else MediaBrowser.MediaItem.FLAG_PLAYABLE)
     }
 
@@ -182,7 +181,7 @@ class JarvisMediaService : MediaBrowserService() {
     private fun enfants(parentId: String): MutableList<MediaBrowser.MediaItem> = when {
         // Onglets (Android Auto affiche en onglets les dossiers de la racine).
         parentId == RACINE -> mutableListOf(
-            element(ONGLET_JARVIS, "JARVIS", icone = "dragon_tete", dossier = true, style = GRILLE),
+            element(ONGLET_JARVIS, "JARVIS", icone = "ic_auto_dragon", dossier = true, style = GRILLE),
             element(ONGLET_AGENDA, "Aujourd'hui", icone = "auto_onglet_agenda", dossier = true),
             element(ONGLET_RACCOURCIS, "Raccourcis", icone = "auto_onglet_eclair", dossier = true),
         )
@@ -424,10 +423,10 @@ class JarvisMediaService : MediaBrowserService() {
                 afficher("🎙️ Je t'écoute…", "Parle maintenant", PlaybackState.STATE_PLAYING)
             }
             ActiviteVoiture.Etape.PARTIEL -> if (enCours) afficher("🎙️ « ${e.texte.take(90)} »", "…", PlaybackState.STATE_PLAYING)
-            ActiviteVoiture.Etape.REFLEXION -> if (enCours) afficher("« ${e.question.take(90)} »", "JARVIS réfléchit…", PlaybackState.STATE_BUFFERING)
+            ActiviteVoiture.Etape.REFLEXION -> if (enCours) afficher("JARVIS", "Traitement de la demande…", PlaybackState.STATE_BUFFERING)
             ActiviteVoiture.Etape.REPONSE -> {
                 derniere = propre(e.texte)
-                if (enCours) afficher("« ${e.question.take(70)} »", derniere, PlaybackState.STATE_PLAYING)
+                if (enCours) afficher("JARVIS", derniere, PlaybackState.STATE_PLAYING)
             }
             ActiviteVoiture.Etape.FIN -> if (enCours) {
                 enCours = false; derniereFin = SystemClock.elapsedRealtime()
@@ -440,7 +439,7 @@ class JarvisMediaService : MediaBrowserService() {
     /** Raccourci ou phrase dictée à l'Assistant (« Ok Google, … sur JARVIS ») : JARVIS répond à voix haute. */
     private fun demander(demande: String) {
         if (demande.isBlank()) return
-        afficher("« $demande »", "JARVIS réfléchit…", PlaybackState.STATE_BUFFERING)
+        afficher("JARVIS", "Traitement de la demande…", PlaybackState.STATE_BUFFERING)
         portee.launch {
             val question = ChatMsg(true, demande)
             app.chatCharger()
@@ -454,7 +453,7 @@ class JarvisMediaService : MediaBrowserService() {
             val reponse = ChatMsg(false, p)
             CarBridge.ajouter(reponse); app.chatAjouter(reponse)
             derniere = p
-            lire("« $demande »", p)
+            lire("JARVIS", p)
             notifyChildrenChanged(ONGLET_RACCOURCIS)
         }
     }
