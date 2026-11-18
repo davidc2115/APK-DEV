@@ -117,7 +117,8 @@ class BargeInVoiture(private val contexte: androidx.car.app.CarContext, private 
                     var echantillons = 0
                     var i = 0
                     while (i + 1 < n) {
-                        val v = ((buf[i].toInt() shl 8) or (buf[i + 1].toInt() and 0xFF)).toShort().toInt()
+                        // CarAudioRecord fournit du PCM 16 bits little-endian (comme Pcm.rms ci-dessus).
+                        val v = ((buf[i].toInt() and 0xFF) or (buf[i + 1].toInt() shl 8)).toShort().toInt()
                         if (echantillons > 0 && (v >= 0) != (precedent >= 0)) passages++
                         precedent = v; echantillons++; i += 2
                     }
