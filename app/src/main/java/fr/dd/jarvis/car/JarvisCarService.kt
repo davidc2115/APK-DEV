@@ -95,7 +95,7 @@ object NavigationVoiture {
         // et l'hôte peut accepter l'intent sans démarrer le guidage. Dans ce cas, laisser ToolBox lancer
         // Waze / Google Maps directement avec l'adresse plutôt que d'annoncer un faux démarrage.
         val coord = point ?: return false
-        if (destination.isBlank() && (coord.first == 0.0 || coord.second == 0.0)) return false
+        if (coord.first == 0.0 && coord.second == 0.0) return false
 
         // Android Auto documente geo:latitude,longitude comme destination de navigation.
         val coordonnees = Uri.parse("geo:${coord.first},${coord.second}")
