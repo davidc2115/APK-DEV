@@ -331,6 +331,13 @@ class JarvisService : Service() {
      */
     private fun demandeExterne(essai: Int = 0) {
         if (!running) return
+        // Le service publie running avant la fin de son initialisation : attendre le moteur vocal plutôt que perdre le Play.
+        if (voice == null) {
+            if (essai < 12) main.postDelayed({ demandeExterne(essai + 1) }, 300)
+            else fr.dd.jarvis.car.ActiviteVoiture.signaler(fr.dd.jarvis.car.ActiviteVoiture.Etape.ECHEC,
+                texte = "Le moteur vocal n'est pas encore prêt. Réessaie dans un instant.")
+            return
+        }
         // Le bouton Play d'Android Auto peut arriver avant que JarvisApp.enVoiture soit actualisé.
         // Force le routage média voiture pour le bip et la voix de cette session, même si le booléen est en retard.
         voice?.sortieVoitureForcee = true
@@ -495,12 +502,22 @@ class JarvisService : Service() {
             awake -> "conversation déjà en cours"
             busy -> "demande en cours de traitement"
             suspenduParAppli -> "l'appli a le micro"
-            maintenant - dernierReveil < 2500 -> "2e détection en moins de 2,5 s (écho)"   // écho du bip / de la voix de JARVIS
-            dernierReveil != 0L && maintenant - finLe < 1500 -> "juste après la fin d'une réponse (écho)"
+            !depuisMediaAndroidAuto && maintenant - dernierReveil < 2500 -> "2e détection en moins de 2,5 s (écho)"   // écho du bip / de la voix de JARVIS
+            !depuisMediaAndroidAuto && dernierReveil != 0L && maintenant - finLe < 1500 -> "juste après la fin d'une réponse (écho)"
             else -> null
         }
         fr.dd.jarvis.voice.JournalVoix.noter("service", if (refus == null) "réveil accepté" else "réveil ignoré : $refus")
-        if (refus != null) return
+        if (refus != null) {
+            if (depuisMediaAndroidAuto) fr.dd.jarvis.car.ActiviteVoiture.signaler(
+                fr.dd.jarvis.car.ActiviteVoiture.Etape.ECHEC,
+                texte = when (refus) {
+                    "l'appli a le micro" -> "Le micro est déjà utilisé par JARVIS sur le téléphone. Ferme cette écoute puis réessaie depuis Android Auto."
+                    "conversation déjà en cours" -> "Une conversation JARVIS est déjà ouverte. Appuie sur Play après sa fermeture."
+                    "demande en cours de traitement" -> "JARVIS termine encore la demande précédente. Réessaie dans un instant."
+                    else -> "Le service vocal refuse l'ouverture du micro : $refus."
+                })
+            return
+        }
         dernierReveil = maintenant
         conversationActive.value = true
         garderEveille(true)
