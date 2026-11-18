@@ -373,12 +373,12 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            fr.dd.jarvis.ui.TeteDragonAnimee(Modifier.size(46.dp), active = vm.busy || vm.listening, parle = vm.parle)
+            fr.dd.jarvis.ui.TeteDragonAnimee(Modifier.size(46.dp), active = vm.busy || vm.listening || fr.dd.jarvis.service.JarvisService.conversationActive.value, parle = vm.parle)
             Column(Modifier.padding(start = 12.dp)) {
                 Text("J.A.R.V.I.S", color = accent, fontWeight = FontWeight.Bold, fontSize = 18.sp, letterSpacing = 4.sp, fontFamily = FontFamily.Monospace)
                 Text(
                     when {
-                        vm.listening -> "À l'écoute…"
+                        vm.listening || fr.dd.jarvis.service.JarvisService.conversationActive.value -> "À l'écoute…"
                         vm.busy -> vm.status.ifBlank { "Réflexion…" }
                         else -> tabs[tab].label.uppercase()
                     },
