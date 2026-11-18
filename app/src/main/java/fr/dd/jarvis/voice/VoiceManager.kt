@@ -891,8 +891,8 @@ class VoiceManager(private val ctx: Context) {
                     // sortieVoitureForcee est activé par le service dès la réception de cette action.
                     val voiture = sortieVoitureForcee || appli()?.enVoiture == true
                     val avance = (taux * when {
-                        sco -> if (voiture) 0.6 else 0.35          // haut-parleurs « appel » de la voiture : ~0,5 s pour s'ouvrir
-                        voiture -> 1.2                             // canal média d'Android Auto : jusqu'à ~1 s pour s'ouvrir
+                        sco -> if (voiture) 0.6 else 0.35
+                        voiture -> 1.8                             // projection Android Auto : laisser réellement réveiller l'ampli de l'autoradio
                         externe -> 0.8
                         else -> 0.35
                     }).toInt()
@@ -913,7 +913,14 @@ class VoiceManager(private val ctx: Context) {
                         .setAudioAttributes(attrs)
                         .setAudioFormat(AudioFormat.Builder().setSampleRate(taux).setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
                         .setTransferMode(AudioTrack.MODE_STATIC).setBufferSizeInBytes(pcm.size * 2).build()
-                    piste.write(pcm, 0, pcm.size)
+                    if (voiture && Build.VERSION.SDK_INT >= 33) {
+                        val sortie = runCatching { am.getAudioDevicesForAttributes(attrs).firstOrNull() }.getOrNull()
+                        if (sortie != null) runCatching { piste?.preferredDevice = sortie }
+                        JournalVoix.noter(nom, "sortie bip voiture : ${sortie?.productName ?: "routage média Android"}")
+                    }
+                    if (piste?.state != AudioTrack.STATE_INITIALIZED) error("AudioTrack bip non initialisé")
+                    val ecrits = piste.write(pcm, 0, pcm.size)
+                    if (ecrits <= 0) error("écriture bip refusée : $ecrits")
                     piste.play()
                     JournalVoix.noter(nom, "bip joué sur " + when {
                         sco -> "la liaison mains-libres Bluetooth (${microBt?.productName ?: "casque"})" +
@@ -1405,6 +1412,12 @@ class VoiceManager(private val ctx: Context) {
                 piste = AudioTrack.Builder().setAudioAttributes(attrsVoix)
                     .setAudioFormat(AudioFormat.Builder().setSampleRate(a.frequence).setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(canal).build())
                     .setTransferMode(AudioTrack.MODE_STREAM).setBufferSizeInBytes(min * 4).build()
+                val voiture = sortieVoitureForcee || appli()?.enVoiture == true
+                if (voiture && Build.VERSION.SDK_INT >= 33) {
+                    val sortie = runCatching { am.getAudioDevicesForAttributes(attrsVoix).firstOrNull() }.getOrNull()
+                    if (sortie != null) runCatching { piste?.preferredDevice = sortie }
+                    JournalVoix.noter(nom, "sortie voix voiture : ${sortie?.productName ?: "routage média Android"}")
+                }
                 formatPiste = a.frequence to a.canaux
                 ecrits = 0L
                 fenetre = (a.frequence / 50).coerceAtLeast(1)
@@ -1412,6 +1425,19 @@ class VoiceManager(private val ctx: Context) {
                 Presence.brancher { niveauPiste() }
                 runCatching { piste?.setVolume(volume) }
                 piste?.play()
+                // L'autoradio Android Auto met parfois plusieurs centaines de ms à réactiver ses amplis
+                // après un silence. Injecter un pré-roll muet DANS la piste avant le premier phonème :
+                // le délai est consommé par l'autoradio, pas par le texte prononcé.
+                if (voiture) {
+                    val silence = ByteArray((a.frequence * 2L * a.canaux * 900L / 1000L).toInt())
+                    var offset = 0
+                    while (offset < silence.size && !fini.get()) {
+                        val nSilence = piste?.write(silence, offset, minOf(8192, silence.size - offset)) ?: 0
+                        if (nSilence <= 0) break
+                        offset += nSilence
+                    }
+                    JournalVoix.noter(nom, "pré-ouverture sortie voiture : ${offset / (a.frequence * 2L * a.canaux / 1000L).coerceAtLeast(1)} ms")
+                }
                 voixLancee()
             }
             val t = piste ?: return
