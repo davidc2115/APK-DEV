@@ -88,12 +88,13 @@ class BargeInVoiture(private val contexte: androidx.car.app.CarContext, private 
         thread = Thread {
             var record: androidx.car.app.media.CarAudioRecord? = null
             try {
-                record = androidx.car.app.media.CarAudioRecord.create(contexte)
-                record.startRecording()
+                val r = androidx.car.app.media.CarAudioRecord.create(contexte) ?: return@Thread
+                record = r
+                r.startRecording()
                 val buf = ByteArray(androidx.car.app.media.CarAudioRecord.AUDIO_CONTENT_BUFFER_SIZE)
                 val detecteur = DetecteurParole()
                 while (run) {
-                    val n = record.read(buf, 0, buf.size)
+                    val n = r.read(buf, 0, buf.size)
                     if (n <= 0) { if (n < 0) break; continue }
                     val rms = fr.dd.jarvis.car.Pcm.rms(buf, 0, n, true)
                     var passages = 0
