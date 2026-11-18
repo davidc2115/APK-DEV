@@ -8,6 +8,7 @@ import android.media.AudioFocusRequest
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import android.media.ToneGenerator
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -869,71 +870,43 @@ class VoiceManager(private val ctx: Context) {
      */
     fun carillon(montant: Boolean = true, puis: () -> Unit = {}) {
         JournalVoix.noter(nom, "bip ${if (montant) "montant (je t'écoute)" else "descendant (fin)"}")
-        // Posté : une conversation qui vient de commencer (sessionDebut, posté juste avant) a déjà demandé le micro Bluetooth.
         main.post {
             Thread {
-                var piste: AudioTrack? = null
+                var tonalite: ToneGenerator? = null
                 var focusBip: AudioFocusRequest? = null
                 try {
-                    // Micro du casque / de la voiture Bluetooth demandé : le bip attend que la liaison soit prête et passe
-                    // par elle (sinon il partait en A2DP, coupé par le casque au moment où il bascule en mains-libres).
-                    val sco = attendreMicroBluetooth()
-                    val externe = sco || sortieBluetooth()
-                    // Autoradio (Android Auto) et casques A2DP : même usage « média » que la voix de JARVIS. L'usage
-                    // « assistant / son système » n'y était pas toujours transmis : bip muet dans la voiture.
-                    val attrs = when { sco -> attrAppel; externe -> attrBluetooth; else -> attrBip }
-                    val taux = 22050
-                    val notes = if (montant) doubleArrayOf(784.0, 1175.0) else doubleArrayOf(988.0, 659.0)
-                    val n = (taux * 0.11).toInt()
-                    // Sortie en veille : ~0,3 s pour le haut-parleur du téléphone, jusqu'à ~0,7 s pour un lien Bluetooth
-                    // ou le canal média d'Android Auto. Ce silence d'abord, sinon le début du bip est avalé.
-                    // Le mode voiture peut être signalé après l'appui Play d'Android Auto.
-                    // sortieVoitureForcee est activé par le service dès la réception de cette action.
+                    // Android Auto utilise son canal média : ne jamais tenter d'ouvrir le profil mains-libres SCO ici.
+                    // Hors projection, on conserve le micro Bluetooth si une conversation l'a explicitement demandé.
                     val voiture = sortieVoitureForcee || appli()?.enVoiture == true
-                    val avance = (taux * when {
-                        sco -> if (voiture) 0.6 else 0.35
-                        voiture -> 1.8                             // projection Android Auto : laisser réellement réveiller l'ampli de l'autoradio
-                        externe -> 0.8
-                        else -> 0.35
-                    }).toInt()
-                    val amplitude = if (externe) 0.32 else 0.25
-                    val pcm = ShortArray(avance + n * notes.size + taux / 20)
-                    notes.forEachIndexed { k, f ->
-                        for (i in 0 until n) {
-                            val enveloppe = sin(PI * i / n)
-                            pcm[avance + k * n + i] = (sin(2 * PI * f * i / taux) * enveloppe * amplitude * Short.MAX_VALUE).toInt().toShort()
-                        }
+                    val sco = if (voiture) false else attendreMicroBluetooth()
+                    val externe = sco || sortieBluetooth() || voiture
+                    val attrs = when {
+                        sco -> attrAppel
+                        externe -> attrBluetooth
+                        else -> attrBip
                     }
-                    // Hors conversation, la musique de la voiture / du casque baisse le temps du bip (sinon il s'y perd).
-                    if (externe && !sessionActive && Build.VERSION.SDK_INT >= 26) focusBip = runCatching {
-                        AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK).setAudioAttributes(attrs)
-                            .setOnAudioFocusChangeListener({ }, main).build().also { am.requestAudioFocus(it) }
-                    }.getOrNull()
-                    piste = AudioTrack.Builder()
-                        .setAudioAttributes(attrs)
-                        .setAudioFormat(AudioFormat.Builder().setSampleRate(taux).setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
-                        .setTransferMode(AudioTrack.MODE_STATIC).setBufferSizeInBytes(pcm.size * 2).build()
-                    if (voiture && Build.VERSION.SDK_INT >= 33) {
-                        val sortie = runCatching { am.getAudioDevicesForAttributes(attrs).firstOrNull() }.getOrNull()
-                        if (sortie != null) runCatching { piste?.preferredDevice = sortie }
-                        JournalVoix.noter(nom, "sortie bip voiture : ${sortie?.productName ?: "routage média Android"}")
+                    if (externe && !sessionActive && Build.VERSION.SDK_INT >= 26) {
+                        focusBip = runCatching {
+                            AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                                .setAudioAttributes(attrs).setOnAudioFocusChangeListener({ }, main).build()
+                                .also { am.requestAudioFocus(it) }
+                        }.getOrNull()
                     }
-                    if (piste?.state != AudioTrack.STATE_INITIALIZED) error("AudioTrack bip non initialisé")
-                    val ecrits = piste.write(pcm, 0, pcm.size)
-                    if (ecrits <= 0) error("écriture bip refusée : $ecrits")
-                    piste.play()
-                    JournalVoix.noter(nom, "bip joué sur " + when {
-                        sco -> "la liaison mains-libres Bluetooth (${microBt?.productName ?: "casque"})" +
-                            (if (appli()?.enVoiture == true) " de la voiture, Android Auto" else "")
-                        appli()?.enVoiture == true -> "les haut-parleurs de la voiture (Android Auto)"
-                        externe -> "la sortie Bluetooth / externe"
-                        else -> "le haut-parleur du téléphone"
-                    })
-                    Thread.sleep(pcm.size * 1000L / taux + 30)
+                    // ToneGenerator est plus fiable que l'AudioTrack statique sur certaines ROM : il utilise
+                    // directement le flux média du téléphone / de la projection et ne dépend pas d'un buffer PCM.
+                    val stream = if (sco) AudioManager.STREAM_VOICE_CALL else AudioManager.STREAM_MUSIC
+                    tonalite = ToneGenerator(stream, 85)
+                    val premier = if (montant) ToneGenerator.TONE_PROP_BEEP else ToneGenerator.TONE_PROP_ACK
+                    val second = if (montant) ToneGenerator.TONE_PROP_ACK else ToneGenerator.TONE_PROP_BEEP
+                    if (!tonalite.startTone(premier, 130)) error("ToneGenerator n'a pas démarré le premier bip")
+                    Thread.sleep(170)
+                    if (!tonalite.startTone(second, 160)) error("ToneGenerator n'a pas démarré le second bip")
+                    Thread.sleep(210)
+                    JournalVoix.noter(nom, "bip diffusé sur ${if (voiture) "le flux média Android Auto" else if (sco) "la liaison mains-libres" else if (externe) "la sortie externe" else "le téléphone"}")
                 } catch (e: Throwable) {
                     JournalVoix.noter(nom, "échec lecture bip : ${e.message ?: e.javaClass.simpleName}")
                 } finally {
-                    runCatching { piste?.release() }
+                    runCatching { tonalite?.release() }
                     focusBip?.let { f -> runCatching { am.abandonAudioFocusRequest(f) } }
                 }
                 main.post(puis)
