@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tête de dragon monochrome : icône vectorielle adaptée aux onglets Android Auto. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M2,18 L4,14 L3,11 L7,10 L9,6 L12,9 L15,5 L17,9 L20,8 L19,12 L23,14 L20,16 L21,19 L17,18 L14,21 L11,19 L8,20 L6,17 Z M16,12 L18,12 L17,13 Z M8,14 L11,15 L10,17 L8,16 Z" />
+</vector>
