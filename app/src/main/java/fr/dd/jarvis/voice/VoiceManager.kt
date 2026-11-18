@@ -885,7 +885,10 @@ class VoiceManager(private val ctx: Context) {
                         externe -> attrBluetooth
                         else -> attrBip
                     }
-                    if (externe && !sessionActive && Build.VERSION.SDK_INT >= 26) {
+                    // Android Auto peut conserver le focus exclusif de la session sur USAGE_ASSISTANT :
+                    // reprendre explicitement et brièvement le focus MEDIA permet au bip d'atteindre l'autoradio,
+                    // même si la session vocale est déjà ouverte.
+                    if ((voiture || externe && !sessionActive) && Build.VERSION.SDK_INT >= 26) {
                         focusBip = runCatching {
                             AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
                                 .setAudioAttributes(attrs).setOnAudioFocusChangeListener({ }, main).build()
@@ -1327,12 +1330,15 @@ class VoiceManager(private val ctx: Context) {
             prepare = true
             // Sur l'autoradio / un casque Bluetooth, le micro entend la voix de Jarvis sans annulation d'écho : la « coupure
             // en reprenant la parole » se déclencherait sur sa propre voix. Elle reste active sur le téléphone seul.
-            externe = sortieBluetooth()
-            coupe = bargeIn && micOk() && (!externe || sortieVoitureForcee)
-            val appel = coupe && duplex && hautParleurSeul() && entrerModeAppel()
+            // Android Auto est une sortie externe même si Android ne l'expose pas comme périphérique Bluetooth.
+            // Sans cela, la synthèse et son bip utilisent USAGE_ASSISTANT/STREAM_NOTIFICATION au lieu du canal média
+            // réellement projeté par l'autoradio, et le micro de coupure n'est pas activé de façon cohérente.
+            externe = sortieBluetooth() || sortieVoitureForcee
+            coupe = bargeIn && micOk() && (!sortieBluetooth() || sortieVoitureForcee)
+            val appel = coupe && duplex && hautParleurSeul() && !sortieVoitureForcee && entrerModeAppel()
             // En Bluetooth/A2DP et Android Auto, l'usage MEDIA garantit le routage vers l'autoradio.
             // Micro du casque Bluetooth en service : la voix passe par la même liaison mains-libres (l'A2DP y est suspendu).
-            attrsVoix = when { appel -> attrAppel; microBluetoothPret() -> attrAppel; externe -> attrBluetooth; else -> attrAssistant }
+            attrsVoix = when { appel -> attrAppel; microBluetoothPret() && !sortieVoitureForcee -> attrAppel; externe -> attrBluetooth; else -> attrAssistant }
             if (!appel && am.mode == AudioManager.MODE_NORMAL && !sessionActive) demanderFocusReponse(attrsVoix)
             // Hors session : focus + vraie commande PAUSE pour les lecteurs qui ignorent le focus, reprise après la réponse.
             mediaPauseeParJarvis = !sessionActive && externe && fr.dd.jarvis.service.JarvisNotificationListener.pauseMediaPourVoix(ctx)
