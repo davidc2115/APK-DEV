@@ -971,23 +971,18 @@ class ToolBox(
         "controle_media" -> ToolResult(fr.dd.jarvis.device.CommandeMedia.depuisOutil(a.optString("action"))?.let { fr.dd.jarvis.device.CommandeMedia.executer(app, it, app.enVoiture) }
             ?: app.phone.mediaKey(a.optString("action")))
         "naviguer" -> {
-            // En voiture : Android Auto lance son propre GPS (Waze / Maps de la voiture), sans question ni écran du téléphone.
-            if ((app.enVoiture || fr.dd.jarvis.car.NavigationVoiture.contexte != null) && a.optString("destination").isNotBlank()) {
-                val pt = runCatching { fr.dd.jarvis.societe.Geo.geocode(a.optString("destination")) }.getOrNull()
-                if (fr.dd.jarvis.car.NavigationVoiture.lancer(a.optString("destination"), pt?.let { it.lat to it.lon }))
-                    return ToolResult("🧭 Demande de guidage transmise à Android Auto vers ${a.optString("destination")}")
-                // JARVIS pas ouvert dans Android Auto : l'appli de navigation du téléphone est lancée (son guidage
-                // s'affiche dans la voiture), avec les coordonnées si l'adresse a été trouvée.
-                fr.dd.jarvis.voice.JournalVoix.noter("voiture", "guidage par le téléphone (JARVIS n'est pas ouvert dans Android Auto)")
-            }
+            // Android Auto : le bouton Play ouvre le micro ; la commande reconnue doit ensuite lancer
+            // directement l'application GPS du téléphone. Android Auto projette alors son guidage.
+            // ACTION_NAVIGATE via CarContext pouvait être accepté sans démarrer réellement l'itinéraire.
+            val enVoiture = app.enVoiture || fr.dd.jarvis.car.NavigationVoiture.contexte != null
             var appli = a.optString("appli").trim()
             val toujours = a.optString("toujours").trim().lowercase() in setOf("true", "oui", "1", "vrai")
             if (appli.isBlank()) appli = app.store.appPrefs["navigation"].orEmpty()
             val dispo = app.phone.navApps().keys
-            // En voiture, pas de question : Waze s'il est installé (c'est le GPS d'Android Auto le plus courant).
-            if (appli.isBlank() && app.enVoiture) appli = dispo.firstOrNull { it.contains("Waze") } ?: dispo.firstOrNull().orEmpty()
+            // En voiture, choix automatique : Waze en priorité, sinon le premier GPS installé.
+            if (appli.isBlank() && enVoiture) appli = dispo.firstOrNull { it.contains("Waze", ignoreCase = true) } ?: dispo.firstOrNull().orEmpty()
             if (appli.isBlank() && dispo.size > 1)
-                ToolResult("CHOIX_REQUIS : demande à l'utilisateur avec quelle application lancer l'itinéraire (${dispo.joinToString(" ou ")}) et s'il veut la garder toujours ou une seule fois, puis rappelle naviguer avec appli et toujours.")
+                ToolResult("CHOIX_REQUIS : demande à l'utilisateur avec quelle application lancer l'itinéraire (${dispo.joinToString(" ou ")}) et s'il veut la garder toujours ou ponctuellement, puis rappelle naviguer avec appli et toujours.")
             else {
                 if (appli.isBlank()) appli = dispo.firstOrNull().orEmpty()
                 if (toujours && a.optString("appli").isNotBlank()) app.store.setAppPref("navigation", a.optString("appli").trim())
