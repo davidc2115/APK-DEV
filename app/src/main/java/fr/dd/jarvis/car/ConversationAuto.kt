@@ -24,18 +24,30 @@ import kotlin.coroutines.resume
  */
 object ConversationAuto {
     @Volatile private var enCours = false
+    @Volatile private var travail: kotlinx.coroutines.Job? = null
+    @Volatile private var microActif: MicroVoiture? = null
     private val arret = Regex("^(merci|c'est tout|c est tout|stop|arrete|termine|fin|au revoir|laisse tomber|ca suffit)\\b.*")
 
     fun possible(app: JarvisApp): Boolean = app.enVoiture && !enCours && NavigationVoiture.contexte != null &&
         runCatching { app.llm.groq.disponible() }.getOrDefault(false)
+
+    /** Arrêt immédiat depuis le bouton STOP du téléphone ou Android Auto. */
+    fun arreter() {
+        microActif?.arreter()
+        travail?.cancel()
+        enCours = false
+    }
 
     /** Lance la conversation ; [fin] est appelé (fil principal) quand elle se termine, quelle qu'en soit la raison. */
     fun demarrer(app: JarvisApp, fin: () -> Unit) {
         val ctx = NavigationVoiture.contexte
         if (ctx == null || enCours) { fin(); return }
         enCours = true
-        CoroutineScope(SupervisorJob() + Dispatchers.Main).launch {
-            try { boucle(app, ctx) } catch (_: Throwable) { } finally { enCours = false; fin() }
+        travail = CoroutineScope(SupervisorJob() + Dispatchers.Main).launch {
+            try { boucle(app, ctx) } catch (_: Throwable) { } finally {
+                microActif?.arreter(); microActif = null
+                enCours = false; travail = null; fin()
+            }
         }
     }
 
@@ -54,7 +66,10 @@ object ConversationAuto {
         while (true) {
             ActiviteVoiture.signaler(ActiviteVoiture.Etape.ECOUTE)
             val micro = MicroVoiture(ctx)
-            val res = withContext(Dispatchers.IO) { micro.ecouter(if (premiere) maxOf(silence, 8000L) else silence) }
+            microActif = micro
+            val res = try {
+                withContext(Dispatchers.IO) { micro.ecouter(if (premiere) maxOf(silence, 8000L) else silence) }
+            } finally { if (microActif === micro) microActif = null }
             premiere = false
             val pcm = when (res) {
                 is Ecoute.Phrase -> res.pcm
