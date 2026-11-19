@@ -13,7 +13,7 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
         val KEYWORDS = Regex("discord|r[ôo]le\\b|r[ôo]les\\b|mod[ée]rateur|mod[ée]ration|serveur discord|salon\\b|salons\\b|channels?\\b|cat[ée]gorie discord", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t) || DiscordNoms.cite(t)
         val NAMES = setOf(
-            "discord_guildes", "discord_roles", "discord_salons", "discord_audit_serveur", "discord_role_creer", "discord_role_modifier",
+            "discord_diagnostic", "discord_guildes", "discord_roles", "discord_salons", "discord_audit_serveur", "discord_role_creer", "discord_role_modifier",
             "discord_role_supprimer", "discord_role_position", "discord_role_attribuer", "discord_salon_permission", "discord_message_envoyer", "discord_messages_lire", "discord_messages_rechercher", "discord_fil_lire"
         )
     }
@@ -29,6 +29,7 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
         Discord.Perm.NOMS.keys.joinToString(", ") + ". Vide = aucune permission (rôle purement cosmétique)."
 
     val schema: List<JSONObject> = listOf(
+        tool("discord_diagnostic", "Discord : diagnostic en lecture seule du bot JARVIS. Vérifie le jeton, l'identité du bot, les serveurs accessibles, son membre et ses rôles sur chaque serveur, la hiérarchie de ses rôles, les permissions cumulées et l'inventaire des salons. Signale les permissions Discord utiles manquantes. Les intents privilégiés du portail développeur ne sont pas lisibles par l'API : ils ne sont pas déclarés comme vérifiés.", mapOf("serveur" to prop("Nom ou ID d'un serveur précis ; vide pour examiner tous les serveurs accessibles au bot."))),
         tool("discord_guildes", "Discord : liste les serveurs (guildes) où le bot JARVIS est présent.", emptyMap()),
         tool("discord_roles", "Discord : liste les rôles d'un serveur (nom, couleur, permissions, position).",
             mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si le bot n'est que sur un seul)."))),
@@ -97,6 +98,69 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
 
     private suspend fun run(name: String, a: JSONObject): ToolResult {
         return when (name) {
+        "discord_diagnostic" -> {
+            val bot = Discord.moi(app)
+            val botId = bot.optString("id")
+            val botNom = bot.optString("global_name").ifBlank { bot.optString("username").ifBlank { "Bot inconnu" } }
+            val toutes = Discord.guildes(app)
+            val demande = a.optString("serveur").trim()
+            val guildes = if (demande.isBlank()) {
+                (0 until toutes.length()).map { toutes.getJSONObject(it) }
+            } else {
+                val choisie = Discord.trouverGuilde(app, demande)
+                    ?: return ToolResult("Serveur « $demande » introuvable parmi ceux accessibles au bot : " + Discord.noms(toutes) + ".")
+                listOf(choisie)
+            }
+            if (guildes.isEmpty()) return ToolResult("Le jeton est accepté pour l'identité du bot « $botNom », mais aucun serveur accessible n'a été retourné par l'API.")
+            val lignes = mutableListOf("# Diagnostic du bot Discord — lecture seule", "Bot : **$botNom** · ID $botId", "Serveurs inspectés : ${guildes.size}", "Aucune modification effectuée.")
+            val droitsUtiles = listOf(
+                Discord.Perm.VIEW_CHANNEL to "voir les salons",
+                Discord.Perm.SEND_MESSAGES to "envoyer des messages",
+                Discord.Perm.READ_MESSAGE_HISTORY to "lire l'historique",
+                Discord.Perm.ADD_REACTIONS to "ajouter des réactions",
+                Discord.Perm.MANAGE_MESSAGES to "gérer les messages",
+                Discord.Perm.MANAGE_CHANNELS to "gérer les salons",
+                Discord.Perm.MANAGE_ROLES to "gérer les rôles",
+                Discord.Perm.MANAGE_GUILD to "gérer le serveur",
+                Discord.Perm.KICK_MEMBERS to "expulser des membres",
+                Discord.Perm.BAN_MEMBERS to "bannir des membres",
+                Discord.Perm.MODERATE_MEMBERS to "modérer les membres"
+            )
+            for (g in guildes) {
+                val gid = g.optString("id")
+                val nom = g.optString("name")
+                val roles = Discord.roles(app, gid)
+                val membre = runCatching { Discord.membre(app, gid, botId) }.getOrNull()
+                val rolesBot = (membre?.optJSONArray("roles") ?: JSONArray()).let { a -> (0 until a.length()).map { a.optString(it) }.toSet() }
+                var permissions = 0L
+                val rolesAttribues = mutableListOf<JSONObject>()
+                for (i in 0 until roles.length()) {
+                    val role = roles.getJSONObject(i)
+                    val id = role.optString("id")
+                    if (id == gid || id in rolesBot) {
+                        permissions = permissions or (role.optString("permissions", "0").toLongOrNull() ?: 0L)
+                        if (id != gid) rolesAttribues += role
+                    }
+                }
+                val admin = permissions and Discord.Perm.ADMINISTRATOR != 0L
+                val plusHaut = rolesAttribues.maxByOrNull { it.optInt("position") }
+                val salons = runCatching { Discord.salons(app, gid) }.getOrNull()
+                lignes += ""
+                lignes += "## $nom"
+                lignes += "Membre bot : " + if (membre == null) "non récupérable (permissions ou accès membre à vérifier)" else "présent"
+                lignes += "Salons retournés par l'API : ${salons?.length() ?: "non vérifiables"} · rôles du serveur : ${roles.length()}"
+                lignes += "Rôle le plus haut du bot : " + (plusHaut?.optString("name") ?: "@everyone") + (plusHaut?.let { " (position ${it.optInt("position")})" } ?: "")
+                lignes += "Permissions cumulées des rôles : " + if (admin) "ADMINISTRATEUR (toutes permissions)" else Discord.Perm.noms(permissions).joinToString(", ").ifBlank { "aucune permission détectée" }
+                if (!admin) {
+                    val manquantes = droitsUtiles.filter { (bit, _) -> permissions and bit == 0L }.map { it.second }
+                    lignes += "Permissions utiles absentes des rôles : " + manquantes.joinToString(", ").ifBlank { "aucune parmi celles contrôlées" }
+                }
+                if (rolesAttribues.isEmpty()) lignes += "Attention : aucun rôle attribué au bot au-delà de @everyone."
+            }
+            lignes += ""
+            lignes += "Limite du diagnostic : les permissions affichées sont l'union des permissions des rôles, avant les restrictions/overrides propres à chaque salon. Les intents MESSAGE_CONTENT et GUILD_MEMBERS doivent être vérifiés dans le portail développeur ou les journaux PM2."
+            ToolResult(lignes.joinToString("\n"), direct = true)
+        }
         "discord_guildes" -> {
             val arr = Discord.guildes(app)
             ToolResult("# 💬 Serveurs Discord (${arr.length()})\n" + (0 until arr.length()).joinToString("\n") { i -> "- " + Discord.affiche(arr.getJSONObject(i).optString("name")) }, direct = true)
