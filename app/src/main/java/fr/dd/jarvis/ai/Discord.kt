@@ -195,6 +195,7 @@ object Discord {
     }
 
     fun guildes(app: JarvisApp): JSONArray = reqArr(app, "GET", "/users/@me/guilds").also { DiscordNoms.retenir(app, it) }
+    fun infosGuilde(app: JarvisApp, guildId: String): JSONObject = req(app, "GET", "/guilds/$guildId?with_counts=true")
     fun roles(app: JarvisApp, guildId: String): JSONArray = reqArr(app, "GET", "/guilds/$guildId/roles")
     fun salons(app: JarvisApp, guildId: String): JSONArray = reqArr(app, "GET", "/guilds/$guildId/channels").also { DiscordNoms.retenir(app, it) }
     /** Lit les derniers messages d’un salon. afterId permet de ne récupérer que les messages plus récents. */
@@ -288,12 +289,10 @@ object Discord {
     }
 
     fun expulserMembre(app: JarvisApp, guildId: String, userId: String, raison: String) {
-        val q = java.net.URLEncoder.encode(raison.take(400), "UTF-8").replace("+", "%20")
         req(app, "DELETE", "/guilds/$guildId/members/$userId", null, raison)
     }
 
     fun bannirMembre(app: JarvisApp, guildId: String, userId: String, raison: String, supprimerMessagesSecondes: Int) {
-        val q = java.net.URLEncoder.encode(raison.take(400), "UTF-8").replace("+", "%20")
         val body = JSONObject().put("delete_message_seconds", supprimerMessagesSecondes.coerceIn(0, 604800))
         req(app, "PUT", "/guilds/$guildId/bans/$userId", body, raison)
     }
