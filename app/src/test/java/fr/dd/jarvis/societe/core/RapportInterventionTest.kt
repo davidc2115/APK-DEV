@@ -28,4 +28,20 @@ class RapportInterventionTest {
         assertEquals(5, resultat.series.size)
         assertEquals("185 V", resultat.series.first { it.numero == 3 }.valeur)
     }
+    @Test fun rapportConserveTousLesOnduleurs() {
+        val site = Site("site-1", "Toiture", onduleur = "Onduleur historique")
+        val client = Client("client-1", "Client test", sites = listOf(site))
+        val intervention = Intervention(
+            id = "inter-1",
+            date = "2026-11-19",
+            description = "Contrôle des onduleurs",
+            onduleurs = "SMA Sunny Tripower\nFronius Symo"
+        )
+        val rapport = Rendu.rendreIntervention(SocieteData(clients = listOf(client)), client, site, intervention)
+
+        assertTrue(rapport.contains("SMA Sunny Tripower"))
+        assertTrue(rapport.contains("Fronius Symo"))
+        assertTrue(!rapport.contains("Onduleur historique"))
+    }
+
 }
