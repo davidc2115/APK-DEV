@@ -131,7 +131,8 @@ object Http {
  *    suivant (Groq → Gemini → Cloudflare) au lieu de perdre du temps sur des clés épuisées.
  */
 class KeyRing(private val keys: () -> List<String>) {
-    private var next = 0
+    // Plusieurs agents peuvent appeler le même anneau simultanément : réservation atomique du point de départ.
+    private val next = java.util.concurrent.atomic.AtomicInteger(0)
     private val cooldown = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     fun count(): Int = keys().count { it.isNotBlank() }
@@ -241,7 +242,8 @@ class KeyRing(private val keys: () -> List<String>) {
         val list = keys().filter { it.isNotBlank() }
         if (list.isEmpty()) throw IllegalStateException("Aucune clé configurée (Réglages)")
         val now = System.currentTimeMillis()
-        val order = list.indices.map { (next + it) % list.size }
+        val depart = next.getAndUpdate { (it + 1) % list.size }.let { Math.floorMod(it, list.size) }
+        val order = list.indices.map { (depart + it) % list.size }
         val (ready, cooling) = order.partition { (cooldown[list[it]] ?: 0L) <= now }
         // Toutes en pause : on ne retente que la clé qui se libère dans moins de 90 s ; sinon échec immédiat (relais suivant).
         val essais = ready.ifEmpty {
@@ -257,7 +259,6 @@ class KeyRing(private val keys: () -> List<String>) {
             val key = list[i]
             try {
                 val result = block(key)
-                next = (i + 1) % list.size
                 cooldown.remove(key); refusees.remove(key); raisons.remove(key)
                 return result
             } catch (e: ApiException) {
