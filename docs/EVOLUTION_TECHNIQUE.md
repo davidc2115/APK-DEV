@@ -93,3 +93,10 @@ C'est une mesure de sécurité transitoire : elle peut temporairement retirer l'
 - AndroidX Compose UI : https://developer.android.com/jetpack/androidx/releases/compose-ui
 - AndroidX Media3 : https://developer.android.com/jetpack/androidx/releases/media3
 - Kotlin releases : https://kotlinlang.org/docs/releases.html
+
+
+### Rotation concurrent des fournisseurs IA
+
+- Les anneaux Groq/Gemini/OpenAI utilisent désormais un index de départ atomique : plusieurs agents qui sollicitent le même fournisseur en parallèle ne se marchent plus dessus lors de la sélection de la prochaine clé.
+- Le relais Cloudflare utilise également un index atomique et une table de temporisation concurrente pour ses comptes.
+- La sélection reste en rotation entre les clés disponibles ; les temporisations et les règles de bascule fournisseur restent inchangées. Aucun secret ni contenu de conversation n'est journalisé par cette évolution.
