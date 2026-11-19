@@ -393,7 +393,7 @@ object Discord {
             val u = m.optJSONObject("user") ?: JSONObject()
             listOf(m.optString("nick"), u.optString("global_name"), u.optString("username")).filter { it.isNotBlank() }.map { JSONObject().put("id", u.optString("id")).put("name", it) to m }
         }
-        val choisi = choisir(vues.map { it.first }, q, textesAlias(app)) ?: return trouves?.takeIf { it.length() > 0 }?.getJSONObject(0)
+        val choisi = choisir(vues.map { it.first }, q, textesAlias(app)) ?: return null
         return vues.first { it.first === choisi }.second
     }
 
