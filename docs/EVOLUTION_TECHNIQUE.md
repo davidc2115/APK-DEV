@@ -68,7 +68,7 @@ C'est une mesure de sécurité transitoire : elle peut temporairement retirer l'
 
 ## Audit réseau local et clients Freebox
 
-- Le scan Wi-Fi reste limité au sous-réseau privé (maximum /22), mais son exécution bloquante est maintenant plafonnée à 32 threads au lieu de 160 ; les résolutions DNS sont plafonnées à 24 threads au lieu d'un pool extensible sans borne.
+- Le scan Wi-Fi reste limité au sous-réseau privé (maximum /22), mais son exécution bloquante est maintenant plafonnée à 64 threads au lieu de 160 ; les résolutions DNS sont plafonnées à 24 threads au lieu d'un pool extensible sans borne.
 - Les appels HTTP ont un délai total (`callTimeout`) en plus des délais de connexion/lecture, pour éviter qu'une réponse lente garde une opération bloquée indéfiniment.
 - Le client TLS permissif reste réservé aux équipements locaux ; son gestionnaire de confiance est initialisé une seule fois.
 - Les URL de description UPnP sont acceptées uniquement en HTTP(S), sans identifiants intégrés, et si tous les résultats DNS sont des adresses IPv4 privées/link-local. Leur lecture ne suit pas les redirections.
