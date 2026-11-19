@@ -434,8 +434,15 @@ class Brain(
         }
         // Outils retirés : ceux qui renverraient vers Hermès (quand c'est Hermès qui demande), et le SSH pour une demande
         // Home Assistant ordinaire — elle passe par l'API (ha_*) ; si l'API échoue, l'approfondissement prend le relais.
+        val demandeStockageHote = Regex("stockage|volume|dossier|fichier|chemin|disque", RegexOption.IGNORE_CASE).containsMatchIn(recent)
+        val outilsDebianAExclure = if (fr.dd.jarvis.hermes.Routeur.homeAssistantApi(texteUser)) {
+            // Pour les demandes domotiques, ne laisse pas l'agent choisir le serveur Debian à la place de l'API HA.
+            // Exception : demande explicite de stockage/volume, où serveur_service action=stockage est le bon outil.
+            setOf("ssh_commande", "ssh_fichier", "ssh_script", "serveur_diagnostic", "serveur_fichiers", "serveur_tache", "ha_sauvegarde") +
+                (if (demandeStockageHote) emptySet() else setOf("serveur_service"))
+        } else emptySet()
         val retires = (if (pourHermes || MaisonDirecte.concerne(texteUser) || (!pourHermes && fr.dd.jarvis.hermes.Routeur.dernierChoixMaison)) setOf("hermes", "hermes_deleguer", "tache_arriere_plan") else emptySet()) +
-            (if (fr.dd.jarvis.hermes.Routeur.homeAssistantApi(texteUser)) setOf("ssh_commande", "ssh_fichier", "ssh_script", "serveur_diagnostic") else emptySet())
+            outilsDebianAExclure
         val schemaFinal = if (retires.isEmpty()) schema else JSONArray().also { f ->
             for (i in 0 until schema.length()) {
                 val nom = schema.optJSONObject(i)?.optJSONObject("function")?.optString("name")
