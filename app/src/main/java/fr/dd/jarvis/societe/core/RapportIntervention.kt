@@ -148,7 +148,7 @@ object MesuresSeries {
             val uniteLigne = Regex("""(?i)\b(kV|mV|mA|volts?|V|A|amp(?:ères?)?|W|kW|Ω|ohms?|MΩ)\b""")
                 .find(ligneBrute)?.groupValues?.get(1)
             val ligne = if (uniteLigne == null) ligneBrute else {
-                val sansUnite = Regex("""(?i)(\b\d{1,3}\s*$SERIE\s*[^\d\n]{0,20}?\d+(?:[.,]\d+)?)(?=\s*(?:[,;.)]|$))""")
+                val sansUnite = Regex("""(?i)(\b\d{1,3}\s*$SERIE\s*[^\d\n]{0,20}?\d+(?:[.,]\d+)?)(?=\s*(?:[,;.)]|\(|$))""")
                 sansUnite.replace(ligneBrute) { m ->
                     if (Regex("""(?i)\b(kV|mV|mA|volts?|V|A|amp(?:ères?)?|W|kW|Ω|ohms?|MΩ)\b""").containsMatchIn(m.value))
                         m.value else m.value + " " + uniteLigne
