@@ -158,7 +158,7 @@ class ServeurAdminTools(private val app: JarvisApp, private val confirm: suspend
         val pm2 = "export PATH=\"\$PATH:/usr/local/bin:\$HOME/.npm-global/bin\"; for d in \$HOME/.nvm/versions/node/*/bin; do [ -d \"\$d\" ] && PATH=\"\$PATH:\$d\"; done; "
         val (cmd, delai) = when (c.type) {
             "docker" -> when (action) {
-                "stockage" -> su("docker inspect -f 'Conteneur: {{.Name}}\\nImage: {{.Config.Image}}\\n{{range .Mounts}}{{.Type}} | hôte={{.Source}} | conteneur={{.Destination}} | lecture-écriture={{.RW}}{{println}}{{end}}' $nq") to 40
+                "stockage" -> su("docker inspect -f 'Conteneur: {{.Name}}{{println}}Image: {{.Config.Image}}{{println}}{{range .Mounts}}{{.Type}} | hôte={{.Source}} | conteneur={{.Destination}} | lecture-écriture={{.RW}}{{println}}{{end}}' $nq") to 40
                 "etat" -> su("docker ps -a --filter name=^/${c.nom}\$ --format 'table {{.Names}}\\t{{.Status}}\\t{{.Image}}\\t{{.Ports}}'; docker inspect -f 'État : {{.State.Status}} · démarré {{.State.StartedAt}} · redémarrages {{.RestartCount}} · relance auto {{.HostConfig.RestartPolicy.Name}}{{if .State.Health}} · santé {{.State.Health.Status}}{{end}}' $nq; echo; docker logs --tail 15 $nq 2>&1") to 40
                 "logs" -> su("docker logs --tail $n $nq 2>&1") to 40
                 "demarrer" -> su("docker start $nq && sleep 3 && docker ps --filter name=^/${c.nom}\$ --format '{{.Names}} {{.Status}}'") to 90
