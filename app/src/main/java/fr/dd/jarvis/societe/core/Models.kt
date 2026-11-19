@@ -109,8 +109,6 @@ data class Intervention(
     val actions: String = "",
     val pieces: String = "",
     val mesures: String = "",
-    /** Tous les onduleurs concernés par cette intervention, un par ligne si plusieurs. */
-    val onduleurs: String = "",
     val statut: String = "terminee",
     val prochaineMaintenance: String = "",
     val notes: String = "",
@@ -118,7 +116,9 @@ data class Intervention(
     val photosAvant: List<String> = emptyList(),
     val photosApres: List<String> = emptyList(),
     /** Signature du client (chemin relatif dans le stockage privé), vide si non recueillie. */
-    val signature: String = ""
+    val signature: String = "",
+    /** Tous les onduleurs concernés par cette intervention, un par ligne si plusieurs. */
+    val onduleurs: String = ""
 )
 
 @Serializable
