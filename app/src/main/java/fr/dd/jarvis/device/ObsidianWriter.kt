@@ -125,7 +125,9 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             val cur = if (dossierReel != null) {
                 if (dossierReel.isBlank()) tree else trouver(dossierReel)?.takeIf { it.isDirectory }
             } else null
-            val cible = cur?.trouverLoose(name)
+            val cheminFichier = if (dossierRelatif.isBlank()) resoudre(name) else resoudre("$dossierRelatif/$name")
+            val cible = cheminFichier?.let { trouver(it)?.takeIf { f -> f.isFile } }
+                ?: cur?.trouverLoose(name)
             var supprime = false
             if (cible != null) {
                 if (!cible.canWrite()) return false
@@ -236,7 +238,8 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                     val cur = if (dossierReel != null) {
                         if (dossierReel.isBlank()) tree else trouver(dossierReel)?.takeIf { it.isDirectory }
                     } else null
-                    val f = cur?.trouverLoose(name)
+                    val cheminFichier = if (dossierRelatif.isBlank()) resoudre(name) else resoudre("$dossierRelatif/$name")
+                    val f = cheminFichier?.let { trouver(it)?.takeIf { doc -> doc.isFile } } ?: cur?.trouverLoose(name)
                     if (f != null) return ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
                     return null
                 }
