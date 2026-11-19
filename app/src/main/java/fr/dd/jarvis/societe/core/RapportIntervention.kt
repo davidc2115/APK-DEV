@@ -19,6 +19,7 @@ object ListesRapport {
  */
 object OnduleursIntervention {
     private val MARQUEUR = Regex("""(?i)\bonduleur\s*(?:n[°o]\s*)?(\d+)\s*[:=\-–]?\s*""")
+    private val FIN_BLOC = Regex("""(?i)^\s*(?:[•*▪-]\s*)?(?:pdl\b|coffret\b|partie\b|remise en service\b|aucun probl[eè]me\b|nettoyage\b|contr[oô]le\b|diagnostic\b|conclusion\b)""")
 
     data class Bloc(val numero: Int, val nom: String, val contenu: String)
 
@@ -29,6 +30,10 @@ object OnduleursIntervention {
         for (ligne in source.split(Regex("""[\r\n;]+"""))) {
             val matches = MARQUEUR.findAll(ligne).toList()
             if (matches.isEmpty()) {
+                if (FIN_BLOC.containsMatchIn(ligne)) {
+                    courant = null
+                    continue
+                }
                 courant?.let { n -> contenus.getOrPut(n) { StringBuilder() }.append(" ").append(ligne.trim()) }
                 continue
             }
