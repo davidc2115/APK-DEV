@@ -8,7 +8,7 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * Administration complète du serveur Debian, en plus de ssh_commande / ssh_script :
+ * Administration du serveur Debian uniquement, en plus de ssh_commande / ssh_script :
  *  - serveur_service : un service par son nom (« Home Assistant », « Plex », « bot Discord »…) qu'il soit conteneur Docker
  *    (compose ou non), service systemd ou processus pm2 : état, journaux, démarrer, arrêter, redémarrer, mettre à jour,
  *    lancement automatique ;
@@ -51,14 +51,14 @@ class ServeurAdminTools(private val app: JarvisApp, private val confirm: suspend
                 .put("required", JSONArray(required))))
 
     val schema = listOf(
-        tool("serveur_service", "Serveur Debian : gère un SERVICE par son nom, quel que soit son type (conteneur Docker ou docker compose, service systemd, processus pm2) — Home Assistant, Plex, bot Discord, Ollama, Mosquitto… Actions : lister | etat | logs | demarrer | arreter | redemarrer | mettre_a_jour | activer (relance automatique au démarrage) | desactiver. Trouve tout seul le bon conteneur / unité / processus.",
+        tool("serveur_service", "Serveur Debian uniquement : gère un service hors Home Assistant par son nom (conteneur Docker, systemd, pm2) — Plex, bot Discord, Ollama, Mosquitto… Actions : lister | etat | logs | demarrer | arreter | redemarrer | mettre_a_jour | activer (relance automatique au démarrage) | desactiver. Trouve tout seul le bon conteneur / unité / processus.",
             mapOf("action" to prop("lister | etat | logs | demarrer | arreter | redemarrer | mettre_a_jour | activer | desactiver"),
                 "service" to prop("Nom du service (« Home Assistant », « Plex », « bot Discord »…) ou nom exact du conteneur / de l'unité."),
                 "lignes" to prop("Logs : nombre de lignes (défaut 80).")), listOf("action")),
         tool("serveur_tache", "Serveur Debian : TÂCHE LONGUE en arrière-plan (au-delà de quelques minutes : restauration, mise à jour, copie, compilation…) qui continue même si la connexion se coupe ; puis suivi de son journal. Actions : lancer (code bash) | etat | liste | arreter.",
             mapOf("action" to prop("lancer | etat | liste | arreter"), "code" to prop("lancer : script bash complet."), "nom" to prop("lancer : nom court de la tâche."),
                 "root" to prop("« oui » : exécuter en root (automatique si le script contient sudo)."), "id" to prop("etat / arreter : identifiant (défaut : la dernière tâche).")), listOf("action")),
-        tool("ha_sauvegarde", "Home Assistant (conteneur Docker sur le serveur Debian) : SAUVEGARDES et REMISE EN SERVICE, même quand Home Assistant est arrêté ou cassé. Actions : lister (sauvegardes trouvées sur le serveur, avec date, nom, taille, chiffrée ou non) | creer | restaurer (une sauvegarde choisie : arrêt du conteneur, ancienne configuration conservée à côté, restauration, redémarrage, vérification) | etat (conteneur, dossier de configuration, réponse HTTP, dernières erreurs). Les sauvegardes chiffrées utilisent la clé enregistrée dans Réglages › Sécurité › Systèmes.",
+        tool("ha_sauvegarde", "DÉSACTIVÉ : aucune sauvegarde, inspection de conteneur ou restauration Home Assistant ne doit passer par le SSH Debian. Utilise les fonctions API Home Assistant ; les archives hors ligne nécessiteront un profil SSH HA indépendant.",
             mapOf("action" to prop("lister | creer | restaurer | etat"),
                 "sauvegarde" to prop("restaurer : chemin complet, nom, ou date de la sauvegarde (« derniere » = la plus récente) ; voir lister."),
                 "nom" to prop("creer : nom de la sauvegarde (optionnel).")), listOf("action")),
