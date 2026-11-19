@@ -80,7 +80,7 @@ object HaSur {
         val hote = if (!Serveur.sshConfigure(app)) {
             "Inspection du conteneur non disponible : connexion SSH Debian non configurée."
         } else runCatching {
-            val sudo = app.store.sshUser.value.trim() != "root" && app.store.sshPass.value.isNotBlank()
+            val sudo = app.store.sshUser.value.trim() != "root"
             val r = Serveur.exec(app, ServeurDiagnostic.commande("home assistant", "", 80, sudo), 90)
             if (r.first == 0) r.second.trim().take(6500)
             else "Inspection du conteneur via SSH Debian impossible (code ${r.first}) : ${r.second.take(500)}"
