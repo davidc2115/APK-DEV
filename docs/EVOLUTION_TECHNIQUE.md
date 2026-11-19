@@ -60,6 +60,10 @@ Tant qu'aucun profil SSH HA indépendant n'existe, l'application fonctionne en m
 - La lecture, l'écriture et la restauration de fichiers YAML sont suspendues ; le chemin historique `haDir` n'est pas réutilisé car il pouvait désigner le système de fichiers Debian.
 - Un échec API ne déclenche jamais de repli sur `Serveur.exec`, `Serveur.execComplet` ou SFTP du serveur Debian.
 
+- Les chemins génériques ont aussi été verrouillés : `ssh_commande`, `ssh_script` et `serveur_tache` refusent les commandes/scripts Docker ou CLI visant explicitement Home Assistant ; `ssh_fichier` refuse le conteneur HA ; `serveur_service` bloque un service identifié comme HA.
+- Les sauvegardes disque et restaurations HA via `ha_sauvegarde` sont suspendues : aucune recherche d'archive, inspection Docker ou restauration ne doit être effectuée sur Debian. La sauvegarde officielle par API HA reste le chemin autorisé.
+- `serveur_diagnostic` ne teste plus `localhost:8123` et ne lit plus les journaux HA : il décrit uniquement Debian/Jarvis. Le diagnostic HA passe par son API distante.
+
 C'est une mesure de sécurité transitoire : elle peut temporairement retirer l'administration des fichiers YAML et les opérations Docker, mais elle préserve les commandes HA accessibles par API et empêche qu'une action HA modifie le mauvais hôte. La réactivation nécessitera un profil séparé avec hôte, port, utilisateur, clé/mot de passe, chemin de configuration et consentement explicite, ainsi que des tests prouvant que les appels SSH sont routés vers ce profil uniquement.
 
 ## Plan de validation avant toute fusion
