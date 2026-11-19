@@ -128,4 +128,19 @@ class RapportInterventionTest {
         assertTrue(groupes[1].second.series.last().valeur.contains("770"))
     }
 
+    @Test fun enteteOnduleursNeContientQueLesModelesEtPasLesSeries() {
+        val source = """
+            Onduleur 1 : Sungrow 125cx
+            Onduleur 2 : Sungrow 125cx
+            Onduleur 1 : 16 séries à 775 volts et deux séries à 805 volts
+            Onduleur 2 : quatre séries à environ 810 volts et 14 séries environ 770 volts
+        """.trimIndent()
+        val entete = OnduleursIntervention.identites(source)
+        assertEquals(listOf("Onduleur 1 : Sungrow 125cx", "Onduleur 2 : Sungrow 125cx"), entete)
+        val groupes = MesuresSeries.parOnduleur(source)
+        assertEquals(2, groupes.size)
+        assertEquals(18, groupes[0].second.series.size)
+        assertEquals(18, groupes[1].second.series.size)
+    }
+
 }
