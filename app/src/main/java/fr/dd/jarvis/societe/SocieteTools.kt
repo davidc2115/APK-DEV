@@ -1010,8 +1010,8 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         gardes["onduleurs"] = OnduleursIntervention.completer(gardes["onduleurs"].orEmpty(), source)
         if (blocsOnduleurs.isNotEmpty()) {
             // Ces blocs seront analysés séparément par onduleur lors du rendu PDF/Obsidian.
-            gardes["mesures"] = (gardes["mesures"].orEmpty() + "\\n" + blocsOnduleurs.joinToString("\\n"))
-                .trim().trimStart('\\n')
+            gardes["mesures"] = (gardes["mesures"].orEmpty() + "\n" + blocsOnduleurs.joinToString("\n"))
+                .trim().trimStart('\n')
         }
         return Garde(gardes, retires, true)
     }
