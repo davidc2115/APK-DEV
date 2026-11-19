@@ -114,14 +114,8 @@ internal object ServeurDiagnostic {
         if (!Serveur.haConfigure(app)) return "API Home Assistant non configurée : contrôle API ignoré."
         return runCatching {
             val states = org.json.JSONArray(Serveur.ha(app, "GET", "/api/states"))
-            var indisponibles = 0
-            var inconnus = 0
-            for (i in 0 until states.length()) when (states.optJSONObject(i)?.optString("state")) {
-                "unavailable" -> indisponibles++
-                "unknown" -> inconnus++
-            }
             val config = runCatching { org.json.JSONObject(Serveur.ha(app, "GET", "/api/config")) }.getOrNull()
-            "API Home Assistant : OK · version ${config?.optString("version").orEmpty().ifBlank { "non fournie" }} · ${states.length()} entités · $indisponibles indisponible(s) · $inconnus état(s) inconnu(s)."
+            HomeAssistantDiagnosticResume.formater(states, config?.optString("version").orEmpty())
         }.getOrElse { "API Home Assistant : échec — ${it.message?.take(220) ?: it.javaClass.simpleName}." }
     }
 }
