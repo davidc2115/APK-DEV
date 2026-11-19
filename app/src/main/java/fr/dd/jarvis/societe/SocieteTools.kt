@@ -994,7 +994,9 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         if (!ici) return Garde(champs, emptyList(), false)
         val support = dits + "\n" + connu
         val retires = mutableListOf<String>()
-        val gardes = champs.mapValues { (_, v) -> Fidelite.verifier(v, support).also { retires += it.retires }.garde }
+        val gardes = champs.mapValues { (_, v) -> Fidelite.verifier(v, support).also { retires += it.retires }.garde }.toMutableMap()
+        // Les équipements numérotés sont extraits de la dictée elle-même : ils ne dépendent pas du résumé IA.
+        gardes["onduleurs"] = OnduleursIntervention.completer(gardes["onduleurs"].orEmpty(), dits)
         return Garde(gardes, retires, true)
     }
 
