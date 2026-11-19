@@ -742,7 +742,8 @@ object Serveur {
                 "Les plus proches (vérifie avec l'utilisateur avant d'agir, n'invente rien d'autre) :\n" + voisines.joinToString("\n") { o ->
                     val a = o.optJSONObject("attributes"); "- `${o.getString("entity_id")}` · ${a?.optString("friendly_name").orEmpty()} : **${o.getString("state")}${a?.optString("unit_of_measurement").orEmpty()}**"
                 }
-            return "Aucune entité ne correspond à « ${recherche.ifBlank { domaine }} » (${arr.length()} entités au total). Dis-le clairement à l'utilisateur, sans inventer. " +
+            val libelleFiltre = rechercheEntite.ifBlank { domaine.ifBlank { filtreEtat.ifBlank { "toutes les entités" } } }
+            return "Aucune entité Home Assistant ne correspond au filtre « $libelleFiltre » (${arr.length()} entités au total). Dis-le clairement à l'utilisateur, sans inventer. " +
                 "Domaines présents : " + parDomaine.take(14).joinToString(", ") { "${it.key} (${it.value})" } + "." +
                 (if (medias.isNotEmpty()) "\nAppareils multimédia (télé, enceintes) : " + medias.joinToString(" ; ") { "`${it.first}` ${it.second}" } else "") +
                 "\nRéessaie avec un autre mot (nom de la pièce, marque, tv…) ou un domaine, et regarde les notes de l'utilisateur (notes_lire / memoire_lire / obsidian_chercher)."
