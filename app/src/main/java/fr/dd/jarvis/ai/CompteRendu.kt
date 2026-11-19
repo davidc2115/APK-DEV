@@ -20,7 +20,7 @@ N'invente RIEN : chaque champ reprend uniquement ce qui a été dit (laisse vide
 Réponds uniquement par ce JSON :
 {"categorie":"maintenance|panne|diagnostic|nettoyage|remplacement|contrôle|autre","description":"résumé factuel de l'intervention (1 à 3 phrases)",
 "diagnostic":"constat (distingue constat et hypothèse)","actions":"actions réellement réalisées","pieces":"pièces remplacées avec références et quantités",
-"mesures":"mesures relevées avec unités","statut":"terminee|a_suivre|en_attente","prochaine_maintenance":"yyyy-MM-dd si une date est dite, sinon vide",
+"mesures":"mesures relevées avec unités","onduleurs":"tous les onduleurs concernés, chacun conservé, un par ligne si plusieurs sont cités","statut":"terminee|a_suivre|en_attente","prochaine_maintenance":"yyyy-MM-dd si une date est dite, sinon vide",
 "notes":"autres informations utiles (suite à donner, remarques du client)"}"""
 
     internal fun champs(brut: String?, dictee: String, categorie: String): JSONObject {
@@ -31,7 +31,7 @@ Réponds uniquement par ce JSON :
         return JSONObject()
             .put("categorie", t("categorie").ifBlank { categorie })
             .put("description", t("description").ifBlank { dictee.trim().take(500) })
-            .put("diagnostic", t("diagnostic")).put("actions", t("actions")).put("pieces", t("pieces")).put("mesures", t("mesures"))
+            .put("diagnostic", t("diagnostic")).put("actions", t("actions")).put("pieces", t("pieces")).put("mesures", t("mesures")).put("onduleurs", t("onduleurs"))
             .put("statut", statut).put("prochaine_maintenance", prochaine).put("notes", t("notes"))
     }
 
@@ -42,7 +42,7 @@ Réponds uniquement par ce JSON :
         val site = client.sites.firstOrNull { it.id == siteId } ?: return Resultat("❌ Installation introuvable.", null, null)
         val date = LocalDate.now().toString()
         val contexte = "Installation : ${client.nom} — ${site.nom}" + (if (site.kwc > 0) " (${site.kwc} kWc)" else "") +
-            (if (site.onduleur.isNotBlank()) ", onduleur ${site.onduleur}" else "") + ". Catégorie choisie : $categorie. Date : $date.\n\nDictée du technicien :\n$dictee"
+            (if (site.onduleur.isNotBlank()) ", onduleur(s) déjà connus : ${site.onduleur}" else "") + "\nConserve séparément TOUS les onduleurs cités dans la dictée, sans en choisir un seul." + ". Catégorie choisie : $categorie. Date : $date.\n\nDictée du technicien :\n$dictee"
         val brut = withTimeoutOrNull(45_000) { runCatching { app.llm.agent(SYSTEME, contexte) }.getOrNull() }
         val args = champs(brut, dictee, categorie).put("client", client.nom).put("installation", site.nom).put("date", date)
         val res = ToolBox(app) { _, _ -> true }.execute("intervention_enregistrer", args)
