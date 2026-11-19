@@ -998,7 +998,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             if (numerotes.isEmpty()) return Garde(champs, emptyList(), false)
             val preserves = champs.toMutableMap()
             preserves["onduleurs"] = numerotes.joinToString("\n")
-            preserves["mesures"] = (preserves["mesures"].orEmpty() + "\n" + numerotes.joinToString("\n")).trim()
+            preserves["mesures"] = (preserves["mesures"].orEmpty() + "\n" + source).trim()
             return Garde(preserves, emptyList(), false)
         }
         val support = dits + "\n" + connu
@@ -1006,13 +1006,9 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         val gardes = champs.mapValues { (_, v) -> Fidelite.verifier(v, support).also { retires += it.retires }.garde }.toMutableMap()
         // Les équipements et leurs mesures sont extraits de la dictée d'origine, pas seulement du résumé IA.
         val source = a.s("source_utilisateur").ifBlank { dits }
-        val blocsOnduleurs = OnduleursIntervention.numerotes(source)
         gardes["onduleurs"] = OnduleursIntervention.completer(gardes["onduleurs"].orEmpty(), source)
-        if (blocsOnduleurs.isNotEmpty()) {
-            // Ces blocs seront analysés séparément par onduleur lors du rendu PDF/Obsidian.
-            gardes["mesures"] = (gardes["mesures"].orEmpty() + "\n" + blocsOnduleurs.joinToString("\n"))
-                .trim().trimStart('\n')
-        }
+        // Conserver la dictée brute pour reconstruire les blocs et séries de chaque onduleur au rendu.
+        gardes["mesures"] = (gardes["mesures"].orEmpty() + "\n" + source).trim().trimStart('\n')
         return Garde(gardes, retires, true)
     }
 
