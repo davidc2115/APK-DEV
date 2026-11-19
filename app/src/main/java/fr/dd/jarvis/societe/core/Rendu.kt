@@ -287,6 +287,27 @@ object Rendu {
         "terminee" -> "✅ Terminée"; "a_suivre" -> "🔁 À suivre"; "en_attente" -> "⏳ En attente"; else -> s
     }
 
+    /**
+     * Tableau compact : trois paires Série/Tension par ligne.
+     * Sur 18 séries, cela réduit le tableau de 18 à 6 lignes sans regrouper les mesures.
+     */
+    private fun tableauSeriesCompact(series: List<MesuresSeries.Serie>): String {
+        if (series.isEmpty()) return ""
+        val colonnes = 3
+        val entete = List(colonnes) { listOf("Série", "Tension relevée") }.flatten()
+        val separateur = List(colonnes) { listOf("---:", "---:") }.flatten()
+        val lignes = series.chunked(colonnes).map { groupe ->
+            val cellules = groupe.flatMap { listOf(it.numero.toString(), it.valeur) }.toMutableList()
+            while (cellules.size < colonnes * 2) cellules.addAll(listOf("", ""))
+            "| " + cellules.joinToString(" | ") + " |"
+        }
+        return buildString {
+            append("| ").append(entete.joinToString(" | ")).append(" |\\n")
+            append("| ").append(separateur.joinToString(" | ")).append(" |\\n")
+            lignes.forEach { append(it).append('\\n') }
+        }.trimEnd()
+    }
+
     /** Données d'un rapport d'intervention (modèle « rapport »). */
     fun interventionCtx(d: SocieteData, c: Client, s: Site, i: Intervention): Ctx {
         // « onduleurs » est le champ d'identité (numéro + modèle) ; « mesures » conserve la dictée
@@ -318,9 +339,7 @@ object Rendu {
                 "serie_b" to (p.getOrNull(1)?.let { "Série ${it.numero}" } ?: ""), "valeur_b" to (p.getOrNull(1)?.valeur ?: ""))
         }
         val groupesOnduleurs = parOnduleur.map { (nom, resultat) ->
-            val tableau = if (resultat.series.isEmpty()) "" else
-                "| Série | Tension relevée |\n|---:|---:|\n" +
-                    resultat.series.joinToString("\n") { "| ${it.numero} | ${it.valeur} |" }
+            val tableau = tableauSeriesCompact(resultat.series)
             val observations = resultat.autres.joinToString("\n") { "- 🌦️ ${it}" }
             mapOf("onduleur" to nom, "details" to listOf(tableau, observations).filter { it.isNotBlank() }.joinToString("\n\n"))
         }
@@ -368,10 +387,7 @@ object Rendu {
             append("\n\n## 📊 Détail individuel des séries par onduleur\n")
             manquants.forEach { (nom, resultat) ->
                 append("\n### 🔌 ").append(nom).append('\n')
-                append("| Série | Tension relevée |\n|---:|---:|\n")
-                resultat.series.forEach { serie ->
-                    append("| ").append(serie.numero).append(" | ").append(serie.valeur).append(" |\n")
-                }
+                append(tableauSeriesCompact(resultat.series)).append('\\n')
                 resultat.autres.forEach { observation -> append("- 🌦️ ").append(observation).append('\n') }
             }
         }
