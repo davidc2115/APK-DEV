@@ -23,7 +23,7 @@ internal object ServeurDiagnostic {
         val dockerSection = if (dockerFiltre.isBlank()) "" else """
             echo
             echo '== Docker : conteneurs Plex / Home Assistant =='
-            docker ps -a --format 'table {{.Names}}\\t{{.Status}}\\t{{.Image}}\\t{{.Ports}}' 2>&1
+            docker ps -a --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Ports}}' 2>&1
             for c in ${'$'}(docker ps -a --format '{{.Names}}|{{.Image}}' | awk -F'|' 'tolower(${'$'}1 FS ${'$'}2) ~ /$dockerFiltre/ {print ${'$'}1}' | head -8); do
               echo
               echo "--- Conteneur : ${'$'}c ---"
@@ -38,21 +38,20 @@ internal object ServeurDiagnostic {
             echo '== Espace Docker =='
             docker system df 2>&1
         """.trimIndent()
+        val plexLibrarySection = if (tokenHeader.isNotBlank()) """
+            PLEX_LIB=${'$'}(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
+            echo 'Bibliothèques :'
+            printf '%s' "${'$'}PLEX_LIB" | sed 's/></>/\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\1="[masqué]"/g' | head -20
+            PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
+            echo "Lectures actives : ${'$'}(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
+        """.trimIndent() else "echo 'Jeton Plex absent : identité seulement, bibliothèques et sessions non interrogées.'"
         val plexSection = if (cible in setOf("complet", "plex")) """
             echo
             echo '== Plex Media Server : API locale =='
             if command -v curl >/dev/null 2>&1; then
-              PLEX_ID=${'$'}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
-              printf '%s\\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
-              if [ -n '$tokenHeader' ]; then
-                PLEX_LIB=${'$'}(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
-                echo 'Bibliothèques :'
-                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
-                PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
-                echo "Lectures actives : $(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
-              else
-                echo 'Jeton Plex absent dans les réglages : identité testée sans authentification, bibliothèques et sessions non interrogées.'
-              fi
+              PLEX_ID=${'$'}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
+              printf '%s\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\1="[masqué]"/g' | head -8
+              $plexLibrarySection
             else
               echo 'curl absent sur Debian : test API Plex ignoré.'
             fi
@@ -86,7 +85,7 @@ internal object ServeurDiagnostic {
             echo
             echo '== Réseau et ports utiles =='
             (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
-            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\\b' || true)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
             $sshSection
             $dockerSection
             $plexSection
@@ -131,12 +130,12 @@ internal object ServeurDiagnostic {
             echo
             echo '== Plex Media Server : API locale =='
             if command -v curl >/dev/null 2>&1; then
-              PLEX_ID=${'$'}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
-              printf '%s\\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
+              PLEX_ID=${'$'}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
+              printf '%s\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\1="[masqué]"/g' | head -8
               if [ -n '$tokenHeader' ]; then
                 PLEX_LIB=${'$'}(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
                 echo 'Bibliothèques :'
-                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
+                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\1="[masqué]"/g' | head -20
                 PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
                 echo "Lectures actives : $(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
               else
@@ -175,7 +174,7 @@ internal object ServeurDiagnostic {
             echo
             echo '== Réseau et ports utiles =='
             (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
-            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\\b' || true)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
             $sshSection
             $dockerSection
             $plexSection
@@ -220,12 +219,12 @@ internal object ServeurDiagnostic {
             echo
             echo '== Plex Media Server : API locale =='
             if command -v curl >/dev/null 2>&1; then
-              PLEX_ID=${'$'}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
-              printf '%s\\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
+              PLEX_ID=${'$'}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
+              printf '%s\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\1="[masqué]"/g' | head -8
               if [ -n '$tokenHeader' ]; then
                 PLEX_LIB=${'$'}(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
                 echo 'Bibliothèques :'
-                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
+                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\1="[masqué]"/g' | head -20
                 PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
                 echo "Lectures actives : $(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
               else
@@ -264,7 +263,7 @@ internal object ServeurDiagnostic {
             echo
             echo '== Réseau et ports utiles =='
             (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
-            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\\b' || true)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
             $sshSection
             $dockerSection
             $plexSection
@@ -309,12 +308,12 @@ internal object ServeurDiagnostic {
             echo
             echo '== Plex Media Server : API locale =='
             if command -v curl >/dev/null 2>&1; then
-              PLEX_ID=${'$'}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
-              printf '%s\\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
+              PLEX_ID=${'$'}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
+              printf '%s\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\1="[masqué]"/g' | head -8
               if [ -n '$tokenHeader' ]; then
                 PLEX_LIB=${'$'}(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
                 echo 'Bibliothèques :'
-                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
+                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\1="[masqué]"/g' | head -20
                 PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
                 echo "Lectures actives : $(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
               else
@@ -353,7 +352,7 @@ internal object ServeurDiagnostic {
             echo
             echo '== Réseau et ports utiles =='
             (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
-            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\\b' || true)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
             $sshSection
             $dockerSection
             $plexSection
@@ -398,12 +397,12 @@ internal object ServeurDiagnostic {
             echo
             echo '== Plex Media Server : API locale =='
             if command -v curl >/dev/null 2>&1; then
-              PLEX_ID=${'$'}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
-              printf '%s\\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
+              PLEX_ID=${'$'}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
+              printf '%s\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\1="[masqué]"/g' | head -8
               if [ -n '$tokenHeader' ]; then
                 PLEX_LIB=${'$'}(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
                 echo 'Bibliothèques :'
-                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
+                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\1="[masqué]"/g' | head -20
                 PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
                 echo "Lectures actives : $(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
               else
@@ -442,7 +441,7 @@ internal object ServeurDiagnostic {
             echo
             echo '== Réseau et ports utiles =='
             (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
-            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\\b' || true)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
             $sshSection
             $dockerSection
             $plexSection
@@ -485,12 +484,12 @@ internal object ServeurDiagnostic {
             echo
             echo '== Plex Media Server : API locale =='
             if command -v curl >/dev/null 2>&1; then
-              PLEX_ID=${'$'}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
-              printf '%s\\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
+              PLEX_ID=${'$'}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
+              printf '%s\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\1="[masqué]"/g' | head -8
               if [ -n '$tokenHeader' ]; then
                 PLEX_LIB=${'$'}(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
                 echo 'Bibliothèques :'
-                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
+                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\1="[masqué]"/g' | head -20
                 PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
                 echo "Lectures actives : $(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
               else
@@ -529,7 +528,7 @@ internal object ServeurDiagnostic {
             echo
             echo '== Réseau et ports utiles =='
             (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
-            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\\b' || true)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
             $sshSection
             $dockerSection
             $plexSection
@@ -571,12 +570,12 @@ internal object ServeurDiagnostic {
             echo
             echo '== Plex Media Server : API locale =='
             if command -v curl >/dev/null 2>&1; then
-              PLEX_ID=${'$'}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
-              printf '%s\\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
+              PLEX_ID=${'$'}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
+              printf '%s\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\1="[masqué]"/g' | head -8
               if [ -n '$tokenHeader' ]; then
                 PLEX_LIB=${'$'}(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
                 echo 'Bibliothèques :'
-                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
+                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\1="[masqué]"/g' | head -20
                 PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
                 echo "Lectures actives : $(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
               else
@@ -615,7 +614,7 @@ internal object ServeurDiagnostic {
             echo
             echo '== Réseau et ports utiles =='
             (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
-            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\\b' || true)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
             $sshSection
             $dockerSection
             $plexSection
@@ -656,12 +655,12 @@ internal object ServeurDiagnostic {
             echo
             echo '== Plex Media Server : API locale =='
             if command -v curl >/dev/null 2>&1; then
-              PLEX_ID=${'$'}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
-              printf '%s\\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
+              PLEX_ID=${'$'}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
+              printf '%s\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\1="[masqué]"/g' | head -8
               if [ -n '$tokenHeader' ]; then
                 PLEX_LIB=${'$'}(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
                 echo 'Bibliothèques :'
-                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
+                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\1="[masqué]"/g' | head -20
                 PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
                 echo "Lectures actives : $(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
               else
@@ -700,7 +699,7 @@ internal object ServeurDiagnostic {
             echo
             echo '== Réseau et ports utiles =='
             (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
-            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\\b' || true)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
             $sshSection
             $dockerSection
             $plexSection
@@ -739,12 +738,12 @@ internal object ServeurDiagnostic {
             echo
             echo '== Plex Media Server : API locale =='
             if command -v curl >/dev/null 2>&1; then
-              PLEX_ID=${'$'}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
-              printf '%s\\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
+              PLEX_ID=${'$'}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
+              printf '%s\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\1="[masqué]"/g' | head -8
               if [ -n '$tokenHeader' ]; then
                 PLEX_LIB=${'$'}(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
                 echo 'Bibliothèques :'
-                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
+                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\1="[masqué]"/g' | head -20
                 PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
                 echo "Lectures actives : $(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
               else
@@ -783,7 +782,7 @@ internal object ServeurDiagnostic {
             echo
             echo '== Réseau et ports utiles =='
             (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
-            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\\b' || true)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
             $sshSection
             $dockerSection
             $plexSection
@@ -820,12 +819,12 @@ internal object ServeurDiagnostic {
             echo
             echo '== Plex Media Server : API locale =='
             if command -v curl >/dev/null 2>&1; then
-              PLEX_ID=${'(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
-              printf '%s\\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
+              PLEX_ID=${'(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
+              printf '%s\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\1="[masqué]"/g' | head -8
               if [ -n '$tokenHeader' ]; then
                 PLEX_LIB=${'$'}(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
                 echo 'Bibliothèques :'
-                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
+                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\1="[masqué]"/g' | head -20
                 PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
                 echo "Lectures actives : $(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
               else
@@ -864,7 +863,7 @@ internal object ServeurDiagnostic {
             echo
             echo '== Réseau et ports utiles =='
             (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
-            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\\b' || true)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
             $sshSection
             $dockerSection
             $plexSection
@@ -891,12 +890,12 @@ internal object ServeurDiagnostic {
         }.getOrElse { "API Home Assistant : échec — ${it.message?.take(220) ?: it.javaClass.simpleName}." }
     }
 }
-}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
-              printf '%s\\n' "${'PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
+}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
+              printf '%s\n' "${'PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\1="[masqué]"/g' | head -8
               if [ -n '$tokenHeader' ]; then
                 PLEX_LIB=${'$'}(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
                 echo 'Bibliothèques :'
-                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
+                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\1="[masqué]"/g' | head -20
                 PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
                 echo "Lectures actives : $(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
               else
@@ -935,7 +934,7 @@ internal object ServeurDiagnostic {
             echo
             echo '== Réseau et ports utiles =='
             (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
-            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\\b' || true)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
             $sshSection
             $dockerSection
             $plexSection
@@ -962,11 +961,11 @@ internal object ServeurDiagnostic {
         }.getOrElse { "API Home Assistant : échec — ${it.message?.take(220) ?: it.javaClass.simpleName}." }
     }
 }
-}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
+}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\1="[masqué]"/g' | head -8
               if [ -n '$tokenHeader' ]; then
                 PLEX_LIB=${'(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
                 echo 'Bibliothèques :'
-                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
+                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\1="[masqué]"/g' | head -20
                 PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
                 echo "Lectures actives : $(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
               else
@@ -1005,7 +1004,7 @@ internal object ServeurDiagnostic {
             echo
             echo '== Réseau et ports utiles =='
             (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
-            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\\b' || true)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
             $sshSection
             $dockerSection
             $plexSection
@@ -1034,7 +1033,7 @@ internal object ServeurDiagnostic {
 }
 }(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
                 echo 'Bibliothèques :'
-                printf '%s' "${'PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
+                printf '%s' "${'PLEX_LIB" | sed 's/></>\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\1="[masqué]"/g' | head -20
                 PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
                 echo "Lectures actives : $(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
               else
@@ -1073,7 +1072,7 @@ internal object ServeurDiagnostic {
             echo
             echo '== Réseau et ports utiles =='
             (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
-            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\\b' || true)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
             $sshSection
             $dockerSection
             $plexSection
@@ -1100,7 +1099,7 @@ internal object ServeurDiagnostic {
         }.getOrElse { "API Home Assistant : échec — ${it.message?.take(220) ?: it.javaClass.simpleName}." }
     }
 }
-}PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
+}PLEX_LIB" | sed 's/></>\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\1="[masqué]"/g' | head -20
                 PLEX_SESS=${'(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
                 echo "Lectures actives : $(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
               else
@@ -1139,7 +1138,7 @@ internal object ServeurDiagnostic {
             echo
             echo '== Réseau et ports utiles =='
             (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
-            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\\b' || true)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
             $sshSection
             $dockerSection
             $plexSection
@@ -1204,7 +1203,7 @@ internal object ServeurDiagnostic {
             echo
             echo '== Réseau et ports utiles =='
             (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
-            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\\b' || true)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
             $sshSection
             $dockerSection
             $plexSection
@@ -1268,7 +1267,7 @@ internal object ServeurDiagnostic {
             echo
             echo '== Réseau et ports utiles =='
             (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
-            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\\b' || true)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
             $sshSection
             $dockerSection
             $plexSection
