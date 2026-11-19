@@ -1008,7 +1008,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         val source = a.s("source_utilisateur").ifBlank { dits }
         gardes["onduleurs"] = OnduleursIntervention.completer(gardes["onduleurs"].orEmpty(), source)
         // Conserver la dictée brute pour reconstruire les blocs et séries de chaque onduleur au rendu.
-        gardes["mesures"] = (gardes["mesures"].orEmpty() + "\n" + source).trim().trimStart('\n')
+        gardes["mesures"] = source.ifBlank { gardes["mesures"].orEmpty() }.trim()
         return Garde(gardes, retires, true)
     }
 
