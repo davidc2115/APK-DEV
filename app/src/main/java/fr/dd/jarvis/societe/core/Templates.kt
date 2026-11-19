@@ -237,8 +237,8 @@ Mise en forme Markdown obligatoire :
 | 🔧 **Intervention** | {{categorie}} |
 | 📌 **Statut** | {{statut}} |
 {{#adresse}}| 📍 **Adresse** | {{adresse}} |
-{{/adresse}}{{#onduleur}}| ⚡ **Onduleur** | {{onduleur}} |
-{{/onduleur}}{{#kwc}}| ☀️ **Puissance** | {{kwc}} kWc |
+{{/adresse}}{{#onduleurs}}| ⚡ **Onduleur(s)** | {{onduleurs}} |
+{{/onduleurs}}{{#kwc}}| ☀️ **Puissance** | {{kwc}} kWc |
 {{/kwc}}
 {{#description}}
 ## 📝 Description
