@@ -551,8 +551,11 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
      * « JARVIS/Images ») au lieu d'en créer un nouveau à côté. Les parties restantes seront créées.
      */
     fun cheminDossier(chemin: String): String {
-        val parts = relatif(chemin).split('/').filter { it.isNotBlank() }
+        val normalise = relatif(chemin)
+        val parts = normalise.split('/').filter { it.isNotBlank() }
         if (parts.isEmpty()) return ""
+        // Si le dossier existe déjà, renvoyer son chemin réel, y compris lorsqu'un préfixe est omis.
+        resoudre(normalise)?.let { return it }
         var base = ""
         var i = 0
         val racine = enfants("").orEmpty()
@@ -561,9 +564,25 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         else {
             val voulu = cleNom(parts[0])
             val candidats = toutLister().filter { it.second && cleNom(it.first.substringAfterLast('/')) == voulu }.map { it.first }.distinct()
-            if (candidats.size == 1) { base = candidats[0]; i = 1 }
-            else if (candidats.size > 1) {
-                throw IllegalArgumentException("Plusieurs dossiers « ${parts[0]} » existent dans le coffre. Précise leur chemin complet pour éviter de créer un doublon.")
+            if (candidats.isNotEmpty()) {
+                // Choisir le parent qui correspond au plus long préfixe restant, pas le premier trouvé.
+                val essais = candidats.map { candidat ->
+                    var courant = candidat
+                    var nb = 1
+                    for (j in 1 until parts.size) {
+                        val m = correspondance(enfants(courant).orEmpty(), parts[j], dossierSeul = true) ?: break
+                        courant = "$courant/$m"
+                        nb++
+                    }
+                    Triple(candidat, courant, nb)
+                }
+                val meilleurScore = essais.maxOf { it.third }
+                val meilleurs = essais.filter { it.third == meilleurScore }
+                if (meilleurs.size != 1) {
+                    throw IllegalArgumentException("Plusieurs dossiers « ${parts[0]} » correspondent dans le coffre. Précise le chemin complet pour éviter une erreur.")
+                }
+                base = meilleurs.single().second
+                i = meilleurs.single().third
             }
         }
         while (i < parts.size) {
