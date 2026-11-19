@@ -352,8 +352,31 @@ object Rendu {
             "mesures" to autres, "photos_avant" to avant, "photos_apres" to apres))
     }
 
-    fun rendreIntervention(d: SocieteData, c: Client, s: Site, i: Intervention): String =
-        Templates.render(d.modele("rapport"), interventionCtx(d, c, s, i)).replace(Regex("\n{3,}"), "\n\n").trim() + "\n"
+    fun rendreIntervention(d: SocieteData, c: Client, s: Site, i: Intervention): String {
+        val contexte = interventionCtx(d, c, s, i)
+        val rendu = Templates.render(d.modele("rapport"), contexte)
+            .replace(Regex("\n{3,}"), "\n\n").trim()
+        // Un modèle personnalisé peut omettre les tableaux imbriqués ou n’afficher que des plages.
+        // Vérifier le Markdown final et ajouter une ligne explicite pour chaque série manquante.
+        val source = i.mesures.ifBlank { i.onduleurs }
+        val groupes = MesuresSeries.parOnduleur(source)
+        val manquants = groupes.filter { (_, resultat) ->
+            resultat.series.any { serie -> !rendu.contains("| \${serie.numero} | \${serie.valeur} |") }
+        }
+        if (manquants.isEmpty()) return rendu + "\n"
+        val complement = buildString {
+            append("\n\n## 📊 Détail individuel des séries par onduleur\n")
+            manquants.forEach { (nom, resultat) ->
+                append("\n### 🔌 ").append(nom).append('\n')
+                append("| Série | Tension relevée |\n|---:|---:|\n")
+                resultat.series.forEach { serie ->
+                    append("| ").append(serie.numero).append(" | ").append(serie.valeur).append(" |\n")
+                }
+                resultat.autres.forEach { observation -> append("- 🌦️ ").append(observation).append('\n') }
+            }
+        }
+        return (rendu + complement).trim() + "\n"
+    }
 
     /** Données fictives pour valider un modèle réécrit (balises autorisées + rendu sans erreur). */
     fun exemple(type: String): Ctx {
