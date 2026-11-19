@@ -991,12 +991,18 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         val tout = champs.values.joinToString("\n")
         val nomCite = Fidelite.normaliser(dits).let { d -> listOf(client.nom, site.nom).any { n -> n.length >= 3 && d.contains(Fidelite.normaliser(n).take(8)) } }
         val ici = dits.isNotBlank() && (nomCite || Fidelite.appui(tout, dits) >= 0.15 || Fidelite.nombres(tout).any { it in Fidelite.nombres(dits) })
-        if (!ici) return Garde(champs, emptyList(), false)
+        if (!ici) {
+            // Même si le résumé IA ne suffit pas à valider les autres champs, les onduleurs explicitement numérotés
+            // dans la dictée d'origine restent récupérables sans être inventés par le modèle.
+            val numerotes = OnduleursIntervention.numerotes(a.s("source_utilisateur"))
+            if (numerotes.isEmpty()) return Garde(champs, emptyList(), false)
+            return Garde(champs + ("onduleurs" to numerotes.joinToString("\n")), emptyList(), false)
+        }
         val support = dits + "\n" + connu
         val retires = mutableListOf<String>()
         val gardes = champs.mapValues { (_, v) -> Fidelite.verifier(v, support).also { retires += it.retires }.garde }.toMutableMap()
         // Les équipements numérotés sont extraits de la dictée elle-même : ils ne dépendent pas du résumé IA.
-        gardes["onduleurs"] = OnduleursIntervention.completer(gardes["onduleurs"].orEmpty(), dits)
+        gardes["onduleurs"] = OnduleursIntervention.completer(gardes["onduleurs"].orEmpty(), a.s("source_utilisateur").ifBlank { dits })
         return Garde(gardes, retires, true)
     }
 
