@@ -24,15 +24,15 @@ internal object ServeurDiagnostic {
             echo
             echo '== Docker : conteneurs Plex / Home Assistant =='
             docker ps -a --format 'table {{.Names}}\\t{{.Status}}\\t{{.Image}}\\t{{.Ports}}' 2>&1
-            for c in ${'(docker ps -a --format '{{.Names}}|{{.Image}}' | awk -F'|' 'tolower(\$1 FS \$2) ~ /$dockerFiltre/ {print \$1}' | head -8); do
+            for c in ${'$'}(docker ps -a --format '{{.Names}}|{{.Image}}' | awk -F'|' 'tolower(${'$'}1 FS ${'$'}2) ~ /$dockerFiltre/ {print ${'$'}1}' | head -8); do
               echo
-              echo "--- Conteneur : \$c ---"
-              docker inspect -f 'état={{.State.Status}} code={{.State.ExitCode}} erreur={{.State.Error}} OOM={{.State.OOMKilled}} démarré={{.State.StartedAt}} redémarrages={{.RestartCount}} relance={{.HostConfig.RestartPolicy.Name}}{{if .State.Health}} santé={{.State.Health.Status}}{{else}} santé=non-configurée{{end}}' "\$c" 2>&1
-              docker stats --no-stream --format 'CPU={{.CPUPerc}} mémoire={{.MemUsage}} réseau={{.NetIO}} disque={{.BlockIO}}' "\$c" 2>&1
+              echo "--- Conteneur : ${'$'}c ---"
+              docker inspect -f 'état={{.State.Status}} code={{.State.ExitCode}} erreur={{.State.Error}} OOM={{.State.OOMKilled}} démarré={{.State.StartedAt}} redémarrages={{.RestartCount}} relance={{.HostConfig.RestartPolicy.Name}}{{if .State.Health}} santé={{.State.Health.Status}}{{else}} santé=non-configurée{{end}}' "${'$'}c" 2>&1
+              docker stats --no-stream --format 'CPU={{.CPUPerc}} mémoire={{.MemUsage}} réseau={{.NetIO}} disque={{.BlockIO}}' "${'$'}c" 2>&1
               echo 'Volumes (hôte -> conteneur) :'
-              docker inspect -f '{{range .Mounts}}{{println .Source "->" .Destination "rw=" .RW}}{{end}}' "\$c" 2>&1
+              docker inspect -f '{{range .Mounts}}{{println .Source "->" .Destination "rw=" .RW}}{{end}}' "${'$'}c" 2>&1
               echo 'Erreurs récentes :'
-              docker logs --tail $n "\$c" 2>&1 | grep -iE 'error|exception|failed|fatal|warning|timeout|database|corrupt|permission|no space|oom|unavailable' | tail -15
+              docker logs --tail $n "${'$'}c" 2>&1 | grep -iE 'error|exception|failed|fatal|warning|timeout|database|corrupt|permission|no space|oom|unavailable' | tail -15
             done
             echo
             echo '== Espace Docker =='
@@ -42,14 +42,14 @@ internal object ServeurDiagnostic {
             echo
             echo '== Plex Media Server : API locale =='
             if command -v curl >/dev/null 2>&1; then
-              PLEX_ID=\$(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
-              printf '%s\\n' "\$PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
+              PLEX_ID=${'$'}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
+              printf '%s\\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
               if [ -n '$tokenHeader' ]; then
-                PLEX_LIB=\$(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
+                PLEX_LIB=${'$'}(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
                 echo 'Bibliothèques :'
-                printf '%s' "\$PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
-                PLEX_SESS=\$(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
-                echo "Lectures actives : $(printf '%s' "\$PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
+                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
+                PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
+                echo "Lectures actives : $(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
               else
                 echo 'Jeton Plex absent dans les réglages : identité testée sans authentification, bibliothèques et sessions non interrogées.'
               fi
@@ -113,15 +113,15 @@ internal object ServeurDiagnostic {
         }.getOrElse { "API Home Assistant : échec — ${it.message?.take(220) ?: it.javaClass.simpleName}." }
     }
 }
-}(docker ps -a --format '{{.Names}}|{{.Image}}' | awk -F'|' 'tolower(${'1 FS \$2) ~ /$dockerFiltre/ {print \$1}' | head -8); do
+}(docker ps -a --format '{{.Names}}|{{.Image}}' | awk -F'|' 'tolower(${'1 FS ${'$'}2) ~ /$dockerFiltre/ {print ${'$'}1}' | head -8); do
               echo
-              echo "--- Conteneur : \$c ---"
-              docker inspect -f 'état={{.State.Status}} code={{.State.ExitCode}} erreur={{.State.Error}} OOM={{.State.OOMKilled}} démarré={{.State.StartedAt}} redémarrages={{.RestartCount}} relance={{.HostConfig.RestartPolicy.Name}}{{if .State.Health}} santé={{.State.Health.Status}}{{else}} santé=non-configurée{{end}}' "\$c" 2>&1
-              docker stats --no-stream --format 'CPU={{.CPUPerc}} mémoire={{.MemUsage}} réseau={{.NetIO}} disque={{.BlockIO}}' "\$c" 2>&1
+              echo "--- Conteneur : ${'$'}c ---"
+              docker inspect -f 'état={{.State.Status}} code={{.State.ExitCode}} erreur={{.State.Error}} OOM={{.State.OOMKilled}} démarré={{.State.StartedAt}} redémarrages={{.RestartCount}} relance={{.HostConfig.RestartPolicy.Name}}{{if .State.Health}} santé={{.State.Health.Status}}{{else}} santé=non-configurée{{end}}' "${'$'}c" 2>&1
+              docker stats --no-stream --format 'CPU={{.CPUPerc}} mémoire={{.MemUsage}} réseau={{.NetIO}} disque={{.BlockIO}}' "${'$'}c" 2>&1
               echo 'Volumes (hôte -> conteneur) :'
-              docker inspect -f '{{range .Mounts}}{{println .Source "->" .Destination "rw=" .RW}}{{end}}' "\$c" 2>&1
+              docker inspect -f '{{range .Mounts}}{{println .Source "->" .Destination "rw=" .RW}}{{end}}' "${'$'}c" 2>&1
               echo 'Erreurs récentes :'
-              docker logs --tail $n "\$c" 2>&1 | grep -iE 'error|exception|failed|fatal|warning|timeout|database|corrupt|permission|no space|oom|unavailable' | tail -15
+              docker logs --tail $n "${'$'}c" 2>&1 | grep -iE 'error|exception|failed|fatal|warning|timeout|database|corrupt|permission|no space|oom|unavailable' | tail -15
             done
             echo
             echo '== Espace Docker =='
@@ -131,14 +131,14 @@ internal object ServeurDiagnostic {
             echo
             echo '== Plex Media Server : API locale =='
             if command -v curl >/dev/null 2>&1; then
-              PLEX_ID=\$(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
-              printf '%s\\n' "\$PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
+              PLEX_ID=${'$'}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
+              printf '%s\\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
               if [ -n '$tokenHeader' ]; then
-                PLEX_LIB=\$(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
+                PLEX_LIB=${'$'}(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
                 echo 'Bibliothèques :'
-                printf '%s' "\$PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
-                PLEX_SESS=\$(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
-                echo "Lectures actives : $(printf '%s' "\$PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
+                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
+                PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
+                echo "Lectures actives : $(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
               else
                 echo 'Jeton Plex absent dans les réglages : identité testée sans authentification, bibliothèques et sessions non interrogées.'
               fi
@@ -202,15 +202,15 @@ internal object ServeurDiagnostic {
         }.getOrElse { "API Home Assistant : échec — ${it.message?.take(220) ?: it.javaClass.simpleName}." }
     }
 }
-}1 FS ${'2) ~ /$dockerFiltre/ {print \$1}' | head -8); do
+}1 FS ${'2) ~ /$dockerFiltre/ {print ${'$'}1}' | head -8); do
               echo
-              echo "--- Conteneur : \$c ---"
-              docker inspect -f 'état={{.State.Status}} code={{.State.ExitCode}} erreur={{.State.Error}} OOM={{.State.OOMKilled}} démarré={{.State.StartedAt}} redémarrages={{.RestartCount}} relance={{.HostConfig.RestartPolicy.Name}}{{if .State.Health}} santé={{.State.Health.Status}}{{else}} santé=non-configurée{{end}}' "\$c" 2>&1
-              docker stats --no-stream --format 'CPU={{.CPUPerc}} mémoire={{.MemUsage}} réseau={{.NetIO}} disque={{.BlockIO}}' "\$c" 2>&1
+              echo "--- Conteneur : ${'$'}c ---"
+              docker inspect -f 'état={{.State.Status}} code={{.State.ExitCode}} erreur={{.State.Error}} OOM={{.State.OOMKilled}} démarré={{.State.StartedAt}} redémarrages={{.RestartCount}} relance={{.HostConfig.RestartPolicy.Name}}{{if .State.Health}} santé={{.State.Health.Status}}{{else}} santé=non-configurée{{end}}' "${'$'}c" 2>&1
+              docker stats --no-stream --format 'CPU={{.CPUPerc}} mémoire={{.MemUsage}} réseau={{.NetIO}} disque={{.BlockIO}}' "${'$'}c" 2>&1
               echo 'Volumes (hôte -> conteneur) :'
-              docker inspect -f '{{range .Mounts}}{{println .Source "->" .Destination "rw=" .RW}}{{end}}' "\$c" 2>&1
+              docker inspect -f '{{range .Mounts}}{{println .Source "->" .Destination "rw=" .RW}}{{end}}' "${'$'}c" 2>&1
               echo 'Erreurs récentes :'
-              docker logs --tail $n "\$c" 2>&1 | grep -iE 'error|exception|failed|fatal|warning|timeout|database|corrupt|permission|no space|oom|unavailable' | tail -15
+              docker logs --tail $n "${'$'}c" 2>&1 | grep -iE 'error|exception|failed|fatal|warning|timeout|database|corrupt|permission|no space|oom|unavailable' | tail -15
             done
             echo
             echo '== Espace Docker =='
@@ -220,14 +220,14 @@ internal object ServeurDiagnostic {
             echo
             echo '== Plex Media Server : API locale =='
             if command -v curl >/dev/null 2>&1; then
-              PLEX_ID=\$(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
-              printf '%s\\n' "\$PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
+              PLEX_ID=${'$'}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
+              printf '%s\\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
               if [ -n '$tokenHeader' ]; then
-                PLEX_LIB=\$(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
+                PLEX_LIB=${'$'}(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
                 echo 'Bibliothèques :'
-                printf '%s' "\$PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
-                PLEX_SESS=\$(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
-                echo "Lectures actives : $(printf '%s' "\$PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
+                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
+                PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
+                echo "Lectures actives : $(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
               else
                 echo 'Jeton Plex absent dans les réglages : identité testée sans authentification, bibliothèques et sessions non interrogées.'
               fi
@@ -293,13 +293,13 @@ internal object ServeurDiagnostic {
 }
 }2) ~ /$dockerFiltre/ {print ${'1}' | head -8); do
               echo
-              echo "--- Conteneur : \$c ---"
-              docker inspect -f 'état={{.State.Status}} code={{.State.ExitCode}} erreur={{.State.Error}} OOM={{.State.OOMKilled}} démarré={{.State.StartedAt}} redémarrages={{.RestartCount}} relance={{.HostConfig.RestartPolicy.Name}}{{if .State.Health}} santé={{.State.Health.Status}}{{else}} santé=non-configurée{{end}}' "\$c" 2>&1
-              docker stats --no-stream --format 'CPU={{.CPUPerc}} mémoire={{.MemUsage}} réseau={{.NetIO}} disque={{.BlockIO}}' "\$c" 2>&1
+              echo "--- Conteneur : ${'$'}c ---"
+              docker inspect -f 'état={{.State.Status}} code={{.State.ExitCode}} erreur={{.State.Error}} OOM={{.State.OOMKilled}} démarré={{.State.StartedAt}} redémarrages={{.RestartCount}} relance={{.HostConfig.RestartPolicy.Name}}{{if .State.Health}} santé={{.State.Health.Status}}{{else}} santé=non-configurée{{end}}' "${'$'}c" 2>&1
+              docker stats --no-stream --format 'CPU={{.CPUPerc}} mémoire={{.MemUsage}} réseau={{.NetIO}} disque={{.BlockIO}}' "${'$'}c" 2>&1
               echo 'Volumes (hôte -> conteneur) :'
-              docker inspect -f '{{range .Mounts}}{{println .Source "->" .Destination "rw=" .RW}}{{end}}' "\$c" 2>&1
+              docker inspect -f '{{range .Mounts}}{{println .Source "->" .Destination "rw=" .RW}}{{end}}' "${'$'}c" 2>&1
               echo 'Erreurs récentes :'
-              docker logs --tail $n "\$c" 2>&1 | grep -iE 'error|exception|failed|fatal|warning|timeout|database|corrupt|permission|no space|oom|unavailable' | tail -15
+              docker logs --tail $n "${'$'}c" 2>&1 | grep -iE 'error|exception|failed|fatal|warning|timeout|database|corrupt|permission|no space|oom|unavailable' | tail -15
             done
             echo
             echo '== Espace Docker =='
@@ -309,14 +309,14 @@ internal object ServeurDiagnostic {
             echo
             echo '== Plex Media Server : API locale =='
             if command -v curl >/dev/null 2>&1; then
-              PLEX_ID=\$(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
-              printf '%s\\n' "\$PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
+              PLEX_ID=${'$'}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
+              printf '%s\\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
               if [ -n '$tokenHeader' ]; then
-                PLEX_LIB=\$(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
+                PLEX_LIB=${'$'}(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
                 echo 'Bibliothèques :'
-                printf '%s' "\$PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
-                PLEX_SESS=\$(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
-                echo "Lectures actives : $(printf '%s' "\$PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
+                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
+                PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
+                echo "Lectures actives : $(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
               else
                 echo 'Jeton Plex absent dans les réglages : identité testée sans authentification, bibliothèques et sessions non interrogées.'
               fi
@@ -383,12 +383,12 @@ internal object ServeurDiagnostic {
 }1}' | head -8); do
               echo
               echo "--- Conteneur : ${'c ---"
-              docker inspect -f 'état={{.State.Status}} code={{.State.ExitCode}} erreur={{.State.Error}} OOM={{.State.OOMKilled}} démarré={{.State.StartedAt}} redémarrages={{.RestartCount}} relance={{.HostConfig.RestartPolicy.Name}}{{if .State.Health}} santé={{.State.Health.Status}}{{else}} santé=non-configurée{{end}}' "\$c" 2>&1
-              docker stats --no-stream --format 'CPU={{.CPUPerc}} mémoire={{.MemUsage}} réseau={{.NetIO}} disque={{.BlockIO}}' "\$c" 2>&1
+              docker inspect -f 'état={{.State.Status}} code={{.State.ExitCode}} erreur={{.State.Error}} OOM={{.State.OOMKilled}} démarré={{.State.StartedAt}} redémarrages={{.RestartCount}} relance={{.HostConfig.RestartPolicy.Name}}{{if .State.Health}} santé={{.State.Health.Status}}{{else}} santé=non-configurée{{end}}' "${'$'}c" 2>&1
+              docker stats --no-stream --format 'CPU={{.CPUPerc}} mémoire={{.MemUsage}} réseau={{.NetIO}} disque={{.BlockIO}}' "${'$'}c" 2>&1
               echo 'Volumes (hôte -> conteneur) :'
-              docker inspect -f '{{range .Mounts}}{{println .Source "->" .Destination "rw=" .RW}}{{end}}' "\$c" 2>&1
+              docker inspect -f '{{range .Mounts}}{{println .Source "->" .Destination "rw=" .RW}}{{end}}' "${'$'}c" 2>&1
               echo 'Erreurs récentes :'
-              docker logs --tail $n "\$c" 2>&1 | grep -iE 'error|exception|failed|fatal|warning|timeout|database|corrupt|permission|no space|oom|unavailable' | tail -15
+              docker logs --tail $n "${'$'}c" 2>&1 | grep -iE 'error|exception|failed|fatal|warning|timeout|database|corrupt|permission|no space|oom|unavailable' | tail -15
             done
             echo
             echo '== Espace Docker =='
@@ -398,14 +398,14 @@ internal object ServeurDiagnostic {
             echo
             echo '== Plex Media Server : API locale =='
             if command -v curl >/dev/null 2>&1; then
-              PLEX_ID=\$(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
-              printf '%s\\n' "\$PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
+              PLEX_ID=${'$'}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
+              printf '%s\\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
               if [ -n '$tokenHeader' ]; then
-                PLEX_LIB=\$(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
+                PLEX_LIB=${'$'}(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
                 echo 'Bibliothèques :'
-                printf '%s' "\$PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
-                PLEX_SESS=\$(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
-                echo "Lectures actives : $(printf '%s' "\$PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
+                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
+                PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
+                echo "Lectures actives : $(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
               else
                 echo 'Jeton Plex absent dans les réglages : identité testée sans authentification, bibliothèques et sessions non interrogées.'
               fi
@@ -471,11 +471,11 @@ internal object ServeurDiagnostic {
 }
 }c ---"
               docker inspect -f 'état={{.State.Status}} code={{.State.ExitCode}} erreur={{.State.Error}} OOM={{.State.OOMKilled}} démarré={{.State.StartedAt}} redémarrages={{.RestartCount}} relance={{.HostConfig.RestartPolicy.Name}}{{if .State.Health}} santé={{.State.Health.Status}}{{else}} santé=non-configurée{{end}}' "${'c" 2>&1
-              docker stats --no-stream --format 'CPU={{.CPUPerc}} mémoire={{.MemUsage}} réseau={{.NetIO}} disque={{.BlockIO}}' "\$c" 2>&1
+              docker stats --no-stream --format 'CPU={{.CPUPerc}} mémoire={{.MemUsage}} réseau={{.NetIO}} disque={{.BlockIO}}' "${'$'}c" 2>&1
               echo 'Volumes (hôte -> conteneur) :'
-              docker inspect -f '{{range .Mounts}}{{println .Source "->" .Destination "rw=" .RW}}{{end}}' "\$c" 2>&1
+              docker inspect -f '{{range .Mounts}}{{println .Source "->" .Destination "rw=" .RW}}{{end}}' "${'$'}c" 2>&1
               echo 'Erreurs récentes :'
-              docker logs --tail $n "\$c" 2>&1 | grep -iE 'error|exception|failed|fatal|warning|timeout|database|corrupt|permission|no space|oom|unavailable' | tail -15
+              docker logs --tail $n "${'$'}c" 2>&1 | grep -iE 'error|exception|failed|fatal|warning|timeout|database|corrupt|permission|no space|oom|unavailable' | tail -15
             done
             echo
             echo '== Espace Docker =='
@@ -485,14 +485,14 @@ internal object ServeurDiagnostic {
             echo
             echo '== Plex Media Server : API locale =='
             if command -v curl >/dev/null 2>&1; then
-              PLEX_ID=\$(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
-              printf '%s\\n' "\$PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
+              PLEX_ID=${'$'}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
+              printf '%s\\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
               if [ -n '$tokenHeader' ]; then
-                PLEX_LIB=\$(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
+                PLEX_LIB=${'$'}(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
                 echo 'Bibliothèques :'
-                printf '%s' "\$PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
-                PLEX_SESS=\$(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
-                echo "Lectures actives : $(printf '%s' "\$PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
+                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
+                PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
+                echo "Lectures actives : $(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
               else
                 echo 'Jeton Plex absent dans les réglages : identité testée sans authentification, bibliothèques et sessions non interrogées.'
               fi
@@ -559,9 +559,9 @@ internal object ServeurDiagnostic {
 }c" 2>&1
               docker stats --no-stream --format 'CPU={{.CPUPerc}} mémoire={{.MemUsage}} réseau={{.NetIO}} disque={{.BlockIO}}' "${'c" 2>&1
               echo 'Volumes (hôte -> conteneur) :'
-              docker inspect -f '{{range .Mounts}}{{println .Source "->" .Destination "rw=" .RW}}{{end}}' "\$c" 2>&1
+              docker inspect -f '{{range .Mounts}}{{println .Source "->" .Destination "rw=" .RW}}{{end}}' "${'$'}c" 2>&1
               echo 'Erreurs récentes :'
-              docker logs --tail $n "\$c" 2>&1 | grep -iE 'error|exception|failed|fatal|warning|timeout|database|corrupt|permission|no space|oom|unavailable' | tail -15
+              docker logs --tail $n "${'$'}c" 2>&1 | grep -iE 'error|exception|failed|fatal|warning|timeout|database|corrupt|permission|no space|oom|unavailable' | tail -15
             done
             echo
             echo '== Espace Docker =='
@@ -571,14 +571,14 @@ internal object ServeurDiagnostic {
             echo
             echo '== Plex Media Server : API locale =='
             if command -v curl >/dev/null 2>&1; then
-              PLEX_ID=\$(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
-              printf '%s\\n' "\$PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
+              PLEX_ID=${'$'}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
+              printf '%s\\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
               if [ -n '$tokenHeader' ]; then
-                PLEX_LIB=\$(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
+                PLEX_LIB=${'$'}(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
                 echo 'Bibliothèques :'
-                printf '%s' "\$PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
-                PLEX_SESS=\$(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
-                echo "Lectures actives : $(printf '%s' "\$PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
+                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
+                PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
+                echo "Lectures actives : $(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
               else
                 echo 'Jeton Plex absent dans les réglages : identité testée sans authentification, bibliothèques et sessions non interrogées.'
               fi
@@ -646,7 +646,7 @@ internal object ServeurDiagnostic {
               echo 'Volumes (hôte -> conteneur) :'
               docker inspect -f '{{range .Mounts}}{{println .Source "->" .Destination "rw=" .RW}}{{end}}' "${'c" 2>&1
               echo 'Erreurs récentes :'
-              docker logs --tail $n "\$c" 2>&1 | grep -iE 'error|exception|failed|fatal|warning|timeout|database|corrupt|permission|no space|oom|unavailable' | tail -15
+              docker logs --tail $n "${'$'}c" 2>&1 | grep -iE 'error|exception|failed|fatal|warning|timeout|database|corrupt|permission|no space|oom|unavailable' | tail -15
             done
             echo
             echo '== Espace Docker =='
@@ -656,14 +656,14 @@ internal object ServeurDiagnostic {
             echo
             echo '== Plex Media Server : API locale =='
             if command -v curl >/dev/null 2>&1; then
-              PLEX_ID=\$(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
-              printf '%s\\n' "\$PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
+              PLEX_ID=${'$'}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
+              printf '%s\\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
               if [ -n '$tokenHeader' ]; then
-                PLEX_LIB=\$(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
+                PLEX_LIB=${'$'}(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
                 echo 'Bibliothèques :'
-                printf '%s' "\$PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
-                PLEX_SESS=\$(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
-                echo "Lectures actives : $(printf '%s' "\$PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
+                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
+                PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
+                echo "Lectures actives : $(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
               else
                 echo 'Jeton Plex absent dans les réglages : identité testée sans authentification, bibliothèques et sessions non interrogées.'
               fi
@@ -739,14 +739,14 @@ internal object ServeurDiagnostic {
             echo
             echo '== Plex Media Server : API locale =='
             if command -v curl >/dev/null 2>&1; then
-              PLEX_ID=\$(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
-              printf '%s\\n' "\$PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
+              PLEX_ID=${'$'}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
+              printf '%s\\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
               if [ -n '$tokenHeader' ]; then
-                PLEX_LIB=\$(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
+                PLEX_LIB=${'$'}(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
                 echo 'Bibliothèques :'
-                printf '%s' "\$PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
-                PLEX_SESS=\$(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
-                echo "Lectures actives : $(printf '%s' "\$PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
+                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
+                PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
+                echo "Lectures actives : $(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
               else
                 echo 'Jeton Plex absent dans les réglages : identité testée sans authentification, bibliothèques et sessions non interrogées.'
               fi
@@ -821,13 +821,13 @@ internal object ServeurDiagnostic {
             echo '== Plex Media Server : API locale =='
             if command -v curl >/dev/null 2>&1; then
               PLEX_ID=${'(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
-              printf '%s\\n' "\$PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
+              printf '%s\\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
               if [ -n '$tokenHeader' ]; then
-                PLEX_LIB=\$(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
+                PLEX_LIB=${'$'}(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
                 echo 'Bibliothèques :'
-                printf '%s' "\$PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
-                PLEX_SESS=\$(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
-                echo "Lectures actives : $(printf '%s' "\$PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
+                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
+                PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
+                echo "Lectures actives : $(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
               else
                 echo 'Jeton Plex absent dans les réglages : identité testée sans authentification, bibliothèques et sessions non interrogées.'
               fi
@@ -894,11 +894,11 @@ internal object ServeurDiagnostic {
 }(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
               printf '%s\\n' "${'PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\\1="[masqué]"/g' | head -8
               if [ -n '$tokenHeader' ]; then
-                PLEX_LIB=\$(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
+                PLEX_LIB=${'$'}(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
                 echo 'Bibliothèques :'
-                printf '%s' "\$PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
-                PLEX_SESS=\$(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
-                echo "Lectures actives : $(printf '%s' "\$PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
+                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
+                PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
+                echo "Lectures actives : $(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
               else
                 echo 'Jeton Plex absent dans les réglages : identité testée sans authentification, bibliothèques et sessions non interrogées.'
               fi
@@ -966,9 +966,9 @@ internal object ServeurDiagnostic {
               if [ -n '$tokenHeader' ]; then
                 PLEX_LIB=${'(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
                 echo 'Bibliothèques :'
-                printf '%s' "\$PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
-                PLEX_SESS=\$(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
-                echo "Lectures actives : $(printf '%s' "\$PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
+                printf '%s' "${'$'}PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
+                PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
+                echo "Lectures actives : $(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
               else
                 echo 'Jeton Plex absent dans les réglages : identité testée sans authentification, bibliothèques et sessions non interrogées.'
               fi
@@ -1035,8 +1035,8 @@ internal object ServeurDiagnostic {
 }(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
                 echo 'Bibliothèques :'
                 printf '%s' "${'PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
-                PLEX_SESS=\$(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
-                echo "Lectures actives : $(printf '%s' "\$PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
+                PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
+                echo "Lectures actives : $(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
               else
                 echo 'Jeton Plex absent dans les réglages : identité testée sans authentification, bibliothèques et sessions non interrogées.'
               fi
@@ -1102,7 +1102,7 @@ internal object ServeurDiagnostic {
 }
 }PLEX_LIB" | sed 's/></>\\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\\1="[masqué]"/g' | head -20
                 PLEX_SESS=${'(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
-                echo "Lectures actives : $(printf '%s' "\$PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
+                echo "Lectures actives : $(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
               else
                 echo 'Jeton Plex absent dans les réglages : identité testée sans authentification, bibliothèques et sessions non interrogées.'
               fi
