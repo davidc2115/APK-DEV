@@ -14,14 +14,24 @@ class MusicTools(private val app: JarvisApp) {
 
         /** Normalise les formulations orales de la section « J'aime » de la bibliothèque. */
         internal fun sectionBibliotheque(section: String): String {
-            val s = fr.dd.jarvis.societe.core.normaliser(section).replace(" ", "")
+            // Normalisation locale et prévisible : ne dépend pas du normaliseur métier (qui peut conserver
+            // les préfixes possessifs ou traiter différemment les apostrophes et accents).
+            val s = java.text.Normalizer.normalize(section.lowercase(java.util.Locale.ROOT), java.text.Normalizer.Form.NFD)
+                .replace(Regex("\\p{M}+"), "")
+                .replace("’", "'")
+                .replace(Regex("[^a-z0-9]+"), " ")
+                .trim()
+            val compact = s.replace(" ", "")
             return when {
-                s.contains("aime") || s.contains("like") || s.contains("favor") || s.contains("coeur") -> "jaime"
-                s.startsWith("playlist") -> "playlists"
-                s.startsWith("titre") || s.startsWith("chanson") -> "titres"
-                s.startsWith("album") -> "albums"
-                s.startsWith("artiste") -> "artistes"
-                s.startsWith("telecharg") -> "telechargements"
+                Regex("(j aime|aime|aimes|aimes|liked|likes|like|favori|favoris|favoris|coeur|coup de coeur)").containsMatchIn(s) ||
+                    compact.contains("jaime") || compact.contains("favor") || compact.contains("coeur") -> "jaime"
+                Regex("^(mes |ma |mon |les |le |la |tous les |toutes les )*playlists?$").containsMatchIn(s) ||
+                    compact.endsWith("playlist") || compact.endsWith("playlists") -> "playlists"
+                Regex("^(mes |ma |mon |les |le |la |tous les |toutes les )*(titres?|chansons?)$").containsMatchIn(s) ||
+                    compact.endsWith("titre") || compact.endsWith("titres") || compact.endsWith("chanson") || compact.endsWith("chansons") -> "titres"
+                compact.endsWith("album") || compact.endsWith("albums") -> "albums"
+                compact.endsWith("artiste") || compact.endsWith("artistes") -> "artistes"
+                compact.endsWith("telechargement") || compact.endsWith("telechargements") -> "telechargements"
                 else -> "playlists"
             }
         }
