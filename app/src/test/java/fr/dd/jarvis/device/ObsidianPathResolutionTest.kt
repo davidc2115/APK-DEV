@@ -16,35 +16,41 @@ class ObsidianPathResolutionTest {
             if (word.length > 3 && (word.endsWith("s") || word.endsWith("x"))) word.dropLast(1) else word
         } }
 
-    @Test fun retrouveUnDossierUniqueSousUnDossierParent() {
+    @Test fun retrouveUnCheminCompletSousUnDossierParent() {
+        val folders = listOf("JARVIS/Images", "JARVIS/Vidéos", "Documents")
         assertEquals(
-            "JARVIS/Images",
-            ObsidianPathResolution.uniqueNestedFolder(
-                "image",
-                listOf("JARVIS/Images", "JARVIS/Vidéos", "Documents"),
-                ::key
-            )
+            "JARVIS/Images/coloriage train",
+            ObsidianPathResolution.uniqueNestedPath("image", folders, ::key) { parent ->
+                if (parent == "JARVIS/Images") "$parent/coloriage train" else null
+            }
         )
     }
 
-    @Test fun refuseDeChoisirEntreDeuxDossiersHomonymes() {
+    @Test fun distingueLesDossiersImagesGraceAuSousDossierDemande() {
+        val folders = listOf("JARVIS/Images", "Archives/Images", "Photos/Images")
+        assertEquals(
+            "JARVIS/Images/coloriage train",
+            ObsidianPathResolution.uniqueNestedPath("Images", folders, ::key) { parent ->
+                if (parent == "JARVIS/Images") "$parent/coloriage train" else null
+            }
+        )
+    }
+
+    @Test fun refuseDeuxCorrespondancesCompletes() {
+        val folders = listOf("JARVIS/Images", "Archives/Images")
         assertNull(
-            ObsidianPathResolution.uniqueNestedFolder(
-                "Images",
-                listOf("JARVIS/Images", "Archives/Images"),
-                ::key
-            )
+            ObsidianPathResolution.uniqueNestedPath("Images", folders, ::key) { parent ->
+                "$parent/coloriage train"
+            }
         )
     }
 
     @Test fun ignoreLesDifferencesDAccentsEtDeCasse() {
         assertEquals(
-            "JARVIS/Coloriés",
-            ObsidianPathResolution.uniqueNestedFolder(
-                "colories",
-                listOf("JARVIS/Coloriés"),
-                ::key
-            )
+            "JARVIS/Coloriés/Train",
+            ObsidianPathResolution.uniqueNestedPath("colories", listOf("JARVIS/Coloriés"), ::key) { parent ->
+                "$parent/Train"
+            }
         )
     }
 }
