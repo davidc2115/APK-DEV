@@ -494,7 +494,14 @@ class ToolBox(
             // « allume le salon » passent par Home Assistant (API), pas par une commande SSH.
             val ssh = adm || fr.dd.jarvis.hermes.ServeurInventaire.serveurDemande(recentUserText)
             fun serveurSeul(o: JSONObject) = o.optJSONObject("function")?.optString("name").orEmpty().let { it.startsWith("ssh_") || it.startsWith("serveur_") }
-            if (srv) serveur.schema.forEach { if (ssh || !serveurSeul(it)) out.put(it) }
+            if (srv) {
+                // « appareils indisponibles sur Home Assistant » = états /api/states, jamais inventaire Wi-Fi.
+                val haDisponibilite = ServeurTools.prioriteHaDisponibilite(recentUserText)
+                serveur.schema.forEach {
+                    val nom = it.optJSONObject("function")?.optString("name").orEmpty()
+                    if (if (haDisponibilite) nom in setOf("ha_entites", "ha_etat") else ssh || !serveurSeul(it)) out.put(it)
+                }
+            }
             if (ssh && (srv || adm)) serveurAdmin.schema.forEach { out.put(it) }
             if (web) sitesWeb.schema.forEach { out.put(it) }
             if (dis) discord.schema.forEach { out.put(it) }
