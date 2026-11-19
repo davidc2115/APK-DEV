@@ -53,7 +53,12 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             val tree = DocumentFile.fromTreeUri(ctx, Uri.parse(uriStr))
                 ?: throw java.io.IOException("Le coffre Obsidian sélectionné n'est plus accessible.")
             if (!tree.canWrite()) throw java.io.IOException("Le coffre Obsidian est en lecture seule ou l'autorisation d'écriture a expiré.")
-            val dir = subDir(tree, folder)
+            val dossierRelatif = relatif(folder)
+            val dossierReel = when {
+                dossierRelatif.isBlank() -> ""
+                else -> resoudre(dossierRelatif) ?: cheminDossier(dossierRelatif)
+            }
+            val dir = subDir(tree, dossierReel)
             if (!dir.isDirectory || !dir.canWrite())
                 throw java.io.IOException("Impossible d'accéder au dossier Obsidian demandé : $folder")
             val target = dir.trouverLoose(name) ?: dir.createFile(mime, name)
@@ -64,7 +69,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             val size = runCatching { ctx.contentResolver.openFileDescriptor(target.uri, "r")?.use { it.statSize } ?: -1L }.getOrDefault(-1L)
             if (size >= 0L && size != bytes.size.toLong())
                 throw java.io.IOException("Écriture Obsidian incomplète pour $name ($size/${bytes.size} octets).")
-            return "coffre Obsidian › ${folder.replace("/", " › ")} › $name"
+            return "coffre Obsidian › ${dossierReel.replace("/", " › ")} › $name"
         }
         val dir = File(ctx.getExternalFilesDir(null), folder).apply {
             if (!exists() && !mkdirs()) throw java.io.IOException("Impossible de créer le dossier local : $absolutePath")
@@ -315,12 +320,15 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     /** Notes du coffre (chemins relatifs), éventuellement dans un dossier. */
     fun listNotes(folder: String = ""): List<String> {
         signalerFilPrincipal("listNotes")
-        val f = folder.trim().trim('/')
-        val vaultNotes = if (vaultRoot() != null) allNotes().map { it.first } else emptyList()
+        val f = relatif(folder)
+        val vaultNotes = if (vaultRoot() != null) {
+            val dossierReel = if (f.isBlank()) "" else resoudre(f) ?: return emptyList()
+            allNotes().map { it.first }.filter { dossierReel.isEmpty() || it.startsWith("$dossierReel/") }
+        } else emptyList()
         val localDir = File(localRoot(), f)
         val localNotes = if (localDir.exists()) localDir.walkTopDown().filter { it.isFile && it.name.endsWith(".md", true) }
             .map { it.relativeTo(localRoot()).path }.toList() else emptyList()
-        return (vaultNotes.filter { f.isEmpty() || it.startsWith("$f/") } + localNotes).distinct().sorted()
+        return (vaultNotes + localNotes).distinct().sorted()
     }
 
     /** Recherche texte (nom + contenu). Retourne (chemin, extrait). */
@@ -359,9 +367,8 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         val p = withMd(path)
         val v = vaultRoot()
         if (v != null) {
-            var cur: DocumentFile? = v
-            for (part in p.split('/').filter { it.isNotBlank() }) cur = cur?.findFile(part)
-            val f = cur?.takeIf { it.isFile }
+            val reel = resoudre(p)
+            val f = reel?.let { trouver(it) }?.takeIf { it.isFile }
             if (f != null) {
                 val content = runCatching { ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes().toString(Charsets.UTF_8) } }.getOrNull()
                 if (content != null) return content
