@@ -63,6 +63,33 @@ object MusiqueBibliotheque {
 
     private fun cliquer(n: AccessibilityNodeInfo?): Boolean = cliquable(n)?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
 
+    /**
+     * Envoie PLAY à la vraie session multimédia puis attend sa confirmation.
+     * Le simple fait d'ouvrir une playlist ou son écran n'est jamais considéré comme une lecture démarrée.
+     */
+    suspend fun demarrerLecture(ctx: Context, paquet: String, aleatoire: Boolean = false): Boolean {
+        val libelles = if (aleatoire) BOUTONS_ALEATOIRE + BOUTONS_LECTURE else BOUTONS_LECTURE
+        val bouton = attendre(paquet, libelles, 2200, exact = false)
+        if (bouton != null) cliquer(bouton)
+        repeat(12) {
+            val c = controleur(ctx, paquet)
+            if (c != null) {
+                val etat = c.playbackState?.state
+                if (etat != PlaybackState.STATE_PLAYING && etat != PlaybackState.STATE_BUFFERING) {
+                    runCatching { c.transportControls.play() }
+                }
+                delay(450)
+                val confirme = controleur(ctx, paquet)?.playbackState?.state
+                if (confirme == PlaybackState.STATE_PLAYING || confirme == PlaybackState.STATE_BUFFERING) return true
+            } else {
+                // Sans accès aux sessions, un libellé Pause visible est le seul indice UI acceptable.
+                if (attendre(paquet, listOf("Pause", "Mettre en pause", "Pause la lecture"), 180, exact = false) != null) return true
+                delay(300)
+            }
+        }
+        return false
+    }
+
     /** Ouvre l'appli sur la bibliothèque, filtre [section] sélectionné. Renvoie une erreur lisible, ou null si c'est bon. */
     private suspend fun ouvrirSection(ctx: Context, paquet: String, section: String): String? {
         if (service() == null) return "Il faut le service d'accessibilité de JARVIS pour lire ta bibliothèque (Réglages › Téléphone › Contrôle)."
@@ -135,12 +162,12 @@ object MusiqueBibliotheque {
         }
         if (cible == null) return "❌ « $nom » introuvable dans ta bibliothèque (${section})."
         if (!cliquer(cible)) return "❌ Impossible d'ouvrir « $nom »."
-        if (section == "titres") return "▶️ « $nom » lancé depuis ta bibliothèque."
-        delay(1500)
-        val bouton = attendre(paquet, if (aleatoire) BOUTONS_ALEATOIRE else BOUTONS_LECTURE, 5000)
-            ?: attendre(paquet, BOUTONS_LECTURE + BOUTONS_ALEATOIRE, 1500, exact = false)
-        return if (bouton != null && cliquer(bouton)) "▶️ « $nom » lancé" + (if (aleatoire) " en aléatoire" else "") + " depuis ta bibliothèque."
-        else "📂 « $nom » ouvert ; bouton de lecture introuvable (appuie sur Lecture)."
+        delay(900)
+        return if (demarrerLecture(ctx, paquet, aleatoire)) {
+            "▶️ « $nom » est en lecture" + (if (aleatoire) " aléatoire" else "") + " depuis ta bibliothèque."
+        } else {
+            "📂 « $nom » est ouvert, mais le démarrage de la lecture n'a pas été confirmé. Vérifie le lecteur dans l'application."
+        }
     }
 
     // ------------------------------------------------------------------ lecteur (session média de l'appli)
