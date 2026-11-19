@@ -367,7 +367,8 @@ class Brain(
         suivi.cerveauJarvis = true
         onStatus("🧠 Analyse de la demande…")
         val all = tools.schemaAll()
-        val sansAnalyse = pourHermes || fr.dd.jarvis.hermes.Routeur.commandeSimple(texteUser)
+        // En voiture, éviter l'appel Gemini supplémentaire de planification : le cerveau Jarvis/Hermès et ses outils restent disponibles.
+        val sansAnalyse = pourHermes || app.enVoiture || fr.dd.jarvis.hermes.Routeur.commandeSimple(texteUser)
         // Notes pertinentes et analyse de la demande EN MÊME TEMPS (avant : l'une après l'autre, jusqu'à 2,5 s de perdues).
         val debutContexte = System.currentTimeMillis()
         val (notesUtiles, plan) = kotlinx.coroutines.coroutineScope {
