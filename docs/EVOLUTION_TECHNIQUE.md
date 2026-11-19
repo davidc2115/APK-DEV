@@ -105,6 +105,7 @@ C'est une mesure de sécurité transitoire : elle peut temporairement retirer l'
 ## Fiabilisation Android Auto : micro, demandes et musique
 
 - Le bouton micro ne déclare plus un échec après seulement trois secondes lorsque le service vocal traite encore une demande. L'appui reste en attente et ouvre le micro dès que le traitement précédent libère le service.
+- Cette attente est bornée à 30 secondes (60 tentatives espacées de 500 ms) : une demande longue n'est pas rejetée prématurément, mais un callback réellement bloqué ne crée pas de boucle de relance infinie. Le message d'échec n'est émis qu'à l'expiration de ce délai.
 - Le parcours utilisant directement le microphone Android Auto applique désormais le routage déterministe des commandes musicales avant d'appeler le modèle IA. Une demande de lecture ne doit pas se limiter à ouvrir une application.
 - Les formulations « lance une musique » et « lance la musique » sont reconnues par le routeur média ; un test unitaire couvre explicitement la formulation avec « une ».
 - La transcription voiture est bornée à 45 secondes et la réponse IA à 90 secondes afin qu'une requête distante lente ne garde pas indéfiniment la session de conversation.
