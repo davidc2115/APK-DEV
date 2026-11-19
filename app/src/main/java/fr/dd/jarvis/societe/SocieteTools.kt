@@ -269,7 +269,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "diagnostic" to prop("Constat donné par l'utilisateur, seulement s'il en a donné un ; sinon vide."),
             "actions" to prop("Actions dites par l'utilisateur, UNE PAR LIGNE (elles deviennent une liste ✅). Aucune action supposée."),
             "pieces" to prop("Pièces remplacées dites par l'utilisateur, une par ligne (références et quantités s'il les donne)."),
-            "mesures" to prop("Mesures dites par l'utilisateur, recopiées telles quelles avec unités, une par ligne (ex. « 20 séries à environ 500 V », « série 7 : 320 V », « isolement 20 MΩ »). Les séries deviennent automatiquement un tableau Série 1…N. Aucune valeur supposée."),
+            "mesures" to prop("Mesures dites par l'utilisateur, recopiées telles quelles avec unités, une par ligne (ex. « 20 séries à environ 500 V », « série 7 : 320 V », « isolement 20 MΩ »). Les groupes successifs s’additionnent dans l’ordre (2 séries à 100 V puis 5 séries à 200 V = séries 1–2 à 100 V et 3–7 à 200 V). Aucune valeur supposée."),
             "onduleurs" to prop("Tous les onduleurs concernés par cette intervention, conserver chaque marque/modèle/numéro de série cité, un par ligne. Ne jamais réduire à un seul onduleur."),
             "statut" to prop("terminee | a_suivre | en_attente."),
             "prochaine_maintenance" to prop("Date yyyy-MM-dd UNIQUEMENT si l'utilisateur l'a demandée."), "notes" to prop("Remarques dites par l'utilisateur, sinon vide.")
