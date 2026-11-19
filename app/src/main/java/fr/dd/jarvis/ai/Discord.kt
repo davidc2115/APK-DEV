@@ -248,6 +248,61 @@ object Discord {
             .put("allowed_mentions", JSONObject().put("parse", JSONArray()))
         return req(app, "POST", "/channels/$channelId/messages", body)
     }
+
+    /** Modifie le contenu d'un message. Les mentions automatiques restent neutralisées. */
+    fun modifierMessage(app: JarvisApp, channelId: String, messageId: String, contenu: String): JSONObject {
+        val texte = contenu.trim()
+        require(texte.isNotBlank()) { "Le message modifié ne peut pas être vide." }
+        require(texte.length <= 2000) { "Un message Discord ne peut pas dépasser 2 000 caractères." }
+        return req(app, "PATCH", "/channels/$channelId/messages/$messageId",
+            JSONObject().put("content", texte).put("allowed_mentions", JSONObject().put("parse", JSONArray())))
+    }
+
+    fun supprimerMessage(app: JarvisApp, channelId: String, messageId: String) {
+        req(app, "DELETE", "/channels/$channelId/messages/$messageId")
+    }
+
+    fun epinglerMessage(app: JarvisApp, channelId: String, messageId: String, epingler: Boolean) {
+        req(app, if (epingler) "PUT" else "DELETE", "/channels/$channelId/pins/$messageId")
+    }
+
+    /** Ajoute ou retire la réaction du bot. */
+    fun reaction(app: JarvisApp, channelId: String, messageId: String, emoji: String, ajouter: Boolean) {
+        val e = java.net.URLEncoder.encode(emoji.trim(), "UTF-8").replace("+", "%20")
+        require(e.isNotBlank()) { "Emoji de réaction manquant." }
+        req(app, if (ajouter) "PUT" else "DELETE", "/channels/$channelId/messages/$messageId/reactions/$e/@me")
+    }
+
+    fun creerFilDepuisMessage(app: JarvisApp, channelId: String, messageId: String, nom: String, archivageMinutes: Int): JSONObject {
+        val titre = nom.trim()
+        require(titre.isNotBlank() && titre.length <= 100) { "Le nom du fil doit contenir de 1 à 100 caractères." }
+        val duree = archivageMinutes.coerceIn(60, 10080)
+        return req(app, "POST", "/channels/$channelId/messages/$messageId/threads",
+            JSONObject().put("name", titre).put("auto_archive_duration", duree))
+    }
+
+    fun timeoutMembre(app: JarvisApp, guildId: String, userId: String, jusquAu: String?) {
+        req(app, "PATCH", "/guilds/$guildId/members/$userId",
+            JSONObject().put("communication_disabled_until", jusquAu ?: JSONObject.NULL))
+    }
+
+    fun expulserMembre(app: JarvisApp, guildId: String, userId: String, raison: String) {
+        val q = java.net.URLEncoder.encode(raison.take(400), "UTF-8").replace("+", "%20")
+        req(app, "DELETE", "/guilds/$guildId/members/$userId" + if (q.isBlank()) "" else "?reason=$q")
+    }
+
+    fun bannirMembre(app: JarvisApp, guildId: String, userId: String, raison: String, supprimerMessagesSecondes: Int) {
+        val q = java.net.URLEncoder.encode(raison.take(400), "UTF-8").replace("+", "%20")
+        val body = JSONObject().put("delete_message_seconds", supprimerMessagesSecondes.coerceIn(0, 604800))
+        req(app, "PUT", "/guilds/$guildId/bans/$userId" + if (q.isBlank()) "" else "?reason=$q", body)
+    }
+
+    fun modifierPseudoMembre(app: JarvisApp, guildId: String, userId: String, pseudo: String) {
+        val nom = pseudo.trim()
+        require(nom.length <= 32) { "Le pseudo ne peut pas dépasser 32 caractères." }
+        req(app, "PATCH", "/guilds/$guildId/members/$userId", JSONObject().put("nick", nom.ifBlank { JSONObject.NULL }))
+    }
+
     fun membre(app: JarvisApp, guildId: String, userId: String): JSONObject = req(app, "GET", "/guilds/$guildId/members/$userId")
     fun chercherMembres(app: JarvisApp, guildId: String, query: String): JSONArray = reqArr(app, "GET", "/guilds/$guildId/members/search?query=${java.net.URLEncoder.encode(query, "UTF-8")}&limit=10")
 
