@@ -150,7 +150,7 @@ object MesuresSeries {
             val uniteLigne = Regex("""(?i)\b\d+(?:[.,]\d+)?\s*(kV|mV|mA|volts?|V|A|amp(?:ères?)?|W|kW|Ω|ohms?|MΩ)\b""")
                 .find(ligneBrute)?.groupValues?.get(1)
             val ligne = if (uniteLigne == null) ligneBrute else {
-                val sansUnite = Regex("""(?i)(\b\d{1,3}\s*$SERIE\s*[^\d\n]{0,20}?\d+(?:[.,]\d+)?)(?!\s*(?:kV|mV|mA|volts?|V|A|amp(?:ères?)?|W|kW|Ω|ohms?|MΩ)\b)""")
+                val sansUnite = Regex("""(?i)(\b\d{1,3}\s*$SERIE\s*[^\d\n]{0,20}?\d++(?:[.,]\d++)?+)(?!\s*(?:kV|mV|mA|volts?|V|A|amp(?:ères?)?|W|kW|Ω|ohms?|MΩ)\b)""")
                 sansUnite.replace(ligneBrute) { m ->
                     // Le texte a déjà été normalisé sans accents : « à » devient « a ».
                     // Tester la présence de l'unité sur tout le groupe confondait ce « a »
