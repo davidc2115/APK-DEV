@@ -30,8 +30,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -82,7 +86,7 @@ internal fun jpegReduit(ctx: Context, uri: Uri, max: Int = 1600): ByteArray? = r
 @Composable
 private fun appareilPhoto(prefixe: String, surPhoto: (Uri) -> Unit): () -> Unit {
     val ctx = LocalContext.current
-    var attendu by remember { mutableStateOf<Uri?>(null) }
+    var attendu by rememberSaveable { mutableStateOf<Uri?>(null) }
     val lanceur = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok -> attendu?.let { if (ok) surPhoto(it) }; attendu = null }
     return {
         val (_, uri) = nouvellePhoto(ctx, prefixe)
@@ -244,6 +248,24 @@ fun RegarderEcran(app: JarvisApp, onFermer: () -> Unit, onDemander: (String) -> 
 /** Trait de signature (points successifs). */
 private class Trait(val points: MutableList<Offset> = mutableListOf())
 
+private val UriListSaver = listSaver<SnapshotStateList<Uri>, String>(
+    save = { photos -> photos.map(Uri::toString) },
+    restore = { saved -> mutableStateListOf<Uri>().apply { addAll(saved.map(Uri::parse)) } }
+)
+
+private val TraitListSaver = listSaver<SnapshotStateList<Trait>, String>(
+    save = { traits -> traits.map { trait -> trait.points.joinToString(";") { "${it.x}:${it.y}" } } },
+    restore = { saved -> mutableStateListOf<Trait>().apply {
+        saved.forEach { encoded ->
+            val points = encoded.split(";").mapNotNull { point ->
+                val xy = point.split(":")
+                if (xy.size != 2) null else runCatching { Offset(xy[0].toFloat(), xy[1].toFloat()) }.getOrNull()
+            }
+            add(Trait(points.toMutableList()))
+        }
+    } }
+)
+
 /** Zone de signature du client. */
 @Composable
 private fun ZoneSignature(traits: MutableList<Trait>, version: Int, onTaille: (androidx.compose.ui.unit.IntSize) -> Unit, onChange: () -> Unit) {
@@ -282,20 +304,27 @@ private fun signaturePng(traits: List<Trait>, largeur: Int, hauteur: Int): ByteA
 fun CompteRenduEcran(app: JarvisApp, onFermer: () -> Unit, onDemander: (String) -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    var installation by remember { mutableStateOf<Vision.SiteProche?>(null) }
-    var categorie by remember { mutableStateOf("maintenance") }
-    var dictee by remember { mutableStateOf("") }
-    val avant = remember { mutableStateListOf<Uri>() }
-    val apres = remember { mutableStateListOf<Uri>() }
-    val traits = remember { mutableStateListOf<Trait>() }
-    var version by remember { mutableStateOf(0) }
-    var tailleSig by remember { mutableStateOf(androidx.compose.ui.unit.IntSize(900, 300)) }
-    var message by remember { mutableStateOf("") }
+    // Le brouillon est restauré après rotation, retour de l'appareil photo et recréation de l'activité.
+    var installationCle by rememberSaveable { mutableStateOf("") }
+    var categorie by rememberSaveable { mutableStateOf("maintenance") }
+    var dictee by rememberSaveable { mutableStateOf("") }
+    val avant = rememberSaveable(saver = UriListSaver) { mutableStateListOf<Uri>() }
+    val apres = rememberSaveable(saver = UriListSaver) { mutableStateListOf<Uri>() }
+    val traits = rememberSaveable(saver = TraitListSaver) { mutableStateListOf<Trait>() }
+    var version by rememberSaveable { mutableStateOf(0) }
+    var largeurSig by rememberSaveable { mutableIntStateOf(900) }
+    var hauteurSig by rememberSaveable { mutableIntStateOf(300) }
+    var message by rememberSaveable { mutableStateOf("") }
     var occupe by remember { mutableStateOf(false) }
-    var fini by remember { mutableStateOf<Pair<String, String>?>(null) } // (date, description)
-    // Ouvert sur place (mode chantier) : l'installation la plus proche est déjà choisie.
+    var finiDate by rememberSaveable { mutableStateOf("") }
+    var finiDescription by rememberSaveable { mutableStateOf("") }
+    var installations by remember { mutableStateOf<List<Vision.SiteProche>>(emptyList()) }
+    val installation = installations.firstOrNull { installationCle == it.client.id + "::" + it.site.id }
+    // Ouvert sur place : présélectionne le site proche uniquement si aucun choix restauré n'existe.
     androidx.compose.runtime.LaunchedEffect(Unit) {
-        if (installation == null) installation = withContext(Dispatchers.IO) { runCatching { Vision.sitesProches(app).firstOrNull { (it.km ?: 99.0) < 0.25 } }.getOrNull() }
+        installations = withContext(Dispatchers.IO) { runCatching { Vision.sitesProches(app) }.getOrDefault(emptyList()) }
+        if (installationCle.isBlank()) installationCle = installations.firstOrNull { (it.km ?: 99.0) < 0.25 }
+            ?.let { it.client.id + "::" + it.site.id }.orEmpty()
     }
 
     val photoAvant = appareilPhoto("avant") { avant.add(it) }
@@ -308,7 +337,7 @@ fun CompteRenduEcran(app: JarvisApp, onFermer: () -> Unit, onDemander: (String) 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(14.dp)) {
         EnteteEcran("📝 COMPTE-RENDU", onFermer)
         Text("Installation", color = HudDim, fontSize = 12.sp)
-        ChoixInstallation(app, installation) { installation = it }
+        ChoixInstallation(app, installation) { installationCle = it.client.id + "::" + it.site.id }
         Spacer(Modifier.height(10.dp))
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             listOf("maintenance", "panne", "diagnostic", "nettoyage", "remplacement", "contrôle").forEach { c -> HudChip(c.replaceFirstChar { it.uppercase() }, categorie == c) { categorie = c } }
@@ -337,28 +366,27 @@ fun CompteRenduEcran(app: JarvisApp, onFermer: () -> Unit, onDemander: (String) 
             Text("Signature du client (optionnelle)", color = HudDim, fontSize = 12.sp, modifier = Modifier.weight(1f))
             if (traits.isNotEmpty()) HudChip("Effacer") { traits.clear(); version++ }
         }
-        ZoneSignature(traits, version, { tailleSig = it }) { version++ }
+        ZoneSignature(traits, version, { largeurSig = it.width; hauteurSig = it.height }) { version++ }
         Spacer(Modifier.height(12.dp))
         HudButton(if (occupe) "Création…" else "✅ Créer le rapport", Modifier.fillMaxWidth(), filled = true, enabled = !occupe && installation != null && dictee.isNotBlank()) {
             val s = installation ?: return@HudButton
             occupe = true; message = "🪽 Je rédige le rapport…"
-            val signature = signaturePng(traits.toList(), tailleSig.width, tailleSig.height)
+            val signature = signaturePng(traits.toList(), largeurSig, hauteurSig)
             scope.launch {
                 val r = runCatching {
                     fr.dd.jarvis.ai.CompteRendu.creer(app, s.client.id, s.site.id, categorie, dictee, avant.toList(), apres.toList(), signature)
                 }.getOrElse { fr.dd.jarvis.ai.CompteRendu.Resultat("❌ ${it.message}", null, null) }
                 message = r.texte
-                if (r.date != null && r.description != null) fini = r.date to r.description
+                if (r.date != null && r.description != null) { finiDate = r.date; finiDescription = r.description }
                 occupe = false
             }
         }
         if (message.isNotBlank()) Text(message, color = HudText, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
-        val f = fini
         val s = installation
-        if (f != null && s != null) {
+        if (finiDate.isNotBlank() && s != null) {
             Row(Modifier.padding(top = 10.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 HudButton("📄 Créer la facture", filled = true) {
-                    onDemander("Crée la facture de l'intervention du ${f.first} chez ${s.client.nom} (installation ${s.site.nom}) : ${f.second}. Applique mes tarifs habituels et les frais de déplacement, puis montre-la-moi avant envoi.")
+                    onDemander("Crée la facture de l'intervention du ${finiDate} chez ${s.client.nom} (installation ${s.site.nom}) : ${finiDescription}. Applique mes tarifs habituels et les frais de déplacement, puis montre-la-moi avant envoi.")
                 }
                 HudButton("✉️ Envoyer le rapport") {
                     onDemander("Envoie par mail à ${s.client.nom} le rapport de l'intervention du ${f.first} sur l'installation ${s.site.nom} (PDF), avec un message court et professionnel.")
