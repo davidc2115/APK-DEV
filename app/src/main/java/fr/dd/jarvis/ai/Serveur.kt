@@ -717,7 +717,8 @@ object Serveur {
     }
 
     fun haEntites(app: JarvisApp, recherche: String, domaine: String, decalage: Int = 0, limite: Int = 100, etat: String = ""): String {
-        val filtreImplicitementDansRecherche = recherche.takeIf { correspondEtatHa("unavailable", it) && fr.dd.jarvis.societe.core.normaliser(it) in setOf("indisponible", "injoignable", "hors ligne", "offline", "deconnecte", "deconnectee", "unavailable") }
+        val termeRechercheNormalise = fr.dd.jarvis.societe.core.normaliser(recherche)
+        val filtreImplicitementDansRecherche = recherche.takeIf { termeRechercheNormalise in setOf("indisponible", "injoignable", "hors ligne", "offline", "deconnecte", "deconnectee", "unavailable", "inconnu", "unknown", "etat inconnu", "indisponible ou inconnu", "injoignable ou inconnu", "tous les problemes") }
         val rechercheEntite = if (etat.isBlank() && filtreImplicitementDansRecherche != null) "" else recherche
         val filtreEtat = etat.ifBlank { filtreImplicitementDansRecherche.orEmpty() }
         val arr = JSONArray(ha(app, "GET", "/api/states"))
