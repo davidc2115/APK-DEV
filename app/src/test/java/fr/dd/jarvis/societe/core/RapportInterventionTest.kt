@@ -205,6 +205,14 @@ class RapportInterventionTest {
             mesures = dict, onduleurs = "Onduleur 1 : Sungrow\nOnduleur 2 : Sungrow"
         )
         val rapport = Rendu.rendreIntervention(SocieteData(clients = listOf(client)), client, site, intervention)
+        val enteteCompacte = "| Série | Tension relevée | Série | Tension relevée | Série | Tension relevée |"
+        assertTrue("Le tableau doit afficher trois paires de colonnes", rapport.contains(enteteCompacte))
+        assertEquals("Les 18 séries de chaque onduleur doivent tenir sur 6 lignes", 6,
+            rapport.lines().count { it.startsWith("|") && it.contains("775 V") })
+        assertEquals("Le second onduleur doit également tenir sur 6 lignes", 6,
+            rapport.lines().count { it.startsWith("|") && it.contains("810 V") })
+        assertTrue("Le tableau de secours ne doit pas être ajouté en double",
+            !rapport.contains("Détail individuel des séries par onduleur"))
         for (n in 1..16) assertTrue("Série $n de l'onduleur 1 absente", rapport.contains("| $n | 775 V |"))
         assertTrue(rapport.contains("| 17 | 805 V |"))
         assertTrue(rapport.contains("| 18 | 805 V |"))
