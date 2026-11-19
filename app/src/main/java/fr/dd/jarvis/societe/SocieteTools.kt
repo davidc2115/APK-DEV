@@ -998,7 +998,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             if (numerotes.isEmpty()) return Garde(champs, emptyList(), false)
             val preserves = champs.toMutableMap()
             preserves["onduleurs"] = numerotes.joinToString("\n")
-            preserves["mesures"] = (preserves["mesures"].orEmpty() + "\n" + source).trim()
+            preserves["mesures"] = source.ifBlank { preserves["mesures"].orEmpty() }.trim()
             return Garde(preserves, emptyList(), false)
         }
         val support = dits + "\n" + connu
