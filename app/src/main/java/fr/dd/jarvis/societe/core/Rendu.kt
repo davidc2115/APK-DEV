@@ -316,7 +316,7 @@ object Rendu {
         val groupesOnduleurs = parOnduleur.map { (nom, resultat) ->
             val details = resultat.series.map { "- 🔌 Série ${it.numero} : ${it.valeur}" } +
                 resultat.autres.map { "- 🌦️ ${it}" }
-            mapOf("onduleur" to nom, "details" to details.joinToString("\\n"))
+            mapOf("onduleur" to nom, "details" to details.joinToString("\n"))
         }
         val autres = (if (parOnduleur.isEmpty()) mes.autres else emptyList()).map { mapOf("mesure" to it) }
         fun image(chemin: String) = "![[${i.id}-${chemin.substringAfterLast('/')}]]"
