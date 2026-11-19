@@ -232,7 +232,9 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         try {
             if (uriStr.isNotBlank()) {
                 val tree = DocumentFile.fromTreeUri(ctx, Uri.parse(uriStr))
-                if (tree != null && tree.canRead()) {
+                    ?: return null
+                if (!tree.canRead()) return null
+                run {
                     val dossierRelatif = relatif(folder)
                     val dossierReel = if (dossierRelatif.isBlank()) "" else resoudre(dossierRelatif)
                     val cur = if (dossierReel != null) {
@@ -316,6 +318,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                 action(path, t)
             }
         } else {
+            if (store.obsidianUri.value.isNotBlank()) return
             localRoot().walkTopDown().filter { it.isFile && it.name.endsWith(".md", true) }.take(limite).forEach { f ->
                 runCatching { f.readText() }.getOrNull()?.let { action(f.relativeTo(localRoot()).path, it) }
             }
@@ -326,14 +329,16 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     fun listNotes(folder: String = ""): List<String> {
         signalerFilPrincipal("listNotes")
         val f = relatif(folder)
-        val vaultNotes = if (vaultRoot() != null) {
+        val coffreConfigure = store.obsidianUri.value.isNotBlank()
+        val coffre = vaultRoot()
+        if (coffreConfigure && coffre == null) return emptyList()
+        if (coffre != null) {
             val dossierReel = if (f.isBlank()) "" else resoudre(f) ?: return emptyList()
-            allNotes().map { it.first }.filter { dossierReel.isEmpty() || it.startsWith("$dossierReel/") }
-        } else emptyList()
+            return allNotes().map { it.first }.filter { dossierReel.isEmpty() || it.startsWith("$dossierReel/") }.distinct().sorted()
+        }
         val localDir = File(localRoot(), f)
-        val localNotes = if (localDir.exists()) localDir.walkTopDown().filter { it.isFile && it.name.endsWith(".md", true) }
-            .map { it.relativeTo(localRoot()).path }.toList() else emptyList()
-        return (vaultNotes + localNotes).distinct().sorted()
+        return if (localDir.exists()) localDir.walkTopDown().filter { it.isFile && it.name.endsWith(".md", true) }
+            .map { it.relativeTo(localRoot()).path }.sorted().toList() else emptyList()
     }
 
     /** Recherche texte (nom + contenu). Retourne (chemin, extrait). */
@@ -346,7 +351,10 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             val i = txt.lowercase().indexOf(q)
             return if (i < 0) "" else txt.substring(maxOf(0, i - 60), minOf(txt.length, i + 140)).replace(Regex("\\s+"), " ")
         }
-        if (vaultRoot() != null) {
+        val coffreConfigure = store.obsidianUri.value.isNotBlank()
+        val coffre = vaultRoot()
+        if (coffreConfigure && coffre == null) return emptyList()
+        if (coffre != null) {
             val notes = allNotes()
             for ((path, f) in notes) if (path.lowercase().contains(q) && out.size < limit) out += path to ""
             for ((path, f) in notes.take(600)) {
@@ -356,6 +364,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                 if (t.lowercase().contains(q)) out += path to extrait(t)
             }
         } else {
+            if (coffreConfigure) return emptyList()
             localRoot().walkTopDown().filter { it.isFile && it.name.endsWith(".md", true) }.forEach { f ->
                 if (out.size >= limit) return@forEach
                 val t = runCatching { f.readText() }.getOrDefault("")
@@ -371,6 +380,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         signalerFilPrincipal("readNote")
         val p = withMd(path)
         val v = vaultRoot()
+        if (store.obsidianUri.value.isNotBlank() && v == null) return null
         if (v != null) {
             val reel = resoudre(p)
             val f = reel?.let { trouver(it) }?.takeIf { it.isFile }
@@ -379,7 +389,8 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                 if (content != null) return content
             }
         }
-        // saveBytes peut avoir utilisé le stockage local si le coffre SAF était en lecture seule.
+        // Le stockage local n'est consulté que si aucun coffre n'a été configuré.
+        if (store.obsidianUri.value.isNotBlank()) return null
         val local = File(localRoot(), p)
         return if (local.isFile) runCatching { local.readText() }.getOrNull() else null
     }
