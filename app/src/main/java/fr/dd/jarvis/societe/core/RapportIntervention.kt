@@ -58,6 +58,11 @@ object OnduleursIntervention {
         }
     }
 
+    /** Représentation complète des blocs numérotés, utilisée pour préserver la dictée brute. */
+    fun numerotes(source: String): List<String> = blocs(source).map { bloc ->
+        bloc.nom + if (bloc.contenu.isBlank()) "" else " : ${bloc.contenu}"
+    }
+
     /** Ne conserve dans l'en-tête que l'identité (marque/modèle), jamais les mesures de séries. */
     fun identites(source: String): List<String> {
         val resultat = sortedMapOf<Int, String>()
