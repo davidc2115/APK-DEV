@@ -18,11 +18,11 @@ object ListesRapport {
  * « Onduleur 1 », « Onduleur 2 », etc. sont donc extraits directement de la source.
  */
 object OnduleursIntervention {
-    private val MARQUEUR = Regex("""(?i)\\bonduleur\\s*(?:n[°o]\\s*)?(\\d+)\\s*[:=\\-–]?\\s*""")
+    private val MARQUEUR = Regex("""(?i)\bonduleur\s*(?:n[°o]\s*)?(\d+)\s*[:=\-–]?\s*""")
 
     fun numerotes(source: String): List<String> {
         val resultat = linkedMapOf<Int, String>()
-        for (ligne in source.split(Regex("""[\\r\\n;]+"""))) {
+        for (ligne in source.split(Regex("""[\r\n;]+"""))) {
             val matches = MARQUEUR.findAll(ligne).toList()
             for ((index, match) in matches.withIndex()) {
                 val numero = match.groupValues[1].toIntOrNull() ?: continue
@@ -40,18 +40,18 @@ object OnduleursIntervention {
     /** Fusionne la sortie IA avec les mentions numérotées exactes de la dictée, sans doublons. */
     fun completer(texteIA: String, source: String): String {
         val lignes = linkedMapOf<String, String>()
-        texteIA.split(Regex("""[\\r\\n;]+""")).map { it.trim() }.filter { it.isNotBlank() }
+        texteIA.split(Regex("""[\r\n;]+""")).map { it.trim() }.filter { it.isNotBlank() }
             .forEach { lignes[Fidelite.normaliser(it)] = it }
         numerotes(source).forEach { ligne ->
-            val cle = Regex("""(?i)^onduleur\\s+(\\d+)""").find(ligne)?.groupValues?.get(1)
+            val cle = Regex("""(?i)^onduleur\s+(\d+)""").find(ligne)?.groupValues?.get(1)
             if (cle != null) {
-                val prefixe = Regex("""(?i)^onduleur\\s+$cle\\b""")
+                val prefixe = Regex("""(?i)^onduleur\s+$cle\b""")
                 val existante = lignes.entries.firstOrNull { prefixe.containsMatchIn(it.value) }
                 if (existante != null) lignes.remove(existante.key)
             }
             lignes[Fidelite.normaliser(ligne)] = ligne
         }
-        return lignes.values.joinToString("\\n")
+        return lignes.values.joinToString("\n")
     }
 }
 
