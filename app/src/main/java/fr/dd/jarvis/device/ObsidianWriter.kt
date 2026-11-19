@@ -417,7 +417,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
      * Racine « fichier » utilisable directement : le coffre lui-même (accès à tous les fichiers, contrôlé contre la
      * vue Android du coffre) ou, sans coffre choisi, le dossier local. Null : passer par le coffre SAF.
      */
-    private fun racineFichier(): File? = fichierCoffre() ?: if (vaultRoot() == null) localRoot() else null
+    private fun racineFichier(): File? = fichierCoffre() ?: if (store.obsidianUri.value.isBlank()) localRoot() else null
 
     private fun fichierSur(racine: File, chemin: String): File {
         val r = racine.canonicalFile
@@ -968,7 +968,10 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                 val racine = idCoffre() ?: return 0L
                 signatureSaf(v.uri, racine, "", 0) { c, d, t -> mix(c, d, t) }
             }
-            else -> localRoot().walkTopDown().forEach { f -> mix(f.path, f.lastModified(), if (f.isFile) f.length() else -1) }
+            else -> {
+                if (store.obsidianUri.value.isNotBlank()) return 0L
+                localRoot().walkTopDown().forEach { f -> mix(f.path, f.lastModified(), if (f.isFile) f.length() else -1) }
+            }
         }
         return h
     }
@@ -1019,6 +1022,9 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
      *  (liens, tags) que pour [limiteLecture] notes, plafonné à [limiteOctets] par note, pour rester fluide. */
     fun graph(limiteNotes: Int = 3000, limiteOctets: Int = 60_000, limitePieces: Int = 3000, limiteLecture: Int = 700): GraphData {
         val v = vaultRoot()
+        if (store.obsidianUri.value.isNotBlank() && v == null) {
+            return GraphData(emptyList(), emptyList(), emptyList(), emptyMap(), emptyList(), emptyList())
+        }
         val direct = fichierCoffre()
         val cheminsPieces = mutableListOf<String>()
         val dossiers = mutableListOf<String>()
