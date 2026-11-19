@@ -344,6 +344,15 @@ class Brain(
             fr.dd.jarvis.hermes.Routeur.marquerBavardage()
             return reflexe(reponse)
         }
+        // Lecture déterministe de l'état Home Assistant : une demande explicitement HA + indisponible
+        // doit consulter /api/states, sans LLM, sans inventaire Wi-Fi et sans appareils enregistrés par Jarvis.
+        if (!pourHermes && ServeurTools.prioriteHaDisponibilite(texteUser)) {
+            onStatus("🏠 Vérification des appareils Home Assistant…")
+            return try {
+                tools.execute("ha_entites", JSONObject().put("etat", "indisponible")).text
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { "❌ Impossible de lire les états de Home Assistant : ${e.message ?: "erreur inconnue"}" }
+        }
         // Hermès, cerveau principal (mode « tout » : toutes les autres demandes ; mode « auto » : les tâches complexes).
         // S'il est indisponible, Jarvis reprend la main avec ses outils.
         if (!pourHermes) {
