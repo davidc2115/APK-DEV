@@ -181,6 +181,18 @@ class RapportInterventionTest {
     }
 
 
+    @Test fun uniteDejaPresenteNestPasDupliqueeEtLeTotalNestPasUneMesure() {
+        val resultat = MesuresSeries.analyser(
+            "16 séries à 775 volts et deux séries à 805 volts (18 séries au total)"
+        )
+
+        assertEquals(18, resultat.series.size)
+        assertEquals((1..16).toList(), resultat.series.take(16).map { it.numero })
+        assertTrue(resultat.series.take(16).all { it.valeur == "775 V" })
+        assertEquals("805 V", resultat.series[16].valeur)
+        assertEquals("805 V", resultat.series[17].valeur)
+    }
+
     @Test fun rapportAfficheChaqueSerieSurSaPropreLignePourChaqueOnduleur() {
         val client = Client("c-test", "Client test")
         val site = Site("s-test", "Installation")
