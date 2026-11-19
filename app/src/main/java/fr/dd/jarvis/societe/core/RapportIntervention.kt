@@ -20,21 +20,38 @@ object ListesRapport {
 object OnduleursIntervention {
     private val MARQUEUR = Regex("""(?i)\bonduleur\s*(?:n[°o]\s*)?(\d+)\s*[:=\-–]?\s*""")
 
-    fun numerotes(source: String): List<String> {
-        val resultat = linkedMapOf<Int, String>()
+    data class Bloc(val numero: Int, val nom: String, val contenu: String)
+
+    /** Récupère les lignes de chaque onduleur jusqu'au marqueur du suivant. */
+    fun blocs(source: String): List<Bloc> {
+        val contenus = linkedMapOf<Int, StringBuilder>()
+        var courant: Int? = null
         for (ligne in source.split(Regex("""[\r\n;]+"""))) {
             val matches = MARQUEUR.findAll(ligne).toList()
+            if (matches.isEmpty()) {
+                courant?.let { n -> contenus.getOrPut(n) { StringBuilder() }.append(" ").append(ligne.trim()) }
+                continue
+            }
             for ((index, match) in matches.withIndex()) {
                 val numero = match.groupValues[1].toIntOrNull() ?: continue
                 if (numero !in 1..100) continue
+                courant = numero
                 val fin = matches.getOrNull(index + 1)?.range?.first ?: ligne.length
-                val detail = ligne.substring(match.range.last + 1, fin)
-                    .trim().trim(',', ';', ':', '-', '–', '.', ' ')
-                val libelle = "Onduleur $numero" + if (detail.isBlank()) "" else " : $detail"
-                resultat[numero] = libelle
+                val detail = ligne.substring(match.range.last + 1, fin).trim().trim(',', ';', ':', '-', '–', '.', ' ')
+                val cible = contenus.getOrPut(numero) { StringBuilder() }
+                if (detail.isNotBlank()) {
+                    if (cible.isNotEmpty()) cible.append(" ")
+                    cible.append(detail)
+                }
             }
         }
-        return resultat.toSortedMap().values.toList()
+        return contenus.toSortedMap().map { (numero, contenu) ->
+            Bloc(numero, "Onduleur $numero", contenu.toString().trim())
+        }
+    }
+
+    fun numerotes(source: String): List<String> = blocs(source).map {
+        it.nom + if (it.contenu.isBlank()) "" else " : \${it.contenu}"
     }
 
     /** Fusionne la sortie IA avec les mentions numérotées exactes de la dictée, sans doublons. */
@@ -45,7 +62,7 @@ object OnduleursIntervention {
         numerotes(source).forEach { ligne ->
             val cle = Regex("""(?i)^onduleur\s+(\d+)""").find(ligne)?.groupValues?.get(1)
             if (cle != null) {
-                val prefixe = Regex("""(?i)^onduleur\s+$cle\b""")
+                val prefixe = Regex("""(?i)^onduleur\s+\$cle\b""")
                 val existante = lignes.entries.firstOrNull { prefixe.containsMatchIn(it.value) }
                 if (existante != null) lignes.remove(existante.key)
             }
@@ -88,12 +105,16 @@ object MesuresSeries {
         return (if (approx) "≈ " else "") + premier + second
     }
 
+    /** Analyse séparément les séries de chaque onduleur ; les numéros repartent à 1. */
+    fun parOnduleur(texte: String): List<Pair<String, Resultat>> =
+        OnduleursIntervention.blocs(texte).map { bloc -> bloc.nom to analyser(bloc.contenu) }
+
     fun analyser(texte: String): Resultat {
         val valeurs = sortedMapOf<Int, String>()
         val autres = mutableListOf<String>()
         // Les quantités successives décrivent des groupes distincts : 2 séries puis 5 séries = séries 1 à 7.
         var prochaineSerie = 1
-        for (ligne in ListesRapport.elements(texte)) {
+        for (ligne in ListesRapport.elements(Fidelite.enChiffres(texte))) {
             var reste = ligne
             var trouve = false
             GROUPE.findAll(ligne).forEach { m ->
