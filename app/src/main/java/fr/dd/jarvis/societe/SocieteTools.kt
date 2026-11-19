@@ -294,6 +294,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "actions" to prop("Actions réalisées, une par ligne, ou « effacer » (optionnel)."),
             "pieces" to prop("Pièces remplacées ou « effacer » (optionnel)."),
             "mesures" to prop("Mesures relevées avec unités, une par ligne (« 20 séries à environ 500 V » → tableau des séries), ou « effacer » (optionnel)."),
+            "onduleurs" to prop("Tous les onduleurs concernés, un par ligne, ou « effacer » (optionnel)."),
             "statut" to prop("terminee | a_suivre | en_attente (optionnel)."),
             "prochaine_maintenance" to prop("Date yyyy-MM-dd ou « effacer » (optionnel)."),
             "notes" to prop("Notes ou « effacer » (optionnel).")
