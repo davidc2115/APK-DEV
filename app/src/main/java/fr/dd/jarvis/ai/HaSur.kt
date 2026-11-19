@@ -6,19 +6,18 @@ import kotlinx.coroutines.delay
 /**
  * Opérations Home Assistant via l'API configurée (DuckDNS/HTTPS).
  *
- * Important : le profil SSH général de Jarvis désigne le serveur Debian qui héberge Jarvis/Hermes,
- * pas l'hôte Docker de Home Assistant. En l'absence d'un profil SSH HA indépendant, ce composant
- * n'exécute donc aucune commande Docker/SSH et ne lit/écrit aucun YAML sur le serveur Debian.
- * Les actions REST restent disponibles ; démarrage, mise à jour et fichiers YAML restent explicitement suspendus
- * jusqu'à l'ajout et la validation du profil dédié. Le diagnostic d'hôte Docker est autorisé en lecture seule
- * via le profil Debian, sans action sur le conteneur.
+ * Le profil SSH général désigne l'hôte Debian, qui peut héberger les conteneurs Home Assistant et Plex.
+ * L'API Home Assistant reste le plan de contrôle des entités et des services ; SSH Debian sert uniquement
+ * à inspecter l'hôte et le conteneur HA en lecture seule (état, volumes, ressources, journaux).
+ * Les opérations de cycle de vie Docker et les modifications YAML restent suspendues tant qu'un flux
+ * dédié, confirmé et vérifié n'est pas disponible.
  */
 object HaSur {
     private fun q(s: String) = Serveur.q(s)
 
-    /** Docker HA ne doit jamais utiliser le SSH général, réservé au serveur Debian Jarvis. */
+    /** Les opérations Docker sur HA sont désactivées ici ; seul ServeurDiagnostic inspecte le conteneur en lecture seule. */
     fun docker(app: JarvisApp, cmd: String, delai: Int = 90): Pair<Int, String> =
-        -1 to "Accès Docker HA désactivé : aucun profil SSH Home Assistant indépendant n'est configuré."
+        -1 to "Opérations Docker Home Assistant désactivées : le SSH Debian est réservé au diagnostic en lecture seule."
 
     fun dockerComplet(app: JarvisApp, cmd: String, delai: Int = 240): Pair<Int, String> =
         docker(app, cmd, delai)
