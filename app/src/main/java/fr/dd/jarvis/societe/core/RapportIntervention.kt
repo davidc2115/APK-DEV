@@ -59,12 +59,21 @@ object OnduleursIntervention {
     }
 
     /** Ne conserve dans l'en-tête que l'identité (marque/modèle), jamais les mesures de séries. */
-    fun identites(source: String): List<String> = blocs(source).mapNotNull { bloc ->
-        val contenu = Fidelite.enChiffres(bloc.contenu)
-        val debutMesures = Regex("""(?i)\b\d{1,3}\s*(?:s[ée]ries?|strings?|cha[îi]nes?)\b""").find(contenu)?.range?.first
-            ?: contenu.length
-        val identite = contenu.substring(0, debutMesures).trim().trim(',', ';', ':', '-', '–', '.')
-        if (identite.isBlank()) null else "\${bloc.nom} : $identite"
+    fun identites(source: String): List<String> {
+        val resultat = sortedMapOf<Int, String>()
+        for (ligne in source.split(Regex("""[\r\n;]+"""))) {
+            val matches = MARQUEUR.findAll(ligne).toList()
+            for ((index, match) in matches.withIndex()) {
+                val numero = match.groupValues[1].toIntOrNull() ?: continue
+                if (numero !in 1..100) continue
+                val fin = matches.getOrNull(index + 1)?.range?.first ?: ligne.length
+                val detail = ligne.substring(match.range.last + 1, fin).trim().trim(',', ';', ':', '-', '–', '.', ' ')
+                val normalise = Fidelite.enChiffres(detail)
+                if (Regex("""(?i)\b\d{1,3}\s*(?:s[ée]ries?|strings?|cha[îi]nes?)\b""").containsMatchIn(normalise)) continue
+                if (detail.isNotBlank() && !resultat.containsKey(numero)) resultat[numero] = detail
+            }
+        }
+        return resultat.map { (numero, modele) -> "Onduleur $numero : $modele" }
     }
 
     /** Fusionne les identités de la dictée dans le champ équipement, sans y mélanger les mesures. */
