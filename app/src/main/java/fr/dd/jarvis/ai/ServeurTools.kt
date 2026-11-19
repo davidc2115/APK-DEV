@@ -307,7 +307,8 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 ssh()
                 val cible = a.optString("cible").trim().ifBlank { "complet" }
                 val lignes = a.optString("lignes").toIntOrNull() ?: 80
-                val commande = ServeurDiagnostic.commande(cible, app.store.plexToken.value, lignes)
+                val sudo = app.store.sshUser.value.trim() != "root" && app.store.sshPass.value.isNotBlank()
+                val commande = ServeurDiagnostic.commande(cible, app.store.plexToken.value, lignes, sudo)
                 val r = Serveur.exec(app, commande, 120)
                 val sortieHote = sortie(r, 8500)
                 val ha = if (cible.equals("complet", true) || cible.equals("home assistant", true) || cible.equals("ha", true)) {
