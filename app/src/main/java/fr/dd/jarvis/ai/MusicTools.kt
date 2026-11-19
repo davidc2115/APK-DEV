@@ -80,7 +80,9 @@ class MusicTools(private val app: JarvisApp) {
 
     private fun paquet(): String? = fr.dd.jarvis.device.YtMusique.paquet(app, app.store.appPrefs["musique"])
     @Suppress("UNUSED_PARAMETER") private fun nomAppli(p: String) = fr.dd.jarvis.device.YtMusique.NOM
-    suspend fun execute(name: String, a: JSONObject): ToolResult = try {
+    suspend fun execute(name: String, a: JSONObject): ToolResult {
+        val debut = System.currentTimeMillis()
+        return try {
         when (name) {
             "musique_etat" -> ToolResult(Musique.etat(app), direct = true)
             "musique_commander" -> ToolResult(Musique.commander(app, a.optString("action")), direct = true)
@@ -144,9 +146,12 @@ class MusicTools(private val app: JarvisApp) {
             }, direct = true)
             else -> ToolResult("Outil musical inconnu.")
         }
-    } catch (e: SecurityException) {
-        ToolResult("Accès aux sessions multimédias refusé. Active l'accès aux notifications de JARVIS dans les réglages Android.")
-    } catch (e: Exception) {
-        ToolResult("Erreur musicale : ${e.message ?: e.javaClass.simpleName}")
+        } catch (e: SecurityException) {
+            ToolResult("Accès aux sessions multimédias refusé. Active l'accès aux notifications de JARVIS dans les réglages Android.")
+        } catch (e: Exception) {
+            ToolResult("Erreur musicale : ${e.message ?: e.javaClass.simpleName}")
+        } finally {
+            fr.dd.jarvis.voice.JournalVoix.noter("musique", "$name en ${System.currentTimeMillis() - debut} ms")
+        }
     }
 }
