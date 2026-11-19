@@ -40,6 +40,9 @@ object OnduleursIntervention {
             for ((index, match) in matches.withIndex()) {
                 val numero = match.groupValues[1].toIntOrNull() ?: continue
                 if (numero !in 1..100) continue
+                // Si un résumé IA est suivi de la dictée source, le second bloc numéroté remplace le premier
+                // au lieu de doubler artificiellement le nombre de séries.
+                if (courant != numero && contenus.containsKey(numero)) contenus[numero] = StringBuilder()
                 courant = numero
                 val fin = matches.getOrNull(index + 1)?.range?.first ?: ligne.length
                 val detail = ligne.substring(match.range.last + 1, fin).trim().trim(',', ';', ':', '-', '–', '.', ' ')
