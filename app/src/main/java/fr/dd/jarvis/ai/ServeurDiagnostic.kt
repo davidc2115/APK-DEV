@@ -183,9 +183,11 @@ internal object ServeurDiagnostic {
             val states = org.json.JSONArray(Serveur.ha(app, "GET", "/api/states"))
             var indisponibles = 0
             var inconnus = 0
-            for (i in 0 until states.length()) when (states.optJSONObject(i)?.optString("state")) {
-                "unavailable" -> indisponibles++
-                "unknown" -> inconnus++
+            for (i in 0 until states.length()) {
+                when (states.optJSONObject(i)?.optString("state")) {
+                    "unavailable" -> indisponibles++
+                    "unknown" -> inconnus++
+                }
             }
             val config = runCatching { org.json.JSONObject(Serveur.ha(app, "GET", "/api/config")) }.getOrNull()
             "API Home Assistant : OK · version ${config?.optString("version").orEmpty().ifBlank { "non fournie" }} · ${states.length()} entités · $indisponibles indisponible(s) · $inconnus état(s) inconnu(s)."
