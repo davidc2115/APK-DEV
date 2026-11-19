@@ -29,6 +29,18 @@ Le dépôt utilise désormais Dependabot pour surveiller chaque semaine les dép
 - **IA locale** : LiteRT peut être évalué pour des tâches locales légères, mais ne pas ajouter de modèle ou de runtime tant qu'un cas d'usage, la taille du modèle, la compatibilité CPU/NPU et le budget mémoire/batterie ne sont pas mesurés.
 - **Recherche mémoire** : exploiter d'abord Room et les fichiers Markdown comme sources de vérité. Évaluer FTS pour la recherche lexicale et les embeddings uniquement après mesure sur un jeu de requêtes réel.
 
+## Renforcement immédiat du stockage des secrets
+
+La migration hors de `androidx.security:security-crypto` reste différée : il ne faut pas remplacer le chiffrement existant tant qu'une migration compatible avec le Keystore n'est pas testée. En revanche, les secrets qui étaient encore écrits dans les préférences ordinaires sont désormais déplacés vers le coffre chiffré existant (`EncryptedSharedPreferences`) :
+
+- jeton Home Assistant, mot de passe et clé privée SSH, jeton GitHub et mot de passe du partage réseau ;
+- clés Picovoice et TomTom, jeton Discord, identifiants OAuth TikTok, jeton Hugging Face, jeton du worker vidéo et mot de passe IMAP ;
+- code de secours antivol et jetons Cloudflare (ID de compte + jeton).
+
+La migration copie d'abord la valeur dans le stockage chiffré avec validation synchrone ; l'ancienne valeur en clair n'est supprimée qu'après confirmation de l'écriture. Si le coffre chiffré est indisponible, les opérations d'écriture échouent explicitement et les anciennes valeurs ne sont pas effacées. Les clés Groq, Gemini et OpenAI conservent leur stockage chiffré dédié existant.
+
+Cette étape ne remplace pas encore la bibliothèque dépréciée : elle réduit l'exposition des secrets sans changer le format cryptographique ni imposer une réinitialisation des clés. La migration de bibliothèque devra être un chantier distinct, avec tests de reprise après mise à jour, perte/invalidation du Keystore, et vérification que chaque secret reste lisible après migration.
+
 ## Architecture cible à préserver
 
 1. **Chemin rapide** : commandes locales déterministes et conversation courte avant tout appel distant.
