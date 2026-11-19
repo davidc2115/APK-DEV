@@ -1,20 +1,24 @@
 package fr.dd.jarvis.device
 
 /**
- * Sélectionne un dossier imbriqué quand l'utilisateur omet un préfixe connu du coffre.
- * Le résultat n'est accepté que s'il est unique : aucune sélection arbitraire entre homonymes.
+ * Résolution des chemins dont le premier dossier est omis.
+ * On ne retient un chemin que si le suffixe complet correspond à un seul emplacement.
  */
 internal object ObsidianPathResolution {
-    fun uniqueNestedFolder(
+    fun <T> uniqueNestedPath(
         firstSegment: String,
         folderPaths: List<String>,
-        normalize: (String) -> String
-    ): String? {
+        normalize: (String) -> String,
+        resolveRemainder: (String) -> T?
+    ): T? {
         val wanted = normalize(firstSegment)
         if (wanted.isBlank()) return null
-        return folderPaths.asSequence()
+        val candidates = folderPaths.asSequence()
             .filter { path -> path.isNotBlank() && normalize(path.substringAfterLast('/')) == wanted }
             .distinct()
-            .singleOrNull()
+            .mapNotNull(resolveRemainder)
+            .distinct()
+            .toList()
+        return candidates.singleOrNull()
     }
 }
