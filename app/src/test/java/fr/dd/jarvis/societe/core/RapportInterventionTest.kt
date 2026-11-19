@@ -143,4 +143,31 @@ class RapportInterventionTest {
         assertEquals(18, groupes[1].second.series.size)
     }
 
+    @Test fun renduGardeLesTableauxDeChaqueOnduleurQuandLesIdentitesSontStockeesAilleurs() {
+        val site = Site("site-mesures", "Toiture")
+        val client = Client("client-mesures", "Client mesures", sites = listOf(site))
+        val dictee = """
+            Onduleur 1 : 16 séries à 775 volts et deux séries à 805 volts
+            de légères tensions à la terre dues à la pluie mais rien d'anormal
+            Onduleur 2 : quatre séries à environ 810 volts et 14 séries environ 770 volts
+            de légères tensions à la terre dues à la pluie mais rien d'anormal
+        """.trimIndent()
+        val intervention = Intervention(
+            id = "inter-mesures", date = "2026-11-19", description = "Mesures des onduleurs",
+            mesures = dictee,
+            onduleurs = """['Onduleur 1 : Sungrow 125cx', 'Onduleur 2 : Sungrow 125cx']"""
+        )
+        val rapport = Rendu.rendreIntervention(SocieteData(clients = listOf(client)), client, site, intervention)
+
+        assertTrue(rapport.contains("Onduleur 1 : Sungrow 125cx"))
+        assertTrue(rapport.contains("Onduleur 2 : Sungrow 125cx"))
+        assertTrue(rapport.contains("Mesures par onduleur"))
+        assertTrue(rapport.contains("775 V"))
+        assertTrue(rapport.contains("805 V"))
+        assertTrue(rapport.contains("≈ 810 V"))
+        assertTrue(rapport.contains("≈ 770 V"))
+        assertTrue(rapport.contains("| 18 |"))
+        assertTrue(!rapport.contains("Sungrow 125cx',"))
+    }
+
 }
