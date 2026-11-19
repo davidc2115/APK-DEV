@@ -35,13 +35,15 @@ Si la demande consiste à analyser le planning/l’agenda pour compléter ou met
         val cle = cle(historique)
         if (cle != null) synchronized(cache) { cache[cle] }?.let { (quand, plan) -> if (System.currentTimeMillis() - quand < 15 * 60_000L) return plan }
         val noms = mutableMapOf<String, String>()
-        for (i in 0 until tousOutils.length()) {
-            val f = tousOutils.getJSONObject(i).getJSONObject("function")
-            // Descriptions courtes : le choix des outils n'a besoin que du sujet de chacun (requête 2× plus légère, plus rapide).
-            noms[f.getString("name")] = f.optString("description").substringBefore(". ").take(90)
+        // L'analyseur n'a besoin que des noms et sujets des outils. Ne lui transmet jamais le catalogue complet :
+        // il dépassait 128 fonctions chez Groq et gonflait inutilement les appels Gemini.
+        val catalogue = BudgetRequeteIA.outils(tousOutils, niveau = 1) ?: JSONArray()
+        for (i in 0 until catalogue.length()) {
+            val f = catalogue.getJSONObject(i).getJSONObject("function")
+            noms[f.getString("name")] = f.optString("description").substringBefore(". ").take(70)
         }
-        val conv = historique.takeLast(6).joinToString("\n") { (if (it.fromUser) "Utilisateur : " else "JARVIS : ") + it.text.take(400) }
-        val user = "Date : ${Prompts.now()}\n\nOUTILS :\n" + noms.entries.joinToString("\n") { "- ${it.key} : ${it.value}" } + "\n\nCONVERSATION :\n$conv"
+        val conv = historique.takeLast(4).joinToString("\n") { (if (it.fromUser) "Utilisateur : " else "JARVIS : ") + it.text.take(280) }
+        val user = ("Date : ${Prompts.now()}\n\nOUTILS :\n" + noms.entries.joinToString("\n") { "- ${it.key} : ${it.value}" } + "\n\nCONVERSATION :\n$conv").take(14_000)
         // Au-delà de 4,5 s, on n'attend plus : les outils sont choisis par mots-clés (la réponse part plus vite).
         val rep = withTimeoutOrNull(4_500) {
             try { app.llm.agent(SYSTEM, user) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { null }
