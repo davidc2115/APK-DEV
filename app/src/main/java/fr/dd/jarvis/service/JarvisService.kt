@@ -140,6 +140,8 @@ class JarvisService : Service() {
     private var echangeReel = false        // vrai dès qu'une vraie demande a été traitée pendant cette conversation
     private lateinit var app: JarvisApp
     private lateinit var tools: ToolBox
+    /** Réutilisé entre les tours : Brain ne contient pas d'état propre à une requête. */
+    private lateinit var brain: Brain
 
     private fun norm(s: String) = Normalizer.normalize(s.lowercase(), Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
     private val wakeRegex = Regex("\\b(jarvis|jarvice|jarviss|djarvis|jarvi|jarves|charvis)\\b[ ,.:!?-]*")
@@ -212,6 +214,7 @@ class JarvisService : Service() {
                 }
             } else voiceConfirm(q)
         }
+        brain = Brain(app.llm, tools, app) { app.store.userName.value }
         // Hermès installé : on s'assure que sa passerelle tourne dans Termux (après un redémarrage du téléphone par ex.).
         if (app.store.hermesMode.value != "off") scope.launch {
             runCatching {
@@ -590,8 +593,9 @@ class JarvisService : Service() {
             var relancer = true
             val flux = withContext(Dispatchers.Main) { voice?.parole(5000) { if (gen == generation) { busy = false; if (relancer) ecouter() else goIdle() } } }
             val reply = try {
-                fr.dd.jarvis.ai.Brain(app.llm, tools, app) { app.store.userName.value }
-                    .reply(app.chat.toList().takeLast(16), onTexte = { d -> if (gen == generation) flux?.ajouter(d) }) { etat -> android.os.Handler(android.os.Looper.getMainLooper()).post { majNotification(etat) } }
+                val debutCerveau = System.currentTimeMillis()
+                brain.reply(app.chat.toList().takeLast(16), onTexte = { d -> if (gen == generation) flux?.ajouter(d) }) { etat -> android.os.Handler(android.os.Looper.getMainLooper()).post { majNotification(etat) } }
+                    .also { fr.dd.jarvis.voice.JournalVoix.noter("service", "compréhension + action en ${System.currentTimeMillis() - debutCerveau} ms") }
             } catch (e: CancellationException) { flux?.arreter(sansSuite = true); throw e }
               catch (e: Throwable) { "⚠️ ${e.message ?: e.javaClass.simpleName}" }
             val assistantMessage = ChatMsg(false, reply)
