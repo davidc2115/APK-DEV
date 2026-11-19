@@ -319,11 +319,17 @@ class JarvisService : Service() {
             derniereDemandeExterne = t
         }
         if (busy) {
-            // Une demande peut dépasser quelques secondes (réseau / Hermès / synthèse vocale).
-            // On conserve l'appui micro en attente : l'ancienne limite de 3 s affichait un échec
-            // alors que le service était simplement occupé, et empêchait de reprendre le micro.
-            voice?.stopSpeaking()
-            main.postDelayed({ demandeExterne(essai + 1) }, 500)
+            // Attente bornée : ne pas annoncer un faux échec au bout de 3 s, mais ne jamais
+            // programmer une boucle infinie si un traitement ou un callback reste réellement bloqué.
+            if (essai < 60) {
+                if (essai == 0) voice?.stopSpeaking()
+                main.postDelayed({ demandeExterne(essai + 1) }, 500)
+            } else {
+                fr.dd.jarvis.car.ActiviteVoiture.signaler(
+                    fr.dd.jarvis.car.ActiviteVoiture.Etape.ECHEC,
+                    texte = "JARVIS est toujours occupé. Réessaie dans quelques instants."
+                )
+            }
             return
         }
         if (awake) {
