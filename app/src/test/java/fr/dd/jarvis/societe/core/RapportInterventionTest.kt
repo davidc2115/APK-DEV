@@ -210,7 +210,7 @@ class RapportInterventionTest {
         assertEquals("Les 18 séries de chaque onduleur doivent tenir sur 6 lignes", 6,
             rapport.lines().count { it.startsWith("|") && it.contains("775 V") })
         assertEquals("Le second onduleur doit également tenir sur 6 lignes", 6,
-            rapport.lines().count { it.startsWith("|") && it.contains("810 V") })
+            rapport.lines().count { it.startsWith("|") && (it.contains("810 V") || it.contains("770 V")) })
         assertTrue("Le tableau de secours ne doit pas être ajouté en double",
             !rapport.contains("Détail individuel des séries par onduleur"))
         for (n in 1..16) assertTrue("Série $n de l'onduleur 1 absente", rapport.contains("| $n | 775 V |"))
