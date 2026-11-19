@@ -16,7 +16,7 @@ internal object ServeurDiagnostic {
         val dockerFiltre = when (cible) {
             "plex" -> "plex"
             "ha", "home assistant", "homeassistant" -> "home.?assistant|hass"
-            "ssh" -> ""
+            "ssh", "discord", "bagbot" -> ""
             else -> "plex|home.?assistant|hass"
         }
         val tokenHeader = plexToken.trim().takeIf { it.isNotBlank() }
