@@ -334,7 +334,7 @@ object Rendu {
             "client" to c.nom, "installation" to s.nom.ifBlank { "Installation" },
             "date" to dateFr(i.date), "categorie" to i.categorie.replaceFirstChar { it.uppercase() },
             "statut" to statutIntervention(i.statut),
-            "adresse" to s.adresse, "onduleur" to i.onduleurs.ifBlank { s.onduleur }, "onduleurs" to i.onduleurs.ifBlank { s.onduleur }.replace("\n", "<br>"), "kwc" to (if (s.kwc > 0) nombre(s.kwc) else ""),
+            "adresse" to s.adresse, "onduleur" to onduleursAffiches, "onduleurs" to onduleursAffiches.replace("\n", "<br>"), "kwc" to (if (s.kwc > 0) nombre(s.kwc) else ""),
             "description" to Fidelite.sansMeta(i.description), "diagnostic" to Fidelite.sansMeta(i.diagnostic),
             "a_actions" to drapeau(actions), "a_pieces" to drapeau(pieces), "a_series" to drapeau(series), "a_groupes_onduleurs" to drapeau(groupesOnduleurs),
             "a_mesures" to drapeau(autres), "a_photos_avant" to drapeau(avant), "a_photos_apres" to drapeau(apres),
