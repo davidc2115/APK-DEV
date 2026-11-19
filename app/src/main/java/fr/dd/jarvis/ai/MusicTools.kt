@@ -115,6 +115,7 @@ class MusicTools(private val app: JarvisApp) {
                     else {
                         kotlinx.coroutines.delay(1400)
                         if (fr.dd.jarvis.device.MusiqueBibliotheque.demarrerLecture(app, p, aleatoire)) {
+                            fr.dd.jarvis.device.RetourJarvisMusique.afficher(app)
                             "❤️ Tes titres « J'aime » sont bien en lecture dans ${nomAppli(p)}" + (if (aleatoire) " en aléatoire." else ".")
                         } else {
                             "📂 Ta liste « J'aime » est ouverte dans ${nomAppli(p)}, mais le lecteur n'a pas confirmé le démarrage. Vérifie le bouton Lecture dans l'application."
@@ -124,7 +125,9 @@ class MusicTools(private val app: JarvisApp) {
                     val (l, err) = fr.dd.jarvis.device.MusiqueBibliotheque.lister(app, p, section)
                     err?.let { "❌ $it" } ?: ("📚 Ta bibliothèque — $section :\n" + l.take(40).mapIndexed { i, e -> "${i + 1}. ${e.titre}" + (if (e.sousTitre.isNotBlank()) " — ${e.sousTitre}" else "") }.joinToString("\n") +
                         "\n\nDis lequel lancer (ex. « mets la playlist ${l.firstOrNull()?.titre ?: "…"} »).")
-                } else fr.dd.jarvis.device.MusiqueBibliotheque.jouer(app, p, section, nom, aleatoire)
+                } else fr.dd.jarvis.device.MusiqueBibliotheque.jouer(app, p, section, nom, aleatoire).also { resultat ->
+                    if (resultat.startsWith("▶️")) fr.dd.jarvis.device.RetourJarvisMusique.afficher(app)
+                }
             }, direct = true)
             "musique_action" -> ToolResult(if (fr.dd.jarvis.societe.core.normaliser(a.optString("action")).contains("radio")) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 val e = fr.dd.jarvis.device.MusiqueBibliotheque.enCours(app)
