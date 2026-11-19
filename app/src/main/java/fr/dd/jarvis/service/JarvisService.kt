@@ -58,13 +58,24 @@ class JarvisService : Service() {
          */
         fun ecouterDepuisVoiture(ctx: Context): Boolean {
             val s = actuel
-            if (running && s != null) { s.main.post { s.demandeExterne() }; return true }
-            if (!micAccorde(ctx)) return false
+            if (running && s != null) {
+                fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "demande micro transmise au service vocal déjà actif")
+                s.main.post { s.demandeExterne() }
+                return true
+            }
+            if (!micAccorde(ctx)) {
+                fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "micro refusé : RECORD_AUDIO non accordé")
+                return false
+            }
             return try {
                 val i = Intent(ctx, JarvisService::class.java).setAction(ACTION_ECOUTER)
                 if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
+                fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "demande de démarrage du service vocal envoyée")
                 true
-            } catch (_: Throwable) { false }
+            } catch (e: Throwable) {
+                fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "démarrage service vocal refusé : ${e.javaClass.simpleName}: ${e.message.orEmpty().take(180)}")
+                false
+            }
         }
 
         /**
@@ -169,8 +180,12 @@ class JarvisService : Service() {
     private fun premierPlan(): Boolean = try {
         if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIF, notificationEcoute(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
         else startForeground(NOTIF, notificationEcoute())
+        fr.dd.jarvis.voice.JournalVoix.noter("service", "service vocal passé au premier plan avec type microphone")
         true
-    } catch (_: Throwable) { false }
+    } catch (e: Throwable) {
+        fr.dd.jarvis.voice.JournalVoix.noter("service", "échec premier plan microphone : ${e.javaClass.simpleName}: ${e.message.orEmpty().take(180)}")
+        false
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         app = application as JarvisApp
@@ -179,6 +194,10 @@ class JarvisService : Service() {
             stopSelf(); return START_NOT_STICKY
         }
         if (running) {
+            if (intent?.action == ACTION_ECOUTER) {
+                fr.dd.jarvis.voice.JournalVoix.noter("service", "ACTION_ECOUTER reçu alors que le service est déjà actif")
+                main.post { demandeExterne() }
+            }
             if (intent?.action == ACTION_RELANCER) {
                 // Toucher la notification redonne le droit au micro : on repasse au premier plan et on réarme le détecteur.
                 getSystemService(NotificationManager::class.java).cancel(NOTIF_REPRISE)
@@ -318,16 +337,25 @@ class JarvisService : Service() {
         // La voiture envoie parfois deux fois le même appui (▶ puis « jouer depuis la recherche ») : un seul bip.
         if (essai == 0) {
             val t = System.currentTimeMillis()
-            if (t - derniereDemandeExterne < 1500) return
+            if (t - derniereDemandeExterne < 1500) {
+                fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "double appui micro ignoré (demande précédente déjà reçue)")
+                return
+            }
             derniereDemandeExterne = t
+            fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "service vocal traite la demande du bouton micro")
         }
         if (busy) {
+            if (essai == 0) {
+                fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "micro différé : JARVIS termine une demande en cours")
+                fr.dd.jarvis.car.ActiviteVoiture.signaler(fr.dd.jarvis.car.ActiviteVoiture.Etape.REFLEXION, texte = "JARVIS termine la demande en cours…")
+            }
             // Attente bornée : ne pas annoncer un faux échec au bout de 3 s, mais ne jamais
             // programmer une boucle infinie si un traitement ou un callback reste réellement bloqué.
             if (essai < 60) {
                 if (essai == 0) voice?.stopSpeaking()
                 main.postDelayed({ demandeExterne(essai + 1) }, 500)
             } else {
+                fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "micro abandonné : service toujours occupé après 30 s")
                 fr.dd.jarvis.car.ActiviteVoiture.signaler(
                     fr.dd.jarvis.car.ActiviteVoiture.Etape.ECHEC,
                     texte = "JARVIS est toujours occupé. Réessaie dans quelques instants."
