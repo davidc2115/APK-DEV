@@ -406,7 +406,8 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             val u = m.optJSONObject("user") ?: JSONObject()
             val uid = u.optString("id")
             val pseudo = m.optString("nick").ifBlank { u.optString("global_name").ifBlank { u.optString("username").ifBlank { uid } } }
-            if (uid == g.optString("owner_id")) return ToolResult("Action refusée : le propriétaire du serveur ne peut pas être modéré par ce bot.")
+            val infosGuilde = Discord.infosGuilde(app, gid)
+            if (uid == infosGuilde.optString("owner_id")) return ToolResult("Action refusée : le propriétaire du serveur ne peut pas être modéré par ce bot.")
             if (uid == Discord.moi(app).optString("id")) return ToolResult("Action refusée : le bot ne peut pas se modérer lui-même.")
             val raison = a.optString("raison").trim().ifBlank { "Action demandée depuis Jarvis" }
             when (name) {
