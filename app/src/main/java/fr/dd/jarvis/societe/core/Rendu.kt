@@ -322,6 +322,12 @@ object Rendu {
         fun image(chemin: String) = "![[${i.id}-${chemin.substringAfterLast('/')}]]"
         val avant = i.photosAvant.map { mapOf("photo" to image(it)) }
         val apres = i.photosApres.map { mapOf("photo" to image(it)) }
+        val onduleursAffiches = i.onduleurs.ifBlank { s.onduleur }
+            .split(Regex("""[\\r\\n]+"""))
+            .map { ligne ->
+                ligne.replace(Regex("""(?i)\\b\\d{1,3}\\s*s[ée]ries?\\b.*$"""), "")
+                    .trim().trimEnd(':', '-', '–', ',')
+            }.filter { it.isNotBlank() }.joinToString("\\n")
         fun drapeau(l: List<*>) = if (l.isEmpty()) "" else "oui"
         val vars = societeVars(d) + mapOf(
             "titre" to "Rapport d'intervention", "reference" to i.id,
