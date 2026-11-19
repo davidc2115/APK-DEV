@@ -285,8 +285,8 @@ class PhoneControl(private val ctx: Context) {
             val confirmation = "🎵 « $requete » est en cours de lecture dans $nom (en arrière-plan)." +
                 (if (!titre.isNullOrBlank()) "\nTitre affiché par le lecteur : $titre" else "") +
                 (if (visuel != null) "\n\n![Lecteur](jarvis-img:$visuel)" else "")
-            // Lecture confirmée : on remet JARVIS (ou l'appli précédente) au premier plan, l'appli de musique reste en arrière-plan.
-            if (fr.dd.jarvis.service.JarvisAccessibilityService.instance != null) runCatching { fr.dd.jarvis.service.JarvisAccessibilityService.instance?.global(AccessibilityService.GLOBAL_ACTION_HOME) }
+            // Lecture confirmée : revenir à JARVIS (et au mode Présence s'il était actif) sans arrêter la musique.
+            RetourJarvisMusique.afficher(ctx)
             return confirmation
         }
         // Beaucoup d'applis tierces (YouTube Music, Spotify, Deezer…) n'implémentent pas vraiment playFromSearch() : la session existe
