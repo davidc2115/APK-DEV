@@ -20,7 +20,7 @@ import java.io.File
 class ServeurAdminTools(private val app: JarvisApp, private val confirm: suspend (String, Boolean) -> Boolean) {
     companion object {
         val NAMES = setOf("serveur_service", "serveur_tache", "ha_sauvegarde", "serveur_fichiers")
-        private val MOTS = Regex("sauvegarde|restaur|backup|remettre en (service|route)|r[ée]par|ne d[ée]marre|plant[ée]|\\bbot\\b|discord|plex|\\bservices?\\b|conteneur|\\blogs?\\b|journaux|t[âa]che|mise à jour|mettre à jour|fichiers? (du|sur le) serveur|ssh|serveur|debian|docker", RegexOption.IGNORE_CASE)
+        private val MOTS = Regex("home ?assistant|\\bha\\b|stockage|volumes?|sauvegarde|restaur|backup|remettre en (service|route)|r[ée]par|ne d[ée]marre|plant[ée]|\\bbot\\b|discord|plex|\\bservices?\\b|conteneur|\\blogs?\\b|journaux|t[âa]che|mise à jour|mettre à jour|fichiers? (du|sur le) serveur|ssh|serveur|debian|docker", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = MOTS.containsMatchIn(t)
         private const val TACHES = "/tmp/jarvis_taches"
 
@@ -136,7 +136,7 @@ class ServeurAdminTools(private val app: JarvisApp, private val confirm: suspend
         val service = a.optString("service").trim()
         val trouves = trouver(service, l)
         if (trouves.isEmpty()) return ToolResult("Aucun service « $service » trouvé sur le serveur (conteneurs Docker, services systemd, pm2). Dis « liste les services du serveur » pour voir les noms exacts.")
-        if (trouves.size > 1 && action !in setOf("etat", "logs", "stockage")) return ToolResult("Plusieurs services correspondent à « $service » : " +
+        if (trouves.size > 1 && action !in setOf("etat", "logs")) return ToolResult("Plusieurs services correspondent à « $service » : " +
             trouves.joinToString { "${it.nom} (${it.type})" } + ". Précise lequel (nom exact).")
         val n = (a.optString("lignes").toIntOrNull() ?: 80).coerceIn(10, 400)
         val c = trouves.first()
