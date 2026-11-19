@@ -96,8 +96,8 @@ dependencies {
     implementation("androidx.documentfile:documentfile:1.0.1")
     // Extraction PDF multi-pages avec ordre spatial du texte.
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
-    // Conserver 2.9.0 : WorkManager 2.12.0 exige AGP >= 8.6.0, le projet utilise AGP 8.5.2.
-    implementation("androidx.work:work-runtime-ktx:2.9.0")
+    // WorkManager 2.12.0 : AGP 8.6.1 / Gradle 8.7 ; minSdk 24 (Jarvis : 26).
+    implementation("androidx.work:work-runtime-ktx:2.12.0")
     implementation("com.google.android.gms:play-services-auth:21.2.0")
     // Gemini Nano sur l’appareil via Android AICore.
     implementation("com.google.mlkit:genai-prompt:1.0.0-beta4")
