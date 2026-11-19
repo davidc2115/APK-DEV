@@ -304,7 +304,7 @@ object Rendu {
         return buildString {
             append("| ").append(entete.joinToString(" | ")).append(" |\n")
             append("| ").append(separateur.joinToString(" | ")).append(" |\n")
-            lignes.forEach { append(it).append('\\n') }
+            lignes.forEach { append(it).append('\n') }
         }.trimEnd()
     }
 
@@ -387,7 +387,7 @@ object Rendu {
             append("\n\n## 📊 Détail individuel des séries par onduleur\n")
             manquants.forEach { (nom, resultat) ->
                 append("\n### 🔌 ").append(nom).append('\n')
-                append(tableauSeriesCompact(resultat.series)).append('\\n')
+                append(tableauSeriesCompact(resultat.series)).append('\n')
                 resultat.autres.forEach { observation -> append("- 🌦️ ").append(observation).append('\n') }
             }
         }
