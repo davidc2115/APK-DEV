@@ -983,7 +983,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
     private fun garder(a: JSONObject, client: Client, site: Site, ancienne: Intervention?): Garde {
         val cles = listOf("description", "diagnostic", "actions", "pieces", "mesures", "onduleurs", "notes")
         val champs = cles.filter { a.has(it) }.associateWith { a.s(it) }
-        val dits = paroles()
+        val dits = listOf(paroles(), a.s("source_utilisateur")).filter { it.isNotBlank() }.joinToString("\n")
         val connu = listOf(client.nom, site.nom, site.adresse, site.onduleur, site.notes,
             if (site.kwc > 0) site.kwc.toString() else "", if (site.nbPanneaux > 0) site.nbPanneaux.toString() else "",
             a.s("categorie"), ancienne?.let { listOf(it.description, it.diagnostic, it.actions, it.pieces, it.mesures, it.onduleurs, it.notes).joinToString("\n") }.orEmpty()
