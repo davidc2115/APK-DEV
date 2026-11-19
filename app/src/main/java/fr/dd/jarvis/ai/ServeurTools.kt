@@ -313,7 +313,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                     val commande = ServeurDiagnostic.commande(cible, app.store.plexToken.value, lignes, sudo)
                     sortie(Serveur.exec(app, commande, 120), 8500)
                 }.getOrElse { "Diagnostic SSH Debian impossible : ${it.message?.take(220) ?: it.javaClass.simpleName}." }
-                val ha = if (cible.equals("complet", true) || cible.equals("home assistant", true) || cible.equals("ha", true)) {
+                val ha = if (cible.equals("complet", true) || cible.equals("home assistant", true) || cible.equals("homeassistant", true) || cible.equals("ha", true)) {
                     "\n\n## Home Assistant — contrôle API (instance configurée)\n" + ServeurDiagnostic.resumeHomeAssistant(app)
                 } else ""
                 ToolResult("# 🧰 Diagnostic approfondi — ${cible}\n\n```\n" + sortieHote + "\n```" + ha +
