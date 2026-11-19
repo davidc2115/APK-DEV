@@ -13,6 +13,49 @@ object ListesRapport {
 }
 
 /**
+ * Préserve les équipements explicitement numérotés dans la dictée.
+ * La fidélité générique peut écarter une ligne descriptive longue ; les libellés
+ * « Onduleur 1 », « Onduleur 2 », etc. sont donc extraits directement de la source.
+ */
+object OnduleursIntervention {
+    private val MARQUEUR = Regex("""(?i)\\bonduleur\\s*(?:n[°o]\\s*)?(\\d+)\\s*[:=\\-–]?\\s*""")
+
+    fun numerotes(source: String): List<String> {
+        val resultat = linkedMapOf<Int, String>()
+        for (ligne in source.split(Regex("""[\\r\\n;]+"""))) {
+            val matches = MARQUEUR.findAll(ligne).toList()
+            for ((index, match) in matches.withIndex()) {
+                val numero = match.groupValues[1].toIntOrNull() ?: continue
+                if (numero !in 1..100) continue
+                val fin = matches.getOrNull(index + 1)?.range?.first ?: ligne.length
+                val detail = ligne.substring(match.range.last + 1, fin)
+                    .trim().trim(',', ';', ':', '-', '–', '.', ' ')
+                val libelle = "Onduleur $numero" + if (detail.isBlank()) "" else " : $detail"
+                resultat[numero] = libelle
+            }
+        }
+        return resultat.toSortedMap().values.toList()
+    }
+
+    /** Fusionne la sortie IA avec les mentions numérotées exactes de la dictée, sans doublons. */
+    fun completer(texteIA: String, source: String): String {
+        val lignes = linkedMapOf<String, String>()
+        texteIA.split(Regex("""[\\r\\n;]+""")).map { it.trim() }.filter { it.isNotBlank() }
+            .forEach { lignes[Fidelite.normaliser(it)] = it }
+        numerotes(source).forEach { ligne ->
+            val cle = Regex("""(?i)^onduleur\\s+(\\d+)""").find(ligne)?.groupValues?.get(1)
+            if (cle != null) {
+                val prefixe = Regex("""(?i)^onduleur\\s+$cle\\b""")
+                val existante = lignes.entries.firstOrNull { prefixe.containsMatchIn(it.value) }
+                if (existante != null) lignes.remove(existante.key)
+            }
+            lignes[Fidelite.normaliser(ligne)] = ligne
+        }
+        return lignes.values.joinToString("\\n")
+    }
+}
+
+/**
  * Mesures par série (string) : « 20 séries à environ 500 V » → Série 1 … Série 20 à ≈ 500 V ; « séries 1 à 10 : 480 V »,
  * « série 7 : 320 V », « S3 = 512 V / 9,1 A » précisent ou corrigent. Le reste (température, isolement…) reste tel quel.
  */
