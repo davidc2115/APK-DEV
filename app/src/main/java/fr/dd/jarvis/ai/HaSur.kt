@@ -4,17 +4,13 @@ import fr.dd.jarvis.JarvisApp
 import kotlinx.coroutines.delay
 
 /**
- * Opérations SÛRES sur Home Assistant installé en Docker sur le serveur (2 Go de mémoire : chaque redémarrage est long).
+ * Opérations Home Assistant via l'API configurée (DuckDNS/HTTPS).
  *
- * Avant, une modification ou un redémarrage par SSH laissait souvent Home Assistant indisponible :
- *  - un YAML modifié par ssh_fichier n'était jamais vérifié → Home Assistant redémarrait en « mode de récupération »
- *    (intégrations non chargées, entités indisponibles) ;
- *  - « docker restart » coupait Home Assistant au bout de 10 s (base de l'historique endommagée, démarrage encore plus long) ;
- *  - rien n'attendait son retour : on annonçait « redémarré » alors qu'il démarrait encore (ou ne revenait jamais) ;
- *  - la mise à jour tirait la nouvelle image sans place disque ni sauvegarde ni retour arrière.
- * Ici : vérification de la configuration avant tout redémarrage, remise automatique de l'ancien fichier si Home Assistant
- * le refuse, rechargement à chaud quand c'est possible (pas de coupure), arrêt propre (2 min accordées), attente du retour
- * en ligne, et mise à jour en tâche de fond avec sauvegarde, contrôle de la place et retour à l'ancienne version si besoin.
+ * Important : le profil SSH général de Jarvis désigne le serveur Debian qui héberge Jarvis/Hermes,
+ * pas l'hôte Docker de Home Assistant. En l'absence d'un profil SSH HA indépendant, ce composant
+ * n'exécute donc aucune commande Docker/SSH et ne lit/écrit aucun YAML sur le serveur Debian.
+ * Les actions REST restent disponibles ; démarrage, mise à jour, diagnostic Docker et fichiers YAML
+ * restent explicitement suspendus jusqu'à l'ajout et la validation du profil dédié.
  */
 object HaSur {
     private fun q(s: String) = Serveur.q(s)
@@ -27,8 +23,6 @@ object HaSur {
         docker(app, cmd, delai)
 
     data class Conteneur(val nom: String, val config: String, val dossierCompose: String, val serviceCompose: String, val image: String)
-
-    @Volatile private var cache: Pair<Long, Conteneur?>? = null
 
     /** Conteneur Home Assistant, son dossier de configuration et, s'il vient de docker compose, son projet. */
     fun conteneur(app: JarvisApp, frais: Boolean = false): Conteneur? = null
