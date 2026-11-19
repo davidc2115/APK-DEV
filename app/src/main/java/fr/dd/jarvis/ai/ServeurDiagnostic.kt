@@ -45,9 +45,13 @@ internal object ServeurDiagnostic {
             printf '%s' "${'$'}PLEX_LIB" | sed 's/></>/\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\1="[masqué]"/g' | head -20
             PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
             echo "Lectures actives : ${'        """.trimIndent() else "echo 'Jeton Plex absent : identité seulement, bibliothèques et sessions non interrogées.'"
+            echo "Transcodages actifs : ${'$'}(printf '%s' "${'$'}PLEX_SESS" | grep -o '<TranscodeSession ' | wc -l | tr -d ' ')"
         val plexSection = if (cible in setOf("complet", "plex")) """
             echo
             echo '== Plex Media Server : API locale =='
+            echo 'Service systemd Plex (si installé) :' 
+            (${rootCmd}systemctl is-active plexmediaserver 2>/dev/null || true)
+            (${rootCmd}journalctl -u plexmediaserver -n 20 --no-pager 2>/dev/null || true) | tail -20
             if command -v curl >/dev/null 2>&1; then
               PLEX_ID=${'$'}(curl -sS --connect-timeout 2 --max-time 6 -H 'Accept: application/xml' $tokenHeader -w '\nHTTP=%{http_code}' http://127.0.0.1:32400/identity 2>&1)
               printf '%s\n' "${'$'}PLEX_ID" | sed -E 's/(machineIdentifier|claimedIdentifier)="[^"]+"/\1="[masqué]"/g' | head -8
