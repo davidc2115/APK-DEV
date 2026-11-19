@@ -394,7 +394,14 @@ class Brain(
         // Domotique (chauffage, télé, lumières, volets…) : toujours de quoi relire les notes, trouver l'entité ET agir.
         val domotique = pilotageChauffage || (Regex("t[ée]l[ée]|\\btv\\b|t[ée]l[ée]vis|volume|lumi[èe]re|lampe|volet|store|prise|home ?assistant|domotique|enceinte", RegexOption.IGNORE_CASE).containsMatchIn(recent) &&
             ACTION_DOMOTIQUE.containsMatchIn(recent))
-        val indispensables = if (domotique) listOf("notes_lire", "obsidian_chercher", "obsidian_lire", "ha_entites", "ha_etat", "ha_service") else emptyList()
+        // Une recherche d'appareils explicitement indisponibles dans Home Assistant doit toujours exposer
+        // l'API HA et son filtre d'état, jamais substituer l'inventaire Wi-Fi du téléphone.
+        val disponibiliteHa = ServeurTools.prioriteHaDisponibilite(recent)
+        val indispensables = when {
+            disponibiliteHa -> listOf("ha_entites")
+            domotique -> listOf("notes_lire", "obsidian_chercher", "obsidian_lire", "ha_entites", "ha_etat", "ha_service")
+            else -> emptyList()
+        }
         if (plan != null && plan.outils.isNotEmpty()) {
             val reglageDirect = Regex("r[eé]glage|param[eè]tre|mode conversation|[eé]coute continue|annonce vocale|r[eé]ponse vocale|confirmation|agent autonome|bips|analyse gemini|gemini|agents? autonomes?|notifications banni[eè]re", RegexOption.IGNORE_CASE).containsMatchIn(recent)
             val keep = (plan.outils + indispensables + (if (reglageDirect) listOf("reglage_jarvis") else emptyList()) + (if (planningClientsSync) listOf("analyser_planning_clients") else emptyList()) + listOf("memoire_ajouter", "memoire_apprendre", "memoire_apprentissages", "memoire_lire", "memoire_oublier", "note_prendre", "notes_lire", "rappel_creer", "rappels_liste") + (if (societeOn || planningClientsSync) fr.dd.jarvis.societe.SocieteTools.NAMES else emptySet<String>()) +
