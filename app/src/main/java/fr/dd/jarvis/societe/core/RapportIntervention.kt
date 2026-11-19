@@ -58,16 +58,21 @@ object OnduleursIntervention {
         }
     }
 
-    fun numerotes(source: String): List<String> = blocs(source).map {
-        it.nom + if (it.contenu.isBlank()) "" else " : ${it.contenu}"
+    /** Ne conserve dans l'en-tête que l'identité (marque/modèle), jamais les mesures de séries. */
+    fun identites(source: String): List<String> = blocs(source).mapNotNull { bloc ->
+        val contenu = Fidelite.enChiffres(bloc.contenu)
+        val debutMesures = Regex("""(?i)\b\d{1,3}\s*(?:s[ée]ries?|strings?|cha[îi]nes?)\b""").find(contenu)?.range?.first
+            ?: contenu.length
+        val identite = contenu.substring(0, debutMesures).trim().trim(',', ';', ':', '-', '–', '.')
+        if (identite.isBlank()) null else "\${bloc.nom} : $identite"
     }
 
-    /** Fusionne la sortie IA avec les mentions numérotées exactes de la dictée, sans doublons. */
+    /** Fusionne les identités de la dictée dans le champ équipement, sans y mélanger les mesures. */
     fun completer(texteIA: String, source: String): String {
         val lignes = linkedMapOf<String, String>()
         texteIA.split(Regex("""[\r\n;]+""")).map { it.trim() }.filter { it.isNotBlank() }
             .forEach { lignes[Fidelite.normaliser(it)] = it }
-        numerotes(source).forEach { ligne ->
+        identites(source).forEach { ligne ->
             val cle = Regex("""(?i)^onduleur\s+(\d+)""").find(ligne)?.groupValues?.get(1)
             if (cle != null) {
                 val prefixe = Regex("""(?i)^onduleur\s+$cle\b""")
