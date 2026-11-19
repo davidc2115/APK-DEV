@@ -1001,8 +1001,15 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         val support = dits + "\n" + connu
         val retires = mutableListOf<String>()
         val gardes = champs.mapValues { (_, v) -> Fidelite.verifier(v, support).also { retires += it.retires }.garde }.toMutableMap()
-        // Les équipements numérotés sont extraits de la dictée elle-même : ils ne dépendent pas du résumé IA.
-        gardes["onduleurs"] = OnduleursIntervention.completer(gardes["onduleurs"].orEmpty(), a.s("source_utilisateur").ifBlank { dits })
+        // Les équipements et leurs mesures sont extraits de la dictée d'origine, pas seulement du résumé IA.
+        val source = a.s("source_utilisateur").ifBlank { dits }
+        val blocsOnduleurs = OnduleursIntervention.numerotes(source)
+        gardes["onduleurs"] = OnduleursIntervention.completer(gardes["onduleurs"].orEmpty(), source)
+        if (blocsOnduleurs.isNotEmpty()) {
+            // Ces blocs seront analysés séparément par onduleur lors du rendu PDF/Obsidian.
+            gardes["mesures"] = (gardes["mesures"].orEmpty() + "\\n" + blocsOnduleurs.joinToString("\\n"))
+                .trim().trimStart('\\n')
+        }
         return Garde(gardes, retires, true)
     }
 
