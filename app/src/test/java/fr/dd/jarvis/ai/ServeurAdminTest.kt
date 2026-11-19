@@ -17,6 +17,12 @@ class ServeurAdminTest {
         assertEquals("sudo -S -p '' -u plex ls", Serveur.commandeSudo("sudo -u plex ls", false))
     }
 
+    @Test fun demandesStockageHomeAssistantEtPlexDeclenchentInspectionServeur() {
+        assertTrue(ServeurAdminTools.concerned("Où se trouve le stockage de Home Assistant ?"))
+        assertTrue(ServeurAdminTools.concerned("Où sont les volumes Docker de Plex ?"))
+        assertTrue(ServeurAdminTools.concerned("Liste les services du serveur Debian"))
+    }
+
     @Test fun homeAssistantApiEtStockageDebianRestentDistincts() {
         assertTrue(ServeurAdminTools.actionLectureSeuleHa("etat"))
         assertTrue(ServeurAdminTools.actionLectureSeuleHa("logs"))
