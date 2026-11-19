@@ -20,6 +20,8 @@ class ServeurDiagnosticTest {
         assertTrue(script.contains("Détails des lectures"))
         assertTrue(script.contains("Failed password"))
         assertTrue(script.contains("fail2ban-client status"))
+        assertTrue(script.contains("Currently banned"))
+        assertTrue(script.contains("Total failed"))
         assertTrue(script.contains("--tail 200"))
         assertFalse(Regex("docker\\s+(restart|stop|rm)\\b|systemctl\\s+(restart|stop)\\b|rm\\s+-rf|apt-get\\s+").containsMatchIn(script))
     }
