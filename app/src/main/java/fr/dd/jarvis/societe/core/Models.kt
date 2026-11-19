@@ -109,6 +109,8 @@ data class Intervention(
     val actions: String = "",
     val pieces: String = "",
     val mesures: String = "",
+    /** Tous les onduleurs concernés par cette intervention, un par ligne si plusieurs. */
+    val onduleurs: String = "",
     val statut: String = "terminee",
     val prochaineMaintenance: String = "",
     val notes: String = "",
