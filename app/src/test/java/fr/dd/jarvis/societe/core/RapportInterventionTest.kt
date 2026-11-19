@@ -180,4 +180,24 @@ class RapportInterventionTest {
         assertEquals("805 V", resultat.series[17].valeur)
     }
 
+
+    @Test fun rapportAfficheChaqueSerieSurSaPropreLignePourChaqueOnduleur() {
+        val client = Client("c-test", "Client test")
+        val site = Site("s-test", "Installation")
+        val dict = """
+            Onduleur 1 : 16 séries à 775 volts et deux séries à 805 volts
+            Onduleur 2 : quatre séries à environ 810 volts et 14 séries environ 770 volts
+        """.trimIndent()
+        val intervention = Intervention(
+            id = "i-test", date = "2026-11-19", description = "Mesures",
+            mesures = dict, onduleurs = "Onduleur 1 : Sungrow\nOnduleur 2 : Sungrow"
+        )
+        val rapport = Rendu.rendreIntervention(SocieteData(clients = listOf(client)), client, site, intervention)
+        for (n in 1..16) assertTrue("Série \${n} de l'onduleur 1 absente", rapport.contains("| \${n} | 775 V |"))
+        assertTrue(rapport.contains("| 17 | 805 V |"))
+        assertTrue(rapport.contains("| 18 | 805 V |"))
+        for (n in 1..4) assertTrue("Série \${n} de l'onduleur 2 absente", rapport.contains("| \${n} | ≈ 810 V |"))
+        for (n in 5..18) assertTrue("Série \${n} de l'onduleur 2 absente", rapport.contains("| \${n} | ≈ 770 V |"))
+    }
+
 }
