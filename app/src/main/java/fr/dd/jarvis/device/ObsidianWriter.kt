@@ -120,13 +120,12 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         }
         return try {
             val tree = DocumentFile.fromTreeUri(ctx, Uri.parse(uriStr)) ?: return false
-            var cur: DocumentFile? = tree
-            var dossierTrouve = true
-            for (part in folder.split('/').filter { it.isNotBlank() }) {
-                cur = cur?.trouverLoose(part)?.takeIf { it.isDirectory }
-                if (cur == null) { dossierTrouve = false; break }
-            }
-            val cible = if (dossierTrouve) cur?.trouverLoose(name) else null
+            val dossierRelatif = relatif(folder)
+            val dossierReel = if (dossierRelatif.isBlank()) "" else resoudre(dossierRelatif)
+            val cur = if (dossierReel != null) {
+                if (dossierReel.isBlank()) tree else trouver(dossierReel)?.takeIf { it.isDirectory }
+            } else null
+            val cible = cur?.trouverLoose(name)
             var supprime = false
             if (cible != null) {
                 if (!cible.canWrite()) return false
@@ -232,9 +231,12 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             if (uriStr.isNotBlank()) {
                 val tree = DocumentFile.fromTreeUri(ctx, Uri.parse(uriStr))
                 if (tree != null && tree.canRead()) {
-                    var cur: DocumentFile? = tree
-                    for (part in folder.split('/').filter { it.isNotBlank() }) cur = cur?.findFile(part)?.takeIf { it.isDirectory }
-                    val f = cur?.findFile(name)
+                    val dossierRelatif = relatif(folder)
+                    val dossierReel = if (dossierRelatif.isBlank()) "" else resoudre(dossierRelatif)
+                    val cur = if (dossierReel != null) {
+                        if (dossierReel.isBlank()) tree else trouver(dossierReel)?.takeIf { it.isDirectory }
+                    } else null
+                    val f = cur?.trouverLoose(name)
                     if (f != null) return ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
                     return null
                 }
@@ -558,8 +560,11 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         if (premier != null) { base = premier; i = 1 }
         else {
             val voulu = cleNom(parts[0])
-            val candidats = toutLister().filter { it.second && cleNom(it.first.substringAfterLast('/')) == voulu }.map { it.first }
+            val candidats = toutLister().filter { it.second && cleNom(it.first.substringAfterLast('/')) == voulu }.map { it.first }.distinct()
             if (candidats.size == 1) { base = candidats[0]; i = 1 }
+            else if (candidats.size > 1) {
+                throw IllegalArgumentException("Plusieurs dossiers « ${parts[0]} » existent dans le coffre. Précise leur chemin complet pour éviter de créer un doublon.")
+            }
         }
         while (i < parts.size) {
             val m = correspondance(enfants(base).orEmpty(), parts[i], dossierSeul = true) ?: break
