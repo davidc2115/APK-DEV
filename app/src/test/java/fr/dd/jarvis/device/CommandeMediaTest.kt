@@ -11,7 +11,9 @@ class CommandeMediaTest {
         val cas = mapOf(
             "Reprends la musique" to Action.PLAY, "Jarvis, peux-tu reprendre la musique s'il te plaît" to Action.PLAY,
             "remets la musique" to Action.PLAY, "reprends la lecture" to Action.PLAY, "relance la musique" to Action.PLAY,
-            "mets de la musique" to Action.PLAY, "lance la musique" to Action.PLAY, "lance une musique" to Action.PLAY, "enlève la pause" to Action.PLAY,
+            "mets de la musique" to Action.PLAY, "lance la musique" to Action.PLAY, "lance une musique" to Action.PLAY,
+            "lancer la musique" to Action.PLAY, "démarrer la musique" to Action.PLAY, "démarre la musique" to Action.PLAY,
+            "jouer de la musique" to Action.PLAY, "joue de la musique" to Action.PLAY, "enlève la pause" to Action.PLAY,
             "mets en pause" to Action.PAUSE, "mets pause" to Action.PAUSE, "mets la musique en pause" to Action.PAUSE,
             "pause la musique" to Action.PAUSE, "arrête la musique" to Action.PAUSE, "stop la musique" to Action.PAUSE,
             "chanson suivante" to Action.NEXT, "passe à la chanson suivante" to Action.NEXT, "musique suivante" to Action.NEXT,
