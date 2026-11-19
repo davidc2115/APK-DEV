@@ -14,6 +14,13 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
     companion object {
         val KEYWORDS = Regex("home ?assistant|domotique|\\bha\\b|hacs|int[ée]gration|entit[ée]s?\\b|helper|\\baides?\\b|ssh|serveur|server|yaml|docker|lumi[èe]re|volet|thermostat|automatisation|automation|sc[èe]ne\\b|configuration\\.yaml|debian|raspberry|esphome|zigbee|mqtt|capteur|\\bprise\\b|interrupteur|box|livebox|freebox|bbox|vpn|wireguard|openvpn|redirection|\\bnat\\b|dmz|dhcp|disque|nas|\\bftp\\b|\\bsmb\\b|r[ée]seau|wifi|wi-fi|imprim|scann|indisponible|injoignable|hors ligne|offline|unavailable|inaccessible|déconnecté|deconnecte|\\bip\\b|adresse ip|github|\\bgit\\b|canon|epson|brother|\\bhp\\b|appareils?\\b|script|\\bcode\\b|ping|port|volume|\\bson\\b|t[ée]l[ée]\\b|t[ée]l[ée]vision|\\btv\\b|chauffage|climatisation|temp[ée]rature|consigne|po[êe]le|poil|degr[ée]s|granul[ée]s|pellet|chaudi[èe]re|radiateur|thermique|climate|media_player|lecteur multim[ée]dia|localis|o[uù] (est|se trouve)|position d|luminosit[ée]|store\\b|persienne|\\ballume\\b|allumer|[ée]teins?\\b|[ée]teindre", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
+        /** Une demande explicitement Home Assistant + indisponibilité doit rester dans l'API HA, jamais dans le scan Wi-Fi. */
+        fun prioriteHaDisponibilite(t: String): Boolean {
+            val n = fr.dd.jarvis.societe.core.normaliser(t)
+            val parleHa = Regex("\\bhome assistant\\b|\\bha\\b").containsMatchIn(n)
+            val indisponible = Regex("\\b(indisponibles?|injoignables?|hors ligne|offline|unavailable|inaccessibles?|deconnectes?|deconnectees?)\\b").containsMatchIn(n)
+            return parleHa && indisponible
+        }
         val NAMES = setOf("ha_entites", "ha_position", "ha_etat", "ha_service", "ha_config", "ha_dashboard", "ha_admin", "ssh_commande", "ssh_fichier", "serveur_diagnostic", "serveur_scan_ports", "routeur_diagnostiquer", "reseau_infos", "reseau_scanner", "appareil_sonder", "appareil_page", "imprimantes_trouver", "imprimer", "ssh_script", "github", "appareils_liste", "appareil_nommer", "ip_publique", "box_disque", "freebox", "appareil_acces_distant", "appareil_ouvrir", "appareil_masquer", "tele")
     }
 
