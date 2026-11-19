@@ -442,13 +442,32 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
      */
     fun resoudre(chemin: String): String? {
         val parts = relatif(chemin).split('/').filter { it.isNotBlank() }
-        var courant = ""
-        for ((i, part) in parts.withIndex()) {
-            val noms = enfants(courant) ?: return null
-            val m = correspondance(noms, part, dossierSeul = i < parts.size - 1) ?: return null
-            courant = if (courant.isEmpty()) m else "$courant/$m"
+        if (parts.isEmpty()) return ""
+        fun depuis(baseInitiale: String, indexInitial: Int): String? {
+            var courant = baseInitiale
+            for (i in indexInitial until parts.size) {
+                val noms = enfants(courant) ?: return null
+                val m = correspondance(noms, parts[i], dossierSeul = i < parts.size - 1) ?: return null
+                courant = if (courant.isEmpty()) m else "$courant/$m"
+            }
+            return courant
         }
-        return courant
+
+        // Priorité absolue au chemin relatif classique depuis la racine du coffre.
+        depuis("", 0)?.let { return it }
+
+        // Jarvis range certains contenus sous « JARVIS/Images », alors que l'utilisateur peut
+        // naturellement demander « Images/... ». Si le premier dossier n'existe pas à la racine,
+        // on accepte son emplacement imbriqué uniquement lorsqu'il est unique dans tout le coffre.
+        // Plusieurs dossiers « Images » : aucune sélection arbitraire, on laisse la demande ambiguë.
+        val premier = parts.first()
+        val candidats = toutLister().asSequence()
+            .filter { it.second && cleNom(it.first.substringAfterLast('/')) == cleNom(premier) }
+            .map { it.first }
+            .distinct()
+            .toList()
+        if (candidats.size != 1) return null
+        return depuis(candidats.single(), 1)
     }
 
     /** Chemin du coffre sur le téléphone (ex. « Documents/Obsidian jarvis »), d'après le dossier choisi dans les Réglages. */
