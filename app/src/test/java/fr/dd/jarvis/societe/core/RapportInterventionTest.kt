@@ -170,4 +170,14 @@ class RapportInterventionTest {
         assertTrue(!rapport.contains("Sungrow 125cx',"))
     }
 
+    @Test fun propageUniteVoltageOmetteeDansLeMemeBlocSansCompterLeTotal() {
+        val resultat = MesuresSeries.analyser(
+            "16 séries à 775 volts et deux séries à 805 (18 séries au total)"
+        )
+        assertEquals(18, resultat.series.size)
+        assertEquals("775 V", resultat.series[0].valeur)
+        assertEquals("805 V", resultat.series[16].valeur)
+        assertEquals("805 V", resultat.series[17].valeur)
+    }
+
 }
