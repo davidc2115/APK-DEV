@@ -76,10 +76,10 @@ object ConversationAuto {
                 }
                 else -> return
             }
-            ActiviteVoiture.signaler(ActiviteVoiture.Etape.REFLEXION, "…")
+            ActiviteVoiture.signaler(ActiviteVoiture.Etape.REFLEXION, "Transcription de ta demande…")
             val debutTranscription = System.currentTimeMillis()
             val texte = try {
-                withTimeoutOrNull(45_000) {
+                withTimeoutOrNull(20_000) {
                     withContext(Dispatchers.IO) { Pcm.nettoyerTranscription(app.llm.groq.transcrire(Pcm.wav(pcm))) }
                 }
             } catch (_: Throwable) { null }
