@@ -17,6 +17,13 @@ class HaSurTest {
         assertTrue(!Serveur.correspondEtatHa("off", "injoignable"))
         assertTrue(Serveur.correspondEtatHa("on", ""))
     }
+    @Test fun routeLesAppareilsIndisponiblesVersHomeAssistantEtPasLeWifi() {
+        assertTrue(ServeurTools.prioriteHaDisponibilite("Quels appareils sont indisponibles sur Home Assistant ?"))
+        assertTrue(ServeurTools.prioriteHaDisponibilite("liste les appareils injoignables sur HA"))
+        assertTrue(!ServeurTools.prioriteHaDisponibilite("Quels appareils sont déconnectés du Wi-Fi ?"))
+        assertTrue(!ServeurTools.prioriteHaDisponibilite("Quels appareils sont indisponibles ?"))
+    }
+
     @Test fun interception() {
         assertEquals("redemarrer", HaSur.interception("docker restart homeassistant", "homeassistant"))
         assertEquals("redemarrer", HaSur.interception("sudo docker restart -t 10 ha_core", "ha_core"))
