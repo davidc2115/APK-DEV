@@ -157,7 +157,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 "filtre" to prop("appareils / supprimer_appareil : sans_nom (appareils sans nom) ou hors_ligne (tous les appareils déconnectés).")), listOf("action")),
         tool("box_disque", "Box internet : accède au disque dur branché sur la box (Freebox associée : par Freebox OS, sans réglage ; autres box : SMB ou FTP, selon Réglages › Maison › Box Internet) : liste les partages et dossiers, lit un fichier texte, le télécharge dans l'appli, y envoie un fichier créé par JARVIS, crée un dossier, supprime, renomme ou déplace un fichier/dossier (utile pour réorganiser une bibliothèque de films/séries pour Plex, par exemple), ou lance directement la lecture d'une vidéo dans le lecteur vidéo du téléphone (aucune app spécifique requise, pas de téléchargement).",
             mapOf("action" to prop("partages | lister | lire | telecharger | envoyer | supprimer | dossier | renommer | deplacer | lire_telephone"), "chemin" to prop("Chemin sur la box : partage/dossier/fichier (ex. « Disque dur/Photos/2026 »). Pour renommer/deplacer : le chemin ACTUEL (source)."), "fichier" to prop("envoyer : nom du fichier créé par JARVIS à copier sur la box. renommer/deplacer : le NOUVEAU chemin complet sur la box (ex. « Disque dur/Films/Dirty Dancing (1987).avi »).")), listOf("action")),
-        tool("serveur_diagnostic", "Diagnostic rapide du serveur : charge, mémoire, disque, conteneurs Docker et derniers logs de Home Assistant.", emptyMap()),
+        tool("serveur_diagnostic", "Diagnostic approfondi en lecture seule. cible=complet (défaut) vérifie Debian, SSH, Docker, Plex et Home Assistant ; cible=plex vérifie le conteneur, les volumes, ressources, erreurs, API Plex, bibliothèques et sessions si le jeton est configuré ; cible=home assistant vérifie les entités indisponibles via l’API et le conteneur/volumes/logs côté hôte Debian ; cible=ssh vérifie service SSH, ports d’écoute, paramètres effectifs, pare-feu et journaux ; cible=debian vérifie ressources, disques, Docker et processus. Ne modifie rien.", mapOf("cible" to prop("complet | debian | ssh | plex | home assistant (défaut complet)."), "lignes" to prop("Nombre de lignes de logs à examiner (20 à 200, défaut 80)."))),
         tool("serveur_scan_ports", "Dépannage réseau : teste DIRECTEMENT DEPUIS LE TÉLÉPHONE (pas besoin que SSH fonctionne) quels ports répondent sur le serveur — utile en premier recours quand SSH refuse de se connecter (mauvais port probable). Teste les ports SSH non standards les plus courants et quelques ports de services courants, identifie lequel répond vraiment comme un serveur SSH (bannière « SSH-… »), et peut corriger le port SSH dans Réglages si tu le demandes et que l'utilisateur confirme. Ne fonctionne que si le téléphone peut atteindre cette adresse (même réseau local que le serveur, ou port déjà redirigé vers l'extérieur).",
             mapOf("hote" to prop("Adresse à tester (optionnel, défaut : l'adresse du serveur dans Réglages)."), "ports" to prop("Ports supplémentaires à tester, séparés par des virgules (optionnel, en plus des ports courants).")))
     )
@@ -305,9 +305,16 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
             "ssh_fichier" -> { ssh(); sshFichier(a) }
             "serveur_diagnostic" -> {
                 ssh()
-                val r = Serveur.exec(app, "echo '== Debian / Jarvis uniquement =='; hostname; uptime; echo; free -h | head -2; echo; df -h / | tail -1; echo; docker ps -a --format 'table {{.Names}}\\\\t{{.Status}}\\\\t{{.Image}}' 2>&1 | head -20", 60)
-                ToolResult("# 🖥️ Serveur Debian / Jarvis\\n```\\n" + sortie(r, 6000) + "\\n```" +
-                    "\\n\\n_Ce diagnostic concerne uniquement le serveur Debian/Jarvis. Home Assistant est vérifié séparément par son API configurée._")
+                val cible = a.optString("cible").trim().ifBlank { "complet" }
+                val lignes = a.optString("lignes").toIntOrNull() ?: 80
+                val commande = ServeurDiagnostic.commande(cible, app.store.plexToken.value, lignes)
+                val r = Serveur.exec(app, commande, 120)
+                val sortieHote = sortie(r, 8500)
+                val ha = if (cible.equals("complet", true) || cible.equals("home assistant", true) || cible.equals("ha", true)) {
+                    "\\n\\n## Home Assistant — contrôle API (instance configurée)\\n" + ServeurDiagnostic.resumeHomeAssistant(app)
+                } else ""
+                ToolResult("# 🧰 Diagnostic approfondi — ${cible}\\n\\n```\\n" + sortieHote + "\\n```" + ha +
+                    "\\n\\n_Contrôle SSH en lecture seule : aucun service, conteneur, fichier, volume ou réglage n'a été modifié._", direct = true)
             }
             "serveur_scan_ports" -> {
                 val hote = a.optString("hote").trim().ifBlank { app.store.sshHost.value.trim() }
