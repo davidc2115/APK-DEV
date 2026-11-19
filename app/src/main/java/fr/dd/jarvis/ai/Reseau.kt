@@ -7,7 +7,6 @@ import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.asCoroutineDispatcher
-import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -34,17 +33,41 @@ object Reseau {
 
     // Client permissif réservé aux interfaces locales (certificats auto-signés des imprimantes/box).
     // Ne jamais l'utiliser pour une requête Internet ou pour transmettre des identifiants.
-    private val http = OkHttpClient.Builder().connectTimeout(1500, TimeUnit.MILLISECONDS).readTimeout(2500, TimeUnit.MILLISECONDS).followRedirects(true)
-        .hostnameVerifier { _, _ -> true }.sslSocketFactory(trustAll().first, trustAll().second).build()
+    private val confianceLocale = trustAll()
+    private val http = OkHttpClient.Builder()
+        .connectTimeout(1500, TimeUnit.MILLISECONDS)
+        .readTimeout(2500, TimeUnit.MILLISECONDS)
+        .callTimeout(8, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .hostnameVerifier { _, _ -> true }
+        .sslSocketFactory(confianceLocale.first, confianceLocale.second)
+        .build()
+    // Descripteurs UPnP : aucune redirection hors de l'appareil LAN qui a répondu au SSDP.
+    private val httpDescriptionLocale = http.newBuilder()
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .build()
     // Internet public : validation TLS/nom d'hôte standard OkHttp, sans exception.
-    private val httpPublic = OkHttpClient.Builder().connectTimeout(2500, TimeUnit.MILLISECONDS).readTimeout(3500, TimeUnit.MILLISECONDS)
-        .followRedirects(false).build()
+    private val httpPublic = OkHttpClient.Builder()
+        .connectTimeout(2500, TimeUnit.MILLISECONDS)
+        .readTimeout(3500, TimeUnit.MILLISECONDS)
+        .callTimeout(6, TimeUnit.SECONDS)
+        .followRedirects(false)
+        .build()
     private val dns = Executors.newCachedThreadPool()
     val clientLax: OkHttpClient get() = http
     fun ouvertTcp(ip: String, port: Int, ms: Int = 1500) = ouvert(ip, port, ms) == 1
 
     /** Client HTTP attaché explicitement au Wi-Fi, même si Android préfère les données mobiles. */
     fun clientWifi(): OkHttpClient = wifiNet?.let { runCatching { http.newBuilder().socketFactory(it.socketFactory).build() }.getOrNull() } ?: http
+
+    /** N'accepte une URL de description UPnP que si tous ses hôtes DNS restent sur le LAN. */
+    private fun urlDescriptionLocale(raw: String): Boolean = runCatching {
+        val u = java.net.URL(raw)
+        if (u.protocol !in setOf("http", "https") || u.userInfo != null || u.port == 0 || u.port > 65535) return@runCatching false
+        val adresses = InetAddress.getAllByName(u.host)
+        adresses.isNotEmpty() && adresses.all { it is Inet4Address && (it.isSiteLocalAddress || it.isLinkLocalAddress) }
+    }.getOrDefault(false)
 
     private fun trustAll(): Pair<javax.net.ssl.SSLSocketFactory, javax.net.ssl.X509TrustManager> {
         val tm = object : javax.net.ssl.X509TrustManager {
@@ -170,7 +193,9 @@ object Reseau {
         dns.submit<String> { InetAddress.getByName(ip).canonicalHostName }.get(900, TimeUnit.MILLISECONDS).takeIf { it != ip }.orEmpty()
     }.getOrDefault("")
 
-    private val pool = Executors.newFixedThreadPool(160).asCoroutineDispatcher()
+    // Le scan crée une coroutine par IP, mais seules 32 sondes bloquantes tournent en parallèle.
+    // 160 threads provoquaient une pression inutile sur le CPU, les sockets et la batterie.
+    private val pool = Executors.newFixedThreadPool(32).asCoroutineDispatcher()
     private val ESSENTIELS = listOf(631, 9100, 80, 443, 515, 8611, 22, 445, 8080)
     private val RAPIDES = listOf(80, 443, 22, 445, 62078, 8009, 5353, 8080)
 
@@ -296,7 +321,7 @@ object Reseau {
                         val t = String(p.data, 0, p.length)
                         val loc = Regex("(?im)^location:\\s*(\\S+)").find(t)?.groupValues?.get(1)
                         val srv = Regex("(?im)^server:\\s*(.+)$").find(t)?.groupValues?.get(1)?.trim().orEmpty()
-                        if (loc != null && !locs.containsKey(ip)) locs[ip] = loc
+                        if (loc != null && urlDescriptionLocale(loc) && !locs.containsKey(ip)) locs[ip] = loc
                         if (!res.containsKey(ip)) res[ip] = srv.take(50)
                     } catch (_: java.net.SocketTimeoutException) { }
                 }
@@ -304,7 +329,7 @@ object Reseau {
         } finally { runCatching { lock?.release() } }
         // Description UPnP : nom convivial, fabricant, modèle
         for ((ip, loc) in locs) runCatching {
-            http.newCall(Request.Builder().url(loc).build()).execute().use { r ->
+            httpDescriptionLocale.newCall(Request.Builder().url(loc).build()).execute().use { r ->
                 val x = r.body?.string().orEmpty().take(30000)
                 fun tag(n: String) = Regex("<$n>(.*?)</$n>", RegexOption.DOT_MATCHES_ALL).find(x)?.groupValues?.get(1)?.trim().orEmpty()
                 val d = listOf(tag("manufacturer"), tag("modelName"), tag("friendlyName").let { if (it.isNotBlank()) "($it)" else "" }).filter { it.isNotBlank() }.joinToString(" ")
@@ -361,7 +386,7 @@ object Reseau {
 
         if (location.isBlank()) return@withContext RouteurDiagnostic(i.passerelle, "", "", emptyList())
         runCatching {
-            http.newCall(Request.Builder().url(location).header("User-Agent", "JARVIS-UPnP-Discovery").build()).execute().use { r ->
+            httpDescriptionLocale.newCall(Request.Builder().url(location).header("User-Agent", "JARVIS-UPnP-Discovery").build()).execute().use { r ->
                 if (!r.isSuccessful) return@use RouteurDiagnostic(i.passerelle, "", "", emptyList())
                 val xml = r.body?.string().orEmpty().take(50000)
                 fun tag(source: String, name: String) = Regex("<(?:[\\w.-]+:)?$name>(.*?)</(?:[\\w.-]+:)?$name>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)).find(source)?.groupValues?.get(1)?.trim().orEmpty()
