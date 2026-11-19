@@ -10,7 +10,8 @@ import kotlinx.coroutines.delay
  * pas l'hôte Docker de Home Assistant. En l'absence d'un profil SSH HA indépendant, ce composant
  * n'exécute donc aucune commande Docker/SSH et ne lit/écrit aucun YAML sur le serveur Debian.
  * Les actions REST restent disponibles ; démarrage, mise à jour, diagnostic Docker et fichiers YAML
- * restent explicitement suspendus jusqu'à l'ajout et la validation du profil dédié.
+ * restent explicitement suspendus jusqu'à l'ajout et la validation du profil dédié. Le diagnostic d'hôte Docker
+ * est toutefois autorisé en lecture seule via le profil Debian, sans action sur le conteneur.
  */
 object HaSur {
     private fun q(s: String) = Serveur.q(s)
@@ -71,11 +72,20 @@ object HaSur {
         return false to "⚠️ Home Assistant ne répond toujours pas après ${maxS / 60} min.\n" + diagnostic(app)
     }
 
-    /** Pourquoi Home Assistant ne revient pas : état du conteneur, mémoire, dernières erreurs. */
+    /**
+     * Diagnostic croisé : l'API décrit l'instance HA ; le SSH Debian inspecte uniquement son conteneur,
+     * ses ressources, volumes et journaux. Aucun fichier ni service n'est modifié.
+     */
     fun diagnostic(app: JarvisApp): String {
-        if (!Serveur.haConfigure(app)) return "API Home Assistant non configurée. Diagnostic Docker désactivé sans profil SSH HA dédié."
-        return runCatching { Serveur.ha(app, "GET", "/api/"); "Home Assistant répond via son API DuckDNS." }
-            .getOrElse { "Home Assistant ne répond pas via son API : ${it.message?.take(180)}. Aucun accès au serveur Debian n'a été tenté." }
+        val api = ServeurDiagnostic.resumeHomeAssistant(app)
+        val hote = if (!Serveur.sshConfigure(app)) {
+            "Inspection du conteneur non disponible : connexion SSH Debian non configurée."
+        } else runCatching {
+            val r = Serveur.exec(app, ServeurDiagnostic.commande("home assistant", "", 80), 90)
+            if (r.first == 0) r.second.trim().take(6500)
+            else "Inspection du conteneur via SSH Debian impossible (code ${r.first}) : ${r.second.take(500)}"
+        }.getOrElse { "Inspection du conteneur via SSH Debian impossible : ${it.message?.take(180)}" }
+        return "## API Home Assistant\n$api\n\n## Hôte Debian — conteneur Home Assistant (lecture seule)\n```\n$hote\n```"
     }
 
     // ------------------------------------------------------------------ rechargement et redémarrage
