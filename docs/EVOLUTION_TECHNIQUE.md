@@ -66,6 +66,15 @@ Tant qu'aucun profil SSH HA indépendant n'existe, l'application fonctionne en m
 
 C'est une mesure de sécurité transitoire : elle peut temporairement retirer l'administration des fichiers YAML et les opérations Docker, mais elle préserve les commandes HA accessibles par API et empêche qu'une action HA modifie le mauvais hôte. La réactivation nécessitera un profil séparé avec hôte, port, utilisateur, clé/mot de passe, chemin de configuration et consentement explicite, ainsi que des tests prouvant que les appels SSH sont routés vers ce profil uniquement.
 
+## Audit réseau local et clients Freebox
+
+- Le scan Wi-Fi reste limité au sous-réseau privé (maximum /22), mais son exécution bloquante est maintenant plafonnée à 32 threads au lieu de 160 ; les résolutions DNS sont plafonnées à 24 threads au lieu d'un pool extensible sans borne.
+- Les appels HTTP ont un délai total (`callTimeout`) en plus des délais de connexion/lecture, pour éviter qu'une réponse lente garde une opération bloquée indéfiniment.
+- Le client TLS permissif reste réservé aux équipements locaux ; son gestionnaire de confiance est initialisé une seule fois.
+- Les URL de description UPnP sont acceptées uniquement en HTTP(S), sans identifiants intégrés, et si tous les résultats DNS sont des adresses IPv4 privées/link-local. Leur lecture ne suit pas les redirections.
+- Les uploads WebSocket Freebox réutilisent désormais un client OkHttp et le même gestionnaire TLS, au lieu de recréer un pool et un dispatcher à chaque transfert. Les retries automatiques sont désactivés pour éviter de rejouer implicitement un upload.
+- Les clients dédiés de fournisseurs IA n'ont pas été fusionnés dans cet audit : leurs durées longues, mécanismes de rotation et comportements de reprise doivent être évalués par fournisseur pour ne pas casser Groq, Gemini, OpenAI ou Hermès.
+
 ## Plan de validation avant toute fusion
 
 - Build debug et tests unitaires GitHub Actions.
