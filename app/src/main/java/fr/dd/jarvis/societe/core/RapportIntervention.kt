@@ -51,7 +51,7 @@ object OnduleursIntervention {
     }
 
     fun numerotes(source: String): List<String> = blocs(source).map {
-        it.nom + if (it.contenu.isBlank()) "" else " : \${it.contenu}"
+        it.nom + if (it.contenu.isBlank()) "" else " : ${it.contenu}"
     }
 
     /** Fusionne la sortie IA avec les mentions numérotées exactes de la dictée, sans doublons. */
@@ -62,7 +62,7 @@ object OnduleursIntervention {
         numerotes(source).forEach { ligne ->
             val cle = Regex("""(?i)^onduleur\s+(\d+)""").find(ligne)?.groupValues?.get(1)
             if (cle != null) {
-                val prefixe = Regex("""(?i)^onduleur\s+\$cle\b""")
+                val prefixe = Regex("""(?i)^onduleur\s+$cle\b""")
                 val existante = lignes.entries.firstOrNull { prefixe.containsMatchIn(it.value) }
                 if (existante != null) lignes.remove(existante.key)
             }
