@@ -20,7 +20,11 @@ object Http {
     @Volatile private var familleLe = 0L
 
     /** Résolution IPv4 par DNS chiffré (réseaux mobiles en IPv6 seul avec traduction 464XLAT : l'IPv4 reste joignable). */
-    private val doh = OkHttpClient.Builder().connectTimeout(3, TimeUnit.SECONDS).readTimeout(3, TimeUnit.SECONDS).build()
+    private val doh = OkHttpClient.Builder()
+        .connectTimeout(3, TimeUnit.SECONDS)
+        .readTimeout(3, TimeUnit.SECONDS)
+        .callTimeout(6, TimeUnit.SECONDS)
+        .build()
     private val cacheA = java.util.concurrent.ConcurrentHashMap<String, Pair<List<java.net.InetAddress>, Long>>()
     private fun ipv4ParDoh(host: String): List<java.net.InetAddress> {
         cacheA[host]?.takeIf { System.currentTimeMillis() - it.second < 10 * 60_000L }?.let { return it.first }
