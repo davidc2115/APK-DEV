@@ -136,7 +136,28 @@ object CommandeMedia {
         val tc = c.transportControls
         val appli = nomAppli(ctx, c)
         return when (a) {
-            Action.PAUSE -> { l.filter { joue(it) }.ifEmpty { listOf(c) }.forEach { runCatching { it.transportControls.pause() } }; "⏸️ Musique en pause." }
+            Action.PAUSE -> {
+                // Envoyer pause à toutes les sessions actives : plusieurs lecteurs peuvent continuer simultanément.
+                val actives = l.filter { joue(it) }
+                if (actives.isEmpty()) {
+                    "ℹ️ Aucune lecture musicale active à mettre en pause."
+                } else {
+                    val echecs = actives.count { controller ->
+                        runCatching { controller.transportControls.pause() }.isFailure
+                    }
+                    // PlaybackState est actualisé de façon asynchrone par l'application musicale.
+                    val limite = android.os.SystemClock.elapsedRealtime() + 1200L
+                    while (actives.any { joue(it) } && android.os.SystemClock.elapsedRealtime() < limite) {
+                        android.os.SystemClock.sleep(100L)
+                    }
+                    val encoreActives = actives.filter { joue(it) }
+                    when {
+                        encoreActives.isEmpty() -> "⏸️ Musique mise en pause ($appli)."
+                        echecs == actives.size -> "⚠️ L'application musicale ($appli) n'a pas accepté la commande pause. La lecture est peut-être toujours active."
+                        else -> "⚠️ La commande pause a été envoyée, mais ${encoreActives.size} session(s) musicale(s) signalent encore une lecture. Je ne confirme pas la pause."
+                    }
+                }
+            }
             Action.PLAY -> { tc.play(); "▶️ Lecture reprise" + morceau(c).let { if (it.isBlank()) " ($appli)." else " : $it." } }
             Action.NEXT -> { tc.skipToNext(); if (!joue(c)) tc.play(); "⏭️ Morceau suivant." }
             Action.PREVIOUS -> { tc.skipToPrevious(); if (!joue(c)) tc.play(); "⏮️ Morceau précédent." }
