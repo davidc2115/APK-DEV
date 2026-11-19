@@ -359,7 +359,7 @@ class PhoneControl(private val ctx: Context) {
         val suite = if (autres.isEmpty()) "" else "\nAutres résultats (dis « mets le 2 », etc.) :\n" +
             autres.mapIndexed { i, r -> "${i + 2}. ${r.ligne()}" }.joinToString("\n")
         YtMusique.retenir(listOf(choisi) + autres)
-        if (joueBien && fr.dd.jarvis.service.JarvisAccessibilityService.instance != null) runCatching { fr.dd.jarvis.service.JarvisAccessibilityService.instance?.global(AccessibilityService.GLOBAL_ACTION_HOME) }
+        if (joueBien) RetourJarvisMusique.afficher(ctx)
         return (if (joueBien) "🎵 En lecture dans $nom : ${choisi.ligne()}" + (c?.let { titreDe(it) }?.takeIf { it.isNotBlank() && !choisi.titre.contains(it, true) }?.let { "\n(lecteur : $it)" } ?: "")
             else "🎵 J'ai ouvert ${choisi.ligne()} dans $nom" + (if (c == null) " (l'appli n'a pas encore confirmé la lecture)." else " ; la lecture n'est pas confirmée — appuie sur lecture si besoin.")) + suite
     }
