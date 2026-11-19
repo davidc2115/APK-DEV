@@ -40,10 +40,12 @@ Si la demande consiste à analyser le planning/l’agenda pour compléter ou met
         val catalogue = BudgetRequeteIA.outils(tousOutils, niveau = 1) ?: JSONArray()
         for (i in 0 until catalogue.length()) {
             val f = catalogue.getJSONObject(i).getJSONObject("function")
-            noms[f.getString("name")] = f.optString("description").substringBefore(". ").take(70)
+            noms[f.getString("name")] = f.optString("description").substringBefore(". ").take(45)
         }
-        val conv = historique.takeLast(4).joinToString("\n") { (if (it.fromUser) "Utilisateur : " else "JARVIS : ") + it.text.take(280) }
-        val user = ("Date : ${Prompts.now()}\n\nOUTILS :\n" + noms.entries.joinToString("\n") { "- ${it.key} : ${it.value}" } + "\n\nCONVERSATION :\n$conv").take(14_000)
+        val outilsTexte = noms.entries.joinToString("\n") { "- ${it.key} : ${it.value}" }.take(10_000)
+        // La conversation (et surtout la dernière demande) reste toujours présente, même si le catalogue est tronqué.
+        val conv = historique.takeLast(4).joinToString("\n") { (if (it.fromUser) "Utilisateur : " else "JARVIS : ") + it.text.take(300) }.takeLast(2_500)
+        val user = "Date : ${Prompts.now()}\n\nOUTILS :\n$outilsTexte\n\nCONVERSATION :\n$conv"
         // Au-delà de 4,5 s, on n'attend plus : les outils sont choisis par mots-clés (la réponse part plus vite).
         val rep = withTimeoutOrNull(4_500) {
             try { app.llm.agent(SYSTEM, user) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { null }
