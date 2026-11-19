@@ -193,11 +193,11 @@ class RapportInterventionTest {
             mesures = dict, onduleurs = "Onduleur 1 : Sungrow\nOnduleur 2 : Sungrow"
         )
         val rapport = Rendu.rendreIntervention(SocieteData(clients = listOf(client)), client, site, intervention)
-        for (n in 1..16) assertTrue("Série \${n} de l'onduleur 1 absente", rapport.contains("| \${n} | 775 V |"))
+        for (n in 1..16) assertTrue("Série $n de l'onduleur 1 absente", rapport.contains("| $n | 775 V |"))
         assertTrue(rapport.contains("| 17 | 805 V |"))
         assertTrue(rapport.contains("| 18 | 805 V |"))
-        for (n in 1..4) assertTrue("Série \${n} de l'onduleur 2 absente", rapport.contains("| \${n} | ≈ 810 V |"))
-        for (n in 5..18) assertTrue("Série \${n} de l'onduleur 2 absente", rapport.contains("| \${n} | ≈ 770 V |"))
+        for (n in 1..4) assertTrue("Série $n de l'onduleur 2 absente", rapport.contains("| $n | ≈ 810 V |"))
+        for (n in 5..18) assertTrue("Série $n de l'onduleur 2 absente", rapport.contains("| $n | ≈ 770 V |"))
     }
 
 }
