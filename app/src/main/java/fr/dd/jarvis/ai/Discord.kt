@@ -386,7 +386,7 @@ object Discord {
         if (q.matches(Regex("\\d{17,20}"))) runCatching { return membre(app, guildId, q) }
         val trouves = runCatching { chercherMembres(app, guildId, q) }.getOrNull()
         // Même si la recherche Discord ne renvoie qu'un résultat partiel, on vérifie le nom avant toute action.
-        val candidats = (trouves?.takeIf { it.length() > 1 } ?: runCatching { reqArr(app, "GET", "/guilds/$guildId/members?limit=1000") }.getOrNull())
+        val candidats = (trouves?.takeIf { it.length() > 0 } ?: runCatching { reqArr(app, "GET", "/guilds/$guildId/members?limit=1000") }.getOrNull())
             ?.let { a -> (0 until a.length()).map { a.getJSONObject(it) } }.orEmpty()
         // Chaque membre comparé sous ses trois noms (surnom sur le serveur, nom affiché, nom d'utilisateur).
         val vues = candidats.flatMap { m ->
