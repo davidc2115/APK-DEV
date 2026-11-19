@@ -289,9 +289,10 @@ object Rendu {
 
     /** Données d'un rapport d'intervention (modèle « rapport »). */
     fun interventionCtx(d: SocieteData, c: Client, s: Site, i: Intervention): Ctx {
-        // Certains retours IA sérialisent « onduleurs » comme un tableau JSON et y placent parfois
-        // une partie des mesures. On analyse donc les deux champs, sans perdre les mesures de l'un ou l'autre.
-        val sourceMesures = listOf(i.mesures, i.onduleurs).filter { it.isNotBlank() }.joinToString("\n")
+        // « onduleurs » est le champ d'identité (numéro + modèle) ; « mesures » conserve la dictée
+        // complète. Les concaténer réinitialisait les blocs déjà lus lorsque les identités revenaient après.
+        // On n'utilise le champ onduleurs qu'en secours si le champ mesures est réellement vide.
+        val sourceMesures = i.mesures.ifBlank { i.onduleurs }
         val mes = MesuresSeries.analyser(sourceMesures)
         val parOnduleur = MesuresSeries.parOnduleur(sourceMesures)
         val actions = ListesRapport.elements(i.actions).map { action ->
@@ -330,6 +331,8 @@ object Rendu {
         val onduleursBruts = i.onduleurs.ifBlank { s.onduleur }
         val onduleursAffiches = OnduleursIntervention.identites(onduleursBruts).takeIf { it.isNotEmpty() }
             ?.joinToString("\n") ?: onduleursBruts
+            .replace(Regex("""[\[\]'"]"""), "")
+            .replace(Regex("""(?i),\s*(?=onduleur\s*(?:n[°o]\s*)?\d+)"""), "\n")
         fun drapeau(l: List<*>) = if (l.isEmpty()) "" else "oui"
         val vars = societeVars(d) + mapOf(
             "titre" to "Rapport d'intervention", "reference" to i.id,
