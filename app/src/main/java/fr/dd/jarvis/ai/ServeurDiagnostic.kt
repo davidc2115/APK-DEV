@@ -85,7 +85,7 @@ internal object ServeurDiagnostic {
             echo 'Authentifications récentes (journal fichier, si présent) :'
             (${rootCmd}grep -hEi 'Failed password|Invalid user|Accepted (password|publickey)|authentication failure' /var/log/auth.log /var/log/secure 2>/dev/null || true) | tail -20
             echo 'Fail2ban :'
-            (fail2ban-client status 2>/dev/null || echo 'Fail2ban absent ou inactif') | head -20
+            (${rootCmd}fail2ban-client status 2>/dev/null || echo 'Fail2ban absent, inactif ou droits insuffisants') | head -20
             echo 'Pare-feu UFW :'
             (${rootCmd}ufw status 2>/dev/null || echo 'UFW absent ou droits insuffisants') | head -20
         """.trimIndent() else ""
