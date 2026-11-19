@@ -312,10 +312,10 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 val r = Serveur.exec(app, commande, 120)
                 val sortieHote = sortie(r, 8500)
                 val ha = if (cible.equals("complet", true) || cible.equals("home assistant", true) || cible.equals("ha", true)) {
-                    "\\n\\n## Home Assistant — contrôle API (instance configurée)\\n" + ServeurDiagnostic.resumeHomeAssistant(app)
+                    "\n\n## Home Assistant — contrôle API (instance configurée)\n" + ServeurDiagnostic.resumeHomeAssistant(app)
                 } else ""
-                ToolResult("# 🧰 Diagnostic approfondi — ${cible}\\n\\n```\\n" + sortieHote + "\\n```" + ha +
-                    "\\n\\n_Contrôle SSH en lecture seule : aucun service, conteneur, fichier, volume ou réglage n'a été modifié._", direct = true)
+                ToolResult("# 🧰 Diagnostic approfondi — ${cible}\n\n```\n" + sortieHote + "\n```" + ha +
+                    "\n\n_Contrôle SSH en lecture seule : aucun service, conteneur, fichier, volume ou réglage n'a été modifié._", direct = true)
             }
             "serveur_scan_ports" -> {
                 val hote = a.optString("hote").trim().ifBlank { app.store.sshHost.value.trim() }
