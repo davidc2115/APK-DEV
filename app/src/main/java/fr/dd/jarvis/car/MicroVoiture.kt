@@ -129,18 +129,27 @@ class MicroVoiture(private val ctx: CarContext) {
     /** Bloquant : à appeler hors du fil principal. [attenteMs] = délai pour commencer à parler. */
     fun ecouter(attenteMs: Long, maxMs: Long = 15_000): Ecoute {
         val am = ctx.getSystemService(AudioManager::class.java)
+        var voiture: CarAudioRecord? = null
         val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
             .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+            .setOnAudioFocusChangeListener { changement ->
+                if (changement == AudioManager.AUDIOFOCUS_LOSS || changement == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
+                    runCatching { voiture?.stopRecording() }
+                }
+            }
             .build()
-        runCatching { am.requestAudioFocus(focus) }
+        val focusAccorde = runCatching { am.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED }.getOrDefault(false)
         try {
             // 1) Micro de la voiture (Android Auto le transmet au téléphone).
-            val voiture = runCatching { CarAudioRecord.create(ctx) }.getOrNull()
-            if (voiture != null) {
+            voiture = runCatching { CarAudioRecord.create(ctx) }.getOrNull()
+            if (focusAccorde && voiture != null) {
+                val record = voiture!!
                 val r = runCatching {
-                    voiture.startRecording()
-                    try { boucle(attenteMs, maxMs, maxOf(CarAudioRecord.AUDIO_CONTENT_BUFFER_SIZE, Pcm.TRAME)) { b -> voiture.read(b, 0, b.size) } }
-                    finally { runCatching { voiture.stopRecording() } }
+                    record.startRecording()
+                    try {
+                        // CarAudioRecord impose des lectures <= 512 octets ; Pcm accumule les fragments en trames de 640.
+                        boucle(attenteMs, maxMs, CarAudioRecord.AUDIO_CONTENT_BUFFER_SIZE) { b -> record.read(b, 0, b.size) }
+                    } finally { runCatching { record.stopRecording() } }
                 }.getOrNull()
                 if (r != null && r !is Ecoute.Erreur) { telephone = false; return r }
             }
@@ -148,7 +157,7 @@ class MicroVoiture(private val ctx: CarContext) {
             telephone = true
             return telephone(attenteMs, maxMs)
         } finally {
-            runCatching { am.abandonAudioFocusRequest(focus) }
+            if (focusAccorde) runCatching { am.abandonAudioFocusRequest(focus) }
         }
     }
 
