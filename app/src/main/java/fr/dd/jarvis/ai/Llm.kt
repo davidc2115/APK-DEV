@@ -125,8 +125,12 @@ class Llm(private val store: Store) {
     /** Appel du cerveau ; si le modèle n'existe plus (404), choisit automatiquement un modèle disponible.
      *  [forceText] = interdit explicitement un appel d'outil ce tour-ci (reprise après un échec), en gardant les outils
      *  visibles pour le modèle plutôt que de les retirer (ce qui provoquait une erreur Groq, cf. Clients.kt). */
-    suspend fun groqChat(messages: org.json.JSONArray, tools: org.json.JSONArray?, forceText: Boolean = false): org.json.JSONObject =
-        groqChatEnLigne(messages, tools, forceText)
+    suspend fun groqChat(messages: org.json.JSONArray, tools: org.json.JSONArray?, forceText: Boolean = false): org.json.JSONObject {
+        // Même enveloppe pour Groq et tous les relais : aucun fournisseur ne reçoit un contexte brut démesuré.
+        val messagesSurs = BudgetRequeteIA.messages(messages, niveau = 1)
+        val outilsSurs = BudgetRequeteIA.outils(tools, niveau = 1)
+        return groqChatEnLigne(messagesSurs, outilsSurs, forceText)
+    }
 
     private suspend fun groqChatEnLigne(messages: org.json.JSONArray, tools: org.json.JSONArray?, forceText: Boolean): org.json.JSONObject {
         val erreurGroq = try {
@@ -141,10 +145,14 @@ class Llm(private val store: Store) {
     } catch (e: ApiException) {
         when {
             e.code == 404 && autoFixGroq() -> groq.chat(messages, tools, 1800, forceText)
-            // 413 : requête trop grosse pour la limite de jetons/minute du modèle → on compacte (historique, résultats d'outils, schéma) et on réessaie.
-            e.code == 413 || (e.code == 429 && (e.message ?: "").contains("tokens per minute", true) && (e.message ?: "").contains("Requested")) -> {
-                try { groq.chat(compacter(messages, 1), compacterSchema(tools, 1), 700, forceText) }
-                catch (e2: ApiException) { if (e2.code == 413) groq.chat(compacter(messages, 2), compacterSchema(tools, 2), 500, forceText) else throw e2 }
+            requeteTropGrosse(e) -> {
+                val m2 = BudgetRequeteIA.messages(messages, niveau = 2)
+                val t2 = BudgetRequeteIA.outils(tools, niveau = 2)
+                try { groq.chat(m2, t2, 650, forceText) }
+                catch (e2: ApiException) {
+                    if (requeteTropGrosse(e2)) groq.chat(BudgetRequeteIA.messages(messages, niveau = 3), BudgetRequeteIA.outils(tools, niveau = 3), 400, forceText)
+                    else throw e2
+                }
             }
             else -> throw e
         }
@@ -159,32 +167,52 @@ class Llm(private val store: Store) {
                                 cloudflareCompact: Pair<org.json.JSONArray, org.json.JSONArray?>? = null, sansGemini: Boolean = false): org.json.JSONObject {
         val erreurs = mutableListOf("Groq : " + (origine.message ?: origine.javaClass.simpleName).take(140))
         if (sansGemini) erreurs += "Gemini : déjà essayé en premier"
+        val source = cloudflareCompact ?: (messages to tools)
+        val m1 = BudgetRequeteIA.messages(source.first, niveau = 1)
+        val t1 = BudgetRequeteIA.outils(source.second, niveau = 1)
         if (geminiChat.disponible() && !sansGemini) {
             try {
-                // Dans le relais Hermes, réutilise la version compactée : Gemini ne doit pas recevoir un prompt géant après l'échec Groq.
-                val (messagesGemini, outilsGemini) = cloudflareCompact ?: (messages to tools)
-                return geminiChat.chat(messagesGemini, outilsGemini, 1200, forceText).also { noterRelais("Gemini") }
+                return try {
+                    geminiChat.chat(m1, t1, 1000, forceText)
+                } catch (e: ApiException) {
+                    if (requeteTropGrosse(e)) geminiChat.chat(BudgetRequeteIA.messages(source.first, 2), BudgetRequeteIA.outils(source.second, 2), 650, forceText) else throw e
+                }.also { noterRelais("Gemini") }
             } catch (e: CancellationException) { throw e } catch (e: Exception) {
                 erreurs += "Gemini : " + (e.message ?: e.javaClass.simpleName).take(140)
             }
         }
         if (openai.disponible()) {
             try {
-                return openai.chat(messages, tools, 1800, forceText).also { noterRelais("OpenAI") }
+                return try {
+                    openai.chat(m1, t1, 1200, forceText)
+                } catch (e: ApiException) {
+                    if (requeteTropGrosse(e)) openai.chat(BudgetRequeteIA.messages(source.first, 2), BudgetRequeteIA.outils(source.second, 2), 650, forceText) else throw e
+                }.also { noterRelais("OpenAI") }
             } catch (e: CancellationException) { throw e } catch (e: Exception) {
                 erreurs += "OpenAI : " + (e.message ?: e.javaClass.simpleName).take(140)
             }
         }
         if (cloudflare.disponible()) {
             try {
-                val (m, t) = cloudflareCompact ?: (messages to tools)
-                return cloudflare.chat(m, if (forceText) null else t).also { noterRelais("Cloudflare") }
+                return try {
+                    cloudflare.chat(m1, if (forceText) null else t1)
+                } catch (e: ApiException) {
+                    if (requeteTropGrosse(e)) cloudflare.chat(BudgetRequeteIA.messages(source.first, 2), if (forceText) null else BudgetRequeteIA.outils(source.second, 2))
+                    else throw e
+                }.also { noterRelais("Cloudflare") }
             } catch (e: CancellationException) { throw e } catch (e: Exception) {
                 erreurs += "Cloudflare : " + (e.message ?: e.javaClass.simpleName).take(140)
             }
         }
         lastError = erreurs.joinToString(" | ")
         throw if (origine is ApiException) ApiException(origine.code, lastError) else IllegalStateException(lastError, origine)
+    }
+
+    private fun requeteTropGrosse(e: ApiException): Boolean {
+        val m = e.message.orEmpty()
+        return e.code == 413 ||
+            (e.code == 429 && Regex("tokens per minute|token limit|input token", RegexOption.IGNORE_CASE).containsMatchIn(m)) ||
+            (e.code == 400 && Regex("maximum number of items|context length|too many tokens|request too large|payload too large|input is too long", RegexOption.IGNORE_CASE).containsMatchIn(m))
     }
 
     private fun noterRelais(qui: String) { dernierFournisseur = "$qui (relais)"; dernierRelais = System.currentTimeMillis() }
