@@ -250,7 +250,7 @@ Mise en forme Markdown obligatoire :
 {{/diagnostic}}
 {{#a_actions}}
 ## 🛠️ Actions réalisées
-{{#actions}}- ✅ {{action}}
+{{#actions}}- {{emoji}} {{action}}
 {{/actions}}{{/a_actions}}
 {{#a_pieces}}
 ## 🔩 Pièces remplacées
