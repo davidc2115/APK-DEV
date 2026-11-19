@@ -160,9 +160,10 @@ object Discord {
 
     // ------------------------------------------------------------ appels HTTP
 
-    private fun req(app: JarvisApp, method: String, path: String, corps: JSONObject? = null): JSONObject {
+    private fun req(app: JarvisApp, method: String, path: String, corps: JSONObject? = null, raisonAudit: String? = null): JSONObject {
         if (!configure(app)) throw IllegalStateException("Discord non configuré (Réglages › Comptes › Discord : jeton du bot).")
         val b = Request.Builder().url(API + path).header("Authorization", "Bot ${jeton(app)}").header("User-Agent", "DiscordBot (https://github.com/davidc2115/APK-DEV, 1.0)")
+        raisonAudit?.takeIf { it.isNotBlank() }?.let { b.header("X-Audit-Log-Reason", java.net.URLEncoder.encode(it.take(400), "UTF-8").replace("+", "%20")) }
         when (method) {
             "POST" -> b.post((corps?.toString() ?: "{}").toRequestBody("application/json".toMediaType()))
             "PATCH" -> b.patch((corps?.toString() ?: "{}").toRequestBody("application/json".toMediaType()))
@@ -281,20 +282,20 @@ object Discord {
             JSONObject().put("name", titre).put("auto_archive_duration", duree))
     }
 
-    fun timeoutMembre(app: JarvisApp, guildId: String, userId: String, jusquAu: String?) {
+    fun timeoutMembre(app: JarvisApp, guildId: String, userId: String, jusquAu: String?, raisonAudit: String = "") {
         req(app, "PATCH", "/guilds/$guildId/members/$userId",
-            JSONObject().put("communication_disabled_until", jusquAu ?: JSONObject.NULL))
+            JSONObject().put("communication_disabled_until", jusquAu ?: JSONObject.NULL), raisonAudit)
     }
 
     fun expulserMembre(app: JarvisApp, guildId: String, userId: String, raison: String) {
         val q = java.net.URLEncoder.encode(raison.take(400), "UTF-8").replace("+", "%20")
-        req(app, "DELETE", "/guilds/$guildId/members/$userId" + if (q.isBlank()) "" else "?reason=$q")
+        req(app, "DELETE", "/guilds/$guildId/members/$userId", null, raison)
     }
 
     fun bannirMembre(app: JarvisApp, guildId: String, userId: String, raison: String, supprimerMessagesSecondes: Int) {
         val q = java.net.URLEncoder.encode(raison.take(400), "UTF-8").replace("+", "%20")
         val body = JSONObject().put("delete_message_seconds", supprimerMessagesSecondes.coerceIn(0, 604800))
-        req(app, "PUT", "/guilds/$guildId/bans/$userId" + if (q.isBlank()) "" else "?reason=$q", body)
+        req(app, "PUT", "/guilds/$guildId/bans/$userId", body, raison)
     }
 
     fun modifierPseudoMembre(app: JarvisApp, guildId: String, userId: String, pseudo: String) {
