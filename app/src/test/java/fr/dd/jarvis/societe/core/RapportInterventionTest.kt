@@ -112,4 +112,20 @@ class RapportInterventionTest {
         assertTrue(!blocs.single().contenu.contains("remise en service"))
         assertTrue(!blocs.single().contenu.contains("nettoyage"))
     }
+    @Test fun mesuresSontRecupereesMemeSiLeModeleLesPlaceDansLeChampOnduleurs() {
+        val onduleursCommeTableau = """['Onduleur 1 : Sungrow 125cx', 'Onduleur 2 : à quatre séries à environ 810 volts, et 14 séries environ 770 volts']"""
+        val source = onduleursCommeTableau + """
+            Onduleur 1 : 16 séries à 775 volts et deux séries à 805 volts
+            Onduleur 2 : quatre séries à environ 810 volts et 14 séries environ 770 volts
+        """.trimIndent()
+        val groupes = MesuresSeries.parOnduleur(source)
+        assertEquals(listOf("Onduleur 1", "Onduleur 2"), groupes.map { it.first })
+        assertEquals(18, groupes[0].second.series.size)
+        assertEquals(18, groupes[1].second.series.size)
+        assertTrue(groupes[0].second.series.first().valeur.contains("775"))
+        assertTrue(groupes[0].second.series.last().valeur.contains("805"))
+        assertTrue(groupes[1].second.series.first().valeur.contains("810"))
+        assertTrue(groupes[1].second.series.last().valeur.contains("770"))
+    }
+
 }
