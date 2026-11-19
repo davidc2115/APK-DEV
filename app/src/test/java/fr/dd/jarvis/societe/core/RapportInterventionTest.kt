@@ -44,4 +44,24 @@ class RapportInterventionTest {
         assertTrue(!rapport.contains("Onduleur historique"))
     }
 
+
+    @Test fun tousLesOnduleursNumerotesSontRecuperesDepuisLaDictee() {
+        val source = "Onduleur 1 : Huawei SUN2000, onduleur 2 : SMA Tripower, onduleur 3 : Fronius Symo"
+        val lignes = OnduleursIntervention.numerotes(source)
+
+        assertEquals(3, lignes.size)
+        assertTrue(lignes[0].contains("Onduleur 1") && lignes[0].contains("Huawei SUN2000"))
+        assertTrue(lignes[1].contains("Onduleur 2") && lignes[1].contains("SMA Tripower"))
+        assertTrue(lignes[2].contains("Onduleur 3") && lignes[2].contains("Fronius Symo"))
+    }
+
+    @Test fun completeLesOnduleursOubliesParLeResumeIA() {
+        val source = "Onduleur 1 : Huawei SUN2000\\nOnduleur 2 : SMA Tripower"
+        val resultat = OnduleursIntervention.completer("Onduleur 1 : Huawei SUN2000", source)
+
+        assertTrue(resultat.contains("Onduleur 1"))
+        assertTrue(resultat.contains("Onduleur 2"))
+        assertTrue(resultat.contains("SMA Tripower"))
+    }
+
 }
