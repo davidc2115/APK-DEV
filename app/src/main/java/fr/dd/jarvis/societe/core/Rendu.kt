@@ -317,9 +317,11 @@ object Rendu {
                 "serie_b" to (p.getOrNull(1)?.let { "Série ${it.numero}" } ?: ""), "valeur_b" to (p.getOrNull(1)?.valeur ?: ""))
         }
         val groupesOnduleurs = parOnduleur.map { (nom, resultat) ->
-            val details = resultat.series.map { "- 🔌 Série ${it.numero} : ${it.valeur}" } +
-                resultat.autres.map { "- 🌦️ ${it}" }
-            mapOf("onduleur" to nom, "details" to details.joinToString("\n"))
+            val tableau = if (resultat.series.isEmpty()) "" else
+                "| Série | Tension relevée |\n|---:|---:|\n" +
+                    resultat.series.joinToString("\n") { "| ${it.numero} | ${it.valeur} |" }
+            val observations = resultat.autres.joinToString("\n") { "- 🌦️ ${it}" }
+            mapOf("onduleur" to nom, "details" to listOf(tableau, observations).filter { it.isNotBlank() }.joinToString("\n\n"))
         }
         val autres = (if (parOnduleur.isEmpty()) mes.autres else emptyList()).map { mapOf("mesure" to it) }
         fun image(chemin: String) = "![[${i.id}-${chemin.substringAfterLast('/')}]]"
