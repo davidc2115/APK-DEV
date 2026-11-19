@@ -299,7 +299,10 @@ class Brain(
             }
         }
         // Une procédure qu'Hermès a apprise (skill ajouté) passe avant les raccourcis de Jarvis sur le même sujet.
-        val competence = if (pourHermes || app.store.hermesMode.value == "off") null
+        // Une commande simple est déjà reconnue localement : charger et parcourir les skills Hermès
+        // (lecture de mémoire + comparaison de toutes les descriptions) ne peut rien lui apporter.
+        val commandeSimple = !pourHermes && fr.dd.jarvis.hermes.Routeur.commandeSimple(texteUser)
+        val competence = if (pourHermes || app.store.hermesMode.value == "off" || commandeSimple) null
             else runCatching { fr.dd.jarvis.hermes.Routeur.competence(texteUser, app.memo.skillsHermes()) }.getOrNull()
         // Mode « Hermès pour tout » : seules les commandes instantanées du téléphone (sans IA) passent avant Hermès ;
         // tout le reste (fichiers, Freebox, vidéos, position, installations…) est traité par Hermès avec les outils de Jarvis.
