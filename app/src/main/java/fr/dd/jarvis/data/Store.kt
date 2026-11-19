@@ -74,6 +74,16 @@ class Store(context: Context) {
                     if (saved) prefs.edit().remove(key).commit()
                 }
             }
+            // Les jetons Cloudflare étaient historiquement stockés avec les préférences ordinaires.
+            // Copie d'abord vers le coffre chiffré ; ne supprime l'ancienne valeur qu'après validation.
+            val anciensComptesCloudflare = prefs.getString("cfAccounts", null)
+            if (!anciensComptesCloudflare.isNullOrBlank()) {
+                val comptesChiffres = secure.getString("cfAccounts", null)
+                val copieOk = if (comptesChiffres.isNullOrBlank()) {
+                    secure.edit().putString("cfAccounts", anciensComptesCloudflare).commit()
+                } else true
+                if (copieOk) prefs.edit().remove("cfAccounts").commit()
+            }
             // Suppression des anciens identifiants Google Flow : fournisseur retiré de JARVIS.
             secure.edit().remove("googleFlowApiToken").commit()
             prefs.edit().remove("googleFlowAccountEmail").remove("googleFlowModel").apply()
@@ -215,7 +225,7 @@ class Store(context: Context) {
     val ollamaActif = BPref("ollamaActif", true)
     val ollamaUrl = SPref("ollamaUrl", "")
     val ollamaModele = SPref("ollamaModele", "")
-    val cfAccounts: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readList("cfAccounts")) }
+    val cfAccounts: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readSecretList("cfAccounts")) }
     /** Ajoute un compte (ID + clé API). Retourne un message d'erreur, ou null si c'est bon. */
     fun addCfAccount(idRaw: String, keyRaw: String): String? {
         var id = idRaw.trim(); var key = keyRaw.trim()
@@ -228,11 +238,17 @@ class Store(context: Context) {
         if (key.length < 20 || key.any { it.isWhitespace() }) return "Clé API invalide (jeton Workers AI, sans espace)."
         val entry = "$id:$key"
         if (entry in cfAccounts) return "Ce compte est déjà enregistré."
-        cfAccounts.add(entry); writeList("cfAccounts", cfAccounts)
-        prefs.edit().commit()
+        val updated = cfAccounts.toList() + entry
+        writeSecretList("cfAccounts", updated)
+        cfAccounts.add(entry)
         return null
     }
-    fun removeCfAccount(i: Int) { if (i in cfAccounts.indices) cfAccounts.removeAt(i); writeList("cfAccounts", cfAccounts) }
+    fun removeCfAccount(i: Int) {
+        if (i !in cfAccounts.indices) return
+        val updated = cfAccounts.toList().toMutableList().also { it.removeAt(i) }
+        writeSecretList("cfAccounts", updated)
+        cfAccounts.removeAt(i)
+    }
 
 
     // Fournisseurs externes configurables depuis la conversation Hermès/Jarvis.
@@ -299,6 +315,20 @@ class Store(context: Context) {
             "Échec de l'enregistrement chiffré des clés API."
         }
         list.addAll(parts)
+    }
+
+    private fun readSecretList(k: String): List<String> {
+        val secure = secretPrefs ?: return emptyList()
+        return (secure.getString(k, "") ?: "").split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+    }
+
+    private fun writeSecretList(k: String, values: List<String>) {
+        val secure = secretPrefs ?: throw IllegalStateException(
+            "Stockage chiffré Android indisponible : les jetons Cloudflare ne peuvent pas être modifiés."
+        )
+        check(secure.edit().putString(k, values.joinToString("\n")).commit()) {
+            "Échec de l'enregistrement chiffré des jetons Cloudflare."
+        }
     }
 
     private fun readList(k: String): List<String> =
