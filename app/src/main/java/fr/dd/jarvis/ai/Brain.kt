@@ -27,10 +27,18 @@ class Brain(
      */
     suspend fun reply(history: List<ChatMsg>, pourHermes: Boolean = false, onTexte: ((String) -> Unit)? = null, onStatus: (String) -> Unit): String {
         // L'avatar montre que JARVIS réfléchit tant que la réponse se prépare.
+        val debutTotal = System.currentTimeMillis()
         fr.dd.jarvis.voice.Presence.debutReflexion()
         // « Recommence / reprends là où tu en étais » après une demande interrompue (délai, coupure) : elle est relancée.
+        val debutReprise = System.currentTimeMillis()
         val h = runCatching { fr.dd.jarvis.hermes.Reprise.reecrire(app, history) }.getOrNull()?.also { onStatus("🔁 Reprise de la demande interrompue…") } ?: history
-        try { return replyInterne(h, pourHermes, onTexte, onStatus) } finally { fr.dd.jarvis.voice.Presence.finReflexion() }
+        fr.dd.jarvis.voice.JournalVoix.noter("brain", "vérification reprise en ${System.currentTimeMillis() - debutReprise} ms")
+        try {
+            return replyInterne(h, pourHermes, onTexte, onStatus)
+        } finally {
+            fr.dd.jarvis.voice.JournalVoix.noter("brain", "temps total cerveau ${System.currentTimeMillis() - debutTotal} ms")
+            fr.dd.jarvis.voice.Presence.finReflexion()
+        }
     }
 
     private suspend fun replyInterne(history: List<ChatMsg>, pourHermes: Boolean, onTexte: ((String) -> Unit)?, onStatus: (String) -> Unit): String {
@@ -361,6 +369,7 @@ class Brain(
         val all = tools.schemaAll()
         val sansAnalyse = pourHermes || fr.dd.jarvis.hermes.Routeur.commandeSimple(texteUser)
         // Notes pertinentes et analyse de la demande EN MÊME TEMPS (avant : l'une après l'autre, jusqu'à 2,5 s de perdues).
+        val debutContexte = System.currentTimeMillis()
         val (notesUtiles, plan) = kotlinx.coroutines.coroutineScope {
             // En voiture : on n'attend pas plus d'une demi-seconde les notes (chaque seconde compte au volant).
             val notes = async(kotlinx.coroutines.Dispatchers.IO) { runCatching {
@@ -374,6 +383,7 @@ class Brain(
             }
             notes.await() to analyse.await()
         }
+        fr.dd.jarvis.voice.JournalVoix.noter("brain", "notes + analyse en ${System.currentTimeMillis() - debutContexte} ms")
         // Pour une consigne de chauffage, le planificateur ne doit jamais retirer les outils nécessaires :
         // il faut pouvoir retrouver les correspondances dans Obsidian, vérifier les entités HA puis agir.
         val pilotageChauffage = Regex("po[eê]les?|poils?|pellets?|granul[eé]s?|chauffage|thermostats?|climate\\.|temp[eé]rature|consigne|degr[eé]s?", RegexOption.IGNORE_CASE).containsMatchIn(recent) &&
@@ -415,6 +425,7 @@ class Brain(
                 if (nom !in retires) f.put(schema.get(i))
             }
         }
+        val debutPrompt = System.currentTimeMillis()
         val messages = JSONArray()
         messages.put(JSONObject().put("role", "system").put("content",
             (if (pourHermes) "Tu es l'agent téléphone de JARVIS, missionné par Hermès (le cerveau) : exécute la consigne avec tes outils, puis rends un compte rendu factuel et complet (résultats réels, chemins, identifiants, erreurs exactes), sans poser de question sauf si une information indispensable manque.\n\n" else "") +
@@ -439,6 +450,7 @@ class Brain(
             val cap = if (recentHistory.size - 1 - idx < 3) 12000 else 1600
             messages.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(cap)))
         }
+        fr.dd.jarvis.voice.JournalVoix.noter("brain", "construction contexte + prompt + outils en ${System.currentTimeMillis() - debutPrompt} ms (messages ${messages.length()}, outils ${schemaFinal.length()})")
 
         // Budget d'orchestration élargi : chaque cycle peut consulter des outils, vérifier leur résultat,
         // corriger une action ou poursuivre le plan. Les demandes complexes ne doivent plus s'arrêter après
@@ -451,7 +463,8 @@ class Brain(
             multi -> 18
             else -> 10
         }
-        repeat(toursMax) {
+        repeat(toursMax) { tour ->
+            val debutAppelIA = System.currentTimeMillis()
             val msg = try {
                 llm.groqChat(messages, schemaFinal)
             } catch (e: ApiException) {
@@ -471,6 +484,7 @@ class Brain(
                     }
                 } else throw e
             }
+            fr.dd.jarvis.voice.JournalVoix.noter("brain", "appel Groq tour ${tour + 1} en ${System.currentTimeMillis() - debutAppelIA} ms")
             val calls = msg.optJSONArray("tool_calls")
             if (calls == null || calls.length() == 0) {
                 return msg.optString("content", "").trim().ifBlank { "…" }
@@ -490,6 +504,7 @@ class Brain(
                     null
                 }
                 onStatus("⚙️ $name…")
+                val debutOutil = System.currentTimeMillis()
                 val res = try {
                     // Arguments illisibles = réponse de l'IA coupée en plein appel : rien n'est exécuté (avant, l'outil
                     // partait avec des arguments vides ou incomplets — commandes SSH tronquées).
@@ -501,6 +516,7 @@ class Brain(
                 } catch (e: Exception) {
                     ToolResult("Erreur : ${e.message}")
                 }
+                fr.dd.jarvis.voice.JournalVoix.noter("brain", "outil $name en ${System.currentTimeMillis() - debutOutil} ms")
                 messages.put(
                     JSONObject().put("role", "tool").put("tool_call_id", c.getString("id")).put("content", res.text.take(12000))
                 )
