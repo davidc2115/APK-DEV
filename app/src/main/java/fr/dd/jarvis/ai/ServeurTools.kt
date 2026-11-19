@@ -697,8 +697,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
             }
             "valider" -> return ToolResult(Serveur.haValider(app)?.let { "❌ $it" } ?: "✅ Configuration valide.")
         }
-        if (!Serveur.sshConfigure(app)) return ToolResult("SSH non configuré : l'accès aux fichiers de configuration passe par le serveur (Réglages › Maison › Serveur).")
-        val dir = Serveur.haDossier(app) ?: return ToolResult("Dossier de configuration Home Assistant introuvable : indique-le dans Réglages › Maison › Serveur (là où se trouve configuration.yaml).")
+        return ToolResult("⛔ Lecture/écriture directe des fichiers Home Assistant suspendue : le SSH configuré pointe vers le serveur Debian Jarvis, pas vers la machine Home Assistant. Les actions via l'API (états, entités, intégrations, services, journal, validation) restent disponibles. Un profil SSH HA distinct sera ajouté avant de réactiver les fichiers YAML.")
         fun chemin(f: String): String {
             val r = f.trim().trimStart('/').ifBlank { "configuration.yaml" }
             if (r.contains("..")) throw IllegalArgumentException("Chemin non autorisé.")
