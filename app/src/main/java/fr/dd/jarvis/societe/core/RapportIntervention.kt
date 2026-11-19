@@ -142,7 +142,18 @@ object MesuresSeries {
         val autres = mutableListOf<String>()
         // Les quantités successives décrivent des groupes distincts : 2 séries puis 5 séries = séries 1 à 7.
         var prochaineSerie = 1
-        for (ligne in ListesRapport.elements(Fidelite.enChiffres(texte))) {
+        for (ligneBrute in ListesRapport.elements(Fidelite.enChiffres(texte))) {
+            // Une dictée peut donner l'unité une seule fois (« 16 séries à 775 volts et 2 séries à 805 »).
+            // On propage cette unité uniquement aux groupes sans unité, jamais aux totaux (« 18 séries au total »).
+            val uniteLigne = Regex("""(?i)\b(kV|mV|mA|volts?|V|A|amp(?:ères?)?|W|kW|Ω|ohms?|MΩ)\b""")
+                .find(ligneBrute)?.groupValues?.get(1)
+            val ligne = if (uniteLigne == null) ligneBrute else {
+                val sansUnite = Regex("""(?i)(\b\d{1,3}\s*$SERIE\s*[^\d\n]{0,20}?\d+(?:[.,]\d+)?)(?=\s*(?:[,;.)]|$))""")
+                sansUnite.replace(ligneBrute) { m ->
+                    if (Regex("""(?i)\b(kV|mV|mA|volts?|V|A|amp(?:ères?)?|W|kW|Ω|ohms?|MΩ)\b""").containsMatchIn(m.value))
+                        m.value else m.value + " " + uniteLigne
+                }
+            }
             var reste = ligne
             var trouve = false
             GROUPE.findAll(ligne).forEach { m ->
