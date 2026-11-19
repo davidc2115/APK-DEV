@@ -51,10 +51,16 @@ object ConversationAuto {
         var incompris = 0
         app.chatCharger()
         if (CarBridge.contexte().isEmpty()) app.chat.toList().takeLast(10).forEach { CarBridge.ajouter(it) }
+        // Prépare le moteur et ses outils une seule fois par conversation voiture, pas à chaque phrase.
+        val tools = ToolBox(app) { _, force -> !force }
+        val brain = Brain(app.llm, tools, app) { app.store.userName.value }
+        val journal = fr.dd.jarvis.voice.JournalVoix
         while (true) {
             ActiviteVoiture.signaler(ActiviteVoiture.Etape.ECOUTE)
             val micro = MicroVoiture(ctx)
+            val debutEcoute = System.currentTimeMillis()
             val res = withContext(Dispatchers.IO) { micro.ecouter(if (premiere) maxOf(silence, 8000L) else silence) }
+            journal.noter("android-auto", "écoute terminée en ${System.currentTimeMillis() - debutEcoute} ms")
             premiere = false
             val pcm = when (res) {
                 is Ecoute.Phrase -> res.pcm
@@ -71,11 +77,13 @@ object ConversationAuto {
                 else -> return
             }
             ActiviteVoiture.signaler(ActiviteVoiture.Etape.REFLEXION, "…")
+            val debutTranscription = System.currentTimeMillis()
             val texte = try {
                 withTimeoutOrNull(45_000) {
                     withContext(Dispatchers.IO) { Pcm.nettoyerTranscription(app.llm.groq.transcrire(Pcm.wav(pcm))) }
                 }
             } catch (_: Throwable) { null }
+            journal.noter("android-auto", "transcription Groq en ${System.currentTimeMillis() - debutTranscription} ms")
             if (texte == null) { parler(app, "La transcription a pris trop de temps. Réessaie."); return }
             if (texte.isBlank()) { if (++incompris < 3) continue else { parler(app, "Je n'ai pas compris."); return } }
             incompris = 0
@@ -105,15 +113,18 @@ object ConversationAuto {
             ActiviteVoiture.signaler(ActiviteVoiture.Etape.REFLEXION, texte)
             val question = ChatMsg(true, texte)
             CarBridge.ajouter(question); app.chatAjouter(question)
+            val debutTraitement = System.currentTimeMillis()
             val rep = withTimeoutOrNull(90_000) {
                 withContext(Dispatchers.IO) {
-                    try { Brain(app.llm, ToolBox(app) { _, force -> !force }, app) { app.store.userName.value }.reply(CarBridge.contexte()) { } }
+                    try { brain.reply(CarBridge.contexte()) { } }
                     catch (e: Throwable) { "Désolé, je n'ai pas pu faire ça : ${e.message ?: e.javaClass.simpleName}" }
                 }
             } ?: run {
+                journal.noter("android-auto", "traitement interrompu après ${System.currentTimeMillis() - debutTraitement} ms")
                 parler(app, "Le traitement a pris trop de temps. Tu peux redemander.")
                 return
             }
+            journal.noter("android-auto", "compréhension + action en ${System.currentTimeMillis() - debutTraitement} ms")
             val propre = rep.replace(Regex("!?\\[([^\\]]*)]\\([^)]*\\)"), "$1").replace(Regex("[#*_`>|]+"), "")
                 .replace(Regex("\\s+"), " ").trim().ifBlank { "C'est fait." }
             val reponse = ChatMsg(false, propre)
