@@ -44,8 +44,9 @@ internal object ServeurDiagnostic {
             echo 'Bibliothèques :'
             printf '%s' "${'$'}PLEX_LIB" | sed 's/></>/\n</g' | grep -E '<Directory ' | sed -E 's/(key|uuid|agent|scanner)="[^"]+"/\1="[masqué]"/g' | head -20
             PLEX_SESS=${'$'}(curl -sS --connect-timeout 2 --max-time 6 $tokenHeader http://127.0.0.1:32400/status/sessions 2>&1)
-            echo "Lectures actives : ${'        """.trimIndent() else "echo 'Jeton Plex absent : identité seulement, bibliothèques et sessions non interrogées.'"
+            echo "Lectures actives : ${'$'}(printf '%s' "${'$'}PLEX_SESS" | grep -o '<Video ' | wc -l | tr -d ' ')"
             echo "Transcodages actifs : ${'$'}(printf '%s' "${'$'}PLEX_SESS" | grep -o '<TranscodeSession ' | wc -l | tr -d ' ')"
+        """.trimIndent() else "echo 'Jeton Plex absent : identité seulement, bibliothèques et sessions non interrogées.'"
         val plexSection = if (cible in setOf("complet", "plex")) """
             echo
             echo '== Plex Media Server : API locale =='
