@@ -237,9 +237,12 @@ Mise en forme Markdown obligatoire :
 | 🔧 **Intervention** | {{categorie}} |
 | 📌 **Statut** | {{statut}} |
 {{#adresse}}| 📍 **Adresse** | {{adresse}} |
-{{/adresse}}{{#onduleurs}}| ⚡ **Onduleur(s)** | {{onduleurs}} |
-{{/onduleurs}}{{#kwc}}| ☀️ **Puissance** | {{kwc}} kWc |
+{{/adresse}}{{#kwc}}| ☀️ **Puissance** | {{kwc}} kWc |
 {{/kwc}}
+{{#onduleurs}}
+## ⚡ Onduleurs installés
+{{onduleurs}}
+{{/onduleurs}}
 {{#description}}
 ## 📝 Description
 {{description}}
