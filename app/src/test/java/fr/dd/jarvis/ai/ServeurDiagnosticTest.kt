@@ -17,6 +17,9 @@ class ServeurDiagnosticTest {
         assertTrue(script.contains("Volumes (hôte -> conteneur)"))
         assertTrue(script.contains("Transcodages actifs"))
         assertTrue(script.contains("plexmediaserver"))
+        assertTrue(script.contains("Détails des lectures"))
+        assertTrue(script.contains("Failed password"))
+        assertTrue(script.contains("fail2ban-client status"))
         assertTrue(script.contains("--tail 200"))
         assertFalse(Regex("docker\\s+(restart|stop|rm)\\b|systemctl\\s+(restart|stop)\\b|rm\\s+-rf|apt-get\\s+").containsMatchIn(script))
     }
