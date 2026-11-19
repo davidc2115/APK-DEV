@@ -48,7 +48,12 @@ internal object ServeurDiagnostic {
             echo "Transcodages actifs : ${'$'}(printf '%s' ${'$'}PLEX_SESS | grep -o '<TranscodeSession ' | wc -l | tr -d ' ')"
             echo 'Détails des lectures (titres/clients, identifiants masqués) :'
             printf '%s' "${'$'}PLEX_SESS" | sed 's/></>/\n</g' | grep -E '<Video |<Player |<TranscodeSession ' | sed -E 's/(key|ratingKey|sessionKey|machineIdentifier|clientIdentifier)="[^"]+"/\1="[masqué]"/g' | head -18
-        """.trimIndent() else "echo 'Jeton Plex absent : identité seulement, bibliothèques et sessions non interrogées.'"
+        """.trimIndent() else """
+            echo 'Jeton Plex absent : identité seulement, bibliothèques et sessions non interrogées.'
+            echo 'Bibliothèques : non interrogées (jeton absent)'
+            echo 'Transcodages actifs : non vérifiables (jeton absent)'
+            echo 'Détails des lectures : non disponibles (jeton absent)'
+        """.trimIndent()
         val plexSection = if (cible in setOf("complet", "plex")) """
             echo
             echo '== Plex Media Server : API locale =='
