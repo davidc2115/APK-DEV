@@ -389,7 +389,7 @@ fun CompteRenduEcran(app: JarvisApp, onFermer: () -> Unit, onDemander: (String) 
                     onDemander("Crée la facture de l'intervention du ${finiDate} chez ${s.client.nom} (installation ${s.site.nom}) : ${finiDescription}. Applique mes tarifs habituels et les frais de déplacement, puis montre-la-moi avant envoi.")
                 }
                 HudButton("✉️ Envoyer le rapport") {
-                    onDemander("Envoie par mail à ${s.client.nom} le rapport de l'intervention du ${f.first} sur l'installation ${s.site.nom} (PDF), avec un message court et professionnel.")
+                    onDemander("Envoie par mail à ${s.client.nom} le rapport de l’intervention du ${finiDate} sur l’installation ${s.site.nom} (PDF), avec un message court et professionnel.")
                 }
             }
         }
