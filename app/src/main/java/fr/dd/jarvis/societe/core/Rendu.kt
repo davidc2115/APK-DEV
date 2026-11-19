@@ -289,8 +289,11 @@ object Rendu {
 
     /** Données d'un rapport d'intervention (modèle « rapport »). */
     fun interventionCtx(d: SocieteData, c: Client, s: Site, i: Intervention): Ctx {
-        val mes = MesuresSeries.analyser(i.mesures)
-        val parOnduleur = MesuresSeries.parOnduleur(i.mesures)
+        // Certains retours IA sérialisent « onduleurs » comme un tableau JSON et y placent parfois
+        // une partie des mesures. On analyse donc les deux champs, sans perdre les mesures de l'un ou l'autre.
+        val sourceMesures = listOf(i.mesures, i.onduleurs).filter { it.isNotBlank() }.joinToString("\n")
+        val mes = MesuresSeries.analyser(sourceMesures)
+        val parOnduleur = MesuresSeries.parOnduleur(sourceMesures)
         val actions = ListesRapport.elements(i.actions).map { action ->
             val n = Fidelite.normaliser(action)
             val emoji = when {
@@ -322,12 +325,14 @@ object Rendu {
         fun image(chemin: String) = "![[${i.id}-${chemin.substringAfterLast('/')}]]"
         val avant = i.photosAvant.map { mapOf("photo" to image(it)) }
         val apres = i.photosApres.map { mapOf("photo" to image(it)) }
-        val onduleursAffiches = i.onduleurs.ifBlank { s.onduleur }
-            .split(Regex("""[\r\n]+"""))
+        val onduleursBruts = i.onduleurs.ifBlank { s.onduleur }
+            .replace(Regex("""[\[\]'"]"""), "")
+            .replace(Regex("""(?i),\s*(?=onduleur\s*(?:n[°o]\s*)?\d+)"""), "\n")
+        val onduleursAffiches = onduleursBruts.split(Regex("""[\r\n]+"""))
             .map { ligne ->
                 ligne.replace(Regex("""(?i)\b\d{1,3}\s*s[ée]ries?\b.*$"""), "")
                     .trim().trimEnd(':', '-', '–', ',')
-            }.filter { it.isNotBlank() }.joinToString("\n")
+            }.filter { it.isNotBlank() }.distinct().joinToString("\n")
         fun drapeau(l: List<*>) = if (l.isEmpty()) "" else "oui"
         val vars = societeVars(d) + mapOf(
             "titre" to "Rapport d'intervention", "reference" to i.id,
