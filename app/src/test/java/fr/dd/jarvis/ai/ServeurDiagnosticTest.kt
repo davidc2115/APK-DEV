@@ -45,6 +45,7 @@ class ServeurDiagnosticTest {
         assertTrue(ServeurDiagnostic.commande("debian", "", 1).contains("--tail 20"))
         assertTrue(ServeurDiagnostic.commande("debian", "", 500).contains("--tail 200"))
         assertTrue(ServeurDiagnostic.commande("debian", "", 40, sudo = true).contains("sudo docker ps -a"))
+        assertTrue(ServeurDiagnostic.commande("debian", "", 40, sudo = true).contains("sudo fail2ban-client status"))
         var refuse = false
         try {
             ServeurDiagnostic.commande("freebox", "", 80)
