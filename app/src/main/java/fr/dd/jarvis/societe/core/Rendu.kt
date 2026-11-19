@@ -326,13 +326,8 @@ object Rendu {
         val avant = i.photosAvant.map { mapOf("photo" to image(it)) }
         val apres = i.photosApres.map { mapOf("photo" to image(it)) }
         val onduleursBruts = i.onduleurs.ifBlank { s.onduleur }
-            .replace(Regex("""[\[\]'"]"""), "")
-            .replace(Regex("""(?i),\s*(?=onduleur\s*(?:n[°o]\s*)?\d+)"""), "\n")
-        val onduleursAffiches = onduleursBruts.split(Regex("""[\r\n]+"""))
-            .map { ligne ->
-                ligne.replace(Regex("""(?i)\b\d{1,3}\s*s[ée]ries?\b.*$"""), "")
-                    .trim().trimEnd(':', '-', '–', ',')
-            }.filter { it.isNotBlank() }.distinct().joinToString("\n")
+        val onduleursAffiches = OnduleursIntervention.identites(onduleursBruts).takeIf { it.isNotEmpty() }
+            ?.joinToString("\n") ?: onduleursBruts
         fun drapeau(l: List<*>) = if (l.isEmpty()) "" else "oui"
         val vars = societeVars(d) + mapOf(
             "titre" to "Rapport d'intervention", "reference" to i.id,
