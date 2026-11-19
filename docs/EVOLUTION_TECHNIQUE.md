@@ -100,3 +100,13 @@ C'est une mesure de sécurité transitoire : elle peut temporairement retirer l'
 - Les anneaux Groq/Gemini/OpenAI utilisent désormais un index de départ atomique : plusieurs agents qui sollicitent le même fournisseur en parallèle ne se marchent plus dessus lors de la sélection de la prochaine clé.
 - Le relais Cloudflare utilise également un index atomique et une table de temporisation concurrente pour ses comptes.
 - La sélection reste en rotation entre les clés disponibles ; les temporisations et les règles de bascule fournisseur restent inchangées. Aucun secret ni contenu de conversation n'est journalisé par cette évolution.
+
+
+## Fiabilisation Android Auto : micro, demandes et musique
+
+- Le bouton micro ne déclare plus un échec après seulement trois secondes lorsque le service vocal traite encore une demande. L'appui reste en attente et ouvre le micro dès que le traitement précédent libère le service.
+- Le parcours utilisant directement le microphone Android Auto applique désormais le routage déterministe des commandes musicales avant d'appeler le modèle IA. Une demande de lecture ne doit pas se limiter à ouvrir une application.
+- Les formulations « lance une musique » et « lance la musique » sont reconnues par le routeur média ; un test unitaire couvre explicitement la formulation avec « une ».
+- La transcription voiture est bornée à 45 secondes et la réponse IA à 90 secondes afin qu'une requête distante lente ne garde pas indéfiniment la session de conversation.
+- Les commandes de lecture continuent de cibler une session média externe et n'envoient pas de touche média générique susceptible d'être captée par la session JARVIS.
+- À valider sur le véhicule : microphone intégré, commande vocale « lance une musique », reprise de lecture, bouton Play/Pause, puis une seconde demande après une réponse longue.
