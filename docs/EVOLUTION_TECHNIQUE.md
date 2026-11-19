@@ -15,6 +15,10 @@ Aucune mise à niveau majeure de Kotlin, AGP, Gradle, Compose ou des API audio/v
 - Aucun changement n'est apporté aux Workers, aux identifiants de tâches, aux contraintes, aux périodicités ni à la persistance de leur planification. La migration est limitée à la bibliothèque et à l'outillage de compilation.
 - La validation CI doit confirmer les tests unitaires et la construction de l'APK avant toute autre mise à niveau.
 
+## Suivi automatisé des dépendances
+
+Le dépôt utilise désormais Dependabot pour surveiller chaque semaine les dépendances Gradle et les actions GitHub. Les mises à jour mineures et correctives sont regroupées pour limiter le bruit ; les mises à jour majeures restent séparées. Les PR générées ne sont jamais fusionnées automatiquement : elles doivent passer la CI et être examinées, en particulier pour les bibliothèques touchant à la voix, Android Auto, la sécurité, la mémoire ou le montage vidéo.
+
 ## Mises à niveau volontairement différées
 
 - **Compose BOM** : ne pas passer directement à la BOM 2026.09.00. Les notes officielles Compose 1.12 indiquent une compilation avec API 37 et un AGP minimum 9. Le projet reste en compileSdk 35 / AGP 8.6.1. Une mise à niveau Compose nécessite donc une migration séparée de la chaîne de build.
