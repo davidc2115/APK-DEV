@@ -378,7 +378,7 @@ class HomeAssistantAdmin(
             }
             // ---- système
             "verifier" -> rest("POST", "/api/config/core/check_config").toString()
-            "journal" -> rest("GET", "/api/error_log").toString().lines().takeLast(a.optString("lignes").toIntOrNull() ?: 60).joinToString("\n").takeLast(6000)
+            "journal" -> runCatching { rest("GET", "/api/error_log").toString().lines().takeLast(a.optString("lignes").toIntOrNull() ?: 60).joinToString("\n").takeLast(6000) }.getOrElse { "API Home Assistant indisponible : ${it.message?.take(180)}.\n\n" + HaSur.diagnostic(app) }
             "modele" -> rest("POST", "/api/template", JSONObject().put("template", a.optString("modele"))).toString().take(4000)
             "redemarrer" -> {
                 val v = rest("POST", "/api/config/core/check_config") as? JSONObject
@@ -390,7 +390,7 @@ class HomeAssistantAdmin(
                 kotlinx.coroutines.delay(15_000)
                 while (System.currentTimeMillis() - debut < 480_000 && runCatching { rest("GET", "/api/") }.isFailure) kotlinx.coroutines.delay(6000)
                 if (runCatching { rest("GET", "/api/") }.isSuccess) "✅ Home Assistant redémarré et de nouveau en ligne (au bout de ${(System.currentTimeMillis() - debut) / 1000} s)."
-                else "⚠️ Home Assistant ne répond toujours pas après 8 min : dis « état de Home Assistant » (ha_sauvegarde etat) pour voir ses erreurs."
+                else "⚠️ Home Assistant ne répond toujours pas après 8 min.\n\n" + HaSur.diagnostic(app)
             }
             // ---- accès brut (tout le reste)
             "ws" -> {
