@@ -9,7 +9,7 @@ package fr.dd.jarvis.ai
 internal object ServeurDiagnostic {
     fun commande(cibleBrute: String, plexToken: String, lignes: Int = 80, sudo: Boolean = false): String {
         val cible = fr.dd.jarvis.societe.core.normaliser(cibleBrute).ifBlank { "complet" }
-        val cibleValide = cible in setOf("complet", "debian", "ssh", "plex", "home assistant", "homeassistant", "ha")
+        val cibleValide = cible in setOf("complet", "debian", "ssh", "plex", "home assistant", "homeassistant", "ha", "discord", "bagbot")
         require(cibleValide) { "Cible de diagnostic inconnue : $cibleBrute" }
         val n = lignes.coerceIn(20, 200)
         val rootCmd = if (sudo) "sudo " else ""
@@ -98,6 +98,375 @@ internal object ServeurDiagnostic {
             fi
             echo 'Pare-feu UFW :'
             (${rootCmd}ufw status 2>/dev/null || echo 'UFW absent ou droits insuffisants') | head -20
+        """.trimIndent() else ""
+        val discordSection = if (cible in setOf("discord", "bagbot")) """
+            echo
+            echo '== Bagbot / Discord : état PM2 (lecture seule) =='
+            if ! command -v pm2 >/dev/null 2>&1; then
+              echo 'PM2 introuvable pour cet utilisateur SSH.'
+              echo 'PM2 possède un démon par utilisateur Linux ; le bot peut être lancé sous un autre compte.'
+            else
+              PM2_JSON=$(\${'
+            echo '== Hôte Debian =='
+            hostname
+            date -Is 2>/dev/null
+            uptime
+            echo
+            echo '== Ressources système =='
+            free -h 2>&1 | head -3
+            df -hT 2>&1 | head -12
+            df -i 2>&1 | head -12
+            echo
+            echo '== Réseau et ports utiles =='
+            (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
+            $sshSection
+            $dockerSection
+            $plexSection
+            $discordSection
+            echo
+            echo '== Processus les plus consommateurs =='
+            ps -eo pid,comm,%cpu,%mem,rss --sort=-%cpu 2>/dev/null | head -8
+            echo
+            echo 'Diagnostic terminé (aucune modification effectuée).'
+        """.trimIndent()
+    }
+
+    fun resumeHomeAssistant(app: fr.dd.jarvis.JarvisApp): String {
+        if (!Serveur.haConfigure(app)) return "API Home Assistant non configurée : contrôle API ignoré."
+        return runCatching {
+            val states = org.json.JSONArray(Serveur.ha(app, "GET", "/api/states"))
+            val config = runCatching { org.json.JSONObject(Serveur.ha(app, "GET", "/api/config")) }.getOrNull()
+            HomeAssistantDiagnosticResume.formater(states, config?.optString("version").orEmpty())
+        }.getOrElse { "API Home Assistant : échec — ${it.message?.take(220) ?: it.javaClass.simpleName}." }
+    }
+}
+}(pm2 jlist 2>/dev/null))
+              if [ -z "\${'
+            echo '== Hôte Debian =='
+            hostname
+            date -Is 2>/dev/null
+            uptime
+            echo
+            echo '== Ressources système =='
+            free -h 2>&1 | head -3
+            df -hT 2>&1 | head -12
+            df -i 2>&1 | head -12
+            echo
+            echo '== Réseau et ports utiles =='
+            (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
+            $sshSection
+            $dockerSection
+            $plexSection
+            echo
+            echo '== Processus les plus consommateurs =='
+            ps -eo pid,comm,%cpu,%mem,rss --sort=-%cpu 2>/dev/null | head -8
+            echo
+            echo 'Diagnostic terminé (aucune modification effectuée).'
+        """.trimIndent()
+    }
+
+    fun resumeHomeAssistant(app: fr.dd.jarvis.JarvisApp): String {
+        if (!Serveur.haConfigure(app)) return "API Home Assistant non configurée : contrôle API ignoré."
+        return runCatching {
+            val states = org.json.JSONArray(Serveur.ha(app, "GET", "/api/states"))
+            val config = runCatching { org.json.JSONObject(Serveur.ha(app, "GET", "/api/config")) }.getOrNull()
+            HomeAssistantDiagnosticResume.formater(states, config?.optString("version").orEmpty())
+        }.getOrElse { "API Home Assistant : échec — ${it.message?.take(220) ?: it.javaClass.simpleName}." }
+    }
+}
+}PM2_JSON" ]; then
+                echo 'PM2 ne renvoie aucun processus (démon absent, arrêté ou inaccessible pour cet utilisateur).'
+              elif command -v node >/dev/null 2>&1; then
+                echo 'Processus PM2 correspondants (aucune variable d’environnement ni aucun secret affiché) :'
+                printf '%s' "\${'
+            echo '== Hôte Debian =='
+            hostname
+            date -Is 2>/dev/null
+            uptime
+            echo
+            echo '== Ressources système =='
+            free -h 2>&1 | head -3
+            df -hT 2>&1 | head -12
+            df -i 2>&1 | head -12
+            echo
+            echo '== Réseau et ports utiles =='
+            (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
+            $sshSection
+            $dockerSection
+            $plexSection
+            echo
+            echo '== Processus les plus consommateurs =='
+            ps -eo pid,comm,%cpu,%mem,rss --sort=-%cpu 2>/dev/null | head -8
+            echo
+            echo 'Diagnostic terminé (aucune modification effectuée).'
+        """.trimIndent()
+    }
+
+    fun resumeHomeAssistant(app: fr.dd.jarvis.JarvisApp): String {
+        if (!Serveur.haConfigure(app)) return "API Home Assistant non configurée : contrôle API ignoré."
+        return runCatching {
+            val states = org.json.JSONArray(Serveur.ha(app, "GET", "/api/states"))
+            val config = runCatching { org.json.JSONObject(Serveur.ha(app, "GET", "/api/config")) }.getOrNull()
+            HomeAssistantDiagnosticResume.formater(states, config?.optString("version").orEmpty())
+        }.getOrElse { "API Home Assistant : échec — ${it.message?.take(220) ?: it.javaClass.simpleName}." }
+    }
+}
+}PM2_JSON" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const a=JSON.parse(s);const f=a.filter(p=>/bagbot|discord/i.test([p.name,p.pm2_env&&p.pm2_env.pm_exec_path,p.pm2_env&&p.pm2_env.pm_cwd].join(" ")));if(!f.length){console.log("Aucun processus nommé ou situé dans un chemin Bagbot/Discord.");return;}for(const p of f){const e=p.pm2_env||{};const m=p.monit||{};console.log("nom="+p.name+" | id="+p.pm_id+" | état="+(e.status||"?")+" | pid="+p.pid+" | redémarrages="+(e.restart_time??"?")+" | CPU="+(m.cpu??"?")+"% | mémoire="+(m.memory??"?")+" octets | script="+(e.pm_exec_path||"?")+" | dossier="+(e.pm_cwd||"?"));}}catch(e){console.log("Réponse PM2 illisible (aucune donnée sensible affichée).");}})'
+                IDS=$(printf '%s' "\${'
+            echo '== Hôte Debian =='
+            hostname
+            date -Is 2>/dev/null
+            uptime
+            echo
+            echo '== Ressources système =='
+            free -h 2>&1 | head -3
+            df -hT 2>&1 | head -12
+            df -i 2>&1 | head -12
+            echo
+            echo '== Réseau et ports utiles =='
+            (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
+            $sshSection
+            $dockerSection
+            $plexSection
+            echo
+            echo '== Processus les plus consommateurs =='
+            ps -eo pid,comm,%cpu,%mem,rss --sort=-%cpu 2>/dev/null | head -8
+            echo
+            echo 'Diagnostic terminé (aucune modification effectuée).'
+        """.trimIndent()
+    }
+
+    fun resumeHomeAssistant(app: fr.dd.jarvis.JarvisApp): String {
+        if (!Serveur.haConfigure(app)) return "API Home Assistant non configurée : contrôle API ignoré."
+        return runCatching {
+            val states = org.json.JSONArray(Serveur.ha(app, "GET", "/api/states"))
+            val config = runCatching { org.json.JSONObject(Serveur.ha(app, "GET", "/api/config")) }.getOrNull()
+            HomeAssistantDiagnosticResume.formater(states, config?.optString("version").orEmpty())
+        }.getOrElse { "API Home Assistant : échec — ${it.message?.take(220) ?: it.javaClass.simpleName}." }
+    }
+}
+}PM2_JSON" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{for(const p of JSON.parse(s)){const e=p.pm2_env||{};if(/bagbot|discord/i.test([p.name,e.pm_exec_path,e.pm_cwd].join(" ")))console.log(p.pm_id);}}catch(e){}})')
+                for id in \${'
+            echo '== Hôte Debian =='
+            hostname
+            date -Is 2>/dev/null
+            uptime
+            echo
+            echo '== Ressources système =='
+            free -h 2>&1 | head -3
+            df -hT 2>&1 | head -12
+            df -i 2>&1 | head -12
+            echo
+            echo '== Réseau et ports utiles =='
+            (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
+            $sshSection
+            $dockerSection
+            $plexSection
+            echo
+            echo '== Processus les plus consommateurs =='
+            ps -eo pid,comm,%cpu,%mem,rss --sort=-%cpu 2>/dev/null | head -8
+            echo
+            echo 'Diagnostic terminé (aucune modification effectuée).'
+        """.trimIndent()
+    }
+
+    fun resumeHomeAssistant(app: fr.dd.jarvis.JarvisApp): String {
+        if (!Serveur.haConfigure(app)) return "API Home Assistant non configurée : contrôle API ignoré."
+        return runCatching {
+            val states = org.json.JSONArray(Serveur.ha(app, "GET", "/api/states"))
+            val config = runCatching { org.json.JSONObject(Serveur.ha(app, "GET", "/api/config")) }.getOrNull()
+            HomeAssistantDiagnosticResume.formater(states, config?.optString("version").orEmpty())
+        }.getOrElse { "API Home Assistant : échec — ${it.message?.take(220) ?: it.javaClass.simpleName}." }
+    }
+}
+}IDS; do
+                  [ -n "\${'
+            echo '== Hôte Debian =='
+            hostname
+            date -Is 2>/dev/null
+            uptime
+            echo
+            echo '== Ressources système =='
+            free -h 2>&1 | head -3
+            df -hT 2>&1 | head -12
+            df -i 2>&1 | head -12
+            echo
+            echo '== Réseau et ports utiles =='
+            (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
+            $sshSection
+            $dockerSection
+            $plexSection
+            echo
+            echo '== Processus les plus consommateurs =='
+            ps -eo pid,comm,%cpu,%mem,rss --sort=-%cpu 2>/dev/null | head -8
+            echo
+            echo 'Diagnostic terminé (aucune modification effectuée).'
+        """.trimIndent()
+    }
+
+    fun resumeHomeAssistant(app: fr.dd.jarvis.JarvisApp): String {
+        if (!Serveur.haConfigure(app)) return "API Home Assistant non configurée : contrôle API ignoré."
+        return runCatching {
+            val states = org.json.JSONArray(Serveur.ha(app, "GET", "/api/states"))
+            val config = runCatching { org.json.JSONObject(Serveur.ha(app, "GET", "/api/config")) }.getOrNull()
+            HomeAssistantDiagnosticResume.formater(states, config?.optString("version").orEmpty())
+        }.getOrElse { "API Home Assistant : échec — ${it.message?.take(220) ?: it.javaClass.simpleName}." }
+    }
+}
+}id" ] || continue
+                  LOGS=$(pm2 logs "\${'
+            echo '== Hôte Debian =='
+            hostname
+            date -Is 2>/dev/null
+            uptime
+            echo
+            echo '== Ressources système =='
+            free -h 2>&1 | head -3
+            df -hT 2>&1 | head -12
+            df -i 2>&1 | head -12
+            echo
+            echo '== Réseau et ports utiles =='
+            (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
+            $sshSection
+            $dockerSection
+            $plexSection
+            echo
+            echo '== Processus les plus consommateurs =='
+            ps -eo pid,comm,%cpu,%mem,rss --sort=-%cpu 2>/dev/null | head -8
+            echo
+            echo 'Diagnostic terminé (aucune modification effectuée).'
+        """.trimIndent()
+    }
+
+    fun resumeHomeAssistant(app: fr.dd.jarvis.JarvisApp): String {
+        if (!Serveur.haConfigure(app)) return "API Home Assistant non configurée : contrôle API ignoré."
+        return runCatching {
+            val states = org.json.JSONArray(Serveur.ha(app, "GET", "/api/states"))
+            val config = runCatching { org.json.JSONObject(Serveur.ha(app, "GET", "/api/config")) }.getOrNull()
+            HomeAssistantDiagnosticResume.formater(states, config?.optString("version").orEmpty())
+        }.getOrElse { "API Home Assistant : échec — ${it.message?.take(220) ?: it.javaClass.simpleName}." }
+    }
+}
+}id" --lines $n --nostream 2>&1)
+                  echo "--- Synthèse des journaux PM2 id=\${'
+            echo '== Hôte Debian =='
+            hostname
+            date -Is 2>/dev/null
+            uptime
+            echo
+            echo '== Ressources système =='
+            free -h 2>&1 | head -3
+            df -hT 2>&1 | head -12
+            df -i 2>&1 | head -12
+            echo
+            echo '== Réseau et ports utiles =='
+            (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
+            $sshSection
+            $dockerSection
+            $plexSection
+            echo
+            echo '== Processus les plus consommateurs =='
+            ps -eo pid,comm,%cpu,%mem,rss --sort=-%cpu 2>/dev/null | head -8
+            echo
+            echo 'Diagnostic terminé (aucune modification effectuée).'
+        """.trimIndent()
+    }
+
+    fun resumeHomeAssistant(app: fr.dd.jarvis.JarvisApp): String {
+        if (!Serveur.haConfigure(app)) return "API Home Assistant non configurée : contrôle API ignoré."
+        return runCatching {
+            val states = org.json.JSONArray(Serveur.ha(app, "GET", "/api/states"))
+            val config = runCatching { org.json.JSONObject(Serveur.ha(app, "GET", "/api/config")) }.getOrNull()
+            HomeAssistantDiagnosticResume.formater(states, config?.optString("version").orEmpty())
+        }.getOrElse { "API Home Assistant : échec — ${it.message?.take(220) ?: it.javaClass.simpleName}." }
+    }
+}
+}id (sur $n lignes) ---"
+                  printf '%s\n' "\${'
+            echo '== Hôte Debian =='
+            hostname
+            date -Is 2>/dev/null
+            uptime
+            echo
+            echo '== Ressources système =='
+            free -h 2>&1 | head -3
+            df -hT 2>&1 | head -12
+            df -i 2>&1 | head -12
+            echo
+            echo '== Réseau et ports utiles =='
+            (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
+            $sshSection
+            $dockerSection
+            $plexSection
+            echo
+            echo '== Processus les plus consommateurs =='
+            ps -eo pid,comm,%cpu,%mem,rss --sort=-%cpu 2>/dev/null | head -8
+            echo
+            echo 'Diagnostic terminé (aucune modification effectuée).'
+        """.trimIndent()
+    }
+
+    fun resumeHomeAssistant(app: fr.dd.jarvis.JarvisApp): String {
+        if (!Serveur.haConfigure(app)) return "API Home Assistant non configurée : contrôle API ignoré."
+        return runCatching {
+            val states = org.json.JSONArray(Serveur.ha(app, "GET", "/api/states"))
+            val config = runCatching { org.json.JSONObject(Serveur.ha(app, "GET", "/api/config")) }.getOrNull()
+            HomeAssistantDiagnosticResume.formater(states, config?.optString("version").orEmpty())
+        }.getOrElse { "API Home Assistant : échec — ${it.message?.take(220) ?: it.javaClass.simpleName}." }
+    }
+}
+}LOGS" | grep -ciE 'error|exception|failed|fatal|warning|timeout|disconnect|reconnect|ready|login|gateway|intent|missing access|forbidden|rate.?limit|401|403|429' | awk '{print "Lignes correspondant aux événements/erreurs surveillés : " $1}'
+                  printf '%s\n' "\${'
+            echo '== Hôte Debian =='
+            hostname
+            date -Is 2>/dev/null
+            uptime
+            echo
+            echo '== Ressources système =='
+            free -h 2>&1 | head -3
+            df -hT 2>&1 | head -12
+            df -i 2>&1 | head -12
+            echo
+            echo '== Réseau et ports utiles =='
+            (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
+            $sshSection
+            $dockerSection
+            $plexSection
+            echo
+            echo '== Processus les plus consommateurs =='
+            ps -eo pid,comm,%cpu,%mem,rss --sort=-%cpu 2>/dev/null | head -8
+            echo
+            echo 'Diagnostic terminé (aucune modification effectuée).'
+        """.trimIndent()
+    }
+
+    fun resumeHomeAssistant(app: fr.dd.jarvis.JarvisApp): String {
+        if (!Serveur.haConfigure(app)) return "API Home Assistant non configurée : contrôle API ignoré."
+        return runCatching {
+            val states = org.json.JSONArray(Serveur.ha(app, "GET", "/api/states"))
+            val config = runCatching { org.json.JSONObject(Serveur.ha(app, "GET", "/api/config")) }.getOrNull()
+            HomeAssistantDiagnosticResume.formater(states, config?.optString("version").orEmpty())
+        }.getOrElse { "API Home Assistant : échec — ${it.message?.take(220) ?: it.javaClass.simpleName}." }
+    }
+}
+}LOGS" | grep -ciE 'error|exception|failed|fatal|disconnect|missing access|forbidden|401|403|429' | awk '{print "Lignes d’erreur/déconnexion : " $1}'
+                done
+              else
+                echo 'Node.js absent : état PM2 simplifié.'
+                pm2 ls 2>&1 | head -20
+              fi
+            fi
+            echo 'Contrôle PM2 effectué sans redémarrage, arrêt ni modification.'
         """.trimIndent() else ""
         return """
             set +e
