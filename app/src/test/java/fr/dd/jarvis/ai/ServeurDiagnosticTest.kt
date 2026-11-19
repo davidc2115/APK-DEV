@@ -39,6 +39,7 @@ class ServeurDiagnosticTest {
     fun limitesEtCibleInconnueSontControlees() {
         assertTrue(ServeurDiagnostic.commande("debian", "", 1).contains("--tail 20"))
         assertTrue(ServeurDiagnostic.commande("debian", "", 500).contains("--tail 200"))
+        assertTrue(ServeurDiagnostic.commande("debian", "", 40, sudo = true).contains("sudo -n docker ps -a"))
         var refuse = false
         try {
             ServeurDiagnostic.commande("freebox", "", 80)
