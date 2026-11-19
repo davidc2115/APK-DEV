@@ -16,7 +16,7 @@ object CompteRendu {
     data class Resultat(val texte: String, val date: String?, val description: String?)
 
     private const val SYSTEME = """Tu structures le compte-rendu d'une intervention de maintenance photovoltaïque dicté par le technicien.
-N'invente RIEN : chaque champ reprend uniquement ce qui a été dit (laisse vide sinon). Style factuel et professionnel, phrases courtes. Pour les mesures, conserve chaque groupe de séries et sa tension propre, dans l'ordre ; ne fusionne jamais plusieurs groupes de tensions différentes.
+N'invente RIEN : chaque champ reprend uniquement ce qui a été dit (laisse vide sinon). Style factuel et professionnel, phrases courtes. Pour les actions, conserve les rubriques dictées (ex. PDL, coffret AC, partie AC onduleur), puis une action par ligne, sans fusionner les contrôles. Pour les mesures, conserve impérativement les blocs « Onduleur 1 », « Onduleur 2 », etc. Chaque onduleur garde ses propres séries numérotées à partir de 1 et ses propres tensions ; ne mélange jamais les mesures entre onduleurs. Convertis aussi les nombres dictés en lettres (deux, quatre, quatorze…) sans en perdre. Conserve toutes les lignes de commentaire associées à chaque bloc.
 Réponds uniquement par ce JSON :
 {"categorie":"maintenance|panne|diagnostic|nettoyage|remplacement|contrôle|autre","description":"résumé factuel de l'intervention (1 à 3 phrases)",
 "diagnostic":"constat (distingue constat et hypothèse)","actions":"actions réellement réalisées","pieces":"pièces remplacées avec références et quantités",
