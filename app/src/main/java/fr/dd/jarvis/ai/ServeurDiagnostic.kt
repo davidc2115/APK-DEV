@@ -85,7 +85,17 @@ internal object ServeurDiagnostic {
             echo 'Authentifications récentes (journal fichier, si présent) :'
             (${rootCmd}grep -hEi 'Failed password|Invalid user|Accepted (password|publickey)|authentication failure' /var/log/auth.log /var/log/secure 2>/dev/null || true) | tail -20
             echo 'Fail2ban :'
-            (${rootCmd}fail2ban-client status 2>/dev/null || echo 'Fail2ban absent, inactif ou droits insuffisants') | head -20
+            FAIL2BAN_JAILS=$(${rootCmd}fail2ban-client status 2>/dev/null | sed -n 's/.*Jail list:[[:space:]]*//p' | tr ',' ' ')
+            if [ -n "$FAIL2BAN_JAILS" ]; then
+              echo "Fail2ban : actif — jails : $(printf '%s' "$FAIL2BAN_JAILS" | xargs)"
+              for jail in $FAIL2BAN_JAILS; do
+                [ -n "$jail" ] || continue
+                echo "--- Fail2ban : $jail ---"
+                ${rootCmd}fail2ban-client status "$jail" 2>/dev/null | grep -E 'Currently failed|Total failed|Currently banned|Total banned' | head -8
+              done
+            else
+              echo 'Fail2ban absent, inactif, sans jail ou droits insuffisants.'
+            fi
             echo 'Pare-feu UFW :'
             (${rootCmd}ufw status 2>/dev/null || echo 'UFW absent ou droits insuffisants') | head -20
         """.trimIndent() else ""
