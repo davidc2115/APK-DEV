@@ -267,9 +267,9 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "categorie" to prop("maintenance | panne | diagnostic | nettoyage | remplacement | contrôle | autre."),
             "description" to prop("Résumé de ce que l'utilisateur a dit de l'intervention (une ou deux phrases, sans rien ajouter)."),
             "diagnostic" to prop("Constat donné par l'utilisateur, seulement s'il en a donné un ; sinon vide."),
-            "actions" to prop("Actions dites par l'utilisateur, UNE PAR LIGNE (elles deviennent une liste ✅). Aucune action supposée."),
+            "actions" to prop("Conserver les rubriques dictées (PDL, coffret AC, partie AC onduleur…), puis une puce par action, sans fusionner les contrôles ; aucune action supposée."),
             "pieces" to prop("Pièces remplacées dites par l'utilisateur, une par ligne (références et quantités s'il les donne)."),
-            "mesures" to prop("Mesures dites par l'utilisateur, recopiées telles quelles avec unités, une par ligne (ex. « 20 séries à environ 500 V », « série 7 : 320 V », « isolement 20 MΩ »). Les groupes successifs s’additionnent dans l’ordre (2 séries à 100 V puis 5 séries à 200 V = séries 1–2 à 100 V et 3–7 à 200 V). Aucune valeur supposée."),
+            "mesures" to prop("Mesures avec unités et blocs « Onduleur 1 », « Onduleur 2 », etc. strictement séparés. Conserver chaque quantité, toutes les séries et chaque tension dans le bon onduleur, y compris les nombres dictés en lettres. Aucune valeur supposée."),
             "onduleurs" to prop("Liste exhaustive et ordonnée : « Onduleur 1 : ... », « Onduleur 2 : ... », « Onduleur 3 : ... », etc. Conserver chaque marque, modèle et numéro de série cité, un par ligne, sans fusion ni omission."),
             "statut" to prop("terminee | a_suivre | en_attente."),
             "prochaine_maintenance" to prop("Date yyyy-MM-dd UNIQUEMENT si l'utilisateur l'a demandée."), "notes" to prop("Remarques dites par l'utilisateur, sinon vide.")
@@ -992,11 +992,14 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         val nomCite = Fidelite.normaliser(dits).let { d -> listOf(client.nom, site.nom).any { n -> n.length >= 3 && d.contains(Fidelite.normaliser(n).take(8)) } }
         val ici = dits.isNotBlank() && (nomCite || Fidelite.appui(tout, dits) >= 0.15 || Fidelite.nombres(tout).any { it in Fidelite.nombres(dits) })
         if (!ici) {
-            // Même si le résumé IA ne suffit pas à valider les autres champs, les onduleurs explicitement numérotés
-            // dans la dictée d'origine restent récupérables sans être inventés par le modèle.
-            val numerotes = OnduleursIntervention.numerotes(a.s("source_utilisateur"))
+            // Même si le résumé IA ne suffit pas à valider les autres champs, préserver les blocs dictés explicitement.
+            val source = a.s("source_utilisateur")
+            val numerotes = OnduleursIntervention.numerotes(source)
             if (numerotes.isEmpty()) return Garde(champs, emptyList(), false)
-            return Garde(champs + ("onduleurs" to numerotes.joinToString("\n")), emptyList(), false)
+            val preserves = champs.toMutableMap()
+            preserves["onduleurs"] = numerotes.joinToString("\n")
+            preserves["mesures"] = (preserves["mesures"].orEmpty() + "\n" + numerotes.joinToString("\n")).trim()
+            return Garde(preserves, emptyList(), false)
         }
         val support = dits + "\n" + connu
         val retires = mutableListOf<String>()
