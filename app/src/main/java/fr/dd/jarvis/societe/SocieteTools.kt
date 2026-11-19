@@ -270,6 +270,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "actions" to prop("Actions dites par l'utilisateur, UNE PAR LIGNE (elles deviennent une liste ✅). Aucune action supposée."),
             "pieces" to prop("Pièces remplacées dites par l'utilisateur, une par ligne (références et quantités s'il les donne)."),
             "mesures" to prop("Mesures dites par l'utilisateur, recopiées telles quelles avec unités, une par ligne (ex. « 20 séries à environ 500 V », « série 7 : 320 V », « isolement 20 MΩ »). Les séries deviennent automatiquement un tableau Série 1…N. Aucune valeur supposée."),
+            "onduleurs" to prop("Tous les onduleurs concernés par cette intervention, conserver chaque marque/modèle/numéro de série cité, un par ligne. Ne jamais réduire à un seul onduleur."),
             "statut" to prop("terminee | a_suivre | en_attente."),
             "prochaine_maintenance" to prop("Date yyyy-MM-dd UNIQUEMENT si l'utilisateur l'a demandée."), "notes" to prop("Remarques dites par l'utilisateur, sinon vide.")
         ), listOf("client", "description")),
@@ -938,13 +939,14 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
                 existante.diagnostic.trim().equals(a.s("diagnostic").trim(), true) &&
                 existante.actions.trim().equals(a.s("actions").trim(), true) &&
                 existante.pieces.trim().equals(a.s("pieces").trim(), true) &&
-                existante.mesures.trim().equals(a.s("mesures").trim(), true)
+                existante.mesures.trim().equals(a.s("mesures").trim(), true) &&
+                existante.onduleurs.trim().equals(a.s("onduleurs").trim(), true)
         }
         if (doublon != null) return err("⚠️ Intervention potentiellement en double : la fiche #${doublon.id} du $date (${doublon.categorie}) contient déjà exactement les mêmes éléments pour ${client.nom} — ${site.nom}. Aucune nouvelle fiche créée. Consulte interventions_liste ; modifie ou supprime la fiche existante avec l’outil adapté. Si ce sont deux interventions réellement distinctes, précise leur différence dans la description.")
         val intervention = Intervention(
             id = svc.newId(), date = date, categorie = categorie, description = description,
             diagnostic = garde.champs["diagnostic"].orEmpty(), actions = garde.champs["actions"].orEmpty(), pieces = garde.champs["pieces"].orEmpty(),
-            mesures = garde.champs["mesures"].orEmpty(), statut = statut, prochaineMaintenance = prochaine, notes = garde.champs["notes"].orEmpty()
+            mesures = garde.champs["mesures"].orEmpty(), onduleurs = garde.champs["onduleurs"].orEmpty(), statut = statut, prochaineMaintenance = prochaine, notes = garde.champs["notes"].orEmpty()
         )
         val siteMaj = site.copy(interventions = (site.interventions + intervention).sortedByDescending { it.date })
         svc.repo.update { data -> data.copy(clients = data.clients.map { c ->
@@ -978,12 +980,12 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
      * d'ailleurs (aucune parole correspondante ici, ex. Hermès sur une autre messagerie), rien n'est filtré.
      */
     private fun garder(a: JSONObject, client: Client, site: Site, ancienne: Intervention?): Garde {
-        val cles = listOf("description", "diagnostic", "actions", "pieces", "mesures", "notes")
+        val cles = listOf("description", "diagnostic", "actions", "pieces", "mesures", "onduleurs", "notes")
         val champs = cles.filter { a.has(it) }.associateWith { a.s(it) }
         val dits = paroles()
         val connu = listOf(client.nom, site.nom, site.adresse, site.onduleur, site.notes,
             if (site.kwc > 0) site.kwc.toString() else "", if (site.nbPanneaux > 0) site.nbPanneaux.toString() else "",
-            a.s("categorie"), ancienne?.let { listOf(it.description, it.diagnostic, it.actions, it.pieces, it.mesures, it.notes).joinToString("\n") }.orEmpty()
+            a.s("categorie"), ancienne?.let { listOf(it.description, it.diagnostic, it.actions, it.pieces, it.mesures, it.onduleurs, it.notes).joinToString("\n") }.orEmpty()
         ).joinToString("\n")
         val tout = champs.values.joinToString("\n")
         val nomCite = Fidelite.normaliser(dits).let { d -> listOf(client.nom, site.nom).any { n -> n.length >= 3 && d.contains(Fidelite.normaliser(n).take(8)) } }
@@ -1032,6 +1034,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             actions = champ("actions", ancienne.actions),
             pieces = champ("pieces", ancienne.pieces),
             mesures = champ("mesures", ancienne.mesures),
+            onduleurs = champ("onduleurs", ancienne.onduleurs),
             statut = statut,
             prochaineMaintenance = prochaine,
             notes = champ("notes", ancienne.notes)
@@ -1080,6 +1083,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
                         if (item.actions.isNotBlank()) append("\n- Actions : " + item.actions)
                         if (item.pieces.isNotBlank()) append("\n- Pièces : " + item.pieces)
                         if (item.mesures.isNotBlank()) append("\n- Mesures : " + item.mesures)
+                        if (item.onduleurs.isNotBlank()) append("\n- Onduleur(s) : " + item.onduleurs)
                         if (item.prochaineMaintenance.isNotBlank()) append("\n- Prochaine maintenance : " + item.prochaineMaintenance)
                         if (item.notes.isNotBlank()) append("\n- Notes : " + item.notes)
                     }
