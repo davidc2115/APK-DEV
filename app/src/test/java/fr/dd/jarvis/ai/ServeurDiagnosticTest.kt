@@ -15,6 +15,8 @@ class ServeurDiagnosticTest {
         assertTrue(script.contains("docker stats --no-stream"))
         assertTrue(script.contains("OOM="))
         assertTrue(script.contains("Volumes (hôte -> conteneur)"))
+        assertTrue(script.contains("Transcodages actifs"))
+        assertTrue(script.contains("plexmediaserver"))
         assertTrue(script.contains("--tail 200"))
         assertFalse(Regex("docker\\s+(restart|stop|rm)\\b|systemctl\\s+(restart|stop)\\b|rm\\s+-rf|apt-get\\s+").containsMatchIn(script))
     }
