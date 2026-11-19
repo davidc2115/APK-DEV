@@ -25,6 +25,10 @@ class ServeurAdminTools(private val app: JarvisApp, private val confirm: suspend
         private const val TACHES = "/tmp/jarvis_taches"
 
         /** Mots d'un service → motifs probables de son nom de conteneur / unité / processus. */
+        /** Home Assistant reste piloté par son API ; SSH Debian sert à inspecter les volumes en lecture seule. */
+        internal fun actionLectureSeuleHa(action: String): Boolean =
+            fr.dd.jarvis.societe.core.normaliser(action).replace(' ', '_') in setOf("etat", "logs", "stockage")
+
         internal fun motifs(service: String): List<String> {
             val n = fr.dd.jarvis.societe.core.normaliser(service)
             return when {
@@ -51,8 +55,8 @@ class ServeurAdminTools(private val app: JarvisApp, private val confirm: suspend
                 .put("required", JSONArray(required))))
 
     val schema = listOf(
-        tool("serveur_service", "Serveur Debian uniquement : gère un service hors Home Assistant par son nom (conteneur Docker, systemd, pm2) — Plex, bot Discord, Ollama, Mosquitto… Actions : lister | etat | logs | demarrer | arreter | redemarrer | mettre_a_jour | activer (relance automatique au démarrage) | desactiver. Trouve tout seul le bon conteneur / unité / processus.",
-            mapOf("action" to prop("lister | etat | logs | demarrer | arreter | redemarrer | mettre_a_jour | activer | desactiver"),
+        tool("serveur_service", "Serveur Debian via SSH : distingue l’hôte Debian et les services qui y tournent. Plex : état, journaux, stockage Docker, démarrer/arrêter/redémarrer/mettre à jour. Home Assistant : état, journaux et stockage Docker en lecture seule ; les entités, états domotiques, services et redémarrages normaux passent par l’API Home Assistant (ha_*), jamais par SSH. « stockage » affiche les chemins hôte ↔ conteneur des volumes montés, sans lire ni modifier les fichiers. Actions : lister | etat | logs | stockage | demarrer | arreter | redemarrer | mettre_a_jour | activer | desactiver.",
+            mapOf("action" to prop("lister | etat | logs | stockage | demarrer | arreter | redemarrer | mettre_a_jour | activer | desactiver"),
                 "service" to prop("Nom du service (« Home Assistant », « Plex », « bot Discord »…) ou nom exact du conteneur / de l'unité."),
                 "lignes" to prop("Logs : nombre de lignes (défaut 80).")), listOf("action")),
         tool("serveur_tache", "Serveur Debian : TÂCHE LONGUE en arrière-plan (au-delà de quelques minutes : restauration, mise à jour, copie, compilation…) qui continue même si la connexion se coupe ; puis suivi de son journal. Actions : lancer (code bash) | etat | liste | arreter.",
@@ -138,7 +142,7 @@ class ServeurAdminTools(private val app: JarvisApp, private val confirm: suspend
         val c = trouves.first()
         val estHaIdentifie = Regex("home.?assistant|\\bhass\\b", RegexOption.IGNORE_CASE)
             .containsMatchIn(c.nom + " " + c.image + " " + c.dossier + " " + c.svcCompose + " " + service)
-        if (estHaIdentifie) return ToolResult("⛔ Accès Home Assistant bloqué depuis le SSH Debian : cet outil ne doit ni inspecter ni piloter un conteneur HA sur cet hôte. Utilise l'API Home Assistant ; configure un profil SSH HA distinct pour les opérations système.")
+        if (estHaIdentifie && !actionLectureSeuleHa(action)) return ToolResult("⛔ Cette action concerne le cycle de vie Home Assistant : utilise son API dédiée (ha_service / ha_config). Le SSH Debian reste distinct et n'est autorisé ici que pour l'état, les journaux et l'inspection en lecture seule des volumes du conteneur (action=stockage). Aucun fichier ni conteneur n'a été modifié.")
         val sensible = action in setOf("arreter", "redemarrer", "mettre_a_jour", "desactiver", "demarrer")
         val estHa = c.type == "docker" && runCatching { HaSur.conteneur(app)?.nom == c.nom }.getOrDefault(false)
         if (sensible && !confirm("${libelleAction(action)} « ${c.nom} » (${c.type}) sur le serveur ?" + (if (estHa && action != "arreter")
@@ -154,6 +158,7 @@ class ServeurAdminTools(private val app: JarvisApp, private val confirm: suspend
         val pm2 = "export PATH=\"\$PATH:/usr/local/bin:\$HOME/.npm-global/bin\"; for d in \$HOME/.nvm/versions/node/*/bin; do [ -d \"\$d\" ] && PATH=\"\$PATH:\$d\"; done; "
         val (cmd, delai) = when (c.type) {
             "docker" -> when (action) {
+                "stockage" -> su("docker inspect -f 'Conteneur: {{.Name}}\\nImage: {{.Config.Image}}\\nProjet Compose: {{index .Config.Labels \\"com.docker.compose.project.working_dir\\"}}\\n{{range .Mounts}}{{.Type}} | hôte={{.Source}} | conteneur={{.Destination}} | lecture-écriture={{.RW}}{{println}}{{end}}' $nq") to 40
                 "etat" -> su("docker ps -a --filter name=^/${c.nom}\$ --format 'table {{.Names}}\\t{{.Status}}\\t{{.Image}}\\t{{.Ports}}'; docker inspect -f 'État : {{.State.Status}} · démarré {{.State.StartedAt}} · redémarrages {{.RestartCount}} · relance auto {{.HostConfig.RestartPolicy.Name}}{{if .State.Health}} · santé {{.State.Health.Status}}{{end}}' $nq; echo; docker logs --tail 15 $nq 2>&1") to 40
                 "logs" -> su("docker logs --tail $n $nq 2>&1") to 40
                 "demarrer" -> su("docker start $nq && sleep 3 && docker ps --filter name=^/${c.nom}\$ --format '{{.Names}} {{.Status}}'") to 90
@@ -168,6 +173,7 @@ class ServeurAdminTools(private val app: JarvisApp, private val confirm: suspend
                 else -> return ToolResult("Action inconnue.")
             }
             "systemd" -> when (action) {
+                "stockage" -> "systemctl show $nq -p FragmentPath -p WorkingDirectory -p ExecStart --no-pager" to 30
                 "etat" -> "systemctl status $nq --no-pager -n 15 2>&1" to 30
                 "logs" -> su("journalctl -u $nq -n $n --no-pager 2>&1") to 40
                 "demarrer" -> su("systemctl start $nq && systemctl is-active $nq") to 90
@@ -180,6 +186,7 @@ class ServeurAdminTools(private val app: JarvisApp, private val confirm: suspend
                 else -> return ToolResult("Action inconnue.")
             }
             else -> when (action) {   // pm2 : toujours sous le compte SSH (pm2 est propre à chaque utilisateur)
+                "stockage" -> "${pm2}pm2 describe $nq 2>&1 | grep -E 'script path|exec cwd|pm_exec_path|pm_cwd' | head -12" to 30
                 "etat" -> "${pm2}pm2 describe $nq 2>&1 | head -40" to 30
                 "logs" -> "${pm2}pm2 logs $nq --lines $n --nostream 2>&1 | tail -$n" to 40
                 "demarrer" -> "${pm2}pm2 start $nq 2>&1 | tail -15" to 60
