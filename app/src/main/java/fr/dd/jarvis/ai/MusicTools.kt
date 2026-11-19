@@ -19,6 +19,8 @@ class MusicTools(private val app: JarvisApp) {
             val s = java.text.Normalizer.normalize(section.lowercase(java.util.Locale.ROOT), java.text.Normalizer.Form.NFD)
                 .replace(Regex("\\p{M}+"), "")
                 .replace("’", "'")
+                // NFD ne décompose pas les ligatures françaises œ/æ : les translittérer avant le filtre ASCII.
+                .replace("œ", "oe").replace("æ", "ae")
                 .replace(Regex("[^a-z0-9]+"), " ")
                 .trim()
             val compact = s.replace(" ", "")
