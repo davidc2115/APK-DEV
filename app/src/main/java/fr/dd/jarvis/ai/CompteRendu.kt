@@ -45,6 +45,8 @@ Réponds uniquement par ce JSON :
             (if (site.onduleur.isNotBlank()) ", onduleur(s) déjà connus : ${site.onduleur}" else "") + "\nConserve séparément TOUS les onduleurs cités dans la dictée, sans en choisir un seul." + ". Catégorie choisie : $categorie. Date : $date.\n\nDictée du technicien :\n$dictee"
         val brut = withTimeoutOrNull(45_000) { runCatching { app.llm.agent(SYSTEME, contexte) }.getOrNull() }
         val args = champs(brut, dictee, categorie).put("client", client.nom).put("installation", site.nom).put("date", date)
+            // La dictée du formulaire n'est pas nécessairement dans l'historique du chat : elle reste la source de vérité du filtre de fidélité.
+            .put("source_utilisateur", dictee)
         val res = ToolBox(app) { _, _ -> true }.execute("intervention_enregistrer", args)
         if (!res.text.startsWith("✅")) return Resultat(res.text, null, null)
 
