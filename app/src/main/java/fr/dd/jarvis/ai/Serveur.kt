@@ -704,11 +704,23 @@ object Serveur {
         }.filter { it.second >= 0.45 }.sortedByDescending { it.second }.take(n).map { it.first }
     }
 
-    fun haEntites(app: JarvisApp, recherche: String, domaine: String, decalage: Int = 0, limite: Int = 100): String {
+    internal fun correspondEtatHa(etatBrut: String, filtre: String): Boolean {
+        val e = fr.dd.jarvis.societe.core.normaliser(etatBrut)
+        val f = fr.dd.jarvis.societe.core.normaliser(filtre)
+        if (f.isBlank()) return true
+        return when {
+            f in setOf("indisponible", "injoignable", "hors ligne", "offline", "deconnecte", "deconnectee", "unavailable") -> e == "unavailable"
+            f in setOf("inconnu", "unknown", "etat inconnu") -> e == "unknown"
+            f in setOf("indisponible ou inconnu", "injoignable ou inconnu", "tous les problemes") -> e in setOf("unavailable", "unknown")
+            else -> e == f
+        }
+    }
+
+    fun haEntites(app: JarvisApp, recherche: String, domaine: String, decalage: Int = 0, limite: Int = 100, etat: String = ""): String {
         val arr = JSONArray(ha(app, "GET", "/api/states"))
         val toutes = (0 until arr.length()).map { arr.getJSONObject(it) }
         val paires = toutes.map { it.getString("entity_id") to it.optJSONObject("attributes")?.optString("friendly_name").orEmpty() }
-        val l = filtrerEntites(paires, recherche, domaine).map { toutes[it] }
+        val l = filtrerEntites(paires, recherche, domaine).map { toutes[it] }.filter { correspondEtatHa(it.optString("state"), etat) }
         // Entités que l'utilisateur a notées pour ce sujet (carnet, mémoire) : en tête, avec leur état réel.
         val notees = if (recherche.isBlank() || decalage > 0) emptyList() else runCatching { fr.dd.jarvis.device.Carnet.entitesNotees(app, recherche) }.getOrDefault(emptyList())
         val blocNotes = if (notees.isEmpty()) "" else "📝 D'APRÈS TES NOTES (à utiliser en priorité, sans chercher d'autre entité) :\n" + notees.joinToString("\n") { (id, note) ->
