@@ -54,7 +54,8 @@ object Reseau {
         .callTimeout(6, TimeUnit.SECONDS)
         .followRedirects(false)
         .build()
-    private val dns = Executors.newCachedThreadPool()
+    // Résolution des noms limitée : un scan /22 ne doit jamais créer des centaines de threads DNS.
+    private val dns = Executors.newFixedThreadPool(24)
     val clientLax: OkHttpClient get() = http
     fun ouvertTcp(ip: String, port: Int, ms: Int = 1500) = ouvert(ip, port, ms) == 1
 
