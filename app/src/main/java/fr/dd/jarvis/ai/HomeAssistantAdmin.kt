@@ -30,10 +30,11 @@ class HomeAssistantAdmin(
     /** Commande sur le serveur SSH (null si SSH non configuré) : sert à installer HACS. */
     private val ssh: ((String, Int) -> Pair<Int, String>)? = null,
     private val conteneur: () -> String? = { null },
+    private val diagnosticSecours: (() -> String)? = null,
 ) {
     constructor(app: JarvisApp, confirm: suspend (String, Boolean) -> Boolean) : this(
         Serveur.haBaseDirecte(app), app.store.haToken.value, confirm,
-        null, { null })
+        null, { null }, { HaSur.diagnostic(app) })
 
     private val base = urlBrute.trim().trimEnd('/').let { if (it.isBlank() || it.startsWith("http")) it else "http://$it" }
     private val jeton = jetonBrut.trim()
@@ -378,7 +379,7 @@ class HomeAssistantAdmin(
             }
             // ---- système
             "verifier" -> rest("POST", "/api/config/core/check_config").toString()
-            "journal" -> runCatching { rest("GET", "/api/error_log").toString().lines().takeLast(a.optString("lignes").toIntOrNull() ?: 60).joinToString("\n").takeLast(6000) }.getOrElse { "API Home Assistant indisponible : ${it.message?.take(180)}.\n\n" + HaSur.diagnostic(app) }
+            "journal" -> runCatching { rest("GET", "/api/error_log").toString().lines().takeLast(a.optString("lignes").toIntOrNull() ?: 60).joinToString("\n").takeLast(6000) }.getOrElse { "API Home Assistant indisponible : ${it.message?.take(180)}.\n\n" + (diagnosticSecours?.invoke() ?: "Diagnostic hôte indisponible : profil SSH Debian non configuré.") }
             "modele" -> rest("POST", "/api/template", JSONObject().put("template", a.optString("modele"))).toString().take(4000)
             "redemarrer" -> {
                 val v = rest("POST", "/api/config/core/check_config") as? JSONObject
@@ -390,7 +391,7 @@ class HomeAssistantAdmin(
                 kotlinx.coroutines.delay(15_000)
                 while (System.currentTimeMillis() - debut < 480_000 && runCatching { rest("GET", "/api/") }.isFailure) kotlinx.coroutines.delay(6000)
                 if (runCatching { rest("GET", "/api/") }.isSuccess) "✅ Home Assistant redémarré et de nouveau en ligne (au bout de ${(System.currentTimeMillis() - debut) / 1000} s)."
-                else "⚠️ Home Assistant ne répond toujours pas après 8 min.\n\n" + HaSur.diagnostic(app)
+                else "⚠️ Home Assistant ne répond toujours pas après 8 min.\n\n" + (diagnosticSecours?.invoke() ?: "Diagnostic hôte indisponible : profil SSH Debian non configuré.")
             }
             // ---- accès brut (tout le reste)
             "ws" -> {
