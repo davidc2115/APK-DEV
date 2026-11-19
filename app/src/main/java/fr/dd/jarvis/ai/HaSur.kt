@@ -31,21 +31,7 @@ object HaSur {
     @Volatile private var cache: Pair<Long, Conteneur?>? = null
 
     /** Conteneur Home Assistant, son dossier de configuration et, s'il vient de docker compose, son projet. */
-    fun conteneur(app: JarvisApp, frais: Boolean = false): Conteneur? {
-        cache?.takeIf { !frais && System.currentTimeMillis() - it.first < 10 * 60_000L }?.let { return it.second }
-        // Aucun scan Docker via le SSH général : il pointe vers Debian/Jarvis, pas vers HA.
-        return null
-        @Suppress("UNREACHABLE_CODE")
-        val l = docker(app, "docker ps -a --format '{{.Names}}|{{.Image}}'", 30).second.lines().mapNotNull { it.split('|').takeIf { p -> p.size == 2 } }
-        val nom = (l.firstOrNull { it[1].contains(Regex("home-?assistant", RegexOption.IGNORE_CASE)) }
-            ?: l.firstOrNull { it[0].contains(Regex("home.?assistant|^hass$|^ha$", RegexOption.IGNORE_CASE)) })?.get(0)?.trim()
-        val c = nom?.let { n ->
-            val i = docker(app, "docker inspect -f '{{range .Mounts}}{{if eq .Destination \"/config\"}}{{.Source}}{{end}}{{end}}|{{index .Config.Labels \"com.docker.compose.project.working_dir\"}}|{{index .Config.Labels \"com.docker.compose.service\"}}|{{.Config.Image}}' ${q(n)}", 30).second.trim().split('|')
-            Conteneur(n, i.getOrElse(0) { "" }, i.getOrElse(1) { "" }.removePrefix("<no value>"), i.getOrElse(2) { "" }.removePrefix("<no value>"), i.getOrElse(3) { "" })
-        }
-        cache = System.currentTimeMillis() to c
-        return c
-    }
+    fun conteneur(app: JarvisApp, frais: Boolean = false): Conteneur? = null
 
     /** Le fichier [chemin] (sur le serveur, ou dans [conteneurFichier]) fait-il partie de la configuration de Home Assistant ? */
     fun estConfigHa(app: JarvisApp, chemin: String, conteneurFichier: String): Boolean {
@@ -72,16 +58,6 @@ object HaSur {
         } catch (e: Exception) {
             "Validation Home Assistant impossible via l'API (${e.message?.take(180)}). Aucun repli vers le SSH Debian n'a été tenté."
         }
-        @Suppress("UNREACHABLE_CODE")
-        val c = runCatching { conteneur(app) }.getOrNull() ?: return "API HA indisponible."
-        val r = docker(app, "docker exec ${q(c.nom)} python3 -m homeassistant --script check_config -c /config > /tmp/jarvis_ha_check.txt 2>&1; rc=\$?; echo \"JARVIS_RC=\$rc\"; tail -40 /tmp/jarvis_ha_check.txt; rm -f /tmp/jarvis_ha_check.txt; exit \$rc", 240)
-        val rc = Regex("JARVIS_RC=(\\d+)").find(r.second)?.groupValues?.get(1)?.toIntOrNull()
-        val sortie = r.second.replace(Regex("JARVIS_RC=\\d+"), "").trim()
-        return when {
-            rc == 0 -> null
-            rc == null && !Regex("Failed config|Invalid config|ERROR", RegexOption.IGNORE_CASE).containsMatchIn(sortie) -> null
-            else -> sortie.lines().filter { it.isNotBlank() && !it.startsWith("Testing configuration") }.takeLast(20).joinToString("\n").take(1200)
-        }
     }
 
     // ------------------------------------------------------------------ attente du retour en ligne
@@ -106,13 +82,6 @@ object HaSur {
         if (!Serveur.haConfigure(app)) return "API Home Assistant non configurée. Diagnostic Docker désactivé sans profil SSH HA dédié."
         return runCatching { Serveur.ha(app, "GET", "/api/"); "Home Assistant répond via son API DuckDNS." }
             .getOrElse { "Home Assistant ne répond pas via son API : ${it.message?.take(180)}. Aucun accès au serveur Debian n'a été tenté." }
-        @Suppress("UNREACHABLE_CODE")
-        val c = runCatching { conteneur(app, frais = true) }.getOrNull() ?: return "Conteneur HA indisponible."
-        val etat = docker(app, "docker inspect -f 'état {{.State.Status}} · redémarrages {{.RestartCount}} · tué par manque de mémoire : {{.State.OOMKilled}}' ${q(c.nom)}", 30).second.trim()
-        val mem = Serveur.exec(app, "free -m | awk 'NR==2{print \"mémoire libre \" \$7 \" Mo sur \" \$2 \" Mo\"}'; df -Pm / | awk 'NR==2{print \"disque libre \" \$4 \" Mo\"}'", 20).second.trim()
-        val erreurs = docker(app, "docker logs --tail 300 ${q(c.nom)} 2>&1 | grep -iE 'error|exception|invalid|failed|recovery mode|safe mode' | tail -12", 40).second.trim()
-        return "• ${c.nom} : $etat\n• $mem" + (if (erreurs.isNotBlank()) "\n```\n${erreurs.take(1800)}\n```" else "") +
-            (if (etat.contains("OOMKilled: true") || etat.contains("mémoire : true")) "\n💡 Le serveur a manqué de mémoire : arrête un service gourmand (ex. Ollama) avant de redémarrer Home Assistant." else "")
     }
 
     // ------------------------------------------------------------------ rechargement et redémarrage
