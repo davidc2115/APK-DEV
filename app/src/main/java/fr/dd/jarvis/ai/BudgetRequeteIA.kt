@@ -43,15 +43,16 @@ internal object BudgetRequeteIA {
 
         // Si une succession d'outils dépasse encore le budget, réduire les anciens résultats en premier.
         var total = taille(out)
+        val dernierUserSortie = (0 until out.length()).lastOrNull { out.optJSONObject(it)?.optString("role") == "user" } ?: -1
         if (total > budgetTotal) {
             for (i in 0 until out.length()) {
                 if (total <= budgetTotal) break
                 val item = out.optJSONObject(i) ?: continue
                 val role = item.optString("role")
-                if (role == "system" || (role == "user" && i == out.length() - 1)) continue
+                if (role == "system" || i == dernierUserSortie) continue
                 val value = item.optString("content")
                 if (value.isBlank()) continue
-                val minimum = if (role == "tool") 180 else 240
+                val minimum = if (role == "tool") { if (strict) 80 else 120 } else { if (strict) 120 else 180 }
                 val nouveau = value.take(minimum) + if (value.length > minimum) "…" else ""
                 item.put("content", nouveau)
                 total = taille(out)
