@@ -230,6 +230,10 @@ class ServeurAdminTools(private val app: JarvisApp, private val confirm: suspend
             "lancer" -> {
                 val code = a.optString("code").trim()
                 if (code.isBlank()) return ToolResult("Script vide.")
+                if (Regex("(?:docker|docker-compose|docker\\s+compose|ha\\s+core)\\b", RegexOption.IGNORE_CASE).containsMatchIn(code) &&
+                    Regex("home.?assistant|\\bhass\\b|127\\.0\\.0\\.1:8123|localhost:8123", RegexOption.IGNORE_CASE).containsMatchIn(code)) {
+                    return ToolResult("⛔ Tâche refusée : elle cible Home Assistant depuis le SSH Debian. Utilise l'API HA ou un profil SSH HA indépendant.")
+                }
                 if (!confirm("Lancer cette tâche en arrière-plan sur le serveur ${app.store.sshHost.value} ?\n\n" + code.take(900), true)) return ToolResult("Refusé par l'utilisateur.")
                 val root = a.optString("root").lowercase() in setOf("oui", "true", "1") || Regex("\\bsudo\\b").containsMatchIn(code)
                 val id = lancerTache(code.replace(Regex("\\bsudo\\s+"), if (root) "" else "sudo "), a.optString("nom"), root)
