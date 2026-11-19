@@ -283,6 +283,19 @@ object Discord {
             JSONObject().put("name", titre).put("auto_archive_duration", duree))
     }
 
+    /** Crée une publication autonome dans un salon Forum/Media Discord (types 15 et 16). */
+    fun creerPublicationForum(app: JarvisApp, channelId: String, nom: String, contenu: String, archivageMinutes: Int): JSONObject {
+        val titre = nom.trim()
+        val texte = contenu.trim()
+        require(titre.isNotBlank() && titre.length <= 100) { "Le titre doit contenir de 1 à 100 caractères." }
+        require(texte.isNotBlank() && texte.length <= 2000) { "Le contenu doit contenir de 1 à 2 000 caractères." }
+        val duree = listOf(60, 1440, 4320, 10080).minBy { kotlin.math.abs(it - archivageMinutes) }
+        val message = JSONObject().put("content", texte)
+            .put("allowed_mentions", JSONObject().put("parse", JSONArray()))
+        val corps = JSONObject().put("name", titre).put("auto_archive_duration", duree).put("message", message)
+        return req(app, "POST", "/channels/$channelId/threads", corps)
+    }
+
     fun timeoutMembre(app: JarvisApp, guildId: String, userId: String, jusquAu: String?, raisonAudit: String = "") {
         req(app, "PATCH", "/guilds/$guildId/members/$userId",
             JSONObject().put("communication_disabled_until", jusquAu ?: JSONObject.NULL), raisonAudit)
