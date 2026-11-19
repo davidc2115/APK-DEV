@@ -20,7 +20,7 @@ N'invente RIEN : chaque champ reprend uniquement ce qui a été dit (laisse vide
 Réponds uniquement par ce JSON :
 {"categorie":"maintenance|panne|diagnostic|nettoyage|remplacement|contrôle|autre","description":"résumé factuel de l'intervention (1 à 3 phrases)",
 "diagnostic":"constat (distingue constat et hypothèse)","actions":"actions réellement réalisées","pieces":"pièces remplacées avec références et quantités",
-"mesures":"mesures relevées avec unités","onduleurs":"tous les onduleurs concernés, chacun conservé, un par ligne si plusieurs sont cités","statut":"terminee|a_suivre|en_attente","prochaine_maintenance":"yyyy-MM-dd si une date est dite, sinon vide",
+"mesures":"mesures relevées avec unités","onduleurs":"liste exhaustive et ordonnée ; conserver explicitement chaque libellé « Onduleur 1 : ... », « Onduleur 2 : ... », « Onduleur 3 : ... » etc., avec marque, modèle et numéro de série s’ils sont dictés ; un par ligne, ne jamais fusionner ni omettre","statut":"terminee|a_suivre|en_attente","prochaine_maintenance":"yyyy-MM-dd si une date est dite, sinon vide",
 "notes":"autres informations utiles (suite à donner, remarques du client)"}"""
 
     internal fun champs(brut: String?, dictee: String, categorie: String): JSONObject {
