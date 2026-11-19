@@ -56,7 +56,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             val dossierRelatif = relatif(folder)
             val dossierReel = when {
                 dossierRelatif.isBlank() -> ""
-                else -> resoudre(dossierRelatif) ?: cheminDossier(dossierRelatif)
+                else -> resoudre(dossierRelatif)?.takeIf { enfants(it) != null } ?: cheminDossier(dossierRelatif)
             }
             val dir = subDir(tree, dossierReel)
             if (!dir.isDirectory || !dir.canWrite())
@@ -467,8 +467,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
         // Jarvis range certains contenus sous « JARVIS/Images », alors que l'utilisateur peut
         // naturellement demander « Images/... ». Si le premier dossier n'existe pas à la racine,
-        // on accepte son emplacement imbriqué uniquement lorsqu'il est unique dans tout le coffre.
-        // Plusieurs dossiers « Images » : aucune sélection arbitraire, on laisse la demande ambiguë.
+        // on accepte un emplacement imbriqué uniquement si le chemin restant permet de le distinguer.
         val premier = parts.first()
         val dossiers = toutLister().filter { it.second }.map { it.first }
         // Plusieurs dossiers « Images » peuvent exister. On compare le chemin restant aussi :
@@ -555,7 +554,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         val parts = normalise.split('/').filter { it.isNotBlank() }
         if (parts.isEmpty()) return ""
         // Si le dossier existe déjà, renvoyer son chemin réel, y compris lorsqu'un préfixe est omis.
-        resoudre(normalise)?.let { return it }
+        resoudre(normalise)?.takeIf { enfants(it) != null }?.let { return it }
         var base = ""
         var i = 0
         val racine = enfants("").orEmpty()
