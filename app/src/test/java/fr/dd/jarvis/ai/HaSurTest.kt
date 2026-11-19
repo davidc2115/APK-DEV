@@ -6,6 +6,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HaSurTest {
+    @Test fun filtreLesEtatsIndisponiblesDeHomeAssistantSansConfondreUnknown() {
+        assertTrue(Serveur.correspondEtatHa("unavailable", "indisponible"))
+        assertTrue(Serveur.correspondEtatHa("unavailable", "injoignable"))
+        assertTrue(Serveur.correspondEtatHa("unavailable", "hors ligne"))
+        assertTrue(Serveur.correspondEtatHa("unknown", "inconnu"))
+        assertTrue(Serveur.correspondEtatHa("unknown", "tous les problèmes"))
+        assertTrue(Serveur.correspondEtatHa("unavailable", "tous les problèmes"))
+        assertTrue(!Serveur.correspondEtatHa("on", "indisponible"))
+        assertTrue(!Serveur.correspondEtatHa("off", "injoignable"))
+        assertTrue(Serveur.correspondEtatHa("on", ""))
+    }
     @Test fun interception() {
         assertEquals("redemarrer", HaSur.interception("docker restart homeassistant", "homeassistant"))
         assertEquals("redemarrer", HaSur.interception("sudo docker restart -t 10 ha_core", "ha_core"))
