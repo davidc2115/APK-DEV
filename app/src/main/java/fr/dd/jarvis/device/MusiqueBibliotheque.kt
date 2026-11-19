@@ -71,16 +71,18 @@ object MusiqueBibliotheque {
         val libelles = if (aleatoire) BOUTONS_ALEATOIRE + BOUTONS_LECTURE else BOUTONS_LECTURE
         val bouton = attendre(paquet, libelles, 2200, exact = false)
         if (bouton != null) cliquer(bouton)
-        repeat(12) {
+        repeat(20) {
             val c = controleur(ctx, paquet)
             if (c != null) {
                 val etat = c.playbackState?.state
                 if (etat != PlaybackState.STATE_PLAYING && etat != PlaybackState.STATE_BUFFERING) {
                     runCatching { c.transportControls.play() }
                 }
-                delay(450)
+                delay(500)
+                // BUFFERING prouve seulement que le lecteur prépare le flux, pas que la lecture a réellement démarré.
+                // On attend jusqu'à 10 s l'état PLAYING avant d'annoncer le succès à l'utilisateur.
                 val confirme = controleur(ctx, paquet)?.playbackState?.state
-                if (confirme == PlaybackState.STATE_PLAYING || confirme == PlaybackState.STATE_BUFFERING) return true
+                if (confirme == PlaybackState.STATE_PLAYING) return true
             } else {
                 // Sans accès aux sessions, un libellé Pause visible est le seul indice UI acceptable.
                 if (attendre(paquet, listOf("Pause", "Mettre en pause", "Pause la lecture"), 180, exact = false) != null) return true
