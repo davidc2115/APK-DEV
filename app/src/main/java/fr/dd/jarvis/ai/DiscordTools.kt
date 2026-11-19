@@ -308,7 +308,7 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
                     ToolResult("Réaction $emoji ${if (retirer) "retirée" else "ajoutée"} au message.", direct = true)
                 }
                 else -> {
-                    if (salon.optInt("type") !in setOf(0, 5, 10, 11, 12, 15, 16)) return ToolResult("Ce type de salon ne permet pas de créer un fil à partir d'un message.")
+                    if (salon.optInt("type") !in setOf(0, 5)) return ToolResult("La création d'un fil à partir d'un message est disponible dans les salons textuels et d'annonces. Les forums utilisent un flux de création de publication distinct.")
                     val nom = a.optString("nom").trim()
                     if (nom.isBlank()) return ToolResult("Nom du fil manquant.")
                     val demandeArchive = a.optString("archivage_minutes").toIntOrNull() ?: 1440
