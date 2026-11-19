@@ -291,7 +291,21 @@ object Rendu {
     fun interventionCtx(d: SocieteData, c: Client, s: Site, i: Intervention): Ctx {
         val mes = MesuresSeries.analyser(i.mesures)
         val parOnduleur = MesuresSeries.parOnduleur(i.mesures)
-        val actions = ListesRapport.elements(i.actions).map { mapOf("action" to it) }
+        val actions = ListesRapport.elements(i.actions).map { action ->
+            val n = Fidelite.normaliser(action)
+            val emoji = when {
+                "pdl" in n -> "📍"
+                "coffret" in n || "sectionneur" in n || "disjoncteur" in n || "parafoudre" in n -> "⚡"
+                "onduleur" in n -> "🔌"
+                "mesure" in n || "tension" in n || "serie" in n -> "📏"
+                "nettoy" in n || "aeration" in n || "ventilation" in n -> "🧹"
+                "remise en service" in n || "redemarrage" in n -> "▶️"
+                "serrage" in n || "resserrage" in n -> "🔧"
+                "controle" in n || "verification" in n -> "🔍"
+                else -> "✅"
+            }
+            mapOf("action" to action, "emoji" to emoji)
+        }
         val pieces = ListesRapport.elements(i.pieces).map { mapOf("piece" to it) }
         // En présence de blocs numérotés, chaque onduleur possède ses propres séries 1..N.
         val series = if (parOnduleur.isEmpty()) mes.series.map { mapOf("serie" to "Série ${it.numero}", "valeur" to it.valeur) } else emptyList()
