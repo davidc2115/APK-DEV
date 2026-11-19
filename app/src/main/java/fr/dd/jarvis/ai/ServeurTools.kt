@@ -272,8 +272,9 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 val cmd = a.optString("commande").trim()
                 if (cmd.isBlank()) return ToolResult("Commande vide.")
                 // Aucun accès Docker/CLI HA via le SSH générique : il cible exclusivement Debian/Jarvis.
-                if (cible == null && Regex("(?:docker|docker-compose|docker\\s+compose|ha\\s+core)\\b", RegexOption.IGNORE_CASE).containsMatchIn(cmd) &&
-                    Regex("home.?assistant|\\bhass\\b|127\\.0\\.0\\.1:8123|localhost:8123", RegexOption.IGNORE_CASE).containsMatchIn(cmd)) {
+                if (cible == null && (Regex("127\\.0\\.0\\.1:8123|localhost:8123", RegexOption.IGNORE_CASE).containsMatchIn(cmd) ||
+                    (Regex("(?:docker|docker-compose|docker\\s+compose|ha\\s+core)\\b", RegexOption.IGNORE_CASE).containsMatchIn(cmd) &&
+                        Regex("home.?assistant|\\bhass\\b", RegexOption.IGNORE_CASE).containsMatchIn(cmd)))) {
                     return ToolResult("⛔ Commande refusée : elle cible Home Assistant depuis le SSH Debian. Les commandes système HA doivent passer par l'API HA ou par un futur profil SSH HA indépendant.")
                 }
                 // Redémarrage / mise à jour de Home Assistant « à la main » : remplacés par les versions sûres.
@@ -298,8 +299,8 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
             "serveur_diagnostic" -> {
                 ssh()
                 val r = Serveur.exec(app, "echo '== Debian / Jarvis uniquement =='; hostname; uptime; echo; free -h | head -2; echo; df -h / | tail -1; echo; docker ps -a --format 'table {{.Names}}\\\\t{{.Status}}\\\\t{{.Image}}' 2>&1 | head -20", 60)
-                ToolResult("# 🖥️ Serveur\n```\n" + sortie(r, 6000) + "\n```" +
-                    "\n\n_Le test « Home Assistant (local) » est fait DEPUIS le serveur Debian : s'il répond en local mais pas depuis le téléphone, le problème est le réseau entre le téléphone et le serveur (ou l'adresse/port dans Réglages › Maison › Serveur), pas Home Assistant lui-même._")
+                ToolResult("# 🖥️ Serveur Debian / Jarvis\\n```\\n" + sortie(r, 6000) + "\\n```" +
+                    "\\n\\n_Ce diagnostic concerne uniquement le serveur Debian/Jarvis. Home Assistant est vérifié séparément par son API configurée._")
             }
             "serveur_scan_ports" -> {
                 val hote = a.optString("hote").trim().ifBlank { app.store.sshHost.value.trim() }
