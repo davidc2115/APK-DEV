@@ -11,6 +11,20 @@ class MusicTools(private val app: JarvisApp) {
         val KEYWORDS = Regex("musique|music|morceau|chanson|titre|artiste|album|playlist|biblioth[eè]que|j.aime|al[ée]atoire|file d.attente|yt ?music|morphe|spotify|lecture musicale|\u00e9couter|mets le \\d", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
         val NAMES = setOf("musique_etat", "musique_commander", "musique_rechercher", "musique_resultats", "musique_choisir", "musique_bibliotheque", "musique_action", "musique_file")
+
+        /** Normalise les formulations orales de la section « J'aime » de la bibliothèque. */
+        internal fun sectionBibliotheque(section: String): String {
+            val s = fr.dd.jarvis.societe.core.normaliser(section).replace(" ", "")
+            return when {
+                s.contains("aime") || s.contains("like") || s.contains("favor") || s.contains("coeur") -> "jaime"
+                s.startsWith("playlist") -> "playlists"
+                s.startsWith("titre") || s.startsWith("chanson") -> "titres"
+                s.startsWith("album") -> "albums"
+                s.startsWith("artiste") -> "artistes"
+                s.startsWith("telecharg") -> "telechargements"
+                else -> "playlists"
+            }
+        }
     }
     private fun prop(d: String) = JSONObject().put("type", "string").put("description", d)
     val schema: List<JSONObject> = listOf(
@@ -81,9 +95,7 @@ class MusicTools(private val app: JarvisApp) {
             }, direct = true)
             "musique_bibliotheque" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 val p = paquet() ?: return@withContext "YT Music Morphe n'est pas installée."
-                val section = fr.dd.jarvis.societe.core.normaliser(a.optString("section")).replace(" ", "").let { s ->
-                    when { s.contains("aime") || s.contains("like") -> "jaime"; s.startsWith("playlist") -> "playlists"; s.startsWith("titre") || s.startsWith("chanson") -> "titres"
-                        s.startsWith("album") -> "albums"; s.startsWith("artiste") -> "artistes"; s.startsWith("telecharg") -> "telechargements"; else -> "playlists" } }
+                val section = sectionBibliotheque(a.optString("section"))
                 val nom = a.optString("nom").trim()
                 val aleatoire = a.optString("aleatoire").lowercase() in setOf("oui", "true", "1")
                 if (section == "jaime") {
