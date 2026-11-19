@@ -462,8 +462,11 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         // Plusieurs dossiers « Images » : aucune sélection arbitraire, on laisse la demande ambiguë.
         val premier = parts.first()
         val dossiers = toutLister().filter { it.second }.map { it.first }
-        val candidat = ObsidianPathResolution.uniqueNestedFolder(premier, dossiers, ::cleNom) ?: return null
-        return depuis(candidat, 1)
+        // Plusieurs dossiers « Images » peuvent exister. On compare le chemin restant aussi :
+        // « Images/coloriage train » identifie son parent uniquement si le suffixe complet est unique.
+        return ObsidianPathResolution.uniqueNestedPath(premier, dossiers, ::cleNom) { candidat ->
+            depuis(candidat, 1)
+        }
     }
 
     /** Chemin du coffre sur le téléphone (ex. « Documents/Obsidian jarvis »), d'après le dossier choisi dans les Réglages. */
