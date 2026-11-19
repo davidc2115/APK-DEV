@@ -271,6 +271,73 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             val sent = Discord.envoyerMessage(app, salon.getString("id"), message)
             ToolResult("✅ Message envoyé dans #${salon.optString("name")} sur « $gnom » (ID ${sent.optString("id")}). Les mentions globales ont été neutralisées.", direct = true)
         }
+        "discord_message_modifier", "discord_message_supprimer", "discord_message_epingler", "discord_reaction", "discord_fil_creer" -> {
+            val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
+            val nomSalon = a.optString("salon").trim()
+            val salon = Discord.trouverSalon(app, gid, nomSalon)
+                ?: if (nomSalon.matches(Regex("\\d{17,20}"))) JSONObject().put("id", nomSalon).put("name", "salon $nomSalon").put("type", 0)
+                   else return ToolResult(Discord.introuvable("salon", nomSalon, gnom, Discord.salons(app, gid)))
+            val messageId = a.optString("message_id").trim()
+            if (!messageId.matches(Regex("\\d{17,20}"))) return ToolResult("Identifiant de message Discord invalide.")
+            val salonId = salon.getString("id")
+            when (name) {
+                "discord_message_modifier" -> {
+                    val nouveau = a.optString("message").trim()
+                    if (nouveau.isBlank() || nouveau.length > 2000) return ToolResult("Le nouveau texte doit contenir de 1 à 2 000 caractères.")
+                    if (!confirm("Modifier le message $messageId dans #${salon.optString("name")} sur « $gnom » ?\n\n$nouveau", true)) return ToolResult("Modification annulée.")
+                    Discord.modifierMessage(app, salonId, messageId, nouveau)
+                    ToolResult("Message $messageId modifié dans #${salon.optString("name")}.", direct = true)
+                }
+                "discord_message_supprimer" -> {
+                    if (!confirm("Supprimer définitivement le message $messageId dans #${salon.optString("name")} sur « $gnom » ? Cette action est irréversible.", true)) return ToolResult("Suppression annulée.")
+                    Discord.supprimerMessage(app, salonId, messageId)
+                    ToolResult("Message $messageId supprimé de #${salon.optString("name")}.", direct = true)
+                }
+                "discord_message_epingler" -> {
+                    val retirer = a.optString("action").lowercase().contains("des") || a.optString("action").lowercase().contains("retir")
+                    if (!confirm("${if (retirer) "Désépingler" else "Épingler"} le message $messageId dans #${salon.optString("name")} sur « $gnom » ?", true)) return ToolResult("Action annulée.")
+                    Discord.epinglerMessage(app, salonId, messageId, !retirer)
+                    ToolResult("Message ${if (retirer) "désépinglé" else "épinglé"} dans #${salon.optString("name")}.", direct = true)
+                }
+                "discord_reaction" -> {
+                    val emoji = a.optString("emoji").trim()
+                    if (emoji.isBlank()) return ToolResult("Emoji manquant.")
+                    val retirer = a.optString("action").lowercase().startsWith("retir")
+                    if (!confirm("${if (retirer) "Retirer" else "Ajouter"} la réaction $emoji au message $messageId dans #${salon.optString("name")} ?", true)) return ToolResult("Action annulée.")
+                    Discord.reaction(app, salonId, messageId, emoji, !retirer)
+                    ToolResult("Réaction $emoji ${if (retirer) "retirée" else "ajoutée"} au message.", direct = true)
+                }
+                else -> {
+                    if (salon.optInt("type") !in setOf(0, 5, 10, 11, 12, 15, 16)) return ToolResult("Ce type de salon ne permet pas de créer un fil à partir d'un message.")
+                    val nom = a.optString("nom").trim()
+                    if (nom.isBlank()) return ToolResult("Nom du fil manquant.")
+                    val demandeArchive = a.optString("archivage_minutes").toIntOrNull() ?: 1440
+                    val archive = listOf(60, 1440, 4320, 10080).minBy { kotlin.math.abs(it - demandeArchive) }
+                    if (!confirm("Créer le fil « $nom » à partir du message $messageId dans #${salon.optString("name")} sur « $gnom » (archivage après $archive minutes) ?", true)) return ToolResult("Création du fil annulée.")
+                    val fil = Discord.creerFilDepuisMessage(app, salonId, messageId, nom, archive)
+                    ToolResult("Fil « ${fil.optString("name", nom)} » créé (ID ${fil.optString("id")}).", direct = true)
+                }
+            }
+        }
+        "discord_membre_info" -> {
+            val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
+            val m = Discord.trouverMembre(app, gid, a.optString("membre")) ?: return ToolResult("Membre « ${a.optString("membre")} » introuvable sur « $gnom ».")
+            val u = m.optJSONObject("user") ?: JSONObject()
+            val uid = u.optString("id")
+            val rolesIds = m.optJSONArray("roles") ?: JSONArray()
+            val roles = Discord.roles(app, gid)
+            val nomsRoles = (0 until rolesIds.length()).mapNotNull { index ->
+                (0 until roles.length()).map { roles.getJSONObject(it) }.firstOrNull { it.optString("id") == rolesIds.optString(index) }?.optString("name")
+            }
+            val pseudo = m.optString("nick").ifBlank { u.optString("global_name").ifBlank { u.optString("username") } }
+            val lignes = listOf("# Membre Discord — $pseudo", "Serveur : $gnom", "ID : $uid",
+                "Nom du compte : ${u.optString("username")}", "Compte bot : ${u.optBoolean("bot")}",
+                "Arrivée : ${m.optString("joined_at").ifBlank { "non disponible" }}",
+                "Rôles : ${nomsRoles.joinToString(", ").ifBlank { "aucun rôle attribué" }}",
+                "Timeout jusqu'au : ${m.optString("communication_disabled_until").ifBlank { "aucun" }}")
+            ToolResult(lignes.joinToString("\n"), direct = true)
+        }
+
         "discord_roles" -> {
             val gid = guilde(a)
             val arr = Discord.roles(app, gid)
