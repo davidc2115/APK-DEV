@@ -86,10 +86,20 @@ class RapportInterventionTest {
 
     @Test fun blocsOnduleursRecuperentLesLignesDeContinuation() {
         val blocs = OnduleursIntervention.blocs(
-            "Onduleur 1 : Huawei\\n16 séries à 775 V\\nOnduleur 2 : SMA\\n14 séries à 770 V"
+            "Onduleur 1 : Huawei\n16 séries à 775 V\nOnduleur 2 : SMA\n14 séries à 770 V"
         )
         assertEquals(2, blocs.size)
         assertTrue(blocs[0].contenu.contains("16 séries"))
         assertTrue(blocs[1].contenu.contains("14 séries"))
+    }
+
+    @Test fun lesActionsSuivantLesMesuresNeSontPasAjouteesAuBlocOnduleur() {
+        val blocs = OnduleursIntervention.blocs(
+            "Onduleur 2 : 14 séries à 770 V\\nde légères tensions à la terre\\nremise en service de l'installation OK\\nnettoyage des ventilations"
+        )
+        assertEquals(1, blocs.size)
+        assertTrue(blocs.single().contenu.contains("légères tensions"))
+        assertTrue(!blocs.single().contenu.contains("remise en service"))
+        assertTrue(!blocs.single().contenu.contains("nettoyage"))
     }
 }
