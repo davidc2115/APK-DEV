@@ -400,6 +400,53 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             ToolResult("✅ Rôle « ${role.optString("name")} » déplacé en position $position sur « $gnom »." +
                 (if (auMaximum) " C'est le plus haut possible : Discord ne permet jamais de dépasser le rôle le plus haut que JARVIS possède lui-même sur ce serveur." else ""), direct = true)
         }
+        "discord_membre_timeout", "discord_membre_expulser", "discord_membre_bannir", "discord_membre_pseudo" -> {
+            val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
+            val m = Discord.trouverMembre(app, gid, a.optString("membre")) ?: return ToolResult("Membre « ${a.optString("membre")} » introuvable sur « $gnom ».")
+            val u = m.optJSONObject("user") ?: JSONObject()
+            val uid = u.optString("id")
+            val pseudo = m.optString("nick").ifBlank { u.optString("global_name").ifBlank { u.optString("username").ifBlank { uid } } }
+            if (uid == g.optString("owner_id")) return ToolResult("Action refusée : le propriétaire du serveur ne peut pas être modéré par ce bot.")
+            if (uid == Discord.moi(app).optString("id")) return ToolResult("Action refusée : le bot ne peut pas se modérer lui-même.")
+            val raison = a.optString("raison").trim().ifBlank { "Action demandée depuis Jarvis" }
+            when (name) {
+                "discord_membre_timeout" -> {
+                    val retirer = a.optString("action").lowercase().startsWith("retir") || a.optString("duree_minutes").toIntOrNull() == 0
+                    if (retirer) {
+                        if (!confirm("Retirer le timeout de $pseudo sur « $gnom » ?", true)) return ToolResult("Action annulée.")
+                        Discord.timeoutMembre(app, gid, uid, null, raison)
+                        ToolResult("Timeout retiré pour $pseudo sur « $gnom ».", direct = true)
+                    } else {
+                        val minutes = a.optString("duree_minutes").toIntOrNull() ?: return ToolResult("Précise une durée en minutes (1 à 40 320, soit 28 jours maximum).")
+                        if (minutes !in 1..40320) return ToolResult("Durée invalide : un timeout Discord est limité à 28 jours (40 320 minutes).")
+                        val fin = java.time.Instant.now().plusSeconds(minutes * 60L).toString()
+                        if (!confirm("Appliquer un timeout de $minutes minute(s) à $pseudo sur « $gnom » ?\nRaison : $raison", true)) return ToolResult("Action annulée.")
+                        Discord.timeoutMembre(app, gid, uid, fin, raison)
+                        ToolResult("Timeout appliqué à $pseudo jusqu'au $fin.", direct = true)
+                    }
+                }
+                "discord_membre_expulser" -> {
+                    if (!confirm("Expulser $pseudo du serveur « $gnom » ? La personne pourra revenir avec une invitation.\nRaison : $raison", true)) return ToolResult("Expulsion annulée.")
+                    Discord.expulserMembre(app, gid, uid, raison)
+                    ToolResult("$pseudo a été expulsé de « $gnom ».", direct = true)
+                }
+                "discord_membre_bannir" -> {
+                    val heures = a.optString("supprimer_messages_heures").toIntOrNull() ?: 0
+                    if (heures !in 0..168) return ToolResult("La suppression de messages doit être comprise entre 0 et 168 heures.")
+                    if (!confirm("Bannir définitivement $pseudo du serveur « $gnom » ?\nSuppression des messages des $heures dernière(s) heure(s).\nRaison : $raison", true)) return ToolResult("Bannissement annulé.")
+                    Discord.bannirMembre(app, gid, uid, raison, heures * 3600)
+                    ToolResult("$pseudo a été banni de « $gnom ».", direct = true)
+                }
+                else -> {
+                    val nouveau = a.optString("pseudo").trim()
+                    if (nouveau.length > 32) return ToolResult("Le pseudo ne peut pas dépasser 32 caractères.")
+                    if (!confirm("Changer le pseudo de $pseudo en « ${nouveau.ifBlank { "(réinitialiser)" }} » sur « $gnom » ?", true)) return ToolResult("Modification annulée.")
+                    Discord.modifierPseudoMembre(app, gid, uid, nouveau)
+                    ToolResult("Pseudo de $pseudo mis à jour sur « $gnom ».", direct = true)
+                }
+            }
+        }
+
         "discord_role_attribuer" -> {
             val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
             val role = Discord.trouverRole(app, gid, a.optString("role")) ?: return ToolResult(Discord.introuvable("rôle", a.optString("role"), gnom, Discord.roles(app, gid)))
