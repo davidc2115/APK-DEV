@@ -290,14 +290,21 @@ object Rendu {
     /** Données d'un rapport d'intervention (modèle « rapport »). */
     fun interventionCtx(d: SocieteData, c: Client, s: Site, i: Intervention): Ctx {
         val mes = MesuresSeries.analyser(i.mesures)
+        val parOnduleur = MesuresSeries.parOnduleur(i.mesures)
         val actions = ListesRapport.elements(i.actions).map { mapOf("action" to it) }
         val pieces = ListesRapport.elements(i.pieces).map { mapOf("piece" to it) }
-        val series = mes.series.map { mapOf("serie" to "Série ${it.numero}", "valeur" to it.valeur) }
+        // En présence de blocs numérotés, chaque onduleur possède ses propres séries 1..N.
+        val series = if (parOnduleur.isEmpty()) mes.series.map { mapOf("serie" to "Série ${it.numero}", "valeur" to it.valeur) } else emptyList()
         val paires = mes.series.chunked(2).map { p ->
             mapOf("serie_a" to "Série ${p[0].numero}", "valeur_a" to p[0].valeur,
                 "serie_b" to (p.getOrNull(1)?.let { "Série ${it.numero}" } ?: ""), "valeur_b" to (p.getOrNull(1)?.valeur ?: ""))
         }
-        val autres = mes.autres.map { mapOf("mesure" to it) }
+        val groupesOnduleurs = parOnduleur.map { (nom, resultat) ->
+            val details = resultat.series.map { "- 🔌 Série ${it.numero} : ${it.valeur}" } +
+                resultat.autres.map { "- 🌦️ ${it}" }
+            mapOf("onduleur" to nom, "details" to details.joinToString("\\n"))
+        }
+        val autres = (if (parOnduleur.isEmpty()) mes.autres else emptyList()).map { mapOf("mesure" to it) }
         fun image(chemin: String) = "![[${i.id}-${chemin.substringAfterLast('/')}]]"
         val avant = i.photosAvant.map { mapOf("photo" to image(it)) }
         val apres = i.photosApres.map { mapOf("photo" to image(it)) }
@@ -309,14 +316,14 @@ object Rendu {
             "statut" to statutIntervention(i.statut),
             "adresse" to s.adresse, "onduleur" to i.onduleurs.ifBlank { s.onduleur }, "onduleurs" to i.onduleurs.ifBlank { s.onduleur }.replace("\n", "<br>"), "kwc" to (if (s.kwc > 0) nombre(s.kwc) else ""),
             "description" to Fidelite.sansMeta(i.description), "diagnostic" to Fidelite.sansMeta(i.diagnostic),
-            "a_actions" to drapeau(actions), "a_pieces" to drapeau(pieces), "a_series" to drapeau(series),
+            "a_actions" to drapeau(actions), "a_pieces" to drapeau(pieces), "a_series" to drapeau(series), "a_groupes_onduleurs" to drapeau(groupesOnduleurs),
             "a_mesures" to drapeau(autres), "a_photos_avant" to drapeau(avant), "a_photos_apres" to drapeau(apres),
             "nb_series" to (if (series.isEmpty()) "" else series.size.toString()),
             "prochaine_maintenance" to (if (i.prochaineMaintenance.isBlank()) "" else dateFr(i.prochaineMaintenance)),
             "notes" to Fidelite.sansMeta(i.notes),
             "signature" to (if (i.signature.isBlank()) "" else image(i.signature))
         )
-        return Ctx(vars, mapOf("actions" to actions, "pieces" to pieces, "series" to series, "series_paires" to paires,
+        return Ctx(vars, mapOf("actions" to actions, "pieces" to pieces, "series" to series, "series_paires" to paires, "groupes_onduleurs" to groupesOnduleurs,
             "mesures" to autres, "photos_avant" to avant, "photos_apres" to apres))
     }
 
