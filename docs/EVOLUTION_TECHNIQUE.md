@@ -109,4 +109,5 @@ C'est une mesure de sécurité transitoire : elle peut temporairement retirer l'
 - Les formulations « lance une musique » et « lance la musique » sont reconnues par le routeur média ; un test unitaire couvre explicitement la formulation avec « une ».
 - La transcription voiture est bornée à 45 secondes et la réponse IA à 90 secondes afin qu'une requête distante lente ne garde pas indéfiniment la session de conversation.
 - Les commandes de lecture continuent de cibler une session média externe et n'envoient pas de touche média générique susceptible d'être captée par la session JARVIS.
+- Le lecteur `CarAudioRecord` reçoit maintenant des blocs de 512 octets maximum, conformément au contrat de l'API AndroidX Car ; les fragments sont réassemblés ensuite en trames PCM de 640 octets. Le focus audio doit être accordé avant d'ouvrir le micro voiture, et une perte de focus arrête l'enregistrement proprement avant le repli micro téléphone.
 - À valider sur le véhicule : microphone intégré, commande vocale « lance une musique », reprise de lecture, bouton Play/Pause, puis une seconde demande après une réponse longue.
