@@ -256,6 +256,12 @@ Mise en forme Markdown obligatoire :
 ## 🔩 Pièces remplacées
 {{#pieces}}- 🔹 {{piece}}
 {{/pieces}}{{/a_pieces}}
+{{#a_groupes_onduleurs}}
+## ⚡ Mesures par onduleur
+{{#groupes_onduleurs}}
+### 🔌 {{onduleur}}
+{{details}}
+{{/groupes_onduleurs}}{{/a_groupes_onduleurs}}
 {{#a_series}}
 ## 📊 Mesures par série
 | Série | Valeur | Série | Valeur |
