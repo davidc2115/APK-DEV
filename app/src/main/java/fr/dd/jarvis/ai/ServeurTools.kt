@@ -714,7 +714,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
     private suspend fun haConfig(a: JSONObject): ToolResult {
         val act = a.optString("action").lowercase()
         return when (act) {
-            "journal" -> ToolResult("```\n" + Serveur.ha(app, "GET", "/api/error_log").takeLast(5000) + "\n```")
+            "journal" -> ToolResult(runCatching { "```\\n" + Serveur.ha(app, "GET", "/api/error_log").takeLast(5000) + "\\n```" }.getOrElse { "API Home Assistant indisponible : ${it.message?.take(180)}.\\n\\n" + HaSur.diagnostic(app) }, direct = true)
             "recharger" -> {
                 val q = a.optString("quoi").ifBlank { "all" }.lowercase()
                 val (d, s) = when (q) {
