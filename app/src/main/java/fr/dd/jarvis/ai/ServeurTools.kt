@@ -304,18 +304,20 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
             }
             "ssh_fichier" -> { ssh(); sshFichier(a) }
             "serveur_diagnostic" -> {
-                ssh()
                 val cible = a.optString("cible").trim().ifBlank { "complet" }
                 val lignes = a.optString("lignes").toIntOrNull() ?: 80
-                val sudo = app.store.sshUser.value.trim() != "root" && app.store.sshPass.value.isNotBlank()
-                val commande = ServeurDiagnostic.commande(cible, app.store.plexToken.value, lignes, sudo)
-                val r = Serveur.exec(app, commande, 120)
-                val sortieHote = sortie(r, 8500)
+                val sortieHote = if (!Serveur.sshConfigure(app)) {
+                    "Connexion SSH Debian non configurée : diagnostic hôte ignoré."
+                } else runCatching {
+                    val sudo = app.store.sshUser.value.trim() != "root" && app.store.sshPass.value.isNotBlank()
+                    val commande = ServeurDiagnostic.commande(cible, app.store.plexToken.value, lignes, sudo)
+                    sortie(Serveur.exec(app, commande, 120), 8500)
+                }.getOrElse { "Diagnostic SSH Debian impossible : ${it.message?.take(220) ?: it.javaClass.simpleName}." }
                 val ha = if (cible.equals("complet", true) || cible.equals("home assistant", true) || cible.equals("ha", true)) {
                     "\n\n## Home Assistant — contrôle API (instance configurée)\n" + ServeurDiagnostic.resumeHomeAssistant(app)
                 } else ""
                 ToolResult("# 🧰 Diagnostic approfondi — ${cible}\n\n```\n" + sortieHote + "\n```" + ha +
-                    "\n\n_Contrôle SSH en lecture seule : aucun service, conteneur, fichier, volume ou réglage n'a été modifié._", direct = true)
+                    "\n\n_Contrôle SSH en lecture seule : aucune modification n’a été effectuée._", direct = true)
             }
             "serveur_scan_ports" -> {
                 val hote = a.optString("hote").trim().ifBlank { app.store.sshHost.value.trim() }
