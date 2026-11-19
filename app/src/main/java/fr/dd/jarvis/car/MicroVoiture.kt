@@ -128,6 +128,12 @@ class MicroVoiture(private val ctx: CarContext) {
 
     /** Bloquant : à appeler hors du fil principal. [attenteMs] = délai pour commencer à parler. */
     fun ecouter(attenteMs: Long, maxMs: Long = 15_000): Ecoute {
+        // CarAudioRecord et AudioRecord nécessitent tous deux l'autorisation runtime RECORD_AUDIO.
+        // Un lancement depuis Android Auto ne peut pas demander cette autorisation à l'écran.
+        if (ctx.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            telephone = false
+            return Ecoute.Erreur("autorisation du microphone refusée pour JARVIS ; ouvre JARVIS sur le téléphone et autorise le microphone dans Android")
+        }
         val am = ctx.getSystemService(AudioManager::class.java)
         var voiture: CarAudioRecord? = null
         val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
