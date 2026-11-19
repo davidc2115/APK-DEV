@@ -24,20 +24,20 @@ internal object ServeurDiagnostic {
         val dockerSection = if (dockerFiltre.isBlank()) "" else """
             echo
             echo '== Docker : conteneurs Plex / Home Assistant =='
-            $rootCmddocker ps -a --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Ports}}' 2>&1
+            ${rootCmd}docker ps -a --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Ports}}' 2>&1
             for c in ${'$'}(docker ps -a --format '{{.Names}}|{{.Image}}' | awk -F'|' 'tolower(${'$'}1 FS ${'$'}2) ~ /$dockerFiltre/ {print ${'$'}1}' | head -8); do
               echo
               echo "--- Conteneur : ${'$'}c ---"
-              $rootCmddocker inspect -f 'état={{.State.Status}} code={{.State.ExitCode}} erreur={{.State.Error}} OOM={{.State.OOMKilled}} démarré={{.State.StartedAt}} redémarrages={{.RestartCount}} relance={{.HostConfig.RestartPolicy.Name}}{{if .State.Health}} santé={{.State.Health.Status}}{{else}} santé=non-configurée{{end}}' "${'$'}c" 2>&1
-              $rootCmddocker stats --no-stream --format 'CPU={{.CPUPerc}} mémoire={{.MemUsage}} réseau={{.NetIO}} disque={{.BlockIO}}' "${'$'}c" 2>&1
+              ${rootCmd}docker inspect -f 'état={{.State.Status}} code={{.State.ExitCode}} erreur={{.State.Error}} OOM={{.State.OOMKilled}} démarré={{.State.StartedAt}} redémarrages={{.RestartCount}} relance={{.HostConfig.RestartPolicy.Name}}{{if .State.Health}} santé={{.State.Health.Status}}{{else}} santé=non-configurée{{end}}' "${'$'}c" 2>&1
+              ${rootCmd}docker stats --no-stream --format 'CPU={{.CPUPerc}} mémoire={{.MemUsage}} réseau={{.NetIO}} disque={{.BlockIO}}' "${'$'}c" 2>&1
               echo 'Volumes (hôte -> conteneur) :'
-              $rootCmddocker inspect -f '{{range .Mounts}}{{println .Source "->" .Destination "rw=" .RW}}{{end}}' "${'$'}c" 2>&1
+              ${rootCmd}docker inspect -f '{{range .Mounts}}{{println .Source "->" .Destination "rw=" .RW}}{{end}}' "${'$'}c" 2>&1
               echo 'Erreurs récentes :'
-              $rootCmddocker logs --tail $n "${'$'}c" 2>&1 | grep -iE 'error|exception|failed|fatal|warning|timeout|database|corrupt|permission|no space|oom|unavailable' | tail -15
+              ${rootCmd}docker logs --tail $n "${'$'}c" 2>&1 | grep -iE 'error|exception|failed|fatal|warning|timeout|database|corrupt|permission|no space|oom|unavailable' | tail -15
             done
             echo
             echo '== Espace Docker =='
-            $rootCmddocker system df 2>&1
+            ${rootCmd}docker system df 2>&1
         """.trimIndent()
         val plexLibrarySection = if (tokenHeader.isNotBlank()) """
             PLEX_LIB=${'$'}(curl -sS --connect-timeout 2 --max-time 8 $tokenHeader http://127.0.0.1:32400/library/sections 2>&1)
@@ -60,17 +60,17 @@ internal object ServeurDiagnostic {
         val sshSection = if (cible in setOf("complet", "debian", "ssh")) """
             echo
             echo '== SSH : service, écoute et configuration effective =='
-            ($rootCmdsystemctl is-active ssh 2>/dev/null || systemctl is-active sshd 2>/dev/null || true)
-            ($rootCmdss -lntp 2>/dev/null | grep -E '(:22|sshd)' || true)
+            (${rootCmd}systemctl is-active ssh 2>/dev/null || systemctl is-active sshd 2>/dev/null || true)
+            (${rootCmd}ss -lntp 2>/dev/null | grep -E '(:22|sshd)' || true)
             if command -v sshd >/dev/null 2>&1; then
-              $rootCmdsshd -T 2>/dev/null | grep -E '^(port|listenaddress|passwordauthentication|pubkeyauthentication|permitrootlogin|maxauthtries|allowusers|denyusers) ' | head -20
+              ${rootCmd}sshd -T 2>/dev/null | grep -E '^(port|listenaddress|passwordauthentication|pubkeyauthentication|permitrootlogin|maxauthtries|allowusers|denyusers) ' | head -20
             else
               echo 'Binaire sshd non trouvé dans le PATH.'
             fi
             echo 'Derniers événements SSH (identifiants et adresses peuvent apparaître) :'
-            ($rootCmdjournalctl -u ssh -u sshd -n 25 --no-pager 2>/dev/null || true) | tail -25
+            (${rootCmd}journalctl -u ssh -u sshd -n 25 --no-pager 2>/dev/null || true) | tail -25
             echo 'Pare-feu UFW :'
-            ($rootCmdufw status 2>/dev/null || echo 'UFW absent ou droits insuffisants') | head -20
+            (${rootCmd}ufw status 2>/dev/null || echo 'UFW absent ou droits insuffisants') | head -20
         """.trimIndent() else ""
         return """
             set +e
