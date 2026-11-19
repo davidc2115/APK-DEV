@@ -150,8 +150,11 @@ object MesuresSeries {
             val ligne = if (uniteLigne == null) ligneBrute else {
                 val sansUnite = Regex("""(?i)(\b\d{1,3}\s*$SERIE\s*[^\d\n]{0,20}?\d+(?:[.,]\d+)?)(?=\s*(?:[,;.)]|\(|$))""")
                 sansUnite.replace(ligneBrute) { m ->
-                    if (Regex("""(?i)\b(kV|mV|mA|volts?|V|A|amp(?:ères?)?|W|kW|Ω|ohms?|MΩ)\b""").containsMatchIn(m.value))
-                        m.value else m.value + " " + uniteLigne
+                    // Le texte a déjà été normalisé sans accents : « à » devient « a ».
+                    // Tester la présence de l'unité sur tout le groupe confondait ce « a »
+                    // avec l'unité ampère « A » et supprimait la propagation des volts.
+                    // Le motif ne capture que les groupes dont l'unité manque après la valeur.
+                    m.value + " " + uniteLigne
                 }
             }
             var reste = ligne
