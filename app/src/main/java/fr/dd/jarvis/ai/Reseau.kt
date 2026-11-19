@@ -194,9 +194,9 @@ object Reseau {
         dns.submit<String> { InetAddress.getByName(ip).canonicalHostName }.get(900, TimeUnit.MILLISECONDS).takeIf { it != ip }.orEmpty()
     }.getOrDefault("")
 
-    // Le scan crée une coroutine par IP, mais seules 32 sondes bloquantes tournent en parallèle.
+    // Le scan crée une coroutine par IP, mais seules 64 sondes bloquantes tournent en parallèle.
     // 160 threads provoquaient une pression inutile sur le CPU, les sockets et la batterie.
-    private val pool = Executors.newFixedThreadPool(32).asCoroutineDispatcher()
+    private val pool = Executors.newFixedThreadPool(64).asCoroutineDispatcher()
     private val ESSENTIELS = listOf(631, 9100, 80, 443, 515, 8611, 22, 445, 8080)
     private val RAPIDES = listOf(80, 443, 22, 445, 62078, 8009, 5353, 8080)
 
