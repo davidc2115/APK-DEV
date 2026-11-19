@@ -707,4 +707,5 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 ToolResult("⛔ Fichiers YAML Home Assistant non accessibles pour le moment : le SSH configuré cible Debian/Jarvis et non la machine HA. Les fonctions API restent disponibles ; un profil SSH HA séparé sera nécessaire pour réactiver ces opérations.")
             else -> ToolResult("Action inconnue : $act")
         }
-    }}
+    }
+}
