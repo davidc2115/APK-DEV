@@ -86,12 +86,258 @@ internal object ServeurDiagnostic {
             (${rootCmd}grep -hEi 'Failed password|Invalid user|Accepted (password|publickey)|authentication failure' /var/log/auth.log /var/log/secure 2>/dev/null || true) | tail -20
             echo 'Fail2ban :'
             FAIL2BAN_JAILS=$(${rootCmd}fail2ban-client status 2>/dev/null | sed -n 's/.*Jail list:[[:space:]]*//p' | tr ',' ' ')
-            if [ -n "$FAIL2BAN_JAILS" ]; then
-              echo "Fail2ban : actif — jails : $(printf '%s' "$FAIL2BAN_JAILS" | xargs)"
-              for jail in $FAIL2BAN_JAILS; do
-                [ -n "$jail" ] || continue
-                echo "--- Fail2ban : $jail ---"
-                ${rootCmd}fail2ban-client status "$jail" 2>/dev/null | grep -E 'Currently failed|Total failed|Currently banned|Total banned' | head -8
+            if [ -n "${'
+              echo 'Fail2ban absent, inactif, sans jail ou droits insuffisants.'
+            fi
+            echo 'Pare-feu UFW :'
+            (${rootCmd}ufw status 2>/dev/null || echo 'UFW absent ou droits insuffisants') | head -20
+        """.trimIndent() else ""
+        return """
+            set +e
+            echo '== Hôte Debian =='
+            hostname
+            date -Is 2>/dev/null
+            uptime
+            echo
+            echo '== Ressources système =='
+            free -h 2>&1 | head -3
+            df -hT 2>&1 | head -12
+            df -i 2>&1 | head -12
+            echo
+            echo '== Réseau et ports utiles =='
+            (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
+            $sshSection
+            $dockerSection
+            $plexSection
+            echo
+            echo '== Processus les plus consommateurs =='
+            ps -eo pid,comm,%cpu,%mem,rss --sort=-%cpu 2>/dev/null | head -8
+            echo
+            echo 'Diagnostic terminé (aucune modification effectuée).'
+        """.trimIndent()
+    }
+
+    fun resumeHomeAssistant(app: fr.dd.jarvis.JarvisApp): String {
+        if (!Serveur.haConfigure(app)) return "API Home Assistant non configurée : contrôle API ignoré."
+        return runCatching {
+            val states = org.json.JSONArray(Serveur.ha(app, "GET", "/api/states"))
+            val config = runCatching { org.json.JSONObject(Serveur.ha(app, "GET", "/api/config")) }.getOrNull()
+            HomeAssistantDiagnosticResume.formater(states, config?.optString("version").orEmpty())
+        }.getOrElse { "API Home Assistant : échec — ${it.message?.take(220) ?: it.javaClass.simpleName}." }
+    }
+}
+}FAIL2BAN_JAILS" ]; then
+              echo "Fail2ban : actif — jails : $(printf '%s' "${'
+              echo 'Fail2ban absent, inactif, sans jail ou droits insuffisants.'
+            fi
+            echo 'Pare-feu UFW :'
+            (${rootCmd}ufw status 2>/dev/null || echo 'UFW absent ou droits insuffisants') | head -20
+        """.trimIndent() else ""
+        return """
+            set +e
+            echo '== Hôte Debian =='
+            hostname
+            date -Is 2>/dev/null
+            uptime
+            echo
+            echo '== Ressources système =='
+            free -h 2>&1 | head -3
+            df -hT 2>&1 | head -12
+            df -i 2>&1 | head -12
+            echo
+            echo '== Réseau et ports utiles =='
+            (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
+            $sshSection
+            $dockerSection
+            $plexSection
+            echo
+            echo '== Processus les plus consommateurs =='
+            ps -eo pid,comm,%cpu,%mem,rss --sort=-%cpu 2>/dev/null | head -8
+            echo
+            echo 'Diagnostic terminé (aucune modification effectuée).'
+        """.trimIndent()
+    }
+
+    fun resumeHomeAssistant(app: fr.dd.jarvis.JarvisApp): String {
+        if (!Serveur.haConfigure(app)) return "API Home Assistant non configurée : contrôle API ignoré."
+        return runCatching {
+            val states = org.json.JSONArray(Serveur.ha(app, "GET", "/api/states"))
+            val config = runCatching { org.json.JSONObject(Serveur.ha(app, "GET", "/api/config")) }.getOrNull()
+            HomeAssistantDiagnosticResume.formater(states, config?.optString("version").orEmpty())
+        }.getOrElse { "API Home Assistant : échec — ${it.message?.take(220) ?: it.javaClass.simpleName}." }
+    }
+}
+}FAIL2BAN_JAILS" | xargs)"
+              for jail in ${'
+              echo 'Fail2ban absent, inactif, sans jail ou droits insuffisants.'
+            fi
+            echo 'Pare-feu UFW :'
+            (${rootCmd}ufw status 2>/dev/null || echo 'UFW absent ou droits insuffisants') | head -20
+        """.trimIndent() else ""
+        return """
+            set +e
+            echo '== Hôte Debian =='
+            hostname
+            date -Is 2>/dev/null
+            uptime
+            echo
+            echo '== Ressources système =='
+            free -h 2>&1 | head -3
+            df -hT 2>&1 | head -12
+            df -i 2>&1 | head -12
+            echo
+            echo '== Réseau et ports utiles =='
+            (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
+            $sshSection
+            $dockerSection
+            $plexSection
+            echo
+            echo '== Processus les plus consommateurs =='
+            ps -eo pid,comm,%cpu,%mem,rss --sort=-%cpu 2>/dev/null | head -8
+            echo
+            echo 'Diagnostic terminé (aucune modification effectuée).'
+        """.trimIndent()
+    }
+
+    fun resumeHomeAssistant(app: fr.dd.jarvis.JarvisApp): String {
+        if (!Serveur.haConfigure(app)) return "API Home Assistant non configurée : contrôle API ignoré."
+        return runCatching {
+            val states = org.json.JSONArray(Serveur.ha(app, "GET", "/api/states"))
+            val config = runCatching { org.json.JSONObject(Serveur.ha(app, "GET", "/api/config")) }.getOrNull()
+            HomeAssistantDiagnosticResume.formater(states, config?.optString("version").orEmpty())
+        }.getOrElse { "API Home Assistant : échec — ${it.message?.take(220) ?: it.javaClass.simpleName}." }
+    }
+}
+}FAIL2BAN_JAILS; do
+                [ -n "${'
+              echo 'Fail2ban absent, inactif, sans jail ou droits insuffisants.'
+            fi
+            echo 'Pare-feu UFW :'
+            (${rootCmd}ufw status 2>/dev/null || echo 'UFW absent ou droits insuffisants') | head -20
+        """.trimIndent() else ""
+        return """
+            set +e
+            echo '== Hôte Debian =='
+            hostname
+            date -Is 2>/dev/null
+            uptime
+            echo
+            echo '== Ressources système =='
+            free -h 2>&1 | head -3
+            df -hT 2>&1 | head -12
+            df -i 2>&1 | head -12
+            echo
+            echo '== Réseau et ports utiles =='
+            (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
+            $sshSection
+            $dockerSection
+            $plexSection
+            echo
+            echo '== Processus les plus consommateurs =='
+            ps -eo pid,comm,%cpu,%mem,rss --sort=-%cpu 2>/dev/null | head -8
+            echo
+            echo 'Diagnostic terminé (aucune modification effectuée).'
+        """.trimIndent()
+    }
+
+    fun resumeHomeAssistant(app: fr.dd.jarvis.JarvisApp): String {
+        if (!Serveur.haConfigure(app)) return "API Home Assistant non configurée : contrôle API ignoré."
+        return runCatching {
+            val states = org.json.JSONArray(Serveur.ha(app, "GET", "/api/states"))
+            val config = runCatching { org.json.JSONObject(Serveur.ha(app, "GET", "/api/config")) }.getOrNull()
+            HomeAssistantDiagnosticResume.formater(states, config?.optString("version").orEmpty())
+        }.getOrElse { "API Home Assistant : échec — ${it.message?.take(220) ?: it.javaClass.simpleName}." }
+    }
+}
+}jail" ] || continue
+                echo "--- Fail2ban : ${'
+              echo 'Fail2ban absent, inactif, sans jail ou droits insuffisants.'
+            fi
+            echo 'Pare-feu UFW :'
+            (${rootCmd}ufw status 2>/dev/null || echo 'UFW absent ou droits insuffisants') | head -20
+        """.trimIndent() else ""
+        return """
+            set +e
+            echo '== Hôte Debian =='
+            hostname
+            date -Is 2>/dev/null
+            uptime
+            echo
+            echo '== Ressources système =='
+            free -h 2>&1 | head -3
+            df -hT 2>&1 | head -12
+            df -i 2>&1 | head -12
+            echo
+            echo '== Réseau et ports utiles =='
+            (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
+            $sshSection
+            $dockerSection
+            $plexSection
+            echo
+            echo '== Processus les plus consommateurs =='
+            ps -eo pid,comm,%cpu,%mem,rss --sort=-%cpu 2>/dev/null | head -8
+            echo
+            echo 'Diagnostic terminé (aucune modification effectuée).'
+        """.trimIndent()
+    }
+
+    fun resumeHomeAssistant(app: fr.dd.jarvis.JarvisApp): String {
+        if (!Serveur.haConfigure(app)) return "API Home Assistant non configurée : contrôle API ignoré."
+        return runCatching {
+            val states = org.json.JSONArray(Serveur.ha(app, "GET", "/api/states"))
+            val config = runCatching { org.json.JSONObject(Serveur.ha(app, "GET", "/api/config")) }.getOrNull()
+            HomeAssistantDiagnosticResume.formater(states, config?.optString("version").orEmpty())
+        }.getOrElse { "API Home Assistant : échec — ${it.message?.take(220) ?: it.javaClass.simpleName}." }
+    }
+}
+}jail ---"
+                ${rootCmd}fail2ban-client status "${'
+              echo 'Fail2ban absent, inactif, sans jail ou droits insuffisants.'
+            fi
+            echo 'Pare-feu UFW :'
+            (${rootCmd}ufw status 2>/dev/null || echo 'UFW absent ou droits insuffisants') | head -20
+        """.trimIndent() else ""
+        return """
+            set +e
+            echo '== Hôte Debian =='
+            hostname
+            date -Is 2>/dev/null
+            uptime
+            echo
+            echo '== Ressources système =='
+            free -h 2>&1 | head -3
+            df -hT 2>&1 | head -12
+            df -i 2>&1 | head -12
+            echo
+            echo '== Réseau et ports utiles =='
+            (ip -brief address 2>/dev/null || hostname -I 2>/dev/null)
+            (ss -lnt 2>/dev/null | grep -E ':(22|80|443|8123|32400)\b' || true)
+            $sshSection
+            $dockerSection
+            $plexSection
+            echo
+            echo '== Processus les plus consommateurs =='
+            ps -eo pid,comm,%cpu,%mem,rss --sort=-%cpu 2>/dev/null | head -8
+            echo
+            echo 'Diagnostic terminé (aucune modification effectuée).'
+        """.trimIndent()
+    }
+
+    fun resumeHomeAssistant(app: fr.dd.jarvis.JarvisApp): String {
+        if (!Serveur.haConfigure(app)) return "API Home Assistant non configurée : contrôle API ignoré."
+        return runCatching {
+            val states = org.json.JSONArray(Serveur.ha(app, "GET", "/api/states"))
+            val config = runCatching { org.json.JSONObject(Serveur.ha(app, "GET", "/api/config")) }.getOrNull()
+            HomeAssistantDiagnosticResume.formater(states, config?.optString("version").orEmpty())
+        }.getOrElse { "API Home Assistant : échec — ${it.message?.take(220) ?: it.javaClass.simpleName}." }
+    }
+}
+}jail" 2>/dev/null | grep -E 'Currently failed|Total failed|Currently banned|Total banned' | head -8
               done
             else
               echo 'Fail2ban absent, inactif, sans jail ou droits insuffisants.'
