@@ -43,6 +43,16 @@ class ServeurDiagnosticTest {
     }
 
     @Test
+    fun diagnosticDiscordInspectePm2SansAfficherLesSecrets() {
+        val script = ServeurDiagnostic.commande("discord", "", 40)
+        assertTrue(script.contains("pm2 jlist"))
+        assertTrue(script.contains("pm2 logs"))
+        assertTrue(script.contains("métadonnées non sensibles"))
+        assertFalse(script.contains("pm2 restart"))
+        assertFalse(script.contains("pm2 stop"))
+    }
+
+    @Test
     fun limitesEtCibleInconnueSontControlees() {
         assertTrue(ServeurDiagnostic.commande("debian", "", 1).contains("--tail 20"))
         assertTrue(ServeurDiagnostic.commande("debian", "", 500).contains("--tail 200"))
