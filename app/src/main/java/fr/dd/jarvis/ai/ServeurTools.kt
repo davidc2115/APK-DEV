@@ -168,6 +168,9 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
     /** ssh_fichier : lecture, recherche, modifications ciblées, réécriture et restauration (serveur ou conteneur Docker). */
     private suspend fun sshFichier(a: JSONObject): ToolResult {
         val ct = a.optString("conteneur").trim()
+        if (Regex("home.?assistant|\\bhass\\b", RegexOption.IGNORE_CASE).containsMatchIn(ct)) {
+            return ToolResult("⛔ Accès aux fichiers du conteneur Home Assistant bloqué depuis le SSH Debian. Le profil SSH configuré cible Debian/Jarvis, pas la machine HA. Les opérations YAML nécessitent un profil SSH HA indépendant.")
+        }
         val p = a.optString("chemin").trim().let { if (ct.isBlank() && it.isNotBlank()) Serveur.absolu(app, it) else it }
         if (p.isBlank()) return ToolResult("Indique « chemin » (fichier, ou dossier pour lister).")
         val ou = if (ct.isBlank()) "sur le serveur" else "dans le conteneur $ct"
@@ -268,6 +271,11 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 if (cible?.jump == true) ssh()
                 val cmd = a.optString("commande").trim()
                 if (cmd.isBlank()) return ToolResult("Commande vide.")
+                // Aucun accès Docker/CLI HA via le SSH générique : il cible exclusivement Debian/Jarvis.
+                if (cible == null && Regex("(?:docker|docker-compose|docker\\s+compose|ha\\s+core)\\b", RegexOption.IGNORE_CASE).containsMatchIn(cmd) &&
+                    Regex("home.?assistant|\\bhass\\b|127\\.0\\.0\\.1:8123|localhost:8123", RegexOption.IGNORE_CASE).containsMatchIn(cmd)) {
+                    return ToolResult("⛔ Commande refusée : elle cible Home Assistant depuis le SSH Debian. Les commandes système HA doivent passer par l'API HA ou par un futur profil SSH HA indépendant.")
+                }
                 // Redémarrage / mise à jour de Home Assistant « à la main » : remplacés par les versions sûres.
                 if (cible == null) runCatching { HaSur.interception(cmd, HaSur.conteneur(app)?.nom) }.getOrNull()?.let { quoi ->
                     return if (quoi == "redemarrer") {
@@ -289,7 +297,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
             "ssh_fichier" -> { ssh(); sshFichier(a) }
             "serveur_diagnostic" -> {
                 ssh()
-                val r = Serveur.exec(app, "uptime; echo; free -h | head -2; echo; df -h / | tail -1; echo; docker ps -a --format 'table {{.Names}}\\t{{.Status}}\\t{{.Image}}' 2>&1 | head -20; echo; n=\$(docker ps -a --format '{{.Names}}\\t{{.Image}}' 2>/dev/null | grep -i home-assistant | head -1 | cut -f1); [ -n \"\$n\" ] && { echo \"== logs \$n ==\"; docker logs --tail 25 \$n 2>&1; }; echo; echo \"== Home Assistant (local, port 8123) ==\"; curl -s -o /dev/null -m 5 -w 'HTTP %{http_code} en %{time_total}s\\n' http://localhost:8123/ 2>&1 || echo \"injoignable en local sur le serveur (curl a échoué)\"", 60)
+                val r = Serveur.exec(app, "echo '== Debian / Jarvis uniquement =='; hostname; uptime; echo; free -h | head -2; echo; df -h / | tail -1; echo; docker ps -a --format 'table {{.Names}}\\\\t{{.Status}}\\\\t{{.Image}}' 2>&1 | head -20", 60)
                 ToolResult("# 🖥️ Serveur\n```\n" + sortie(r, 6000) + "\n```" +
                     "\n\n_Le test « Home Assistant (local) » est fait DEPUIS le serveur Debian : s'il répond en local mais pas depuis le téléphone, le problème est le réseau entre le téléphone et le serveur (ou l'adresse/port dans Réglages › Maison › Serveur), pas Home Assistant lui-même._")
             }
