@@ -189,6 +189,8 @@ class KeyRing(private val keys: () -> List<String>) {
         private val ATTENTE = Regex("(?:try again|retry) in ((?:\\d+h)?(?:\\d+m(?!s))?(?:\\d+(?:\\.\\d+)?s)?(?:\\d+ms)?)", RegexOption.IGNORE_CASE)
         private val DELAI_JSON = Regex("\"retryDelay\"\\s*:\\s*\"(\\d+(?:\\.\\d+)?)s\"")
         private val JOUR = Regex("per ?day|PerDay|\\(TPD\\)|\\(RPD\\)|daily", RegexOption.IGNORE_CASE)
+        /** Compte sans solde/crédits : ne pas retenter toutes les minutes comme un simple quota de débit. */
+        private val CREDITS_EPUISES = Regex("no credits remaining|insufficient[_ ]quota|billing[_ ]hard[_ ]limit|insufficient funds|out of credits|credit balance", RegexOption.IGNORE_CASE)
 
         /** Durée (ms) d'une expression « 1h2m3.5s », « 7m30s », « 41.2s », « 450ms ». */
         internal fun duree(t: String): Long {
@@ -223,6 +225,7 @@ class KeyRing(private val keys: () -> List<String>) {
             if (code == 401) return 10 * 60_000L
             if (code == 403) return if (CLE_INVALIDE.containsMatchIn(message)) 6 * 60 * 60_000L else if (cleRefusee(code, message)) 10 * 60_000L else 60_000L
             if (code == 400 && CLE_INVALIDE.containsMatchIn(message)) return 6 * 60 * 60_000L
+            if ((code == 402 || code == 429) && CREDITS_EPUISES.containsMatchIn(message)) return 24 * 60 * 60_000L
             if (code >= 500) return 15_000L
             if (code != 429) return null
             val demande = ATTENTE.find(message)?.groupValues?.get(1)?.let { duree(it) }?.takeIf { it > 0 }
