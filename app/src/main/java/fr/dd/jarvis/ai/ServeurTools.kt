@@ -332,6 +332,10 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 ssh()
                 val code = a.optString("code")
                 if (code.isBlank()) return ToolResult("Script vide.")
+                if (Regex("(?:docker|docker-compose|docker\\s+compose|ha\\s+core)\\b", RegexOption.IGNORE_CASE).containsMatchIn(code) &&
+                    Regex("home.?assistant|\\bhass\\b|127\\.0\\.0\\.1:8123|localhost:8123", RegexOption.IGNORE_CASE).containsMatchIn(code)) {
+                    return ToolResult("⛔ Script refusé : il cible Home Assistant depuis le SSH Debian. Utilise l'API HA ou un profil SSH HA indépendant.")
+                }
                 val py = a.optString("langage").lowercase().startsWith("py")
                 if (!py) Serveur.commandeIncomplete(code)?.let { return ToolResult("⛔ Script incomplet, rien n'a été exécuté : $it. Renvoie le script COMPLET.") }
                 if (!confirm("Exécuter ce script ${if (py) "Python" else "bash"} sur le serveur ${app.store.sshHost.value} ?\n\n" + code.take(900), true)) return ToolResult("Refusé par l'utilisateur.")
