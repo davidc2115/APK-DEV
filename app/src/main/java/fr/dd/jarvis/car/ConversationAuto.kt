@@ -58,7 +58,16 @@ object ConversationAuto {
             premiere = false
             val pcm = when (res) {
                 is Ecoute.Phrase -> res.pcm
-                is Ecoute.Erreur -> { parler(app, "Je n'arrive pas à utiliser le micro."); return }
+                is Ecoute.Erreur -> {
+                    val raison = res.message
+                    val message = when {
+                        raison.contains("autorisation", ignoreCase = true) || raison.contains("permission", ignoreCase = true) ->
+                            "L'accès au microphone de JARVIS n'est pas autorisé. Ouvre JARVIS sur le téléphone, autorise le microphone dans les permissions de l'application, puis relance Android Auto."
+                        else -> "Je n'arrive pas à utiliser le micro : $raison."
+                    }
+                    parler(app, message)
+                    return
+                }
                 else -> return
             }
             ActiviteVoiture.signaler(ActiviteVoiture.Etape.REFLEXION, "…")
