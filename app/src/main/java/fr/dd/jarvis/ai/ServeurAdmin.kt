@@ -136,6 +136,9 @@ class ServeurAdminTools(private val app: JarvisApp, private val confirm: suspend
             trouves.joinToString { "${it.nom} (${it.type})" } + ". Précise lequel (nom exact).")
         val n = (a.optString("lignes").toIntOrNull() ?: 80).coerceIn(10, 400)
         val c = trouves.first()
+        val estHaIdentifie = Regex("home.?assistant|\\bhass\\b", RegexOption.IGNORE_CASE)
+            .containsMatchIn(c.nom + " " + c.image + " " + c.dossier + " " + c.svcCompose + " " + service)
+        if (estHaIdentifie) return ToolResult("⛔ Accès Home Assistant bloqué depuis le SSH Debian : cet outil ne doit ni inspecter ni piloter un conteneur HA sur cet hôte. Utilise l'API Home Assistant ; configure un profil SSH HA distinct pour les opérations système.")
         val sensible = action in setOf("arreter", "redemarrer", "mettre_a_jour", "desactiver", "demarrer")
         val estHa = c.type == "docker" && runCatching { HaSur.conteneur(app)?.nom == c.nom }.getOrDefault(false)
         if (sensible && !confirm("${libelleAction(action)} « ${c.nom} » (${c.type}) sur le serveur ?" + (if (estHa && action != "arreter")
@@ -332,49 +335,13 @@ log "📁 Ancienne configuration conservée dans ${'$'}OLD (à supprimer quand t
 rm -rf "${'$'}T"
 """.trimIndent()
 
-    private suspend fun sauvegarde(a: JSONObject): ToolResult {
-        return when (fr.dd.jarvis.societe.core.normaliser(a.optString("action"))) {
-            "lister", "liste" -> ToolResult("# 💾 Sauvegardes Home Assistant\n```\n" + sortie(Serveur.exec(app, su("bash -c " + q(detection() + "\n" + LISTE)), 120), 7000) + "\n```" +
-                "\nPour restaurer : « restaure la sauvegarde du <date> » (ou « la dernière »).")
-            "etat" -> ToolResult("```\n" + sortie(Serveur.exec(app, su("bash -c " + q(detection() + """
-echo "Conteneur : ${'$'}{C:-introuvable}"; echo "Configuration : ${'$'}{CFG:-introuvable}"
-[ -n "${'$'}C" ] && docker inspect -f 'État : {{.State.Status}} · démarré {{.State.StartedAt}} · redémarrages {{.RestartCount}} · image {{.Config.Image}}' "${'$'}C"
-echo "HTTP local : ${'$'}(curl -s -o /dev/null -w '%{http_code}' -m 5 http://localhost:8123/ || echo injoignable)"
-[ -n "${'$'}CFG" ] && { ls -la "${'$'}CFG" | head -20; du -sh "${'$'}CFG" 2>/dev/null; ls -d "${'$'}CFG".avant-restauration-* 2>/dev/null; }
-[ -n "${'$'}C" ] && { echo "--- erreurs récentes ---"; docker logs --tail 200 "${'$'}C" 2>&1 | grep -iE 'error|exception|failed|critical' | tail -15; }
-""")), 60)) + "\n```")
-            "creer" -> {
-                val nom = a.optString("nom").trim().ifBlank { "Jarvis " + java.time.LocalDateTime.now().withNano(0).toString().replace('T', ' ') }
-                // Home Assistant en marche : sauvegarde officielle ; sinon archive de la configuration.
-                val api = runCatching { Serveur.ha(app, "POST", "/api/services/backup/create", JSONObject()); true }.getOrDefault(false)
-                if (api) return ToolResult("✅ Sauvegarde Home Assistant demandée (format officiel). Elle apparaîtra dans quelques minutes : « liste les sauvegardes Home Assistant ».")
-                if (!confirm("Home Assistant ne répond pas : créer une archive de sa configuration sur le serveur (« $nom ») ?", false)) return ToolResult("Annulé.")
-                val r = Serveur.exec(app, su("bash -c " + q(detection() + "\n[ -n \"\$CFG\" ] || { echo 'Dossier de configuration introuvable'; exit 1; }; mkdir -p \"\$CFG/backups\"; " +
-                    "f=\"\$CFG/backups/ha-config-\$(date +%Y%m%d-%H%M%S).tar.gz\"; tar --exclude=./backups -czf \"\$f\" -C \"\$CFG\" . && du -h \"\$f\"")), 900)
-                ToolResult("```\n" + sortie(r) + "\n```")
-            }
-            "restaurer" -> {
-                val demande = a.optString("sauvegarde").trim().ifBlank { "derniere" }
-                val liste = Serveur.exec(app, su("bash -c " + q(detection() + "\n" + LISTE)), 120).second
-                val lignes = liste.lines().filter { it.count { c -> c == '|' } >= 3 }
-                val choisie = if (fr.dd.jarvis.societe.core.normaliser(demande).let { it.startsWith("dern") || it == "plus recente" }) lignes.firstOrNull()
-                    else lignes.firstOrNull { it.split('|')[2].trim() == demande } ?: lignes.firstOrNull { it.contains(demande, true) }
-                        ?: lignes.firstOrNull { l -> fr.dd.jarvis.societe.core.normaliser(l).contains(fr.dd.jarvis.societe.core.normaliser(demande)) }
-                if (choisie == null) return ToolResult("Sauvegarde « $demande » introuvable. Sauvegardes trouvées :\n```\n${liste.take(3000)}\n```")
-                val fichier = choisie.split('|')[2].trim()
-                if (!confirm("Restaurer Home Assistant avec la sauvegarde :\n$choisie\n\nLe conteneur sera arrêté ; la configuration actuelle est conservée à côté (dossier « .avant-restauration-… »).", true))
-                    return ToolResult("Restauration annulée.")
-                val cle = runCatching { app.store.cleSauvegardeHa.value }.getOrDefault("")
-                val id = lancerTache(restauration(fichier, cle), "Restauration Home Assistant", root())
-                kotlinx.coroutines.delay(20_000)
-                ToolResult("▶️ Restauration lancée en arrière-plan (tâche **$id**) depuis :\n$choisie\n\nPremières étapes :\n```\n" + etatTache(id) + "\n```\n" +
-                    "Elle continue même si la connexion se coupe ; dis « où en est la restauration ? » pour suivre (serveur_tache etat).")
-            }
-            else -> ToolResult("Action inconnue (lister, creer, restaurer, etat).")
-        }
-    }
-
-    // ------------------------------------------------------------------ fichiers
+    /**
+     * Les sauvegardes HA ne doivent jamais être cherchées/restaurées sur le SSH Debian :
+     * Home Assistant est une machine distincte. La sauvegarde officielle reste accessible
+     * via l'API HA (outil ha_config / service backup), sans accès disque distant.
+     */
+    private suspend fun sauvegarde(a: JSONObject): ToolResult =
+        ToolResult("⛔ Sauvegardes locales/restauration Home Assistant suspendues : le SSH configuré cible le serveur Debian Jarvis, pas la machine Home Assistant. Aucune commande Docker, lecture de disque ou restauration n'a été envoyée à Debian. Utilise la sauvegarde officielle depuis l'API Home Assistant ; un profil SSH HA indépendant sera nécessaire pour les archives hors ligne.\n")
 
     private suspend fun fichiers(a: JSONObject): ToolResult {
         val action = fr.dd.jarvis.societe.core.normaliser(a.optString("action"))
