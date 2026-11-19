@@ -134,6 +134,7 @@ internal object ServeurDiagnostic {
             $sshSection
             $dockerSection
             $plexSection
+            $discordSection
             echo
             echo '== Processus les plus consommateurs =='
             ps -eo pid,comm,%cpu,%mem,rss --sort=-%cpu 2>/dev/null | head -8
