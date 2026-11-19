@@ -107,6 +107,7 @@ internal object ServeurDiagnostic {
               echo 'Le démon PM2 est propre à chaque utilisateur Linux ; le bot peut être lancé sous un autre compte.'
             elif [ ! -S "$(getent passwd "$(id -u)" | cut -d: -f6)/.pm2/rpc.sock" ]; then
               echo 'Démon PM2 non actif pour cet utilisateur SSH (socket absent) ; aucune tentative de démarrage.'
+            elif ! command -v node >/dev/null 2>&1; then
               echo 'Node.js absent : état PM2 simplifié.'
               pm2 ls 2>&1 | head -20
             else
