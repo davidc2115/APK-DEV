@@ -17,6 +17,15 @@ class ServeurAdminTest {
         assertEquals("sudo -S -p '' -u plex ls", Serveur.commandeSudo("sudo -u plex ls", false))
     }
 
+    @Test fun homeAssistantApiEtStockageDebianRestentDistincts() {
+        assertTrue(ServeurAdminTools.actionLectureSeuleHa("etat"))
+        assertTrue(ServeurAdminTools.actionLectureSeuleHa("logs"))
+        assertTrue(ServeurAdminTools.actionLectureSeuleHa("stockage"))
+        assertEquals(false, ServeurAdminTools.actionLectureSeuleHa("demarrer"))
+        assertEquals(false, ServeurAdminTools.actionLectureSeuleHa("redemarrer"))
+        assertEquals(false, ServeurAdminTools.actionLectureSeuleHa("mettre_a_jour"))
+    }
+
     @Test fun motifsDesServices() {
         assertTrue(ServeurAdminTools.motifs("Home Assistant").contains("homeassistant"))
         assertTrue(ServeurAdminTools.motifs("le bot Discord").contains("discord"))
