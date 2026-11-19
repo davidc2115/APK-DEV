@@ -33,8 +33,7 @@ class HomeAssistantAdmin(
 ) {
     constructor(app: JarvisApp, confirm: suspend (String, Boolean) -> Boolean) : this(
         Serveur.haBaseDirecte(app), app.store.haToken.value, confirm,
-        if (Serveur.sshConfigure(app)) { c, t -> Serveur.exec(app, c, t) } else null,
-        { Serveur.haConteneur(app) })
+        null, { null })
 
     private val base = urlBrute.trim().trimEnd('/').let { if (it.isBlank() || it.startsWith("http")) it else "http://$it" }
     private val jeton = jetonBrut.trim()
@@ -434,7 +433,7 @@ class HomeAssistantAdmin(
     /** Installe HACS dans le conteneur Home Assistant (script officiel), redémarre, puis lance sa configuration. */
     private suspend fun installerHacs(): String {
         if (runCatching { ws { w -> w.cmd("hacs/info") } }.isSuccess) return "✅ HACS est déjà installé et configuré."
-        val ssh = ssh ?: return "❌ Il faut l'accès SSH au serveur (Réglages › Maison › Serveur) pour installer HACS."
+        val ssh = ssh ?: return "❌ Installation HACS par script désactivée : le profil SSH actuel cible Debian/Jarvis. Un profil SSH Home Assistant indépendant sera nécessaire."
         if (!confirm("Home Assistant : installer HACS (script officiel get.hacs.xyz) puis redémarrer Home Assistant ?", true)) return "Annulé."
         val ctn = conteneur() ?: return "❌ Conteneur Home Assistant introuvable sur le serveur."
         var r = ssh("docker exec -w /config $ctn bash -c 'wget -O - https://get.hacs.xyz | bash -' 2>&1", 300)
