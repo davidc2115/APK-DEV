@@ -38,7 +38,7 @@ class MusicTools(private val app: JarvisApp) {
                 .put("radio", prop("oui pour la radio du titre."))).put("required", JSONArray().put("numero")))),
         JSONObject().put("type", "function").put("function", JSONObject()
             .put("name", "musique_bibliotheque")
-            .put("description", "Bibliothèque PERSONNELLE de YT Music Morphe : section = jaime (titres J'aime), playlists, titres, albums, artistes, telechargements. Sans nom : liste ce qu'elle contient. Avec nom : lance cet élément (aleatoire=oui pour la lecture aléatoire). Ex. « mets ma playlist Sport », « lance mes titres j'aime en aléatoire ».")
+            .put("description", "Bibliothèque PERSONNELLE de YT Music Morphe. À utiliser impérativement pour les demandes de lecture de bibliothèque, notamment « lis ma bibliothèque J'aime », « lance mes titres aimés », « mets ma playlist … », « lis mes albums ». section = jaime pour J'aime/titres aimés/favoris, sinon playlists, titres, albums, artistes ou telechargements. Sans nom : pour J'aime, lance toute la liste ; pour les autres sections, affiche les éléments. Avec nom : lance cet élément. Ne réponds jamais que la lecture a démarré sans confirmation du lecteur.")
             .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject().put("section", prop("jaime | playlists | titres | albums | artistes | telechargements"))
                 .put("nom", prop("Élément à lancer (facultatif)."))
                 .put("aleatoire", prop("oui pour la lecture aléatoire."))).put("required", JSONArray().put("section")))),
@@ -89,9 +89,12 @@ class MusicTools(private val app: JarvisApp) {
                 if (section == "jaime") {
                     if (!fr.dd.jarvis.device.YtMusique.ouvrirLien(app, p, "https://music.youtube.com/watch?list=LM")) "❌ Impossible d'ouvrir tes titres J'aime."
                     else {
-                        Thread.sleep(3500)
-                        if (aleatoire) fr.dd.jarvis.device.MusiqueBibliotheque.action(app, "aleatoire", p)
-                        "❤️ Lecture de tes titres « J'aime » dans ${nomAppli(p)}" + (if (aleatoire) " (aléatoire demandé)." else ".")
+                        kotlinx.coroutines.delay(1400)
+                        if (fr.dd.jarvis.device.MusiqueBibliotheque.demarrerLecture(app, p, aleatoire)) {
+                            "❤️ Tes titres « J'aime » sont bien en lecture dans ${nomAppli(p)}" + (if (aleatoire) " en aléatoire." else ".")
+                        } else {
+                            "📂 Ta liste « J'aime » est ouverte dans ${nomAppli(p)}, mais le lecteur n'a pas confirmé le démarrage. Vérifie le bouton Lecture dans l'application."
+                        }
                     }
                 } else if (nom.isBlank()) {
                     val (l, err) = fr.dd.jarvis.device.MusiqueBibliotheque.lister(app, p, section)
