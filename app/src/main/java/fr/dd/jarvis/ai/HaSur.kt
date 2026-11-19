@@ -9,9 +9,9 @@ import kotlinx.coroutines.delay
  * Important : le profil SSH général de Jarvis désigne le serveur Debian qui héberge Jarvis/Hermes,
  * pas l'hôte Docker de Home Assistant. En l'absence d'un profil SSH HA indépendant, ce composant
  * n'exécute donc aucune commande Docker/SSH et ne lit/écrit aucun YAML sur le serveur Debian.
- * Les actions REST restent disponibles ; démarrage, mise à jour, diagnostic Docker et fichiers YAML
- * restent explicitement suspendus jusqu'à l'ajout et la validation du profil dédié. Le diagnostic d'hôte Docker
- * est toutefois autorisé en lecture seule via le profil Debian, sans action sur le conteneur.
+ * Les actions REST restent disponibles ; démarrage, mise à jour et fichiers YAML restent explicitement suspendus
+ * jusqu'à l'ajout et la validation du profil dédié. Le diagnostic d'hôte Docker est autorisé en lecture seule
+ * via le profil Debian, sans action sur le conteneur.
  */
 object HaSur {
     private fun q(s: String) = Serveur.q(s)
