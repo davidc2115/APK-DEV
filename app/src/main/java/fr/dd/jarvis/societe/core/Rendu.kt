@@ -302,8 +302,8 @@ object Rendu {
             "| " + cellules.joinToString(" | ") + " |"
         }
         return buildString {
-            append("| ").append(entete.joinToString(" | ")).append(" |\\n")
-            append("| ").append(separateur.joinToString(" | ")).append(" |\\n")
+            append("| ").append(entete.joinToString(" | ")).append(" |\n")
+            append("| ").append(separateur.joinToString(" | ")).append(" |\n")
             lignes.forEach { append(it).append('\\n') }
         }.trimEnd()
     }
@@ -380,7 +380,7 @@ object Rendu {
         val source = i.mesures.ifBlank { i.onduleurs }
         val groupes = MesuresSeries.parOnduleur(source)
         val manquants = groupes.filter { (_, resultat) ->
-            resultat.series.any { serie -> !rendu.contains("| \${serie.numero} | \${serie.valeur} |") }
+            resultat.series.any { serie -> !rendu.contains("| ${serie.numero} | ${serie.valeur} |") }
         }
         if (manquants.isEmpty()) return rendu + "\n"
         val complement = buildString {
