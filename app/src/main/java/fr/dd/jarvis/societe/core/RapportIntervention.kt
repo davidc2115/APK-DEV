@@ -48,6 +48,8 @@ object MesuresSeries {
     fun analyser(texte: String): Resultat {
         val valeurs = sortedMapOf<Int, String>()
         val autres = mutableListOf<String>()
+        // Les quantités successives décrivent des groupes distincts : 2 séries puis 5 séries = séries 1 à 7.
+        var prochaineSerie = 1
         for (ligne in ListesRapport.elements(texte)) {
             var reste = ligne
             var trouve = false
@@ -55,7 +57,9 @@ object MesuresSeries {
                 val n = m.groupValues[1].toInt()
                 if (n in 1..200) {
                     val v = valeur(m.groupValues, 2)
-                    for (k in 1..n) if (!valeurs.containsKey(k) || valeurs[k]!!.startsWith("≈")) valeurs[k] = v
+                    val fin = (prochaineSerie + n - 1).coerceAtMost(200)
+                    for (k in prochaineSerie..fin) valeurs[k] = v
+                    prochaineSerie = fin + 1
                     reste = reste.replace(m.value, " "); trouve = true
                 }
             }
