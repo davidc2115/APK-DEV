@@ -461,13 +461,9 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         // on accepte son emplacement imbriqué uniquement lorsqu'il est unique dans tout le coffre.
         // Plusieurs dossiers « Images » : aucune sélection arbitraire, on laisse la demande ambiguë.
         val premier = parts.first()
-        val candidats = toutLister().asSequence()
-            .filter { it.second && cleNom(it.first.substringAfterLast('/')) == cleNom(premier) }
-            .map { it.first }
-            .distinct()
-            .toList()
-        if (candidats.size != 1) return null
-        return depuis(candidats.single(), 1)
+        val dossiers = toutLister().filter { it.second }.map { it.first }
+        val candidat = ObsidianPathResolution.uniqueNestedFolder(premier, dossiers, ::cleNom) ?: return null
+        return depuis(candidat, 1)
     }
 
     /** Chemin du coffre sur le téléphone (ex. « Documents/Obsidian jarvis »), d'après le dossier choisi dans les Réglages. */
