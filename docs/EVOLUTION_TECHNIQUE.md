@@ -51,6 +51,17 @@ Cette étape ne remplace pas encore la bibliothèque dépréciée : elle réduit
 6. **Serveur Debian Jarvis** : profil distinct, accès système/SSH dédié. Il ne doit jamais être considéré comme l'hôte Docker de Home Assistant puisque les deux environnements sont séparés.
 7. **Réparations sûres** : diagnostic avant action, liste blanche d'actions non destructives, sauvegarde et validation avant changement de configuration, vérification après action, journal d'audit et arrêt après échec répété. Suppression de données/conteneurs et redémarrage du serveur Debian jamais automatiques.
 
+## Séparation effective Home Assistant / Debian
+
+Tant qu'aucun profil SSH HA indépendant n'existe, l'application fonctionne en mode API-only pour Home Assistant :
+
+- Les appels REST/WebSocket vers l'URL HA configurée (DuckDNS/API) restent actifs.
+- La détection de conteneur, les commandes Docker, le diagnostic local `127.0.0.1:8123`, le démarrage, la mise à jour et les scripts d'installation HACS par SSH sont désactivés.
+- La lecture, l'écriture et la restauration de fichiers YAML sont suspendues ; le chemin historique `haDir` n'est pas réutilisé car il pouvait désigner le système de fichiers Debian.
+- Un échec API ne déclenche jamais de repli sur `Serveur.exec`, `Serveur.execComplet` ou SFTP du serveur Debian.
+
+C'est une mesure de sécurité transitoire : elle peut temporairement retirer l'administration des fichiers YAML et les opérations Docker, mais elle préserve les commandes HA accessibles par API et empêche qu'une action HA modifie le mauvais hôte. La réactivation nécessitera un profil séparé avec hôte, port, utilisateur, clé/mot de passe, chemin de configuration et consentement explicite, ainsi que des tests prouvant que les appels SSH sont routés vers ce profil uniquement.
+
 ## Plan de validation avant toute fusion
 
 - Build debug et tests unitaires GitHub Actions.
