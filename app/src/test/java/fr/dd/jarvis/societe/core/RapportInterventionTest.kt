@@ -64,4 +64,32 @@ class RapportInterventionTest {
         assertTrue(resultat.contains("SMA Tripower"))
     }
 
+
+    @Test fun mesuresDeChaqueOnduleurRestentSepareesAvecLesNombresEnLettres() {
+        val source = """
+            Onduleur 1 : 16 séries à 775 volts et deux séries à 805 volts
+            de légères tensions à la terre dues à la pluie mais rien d'anormal
+            Onduleur 2 : à quatre séries à environ 810 volts, et 14 séries environ 770 volts
+            de légères tensions à la terre dues à la pluie mais rien d'anormal
+        """.trimIndent()
+
+        val groupes = MesuresSeries.parOnduleur(source)
+        assertEquals(listOf("Onduleur 1", "Onduleur 2"), groupes.map { it.first })
+        assertEquals(18, groupes[0].second.series.size)
+        assertEquals("775 V", groupes[0].second.series.first().valeur)
+        assertEquals("805 V", groupes[0].second.series.last().valeur)
+        assertEquals(18, groupes[1].second.series.size)
+        assertEquals("≈ 810 V", groupes[1].second.series.first().valeur)
+        assertEquals("≈ 770 V", groupes[1].second.series.last().valeur)
+        assertTrue(groupes.all { g -> g.second.autres.any { it.contains("pluie") } })
+    }
+
+    @Test fun blocsOnduleursRecuperentLesLignesDeContinuation() {
+        val blocs = OnduleursIntervention.blocs(
+            "Onduleur 1 : Huawei\\n16 séries à 775 V\\nOnduleur 2 : SMA\\n14 séries à 770 V"
+        )
+        assertEquals(2, blocs.size)
+        assertTrue(blocs[0].contenu.contains("16 séries"))
+        assertTrue(blocs[1].contenu.contains("14 séries"))
+    }
 }
