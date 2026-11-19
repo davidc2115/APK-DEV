@@ -327,7 +327,7 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
     }
     var tab by rememberSaveable { mutableStateOf(0) }
     // Écrans de terrain ouverts par-dessus l'onglet en cours (caméra, compte-rendu d'intervention).
-    var terrain by remember { mutableStateOf(if (app.store.presenceModeActif.value) "presence" else "") }
+    var terrain by rememberSaveable { mutableStateOf(if (app.store.presenceModeActif.value) "presence" else "") }
     LaunchedEffect(terrain) { app.store.presenceModeActif.set(terrain == "presence") }
     LaunchedEffect(terrain, app.store.presenceVerrouillage.value) {
         val afficherVerrouille = terrain == "presence" && app.store.presenceVerrouillage.value
