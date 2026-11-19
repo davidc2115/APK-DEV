@@ -304,7 +304,10 @@ class PhoneControl(private val ctx: Context) {
             // pour laisser Android résoudre lui-même le lien (navigateur si besoin, mieux que rien).
             var err = start(Intent.ACTION_VIEW, rechercheUrl(requete), pkg)
             if (err.isNotBlank()) err = start(Intent.ACTION_VIEW, rechercheUrl(requete), null)
-            if (err.isBlank()) return "🔎 $nom ne confirme pas la lecture à distance de « $requete » : j'ai ouvert sa recherche avec ce titre déjà affiché, il ne reste plus qu'à appuyer sur lecture."
+            if (err.isBlank()) {
+                RetourJarvisMusique.afficher(ctx)
+                return "🔎 $nom ne confirme pas la lecture à distance de « $requete » : j'ai ouvert sa recherche avec ce titre déjà affiché, il ne reste plus qu'à appuyer sur lecture."
+            }
         }
         return when (etat) {
             "session" -> "🎵 J'ai demandé la lecture de « $requete » dans $nom, mais je n'ai pas pu confirmer qu'elle a démarré. Si rien ne joue, ouvre $nom et lance un titre une fois à la main (première utilisation)."
@@ -359,7 +362,8 @@ class PhoneControl(private val ctx: Context) {
         val suite = if (autres.isEmpty()) "" else "\nAutres résultats (dis « mets le 2 », etc.) :\n" +
             autres.mapIndexed { i, r -> "${i + 2}. ${r.ligne()}" }.joinToString("\n")
         YtMusique.retenir(listOf(choisi) + autres)
-        if (joueBien) RetourJarvisMusique.afficher(ctx)
+        // Même si le lecteur n'a pas confirmé, on rend l'écran à JARVIS après avoir tenté la lecture.
+        RetourJarvisMusique.afficher(ctx)
         return (if (joueBien) "🎵 En lecture dans $nom : ${choisi.ligne()}" + (c?.let { titreDe(it) }?.takeIf { it.isNotBlank() && !choisi.titre.contains(it, true) }?.let { "\n(lecteur : $it)" } ?: "")
             else "🎵 J'ai ouvert ${choisi.ligne()} dans $nom" + (if (c == null) " (l'appli n'a pas encore confirmé la lecture)." else " ; la lecture n'est pas confirmée — appuie sur lecture si besoin.")) + suite
     }
