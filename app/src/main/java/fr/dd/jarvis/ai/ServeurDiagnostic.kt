@@ -154,4 +154,3 @@ internal object ServeurDiagnostic {
         }.getOrElse { "API Home Assistant : échec — ${it.message?.take(220) ?: it.javaClass.simpleName}." }
     }
 }
-}
