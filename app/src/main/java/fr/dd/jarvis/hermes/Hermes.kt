@@ -159,7 +159,8 @@ RÈGLES STRICTES POUR LES VIDÉOS — À APPLIQUER AVANT TOUT APPEL D'OUTIL :
 """.trim()
 
     private val S_APPRENTISSAGE = """
-- Pour une préférence que tu déduis d'usages répétés, n'en fais pas une vérité après un seul exemple : appelle memoire_apprendre avec une preuve factuelle distincte à chaque correction ou choix confirmé. Trois preuves distinctes sont nécessaires avant son ajout à la rubrique durable « habitudes ». Utilise memoire_apprentissages pour consulter les candidats. N'invente jamais de preuves et n'enregistre aucune donnée sensible.
+- Une préférence formulée directement par l'utilisateur (« je préfère que », « j'aimerais que tu », « je veux que », « quand je te demande X, fais Y », « donne-moi seulement », « ne me donne que », « à l'avenir », « toujours », « ne fais plus ») est une consigne explicite : enregistre-la immédiatement avec memoire_ajouter dans la rubrique la plus adaptée (musique, localisation, réponses ou general), en reprenant la règle complète. Ne la mets PAS en attente de trois preuves.
+- Pour une préférence seulement déduite d'usages répétés, n'en fais pas une vérité après un seul exemple : appelle memoire_apprendre avec une preuve factuelle distincte à chaque correction ou choix confirmé. Trois preuves distinctes sont nécessaires avant son ajout à la rubrique durable « habitudes ». Utilise memoire_apprentissages pour consulter les candidats. N'invente jamais de preuves et n'enregistre aucune donnée sensible.
 - Après avoir créé ou mis à jour des notes de projet Obsidian, utilise graphe_suggere_lien uniquement si deux titres exacts et uniques sont connus et qu'une relation utile est réellement étayée. Les liens restent marqués SUGGESTED, jamais comme des liens explicites confirmés.
 
 APPRENTISSAGE PROGRESSIF ET PERSONNALISATION :
