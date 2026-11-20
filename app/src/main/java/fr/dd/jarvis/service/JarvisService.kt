@@ -655,13 +655,17 @@ class JarvisService : Service() {
             }
             notifier(cmd, reply)
             withContext(Dispatchers.Main) {
-                // La conversation continue : on réécoute après la réponse (ou dès que l'utilisateur la coupe), puis on
-                // referme après quelques secondes de silence.
-                // Autoradio / Bluetooth : on ne rouvre le micro que si Jarvis pose une question — sinon il entendrait la
-                // radio ou la suite de sa propre réponse ; il suffit de redire « Jarvis » pour une nouvelle demande.
+                // Le traitement (cerveau + actions + enregistrement) est terminé ici. Ne garde pas busy à true
+                // pendant la seule lecture TTS : une nouvelle demande Android Auto peut interrompre cette lecture.
+                // Le callback TTS garde uniquement la responsabilité de rouvrir le micro après la réponse.
                 relancer = awake && (voice?.sortieExterne() != true || reply.trimEnd().endsWith("?"))
-                // Échange abandonné entre-temps (déverrouillage prioritaire) : la réponse reste écrite mais n'est pas dite.
-                if (gen != generation) flux?.arreter(sansSuite = true) else flux?.finir(reply) ?: run { busy = false }
+                // Échange abandonné entre-temps (déverrouillage prioritaire) : ne pas libérer le busy du déverrouillage.
+                if (gen != generation) {
+                    flux?.arreter(sansSuite = true)
+                } else {
+                    busy = false
+                    flux?.finir(reply)
+                }
             }
         }
     }
