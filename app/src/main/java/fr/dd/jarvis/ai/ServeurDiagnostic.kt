@@ -12,7 +12,7 @@ internal object ServeurDiagnostic {
         val cibleValide = cible in setOf("complet", "debian", "ssh", "plex", "home assistant", "homeassistant", "ha", "discord", "bagbot")
         require(cibleValide) { "Cible de diagnostic inconnue : $cibleBrute" }
         val n = lignes.coerceIn(20, 200)
-        val rootCmd = if (sudo) "sudo " else ""
+        val rootCmd = if (sudo) "sudo -n " else ""
         val dockerFiltre = when (cible) {
             "plex" -> "plex"
             "ha", "home assistant", "homeassistant" -> "home.?assistant|hass"
