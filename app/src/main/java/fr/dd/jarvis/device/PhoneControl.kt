@@ -340,21 +340,19 @@ class PhoneControl(private val ctx: Context) {
      * s'est ouverte en pause). Renvoie null si ça n'a pas pu aboutir (on retombe alors sur la méthode classique).
      */
     fun jouerYtm(pkg: String, requete: String, nomDemande: String, resultat: YtMusique.Resultat? = null, radio: Boolean = false, mode: String = "normal"): String? {
-        val nom = if (pkg == Musique.MORPHE_PACKAGE) YtMusique.NOM else nomDemande
         val liste = if (resultat != null) YtMusique.derniers else runCatching { YtMusique.rechercher(requete) }.getOrNull() ?: return null
         val choisi = (resultat ?: YtMusique.meilleur(requete, liste) ?: return null).let { YtMusique.completer(it) }
         val avant = session(pkg)?.let { titreDe(it) }
         if (!YtMusique.ouvrir(ctx, pkg, choisi, radio)) return null
         var c: android.media.session.MediaController? = null
         var modeEnvoye = false
-        var modeResultat = ""
         val fin = System.currentTimeMillis() + 9000
         var relance = false
         while (System.currentTimeMillis() < fin) {
             Thread.sleep(600)
             c = session(pkg) ?: continue
             if (!modeEnvoye) {
-                modeResultat = MusiqueBibliotheque.configurerMode(ctx, mode, pkg)
+                MusiqueBibliotheque.configurerMode(ctx, mode, pkg)
                 modeEnvoye = true
             }
             val titre = titreDe(c)
