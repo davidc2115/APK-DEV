@@ -175,6 +175,9 @@ class MusicTools(private val app: JarvisApp) {
             }, direct = true)
             else -> ToolResult("Outil musical inconnu.")
         }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // Laisse l'annulation remonter jusqu'au service pour qu'il libère immédiatement la demande en cours.
+            throw e
         } catch (e: SecurityException) {
             ToolResult("Accès aux sessions multimédias refusé. Active l'accès aux notifications de JARVIS dans les réglages Android.")
         } catch (e: Exception) {
