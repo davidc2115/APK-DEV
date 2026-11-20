@@ -52,6 +52,14 @@ class FinDePhraseTest {
         assertEquals(70, f.tramesVoix)
     }
 
+    @Test fun coupeLeSilenceFinalSansDepasserLeTampon() {
+        val taille = 16000 * 2 * 3
+        // Dernière voix à 1,0 s : garder 300 ms, pas les 1,1 s de silence de détection.
+        assertEquals(1_300 * 32, Pcm.finUtile(taille, 50))
+        assertEquals(taille, Pcm.finUtile(taille, 200))
+        assertEquals(0, Pcm.finUtile(taille, -100))
+    }
+
     @Test fun echelleDuNiveau() {
         assertTrue(MicroJarvis.db(30.0) < 0.5f)
         assertTrue(MicroJarvis.db(3000.0) > 9f)
