@@ -188,6 +188,8 @@ class JarvisService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val demandeDepuisVoiture = intent?.action == ACTION_ECOUTER
+        val debutDemandeVoiture = if (demandeDepuisVoiture) android.os.SystemClock.elapsedRealtime() else 0L
         app = application as JarvisApp
         if (intent?.action == ACTION_STOP) {
             app.store.wakeOn.set(false)
@@ -216,7 +218,6 @@ class JarvisService : Service() {
         getSystemService(NotificationManager::class.java).cancel(NOTIF_REPRISE)
         running = true
         actuel = this
-        if (intent?.action == ACTION_ECOUTER) main.postDelayed({ demandeExterne() }, 1800)
         // Verrou de veille seulement PENDANT une conversation (voir garderEveille) : en attente du mot « Jarvis », le
         // micro actif suffit à Android ; le verrou permanent empêchait le téléphone de dormir même micro coupé.
         wake = (getSystemService(POWER_SERVICE) as PowerManager).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "jarvis:wake").apply { setReferenceCounted(false) }
@@ -276,6 +277,16 @@ class JarvisService : Service() {
                 }
             }
         }
+        // Le service est maintenant réellement prêt à écouter : ne pas ajouter 1,8 s fixe après son démarrage.
+        // Le callback est posté après l'initialisation du moteur vocal ; la demande manuelle ne dépend pas du détecteur Vosk.
+        if (demandeDepuisVoiture) main.post {
+            fr.dd.jarvis.voice.JournalVoix.noter(
+                "android-auto",
+                "service vocal initialisé en ${android.os.SystemClock.elapsedRealtime() - debutDemandeVoiture} ms ; ouverture micro"
+            )
+            demandeExterne()
+        }
+
         // Modèle français installé : l'ancien modèle anglais (≈ 70 Mo) est supprimé avant d'armer le détecteur.
         fr.dd.jarvis.voice.VoskModel.nettoyer(this)
         vosk = when {
@@ -310,7 +321,8 @@ class JarvisService : Service() {
         }
         // Le canal de notification JARVIS n'est utile que pendant une projection Android Auto.
         if (app.enVoiture) runCatching { CarBridge.post(this, "Je suis prêt. Réponds pour me parler.") }
-        main.postDelayed({ goIdle() }, 1200)
+        // Une demande Android Auto vient déjà d'ouvrir une conversation : ne pas la refermer avec l'initialisation idle.
+        if (!demandeDepuisVoiture) main.postDelayed({ goIdle() }, 1200)
         return START_STICKY
     }
 
