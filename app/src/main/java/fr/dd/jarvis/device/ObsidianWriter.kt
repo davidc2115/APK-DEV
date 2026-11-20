@@ -452,11 +452,13 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     }
 
     private fun correspondance(noms: List<Pair<String, Boolean>>, voulu: String, dossierSeul: Boolean = false): String? {
-        val c = noms.filter { !dossierSeul || it.second }
-        return c.firstOrNull { it.first == voulu }?.first
-            ?: c.firstOrNull { normaliseNom(it.first) == normaliseNom(voulu) }?.first
-            ?: c.firstOrNull { cleNom(it.first) == cleNom(voulu) }?.first
-            ?: c.firstOrNull { cleNom(it.first.substringBeforeLast('.')) == cleNom(voulu) }?.first
+        val c = noms.filter { !dossierSeul || it.second }.map { it.first }
+        return ObsidianPathResolution.uniqueNameMatch(
+            candidates = c,
+            wanted = voulu,
+            normalize = ::normaliseNom,
+            loose = { nom -> cleNom(nom).let { cle -> if (cle == cleNom(voulu)) cle else cleNom(nom.substringBeforeLast('.')) } }
+        )
     }
 
     /**
