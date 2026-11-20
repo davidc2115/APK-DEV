@@ -36,4 +36,27 @@ class HomeAssistantDiagnosticResumeTest {
         assertTrue(result.contains("Liste limitée aux 12 premiers éléments par état."))
         assertTrue(!result.contains("sensor.test_29"))
     }
+
+    @Test
+    fun signaleUneListeTronqueeDesQueLeTreiziemeElementEstMasque() {
+        val states = JSONArray()
+        repeat(13) { i ->
+            states.put(JSONObject().put("entity_id", "sensor.indispo_" + i).put("state", "unavailable"))
+        }
+        val result = HomeAssistantDiagnosticResume.formater(states, "")
+        assertTrue(result.contains("13 indisponible(s)"))
+        assertTrue(result.contains("Liste limitée aux 12 premiers éléments par état."))
+        assertTrue(!result.contains("sensor.indispo_12"))
+    }
+
+    @Test
+    fun neSignalePasDeTroncatureQuandLesDouzeExemplesSontComplets() {
+        val states = JSONArray()
+        repeat(12) { i ->
+            states.put(JSONObject().put("entity_id", "sensor.indispo_" + i).put("state", "unavailable"))
+        }
+        val result = HomeAssistantDiagnosticResume.formater(states, "")
+        assertTrue(result.contains("12 indisponible(s)"))
+        assertTrue(!result.contains("Liste limitée aux 12 premiers éléments par état."))
+    }
 }
