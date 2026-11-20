@@ -299,11 +299,24 @@ object VoixNaturelle {
         val fin = Regex("(?<=[.!?…:;])\\s+|\\n+")
         while (true) {
             val limites = fin.findAll(reste).map { it.range.last + 1 }.toList()
-            if (limites.isEmpty()) break
-            val coupe = if (premier) limites.firstOrNull { reste.substring(0, it).trim().length >= 12 } ?: break
-                else limites.lastOrNull { it <= taille } ?: limites.first()
-            // Hors première phrase, on attend d'avoir un bloc assez long (sauf si tout doit être dit maintenant).
-            if (!premier && !toutDire && attendreBloc && coupe < taille / 2 && limites.last() == coupe) break
+            val ponctuation = if (premier) {
+                limites.firstOrNull { reste.substring(0, it).trim().length >= 12 }
+            } else {
+                limites.lastOrNull { it <= taille } ?: limites.firstOrNull()
+            }
+            // Une phrase sans ponctuation (ou très longue) doit elle aussi être segmentée :
+            // les moteurs TTS et certains fournisseurs refusent les entrées trop longues.
+            // On coupe au dernier espace avant la limite, sans couper un mot.
+            val espace = reste.lastIndexOf(' ', taille.coerceAtMost(reste.lastIndex))
+                .takeIf { it > 0 }?.plus(1)
+            val coupe = when {
+                ponctuation != null && (ponctuation <= taille || reste.length <= taille) -> ponctuation
+                reste.length > taille && espace != null -> espace
+                ponctuation != null -> ponctuation
+                else -> break
+            }
+            // Hors première phrase, on attend un bloc assez rempli, sauf si tout doit être dit maintenant.
+            if (!premier && !toutDire && attendreBloc && coupe < taille / 2 && reste.length < taille) break
             val morceau = reste.substring(0, coupe).trim()
             if (morceau.isNotBlank()) out += morceau
             reste = reste.substring(coupe)
