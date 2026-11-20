@@ -13,8 +13,8 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
         val KEYWORDS = Regex("discord|r[ôo]le\\b|r[ôo]les\\b|mod[ée]rateur|mod[ée]ration|serveur discord|salon\\b|salons\\b|channels?\\b|cat[ée]gorie discord", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t) || DiscordNoms.cite(t)
         val NAMES = setOf(
-            "discord_guildes", "discord_roles", "discord_salons", "discord_audit_serveur", "discord_role_creer", "discord_role_modifier",
-            "discord_role_supprimer", "discord_role_position", "discord_role_attribuer", "discord_salon_permission", "discord_message_envoyer", "discord_messages_lire", "discord_messages_rechercher", "discord_fil_lire"
+            "discord_diagnostic", "discord_guildes", "discord_roles", "discord_salons", "discord_audit_serveur", "discord_role_creer", "discord_role_modifier",
+            "discord_role_supprimer", "discord_role_position", "discord_role_attribuer", "discord_salon_permission", "discord_message_envoyer", "discord_messages_lire", "discord_messages_rechercher", "discord_fil_lire", "discord_message_modifier", "discord_message_supprimer", "discord_message_epingler", "discord_reaction", "discord_fil_creer", "discord_membre_info", "discord_membre_timeout", "discord_membre_expulser", "discord_membre_bannir", "discord_membre_pseudo"
         )
     }
 
@@ -29,6 +29,7 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
         Discord.Perm.NOMS.keys.joinToString(", ") + ". Vide = aucune permission (rôle purement cosmétique)."
 
     val schema: List<JSONObject> = listOf(
+        tool("discord_diagnostic", "Discord : diagnostic en lecture seule du bot JARVIS. Vérifie le jeton, l'identité du bot, les serveurs accessibles, son membre et ses rôles sur chaque serveur, la hiérarchie de ses rôles, les permissions cumulées et l'inventaire des salons. Signale les permissions Discord utiles manquantes. Les intents privilégiés du portail développeur ne sont pas lisibles par l'API : ils ne sont pas déclarés comme vérifiés.", mapOf("serveur" to prop("Nom ou ID d'un serveur précis ; vide pour examiner tous les serveurs accessibles au bot."))),
         tool("discord_guildes", "Discord : liste les serveurs (guildes) où le bot JARVIS est présent.", emptyMap()),
         tool("discord_roles", "Discord : liste les rôles d'un serveur (nom, couleur, permissions, position).",
             mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si le bot n'est que sur un seul)."))),
@@ -47,6 +48,16 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             mapOf("serveur" to prop("Nom, surnom ou ID du serveur Discord (optionnel si un seul)."),
                 "salon" to prop("Nom simple du salon textuel cible (emojis et décorations inutiles) ou ID."),
                 "message" to prop("Texte exact à envoyer (2 000 caractères maximum).")), listOf("salon", "message")),
+        tool("discord_message_modifier", "Discord : modifie le texte d'un message existant. Nécessite le salon et l'identifiant du message.", mapOf("serveur" to prop("Nom ou ID du serveur."), "salon" to prop("Nom ou ID du salon."), "message_id" to prop("ID du message à modifier."), "message" to prop("Nouveau texte (2 000 caractères maximum).")), listOf("salon", "message_id", "message")),
+        tool("discord_message_supprimer", "Discord : supprime définitivement un message. Demande confirmation.", mapOf("serveur" to prop("Nom ou ID du serveur."), "salon" to prop("Nom ou ID du salon."), "message_id" to prop("ID du message à supprimer.")), listOf("salon", "message_id")),
+        tool("discord_message_epingler", "Discord : épingle ou désépingle un message.", mapOf("serveur" to prop("Nom ou ID du serveur."), "salon" to prop("Nom ou ID du salon."), "message_id" to prop("ID du message."), "action" to prop("epingler (défaut) ou desepingler.")), listOf("salon", "message_id")),
+        tool("discord_reaction", "Discord : ajoute ou retire la réaction du bot sur un message.", mapOf("serveur" to prop("Nom ou ID du serveur."), "salon" to prop("Nom ou ID du salon."), "message_id" to prop("ID du message."), "emoji" to prop("Emoji Unicode ou nom:id d'un emoji personnalisé."), "action" to prop("ajouter (défaut) ou retirer.")), listOf("salon", "message_id", "emoji")),
+        tool("discord_fil_creer", "Discord : crée un fil de discussion à partir d'un message existant.", mapOf("serveur" to prop("Nom ou ID du serveur."), "salon" to prop("Nom ou ID du salon parent."), "message_id" to prop("ID du message de départ."), "nom" to prop("Nom du nouveau fil (1 à 100 caractères)."), "archivage_minutes" to prop("60, 1440, 4320 ou 10080 minutes (défaut 1440).")), listOf("salon", "message_id", "nom")),
+        tool("discord_membre_info", "Discord : affiche les informations disponibles d'un membre (pseudo, compte, date d'arrivée, rôles, timeout). Lecture seule.", mapOf("serveur" to prop("Nom ou ID du serveur."), "membre" to prop("Pseudo, nom ou ID du membre.")), listOf("membre")),
+        tool("discord_membre_timeout", "Discord : applique un timeout temporaire ou retire le timeout d'un membre. Confirmation obligatoire. Maximum 28 jours.", mapOf("serveur" to prop("Nom ou ID du serveur."), "membre" to prop("Pseudo, nom ou ID du membre."), "duree_minutes" to prop("Durée en minutes (1 à 40320). Omettre ou mettre 0 avec action=retirer pour lever le timeout."), "raison" to prop("Raison de modération (optionnelle)."), "action" to prop("appliquer (défaut) ou retirer.")), listOf("membre")),
+        tool("discord_membre_expulser", "Discord : expulse un membre du serveur (il pourra revenir avec une invitation). Confirmation obligatoire.", mapOf("serveur" to prop("Nom ou ID du serveur."), "membre" to prop("Pseudo, nom ou ID du membre."), "raison" to prop("Raison de l'expulsion (optionnelle).")), listOf("membre")),
+        tool("discord_membre_bannir", "Discord : bannit un membre du serveur. Peut supprimer ses messages récents (maximum 7 jours). Confirmation obligatoire.", mapOf("serveur" to prop("Nom ou ID du serveur."), "membre" to prop("Pseudo, nom ou ID du membre."), "raison" to prop("Raison du bannissement (optionnelle)."), "supprimer_messages_heures" to prop("0 à 168 heures de messages à supprimer (défaut 0).")), listOf("membre")),
+        tool("discord_membre_pseudo", "Discord : change le pseudo d'un membre sur ce serveur (vide pour réinitialiser). Confirmation obligatoire.", mapOf("serveur" to prop("Nom ou ID du serveur."), "membre" to prop("Pseudo, nom ou ID du membre."), "pseudo" to prop("Nouveau pseudo (32 caractères maximum), vide pour réinitialiser.")), listOf("membre", "pseudo")),
         tool("discord_role_creer", "Discord : crée un nouveau rôle sur le serveur.",
             mapOf("serveur" to prop("Nom, surnom ou ID du serveur (optionnel si un seul)."), "nom" to prop("Nom du rôle."),
                 "couleur" to prop("Couleur hexadécimale, ex. #ff5733 (optionnel)."), "permissions" to prop(permDesc),
@@ -97,6 +108,69 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
 
     private suspend fun run(name: String, a: JSONObject): ToolResult {
         return when (name) {
+        "discord_diagnostic" -> {
+            val bot = Discord.moi(app)
+            val botId = bot.optString("id")
+            val botNom = bot.optString("global_name").ifBlank { bot.optString("username").ifBlank { "Bot inconnu" } }
+            val toutes = Discord.guildes(app)
+            val demande = a.optString("serveur").trim()
+            val guildes = if (demande.isBlank()) {
+                (0 until toutes.length()).map { toutes.getJSONObject(it) }
+            } else {
+                val choisie = Discord.trouverGuilde(app, demande)
+                    ?: return ToolResult("Serveur « $demande » introuvable parmi ceux accessibles au bot : " + Discord.noms(toutes) + ".")
+                listOf(choisie)
+            }
+            if (guildes.isEmpty()) return ToolResult("Le jeton est accepté pour l'identité du bot « $botNom », mais aucun serveur accessible n'a été retourné par l'API.")
+            val lignes = mutableListOf("# Diagnostic du bot Discord — lecture seule", "Bot : **$botNom** · ID $botId", "Serveurs inspectés : ${guildes.size}", "Aucune modification effectuée.")
+            val droitsUtiles = listOf(
+                Discord.Perm.VIEW_CHANNEL to "voir les salons",
+                Discord.Perm.SEND_MESSAGES to "envoyer des messages",
+                Discord.Perm.READ_MESSAGE_HISTORY to "lire l'historique",
+                Discord.Perm.ADD_REACTIONS to "ajouter des réactions",
+                Discord.Perm.MANAGE_MESSAGES to "gérer les messages",
+                Discord.Perm.MANAGE_CHANNELS to "gérer les salons",
+                Discord.Perm.MANAGE_ROLES to "gérer les rôles",
+                Discord.Perm.MANAGE_GUILD to "gérer le serveur",
+                Discord.Perm.KICK_MEMBERS to "expulser des membres",
+                Discord.Perm.BAN_MEMBERS to "bannir des membres",
+                Discord.Perm.MODERATE_MEMBERS to "modérer les membres"
+            )
+            for (g in guildes) {
+                val gid = g.optString("id")
+                val nom = g.optString("name")
+                val roles = Discord.roles(app, gid)
+                val membre = runCatching { Discord.membre(app, gid, botId) }.getOrNull()
+                val rolesBot = (membre?.optJSONArray("roles") ?: JSONArray()).let { a -> (0 until a.length()).map { a.optString(it) }.toSet() }
+                var permissions = 0L
+                val rolesAttribues = mutableListOf<JSONObject>()
+                for (i in 0 until roles.length()) {
+                    val role = roles.getJSONObject(i)
+                    val id = role.optString("id")
+                    if (id == gid || id in rolesBot) {
+                        permissions = permissions or (role.optString("permissions", "0").toLongOrNull() ?: 0L)
+                        if (id != gid) rolesAttribues += role
+                    }
+                }
+                val admin = permissions and Discord.Perm.ADMINISTRATOR != 0L
+                val plusHaut = rolesAttribues.maxByOrNull { it.optInt("position") }
+                val salons = runCatching { Discord.salons(app, gid) }.getOrNull()
+                lignes += ""
+                lignes += "## $nom"
+                lignes += "Membre bot : " + if (membre == null) "non récupérable (permissions ou accès membre à vérifier)" else "présent"
+                lignes += "Salons retournés par l'API : ${salons?.length() ?: "non vérifiables"} · rôles du serveur : ${roles.length()}"
+                lignes += "Rôle le plus haut du bot : " + (plusHaut?.optString("name") ?: "@everyone") + (plusHaut?.let { " (position ${it.optInt("position")})" } ?: "")
+                lignes += "Permissions cumulées des rôles : " + if (admin) "ADMINISTRATEUR (toutes permissions)" else Discord.Perm.noms(permissions).joinToString(", ").ifBlank { "aucune permission détectée" }
+                if (!admin) {
+                    val manquantes = droitsUtiles.filter { (bit, _) -> permissions and bit == 0L }.map { it.second }
+                    lignes += "Permissions utiles absentes des rôles : " + manquantes.joinToString(", ").ifBlank { "aucune parmi celles contrôlées" }
+                }
+                if (rolesAttribues.isEmpty()) lignes += "Attention : aucun rôle attribué au bot au-delà de @everyone."
+            }
+            lignes += ""
+            lignes += "Limite du diagnostic : les permissions affichées sont l'union des permissions des rôles, avant les restrictions/overrides propres à chaque salon. Les intents MESSAGE_CONTENT et GUILD_MEMBERS doivent être vérifiés dans le portail développeur ou les journaux PM2."
+            ToolResult(lignes.joinToString("\n"), direct = true)
+        }
         "discord_guildes" -> {
             val arr = Discord.guildes(app)
             ToolResult("# 💬 Serveurs Discord (${arr.length()})\n" + (0 until arr.length()).joinToString("\n") { i -> "- " + Discord.affiche(arr.getJSONObject(i).optString("name")) }, direct = true)
@@ -197,6 +271,73 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             val sent = Discord.envoyerMessage(app, salon.getString("id"), message)
             ToolResult("✅ Message envoyé dans #${salon.optString("name")} sur « $gnom » (ID ${sent.optString("id")}). Les mentions globales ont été neutralisées.", direct = true)
         }
+        "discord_message_modifier", "discord_message_supprimer", "discord_message_epingler", "discord_reaction", "discord_fil_creer" -> {
+            val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
+            val nomSalon = a.optString("salon").trim()
+            val salon = Discord.trouverSalon(app, gid, nomSalon)
+                ?: if (nomSalon.matches(Regex("\\d{17,20}"))) JSONObject().put("id", nomSalon).put("name", "salon $nomSalon").put("type", 0)
+                   else return ToolResult(Discord.introuvable("salon", nomSalon, gnom, Discord.salons(app, gid)))
+            val messageId = a.optString("message_id").trim()
+            if (!messageId.matches(Regex("\\d{17,20}"))) return ToolResult("Identifiant de message Discord invalide.")
+            val salonId = salon.getString("id")
+            when (name) {
+                "discord_message_modifier" -> {
+                    val nouveau = a.optString("message").trim()
+                    if (nouveau.isBlank() || nouveau.length > 2000) return ToolResult("Le nouveau texte doit contenir de 1 à 2 000 caractères.")
+                    if (!confirm("Modifier le message $messageId dans #${salon.optString("name")} sur « $gnom » ?\n\n$nouveau", true)) return ToolResult("Modification annulée.")
+                    Discord.modifierMessage(app, salonId, messageId, nouveau)
+                    ToolResult("Message $messageId modifié dans #${salon.optString("name")}.", direct = true)
+                }
+                "discord_message_supprimer" -> {
+                    if (!confirm("Supprimer définitivement le message $messageId dans #${salon.optString("name")} sur « $gnom » ? Cette action est irréversible.", true)) return ToolResult("Suppression annulée.")
+                    Discord.supprimerMessage(app, salonId, messageId)
+                    ToolResult("Message $messageId supprimé de #${salon.optString("name")}.", direct = true)
+                }
+                "discord_message_epingler" -> {
+                    val retirer = a.optString("action").lowercase().contains("des") || a.optString("action").lowercase().contains("retir")
+                    if (!confirm("${if (retirer) "Désépingler" else "Épingler"} le message $messageId dans #${salon.optString("name")} sur « $gnom » ?", true)) return ToolResult("Action annulée.")
+                    Discord.epinglerMessage(app, salonId, messageId, !retirer)
+                    ToolResult("Message ${if (retirer) "désépinglé" else "épinglé"} dans #${salon.optString("name")}.", direct = true)
+                }
+                "discord_reaction" -> {
+                    val emoji = a.optString("emoji").trim()
+                    if (emoji.isBlank()) return ToolResult("Emoji manquant.")
+                    val retirer = a.optString("action").lowercase().startsWith("retir")
+                    if (!confirm("${if (retirer) "Retirer" else "Ajouter"} la réaction $emoji au message $messageId dans #${salon.optString("name")} ?", true)) return ToolResult("Action annulée.")
+                    Discord.reaction(app, salonId, messageId, emoji, !retirer)
+                    ToolResult("Réaction $emoji ${if (retirer) "retirée" else "ajoutée"} au message.", direct = true)
+                }
+                else -> {
+                    if (salon.optInt("type") !in setOf(0, 5)) return ToolResult("La création d'un fil à partir d'un message est disponible dans les salons textuels et d'annonces. Les forums utilisent un flux de création de publication distinct.")
+                    val nom = a.optString("nom").trim()
+                    if (nom.isBlank()) return ToolResult("Nom du fil manquant.")
+                    val demandeArchive = a.optString("archivage_minutes").toIntOrNull() ?: 1440
+                    val archive = listOf(60, 1440, 4320, 10080).minBy { kotlin.math.abs(it - demandeArchive) }
+                    if (!confirm("Créer le fil « $nom » à partir du message $messageId dans #${salon.optString("name")} sur « $gnom » (archivage après $archive minutes) ?", true)) return ToolResult("Création du fil annulée.")
+                    val fil = Discord.creerFilDepuisMessage(app, salonId, messageId, nom, archive)
+                    ToolResult("Fil « ${fil.optString("name", nom)} » créé (ID ${fil.optString("id")}).", direct = true)
+                }
+            }
+        }
+        "discord_membre_info" -> {
+            val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
+            val m = Discord.trouverMembre(app, gid, a.optString("membre")) ?: return ToolResult("Membre « ${a.optString("membre")} » introuvable sur « $gnom ».")
+            val u = m.optJSONObject("user") ?: JSONObject()
+            val uid = u.optString("id")
+            val rolesIds = m.optJSONArray("roles") ?: JSONArray()
+            val roles = Discord.roles(app, gid)
+            val nomsRoles = (0 until rolesIds.length()).mapNotNull { index ->
+                (0 until roles.length()).map { roles.getJSONObject(it) }.firstOrNull { it.optString("id") == rolesIds.optString(index) }?.optString("name")
+            }
+            val pseudo = m.optString("nick").ifBlank { u.optString("global_name").ifBlank { u.optString("username") } }
+            val lignes = listOf("# Membre Discord — $pseudo", "Serveur : $gnom", "ID : $uid",
+                "Nom du compte : ${u.optString("username")}", "Compte bot : ${u.optBoolean("bot")}",
+                "Arrivée : ${m.optString("joined_at").ifBlank { "non disponible" }}",
+                "Rôles : ${nomsRoles.joinToString(", ").ifBlank { "aucun rôle attribué" }}",
+                "Timeout jusqu'au : ${m.optString("communication_disabled_until").ifBlank { "aucun" }}")
+            ToolResult(lignes.joinToString("\n"), direct = true)
+        }
+
         "discord_roles" -> {
             val gid = guilde(a)
             val arr = Discord.roles(app, gid)
@@ -259,6 +400,101 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             ToolResult("✅ Rôle « ${role.optString("name")} » déplacé en position $position sur « $gnom »." +
                 (if (auMaximum) " C'est le plus haut possible : Discord ne permet jamais de dépasser le rôle le plus haut que JARVIS possède lui-même sur ce serveur." else ""), direct = true)
         }
+        "discord_membre_timeout", "discord_membre_expulser", "discord_membre_bannir", "discord_membre_pseudo" -> {
+            val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
+            val m = Discord.trouverMembre(app, gid, a.optString("membre")) ?: return ToolResult("Membre « ${a.optString("membre")} » introuvable sur « $gnom ».")
+            val u = m.optJSONObject("user") ?: JSONObject()
+            val uid = u.optString("id")
+            val pseudo = m.optString("nick").ifBlank { u.optString("global_name").ifBlank { u.optString("username").ifBlank { uid } } }
+            val infosGuilde = Discord.infosGuilde(app, gid)
+            if (uid == infosGuilde.optString("owner_id")) return ToolResult("Action refusée : le propriétaire du serveur ne peut pas être modéré par ce bot.")
+            if (uid == Discord.moi(app).optString("id")) return ToolResult("Action refusée : le bot ne peut pas se modérer lui-même.")
+            val raison = a.optString("raison").trim().ifBlank { "Action demandée depuis Jarvis" }
+            when (name) {
+                "discord_membre_timeout" -> {
+                    val retirer = a.optString("action").lowercase().startsWith("retir") || a.optString("duree_minutes").toIntOrNull() == 0
+                    if (retirer) {
+                        if (!confirm("Retirer le timeout de $pseudo sur « $gnom » ?", true)) return ToolResult("Action annulée.")
+                        Discord.timeoutMembre(app, gid, uid, null, raison)
+                        ToolResult("Timeout retiré pour $pseudo sur « $gnom ».", direct = true)
+                    } else {
+                        val minutes = a.optString("duree_minutes").toIntOrNull() ?: return ToolResult("Précise une durée en minutes (1 à 40 320, soit 28 jours maximum).")
+                        if (minutes !in 1..40320) return ToolResult("Durée invalide : un timeout Discord est limité à 28 jours (40 320 minutes).")
+                        val fin = java.time.Instant.now().plusSeconds(minutes * 60L).toString()
+                        if (!confirm("Appliquer un timeout de $minutes minute(s) à $pseudo sur « $gnom » ?\nRaison : $raison", true)) return ToolResult("Action annulée.")
+                        Discord.timeoutMembre(app, gid, uid, fin, raison)
+                        ToolResult("Timeout appliqué à $pseudo jusqu'au $fin.", direct = true)
+                    }
+                }
+                "discord_membre_expulser" -> {
+                    if (!confirm("Expulser $pseudo du serveur « $gnom » ? La personne pourra revenir avec une invitation.\nRaison : $raison", true)) return ToolResult("Expulsion annulée.")
+                    Discord.expulserMembre(app, gid, uid, raison)
+                    ToolResult("$pseudo a été expulsé de « $gnom ».", direct = true)
+                }
+                "discord_membre_bannir" -> {
+                    val heures = a.optString("supprimer_messages_heures").toIntOrNull() ?: 0
+                    if (heures !in 0..168) return ToolResult("La suppression de messages doit être comprise entre 0 et 168 heures.")
+                    if (!confirm("Bannir définitivement $pseudo du serveur « $gnom » ?\nSuppression des messages des $heures dernière(s) heure(s).\nRaison : $raison", true)) return ToolResult("Bannissement annulé.")
+                    Discord.bannirMembre(app, gid, uid, raison, heures * 3600)
+                    ToolResult("$pseudo a été banni de « $gnom ».", direct = true)
+                }
+                else -> {
+                    val nouveau = a.optString("pseudo").trim()
+                    if (nouveau.length > 32) return ToolResult("Le pseudo ne peut pas dépasser 32 caractères.")
+                    if (!confirm("Changer le pseudo de $pseudo en « ${nouveau.ifBlank { "(réinitialiser)" }} » sur « $gnom » ?", true)) return ToolResult("Modification annulée.")
+                    Discord.modifierPseudoMembre(app, gid, uid, nouveau)
+                    ToolResult("Pseudo de $pseudo mis à jour sur « $gnom ».", direct = true)
+                }
+            }
+        }
+
+        "discord_membre_timeout", "discord_membre_expulser", "discord_membre_bannir", "discord_membre_pseudo" -> {
+            val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
+            val m = Discord.trouverMembre(app, gid, a.optString("membre")) ?: return ToolResult("Membre « ${a.optString("membre")} » introuvable sur « $gnom ».")
+            val u = m.optJSONObject("user") ?: JSONObject()
+            val uid = u.optString("id")
+            val pseudo = m.optString("nick").ifBlank { u.optString("global_name").ifBlank { u.optString("username").ifBlank { uid } } }
+            if (uid == g.optString("owner_id")) return ToolResult("Action refusée : le propriétaire du serveur ne peut pas être modéré par ce bot.")
+            if (uid == Discord.moi(app).optString("id")) return ToolResult("Action refusée : le bot ne peut pas se modérer lui-même.")
+            val raison = a.optString("raison").trim().ifBlank { "Action demandée depuis Jarvis" }
+            when (name) {
+                "discord_membre_timeout" -> {
+                    val retirer = a.optString("action").lowercase().startsWith("retir") || a.optString("duree_minutes").toIntOrNull() == 0
+                    if (retirer) {
+                        if (!confirm("Retirer le timeout de $pseudo sur « $gnom » ?", true)) return ToolResult("Action annulée.")
+                        Discord.timeoutMembre(app, gid, uid, null, raison)
+                        ToolResult("Timeout retiré pour $pseudo sur « $gnom ».", direct = true)
+                    } else {
+                        val minutes = a.optString("duree_minutes").toIntOrNull() ?: return ToolResult("Précise une durée en minutes (1 à 40 320, soit 28 jours maximum).")
+                        if (minutes !in 1..40320) return ToolResult("Durée invalide : un timeout Discord est limité à 28 jours (40 320 minutes).")
+                        val fin = java.time.Instant.now().plusSeconds(minutes * 60L).toString()
+                        if (!confirm("Appliquer un timeout de $minutes minute(s) à $pseudo sur « $gnom » ?\nRaison : $raison", true)) return ToolResult("Action annulée.")
+                        Discord.timeoutMembre(app, gid, uid, fin, raison)
+                        ToolResult("Timeout appliqué à $pseudo jusqu'au $fin.", direct = true)
+                    }
+                }
+                "discord_membre_expulser" -> {
+                    if (!confirm("Expulser $pseudo du serveur « $gnom » ? La personne pourra revenir avec une invitation.\nRaison : $raison", true)) return ToolResult("Expulsion annulée.")
+                    Discord.expulserMembre(app, gid, uid, raison)
+                    ToolResult("$pseudo a été expulsé de « $gnom ».", direct = true)
+                }
+                "discord_membre_bannir" -> {
+                    val heures = a.optString("supprimer_messages_heures").toIntOrNull() ?: 0
+                    if (heures !in 0..168) return ToolResult("La suppression de messages doit être comprise entre 0 et 168 heures.")
+                    if (!confirm("Bannir définitivement $pseudo du serveur « $gnom » ?\nSuppression des messages des $heures dernière(s) heure(s).\nRaison : $raison", true)) return ToolResult("Bannissement annulé.")
+                    Discord.bannirMembre(app, gid, uid, raison, heures * 3600)
+                    ToolResult("$pseudo a été banni de « $gnom ».", direct = true)
+                }
+                else -> {
+                    val nouveau = a.optString("pseudo").trim()
+                    if (nouveau.length > 32) return ToolResult("Le pseudo ne peut pas dépasser 32 caractères.")
+                    if (!confirm("Changer le pseudo de $pseudo en « ${nouveau.ifBlank { "(réinitialiser)" }} » sur « $gnom » ?", true)) return ToolResult("Modification annulée.")
+                    Discord.modifierPseudoMembre(app, gid, uid, nouveau)
+                    ToolResult("Pseudo de $pseudo mis à jour sur « $gnom ».", direct = true)
+                }
+            }
+        }
+
         "discord_role_attribuer" -> {
             val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
             val role = Discord.trouverRole(app, gid, a.optString("role")) ?: return ToolResult(Discord.introuvable("rôle", a.optString("role"), gnom, Discord.roles(app, gid)))

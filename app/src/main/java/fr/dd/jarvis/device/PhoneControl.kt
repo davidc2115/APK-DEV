@@ -273,21 +273,14 @@ class PhoneControl(private val ctx: Context) {
             }
         }
         if (etat == "lecture") {
-            // Visuel : si l'appli de musique est à l'écran, capture du lecteur jointe à la réponse.
-            val visuel = runCatching {
-                val svc = fr.dd.jarvis.service.JarvisAccessibilityService.instance
-                if (svc?.rootInActiveWindow?.packageName?.toString() == pkg) {
-                    Thread.sleep(1200)
-                    svc.capture()?.let { b -> PiloteEcran.enregistrer(ctx.applicationContext as fr.dd.jarvis.JarvisApp, b, "musique") }
-                } else null
-            }.getOrNull()
-            val titre = session(pkg)?.let { titreDe(it) }
-            val confirmation = "🎵 « $requete » est en cours de lecture dans $nom (en arrière-plan)." +
-                (if (!titre.isNullOrBlank()) "\nTitre affiché par le lecteur : $titre" else "") +
-                (if (visuel != null) "\n\n![Lecteur](jarvis-img:$visuel)" else "")
-            // Lecture confirmée : on remet JARVIS (ou l'appli précédente) au premier plan, l'appli de musique reste en arrière-plan.
-            if (fr.dd.jarvis.service.JarvisAccessibilityService.instance != null) runCatching { fr.dd.jarvis.service.JarvisAccessibilityService.instance?.global(AccessibilityService.GLOBAL_ACTION_HOME) }
-            return confirmation
+            val metadata = session(pkg)?.metadata
+            val titre = metadata?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE).orEmpty().trim()
+            val artiste = (metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST)
+                ?: metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM_ARTIST)).orEmpty().trim()
+            val morceau = listOf(titre, artiste).filter { it.isNotBlank() }.joinToString(" — ")
+            // Réponse minimale et vérifiée : aucun nom d’application, commentaire, capture d’écran ou détail secondaire.
+            RetourJarvisMusique.afficher(ctx)
+            return morceau.ifBlank { "Lecture lancée (titre et artiste non fournis par le lecteur)." }
         }
         // Beaucoup d'applis tierces (YouTube Music, Spotify, Deezer…) n'implémentent pas vraiment playFromSearch() : la session existe
         // mais ignore la recherche demandée. Plutôt que de laisser l'ancien titre tourner sans rien faire, on ouvre directement l'écran
@@ -304,11 +297,14 @@ class PhoneControl(private val ctx: Context) {
             // pour laisser Android résoudre lui-même le lien (navigateur si besoin, mieux que rien).
             var err = start(Intent.ACTION_VIEW, rechercheUrl(requete), pkg)
             if (err.isNotBlank()) err = start(Intent.ACTION_VIEW, rechercheUrl(requete), null)
-            if (err.isBlank()) return "🔎 $nom ne confirme pas la lecture à distance de « $requete » : j'ai ouvert sa recherche avec ce titre déjà affiché, il ne reste plus qu'à appuyer sur lecture."
+            if (err.isBlank()) {
+                RetourJarvisMusique.afficher(ctx)
+                return "Lecture non confirmée : « $requete » est affiché dans la recherche."
+            }
         }
         return when (etat) {
-            "session" -> "🎵 J'ai demandé la lecture de « $requete » dans $nom, mais je n'ai pas pu confirmer qu'elle a démarré. Si rien ne joue, ouvre $nom et lance un titre une fois à la main (première utilisation)."
-            else -> "⚠️ Je n'ai pas trouvé la session de lecture de $nom (l'appli met parfois quelques secondes, ou doit être connectée/ouverte manuellement une première fois). Réessaie, ou ouvre $nom toi-même une fois."
+            "session" -> "Lecture non confirmée : « $requete »."
+            else -> "Impossible de confirmer la lecture demandée."
         }
     }
 
@@ -336,18 +332,28 @@ class PhoneControl(private val ctx: Context) {
      * demande), ouverture de CE résultat dans l'appli, vérification sur la session média (relance « lecture » si l'appli
      * s'est ouverte en pause). Renvoie null si ça n'a pas pu aboutir (on retombe alors sur la méthode classique).
      */
-    fun jouerYtm(pkg: String, requete: String, nomDemande: String, resultat: YtMusique.Resultat? = null, radio: Boolean = false): String? {
-        val nom = if (pkg == Musique.MORPHE_PACKAGE) YtMusique.NOM else nomDemande
-        val liste = if (resultat != null) YtMusique.derniers else runCatching { YtMusique.rechercher(requete) }.getOrNull() ?: return null
+    fun jouerYtm(pkg: String, requete: String, nomDemande: String, resultat: YtMusique.Resultat? = null, radio: Boolean = false, mode: String = "normal"): String? {
+        val liste = if (resultat != null) YtMusique.derniers else try {
+            YtMusique.rechercher(requete)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            return null
+        }
         val choisi = (resultat ?: YtMusique.meilleur(requete, liste) ?: return null).let { YtMusique.completer(it) }
         val avant = session(pkg)?.let { titreDe(it) }
         if (!YtMusique.ouvrir(ctx, pkg, choisi, radio)) return null
         var c: android.media.session.MediaController? = null
+        var modeEnvoye = false
         val fin = System.currentTimeMillis() + 9000
         var relance = false
         while (System.currentTimeMillis() < fin) {
             Thread.sleep(600)
             c = session(pkg) ?: continue
+            if (!modeEnvoye) {
+                MusiqueBibliotheque.configurerMode(ctx, mode, pkg)
+                modeEnvoye = true
+            }
             val titre = titreDe(c)
             val change = titre != null && titre != avant
             if (joue(c) && (change || correspond(c, choisi.titre))) break
@@ -355,13 +361,12 @@ class PhoneControl(private val ctx: Context) {
             if (!joue(c) && change && !relance && System.currentTimeMillis() > fin - 6000) { runCatching { c.transportControls.play() }; relance = true }
         }
         val joueBien = c != null && joue(c)
-        val autres = liste.filter { it.cle() != choisi.cle() && it.type != YtMusique.Type.AUTRE }.take(4)
-        val suite = if (autres.isEmpty()) "" else "\nAutres résultats (dis « mets le 2 », etc.) :\n" +
-            autres.mapIndexed { i, r -> "${i + 2}. ${r.ligne()}" }.joinToString("\n")
-        YtMusique.retenir(listOf(choisi) + autres)
-        if (joueBien && fr.dd.jarvis.service.JarvisAccessibilityService.instance != null) runCatching { fr.dd.jarvis.service.JarvisAccessibilityService.instance?.global(AccessibilityService.GLOBAL_ACTION_HOME) }
-        return (if (joueBien) "🎵 En lecture dans $nom : ${choisi.ligne()}" + (c?.let { titreDe(it) }?.takeIf { it.isNotBlank() && !choisi.titre.contains(it, true) }?.let { "\n(lecteur : $it)" } ?: "")
-            else "🎵 J'ai ouvert ${choisi.ligne()} dans $nom" + (if (c == null) " (l'appli n'a pas encore confirmé la lecture)." else " ; la lecture n'est pas confirmée — appuie sur lecture si besoin.")) + suite
+        YtMusique.retenir(listOf(choisi))
+        // Réponse volontairement minimale : l'utilisateur veut uniquement le titre et l'artiste,
+        // pas le nom de l'application, le mode de lecture ni une liste de résultats secondaires.
+        val artiste = choisi.sousTitre.substringBefore(" • ").trim()
+        val morceau = listOf(choisi.titre, artiste).filter { it.isNotBlank() }.joinToString(" — ")
+        return if (joueBien) morceau else "$morceau (lecture non confirmée)"
     }
 
     /** Titre en cours de lecture dans [pkg] (paquet ou nom d'appli), ou null si rien ne joue. */

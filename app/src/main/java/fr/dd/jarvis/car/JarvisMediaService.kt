@@ -85,12 +85,14 @@ class JarvisMediaService : MediaBrowserService() {
     private lateinit var session: MediaSession
     private val portee = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val app get() = application as JarvisApp
+    // Réutilise le moteur et son catalogue d'outils entre les demandes Android Auto.
+    private val outils by lazy { ToolBox(app) { _, force -> !force } }
+    private val cerveau by lazy { Brain(app.llm, outils, app) { app.store.userName.value } }
 
     // Android Auto reçoit directement les bitmaps pour éviter les problèmes de rendu des URI de ressources.
     private val artworkDragon by lazy {
         mapOf(
-            "dragon_tete" to BitmapFactory.decodeResource(resources, R.drawable.dragon_tete),
-            "auto_dragon_accueil" to BitmapFactory.decodeResource(resources, R.drawable.auto_dragon_accueil)
+            "dragon_tete" to BitmapFactory.decodeResource(resources, R.drawable.dragon_tete)
         )
     }
     private val creeLe = SystemClock.elapsedRealtime()
@@ -394,14 +396,16 @@ class JarvisMediaService : MediaBrowserService() {
     /** Lit [texte] avec la voix de JARVIS et l'affiche. */
     private fun lire(titre: String, texte: String, icone: String = "auto_micro") {
         afficher(titre, texte, PlaybackState.STATE_PLAYING, icone)
-        VoixVoiture.parler(this, texte.take(1500)) { session.setPlaybackState(etat(PlaybackState.STATE_PAUSED)) }
+        // La voix lit la réponse complète ; VoixVoiture découpe le flux en segments TTS sûrs.
+        VoixVoiture.parler(this, texte) { session.setPlaybackState(etat(PlaybackState.STATE_PAUSED)) }
     }
 
     /** 🎙️ : JARVIS ouvre le micro (bip, puis ta demande) ; l'écran de lecture suit la conversation. */
     private fun parler() {
         dernierParler = SystemClock.elapsedRealtime()
         VoixVoiture.taire()
-        piloteJusqua = SystemClock.elapsedRealtime() + 8000
+        piloteJusqua = SystemClock.elapsedRealtime() + 45_000
+        fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "appui micro reçu ; service vocal demandé")
         afficher("🎙️ Je t'écoute…", "Parle après le bip", PlaybackState.STATE_BUFFERING)
         if (!JarvisService.ecouterDepuisVoiture(this)) {
             echec("Micro indisponible : autorise le micro et active l'écoute « Jarvis » dans JARVIS. Tu peux aussi toucher la loupe pour dicter.")
@@ -410,12 +414,13 @@ class JarvisMediaService : MediaBrowserService() {
         // Rien après 8 s (micro bloqué par Android, écoute coupée) : on le dit au lieu de rester sur « Je t'écoute ».
         veille?.cancel()
         veille = portee.launch {
-            delay(8000)
-            if (!enCours) echec("Le micro ne s'est pas ouvert. Active l'écoute « Jarvis » dans JARVIS, ou touche la loupe pour dicter.")
+            delay(15_000)
+            if (!enCours) echec("Le service vocal n'a pas confirmé l'ouverture du micro après 15 secondes. Vérifie que l'écoute « Jarvis » est active sur le téléphone ; le diagnostic détaillé est conservé dans Réglages › Écoute.")
         }
     }
 
     private fun echec(texte: String) {
+        fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "échec micro : $texte")
         enCours = false; piloteJusqua = 0L; veille?.cancel(); derniereFin = SystemClock.elapsedRealtime()
         lire("🎙️ JARVIS", texte)
     }
@@ -429,7 +434,11 @@ class JarvisMediaService : MediaBrowserService() {
                 afficher("🎙️ Je t'écoute…", "Parle maintenant", PlaybackState.STATE_PLAYING)
             }
             ActiviteVoiture.Etape.PARTIEL -> if (enCours) afficher("🎙️ « ${e.texte.take(90)} »", "…", PlaybackState.STATE_PLAYING)
-            ActiviteVoiture.Etape.REFLEXION -> if (enCours) afficher("« ${e.question.take(90)} »", "JARVIS réfléchit…", PlaybackState.STATE_BUFFERING)
+            ActiviteVoiture.Etape.REFLEXION -> if (pilote) {
+                // La demande a bien atteint le service ; il peut terminer une réponse précédente avant d'ouvrir le micro.
+                enCours = true; veille?.cancel()
+                afficher("« ${e.question.take(90)} »", e.question.ifBlank { "JARVIS prépare l'écoute…" }.take(120), PlaybackState.STATE_BUFFERING)
+            }
             ActiviteVoiture.Etape.REPONSE -> {
                 derniere = propre(e.texte)
                 if (enCours) afficher("« ${e.question.take(70)} »", derniere, PlaybackState.STATE_PLAYING)
@@ -452,7 +461,7 @@ class JarvisMediaService : MediaBrowserService() {
             if (CarBridge.contexte().isEmpty()) app.chat.toList().takeLast(10).forEach { CarBridge.ajouter(it) }
             CarBridge.ajouter(question); app.chatAjouter(question)
             val rep = withContext(Dispatchers.IO) {
-                try { Brain(app.llm, ToolBox(app) { _, force -> !force }, app) { app.store.userName.value }.reply(CarBridge.contexte()) { } }
+                try { cerveau.reply(CarBridge.contexte()) { } }
                 catch (e: Throwable) { "Désolé, je n'ai pas pu faire ça : ${e.message ?: e.javaClass.simpleName}" }
             }
             val p = propre(rep).ifBlank { "C'est fait." }

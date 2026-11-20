@@ -318,8 +318,19 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { }
-    LaunchedEffect(Unit) {
+    // Le micro est indispensable à la commande vocale sur le téléphone ET à CarAudioRecord dans Android Auto.
+    // Demander l'autorisation depuis l'activité du téléphone : Android Auto ne peut pas afficher cette boîte système.
+    val microphonePermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) {
         if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            ctx.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+    }
+    LaunchedEffect(Unit) {
+        if (ctx.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            microphonePermission.launch(android.Manifest.permission.RECORD_AUDIO)
+        } else if (android.os.Build.VERSION.SDK_INT >= 33 &&
             ctx.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
         ) {
             notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
@@ -327,7 +338,7 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
     }
     var tab by rememberSaveable { mutableStateOf(0) }
     // Écrans de terrain ouverts par-dessus l'onglet en cours (caméra, compte-rendu d'intervention).
-    var terrain by remember { mutableStateOf(if (app.store.presenceModeActif.value) "presence" else "") }
+    var terrain by rememberSaveable { mutableStateOf(if (app.store.presenceModeActif.value) "presence" else "") }
     LaunchedEffect(terrain) { app.store.presenceModeActif.set(terrain == "presence") }
     LaunchedEffect(terrain, app.store.presenceVerrouillage.value) {
         val afficherVerrouille = terrain == "presence" && app.store.presenceVerrouillage.value

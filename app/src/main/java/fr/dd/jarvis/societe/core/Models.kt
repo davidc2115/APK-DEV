@@ -116,7 +116,9 @@ data class Intervention(
     val photosAvant: List<String> = emptyList(),
     val photosApres: List<String> = emptyList(),
     /** Signature du client (chemin relatif dans le stockage privé), vide si non recueillie. */
-    val signature: String = ""
+    val signature: String = "",
+    /** Tous les onduleurs concernés par cette intervention, un par ligne si plusieurs. */
+    val onduleurs: String = ""
 )
 
 @Serializable

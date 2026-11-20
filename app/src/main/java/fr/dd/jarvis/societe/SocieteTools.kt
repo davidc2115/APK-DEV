@@ -267,9 +267,10 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "categorie" to prop("maintenance | panne | diagnostic | nettoyage | remplacement | contrôle | autre."),
             "description" to prop("Résumé de ce que l'utilisateur a dit de l'intervention (une ou deux phrases, sans rien ajouter)."),
             "diagnostic" to prop("Constat donné par l'utilisateur, seulement s'il en a donné un ; sinon vide."),
-            "actions" to prop("Actions dites par l'utilisateur, UNE PAR LIGNE (elles deviennent une liste ✅). Aucune action supposée."),
+            "actions" to prop("Conserver les rubriques dictées (PDL, coffret AC, partie AC onduleur…), puis une puce par action, sans fusionner les contrôles ; aucune action supposée."),
             "pieces" to prop("Pièces remplacées dites par l'utilisateur, une par ligne (références et quantités s'il les donne)."),
-            "mesures" to prop("Mesures dites par l'utilisateur, recopiées telles quelles avec unités, une par ligne (ex. « 20 séries à environ 500 V », « série 7 : 320 V », « isolement 20 MΩ »). Les séries deviennent automatiquement un tableau Série 1…N. Aucune valeur supposée."),
+            "mesures" to prop("Mesures avec unités et blocs « Onduleur 1 », « Onduleur 2 », etc. strictement séparés. Conserver chaque quantité, toutes les séries et chaque tension dans le bon onduleur, y compris les nombres dictés en lettres. Aucune valeur supposée."),
+            "onduleurs" to prop("Liste exhaustive et ordonnée : « Onduleur 1 : ... », « Onduleur 2 : ... », « Onduleur 3 : ... », etc. Conserver chaque marque, modèle et numéro de série cité, un par ligne, sans fusion ni omission."),
             "statut" to prop("terminee | a_suivre | en_attente."),
             "prochaine_maintenance" to prop("Date yyyy-MM-dd UNIQUEMENT si l'utilisateur l'a demandée."), "notes" to prop("Remarques dites par l'utilisateur, sinon vide.")
         ), listOf("client", "description")),
@@ -293,6 +294,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "actions" to prop("Actions réalisées, une par ligne, ou « effacer » (optionnel)."),
             "pieces" to prop("Pièces remplacées ou « effacer » (optionnel)."),
             "mesures" to prop("Mesures relevées avec unités, une par ligne (« 20 séries à environ 500 V » → tableau des séries), ou « effacer » (optionnel)."),
+            "onduleurs" to prop("Tous les onduleurs concernés, un par ligne, ou « effacer » (optionnel)."),
             "statut" to prop("terminee | a_suivre | en_attente (optionnel)."),
             "prochaine_maintenance" to prop("Date yyyy-MM-dd ou « effacer » (optionnel)."),
             "notes" to prop("Notes ou « effacer » (optionnel).")
@@ -938,13 +940,14 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
                 existante.diagnostic.trim().equals(a.s("diagnostic").trim(), true) &&
                 existante.actions.trim().equals(a.s("actions").trim(), true) &&
                 existante.pieces.trim().equals(a.s("pieces").trim(), true) &&
-                existante.mesures.trim().equals(a.s("mesures").trim(), true)
+                existante.mesures.trim().equals(a.s("mesures").trim(), true) &&
+                existante.onduleurs.trim().equals(a.s("onduleurs").trim(), true)
         }
         if (doublon != null) return err("⚠️ Intervention potentiellement en double : la fiche #${doublon.id} du $date (${doublon.categorie}) contient déjà exactement les mêmes éléments pour ${client.nom} — ${site.nom}. Aucune nouvelle fiche créée. Consulte interventions_liste ; modifie ou supprime la fiche existante avec l’outil adapté. Si ce sont deux interventions réellement distinctes, précise leur différence dans la description.")
         val intervention = Intervention(
             id = svc.newId(), date = date, categorie = categorie, description = description,
             diagnostic = garde.champs["diagnostic"].orEmpty(), actions = garde.champs["actions"].orEmpty(), pieces = garde.champs["pieces"].orEmpty(),
-            mesures = garde.champs["mesures"].orEmpty(), statut = statut, prochaineMaintenance = prochaine, notes = garde.champs["notes"].orEmpty()
+            mesures = garde.champs["mesures"].orEmpty(), onduleurs = garde.champs["onduleurs"].orEmpty(), statut = statut, prochaineMaintenance = prochaine, notes = garde.champs["notes"].orEmpty()
         )
         val siteMaj = site.copy(interventions = (site.interventions + intervention).sortedByDescending { it.date })
         svc.repo.update { data -> data.copy(clients = data.clients.map { c ->
@@ -978,20 +981,34 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
      * d'ailleurs (aucune parole correspondante ici, ex. Hermès sur une autre messagerie), rien n'est filtré.
      */
     private fun garder(a: JSONObject, client: Client, site: Site, ancienne: Intervention?): Garde {
-        val cles = listOf("description", "diagnostic", "actions", "pieces", "mesures", "notes")
+        val cles = listOf("description", "diagnostic", "actions", "pieces", "mesures", "onduleurs", "notes")
         val champs = cles.filter { a.has(it) }.associateWith { a.s(it) }
-        val dits = paroles()
+        val dits = listOf(paroles(), a.s("source_utilisateur")).filter { it.isNotBlank() }.joinToString("\n")
         val connu = listOf(client.nom, site.nom, site.adresse, site.onduleur, site.notes,
             if (site.kwc > 0) site.kwc.toString() else "", if (site.nbPanneaux > 0) site.nbPanneaux.toString() else "",
-            a.s("categorie"), ancienne?.let { listOf(it.description, it.diagnostic, it.actions, it.pieces, it.mesures, it.notes).joinToString("\n") }.orEmpty()
+            a.s("categorie"), ancienne?.let { listOf(it.description, it.diagnostic, it.actions, it.pieces, it.mesures, it.onduleurs, it.notes).joinToString("\n") }.orEmpty()
         ).joinToString("\n")
         val tout = champs.values.joinToString("\n")
         val nomCite = Fidelite.normaliser(dits).let { d -> listOf(client.nom, site.nom).any { n -> n.length >= 3 && d.contains(Fidelite.normaliser(n).take(8)) } }
         val ici = dits.isNotBlank() && (nomCite || Fidelite.appui(tout, dits) >= 0.15 || Fidelite.nombres(tout).any { it in Fidelite.nombres(dits) })
-        if (!ici) return Garde(champs, emptyList(), false)
+        if (!ici) {
+            // Même si le résumé IA ne suffit pas à valider les autres champs, préserver les blocs dictés explicitement.
+            val source = a.s("source_utilisateur")
+            val numerotes = OnduleursIntervention.numerotes(source)
+            if (numerotes.isEmpty()) return Garde(champs, emptyList(), false)
+            val preserves = champs.toMutableMap()
+            preserves["onduleurs"] = numerotes.joinToString("\n")
+            preserves["mesures"] = source.ifBlank { preserves["mesures"].orEmpty() }.trim()
+            return Garde(preserves, emptyList(), false)
+        }
         val support = dits + "\n" + connu
         val retires = mutableListOf<String>()
-        val gardes = champs.mapValues { (_, v) -> Fidelite.verifier(v, support).also { retires += it.retires }.garde }
+        val gardes = champs.mapValues { (_, v) -> Fidelite.verifier(v, support).also { retires += it.retires }.garde }.toMutableMap()
+        // Les équipements et leurs mesures sont extraits de la dictée d'origine, pas seulement du résumé IA.
+        val source = a.s("source_utilisateur").ifBlank { dits }
+        gardes["onduleurs"] = OnduleursIntervention.completer(gardes["onduleurs"].orEmpty(), source)
+        // Conserver la dictée brute pour reconstruire les blocs et séries de chaque onduleur au rendu.
+        gardes["mesures"] = source.ifBlank { gardes["mesures"].orEmpty() }.trim()
         return Garde(gardes, retires, true)
     }
 
@@ -1032,6 +1049,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             actions = champ("actions", ancienne.actions),
             pieces = champ("pieces", ancienne.pieces),
             mesures = champ("mesures", ancienne.mesures),
+            onduleurs = champ("onduleurs", ancienne.onduleurs),
             statut = statut,
             prochaineMaintenance = prochaine,
             notes = champ("notes", ancienne.notes)
@@ -1080,6 +1098,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
                         if (item.actions.isNotBlank()) append("\n- Actions : " + item.actions)
                         if (item.pieces.isNotBlank()) append("\n- Pièces : " + item.pieces)
                         if (item.mesures.isNotBlank()) append("\n- Mesures : " + item.mesures)
+                        if (item.onduleurs.isNotBlank()) append("\n- Onduleur(s) : " + item.onduleurs)
                         if (item.prochaineMaintenance.isNotBlank()) append("\n- Prochaine maintenance : " + item.prochaineMaintenance)
                         if (item.notes.isNotBlank()) append("\n- Notes : " + item.notes)
                     }

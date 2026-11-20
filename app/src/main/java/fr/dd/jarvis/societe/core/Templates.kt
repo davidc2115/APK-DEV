@@ -237,9 +237,12 @@ Mise en forme Markdown obligatoire :
 | 🔧 **Intervention** | {{categorie}} |
 | 📌 **Statut** | {{statut}} |
 {{#adresse}}| 📍 **Adresse** | {{adresse}} |
-{{/adresse}}{{#onduleur}}| ⚡ **Onduleur** | {{onduleur}} |
-{{/onduleur}}{{#kwc}}| ☀️ **Puissance** | {{kwc}} kWc |
+{{/adresse}}{{#kwc}}| ☀️ **Puissance** | {{kwc}} kWc |
 {{/kwc}}
+{{#onduleurs}}
+## ⚡ Onduleurs installés
+{{onduleurs}}
+{{/onduleurs}}
 {{#description}}
 ## 📝 Description
 {{description}}
@@ -250,12 +253,18 @@ Mise en forme Markdown obligatoire :
 {{/diagnostic}}
 {{#a_actions}}
 ## 🛠️ Actions réalisées
-{{#actions}}- ✅ {{action}}
+{{#actions}}- {{emoji}} {{action}}
 {{/actions}}{{/a_actions}}
 {{#a_pieces}}
 ## 🔩 Pièces remplacées
 {{#pieces}}- 🔹 {{piece}}
 {{/pieces}}{{/a_pieces}}
+{{#a_groupes_onduleurs}}
+## ⚡ Mesures par onduleur
+{{#groupes_onduleurs}}
+### 🔌 {{onduleur}}
+{{details}}
+{{/groupes_onduleurs}}{{/a_groupes_onduleurs}}
 {{#a_series}}
 ## 📊 Mesures par série
 | Série | Valeur | Série | Valeur |

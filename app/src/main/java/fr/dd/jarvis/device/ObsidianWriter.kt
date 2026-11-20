@@ -53,7 +53,12 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             val tree = DocumentFile.fromTreeUri(ctx, Uri.parse(uriStr))
                 ?: throw java.io.IOException("Le coffre Obsidian sélectionné n'est plus accessible.")
             if (!tree.canWrite()) throw java.io.IOException("Le coffre Obsidian est en lecture seule ou l'autorisation d'écriture a expiré.")
-            val dir = subDir(tree, folder)
+            val dossierRelatif = relatif(folder)
+            val dossierReel = when {
+                dossierRelatif.isBlank() -> ""
+                else -> resoudre(dossierRelatif)?.takeIf { enfants(it) != null } ?: cheminDossier(dossierRelatif)
+            }
+            val dir = subDir(tree, dossierReel)
             if (!dir.isDirectory || !dir.canWrite())
                 throw java.io.IOException("Impossible d'accéder au dossier Obsidian demandé : $folder")
             val target = dir.trouverLoose(name) ?: dir.createFile(mime, name)
@@ -64,7 +69,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             val size = runCatching { ctx.contentResolver.openFileDescriptor(target.uri, "r")?.use { it.statSize } ?: -1L }.getOrDefault(-1L)
             if (size >= 0L && size != bytes.size.toLong())
                 throw java.io.IOException("Écriture Obsidian incomplète pour $name ($size/${bytes.size} octets).")
-            return "coffre Obsidian › ${folder.replace("/", " › ")} › $name"
+            return "coffre Obsidian › ${dossierReel.replace("/", " › ")} › $name"
         }
         val dir = File(ctx.getExternalFilesDir(null), folder).apply {
             if (!exists() && !mkdirs()) throw java.io.IOException("Impossible de créer le dossier local : $absolutePath")
@@ -115,13 +120,14 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         }
         return try {
             val tree = DocumentFile.fromTreeUri(ctx, Uri.parse(uriStr)) ?: return false
-            var cur: DocumentFile? = tree
-            var dossierTrouve = true
-            for (part in folder.split('/').filter { it.isNotBlank() }) {
-                cur = cur?.trouverLoose(part)?.takeIf { it.isDirectory }
-                if (cur == null) { dossierTrouve = false; break }
-            }
-            val cible = if (dossierTrouve) cur?.trouverLoose(name) else null
+            val dossierRelatif = relatif(folder)
+            val dossierReel = if (dossierRelatif.isBlank()) "" else resoudre(dossierRelatif)
+            val cur = if (dossierReel != null) {
+                if (dossierReel.isBlank()) tree else trouver(dossierReel)?.takeIf { it.isDirectory }
+            } else null
+            val cheminFichier = if (dossierRelatif.isBlank()) resoudre(name) else resoudre("$dossierRelatif/$name")
+            val cible = cheminFichier?.let { trouver(it)?.takeIf { f -> f.isFile } }
+                ?: cur?.trouverLoose(name)
             var supprime = false
             if (cible != null) {
                 if (!cible.canWrite()) return false
@@ -226,10 +232,16 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         try {
             if (uriStr.isNotBlank()) {
                 val tree = DocumentFile.fromTreeUri(ctx, Uri.parse(uriStr))
-                if (tree != null && tree.canRead()) {
-                    var cur: DocumentFile? = tree
-                    for (part in folder.split('/').filter { it.isNotBlank() }) cur = cur?.findFile(part)?.takeIf { it.isDirectory }
-                    val f = cur?.findFile(name)
+                    ?: return null
+                if (!tree.canRead()) return null
+                run {
+                    val dossierRelatif = relatif(folder)
+                    val dossierReel = if (dossierRelatif.isBlank()) "" else resoudre(dossierRelatif)
+                    val cur = if (dossierReel != null) {
+                        if (dossierReel.isBlank()) tree else trouver(dossierReel)?.takeIf { it.isDirectory }
+                    } else null
+                    val cheminFichier = if (dossierRelatif.isBlank()) resoudre(name) else resoudre("$dossierRelatif/$name")
+                    val f = cheminFichier?.let { trouver(it)?.takeIf { doc -> doc.isFile } } ?: cur?.trouverLoose(name)
                     if (f != null) return ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
                     return null
                 }
@@ -306,6 +318,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                 action(path, t)
             }
         } else {
+            if (store.obsidianUri.value.isNotBlank()) return
             localRoot().walkTopDown().filter { it.isFile && it.name.endsWith(".md", true) }.take(limite).forEach { f ->
                 runCatching { f.readText() }.getOrNull()?.let { action(f.relativeTo(localRoot()).path, it) }
             }
@@ -315,12 +328,17 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     /** Notes du coffre (chemins relatifs), éventuellement dans un dossier. */
     fun listNotes(folder: String = ""): List<String> {
         signalerFilPrincipal("listNotes")
-        val f = folder.trim().trim('/')
-        val vaultNotes = if (vaultRoot() != null) allNotes().map { it.first } else emptyList()
+        val f = relatif(folder)
+        val coffreConfigure = store.obsidianUri.value.isNotBlank()
+        val coffre = vaultRoot()
+        if (coffreConfigure && coffre == null) return emptyList()
+        if (coffre != null) {
+            val dossierReel = if (f.isBlank()) "" else resoudre(f) ?: return emptyList()
+            return allNotes().map { it.first }.filter { dossierReel.isEmpty() || it.startsWith("$dossierReel/") }.distinct().sorted()
+        }
         val localDir = File(localRoot(), f)
-        val localNotes = if (localDir.exists()) localDir.walkTopDown().filter { it.isFile && it.name.endsWith(".md", true) }
-            .map { it.relativeTo(localRoot()).path }.toList() else emptyList()
-        return (vaultNotes.filter { f.isEmpty() || it.startsWith("$f/") } + localNotes).distinct().sorted()
+        return if (localDir.exists()) localDir.walkTopDown().filter { it.isFile && it.name.endsWith(".md", true) }
+            .map { it.relativeTo(localRoot()).path }.sorted().toList() else emptyList()
     }
 
     /** Recherche texte (nom + contenu). Retourne (chemin, extrait). */
@@ -333,7 +351,10 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             val i = txt.lowercase().indexOf(q)
             return if (i < 0) "" else txt.substring(maxOf(0, i - 60), minOf(txt.length, i + 140)).replace(Regex("\\s+"), " ")
         }
-        if (vaultRoot() != null) {
+        val coffreConfigure = store.obsidianUri.value.isNotBlank()
+        val coffre = vaultRoot()
+        if (coffreConfigure && coffre == null) return emptyList()
+        if (coffre != null) {
             val notes = allNotes()
             for ((path, f) in notes) if (path.lowercase().contains(q) && out.size < limit) out += path to ""
             for ((path, f) in notes.take(600)) {
@@ -343,6 +364,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                 if (t.lowercase().contains(q)) out += path to extrait(t)
             }
         } else {
+            if (coffreConfigure) return emptyList()
             localRoot().walkTopDown().filter { it.isFile && it.name.endsWith(".md", true) }.forEach { f ->
                 if (out.size >= limit) return@forEach
                 val t = runCatching { f.readText() }.getOrDefault("")
@@ -358,16 +380,17 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         signalerFilPrincipal("readNote")
         val p = withMd(path)
         val v = vaultRoot()
+        if (store.obsidianUri.value.isNotBlank() && v == null) return null
         if (v != null) {
-            var cur: DocumentFile? = v
-            for (part in p.split('/').filter { it.isNotBlank() }) cur = cur?.findFile(part)
-            val f = cur?.takeIf { it.isFile }
+            val reel = resoudre(p)
+            val f = reel?.let { trouver(it) }?.takeIf { it.isFile }
             if (f != null) {
                 val content = runCatching { ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes().toString(Charsets.UTF_8) } }.getOrNull()
                 if (content != null) return content
             }
         }
-        // saveBytes peut avoir utilisé le stockage local si le coffre SAF était en lecture seule.
+        // Le stockage local n'est consulté que si aucun coffre n'a été configuré.
+        if (store.obsidianUri.value.isNotBlank()) return null
         val local = File(localRoot(), p)
         return if (local.isFile) runCatching { local.readText() }.getOrNull() else null
     }
@@ -394,7 +417,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
      * Racine « fichier » utilisable directement : le coffre lui-même (accès à tous les fichiers, contrôlé contre la
      * vue Android du coffre) ou, sans coffre choisi, le dossier local. Null : passer par le coffre SAF.
      */
-    private fun racineFichier(): File? = fichierCoffre() ?: if (vaultRoot() == null) localRoot() else null
+    private fun racineFichier(): File? = fichierCoffre() ?: if (store.obsidianUri.value.isBlank()) localRoot() else null
 
     private fun fichierSur(racine: File, chemin: String): File {
         val r = racine.canonicalFile
@@ -424,16 +447,29 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             val d = fichierSur(r, dossier)
             return d.takeIf { it.isDirectory }?.listFiles()?.filter { !it.name.startsWith(".") }?.map { it.name to it.isDirectory }
         }
-        val d = (if (dossier.isBlank()) vaultRoot() else trouver(dossier))?.takeIf { it.isDirectory } ?: return null
-        return d.listFiles().mapNotNull { f -> f.name?.takeIf { !it.startsWith(".") }?.let { it to f.isDirectory } }
+        val d = (if (dossier.isBlank()) vaultRoot() else trouver(dossier))?.takeIf { it.isDirectory }
+        val depuisDocumentFile = d?.let { dossierDoc ->
+            runCatching { dossierDoc.listFiles().mapNotNull { f -> f.name?.takeIf { !it.startsWith(".") }?.let { it to f.isDirectory } } }
+                .getOrNull()
+        }
+        if (!depuisDocumentFile.isNullOrEmpty()) return depuisDocumentFile
+
+        // Certains fournisseurs SAF renvoient une liste vide via DocumentFile.listFiles() alors que
+        // DocumentsContract voit bien les éléments. L'index complet sert de seconde lecture, sans
+        // deviner de dossier ni créer un doublon à un autre emplacement.
+        val depuisIndex = ObsidianPathResolution.directChildren(dossier, toutLister())
+        if (depuisIndex.isNotEmpty()) return depuisIndex
+        return depuisDocumentFile ?: if (d == null) null else emptyList()
     }
 
     private fun correspondance(noms: List<Pair<String, Boolean>>, voulu: String, dossierSeul: Boolean = false): String? {
-        val c = noms.filter { !dossierSeul || it.second }
-        return c.firstOrNull { it.first == voulu }?.first
-            ?: c.firstOrNull { normaliseNom(it.first) == normaliseNom(voulu) }?.first
-            ?: c.firstOrNull { cleNom(it.first) == cleNom(voulu) }?.first
-            ?: c.firstOrNull { cleNom(it.first.substringBeforeLast('.')) == cleNom(voulu) }?.first
+        val c = noms.filter { !dossierSeul || it.second }.map { it.first }
+        return ObsidianPathResolution.uniqueNameMatch(
+            candidates = c,
+            wanted = voulu,
+            normalize = ::normaliseNom,
+            loose = { nom -> cleNom(nom.substringBeforeLast('.')) }
+        )
     }
 
     /**
@@ -442,13 +478,30 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
      */
     fun resoudre(chemin: String): String? {
         val parts = relatif(chemin).split('/').filter { it.isNotBlank() }
-        var courant = ""
-        for ((i, part) in parts.withIndex()) {
-            val noms = enfants(courant) ?: return null
-            val m = correspondance(noms, part, dossierSeul = i < parts.size - 1) ?: return null
-            courant = if (courant.isEmpty()) m else "$courant/$m"
+        if (parts.isEmpty()) return ""
+        fun depuis(baseInitiale: String, indexInitial: Int): String? {
+            var courant = baseInitiale
+            for (i in indexInitial until parts.size) {
+                val noms = enfants(courant) ?: return null
+                val m = correspondance(noms, parts[i], dossierSeul = i < parts.size - 1) ?: return null
+                courant = if (courant.isEmpty()) m else "$courant/$m"
+            }
+            return courant
         }
-        return courant
+
+        // Priorité absolue au chemin relatif classique depuis la racine du coffre.
+        depuis("", 0)?.let { return it }
+
+        // Jarvis range certains contenus sous « JARVIS/Images », alors que l'utilisateur peut
+        // naturellement demander « Images/... ». Si le premier dossier n'existe pas à la racine,
+        // on accepte un emplacement imbriqué uniquement si le chemin restant permet de le distinguer.
+        val premier = parts.first()
+        val dossiers = toutLister().filter { it.second }.map { it.first }
+        // Plusieurs dossiers « Images » peuvent exister. On compare le chemin restant aussi :
+        // « Images/coloriage train » identifie son parent uniquement si le suffixe complet est unique.
+        return ObsidianPathResolution.uniqueNestedPath(premier, dossiers, ::cleNom) { candidat ->
+            depuis(candidat, 1)
+        }
     }
 
     /** Chemin du coffre sur le téléphone (ex. « Documents/Obsidian jarvis »), d'après le dossier choisi dans les Réglages. */
@@ -524,8 +577,11 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
      * « JARVIS/Images ») au lieu d'en créer un nouveau à côté. Les parties restantes seront créées.
      */
     fun cheminDossier(chemin: String): String {
-        val parts = relatif(chemin).split('/').filter { it.isNotBlank() }
+        val normalise = relatif(chemin)
+        val parts = normalise.split('/').filter { it.isNotBlank() }
         if (parts.isEmpty()) return ""
+        // Si le dossier existe déjà, renvoyer son chemin réel, y compris lorsqu'un préfixe est omis.
+        resoudre(normalise)?.takeIf { enfants(it) != null }?.let { return it }
         var base = ""
         var i = 0
         val racine = enfants("").orEmpty()
@@ -533,8 +589,27 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         if (premier != null) { base = premier; i = 1 }
         else {
             val voulu = cleNom(parts[0])
-            val candidats = toutLister().filter { it.second && cleNom(it.first.substringAfterLast('/')) == voulu }.map { it.first }
-            if (candidats.size == 1) { base = candidats[0]; i = 1 }
+            val candidats = toutLister().filter { it.second && cleNom(it.first.substringAfterLast('/')) == voulu }.map { it.first }.distinct()
+            if (candidats.isNotEmpty()) {
+                // Choisir le parent qui correspond au plus long préfixe restant, pas le premier trouvé.
+                val essais = candidats.map { candidat ->
+                    var courant = candidat
+                    var nb = 1
+                    for (j in 1 until parts.size) {
+                        val m = correspondance(enfants(courant).orEmpty(), parts[j], dossierSeul = true) ?: break
+                        courant = "$courant/$m"
+                        nb++
+                    }
+                    Triple(candidat, courant, nb)
+                }
+                val meilleurScore = essais.maxOf { it.third }
+                val meilleurs = essais.filter { it.third == meilleurScore }
+                if (meilleurs.size != 1) {
+                    throw IllegalArgumentException("Plusieurs dossiers « ${parts[0]} » correspondent dans le coffre. Précise le chemin complet pour éviter une erreur.")
+                }
+                base = meilleurs.single().second
+                i = meilleurs.single().third
+            }
         }
         while (i < parts.size) {
             val m = correspondance(enfants(base).orEmpty(), parts[i], dossierSeul = true) ?: break
@@ -549,8 +624,17 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
     /** Retrouve un fichier du coffre à partir de son seul nom (premier trouvé), pour « déplace img_….png ». */
     fun chercherParNom(nom: String): String? {
-        val cible = cleNom(nom.trim())
-        return toutLister().firstOrNull { !it.second && (cleNom(it.first.substringAfterLast('/')) == cible || cleNom(it.first.substringAfterLast('/').substringBeforeLast('.')) == cible) }?.first
+        val demande = nom.trim()
+        if (demande.isBlank()) return null
+        val candidats = toutLister().filter { !it.second }.map { it.first }.distinct()
+        // Un nom de fichier seul n'est exploitable que s'il désigne un seul chemin dans le coffre.
+        // Ne jamais prendre le premier résultat : deux dossiers peuvent contenir « facture.pdf ».
+        return ObsidianPathResolution.uniqueNameMatch(
+            candidates = candidats,
+            wanted = demande,
+            normalize = { cleNom(it.substringAfterLast('/')) },
+            loose = { cleNom(it.substringAfterLast('/').substringBeforeLast('.')) }
+        )
     }
 
     /**
@@ -906,7 +990,10 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                 val racine = idCoffre() ?: return 0L
                 signatureSaf(v.uri, racine, "", 0) { c, d, t -> mix(c, d, t) }
             }
-            else -> localRoot().walkTopDown().forEach { f -> mix(f.path, f.lastModified(), if (f.isFile) f.length() else -1) }
+            else -> {
+                if (store.obsidianUri.value.isNotBlank()) return 0L
+                localRoot().walkTopDown().forEach { f -> mix(f.path, f.lastModified(), if (f.isFile) f.length() else -1) }
+            }
         }
         return h
     }
@@ -957,6 +1044,9 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
      *  (liens, tags) que pour [limiteLecture] notes, plafonné à [limiteOctets] par note, pour rester fluide. */
     fun graph(limiteNotes: Int = 3000, limiteOctets: Int = 60_000, limitePieces: Int = 3000, limiteLecture: Int = 700): GraphData {
         val v = vaultRoot()
+        if (store.obsidianUri.value.isNotBlank() && v == null) {
+            return GraphData(emptyList(), emptyList(), emptyList(), emptyMap(), emptyList(), emptyList())
+        }
         val direct = fichierCoffre()
         val cheminsPieces = mutableListOf<String>()
         val dossiers = mutableListOf<String>()

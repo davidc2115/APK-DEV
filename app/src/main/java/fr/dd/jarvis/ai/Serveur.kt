@@ -17,7 +17,11 @@ import java.util.concurrent.TimeUnit
 
 /** Serveur personnel : SSH (commandes, fichiers) et Home Assistant (API REST + fichiers de configuration YAML). */
 object Serveur {
-    private val http = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(40, TimeUnit.SECONDS).build()
+    private val http = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(40, TimeUnit.SECONDS)
+        .callTimeout(45, TimeUnit.SECONDS)
+        .build()
 
     // ------------------------------------------------------------------ SSH
 
@@ -700,13 +704,29 @@ object Serveur {
         }.filter { it.second >= 0.45 }.sortedByDescending { it.second }.take(n).map { it.first }
     }
 
-    fun haEntites(app: JarvisApp, recherche: String, domaine: String, decalage: Int = 0, limite: Int = 100): String {
+    internal fun correspondEtatHa(etatBrut: String, filtre: String): Boolean {
+        val e = fr.dd.jarvis.societe.core.normaliser(etatBrut)
+        val f = fr.dd.jarvis.societe.core.normaliser(filtre)
+        if (f.isBlank()) return true
+        return when {
+            f in setOf("indisponible", "injoignable", "hors ligne", "offline", "deconnecte", "deconnectee", "unavailable") -> e == "unavailable"
+            f in setOf("inconnu", "unknown", "etat inconnu") -> e == "unknown"
+            f in setOf("indisponible ou inconnu", "injoignable ou inconnu", "tous les problemes") -> e in setOf("unavailable", "unknown")
+            else -> e == f
+        }
+    }
+
+    fun haEntites(app: JarvisApp, recherche: String, domaine: String, decalage: Int = 0, limite: Int = 100, etat: String = ""): String {
+        val termeRechercheNormalise = fr.dd.jarvis.societe.core.normaliser(recherche)
+        val filtreImplicitementDansRecherche = recherche.takeIf { termeRechercheNormalise in setOf("indisponible", "injoignable", "hors ligne", "offline", "deconnecte", "deconnectee", "unavailable", "inconnu", "unknown", "etat inconnu", "indisponible ou inconnu", "injoignable ou inconnu", "tous les problemes") }
+        val rechercheEntite = if (etat.isBlank() && filtreImplicitementDansRecherche != null) "" else recherche
+        val filtreEtat = etat.ifBlank { filtreImplicitementDansRecherche.orEmpty() }
         val arr = JSONArray(ha(app, "GET", "/api/states"))
         val toutes = (0 until arr.length()).map { arr.getJSONObject(it) }
         val paires = toutes.map { it.getString("entity_id") to it.optJSONObject("attributes")?.optString("friendly_name").orEmpty() }
-        val l = filtrerEntites(paires, recherche, domaine).map { toutes[it] }
+        val l = filtrerEntites(paires, rechercheEntite, domaine).map { toutes[it] }.filter { correspondEtatHa(it.optString("state"), filtreEtat) }
         // Entités que l'utilisateur a notées pour ce sujet (carnet, mémoire) : en tête, avec leur état réel.
-        val notees = if (recherche.isBlank() || decalage > 0) emptyList() else runCatching { fr.dd.jarvis.device.Carnet.entitesNotees(app, recherche) }.getOrDefault(emptyList())
+        val notees = if (rechercheEntite.isBlank() || decalage > 0) emptyList() else runCatching { fr.dd.jarvis.device.Carnet.entitesNotees(app, rechercheEntite) }.getOrDefault(emptyList())
         val blocNotes = if (notees.isEmpty()) "" else "📝 D'APRÈS TES NOTES (à utiliser en priorité, sans chercher d'autre entité) :\n" + notees.joinToString("\n") { (id, note) ->
             val o = toutes.firstOrNull { it.getString("entity_id") == id }
             "- `$id` · " + (o?.let { x -> val a = x.optJSONObject("attributes"); "${a?.optString("friendly_name").orEmpty()} : **${x.getString("state")}${a?.optString("unit_of_measurement").orEmpty()}**" }
@@ -722,7 +742,8 @@ object Serveur {
                 "Les plus proches (vérifie avec l'utilisateur avant d'agir, n'invente rien d'autre) :\n" + voisines.joinToString("\n") { o ->
                     val a = o.optJSONObject("attributes"); "- `${o.getString("entity_id")}` · ${a?.optString("friendly_name").orEmpty()} : **${o.getString("state")}${a?.optString("unit_of_measurement").orEmpty()}**"
                 }
-            return "Aucune entité ne correspond à « ${recherche.ifBlank { domaine }} » (${arr.length()} entités au total). Dis-le clairement à l'utilisateur, sans inventer. " +
+            val libelleFiltre = rechercheEntite.ifBlank { domaine.ifBlank { filtreEtat.ifBlank { "toutes les entités" } } }
+            return "Aucune entité Home Assistant ne correspond au filtre « $libelleFiltre » (${arr.length()} entités au total). Dis-le clairement à l'utilisateur, sans inventer. " +
                 "Domaines présents : " + parDomaine.take(14).joinToString(", ") { "${it.key} (${it.value})" } + "." +
                 (if (medias.isNotEmpty()) "\nAppareils multimédia (télé, enceintes) : " + medias.joinToString(" ; ") { "`${it.first}` ${it.second}" } else "") +
                 "\nRéessaie avec un autre mot (nom de la pièce, marque, tv…) ou un domaine, et regarde les notes de l'utilisateur (notes_lire / memoire_lire / obsidian_chercher)."
@@ -742,25 +763,25 @@ object Serveur {
      * Position d'une personne suivie par Home Assistant (entités person.* et device_tracker.*) : zone, coordonnées
      * GPS, adresse précise, précision, fraîcheur, distance, lien de carte. Dit clairement quand la position est inconnue.
      */
-    suspend fun haPosition(app: JarvisApp, nom: String): String {
+    suspend fun haPosition(app: JarvisApp, nom: String, concise: Boolean = false): String {
         val arr = JSONArray(ha(app, "GET", "/api/states"))
         val toutes = (0 until arr.length()).map { arr.getJSONObject(it) }
         val suivis = toutes.filter { it.getString("entity_id").startsWith("person.") || it.getString("entity_id").startsWith("device_tracker.") }
-        if (suivis.isEmpty()) return "Home Assistant ne suit aucune personne (aucune entité person.* ni device_tracker.*). Je ne peux donc pas dire où elle se trouve."
+        if (suivis.isEmpty()) return if (concise) "📍 Position indisponible." else "Home Assistant ne suit aucune personne (aucune entité person.* ni device_tracker.*). Je ne peux donc pas dire où elle se trouve."
         val paires = suivis.map { it.getString("entity_id") to it.optJSONObject("attributes")?.optString("friendly_name").orEmpty() }
         val personnes = suivis.filter { it.getString("entity_id").startsWith("person.") }
         val idx = if (nom.isBlank()) personnes.map { suivis.indexOf(it) } else filtrerEntites(paires, nom, "").ifEmpty { proches(paires, nom, 3) }
-        if (idx.isEmpty()) return "Je ne trouve personne nommé « $nom » dans Home Assistant. Personnes suivies : " +
+        if (idx.isEmpty()) return if (concise) "📍 Position de $nom indisponible." else "Je ne trouve personne nommé « $nom » dans Home Assistant. Personnes suivies : " +
             personnes.joinToString(", ") { it.optJSONObject("attributes")?.optString("friendly_name").orEmpty().ifBlank { it.getString("entity_id") } }.ifBlank { "aucune" } + "."
         // Une personne (person.*) plutôt que l'un de ses appareils.
         val choisies = idx.map { suivis[it] }.sortedBy { if (it.getString("entity_id").startsWith("person.")) 0 else 1 }.take(if (nom.isBlank()) 6 else 1)
-        val moi = runCatching { fr.dd.jarvis.device.Locator.point(app) }.getOrNull()
+        val moi = if (concise) null else runCatching { fr.dd.jarvis.device.Locator.point(app) }.getOrNull()
         val fiches = mutableListOf<String>()
-        for (o in choisies) fiches += fichePosition(app, o, toutes, moi)
+        for (o in choisies) fiches += fichePosition(app, o, toutes, moi, concise)
         return fiches.joinToString("\n\n")
     }
 
-    private suspend fun fichePosition(app: JarvisApp, o: JSONObject, toutes: List<JSONObject>, moi: fr.dd.jarvis.societe.Geo.Point?): String {
+    private suspend fun fichePosition(app: JarvisApp, o: JSONObject, toutes: List<JSONObject>, moi: fr.dd.jarvis.societe.Geo.Point?, concise: Boolean = false): String {
         val a = o.optJSONObject("attributes") ?: JSONObject()
         val nom = a.optString("friendly_name").ifBlank { o.getString("entity_id") }
         val etat = o.optString("state")
@@ -775,6 +796,13 @@ object Serveur {
             "not_home" -> "🚶 absent·e (hors des zones connues)"
             "unknown", "unavailable", "" -> "❓ position inconnue pour Home Assistant"
             else -> "📍 zone « $etat »"
+        }
+        if (concise) {
+            val localisation = if (!lat.isNaN() && !lon.isNaN()) {
+                val p = fr.dd.jarvis.societe.Geo.Point(lat, lon)
+                runCatching { fr.dd.jarvis.societe.Geo.adresseDe(p)?.libelle }.getOrNull()?.takeIf { it.isNotBlank() } ?: zone
+            } else zone
+            return "📍 $nom : $localisation"
         }
         val maj = runCatching { java.time.OffsetDateTime.parse(o.optString("last_updated")).toInstant().toEpochMilli() }.getOrNull()
         val age = maj?.let { val m = (System.currentTimeMillis() - it) / 60_000; when { m < 1 -> "à l'instant"; m < 60 -> "il y a $m min"; m < 1440 -> "il y a ${m / 60} h"; else -> "il y a ${m / 1440} j" } }
@@ -812,20 +840,9 @@ object Serveur {
 
     fun haConteneur(app: JarvisApp): String? = runCatching { HaSur.conteneur(app)?.nom }.getOrNull()
 
-    /** Dossier de configuration de Home Assistant sur le serveur (réglage, sinon détection Docker puis emplacements usuels). */
-    fun haDossier(app: JarvisApp): String? {
-        app.store.haDir.value.trim().takeIf { it.isNotBlank() }?.let { return it.trimEnd('/') }
-        val nom = haConteneur(app)
-        if (nom != null) {
-            val src = exec(app, "docker inspect $nom --format '{{range .Mounts}}{{if eq .Destination \"/config\"}}{{.Source}}{{end}}{{end}}'").second.trim()
-            if (src.startsWith("/")) { app.store.haDir.set(src); return src }
-        }
-        for (c in listOf("/config", "~/homeassistant", "/opt/homeassistant/config", "/opt/homeassistant", "/home/homeassistant/.homeassistant", "/usr/share/hassio/homeassistant", "~/.homeassistant")) {
-            if (exec(app, "test -f $c/configuration.yaml").first == 0) {
-                val abs = exec(app, "cd $c && pwd").second.trim().ifBlank { c }
-                app.store.haDir.set(abs); return abs
-            }
-        }
-        return null
-    }
+    /**
+     * Aucun chemin HA ne peut être résolu sur le SSH général : ce profil désigne Debian/Jarvis.
+     * Le réglage historique haDir est volontairement ignoré pour éviter toute écriture sur le mauvais hôte.
+     */
+    fun haDossier(app: JarvisApp): String? = null
 }

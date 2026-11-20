@@ -30,11 +30,11 @@ class HomeAssistantAdmin(
     /** Commande sur le serveur SSH (null si SSH non configuré) : sert à installer HACS. */
     private val ssh: ((String, Int) -> Pair<Int, String>)? = null,
     private val conteneur: () -> String? = { null },
+    private val diagnosticSecours: (() -> String)? = null,
 ) {
     constructor(app: JarvisApp, confirm: suspend (String, Boolean) -> Boolean) : this(
         Serveur.haBaseDirecte(app), app.store.haToken.value, confirm,
-        if (Serveur.sshConfigure(app)) { c, t -> Serveur.exec(app, c, t) } else null,
-        { Serveur.haConteneur(app) })
+        null, { null }, { HaSur.diagnostic(app) })
 
     private val base = urlBrute.trim().trimEnd('/').let { if (it.isBlank() || it.startsWith("http")) it else "http://$it" }
     private val jeton = jetonBrut.trim()
@@ -379,7 +379,7 @@ class HomeAssistantAdmin(
             }
             // ---- système
             "verifier" -> rest("POST", "/api/config/core/check_config").toString()
-            "journal" -> rest("GET", "/api/error_log").toString().lines().takeLast(a.optString("lignes").toIntOrNull() ?: 60).joinToString("\n").takeLast(6000)
+            "journal" -> runCatching { rest("GET", "/api/error_log").toString().lines().takeLast(a.optString("lignes").toIntOrNull() ?: 60).joinToString("\n").takeLast(6000) }.getOrElse { "API Home Assistant indisponible : ${it.message?.take(180)}.\n\n" + (diagnosticSecours?.invoke() ?: "Diagnostic hôte indisponible : profil SSH Debian non configuré.") }
             "modele" -> rest("POST", "/api/template", JSONObject().put("template", a.optString("modele"))).toString().take(4000)
             "redemarrer" -> {
                 val v = rest("POST", "/api/config/core/check_config") as? JSONObject
@@ -391,7 +391,7 @@ class HomeAssistantAdmin(
                 kotlinx.coroutines.delay(15_000)
                 while (System.currentTimeMillis() - debut < 480_000 && runCatching { rest("GET", "/api/") }.isFailure) kotlinx.coroutines.delay(6000)
                 if (runCatching { rest("GET", "/api/") }.isSuccess) "✅ Home Assistant redémarré et de nouveau en ligne (au bout de ${(System.currentTimeMillis() - debut) / 1000} s)."
-                else "⚠️ Home Assistant ne répond toujours pas après 8 min : dis « état de Home Assistant » (ha_sauvegarde etat) pour voir ses erreurs."
+                else "⚠️ Home Assistant ne répond toujours pas après 8 min.\n\n" + (diagnosticSecours?.invoke() ?: "Diagnostic hôte indisponible : profil SSH Debian non configuré.")
             }
             // ---- accès brut (tout le reste)
             "ws" -> {
@@ -434,7 +434,7 @@ class HomeAssistantAdmin(
     /** Installe HACS dans le conteneur Home Assistant (script officiel), redémarre, puis lance sa configuration. */
     private suspend fun installerHacs(): String {
         if (runCatching { ws { w -> w.cmd("hacs/info") } }.isSuccess) return "✅ HACS est déjà installé et configuré."
-        val ssh = ssh ?: return "❌ Il faut l'accès SSH au serveur (Réglages › Maison › Serveur) pour installer HACS."
+        val ssh = ssh ?: return "❌ Installation HACS par script désactivée : le profil SSH actuel cible Debian/Jarvis. Un profil SSH Home Assistant indépendant sera nécessaire."
         if (!confirm("Home Assistant : installer HACS (script officiel get.hacs.xyz) puis redémarrer Home Assistant ?", true)) return "Annulé."
         val ctn = conteneur() ?: return "❌ Conteneur Home Assistant introuvable sur le serveur."
         var r = ssh("docker exec -w /config $ctn bash -c 'wget -O - https://get.hacs.xyz | bash -' 2>&1", 300)

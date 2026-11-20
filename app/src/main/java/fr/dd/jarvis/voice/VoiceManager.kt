@@ -374,7 +374,7 @@ class VoiceManager(private val ctx: Context) {
                     main.post { if (recognizer === r) liberer() }
                     main.postDelayed(unmuteLater, 900)
                     signalerEcoute(false)
-                    JournalVoix.noter(nom, "$note : « ${t.take(240)} »")
+                    JournalVoix.noter(nom, "$note : « ${t.take(240)} » (écoute ${System.currentTimeMillis() - ouvertLe} ms)")
                     onFinal(t)
                 }
 

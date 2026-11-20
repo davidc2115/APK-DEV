@@ -27,10 +27,18 @@ class Brain(
      */
     suspend fun reply(history: List<ChatMsg>, pourHermes: Boolean = false, onTexte: ((String) -> Unit)? = null, onStatus: (String) -> Unit): String {
         // L'avatar montre que JARVIS réfléchit tant que la réponse se prépare.
+        val debutTotal = System.currentTimeMillis()
         fr.dd.jarvis.voice.Presence.debutReflexion()
         // « Recommence / reprends là où tu en étais » après une demande interrompue (délai, coupure) : elle est relancée.
+        val debutReprise = System.currentTimeMillis()
         val h = runCatching { fr.dd.jarvis.hermes.Reprise.reecrire(app, history) }.getOrNull()?.also { onStatus("🔁 Reprise de la demande interrompue…") } ?: history
-        try { return replyInterne(h, pourHermes, onTexte, onStatus) } finally { fr.dd.jarvis.voice.Presence.finReflexion() }
+        fr.dd.jarvis.voice.JournalVoix.noter("brain", "vérification reprise en ${System.currentTimeMillis() - debutReprise} ms")
+        try {
+            return replyInterne(h, pourHermes, onTexte, onStatus)
+        } finally {
+            fr.dd.jarvis.voice.JournalVoix.noter("brain", "temps total cerveau ${System.currentTimeMillis() - debutTotal} ms")
+            fr.dd.jarvis.voice.Presence.finReflexion()
+        }
     }
 
     private suspend fun replyInterne(history: List<ChatMsg>, pourHermes: Boolean, onTexte: ((String) -> Unit)?, onStatus: (String) -> Unit): String {
@@ -299,7 +307,10 @@ class Brain(
             }
         }
         // Une procédure qu'Hermès a apprise (skill ajouté) passe avant les raccourcis de Jarvis sur le même sujet.
-        val competence = if (pourHermes || app.store.hermesMode.value == "off") null
+        // Une commande simple est déjà reconnue localement : charger et parcourir les skills Hermès
+        // (lecture de mémoire + comparaison de toutes les descriptions) ne peut rien lui apporter.
+        val commandeSimple = !pourHermes && fr.dd.jarvis.hermes.Routeur.commandeSimple(texteUser)
+        val competence = if (pourHermes || app.store.hermesMode.value == "off" || commandeSimple) null
             else runCatching { fr.dd.jarvis.hermes.Routeur.competence(texteUser, app.memo.skillsHermes()) }.getOrNull()
         // Mode « Hermès pour tout » : seules les commandes instantanées du téléphone (sans IA) passent avant Hermès ;
         // tout le reste (fichiers, Freebox, vidéos, position, installations…) est traité par Hermès avec les outils de Jarvis.
@@ -333,6 +344,15 @@ class Brain(
             fr.dd.jarvis.hermes.Routeur.marquerBavardage()
             return reflexe(reponse)
         }
+        // Lecture déterministe de l'état Home Assistant : une demande explicitement HA + indisponible
+        // doit consulter /api/states, sans LLM, sans inventaire Wi-Fi et sans appareils enregistrés par Jarvis.
+        if (!pourHermes && ServeurTools.prioriteHaDisponibilite(texteUser)) {
+            onStatus("🏠 Vérification des appareils Home Assistant…")
+            return try {
+                tools.execute("ha_entites", JSONObject().put("etat", "indisponible")).text
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { "❌ Impossible de lire les états de Home Assistant : ${e.message ?: "erreur inconnue"}" }
+        }
         // Hermès, cerveau principal (mode « tout » : toutes les autres demandes ; mode « auto » : les tâches complexes).
         // S'il est indisponible, Jarvis reprend la main avec ses outils.
         if (!pourHermes) {
@@ -356,8 +376,10 @@ class Brain(
         suivi.cerveauJarvis = true
         onStatus("🧠 Analyse de la demande…")
         val all = tools.schemaAll()
-        val sansAnalyse = pourHermes || fr.dd.jarvis.hermes.Routeur.commandeSimple(texteUser)
+        // En voiture, éviter l'appel Gemini supplémentaire de planification : le cerveau Jarvis/Hermès et ses outils restent disponibles.
+        val sansAnalyse = pourHermes || app.enVoiture || fr.dd.jarvis.hermes.Routeur.commandeSimple(texteUser)
         // Notes pertinentes et analyse de la demande EN MÊME TEMPS (avant : l'une après l'autre, jusqu'à 2,5 s de perdues).
+        val debutContexte = System.currentTimeMillis()
         val (notesUtiles, plan) = kotlinx.coroutines.coroutineScope {
             // En voiture : on n'attend pas plus d'une demi-seconde les notes (chaque seconde compte au volant).
             val notes = async(kotlinx.coroutines.Dispatchers.IO) { runCatching {
@@ -371,6 +393,7 @@ class Brain(
             }
             notes.await() to analyse.await()
         }
+        fr.dd.jarvis.voice.JournalVoix.noter("brain", "notes + analyse en ${System.currentTimeMillis() - debutContexte} ms")
         // Pour une consigne de chauffage, le planificateur ne doit jamais retirer les outils nécessaires :
         // il faut pouvoir retrouver les correspondances dans Obsidian, vérifier les entités HA puis agir.
         val pilotageChauffage = Regex("po[eê]les?|poils?|pellets?|granul[eé]s?|chauffage|thermostats?|climate\\.|temp[eé]rature|consigne|degr[eé]s?", RegexOption.IGNORE_CASE).containsMatchIn(recent) &&
@@ -380,7 +403,14 @@ class Brain(
         // Domotique (chauffage, télé, lumières, volets…) : toujours de quoi relire les notes, trouver l'entité ET agir.
         val domotique = pilotageChauffage || (Regex("t[ée]l[ée]|\\btv\\b|t[ée]l[ée]vis|volume|lumi[èe]re|lampe|volet|store|prise|home ?assistant|domotique|enceinte", RegexOption.IGNORE_CASE).containsMatchIn(recent) &&
             ACTION_DOMOTIQUE.containsMatchIn(recent))
-        val indispensables = if (domotique) listOf("notes_lire", "obsidian_chercher", "obsidian_lire", "ha_entites", "ha_etat", "ha_service") else emptyList()
+        // Une recherche d'appareils explicitement indisponibles dans Home Assistant doit toujours exposer
+        // l'API HA et son filtre d'état, jamais substituer l'inventaire Wi-Fi du téléphone.
+        val disponibiliteHa = ServeurTools.prioriteHaDisponibilite(recent)
+        val indispensables = when {
+            disponibiliteHa -> listOf("ha_entites")
+            domotique -> listOf("notes_lire", "obsidian_chercher", "obsidian_lire", "ha_entites", "ha_etat", "ha_service")
+            else -> emptyList()
+        }
         if (plan != null && plan.outils.isNotEmpty()) {
             val reglageDirect = Regex("r[eé]glage|param[eè]tre|mode conversation|[eé]coute continue|annonce vocale|r[eé]ponse vocale|confirmation|agent autonome|bips|analyse gemini|gemini|agents? autonomes?|notifications banni[eè]re", RegexOption.IGNORE_CASE).containsMatchIn(recent)
             val keep = (plan.outils + indispensables + (if (reglageDirect) listOf("reglage_jarvis") else emptyList()) + (if (planningClientsSync) listOf("analyser_planning_clients") else emptyList()) + listOf("memoire_ajouter", "memoire_apprendre", "memoire_apprentissages", "memoire_lire", "memoire_oublier", "note_prendre", "notes_lire", "rappel_creer", "rappels_liste") + (if (societeOn || planningClientsSync) fr.dd.jarvis.societe.SocieteTools.NAMES else emptySet<String>()) +
@@ -404,14 +434,22 @@ class Brain(
         }
         // Outils retirés : ceux qui renverraient vers Hermès (quand c'est Hermès qui demande), et le SSH pour une demande
         // Home Assistant ordinaire — elle passe par l'API (ha_*) ; si l'API échoue, l'approfondissement prend le relais.
+        val demandeStockageHote = Regex("stockage|volume|dossier|fichier|chemin|disque", RegexOption.IGNORE_CASE).containsMatchIn(recent)
+        val outilsDebianAExclure = if (fr.dd.jarvis.hermes.Routeur.homeAssistantApi(texteUser)) {
+            // Pour les demandes domotiques, ne laisse pas l'agent choisir le serveur Debian à la place de l'API HA.
+            // Exception : demande explicite de stockage/volume, où serveur_service action=stockage est le bon outil.
+            setOf("ssh_commande", "ssh_fichier", "ssh_script", "serveur_diagnostic", "serveur_fichiers", "serveur_tache", "ha_sauvegarde") +
+                (if (demandeStockageHote) emptySet() else setOf("serveur_service"))
+        } else emptySet()
         val retires = (if (pourHermes || MaisonDirecte.concerne(texteUser) || (!pourHermes && fr.dd.jarvis.hermes.Routeur.dernierChoixMaison)) setOf("hermes", "hermes_deleguer", "tache_arriere_plan") else emptySet()) +
-            (if (fr.dd.jarvis.hermes.Routeur.homeAssistantApi(texteUser)) setOf("ssh_commande", "ssh_fichier", "ssh_script", "serveur_diagnostic") else emptySet())
+            outilsDebianAExclure
         val schemaFinal = if (retires.isEmpty()) schema else JSONArray().also { f ->
             for (i in 0 until schema.length()) {
                 val nom = schema.optJSONObject(i)?.optJSONObject("function")?.optString("name")
                 if (nom !in retires) f.put(schema.get(i))
             }
         }
+        val debutPrompt = System.currentTimeMillis()
         val messages = JSONArray()
         messages.put(JSONObject().put("role", "system").put("content",
             (if (pourHermes) "Tu es l'agent téléphone de JARVIS, missionné par Hermès (le cerveau) : exécute la consigne avec tes outils, puis rends un compte rendu factuel et complet (résultats réels, chemins, identifiants, erreurs exactes), sans poser de question sauf si une information indispensable manque.\n\n" else "") +
@@ -436,6 +474,7 @@ class Brain(
             val cap = if (recentHistory.size - 1 - idx < 3) 12000 else 1600
             messages.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(cap)))
         }
+        fr.dd.jarvis.voice.JournalVoix.noter("brain", "construction contexte + prompt + outils en ${System.currentTimeMillis() - debutPrompt} ms (messages ${messages.length()}, outils ${schemaFinal.length()})")
 
         // Budget d'orchestration élargi : chaque cycle peut consulter des outils, vérifier leur résultat,
         // corriger une action ou poursuivre le plan. Les demandes complexes ne doivent plus s'arrêter après
@@ -448,7 +487,8 @@ class Brain(
             multi -> 18
             else -> 10
         }
-        repeat(toursMax) {
+        repeat(toursMax) { tour ->
+            val debutAppelIA = System.currentTimeMillis()
             val msg = try {
                 llm.groqChat(messages, schemaFinal)
             } catch (e: ApiException) {
@@ -468,6 +508,7 @@ class Brain(
                     }
                 } else throw e
             }
+            fr.dd.jarvis.voice.JournalVoix.noter("brain", "appel Groq tour ${tour + 1} en ${System.currentTimeMillis() - debutAppelIA} ms")
             val calls = msg.optJSONArray("tool_calls")
             if (calls == null || calls.length() == 0) {
                 return msg.optString("content", "").trim().ifBlank { "…" }
@@ -487,17 +528,23 @@ class Brain(
                     null
                 }
                 onStatus("⚙️ $name…")
+                val debutOutil = System.currentTimeMillis()
                 val res = try {
                     // Arguments illisibles = réponse de l'IA coupée en plein appel : rien n'est exécuté (avant, l'outil
                     // partait avec des arguments vides ou incomplets — commandes SSH tronquées).
                     if (args == null) ToolResult("❌ Arguments incomplets ou illisibles (réponse coupée) : l'outil n'a PAS été exécuté. Renvoie l'appel avec des arguments JSON complets.")
                     else if (name in retires) ToolResult(if (name.startsWith("ssh") || name == "serveur_diagnostic") "Pour Home Assistant, utilise l'API (ha_entites, ha_etat, ha_service, ha_config, ha_dashboard, ha_admin), pas le SSH." else "Outil indisponible ici.")
                     else tools.execute(name, args)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    // Ne jamais convertir une annulation en simple résultat d'outil : cela avalerait
+                    // l'annulation structurée et laisserait le service croire que la demande travaille encore.
+                    throw e
                 } catch (e: ApiException) {
                     ToolResult("Erreur du service IA : ${e.message}")
                 } catch (e: Exception) {
                     ToolResult("Erreur : ${e.message}")
                 }
+                fr.dd.jarvis.voice.JournalVoix.noter("brain", "outil $name en ${System.currentTimeMillis() - debutOutil} ms")
                 messages.put(
                     JSONObject().put("role", "tool").put("tool_call_id", c.getString("id")).put("content", res.text.take(12000))
                 )

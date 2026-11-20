@@ -74,6 +74,31 @@ class Store(context: Context) {
                     if (saved) prefs.edit().remove(key).commit()
                 }
             }
+            // Migration des identifiants historiques vers le coffre chiffré.
+            // La valeur en clair n'est retirée qu'après confirmation de l'écriture chiffrée.
+            listOf(
+                "haToken", "sshPass", "sshKey", "ghToken", "boxPass", "picoKey", "tomtomKey",
+                "discordToken", "tiktokClientKey", "tiktokClientSecret", "tiktokAccessToken",
+                "tiktokRefreshToken", "huggingFaceToken", "imageVideoWorkerToken", "mailPass",
+                "antivolSecours"
+            ).forEach { secret ->
+                val legacy = prefs.getString(secret, null)
+                if (!legacy.isNullOrBlank()) {
+                    val current = secure.getString(secret, null)
+                    val saved = if (current.isNullOrBlank()) secure.edit().putString(secret, legacy).commit() else true
+                    if (saved) prefs.edit().remove(secret).commit()
+                }
+            }
+            // Les jetons Cloudflare étaient historiquement stockés avec les préférences ordinaires.
+            // Copie d'abord vers le coffre chiffré ; ne supprime l'ancienne valeur qu'après validation.
+            val anciensComptesCloudflare = prefs.getString("cfAccounts", null)
+            if (!anciensComptesCloudflare.isNullOrBlank()) {
+                val comptesChiffres = secure.getString("cfAccounts", null)
+                val copieOk = if (comptesChiffres.isNullOrBlank()) {
+                    secure.edit().putString("cfAccounts", anciensComptesCloudflare).commit()
+                } else true
+                if (copieOk) prefs.edit().remove("cfAccounts").commit()
+            }
             // Suppression des anciens identifiants Google Flow : fournisseur retiré de JARVIS.
             secure.edit().remove("googleFlowApiToken").commit()
             prefs.edit().remove("googleFlowAccountEmail").remove("googleFlowModel").apply()
@@ -155,15 +180,15 @@ class Store(context: Context) {
 
     // ---- Serveur personnel : SSH + Home Assistant
     val haUrl = SPref("haUrl", "")
-    val haToken = SPref("haToken", "")
+    val haToken = SecretPref("haToken")
     /** Adresse de Home Assistant depuis l'extérieur (Nabu Casa, DuckDNS, port ouvert…) : utilisée hors de la maison. */
     val haUrlDistant = SPref("haUrlDistant", "")
     val haDir = SPref("haDir", "")
     val sshHost = SPref("sshHost", "")
     val sshPort = SPref("sshPort", "22")
     val sshUser = SPref("sshUser", "")
-    val sshPass = SPref("sshPass", "")
-    val sshKey = SPref("sshKey", "")
+    val sshPass = SecretPref("sshPass")
+    val sshKey = SecretPref("sshKey")
     val sshFp = SPref("sshFp", "")
     /** Jeton Plex Media Server : toujours conservé dans le stockage chiffré du Keystore. */
     val plexToken = SecretPref("plexToken")
@@ -173,7 +198,7 @@ class Store(context: Context) {
     val autorisationsPermanentes = SPref("autorisationsPermanentes", "[]")
     /** Commandes précises autorisées une fois pour toutes (« Toujours pour cette commande ») : même outil, mêmes arguments (JSON). */
     val autorisationsCommandes = SPref("autorisationsCommandes", "[]")
-    val ghToken = SPref("ghToken", "")
+    val ghToken = SecretPref("ghToken")
     val scanAuto = BPref("scanAuto", true)
     val sshHostDistant = SPref("sshHostDistant", "")
     val sshPortDistant = SPref("sshPortDistant", "")
@@ -195,7 +220,7 @@ class Store(context: Context) {
     val boxProto = SPref("boxProto", "smb")
     val boxPort = SPref("boxPort", "21")
     val boxUser = SPref("boxUser", "")
-    val boxPass = SPref("boxPass", "")
+    val boxPass = SecretPref("boxPass")
     // ---- Freebox OS : identité API et jeton d’application conservé uniquement chiffré
     val freeboxApiDomain = SPref("freeboxApiDomain", "")
     val freeboxHttpsPort = SPref("freeboxHttpsPort", "443")
@@ -215,7 +240,7 @@ class Store(context: Context) {
     val ollamaActif = BPref("ollamaActif", true)
     val ollamaUrl = SPref("ollamaUrl", "")
     val ollamaModele = SPref("ollamaModele", "")
-    val cfAccounts: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readList("cfAccounts")) }
+    val cfAccounts: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readSecretList("cfAccounts")) }
     /** Ajoute un compte (ID + clé API). Retourne un message d'erreur, ou null si c'est bon. */
     fun addCfAccount(idRaw: String, keyRaw: String): String? {
         var id = idRaw.trim(); var key = keyRaw.trim()
@@ -228,11 +253,17 @@ class Store(context: Context) {
         if (key.length < 20 || key.any { it.isWhitespace() }) return "Clé API invalide (jeton Workers AI, sans espace)."
         val entry = "$id:$key"
         if (entry in cfAccounts) return "Ce compte est déjà enregistré."
-        cfAccounts.add(entry); writeList("cfAccounts", cfAccounts)
-        prefs.edit().commit()
+        val updated = cfAccounts.toList() + entry
+        writeSecretList("cfAccounts", updated)
+        cfAccounts.add(entry)
         return null
     }
-    fun removeCfAccount(i: Int) { if (i in cfAccounts.indices) cfAccounts.removeAt(i); writeList("cfAccounts", cfAccounts) }
+    fun removeCfAccount(i: Int) {
+        if (i !in cfAccounts.indices) return
+        val updated = cfAccounts.toList().toMutableList().also { it.removeAt(i) }
+        writeSecretList("cfAccounts", updated)
+        cfAccounts.removeAt(i)
+    }
 
 
     // Fournisseurs externes configurables depuis la conversation Hermès/Jarvis.
@@ -301,6 +332,20 @@ class Store(context: Context) {
         list.addAll(parts)
     }
 
+    private fun readSecretList(k: String): List<String> {
+        val secure = secretPrefs ?: return emptyList()
+        return (secure.getString(k, "") ?: "").split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+    }
+
+    private fun writeSecretList(k: String, values: List<String>) {
+        val secure = secretPrefs ?: throw IllegalStateException(
+            "Stockage chiffré Android indisponible : les jetons Cloudflare ne peuvent pas être modifiés."
+        )
+        check(secure.edit().putString(k, values.joinToString("\n")).commit()) {
+            "Échec de l'enregistrement chiffré des jetons Cloudflare."
+        }
+    }
+
     private fun readList(k: String): List<String> =
         (prefs.getString(k, "") ?: "").split("\n").map { it.trim() }.filter { it.isNotEmpty() }
 
@@ -318,7 +363,7 @@ class Store(context: Context) {
     }
 
     // Clé d'accès Picovoice (gratuite, console.picovoice.ai) : détecteur « Jarvis » de type OK Google
-    val picoKey = SPref("picoKey", "")
+    val picoKey = SecretPref("picoKey")
 
     // ---- Voix
     val speakReplies = BPref("speakReplies", true)
@@ -339,7 +384,7 @@ class Store(context: Context) {
     val meteoAlertes = BPref("meteoAlertes", true)
     val meteoNotifie = SPref("meteoNotifie", "")
     /** Clé TomTom (gratuite, facultative) : trafic en temps réel pour l'heure de départ. */
-    val tomtomKey = SPref("tomtomKey", "")
+    val tomtomKey = SecretPref("tomtomKey")
     val routinesDernier = SPref("routinesDernier", "{}")
     val veilleLieu = SPref("veilleLieu", "")
     val journalAuto = BPref("journalAuto", true)
@@ -452,26 +497,26 @@ class Store(context: Context) {
     val agentRunHistory = SPref("agentRunHistory", "")
 
     // ---- Discord (bot)
-    val discordToken = SPref("discordToken", "")
+    val discordToken = SecretPref("discordToken")
     val discordGuildId = SPref("discordGuildId", "")
 
     // ---- TikTok (OAuth, compte personnel)
-    val tiktokClientKey = SPref("tiktokClientKey", "")
-    val tiktokClientSecret = SPref("tiktokClientSecret", "")
-    val tiktokAccessToken = SPref("tiktokAccessToken", "")
-    val tiktokRefreshToken = SPref("tiktokRefreshToken", "")
+    val tiktokClientKey = SecretPref("tiktokClientKey")
+    val tiktokClientSecret = SecretPref("tiktokClientSecret")
+    val tiktokAccessToken = SecretPref("tiktokAccessToken")
+    val tiktokRefreshToken = SecretPref("tiktokRefreshToken")
     val tiktokOpenId = SPref("tiktokOpenId", "")
 
     // ---- Génération vidéo IA (tiktok_video) : Hugging Face (ZeroGPU, Spaces officiels), compte gratuit sans
     // carte bancaire, token créé sur huggingface.co/settings/tokens (lecture suffit). Pollinations.ai exige
     // maintenant un abonnement payant ("Pollen") même pour la vidéo — plus utilisable gratuitement.
-    val huggingFaceToken = SPref("huggingFaceToken", "")
+    val huggingFaceToken = SecretPref("huggingFaceToken")
     val falApiKey = SecretPref("falApiKey")
     val dreaminaApiKey = SecretPref("dreaminaApiKey")
     val dreaminaModel = SPref("dreaminaModel", "seedance-1-5-pro-251215")
     // ---- Worker Cloudflare personnel pour animer une image avec Wan 2.2 (sans token Hugging Face côté Android)
     val imageVideoWorkerUrl = SPref("imageVideoWorkerUrl", "")
-    val imageVideoWorkerToken = SPref("imageVideoWorkerToken", "")
+    val imageVideoWorkerToken = SecretPref("imageVideoWorkerToken")
     val tiktokTokenExpiry = SPref("tiktokTokenExpiry", "0")   // epoch secondes
     val tiktokOAuthState = SPref("tiktokOAuthState", "")      // anti-CSRF, vérifié au retour
 
@@ -532,7 +577,7 @@ class Store(context: Context) {
     // ---- Anti-vol par SMS (« JARVIS <code> VOL ») : le code est haché (PBKDF2) dans le stockage chiffré
     val antivolActif = BPref("antivolActif", false)
     val antivolCode = SecretPref("antivolCode")
-    val antivolSecours = SPref("antivolSecours", "")
+    val antivolSecours = SecretPref("antivolSecours")
     val antivolAlerte = BPref("antivolAlerte", false)
     val antivolMessage = SPref("antivolMessage", "")
     val antivolSuiviJusqua = SPref("antivolSuiviJusqua", "0")
@@ -566,7 +611,7 @@ class Store(context: Context) {
     val mailHost = SPref("mailHost", "imap.gmail.com")
     val mailPort = SPref("mailPort", "993")
     val mailUser = SPref("mailUser", "")
-    val mailPass = SPref("mailPass", "")
+    val mailPass = SecretPref("mailPass")
     val gmailAccounts: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readList("gmailAccounts")) }
 
     fun addGmailAccount(email: String) {

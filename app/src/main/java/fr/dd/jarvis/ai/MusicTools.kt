@@ -11,6 +11,49 @@ class MusicTools(private val app: JarvisApp) {
         val KEYWORDS = Regex("musique|music|morceau|chanson|titre|artiste|album|playlist|biblioth[eè]que|j.aime|al[ée]atoire|file d.attente|yt ?music|morphe|spotify|lecture musicale|\u00e9couter|mets le \\d", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
         val NAMES = setOf("musique_etat", "musique_commander", "musique_rechercher", "musique_resultats", "musique_choisir", "musique_bibliotheque", "musique_action", "musique_file")
+
+        /** Normalise les formulations orales de la section « J'aime » de la bibliothèque. */
+        /** Mode de lecture explicite ; le mode normal est le défaut, même si l'application gardait le shuffle actif. */
+        internal fun modeLecture(mode: String, aleatoireHistorique: String = ""): String {
+            val brut = mode.ifBlank { if (aleatoireHistorique.lowercase() in setOf("oui", "true", "1")) "aleatoire" else "normal" }
+            val s = java.text.Normalizer.normalize(brut.lowercase(java.util.Locale.ROOT), java.text.Normalizer.Form.NFD)
+                .replace(Regex("\\p{M}+"), "").replace(' ', '_').replace('-', '_')
+            return when {
+                s.contains("aleatoire") || s.contains("shuffle") || s.contains("melange") || s.contains("hasard") -> "aleatoire"
+                (s.contains("repeter") || s.contains("repeat") || s.contains("boucle")) &&
+                    (s.contains("titre") || s.contains("morceau") || s.contains("chanson") || s.contains("song") || s.contains("une_seule") || s.contains("one") || s.contains("track")) -> "repeter_titre"
+                (s.contains("repeter") || s.contains("repeat") || s.contains("boucle")) &&
+                    (s.contains("playlist") || s.contains("liste") || s.contains("tout") || s.contains("all")) -> "repeter_playlist"
+                s in setOf("repeter_titre", "repeat_one", "repeat_track", "une_chanson", "un_titre", "titre") -> "repeter_titre"
+                s in setOf("repeter_playlist", "repeat_all", "repeat_playlist", "toute_la_playlist", "playlist", "tout") -> "repeter_playlist"
+                else -> "normal"
+            }
+        }
+
+        internal fun sectionBibliotheque(section: String): String {
+            // Normalisation locale et prévisible : ne dépend pas du normaliseur métier (qui peut conserver
+            // les préfixes possessifs ou traiter différemment les apostrophes et accents).
+            val s = java.text.Normalizer.normalize(section.lowercase(java.util.Locale.ROOT), java.text.Normalizer.Form.NFD)
+                .replace(Regex("\\p{M}+"), "")
+                .replace("’", "'")
+                // NFD ne décompose pas les ligatures françaises œ/æ : les translittérer avant le filtre ASCII.
+                .replace("œ", "oe").replace("æ", "ae")
+                .replace(Regex("[^a-z0-9]+"), " ")
+                .trim()
+            val compact = s.replace(" ", "")
+            return when {
+                Regex("(j aime|aime|aimes|aimes|liked|likes|like|favori|favoris|favoris|coeur|coup de coeur)").containsMatchIn(s) ||
+                    compact.contains("jaime") || compact.contains("favor") || compact.contains("coeur") -> "jaime"
+                Regex("^(mes |ma |mon |les |le |la |tous les |toutes les )*playlists?$").containsMatchIn(s) ||
+                    compact.endsWith("playlist") || compact.endsWith("playlists") -> "playlists"
+                Regex("^(mes |ma |mon |les |le |la |tous les |toutes les )*(titres?|chansons?)$").containsMatchIn(s) ||
+                    compact.endsWith("titre") || compact.endsWith("titres") || compact.endsWith("chanson") || compact.endsWith("chansons") -> "titres"
+                compact.endsWith("album") || compact.endsWith("albums") -> "albums"
+                compact.endsWith("artiste") || compact.endsWith("artistes") -> "artistes"
+                compact.endsWith("telechargement") || compact.endsWith("telechargements") -> "telechargements"
+                else -> "playlists"
+            }
+        }
     }
     private fun prop(d: String) = JSONObject().put("type", "string").put("description", d)
     val schema: List<JSONObject> = listOf(
@@ -33,19 +76,19 @@ class MusicTools(private val app: JarvisApp) {
                 .put("type", prop("tout | titres | albums | artistes | playlists | videos (défaut tout)."))).put("required", JSONArray().put("requete")))),
         JSONObject().put("type", "function").put("function", JSONObject()
             .put("name", "musique_choisir")
-            .put("description", "Lance le résultat n° numero de la DERNIÈRE liste de musique montrée (« mets le 2 », « plutôt le troisième »). radio=oui : lance la radio de ce titre (titres similaires à la suite).")
+            .put("description", "Lance le résultat n° numero de la DERNIÈRE liste de musique montrée (« mets le 2 », « plutôt le troisième »). mode=normal par défaut, aleatoire, repeter_titre ou repeter_playlist. radio=oui : lance la radio de ce titre (titres similaires à la suite).")
             .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject().put("numero", prop("Numéro dans la liste (1, 2, 3…)."))
-                .put("radio", prop("oui pour la radio du titre."))).put("required", JSONArray().put("numero")))),
+                .put("radio", prop("oui pour la radio du titre.")).put("mode", prop("normal | aleatoire | repeter_titre | repeter_playlist (défaut normal)."))).put("required", JSONArray().put("numero")))),
         JSONObject().put("type", "function").put("function", JSONObject()
             .put("name", "musique_bibliotheque")
-            .put("description", "Bibliothèque PERSONNELLE de YT Music Morphe : section = jaime (titres J'aime), playlists, titres, albums, artistes, telechargements. Sans nom : liste ce qu'elle contient. Avec nom : lance cet élément (aleatoire=oui pour la lecture aléatoire). Ex. « mets ma playlist Sport », « lance mes titres j'aime en aléatoire ».")
+            .put("description", "Bibliothèque PERSONNELLE de YT Music Morphe. À utiliser impérativement pour les demandes de lecture de bibliothèque, notamment « lis ma bibliothèque J'aime », « lance mes titres aimés », « mets ma playlist … », « lis mes albums ». section = jaime pour J'aime/titres aimés/favoris, sinon playlists, titres, albums, artistes ou telechargements. Sans nom : pour J'aime, lance toute la liste ; pour les autres sections, affiche les éléments. Avec nom : lance cet élément. mode=normal par défaut (ordre d'origine, shuffle désactivé), aleatoire, repeter_titre (boucle sur un morceau) ou repeter_playlist (boucle sur toute la liste). Ne réponds jamais que la lecture a démarré sans confirmation du lecteur.")
             .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject().put("section", prop("jaime | playlists | titres | albums | artistes | telechargements"))
                 .put("nom", prop("Élément à lancer (facultatif)."))
-                .put("aleatoire", prop("oui pour la lecture aléatoire."))).put("required", JSONArray().put("section")))),
+                .put("aleatoire", prop("Ancien paramètre compatible : oui pour la lecture aléatoire.")).put("mode", prop("normal | aleatoire | repeter_titre | repeter_playlist (défaut normal)."))).put("required", JSONArray().put("section")))),
         JSONObject().put("type", "function").put("function", JSONObject()
             .put("name", "musique_action")
-            .put("description", "Action sur le titre en cours : jaime (ajouter aux J'aime), jaimepas, aleatoire, repeter, radio.")
-            .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject().put("action", prop("jaime | jaimepas | aleatoire | repeter | radio"))).put("required", JSONArray().put("action")))),
+            .put("description", "Action sur le titre en cours : jaime, jaimepas, normal (désactive shuffle et répétition), aleatoire, repeter_titre, repeter_playlist, repeter (ancienne action), radio.")
+            .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject().put("action", prop("jaime | jaimepas | normal | aleatoire | repeter_titre | repeter_playlist | repeter | radio"))).put("required", JSONArray().put("action")))),
         JSONObject().put("type", "function").put("function", JSONObject()
             .put("name", "musique_file")
             .put("description", "File d'attente du lecteur : sans numéro, liste les prochains titres ; avec numero, saute à ce titre.")
@@ -54,7 +97,9 @@ class MusicTools(private val app: JarvisApp) {
 
     private fun paquet(): String? = fr.dd.jarvis.device.YtMusique.paquet(app, app.store.appPrefs["musique"])
     @Suppress("UNUSED_PARAMETER") private fun nomAppli(p: String) = fr.dd.jarvis.device.YtMusique.NOM
-    suspend fun execute(name: String, a: JSONObject): ToolResult = try {
+    suspend fun execute(name: String, a: JSONObject): ToolResult {
+        val debut = System.currentTimeMillis()
+        return try {
         when (name) {
             "musique_etat" -> ToolResult(Musique.etat(app), direct = true)
             "musique_commander" -> ToolResult(Musique.commander(app, a.optString("action")), direct = true)
@@ -75,31 +120,47 @@ class MusicTools(private val app: JarvisApp) {
                 when {
                     r == null -> "Il n'y a pas de résultat n° $n dans la dernière liste : redemande une recherche."
                     p == null -> "YT Music Morphe n'est pas installée."
-                    else -> app.phone.jouerYtm(p, r.titre, nomAppli(p), r, radio = a.optString("radio").lowercase() in setOf("oui", "true", "1"))
+                    else -> app.phone.jouerYtm(p, r.titre, nomAppli(p), r,
+                        radio = a.optString("radio").lowercase() in setOf("oui", "true", "1"),
+                        mode = modeLecture(a.optString("mode")))
                         ?: "❌ Impossible d'ouvrir ce résultat dans ${nomAppli(p)}."
                 }
             }, direct = true)
             "musique_bibliotheque" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 val p = paquet() ?: return@withContext "YT Music Morphe n'est pas installée."
-                val section = fr.dd.jarvis.societe.core.normaliser(a.optString("section")).replace(" ", "").let { s ->
-                    when { s.contains("aime") || s.contains("like") -> "jaime"; s.startsWith("playlist") -> "playlists"; s.startsWith("titre") || s.startsWith("chanson") -> "titres"
-                        s.startsWith("album") -> "albums"; s.startsWith("artiste") -> "artistes"; s.startsWith("telecharg") -> "telechargements"; else -> "playlists" } }
+                val section = sectionBibliotheque(a.optString("section"))
                 val nom = a.optString("nom").trim()
-                val aleatoire = a.optString("aleatoire").lowercase() in setOf("oui", "true", "1")
+                val mode = modeLecture(a.optString("mode"), a.optString("aleatoire"))
+                val aleatoire = mode == "aleatoire"
+                val repetition = when (mode) { "repeter_titre" -> "titre"; "repeter_playlist" -> "playlist"; else -> "aucune" }
                 if (section == "jaime") {
                     if (!fr.dd.jarvis.device.YtMusique.ouvrirLien(app, p, "https://music.youtube.com/watch?list=LM")) "❌ Impossible d'ouvrir tes titres J'aime."
                     else {
-                        Thread.sleep(3500)
-                        if (aleatoire) fr.dd.jarvis.device.MusiqueBibliotheque.action(app, "aleatoire", p)
-                        "❤️ Lecture de tes titres « J'aime » dans ${nomAppli(p)}" + (if (aleatoire) " (aléatoire demandé)." else ".")
+                        kotlinx.coroutines.delay(1400)
+                        val demarree = fr.dd.jarvis.device.MusiqueBibliotheque.demarrerLecture(app, p, aleatoire, repetition)
+                        fr.dd.jarvis.device.RetourJarvisMusique.afficher(app)
+                        if (demarree) {
+                            "❤️ Tes titres « J'aime » sont bien en lecture dans ${nomAppli(p)}" + when (mode) {
+                                "aleatoire" -> " en aléatoire."
+                                "repeter_titre" -> " avec répétition du titre."
+                                "repeter_playlist" -> " avec répétition de toute la liste."
+                                else -> " dans l'ordre normal."
+                            }
+                        } else {
+                            "📂 Ta liste « J'aime » est ouverte dans ${nomAppli(p)}, mais le lecteur n'a pas confirmé le démarrage. Vérifie le bouton Lecture dans l'application."
+                        }
                     }
                 } else if (nom.isBlank()) {
                     val (l, err) = fr.dd.jarvis.device.MusiqueBibliotheque.lister(app, p, section)
                     err?.let { "❌ $it" } ?: ("📚 Ta bibliothèque — $section :\n" + l.take(40).mapIndexed { i, e -> "${i + 1}. ${e.titre}" + (if (e.sousTitre.isNotBlank()) " — ${e.sousTitre}" else "") }.joinToString("\n") +
                         "\n\nDis lequel lancer (ex. « mets la playlist ${l.firstOrNull()?.titre ?: "…"} »).")
-                } else fr.dd.jarvis.device.MusiqueBibliotheque.jouer(app, p, section, nom, aleatoire)
+                } else fr.dd.jarvis.device.MusiqueBibliotheque.jouer(app, p, section, nom, aleatoire, repetition).also {
+                    fr.dd.jarvis.device.RetourJarvisMusique.afficher(app)
+                }
             }, direct = true)
-            "musique_action" -> ToolResult(if (fr.dd.jarvis.societe.core.normaliser(a.optString("action")).contains("radio")) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            "musique_action" -> ToolResult(if (fr.dd.jarvis.societe.core.normaliser(a.optString("action")).replace(' ', '_') in setOf("normal", "aleatoire", "repeter_titre", "repeter_playlist", "shuffle", "repeat_one", "repeat_all")) {
+                fr.dd.jarvis.device.MusiqueBibliotheque.configurerMode(app, a.optString("action"))
+            } else if (fr.dd.jarvis.societe.core.normaliser(a.optString("action")).contains("radio")) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 val e = fr.dd.jarvis.device.MusiqueBibliotheque.enCours(app)
                 val p = paquet()
                 if (e == null || p == null) "Aucun titre en cours." else
@@ -114,9 +175,15 @@ class MusicTools(private val app: JarvisApp) {
             }, direct = true)
             else -> ToolResult("Outil musical inconnu.")
         }
-    } catch (e: SecurityException) {
-        ToolResult("Accès aux sessions multimédias refusé. Active l'accès aux notifications de JARVIS dans les réglages Android.")
-    } catch (e: Exception) {
-        ToolResult("Erreur musicale : ${e.message ?: e.javaClass.simpleName}")
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // Laisse l'annulation remonter jusqu'au service pour qu'il libère immédiatement la demande en cours.
+            throw e
+        } catch (e: SecurityException) {
+            ToolResult("Accès aux sessions multimédias refusé. Active l'accès aux notifications de JARVIS dans les réglages Android.")
+        } catch (e: Exception) {
+            ToolResult("Erreur musicale : ${e.message ?: e.javaClass.simpleName}")
+        } finally {
+            fr.dd.jarvis.voice.JournalVoix.noter("musique", "$name en ${System.currentTimeMillis() - debut} ms")
+        }
     }
 }

@@ -55,6 +55,6 @@ object PersonneOu {
             .filter { it.getString("entity_id").startsWith("person.") || it.getString("entity_id").startsWith("device_tracker.") }
         val paires = suivis.map { it.getString("entity_id") to it.optJSONObject("attributes")?.optString("friendly_name").orEmpty() }
         if (Serveur.filtrerEntites(paires, nom, "").isEmpty()) return null
-        return Serveur.haPosition(app, nom)
+        return Serveur.haPosition(app, nom, concise = true)
     }
 }

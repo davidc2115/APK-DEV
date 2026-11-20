@@ -1,6 +1,7 @@
 package fr.dd.jarvis.voice
 
 import fr.dd.jarvis.car.FinDePhrase
+import fr.dd.jarvis.car.Pcm
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -50,6 +51,14 @@ class FinDePhraseTest {
         val f = FinDePhrase(40.0, minimum = 150.0, silenceFin = 100, ratio = 2.8)
         (voix(1.0) + silence(0.5) + voix(0.4)).forEach { f.trame(it) }
         assertEquals(70, f.tramesVoix)
+    }
+
+    @Test fun coupeLeSilenceFinalSansDepasserLeTampon() {
+        val taille = 16000 * 2 * 3
+        // Dernière voix à 1,0 s : garder 300 ms, pas les 1,1 s de silence de détection.
+        assertEquals(1_300 * 32, Pcm.finUtile(taille, 50))
+        assertEquals(taille, Pcm.finUtile(taille, 200))
+        assertEquals(0, Pcm.finUtile(taille, -100))
     }
 
     @Test fun echelleDuNiveau() {

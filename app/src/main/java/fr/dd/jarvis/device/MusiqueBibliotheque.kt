@@ -5,6 +5,9 @@ import android.media.MediaMetadata
 import android.media.Rating
 import android.media.session.MediaController
 import android.media.session.PlaybackState
+import android.support.v4.media.session.MediaControllerCompat
+import android.support.v4.media.session.MediaSessionCompat
+import android.support.v4.media.session.PlaybackStateCompat
 import android.view.accessibility.AccessibilityNodeInfo
 import fr.dd.jarvis.service.JarvisAccessibilityService
 import fr.dd.jarvis.societe.core.normaliser
@@ -63,6 +66,54 @@ object MusiqueBibliotheque {
 
     private fun cliquer(n: AccessibilityNodeInfo?): Boolean = cliquable(n)?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
 
+    /**
+     * Envoie PLAY à la vraie session multimédia puis attend sa confirmation.
+     * Le simple fait d'ouvrir une playlist ou son écran n'est jamais considéré comme une lecture démarrée.
+     */
+    suspend fun demarrerLecture(ctx: Context, paquet: String, aleatoire: Boolean = false, repetition: String = "aucune"): Boolean {
+        // Ne jamais cliquer sur le bouton « Aléatoire » pour démarrer : dans YT Music il peut basculer
+        // un état déjà actif et produire exactement l'inverse du mode demandé. Le mode est envoyé à la session.
+        // Correspondance exacte : « Lecture » ne doit surtout pas correspondre à « Lecture aléatoire ».
+        val bouton = attendre(paquet, BOUTONS_LECTURE, 2200, exact = true)
+        if (bouton != null) cliquer(bouton)
+        var modeEnvoye = false
+        var debutBuffering = 0L
+        var relanceApresBuffering = false
+        repeat(20) {
+            val c = controleur(ctx, paquet)
+            if (c != null) {
+                if (!modeEnvoye) {
+                    appliquerMode(ctx, c, aleatoire, repetition)
+                    modeEnvoye = true
+                }
+                val etat = c.playbackState?.state
+                if (etat == PlaybackState.STATE_BUFFERING) {
+                    if (debutBuffering == 0L) debutBuffering = System.currentTimeMillis()
+                    // Certains lecteurs restent bloqués en BUFFERING après une première commande PLAY.
+                    // Une seule relance après 4 s débloque parfois la session sans envoyer PLAY en boucle.
+                    if (!relanceApresBuffering && System.currentTimeMillis() - debutBuffering >= 4000L) {
+                        runCatching { c.transportControls.play() }
+                        relanceApresBuffering = true
+                    }
+                } else {
+                    debutBuffering = 0L
+                    if (etat != PlaybackState.STATE_PLAYING) runCatching { c.transportControls.play() }
+                }
+                delay(500)
+                // BUFFERING prouve seulement que le lecteur prépare le flux, pas que la lecture a réellement démarré.
+                // On attend jusqu'à 10 s l'état PLAYING avant d'annoncer le succès à l'utilisateur.
+                val confirme = controleur(ctx, paquet)?.playbackState?.state
+                if (confirme == PlaybackState.STATE_PLAYING) return true
+            } else {
+                debutBuffering = 0L
+                // Sans accès aux sessions, un libellé Pause visible est le seul indice UI acceptable.
+                if (attendre(paquet, listOf("Pause", "Mettre en pause", "Pause la lecture"), 180, exact = false) != null) return true
+                delay(300)
+            }
+        }
+        return false
+    }
+
     /** Ouvre l'appli sur la bibliothèque, filtre [section] sélectionné. Renvoie une erreur lisible, ou null si c'est bon. */
     private suspend fun ouvrirSection(ctx: Context, paquet: String, section: String): String? {
         if (service() == null) return "Il faut le service d'accessibilité de JARVIS pour lire ta bibliothèque (Réglages › Téléphone › Contrôle)."
@@ -118,7 +169,7 @@ object MusiqueBibliotheque {
     }
 
     /** Lance [nom] depuis la bibliothèque (playlist, album, artiste ou titre) ; [aleatoire] : lecture aléatoire. */
-    suspend fun jouer(ctx: Context, paquet: String, section: String, nom: String, aleatoire: Boolean = false): String {
+    suspend fun jouer(ctx: Context, paquet: String, section: String, nom: String, aleatoire: Boolean = false, repetition: String = "aucune"): String {
         ouvrirSection(ctx, paquet, section)?.let { return "❌ $it" }
         delay(600)
         var cible: AccessibilityNodeInfo? = null
@@ -135,12 +186,54 @@ object MusiqueBibliotheque {
         }
         if (cible == null) return "❌ « $nom » introuvable dans ta bibliothèque (${section})."
         if (!cliquer(cible)) return "❌ Impossible d'ouvrir « $nom »."
-        if (section == "titres") return "▶️ « $nom » lancé depuis ta bibliothèque."
-        delay(1500)
-        val bouton = attendre(paquet, if (aleatoire) BOUTONS_ALEATOIRE else BOUTONS_LECTURE, 5000)
-            ?: attendre(paquet, BOUTONS_LECTURE + BOUTONS_ALEATOIRE, 1500, exact = false)
-        return if (bouton != null && cliquer(bouton)) "▶️ « $nom » lancé" + (if (aleatoire) " en aléatoire" else "") + " depuis ta bibliothèque."
-        else "📂 « $nom » ouvert ; bouton de lecture introuvable (appuie sur Lecture)."
+        delay(900)
+        return if (demarrerLecture(ctx, paquet, aleatoire, repetition)) {
+            "▶️ « $nom » est en lecture" + when {
+                aleatoire -> " en aléatoire"
+                repetition == "titre" -> " avec répétition du titre"
+                repetition == "playlist" -> " avec répétition de toute la playlist"
+                else -> " dans l'ordre normal"
+            } + " depuis ta bibliothèque."
+        } else {
+            "📂 « $nom » est ouvert, mais le démarrage de la lecture n'a pas été confirmé. Vérifie le lecteur dans l'application."
+        }
+    }
+
+    // ------------------------------------------------------------------ modes du lecteur (session média de l'appli)
+
+    private fun appliquerMode(ctx: Context, c: MediaController, aleatoire: Boolean, repetition: String): Boolean {
+        val token = runCatching { MediaSessionCompat.Token.fromToken(c.sessionToken) }.getOrNull() ?: return false
+        val compat = runCatching { MediaControllerCompat(ctx, token) }.getOrNull() ?: return false
+        val modeRepete = when (fr.dd.jarvis.societe.core.normaliser(repetition)) {
+            "titre", "repeter titre", "repeter_titre", "one" -> PlaybackStateCompat.REPEAT_MODE_ONE
+            "playlist", "repeter playlist", "repeter_playlist", "all" -> PlaybackStateCompat.REPEAT_MODE_ALL
+            else -> PlaybackStateCompat.REPEAT_MODE_NONE
+        }
+        return runCatching {
+            compat.transportControls.setShuffleMode(if (aleatoire) PlaybackStateCompat.SHUFFLE_MODE_ALL else PlaybackStateCompat.SHUFFLE_MODE_NONE)
+            compat.transportControls.setRepeatMode(modeRepete)
+        }.isSuccess
+    }
+
+    /** Configure explicitement les modes du lecteur actif : normal, aléatoire, répétition d'un titre ou de la liste. */
+    fun configurerMode(ctx: Context, mode: String, paquet: String? = null): String {
+        val c = controleur(ctx, paquet) ?: return "Aucune session musicale active : mode non modifié."
+        val m = fr.dd.jarvis.societe.core.normaliser(mode).replace(' ', '_')
+        val aleatoire = m in setOf("aleatoire", "shuffle")
+        val repetition = when (m) {
+            "repeter_titre", "repeat_one", "titre" -> "titre"
+            "repeter_playlist", "repeat_all", "playlist" -> "playlist"
+            else -> "aucune"
+        }
+        if (!appliquerMode(ctx, c, aleatoire, repetition)) {
+            return "Le lecteur n'a pas confirmé la configuration des modes (API Android indisponible ou commande refusée)."
+        }
+        return when (m) {
+            "aleatoire", "shuffle" -> "🔀 Commande de lecture aléatoire envoyée au lecteur."
+            "repeter_titre", "repeat_one", "titre" -> "🔂 Commande de répétition du titre envoyée au lecteur."
+            "repeter_playlist", "repeat_all", "playlist" -> "🔁 Commande de répétition de toute la playlist envoyée au lecteur."
+            else -> "▶️ Commande de lecture normale envoyée au lecteur : ordre conservé, aléatoire et répétition désactivés."
+        }
     }
 
     // ------------------------------------------------------------------ lecteur (session média de l'appli)

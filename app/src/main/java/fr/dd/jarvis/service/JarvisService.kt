@@ -58,13 +58,24 @@ class JarvisService : Service() {
          */
         fun ecouterDepuisVoiture(ctx: Context): Boolean {
             val s = actuel
-            if (running && s != null) { s.main.post { s.demandeExterne() }; return true }
-            if (!micAccorde(ctx)) return false
+            if (running && s != null) {
+                fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "demande micro transmise au service vocal déjà actif")
+                s.main.post { s.demandeExterne() }
+                return true
+            }
+            if (!micAccorde(ctx)) {
+                fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "micro refusé : RECORD_AUDIO non accordé")
+                return false
+            }
             return try {
                 val i = Intent(ctx, JarvisService::class.java).setAction(ACTION_ECOUTER)
                 if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
+                fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "demande de démarrage du service vocal envoyée")
                 true
-            } catch (_: Throwable) { false }
+            } catch (e: Throwable) {
+                fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "démarrage service vocal refusé : ${e.javaClass.simpleName}: ${e.message.orEmpty().take(180)}")
+                false
+            }
         }
 
         /**
@@ -139,7 +150,25 @@ class JarvisService : Service() {
     private var incompris = 0              // phrases non comprises d'affilée pendant une conversation
     private var echangeReel = false        // vrai dès qu'une vraie demande a été traitée pendant cette conversation
     private lateinit var app: JarvisApp
-    private lateinit var tools: ToolBox
+    // Le catalogue d'outils et le cerveau ne sont nécessaires qu'après la première phrase comprise.
+    // Les construire à l'ouverture du service retardait inutilement le micro Android Auto.
+    private val tools by lazy(LazyThreadSafetyMode.NONE) {
+        ToolBox(app) { q, _ ->
+            // Action sensible à la voix, téléphone verrouillé : seulement si c'est TA voix (empreinte vocale),
+            // sinon il faut déverrouiller le téléphone (personne d'autre ne peut la déclencher).
+            // Désactiver un système de sécurité téléphone verrouillé : empreinte vocale exigée même si l'option est coupée.
+            if ((app.store.biometrie.value || q.startsWith(fr.dd.jarvis.securite.Systemes.QUESTION)) &&
+                fr.dd.jarvis.device.Securite.sensible(q) && fr.dd.jarvis.device.Securite.verrouille(this)) {
+                if (fr.dd.jarvis.voice.EmpreinteVocale.prete(app)) voiceConfirm(q) && verifierMaVoix()
+                else {
+                    withContext(Dispatchers.Main) { voice?.speak("C'est une action sensible : déverrouille d'abord le téléphone, puis redemande-la.") {} }
+                    false
+                }
+            } else voiceConfirm(q)
+        }
+    }
+    /** Réutilisé entre les tours : Brain ne contient pas d'état propre à une requête. */
+    private val brain by lazy(LazyThreadSafetyMode.NONE) { Brain(app.llm, tools, app) { app.store.userName.value } }
 
     private fun norm(s: String) = Normalizer.normalize(s.lowercase(), Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
     private val wakeRegex = Regex("\\b(jarvis|jarvice|jarviss|djarvis|jarvi|jarves|charvis)\\b[ ,.:!?-]*")
@@ -167,16 +196,26 @@ class JarvisService : Service() {
     private fun premierPlan(): Boolean = try {
         if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIF, notificationEcoute(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
         else startForeground(NOTIF, notificationEcoute())
+        fr.dd.jarvis.voice.JournalVoix.noter("service", "service vocal passé au premier plan avec type microphone")
         true
-    } catch (_: Throwable) { false }
+    } catch (e: Throwable) {
+        fr.dd.jarvis.voice.JournalVoix.noter("service", "échec premier plan microphone : ${e.javaClass.simpleName}: ${e.message.orEmpty().take(180)}")
+        false
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val demandeDepuisVoiture = intent?.action == ACTION_ECOUTER
+        val debutDemandeVoiture = if (demandeDepuisVoiture) android.os.SystemClock.elapsedRealtime() else 0L
         app = application as JarvisApp
         if (intent?.action == ACTION_STOP) {
             app.store.wakeOn.set(false)
             stopSelf(); return START_NOT_STICKY
         }
         if (running) {
+            if (intent?.action == ACTION_ECOUTER) {
+                fr.dd.jarvis.voice.JournalVoix.noter("service", "ACTION_ECOUTER reçu alors que le service est déjà actif")
+                main.post { demandeExterne() }
+            }
             if (intent?.action == ACTION_RELANCER) {
                 // Toucher la notification redonne le droit au micro : on repasse au premier plan et on réarme le détecteur.
                 getSystemService(NotificationManager::class.java).cancel(NOTIF_REPRISE)
@@ -195,25 +234,11 @@ class JarvisService : Service() {
         getSystemService(NotificationManager::class.java).cancel(NOTIF_REPRISE)
         running = true
         actuel = this
-        if (intent?.action == ACTION_ECOUTER) main.postDelayed({ demandeExterne() }, 1800)
         // Verrou de veille seulement PENDANT une conversation (voir garderEveille) : en attente du mot « Jarvis », le
         // micro actif suffit à Android ; le verrou permanent empêchait le téléphone de dormir même micro coupé.
         wake = (getSystemService(POWER_SERVICE) as PowerManager).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "jarvis:wake").apply { setReferenceCounted(false) }
-        tools = ToolBox(app) { q, _ ->
-            // Action sensible à la voix, téléphone verrouillé : seulement si c'est TA voix (empreinte vocale),
-            // sinon il faut déverrouiller le téléphone (personne d'autre ne peut la déclencher).
-            // Désactiver un système de sécurité téléphone verrouillé : empreinte vocale exigée même si l'option est coupée.
-            if ((app.store.biometrie.value || q.startsWith(fr.dd.jarvis.securite.Systemes.QUESTION)) &&
-                fr.dd.jarvis.device.Securite.sensible(q) && fr.dd.jarvis.device.Securite.verrouille(this)) {
-                if (fr.dd.jarvis.voice.EmpreinteVocale.prete(app)) voiceConfirm(q) && verifierMaVoix()
-                else {
-                    withContext(Dispatchers.Main) { voice?.speak("C'est une action sensible : déverrouille d'abord le téléphone, puis redemande-la.") {} }
-                    false
-                }
-            } else voiceConfirm(q)
-        }
         // Hermès installé : on s'assure que sa passerelle tourne dans Termux (après un redémarrage du téléphone par ex.).
-        if (app.store.hermesMode.value != "off") scope.launch {
+        if (app.store.hermesMode.value != "off") scope.launch(Dispatchers.IO) {
             runCatching {
                 fr.dd.jarvis.hermes.PontMcp.demarrer(app)
                 val hook = fr.dd.jarvis.hermes.HermesTermux.VERSION_HOOK_MEMOIRE.toString()
@@ -254,8 +279,20 @@ class JarvisService : Service() {
                 }
             }
         }
+        // Le service est maintenant réellement prêt à écouter : ne pas ajouter 1,8 s fixe après son démarrage.
+        // Le callback est posté après l'initialisation du moteur vocal ; la demande manuelle ne dépend pas du détecteur Vosk.
+        if (demandeDepuisVoiture) main.post {
+            fr.dd.jarvis.voice.JournalVoix.noter(
+                "android-auto",
+                "service vocal initialisé en ${android.os.SystemClock.elapsedRealtime() - debutDemandeVoiture} ms ; ouverture micro"
+            )
+            demandeExterne()
+        }
+
         // Modèle français installé : l'ancien modèle anglais (≈ 70 Mo) est supprimé avant d'armer le détecteur.
-        fr.dd.jarvis.voice.VoskModel.nettoyer(this)
+        // La suppression éventuelle de l'ancien modèle anglais (≈ 70 Mo) ne doit pas bloquer
+        // l'ouverture du micro Android Auto sur le thread principal.
+        scope.launch(Dispatchers.IO) { fr.dd.jarvis.voice.VoskModel.nettoyer(this@JarvisService) }
         vosk = when {
             app.store.picoKey.value.isNotBlank() -> fr.dd.jarvis.voice.PorcupineWake(this, app.store.picoKey.value) { main.post { onWakeWord() } }
             fr.dd.jarvis.voice.VoskModel.ready(this) -> fr.dd.jarvis.voice.VoskWake(this, app.store.ecouteEconome.value) { main.post { onWakeWord() } }
@@ -288,7 +325,8 @@ class JarvisService : Service() {
         }
         // Le canal de notification JARVIS n'est utile que pendant une projection Android Auto.
         if (app.enVoiture) runCatching { CarBridge.post(this, "Je suis prêt. Réponds pour me parler.") }
-        main.postDelayed({ goIdle() }, 1200)
+        // Une demande Android Auto vient déjà d'ouvrir une conversation : ne pas la refermer avec l'initialisation idle.
+        if (!demandeDepuisVoiture) main.postDelayed({ goIdle() }, 1200)
         return START_STICKY
     }
 
@@ -315,14 +353,30 @@ class JarvisService : Service() {
         // La voiture envoie parfois deux fois le même appui (▶ puis « jouer depuis la recherche ») : un seul bip.
         if (essai == 0) {
             val t = System.currentTimeMillis()
-            if (t - derniereDemandeExterne < 1500) return
+            if (t - derniereDemandeExterne < 1500) {
+                fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "double appui micro ignoré (demande précédente déjà reçue)")
+                return
+            }
             derniereDemandeExterne = t
+            fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "service vocal traite la demande du bouton micro")
         }
         if (busy) {
-            voice?.stopSpeaking()
-            if (essai < 6) main.postDelayed({ demandeExterne(essai + 1) }, 500)
-            else fr.dd.jarvis.car.ActiviteVoiture.signaler(fr.dd.jarvis.car.ActiviteVoiture.Etape.ECHEC,
-                texte = "Je termine ta demande précédente, réessaie dans un instant.")
+            if (essai == 0) {
+                fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "micro différé : JARVIS termine une demande en cours")
+                fr.dd.jarvis.car.ActiviteVoiture.signaler(fr.dd.jarvis.car.ActiviteVoiture.Etape.REFLEXION, texte = "JARVIS termine la demande en cours…")
+            }
+            // Attente bornée : ne pas annoncer un faux échec au bout de 3 s, mais ne jamais
+            // programmer une boucle infinie si un traitement ou un callback reste réellement bloqué.
+            if (essai < 8) {
+                if (essai == 0) voice?.stopSpeaking()
+                main.postDelayed({ demandeExterne(essai + 1) }, 500)
+            } else {
+                fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "micro abandonné : service toujours occupé après 4 s")
+                fr.dd.jarvis.car.ActiviteVoiture.signaler(
+                    fr.dd.jarvis.car.ActiviteVoiture.Etape.ECHEC,
+                    texte = "JARVIS termine encore une demande. Réessaie dans quelques secondes."
+                )
+            }
             return
         }
         if (awake) {
@@ -583,10 +637,21 @@ class JarvisService : Service() {
             var relancer = true
             val flux = withContext(Dispatchers.Main) { voice?.parole(5000) { if (gen == generation) { busy = false; if (relancer) ecouter() else goIdle() } } }
             val reply = try {
-                fr.dd.jarvis.ai.Brain(app.llm, tools, app) { app.store.userName.value }
-                    .reply(app.chat.toList().takeLast(16), onTexte = { d -> if (gen == generation) flux?.ajouter(d) }) { etat -> android.os.Handler(android.os.Looper.getMainLooper()).post { majNotification(etat) } }
-            } catch (e: CancellationException) { flux?.arreter(sansSuite = true); throw e }
-              catch (e: Throwable) { "⚠️ ${e.message ?: e.javaClass.simpleName}" }
+                val debutCerveau = System.currentTimeMillis()
+                brain.reply(app.chat.toList().takeLast(16), onTexte = { d -> if (gen == generation) flux?.ajouter(d) }) { etat -> android.os.Handler(android.os.Looper.getMainLooper()).post { majNotification(etat) } }
+                    .also { fr.dd.jarvis.voice.JournalVoix.noter("service", "compréhension + action en ${System.currentTimeMillis() - debutCerveau} ms") }
+            } catch (e: CancellationException) {
+                // Une requête IA / un outil peut être annulé (timeout, arrêt de tâche). Sans ce nettoyage,
+                // busy reste vrai indéfiniment et toutes les demandes suivantes sont refusées comme « déjà occupé ».
+                flux?.arreter(sansSuite = true)
+                main.post {
+                    if (gen == generation && running) {
+                        busy = false
+                        if (awake) ecouter() else goIdle()
+                    }
+                }
+                throw e
+            } catch (e: Throwable) { "⚠️ ${e.message ?: e.javaClass.simpleName}" }
             val assistantMessage = ChatMsg(false, reply)
             fr.dd.jarvis.car.ActiviteVoiture.signaler(fr.dd.jarvis.car.ActiviteVoiture.Etape.REPONSE, cmd, reply)
             withContext(Dispatchers.Main) {
@@ -600,13 +665,17 @@ class JarvisService : Service() {
             }
             notifier(cmd, reply)
             withContext(Dispatchers.Main) {
-                // La conversation continue : on réécoute après la réponse (ou dès que l'utilisateur la coupe), puis on
-                // referme après quelques secondes de silence.
-                // Autoradio / Bluetooth : on ne rouvre le micro que si Jarvis pose une question — sinon il entendrait la
-                // radio ou la suite de sa propre réponse ; il suffit de redire « Jarvis » pour une nouvelle demande.
+                // Le traitement (cerveau + actions + enregistrement) est terminé ici. Ne garde pas busy à true
+                // pendant la seule lecture TTS : une nouvelle demande Android Auto peut interrompre cette lecture.
+                // Le callback TTS garde uniquement la responsabilité de rouvrir le micro après la réponse.
                 relancer = awake && (voice?.sortieExterne() != true || reply.trimEnd().endsWith("?"))
-                // Échange abandonné entre-temps (déverrouillage prioritaire) : la réponse reste écrite mais n'est pas dite.
-                if (gen != generation) flux?.arreter(sansSuite = true) else flux?.finir(reply) ?: run { busy = false }
+                // Échange abandonné entre-temps (déverrouillage prioritaire) : ne pas libérer le busy du déverrouillage.
+                if (gen != generation) {
+                    flux?.arreter(sansSuite = true)
+                } else {
+                    busy = false
+                    flux?.finir(reply)
+                }
             }
         }
     }

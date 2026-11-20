@@ -46,6 +46,8 @@ object Carnet {
         Regex("\\b(alarme|cameras?|videosurveillance)\\b") to "Alarme et caméras",
         Regex("\\b(piscine)\\b") to "Piscine",
         Regex("\\b(voiture|vehicule|camion|utilitaire)\\b") to "Voiture",
+        Regex("\\b(musiques?|chansons?|titres?|artistes?|spotify|deezer|yt music)\\b") to "Musique",
+        Regex("\\b(localisation|positions?|gps|personnes?|geolocalisation|tracker)\\b") to "Localisation",
         Regex("\\b(freebox|box|wifi|routeur)\\b") to "Box et réseau",
         Regex("\\b(serveur|debian|ssh|docker)\\b") to "Serveur",
         Regex("\\b(home assistant|domotique)\\b") to "Home Assistant",

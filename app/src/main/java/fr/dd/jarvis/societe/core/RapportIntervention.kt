@@ -13,6 +13,94 @@ object ListesRapport {
 }
 
 /**
+ * Préserve les équipements explicitement numérotés dans la dictée.
+ * La fidélité générique peut écarter une ligne descriptive longue ; les libellés
+ * « Onduleur 1 », « Onduleur 2 », etc. sont donc extraits directement de la source.
+ */
+object OnduleursIntervention {
+    private val MARQUEUR = Regex("""(?i)\bonduleur\s*(?:n[°o]\s*)?(\d+)\s*[:=\-–]?\s*""")
+    private val FIN_BLOC = Regex("""(?i)^\s*(?:[•*▪-]\s*)?(?:pdl\b|coffret\b|partie\b|remise en service\b|aucun probl[eè]me\b|nettoyage\b|contr[oô]le\b|diagnostic\b|conclusion\b)""")
+
+    data class Bloc(val numero: Int, val nom: String, val contenu: String)
+
+    /** Récupère les lignes de chaque onduleur jusqu'au marqueur du suivant. */
+    fun blocs(source: String): List<Bloc> {
+        val contenus = linkedMapOf<Int, StringBuilder>()
+        var courant: Int? = null
+        for (ligne in source.split(Regex("""[\r\n;]+"""))) {
+            val matches = MARQUEUR.findAll(ligne).toList()
+            if (matches.isEmpty()) {
+                if (FIN_BLOC.containsMatchIn(ligne)) {
+                    courant = null
+                    continue
+                }
+                courant?.let { n -> contenus.getOrPut(n) { StringBuilder() }.append(" ").append(ligne.trim()) }
+                continue
+            }
+            for ((index, match) in matches.withIndex()) {
+                val numero = match.groupValues[1].toIntOrNull() ?: continue
+                if (numero !in 1..100) continue
+                // Si un résumé IA est suivi de la dictée source, le second bloc numéroté remplace le premier
+                // au lieu de doubler artificiellement le nombre de séries.
+                if (courant != numero && contenus.containsKey(numero)) contenus[numero] = StringBuilder()
+                courant = numero
+                val fin = matches.getOrNull(index + 1)?.range?.first ?: ligne.length
+                val detail = ligne.substring(match.range.last + 1, fin).trim().trim(',', ';', ':', '-', '–', '.', ' ')
+                val cible = contenus.getOrPut(numero) { StringBuilder() }
+                if (detail.isNotBlank()) {
+                    if (cible.isNotEmpty()) cible.append(" ")
+                    cible.append(detail)
+                }
+            }
+        }
+        return contenus.toSortedMap().map { (numero, contenu) ->
+            Bloc(numero, "Onduleur $numero", contenu.toString().trim())
+        }
+    }
+
+    /** Représentation complète des blocs numérotés, utilisée pour préserver la dictée brute. */
+    fun numerotes(source: String): List<String> = blocs(source).map { bloc ->
+        bloc.nom + if (bloc.contenu.isBlank()) "" else " : ${bloc.contenu}"
+    }
+
+    /** Ne conserve dans l'en-tête que l'identité (marque/modèle), jamais les mesures de séries. */
+    fun identites(source: String): List<String> {
+        val resultat = sortedMapOf<Int, String>()
+        for (ligne in source.split(Regex("""[\r\n;]+"""))) {
+            val matches = MARQUEUR.findAll(ligne).toList()
+            for ((index, match) in matches.withIndex()) {
+                val numero = match.groupValues[1].toIntOrNull() ?: continue
+                if (numero !in 1..100) continue
+                val fin = matches.getOrNull(index + 1)?.range?.first ?: ligne.length
+                val detail = ligne.substring(match.range.last + 1, fin).trim()
+                    .trim(',', ';', ':', '-', '–', '.', ' ', '\'', '"', '[', ']')
+                val normalise = Fidelite.enChiffres(detail)
+                if (Regex("""(?i)\b\d{1,3}\s*(?:s[ée]ries?|strings?|cha[îi]nes?)\b""").containsMatchIn(normalise)) continue
+                if (detail.isNotBlank() && !resultat.containsKey(numero)) resultat[numero] = detail
+            }
+        }
+        return resultat.map { (numero, modele) -> "Onduleur $numero : $modele" }
+    }
+
+    /** Fusionne les identités de la dictée dans le champ équipement, sans y mélanger les mesures. */
+    fun completer(texteIA: String, source: String): String {
+        val lignes = linkedMapOf<String, String>()
+        texteIA.split(Regex("""[\r\n;]+""")).map { it.trim() }.filter { it.isNotBlank() }
+            .forEach { lignes[Fidelite.normaliser(it)] = it }
+        identites(source).forEach { ligne ->
+            val cle = Regex("""(?i)^onduleur\s+(\d+)""").find(ligne)?.groupValues?.get(1)
+            if (cle != null) {
+                val prefixe = Regex("""(?i)^onduleur\s+$cle\b""")
+                val existante = lignes.entries.firstOrNull { prefixe.containsMatchIn(it.value) }
+                if (existante != null) lignes.remove(existante.key)
+            }
+            lignes[Fidelite.normaliser(ligne)] = ligne
+        }
+        return lignes.values.joinToString("\n")
+    }
+}
+
+/**
  * Mesures par série (string) : « 20 séries à environ 500 V » → Série 1 … Série 20 à ≈ 500 V ; « séries 1 à 10 : 480 V »,
  * « série 7 : 320 V », « S3 = 512 V / 9,1 A » précisent ou corrigent. Le reste (température, isolement…) reste tel quel.
  */
@@ -45,17 +133,41 @@ object MesuresSeries {
         return (if (approx) "≈ " else "") + premier + second
     }
 
+    /** Analyse séparément les séries de chaque onduleur ; les numéros repartent à 1. */
+    fun parOnduleur(texte: String): List<Pair<String, Resultat>> =
+        OnduleursIntervention.blocs(texte).map { bloc -> bloc.nom to analyser(bloc.contenu) }
+
     fun analyser(texte: String): Resultat {
         val valeurs = sortedMapOf<Int, String>()
         val autres = mutableListOf<String>()
-        for (ligne in ListesRapport.elements(texte)) {
+        // Les quantités successives décrivent des groupes distincts : 2 séries puis 5 séries = séries 1 à 7.
+        var prochaineSerie = 1
+        for (ligneBrute in ListesRapport.elements(Fidelite.enChiffres(texte))) {
+            // Une dictée peut donner l'unité une seule fois (« 16 séries à 775 volts et 2 séries à 805 »).
+            // On propage cette unité uniquement aux groupes sans unité, jamais aux totaux (« 18 séries au total »).
+            // Chercher une unité uniquement après une valeur numérique : après normalisation,
+            // « à » devient « a » et ne doit jamais être interprété comme l'unité ampère « A ».
+            val uniteLigne = Regex("""(?i)\b\d+(?:[.,]\d+)?\s*(kV|mV|mA|volts?|V|A|amp(?:ères?)?|W|kW|Ω|ohms?|MΩ)\b""")
+                .find(ligneBrute)?.groupValues?.get(1)
+            val ligne = if (uniteLigne == null) ligneBrute else {
+                val sansUnite = Regex("""(?i)(\b\d{1,3}\s*$SERIE\s*[^\d\n]{0,20}?\d++(?:[.,]\d++)?+)(?!\s*(?:kV|mV|mA|volts?|V|A|amp(?:ères?)?|W|kW|Ω|ohms?|MΩ)\b)""")
+                sansUnite.replace(ligneBrute) { m ->
+                    // Le texte a déjà été normalisé sans accents : « à » devient « a ».
+                    // Tester la présence de l'unité sur tout le groupe confondait ce « a »
+                    // avec l'unité ampère « A » et supprimait la propagation des volts.
+                    // Le motif ne capture que les groupes dont l'unité manque après la valeur.
+                    m.value + " " + uniteLigne
+                }
+            }
             var reste = ligne
             var trouve = false
             GROUPE.findAll(ligne).forEach { m ->
                 val n = m.groupValues[1].toInt()
                 if (n in 1..200) {
                     val v = valeur(m.groupValues, 2)
-                    for (k in 1..n) if (!valeurs.containsKey(k) || valeurs[k]!!.startsWith("≈")) valeurs[k] = v
+                    val fin = (prochaineSerie + n - 1).coerceAtMost(200)
+                    for (k in prochaineSerie..fin) valeurs[k] = v
+                    prochaineSerie = fin + 1
                     reste = reste.replace(m.value, " "); trouve = true
                 }
             }

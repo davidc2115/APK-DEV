@@ -65,7 +65,14 @@ object YtMusique {
             .header("Origin", "https://music.youtube.com").header("Referer", "https://music.youtube.com/")
             .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36")
             .post(corps.put("context", contexte()).toString().toRequestBody(Http.JSON)).build()
-        Http.client.newCall(req).execute().use { r ->
+        // Le client partagé n’impose pas de durée maximale à l’appel complet : une recherche réseau lente
+        // pouvait donc laisser « musique_rechercher… » actif et bloquer les demandes suivantes.
+        val client = Http.client.newBuilder()
+            .callTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+            .connectTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(6, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+        client.newCall(req).execute().use { r ->
             val t = r.body?.string().orEmpty()
             if (!r.isSuccessful) throw IllegalStateException("YouTube Music ${r.code}")
             return t

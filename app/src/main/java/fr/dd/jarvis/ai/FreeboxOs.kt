@@ -41,11 +41,23 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
         return tmf.trustManagers.filterIsInstance<X509TrustManager>().first()
     }
 
-    /** Une seule fabrique TLS : les connexions HTTPS vers la box sont réutilisées (pas de nouvelle poignée de main à chaque requête). */
+    /** Un seul trust manager et une seule fabrique TLS pour toutes les connexions Freebox. */
+    private val confianceTls: X509TrustManager by lazy { confiance() }
     private val fabriqueTls: javax.net.ssl.SSLSocketFactory by lazy {
-        SSLContext.getInstance("TLS").apply { init(null, arrayOf(confiance()), null) }.socketFactory
+        SSLContext.getInstance("TLS").apply { init(null, arrayOf(confianceTls), null) }.socketFactory
     }
     private fun socketFactory(): javax.net.ssl.SSLSocketFactory = fabriqueTls
+
+    /** Client WebSocket réutilisé : évite de recréer dispatcher, pool de connexions et contexte TLS à chaque envoi. */
+    private val clientTeleversement: okhttp3.OkHttpClient by lazy {
+        okhttp3.OkHttpClient.Builder()
+            .sslSocketFactory(socketFactory(), confianceTls)
+            .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(0, java.util.concurrent.TimeUnit.SECONDS)
+            .pingInterval(20, java.util.concurrent.TimeUnit.SECONDS)
+            .retryOnConnectionFailure(false)
+            .build()
+    }
 
     private fun discover(app: JarvisApp) {
         val c = URL("http://mafreebox.freebox.fr/api_version").openConnection() as HttpURLConnection
@@ -878,9 +890,6 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
     private fun televerser(app: JarvisApp, s: String, f: java.io.File, dossier: String, nom: String, ecraser: Boolean): String {
         val domain = app.store.freeboxApiDomain.value.trim()
         val port = app.store.freeboxHttpsPort.value.toIntOrNull() ?: 443
-        val client = okhttp3.OkHttpClient.Builder().sslSocketFactory(socketFactory(), confiance())
-            .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS).readTimeout(0, java.util.concurrent.TimeUnit.SECONDS)
-            .pingInterval(20, java.util.concurrent.TimeUnit.SECONDS).build()
         val req = okhttp3.Request.Builder().url("https://$domain:$port/api/v${version(app)}/ws/upload").header("X-Fbx-App-Auth", s).build()
         val id = (System.currentTimeMillis() % 1_000_000).toInt()
         val demarre = java.util.concurrent.CountDownLatch(1)
@@ -888,7 +897,7 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
         val erreur = java.util.concurrent.atomic.AtomicReference<String?>(null)
         val pret = java.util.concurrent.atomic.AtomicBoolean(false)
         val finalise = java.util.concurrent.atomic.AtomicBoolean(false)
-        val ws = client.newWebSocket(req, object : okhttp3.WebSocketListener() {
+        val ws = clientTeleversement.newWebSocket(req, object : okhttp3.WebSocketListener() {
             override fun onOpen(webSocket: okhttp3.WebSocket, response: okhttp3.Response) {
                 webSocket.send(JSONObject().put("action", "upload_start").put("request_id", id).put("size", f.length())
                     .put("dirname", p64(dossier)).put("filename", nom).put("force", if (ecraser) "overwrite" else "missing").toString())

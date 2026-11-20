@@ -27,7 +27,7 @@ object CommandeMedia {
     private const val MUS = "(?:la musique|ma musique|la lecture|la chanson|le morceau|le titre|le son|la playlist|spotify|deezer|youtube music|yt music|la radio)"
 
     private val R_PAUSE = Regex("^(?:(?:mets?|fais) (?:$MUS |ca |la )?(?:en )?pause|pause (?:$MUS|musique)|(?:stop|stoppe|arrete|suspends?|interromps?) $MUS|(?:mets|met) $MUS en pause)$")
-    private val R_PLAY = Regex("^(?:(?:reprends?|reprendre|relance[rz]?|continue[rz]?|redemarre[rz]?|rejoue|remets?|remettre|relancer) $MUS|(?:lance|mets?|joue|remets?) (?:de la |la |ma )musique|(?:remets?|relance) (?:en route|la lecture de) $MUS|(?:enleve|retire|sors) (?:$MUS )?(?:de la |la )?pause)$")
+    private val R_PLAY = Regex("^(?:(?:reprends?|reprendre|relance[rz]?|continue[rz]?|redemarre[rz]?|rejoue|remets?|remettre|relancer|demarre[rz]?|lance[rz]?|joue[rz]?) $MUS|(?:lance[rz]?|demarre[rz]?|mets?|joue[rz]?|remets?) (?:de la |la |ma |une )musique|(?:remets?|relance|lance[rz]?|demarre[rz]?) (?:en route|la lecture de) $MUS|(?:enleve|retire|sors) (?:$MUS )?(?:de la |la )?pause)$")
     private val R_NEXT = Regex("^(?:(?:chanson|morceau|titre|piste|musique|son) (?:suivante?|d apres)|(?:passe|va) (?:a la |au |la |le )?(?:chanson |morceau |titre |piste )?(?:suivante?|d apres)|(?:passe|change|zappe|saute) (?:la chanson|le morceau|le titre|de chanson|de morceau|de titre|celle ci|celui ci|ca|cette chanson|ce morceau)|(?:mets|joue) (?:la |le )?(?:chanson|morceau|titre) (?:suivante?|d apres))$")
     private val R_PREV = Regex("^(?:(?:chanson|morceau|titre|piste|musique) (?:precedente?|d avant)|(?:reviens|retourne|repasse|va) (?:a la |au )?(?:chanson |morceau |titre )?(?:precedente?|d avant|en arriere)|(?:remets|rejoue|mets) (?:la |le )?(?:chanson|morceau|titre) (?:precedente?|d avant))$")
     private val R_RESTART = Regex("^(?:recommence|reprends?|rejoue|relance) (?:la chanson|le morceau|le titre|ce morceau|cette chanson|ce titre)(?: (?:du|depuis le|au) debut)?$")
@@ -136,7 +136,28 @@ object CommandeMedia {
         val tc = c.transportControls
         val appli = nomAppli(ctx, c)
         return when (a) {
-            Action.PAUSE -> { l.filter { joue(it) }.ifEmpty { listOf(c) }.forEach { runCatching { it.transportControls.pause() } }; "⏸️ Musique en pause." }
+            Action.PAUSE -> {
+                // Envoyer pause à toutes les sessions actives : plusieurs lecteurs peuvent continuer simultanément.
+                val actives = l.filter { joue(it) }
+                if (actives.isEmpty()) {
+                    "ℹ️ Aucune lecture musicale active à mettre en pause."
+                } else {
+                    val echecs = actives.count { controller ->
+                        runCatching { controller.transportControls.pause() }.isFailure
+                    }
+                    // PlaybackState est actualisé de façon asynchrone par l'application musicale.
+                    val limite = android.os.SystemClock.elapsedRealtime() + 1200L
+                    while (actives.any { joue(it) } && android.os.SystemClock.elapsedRealtime() < limite) {
+                        android.os.SystemClock.sleep(100L)
+                    }
+                    val encoreActives = actives.filter { joue(it) }
+                    when {
+                        encoreActives.isEmpty() -> "⏸️ Musique mise en pause ($appli)."
+                        echecs == actives.size -> "⚠️ L'application musicale ($appli) n'a pas accepté la commande pause. La lecture est peut-être toujours active."
+                        else -> "⚠️ La commande pause a été envoyée, mais ${encoreActives.size} session(s) musicale(s) signalent encore une lecture. Je ne confirme pas la pause."
+                    }
+                }
+            }
             Action.PLAY -> { tc.play(); "▶️ Lecture reprise" + morceau(c).let { if (it.isBlank()) " ($appli)." else " : $it." } }
             Action.NEXT -> { tc.skipToNext(); if (!joue(c)) tc.play(); "⏭️ Morceau suivant." }
             Action.PREVIOUS -> { tc.skipToPrevious(); if (!joue(c)) tc.play(); "⏮️ Morceau précédent." }

@@ -287,41 +287,112 @@ object Rendu {
         "terminee" -> "✅ Terminée"; "a_suivre" -> "🔁 À suivre"; "en_attente" -> "⏳ En attente"; else -> s
     }
 
+    /**
+     * Tableau compact : trois paires Série/Tension par ligne.
+     * Sur 18 séries, cela réduit le tableau de 18 à 6 lignes sans regrouper les mesures.
+     */
+    private fun tableauSeriesCompact(series: List<MesuresSeries.Serie>): String {
+        if (series.isEmpty()) return ""
+        val colonnes = 3
+        val entete = List(colonnes) { listOf("Série", "Tension relevée") }.flatten()
+        val separateur = List(colonnes) { listOf("---:", "---:") }.flatten()
+        val lignes = series.chunked(colonnes).map { groupe ->
+            val cellules = groupe.flatMap { listOf(it.numero.toString(), it.valeur) }.toMutableList()
+            while (cellules.size < colonnes * 2) cellules.addAll(listOf("", ""))
+            "| " + cellules.joinToString(" | ") + " |"
+        }
+        return buildString {
+            append("| ").append(entete.joinToString(" | ")).append(" |\n")
+            append("| ").append(separateur.joinToString(" | ")).append(" |\n")
+            lignes.forEach { append(it).append('\n') }
+        }.trimEnd()
+    }
+
     /** Données d'un rapport d'intervention (modèle « rapport »). */
     fun interventionCtx(d: SocieteData, c: Client, s: Site, i: Intervention): Ctx {
-        val mes = MesuresSeries.analyser(i.mesures)
-        val actions = ListesRapport.elements(i.actions).map { mapOf("action" to it) }
+        // « onduleurs » est le champ d'identité (numéro + modèle) ; « mesures » conserve la dictée
+        // complète. Les concaténer réinitialisait les blocs déjà lus lorsque les identités revenaient après.
+        // On n'utilise le champ onduleurs qu'en secours si le champ mesures est réellement vide.
+        val sourceMesures = i.mesures.ifBlank { i.onduleurs }
+        val mes = MesuresSeries.analyser(sourceMesures)
+        val parOnduleur = MesuresSeries.parOnduleur(sourceMesures)
+        val actions = ListesRapport.elements(i.actions).map { action ->
+            val n = Fidelite.normaliser(action)
+            val emoji = when {
+                "pdl" in n -> "📍"
+                "coffret" in n || "sectionneur" in n || "disjoncteur" in n || "parafoudre" in n -> "⚡"
+                "onduleur" in n -> "🔌"
+                "mesure" in n || "tension" in n || "serie" in n -> "📏"
+                "nettoy" in n || "aeration" in n || "ventilation" in n -> "🧹"
+                "remise en service" in n || "redemarrage" in n -> "▶️"
+                "serrage" in n || "resserrage" in n -> "🔧"
+                "controle" in n || "verification" in n -> "🔍"
+                else -> "✅"
+            }
+            mapOf("action" to action, "emoji" to emoji)
+        }
         val pieces = ListesRapport.elements(i.pieces).map { mapOf("piece" to it) }
-        val series = mes.series.map { mapOf("serie" to "Série ${it.numero}", "valeur" to it.valeur) }
+        // En présence de blocs numérotés, chaque onduleur possède ses propres séries 1..N.
+        val series = if (parOnduleur.isEmpty()) mes.series.map { mapOf("serie" to "Série ${it.numero}", "valeur" to it.valeur) } else emptyList()
         val paires = mes.series.chunked(2).map { p ->
             mapOf("serie_a" to "Série ${p[0].numero}", "valeur_a" to p[0].valeur,
                 "serie_b" to (p.getOrNull(1)?.let { "Série ${it.numero}" } ?: ""), "valeur_b" to (p.getOrNull(1)?.valeur ?: ""))
         }
-        val autres = mes.autres.map { mapOf("mesure" to it) }
+        val groupesOnduleurs = parOnduleur.map { (nom, resultat) ->
+            val tableau = tableauSeriesCompact(resultat.series)
+            val observations = resultat.autres.joinToString("\n") { "- 🌦️ ${it}" }
+            mapOf("onduleur" to nom, "details" to listOf(tableau, observations).filter { it.isNotBlank() }.joinToString("\n\n"))
+        }
+        val autres = (if (parOnduleur.isEmpty()) mes.autres else emptyList()).map { mapOf("mesure" to it) }
         fun image(chemin: String) = "![[${i.id}-${chemin.substringAfterLast('/')}]]"
         val avant = i.photosAvant.map { mapOf("photo" to image(it)) }
         val apres = i.photosApres.map { mapOf("photo" to image(it)) }
+        val onduleursBruts = i.onduleurs.ifBlank { s.onduleur }
+        val onduleursAffiches = OnduleursIntervention.identites(onduleursBruts).takeIf { it.isNotEmpty() }
+            ?.joinToString("\n") ?: onduleursBruts
+            .replace(Regex("""[\[\]'"]"""), "")
+            .replace(Regex("""(?i),\s*(?=onduleur\s*(?:n[°o]\s*)?\d+)"""), "\n")
         fun drapeau(l: List<*>) = if (l.isEmpty()) "" else "oui"
         val vars = societeVars(d) + mapOf(
             "titre" to "Rapport d'intervention", "reference" to i.id,
             "client" to c.nom, "installation" to s.nom.ifBlank { "Installation" },
             "date" to dateFr(i.date), "categorie" to i.categorie.replaceFirstChar { it.uppercase() },
             "statut" to statutIntervention(i.statut),
-            "adresse" to s.adresse, "onduleur" to s.onduleur, "kwc" to (if (s.kwc > 0) nombre(s.kwc) else ""),
+            "adresse" to s.adresse, "onduleur" to onduleursAffiches, "onduleurs" to onduleursAffiches.lines().filter { it.isNotBlank() }.joinToString("\n") { "- 🔌 " + it.trim().trimEnd('|') }, "kwc" to (if (s.kwc > 0) nombre(s.kwc) else ""),
             "description" to Fidelite.sansMeta(i.description), "diagnostic" to Fidelite.sansMeta(i.diagnostic),
-            "a_actions" to drapeau(actions), "a_pieces" to drapeau(pieces), "a_series" to drapeau(series),
+            "a_actions" to drapeau(actions), "a_pieces" to drapeau(pieces), "a_series" to drapeau(series), "a_groupes_onduleurs" to drapeau(groupesOnduleurs),
             "a_mesures" to drapeau(autres), "a_photos_avant" to drapeau(avant), "a_photos_apres" to drapeau(apres),
             "nb_series" to (if (series.isEmpty()) "" else series.size.toString()),
             "prochaine_maintenance" to (if (i.prochaineMaintenance.isBlank()) "" else dateFr(i.prochaineMaintenance)),
             "notes" to Fidelite.sansMeta(i.notes),
             "signature" to (if (i.signature.isBlank()) "" else image(i.signature))
         )
-        return Ctx(vars, mapOf("actions" to actions, "pieces" to pieces, "series" to series, "series_paires" to paires,
+        return Ctx(vars, mapOf("actions" to actions, "pieces" to pieces, "series" to series, "series_paires" to paires, "groupes_onduleurs" to groupesOnduleurs,
             "mesures" to autres, "photos_avant" to avant, "photos_apres" to apres))
     }
 
-    fun rendreIntervention(d: SocieteData, c: Client, s: Site, i: Intervention): String =
-        Templates.render(d.modele("rapport"), interventionCtx(d, c, s, i)).replace(Regex("\n{3,}"), "\n\n").trim() + "\n"
+    fun rendreIntervention(d: SocieteData, c: Client, s: Site, i: Intervention): String {
+        val contexte = interventionCtx(d, c, s, i)
+        val rendu = Templates.render(d.modele("rapport"), contexte)
+            .replace(Regex("\n{3,}"), "\n\n").trim()
+        // Un modèle personnalisé peut omettre les tableaux imbriqués ou n’afficher que des plages.
+        // Vérifier le Markdown final et ajouter une ligne explicite pour chaque série manquante.
+        val source = i.mesures.ifBlank { i.onduleurs }
+        val groupes = MesuresSeries.parOnduleur(source)
+        val manquants = groupes.filter { (_, resultat) ->
+            resultat.series.any { serie -> !rendu.contains("| ${serie.numero} | ${serie.valeur} |") }
+        }
+        if (manquants.isEmpty()) return rendu + "\n"
+        val complement = buildString {
+            append("\n\n## 📊 Détail individuel des séries par onduleur\n")
+            manquants.forEach { (nom, resultat) ->
+                append("\n### 🔌 ").append(nom).append('\n')
+                append(tableauSeriesCompact(resultat.series)).append('\n')
+                resultat.autres.forEach { observation -> append("- 🌦️ ").append(observation).append('\n') }
+            }
+        }
+        return (rendu + complement).trim() + "\n"
+    }
 
     /** Données fictives pour valider un modèle réécrit (balises autorisées + rendu sans erreur). */
     fun exemple(type: String): Ctx {

@@ -373,7 +373,7 @@ class ToolBox(
                 "domaine" to prop("surnom : discord_serveur | discord_salon | contact | appareil | lieu | autre."))))
         put(tool("memoire_ajouter", "Enregistre une consigne durable de l'utilisateur dans la note Obsidian « Mémoire JARVIS » (remplace la consigne du même sujet).",
             mapOf(
-                "sujet" to prop("contacts (fiches contact) | briefing (point du matin) | planning | mails | societe | general"),
+                "sujet" to prop("contacts | briefing | planning | mails | societe | musique | localisation | reponses | general. Choisis la rubrique la plus proche ; pour une préférence transversale, utilise general."),
                 "texte" to prop("La consigne complète, formulée clairement (structure, rubriques, calendrier à utiliser, exemples).")
             ), listOf("sujet", "texte")))
         put(tool("note_prendre", "Ajoute une note au CARNET DE NOTES de l'utilisateur (« prends note », « note que », « mets ça dans mes notes »). La note est ajoutée à sa rubrique (jamais remplacée), datée et recopiée dans Obsidian (JARVIS/Notes). Prendre note n'est JAMAIS une action : n'appelle ni Home Assistant ni une autre application pour une demande de note, même si elle parle du poêle, de la télé ou d'un réglage.",
@@ -494,7 +494,14 @@ class ToolBox(
             // « allume le salon » passent par Home Assistant (API), pas par une commande SSH.
             val ssh = adm || fr.dd.jarvis.hermes.ServeurInventaire.serveurDemande(recentUserText)
             fun serveurSeul(o: JSONObject) = o.optJSONObject("function")?.optString("name").orEmpty().let { it.startsWith("ssh_") || it.startsWith("serveur_") }
-            if (srv) serveur.schema.forEach { if (ssh || !serveurSeul(it)) out.put(it) }
+            if (srv) {
+                // « appareils indisponibles sur Home Assistant » = états /api/states, jamais inventaire Wi-Fi.
+                val haDisponibilite = ServeurTools.prioriteHaDisponibilite(recentUserText)
+                serveur.schema.forEach {
+                    val nom = it.optJSONObject("function")?.optString("name").orEmpty()
+                    if (if (haDisponibilite) nom in setOf("ha_entites", "ha_etat") else ssh || !serveurSeul(it)) out.put(it)
+                }
+            }
             if (ssh && (srv || adm)) serveurAdmin.schema.forEach { out.put(it) }
             if (web) sitesWeb.schema.forEach { out.put(it) }
             if (dis) discord.schema.forEach { out.put(it) }

@@ -45,6 +45,10 @@ object Pcm {
         return b.array()
     }
 
+    /** Dernier octet utile après la dernière trame de voix, avec une marge pour ne pas couper la fin des mots. */
+    internal fun finUtile(taille: Int, derniereVoix: Int, margeTrames: Int = 15): Int =
+        ((derniereVoix + margeTrames).coerceAtLeast(0) * TRAME).coerceIn(0, taille)
+
     /** Phrases que Whisper « entend » dans le silence ou la musique (sous-titres de vidéos) : à ignorer. */
     private val hallucinations = Regex(
         "(?i)(sous-?titr|amara\\.org|merci d'avoir regard|abonnez-vous|n'oubliez pas de vous abonner|♪|\\[musique]|\\(musique\\))"
@@ -128,19 +132,34 @@ class MicroVoiture(private val ctx: CarContext) {
 
     /** Bloquant : à appeler hors du fil principal. [attenteMs] = délai pour commencer à parler. */
     fun ecouter(attenteMs: Long, maxMs: Long = 15_000): Ecoute {
+        // CarAudioRecord et AudioRecord nécessitent tous deux l'autorisation runtime RECORD_AUDIO.
+        // Un lancement depuis Android Auto ne peut pas demander cette autorisation à l'écran.
+        if (ctx.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            telephone = false
+            return Ecoute.Erreur("autorisation du microphone refusée pour JARVIS ; ouvre JARVIS sur le téléphone et autorise le microphone dans Android")
+        }
         val am = ctx.getSystemService(AudioManager::class.java)
+        var voiture: CarAudioRecord? = null
         val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
             .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+            .setOnAudioFocusChangeListener { changement ->
+                if (changement == AudioManager.AUDIOFOCUS_LOSS || changement == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
+                    runCatching { voiture?.stopRecording() }
+                }
+            }
             .build()
-        runCatching { am.requestAudioFocus(focus) }
+        val focusAccorde = runCatching { am.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED }.getOrDefault(false)
         try {
             // 1) Micro de la voiture (Android Auto le transmet au téléphone).
-            val voiture = runCatching { CarAudioRecord.create(ctx) }.getOrNull()
-            if (voiture != null) {
+            voiture = runCatching { CarAudioRecord.create(ctx) }.getOrNull()
+            if (focusAccorde && voiture != null) {
+                val record = voiture!!
                 val r = runCatching {
-                    voiture.startRecording()
-                    try { boucle(attenteMs, maxMs, maxOf(CarAudioRecord.AUDIO_CONTENT_BUFFER_SIZE, Pcm.TRAME)) { b -> voiture.read(b, 0, b.size) } }
-                    finally { runCatching { voiture.stopRecording() } }
+                    record.startRecording()
+                    try {
+                        // CarAudioRecord impose des lectures <= 512 octets ; Pcm accumule les fragments en trames de 640.
+                        boucle(attenteMs, maxMs, CarAudioRecord.AUDIO_CONTENT_BUFFER_SIZE) { b -> record.read(b, 0, b.size) }
+                    } finally { runCatching { record.stopRecording() } }
                 }.getOrNull()
                 if (r != null && r !is Ecoute.Erreur) { telephone = false; return r }
             }
@@ -148,7 +167,7 @@ class MicroVoiture(private val ctx: CarContext) {
             telephone = true
             return telephone(attenteMs, maxMs)
         } finally {
-            runCatching { am.abandonAudioFocusRequest(focus) }
+            if (focusAccorde) runCatching { am.abandonAudioFocusRequest(focus) }
         }
     }
 
@@ -181,7 +200,9 @@ class MicroVoiture(private val ctx: CarContext) {
         while (true) {
             if (arret) return Ecoute.Annulee
             val n = lire(buf)
-            if (n < 0) { if (lus == 0L) return Ecoute.Erreur("flux du micro fermé"); break }
+            // Un flux qui se ferme avant la fin de phrase n'est pas un silence utilisateur.
+            // Signaler l'erreur permet à ecouter() d'essayer le micro du téléphone si c'est le micro voiture.
+            if (n < 0) return Ecoute.Erreur("flux du micro fermé (lecture interrompue après $lus octets)")
             lus += n
             if (n > 0) tout.write(buf, 0, n)
             var i = 0
@@ -202,7 +223,7 @@ class MicroVoiture(private val ctx: CarContext) {
                         fin = FinDePhrase((if (be) calBE else calLE).minOrNull() ?: 100.0)
                     }
                 } else if (fin!!.trame(Pcm.rms(trame, 0, Pcm.TRAME, grosBoutiste == true))) {
-                    return Ecoute.Phrase(decouper(tout.toByteArray(), grosBoutiste == true, fin!!.debut + 15))
+                    return Ecoute.Phrase(decouper(tout.toByteArray(), grosBoutiste == true, fin!!.debut + 15, fin!!.derniereVoix))
                 }
             }
             val ecoule = System.currentTimeMillis() - debut
@@ -210,13 +231,16 @@ class MicroVoiture(private val ctx: CarContext) {
             if (ecoule > maxMs) break
         }
         val f = fin
-        return if (f != null && f.parle) Ecoute.Phrase(decouper(tout.toByteArray(), grosBoutiste == true, f.debut + 15)) else Ecoute.Silence
+        return if (f != null && f.parle) Ecoute.Phrase(decouper(tout.toByteArray(), grosBoutiste == true, f.debut + 15, f.derniereVoix)) else Ecoute.Silence
     }
 
     /** PCM petit-boutiste à partir de la trame [trameDebut] (un peu de marge avant la parole). */
-    private fun decouper(pcm: ByteArray, grosBoutiste: Boolean, trameDebut: Int): ByteArray {
+    private fun decouper(pcm: ByteArray, grosBoutiste: Boolean, trameDebut: Int, derniereVoix: Int): ByteArray {
         val depuis = (trameDebut * Pcm.TRAME).coerceIn(0, pcm.size)
-        val utile = pcm.copyOfRange(depuis - depuis % 2, pcm.size)
+        // Whisper n'a pas besoin des 1,1 s de silence qui servent à détecter la fin de phrase :
+        // on conserve 300 ms après la dernière trame de voix, puis on envoie un WAV plus court.
+        val jusqua = Pcm.finUtile(pcm.size, derniereVoix).coerceAtLeast(depuis)
+        val utile = pcm.copyOfRange(depuis - depuis % 2, jusqua - jusqua % 2)
         return if (grosBoutiste) Pcm.inverserOctets(utile) else utile
     }
 }

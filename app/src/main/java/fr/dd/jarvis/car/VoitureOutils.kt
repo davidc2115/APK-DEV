@@ -41,7 +41,7 @@ object VoixVoiture {
     fun preparer(ctx: Context) { main.post { voix(ctx) } }
 
     fun parler(ctx: Context, texte: String, puis: () -> Unit = {}) {
-        main.post { voix(ctx).speak(texte) { main.post(puis) } }
+        main.post { voix(ctx).parole(Int.MAX_VALUE) { main.post(puis) }.apply { ajouter(texte); finir() } }
     }
 
     fun taire() { main.post { vm?.stopSpeaking() } }

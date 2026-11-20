@@ -160,9 +160,10 @@ object Discord {
 
     // ------------------------------------------------------------ appels HTTP
 
-    private fun req(app: JarvisApp, method: String, path: String, corps: JSONObject? = null): JSONObject {
+    private fun req(app: JarvisApp, method: String, path: String, corps: JSONObject? = null, raisonAudit: String? = null): JSONObject {
         if (!configure(app)) throw IllegalStateException("Discord non configuré (Réglages › Comptes › Discord : jeton du bot).")
         val b = Request.Builder().url(API + path).header("Authorization", "Bot ${jeton(app)}").header("User-Agent", "DiscordBot (https://github.com/davidc2115/APK-DEV, 1.0)")
+        raisonAudit?.takeIf { it.isNotBlank() }?.let { b.header("X-Audit-Log-Reason", java.net.URLEncoder.encode(it.take(400), "UTF-8").replace("+", "%20")) }
         when (method) {
             "POST" -> b.post((corps?.toString() ?: "{}").toRequestBody("application/json".toMediaType()))
             "PATCH" -> b.patch((corps?.toString() ?: "{}").toRequestBody("application/json".toMediaType()))
@@ -194,6 +195,7 @@ object Discord {
     }
 
     fun guildes(app: JarvisApp): JSONArray = reqArr(app, "GET", "/users/@me/guilds").also { DiscordNoms.retenir(app, it) }
+    fun infosGuilde(app: JarvisApp, guildId: String): JSONObject = req(app, "GET", "/guilds/$guildId?with_counts=true")
     fun roles(app: JarvisApp, guildId: String): JSONArray = reqArr(app, "GET", "/guilds/$guildId/roles")
     fun salons(app: JarvisApp, guildId: String): JSONArray = reqArr(app, "GET", "/guilds/$guildId/channels").also { DiscordNoms.retenir(app, it) }
     /** Lit les derniers messages d’un salon. afterId permet de ne récupérer que les messages plus récents. */
@@ -248,6 +250,72 @@ object Discord {
             .put("allowed_mentions", JSONObject().put("parse", JSONArray()))
         return req(app, "POST", "/channels/$channelId/messages", body)
     }
+
+    /** Modifie le contenu d'un message. Les mentions automatiques restent neutralisées. */
+    fun modifierMessage(app: JarvisApp, channelId: String, messageId: String, contenu: String): JSONObject {
+        val texte = contenu.trim()
+        require(texte.isNotBlank()) { "Le message modifié ne peut pas être vide." }
+        require(texte.length <= 2000) { "Un message Discord ne peut pas dépasser 2 000 caractères." }
+        return req(app, "PATCH", "/channels/$channelId/messages/$messageId",
+            JSONObject().put("content", texte).put("allowed_mentions", JSONObject().put("parse", JSONArray())))
+    }
+
+    fun supprimerMessage(app: JarvisApp, channelId: String, messageId: String) {
+        req(app, "DELETE", "/channels/$channelId/messages/$messageId")
+    }
+
+    fun epinglerMessage(app: JarvisApp, channelId: String, messageId: String, epingler: Boolean) {
+        req(app, if (epingler) "PUT" else "DELETE", "/channels/$channelId/pins/$messageId")
+    }
+
+    /** Ajoute ou retire la réaction du bot. */
+    fun reaction(app: JarvisApp, channelId: String, messageId: String, emoji: String, ajouter: Boolean) {
+        val e = java.net.URLEncoder.encode(emoji.trim(), "UTF-8").replace("+", "%20")
+        require(e.isNotBlank()) { "Emoji de réaction manquant." }
+        req(app, if (ajouter) "PUT" else "DELETE", "/channels/$channelId/messages/$messageId/reactions/$e/@me")
+    }
+
+    fun creerFilDepuisMessage(app: JarvisApp, channelId: String, messageId: String, nom: String, archivageMinutes: Int): JSONObject {
+        val titre = nom.trim()
+        require(titre.isNotBlank() && titre.length <= 100) { "Le nom du fil doit contenir de 1 à 100 caractères." }
+        val duree = archivageMinutes.coerceIn(60, 10080)
+        return req(app, "POST", "/channels/$channelId/messages/$messageId/threads",
+            JSONObject().put("name", titre).put("auto_archive_duration", duree))
+    }
+
+    /** Crée une publication autonome dans un salon Forum/Media Discord (types 15 et 16). */
+    fun creerPublicationForum(app: JarvisApp, channelId: String, nom: String, contenu: String, archivageMinutes: Int): JSONObject {
+        val titre = nom.trim()
+        val texte = contenu.trim()
+        require(titre.isNotBlank() && titre.length <= 100) { "Le titre doit contenir de 1 à 100 caractères." }
+        require(texte.isNotBlank() && texte.length <= 2000) { "Le contenu doit contenir de 1 à 2 000 caractères." }
+        val duree = listOf(60, 1440, 4320, 10080).minBy { kotlin.math.abs(it - archivageMinutes) }
+        val message = JSONObject().put("content", texte)
+            .put("allowed_mentions", JSONObject().put("parse", JSONArray()))
+        val corps = JSONObject().put("name", titre).put("auto_archive_duration", duree).put("message", message)
+        return req(app, "POST", "/channels/$channelId/threads", corps)
+    }
+
+    fun timeoutMembre(app: JarvisApp, guildId: String, userId: String, jusquAu: String?, raisonAudit: String = "") {
+        req(app, "PATCH", "/guilds/$guildId/members/$userId",
+            JSONObject().put("communication_disabled_until", jusquAu ?: JSONObject.NULL), raisonAudit)
+    }
+
+    fun expulserMembre(app: JarvisApp, guildId: String, userId: String, raison: String) {
+        req(app, "DELETE", "/guilds/$guildId/members/$userId", null, raison)
+    }
+
+    fun bannirMembre(app: JarvisApp, guildId: String, userId: String, raison: String, supprimerMessagesSecondes: Int) {
+        val body = JSONObject().put("delete_message_seconds", supprimerMessagesSecondes.coerceIn(0, 604800))
+        req(app, "PUT", "/guilds/$guildId/bans/$userId", body, raison)
+    }
+
+    fun modifierPseudoMembre(app: JarvisApp, guildId: String, userId: String, pseudo: String) {
+        val nom = pseudo.trim()
+        require(nom.length <= 32) { "Le pseudo ne peut pas dépasser 32 caractères." }
+        req(app, "PATCH", "/guilds/$guildId/members/$userId", JSONObject().put("nick", nom.ifBlank { JSONObject.NULL }))
+    }
+
     fun membre(app: JarvisApp, guildId: String, userId: String): JSONObject = req(app, "GET", "/guilds/$guildId/members/$userId")
     fun chercherMembres(app: JarvisApp, guildId: String, query: String): JSONArray = reqArr(app, "GET", "/guilds/$guildId/members/search?query=${java.net.URLEncoder.encode(query, "UTF-8")}&limit=10")
 
@@ -330,15 +398,15 @@ object Discord {
         if (q.isBlank()) return null
         if (q.matches(Regex("\\d{17,20}"))) runCatching { return membre(app, guildId, q) }
         val trouves = runCatching { chercherMembres(app, guildId, q) }.getOrNull()
-        if (trouves != null && trouves.length() == 1) return trouves.getJSONObject(0)
-        val candidats = (trouves?.takeIf { it.length() > 1 } ?: runCatching { reqArr(app, "GET", "/guilds/$guildId/members?limit=1000") }.getOrNull())
+        // Même si la recherche Discord ne renvoie qu'un résultat partiel, on vérifie le nom avant toute action.
+        val candidats = (trouves?.takeIf { it.length() > 0 } ?: runCatching { reqArr(app, "GET", "/guilds/$guildId/members?limit=1000") }.getOrNull())
             ?.let { a -> (0 until a.length()).map { a.getJSONObject(it) } }.orEmpty()
         // Chaque membre comparé sous ses trois noms (surnom sur le serveur, nom affiché, nom d'utilisateur).
         val vues = candidats.flatMap { m ->
             val u = m.optJSONObject("user") ?: JSONObject()
             listOf(m.optString("nick"), u.optString("global_name"), u.optString("username")).filter { it.isNotBlank() }.map { JSONObject().put("id", u.optString("id")).put("name", it) to m }
         }
-        val choisi = choisir(vues.map { it.first }, q, textesAlias(app)) ?: return trouves?.takeIf { it.length() > 0 }?.getJSONObject(0)
+        val choisi = choisir(vues.map { it.first }, q, textesAlias(app)) ?: return null
         return vues.first { it.first === choisi }.second
     }
 

@@ -32,7 +32,8 @@ object NotesPertinentes {
         setOf("voiture", "auto", "vehicule"),
         setOf("box", "freebox", "routeur"),
         setOf("serveur", "debian", "ssh"),
-        setOf("musique", "spotify", "deezer", "chanson"),
+        setOf("musique", "spotify", "deezer", "chanson", "morceau", "titre", "artiste", "album", "playlist"),
+        setOf("position", "localisation", "localiser", "gps", "personne", "person", "device_tracker", "emplacement", "situe", "situer", "ha_position"),
     )
 
     /** Mots significatifs de la demande (+ synonymes). « son » seul est trop ambigu : gardé seulement avec « volume ». */
@@ -41,6 +42,15 @@ object NotesPertinentes {
         val out = mots.filter { (it.length >= 3 && it !in VIDES) || it == "tv" }.toMutableSet()
         if ("son" in mots && Regex("\\b(baisse|monte|augmente|diminue|coupe|remets?)\\b").containsMatchIn(normaliser(texte))) out += "volume"
         SYNONYMES.forEach { g -> if (g.any { it in out }) out += g.filter { it != "son" } }
+        // Les formulations vocales sont souvent elliptiques : « où est X ? » ne contient pas forcément
+        // le mot « localisation » présent dans la consigne mémorisée.
+        val n = normaliser(texte)
+        if (Regex("\\b(ou est|ou se trouve|localis\\w*|position|situe\\w*|gps|personne)\\b").containsMatchIn(n)) {
+            out += setOf("position", "localisation", "gps", "personne", "person", "device_tracker", "emplacement", "ha_position", "lieu")
+        }
+        if (Regex("\\b(musique|chanson|morceau|titre|artiste|spotify|deezer|youtube music|yt music)\\b").containsMatchIn(n)) {
+            out += setOf("musique", "chanson", "morceau", "titre", "artiste", "spotify", "deezer", "youtube")
+        }
         return out
     }
 
@@ -67,9 +77,16 @@ object NotesPertinentes {
         }
         // 1. Consignes mémorisées par Jarvis (rubrique + contenu).
         runCatching {
+            val rubriquesGenerales = setOf("general", "preferences", "preference", "habitudes", "profil", "style", "ton", "langue")
             app.memo.all().forEach { (k, v) ->
                 val s = score("$k $v", mots)
-                if (s > 0) lignes += s * 2 to "[mémoire · $k] ${extrait(v, mots, 500)}"
+                val generale = normaliser(k) in rubriquesGenerales
+                // Les préférences générales sont des règles transversales : elles ne doivent pas disparaître
+                // dès que la mémoire dépasse 1 800 caractères ou que la demande emploie un synonyme.
+                if (s > 0 || generale) {
+                    val priorite = s * 2 + if (generale) 12 else 0
+                    lignes += priorite to "[mémoire · $k] ${extrait(v, mots, if (generale) 700 else 500)}"
+                }
             }
         }
         // 2. Mémoire d'Hermès (notes et profil).
@@ -100,7 +117,7 @@ object NotesPertinentes {
             }
         }
         if (lignes.isEmpty()) return ""
-        return "\n\nNOTES DE L'UTILISATEUR UTILES POUR CETTE DEMANDE (à appliquer en priorité, avant toute supposition ; " +
+        return "\n\nCONSIGNES ET NOTES DE L'UTILISATEUR À APPLIQUER POUR CETTE DEMANDE (priorité aux consignes explicites ; les préférences générales s'appliquent aussi même si les mots exacts ne sont pas répétés ; respecte strictement les contraintes de format et n'ajoute pas de détails que l'utilisateur a demandé d'omettre ; " +
             "par ex. un nom d'entité, d'appareil, d'adresse ou une procédure déjà notés — une entité Home Assistant notée s'utilise telle quelle, " +
             "sans la rechercher ni en choisir une autre) :\n" +
             lignes.sortedByDescending { it.first }.take(8).joinToString("\n") { "- " + it.second }.take(3000)

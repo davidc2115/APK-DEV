@@ -41,7 +41,10 @@ object ConversationAuto {
 
     private suspend fun parler(app: JarvisApp, texte: String) {
         withTimeoutOrNull(90_000) {
-            suspendCancellableCoroutine { c -> VoixVoiture.parler(app, texte.take(1500)) { if (c.isActive) c.resume(Unit) } }
+            suspendCancellableCoroutine { c ->
+                VoixVoiture.parler(app, texte) { if (c.isActive) c.resume(Unit) }
+                c.invokeOnCancellation { VoixVoiture.taire() }
+            }
         }
     }
 
@@ -49,39 +52,91 @@ object ConversationAuto {
         val silence = app.store.silenceSec.value.coerceIn(4, 30) * 1000L
         var premiere = true
         var incompris = 0
-        app.chatCharger()
+        if (!app.chatLoaded) app.chatCharger()
         if (CarBridge.contexte().isEmpty()) app.chat.toList().takeLast(10).forEach { CarBridge.ajouter(it) }
+        // Prépare le moteur et ses outils une seule fois par conversation voiture, pas à chaque phrase.
+        val tools = ToolBox(app) { _, force -> !force }
+        val brain = Brain(app.llm, tools, app) { app.store.userName.value }
+        val journal = fr.dd.jarvis.voice.JournalVoix
         while (true) {
             ActiviteVoiture.signaler(ActiviteVoiture.Etape.ECOUTE)
             val micro = MicroVoiture(ctx)
+            val debutEcoute = System.currentTimeMillis()
             val res = withContext(Dispatchers.IO) { micro.ecouter(if (premiere) maxOf(silence, 8000L) else silence) }
+            journal.noter("android-auto", "écoute terminée en ${System.currentTimeMillis() - debutEcoute} ms")
             premiere = false
             val pcm = when (res) {
                 is Ecoute.Phrase -> res.pcm
-                is Ecoute.Erreur -> { parler(app, "Je n'arrive pas à utiliser le micro."); return }
+                is Ecoute.Erreur -> {
+                    val raison = res.message
+                    val message = when {
+                        raison.contains("autorisation", ignoreCase = true) || raison.contains("permission", ignoreCase = true) ->
+                            "L'accès au microphone de JARVIS n'est pas autorisé. Ouvre JARVIS sur le téléphone, autorise le microphone dans les permissions de l'application, puis relance Android Auto."
+                        else -> "Je n'arrive pas à utiliser le micro : $raison."
+                    }
+                    parler(app, message)
+                    return
+                }
                 else -> return
             }
-            ActiviteVoiture.signaler(ActiviteVoiture.Etape.REFLEXION, "…")
-            val texte = try { Pcm.nettoyerTranscription(app.llm.groq.transcrire(Pcm.wav(pcm))) }
-                catch (e: Throwable) { parler(app, "Je n'ai pas pu transcrire ta demande."); return }
+            ActiviteVoiture.signaler(ActiviteVoiture.Etape.REFLEXION, "Transcription de ta demande…")
+            val debutTranscription = System.currentTimeMillis()
+            val texte = try {
+                withTimeoutOrNull(20_000) {
+                    withContext(Dispatchers.IO) { Pcm.nettoyerTranscription(app.llm.groq.transcrire(Pcm.wav(pcm))) }
+                }
+            } catch (_: Throwable) { null }
+            journal.noter("android-auto", "transcription Groq en ${System.currentTimeMillis() - debutTranscription} ms")
+            if (texte == null) { parler(app, "La transcription a pris trop de temps. Réessaie."); return }
             if (texte.isBlank()) { if (++incompris < 3) continue else { parler(app, "Je n'ai pas compris."); return } }
             incompris = 0
             val norm = Normalizer.normalize(texte.lowercase(), Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
             if (arret.matches(norm)) { parler(app, "D'accord."); return }
+
+            // Les commandes musicales restent déterministes même avec le micro natif Android Auto :
+            // ne pas les envoyer au Brain qui peut seulement ouvrir l'application sans lancer la lecture.
+            val media = fr.dd.jarvis.device.CommandeMedia.intention(texte) {
+                fr.dd.jarvis.device.CommandeMedia.musiqueOuverte(app)
+            }
+            if (media != null) {
+                ActiviteVoiture.signaler(ActiviteVoiture.Etape.REFLEXION, texte)
+                val rep = withContext(Dispatchers.IO) {
+                    fr.dd.jarvis.device.CommandeMedia.executer(app, media, voiture = true)
+                }
+                val question = ChatMsg(true, texte)
+                val reponse = ChatMsg(false, rep)
+                CarBridge.ajouter(question); CarBridge.ajouter(reponse)
+                app.chatAjouter(question); app.chatAjouter(reponse)
+                ActiviteVoiture.signaler(ActiviteVoiture.Etape.REPONSE, texte, rep)
+                if (!rep.startsWith("▶️")) parler(app, rep)
+                continue
+            }
+
+            if (arret.matches(norm)) { parler(app, "D'accord."); return }
             ActiviteVoiture.signaler(ActiviteVoiture.Etape.REFLEXION, texte)
             val question = ChatMsg(true, texte)
             CarBridge.ajouter(question); app.chatAjouter(question)
-            val rep = withContext(Dispatchers.IO) {
-                try { Brain(app.llm, ToolBox(app) { _, force -> !force }, app) { app.store.userName.value }.reply(CarBridge.contexte()) { } }
-                catch (e: Throwable) { "Désolé, je n'ai pas pu faire ça : ${e.message ?: e.javaClass.simpleName}" }
+            val debutTraitement = System.currentTimeMillis()
+            val rep = withTimeoutOrNull(90_000) {
+                withContext(Dispatchers.IO) {
+                    try { brain.reply(CarBridge.contexte()) { } }
+                    catch (e: Throwable) { "Désolé, je n'ai pas pu faire ça : ${e.message ?: e.javaClass.simpleName}" }
+                }
+            } ?: run {
+                journal.noter("android-auto", "traitement interrompu après ${System.currentTimeMillis() - debutTraitement} ms")
+                parler(app, "Le traitement a pris trop de temps. Tu peux redemander.")
+                return
             }
+            journal.noter("android-auto", "compréhension + action en ${System.currentTimeMillis() - debutTraitement} ms")
             val propre = rep.replace(Regex("!?\\[([^\\]]*)]\\([^)]*\\)"), "$1").replace(Regex("[#*_`>|]+"), "")
                 .replace(Regex("\\s+"), " ").trim().ifBlank { "C'est fait." }
             val reponse = ChatMsg(false, propre)
             CarBridge.ajouter(reponse); app.chatAjouter(reponse)
             ActiviteVoiture.signaler(ActiviteVoiture.Etape.REPONSE, texte, propre)
             parler(app, propre)
-            if (!propre.trimEnd().endsWith("?")) return
+            // En mode Android Auto, on garde la session ouverte après chaque réponse :
+            // l'utilisateur peut enchaîner sans réactiver Jarvis ni redire le mot d'éveil.
+            continue
         }
     }
 }
