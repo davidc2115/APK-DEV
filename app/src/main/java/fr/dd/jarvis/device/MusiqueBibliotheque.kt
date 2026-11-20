@@ -71,12 +71,23 @@ object MusiqueBibliotheque {
         val libelles = if (aleatoire) BOUTONS_ALEATOIRE + BOUTONS_LECTURE else BOUTONS_LECTURE
         val bouton = attendre(paquet, libelles, 2200, exact = false)
         if (bouton != null) cliquer(bouton)
+        var debutBuffering = 0L
+        var relanceApresBuffering = false
         repeat(20) {
             val c = controleur(ctx, paquet)
             if (c != null) {
                 val etat = c.playbackState?.state
-                if (etat != PlaybackState.STATE_PLAYING && etat != PlaybackState.STATE_BUFFERING) {
-                    runCatching { c.transportControls.play() }
+                if (etat == PlaybackState.STATE_BUFFERING) {
+                    if (debutBuffering == 0L) debutBuffering = System.currentTimeMillis()
+                    // Certains lecteurs restent bloqués en BUFFERING après une première commande PLAY.
+                    // Une seule relance après 4 s débloque parfois la session sans envoyer PLAY en boucle.
+                    if (!relanceApresBuffering && System.currentTimeMillis() - debutBuffering >= 4000L) {
+                        runCatching { c.transportControls.play() }
+                        relanceApresBuffering = true
+                    }
+                } else {
+                    debutBuffering = 0L
+                    if (etat != PlaybackState.STATE_PLAYING) runCatching { c.transportControls.play() }
                 }
                 delay(500)
                 // BUFFERING prouve seulement que le lecteur prépare le flux, pas que la lecture a réellement démarré.
@@ -84,6 +95,7 @@ object MusiqueBibliotheque {
                 val confirme = controleur(ctx, paquet)?.playbackState?.state
                 if (confirme == PlaybackState.STATE_PLAYING) return true
             } else {
+                debutBuffering = 0L
                 // Sans accès aux sessions, un libellé Pause visible est le seul indice UI acceptable.
                 if (attendre(paquet, listOf("Pause", "Mettre en pause", "Pause la lecture"), 180, exact = false) != null) return true
                 delay(300)
