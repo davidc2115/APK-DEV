@@ -613,8 +613,17 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
     /** Retrouve un fichier du coffre à partir de son seul nom (premier trouvé), pour « déplace img_….png ». */
     fun chercherParNom(nom: String): String? {
-        val cible = cleNom(nom.trim())
-        return toutLister().firstOrNull { !it.second && (cleNom(it.first.substringAfterLast('/')) == cible || cleNom(it.first.substringAfterLast('/').substringBeforeLast('.')) == cible) }?.first
+        val demande = nom.trim()
+        if (demande.isBlank()) return null
+        val candidats = toutLister().filter { !it.second }.map { it.first }.distinct()
+        // Un nom de fichier seul n'est exploitable que s'il désigne un seul chemin dans le coffre.
+        // Ne jamais prendre le premier résultat : deux dossiers peuvent contenir « facture.pdf ».
+        return ObsidianPathResolution.uniqueNameMatch(
+            candidates = candidats,
+            wanted = demande,
+            normalize = { cleNom(it.substringAfterLast('/')) },
+            loose = { cleNom(it.substringAfterLast('/').substringBeforeLast('.')) }
+        )
     }
 
     /**
