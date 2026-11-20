@@ -67,15 +67,21 @@ object MusiqueBibliotheque {
      * Envoie PLAY à la vraie session multimédia puis attend sa confirmation.
      * Le simple fait d'ouvrir une playlist ou son écran n'est jamais considéré comme une lecture démarrée.
      */
-    suspend fun demarrerLecture(ctx: Context, paquet: String, aleatoire: Boolean = false): Boolean {
-        val libelles = if (aleatoire) BOUTONS_ALEATOIRE + BOUTONS_LECTURE else BOUTONS_LECTURE
-        val bouton = attendre(paquet, libelles, 2200, exact = false)
+    suspend fun demarrerLecture(ctx: Context, paquet: String, aleatoire: Boolean = false, repetition: String = "aucune"): Boolean {
+        // Ne jamais cliquer sur le bouton « Aléatoire » pour démarrer : dans YT Music il peut basculer
+        // un état déjà actif et produire exactement l'inverse du mode demandé. Le mode est envoyé à la session.
+        val bouton = attendre(paquet, BOUTONS_LECTURE, 2200, exact = false)
         if (bouton != null) cliquer(bouton)
+        var modeEnvoye = false
         var debutBuffering = 0L
         var relanceApresBuffering = false
         repeat(20) {
             val c = controleur(ctx, paquet)
             if (c != null) {
+                if (!modeEnvoye) {
+                    appliquerMode(c, aleatoire, repetition)
+                    modeEnvoye = true
+                }
                 val etat = c.playbackState?.state
                 if (etat == PlaybackState.STATE_BUFFERING) {
                     if (debutBuffering == 0L) debutBuffering = System.currentTimeMillis()
@@ -159,7 +165,7 @@ object MusiqueBibliotheque {
     }
 
     /** Lance [nom] depuis la bibliothèque (playlist, album, artiste ou titre) ; [aleatoire] : lecture aléatoire. */
-    suspend fun jouer(ctx: Context, paquet: String, section: String, nom: String, aleatoire: Boolean = false): String {
+    suspend fun jouer(ctx: Context, paquet: String, section: String, nom: String, aleatoire: Boolean = false, repetition: String = "aucune"): String {
         ouvrirSection(ctx, paquet, section)?.let { return "❌ $it" }
         delay(600)
         var cible: AccessibilityNodeInfo? = null
@@ -177,10 +183,47 @@ object MusiqueBibliotheque {
         if (cible == null) return "❌ « $nom » introuvable dans ta bibliothèque (${section})."
         if (!cliquer(cible)) return "❌ Impossible d'ouvrir « $nom »."
         delay(900)
-        return if (demarrerLecture(ctx, paquet, aleatoire)) {
+        return if (demarrerLecture(ctx, paquet, aleatoire, repetition)) {
             "▶️ « $nom » est en lecture" + (if (aleatoire) " aléatoire" else "") + " depuis ta bibliothèque."
         } else {
             "📂 « $nom » est ouvert, mais le démarrage de la lecture n'a pas été confirmé. Vérifie le lecteur dans l'application."
+        }
+    }
+
+    // ------------------------------------------------------------------ modes du lecteur (session média de l'appli)
+
+    private fun appliquerMode(c: MediaController, aleatoire: Boolean, repetition: String): Boolean {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O) return false
+        val modeRepete = when (fr.dd.jarvis.societe.core.normaliser(repetition)) {
+            "titre", "repeter titre", "repeter_titre", "one" -> PlaybackState.REPEAT_MODE_ONE
+            "playlist", "repeter playlist", "repeter_playlist", "all" -> PlaybackState.REPEAT_MODE_ALL
+            else -> PlaybackState.REPEAT_MODE_NONE
+        }
+        val shuffleOk = runCatching {
+            c.transportControls.setShuffleMode(if (aleatoire) PlaybackState.SHUFFLE_MODE_ALL else PlaybackState.SHUFFLE_MODE_NONE)
+        }.isSuccess
+        val repeatOk = runCatching { c.transportControls.setRepeatMode(modeRepete) }.isSuccess
+        return shuffleOk && repeatOk
+    }
+
+    /** Configure explicitement les modes du lecteur actif : normal, aléatoire, répétition d'un titre ou de la liste. */
+    fun configurerMode(ctx: Context, mode: String, paquet: String? = null): String {
+        val c = controleur(ctx, paquet) ?: return "Aucune session musicale active : mode non modifié."
+        val m = fr.dd.jarvis.societe.core.normaliser(mode).replace(' ', '_')
+        val aleatoire = m in setOf("aleatoire", "shuffle")
+        val repetition = when (m) {
+            "repeter_titre", "repeat_one", "titre" -> "titre"
+            "repeter_playlist", "repeat_all", "playlist" -> "playlist"
+            else -> "aucune"
+        }
+        if (!appliquerMode(c, aleatoire, repetition)) {
+            return "Le lecteur n'a pas confirmé la configuration des modes (API Android indisponible ou commande refusée)."
+        }
+        return when (m) {
+            "aleatoire", "shuffle" -> "🔀 Lecture aléatoire activée."
+            "repeter_titre", "repeat_one", "titre" -> "🔂 Répétition du titre activée."
+            "repeter_playlist", "repeat_all", "playlist" -> "🔁 Répétition de toute la playlist activée."
+            else -> "▶️ Lecture normale activée : ordre conservé, aléatoire et répétition désactivés."
         }
     }
 
