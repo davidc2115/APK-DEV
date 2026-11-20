@@ -53,4 +53,29 @@ class ObsidianPathResolutionTest {
             }
         )
     }
+    @Test fun refuseLesNomsApprochesAmbigusAuLieuDeChoisirLePremier() {
+        try {
+            ObsidianPathResolution.uniqueNameMatch(
+                listOf("Images", "image"),
+                "images",
+                { it.lowercase() },
+                { it.lowercase().removeSuffix("s") }
+            )
+            throw AssertionError("Une correspondance ambiguë ne doit pas être choisie.")
+        } catch (e: IllegalArgumentException) {
+            assertEquals(true, e.message?.contains("Précise le chemin complet") == true)
+        }
+    }
+
+    @Test fun privilegieLeNomExactAvantLesCorrespondancesApprochees() {
+        assertEquals(
+            "Images",
+            ObsidianPathResolution.uniqueNameMatch(
+                listOf("Images", "image"),
+                "Images",
+                { it.lowercase() },
+                { it.lowercase().removeSuffix("s") }
+            )
+        )
+    }
 }
