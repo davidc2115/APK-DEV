@@ -30,4 +30,15 @@ class DomotiqueDirecteTest {
         assertEquals(listOf("switch.lampe_bureau"), DomotiqueDirecte.candidats(ents, c("allume la lampe du bureau")!!))
         assertEquals(listOf("media_player.tv_salon"), DomotiqueDirecte.candidats(ents, c("éteins la télé")!!))
     }
+
+    @Test fun appareilDesigneParSonNom() {
+        val e = ents + listOf("switch.prise_sapin" to "Sapin de Noël", "switch.chauffe_eau" to "Chauffe-eau", "input_boolean.mode_invites" to "Invités")
+        c("allume le sapin")!!.let { assertTrue(it.libre); assertEquals("on", it.verbe); assertEquals(listOf("switch.prise_sapin"), DomotiqueDirecte.candidats(e, it)) }
+        c("éteins le chauffe-eau")!!.let { assertEquals("off", it.verbe); assertEquals(listOf("switch.chauffe_eau"), DomotiqueDirecte.candidats(e, it)) }
+        assertTrue(DomotiqueDirecte.candidats(e, c("allume la piscine")?.copy(cible = "inconnu") ?: c("allume le truc")!!).isEmpty())
+        assertNull(c("lance la vidéo"))
+        assertNull(c("allume les sapins"))
+        assertNull(c("allume le salon"))
+        assertNull(c("allume la salle de bain"))
+    }
 }

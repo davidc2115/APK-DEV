@@ -458,6 +458,9 @@ class Brain(
                 .filter { it !in base }.toSet() + indispensables + (plan?.outils ?: emptyList()) +
                 setOf("memoire_lire", "notes_lire", "note_prendre", "memoire_ajouter", "phone_action", "rappel_creer")
         }
+        // Liste allégée (noyau + familles de la demande + outils généraux pertinents + recherche d'outils) : environ deux
+        // fois moins de jetons par tour, donc des réponses plus rapides et des descriptions d'outils gardées complètes.
+        val schemaEnvoye = SelectionOutils.compacte(schemaFinal, tools.nomsDeBase(), outilsPrioritaires, recent)
         val debutPrompt = System.currentTimeMillis()
         val messages = JSONArray()
         messages.put(JSONObject().put("role", "system").put("content",
@@ -483,7 +486,7 @@ class Brain(
             val cap = if (recentHistory.size - 1 - idx < 3) 12000 else 1600
             messages.put(JSONObject().put("role", if (m.fromUser) "user" else "assistant").put("content", m.text.take(cap)))
         }
-        fr.dd.jarvis.voice.JournalVoix.noter("brain", "construction contexte + prompt + outils en ${System.currentTimeMillis() - debutPrompt} ms (messages ${messages.length()}, outils ${schemaFinal.length()})")
+        fr.dd.jarvis.voice.JournalVoix.noter("brain", "construction contexte + prompt + outils en ${System.currentTimeMillis() - debutPrompt} ms (messages ${messages.length()}, outils ${schemaEnvoye.length()} sur ${schemaFinal.length()})")
 
         // Budget d'orchestration élargi : chaque cycle peut consulter des outils, vérifier leur résultat,
         // corriger une action ou poursuivre le plan. Les demandes complexes ne doivent plus s'arrêter après
@@ -499,7 +502,7 @@ class Brain(
         repeat(toursMax) { tour ->
             val debutAppelIA = System.currentTimeMillis()
             val msg = try {
-                llm.groqChat(messages, schemaFinal, prioritaires = outilsPrioritaires, requete = recent)
+                llm.groqChat(messages, schemaEnvoye, prioritaires = outilsPrioritaires, requete = recent)
             } catch (e: ApiException) {
                 // Llama/GPT-OSS génère parfois un appel d'outil mal formé : on réessaie en interdisant explicitement un
                 // nouvel appel d'outil ce tour-ci (tool_choice=none), mais SANS retirer les définitions d'outils du
@@ -511,7 +514,7 @@ class Brain(
                     try {
                         val m2 = JSONArray(); for (k in 0 until messages.length()) m2.put(messages.get(k))
                         m2.put(JSONObject().put("role", "system").put("content", "L'appel d'outil a échoué pour ce tour. N'invente AUCUNE donnée (appareils, imprimantes, mails, événements, fichiers) : dis simplement que l'action n'a pas pu être lancée et demande de réessayer."))
-                        llm.groqChat(m2, schemaFinal, forceText = true, prioritaires = outilsPrioritaires, requete = recent)
+                        llm.groqChat(m2, schemaEnvoye, forceText = true, prioritaires = outilsPrioritaires, requete = recent)
                     } catch (e2: kotlinx.coroutines.CancellationException) { throw e2 } catch (e2: Exception) {
                         return "Désolé, j'ai buté sur cette demande (le modèle n'a pas réussi à formuler l'appel d'outil correctement). Peux-tu reformuler ou réessayer ?"
                     }
@@ -543,6 +546,19 @@ class Brain(
                     // partait avec des arguments vides ou incomplets — commandes SSH tronquées).
                     if (args == null) ToolResult("❌ Arguments incomplets ou illisibles (réponse coupée) : l'outil n'a PAS été exécuté. Renvoie l'appel avec des arguments JSON complets.")
                     else if (name in retires) ToolResult(if (name.startsWith("ssh") || name == "serveur_diagnostic") "Pour Home Assistant, utilise l'API (ha_entites, ha_etat, ha_service, ha_config, ha_dashboard, ha_admin), pas le SSH." else "Outil indisponible ici.")
+                    else if (name == SelectionOutils.META) {
+                        // Le modèle demande un outil absent de sa liste réduite : on l'ajoute pour les tours suivants.
+                        val presents = (0 until schemaEnvoye.length()).map { schemaEnvoye.optJSONObject(it)?.optJSONObject("function")?.optString("name").orEmpty() }.toSet()
+                        val besoin = args.optString("besoin")
+                        val catalogue = tools.schemaAll()
+                        val ajout = (SelectionOutils.rechercher(catalogue, besoin, presents + retires)
+                            .ifEmpty { SelectionOutils.rechercher(catalogue, "$besoin $texteUser", presents + retires) })
+                        ajout.forEach { schemaEnvoye.put(it) }
+                        fr.dd.jarvis.voice.JournalVoix.noter("brain", "outils ajoutés à la demande du modèle (« ${besoin.take(60)} ») : ${ajout.joinToString { it.getJSONObject("function").getString("name") }}")
+                        ToolResult(if (ajout.isEmpty()) "Aucun autre outil du catalogue ne correspond à « $besoin ». Fais avec ta liste actuelle, ou dis précisément ce qui manque."
+                            else "Outils ajoutés à ta liste (appelle maintenant celui qui convient) :\n" + ajout.joinToString("\n") { o ->
+                                val f = o.getJSONObject("function"); "- ${f.getString("name")} : ${f.optString("description").substringBefore(". ").take(160)}" })
+                    }
                     else tools.execute(name, args)
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     // Ne jamais convertir une annulation en simple résultat d'outil : cela avalerait
@@ -786,7 +802,8 @@ class Brain(
         CommandesDirectes.intention(partie)?.takeIf { !it.texteLibre }?.let { i ->
             return { executerDirecte(i) ?: "❓ Application « ${i.appli} » introuvable sur le téléphone." }
         }
-        if (DomotiqueDirecte.commande(n) != null) return {
+        // Appareil désigné par son seul nom : pas dans une suite d'actions (le cerveau garde la main sur ces parties).
+        if (DomotiqueDirecte.commande(n)?.takeIf { !it.libre } != null) return {
             runCatching { DomotiqueDirecte.executer(app, tools, partie) }.getOrNull() ?: "❓ Je n'ai pas trouvé sans ambiguïté l'appareil de « $partie » dans Home Assistant."
         }
         if (MaisonDirecte.analyser(partie) != null) return {

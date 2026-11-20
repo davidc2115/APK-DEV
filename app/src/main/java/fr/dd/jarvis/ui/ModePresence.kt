@@ -28,6 +28,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -127,7 +128,7 @@ fun ModePresenceVue(heure: String, date: String, infos: String, texte: String, p
             Spacer(Modifier.weight(1f))
             BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 val cote = min(maxWidth * 0.82f, 360.dp)
-                Box(Modifier.size(cote).clickable(interactionSource = MutableInteractionSource(), indication = null) { onParler() }) {
+                Box(Modifier.size(cote).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onParler() }) {
                     TeteDragonAnimee(Modifier.fillMaxSize())
                 }
             }
@@ -137,7 +138,7 @@ fun ModePresenceVue(heure: String, date: String, infos: String, texte: String, p
                 maxLines = 4, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth().height(110.dp))
             Spacer(Modifier.weight(1f))
             Text("QUITTER LE MODE PRÉSENCE", color = HudDim.copy(alpha = 0.72f), fontSize = 11.sp,
-                modifier = Modifier.clickable(interactionSource = MutableInteractionSource(), indication = null) { onFermer() }.padding(10.dp))
+                modifier = Modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onFermer() }.padding(10.dp))
         }
     }
 }

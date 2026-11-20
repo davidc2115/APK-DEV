@@ -11,7 +11,12 @@ import kotlinx.coroutines.async
  * Chauffage, poêle, valeurs chiffrées, portes, portail, alarme : laissés au cerveau (notes, confirmations).
  */
 object DomotiqueDirecte {
-    data class Commande(val verbe: String, val cible: String, val domaines: List<String>, val pluriel: Boolean)
+    /** [libre] : appareil désigné par son seul NOM (« allume le sapin », « éteins le chauffe-eau ») — exécuté seulement si
+     *  un appareil unique de Home Assistant porte ce nom ; sinon le cerveau reprend la demande. */
+    data class Commande(val verbe: String, val cible: String, val domaines: List<String>, val pluriel: Boolean, val libre: Boolean = false)
+
+    /** Domaines « marche / arrêt » essayés pour un appareil désigné par son nom. */
+    private val LIBRE = listOf("light", "switch", "fan", "input_boolean")
 
     private val VERBE = Regex("^(?:(?:jarvis|ok|alors|tu peux|peux tu|est ce que tu peux|s il te plait|stp)\\s+)*" +
         "(allume|allumer|eteins|eteint|eteindre|ouvre|ouvrir|ferme|fermer|monte|remonte|leve|descends|descend|baisse|abaisse|coupe|arrete|stoppe|active|desactive|demarre|mets en marche|lance)\\s+(.+?)" +
@@ -35,8 +40,18 @@ object DomotiqueDirecte {
         val m = VERBE.matchEntire(n) ?: return null
         val cible = m.groupValues[2].trim()
         if (INTERDIT.containsMatchIn(cible)) return null
-        val doms = NOMS.firstOrNull { it.first.containsMatchIn(cible) }?.second ?: return null
         val v = m.groupValues[1]
+        val doms = NOMS.firstOrNull { it.first.containsMatchIn(cible) }?.second
+        if (doms == null) {
+            // Pas de mot d'appareil : seulement « allume / éteins + nom » (2 à 4 mots), jamais un pluriel.
+            if (!(v.startsWith("allum") || v.startsWith("etein"))) return null
+            val nom = cible.replace(Regex("^(le|la|les|l|mon|ma|mes)\\s+"), "")
+            val mots = nom.split(' ').filter { it.isNotBlank() }
+            if (mots.isEmpty() || mots.size > 4 || cible.startsWith("les ") || cible.startsWith("mes ")) return null
+            // Une pièce seule (« allume le salon ») est ambiguë : laissée aux lumières de la pièce / au cerveau.
+            if (mots.all { it in PIECES || it in VIDES }) return null
+            return Commande(if (v.startsWith("allum")) "on" else "off", nom, LIBRE, pluriel = false, libre = true)
+        }
         val verbe = when {
             v.startsWith("allum") || v == "active" || v == "demarre" || v == "mets en marche" || v == "lance" -> if ("cover" in doms) return null else "on"
             v.startsWith("etein") || v == "coupe" || v == "desactive" -> if ("cover" in doms) return null else "off"
@@ -54,6 +69,8 @@ object DomotiqueDirecte {
         else -> if (verbe == "on") "turn_on" else "turn_off"
     }
 
+    private val PIECES = setOf("salon", "sejour", "cuisine", "chambre", "chambres", "bureau", "salle", "bain", "manger", "garage", "entree", "couloir",
+        "jardin", "terrasse", "cave", "grenier", "maison", "etage", "rdc", "buanderie", "veranda", "exterieur", "dehors", "toilettes", "wc")
     private val VIDES = setOf("le", "la", "les", "l", "de", "du", "des", "d", "mon", "ma", "mes", "un", "une", "a", "au", "aux", "en", "sur", "dans", "tous", "toutes", "toute", "tout", "piece")
     private val MOTS_LUMIERE = Regex("lumiere|lampe|light|eclairage|led|spot|ampoule|plafonnier|lustre|guirlande|veilleuse|applique")
     private val MOTS_VENTIL = Regex("ventil|vmc|fan")
@@ -64,6 +81,14 @@ object DomotiqueDirecte {
      */
     internal fun candidats(paires: List<Pair<String, String>>, c: Commande): List<String> {
         val mots = c.cible.split(' ').filter { it.length >= 2 && it !in VIDES && NOMS.none { (re, _) -> re.matches(it) } }
+        if (c.libre) {
+            // Nom seul : tous les domaines marche/arrêt à la fois, et TOUS les mots du nom doivent y être.
+            if (mots.isEmpty()) return emptyList()
+            return paires.filter { (id, _) -> c.domaines.any { id.startsWith("$it.") } }.filter { (id, nom) ->
+                val t = " " + fr.dd.jarvis.societe.core.normaliser(id.substringAfter('.').replace('_', ' ') + " " + nom) + " "
+                mots.all { m -> t.contains(" $m ") || t.contains(" ${m.removeSuffix("s")} ") || t.contains(" ${m}s ") }
+            }.map { it.first }
+        }
         val lumiere = NOMS[0].first.containsMatchIn(c.cible)
         for (d in c.domaines) {
             val cand = paires.filter { it.first.startsWith("$d.") }.map { (id, nom) -> id to " " + fr.dd.jarvis.societe.core.normaliser(id.replace('_', ' ').replace('.', ' ') + " " + nom) + " " }

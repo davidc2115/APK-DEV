@@ -45,7 +45,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
     /** [folder] peut contenir des sous-dossiers : « Société/Devis ». Retourne l'emplacement lisible. */
     fun saveBytes(folder: String, fileName: String, bytes: ByteArray, mime: String): String {
-        oublierCache()
+        try {
         val name = safe(fileName, "Fichier")
         val uriStr = store.obsidianUri.value
         if (uriStr.isNotBlank()) {
@@ -81,6 +81,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         if (!target.isFile || target.length() != bytes.size.toLong())
             throw java.io.IOException("Vérification de l'écriture locale échouée : ${target.absolutePath}")
         return "${target.absolutePath} (coffre Obsidian non configuré)"
+        } finally { oublierCache() }
     }
 
     fun saveIn(folder: String, baseName: String, markdown: String): String =
@@ -112,7 +113,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
      * c'était le bug — on affichait « supprimé » même quand rien n'avait disparu du coffre).
      */
     fun supprimerFichier(folder: String, fileName: String): Boolean {
-        oublierCache()
+        try {
         val name = safe(fileName, "Fichier")
         val uriStr = store.obsidianUri.value
         val localFile = File(File(localRoot(), folder), name)
@@ -146,17 +147,19 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         } catch (_: Exception) {
             false
         }
+        } finally { oublierCache() }
     }
     /**
      * Supprime les fichiers .md et .pdf associés à un document (même nom de base que saveIn/saveBytes).
      * Retourne vrai si au moins un des deux a réellement été supprimé.
      */
     fun supprimer(folder: String, baseName: String): Boolean {
-        oublierCache()
+        try {
         val base = safe(baseName, "Fiche")
         val md = supprimerFichier(folder, "$base.md")
         val pdf = supprimerFichier(folder, "$base.pdf")
         return md || pdf
+        } finally { oublierCache() }
     }
 
     /**
@@ -222,11 +225,12 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
     /** Supprime une note par son chemin relatif (ex. « Contacts/Dupont.md »). Vrai si elle a bien disparu. */
     fun supprimerNote(chemin: String): Boolean {
-        oublierCache()
+        try {
         val p = withMd(chemin)
         val folder = p.substringBeforeLast('/', "")
         val name = p.substringAfterLast('/')
         return supprimerFichier(folder, name)
+        } finally { oublierCache() }
     }
 
     /** Relit une note du coffre Obsidian (ou du dossier de l'application) ; null si introuvable. */
@@ -317,7 +321,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     }
 
     /** JARVIS vient d'écrire / supprimer / déplacer dans le coffre : listes et contenus en cache sont oubliés. */
-    fun oublierCache() { listeNotes = null; synchronized(contenus) { contenus.clear() } }
+    fun oublierCache() { listeNotes = null; structure = null; synchronized(contenus) { contenus.clear() } }
 
     private fun listerNotesRapide(racine: DocumentFile): List<Pair<String, DocumentFile>> {
         fichierCoffre()?.let { dir ->
@@ -478,7 +482,6 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
     /** Écrit (ou ajoute à la fin de) une note. Retourne l'emplacement. */
     fun writeNote(path: String, content: String, append: Boolean): String {
-        oublierCache()
         val p = withMd(path)
         val folder = p.substringBeforeLast('/', "")
         val name = p.substringAfterLast('/')
@@ -529,6 +532,12 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             val d = fichierSur(r, dossier)
             return d.takeIf { it.isDirectory }?.listFiles()?.filter { !it.name.startsWith(".") }?.map { it.name to it.isDirectory }
         }
+        // Arborescence en cache (une requête par dossier, gardée 60 s) : DocumentFile.listFiles() coûtait deux ou trois
+        // requêtes PAR ÉLÉMENT du dossier, à chaque segment de chemin de chaque lecture de note.
+        val tout = toutLister()
+        val voulu = dossier.trim('/')
+        if (tout.isNotEmpty() && (voulu.isBlank() || tout.any { it.second && it.first == voulu }))
+            return ObsidianPathResolution.directChildren(voulu, tout)
         val d = (if (dossier.isBlank()) vaultRoot() else trouver(dossier))?.takeIf { it.isDirectory }
         val depuisDocumentFile = d?.let { dossierDoc ->
             runCatching { dossierDoc.listFiles().mapNotNull { f -> f.name?.takeIf { !it.startsWith(".") }?.let { it to f.isDirectory } } }
@@ -559,6 +568,13 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
      * majuscules, accents, singulier/pluriel, extension omise. Chemin réel, ou null s'il n'existe pas.
      */
     fun resoudre(chemin: String): String? {
+        resoudreUneFois(chemin)?.let { return it }
+        // Introuvable avec l'arborescence en cache : peut-être un fichier tout juste créé (Obsidian, synchro) → relecture.
+        if (fichierCoffre() == null && ageStructure() > 1_500) { structure = null; return resoudreUneFois(chemin) }
+        return null
+    }
+
+    private fun resoudreUneFois(chemin: String): String? {
         val parts = relatif(chemin).split('/').filter { it.isNotBlank() }
         if (parts.isEmpty()) return ""
         fun depuis(baseInitiale: String, indexInitial: Int): String? {
@@ -630,8 +646,21 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             }
             return out
         }
+        // Coffre SAF : arborescence gardée 60 s (oubliée à chaque écriture de JARVIS) — chaque résolution de chemin,
+        // lecture de note ou liste de dossier la réutilise au lieu de réinterroger Android dossier par dossier.
+        val cle = store.obsidianUri.value
+        structure?.let { (c, t, l) -> if (c == cle && System.currentTimeMillis() - t < 60_000) return if (l.size > limite) l.take(limite) else l }
         val v = vaultRoot() ?: return out
         val id = idCoffre() ?: return out
+        val complet = parcourirStructure(v, id)
+        structure = Triple(cle, System.currentTimeMillis(), complet)
+        return if (complet.size > limite) complet.take(limite) else complet
+    }
+
+    @Volatile private var structure: Triple<String, Long, List<Pair<String, Boolean>>>? = null
+
+    private fun parcourirStructure(v: DocumentFile, id: String, limite: Int = 20_000): List<Pair<String, Boolean>> {
+        val out = ArrayList<Pair<String, Boolean>>()
         fun parcourir(docId: String, prefixe: String, profondeur: Int) {
             val enfantsUri = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(v.uri, docId)
             val sous = mutableListOf<Pair<String, String>>()
@@ -652,6 +681,9 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         parcourir(id, "", 0)
         return out
     }
+
+    /** Âge (ms) de l'arborescence SAF en cache, ou -1 s'il n'y en a pas. */
+    private fun ageStructure(): Long = structure?.let { System.currentTimeMillis() - it.second } ?: -1L
 
     /**
      * Chemin de dossier à utiliser pour [chemin] : chaque partie existante est retrouvée malgré majuscules / accents /
@@ -758,7 +790,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
      * fichiers, sauf si un dossier de ce nom existe déjà. Rien n'est déplacé hors du coffre.
      */
     fun trier(motif: String, destination: String, types: String = "tous", source: String = "", sousDossier: Boolean = true): String {
-        oublierCache()
+        try {
         val m = motif.trim().trim('"', '\'', '«', '»').trim()
         if (m.isBlank()) return "Précise les mots que doit contenir le nom des fichiers."
         val src = relatif(source).takeIf { it.isNotBlank() }?.let { resoudre(it) ?: return "Dossier introuvable dans le coffre : $source" }
@@ -800,6 +832,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             if (ok.isNotEmpty()) append("\n" + ok.take(40).joinToString("\n") { "- $it" } + (if (ok.size > 40) "\n… et ${ok.size - 40} autres" else ""))
             if (ko.isNotEmpty()) append("\n\n❌ Non déplacé(s) :\n" + ko.take(20).joinToString("\n") { "- $it" })
         }
+        } finally { oublierCache() }
     }
 
     /** Fichier local lisible (pour un montage vidéo…) d'un fichier du coffre : direct si possible, sinon copie dans [dossier]. */
@@ -857,7 +890,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
     /** Crée un dossier du coffre (sous-dossiers compris) s'il n'existe pas ; renvoie le chemin réel utilisé. */
     fun creerDossierChemin(chemin: String): String {
-        oublierCache()
+        try {
         val c = cheminDossier(chemin)
         if (c.isBlank()) throw IllegalArgumentException("Nom de dossier manquant.")
         racineFichier()?.let { r ->
@@ -869,6 +902,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         subDir(tree, c)
         if (trouver(c)?.isDirectory != true) throw IllegalStateException("Création du dossier « $c » refusée par le stockage.")
         return c
+        } finally { oublierCache() }
     }
 
     /** Crée un dossier du coffre (sous-dossiers compris) s'il n'existe pas. */
@@ -876,7 +910,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
     /** Déplace une note, une image, un fichier ou un dossier du coffre dans [dossierCible] (créé au besoin). */
     fun deplacer(source: String, dossierCible: String): String {
-        oublierCache()
+        try {
         val src = resoudre(source) ?: throw IllegalArgumentException("Introuvable dans le coffre : ${source.trim().trim('/')}")
         val dest = creerDossierChemin(dossierCible)
         racineFichier()?.let { r ->
@@ -907,11 +941,12 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             f.delete()
         }
         return "$nom → coffre › ${dest.replace("/", " › ").ifBlank { "racine" }}"
+        } finally { oublierCache() }
     }
 
     /** Renomme un élément du coffre (le dossier ne change pas). */
     fun renommer(chemin: String, nouveauNom: String): String {
-        oublierCache()
+        try {
         val c = resoudre(chemin) ?: throw IllegalArgumentException("Introuvable dans le coffre : ${chemin.trim().trim('/')}")
         val n = safe(nouveauNom.trim(), "")
         if (n.isBlank()) throw IllegalArgumentException("Nouveau nom manquant.")
@@ -926,6 +961,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         val ancien = f.name
         if (!f.renameTo(n)) throw IllegalStateException("Renommage refusé par le stockage.")
         return "$ancien → $n"
+        } finally { oublierCache() }
     }
 
     /** Contenu d'un dossier du coffre : sous-dossiers puis fichiers de tous types (notes, images avec leur description…). */

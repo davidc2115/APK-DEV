@@ -133,12 +133,15 @@ class SurveillanceMaison : Service() {
         }
     }
 
-    /** Photo brute d'une caméra Home Assistant. */
+    /** Photo brute d'une caméra Home Assistant (adresse extérieure quand le téléphone n'est pas à la maison). */
     private fun photo(camera: String): ByteArray? = runCatching {
-        val base = app.store.haUrl.value.trim().trimEnd('/').let { if (it.startsWith("http")) it else "http://$it" }
+        val base = fr.dd.jarvis.ai.Serveur.haBaseDirecte(app).trimEnd('/')
         val req = Request.Builder().url("$base/api/camera_proxy/$camera").header("Authorization", "Bearer ${app.store.haToken.value.trim()}").build()
-        OkHttpClient.Builder().callTimeout(20, TimeUnit.SECONDS).build().newCall(req).execute().use { r -> if (r.isSuccessful) r.body?.bytes() else null }
+        clientPhoto.newCall(req).execute().use { r -> if (r.isSuccessful) r.body?.bytes() else null }
     }.getOrNull()
+
+    // Un seul client (connexions réutilisées) : avant, un client complet était recréé à chaque photo d'alerte.
+    private val clientPhoto: OkHttpClient by lazy { OkHttpClient.Builder().callTimeout(20, TimeUnit.SECONDS).build() }
 
     private suspend fun alerter(s: Systemes.Systeme, capteur: String) {
         val maintenant = System.currentTimeMillis()
