@@ -359,6 +359,8 @@ class ToolBox(
         put(tool("obsidian_ecrire", "Crée, remplace ou complète une note Obsidian.", mapOf(
             "chemin" to prop("Chemin relatif de la note (ex. JARVIS/Idées.md)."), "contenu" to prop("Contenu Markdown."),
             "ajouter" to prop("« true » pour ajouter à la fin de la note existante au lieu de la remplacer.")), listOf("chemin", "contenu")))
+        put(tool("obsidian_relier", "Relie le coffre Obsidian (fichiers orphelins, mentions non liées, notes ou fichiers sans lien) : le titre d'une note écrit en clair dans une autre note devient un [[lien]] (notes de l'utilisateur seulement), et chaque note ou fichier encore isolé est rangé dans l'index de son dossier (« Index — dossier », relié depuis « Index du coffre »). action=apercu : compte ce qui serait fait, sans rien modifier ; action=appliquer : écrit (confirmation demandée).", mapOf(
+            "action" to prop("apercu (par défaut) | appliquer")), listOf()))
         put(tool("obsidian_supprimer", "Supprime DÉFINITIVEMENT une note du coffre Obsidian (fiche contact, devis, facture, ou toute autre note). Utilise obsidian_lister ou obsidian_chercher avant si le chemin exact n'est pas connu. Pour une fiche contact, utilise plutôt supprimer_contact_card (plus simple : juste le nom).",
             mapOf("chemin" to prop("Chemin relatif exact de la note (ex. Contacts/Dupont.md, Société/Devis/D-2026-012 Dupont.md).")), listOf("chemin")))
         put(tool("supprimer_contact_card", "Supprime DÉFINITIVEMENT la fiche contact (Markdown Obsidian) d'un contact, où qu'elle soit rangée sous Contacts. Trouve la fiche à partir du seul nom, pas besoin du chemin exact.",
@@ -1072,6 +1074,12 @@ class ToolBox(
                     else -> ToolResult("Action inconnue (lister, dossier, deplacer, renommer).")
                 }
             } catch (e: Exception) { ToolResult("❌ ${e.message ?: e.javaClass.simpleName}") }
+        }
+        "obsidian_relier" -> {
+            val apercu = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.device.LiensCoffre.relier(app, appliquer = false) }
+            if (!a.optString("action").trim().lowercase().startsWith("appli") || apercu.plan.rienAFaire) ToolResult(apercu.texte(false))
+            else if (!confirm(apercu.texte(false) + "\n\nRelier maintenant ?", true)) ToolResult("Liaison du coffre annulée par l'utilisateur.")
+            else ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.device.LiensCoffre.relier(app, appliquer = true).texte(true) })
         }
         "obsidian_supprimer" -> {
             val chemin = a.optString("chemin")

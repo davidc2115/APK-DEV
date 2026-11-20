@@ -64,6 +64,8 @@ import fr.dd.jarvis.JarvisApp
 import fr.dd.jarvis.device.ObsidianWriter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.heightIn
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
@@ -204,6 +206,48 @@ fun DialoguesConstellation(
     }
 }
 
+/**
+ * « Tout relier » : aperçu (rien n'est modifié), puis confirmation, puis écriture des liens et des index ; le graphe est
+ * rechargé à la fin. Renvoie l'action à brancher sur le bouton.
+ */
+@Composable
+fun rememberRelier(app: JarvisApp, apres: () -> Unit): () -> Unit {
+    var texte by remember { mutableStateOf<String?>(null) }
+    var enCours by remember { mutableStateOf(false) }
+    var aConfirmer by remember { mutableStateOf(false) }
+    val portee = androidx.compose.runtime.rememberCoroutineScope()
+    fun lancer(appliquer: Boolean) {
+        enCours = true; aConfirmer = false; texte = if (appliquer) "Écriture des liens…" else "Analyse du coffre…"
+        portee.launch {
+            val r = withContext(Dispatchers.IO) { runCatching { fr.dd.jarvis.device.LiensCoffre.relier(app, appliquer) { e -> texte = e } } }
+            enCours = false
+            r.onSuccess { b -> texte = b.texte(appliquer); aConfirmer = !appliquer && !b.plan.rienAFaire; if (appliquer) apres() }
+                .onFailure { texte = "❌ ${it.message ?: it.javaClass.simpleName}" }
+        }
+    }
+    texte?.let { t ->
+        AlertDialog(
+            onDismissRequest = { if (!enCours) texte = null },
+            containerColor = Color(0xFF0E0819), titleContentColor = Neon.lavande, textContentColor = Neon.blancViolet,
+            title = { Text("🔗 Relier le coffre", fontFamily = Neon.serif) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    if (enCours) CircularProgressIndicator(color = Neon.violet, modifier = Modifier.size(22.dp).padding(bottom = 6.dp))
+                    Text(t, fontSize = 13.sp)
+                    if (aConfirmer) Text("\nLes mentions sont transformées en liens dans TES notes (jamais dans celles de la Société, de JARVIS ni des " +
+                        "contacts) ; le reste est rangé dans un index par dossier. Relancer « Tout relier » met les index à jour.", color = Neon.sousTitre, fontSize = 11.sp)
+                }
+            },
+            confirmButton = {
+                if (aConfirmer) TextButton({ lancer(true) }) { Text("Relier", color = Neon.violet) }
+                else if (!enCours) TextButton({ texte = null }) { Text("Fermer", color = Neon.violet) }
+            },
+            dismissButton = { if (aConfirmer) TextButton({ texte = null; aConfirmer = false }) { Text("Annuler", color = Neon.sousTitre) } }
+        )
+    }
+    return { if (!enCours) lancer(false) }
+}
+
 /** Écran 2D « Cerveau — Graphe Obsidian » : charge le coffre réel, puis affiche [ConstellationVue]. */
 @Composable
 fun GrapheCerveau2D(app: JarvisApp, enTete: @Composable () -> Unit = {}) {
@@ -211,6 +255,7 @@ fun GrapheCerveau2D(app: JarvisApp, enTete: @Composable () -> Unit = {}) {
     var noteOuverte by remember { mutableStateOf<String?>(null) }
     var hubListe by remember { mutableStateOf<String?>(null) }
     val c = constellationDe(etat)
+    val relier = rememberRelier(app) { etat.version++ }
     if (c == null) ChargementEnCours(etat.erreur, enTete)
     else ConstellationVue(
         c = c, enTete = enTete,
@@ -218,7 +263,8 @@ fun GrapheCerveau2D(app: JarvisApp, enTete: @Composable () -> Unit = {}) {
         onBasculer = { chemin -> etat.deplies = ConstellationLayout.basculer(c.deplies, chemin) },
         onHub = { cle -> if (c.hub(cle)?.type != TypeHub.PIECES && c.hub(cle)?.type != TypeHub.TAGS) hubListe = cle },
         onFichier = { chemin -> app.obsidian.ouvrirFichier(chemin) },
-        onRecharger = { etat.version++ }
+        onRecharger = { etat.version++ },
+        onRelier = relier
     )
     DialoguesConstellation(app, c, noteOuverte, { noteOuverte = it }, hubListe, { hubListe = it })
 }
@@ -237,6 +283,8 @@ fun ConstellationVue(
     onFichier: (String) -> Unit = {},
     onBasculer: (String) -> Unit = {},
     onRecharger: () -> Unit = {},
+    /** « Tout relier » : chaque note / fichier isolé reçoit un lien (mentions en clair, index de dossier). */
+    onRelier: (() -> Unit)? = null,
     animer: Boolean = true
 ) {
     val mesureur = rememberTextMeasurer(cacheSize = 160)
@@ -550,8 +598,11 @@ fun ConstellationVue(
             horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Bottom
         ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                PanneauListe("Fichiers orphelins", "Sans lien depuis le graphe", Icone.FICHIER, Color(0xFFFF6B5C), c.orphelins, orphelinsOuvert) { orphelinsOuvert = !orphelinsOuvert }
-                PanneauListe("Mentions non liées", "Notes sans lien entrant", Icone.ETOILE, Color(0xFFFFC14D), c.sansLienEntrant, mentionsOuvert) { mentionsOuvert = !mentionsOuvert }
+                val ouvrirIsole: (Isole) -> Unit = { e -> e.noteId?.let { noteActive = it; onNote(it) } ?: e.chemin?.let(onFichier) }
+                PanneauListe("Fichiers orphelins", "Sans aucun lien — touche pour ouvrir", Icone.FICHIER, Color(0xFFFF6B5C), c.orphelins, orphelinsOuvert,
+                    ouvrirIsole, onRelier) { orphelinsOuvert = !orphelinsOuvert }
+                PanneauListe("Mentions non liées", "Notes qu'aucune autre ne cite — touche pour ouvrir", Icone.ETOILE, Color(0xFFFFC14D), c.sansLienEntrant, mentionsOuvert,
+                    ouvrirIsole, onRelier) { mentionsOuvert = !mentionsOuvert }
             }
             Panneau(Modifier.widthIn(max = 150.dp), onClick = { legendeOuverte = !legendeOuverte }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -602,7 +653,8 @@ private fun Panneau(modifier: Modifier = Modifier, onClick: (() -> Unit)? = null
 }
 
 @Composable
-private fun PanneauListe(titre: String, sousTitre: String, icone: Icone, puce: Color, items: List<String>, ouvert: Boolean, basculer: () -> Unit) {
+private fun PanneauListe(titre: String, sousTitre: String, icone: Icone, puce: Color, items: List<Isole>, ouvert: Boolean,
+                         onElement: (Isole) -> Unit = {}, onRelier: (() -> Unit)? = null, basculer: () -> Unit) {
     Panneau(Modifier.fillMaxWidth(), onClick = basculer) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconeCompose(icone, 14.dp, if (icone == Icone.ETOILE) Color(0xFFFFC14D) else Color(0xFFFF6B5C))
@@ -614,13 +666,16 @@ private fun PanneauListe(titre: String, sousTitre: String, icone: Icone, puce: C
         }
         if (ouvert) {
             if (items.isEmpty()) Text("Aucun", color = Neon.sousTitre, fontSize = 11.sp, fontFamily = Neon.serif, modifier = Modifier.padding(top = 3.dp))
-            items.take(4).forEach { s ->
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 3.dp)) {
+            // Chaque élément est un lien : la note (ou le fichier) s'ouvre d'un toucher.
+            Column(Modifier.heightIn(max = 170.dp).verticalScroll(rememberScrollState())) { items.take(60).forEach { s ->
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onElement(s) }.padding(top = 3.dp, bottom = 2.dp)) {
                     Box(Modifier.size(6.dp).background(puce, CircleShape))
-                    Text(s, color = Neon.blancViolet, fontSize = 11.sp, fontFamily = Neon.serif, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 6.dp))
+                    Text(s.label, color = Neon.blancViolet, fontSize = 11.sp, fontFamily = Neon.serif, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 6.dp))
                 }
-            }
-            if (items.size > 4) Text("+${items.size - 4} autres", color = Neon.sousTitre, fontSize = 10.sp, fontFamily = Neon.serif, modifier = Modifier.padding(top = 2.dp))
+            } }
+            if (items.size > 60) Text("+${items.size - 60} autres", color = Neon.sousTitre, fontSize = 10.sp, fontFamily = Neon.serif, modifier = Modifier.padding(top = 2.dp))
+            if (items.isNotEmpty() && onRelier != null) Text("🔗 Tout relier dans le coffre", color = Neon.lavande, fontSize = 12.sp, fontFamily = Neon.serif,
+                fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 6.dp).clickable { onRelier() }.padding(vertical = 3.dp))
         }
     }
 }

@@ -90,6 +90,9 @@ data class ContenuDossier(
 /** Vrai lien [[wikilink]] orienté entre deux notes affichées. */
 data class LienReel(val de: String, val vers: String)
 
+/** Élément des panneaux « Mentions non liées » / « Fichiers orphelins » : une note ([noteId]) ou un fichier ([chemin]). */
+data class Isole(val label: String, val noteId: String? = null, val chemin: String? = null)
+
 data class Constellation(
     val hubs: List<Hub>,
     val etiquettes: List<Etiquette>,
@@ -97,9 +100,9 @@ data class Constellation(
     /** Tous les liens réels du coffre (y compris entre notes non affichées), pour la fiche d'une note. */
     val tousLiens: List<LienReel>,
     /** Notes qu'aucune autre note ne cite (aucun lien entrant). */
-    val sansLienEntrant: List<String>,
+    val sansLienEntrant: List<Isole>,
     /** Notes sans aucun lien (ni entrant ni sortant) + pièces jointes citées nulle part. */
-    val orphelins: List<String>,
+    val orphelins: List<Isole>,
     val notesParHub: Map<String, List<ObsidianWriter.GraphNode>>,
     /** Arborescence réelle : chemin de dossier ("" = racine, "Autres" = catégories regroupées) → contenu. */
     val dossiers: Map<String, ContenuDossier>,
@@ -397,11 +400,15 @@ object ConstellationLayout {
         val liens = liensTous.filter { it.de in notesAffichees && it.vers in notesAffichees }
 
         // ---- panneaux
-        val sansEntrant = notes.filter { (entrants[it.id] ?: 0) == 0 }.sortedBy { it.label.lowercase() }.map { it.label }
+        // Les index générés par « Tout relier » (Index du coffre, Index — dossier) ne sont jamais comptés comme isolés.
+        val sansEntrant = notes.filter { (entrants[it.id] ?: 0) == 0 && !fr.dd.jarvis.device.LiensCoffre.estIndex(it.id) }
+            .sortedBy { it.label.lowercase() }.map { Isole(it.label, noteId = it.id) }
         val toutesCibles = data.references.map { it.rawTarget.substringAfterLast('/').lowercase() }.toHashSet()
-        val piecesOrphelines = pieces.filter { it.name.lowercase() !in toutesCibles && it.path.lowercase() !in toutesCibles }.map { it.name }
-        val notesOrphelines = notes.filter { degre(it.id) == 0 }.map { it.label }
-        val orphelins = (notesOrphelines.sortedBy { it.lowercase() } + piecesOrphelines.sortedBy { it.lowercase() })
+        val piecesOrphelines = pieces.filter { it.name.lowercase() !in toutesCibles && it.path.lowercase() !in toutesCibles }
+            .sortedBy { it.name.lowercase() }.map { Isole(it.name, chemin = it.path) }
+        val notesOrphelines = notes.filter { degre(it.id) == 0 && !fr.dd.jarvis.device.LiensCoffre.estIndex(it.id) }
+            .sortedBy { it.label.lowercase() }.map { Isole(it.label, noteId = it.id) }
+        val orphelins = notesOrphelines + piecesOrphelines
 
         // ---- bornes (cerveau, hubs avec leur texte, étiquettes)
         var minX = -RAYON_CERVEAU; var maxX = RAYON_CERVEAU; var minY = -RAYON_CERVEAU; var maxY = RAYON_CERVEAU + 30f

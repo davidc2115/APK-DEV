@@ -104,6 +104,7 @@ object Capacites {
         Categorie("notes", "📝", "Notes, fichiers et mémoire", r("notes?|carnet|fichiers?|documents?|dossiers?|obsidian|coffre|pdf|word|excel|memoire|souviens|conversations?|graphiques?"), listOf(
             i("Carnet de notes : prendre note, relire, supprimer", "prends note que le code du portail est changé|relis mes notes sur le poêle", "note_prendre,notes_lire,note_supprimer", Voie.REFLEXE),
             i("Coffre Obsidian : chercher, lire, écrire, ranger, supprimer", "cherche « onduleur » dans mes notes|range les images coloriage dans un sous-dossier", "obsidian_chercher,obsidian_lire,obsidian_lister,obsidian_ecrire,obsidian_fichiers,obsidian_supprimer,graphe_suggere_lien", Voie.REFLEXE),
+            i("Coffre Obsidian : relier les fichiers orphelins et les mentions non liées", "relie les fichiers sans lien de mon coffre|transforme les mentions non liées en liens", "obsidian_relier"),
             i("Créer des fichiers (PDF, Word, Excel, CSV…) et retrouver ceux déjà créés", "fais un tableau Excel de mes clients|quels fichiers as-tu créés ?", "creer_fichier,fichiers_generes"),
             i("Documents importés : lire, analyser, résumer", "résume le PDF que je t'ai envoyé", "documents_lister,document_lire,document_analyser"),
             i("Graphiques dans la conversation", "fais un graphique du chiffre d'affaires par mois", "graphique"),

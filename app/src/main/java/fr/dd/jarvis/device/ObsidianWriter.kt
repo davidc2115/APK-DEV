@@ -321,7 +321,18 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     }
 
     /** JARVIS vient d'écrire / supprimer / déplacer dans le coffre : listes et contenus en cache sont oubliés. */
-    fun oublierCache() { listeNotes = null; structure = null; synchronized(contenus) { contenus.clear() } }
+    fun oublierCache() { if (lot.get() > 0) return; listeNotes = null; structure = null; synchronized(contenus) { contenus.clear() } }
+
+    private val lot = java.util.concurrent.atomic.AtomicInteger()
+
+    /**
+     * Série d'écritures (« Tout relier »…) : l'arborescence du coffre n'est oubliée qu'une fois à la fin, au lieu d'être
+     * relue entièrement par Android après chaque fichier écrit.
+     */
+    fun <T> enLot(bloc: () -> T): T {
+        lot.incrementAndGet()
+        try { return bloc() } finally { lot.decrementAndGet(); oublierCache() }
+    }
 
     private fun listerNotesRapide(racine: DocumentFile): List<Pair<String, DocumentFile>> {
         fichierCoffre()?.let { dir ->
@@ -1017,6 +1028,8 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     )
 
     private val lienRegex = Regex("\\[\\[([^\\]|#]+)")
+    /** Lien Markdown vers un fichier du coffre : [texte](chemin) ou ![image](chemin). */
+    private val lienMarkdown = Regex("!?\\[[^\\]\\n]*]\\(<?([^)>\\n]+?)>?(?:\\s+\"[^\"]*\")?\\)")
     // #tag Obsidian : précédé d'un début de ligne ou d'un blanc, commence par une lettre (exclut « # Titre » et les
     // couleurs « #FF00AA » qui commencent souvent par un chiffre), lettres/chiffres/_/-// ensuite.
     private val tagRegex = Regex("(?:^|(?<=\\s))#(\\p{L}[\\p{L}\\p{N}_/-]*)")
@@ -1161,10 +1174,11 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         }.isSuccess
     }
 
-    /** Construit le graphe (nœuds = notes du coffre, arêtes = liens « [[...]] », dossiers, pièces jointes) pour l'Orbe
-     *  et le Graphe. Toutes les notes et tous les dossiers sont relevés (jusqu'à [limiteNotes]) ; le contenu n'est lu
-     *  (liens, tags) que pour [limiteLecture] notes, plafonné à [limiteOctets] par note, pour rester fluide. */
-    fun graph(limiteNotes: Int = 3000, limiteOctets: Int = 60_000, limitePieces: Int = 3000, limiteLecture: Int = 700): GraphData {
+    /** Construit le graphe (nœuds = notes du coffre, arêtes = liens « [[...]] » et liens Markdown « [texte](chemin) »,
+     *  dossiers, pièces jointes) pour l'Orbe et le Graphe. Toutes les notes et tous les dossiers sont relevés (jusqu'à
+     *  [limiteNotes]) et leur contenu lu (liens, tags) EN PARALLÈLE, plafonné à [limiteOctets] par note. Avant, seules
+     *  700 notes étaient lues : dans un grand coffre, les autres paraissaient à tort « orphelines » ou « non liées ». */
+    fun graph(limiteNotes: Int = 3000, limiteOctets: Int = 60_000, limitePieces: Int = 3000, limiteLecture: Int = limiteNotes): GraphData {
         val v = vaultRoot()
         if (store.obsidianUri.value.isNotBlank() && v == null) {
             return GraphData(emptyList(), emptyList(), emptyList(), emptyMap(), emptyList(), emptyList())
@@ -1206,12 +1220,27 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         val references = mutableListOf<GraphReference>()
         val vusReferences = HashSet<Pair<String, String>>()
         val vusEdges = HashSet<Pair<String, String>>()
-        for ((chemin, lire) in fichiers.take(limiteLecture)) {
+        val aLire = fichiers.take(limiteLecture)
+        val lecteurs = java.util.concurrent.Executors.newFixedThreadPool(6)
+        val textes: List<String?> = try {
+            aLire.map { (_, lire) -> lecteurs.submit<String?> { lire() } }.map { runCatching { it.get(20, java.util.concurrent.TimeUnit.SECONDS) }.getOrNull() }
+        } finally { lecteurs.shutdownNow() }
+        for ((k, paire) in aLire.withIndex()) {
+            val chemin = paire.first
             val fromId = idOf(chemin)
-            val texte = lire() ?: continue
+            val texte = textes[k] ?: continue
             runCatching { extraireTags(texte) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { tagsParNote[fromId] = it }
-            for (m in lienRegex.findAll(texte)) {
-                val cible = m.groupValues[1].trim().trim('/')
+            val dossierSource = folderOf(chemin)
+            val cibles = lienRegex.findAll(texte).map { it.groupValues[1].trim().trim('/') } +
+                lienMarkdown.findAll(texte).mapNotNull { m ->
+                    val brut = m.groupValues[1].trim()
+                    if (brut.startsWith("#") || Regex("^[a-z][a-z0-9+.-]*:", RegexOption.IGNORE_CASE).containsMatchIn(brut)) return@mapNotNull null
+                    val c = runCatching { java.net.URLDecoder.decode(brut.substringBefore('#').replace("+", "%2B"), "UTF-8") }.getOrDefault(brut).trim().removePrefix("./").trim('/')
+                    // Chemin relatif à la note quand il y désigne une note existante.
+                    val relatifNote = if (dossierSource.isNotBlank()) "$dossierSource/$c" else c
+                    if (parIdMinuscule.containsKey(relatifNote.removeSuffix(".md").lowercase())) relatifNote else c
+                }
+            for (cible in cibles) {
                 if (cible.isBlank()) continue
                 val cibleNorm = cible.removeSuffix(".md").removeSuffix(".MD")
                 val toId = parIdMinuscule[cibleNorm.lowercase()]
