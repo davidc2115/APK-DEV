@@ -140,7 +140,12 @@ class MusicTools(private val app: JarvisApp) {
                         val demarree = fr.dd.jarvis.device.MusiqueBibliotheque.demarrerLecture(app, p, aleatoire, repetition)
                         fr.dd.jarvis.device.RetourJarvisMusique.afficher(app)
                         if (demarree) {
-                            "❤️ Tes titres « J'aime » sont bien en lecture dans ${nomAppli(p)}" + (if (aleatoire) " en aléatoire." else ".")
+                            "❤️ Tes titres « J'aime » sont bien en lecture dans ${nomAppli(p)}" + when (mode) {
+                                "aleatoire" -> " en aléatoire."
+                                "repeter_titre" -> " avec répétition du titre."
+                                "repeter_playlist" -> " avec répétition de toute la liste."
+                                else -> " dans l'ordre normal."
+                            }
                         } else {
                             "📂 Ta liste « J'aime » est ouverte dans ${nomAppli(p)}, mais le lecteur n'a pas confirmé le démarrage. Vérifie le bouton Lecture dans l'application."
                         }
