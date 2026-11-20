@@ -252,6 +252,10 @@ class ConversationVoiture private constructor(private val ctx: CarContext, priva
     }
 
     private val app = ctx.applicationContext as JarvisApp
+    // Le cerveau et son catalogue d'outils sont réutilisés d'un échange à l'autre :
+    // les reconstruire à chaque phrase ajoutait du travail avant même le premier appel au modèle.
+    private val outils by lazy { ToolBox(app) { _, force -> !force } }
+    private val cerveau by lazy { Brain(app.llm, outils, app) { app.store.userName.value } }
     private val main = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var micro: MicroVoiture? = null
@@ -293,13 +297,15 @@ class ConversationVoiture private constructor(private val ctx: CarContext, priva
     private suspend fun traiter(pcm: ByteArray) {
         if (!app.llm.groq.disponible()) { terminer("Ajoute une clé Groq dans JARVIS (Réglages) : elle sert aussi à la dictée en voiture."); return }
         montrer(Etat.Reflexion(""))
+        val debutTranscription = android.os.SystemClock.elapsedRealtime()
         val texte = try {
             Pcm.nettoyerTranscription(withContext(Dispatchers.IO) { app.llm.groq.transcrire(Pcm.wav(pcm)) })
         } catch (e: Throwable) { terminer("Transcription impossible : ${e.message?.take(120) ?: e.javaClass.simpleName}"); return }
+        fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "transcription Groq en ${android.os.SystemClock.elapsedRealtime() - debutTranscription} ms")
         if (fermee) return
         if (texte.isBlank()) { if (++incompris < 3) ecouter() else terminer("Je n'ai pas compris."); return }
         incompris = 0
-        app.chatCharger()
+        if (!app.chatLoaded) app.chatCharger()
         if (CarBridge.contexte().isEmpty()) app.chat.toList().takeLast(10).forEach { CarBridge.ajouter(it) }
         val norm = Normalizer.normalize(texte.lowercase(), Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
         if (arret.matches(norm)) { parler("D'accord.") { terminer("Conversation terminée.") }; return }
@@ -307,12 +313,14 @@ class ConversationVoiture private constructor(private val ctx: CarContext, priva
         val userMessage = ChatMsg(true, texte)
         CarBridge.ajouter(userMessage)
         app.chatAjouter(userMessage)
+        val debutTraitement = android.os.SystemClock.elapsedRealtime()
         val rep = withContext(Dispatchers.IO) {
             try {
                 // En voiture : les actions sensibles (envoi de SMS, appel…) qui exigent une confirmation forcée sont refusées.
-                Brain(app.llm, ToolBox(app) { _, force -> !force }, app) { app.store.userName.value }.reply(CarBridge.contexte()) { }
+                cerveau.reply(CarBridge.contexte()) { }
             } catch (e: Throwable) { "Désolé, je n'ai pas pu faire ça : ${e.message ?: e.javaClass.simpleName}" }
         }
+        fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "compréhension + action en ${android.os.SystemClock.elapsedRealtime() - debutTraitement} ms")
         if (fermee) return
         val propre = rep.replace(Regex("[#*_`>|]+"), "").replace(Regex("\\s+"), " ").trim().ifBlank { "C'est fait." }
         val assistantMessage = ChatMsg(false, propre)
