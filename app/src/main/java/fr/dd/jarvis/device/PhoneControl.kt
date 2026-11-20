@@ -483,21 +483,41 @@ class PhoneControl(private val ctx: Context) {
 
     /** Lance la navigation vers une destination dans l'application [appli] (Waze, Google Maps ou autre ; vide = Google Maps). */
     fun navigate(dest: String, mode: String, appli: String = "", point: Pair<Double, Double>? = null): String {
+        if (dest.isBlank() && point == null) return "❌ Destination vide : indique une adresse ou un lieu."
         val m = when (mode.trim().lowercase()) { "marche", "a pied", "à pied", "walking", "w" -> "w"; "velo", "vélo", "bicycling", "b" -> "b"; else -> "d" }
         val a = appli.trim().lowercase()
+        val coord = point?.let { "${it.first},${it.second}" }
         if (a.contains("waze")) {
-            val uri = if (point != null) "waze://?ll=${point.first},${point.second}&navigate=yes" else "waze://?q=" + Uri.encode(dest) + "&navigate=yes"
-            val r = start(Intent.ACTION_VIEW, uri, "com.waze")
-            return r.ifBlank { "🧭 Waze : navigation vers $dest lancée." }
+            val urls = buildList {
+                if (coord != null) add("waze://?ll=$coord&navigate=yes")
+                else add("waze://?q=" + Uri.encode(dest) + "&navigate=yes")
+                if (coord != null) add("https://waze.com/ul?ll=$coord&navigate=yes")
+                else add("https://waze.com/ul?q=" + Uri.encode(dest) + "&navigate=yes")
+                add(if (coord != null) "geo:$coord?q=$coord(${Uri.encode(dest)})" else "geo:0,0?q=" + Uri.encode(dest))
+            }
+            for (url in urls) {
+                val r = start(Intent.ACTION_VIEW, url, "com.waze")
+                if (r.isBlank()) return "🧭 Waze : navigation vers ${if (dest.isNotBlank()) dest else coord} lancée."
+            }
+            // Waze peut refuser son URI profonde selon sa version : bascule vers le guidage natif de Google Maps.
+            val secours = start(Intent.ACTION_VIEW, "google.navigation:q=" + Uri.encode(dest.ifBlank { coord.orEmpty() }) + "&mode=$m", "com.google.android.apps.maps")
+            if (secours.isBlank()) return "🧭 Waze n'a pas accepté l'itinéraire ; Google Maps prend le relais vers ${dest.ifBlank { coord.orEmpty() }}."
+            return "❌ Impossible d'ouvrir Waze ou Google Maps : $secours"
         }
         if (a.isNotBlank() && !a.contains("google") && !a.contains("maps")) {
             val (pkg, label) = findPackage(a) ?: return "Application « $appli » introuvable."
-            val geo = if (point != null) "geo:${point.first},${point.second}?q=${point.first},${point.second}(${Uri.encode(dest)})" else "geo:0,0?q=" + Uri.encode(dest)
+            val geo = if (coord != null) "geo:$coord?q=$coord(${Uri.encode(dest)})" else "geo:0,0?q=" + Uri.encode(dest)
             val r = start(Intent.ACTION_VIEW, geo, pkg)
             return r.ifBlank { "🧭 $label : $dest ouvert." }
         }
-        val r = start(Intent.ACTION_VIEW, "google.navigation:q=" + Uri.encode(dest) + "&mode=$m", "com.google.android.apps.maps")
-        return r.ifBlank { "🧭 Google Maps : navigation vers $dest lancée." }
+        val cible = dest.ifBlank { coord.orEmpty() }
+        val urls = listOf("google.navigation:q=" + Uri.encode(cible) + "&mode=$m",
+            if (coord != null) "geo:$coord?q=$coord(${Uri.encode(dest)})" else "geo:0,0?q=" + Uri.encode(cible))
+        for (url in urls) {
+            val r = start(Intent.ACTION_VIEW, url, "com.google.android.apps.maps")
+            if (r.isBlank()) return "🧭 Google Maps : navigation vers $cible lancée."
+        }
+        return "❌ Impossible d'ouvrir l'itinéraire dans Google Maps."
     }
 
     /** Lance la lecture d'une vidéo (URL http:// locale ou distante) dans le lecteur vidéo par défaut du téléphone — aucune app spécifique requise. */
