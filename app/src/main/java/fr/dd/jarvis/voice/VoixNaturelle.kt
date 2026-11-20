@@ -307,7 +307,7 @@ object VoixNaturelle {
             // Une phrase sans ponctuation (ou très longue) doit elle aussi être segmentée :
             // les moteurs TTS et certains fournisseurs refusent les entrées trop longues.
             // On coupe au dernier espace avant la limite, sans couper un mot.
-            val espace = reste.lastIndexOf(' ', taille.coerceAtMost(reste.lastIndex))
+            val espace = reste.lastIndexOf(' ', (taille - 1).coerceAtMost(reste.lastIndex))
                 .takeIf { it > 0 }?.plus(1)
             val coupe = when {
                 ponctuation != null && (ponctuation <= taille || reste.length <= taille) -> ponctuation
