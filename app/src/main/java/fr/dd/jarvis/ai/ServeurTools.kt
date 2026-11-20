@@ -309,7 +309,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 val sortieHote = if (!Serveur.sshConfigure(app)) {
                     "Connexion SSH Debian non configurée : diagnostic hôte ignoré."
                 } else runCatching {
-                    val sudo = app.store.sshUser.value.trim() != "root" && app.store.sshPass.value.isNotBlank()
+                    val sudo = app.store.sshUser.value.trim() != "root"
                     val commande = ServeurDiagnostic.commande(cible, app.store.plexToken.value, lignes, sudo)
                     sortie(Serveur.exec(app, commande, 120), 8500)
                 }.getOrElse { "Diagnostic SSH Debian impossible : ${it.message?.take(220) ?: it.javaClass.simpleName}." }
