@@ -150,9 +150,25 @@ class JarvisService : Service() {
     private var incompris = 0              // phrases non comprises d'affilée pendant une conversation
     private var echangeReel = false        // vrai dès qu'une vraie demande a été traitée pendant cette conversation
     private lateinit var app: JarvisApp
-    private lateinit var tools: ToolBox
+    // Le catalogue d'outils et le cerveau ne sont nécessaires qu'après la première phrase comprise.
+    // Les construire à l'ouverture du service retardait inutilement le micro Android Auto.
+    private val tools by lazy(LazyThreadSafetyMode.NONE) {
+        ToolBox(app) { q, _ ->
+            // Action sensible à la voix, téléphone verrouillé : seulement si c'est TA voix (empreinte vocale),
+            // sinon il faut déverrouiller le téléphone (personne d'autre ne peut la déclencher).
+            // Désactiver un système de sécurité téléphone verrouillé : empreinte vocale exigée même si l'option est coupée.
+            if ((app.store.biometrie.value || q.startsWith(fr.dd.jarvis.securite.Systemes.QUESTION)) &&
+                fr.dd.jarvis.device.Securite.sensible(q) && fr.dd.jarvis.device.Securite.verrouille(this)) {
+                if (fr.dd.jarvis.voice.EmpreinteVocale.prete(app)) voiceConfirm(q) && verifierMaVoix()
+                else {
+                    withContext(Dispatchers.Main) { voice?.speak("C'est une action sensible : déverrouille d'abord le téléphone, puis redemande-la.") {} }
+                    false
+                }
+            } else voiceConfirm(q)
+        }
+    }
     /** Réutilisé entre les tours : Brain ne contient pas d'état propre à une requête. */
-    private lateinit var brain: Brain
+    private val brain by lazy(LazyThreadSafetyMode.NONE) { Brain(app.llm, tools, app) { app.store.userName.value } }
 
     private fun norm(s: String) = Normalizer.normalize(s.lowercase(), Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
     private val wakeRegex = Regex("\\b(jarvis|jarvice|jarviss|djarvis|jarvi|jarves|charvis)\\b[ ,.:!?-]*")
@@ -221,22 +237,8 @@ class JarvisService : Service() {
         // Verrou de veille seulement PENDANT une conversation (voir garderEveille) : en attente du mot « Jarvis », le
         // micro actif suffit à Android ; le verrou permanent empêchait le téléphone de dormir même micro coupé.
         wake = (getSystemService(POWER_SERVICE) as PowerManager).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "jarvis:wake").apply { setReferenceCounted(false) }
-        tools = ToolBox(app) { q, _ ->
-            // Action sensible à la voix, téléphone verrouillé : seulement si c'est TA voix (empreinte vocale),
-            // sinon il faut déverrouiller le téléphone (personne d'autre ne peut la déclencher).
-            // Désactiver un système de sécurité téléphone verrouillé : empreinte vocale exigée même si l'option est coupée.
-            if ((app.store.biometrie.value || q.startsWith(fr.dd.jarvis.securite.Systemes.QUESTION)) &&
-                fr.dd.jarvis.device.Securite.sensible(q) && fr.dd.jarvis.device.Securite.verrouille(this)) {
-                if (fr.dd.jarvis.voice.EmpreinteVocale.prete(app)) voiceConfirm(q) && verifierMaVoix()
-                else {
-                    withContext(Dispatchers.Main) { voice?.speak("C'est une action sensible : déverrouille d'abord le téléphone, puis redemande-la.") {} }
-                    false
-                }
-            } else voiceConfirm(q)
-        }
-        brain = Brain(app.llm, tools, app) { app.store.userName.value }
         // Hermès installé : on s'assure que sa passerelle tourne dans Termux (après un redémarrage du téléphone par ex.).
-        if (app.store.hermesMode.value != "off") scope.launch {
+        if (app.store.hermesMode.value != "off") scope.launch(Dispatchers.IO) {
             runCatching {
                 fr.dd.jarvis.hermes.PontMcp.demarrer(app)
                 val hook = fr.dd.jarvis.hermes.HermesTermux.VERSION_HOOK_MEMOIRE.toString()
