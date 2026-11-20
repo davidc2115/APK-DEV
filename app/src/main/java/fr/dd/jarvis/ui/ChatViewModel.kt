@@ -48,8 +48,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val tools = ToolBox(app) { question, force ->
         if (!force && !store.confirmSensitive.value) true
-        else askConfirm(question) && (!store.biometrie.value || !fr.dd.jarvis.device.Securite.sensible(question) ||
-            fr.dd.jarvis.device.Securite.authentifier(app, "Confirmer l'action", question))
+        // La réflexion tourne en arrière-plan : la question (fenêtre, empreinte) est posée sur le fil de l'écran.
+        else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+            askConfirm(question) && (!store.biometrie.value || !fr.dd.jarvis.device.Securite.sensible(question) ||
+                fr.dd.jarvis.device.Securite.authentifier(app, "Confirmer l'action", question))
+        }
     }
     private val brain = Brain(app.llm, tools, app) { store.userName.value }
 
@@ -192,11 +195,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
         val principal = android.os.Handler(android.os.Looper.getMainLooper())
         viewModelScope.launch {
+            val historique = messages.toList()
             val reply = try {
-                brain.reply(messages.toList(), onTexte = { d ->
-                    flux?.ajouter(d)
-                    principal.post { enDirect += d; if (flux != null) parle = true }
-                }) { s -> status = s }
+                // Réflexion HORS du fil de l'écran (comme pour le service vocal) : construction du contexte, notes,
+                // JSON des outils et outils non isolés figeaient l'interface pendant chaque demande.
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    brain.reply(historique, onTexte = { d ->
+                        flux?.ajouter(d)
+                        principal.post { enDirect += d; if (flux != null) parle = true }
+                    }) { s -> principal.post { status = s } }
+                }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 flux?.arreter(sansSuite = true)
                 throw e

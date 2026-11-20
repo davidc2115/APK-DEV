@@ -21,7 +21,9 @@ class SocieteTools(
             "societe_info_set", "societe_info_get", "tarif_set", "tarif_delete", "regles_set", "client_ecrire", "client_fiche", "client_supprimer",
             "document_creer", "document_action", "document_email", "societe_liste", "employe_ecrire", "paie", "reserve_bilan", "societe_resultat", "societe_baremes",
             "presentation_modifier", "distance_deplacement", "clients_exporter_kml", "kml_couleurs_set", "clients_gps", "intervention_enregistrer", "intervention_modifier", "intervention_supprimer", "interventions_liste", "interventions_synthese",
-            "installation_supprimer", "facture_electronique", "societe_sauvegarde"
+            "installation_supprimer", "facture_electronique", "societe_sauvegarde",
+            // Déclarés dans le schéma mais absents d'ici : le modèle les appelait, JARVIS répondait « outil inconnu ».
+            "documents_supprimer", "bulletins"
         )
         private val KEYWORDS = Regex(
             "devis|factur|client|soci[ée]t[ée]|sauvegard|restaur|e-reporting|dossier jarvis soci|tarif|remise|d[ée]placement|paie|salaire|bulletin|r[ée]serve|dividende|b[ée]n[ée]fice|r[ée]sultat|tr[ée]sorerie|charges fixes|imp[ôo]t sur les soci[ée]t[ée]s|capital social|bar[èe]mes?|urssaf|cotisations|s[ée]curit[ée] sociale|smic|plafond|" +
