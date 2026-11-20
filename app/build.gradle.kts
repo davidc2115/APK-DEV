@@ -78,6 +78,8 @@ dependencies {
     implementation(composeBom)
 
     implementation("androidx.core:core-ktx:1.13.1")
+    // MediaControllerCompat expose les commandes standard de shuffle et de répétition des sessions multimédias.
+    implementation("androidx.media:media:1.7.0")
     implementation("androidx.car.app:app:1.7.0")
     // Micro de la voiture (CarAudioRecord) sur Android Auto : implémentation « projetée » indispensable.
     implementation("androidx.car.app:app-projected:1.7.0")
