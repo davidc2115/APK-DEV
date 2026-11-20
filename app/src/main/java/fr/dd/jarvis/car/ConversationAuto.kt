@@ -41,7 +41,10 @@ object ConversationAuto {
 
     private suspend fun parler(app: JarvisApp, texte: String) {
         withTimeoutOrNull(90_000) {
-            suspendCancellableCoroutine { c -> VoixVoiture.parler(app, texte.take(1500)) { if (c.isActive) c.resume(Unit) } }
+            suspendCancellableCoroutine { c ->
+                VoixVoiture.parler(app, texte) { if (c.isActive) c.resume(Unit) }
+                c.invokeOnCancellation { VoixVoiture.taire() }
+            }
         }
     }
 
@@ -106,7 +109,7 @@ object ConversationAuto {
                 app.chatAjouter(question); app.chatAjouter(reponse)
                 ActiviteVoiture.signaler(ActiviteVoiture.Etape.REPONSE, texte, rep)
                 if (!rep.startsWith("▶️")) parler(app, rep)
-                return
+                continue
             }
 
             if (arret.matches(norm)) { parler(app, "D'accord."); return }
@@ -131,7 +134,9 @@ object ConversationAuto {
             CarBridge.ajouter(reponse); app.chatAjouter(reponse)
             ActiviteVoiture.signaler(ActiviteVoiture.Etape.REPONSE, texte, propre)
             parler(app, propre)
-            if (!propre.trimEnd().endsWith("?")) return
+            // En mode Android Auto, on garde la session ouverte après chaque réponse :
+            // l'utilisateur peut enchaîner sans réactiver Jarvis ni redire le mot d'éveil.
+            continue
         }
     }
 }
