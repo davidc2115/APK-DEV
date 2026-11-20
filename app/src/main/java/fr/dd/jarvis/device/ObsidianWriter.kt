@@ -457,7 +457,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             candidates = c,
             wanted = voulu,
             normalize = ::normaliseNom,
-            loose = { nom -> cleNom(nom).let { cle -> if (cle == cleNom(voulu)) cle else cleNom(nom.substringBeforeLast('.')) } }
+            loose = { nom -> cleNom(nom.substringBeforeLast('.')) }
         )
     }
 
