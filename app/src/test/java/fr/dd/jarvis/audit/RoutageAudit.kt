@@ -22,6 +22,7 @@ object RoutageAudit {
         if (!soc && MaisonDirecte.analyserLumiere(t) != null) return "MaisonLumiere$comb"
         if (!soc && PoeleDirect.lecture(t) != null) return "PoeleLecture$comb"
         if (NavigationRdv.demande(t) != null) return "NavRdv$comb"
+        fr.dd.jarvis.device.ReseauMobile.intention(t)?.let { return "Reseau:$it$comb" }
         CommandesDirectes.intention(t)?.let { i -> return "CD:${i.outil ?: i.local ?: i.appli}${if (i.texteLibre) "(libre)" else ""}$comb" }
         if (!soc && PoeleDirect.demande(t) != null) return "PoeleAction$comb"
         DomotiqueDirecte.commande(normaliser(t))?.let { return "Domo${if (it.libre) "(libre)" else ""}$comb" }

@@ -460,6 +460,10 @@ class ToolBox(
             ), listOf("action")))
         put(tool("telephone_mode_energie", "Règle UNIQUEMENT le MODE D'ALIMENTATION (batterie) DU TÉLÉPHONE : économie d'énergie (économiseur de batterie), équilibré ou performance — directement par le système, sans piloter l'écran ; « etat » indique le mode actuel. Pour TOUT AUTRE mode (téléphone sécurisé, maison sécurisée, cinéma, nuit, vacances…), utilise modes_jarvis. À ne pas confondre non plus avec le mode de fonctionnement de l'application Jarvis.",
             mapOf("mode" to prop("economie, equilibre, performance ou etat.")), listOf("mode")))
+        put(tool("reseau_mobile", "Réseau mobile du téléphone : qualité du signal et de la réception (5G / 4G / 3G, dBm, barres), opérateur, données mobiles, itinérance, APN, réception des SMS / MMS, qualité des appels — diagnostic, réglage et amélioration. action=diagnostic (lecture), optimiser (corrige ce qui peut l'être après accord : mode avion, données, relance d'antenne), reenregistrer (relance la recherche d'antenne par 5 s de mode avion, après accord), apn (APN en service et valeurs de l'opérateur ; ouvrir=oui ouvre l'écran des APN), messages (SMS / MMS qui n'arrivent pas), appels (appels qui coupent, son haché, messagerie directe), ouvrir (cible=apn | reseau | operateur | appels | appels_wifi | sms | mode_avion | sim : écran de réglage). Android interdit aux applis d'écrire les APN et le type de réseau : JARVIS donne les valeurs et ouvre l'écran.", mapOf(
+            "action" to prop("diagnostic | optimiser | reenregistrer | apn | messages | appels | ouvrir"),
+            "cible" to prop("pour action=ouvrir : apn, reseau, operateur, appels, appels_wifi, sms, mode_avion, sim"),
+            "ouvrir" to prop("pour action=apn : oui pour ouvrir l'écran des APN")), listOf()))
         put(tool("phone_health_report", "Produit un diagnostic local en lecture seule du téléphone : batterie, température, stockage, RAM, réseau, Shizuku, accessibilité, notifications, alarmes exactes, optimisation batterie, service vocal et présence d'un rapport de plantage. N'affiche aucune donnée personnelle ni aucun secret.", mapOf("detail" to prop("Optionnel : bref, complet (défaut) ou historique des mesures locales."))))
         put(tool("phone_action", "Agit sur le téléphone et pilote les applications Android réellement installées. Actions : list_apps (inventaire réel), open_app, open_url, volume, wifi_on, wifi_off, wifi_connect (ouvre les réglages Wi-Fi), bluetooth_on, bluetooth_off, bluetooth_pair (ouvre les réglages Bluetooth), data_on, data_off, brightness, torch_on, torch_off, call, back, home, recents, notifications, quick_settings, lock, screenshot, read_screen, click_text, click_best_match (sélection sémantique du meilleur élément visible), type_text, scroll_down, scroll_up, tap, inspect_screen et watch_screen (arbre détaillé + journal des changements d'applications, fenêtres, clics, défilements et modifications d'interface observés en arrière-plan). Pour une tâche dans une application : list_apps si le nom est incertain, open_app, inspect_screen, interaction par étapes, puis inspect_screen/watch_screen pour vérifier et récupérer les événements récents. Le journal est alimenté en temps réel par Android lorsque l'accessibilité est active ; il ne conserve pas le texte saisi ni le contenu privé des événements. L'accessibilité JARVIS doit être active pour lire et manipuler l'interface. Les champs sécurisés, écrans protégés, validations Android et confirmations sensibles restent sous le contrôle du système ou de l'utilisateur.",
             mapOf(
@@ -1160,6 +1164,20 @@ class ToolBox(
         "hermes_deleguer" -> fr.dd.jarvis.hermes.Hermes.deleguer(app, a.optString("tache"), this, app.store.userName.value)
             ?.let { ToolResult(it, direct = true) }
             ?: ToolResult("Hermès est indisponible pour l'instant (non installé ou arrêté). Réponds toi-même au mieux.")
+        "reseau_mobile" -> {
+            val rm = fr.dd.jarvis.device.ReseauMobile
+            val action = fr.dd.jarvis.societe.core.normaliser(a.optString("action")).ifBlank { "diagnostic" }
+            val io = kotlinx.coroutines.Dispatchers.IO
+            ToolResult(when {
+                action.startsWith("optim") || action.startsWith("amelior") -> rm.optimiser(app, confirm)
+                action.startsWith("reenreg") || action.startsWith("relanc") -> rm.reenregistrer(app, confirm)
+                action.startsWith("apn") -> kotlinx.coroutines.withContext(io) { rm.apn(app, a.optString("ouvrir").trim().lowercase() in setOf("oui", "true", "1")) }
+                action.startsWith("message") || action.startsWith("sms") -> kotlinx.coroutines.withContext(io) { rm.messages(app) }
+                action.startsWith("appel") -> kotlinx.coroutines.withContext(io) { rm.appels(app) }
+                action.startsWith("ouvr") -> kotlinx.coroutines.withContext(io) { rm.ouvrirReglage(app, a.optString("cible").ifBlank { "reseau" }) }
+                else -> kotlinx.coroutines.withContext(io) { rm.diagnostic(app) }
+            }, direct = true)
+        }
         "phone_health_report" -> ToolResult(if (a.optString("detail").equals("historique", true)) fr.dd.jarvis.device.PhoneHealth.historyReport(app) else fr.dd.jarvis.device.PhoneHealth.report(app), direct = true)
         "phone_action" -> phoneAction(a)
         "voir_ecran" -> ToolResult(fr.dd.jarvis.device.PiloteEcran.voir(app, a.optString("question")), direct = true)

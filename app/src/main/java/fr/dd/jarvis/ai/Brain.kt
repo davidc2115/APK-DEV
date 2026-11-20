@@ -329,6 +329,11 @@ class Brain(
                     return reflexe("🧭 $libelle\n📍 $adresse\n$r")
                 }
             }
+            // Réseau mobile (signal, 4G / 5G, APN, SMS qui n'arrivent pas, appels qui coupent) : diagnostic et réglages.
+            fr.dd.jarvis.device.ReseauMobile.intention(texteUser)?.let { action ->
+                onStatus("📶 Réseau mobile…")
+                return reflexe(tools.execute("reseau_mobile", JSONObject().put("action", action)).text)
+            }
             // Actions courantes reconnues sans IA (alarme, minuteur, appel, SMS, appli, météo, planning, rappel…).
             CommandesDirectes.intention(texteUser)?.let { i ->
                 onStatus(i.statut)
@@ -977,7 +982,7 @@ class Brain(
             "phone_health_report", "bilan_sante", "plex_bibliotheques", "plex_playlists", "plex_sessions", "plex_serveur", "rechercher_mails",
             "rechercher_sms", "rechercher_videos_box", "societe_info_get", "societe_resultat", "stockage_telephone", "summarize_mails", "taches_lister",
             "discord_roles", "discord_salons", "discord_guildes", "discord_membre_info", "discord_diagnostic", "applis_musique", "agents_centre",
-            "reserve_bilan", "analyser_planning_clients", "tournee_optimisee", "voir", "voir_ecran", "routines",
+            "reserve_bilan", "analyser_planning_clients", "tournee_optimisee", "voir", "voir_ecran", "routines", "reseau_mobile",
         )
 
         /** La demande attend-elle autre chose après le résultat direct de [outil] ? */

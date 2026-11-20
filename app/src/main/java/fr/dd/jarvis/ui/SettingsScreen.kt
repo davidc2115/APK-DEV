@@ -296,6 +296,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                         add(android.Manifest.permission.RECORD_AUDIO); add(android.Manifest.permission.READ_CALENDAR); add(android.Manifest.permission.WRITE_CALENDAR)
                         add(android.Manifest.permission.READ_CONTACTS); add(android.Manifest.permission.WRITE_CONTACTS); add(android.Manifest.permission.READ_SMS)
                         add(android.Manifest.permission.SEND_SMS); add(android.Manifest.permission.CALL_PHONE); add(android.Manifest.permission.ACCESS_FINE_LOCATION)
+                        add(android.Manifest.permission.READ_PHONE_STATE)
                         add(android.Manifest.permission.ACCESS_COARSE_LOCATION)
                         if (android.os.Build.VERSION.SDK_INT >= 33) { add(android.Manifest.permission.POST_NOTIFICATIONS); add(android.Manifest.permission.NEARBY_WIFI_DEVICES) }
                         if (android.os.Build.VERSION.SDK_INT >= 36) add("android.permission.ACCESS_LOCAL_NETWORK")
