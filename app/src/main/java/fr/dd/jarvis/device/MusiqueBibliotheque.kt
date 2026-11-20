@@ -184,7 +184,12 @@ object MusiqueBibliotheque {
         if (!cliquer(cible)) return "❌ Impossible d'ouvrir « $nom »."
         delay(900)
         return if (demarrerLecture(ctx, paquet, aleatoire, repetition)) {
-            "▶️ « $nom » est en lecture" + (if (aleatoire) " aléatoire" else "") + " depuis ta bibliothèque."
+            "▶️ « $nom » est en lecture" + when {
+                aleatoire -> " en aléatoire"
+                repetition == "titre" -> " avec répétition du titre"
+                repetition == "playlist" -> " avec répétition de toute la playlist"
+                else -> " dans l'ordre normal"
+            } + " depuis ta bibliothèque."
         } else {
             "📂 « $nom » est ouvert, mais le démarrage de la lecture n'a pas été confirmé. Vérifie le lecteur dans l'application."
         }
@@ -220,10 +225,10 @@ object MusiqueBibliotheque {
             return "Le lecteur n'a pas confirmé la configuration des modes (API Android indisponible ou commande refusée)."
         }
         return when (m) {
-            "aleatoire", "shuffle" -> "🔀 Lecture aléatoire activée."
-            "repeter_titre", "repeat_one", "titre" -> "🔂 Répétition du titre activée."
-            "repeter_playlist", "repeat_all", "playlist" -> "🔁 Répétition de toute la playlist activée."
-            else -> "▶️ Lecture normale activée : ordre conservé, aléatoire et répétition désactivés."
+            "aleatoire", "shuffle" -> "🔀 Commande de lecture aléatoire envoyée au lecteur."
+            "repeter_titre", "repeat_one", "titre" -> "🔂 Commande de répétition du titre envoyée au lecteur."
+            "repeter_playlist", "repeat_all", "playlist" -> "🔁 Commande de répétition de toute la playlist envoyée au lecteur."
+            else -> "▶️ Commande de lecture normale envoyée au lecteur : ordre conservé, aléatoire et répétition désactivés."
         }
     }
 
