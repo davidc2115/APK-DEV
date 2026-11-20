@@ -146,8 +146,10 @@ fun MusiqueEcran(app: JarvisApp, onFermer: () -> Unit) {
             androidx.compose.foundation.layout.FlowRow(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 HudChip("👍 J'aime") { message = MusiqueBibliotheque.action(app, "jaime") }
                 HudChip("👎") { message = MusiqueBibliotheque.action(app, "jaimepas") }
-                HudChip("🔀 Aléatoire") { message = MusiqueBibliotheque.action(app, "aleatoire") }
-                HudChip("🔁 Répéter") { message = MusiqueBibliotheque.action(app, "repeter") }
+                HudChip("▶️ Normal") { message = MusiqueBibliotheque.configurerMode(app, "normal") }
+                HudChip("🔀 Aléatoire") { message = MusiqueBibliotheque.configurerMode(app, "aleatoire") }
+                HudChip("🔂 Répéter titre") { message = MusiqueBibliotheque.configurerMode(app, "repeter_titre") }
+                HudChip("🔁 Répéter playlist") { message = MusiqueBibliotheque.configurerMode(app, "repeter_playlist") }
                 HudChip("📻 Radio") {
                     val x = enCours ?: return@HudChip
                     scope.launch {
