@@ -310,6 +310,25 @@ class Brain(
                 onStatus("🔥 Poêle…")
                 runCatching { PoeleDirect.executerLecture(app, texteUser) }.getOrNull()?.let { return reflexeMaison(it) }
             }
+            // « Lance la navigation vers mon (1er) rendez-vous / chez Dupont / de 14 h » : le bon rendez-vous de l'agenda,
+            // puis le guidage vers son adresse — jamais seulement le planning.
+            if (NavigationRdv.demande(texteUser) != null) {
+                onStatus("🧭 Rendez-vous…")
+                runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { NavigationRdv.preparer(app, texteUser) } }.getOrNull()?.let { (cible, echec) ->
+                    if (echec != null) return reflexe(echec)
+                    val (adresse, libelle) = cible ?: return@let
+                    val n = fr.dd.jarvis.societe.core.normaliser(texteUser)
+                    val appli = when { Regex("\\bwaze\\b").containsMatchIn(n) -> "Waze"; Regex("\\b(google maps|maps)\\b").containsMatchIn(n) -> "Google Maps"; else -> "" }
+                    onStatus("🧭 Navigation…")
+                    val r = tools.execute("naviguer", JSONObject().put("destination", adresse).put("appli", appli)).text
+                    if (r.startsWith("CHOIX_REQUIS")) {
+                        val dispo = runCatching { app.phone.navApps().keys.toList() }.getOrDefault(emptyList())
+                        return reflexe("🧭 $libelle\n📍 $adresse\nAvec quelle application lancer le guidage : ${dispo.joinToString(" ou ")} ? " +
+                            "(dis par exemple « toujours avec ${dispo.firstOrNull() ?: "Waze"} » pour la garder)")
+                    }
+                    return reflexe("🧭 $libelle\n📍 $adresse\n$r")
+                }
+            }
             // Actions courantes reconnues sans IA (alarme, minuteur, appel, SMS, appli, météo, planning, rappel…).
             CommandesDirectes.intention(texteUser)?.let { i ->
                 onStatus(i.statut)
@@ -606,7 +625,9 @@ class Brain(
                 // demandait une action (« baisse le son de la télé »), le modèle s'en sert pour agir ; s'il est vide, pour réessayer.
                 // La liste brute des entités n'est rendue telle quelle que si l'utilisateur demandait une LISTE : pour une
                 // valeur (« la température de mes poêles ») ou une action, le modèle lit les vraies valeurs puis répond.
-                if (res.direct && !(name == "ha_entites" && (res.text.startsWith("Aucune") || ACTION_DOMOTIQUE.containsMatchIn(texteUser) || !listeHaDemandee(texteUser))))
+                if (res.direct && !(name == "ha_entites" && (res.text.startsWith("Aucune") || ACTION_DOMOTIQUE.containsMatchIn(texteUser) || !listeHaDemandee(texteUser))) &&
+                    // Planning / heure de départ consultés pour AGIR (naviguer, appeler, écrire…) : le modèle continue jusqu'à l'action.
+                    !(name in setOf("get_planning", "heure_depart") && ACTION_APRES_LECTURE.containsMatchIn(fr.dd.jarvis.societe.core.normaliser(texteUser))))
                     direct.append(res.text).append("\n\n")
             }
             if (direct.isNotEmpty()) { sortieDirecte = true; return direct.toString().trim() }
@@ -931,6 +952,9 @@ class Brain(
     }
 
     companion object {
+        /** Demande d'agir après avoir consulté l'agenda : le planning n'est alors qu'une étape, jamais la réponse. */
+        internal val ACTION_APRES_LECTURE = Regex("\\b(navigation|navigue|naviguer|gps|itineraire|emmene|amene|guide moi|conduis|waze|maps|trajet|" +
+            "appelle|appeler|telephone a|envoie|envoyer|ecris|sms|message|mail|rappelle moi|rappel|alarme|reveil|minuteur|deplace|decale|annule|supprime|modifie)\\b")
         /** L'utilisateur veut une LISTE d'entités (inventaire), pas une valeur ni une action. */
         internal fun listeHaDemandee(texte: String): Boolean = Regex(
             "\\b(liste|lister|listes|inventaire|recense|recensement|quelles? (sont )?(les |mes )?entites|toutes? les entites|les entites|mes entites|" +
