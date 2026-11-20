@@ -183,7 +183,10 @@ class HomeAssistantAdmin(
 
     // ------------------------------------------------------------------ actions
 
-    suspend fun executer(actionBrute: String, a: JSONObject): String {
+    /** Toute action d'administration peut changer les entités : la liste d'états partagée est oubliée après. */
+    suspend fun executer(actionBrute: String, a: JSONObject): String = try { executerInterne(actionBrute, a) } finally { Serveur.oublierEtatsHa() }
+
+    private suspend fun executerInterne(actionBrute: String, a: JSONObject): String {
         val action = normaliser(actionBrute).replace(' ', '_')
         suspend fun ok(q: String) = confirm("Home Assistant : $q", true)
         return when (action) {

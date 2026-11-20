@@ -246,7 +246,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val list = messages.toList()
         if (list.none { it.fromUser }) return
         if (convId.isBlank()) convId = (list.first().ts.takeIf { it > 0 } ?: System.currentTimeMillis()).toString()
-        runCatching { File(convDir, "$convId.json").writeText(serialize(list)) }
+        val f = File(convDir, "$convId.json")
+        fr.dd.jarvis.data.Ecritures.ecrire(f) { serialize(list) }
     }
 
     /** Nouvelle conversation : l'actuelle est conservée dans l'historique. */
@@ -270,6 +271,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun ouvrir(id: String) {
         if (busy) return
         val f = File(convDir, "$id.json")
+        fr.dd.jarvis.data.Ecritures.attendre()
         if (!f.exists()) return
         val text = f.readText()
         archiveCurrent()
@@ -282,11 +284,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         persist()
     }
 
-    fun supprimer(id: String) { File(convDir, "$id.json").delete(); if (id == convId) { messages.clear(); convId = ""; persist() } }
+    fun supprimer(id: String) { File(convDir, "$id.json").let { fr.dd.jarvis.data.Ecritures.oublier(it); it.delete() }; if (id == convId) { messages.clear(); convId = ""; persist() } }
 
     /** Efface la conversation en cours et tout l'historique. */
     fun toutEffacer() {
         messages.clear(); convId = ""; persist()
+        fr.dd.jarvis.data.Ecritures.oublierDossier(convDir)
         convDir.listFiles()?.forEach { it.delete() }
     }
 
@@ -300,15 +303,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clear() = nouvelle()
 
+    /** Conversation en cours + son archive, enregistrées hors du fil de l'écran (plus d'à-coup à chaque réponse). */
     private fun persist() {
-        try {
-            val arr = JSONArray()
-            messages.takeLast(200).forEach {
-                arr.put(JSONObject().put("u", it.fromUser).put("t", it.text).put("ts", it.ts))
-            }
-            file.writeText(arr.toString())
-        } catch (_: Exception) {
-        }
+        val derniers = messages.takeLast(200)
+        fr.dd.jarvis.data.Ecritures.ecrire(file) { serialize(derniers) }
         archiveCurrent()
     }
 

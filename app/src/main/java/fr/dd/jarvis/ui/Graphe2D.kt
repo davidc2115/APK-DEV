@@ -267,12 +267,11 @@ fun ConstellationVue(
             }
         }
     }
-    val pulse = if (animer) {
-        val t by rememberInfiniteTransition(label = "cerveau").animateFloat(
-            0.78f, 1f, infiniteRepeatable(tween(1600, easing = LinearEasing), RepeatMode.Reverse), label = "pulse"
-        )
-        t
-    } else 1f
+    // Respiration lue seulement pendant le DESSIN (dans le Canvas) : avant, sa lecture ici recomposait tout l'écran du
+    // graphe (panneaux, filtres, calculs) 60 fois par seconde ; maintenant seul le Canvas est redessiné.
+    val pulseEtat: androidx.compose.runtime.State<Float> = if (animer) rememberInfiniteTransition(label = "cerveau").animateFloat(
+        0.78f, 1f, infiniteRepeatable(tween(1600, easing = LinearEasing), RepeatMode.Reverse), label = "pulse"
+    ) else remember { androidx.compose.runtime.mutableFloatStateOf(1f) }
 
     val requete = recherche.trim().lowercase()
     val toutesNotes = remember(c) { c.notesParHub.values.flatten() }
@@ -378,6 +377,7 @@ fun ConstellationVue(
                     )
                 }
         ) {
+            val pulse = pulseEtat.value
             if (fond != null) drawImage(fond) else dessinerFondCosmique(decor, pulse)
             if (dragon != null) dessinerDragon(dragon, outilsDragon, temps, margeHaut = 44.dp.toPx())
             val centre = origine

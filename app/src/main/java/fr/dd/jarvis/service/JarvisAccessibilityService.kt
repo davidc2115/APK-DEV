@@ -40,6 +40,8 @@ class JarvisAccessibilityService : AccessibilityService() {
     }
 
     private var dernierReleveSchema = 0L
+    /** Horodatage des événements d'écran (un seul formateur, au lieu d'un nouveau à chaque événement). */
+    private val HEURE_EVENEMENT = java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss.SSS", java.util.Locale.ROOT)
 
     /** Grille du schéma affichée à l'écran (écran de verrouillage) : gauche, haut, droite, bas — ou null. */
     fun grilleSchema(): IntArray? = fr.dd.jarvis.securite.TelephoneSecurise.choisirGrille(noeudsEcran())?.first
@@ -99,9 +101,11 @@ class JarvisAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         event ?: return
         // Écran de verrouillage affiché avec la grille du schéma : sa vraie position est relevée (calibration automatique).
+        // Seulement quand le téléphone est VERROUILLÉ : avant, chaque événement de la barre d'état (musique, réseau,
+        // notifications…) faisait parcourir toutes les fenêtres de l'écran toutes les 1,5 s sur le fil principal.
         if (event.packageName == "com.android.systemui" && System.currentTimeMillis() - dernierReleveSchema > 1500) {
             dernierReleveSchema = System.currentTimeMillis()
-            runCatching {
+            if (runCatching { (getSystemService(KEYGUARD_SERVICE) as android.app.KeyguardManager).isKeyguardLocked }.getOrDefault(false)) runCatching {
                 grilleSchema()?.let { g -> (application as? fr.dd.jarvis.JarvisApp)?.store?.schemaGrille?.let { if (it.value != g.joinToString(",")) it.set(g.joinToString(",")) } }
             }
         }
@@ -117,7 +121,7 @@ class JarvisAccessibilityService : AccessibilityService() {
             else -> "événement ${event.eventType}"
         }
         val cls = event.className?.toString()?.substringAfterLast('.')?.take(80).orEmpty()
-        val stamp = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.ROOT).format(java.util.Date())
+        val stamp = java.time.LocalTime.now().format(HEURE_EVENEMENT)
         val line = "$stamp · $pkg · $kind" + if (cls.isNotBlank()) " · $cls" else ""
         synchronized(uiEventsLock) {
             uiEventSequence++

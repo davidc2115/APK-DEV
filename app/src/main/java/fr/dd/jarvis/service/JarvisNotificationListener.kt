@@ -55,11 +55,14 @@ class JarvisNotificationListener : NotificationListenerService() {
         private fun fichier(ctx: android.content.Context) = java.io.File(ctx.filesDir, "notifs.json")
 
         /** Sauvegarde les dernières notifications pour qu'elles survivent à un redémarrage du processus. */
+        /** Enregistrées hors du fil principal (une écriture par rafale de notifications, pas une par notification). */
         @Synchronized fun sauver(ctx: android.content.Context) {
-            runCatching {
+            val copie = items.take(120)
+            val f = runCatching { fichier(ctx) }.getOrNull() ?: return
+            fr.dd.jarvis.data.Ecritures.ecrire(f) {
                 val arr = org.json.JSONArray()
-                items.take(120).forEach { arr.put(org.json.JSONObject().put("p", it.pkg).put("a", it.app).put("t", it.titre).put("x", it.texte).put("d", it.time)) }
-                fichier(ctx).writeText(arr.toString())
+                copie.forEach { arr.put(org.json.JSONObject().put("p", it.pkg).put("a", it.app).put("t", it.titre).put("x", it.texte).put("d", it.time)) }
+                arr.toString()
             }
         }
 

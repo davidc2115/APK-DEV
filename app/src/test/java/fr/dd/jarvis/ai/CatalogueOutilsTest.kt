@@ -34,6 +34,15 @@ class CatalogueOutilsTest {
         verifier("ai/SitesWeb.kt", SitesWebTools.NAMES)
     }
 
+    /** Les lectures lancées en parallèle existent toutes et ne comptent aucune action. */
+    @Test fun lecturesParalleles() {
+        val existants = declares("ai/ToolBox.kt") + declares("ai/ServeurTools.kt")
+        val inconnus = Brain.LECTURES - existants
+        assertTrue("outils de lecture inconnus : $inconnus", inconnus.isEmpty())
+        val actions = Brain.LECTURES.filter { Regex("(creer|create|update|delete|supprimer|envoyer|repondre|service|ecrire|ajouter|trier|marquer|jouer|appeler|admin|config)").containsMatchIn(it) }
+        assertTrue("action dans les lectures : $actions", actions.isEmpty())
+    }
+
     @Test fun lesOutilsDeBaseOntUneBrancheDexecution() {
         val s = source("ai/ToolBox.kt")
         val base = Regex("""put\(tool\("([a-z_0-9]+)"""").findAll(s).map { it.groupValues[1] }.toSet()

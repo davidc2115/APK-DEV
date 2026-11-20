@@ -49,12 +49,10 @@ class JarvisApp : Application() {
         chat.add(m); chatSauver()
     }
 
+    /** Sauvegarde de la conversation en cours, faite hors du fil de l'écran (voir [fr.dd.jarvis.data.Ecritures]). */
     fun chatSauver() {
-        runCatching {
-            val arr = org.json.JSONArray()
-            chat.toList().takeLast(200).forEach { arr.put(org.json.JSONObject().put("u", it.fromUser).put("t", it.text).put("ts", it.ts)) }
-            java.io.File(filesDir, "chat.json").writeText(arr.toString())
-        }
+        val derniers = runCatching { chat.toList().takeLast(200) }.getOrNull() ?: return
+        fr.dd.jarvis.data.Ecritures.ecrire(java.io.File(filesDir, "chat.json")) { fr.dd.jarvis.ai.Conversations.serialiser(derniers) }
     }
 
 
@@ -116,6 +114,8 @@ class JarvisApp : Application() {
         // Noms des serveurs et salons Discord : « le serveur B&G » est reconnu comme Discord (pas le serveur Debian).
         runCatching { fr.dd.jarvis.ai.DiscordNoms.initialiser(this); fr.dd.jarvis.ai.DiscordNoms.rafraichirSiBesoin(this) }
         llm = Llm(store)
+        // Pendant que tu parles ou écris : la connexion à Home Assistant est préparée avec celle de l'IA.
+        fr.dd.jarvis.ai.Http.prechauffageAnnexe = { fr.dd.jarvis.ai.Serveur.prechaufferHa(this) }
         calendar = CalendarRepo(this, store)
         mail = MailRepo(this, store)
         contacts = ContactsRepo(this)

@@ -64,7 +64,7 @@ object Restitution {
             "formule de politesse ; garde exactement les faits (noms, titres, adresses, nombres) ; si la réponse signale un échec ou une erreur, " +
             "garde-le. Réponds uniquement avec la réponse remise en forme, en français."
         val utilisateur = "CONSIGNES :\n" + regles.joinToString("\n") { "- $it" } + "\n\nDEMANDE : $demande\n\nRÉPONSE À REMETTRE EN FORME :\n$r"
-        val sortie = kotlinx.coroutines.withTimeoutOrNull(4_000) {
+        val sortie = kotlinx.coroutines.withTimeoutOrNull(2_500) {
             try { app.llm.groq.plain(systeme, utilisateur) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
         }?.trim().orEmpty()
         // Garde-fous : une remise en forme ne rallonge pas la réponse et ne la vide pas.

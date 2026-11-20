@@ -549,6 +549,9 @@ class Brain(
                 JSONObject().put("role", "assistant").put("content", JSONObject.NULL).put("tool_calls", calls)
             )
             val direct = StringBuilder()
+            // Plusieurs LECTURES demandées d'un coup (état de la télé + du poêle, météo + agenda…) : lancées en même
+            // temps au lieu de l'une après l'autre. Dès qu'un appel agit (ou demande une confirmation), tout reste séquentiel.
+            val enAvance: Map<Int, ToolResult> = lecturesEnParallele(calls, retires, onStatus)
             for (i in 0 until calls.length()) {
                 val c = calls.getJSONObject(i)
                 val fn = c.getJSONObject("function")
@@ -558,9 +561,9 @@ class Brain(
                 } catch (e: Exception) {
                     null
                 }
-                onStatus("⚙️ $name…")
+                if (i !in enAvance) onStatus("⚙️ $name…")
                 val debutOutil = System.currentTimeMillis()
-                val res = try {
+                val res = enAvance[i] ?: try {
                     // Arguments illisibles = réponse de l'IA coupée en plein appel : rien n'est exécuté (avant, l'outil
                     // partait avec des arguments vides ou incomplets — commandes SSH tronquées).
                     if (args == null) ToolResult("❌ Arguments incomplets ou illisibles (réponse coupée) : l'outil n'a PAS été exécuté. Renvoie l'appel avec des arguments JSON complets.")
@@ -615,6 +618,35 @@ class Brain(
         return dernierTour?.optString("content")?.trim()?.takeIf { it.isNotBlank() }
             ?: "La demande a atteint la limite d'étapes disponible. Je n'ai pas de confirmation suffisante pour annoncer sa réussite ; les résultats déjà obtenus restent dans le suivi."
 
+    }
+
+    /**
+     * Appels d'outils du même tour exécutés EN MÊME TEMPS, seulement s'ils sont tous des lectures sans effet (liste
+     * [LECTURES]) ; sinon rien n'est fait ici et la boucle les exécute dans l'ordre. Résultat : index de l'appel → résultat.
+     */
+    private suspend fun lecturesEnParallele(calls: JSONArray, retires: Set<String>, onStatus: (String) -> Unit): Map<Int, ToolResult> {
+        if (calls.length() < 2) return emptyMap()
+        val appels = (0 until calls.length()).map { i ->
+            val fn = calls.optJSONObject(i)?.optJSONObject("function") ?: return emptyMap()
+            val nom = fn.optString("name")
+            val args = runCatching { JSONObject(fn.optString("arguments", "{}").ifBlank { "{}" }) }.getOrNull() ?: return emptyMap()
+            if (nom !in LECTURES || nom in retires) return emptyMap()
+            Triple(i, nom, args)
+        }
+        onStatus("⚙️ ${appels.map { it.second }.distinct().joinToString(" + ")}…")
+        val debut = System.currentTimeMillis()
+        val r = kotlinx.coroutines.coroutineScope {
+            appels.map { (i, nom, args) ->
+                i to async {
+                    try { tools.execute(nom, args) }
+                    catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                    catch (e: ApiException) { ToolResult("Erreur du service IA : ${e.message}") }
+                    catch (e: Exception) { ToolResult("Erreur : ${e.message}") }
+                }
+            }.associate { (i, d) -> i to d.await() }
+        }
+        fr.dd.jarvis.voice.JournalVoix.noter("brain", "${appels.size} lectures en parallèle en ${System.currentTimeMillis() - debut} ms")
+        return r
     }
 
     /**
@@ -892,6 +924,13 @@ class Brain(
     }
 
     companion object {
+        /** Outils de pure LECTURE (aucun effet, aucune confirmation) : plusieurs à la fois peuvent partir en parallèle. */
+        internal val LECTURES = setOf(
+            "get_planning", "agendas_liste", "rechercher_mails", "summarize_mails", "lire_sms", "rechercher_sms", "search_contacts",
+            "meteo", "heure_depart", "itineraire", "alarmes_liste", "rappels_liste", "taches_lister", "lire_notifications",
+            "obsidian_chercher", "obsidian_lire", "obsidian_lister", "obsidian_fichiers", "notes_lire", "memoire_lire",
+            "ma_position", "ha_entites", "ha_etat", "ha_position", "documents_lister", "document_lire", "reseau_infos", "ip_publique",
+        )
         /** Demande d'ACTION domotique (et non de simple liste) : le modèle doit agir après avoir trouvé l'entité. */
         internal val ACTION_DOMOTIQUE = Regex(
             "\\b(baisse|monte|augmente|diminue|coupe|r[ée]gle|mets?|allume|[ée]teins|ouvre|ferme|lance|arr[êe]te|active|d[ée]sactive|passe|change|mute|pause|reprends)\\b",

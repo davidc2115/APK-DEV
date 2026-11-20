@@ -317,7 +317,7 @@ object Systemes {
             if (entite.isNotBlank()) return@repeat
             kotlinx.coroutines.delay(800)
             entite = runCatching {
-                val etats = JSONArray(Serveur.ha(app, "GET", "/api/states"))
+                val etats = JSONArray(Serveur.ha(app, "GET", "/api/states", frais = true))
                 (0 until etats.length()).mapNotNull { etats.optJSONObject(it) }
                     .firstOrNull { it.optString("entity_id").startsWith("automation.") && it.optJSONObject("attributes")?.optString("id") == autoId }
                     ?.optString("entity_id").orEmpty()

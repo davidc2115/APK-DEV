@@ -609,14 +609,54 @@ object Serveur {
         return "${u.scheme}://127.0.0.1:$lp" + u.path.orEmpty().trimEnd('/') to client
     }
 
-    fun ha(app: JarvisApp, methode: String, chemin: String, corps: JSONObject? = null): String {
+    // ------------------------------------------------------------------ états partagés + connexion préparée
+
+    /**
+     * Liste complète des états (/api/states) gardée quelques secondes : une même demande la lisait jusqu'à 3 fois
+     * (réflexe télé / lumière, puis réflexe appareil, puis outil ha_entites du cerveau) — chaque fois tout l'inventaire
+     * de la maison par le réseau. Toute action (POST) l'oublie aussitôt : un état n'est jamais relu périmé après un ordre.
+     */
+    private const val ETATS_DUREE_MS = 4_000L
+    private class EtatsHa(val cle: String, val corps: String, val le: Long)
+    @Volatile private var etatsHa: EtatsHa? = null
+    private val generationEtats = java.util.concurrent.atomic.AtomicInteger()
+
+    /** Oublie la liste d'états gardée (après une action faite hors de [ha] : administration, WebSocket…). */
+    fun oublierEtatsHa() { generationEtats.incrementAndGet(); etatsHa = null }
+
+    @Volatile private var prechauffeHaLe = 0L
+
+    /**
+     * Ouvre à l'avance la connexion vers Home Assistant (pendant que l'utilisateur parle) : la commande part ensuite sur
+     * une connexion prête. Adresse directe seulement (jamais de tunnel SSH ici), au plus une fois par minute.
+     */
+    fun prechaufferHa(app: JarvisApp) {
+        if (!haConfigure(app)) return
+        val maintenant = System.currentTimeMillis()
+        if (maintenant - prechauffeHaLe < 60_000L) return
+        prechauffeHaLe = maintenant
+        runCatching {
+            val req = Request.Builder().url(haBaseDirecte(app) + "/api/").header("Authorization", "Bearer ${app.store.haToken.value.trim()}").get().build()
+            http.newBuilder().callTimeout(6, TimeUnit.SECONDS).build().newCall(req).execute().close()
+        }
+    }
+
+    /** [frais] : relit toujours Home Assistant (attente d'une entité qui vient d'être créée, par exemple). */
+    fun ha(app: JarvisApp, methode: String, chemin: String, corps: JSONObject? = null, frais: Boolean = false): String {
         if (!haConfigure(app)) throw IllegalStateException("Home Assistant non configuré (Réglages › Maison › Serveur : adresse et jeton d'accès longue durée).")
         val (adresse, client) = acces(app)
+        val listeEtats = methode != "POST" && chemin == "/api/states"
+        val cle = adresse + "|" + app.store.haToken.value.trim().hashCode()
+        if (listeEtats && !frais) etatsHa?.takeIf { it.cle == cle && System.currentTimeMillis() - it.le < ETATS_DUREE_MS }?.let { return it.corps }
+        if (methode == "POST") oublierEtatsHa()
+        val generation = generationEtats.get()
         val b = Request.Builder().url(adresse + chemin).header("Authorization", "Bearer ${app.store.haToken.value.trim()}")
         if (methode == "POST") b.post((corps?.toString() ?: "{}").toRequestBody("application/json".toMediaType())) else b.get()
         try {
             client.newCall(b.build()).execute().use { r ->
                 val t = r.body?.string().orEmpty()
+                if (methode == "POST") oublierEtatsHa()
+                else if (listeEtats && r.isSuccessful && generation == generationEtats.get()) etatsHa = EtatsHa(cle, t, System.currentTimeMillis())
                 if (r.code == 401) throw IllegalStateException("Home Assistant 401 : le jeton est invalide ou expiré. Dans Home Assistant, connecte-toi avec le compte qui possède les droits d'administration, puis crée un nouveau jeton d'accès longue durée dans ton profil et remplace-le dans JARVIS › Réglages › Maison › Serveur.")
                 if (r.code == 403) throw IllegalStateException("Home Assistant 403 — action interdite pour le compte associé au jeton. Ce n'est pas une permission Android/Shizuku : le jeton reprend les droits du compte Home Assistant qui l'a créé. Vérifie que ce compte peut piloter cet appareil et, si nécessaire, crée un nouveau jeton depuis un compte administrateur. Détail HA : ${t.take(500)}")
                 if (r.code == 404) throw IllegalStateException("Home Assistant 404 : service ou entité introuvable. Vérifie le domaine, le nom du service et l'identifiant exact de l'appareil. Détail HA : ${t.take(400)}")

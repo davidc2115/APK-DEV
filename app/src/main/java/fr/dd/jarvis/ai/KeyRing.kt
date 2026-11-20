@@ -105,6 +105,9 @@ object Http {
 
     @Volatile private var dernierPrechauffage = 0L
 
+    /** Autres connexions préparées en même temps (Home Assistant…), branchées au démarrage de l'application. */
+    @Volatile var prechauffageAnnexe: (() -> Unit)? = null
+
     /**
      * Ouvre à l'avance la connexion sécurisée vers l'IA (pendant que l'utilisateur parle ou écrit) : la demande part
      * ensuite sur une connexion prête, sans les allers-retours de la poignée de main TLS. Au plus une fois par minute.
@@ -119,6 +122,7 @@ object Http {
                 override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) { response.close() }
             })
         }
+        prechauffageAnnexe?.let { f -> runCatching { Thread { runCatching { f() } }.apply { isDaemon = true }.start() } }
     }
 }
 

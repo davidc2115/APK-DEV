@@ -57,12 +57,13 @@ object Conversations {
         val l = app.chat.toList()
         if (l.none { it.fromUser }) return
         if (app.convId.isBlank()) app.convId = (l.first().ts.takeIf { it > 0 } ?: System.currentTimeMillis()).toString()
-        runCatching { File(dossier(app), app.convId + ".json").writeText(serialiser(l)) }
+        fr.dd.jarvis.data.Ecritures.ecrire(File(dossier(app), app.convId + ".json")) { serialiser(l) }
     }
 
     /** Remplace la conversation affichée par l'archive [id] (à appeler sur le thread principal). */
     fun ouvrir(app: JarvisApp, id: String): Boolean {
         val f = File(dossier(app), "$id.json")
+        fr.dd.jarvis.data.Ecritures.attendre()
         if (!f.exists()) return false
         val l = lire(f)
         if (id != app.convId) archiverCourante(app)
