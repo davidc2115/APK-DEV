@@ -142,6 +142,8 @@ object Systemes {
 
     fun choix(app: JarvisApp, texte: String): Systeme? = liste(app).let { l -> choix(texte, l)?.let { l[it] } }
 
+    private val APPAREIL = Regex("\\b(poeles?|poiles?|poils?|granules?|pellets?|chauffage|radiateurs?|thermostat|clim|climatisation|ventilation|ventilateurs?|vmc|aspirateur|lave|four|chaudiere|tele|tv|lumieres?|lampes?|volets?|stores?|enceintes?)\\b")
+
     /** Familles de mots équivalents dans un nom de mode (« téléphone » ≈ portable, « sécurisé » ≈ sécurité…). */
     private val SYNONYMES = mapOf(
         "telep" to listOf("telep", "porta", "smart", "mobil"), "porta" to listOf("telep", "porta", "smart", "mobil"),
@@ -162,6 +164,11 @@ object Systemes {
         l.indexOfFirst { s -> s.phrasesActiver.any { norm(it) == t } }.takeIf { it >= 0 }?.let { return it to true }
         if (t.split(' ').size > 14) return null
         val desactiver = Regex("\\b(desactiv\\w*|coupe\\w*|arret\\w*|desarm\\w*|stop\\w*|quitt\\w*|sors|sortir|eteins|eteindre|termine\\w*|fin du)\\b").containsMatchIn(t)
+        // « Mets le poêle en mode nuit » : le mode d'un APPAREIL, pas un mode de JARVIS (sauf si l'appareil fait partie de son nom).
+        APPAREIL.findAll(t).map { it.value }.toList().takeIf { it.isNotEmpty() }?.let { appareils ->
+            val noms = l.joinToString(" ") { norm(it.nom) }
+            if (appareils.none { a -> noms.contains(a.take(4)) }) return null
+        }
         val activer = !desactiver && Regex("\\b(activ\\w*|lance\\w*|enclench\\w*|arme\\w*|demarr\\w*|mets|met|mettre|passe\\w*|bascule\\w*|securise\\w*|verrouille\\w*)\\b").containsMatchIn(t)
         if (!desactiver && !activer) return null
         val mots = t.split(' ').filter { it.isNotBlank() }

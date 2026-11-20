@@ -310,6 +310,11 @@ class Brain(
                 onStatus(i.statut)
                 executerDirecte(i)?.let { return reflexe(it) }
             }
+            // Poêle : marche / arrêt de l'appareil lui-même (entité climate), jamais un de ses interrupteurs de mode.
+            if (!pourSociete && PoeleDirect.demande(texteUser) != null) {
+                onStatus("🔥 Poêle…")
+                runCatching { PoeleDirect.executer(app, texteUser) }.getOrNull()?.let { return reflexeMaison(it) }
+            }
             // Lumières, volets, prises, télé : Home Assistant directement quand l'appareil est trouvé sans ambiguïté.
             if (!pourSociete && DomotiqueDirecte.commande(fr.dd.jarvis.societe.core.normaliser(texteUser)) != null) {
                 onStatus("🏠 Maison…")
@@ -560,6 +565,8 @@ class Brain(
                     // partait avec des arguments vides ou incomplets — commandes SSH tronquées).
                     if (args == null) ToolResult("❌ Arguments incomplets ou illisibles (réponse coupée) : l'outil n'a PAS été exécuté. Renvoie l'appel avec des arguments JSON complets.")
                     else if (name in retires) ToolResult(if (name.startsWith("ssh") || name == "serveur_diagnostic") "Pour Home Assistant, utilise l'API (ha_entites, ha_etat, ha_service, ha_config, ha_dashboard, ha_admin), pas le SSH." else "Outil indisponible ici.")
+                    else if (name == "ha_service" && PoeleDirect.modeNonDemande(args, texteUser) != null) ToolResult(PoeleDirect.modeNonDemande(args, texteUser)!!)
+                    else if (name == "mode_sonore" && PoeleDirect.visePasLeTelephone(texteUser)) ToolResult(PoeleDirect.REFUS_MODE_TELEPHONE)
                     else if (name == SelectionOutils.META) {
                         // Le modèle demande un outil absent de sa liste réduite : on l'ajoute pour les tours suivants.
                         val presents = (0 until schemaEnvoye.length()).map { schemaEnvoye.optJSONObject(it)?.optJSONObject("function")?.optString("name").orEmpty() }.toSet()

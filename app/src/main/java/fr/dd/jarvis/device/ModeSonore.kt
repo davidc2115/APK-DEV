@@ -18,7 +18,9 @@ object ModeSonore {
     const val SONNERIE = "sonnerie"
     const val ETAT = "etat"
 
-    private val AUTRE_CIBLE = Regex("\\b(tele|tv|enceintes?|musique|chanson|alarme|home assistant|camera|sonnette|voiture|discord|serveur|bot|groupe|conversation|whatsapp|notifications? de)\\b")
+    // Le « mode silence / nuit » d'un APPAREIL de la maison (poêle, clim, ventilation…) n'est jamais celui du téléphone.
+    private val AUTRE_CIBLE = Regex("\\b(tele|tv|enceintes?|musique|chanson|alarme|home assistant|camera|sonnette|voiture|discord|serveur|bot|groupe|conversation|whatsapp|notifications? de|" +
+        "poeles?|poiles?|poils?|granules?|pellets?|inserts?|chauffage|radiateurs?|thermostat|clim|climatisation|pac|ventilation|ventilateurs?|vmc|aspirateur|robot|lave|seche|machine|four|hotte|frigo|congelateur|chaudiere|ballon|chauffe eau|deshumidificateur|purificateur)\\b")
     private val FIN = Regex("\\b(desactive[rsz]?|enleve[rsz]?|coupe[rsz]?|retire[rsz]?|quitte[rsz]?|sors?|sortir|arrete[rsz]?|stoppe|stop|fin du|plus de|eteins?)\\b")
     private val R_NPD = Regex("\\b(ne pas deranger|ne plus deranger|npd|silencieux|en silence|mode silence|sans bruit)\\b")
     private val R_VIBREUR = Regex("\\b(vibreur|mode vibration|en vibration|que vibrer|vibre seulement)\\b")
