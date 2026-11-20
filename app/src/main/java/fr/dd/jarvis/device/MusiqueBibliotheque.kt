@@ -70,7 +70,8 @@ object MusiqueBibliotheque {
     suspend fun demarrerLecture(ctx: Context, paquet: String, aleatoire: Boolean = false, repetition: String = "aucune"): Boolean {
         // Ne jamais cliquer sur le bouton « Aléatoire » pour démarrer : dans YT Music il peut basculer
         // un état déjà actif et produire exactement l'inverse du mode demandé. Le mode est envoyé à la session.
-        val bouton = attendre(paquet, BOUTONS_LECTURE, 2200, exact = false)
+        // Correspondance exacte : « Lecture » ne doit surtout pas correspondre à « Lecture aléatoire ».
+        val bouton = attendre(paquet, BOUTONS_LECTURE, 2200, exact = true)
         if (bouton != null) cliquer(bouton)
         var modeEnvoye = false
         var debutBuffering = 0L
