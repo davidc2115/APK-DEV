@@ -20,7 +20,7 @@ class BudgetRequeteIATest {
                         .put("properties", JSONObject().put("arg", JSONObject()
                             .put("type", "string").put("description", "Paramètre détaillé ".repeat(10)))))))
         }
-        val safe = BudgetRequeteIA.outils(tools)!!
+        val safe = BudgetRequeteIA.outils(tools, niveau = 2)!!
         assertEquals(128, safe.length())
         assertEquals("outil_0", safe.getJSONObject(0).getJSONObject("function").getString("name"))
         assertEquals("outil_149", safe.getJSONObject(127).getJSONObject("function").getString("name"))
@@ -49,5 +49,40 @@ class BudgetRequeteIATest {
         val safe = BudgetRequeteIA.outils(tools)
         assertEquals(12, safe!!.length())
         assertFalse(safe.toString().contains("tool_12"))
+    }
+
+    @Test fun envoiNormalGardeLePromptSystemeEtLesOutilsComplets() {
+        val systeme = "RÈGLES " + "r".repeat(20_000) + " NOTES UTILES : la télé = media_player.salon. Date et heure actuelles : jeudi."
+        val messages = JSONArray()
+            .put(JSONObject().put("role", "system").put("content", systeme))
+            .put(JSONObject().put("role", "user").put("content", "baisse le son de la télé"))
+            .put(JSONObject().put("role", "tool").put("tool_call_id", "c").put("content", "entité ".repeat(800)))
+        val safe = BudgetRequeteIA.messages(messages, niveau = 0)
+        assertEquals(systeme, safe.getJSONObject(0).getString("content"))
+        assertEquals(messages.getJSONObject(2).getString("content"), safe.getJSONObject(2).getString("content"))
+        val tools = JSONArray().put(JSONObject().put("function", JSONObject().put("name", "ha_service").put("description", "D".repeat(900))))
+        assertEquals(900, BudgetRequeteIA.outils(tools, niveau = 0)!!.getJSONObject(0).getJSONObject("function").getString("description").length)
+    }
+
+    @Test fun compactageGardeLeDebutEtLaFinDuPromptSysteme() {
+        val systeme = "RÈGLES HOME ASSISTANT. " + "r".repeat(40_000) + " NOTES UTILES : la télé = media_player.salon. Date et heure actuelles : jeudi."
+        val messages = JSONArray().put(JSONObject().put("role", "system").put("content", systeme))
+            .put(JSONObject().put("role", "user").put("content", "allume la télé"))
+        val c = BudgetRequeteIA.messages(messages, niveau = 1).getJSONObject(0).getString("content")
+        assertTrue(c.length < 13_000)
+        assertTrue(c.startsWith("RÈGLES HOME ASSISTANT."))
+        assertTrue(c.contains("media_player.salon") && c.endsWith("jeudi."))
+    }
+
+    @Test fun auDela128GardeLesOutilsPrioritairesEtPertinents() {
+        val tools = JSONArray()
+        repeat(110) { i -> tools.put(JSONObject().put("function", JSONObject().put("name", "general_$i").put("description", "outil général $i"))) }
+        tools.put(JSONObject().put("function", JSONObject().put("name", "ha_entites").put("description", "Home Assistant : entités")))
+        tools.put(JSONObject().put("function", JSONObject().put("name", "ha_service").put("description", "Home Assistant : service")))
+        repeat(30) { i -> tools.put(JSONObject().put("function", JSONObject().put("name", "musique_$i").put("description", "musique $i"))) }
+        val safe = BudgetRequeteIA.outils(tools, 0, setOf("ha_entites", "ha_service"), "allume la lumière du salon")!!
+        val noms = (0 until safe.length()).map { safe.getJSONObject(it).getJSONObject("function").getString("name") }
+        assertEquals(128, noms.size)
+        assertTrue("ha_entites" in noms && "ha_service" in noms)
     }
 }

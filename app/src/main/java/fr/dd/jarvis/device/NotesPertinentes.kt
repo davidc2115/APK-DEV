@@ -59,15 +59,41 @@ object NotesPertinentes {
         return mots.count { m -> n.contains(" $m") }
     }
 
-    /** Bloc à placer dans le prompt (vide s'il n'y a rien d'utile). */
-    suspend fun pour(app: JarvisApp, demande: String): String = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-        kotlinx.coroutines.withTimeoutOrNull(1200) { calculer(app, demande) }.orEmpty()
+    /** Contenu des notes Obsidian déjà lues (chemin → texte, heure) : le coffre passe par le fournisseur de documents
+     *  d'Android, lent ; une note relue à chaque demande coûtait plusieurs centaines de millisecondes. */
+    private val cacheNotes = object : LinkedHashMap<String, Pair<String, Long>>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<String, Long>>?) = size > 40
     }
 
-    private suspend fun calculer(app: JarvisApp, demande: String): String {
+    private fun lireNote(app: JarvisApp, chemin: String): String {
+        val maintenant = System.currentTimeMillis()
+        synchronized(cacheNotes) { cacheNotes[chemin]?.takeIf { maintenant - it.second < 10 * 60_000 }?.let { return it.first } }
+        val t = app.obsidian.readNote(chemin).orEmpty()
+        synchronized(cacheNotes) { cacheNotes[chemin] = t to maintenant }
+        return t
+    }
+
+    /**
+     * Bloc à placer dans le prompt (vide s'il n'y a rien d'utile).
+     * Carnet, consignes mémorisées et mémoire d'Hermès (lus en mémoire, instantanés) sont TOUJOURS gardés ; seule la
+     * partie coffre Obsidian a un délai (0,9 s). Avant, un coffre lent faisait dépasser le délai global de 1,2 s et TOUT
+     * était perdu — y compris la note « la télé = media_player.salon » dont Home Assistant avait besoin.
+     */
+    suspend fun pour(app: JarvisApp, demande: String, delaiCoffreMs: Long = 900): String = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         val mots = motsCles(demande)
-        if (mots.isEmpty()) return ""
-        val lignes = mutableListOf<Pair<Int, String>>()
+        if (mots.isEmpty()) return@withContext ""
+        val lignes = java.util.Collections.synchronizedList(mutableListOf<Pair<Int, String>>())
+        locales(app, mots, lignes)
+        kotlinx.coroutines.withTimeoutOrNull(delaiCoffreMs) { coffre(app, mots, lignes) }
+        val copie = synchronized(lignes) { lignes.toList() }
+        if (copie.isEmpty()) return@withContext ""
+        "\n\nCONSIGNES ET NOTES DE L'UTILISATEUR À APPLIQUER POUR CETTE DEMANDE (priorité aux consignes explicites ; les préférences générales s'appliquent aussi même si les mots exacts ne sont pas répétés ; respecte strictement les contraintes de format et n'ajoute pas de détails que l'utilisateur a demandé d'omettre ; " +
+            "par ex. un nom d'entité, d'appareil, d'adresse ou une procédure déjà notés — une entité Home Assistant notée s'utilise telle quelle, " +
+            "sans la rechercher ni en choisir une autre) :\n" +
+            copie.sortedByDescending { it.first }.take(8).joinToString("\n") { "- " + it.second }.take(3000)
+    }
+
+    private fun locales(app: JarvisApp, mots: Set<String>, lignes: MutableList<Pair<Int, String>>) {
         // 0. Carnet de notes (« prends note… ») : priorité la plus haute, les plus récentes d'abord à score égal.
         runCatching {
             Carnet.toutes(app).asReversed().forEach { n ->
@@ -96,6 +122,9 @@ object NotesPertinentes {
                 if (s > 0) lignes += s * 2 to "[notes d'Hermès] ${e.replace('\n', ' ').take(400)}"
             }
         }
+    }
+
+    private suspend fun coffre(app: JarvisApp, mots: Set<String>, lignes: MutableList<Pair<Int, String>>) {
         // 3. Notes Obsidian dont le titre correspond (index du coffre, lecture des 2 meilleures seulement).
         runCatching {
             // Les recherches de titres sont indépendantes : les lancer en parallèle évite d'additionner
@@ -111,16 +140,16 @@ object NotesPertinentes {
                 .filter { it.sourcePath.endsWith(".md", true) && !it.sourcePath.contains("Mémoire JARVIS") && !it.sourcePath.contains("Mémoire Hermès") && !it.sourcePath.contains(Carnet.DOSSIER) }
                 .distinctBy { it.sourcePath }
                 .map { it to score(it.title, mots) }.filter { it.second > 0 }.sortedByDescending { it.second }.take(2)
-            candidats.forEach { (node, s) ->
-                val contenu = app.obsidian.readNote(node.sourcePath).orEmpty()
-                if (contenu.isNotBlank() && score(contenu, mots) >= 1) lignes += s * 2 + 1 to "[note « ${node.sourcePath.removeSuffix(".md")} »] ${extrait(contenu, mots, 700)}"
+            // Les deux notes sont lues en même temps (et gardées en cache 10 min).
+            coroutineScope {
+                candidats.map { (node, s) ->
+                    async(Dispatchers.IO) {
+                        val contenu = runCatching { lireNote(app, node.sourcePath) }.getOrDefault("")
+                        if (contenu.isNotBlank() && score(contenu, mots) >= 1) lignes += s * 2 + 1 to "[note « ${node.sourcePath.removeSuffix(".md")} »] ${extrait(contenu, mots, 700)}"
+                    }
+                }.awaitAll()
             }
         }
-        if (lignes.isEmpty()) return ""
-        return "\n\nCONSIGNES ET NOTES DE L'UTILISATEUR À APPLIQUER POUR CETTE DEMANDE (priorité aux consignes explicites ; les préférences générales s'appliquent aussi même si les mots exacts ne sont pas répétés ; respecte strictement les contraintes de format et n'ajoute pas de détails que l'utilisateur a demandé d'omettre ; " +
-            "par ex. un nom d'entité, d'appareil, d'adresse ou une procédure déjà notés — une entité Home Assistant notée s'utilise telle quelle, " +
-            "sans la rechercher ni en choisir une autre) :\n" +
-            lignes.sortedByDescending { it.first }.take(8).joinToString("\n") { "- " + it.second }.take(3000)
     }
 
     /** Les lignes d'un texte qui contiennent les mots de la demande (sinon le début). */

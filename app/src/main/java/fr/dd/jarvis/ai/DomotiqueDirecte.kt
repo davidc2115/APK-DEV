@@ -3,6 +3,7 @@ package fr.dd.jarvis.ai
 import fr.dd.jarvis.JarvisApp
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlinx.coroutines.async
 
 /**
  * « Allume la lumière du salon », « ferme les volets de la chambre », « éteins la télé » : commande Home Assistant
@@ -113,12 +114,17 @@ object DomotiqueDirecte {
             }
         }
         if (ids.isEmpty()) return null
-        val res = ids.map { id ->
-            val dom = id.substringBefore('.')
-            val nom = paires.first { it.first == id }.second.ifBlank { id }
-            val r = runCatching { tools.execute("ha_service", JSONObject().put("domaine", dom).put("service", service(dom, c.verbe)).put("entity_id", id)).text }
-                .getOrElse { "❌ ${it.message}" }
-            if (r.startsWith("✅")) "✅ $nom" else "$nom : $r"
+        // Plusieurs appareils (« éteins les lumières ») : commandes en parallèle, chacune confirmée par son état réel.
+        val res = kotlinx.coroutines.coroutineScope {
+            ids.map { id ->
+                async {
+                    val dom = id.substringBefore('.')
+                    val nom = paires.first { it.first == id }.second.ifBlank { id }
+                    val r = try { tools.execute("ha_service", JSONObject().put("domaine", dom).put("service", service(dom, c.verbe)).put("entity_id", id)).text }
+                        catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { "❌ ${e.message}" }
+                    if (r.startsWith("✅")) "✅ $nom" else "$nom : $r"
+                }
+            }.map { it.await() }
         }
         val action = when (c.verbe) { "on" -> "allumé"; "off" -> "éteint"; "ouvrir" -> "ouvert"; "fermer" -> "fermé"; else -> "arrêté" }
         return if (res.all { it.startsWith("✅") }) "🏠 " + (if (ids.size == 1) res.first().removePrefix("✅ ") + " : $action." else "$action : " + res.joinToString(", ") { it.removePrefix("✅ ") } + ".")

@@ -511,6 +511,9 @@ class ToolBox(
         }
     }
 
+    /** Outils toujours proposés (les autres familles ne sont ajoutées que si la demande les concerne). */
+    fun nomsDeBase(): Set<String> = (0 until schema.length()).mapNotNull { schema.optJSONObject(it)?.optJSONObject("function")?.optString("name") }.toSet()
+
     fun schemaAll(): JSONArray = JSONArray().also { out ->
         for (i in 0 until schema.length()) out.put(schema.get(i))
         societe.schema.forEach { out.put(it) }

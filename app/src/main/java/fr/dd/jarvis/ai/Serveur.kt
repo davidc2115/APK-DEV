@@ -828,11 +828,75 @@ object Serveur {
         return "`$id` = **${o.getString("state")}**\n" + (o.optJSONObject("attributes")?.toString(1)?.take(1800) ?: "")
     }
 
+    /**
+     * Exécute un service puis CONFIRME le résultat : Home Assistant renvoie les états changés pendant l'appel ; pour un
+     * appareil plus lent (Zigbee, télé, poêle…), l'état est relu jusqu'à ~2,5 s. Le compte rendu dit ce qui est
+     * réellement constaté — avant, « exécuté » était annoncé même quand l'appareil, injoignable, n'avait pas bougé.
+     */
     fun haService(app: JarvisApp, domaine: String, service: String, entite: String, donnees: JSONObject?): String {
         val corps = donnees ?: JSONObject()
-        if (entite.isNotBlank()) corps.put("entity_id", if (entite.contains(',')) JSONArray(entite.split(",").map { it.trim() }) else entite)
-        ha(app, "POST", "/api/services/$domaine/$service", corps)
-        return "✅ $domaine.$service" + (if (entite.isNotBlank()) " → $entite" else "") + " exécuté."
+        val ids = entite.split(",").map { it.trim() }.filter { it.isNotBlank() }
+        if (ids.isNotEmpty()) corps.put("entity_id", if (ids.size > 1) JSONArray(ids) else ids.first())
+        val demandes = JSONObject(corps.toString())
+        val reponse = ha(app, "POST", "/api/services/$domaine/$service", corps)
+        if (ids.isEmpty()) return "✅ $domaine.$service exécuté par Home Assistant."
+        val changes = HashMap<String, JSONObject>()
+        runCatching { JSONArray(reponse) }.getOrNull()?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let { changes[it.optString("entity_id")] = it } }
+        val limite = System.currentTimeMillis() + 2_500
+        return ids.joinToString("\n") { id ->
+            var o: JSONObject? = changes[id]
+            while ((o == null || !confirmeService(domaine, service, demandes, o)) && System.currentTimeMillis() < limite) {
+                Thread.sleep(400)
+                o = runCatching { JSONObject(ha(app, "GET", "/api/states/$id")) }.getOrNull() ?: o
+            }
+            if (o == null) o = runCatching { JSONObject(ha(app, "GET", "/api/states/$id")) }.getOrNull()
+            compteRenduService(domaine, service, id, demandes, o)
+        }
+    }
+
+    /** L'état relu correspond-il à ce que le service devait produire ? (vrai si rien de précis n'est attendu) */
+    internal fun confirmeService(domaine: String, service: String, donnees: JSONObject, o: JSONObject): Boolean {
+        val etat = o.optString("state")
+        if (etat in setOf("unavailable", "unknown")) return false
+        val a = o.optJSONObject("attributes") ?: JSONObject()
+        return when {
+            service == "turn_on" -> etat !in setOf("off", "standby")
+            service == "turn_off" -> etat in setOf("off", "standby")
+            service in setOf("open_cover", "open") -> etat in setOf("open", "opening")
+            service in setOf("close_cover", "close") -> etat in setOf("closed", "closing")
+            service == "lock" -> etat in setOf("locked", "locking")
+            service == "unlock" -> etat in setOf("unlocked", "unlocking", "open")
+            service == "set_temperature" && donnees.has("temperature") ->
+                kotlin.math.abs(a.optDouble("temperature", Double.NaN) - donnees.optDouble("temperature", Double.NaN)) < 0.26
+            service == "set_hvac_mode" && donnees.has("hvac_mode") -> etat == donnees.optString("hvac_mode")
+            service == "volume_set" && donnees.has("volume_level") ->
+                kotlin.math.abs(a.optDouble("volume_level", Double.NaN) - donnees.optDouble("volume_level", Double.NaN)) < 0.03
+            service == "volume_mute" && donnees.has("is_volume_muted") -> a.optBoolean("is_volume_muted") == donnees.optBoolean("is_volume_muted")
+            service == "select_source" && donnees.has("source") -> a.optString("source").equals(donnees.optString("source"), true)
+            service == "select_option" && donnees.has("option") -> etat.equals(donnees.optString("option"), true)
+            service == "set_value" && donnees.has("value") -> etat == donnees.opt("value").toString() || etat.toDoubleOrNull() == donnees.optDouble("value", Double.NaN)
+            else -> true
+        }
+    }
+
+    internal fun compteRenduService(domaine: String, service: String, id: String, donnees: JSONObject, o: JSONObject?): String {
+        if (o == null) return "⚠️ $domaine.$service envoyé pour `$id`, mais son état n'a pas pu être relu."
+        val etat = o.optString("state")
+        val a = o.optJSONObject("attributes") ?: JSONObject()
+        val nom = a.optString("friendly_name").ifBlank { id }
+        val detail = buildList {
+            if (a.has("temperature") && domaine == "climate") add("consigne ${a.optDouble("temperature")}°")
+            if (a.has("current_temperature") && domaine == "climate") add("mesurée ${a.optDouble("current_temperature")}°")
+            if (a.has("brightness") && etat == "on") add("luminosité ${(a.optInt("brightness") * 100 / 255)} %")
+            if (a.has("volume_level") && domaine == "media_player") add("volume ${(a.optDouble("volume_level") * 100).toInt()} %")
+            if (a.has("source") && domaine == "media_player") add("source ${a.optString("source")}")
+            if (a.has("current_position") && domaine == "cover") add("position ${a.optInt("current_position")} %")
+        }.joinToString(", ").let { if (it.isBlank()) "" else " ($it)" }
+        return when {
+            etat == "unavailable" -> "⚠️ $nom (`$id`) est INDISPONIBLE dans Home Assistant : la commande $domaine.$service a été acceptée mais l'appareil ne répond pas (hors ligne, intégration déconnectée…)."
+            confirmeService(domaine, service, donnees, o) -> "✅ $nom (`$id`) : $domaine.$service confirmé — état « $etat »$detail."
+            else -> "⚠️ $nom (`$id`) : $domaine.$service accepté par Home Assistant, mais l'état reste « $etat »$detail après 2,5 s. Ne dis PAS que c'est fait : l'appareil n'a peut-être pas suivi (ou il réagit lentement)."
+        }
     }
 
     /** Valide la configuration (API, sinon vérification dans le conteneur). Retourne null si valide, sinon le message d'erreur. */

@@ -124,56 +124,83 @@ class Llm(private val store: Store) {
 
     /** Appel du cerveau ; si le modèle n'existe plus (404), choisit automatiquement un modèle disponible.
      *  [forceText] = interdit explicitement un appel d'outil ce tour-ci (reprise après un échec), en gardant les outils
-     *  visibles pour le modèle plutôt que de les retirer (ce qui provoquait une erreur Groq, cf. Clients.kt). */
-    suspend fun groqChat(messages: org.json.JSONArray, tools: org.json.JSONArray?, forceText: Boolean = false): org.json.JSONObject {
-        // Même enveloppe pour Groq et tous les relais : aucun fournisseur ne reçoit un contexte brut démesuré.
-        val messagesSurs = BudgetRequeteIA.messages(messages, niveau = 1)
-        val outilsSurs = BudgetRequeteIA.outils(tools, niveau = 1)
-        return groqChatEnLigne(messagesSurs, outilsSurs, forceText)
-    }
-
-    private suspend fun groqChatEnLigne(messages: org.json.JSONArray, tools: org.json.JSONArray?, forceText: Boolean): org.json.JSONObject {
+     *  visibles pour le modèle plutôt que de les retirer (ce qui provoquait une erreur Groq, cf. Clients.kt).
+     *
+     *  La requête part COMPLÈTE (palier 0 : prompt, règles, notes, résultats d'outils) ; elle n'est compactée que si le
+     *  compte Groq la refuse (413 / jetons par minute) — et la limite du compte, une fois apprise, est appliquée d'avance
+     *  aux requêtes suivantes : plus d'aller-retour perdu à chaque demande, sans dégrader les comptes qui n'ont pas cette
+     *  limite. [prioritaires] / [requete] : outils à garder en priorité au-delà de 128 (limite Groq). */
+    suspend fun groqChat(messages: org.json.JSONArray, tools: org.json.JSONArray?, forceText: Boolean = false,
+                         prioritaires: Set<String> = emptySet(), requete: String = ""): org.json.JSONObject {
+        val outils = BudgetRequeteIA.outils(tools, 0, prioritaires, requete)
         val erreurGroq = try {
-            return groqSeul(messages, tools, forceText).also { dernierFournisseur = "Groq" }
+            return groqSeul(messages, outils, forceText).also { dernierFournisseur = "Groq" }
         } catch (e: CancellationException) { throw e } catch (e: Exception) { e }
         // Toutes les clés Groq ont échoué (quota, pause, panne, aucune clé) : Gemini (toutes ses clés), puis Cloudflare.
-        return relaisApresGroq(messages, tools, forceText, erreurGroq)
+        return relaisApresGroq(messages, outils, forceText, erreurGroq)
     }
 
-    private suspend fun groqSeul(messages: org.json.JSONArray, tools: org.json.JSONArray?, forceText: Boolean): org.json.JSONObject = try {
-        groq.chat(messages, tools, 900, forceText)
-    } catch (e: ApiException) {
-        when {
-            e.code == 404 && autoFixGroq() -> groq.chat(messages, tools, 1800, forceText)
-            requeteTropGrosse(e) -> {
-                val m2 = BudgetRequeteIA.messages(messages, niveau = 2)
-                val t2 = BudgetRequeteIA.outils(tools, niveau = 2)
-                try { groq.chat(m2, t2, 650, forceText) }
-                catch (e2: ApiException) {
-                    if (requeteTropGrosse(e2)) groq.chat(BudgetRequeteIA.messages(messages, niveau = 3), BudgetRequeteIA.outils(tools, niveau = 3), 400, forceText)
-                    else throw e2
+    /** Limite de jetons par requête apprise du compte Groq (« Limit 12000, Requested 18765 »), 0 = inconnue. */
+    @Volatile private var limiteJetonsGroq = 0
+    private fun sortieGroq(niveau: Int) = when (niveau) { 0 -> 900; 1 -> 800; 2 -> 650; else -> 400 }
+
+    /** Palier le plus doux qui tient dans la limite apprise (marge de 8 %). */
+    private fun palierPour(messages: org.json.JSONArray, tools: org.json.JSONArray?, depuis: Int = 0): Int {
+        val limite = limiteJetonsGroq
+        if (limite <= 0) return depuis
+        var n = depuis
+        while (n < 3 && BudgetRequeteIA.jetons(BudgetRequeteIA.messages(messages, n), BudgetRequeteIA.outils(tools, n)) + sortieGroq(n) > limite * 0.92) n++
+        return n
+    }
+
+    private fun apprendreLimite(e: ApiException) {
+        // 413 « Request too large … Limit 12000, Requested 18765 » : la requête seule dépasse la limite du compte.
+        if (e.code != 413 && !Regex("request too large", RegexOption.IGNORE_CASE).containsMatchIn(e.message.orEmpty())) return
+        Regex("Limit (\\d+), Requested (\\d+)").find(e.message.orEmpty())?.groupValues?.get(1)?.toIntOrNull()?.takeIf { it in 2_000..2_000_000 }
+            ?.let { limiteJetonsGroq = it }
+    }
+
+    private suspend fun groqSeul(messages: org.json.JSONArray, tools: org.json.JSONArray?, forceText: Boolean): org.json.JSONObject {
+        var niveau = palierPour(messages, tools)
+        var modeleCorrige = false
+        while (true) {
+            val m = BudgetRequeteIA.messages(messages, niveau)
+            val t = BudgetRequeteIA.outils(tools, niveau)
+            try {
+                return groq.chat(m, t, sortieGroq(niveau), forceText)
+            } catch (e: ApiException) {
+                when {
+                    e.code == 404 && !modeleCorrige && autoFixGroq() -> modeleCorrige = true
+                    requeteTropGrosse(e) && niveau < 3 -> {
+                        apprendreLimite(e)
+                        niveau = palierPour(messages, tools, niveau + 1)
+                        fr.dd.jarvis.voice.JournalVoix.noter("brain", "Groq : requête trop grosse → compactage palier $niveau" +
+                            (if (limiteJetonsGroq > 0) " (limite du compte ${limiteJetonsGroq} jetons)" else ""))
+                    }
+                    else -> throw e
                 }
             }
-            else -> throw e
         }
     }
 
     /**
-     * Relais quand Groq ne répond plus : Gemini (format OpenAI avec outils, clés en rotation) puis Cloudflare (comptes
-     * en rotation). [cloudflareCompact] : requête déjà réduite réutilisée pour Gemini puis Cloudflare ; sinon l'originale.
-     * Si tout échoue, on remonte l'erreur Groq d'origine, complétée des autres.
+     * Relais quand Groq ne répond plus : Gemini (format OpenAI avec outils, clés en rotation) puis OpenAI, puis
+     * Cloudflare (comptes en rotation). [cloudflareCompact] : requête déjà réduite réutilisée pour les relais ; sinon
+     * l'originale. Gemini et OpenAI ont de grands contextes : requête complète d'abord, compactée seulement s'ils la
+     * refusent ; Cloudflare (petits modèles) reçoit directement une version compacte. Si tout échoue, on remonte
+     * l'erreur Groq d'origine, complétée des autres.
      */
     suspend fun relaisApresGroq(messages: org.json.JSONArray, tools: org.json.JSONArray?, forceText: Boolean, origine: Exception,
                                 cloudflareCompact: Pair<org.json.JSONArray, org.json.JSONArray?>? = null, sansGemini: Boolean = false): org.json.JSONObject {
         val erreurs = mutableListOf("Groq : " + (origine.message ?: origine.javaClass.simpleName).take(140))
         if (sansGemini) erreurs += "Gemini : déjà essayé en premier"
         val source = cloudflareCompact ?: (messages to tools)
-        val m1 = BudgetRequeteIA.messages(source.first, niveau = 1)
-        val t1 = BudgetRequeteIA.outils(source.second, niveau = 1)
+        val m0 = BudgetRequeteIA.messages(source.first, 0)
+        val t0 = BudgetRequeteIA.outils(source.second, 0)
         if (geminiChat.disponible() && !sansGemini) {
             try {
                 return try {
-                    geminiChat.chat(m1, t1, 1000, forceText)
+                    geminiChat.chat(m0, t0, 1000, forceText)
                 } catch (e: ApiException) {
                     if (requeteTropGrosse(e)) geminiChat.chat(BudgetRequeteIA.messages(source.first, 2), BudgetRequeteIA.outils(source.second, 2), 650, forceText) else throw e
                 }.also { noterRelais("Gemini") }
@@ -184,7 +211,7 @@ class Llm(private val store: Store) {
         if (openai.disponible()) {
             try {
                 return try {
-                    openai.chat(m1, t1, 1200, forceText)
+                    openai.chat(m0, t0, 1200, forceText)
                 } catch (e: ApiException) {
                     if (requeteTropGrosse(e)) openai.chat(BudgetRequeteIA.messages(source.first, 2), BudgetRequeteIA.outils(source.second, 2), 650, forceText) else throw e
                 }.also { noterRelais("OpenAI") }
@@ -195,9 +222,9 @@ class Llm(private val store: Store) {
         if (cloudflare.disponible()) {
             try {
                 return try {
-                    cloudflare.chat(m1, if (forceText) null else t1)
+                    cloudflare.chat(BudgetRequeteIA.messages(source.first, 1), if (forceText) null else BudgetRequeteIA.outils(source.second, 1))
                 } catch (e: ApiException) {
-                    if (requeteTropGrosse(e)) cloudflare.chat(BudgetRequeteIA.messages(source.first, 2), if (forceText) null else BudgetRequeteIA.outils(source.second, 2))
+                    if (requeteTropGrosse(e)) cloudflare.chat(BudgetRequeteIA.messages(source.first, 3), if (forceText) null else BudgetRequeteIA.outils(source.second, 3))
                     else throw e
                 }.also { noterRelais("Cloudflare") }
             } catch (e: CancellationException) { throw e } catch (e: Exception) {

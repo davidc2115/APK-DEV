@@ -383,7 +383,8 @@ class Brain(
         val (notesUtiles, plan) = kotlinx.coroutines.coroutineScope {
             // En voiture : on n'attend pas plus d'une demi-seconde les notes (chaque seconde compte au volant).
             val notes = async(kotlinx.coroutines.Dispatchers.IO) { runCatching {
-                if (app.enVoiture) kotlinx.coroutines.withTimeoutOrNull(500) { fr.dd.jarvis.device.NotesPertinentes.pour(app, texteUser) }.orEmpty()
+                // En voiture : 0,35 s au plus pour le coffre Obsidian (consignes et mémoire, instantanées, toujours gardées).
+                if (app.enVoiture) fr.dd.jarvis.device.NotesPertinentes.pour(app, texteUser, 350)
                 else fr.dd.jarvis.device.NotesPertinentes.pour(app, texteUser)
             }.getOrDefault("") }
             val analyse = async {
@@ -449,6 +450,14 @@ class Brain(
                 if (nom !in retires) f.put(schema.get(i))
             }
         }
+        // Au-delà de 128 outils (limite Groq), garder d'abord ceux qui ont été ajoutés POUR cette demande (domaine
+        // reconnu : Home Assistant, Société, musique…), les indispensables et le plan, puis les plus proches des mots.
+        val outilsPrioritaires = run {
+            val base = tools.nomsDeBase()
+            (0 until schemaFinal.length()).mapNotNull { schemaFinal.optJSONObject(it)?.optJSONObject("function")?.optString("name") }
+                .filter { it !in base }.toSet() + indispensables + (plan?.outils ?: emptyList()) +
+                setOf("memoire_lire", "notes_lire", "note_prendre", "memoire_ajouter", "phone_action", "rappel_creer")
+        }
         val debutPrompt = System.currentTimeMillis()
         val messages = JSONArray()
         messages.put(JSONObject().put("role", "system").put("content",
@@ -490,7 +499,7 @@ class Brain(
         repeat(toursMax) { tour ->
             val debutAppelIA = System.currentTimeMillis()
             val msg = try {
-                llm.groqChat(messages, schemaFinal)
+                llm.groqChat(messages, schemaFinal, prioritaires = outilsPrioritaires, requete = recent)
             } catch (e: ApiException) {
                 // Llama/GPT-OSS génère parfois un appel d'outil mal formé : on réessaie en interdisant explicitement un
                 // nouvel appel d'outil ce tour-ci (tool_choice=none), mais SANS retirer les définitions d'outils du
@@ -502,7 +511,7 @@ class Brain(
                     try {
                         val m2 = JSONArray(); for (k in 0 until messages.length()) m2.put(messages.get(k))
                         m2.put(JSONObject().put("role", "system").put("content", "L'appel d'outil a échoué pour ce tour. N'invente AUCUNE donnée (appareils, imprimantes, mails, événements, fichiers) : dis simplement que l'action n'a pas pu être lancée et demande de réessayer."))
-                        llm.groqChat(m2, schemaFinal, forceText = true)
+                        llm.groqChat(m2, schemaFinal, forceText = true, prioritaires = outilsPrioritaires, requete = recent)
                     } catch (e2: kotlinx.coroutines.CancellationException) { throw e2 } catch (e2: Exception) {
                         return "Désolé, j'ai buté sur cette demande (le modèle n'a pas réussi à formuler l'appel d'outil correctement). Peux-tu reformuler ou réessayer ?"
                     }

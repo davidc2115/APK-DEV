@@ -35,14 +35,14 @@ Si la demande consiste à analyser le planning/l’agenda pour compléter ou met
         val cle = cle(historique)
         if (cle != null) synchronized(cache) { cache[cle] }?.let { (quand, plan) -> if (System.currentTimeMillis() - quand < 15 * 60_000L) return plan }
         val noms = mutableMapOf<String, String>()
-        // L'analyseur n'a besoin que des noms et sujets des outils. Ne lui transmet jamais le catalogue complet :
-        // il dépassait 128 fonctions chez Groq et gonflait inutilement les appels Gemini.
-        val catalogue = BudgetRequeteIA.outils(tousOutils, niveau = 1) ?: JSONArray()
-        for (i in 0 until catalogue.length()) {
-            val f = catalogue.getJSONObject(i).getJSONObject("function")
-            noms[f.getString("name")] = f.optString("description").substringBefore(". ").take(45)
+        // L'analyseur reçoit une LISTE TEXTE (nom + sujet court), pas des fonctions : la limite de 128 fonctions de Groq
+        // ne s'applique pas. Le catalogue est donc COMPLET — tronqué à 128 entrées, il perdait les outils Home Assistant,
+        // Société, musique… (placés après les outils généraux) et le plan ne pouvait plus jamais les choisir.
+        for (i in 0 until tousOutils.length()) {
+            val f = tousOutils.optJSONObject(i)?.optJSONObject("function") ?: continue
+            noms[f.getString("name")] = f.optString("description").substringBefore(". ").take(80)
         }
-        val outilsTexte = noms.entries.joinToString("\n") { "- ${it.key} : ${it.value}" }.take(10_000)
+        val outilsTexte = noms.entries.joinToString("\n") { "- ${it.key} : ${it.value}" }.take(26_000)
         // La conversation (et surtout la dernière demande) reste toujours présente, même si le catalogue est tronqué.
         val conv = historique.takeLast(4).joinToString("\n") { (if (it.fromUser) "Utilisateur : " else "JARVIS : ") + it.text.take(300) }.takeLast(2_500)
         val user = "Date : ${Prompts.now()}\n\nOUTILS :\n$outilsTexte\n\nCONVERSATION :\n$conv"
