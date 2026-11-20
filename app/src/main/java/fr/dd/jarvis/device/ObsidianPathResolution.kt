@@ -5,6 +5,17 @@ package fr.dd.jarvis.device
  * On ne retient un chemin que si le suffixe complet correspond à un seul emplacement.
  */
 internal object ObsidianPathResolution {
+    /** Reconstitue les enfants directs depuis l'index SAF complet quand DocumentFile.listFiles() renvoie une liste vide. */
+    fun directChildren(folder: String, entries: List<Pair<String, Boolean>>): List<Pair<String, Boolean>> {
+        val base = folder.trim('/')
+        val prefix = if (base.isBlank()) "" else "$base/"
+        return entries.mapNotNull { (path, isDirectory) ->
+            if (!path.startsWith(prefix)) return@mapNotNull null
+            val remainder = path.substring(prefix.length)
+            if (remainder.isBlank() || '/' in remainder) null else remainder to isDirectory
+        }.distinctBy { it.first }
+    }
+
     fun <T> uniqueNestedPath(
         firstSegment: String,
         folderPaths: List<String>,
