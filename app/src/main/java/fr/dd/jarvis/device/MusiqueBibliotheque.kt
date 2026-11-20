@@ -5,6 +5,9 @@ import android.media.MediaMetadata
 import android.media.Rating
 import android.media.session.MediaController
 import android.media.session.PlaybackState
+import android.support.v4.media.session.MediaControllerCompat
+import android.support.v4.media.session.MediaSessionCompat
+import android.support.v4.media.session.PlaybackStateCompat
 import android.view.accessibility.AccessibilityNodeInfo
 import fr.dd.jarvis.service.JarvisAccessibilityService
 import fr.dd.jarvis.societe.core.normaliser
@@ -80,7 +83,7 @@ object MusiqueBibliotheque {
             val c = controleur(ctx, paquet)
             if (c != null) {
                 if (!modeEnvoye) {
-                    appliquerMode(c, aleatoire, repetition)
+                    appliquerMode(ctx, c, aleatoire, repetition)
                     modeEnvoye = true
                 }
                 val etat = c.playbackState?.state
@@ -198,18 +201,18 @@ object MusiqueBibliotheque {
 
     // ------------------------------------------------------------------ modes du lecteur (session média de l'appli)
 
-    private fun appliquerMode(c: MediaController, aleatoire: Boolean, repetition: String): Boolean {
-        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O) return false
+    private fun appliquerMode(ctx: Context, c: MediaController, aleatoire: Boolean, repetition: String): Boolean {
+        val token = runCatching { MediaSessionCompat.Token.fromToken(c.sessionToken) }.getOrNull() ?: return false
+        val compat = runCatching { MediaControllerCompat(ctx, token) }.getOrNull() ?: return false
         val modeRepete = when (fr.dd.jarvis.societe.core.normaliser(repetition)) {
-            "titre", "repeter titre", "repeter_titre", "one" -> PlaybackState.REPEAT_MODE_ONE
-            "playlist", "repeter playlist", "repeter_playlist", "all" -> PlaybackState.REPEAT_MODE_ALL
-            else -> PlaybackState.REPEAT_MODE_NONE
+            "titre", "repeter titre", "repeter_titre", "one" -> PlaybackStateCompat.REPEAT_MODE_ONE
+            "playlist", "repeter playlist", "repeter_playlist", "all" -> PlaybackStateCompat.REPEAT_MODE_ALL
+            else -> PlaybackStateCompat.REPEAT_MODE_NONE
         }
-        val shuffleOk = runCatching {
-            c.transportControls.setShuffleMode(if (aleatoire) PlaybackState.SHUFFLE_MODE_ALL else PlaybackState.SHUFFLE_MODE_NONE)
+        return runCatching {
+            compat.transportControls.setShuffleMode(if (aleatoire) PlaybackStateCompat.SHUFFLE_MODE_ALL else PlaybackStateCompat.SHUFFLE_MODE_NONE)
+            compat.transportControls.setRepeatMode(modeRepete)
         }.isSuccess
-        val repeatOk = runCatching { c.transportControls.setRepeatMode(modeRepete) }.isSuccess
-        return shuffleOk && repeatOk
     }
 
     /** Configure explicitement les modes du lecteur actif : normal, aléatoire, répétition d'un titre ou de la liste. */
