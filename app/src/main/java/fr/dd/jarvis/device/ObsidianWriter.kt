@@ -447,8 +447,19 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             val d = fichierSur(r, dossier)
             return d.takeIf { it.isDirectory }?.listFiles()?.filter { !it.name.startsWith(".") }?.map { it.name to it.isDirectory }
         }
-        val d = (if (dossier.isBlank()) vaultRoot() else trouver(dossier))?.takeIf { it.isDirectory } ?: return null
-        return d.listFiles().mapNotNull { f -> f.name?.takeIf { !it.startsWith(".") }?.let { it to f.isDirectory } }
+        val d = (if (dossier.isBlank()) vaultRoot() else trouver(dossier))?.takeIf { it.isDirectory }
+        val depuisDocumentFile = d?.let { dossierDoc ->
+            runCatching { dossierDoc.listFiles().mapNotNull { f -> f.name?.takeIf { !it.startsWith(".") }?.let { it to f.isDirectory } } }
+                .getOrNull()
+        }
+        if (!depuisDocumentFile.isNullOrEmpty()) return depuisDocumentFile
+
+        // Certains fournisseurs SAF renvoient une liste vide via DocumentFile.listFiles() alors que
+        // DocumentsContract voit bien les éléments. L'index complet sert de seconde lecture, sans
+        // deviner de dossier ni créer un doublon à un autre emplacement.
+        val depuisIndex = ObsidianPathResolution.directChildren(dossier, toutLister())
+        if (depuisIndex.isNotEmpty()) return depuisIndex
+        return depuisDocumentFile ?: if (d == null) null else emptyList()
     }
 
     private fun correspondance(noms: List<Pair<String, Boolean>>, voulu: String, dossierSeul: Boolean = false): String? {
