@@ -640,8 +640,18 @@ class JarvisService : Service() {
                 val debutCerveau = System.currentTimeMillis()
                 brain.reply(app.chat.toList().takeLast(16), onTexte = { d -> if (gen == generation) flux?.ajouter(d) }) { etat -> android.os.Handler(android.os.Looper.getMainLooper()).post { majNotification(etat) } }
                     .also { fr.dd.jarvis.voice.JournalVoix.noter("service", "compréhension + action en ${System.currentTimeMillis() - debutCerveau} ms") }
-            } catch (e: CancellationException) { flux?.arreter(sansSuite = true); throw e }
-              catch (e: Throwable) { "⚠️ ${e.message ?: e.javaClass.simpleName}" }
+            } catch (e: CancellationException) {
+                // Une requête IA / un outil peut être annulé (timeout, arrêt de tâche). Sans ce nettoyage,
+                // busy reste vrai indéfiniment et toutes les demandes suivantes sont refusées comme « déjà occupé ».
+                flux?.arreter(sansSuite = true)
+                main.post {
+                    if (gen == generation && running) {
+                        busy = false
+                        if (awake) ecouter() else goIdle()
+                    }
+                }
+                throw e
+            } catch (e: Throwable) { "⚠️ ${e.message ?: e.javaClass.simpleName}" }
             val assistantMessage = ChatMsg(false, reply)
             fr.dd.jarvis.car.ActiviteVoiture.signaler(fr.dd.jarvis.car.ActiviteVoiture.Etape.REPONSE, cmd, reply)
             withContext(Dispatchers.Main) {
