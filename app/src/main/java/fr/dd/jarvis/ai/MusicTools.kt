@@ -21,7 +21,7 @@ class MusicTools(private val app: JarvisApp) {
             return when {
                 s.contains("aleatoire") || s.contains("shuffle") || s.contains("melange") || s.contains("hasard") -> "aleatoire"
                 (s.contains("repeter") || s.contains("repeat") || s.contains("boucle")) &&
-                    (s.contains("titre") || s.contains("morceau") || s.contains("chanson") || s.contains("une_seule") || s.contains("one") || s.contains("track")) -> "repeter_titre"
+                    (s.contains("titre") || s.contains("morceau") || s.contains("chanson") || s.contains("song") || s.contains("une_seule") || s.contains("one") || s.contains("track")) -> "repeter_titre"
                 (s.contains("repeter") || s.contains("repeat") || s.contains("boucle")) &&
                     (s.contains("playlist") || s.contains("liste") || s.contains("tout") || s.contains("all")) -> "repeter_playlist"
                 s in setOf("repeter_titre", "repeat_one", "repeat_track", "une_chanson", "un_titre", "titre") -> "repeter_titre"
