@@ -25,7 +25,7 @@ object ModeSonore {
     private val R_NPD = Regex("\\b(ne pas deranger|ne plus deranger|npd|silencieux|en silence|mode silence|sans bruit)\\b")
     private val R_VIBREUR = Regex("\\b(vibreur|mode vibration|en vibration|que vibrer|vibre seulement)\\b")
     private val R_SONNERIE = Regex("\\b(mode sonnerie|mode sonore|mode normal|(mets|met|remets|active|reactive|rallume|retablis|passe en|passe le telephone en) (la |le |en )?(sonnerie|son)|sonnerie (et|plus|\\+) vibreur|sonnerie avec vibreur|remets le son|rends le son)\\b")
-    private val R_VOLUME = Regex("\\b(a fond|au maximum|au max|plus fort|moins fort|monte|baisse|augmente|diminue|\\d+ ?%|pour cent|volume)\\b")
+    private val R_VOLUME = Regex("\\b(a fond|au maximum|au max|plus fort|moins fort|monte|baisse|augmente|diminue|\\d+ ?%|\\d{1,3}|pour cent|volume)\\b")
     private val R_ETAT = Regex("^(quel est le |quel |c est quoi le |dans quel )?mode (sonore|de sonnerie)|^(est ce que )?(je suis|le telephone est|mon telephone est) (en )?(silencieux|vibreur|ne pas deranger|npd|sonnerie)")
 
     /** Mode demandé (npd, npd_off, vibreur, sonnerie, etat) ou null si la phrase ne parle pas du mode sonore du téléphone. */

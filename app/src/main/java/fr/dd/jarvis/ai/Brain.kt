@@ -618,17 +618,21 @@ class Brain(
                     ToolResult("Erreur : ${e.message}")
                 }
                 fr.dd.jarvis.voice.JournalVoix.noter("brain", "outil $name en ${System.currentTimeMillis() - debutOutil} ms")
-                messages.put(
-                    JSONObject().put("role", "tool").put("tool_call_id", c.getString("id")).put("content", res.text.take(12000))
-                )
-                // Un résultat « direct » (liste d'entités…) n'est rendu tel quel que si l'utilisateur voulait cette liste : s'il
-                // demandait une action (« baisse le son de la télé »), le modèle s'en sert pour agir ; s'il est vide, pour réessayer.
-                // La liste brute des entités n'est rendue telle quelle que si l'utilisateur demandait une LISTE : pour une
-                // valeur (« la température de mes poêles ») ou une action, le modèle lit les vraies valeurs puis répond.
-                if (res.direct && !(name == "ha_entites" && (res.text.startsWith("Aucune") || ACTION_DOMOTIQUE.containsMatchIn(texteUser) || !listeHaDemandee(texteUser))) &&
-                    // Planning / heure de départ consultés pour AGIR (naviguer, appeler, écrire…) : le modèle continue jusqu'à l'action.
-                    !(name in setOf("get_planning", "heure_depart") && ACTION_APRES_LECTURE.containsMatchIn(fr.dd.jarvis.societe.core.normaliser(texteUser))))
-                    direct.append(res.text).append("\n\n")
+                // Un résultat « direct » (planning, SMS, liste d'entités, confirmation d'une action…) n'est rendu tel quel que
+                // s'il RÉPOND à toute la demande. Si elle demandait autre chose — une action après cette lecture (« lis mes SMS
+                // et réponds à Paul », « navigation vers mon rendez-vous », « supprime le réveil de 7 h »), ou une seconde
+                // action (« mets un réveil et lance la musique ») —, le modèle continue jusqu'au bout au lieu de s'arrêter là.
+                val finDirecte = res.direct && when (name) {
+                    // Liste brute des entités : seulement si l'utilisateur voulait une LISTE ; pour une valeur ou une action,
+                    // le modèle lit les vraies valeurs puis répond ; vide, il réessaie.
+                    "ha_entites" -> !res.text.startsWith("Aucune") && !ACTION_DOMOTIQUE.containsMatchIn(texteUser) && listeHaDemandee(texteUser) && !demandeComposee(texteUser)
+                    else -> !suiteAttendue(texteUser, name)
+                }
+                val contenu = if (res.direct && !finDirecte && name !in LECTURES_DIRECTES && name != "ha_entites")
+                    res.text.take(11800) + "\n\n[Action déjà faite : ne la refais pas. Fais la suite de la demande, puis réponds en une phrase.]"
+                    else res.text.take(12000)
+                messages.put(JSONObject().put("role", "tool").put("tool_call_id", c.getString("id")).put("content", contenu))
+                if (finDirecte) direct.append(res.text).append("\n\n")
             }
             if (direct.isNotEmpty()) { sortieDirecte = true; return direct.toString().trim() }
             onStatus("Réflexion…")
@@ -952,9 +956,36 @@ class Brain(
     }
 
     companion object {
-        /** Demande d'agir après avoir consulté l'agenda : le planning n'est alors qu'une étape, jamais la réponse. */
-        internal val ACTION_APRES_LECTURE = Regex("\\b(navigation|navigue|naviguer|gps|itineraire|emmene|amene|guide moi|conduis|waze|maps|trajet|" +
-            "appelle|appeler|telephone a|envoie|envoyer|ecris|sms|message|mail|rappelle moi|rappel|alarme|reveil|minuteur|deplace|decale|annule|supprime|modifie)\\b")
+        /** Demande d'AGIR après une lecture (planning, SMS, mails, réveils…) : la lecture n'est alors qu'une étape. Verbes seulement. */
+        internal val ACTION_APRES_LECTURE = Regex("\\b(navigation|navigue|naviguer|gps|itineraire|emmene|amene|ramene|guide moi|conduis|waze|" +
+            "appelle|appeler|telephone a|envoie|envoyer|transfere|transferer|ecris|ecrire|reponds|repondre|previens|prevenir|partage|partager|" +
+            "rappelle moi (?:de|d|que|dans|a|demain)|mets un rappel|cree un rappel|programme (?:un|une|le|la|les)|ajoute|ajouter|cree|creer|supprime|supprimer|" +
+            "efface|effacer|archive|archiver|marque|marquer|deplace|deplacer|decale|decaler|annule|annuler|modifie|modifier|range|ranger|imprime)\\b")
+
+        /** Deux actions dans la même phrase (« lis mes SMS et réponds à Paul », « mets un réveil puis lance la musique »). */
+        private val COMPOSEE = Regex("\\b(et|puis|ensuite|apres ca|et aussi|et apres)\\s+(?:(?:tu|me|m|moi|lui|leur|le|la|les|l|y|en|leur|aussi|ensuite|puis)\\s+)*" +
+            "(appelle|envoie|ecris|reponds|transfere|mets|met|lance|joue|allume|eteins|ouvre|ferme|monte|baisse|coupe|active|desactive|cree|ajoute|" +
+            "supprime|efface|archive|marque|enregistre|rappelle|programme|previens|dis|lis|resume|cherche|trouve|navigue|emmene|partage|imprime|range|" +
+            "trie|deplace|decale|annule|modifie|change|regle|fais|donne|montre|affiche|calcule|compare|verifie|demarre|arrete|relance|reveille)\\b")
+
+        internal fun demandeComposee(texte: String) = COMPOSEE.containsMatchIn(fr.dd.jarvis.societe.core.normaliser(texte))
+
+        /** Outils de LECTURE dont le résultat est rendu tel quel quand il suffit (planning, SMS, mails, listes…). */
+        internal val LECTURES_DIRECTES = setOf(
+            "get_planning", "heure_depart", "itineraire", "agendas_liste", "alarmes_liste", "conversations", "document_lire", "factures_impayees",
+            "journal_de_bord", "lire_notifications", "lire_sms", "memoire_apprentissages", "memoire_lire", "morning_briefing", "obsidian_fichiers",
+            "phone_health_report", "bilan_sante", "plex_bibliotheques", "plex_playlists", "plex_sessions", "plex_serveur", "rechercher_mails",
+            "rechercher_sms", "rechercher_videos_box", "societe_info_get", "societe_resultat", "stockage_telephone", "summarize_mails", "taches_lister",
+            "discord_roles", "discord_salons", "discord_guildes", "discord_membre_info", "discord_diagnostic", "applis_musique", "agents_centre",
+            "reserve_bilan", "analyser_planning_clients", "tournee_optimisee", "voir", "voir_ecran", "routines",
+        )
+
+        /** La demande attend-elle autre chose après le résultat direct de [outil] ? */
+        internal fun suiteAttendue(texte: String, outil: String): Boolean {
+            val n = fr.dd.jarvis.societe.core.normaliser(texte)
+            if (COMPOSEE.containsMatchIn(n)) return true
+            return outil in LECTURES_DIRECTES && ACTION_APRES_LECTURE.containsMatchIn(n)
+        }
         /** L'utilisateur veut une LISTE d'entités (inventaire), pas une valeur ni une action. */
         internal fun listeHaDemandee(texte: String): Boolean = Regex(
             "\\b(liste|lister|listes|inventaire|recense|recensement|quelles? (sont )?(les |mes )?entites|toutes? les entites|les entites|mes entites|" +
@@ -1078,6 +1109,8 @@ class Brain(
             val wifi = Regex("\\bwi ?fi\\b").containsMatchIn(n) && !Regex("freebox|box|reseau|mot de passe|connecte").containsMatchIn(n)
             val bt = Regex("\\bbluetooth\\b").containsMatchIn(n) && !Regex("apparei|connecte|associe").containsMatchIn(n)
             return when {
+                Regex("^(jarvis )?lumos( maxima)?$").matches(n) -> phone("torch_on")
+                Regex("^(jarvis )?nox$").matches(n) -> phone("torch_off")
                 torche && eteins.containsMatchIn(n) -> phone("torch_off")
                 torche && allume.containsMatchIn(n) -> phone("torch_on")
                 Regex("\\b(volume|son)\\b").containsMatchIn(n) && nombre != null && !Regex("\\b(alarme|reveil|sonnerie)\\b").containsMatchIn(n) -> phone("volume", nombre.toString())

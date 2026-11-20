@@ -163,6 +163,8 @@ object Systemes {
         l.indexOfFirst { s -> s.phrasesDesactiver.any { norm(it) == t } }.takeIf { it >= 0 }?.let { return it to false }
         l.indexOfFirst { s -> s.phrasesActiver.any { norm(it) == t } }.takeIf { it >= 0 }?.let { return it to true }
         if (t.split(' ').size > 14) return null
+        // Plusieurs actions (« éteins tout et active le mode nuit ») : le verbe d'une autre action ne doit pas décider.
+        if (fr.dd.jarvis.ai.Brain.decouperActions(texte).size >= 2) return null
         val desactiver = Regex("\\b(desactiv\\w*|coupe\\w*|arret\\w*|desarm\\w*|stop\\w*|quitt\\w*|sors|sortir|eteins|eteindre|termine\\w*|fin du)\\b").containsMatchIn(t)
         // « Mets le poêle en mode nuit » : le mode d'un APPAREIL, pas un mode de JARVIS (sauf si l'appareil fait partie de son nom).
         APPAREIL.findAll(t).map { it.value }.toList().takeIf { it.isNotEmpty() }?.let { appareils ->

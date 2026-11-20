@@ -32,6 +32,9 @@ object NavigationRdv {
     private val NAV = Regex("\\b(navigation|navigue|naviguer|nav|gps|itineraire|emmene|emmener|amene|amener|guide|guider|conduis|conduire|trajet|direction|waze|maps|" +
         "y aller|m y rendre|me rendre|aller (a|au|chez|vers|jusqu)|je vais (a|au|chez)|on va (a|au|chez)|route (vers|pour|jusqu))\\b")
     private val RDV = Regex("\\b(rendez vous|rendez|rdv|rendezvous|chantier|intervention|mission|visite|depannage|maintenance|client|cliente|prochain|suivant|premier|1er|deuxieme|second|2e|troisieme|3e|dernier)\\b")
+    /** Question (temps de trajet, heure de départ) ou modification de l'agenda (point GPS) : pas un guidage à lancer. */
+    private val PAS_GUIDAGE = Regex("\\b(combien de temps|combien de km|combien de kilometres|a quelle heure|quelle heure|quand|distance|duree|partir|depart|" +
+        "coordonnees|point gps|adresse gps|position gps|remplace|remplacer|modifie|modifier|change|changer|corrige|enregistre|ajoute|dans mon rendez vous|dans le rendez vous|dans mon agenda|dans l agenda)\\b")
     private val RANGS = listOf(
         Regex("\\b(premier|premiere|1er|1ere|1)\\b") to 1, Regex("\\b(deuxieme|second|seconde|2e|2eme|2)\\b") to 2,
         Regex("\\b(troisieme|3e|3eme|3)\\b") to 3, Regex("\\b(quatrieme|4e|4eme|4)\\b") to 4, Regex("\\b(cinquieme|5e|5eme|5)\\b") to 5,
@@ -52,7 +55,7 @@ object NavigationRdv {
     /** Demande de navigation vers un rendez-vous de l'agenda (texte brut), ou null. */
     fun demande(texte: String): Demande? {
         val n = normaliser(texte).replace(Regex("[?!.,;:]+"), " ").replace(Regex("\\s+"), " ").trim()
-        if (n.split(' ').size > 20 || !NAV.containsMatchIn(n)) return null
+        if (n.split(' ').size > 20 || !NAV.containsMatchIn(n) || PAS_GUIDAGE.containsMatchIn(n)) return null
         val chezClient = Regex("\\bchez (?!moi\\b|nous\\b)").containsMatchIn(n)
         if (!RDV.containsMatchIn(n) && !chezClient) return null
         val h = HEURE.find(n)

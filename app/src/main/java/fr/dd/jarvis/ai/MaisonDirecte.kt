@@ -390,10 +390,14 @@ object MaisonDirecte {
     // ------------------------------------------------------------------ aiguillage : la maison ne passe jamais par Hermès
 
     private val MAISON = Regex(
-        "t[ée]l[ée]\\b|\\btv\\b|t[ée]l[ée]vis|cha[iî]ne|lumi[èe]re|lampe|[ée]clairage|plafonnier|\\bspots?\\b|\\bvolets?\\b|\\bstores?\\b|rideaux?|" +
+        "t[ée]l[ée](?!\\p{L})|\\btv\\b|t[ée]l[ée]vis|cha[iî]ne|lumi[èe]re|lampe|[ée]clairage|plafonnier|\\bspots?\\b|\\bvolets?\\b|\\bstores?\\b|rideaux?|" +
             "\\bprises?\\b(?! de)|interrupteur|chauffage|po[eê]le|\\bpoils?\\b|granul[ée]s|thermostat|radiateur|\\bclim|ventilateur|\\bvmc\\b|portail|" +
             "porte (du |de )?garage|aspirateur|enceinte|barre de son|sc[èe]ne|ambiance|home ?assistant|domotique|capteur|d[ée]tecteur|" +
-            "temp[ée]rature (du|de la|dans|int[ée]rieure)|humidit[ée]|arrosage|piscine|hdmi|netflix sur|sur la t[ée]l[ée]|ventilo|" +
+            "temp[ée]rature (du|de la|dans|int[ée]rieure)|humidit[ée]|" +
+            // Température d'une pièce, entités et appareils indisponibles, « éteins tout » : Home Assistant, jamais Hermès.
+            "(temp[ée]rature|il fait combien|combien (de degr[ée]s|il fait))[^.?!]{0,20}\\b(dans|au|[àa]) (le |la |l.)?(salon|chambre|cuisine|maison|bureau|salle|s[ée]jour|" +
+            "garage|cave|grenier|v[ée]randa|[ée]tage|entr[ée]e|couloir|pi[èe]ces?|int[ée]rieur)|\\bentit[ée]s?\\b|" +
+            "(appareils?|capteurs?|[ée]quipements?)[^.?!]{0,25}(indisponibles?|injoignables?|hors ligne)|[ée]teins tout\\b|tout [ée]teindre|arrosage|piscine|hdmi|netflix sur|sur la t[ée]l[ée]|ventilo|" +
             // Photovoltaïque : seulement CELUI DE LA MAISON (« mes panneaux », « l'onduleur de la maison ») — sinon c'est
             // peut-être la société (clients, interventions) : voir [SOCIETE].
             "\\b(mes|nos) (panneaux|onduleurs?|batteries? solaires?|installation solaire)|(production|panneaux?|onduleur|consommation)[^.?!]{0,30}" +

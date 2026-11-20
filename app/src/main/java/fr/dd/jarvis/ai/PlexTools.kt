@@ -363,7 +363,9 @@ class PlexTools(private val app: JarvisApp, private val confirm: suspend (String
          * « reprends le film sur la télé », « arrête le film ». Renvoie (outil, arguments) ou null.
          */
         fun intention(texte: String): Pair<String, JSONObject>? {
-            val n = fr.dd.jarvis.societe.core.normaliser(texte).replace(POLI, "").trim()
+            val brut = fr.dd.jarvis.societe.core.normaliser(texte).trim()
+            if (Regex("^(?:jarvis )?(qu est ce qui|qu est ce qu il y a|qu y a t il|quoi|quels?|quelles?|qui|combien|y a t il|liste|montre|est ce qu il y a|est ce que (?!tu |vous ))\\b").containsMatchIn(brut)) return null
+            val n = brut.replace(POLI, "").trim()
             if (n.isBlank() || n.split(' ').size > 16 || PAS_PLEX.containsMatchIn(n)) return null
             val plex = MOT_PLEX.containsMatchIn(n)
             val appareil = Regex("\\bsur (.+)$").find(n)?.groupValues?.get(1)?.trim().orEmpty().removePrefix("plex").trim()

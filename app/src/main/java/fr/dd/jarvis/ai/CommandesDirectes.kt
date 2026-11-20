@@ -171,7 +171,7 @@ object CommandesDirectes {
         "(?:mets|met|cree|ajoute|programme|fais)(?: moi)? un rappel|un rappel|rappel) (.+)")
     // « lance l'itinéraire jusqu'à Dijon », « démarre le trajet vers Lyon », « itinéraire vers Beaune » : avant, sans le mot
     // « navigation », la demande partait au cerveau, qui calculait le trajet (outil itineraire) sans lancer le guidage.
-    private val R_NAV = motif("(?:emmene moi|emmene nous|amene moi|conduis moi|guide moi|guide nous|lance la navigation|demarre la navigation|lance le gps|navigation|navigue|" +
+    private val R_NAV = motif("(?:emmene moi|emmene nous|amene moi|ramene moi|ramene nous|conduis moi|guide moi|guide nous|lance la navigation|demarre la navigation|lance le gps|navigation|navigue|" +
         "(?:lance|relance|demarre|commence|active|mets|ouvre) (?:l |le |un |mon |la )?(?:itineraire|trajet|guidage|gps|route|navigation)|" +
         "itineraire(?= (?:vers|jusqu a|jusqu au|jusque|pour|direction|a|au) )|trajet(?= (?:vers|jusqu a|jusqu au|jusque|direction) )|" +
         "(?:lance|ouvre|demarre) (?:waze|google maps|maps))(?: (?:a|au|aux|vers|jusqu a|jusqu au|jusque|pour|en|direction|sur))* (.+)")
@@ -275,7 +275,7 @@ object CommandesDirectes {
         val texte = quoi.trim().trim(',', '.', ' ')
             .replace(Regex("^(?:de |d'|d’|qu'|qu’|que |qu |pour |a |à )", RegexOption.IGNORE_CASE), "").trim()
             .replace(Regex("(?:,?\\s*(?:s'il te pla[iî]t|stp|svp|merci))+$", RegexOption.IGNORE_CASE), "").trim().trimEnd('.', '!', ',')
-        if (texte.length < 2) return null
+        if (texte.length < 2 || Regex("(?i)\\b(de|du|des|d|a|à|au|aux|pour|le|la|les|l|en|sur|avec|et)$").containsMatchIn(texte)) return null
         val q = quandLisible(quand)
         if (fr.dd.jarvis.device.Rappels.interpreter(q, maintenant) == null) return null
         return Intention("rappel_creer", JSONObject().put("texte", texte.replaceFirstChar { it.uppercase() }).put("quand", q), "⏰ Rappel…", texteLibre = true)
@@ -285,6 +285,7 @@ object CommandesDirectes {
         val m = R_APPEL.matchEntire(p) ?: return null
         val n = m.n(1)
         val numero = Regex("^(?:le )?\\+?[\\d ]{2,20}$").matches(n)
+        if (!numero && Regex("\\b(dernier|derniere|numero|qui m a|client|rendez vous|rdv|chantier)\\b").containsMatchIn(n)) return null
         if (!numero && n.split(' ').size > 5 || Regex("^(moi|toi|nous|vous|lui|leur|les|me|te)\\b").containsMatchIn(n) ||
             Regex("\\b(pour|et|puis|si|quand|demain|ce soir|dans|plus tard|apres|avant|whatsapp|messenger|signal|skype|teams|discord|facetime|visio|video|haut parleur|que|qu)\\b|\\ba \\d").containsMatchIn(n) && !numero) return null
         val contact = m.de(o, 1)?.replace(Regex("(?i)^(le |la |l')(?=\\d)"), "") ?: return null
@@ -327,7 +328,7 @@ object CommandesDirectes {
         var lieu = ""
         if (r.isNotBlank()) {
             val l = Regex("^(?:a|au|aux|pour|sur|en|de|du|vers|dans|chez) (.+)$").matchEntire(r)?.groupValues?.get(1) ?: return null
-            if (l.split(' ').size > 4 || Regex("\\b(chantier|client|installation|rendez vous|rdv|prochain|serveur|salon|chambre|cuisine|maison du)\\b").containsMatchIn(l)) return null
+            if (l.split(' ').size > 4 || Regex("\\b(maison|interieur|dedans|pieces?|etage|grenier|cave|veranda|poele|chauffage|thermostat|chantier|client|installation|rendez vous|rdv|prochain|serveur|salon|chambre|cuisine|maison du)\\b").containsMatchIn(l)) return null
             lieu = l.split(' ').joinToString(" ") { w -> if (w in setOf("le", "la", "les", "de", "du", "des", "sur", "en", "l", "d")) w else w.replaceFirstChar { it.uppercase() } }
                 .replaceFirstChar { it.uppercase() }
         }
@@ -380,10 +381,16 @@ object CommandesDirectes {
         return Intention("jouer_musique", JSONObject().put("requete", requete).put("appli", appli), "🎵 Musique…")
     }
 
+    /** Appareils de la maison (Home Assistant) : « ouvre le portail », « lance l'aspirateur » ne sont pas des applications. */
+    private val APPAREIL_MAISON = Regex("\\b(portails?|volets?|stores?|portes?|garage|fenetres?|rideaux?|velux|baie|vannes?|arrosage|piscine|" +
+        "machine a laver|lave linge|lave vaisselle|seche linge|aspirateur|robot|tondeuse|four|hotte|lumieres?|lampes?|chauffage|clim|climatisation|poeles?|" +
+        "ventilateurs?|vmc|prises?|tele|television|tv|enceintes?|alarme de la maison)\\b")
+
     private fun ouvrir(o: String, p: String): Intention? {
         val m = R_OUVRE.matchEntire(p) ?: return null
         val n = m.n(1).replace(Regex("^(le|la|les|l|mon|ma|mes|un|une) "), "")
         if (n.isBlank() || n.split(' ').size > 4 || Regex("\\d|\\b(et|puis|sur|dans|pour)\\b").containsMatchIn(n)) return null
+        if (APPAREIL_MAISON.containsMatchIn(n)) return null
         val nom = m.de(o, 1)?.replace(Regex("(?i)^(le |la |les |l'|l’|mon |ma |mes |un |une )"), "") ?: return null
         return Intention("phone_action", JSONObject().put("action", "open_app").put("value", nom), "📱 Ouverture…", appli = nom)
     }
