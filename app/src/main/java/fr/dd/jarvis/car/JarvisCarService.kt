@@ -247,6 +247,10 @@ class ConversationVoiture private constructor(private val ctx: CarContext, priva
 
         fun ouvrir(ctx: CarContext, ecrans: androidx.car.app.ScreenManager) {
             courante?.fermer()
+            // Le bouton Android Auto démarre directement la capture (sans passer par le mot d'éveil du service).
+            // Ouvre donc la connexion Groq en arrière-plan pendant que l'utilisateur parle : Whisper réutilisera
+            // le canal TLS déjà établi au lieu d'attendre DNS + connexion + négociation TLS après la phrase.
+            fr.dd.jarvis.ai.Http.prechauffer()
             courante = ConversationVoiture(ctx, ecrans).also { it.ecouter(premiere = true) }
         }
     }
