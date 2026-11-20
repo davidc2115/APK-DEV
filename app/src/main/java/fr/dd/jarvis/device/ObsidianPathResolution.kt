@@ -35,8 +35,20 @@ internal object ObsidianPathResolution {
             return matches.singleOrNull()
         }
         unique(candidates.filter { it == wanted }, "nom exact")?.let { return it }
-        unique(candidates.filter { normalize(it) == normalize(wanted) }, "accents ou casse")?.let { return it }
-        return unique(candidates.filter { loose(it) == loose(wanted) }, "nom approché")
+
+        val normalizedMatches = candidates.filter { normalize(it) == normalize(wanted) }
+        val looseMatches = candidates.filter { loose(it) == loose(wanted) }
+        if (normalizedMatches.isNotEmpty()) {
+            // Une correspondance accent/casse n'est sûre que si aucun autre nom
+            // proche ne pourrait être confondu avec elle (ex. "Images" / "image").
+            if (looseMatches.size > 1) {
+                throw IllegalArgumentException(
+                    "Plusieurs éléments correspondent à « $wanted » (nom approché). Précise le chemin complet."
+                )
+            }
+            return normalizedMatches.singleOrNull()
+        }
+        return unique(looseMatches, "nom approché")
     }
 
 }
