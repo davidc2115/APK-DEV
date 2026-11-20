@@ -16,6 +16,31 @@ class ObsidianPathResolutionTest {
             if (word.length > 3 && (word.endsWith("s") || word.endsWith("x"))) word.dropLast(1) else word
         } }
 
+    @Test fun reconstruitUniquementLesEnfantsDirectsDepuisLIndexSaf() {
+        assertEquals(
+            listOf("coloriage" to true, "dessin.png" to false),
+            ObsidianPathResolution.directChildren(
+                "JARVIS/Images",
+                listOf(
+                    "JARVIS/Images/coloriage" to true,
+                    "JARVIS/Images/dessin.png" to false,
+                    "JARVIS/Images/coloriage/train" to true,
+                    "JARVIS/Images2/autre.png" to false
+                )
+            )
+        )
+    }
+
+    @Test fun reconstruitLesEnfantsDeLaRacineSansInclureLesSousDossiers() {
+        assertEquals(
+            listOf("JARVIS" to true, "note.md" to false),
+            ObsidianPathResolution.directChildren(
+                "",
+                listOf("JARVIS" to true, "JARVIS/Images" to true, "note.md" to false)
+            )
+        )
+    }
+
     @Test fun retrouveUnCheminCompletSousUnDossierParent() {
         val folders = listOf("JARVIS/Images", "JARVIS/Vidéos", "Documents")
         assertEquals(
