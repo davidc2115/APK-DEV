@@ -225,7 +225,7 @@ object MusiqueBibliotheque {
             "repeter_playlist", "repeat_all", "playlist" -> "playlist"
             else -> "aucune"
         }
-        if (!appliquerMode(c, aleatoire, repetition)) {
+        if (!appliquerMode(ctx, c, aleatoire, repetition)) {
             return "Le lecteur n'a pas confirmé la configuration des modes (API Android indisponible ou commande refusée)."
         }
         return when (m) {
