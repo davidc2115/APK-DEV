@@ -40,7 +40,8 @@ internal object HomeAssistantDiagnosticResume {
                 exemplesInconnus.forEach { add("- " + it) }
             }
             if (domaines.isNotEmpty()) add("Domaines concernés : " + domaines.entries.sortedByDescending { it.value }.take(8).joinToString(", ") { it.key + " (" + it.value + ")" })
-            if (indisponibles + inconnus > 24) add("Liste limitée aux 12 premiers éléments par état.")
+            val listeTronquee = indisponibles > exemplesIndisponibles.size || inconnus > exemplesInconnus.size
+            if (listeTronquee) add("Liste limitée aux 12 premiers éléments par état.")
         }
         return resume + if (details.isEmpty()) "" else "\n" + details.joinToString("\n")
     }
