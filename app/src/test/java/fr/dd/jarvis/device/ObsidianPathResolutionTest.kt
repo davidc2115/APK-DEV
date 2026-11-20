@@ -78,4 +78,18 @@ class ObsidianPathResolutionTest {
             )
         )
     }
+    @Test fun refuseDeChoisirUnePieceJointeHomonymeDansUnAutreDossier() {
+        try {
+            ObsidianPathResolution.uniqueNameMatch(
+                listOf("Clients/A/facture.pdf", "Interventions/B/facture.pdf"),
+                "facture",
+                { it.substringAfterLast('/').lowercase() },
+                { it.substringAfterLast('/').substringBeforeLast('.').lowercase() }
+            )
+            throw AssertionError("Deux fichiers homonymes ne doivent pas être départagés arbitrairement.")
+        } catch (e: IllegalArgumentException) {
+            assertEquals(true, e.message?.contains("Précise le chemin complet") == true)
+        }
+    }
+
 }
