@@ -339,18 +339,24 @@ class PhoneControl(private val ctx: Context) {
      * demande), ouverture de CE résultat dans l'appli, vérification sur la session média (relance « lecture » si l'appli
      * s'est ouverte en pause). Renvoie null si ça n'a pas pu aboutir (on retombe alors sur la méthode classique).
      */
-    fun jouerYtm(pkg: String, requete: String, nomDemande: String, resultat: YtMusique.Resultat? = null, radio: Boolean = false): String? {
+    fun jouerYtm(pkg: String, requete: String, nomDemande: String, resultat: YtMusique.Resultat? = null, radio: Boolean = false, mode: String = "normal"): String? {
         val nom = if (pkg == Musique.MORPHE_PACKAGE) YtMusique.NOM else nomDemande
         val liste = if (resultat != null) YtMusique.derniers else runCatching { YtMusique.rechercher(requete) }.getOrNull() ?: return null
         val choisi = (resultat ?: YtMusique.meilleur(requete, liste) ?: return null).let { YtMusique.completer(it) }
         val avant = session(pkg)?.let { titreDe(it) }
         if (!YtMusique.ouvrir(ctx, pkg, choisi, radio)) return null
         var c: android.media.session.MediaController? = null
+        var modeEnvoye = false
+        var modeResultat = ""
         val fin = System.currentTimeMillis() + 9000
         var relance = false
         while (System.currentTimeMillis() < fin) {
             Thread.sleep(600)
             c = session(pkg) ?: continue
+            if (!modeEnvoye) {
+                modeResultat = MusiqueBibliotheque.configurerMode(ctx, mode, pkg)
+                modeEnvoye = true
+            }
             val titre = titreDe(c)
             val change = titre != null && titre != avant
             if (joue(c) && (change || correspond(c, choisi.titre))) break
@@ -365,7 +371,8 @@ class PhoneControl(private val ctx: Context) {
         // Même si le lecteur n'a pas confirmé, on rend l'écran à JARVIS après avoir tenté la lecture.
         RetourJarvisMusique.afficher(ctx)
         return (if (joueBien) "🎵 En lecture dans $nom : ${choisi.ligne()}" + (c?.let { titreDe(it) }?.takeIf { it.isNotBlank() && !choisi.titre.contains(it, true) }?.let { "\n(lecteur : $it)" } ?: "")
-            else "🎵 J'ai ouvert ${choisi.ligne()} dans $nom" + (if (c == null) " (l'appli n'a pas encore confirmé la lecture)." else " ; la lecture n'est pas confirmée — appuie sur lecture si besoin.")) + suite
+            else "🎵 J'ai ouvert ${choisi.ligne()} dans $nom" + (if (c == null) " (l'appli n'a pas encore confirmé la lecture)." else " ; la lecture n'est pas confirmée — appuie sur lecture si besoin.")) +
+            (if (modeResultat.startsWith("Aucune") || modeResultat.startsWith("Le lecteur")) "" else "\\n$modeResultat") + suite
     }
 
     /** Titre en cours de lecture dans [pkg] (paquet ou nom d'appli), ou null si rien ne joue. */
