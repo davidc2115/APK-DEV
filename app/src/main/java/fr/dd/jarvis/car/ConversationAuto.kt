@@ -49,7 +49,7 @@ object ConversationAuto {
         val silence = app.store.silenceSec.value.coerceIn(4, 30) * 1000L
         var premiere = true
         var incompris = 0
-        app.chatCharger()
+        if (!app.chatLoaded) app.chatCharger()
         if (CarBridge.contexte().isEmpty()) app.chat.toList().takeLast(10).forEach { CarBridge.ajouter(it) }
         // Prépare le moteur et ses outils une seule fois par conversation voiture, pas à chaque phrase.
         val tools = ToolBox(app) { _, force -> !force }
