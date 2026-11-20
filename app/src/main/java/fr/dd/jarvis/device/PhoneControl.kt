@@ -372,7 +372,7 @@ class PhoneControl(private val ctx: Context) {
         RetourJarvisMusique.afficher(ctx)
         return (if (joueBien) "🎵 En lecture dans $nom : ${choisi.ligne()}" + (c?.let { titreDe(it) }?.takeIf { it.isNotBlank() && !choisi.titre.contains(it, true) }?.let { "\n(lecteur : $it)" } ?: "")
             else "🎵 J'ai ouvert ${choisi.ligne()} dans $nom" + (if (c == null) " (l'appli n'a pas encore confirmé la lecture)." else " ; la lecture n'est pas confirmée — appuie sur lecture si besoin.")) +
-            (if (modeResultat.startsWith("Aucune") || modeResultat.startsWith("Le lecteur")) "" else "\\n$modeResultat") + suite
+            (if (modeResultat.startsWith("Aucune") || modeResultat.startsWith("Le lecteur")) "" else "\n$modeResultat") + suite
     }
 
     /** Titre en cours de lecture dans [pkg] (paquet ou nom d'appli), ou null si rien ne joue. */
