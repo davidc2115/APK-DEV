@@ -340,7 +340,13 @@ class PhoneControl(private val ctx: Context) {
      * s'est ouverte en pause). Renvoie null si ça n'a pas pu aboutir (on retombe alors sur la méthode classique).
      */
     fun jouerYtm(pkg: String, requete: String, nomDemande: String, resultat: YtMusique.Resultat? = null, radio: Boolean = false, mode: String = "normal"): String? {
-        val liste = if (resultat != null) YtMusique.derniers else runCatching { YtMusique.rechercher(requete) }.getOrNull() ?: return null
+        val liste = if (resultat != null) YtMusique.derniers else try {
+            YtMusique.rechercher(requete)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            return null
+        }
         val choisi = (resultat ?: YtMusique.meilleur(requete, liste) ?: return null).let { YtMusique.completer(it) }
         val avant = session(pkg)?.let { titreDe(it) }
         if (!YtMusique.ouvrir(ctx, pkg, choisi, radio)) return null
