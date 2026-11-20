@@ -367,7 +367,8 @@ class PhoneControl(private val ctx: Context) {
         YtMusique.retenir(listOf(choisi))
         // Réponse volontairement minimale : l'utilisateur veut uniquement le titre et l'artiste,
         // pas le nom de l'application, le mode de lecture ni une liste de résultats secondaires.
-        val morceau = listOf(choisi.titre, choisi.sousTitre).filter { it.isNotBlank() }.joinToString(" — ")
+        val artiste = choisi.sousTitre.substringBefore(" • ").trim()
+        val morceau = listOf(choisi.titre, artiste).filter { it.isNotBlank() }.joinToString(" — ")
         if (joueBien) morceau else "$morceau (lecture non confirmée)"
     }
 
