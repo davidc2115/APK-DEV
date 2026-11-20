@@ -196,7 +196,9 @@ class MicroVoiture(private val ctx: CarContext) {
         while (true) {
             if (arret) return Ecoute.Annulee
             val n = lire(buf)
-            if (n < 0) { if (lus == 0L) return Ecoute.Erreur("flux du micro fermé"); break }
+            // Un flux qui se ferme avant la fin de phrase n'est pas un silence utilisateur.
+            // Signaler l'erreur permet à ecouter() d'essayer le micro du téléphone si c'est le micro voiture.
+            if (n < 0) return Ecoute.Erreur("flux du micro fermé (lecture interrompue après $lus octets)")
             lus += n
             if (n > 0) tout.write(buf, 0, n)
             var i = 0
