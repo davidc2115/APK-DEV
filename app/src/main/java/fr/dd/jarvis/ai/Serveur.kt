@@ -763,7 +763,7 @@ object Serveur {
      * Position d'une personne suivie par Home Assistant (entités person.* et device_tracker.*) : zone, coordonnées
      * GPS, adresse précise, précision, fraîcheur, distance, lien de carte. Dit clairement quand la position est inconnue.
      */
-    suspend fun haPosition(app: JarvisApp, nom: String): String {
+    suspend fun haPosition(app: JarvisApp, nom: String, concise: Boolean = false): String {
         val arr = JSONArray(ha(app, "GET", "/api/states"))
         val toutes = (0 until arr.length()).map { arr.getJSONObject(it) }
         val suivis = toutes.filter { it.getString("entity_id").startsWith("person.") || it.getString("entity_id").startsWith("device_tracker.") }
@@ -777,11 +777,11 @@ object Serveur {
         val choisies = idx.map { suivis[it] }.sortedBy { if (it.getString("entity_id").startsWith("person.")) 0 else 1 }.take(if (nom.isBlank()) 6 else 1)
         val moi = runCatching { fr.dd.jarvis.device.Locator.point(app) }.getOrNull()
         val fiches = mutableListOf<String>()
-        for (o in choisies) fiches += fichePosition(app, o, toutes, moi)
+        for (o in choisies) fiches += fichePosition(app, o, toutes, moi, concise)
         return fiches.joinToString("\n\n")
     }
 
-    private suspend fun fichePosition(app: JarvisApp, o: JSONObject, toutes: List<JSONObject>, moi: fr.dd.jarvis.societe.Geo.Point?): String {
+    private suspend fun fichePosition(app: JarvisApp, o: JSONObject, toutes: List<JSONObject>, moi: fr.dd.jarvis.societe.Geo.Point?, concise: Boolean = false): String {
         val a = o.optJSONObject("attributes") ?: JSONObject()
         val nom = a.optString("friendly_name").ifBlank { o.getString("entity_id") }
         val etat = o.optString("state")
@@ -796,6 +796,13 @@ object Serveur {
             "not_home" -> "🚶 absent·e (hors des zones connues)"
             "unknown", "unavailable", "" -> "❓ position inconnue pour Home Assistant"
             else -> "📍 zone « $etat »"
+        }
+        if (concise) {
+            val localisation = if (!lat.isNaN() && !lon.isNaN()) {
+                val p = fr.dd.jarvis.societe.Geo.Point(lat, lon)
+                runCatching { fr.dd.jarvis.societe.Geo.adresseDe(p)?.libelle }.getOrNull()?.takeIf { it.isNotBlank() } ?: zone
+            } else zone
+            return "📍 $nom : $localisation"
         }
         val maj = runCatching { java.time.OffsetDateTime.parse(o.optString("last_updated")).toInstant().toEpochMilli() }.getOrNull()
         val age = maj?.let { val m = (System.currentTimeMillis() - it) / 60_000; when { m < 1 -> "à l'instant"; m < 60 -> "il y a $m min"; m < 1440 -> "il y a ${m / 60} h"; else -> "il y a ${m / 1440} j" } }
