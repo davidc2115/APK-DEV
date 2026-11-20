@@ -367,7 +367,7 @@ class PhoneControl(private val ctx: Context) {
         // pas le nom de l'application, le mode de lecture ni une liste de résultats secondaires.
         val artiste = choisi.sousTitre.substringBefore(" • ").trim()
         val morceau = listOf(choisi.titre, artiste).filter { it.isNotBlank() }.joinToString(" — ")
-        if (joueBien) morceau else "$morceau (lecture non confirmée)"
+        return if (joueBien) morceau else "$morceau (lecture non confirmée)"
     }
 
     /** Titre en cours de lecture dans [pkg] (paquet ou nom d'appli), ou null si rien ne joue. */
