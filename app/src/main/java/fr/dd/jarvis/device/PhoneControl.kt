@@ -273,21 +273,14 @@ class PhoneControl(private val ctx: Context) {
             }
         }
         if (etat == "lecture") {
-            // Visuel : si l'appli de musique est à l'écran, capture du lecteur jointe à la réponse.
-            val visuel = runCatching {
-                val svc = fr.dd.jarvis.service.JarvisAccessibilityService.instance
-                if (svc?.rootInActiveWindow?.packageName?.toString() == pkg) {
-                    Thread.sleep(1200)
-                    svc.capture()?.let { b -> PiloteEcran.enregistrer(ctx.applicationContext as fr.dd.jarvis.JarvisApp, b, "musique") }
-                } else null
-            }.getOrNull()
-            val titre = session(pkg)?.let { titreDe(it) }
-            val confirmation = "🎵 « $requete » est en cours de lecture dans $nom (en arrière-plan)." +
-                (if (!titre.isNullOrBlank()) "\nTitre affiché par le lecteur : $titre" else "") +
-                (if (visuel != null) "\n\n![Lecteur](jarvis-img:$visuel)" else "")
-            // Lecture confirmée : revenir à JARVIS (et au mode Présence s'il était actif) sans arrêter la musique.
+            val metadata = session(pkg)?.metadata
+            val titre = metadata?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE).orEmpty().trim()
+            val artiste = (metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST)
+                ?: metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM_ARTIST)).orEmpty().trim()
+            val morceau = listOf(titre, artiste).filter { it.isNotBlank() }.joinToString(" — ")
+            // Réponse minimale et vérifiée : aucun nom d’application, commentaire, capture d’écran ou détail secondaire.
             RetourJarvisMusique.afficher(ctx)
-            return confirmation
+            return morceau.ifBlank { "Lecture lancée (titre et artiste non fournis par le lecteur)." }
         }
         // Beaucoup d'applis tierces (YouTube Music, Spotify, Deezer…) n'implémentent pas vraiment playFromSearch() : la session existe
         // mais ignore la recherche demandée. Plutôt que de laisser l'ancien titre tourner sans rien faire, on ouvre directement l'écran
@@ -306,12 +299,12 @@ class PhoneControl(private val ctx: Context) {
             if (err.isNotBlank()) err = start(Intent.ACTION_VIEW, rechercheUrl(requete), null)
             if (err.isBlank()) {
                 RetourJarvisMusique.afficher(ctx)
-                return "🔎 $nom ne confirme pas la lecture à distance de « $requete » : j'ai ouvert sa recherche avec ce titre déjà affiché, il ne reste plus qu'à appuyer sur lecture."
+                return "Lecture non confirmée : « $requete » est affiché dans la recherche."
             }
         }
         return when (etat) {
-            "session" -> "🎵 J'ai demandé la lecture de « $requete » dans $nom, mais je n'ai pas pu confirmer qu'elle a démarré. Si rien ne joue, ouvre $nom et lance un titre une fois à la main (première utilisation)."
-            else -> "⚠️ Je n'ai pas trouvé la session de lecture de $nom (l'appli met parfois quelques secondes, ou doit être connectée/ouverte manuellement une première fois). Réessaie, ou ouvre $nom toi-même une fois."
+            "session" -> "Lecture non confirmée : « $requete »."
+            else -> "Impossible de confirmer la lecture demandée."
         }
     }
 
