@@ -535,6 +535,10 @@ class Brain(
                     if (args == null) ToolResult("❌ Arguments incomplets ou illisibles (réponse coupée) : l'outil n'a PAS été exécuté. Renvoie l'appel avec des arguments JSON complets.")
                     else if (name in retires) ToolResult(if (name.startsWith("ssh") || name == "serveur_diagnostic") "Pour Home Assistant, utilise l'API (ha_entites, ha_etat, ha_service, ha_config, ha_dashboard, ha_admin), pas le SSH." else "Outil indisponible ici.")
                     else tools.execute(name, args)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    // Ne jamais convertir une annulation en simple résultat d'outil : cela avalerait
+                    // l'annulation structurée et laisserait le service croire que la demande travaille encore.
+                    throw e
                 } catch (e: ApiException) {
                     ToolResult("Erreur du service IA : ${e.message}")
                 } catch (e: Exception) {
