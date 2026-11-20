@@ -364,15 +364,11 @@ class PhoneControl(private val ctx: Context) {
             if (!joue(c) && change && !relance && System.currentTimeMillis() > fin - 6000) { runCatching { c.transportControls.play() }; relance = true }
         }
         val joueBien = c != null && joue(c)
-        val autres = liste.filter { it.cle() != choisi.cle() && it.type != YtMusique.Type.AUTRE }.take(4)
-        val suite = if (autres.isEmpty()) "" else "\nAutres résultats (dis « mets le 2 », etc.) :\n" +
-            autres.mapIndexed { i, r -> "${i + 2}. ${r.ligne()}" }.joinToString("\n")
-        YtMusique.retenir(listOf(choisi) + autres)
-        // Même si le lecteur n'a pas confirmé, on rend l'écran à JARVIS après avoir tenté la lecture.
-        RetourJarvisMusique.afficher(ctx)
-        return (if (joueBien) "🎵 En lecture dans $nom : ${choisi.ligne()}" + (c?.let { titreDe(it) }?.takeIf { it.isNotBlank() && !choisi.titre.contains(it, true) }?.let { "\n(lecteur : $it)" } ?: "")
-            else "🎵 J'ai ouvert ${choisi.ligne()} dans $nom" + (if (c == null) " (l'appli n'a pas encore confirmé la lecture)." else " ; la lecture n'est pas confirmée — appuie sur lecture si besoin.")) +
-            (if (modeResultat.startsWith("Aucune") || modeResultat.startsWith("Le lecteur")) "" else "\n$modeResultat") + suite
+        YtMusique.retenir(listOf(choisi))
+        // Réponse volontairement minimale : l'utilisateur veut uniquement le titre et l'artiste,
+        // pas le nom de l'application, le mode de lecture ni une liste de résultats secondaires.
+        val morceau = listOf(choisi.titre, choisi.sousTitre).filter { it.isNotBlank() }.joinToString(" — ")
+        if (joueBien) morceau else "$morceau (lecture non confirmée)"
     }
 
     /** Titre en cours de lecture dans [pkg] (paquet ou nom d'appli), ou null si rien ne joue. */
