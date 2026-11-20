@@ -116,6 +116,86 @@ object PoeleDirect {
         "silencieux du TÉLÉPHONE. Son mode silence / nuit / natural se règle dans Home Assistant (ha_entites puis ha_service sur " +
         "l'entité de cet appareil) ; pour l'allumer ou l'éteindre, vise son entité climate.*."
 
+    // ------------------------------------------------------------------ lecture : température et état des poêles
+
+    data class Lecture(val lieu: List<String>)
+
+    private val VALEUR = Regex("\\b(temperatures?|temp|degres?|chaud|froid|consignes?|etats?|statut|il fait|ca donne|combien)\\b")
+    private val QUESTION_ETAT = Regex("\\b(est ce que|est il|sont ils|est elle|tourne|marche|allumes?|eteints?|en route|en chauffe|chauffe t il)\\b")
+    private val ACTION = Regex("\\b(mets?|met|mettre|regle|regler|passe|passer|monte|monter|baisse|baisser|augmente|augmenter|diminue|diminuer|fixe|fixer|" +
+        "programme|programmer|eteins|eteindre|coupe|couper|rallume|rallumer|relance|relancer|lance|lancer|demarre|demarrer|arrete|arreter|active|desactive|change|changer)\\b")
+    private val VIDES_LECTURE = VIDES + setOf("quelle", "quel", "quelles", "quels", "est", "sont", "ce", "que", "qu", "il", "elle", "ils", "fait", "donne",
+        "temperature", "temperatures", "temp", "degres", "degre", "chaud", "froid", "consigne", "consignes", "etat", "etats", "statut", "combien",
+        "allume", "allumes", "eteint", "eteints", "tourne", "marche", "route", "chauffe", "actuelle", "actuellement", "maintenant", "donne", "dis", "moi",
+        "ca", "y", "t", "quoi", "comment", "va", "vont")
+
+    /** « Quelle est la température de mes poêles ? », « le poêle de l'étage est allumé ? » (texte brut), ou null. */
+    fun lecture(texte: String): Lecture? {
+        val brut = texte.trim()
+        val n = normaliser(brut).replace(Regex("[?!.,;:]+"), " ").replace(Regex("\\s+"), " ").trim()
+        if (n.split(' ').size > 16 || !POELE.containsMatchIn(n)) return null
+        if (ACTION.containsMatchIn(n) || Regex("\\d").containsMatchIn(n)) return null
+        val valeur = VALEUR.containsMatchIn(n)
+        val etat = (brut.endsWith("?") || n.startsWith("est ce")) && QUESTION_ETAT.containsMatchIn(n)
+        if (!valeur && !etat) return null
+        val lieu = n.split(' ').filter { it.length >= 2 && it !in VIDES_LECTURE && !POELE.matches(it) }
+        if (lieu.size > 3) return null
+        return Lecture(lieu)
+    }
+
+    private fun nombre(x: Double): String = if (x == Math.floor(x)) x.toLong().toString() else String.format(java.util.Locale.FRANCE, "%.1f", x)
+
+    /** Une ligne lisible pour un poêle (entité climate) : température mesurée, consigne, marche. */
+    internal fun ligneClimat(o: JSONObject): String {
+        val a = o.optJSONObject("attributes") ?: JSONObject()
+        val nom = a.optString("friendly_name").ifBlank { o.optString("entity_id") }
+        val etat = o.optString("state")
+        if (etat == "unavailable" || etat == "unknown") return "🔥 $nom : indisponible dans Home Assistant"
+        val mesure = a.optDouble("current_temperature").takeIf { !it.isNaN() }
+        val consigne = a.optDouble("temperature").takeIf { !it.isNaN() }
+        val marche = when (a.optString("hvac_action")) {
+            "heating" -> "en chauffe"; "idle" -> "au repos"; "off" -> "éteint"; "fan" -> "ventilation"
+            else -> when (etat) { "off" -> "éteint"; "heat", "auto", "heat_cool" -> "allumé"; else -> etat }
+        }
+        val details = listOfNotNull(consigne?.let { "consigne ${nombre(it)} °C" }, marche.takeIf { it.isNotBlank() }).joinToString(", ")
+        return "🔥 $nom : " + (mesure?.let { "${nombre(it)} °C" } ?: "température non fournie") + (if (details.isNotBlank()) " ($details)" else "")
+    }
+
+    /** Température / état des poêles (au lieu demandé), lus dans Home Assistant ; null si aucun poêle trouvé. */
+    internal fun lire(toutes: List<JSONObject>, l: Lecture, notees: List<String> = emptyList()): String? {
+        val parId = toutes.associateBy { it.optString("entity_id") }
+        val paires = toutes.map { it.optString("entity_id") to it.optJSONObject("attributes")?.optString("friendly_name").orEmpty() }
+        fun nomDe(id: String) = parId[id]?.optJSONObject("attributes")?.optString("friendly_name").orEmpty()
+        val marques = Regex("\\b(mcz|maestro|palazzetti|edilkamin|rika|extraflame|ravelli|micronova|fumis|cadel|laminox|piazzetta)\\b")
+        fun estPoele(id: String) = POELE.containsMatchIn(texte(id, nomDe(id))) || marques.containsMatchIn(texte(id, nomDe(id)))
+        val climats = notees.filter { it.startsWith("climate.") && it in parId }.ifEmpty {
+            paires.filter { (id, _) -> id.startsWith("climate.") && estPoele(id) }.map { it.first }
+        }
+        val auLieu = if (l.lieu.isEmpty()) climats else climats.filter { lieuOk(texte(it, nomDe(it)), l.lieu) }
+        if (auLieu.isNotEmpty()) return auLieu.sorted().joinToString("\n") { ligneClimat(parId.getValue(it)) }
+        // Pas d'entité climate : capteurs de température du poêle (sensor.*), jamais un mode.
+        val capteurs = paires.filter { (id, nom) ->
+            id.startsWith("sensor.") && estPoele(id) && !MODE.containsMatchIn(texte(id, nom)) &&
+                (Regex("\\b(temp\\w*)\\b").containsMatchIn(texte(id, nom)) || parId[id]?.optJSONObject("attributes")?.optString("device_class") == "temperature")
+        }.map { it.first }.filter { l.lieu.isEmpty() || lieuOk(texte(it, nomDe(it)), l.lieu) }
+        if (capteurs.isEmpty()) return null
+        return capteurs.sorted().take(8).joinToString("\n") { id ->
+            val o = parId.getValue(id); val a = o.optJSONObject("attributes")
+            "🌡️ ${a?.optString("friendly_name").orEmpty().ifBlank { id }} : ${o.optString("state")}${a?.optString("unit_of_measurement")?.let { " $it" }.orEmpty()}"
+        }
+    }
+
+    /** Répond à la lecture ; null si ce n'en est pas une ou si aucun poêle n'est trouvé (le cerveau reprend). */
+    suspend fun executerLecture(app: JarvisApp, texte: String): String? {
+        val l = lecture(texte) ?: return null
+        if (!Serveur.haConfigure(app)) return null
+        val arr = JSONArray(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Serveur.ha(app, "GET", "/api/states") })
+        val toutes = (0 until arr.length()).map { arr.getJSONObject(it) }
+        val notees = runCatching { fr.dd.jarvis.device.Carnet.entitesNotees(app, "poele " + l.lieu.joinToString(" ")) }.getOrDefault(emptyList()).map { it.first }
+        fr.dd.jarvis.voice.JournalVoix.noter("maison", "poêle : lecture ${l.lieu}")
+        return lire(toutes, l, notees)
+    }
+
     private val SYNONYMES_MODE = listOf(setOf("nuit", "night", "sleep"), setOf("silence", "silent", "silencieux"),
         setOf("natural", "naturel", "nature"), setOf("eco", "economique"), setOf("confort", "comfort"), setOf("chrono", "crono", "programme"))
 

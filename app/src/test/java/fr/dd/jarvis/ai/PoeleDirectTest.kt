@@ -61,4 +61,39 @@ class PoeleDirectTest {
         assertTrue(!PoeleDirect.visePasLeTelephone("mets le téléphone en silencieux"))
         assertTrue(!PoeleDirect.visePasLeTelephone("active le mode ne pas déranger"))
     }
+
+    private fun climat(id: String, nom: String, etat: String, mesure: Double?, consigne: Double?, action: String?) = JSONObject()
+        .put("entity_id", id).put("state", etat).put("attributes", JSONObject().put("friendly_name", nom).apply {
+            mesure?.let { put("current_temperature", it) }; consigne?.let { put("temperature", it) }; action?.let { put("hvac_action", it) }
+        })
+
+    @Test fun lectureDesTemperatures() {
+        assertNotNull(PoeleDirect.lecture("Quelle est la température de mes poêles ?"))
+        assertEquals(listOf("etage"), PoeleDirect.lecture("la température du poêle de l'étage")!!.lieu)
+        assertNotNull(PoeleDirect.lecture("est-ce que le poêle du salon est allumé ?"))
+        assertNull(PoeleDirect.lecture("mets le poêle à 21 degrés"))
+        assertNull(PoeleDirect.lecture("rallume mon poêle à l'étage"))
+        assertNull(PoeleDirect.lecture("quelle température fait-il dehors ?"))
+        assertNull(PoeleDirect.demande("Quelle est la température de mes poêles ?"))
+        assertNull(CommandesDirectes.intention("Quelle est la température de mes poêles ?"))
+
+        val etats = listOf(
+            climat("climate.poele_etage", "Poêle étage", "heat", 21.5, 22.0, "heating"),
+            climat("climate.poele_salon", "Poêle salon", "off", 19.0, 20.0, "off"),
+            JSONObject().put("entity_id", "switch.poele_etage_mode_nuit").put("state", "off").put("attributes", JSONObject().put("friendly_name", "Poêle étage Mode nuit")),
+        )
+        val tout = PoeleDirect.lire(etats, PoeleDirect.lecture("Quelle est la température de mes poêles ?")!!)!!
+        assertTrue(tout, tout.contains("Poêle étage : 21,5 °C (consigne 22 °C, en chauffe)"))
+        assertTrue(tout, tout.contains("Poêle salon : 19 °C (consigne 20 °C, éteint)"))
+        assertTrue(tout, !tout.contains("Mode nuit"))
+        val haut = PoeleDirect.lire(etats, PoeleDirect.lecture("la température du poêle de l'étage ?")!!)!!
+        assertTrue(haut, haut.contains("étage") && !haut.contains("salon"))
+    }
+
+    @Test fun listeSeulementSiDemandee() {
+        assertTrue(!Brain.listeHaDemandee("Quelle est la température de mes poêles ?"))
+        assertTrue(Brain.listeHaDemandee("liste les entités du poêle"))
+        assertTrue(Brain.listeHaDemandee("quelles sont les entités indisponibles"))
+        assertTrue(Serveur.valeursClimat(climat("climate.poele_etage", "Poêle étage", "heat", 21.5, 22.0, "heating")).contains("mesurée 21,5 °C"))
+    }
 }

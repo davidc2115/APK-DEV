@@ -305,6 +305,11 @@ class Brain(
                 onStatus("🏠 Maison…")
                 runCatching { MaisonDirecte.executerLumiere(app, texteUser) }.getOrNull()?.let { return reflexeMaison(it) }
             }
+            // Température / état des poêles : les vraies valeurs (climate), pas la liste des entités « poêle ».
+            if (!pourSociete && PoeleDirect.lecture(texteUser) != null) {
+                onStatus("🔥 Poêle…")
+                runCatching { PoeleDirect.executerLecture(app, texteUser) }.getOrNull()?.let { return reflexeMaison(it) }
+            }
             // Actions courantes reconnues sans IA (alarme, minuteur, appel, SMS, appli, météo, planning, rappel…).
             CommandesDirectes.intention(texteUser)?.let { i ->
                 onStatus(i.statut)
@@ -599,7 +604,9 @@ class Brain(
                 )
                 // Un résultat « direct » (liste d'entités…) n'est rendu tel quel que si l'utilisateur voulait cette liste : s'il
                 // demandait une action (« baisse le son de la télé »), le modèle s'en sert pour agir ; s'il est vide, pour réessayer.
-                if (res.direct && !(name == "ha_entites" && (res.text.startsWith("Aucune") || ACTION_DOMOTIQUE.containsMatchIn(texteUser))))
+                // La liste brute des entités n'est rendue telle quelle que si l'utilisateur demandait une LISTE : pour une
+                // valeur (« la température de mes poêles ») ou une action, le modèle lit les vraies valeurs puis répond.
+                if (res.direct && !(name == "ha_entites" && (res.text.startsWith("Aucune") || ACTION_DOMOTIQUE.containsMatchIn(texteUser) || !listeHaDemandee(texteUser))))
                     direct.append(res.text).append("\n\n")
             }
             if (direct.isNotEmpty()) { sortieDirecte = true; return direct.toString().trim() }
@@ -924,6 +931,12 @@ class Brain(
     }
 
     companion object {
+        /** L'utilisateur veut une LISTE d'entités (inventaire), pas une valeur ni une action. */
+        internal fun listeHaDemandee(texte: String): Boolean = Regex(
+            "\\b(liste|lister|listes|inventaire|recense|recensement|quelles? (sont )?(les |mes )?entites|toutes? les entites|les entites|mes entites|" +
+                "quels? (sont )?(les |mes )?(appareils|capteurs|interrupteurs|lumieres)|montre (moi )?(les|mes|toutes?)|affiche (les|mes|toutes?)|" +
+                "indisponibles?|injoignables?|hors ligne|combien d (entites|appareils|capteurs))\\b"
+        ).containsMatchIn(fr.dd.jarvis.societe.core.normaliser(texte))
         /** Outils de pure LECTURE (aucun effet, aucune confirmation) : plusieurs à la fois peuvent partir en parallèle. */
         internal val LECTURES = setOf(
             "get_planning", "agendas_liste", "rechercher_mails", "summarize_mails", "lire_sms", "rechercher_sms", "search_contacts",

@@ -756,6 +756,20 @@ object Serveur {
         }
     }
 
+    /** Valeurs d'un thermostat / poêle (climate, chauffe-eau) que l'état seul (« heat ») ne dit pas : mesure, consigne, marche. */
+    internal fun valeursClimat(o: JSONObject): String {
+        val id = o.optString("entity_id")
+        if (!id.startsWith("climate.") && !id.startsWith("water_heater.")) return ""
+        val a = o.optJSONObject("attributes") ?: return ""
+        fun n(x: Double) = if (x == Math.floor(x)) x.toLong().toString() else String.format(java.util.Locale.FRANCE, "%.1f", x)
+        val l = listOfNotNull(
+            a.optDouble("current_temperature").takeIf { !it.isNaN() }?.let { "mesurée ${n(it)} °C" },
+            a.optDouble("temperature").takeIf { !it.isNaN() }?.let { "consigne ${n(it)} °C" },
+            a.optString("hvac_action").takeIf { it.isNotBlank() }?.let { "action $it" },
+        )
+        return if (l.isEmpty()) "" else " · " + l.joinToString(" · ")
+    }
+
     fun haEntites(app: JarvisApp, recherche: String, domaine: String, decalage: Int = 0, limite: Int = 100, etat: String = ""): String {
         val termeRechercheNormalise = fr.dd.jarvis.societe.core.normaliser(recherche)
         val filtreImplicitementDansRecherche = recherche.takeIf { termeRechercheNormalise in setOf("indisponible", "injoignable", "hors ligne", "offline", "deconnecte", "deconnectee", "unavailable", "inconnu", "unknown", "etat inconnu", "indisponible ou inconnu", "injoignable ou inconnu", "tous les problemes") }
@@ -795,7 +809,7 @@ object Serveur {
         val suite = if (fin < l.size) "\n\nIl reste ${l.size - fin} entité(s). Pour continuer, rappelle ha_entites avec decalage=$fin et la même recherche/domaine." else "\n\nToutes les entités correspondant au filtre ont été parcourues."
         return blocNotes + "# 🏠 Entités : ${l.size} résultat(s) · affichage ${if (page.isEmpty()) 0 else debut + 1}–$fin\n\n" + page.joinToString("\n") { o ->
             val a = o.optJSONObject("attributes"); val unit = a?.optString("unit_of_measurement").orEmpty()
-            "- `${o.getString("entity_id")}` · ${a?.optString("friendly_name").orEmpty()} : **${o.getString("state")}$unit**"
+            "- `${o.getString("entity_id")}` · ${a?.optString("friendly_name").orEmpty()} : **${o.getString("state")}$unit**" + valeursClimat(o)
         } + suite
     }
 
