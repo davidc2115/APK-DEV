@@ -19,7 +19,11 @@ class MusicTools(private val app: JarvisApp) {
             val s = java.text.Normalizer.normalize(brut.lowercase(java.util.Locale.ROOT), java.text.Normalizer.Form.NFD)
                 .replace(Regex("\\p{M}+"), "").replace(' ', '_').replace('-', '_')
             return when {
-                s in setOf("aleatoire", "shuffle", "melange", "melanger", "au_hasard") -> "aleatoire"
+                s.contains("aleatoire") || s.contains("shuffle") || s.contains("melange") || s.contains("hasard") -> "aleatoire"
+                (s.contains("repeter") || s.contains("repeat") || s.contains("boucle")) &&
+                    (s.contains("titre") || s.contains("morceau") || s.contains("chanson") || s.contains("une_seule") || s.contains("one") || s.contains("track")) -> "repeter_titre"
+                (s.contains("repeter") || s.contains("repeat") || s.contains("boucle")) &&
+                    (s.contains("playlist") || s.contains("liste") || s.contains("tout") || s.contains("all")) -> "repeter_playlist"
                 s in setOf("repeter_titre", "repeat_one", "repeat_track", "une_chanson", "un_titre", "titre") -> "repeter_titre"
                 s in setOf("repeter_playlist", "repeat_all", "repeat_playlist", "toute_la_playlist", "playlist", "tout") -> "repeter_playlist"
                 else -> "normal"
@@ -77,7 +81,7 @@ class MusicTools(private val app: JarvisApp) {
                 .put("radio", prop("oui pour la radio du titre.")).put("mode", prop("normal | aleatoire | repeter_titre | repeter_playlist (défaut normal)."))).put("required", JSONArray().put("numero")))),
         JSONObject().put("type", "function").put("function", JSONObject()
             .put("name", "musique_bibliotheque")
-            .put("description", "Bibliothèque PERSONNELLE de YT Music Morphe. À utiliser impérativement pour les demandes de lecture de bibliothèque, notamment « lis ma bibliothèque J'aime », « lance mes titres aimés », « mets ma playlist … », « lis mes albums ». section = jaime pour J'aime/titres aimés/favoris, sinon playlists, titres, albums, artistes ou telechargements. Sans nom : pour J'aime, lance toute la liste ; pour les autres sections, affiche les éléments. Avec nom : lance cet élément. Ne réponds jamais que la lecture a démarré sans confirmation du lecteur.")
+            .put("description", "Bibliothèque PERSONNELLE de YT Music Morphe. À utiliser impérativement pour les demandes de lecture de bibliothèque, notamment « lis ma bibliothèque J'aime », « lance mes titres aimés », « mets ma playlist … », « lis mes albums ». section = jaime pour J'aime/titres aimés/favoris, sinon playlists, titres, albums, artistes ou telechargements. Sans nom : pour J'aime, lance toute la liste ; pour les autres sections, affiche les éléments. Avec nom : lance cet élément. mode=normal par défaut (ordre d'origine, shuffle désactivé), aleatoire, repeter_titre (boucle sur un morceau) ou repeter_playlist (boucle sur toute la liste). Ne réponds jamais que la lecture a démarré sans confirmation du lecteur.")
             .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject().put("section", prop("jaime | playlists | titres | albums | artistes | telechargements"))
                 .put("nom", prop("Élément à lancer (facultatif)."))
                 .put("aleatoire", prop("Ancien paramètre compatible : oui pour la lecture aléatoire.")).put("mode", prop("normal | aleatoire | repeter_titre | repeter_playlist (défaut normal)."))).put("required", JSONArray().put("section")))),
