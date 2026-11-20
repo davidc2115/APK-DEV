@@ -767,15 +767,15 @@ object Serveur {
         val arr = JSONArray(ha(app, "GET", "/api/states"))
         val toutes = (0 until arr.length()).map { arr.getJSONObject(it) }
         val suivis = toutes.filter { it.getString("entity_id").startsWith("person.") || it.getString("entity_id").startsWith("device_tracker.") }
-        if (suivis.isEmpty()) return "Home Assistant ne suit aucune personne (aucune entité person.* ni device_tracker.*). Je ne peux donc pas dire où elle se trouve."
+        if (suivis.isEmpty()) return if (concise) "📍 Position indisponible." else "Home Assistant ne suit aucune personne (aucune entité person.* ni device_tracker.*). Je ne peux donc pas dire où elle se trouve."
         val paires = suivis.map { it.getString("entity_id") to it.optJSONObject("attributes")?.optString("friendly_name").orEmpty() }
         val personnes = suivis.filter { it.getString("entity_id").startsWith("person.") }
         val idx = if (nom.isBlank()) personnes.map { suivis.indexOf(it) } else filtrerEntites(paires, nom, "").ifEmpty { proches(paires, nom, 3) }
-        if (idx.isEmpty()) return "Je ne trouve personne nommé « $nom » dans Home Assistant. Personnes suivies : " +
+        if (idx.isEmpty()) return if (concise) "📍 Position de $nom indisponible." else "Je ne trouve personne nommé « $nom » dans Home Assistant. Personnes suivies : " +
             personnes.joinToString(", ") { it.optJSONObject("attributes")?.optString("friendly_name").orEmpty().ifBlank { it.getString("entity_id") } }.ifBlank { "aucune" } + "."
         // Une personne (person.*) plutôt que l'un de ses appareils.
         val choisies = idx.map { suivis[it] }.sortedBy { if (it.getString("entity_id").startsWith("person.")) 0 else 1 }.take(if (nom.isBlank()) 6 else 1)
-        val moi = runCatching { fr.dd.jarvis.device.Locator.point(app) }.getOrNull()
+        val moi = if (concise) null else runCatching { fr.dd.jarvis.device.Locator.point(app) }.getOrNull()
         val fiches = mutableListOf<String>()
         for (o in choisies) fiches += fichePosition(app, o, toutes, moi, concise)
         return fiches.joinToString("\n\n")
