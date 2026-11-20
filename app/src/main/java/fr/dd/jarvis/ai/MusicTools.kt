@@ -97,6 +97,16 @@ class MusicTools(private val app: JarvisApp) {
 
     private fun paquet(): String? = fr.dd.jarvis.device.YtMusique.paquet(app, app.store.appPrefs["musique"])
     @Suppress("UNUSED_PARAMETER") private fun nomAppli(p: String) = fr.dd.jarvis.device.YtMusique.NOM
+    /** « Titre — Artiste » du morceau qui joue dans [paquet] (métadonnées du lecteur, ~1 s pour se mettre à jour), ou null. */
+    private suspend fun morceauEnCours(paquet: String): String? {
+        repeat(4) { essai ->
+            val e = runCatching { fr.dd.jarvis.device.MusiqueBibliotheque.enCours(app, paquet) }.getOrNull()
+            if (e != null && e.titre.isNotBlank() && e.lecture) return listOf(e.titre, e.artiste).filter { it.isNotBlank() }.joinToString(" — ")
+            if (essai < 3) kotlinx.coroutines.delay(350)
+        }
+        return null
+    }
+
     suspend fun execute(name: String, a: JSONObject): ToolResult {
         val debut = System.currentTimeMillis()
         return try {
@@ -140,12 +150,8 @@ class MusicTools(private val app: JarvisApp) {
                         val demarree = fr.dd.jarvis.device.MusiqueBibliotheque.demarrerLecture(app, p, aleatoire, repetition)
                         fr.dd.jarvis.device.RetourJarvisMusique.afficher(app)
                         if (demarree) {
-                            "❤️ Tes titres « J'aime » sont bien en lecture dans ${nomAppli(p)}" + when (mode) {
-                                "aleatoire" -> " en aléatoire."
-                                "repeter_titre" -> " avec répétition du titre."
-                                "repeter_playlist" -> " avec répétition de toute la liste."
-                                else -> " dans l'ordre normal."
-                            }
+                            // Consigne : seulement « Titre — Artiste » du morceau réellement lancé.
+                            morceauEnCours(p) ?: "Titres J'aime en lecture."
                         } else {
                             "📂 Ta liste « J'aime » est ouverte dans ${nomAppli(p)}, mais le lecteur n'a pas confirmé le démarrage. Vérifie le bouton Lecture dans l'application."
                         }
@@ -154,8 +160,11 @@ class MusicTools(private val app: JarvisApp) {
                     val (l, err) = fr.dd.jarvis.device.MusiqueBibliotheque.lister(app, p, section)
                     err?.let { "❌ $it" } ?: ("📚 Ta bibliothèque — $section :\n" + l.take(40).mapIndexed { i, e -> "${i + 1}. ${e.titre}" + (if (e.sousTitre.isNotBlank()) " — ${e.sousTitre}" else "") }.joinToString("\n") +
                         "\n\nDis lequel lancer (ex. « mets la playlist ${l.firstOrNull()?.titre ?: "…"} »).")
-                } else fr.dd.jarvis.device.MusiqueBibliotheque.jouer(app, p, section, nom, aleatoire, repetition).also {
+                } else fr.dd.jarvis.device.MusiqueBibliotheque.jouer(app, p, section, nom, aleatoire, repetition).let { r ->
+                    // Lecture confirmée : seulement « Titre — Artiste » (consigne), sinon le message tel quel (échec, à vérifier).
+                    val court = if (r.startsWith("▶️")) morceauEnCours(p) else null
                     fr.dd.jarvis.device.RetourJarvisMusique.afficher(app)
+                    court ?: r
                 }
             }, direct = true)
             "musique_action" -> ToolResult(if (fr.dd.jarvis.societe.core.normaliser(a.optString("action")).replace(' ', '_') in setOf("normal", "aleatoire", "repeter_titre", "repeter_playlist", "shuffle", "repeat_one", "repeat_all")) {

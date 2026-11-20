@@ -35,13 +35,14 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
         tool("ha_entites", "Home Assistant (INSTANCE, par son API — adresse et jeton des Réglages, sans SSH) : liste/recherche les entités ET filtre leur état réel. OBLIGATOIRE pour « appareils indisponibles/injoignables/hors ligne sur Home Assistant » : utilise etat=indisponible (état HA unavailable), ou etat=inconnu (unknown), jamais le scan Wi-Fi ni les appareils liés à Jarvis. La liste est paginée.",
             mapOf("recherche" to prop("Mot du nom ou de l'identifiant (optionnel)."), "domaine" to prop("light, switch, sensor, climate, cover, automation… (optionnel)."), "decalage" to prop("Index de départ (0 par défaut ; utiliser affichées comme prochain décalage)."), "limite" to prop("Nombre d'entités à afficher (défaut 100, maximum 250)."), "etat" to prop("Filtre d'état Home Assistant : indisponible/injoignable/hors ligne = unavailable ; inconnu = unknown ; vide = tous les états."))),
         tool("ha_etat", "Home Assistant (INSTANCE, par son API — adresse et jeton des Réglages, sans SSH) : état détaillé d'une entité.", mapOf("entity_id" to prop("ex. light.salon")), listOf("entity_id")),
-        tool("ha_position", "Home Assistant : OÙ EST une personne (entités person / device_tracker) — zone, adresse précise, coordonnées GPS, précision, fraîcheur, distance et lien de carte. À utiliser pour toute question « où est X », « localisation de X ». Si la position est inconnue, le dire tel quel.",
-            mapOf("personne" to prop("Prénom ou nom de la personne (vide = toutes les personnes suivies).")), emptyList()),
+        tool("ha_position", "Home Assistant : OÙ EST une personne (entités person / device_tracker). Par défaut, et selon la consigne de l'utilisateur, réponse = UNIQUEMENT le nom et l'adresse exacte (ou la zone) : ne rajoute rien. details=oui seulement si l'utilisateur demande explicitement les coordonnées GPS, la précision, la distance ou depuis quand. Position inconnue : le dire tel quel.",
+            mapOf("personne" to prop("Prénom ou nom de la personne (vide = toutes les personnes suivies)."),
+                "details" to prop("« oui » uniquement si l'utilisateur demande explicitement GPS, précision, distance, fraîcheur ou carte.")), emptyList()),
         tool("ha_service", "Home Assistant (INSTANCE, par son API — adresse et jeton des Réglages, sans SSH) : exécute réellement une commande sur un appareil. Pour un poêle/thermostat : climate.set_temperature avec donnees {temperature: 20}, climate.set_hvac_mode si pris en charge. Pour une télévision/lecteur : media_player.turn_on, media_player.turn_off, media_player.volume_set avec {volume_level: 0.35}, media_player.volume_up, media_player.volume_down, media_player.media_play_pause, media_player.select_source avec {source: \"…\"}. Pour une lumière : light.turn_on/off. Cherche d'abord l'identifiant exact avec ha_entites, puis utilise ha_etat pour connaître les attributs et capacités. N'annonce jamais le succès avant le résultat de l'appel.",
             mapOf("domaine" to prop("Domaine HA exact : climate, media_player, light, switch, cover, automation, scene, script…"), "service" to prop("Service HA exact : set_temperature, turn_on, turn_off, volume_set, volume_up, volume_down, select_source, media_play_pause…"),
                 "entity_id" to prop("Identifiant exact de l'entité, ex. climate.poele ou media_player.television."), "donnees" to JSONObject().put("type", "object").put("description", "Objet JSON de paramètres du service. Exemples : {temperature: 20}, {volume_level: 0.35}, {source: \"HDMI 1\"}. Laisser vide si aucun paramètre n'est nécessaire.")), listOf("domaine", "service")),
-        tool("ha_config", "Home Assistant : journal (API, avec diagnostic de secours en lecture seule du conteneur et des journaux via l'hôte Debian si l'API est indisponible), valider, recharger et redemarrer via l'API. Le SSH Debian ne pilote jamais HA ; il ne sert qu'à inspecter son conteneur, ses volumes et ses logs en lecture seule. L'accès aux fichiers YAML, sauvegardes disque et restauration reste suspendu tant qu'un profil SSH HA indépendant n'est pas configuré.",
-            mapOf("action" to prop("valider | recharger | redemarrer | journal"), "fichier" to prop("Chemin relatif au dossier de config, ex. automations.yaml (ou dossier pour lister)."),
+        tool("ha_config", "Home Assistant — DEUX ACCÈS SÉPARÉS. (1) INSTANCE, par son API (adresse + jeton des Réglages) : valider | recharger | redemarrer (arrêt propre par Home Assistant) | journal (erreurs). (2) HÔTE DEBIAN, par SSH, où tourne le conteneur Docker de Home Assistant : fichiers YAML du dossier /config de CE conteneur (configuration.yaml, automations.yaml, scripts.yaml, scenes.yaml, secrets.yaml, packages/…) : lister | lire | ecrire (sauvegarde auto + validation, ancienne version remise si Home Assistant la refuse) | sauvegardes | restaurer. Toujours lire le fichier avant de le modifier et réécrire le fichier ENTIER.",
+            mapOf("action" to prop("lister | lire | ecrire | sauvegardes | restaurer | valider | recharger | redemarrer | journal"), "fichier" to prop("Chemin relatif au dossier de config, ex. automations.yaml (ou dossier pour lister)."),
                 "contenu" to prop("ecrire : contenu complet du fichier. restaurer : nom de la sauvegarde (.jarvis-bak-…)."), "quoi" to prop("recharger : all | automation | script | scene | core (défaut all).")), listOf("action")),
         tool("ha_dashboard", "Home Assistant Lovelace : crée, liste, lit et refait les tableaux de bord en mode stockage via WebSocket. Peut créer un tableau de bord complet, remplacer toute sa présentation avec une configuration JSON Lovelace, ajouter des cartes dans une vue/section, ajouter une vue ou supprimer un tableau. Avant toute modification, Jarvis sauvegarde automatiquement l'ancienne configuration dans son stockage local. Pour modifier, lire d'abord puis fournir la configuration complète. Les actions destructrices demandent confirmation.",
             mapOf("action" to prop("lister | lire | creer | modifier | refaire | carte_ajouter | vue_ajouter | supprimer"),
@@ -175,9 +176,6 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
     /** ssh_fichier : lecture, recherche, modifications ciblées, réécriture et restauration (serveur ou conteneur Docker). */
     private suspend fun sshFichier(a: JSONObject): ToolResult {
         val ct = a.optString("conteneur").trim()
-        if (Regex("home.?assistant|\\bhass\\b", RegexOption.IGNORE_CASE).containsMatchIn(ct)) {
-            return ToolResult("⛔ Accès aux fichiers du conteneur Home Assistant bloqué depuis le SSH Debian. Le profil SSH configuré cible Debian/Jarvis, pas la machine HA. Les opérations YAML nécessitent un profil SSH HA indépendant.")
-        }
         val p = a.optString("chemin").trim().let { if (ct.isBlank() && it.isNotBlank()) Serveur.absolu(app, it) else it }
         if (p.isBlank()) return ToolResult("Indique « chemin » (fichier, ou dossier pour lister).")
         val ou = if (ct.isBlank()) "sur le serveur" else "dans le conteneur $ct"
@@ -257,7 +255,8 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
             }
             "ha_entites" -> ToolResult(Serveur.haEntites(app, a.optString("recherche"), a.optString("domaine"), a.optString("decalage").toIntOrNull() ?: 0, a.optString("limite").toIntOrNull() ?: 100, a.optString("etat")), direct = true)
             "ha_etat" -> ToolResult(Serveur.haEtat(app, a.optString("entity_id").trim()))
-            "ha_position" -> ToolResult(Serveur.haPosition(app, a.optString("personne").trim()), direct = true)
+            "ha_position" -> ToolResult(Serveur.haPosition(app, a.optString("personne").trim(),
+                concise = a.optString("details").trim().lowercase() !in setOf("oui", "true", "1", "yes")), direct = true)
             "ha_service" -> {
                 val d = a.optString("domaine").trim(); val s = a.optString("service").trim(); val e = a.optString("entity_id").trim()
                 val sensible = (d in setOf("lock", "alarm_control_panel") || s in setOf("restart", "stop", "unlock", "alarm_disarm", "open_cover") && d != "light") || (d == "homeassistant" && s in setOf("restart", "stop"))
@@ -278,12 +277,6 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 if (cible?.jump == true) ssh()
                 val cmd = a.optString("commande").trim()
                 if (cmd.isBlank()) return ToolResult("Commande vide.")
-                // Aucun accès Docker/CLI HA via le SSH générique : il cible exclusivement Debian/Jarvis.
-                if (cible == null && (Regex("127\\.0\\.0\\.1:8123|localhost:8123", RegexOption.IGNORE_CASE).containsMatchIn(cmd) ||
-                    (Regex("(?:docker|docker-compose|docker\\s+compose|ha\\s+core)\\b", RegexOption.IGNORE_CASE).containsMatchIn(cmd) &&
-                        Regex("home.?assistant|\\bhass\\b", RegexOption.IGNORE_CASE).containsMatchIn(cmd)))) {
-                    return ToolResult("⛔ Commande refusée : elle cible Home Assistant depuis le SSH Debian. Les commandes système HA doivent passer par l'API HA ou par un futur profil SSH HA indépendant.")
-                }
                 // Redémarrage / mise à jour de Home Assistant « à la main » : remplacés par les versions sûres.
                 if (cible == null) runCatching { HaSur.interception(cmd, HaSur.conteneur(app)?.nom) }.getOrNull()?.let { quoi ->
                     return if (quoi == "redemarrer") {
@@ -349,10 +342,6 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 ssh()
                 val code = a.optString("code")
                 if (code.isBlank()) return ToolResult("Script vide.")
-                if (Regex("(?:docker|docker-compose|docker\\s+compose|ha\\s+core)\\b", RegexOption.IGNORE_CASE).containsMatchIn(code) &&
-                    Regex("home.?assistant|\\bhass\\b|127\\.0\\.0\\.1:8123|localhost:8123", RegexOption.IGNORE_CASE).containsMatchIn(code)) {
-                    return ToolResult("⛔ Script refusé : il cible Home Assistant depuis le SSH Debian. Utilise l'API HA ou un profil SSH HA indépendant.")
-                }
                 val py = a.optString("langage").lowercase().startsWith("py")
                 if (!py) Serveur.commandeIncomplete(code)?.let { return ToolResult("⛔ Script incomplet, rien n'a été exécuté : $it. Renvoie le script COMPLET.") }
                 if (!confirm("Exécuter ce script ${if (py) "Python" else "bash"} sur le serveur ${app.store.sshHost.value} ?\n\n" + code.take(900), true)) return ToolResult("Refusé par l'utilisateur.")
@@ -713,28 +702,57 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
 
     private suspend fun haConfig(a: JSONObject): ToolResult {
         val act = a.optString("action").lowercase()
-        return when (act) {
-            "journal" -> ToolResult(runCatching { "```\n" + Serveur.ha(app, "GET", "/api/error_log").takeLast(5000) + "\n```" }.getOrElse { "API Home Assistant indisponible : ${it.message?.take(180)}.\n\n" + HaSur.diagnostic(app) }, direct = true)
+        when (act) {
+            // Journal de l'INSTANCE (API) ; API muette : diagnostic du conteneur sur l'hôte Debian.
+            "journal" -> return ToolResult(runCatching { "```\n" + Serveur.ha(app, "GET", "/api/error_log").takeLast(5000) + "\n```" }
+                .getOrElse { "API Home Assistant indisponible : ${it.message?.take(180)}.\n\n" + HaSur.diagnostic(app) }, direct = true)
             "recharger" -> {
                 val q = a.optString("quoi").ifBlank { "all" }.lowercase()
-                val (d, s) = when (q) {
-                    "automation", "automations" -> "automation" to "reload"
-                    "script", "scripts" -> "script" to "reload"
-                    "scene", "scenes" -> "scene" to "reload"
-                    "core" -> "homeassistant" to "reload_core_config"
-                    else -> "homeassistant" to "reload_all"
-                }
+                val (d, s) = when (q) { "automation", "automations" -> "automation" to "reload"; "script", "scripts" -> "script" to "reload"; "scene", "scenes" -> "scene" to "reload"; "core" -> "homeassistant" to "reload_core_config"; else -> "homeassistant" to "reload_all" }
                 Serveur.ha(app, "POST", "/api/services/$d/$s")
-                ToolResult("🔄 Rechargement ($d.$s) demandé.")
+                return ToolResult("🔄 Rechargement ($d.$s) demandé.")
             }
             "redemarrer" -> {
-                if (!confirm("Redémarrer Home Assistant ? (configuration vérifiée avant ; coupure de quelques minutes)", true))
-                    ToolResult("Refusé par l'utilisateur.")
-                else ToolResult(HaSur.redemarrer(app), direct = true)
+                if (!confirm("Redémarrer Home Assistant ? (configuration vérifiée avant ; coupure de quelques minutes)", true)) return ToolResult("Refusé par l'utilisateur.")
+                return ToolResult(HaSur.redemarrer(app), direct = true)
             }
-            "valider" -> ToolResult(Serveur.haValider(app)?.let { "❌ $it" } ?: "✅ Configuration valide.")
-            "lister", "lire", "ecrire", "sauvegardes", "restaurer" ->
-                ToolResult("⛔ Fichiers YAML Home Assistant non accessibles pour le moment : le SSH configuré cible Debian/Jarvis et non la machine HA. Les fonctions API restent disponibles ; un profil SSH HA séparé sera nécessaire pour réactiver ces opérations.")
+            "valider" -> return ToolResult(Serveur.haValider(app)?.let { "❌ $it" } ?: "✅ Configuration valide.")
+        }
+        if (!Serveur.sshConfigure(app)) return ToolResult("SSH non configuré : l'accès aux fichiers de configuration passe par le serveur (Réglages › Maison › Serveur).")
+        val dir = Serveur.haDossier(app) ?: return ToolResult("Dossier de configuration Home Assistant introuvable : indique-le dans Réglages › Maison › Serveur (là où se trouve configuration.yaml).")
+        fun chemin(f: String): String {
+            val r = f.trim().trimStart('/').ifBlank { "configuration.yaml" }
+            if (r.contains("..")) throw IllegalArgumentException("Chemin non autorisé.")
+            return "$dir/$r"
+        }
+        return when (act) {
+            "lister" -> ToolResult("📁 $dir\n```\n" + Serveur.lister(app, if (a.optString("fichier").isBlank()) dir else chemin(a.optString("fichier"))) + "\n```")
+            "lire" -> ToolResult("```yaml\n" + Serveur.lire(app, chemin(a.optString("fichier"))).take(12000) + "\n```")
+            "sauvegardes" -> ToolResult("```\n" + Serveur.exec(app, "ls -1t ${Serveur.q(dir)}/*.jarvis-bak-* ${Serveur.q(dir)}/*/*.jarvis-bak-* 2>/dev/null | head -30").second.ifBlank { "Aucune sauvegarde." } + "\n```")
+            "ecrire" -> {
+                val f = chemin(a.optString("fichier")); val c = a.optString("contenu")
+                if (c.isBlank()) return ToolResult("Contenu vide : rien écrit.")
+                if (c.contains('\t') && f.endsWith(".yaml") ) return ToolResult("❌ Le YAML n'accepte pas les tabulations : réécris avec des espaces.")
+                if (!confirm("Modifier ${f.removePrefix("$dir/")} dans la configuration Home Assistant (sauvegarde + validation automatiques) ?", true)) return ToolResult("Refusé par l'utilisateur.")
+                val bak = Serveur.ecrire(app, f, if (c.endsWith("\n")) c else c + "\n")
+                val err = if (f.endsWith(".yaml") || f.endsWith(".yml")) HaSur.verifier(app) else null
+                if (err != null) {
+                    if (bak != null) Serveur.exec(app, "cp -p ${Serveur.q(bak)} ${Serveur.q(f)} 2>/dev/null || sudo cp -p ${Serveur.q(bak)} ${Serveur.q(f)}")
+                    else Serveur.exec(app, "rm -f ${Serveur.q(f)} 2>/dev/null || sudo rm -f ${Serveur.q(f)}")
+                    ToolResult("⛔ Home Assistant refuse ce fichier : ancienne version remise, rien n'a changé.\n```\n$err\n```")
+                } else ToolResult("✅ ${f.removePrefix("$dir/")} enregistré." + (bak?.let { " Sauvegarde : ${it.substringAfterLast('/')}." } ?: "") +
+                    (if (f.endsWith(".yaml") || f.endsWith(".yml")) "\nConfiguration valide. " + HaSur.recharger(app) + " Si le changement concerne une intégration non rechargeable, dis « redémarre Home Assistant »." else ""))
+            }
+            "restaurer" -> {
+                val nom = a.optString("contenu").trim().substringAfterLast('/')
+                if (!nom.contains(".jarvis-bak-")) return ToolResult("Indique le nom de la sauvegarde (voir action « sauvegardes »).")
+                val src = Serveur.exec(app, "find ${Serveur.q(dir)} -name ${Serveur.q(nom)} | head -1").second.trim()
+                if (src.isBlank()) return ToolResult("Sauvegarde introuvable.")
+                val cible = src.substringBefore(".jarvis-bak-")
+                if (!confirm("Restaurer ${cible.removePrefix("$dir/")} depuis cette sauvegarde ?", true)) return ToolResult("Refusé par l'utilisateur.")
+                val r = Serveur.exec(app, "cp -p ${Serveur.q(src)} ${Serveur.q(cible)} 2>/dev/null || sudo cp -p ${Serveur.q(src)} ${Serveur.q(cible)}")
+                ToolResult(if (r.first == 0) "↩️ ${cible.removePrefix("$dir/")} restauré." else "❌ ${r.second.take(200)}")
+            }
             else -> ToolResult("Action inconnue : $act")
         }
     }

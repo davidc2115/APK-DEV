@@ -689,7 +689,7 @@ object Routeur {
         "\\bssh\\b|docker|conteneur|container|portainer|supervisor|serveur|redemarr|red[ée]marr|reboot|mise [àa] jour|\\bupdate\\b|install|" +
             "sauvegarde|backup|\\blogs?\\b|journal syst|ne (r[ée]pond|marche|fonctionne|d[ée]marre) (plus|pas)|en panne|plant[ée]|" +
             "\\btls\\b|\\bssl\\b|https|certificat|\\bcert\\b|let.?s ?encrypt|nginx|proxy|\\bports?\\b|[àa] distance|acc[èe]s (distant|ext[ée]rieur)|" +
-            "connexion (locale|distante)|nom de domaine|duckdns|erreur|restaur|r[ée]par|configuration",
+            "connexion (locale|distante)|nom de domaine|duckdns|erreur|restaur|r[ée]par|configuration|yaml|\\bhacs\\b|fichiers? de config|volumes?|stockage",
         RegexOption.IGNORE_CASE
     )
 

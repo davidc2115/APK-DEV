@@ -103,7 +103,7 @@ object NotesPertinentes {
         }
         // 1. Consignes mémorisées par Jarvis (rubrique + contenu).
         runCatching {
-            val rubriquesGenerales = setOf("general", "preferences", "preference", "habitudes", "profil", "style", "ton", "langue")
+            val rubriquesGenerales = fr.dd.jarvis.ai.Restitution.RUBRIQUES_PERMANENTES
             app.memo.all().forEach { (k, v) ->
                 val s = score("$k $v", mots)
                 val generale = normaliser(k) in rubriquesGenerales

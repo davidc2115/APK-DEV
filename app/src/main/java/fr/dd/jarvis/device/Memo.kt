@@ -100,6 +100,14 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     companion object {
         const val FOLDER = "JARVIS"
         const val FILE = "Mémoire JARVIS.md"
+
+        /** Mots communs (≥ 4 lettres) / mots de la plus courte des deux phrases. */
+        internal fun proximite(a: String, b: String): Double {
+            fun mots(s: String) = fr.dd.jarvis.societe.core.normaliser(s).split(' ').filter { it.length >= 4 }.toSet()
+            val ma = mots(a); val mb = mots(b)
+            if (ma.isEmpty() || mb.isEmpty()) return 0.0
+            return ma.intersect(mb).size.toDouble() / minOf(ma.size, mb.size)
+        }
     }
 
     private fun parse(md: String) {
@@ -142,6 +150,28 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     fun set(sujet: String, texte: String): String {
         ensure(); items[sujet.trim().lowercase().ifBlank { "general" }] = texte.trim(); return persist()
     }
+
+    /**
+     * AJOUTE une consigne à sa rubrique sans effacer les autres : avant, chaque nouvelle consigne remplaçait toute la
+     * rubrique (« titre et artiste seulement » effaçait « toujours YT Music Morphe »), et JARVIS ne les réappliquait plus.
+     * Une consigne très proche d'une ligne existante la remplace (mise à jour) ; déjà présente : rien ne change.
+     */
+    @Synchronized
+    fun ajouterConsigne(sujet: String, texte: String): String {
+        ensure()
+        val k = sujet.trim().lowercase().ifBlank { "general" }
+        val nouvelle = texte.trim().removePrefix("-").trim()
+        if (nouvelle.isBlank()) return "rien à enregistrer"
+        val lignes = items[k].orEmpty().lines().map { it.trim() }.filter { it.isNotBlank() }.map { it.removePrefix("-").trim() }.toMutableList()
+        val n = fr.dd.jarvis.societe.core.normaliser(nouvelle)
+        if (lignes.any { fr.dd.jarvis.societe.core.normaliser(it) == n || fr.dd.jarvis.societe.core.normaliser(it).contains(n) }) return "déjà enregistrée"
+        val proche = lignes.indexOfFirst { proximite(it, nouvelle) >= 0.6 }
+        if (proche >= 0) lignes[proche] = nouvelle else lignes += nouvelle
+        items[k] = lignes.joinToString("\n") { "- $it" }
+        return persist()
+    }
+
+
 
     @Synchronized
     fun remove(sujet: String): Boolean {
@@ -281,11 +311,13 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         if (items.isEmpty()) return ""
         val complet = toutes()
         if (complet.length <= 1800) return complet
-        val generales = setOf("general", "preferences", "preference", "habitudes", "profil", "style", "identite", "ton", "langue")
+        // Consignes de fonctionnement (préférences, façon de répondre, musique, localisation…) : TOUJOURS en entier —
+        // avant, « mets Johnny » ne contenait pas le mot « musique » et la consigne « titre et artiste seulement » manquait.
+        val generales = fr.dd.jarvis.ai.Restitution.RUBRIQUES_PERMANENTES
         val toujours = items.filterKeys { fr.dd.jarvis.societe.core.normaliser(it) in generales }
         val autres = items.keys - toujours.keys
         return "\n\nMémoire de l'utilisateur (consignes durables, à appliquer) :\n" +
-            toujours.entries.joinToString("\n") { "- [${it.key}] ${it.value.take(500)}" }.take(1800) +
+            toujours.entries.joinToString("\n") { "- [${it.key}] ${it.value.take(600)}" }.take(2800) +
             (if (autres.isNotEmpty()) "\nAutres rubriques mémorisées (celles utiles à cette demande sont dans les notes ci-dessus ; détails avec memoire_lire) : ${autres.joinToString(", ")}" else "")
     }
 

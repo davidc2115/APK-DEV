@@ -8,7 +8,7 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * Administration du serveur Debian uniquement, en plus de ssh_commande / ssh_script :
+ * Administration complète du serveur Debian, en plus de ssh_commande / ssh_script :
  *  - serveur_service : un service par son nom (« Home Assistant », « Plex », « bot Discord »…) qu'il soit conteneur Docker
  *    (compose ou non), service systemd ou processus pm2 : état, journaux, démarrer, arrêter, redémarrer, mettre à jour,
  *    lancement automatique ;
@@ -55,14 +55,14 @@ class ServeurAdminTools(private val app: JarvisApp, private val confirm: suspend
                 .put("required", JSONArray(required))))
 
     val schema = listOf(
-        tool("serveur_service", "Serveur Debian via SSH : distingue l’hôte Debian et les services qui y tournent. Plex : état, journaux, stockage Docker, démarrer/arrêter/redémarrer/mettre à jour. Home Assistant : état, journaux et stockage Docker en lecture seule ; les entités, états domotiques, services et redémarrages normaux passent par l’API Home Assistant (ha_*), jamais par SSH. « stockage » affiche les chemins hôte ↔ conteneur des volumes montés, sans lire ni modifier les fichiers. Actions : lister | etat | logs | stockage | demarrer | arreter | redemarrer | mettre_a_jour | activer | desactiver.",
+        tool("serveur_service", "HÔTE DEBIAN (SSH) : gère un SERVICE qui tourne sur le serveur par son nom, quel que soit son type (conteneur Docker ou docker compose, service systemd, processus pm2) — conteneur Home Assistant, Plex, bot Discord, Mosquitto… Actions : lister | etat | logs | stockage (volumes hôte ↔ conteneur, lecture seule) | demarrer | arreter | redemarrer | mettre_a_jour | activer (relance automatique au démarrage) | desactiver. Trouve tout seul le bon conteneur / unité / processus. Pour Home Assistant, c'est le CONTENEUR sur Debian ; ses appareils et entités se pilotent par l'API de l'instance (ha_*).",
             mapOf("action" to prop("lister | etat | logs | stockage | demarrer | arreter | redemarrer | mettre_a_jour | activer | desactiver"),
                 "service" to prop("Nom du service (« Home Assistant », « Plex », « bot Discord »…) ou nom exact du conteneur / de l'unité."),
                 "lignes" to prop("Logs : nombre de lignes (défaut 80).")), listOf("action")),
         tool("serveur_tache", "Serveur Debian : TÂCHE LONGUE en arrière-plan (au-delà de quelques minutes : restauration, mise à jour, copie, compilation…) qui continue même si la connexion se coupe ; puis suivi de son journal. Actions : lancer (code bash) | etat | liste | arreter.",
             mapOf("action" to prop("lancer | etat | liste | arreter"), "code" to prop("lancer : script bash complet."), "nom" to prop("lancer : nom court de la tâche."),
                 "root" to prop("« oui » : exécuter en root (automatique si le script contient sudo)."), "id" to prop("etat / arreter : identifiant (défaut : la dernière tâche).")), listOf("action")),
-        tool("ha_sauvegarde", "DÉSACTIVÉ : aucune sauvegarde, inspection de conteneur ou restauration Home Assistant ne doit passer par le SSH Debian. Utilise les fonctions API Home Assistant ; les archives hors ligne nécessiteront un profil SSH HA indépendant.",
+        tool("ha_sauvegarde", "Home Assistant (conteneur Docker sur le serveur Debian) : SAUVEGARDES et REMISE EN SERVICE, même quand Home Assistant est arrêté ou cassé. Actions : lister (sauvegardes trouvées sur le serveur, avec date, nom, taille, chiffrée ou non) | creer | restaurer (une sauvegarde choisie : arrêt du conteneur, ancienne configuration conservée à côté, restauration, redémarrage, vérification) | etat (conteneur, dossier de configuration, réponse HTTP, dernières erreurs). Les sauvegardes chiffrées utilisent la clé enregistrée dans Réglages › Sécurité › Systèmes.",
             mapOf("action" to prop("lister | creer | restaurer | etat"),
                 "sauvegarde" to prop("restaurer : chemin complet, nom, ou date de la sauvegarde (« derniere » = la plus récente) ; voir lister."),
                 "nom" to prop("creer : nom de la sauvegarde (optionnel).")), listOf("action")),
@@ -140,9 +140,6 @@ class ServeurAdminTools(private val app: JarvisApp, private val confirm: suspend
             trouves.joinToString { "${it.nom} (${it.type})" } + ". Précise lequel (nom exact).")
         val n = (a.optString("lignes").toIntOrNull() ?: 80).coerceIn(10, 400)
         val c = trouves.first()
-        val estHaIdentifie = Regex("home.?assistant|\\bhass\\b", RegexOption.IGNORE_CASE)
-            .containsMatchIn(c.nom + " " + c.image + " " + c.dossier + " " + c.svcCompose + " " + service)
-        if (estHaIdentifie && !actionLectureSeuleHa(action)) return ToolResult("⛔ Cette action concerne le cycle de vie Home Assistant : utilise son API dédiée (ha_service / ha_config). Le SSH Debian reste distinct et n'est autorisé ici que pour l'état, les journaux et l'inspection en lecture seule des volumes du conteneur (action=stockage). Aucun fichier ni conteneur n'a été modifié.")
         val sensible = action in setOf("arreter", "redemarrer", "mettre_a_jour", "desactiver", "demarrer")
         val estHa = c.type == "docker" && runCatching { HaSur.conteneur(app)?.nom == c.nom }.getOrDefault(false)
         if (sensible && !confirm("${libelleAction(action)} « ${c.nom} » (${c.type}) sur le serveur ?" + (if (estHa && action != "arreter")
@@ -237,10 +234,6 @@ class ServeurAdminTools(private val app: JarvisApp, private val confirm: suspend
             "lancer" -> {
                 val code = a.optString("code").trim()
                 if (code.isBlank()) return ToolResult("Script vide.")
-                if (Regex("(?:docker|docker-compose|docker\\s+compose|ha\\s+core)\\b", RegexOption.IGNORE_CASE).containsMatchIn(code) &&
-                    Regex("home.?assistant|\\bhass\\b|127\\.0\\.0\\.1:8123|localhost:8123", RegexOption.IGNORE_CASE).containsMatchIn(code)) {
-                    return ToolResult("⛔ Tâche refusée : elle cible Home Assistant depuis le SSH Debian. Utilise l'API HA ou un profil SSH HA indépendant.")
-                }
                 if (!confirm("Lancer cette tâche en arrière-plan sur le serveur ${app.store.sshHost.value} ?\n\n" + code.take(900), true)) return ToolResult("Refusé par l'utilisateur.")
                 val root = a.optString("root").lowercase() in setOf("oui", "true", "1") || Regex("\\bsudo\\b").containsMatchIn(code)
                 val id = lancerTache(code.replace(Regex("\\bsudo\\s+"), if (root) "" else "sudo "), a.optString("nom"), root)
@@ -257,13 +250,138 @@ class ServeurAdminTools(private val app: JarvisApp, private val confirm: suspend
         }
     }
 
-    /**
-     * Les sauvegardes HA ne doivent jamais être cherchées/restaurées sur le SSH Debian :
-     * Home Assistant est une machine distincte. La sauvegarde officielle reste accessible
-     * via l'API HA (outil ha_config / service backup), sans accès disque distant.
-     */
-    private suspend fun sauvegarde(a: JSONObject): ToolResult =
-        ToolResult("⛔ Sauvegardes locales/restauration Home Assistant suspendues : le SSH configuré cible le serveur Debian Jarvis, pas la machine Home Assistant. Aucune commande Docker, lecture de disque ou restauration n'a été envoyée à Debian. Utilise la sauvegarde officielle depuis l'API Home Assistant ; un profil SSH HA indépendant sera nécessaire pour les archives hors ligne.\n")
+    // ------------------------------------------------------------------ sauvegardes Home Assistant
+
+    /** Conteneur et dossier de configuration de Home Assistant (réglage « dossier HA », sinon détectés). */
+    private fun detection(): String = """
+C=${'$'}(docker ps -a --format '{{.Names}} {{.Image}}' | awk 'tolower(${'$'}2) ~ /home-assistant|homeassistant/ {print ${'$'}1; exit}')
+[ -z "${'$'}C" ] && C=${'$'}(docker ps -a --format '{{.Names}}' | grep -iE 'home.?assistant|^hass${'$'}|^ha${'$'}' | head -1)
+CFG=${q(app.store.haDir.value.trim())}
+[ -z "${'$'}CFG" ] && [ -n "${'$'}C" ] && CFG=${'$'}(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/config"}}{{.Source}}{{end}}{{end}}' "${'$'}C")
+""".trimIndent()
+
+    private val LISTE = """
+echo "Conteneur : ${'$'}{C:-introuvable}"; echo "Configuration : ${'$'}{CFG:-introuvable}"
+for f in ${'$'}( { ls -1 "${'$'}CFG"/backups/*.tar "${'$'}CFG"/backups/*.tar.gz /backup/*.tar 2>/dev/null; find /home /root /opt /srv /mnt /media -maxdepth 6 \( -path '*backups/*.tar' -o -iname '*homeassistant*.tar*' -o -iname '*home-assistant*.tar*' -o -iname 'ha-config*.tar*' \) 2>/dev/null; } | sort -u ); do
+  t=${'$'}(du -h "${'$'}f" | cut -f1); d=${'$'}(date -r "${'$'}f" '+%Y-%m-%d %H:%M')
+  m=${'$'}(tar -xOf "${'$'}f" ./backup.json 2>/dev/null || tar -xOf "${'$'}f" backup.json 2>/dev/null)
+  if [ -n "${'$'}m" ]; then
+    i=${'$'}(printf '%s' "${'$'}m" | python3 -c 'import json,sys
+b=json.load(sys.stdin); print(b.get("name",""),"|",b.get("date","")[:16].replace("T"," "),"|","CHIFFRÉE" if b.get("protected") else "non chiffrée","|","HA "+str(b.get("homeassistant",{}).get("version","") if isinstance(b.get("homeassistant"),dict) else b.get("homeassistant","")))' 2>/dev/null)
+    echo "${'$'}d | ${'$'}t | ${'$'}f | ${'$'}i"
+  else echo "${'$'}d | ${'$'}t | ${'$'}f | archive de configuration"; fi
+done | sort -r
+""".trimIndent()
+
+    private fun restauration(fichier: String, cle: String): String = """
+set -u
+${detection()}
+F=${q(fichier)}; KEY=${q(cle)}
+log() { echo "[${'$'}(date +%T)] ${'$'}*"; }
+[ -n "${'$'}C" ] || { log "❌ Conteneur Home Assistant introuvable"; exit 1; }
+[ -n "${'$'}CFG" ] && [ -d "${'$'}CFG" ] || { log "❌ Dossier de configuration introuvable (${'$'}CFG) : renseigne-le dans Réglages › Maison › Serveur"; exit 1; }
+[ -f "${'$'}F" ] || { log "❌ Sauvegarde introuvable : ${'$'}F"; exit 1; }
+T=${'$'}(mktemp -d /tmp/jarvis_restau.XXXXXX); mkdir -p "${'$'}T/x"; log "📦 Préparation de ${'$'}F"
+case "${'$'}F" in
+  *.tar.gz|*.tgz) tar -xzf "${'$'}F" -C "${'$'}T/x" || { log "❌ Archive illisible"; exit 1; } ;;
+  *)
+    tar -xf "${'$'}F" -C "${'$'}T" || { log "❌ Archive illisible"; exit 1; }
+    IN=${'$'}(cd "${'$'}T" && ls homeassistant.tar.gz homeassistant.tar 2>/dev/null | head -1)
+    if [ -z "${'$'}IN" ]; then
+      [ -f "${'$'}T/configuration.yaml" ] && cp -a "${'$'}T"/. "${'$'}T/x"/ || { log "❌ Pas de configuration Home Assistant dans cette sauvegarde (contenu : ${'$'}(ls ${'$'}T | tr '\n' ' '))"; exit 1; }
+    else
+      PROT=${'$'}(python3 -c 'import json;print(json.load(open("'"${'$'}T"'/backup.json")).get("protected",False))' 2>/dev/null)
+      GZ=${'$'}(python3 -c 'import json;print(json.load(open("'"${'$'}T"'/backup.json")).get("compressed",True))' 2>/dev/null)
+      if [ "${'$'}PROT" = "True" ]; then
+        [ -n "${'$'}KEY" ] || { log "❌ Sauvegarde CHIFFRÉE : enregistre sa clé de chiffrement dans JARVIS › Réglages › Sécurité › Systèmes, puis relance la restauration"; exit 2; }
+        IMG=${'$'}(docker inspect -f '{{.Config.Image}}' "${'$'}C"); log "🔐 Déchiffrement avec l'image ${'$'}IMG"
+        cat > "${'$'}T/dechiffrer.py" <<'PY'
+import hashlib, os, sys
+from pathlib import Path
+pw = os.environ["CLE"]
+try:
+    from homeassistant.components.backup.util import password_to_key
+    key = password_to_key(pw)
+except Exception:
+    key = pw.encode()
+    for _ in range(100):
+        key = hashlib.sha256(key).digest()
+    key = key[:16]
+from securetar import SecureTarFile
+gz = sys.argv[3] != "False"
+try:
+    tar = SecureTarFile(Path(sys.argv[1]), "r", key=key, gzip=gz)
+except TypeError:
+    tar = SecureTarFile(Path(sys.argv[1]), "r", password=pw, gzip=gz)
+with tar as t:
+    t.extractall(path=sys.argv[2])
+print("déchiffrée")
+PY
+        docker run --rm --entrypoint python3 -e CLE="${'$'}KEY" -v "${'$'}T":/w "${'$'}IMG" /w/dechiffrer.py "/w/${'$'}IN" /w/x "${'$'}GZ" || { log "❌ Déchiffrement impossible (clé incorrecte ?)"; rm -rf "${'$'}T"; exit 3; }
+      else
+        tar -xzf "${'$'}T/${'$'}IN" -C "${'$'}T/x" 2>/dev/null || tar -xf "${'$'}T/${'$'}IN" -C "${'$'}T/x" || { log "❌ Extraction impossible"; exit 1; }
+      fi
+    fi ;;
+esac
+SRC="${'$'}T/x"; [ -d "${'$'}T/x/data" ] && SRC="${'$'}T/x/data"
+[ -f "${'$'}SRC/configuration.yaml" ] || [ -d "${'$'}SRC/.storage" ] || { log "❌ Pas de configuration Home Assistant dans l'archive :"; ls -la "${'$'}SRC"; rm -rf "${'$'}T"; exit 1; }
+log "⏹️ Arrêt de ${'$'}C"; docker stop "${'$'}C" >/dev/null
+OWN=${'$'}(stat -c %u:%g "${'$'}CFG")
+OLD="${'$'}CFG.avant-restauration-${'$'}(date +%Y%m%d-%H%M%S)"
+mv "${'$'}CFG" "${'$'}OLD" && mkdir -p "${'$'}CFG" && cp -a "${'$'}SRC"/. "${'$'}CFG"/ || { log "❌ Copie impossible : remise de l'ancienne configuration"; rm -rf "${'$'}CFG"; mv "${'$'}OLD" "${'$'}CFG"; docker start "${'$'}C"; exit 1; }
+if [ -d "${'$'}OLD/backups" ]; then mkdir -p "${'$'}CFG/backups"; for b in "${'$'}OLD"/backups/*; do [ -e "${'$'}CFG/backups/${'$'}(basename "${'$'}b")" ] || mv "${'$'}b" "${'$'}CFG/backups/"; done; fi
+chown -R "${'$'}OWN" "${'$'}CFG"
+log "▶️ Redémarrage de ${'$'}C"; docker start "${'$'}C" >/dev/null
+ok=0; for i in ${'$'}(seq 1 72); do code=${'$'}(curl -s -o /dev/null -w '%{http_code}' -m 4 http://localhost:8123/ || true); if [ "${'$'}code" = 200 ]; then log "✅ Home Assistant répond (HTTP 200) après ${'$'}((i*5)) s"; ok=1; break; fi; sleep 5; done
+[ ${'$'}ok = 1 ] || log "⚠️ Home Assistant ne répond pas encore après 6 min (premier démarrage parfois long : installation des intégrations)."
+echo "--- dernières lignes du journal ---"; docker logs --tail 25 "${'$'}C" 2>&1 | tail -25
+log "📁 Ancienne configuration conservée dans ${'$'}OLD (à supprimer quand tout fonctionne)."
+rm -rf "${'$'}T"
+""".trimIndent()
+
+    private suspend fun sauvegarde(a: JSONObject): ToolResult {
+        return when (fr.dd.jarvis.societe.core.normaliser(a.optString("action"))) {
+            "lister", "liste" -> ToolResult("# 💾 Sauvegardes Home Assistant\n```\n" + sortie(Serveur.exec(app, su("bash -c " + q(detection() + "\n" + LISTE)), 120), 7000) + "\n```" +
+                "\nPour restaurer : « restaure la sauvegarde du <date> » (ou « la dernière »).")
+            "etat" -> ToolResult("```\n" + sortie(Serveur.exec(app, su("bash -c " + q(detection() + """
+echo "Conteneur : ${'$'}{C:-introuvable}"; echo "Configuration : ${'$'}{CFG:-introuvable}"
+[ -n "${'$'}C" ] && docker inspect -f 'État : {{.State.Status}} · démarré {{.State.StartedAt}} · redémarrages {{.RestartCount}} · image {{.Config.Image}}' "${'$'}C"
+echo "HTTP local : ${'$'}(curl -s -o /dev/null -w '%{http_code}' -m 5 http://localhost:8123/ || echo injoignable)"
+[ -n "${'$'}CFG" ] && { ls -la "${'$'}CFG" | head -20; du -sh "${'$'}CFG" 2>/dev/null; ls -d "${'$'}CFG".avant-restauration-* 2>/dev/null; }
+[ -n "${'$'}C" ] && { echo "--- erreurs récentes ---"; docker logs --tail 200 "${'$'}C" 2>&1 | grep -iE 'error|exception|failed|critical' | tail -15; }
+""")), 60)) + "\n```")
+            "creer" -> {
+                val nom = a.optString("nom").trim().ifBlank { "Jarvis " + java.time.LocalDateTime.now().withNano(0).toString().replace('T', ' ') }
+                // Home Assistant en marche : sauvegarde officielle ; sinon archive de la configuration.
+                val api = runCatching { Serveur.ha(app, "POST", "/api/services/backup/create", JSONObject()); true }.getOrDefault(false)
+                if (api) return ToolResult("✅ Sauvegarde Home Assistant demandée (format officiel). Elle apparaîtra dans quelques minutes : « liste les sauvegardes Home Assistant ».")
+                if (!confirm("Home Assistant ne répond pas : créer une archive de sa configuration sur le serveur (« $nom ») ?", false)) return ToolResult("Annulé.")
+                val r = Serveur.exec(app, su("bash -c " + q(detection() + "\n[ -n \"\$CFG\" ] || { echo 'Dossier de configuration introuvable'; exit 1; }; mkdir -p \"\$CFG/backups\"; " +
+                    "f=\"\$CFG/backups/ha-config-\$(date +%Y%m%d-%H%M%S).tar.gz\"; tar --exclude=./backups -czf \"\$f\" -C \"\$CFG\" . && du -h \"\$f\"")), 900)
+                ToolResult("```\n" + sortie(r) + "\n```")
+            }
+            "restaurer" -> {
+                val demande = a.optString("sauvegarde").trim().ifBlank { "derniere" }
+                val liste = Serveur.exec(app, su("bash -c " + q(detection() + "\n" + LISTE)), 120).second
+                val lignes = liste.lines().filter { it.count { c -> c == '|' } >= 3 }
+                val choisie = if (fr.dd.jarvis.societe.core.normaliser(demande).let { it.startsWith("dern") || it == "plus recente" }) lignes.firstOrNull()
+                    else lignes.firstOrNull { it.split('|')[2].trim() == demande } ?: lignes.firstOrNull { it.contains(demande, true) }
+                        ?: lignes.firstOrNull { l -> fr.dd.jarvis.societe.core.normaliser(l).contains(fr.dd.jarvis.societe.core.normaliser(demande)) }
+                if (choisie == null) return ToolResult("Sauvegarde « $demande » introuvable. Sauvegardes trouvées :\n```\n${liste.take(3000)}\n```")
+                val fichier = choisie.split('|')[2].trim()
+                if (!confirm("Restaurer Home Assistant avec la sauvegarde :\n$choisie\n\nLe conteneur sera arrêté ; la configuration actuelle est conservée à côté (dossier « .avant-restauration-… »).", true))
+                    return ToolResult("Restauration annulée.")
+                val cle = runCatching { app.store.cleSauvegardeHa.value }.getOrDefault("")
+                val id = lancerTache(restauration(fichier, cle), "Restauration Home Assistant", root())
+                kotlinx.coroutines.delay(20_000)
+                ToolResult("▶️ Restauration lancée en arrière-plan (tâche **$id**) depuis :\n$choisie\n\nPremières étapes :\n```\n" + etatTache(id) + "\n```\n" +
+                    "Elle continue même si la connexion se coupe ; dis « où en est la restauration ? » pour suivre (serveur_tache etat).")
+            }
+            else -> ToolResult("Action inconnue (lister, creer, restaurer, etat).")
+        }
+    }
+
+    // ------------------------------------------------------------------ fichiers
 
     private suspend fun fichiers(a: JSONObject): ToolResult {
         val action = fr.dd.jarvis.societe.core.normaliser(a.optString("action"))

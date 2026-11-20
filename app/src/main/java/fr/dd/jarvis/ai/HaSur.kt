@@ -4,28 +4,62 @@ import fr.dd.jarvis.JarvisApp
 import kotlinx.coroutines.delay
 
 /**
- * Opérations Home Assistant via l'API configurée (DuckDNS/HTTPS).
+ * Home Assistant = DEUX ACCÈS SÉPARÉS, jamais confondus :
+ *  - l'INSTANCE Home Assistant, par son API (adresse + jeton longue durée des Réglages) : entités, services, validation
+ *    et rechargement de la configuration, redémarrage propre ;
+ *  - l'HÔTE DEBIAN, par SSH, où tourne le CONTENEUR Docker de Home Assistant : fichiers de configuration (dossier
+ *    /config de ce conteneur), démarrage / arrêt du conteneur quand l'API ne répond plus, mise à jour de l'image,
+ *    sauvegardes. Rien d'autre que ce conteneur n'est visé.
  *
- * Le profil SSH général désigne l'hôte Debian, qui peut héberger les conteneurs Home Assistant et Plex.
- * L'API Home Assistant reste le plan de contrôle des entités et des services ; SSH Debian sert uniquement
- * à inspecter l'hôte et le conteneur HA en lecture seule (état, volumes, ressources, journaux).
- * Les opérations de cycle de vie Docker et les modifications YAML restent suspendues tant qu'un flux
- * dédié, confirmé et vérifié n'est pas disponible.
+ * Opérations SÛRES sur Home Assistant installé en Docker sur le serveur (2 Go de mémoire : chaque redémarrage est long).
+ *
+ * Avant, une modification ou un redémarrage par SSH laissait souvent Home Assistant indisponible :
+ *  - un YAML modifié par ssh_fichier n'était jamais vérifié → Home Assistant redémarrait en « mode de récupération »
+ *    (intégrations non chargées, entités indisponibles) ;
+ *  - « docker restart » coupait Home Assistant au bout de 10 s (base de l'historique endommagée, démarrage encore plus long) ;
+ *  - rien n'attendait son retour : on annonçait « redémarré » alors qu'il démarrait encore (ou ne revenait jamais) ;
+ *  - la mise à jour tirait la nouvelle image sans place disque ni sauvegarde ni retour arrière.
+ * Ici : vérification de la configuration avant tout redémarrage, remise automatique de l'ancien fichier si Home Assistant
+ * le refuse, rechargement à chaud quand c'est possible (pas de coupure), arrêt propre (2 min accordées), attente du retour
+ * en ligne, et mise à jour en tâche de fond avec sauvegarde, contrôle de la place et retour à l'ancienne version si besoin.
  */
 object HaSur {
     private fun q(s: String) = Serveur.q(s)
 
-    /** Les opérations Docker sur HA sont désactivées ici ; seul ServeurDiagnostic inspecte le conteneur en lecture seule. */
-    fun docker(app: JarvisApp, cmd: String, delai: Int = 90): Pair<Int, String> =
-        -1 to "Opérations Docker Home Assistant désactivées : le SSH Debian est réservé au diagnostic en lecture seule."
+    /** Commande docker avec sudo si l'utilisateur SSH n'a pas accès au démon. */
+    fun docker(app: JarvisApp, cmd: String, delai: Int = 90): Pair<Int, String> {
+        val r = Serveur.exec(app, cmd, delai)
+        if (r.first != 0 && Regex("permission denied|docker\\.sock|connect to the docker daemon", RegexOption.IGNORE_CASE).containsMatchIn(r.second))
+            return Serveur.exec(app, "sudo $cmd", delai)
+        return r
+    }
 
-    fun dockerComplet(app: JarvisApp, cmd: String, delai: Int = 240): Pair<Int, String> =
-        docker(app, cmd, delai)
+    /** Commande docker qui doit aller jusqu'au bout (détachée, jamais interrompue), avec sudo si besoin. */
+    fun dockerComplet(app: JarvisApp, cmd: String, delai: Int = 240): Pair<Int, String> {
+        val r = Serveur.execComplet(app, cmd, delai)
+        if (r.first > 0 && Regex("permission denied|docker\\.sock|connect to the docker daemon", RegexOption.IGNORE_CASE).containsMatchIn(r.second))
+            return Serveur.execComplet(app, "sudo $cmd", delai)
+        return r
+    }
 
     data class Conteneur(val nom: String, val config: String, val dossierCompose: String, val serviceCompose: String, val image: String)
 
+    @Volatile private var cache: Pair<Long, Conteneur?>? = null
+
     /** Conteneur Home Assistant, son dossier de configuration et, s'il vient de docker compose, son projet. */
-    fun conteneur(app: JarvisApp, frais: Boolean = false): Conteneur? = null
+    fun conteneur(app: JarvisApp, frais: Boolean = false): Conteneur? {
+        cache?.takeIf { !frais && System.currentTimeMillis() - it.first < 10 * 60_000L }?.let { return it.second }
+        if (!Serveur.sshConfigure(app)) return null
+        val l = docker(app, "docker ps -a --format '{{.Names}}|{{.Image}}'", 30).second.lines().mapNotNull { it.split('|').takeIf { p -> p.size == 2 } }
+        val nom = (l.firstOrNull { it[1].contains(Regex("home-?assistant", RegexOption.IGNORE_CASE)) }
+            ?: l.firstOrNull { it[0].contains(Regex("home.?assistant|^hass$|^ha$", RegexOption.IGNORE_CASE)) })?.get(0)?.trim()
+        val c = nom?.let { n ->
+            val i = docker(app, "docker inspect -f '{{range .Mounts}}{{if eq .Destination \"/config\"}}{{.Source}}{{end}}{{end}}|{{index .Config.Labels \"com.docker.compose.project.working_dir\"}}|{{index .Config.Labels \"com.docker.compose.service\"}}|{{.Config.Image}}' ${q(n)}", 30).second.trim().split('|')
+            Conteneur(n, i.getOrElse(0) { "" }, i.getOrElse(1) { "" }.removePrefix("<no value>"), i.getOrElse(2) { "" }.removePrefix("<no value>"), i.getOrElse(3) { "" })
+        }
+        cache = System.currentTimeMillis() to c
+        return c
+    }
 
     /** Le fichier [chemin] (sur le serveur, ou dans [conteneurFichier]) fait-il partie de la configuration de Home Assistant ? */
     fun estConfigHa(app: JarvisApp, chemin: String, conteneurFichier: String): Boolean {
@@ -41,24 +75,31 @@ object HaSur {
 
     /** null si la configuration est valide ; sinon le message d'erreur de Home Assistant. */
     fun verifier(app: JarvisApp): String? {
-        if (!Serveur.haConfigure(app)) return "Validation impossible : configure l'URL DuckDNS/API et le jeton Home Assistant. Aucun accès SSH/Docker de secours n'est autorisé."
-        return try {
+        if (Serveur.haConfigure(app)) runCatching {
             val o = org.json.JSONObject(Serveur.ha(app, "POST", "/api/config/core/check_config"))
-            when (o.optString("result")) {
-                "valid" -> null
-                "invalid" -> o.optString("errors").ifBlank { o.toString() }.take(1200)
-                else -> "Home Assistant n'a pas confirmé la validité de sa configuration : $o"
-            }
-        } catch (e: Exception) {
-            "Validation Home Assistant impossible via l'API (${e.message?.take(180)}). Aucun repli vers le SSH Debian n'a été tenté."
+            if (o.optString("result") == "valid") return null
+            if (o.optString("result") == "invalid") return o.optString("errors").ifBlank { o.toString() }.take(1200)
+        }
+        val c = runCatching { conteneur(app) }.getOrNull() ?: return null.also { }
+        // Home Assistant ne répond pas : vérification hors ligne, dans le conteneur (code de sortie = nombre d'erreurs).
+        val r = docker(app, "docker exec ${q(c.nom)} python3 -m homeassistant --script check_config -c /config > /tmp/jarvis_ha_check.txt 2>&1; rc=\$?; echo \"JARVIS_RC=\$rc\"; tail -40 /tmp/jarvis_ha_check.txt; rm -f /tmp/jarvis_ha_check.txt; exit \$rc", 240)
+        val rc = Regex("JARVIS_RC=(\\d+)").find(r.second)?.groupValues?.get(1)?.toIntOrNull()
+        val sortie = r.second.replace(Regex("JARVIS_RC=\\d+"), "").trim()
+        return when {
+            rc == 0 -> null
+            rc == null && !Regex("Failed config|Invalid config|ERROR", RegexOption.IGNORE_CASE).containsMatchIn(sortie) -> null
+            else -> sortie.lines().filter { it.isNotBlank() && !it.startsWith("Testing configuration") }.takeLast(20).joinToString("\n").take(1200)
         }
     }
 
     // ------------------------------------------------------------------ attente du retour en ligne
 
     /** Code HTTP de Home Assistant vu depuis le serveur (401/200 = il répond). */
+    private fun codeLocal(app: JarvisApp): Int = Serveur.exec(app, "curl -s -o /dev/null -m 4 -w '%{http_code}' http://127.0.0.1:8123/api/ 2>/dev/null || echo 000", 15).second.trim().takeLast(3).toIntOrNull() ?: 0
+
     private fun repond(app: JarvisApp): Boolean =
-        Serveur.haConfigure(app) && runCatching { Serveur.ha(app, "GET", "/api/") }.isSuccess
+        (Serveur.haConfigure(app) && runCatching { Serveur.ha(app, "GET", "/api/") }.isSuccess) ||
+            (Serveur.sshConfigure(app) && runCatching { codeLocal(app) in setOf(200, 401) }.getOrDefault(false))
 
     /** Attend que Home Assistant réponde (jusqu'à [maxS] s) ; null si revenu (avec la durée), sinon le diagnostic. */
     suspend fun attendre(app: JarvisApp, maxS: Int = 480): Pair<Boolean, String> {
@@ -102,13 +143,23 @@ object HaSur {
     suspend fun redemarrer(app: JarvisApp, verifierAvant: Boolean = true): String {
         if (verifierAvant) verifier(app)?.let { return "⛔ Redémarrage annulé : Home Assistant refuserait sa configuration (il démarrerait en mode de récupération, entités indisponibles).\n```\n$it\n```\nCorrige le fichier en cause (ou dis « restaure le dernier fichier modifié »)." }
         val parApi = Serveur.haConfigure(app) && runCatching { Serveur.ha(app, "POST", "/api/services/homeassistant/restart") }.isSuccess
-        if (!parApi) return "❌ Redémarrage non effectué : l'API Home Assistant n'a pas confirmé la commande. Aucun repli Docker/SSH vers le serveur Debian n'est autorisé."
+        if (!parApi) {
+            val c = conteneur(app) ?: return "❌ Ni l'API de Home Assistant ni son conteneur Docker ne sont joignables."
+            // Arrêt propre : 2 min accordées (10 s par défaut → base de l'historique endommagée, redémarrage encore plus long).
+            val r = dockerComplet(app, "docker restart -t 120 ${q(c.nom)}", 240)
+            if (r.first > 0) return "❌ Redémarrage refusé : ${r.second.take(300)}"
+        }
         return "🔁 Redémarrage de Home Assistant" + (if (parApi) " (arrêt propre par Home Assistant lui-même)" else " (arrêt propre du conteneur)") + "…\n" + attendre(app).second
     }
 
     /** Démarrage du conteneur arrêté, puis attente. */
-    suspend fun demarrer(app: JarvisApp): String =
-        "⛔ Démarrage Docker désactivé : configure d'abord un profil SSH Home Assistant indépendant du serveur Debian. Les opérations via l'API restent disponibles."
+    suspend fun demarrer(app: JarvisApp): String {
+        val c = conteneur(app, frais = true) ?: return "❌ Conteneur Home Assistant introuvable."
+        verifier(app)?.let { return "⛔ Démarrage annulé : configuration refusée par Home Assistant.\n```\n$it\n```" }
+        val r = dockerComplet(app, "docker start ${q(c.nom)}", 120)
+        if (r.first > 0) return "❌ ${r.second.take(300)}"
+        return "▶️ ${c.nom} démarré…\n" + attendre(app).second
+    }
 
     // ------------------------------------------------------------------ mise à jour
 
@@ -152,7 +203,7 @@ exit 5
 
     /** Lance la mise à jour sûre en tâche de fond ; renvoie l'identifiant de tâche ou un message. */
     fun mettreAJour(app: JarvisApp, lancer: (String, String, Boolean) -> String): String {
-        val c = conteneur(app, frais = true) ?: return "❌ Mise à jour Docker désactivée : aucun profil SSH Home Assistant dédié n'est configuré. Aucune commande ne sera envoyée au serveur Debian."
+        val c = conteneur(app, frais = true) ?: return "❌ Conteneur Home Assistant introuvable."
         if (c.dossierCompose.isBlank() || c.serviceCompose.isBlank())
             return "« ${c.nom} » n'a pas été créé avec docker compose : sa mise à jour demande de le recréer avec les mêmes réglages. Dis « recrée Home Assistant avec docker compose » et je préparerai le fichier compose à partir de sa configuration actuelle."
         val id = lancer(scriptMiseAJour(c), "Mise à jour de Home Assistant", true)

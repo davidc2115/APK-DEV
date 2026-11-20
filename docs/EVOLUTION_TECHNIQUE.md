@@ -47,24 +47,18 @@ Cette étape ne remplace pas encore la bibliothèque dépréciée : elle réduit
 2. **Routage IA** : Groq / Gemini selon les capacités et la disponibilité, puis Hermès pour les tâches qui le justifient. Pas de relais coûteux en boucle.
 3. **Mémoire unique** : une source logique partagée Jarvis/Hermès ; index et caches reconstruisibles, sans créer de coffre parallèle.
 4. **Connecteurs isolés** : chaque service possède son adaptateur, ses délais d'attente, ses erreurs et ses autorisations.
-5. **Home Assistant distant** : profil dédié à l'instance joignable par DuckDNS/API.
-6. **Serveur Debian Jarvis** : profil distinct, accès système/SSH dédié. Il ne doit jamais être considéré comme l'hôte Docker de Home Assistant puisque les deux environnements sont séparés.
+5. **Instance Home Assistant** : jointe par son API (adresse + jeton longue durée), pour tout ce qui concerne les entités, services, automatisations, tableaux de bord et la validation / le rechargement / le redémarrage propre.
+6. **Hôte Debian** : accès SSH au serveur, qui héberge le conteneur Docker de Home Assistant (ainsi que Plex, le bot Discord…). Pour Home Assistant, il ne sert qu'au conteneur : fichiers de configuration de son volume `/config`, démarrage / arrêt quand l'API ne répond plus, mise à jour de l'image, sauvegardes, installation de HACS.
 7. **Réparations sûres** : diagnostic avant action, liste blanche d'actions non destructives, sauvegarde et validation avant changement de configuration, vérification après action, journal d'audit et arrêt après échec répété. Suppression de données/conteneurs et redémarrage du serveur Debian jamais automatiques.
 
 ## Séparation effective Home Assistant / Debian
 
-Tant qu'aucun profil SSH HA indépendant n'existe, l'application fonctionne en mode API-only pour Home Assistant :
+Home Assistant tourne en Docker sur le serveur Debian de l'utilisateur. Les deux accès restent distincts (mise à jour du 20/11, qui annule le mode « API seule » du 19/11) :
 
-- Les appels REST/WebSocket vers l'URL HA configurée (DuckDNS/API) restent actifs.
-- La détection de conteneur, les commandes Docker, le diagnostic local `127.0.0.1:8123`, le démarrage, la mise à jour et les scripts d'installation HACS par SSH sont désactivés.
-- La lecture, l'écriture et la restauration de fichiers YAML sont suspendues ; le chemin historique `haDir` n'est pas réutilisé car il pouvait désigner le système de fichiers Debian.
-- Un échec API ne déclenche jamais de repli sur `Serveur.exec`, `Serveur.execComplet` ou SFTP du serveur Debian.
-
-- Les chemins génériques ont aussi été verrouillés : `ssh_commande`, `ssh_script` et `serveur_tache` refusent les commandes/scripts Docker ou CLI visant explicitement Home Assistant ; `ssh_fichier` refuse le conteneur HA ; `serveur_service` bloque un service identifié comme HA.
-- Les sauvegardes disque et restaurations HA via `ha_sauvegarde` sont suspendues : aucune recherche d'archive, inspection Docker ou restauration ne doit être effectuée sur Debian. La sauvegarde officielle par API HA reste le chemin autorisé.
-- `serveur_diagnostic` ne teste plus `localhost:8123` et ne lit plus les journaux HA : il décrit uniquement Debian/Jarvis. Le diagnostic HA passe par son API distante.
-
-C'est une mesure de sécurité transitoire : elle peut temporairement retirer l'administration des fichiers YAML et les opérations Docker, mais elle préserve les commandes HA accessibles par API et empêche qu'une action HA modifie le mauvais hôte. La réactivation nécessitera un profil séparé avec hôte, port, utilisateur, clé/mot de passe, chemin de configuration et consentement explicite, ainsi que des tests prouvant que les appels SSH sont routés vers ce profil uniquement.
+- **Instance (API + jeton)** : `ha_entites`, `ha_etat`, `ha_service` (avec relecture de l'état réel), `ha_position`, `ha_admin`, `ha_dashboard`, et dans `ha_config` : valider, recharger, redémarrer (arrêt propre demandé à Home Assistant), journal.
+- **Hôte Debian (SSH)** : uniquement le conteneur Home Assistant détecté (`docker ps`, image / nom) et son dossier `/config` : `ha_config` lister / lire / écrire (sauvegarde `.jarvis-bak-…`, validation, remise de l'ancienne version si refus) / sauvegardes / restaurer, `ha_sauvegarde`, `serveur_service` (redémarrage, démarrage, mise à jour par les opérations sûres de `HaSur`), installation de HACS.
+- Une demande domotique ordinaire n'expose pas les outils SSH au modèle ; une demande de maintenance (Docker, conteneur, mise à jour, sauvegarde, YAML, HACS, stockage…) les expose.
+- Le redémarrage passe d'abord par l'API ; le conteneur n'est redémarré par Docker que si l'API ne répond pas, et le retour en ligne est attendu.
 
 ## Audit réseau local et clients Freebox
 

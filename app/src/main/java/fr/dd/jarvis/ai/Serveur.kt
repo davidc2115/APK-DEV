@@ -904,9 +904,20 @@ object Serveur {
 
     fun haConteneur(app: JarvisApp): String? = runCatching { HaSur.conteneur(app)?.nom }.getOrNull()
 
-    /**
-     * Aucun chemin HA ne peut être résolu sur le SSH général : ce profil désigne Debian/Jarvis.
-     * Le réglage historique haDir est volontairement ignoré pour éviter toute écriture sur le mauvais hôte.
-     */
-    fun haDossier(app: JarvisApp): String? = null
+    /** Dossier de configuration de Home Assistant sur le serveur (réglage, sinon détection Docker puis emplacements usuels). */
+    fun haDossier(app: JarvisApp): String? {
+        app.store.haDir.value.trim().takeIf { it.isNotBlank() }?.let { return it.trimEnd('/') }
+        val nom = haConteneur(app)
+        if (nom != null) {
+            val src = exec(app, "docker inspect $nom --format '{{range .Mounts}}{{if eq .Destination \"/config\"}}{{.Source}}{{end}}{{end}}'").second.trim()
+            if (src.startsWith("/")) { app.store.haDir.set(src); return src }
+        }
+        for (c in listOf("/config", "~/homeassistant", "/opt/homeassistant/config", "/opt/homeassistant", "/home/homeassistant/.homeassistant", "/usr/share/hassio/homeassistant", "~/.homeassistant")) {
+            if (exec(app, "test -f $c/configuration.yaml").first == 0) {
+                val abs = exec(app, "cd $c && pwd").second.trim().ifBlank { c }
+                app.store.haDir.set(abs); return abs
+            }
+        }
+        return null
+    }
 }

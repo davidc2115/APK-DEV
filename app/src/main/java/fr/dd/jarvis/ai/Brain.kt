@@ -25,6 +25,9 @@ class Brain(
      * Jarvis. Si Jarvis n'aboutit pas (pas d'outil, rien trouvé, information manquante, erreur), Hermès reprend
      * AUTOMATIQUEMENT la demande — avec sa mémoire, ses notes, skills et outils — sans que l'utilisateur ait à le nommer.
      */
+    /** La réponse en cours vient d'un réflexe ou d'un résultat d'outil rendu tel quel (pas d'une rédaction de l'IA). */
+    @Volatile private var sortieDirecte = false
+
     suspend fun reply(history: List<ChatMsg>, pourHermes: Boolean = false, onTexte: ((String) -> Unit)? = null, onStatus: (String) -> Unit): String {
         // L'avatar montre que JARVIS réfléchit tant que la réponse se prépare.
         val debutTotal = System.currentTimeMillis()
@@ -34,7 +37,12 @@ class Brain(
         val h = runCatching { fr.dd.jarvis.hermes.Reprise.reecrire(app, history) }.getOrNull()?.also { onStatus("🔁 Reprise de la demande interrompue…") } ?: history
         fr.dd.jarvis.voice.JournalVoix.noter("brain", "vérification reprise en ${System.currentTimeMillis() - debutReprise} ms")
         try {
-            return replyInterne(h, pourHermes, onTexte, onStatus)
+            sortieDirecte = false
+            val brut = replyInterne(h, pourHermes, onTexte, onStatus)
+            // Réponse rendue sans l'IA (réflexe, résultat d'outil direct) : tes consignes de forme s'y appliquent aussi.
+            if (pourHermes || !sortieDirecte) return brut
+            val demande = h.lastOrNull { it.fromUser }?.text.orEmpty()
+            return runCatching { Restitution.appliquer(app, demande, brut) }.getOrElse { e -> if (e is kotlinx.coroutines.CancellationException) throw e; brut }
         } finally {
             fr.dd.jarvis.voice.JournalVoix.noter("brain", "temps total cerveau ${System.currentTimeMillis() - debutTotal} ms")
             fr.dd.jarvis.voice.Presence.finReflexion()
@@ -174,9 +182,15 @@ class Brain(
         // Suite qui renvoie à l'échange précédent (« ça », « du coup », « directement »…) : les réflexes qui ne lisent que la
         // dernière phrase la comprendraient de travers ; elle va aux cerveaux, qui ont l'historique et le fil.
         val suite = !pourHermes && FilConversation.renvoie(texteUser) && FilConversation.fil(history)?.let { FilConversation.estSuite(it) } == true
-        fun reflexe(r: String) = r.also { if (!pourHermes) fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS }
+        fun reflexe(r: String) = r.also { sortieDirecte = true; if (!pourHermes) fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS }
         /** Réflexe de la maison (Home Assistant) : la suite de la conversation reste aussi à JARVIS. */
         fun reflexeMaison(r: String) = reflexe(r).also { if (!pourHermes) fr.dd.jarvis.hermes.Routeur.noterMaison() }
+        // Consigne durable dite explicitement : enregistrée tout de suite (sans dépendre du modèle), puis la phrase suit son
+        // cours normal (la réponse la confirme ; une demande jointe est traitée).
+        if (!pourHermes) ConsignesExplicites.detecter(texteUser)?.let { (rubrique, consigne) ->
+            runCatching { app.memo.ajouterConsigne(rubrique, consigne) }
+                .onSuccess { fr.dd.jarvis.voice.JournalVoix.noter("brain", "consigne enregistrée [$rubrique] : ${consigne.take(80)}") }
+        }
         // Changement de profil énergétique : commande locale immédiate, sans appel à Groq/Gemini/Hermès.
         // Les trois profils sont persistés puis leurs planificateurs sont recalculés immédiatement.
         if (!pourHermes) {
@@ -578,7 +592,7 @@ class Brain(
                 if (res.direct && !(name == "ha_entites" && (res.text.startsWith("Aucune") || ACTION_DOMOTIQUE.containsMatchIn(texteUser))))
                     direct.append(res.text).append("\n\n")
             }
-            if (direct.isNotEmpty()) return direct.toString().trim()
+            if (direct.isNotEmpty()) { sortieDirecte = true; return direct.toString().trim() }
             onStatus("Réflexion…")
         }
         // Dernière passe sans nouvel outil : restitue les résultats réellement obtenus plutôt qu'un échec générique.
