@@ -100,6 +100,18 @@ object TestDebit {
         }
     }
 
+    /** Internet répond-il par le réseau mobile ? (une requête de quelques octets) */
+    fun ping(app: JarvisApp): Boolean {
+        val reseau = reseauMobile(app) ?: return false
+        try {
+            val c = OkHttpClient.Builder().connectTimeout(6, TimeUnit.SECONDS).readTimeout(6, TimeUnit.SECONDS).retryOnConnectionFailure(false)
+                .socketFactory(reseau.socketFactory).dns(object : okhttp3.Dns { override fun lookup(hostname: String) = reseau.getAllByName(hostname).toList() }).build()
+            return c.newCall(Request.Builder().url("$HOTE/__down?bytes=0").build()).execute().use { it.isSuccessful }.also { c.connectionPool.evictAll() }
+        } catch (_: Exception) { return false } finally {
+            enCours?.let { (cm, cb) -> runCatching { cm.unregisterNetworkCallback(cb) } }; enCours = null
+        }
+    }
+
     fun texte(app: JarvisApp, mobile: Boolean = true): String {
         val r = mesurer(app, mobile)
         if (mobile && r.descenteMbps == null && r.octets == 0L) return "🚀 Test de débit mobile impossible : données mobiles coupées ou pas de réseau. (« améliore mon réseau » pour le diagnostic.)"

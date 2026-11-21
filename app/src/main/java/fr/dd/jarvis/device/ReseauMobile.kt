@@ -168,7 +168,11 @@ object ReseauMobile {
         if (Regex("\\b(ou|a quelle heure|quand)\\b.{0,20}\\b(capte|captes|capter|recois|reception|reseau)\\b.{0,15}\\b(mal|pas|moins|faible)\\b|\\bhistorique\\b.{0,20}\\b(reseau|reception|signal)\\b").containsMatchIn(n)) return "historique"
         if (Regex("\\b(cartes? sim|double sim|deux sim|ma sim|mes sim|quelle sim)\\b").containsMatchIn(n) && !Regex("\\b(code|pin|puk)\\b").containsMatchIn(n)) return "sim"
         if (!SUJET.containsMatchIn(n)) return null
-        if (Regex("\\bapn\\b").containsMatchIn(n)) return "apn"
+        if (Regex("\\bapn\\b").containsMatchIn(n)) return when {
+            Regex("\\b(remets|remettre|restaure|restaurer|retablis|retablir|reviens|revenir|annule|annuler)\\b").containsMatchIn(n) -> "apn_restaurer"
+            Regex("\\b(configure|configurer|regle|regler|corrige|corriger|ameliore|ameliorer|optimise|optimiser|cree|creer|parametre|parametrer|change|changer|modifie|modifier|repare|reparer|mets a jour)\\b").containsMatchIn(n) -> "apn_configurer"
+            else -> "apn"
+        }
         if (Regex("\\b(relance|relancer|reinitialise|reinitialiser|redemarre|redemarrer|reconnecte|reconnecter|rafraichis|rafraichir)\\b").containsMatchIn(n)) return "reenregistrer"
         if (Regex("\\b(ameliore|ameliorer|optimise|optimiser|repare|reparer|corrige|corriger|regle|regler|booste|booster|arrange|arranger|resous|resoudre)\\b").containsMatchIn(n)) return "optimiser"
         if (Regex("\\b(comment|quel|quelle|quels|quelles|est ce|j ai|ai je|etat|qualite|niveau|teste|tester|verifie|verifier|diagnostic|diagnostique|combien|capte|captes|bien|mal|faible|pourquoi)\\b").containsMatchIn(n)) return "diagnostic"
@@ -382,8 +386,9 @@ object ReseauMobile {
                 l += "⚠️ L'APN en service (${actuel["apn"]}) ne correspond pas : c'est souvent la cause d'internet ou de MMS qui ne marchent pas."
             l += "_(valeurs habituelles : en cas de doute, celles du site de ton opérateur font foi)_"
         } else l += "Je ne connais pas les APN de cet opérateur : prends-les sur son site (rubrique « paramètres APN »)."
+        runCatching { ApnConfig.bilan(app, e) }.getOrNull()?.let { l += "\n$it" }
         if (ouvrir) l += "\n" + ouvrirReglage(app, "apn")
-        else l += "\nPour les modifier : « Jarvis, ouvre les réglages APN » (Android ne laisse pas une appli les écrire elle-même)."
+        else if (!PhoneShell.ready(app)) l += "\nPour les modifier : « Jarvis, ouvre les réglages APN » — ou active Shizuku / l'ADB intégré et dis « configure l'APN » : je le fais pour toi."
         return l.joinToString("\n")
     }
 
