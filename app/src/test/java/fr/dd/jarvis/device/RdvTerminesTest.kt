@@ -51,6 +51,15 @@ class RdvTerminesTest {
         assertEquals(listOf(3L), choix("le rendez-vous de 15h est terminé", 17))
         assertEquals(listOf(1L, 2L), choix("tous mes rendez-vous sont terminés", 13))
         assertTrue(RdvTermines.choisir(l, terminer("le rendez-vous est terminé").cible, ms(7), emptySet(), zone = z) is RdvTermines.Choix.Echec)
+        // Pluriel sans « tous » : tous les rendez-vous du jour dit (avant : seulement le dernier).
+        val hier = auj.minusDays(1)
+        val lh = listOf(ev(4, "CE - PRESSIGNY 1", 8, 11, hier), ev(5, "CE - CADET 1/2", 11, 15, hier), ev(6, "CE - APERT 1", 15, 18, hier))
+        listOf("mets les rendez-vous d'hier comme terminés", "les rendez-vous d'hier sont terminés", "mets tous les rendez-vous d'hier comme marqués",
+            "marque les rendez-vous d'hier comme faits en jaune", "termine tous les rendez-vous d'hier", "passe les 3 rendez-vous d'hier en terminé").forEach { t ->
+            val i = RdvTermines.intention(t, auj) as? RdvTermines.Intention.Terminer ?: throw AssertionError("non compris : $t")
+            val r = RdvTermines.choisir(lh, i.cible, ms(19), emptySet(), zone = z) as RdvTermines.Choix.Trouve
+            assertEquals(t, listOf(4L, 5L, 6L), r.l.map { it.id })
+        }
     }
 
     @Test fun nonCarnet() {

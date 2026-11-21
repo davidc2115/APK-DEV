@@ -70,6 +70,9 @@ object RdvTermines {
         Regex("\\b(?:j ai|on a|nous avons|je viens de|on vient de|j en ai)\\s+(?:enfin |bien |deja )?(?:termine|fini|boucle|acheve|cloture)r?\\b"),
         Regex("\\b(?:marque|marquer|note|noter|considere|indique|passe|mets?)\\b.{0,60}\\bcomme (?:$PART|faite?s?)\\b"),
         Regex("\\bfin (?:du|de mon|de ma|de la|de l) (?:rendez vous|rdv|reunion|visite|consultation)\\b"),
+        Regex("\\b(?:comme|en) (?:marquee?s?|$PART|faite?s?)\\b"),
+        // Impératif : « termine tous les rendez-vous d'hier », « clôture le rendez-vous Dupont ».
+        Regex("\\b(?:termine|cloture|boucle|clos)\\s+(?:tous |toutes )?(?:les |mes |le |mon |ce |ces |la |ma )?(?:\\d+ )?(?:rendez vous|rdv|reunion|visite|consultation)s?\\b"),
     )
     private val NEG = Regex("\\b(?:pas|plus|jamais) (?:encore )?(?:termine|fini|fait|acheve)e?s?\\b|\\bdemarque|\\b(?:enleve|retire|annule)r? (?:le |l etat )?(?:termine|fait)\\b|\\bremets? (?:le |la |mon |ma )?(?:rendez vous|rdv|reunion|visite) (?:en cours|a faire|comme avant)")
     private val QUESTION = Regex("^(?:est ce que|est ce qu|qu est ce|quand|pourquoi|comment|ou)\\b|\\b(?:se termine|se finit|finit a|termine a|termine vers|va (?:se )?terminer|a quelle heure|quelle heure|combien de temps|avant de|apres le|une fois (?:le|que))\\b")
@@ -86,8 +89,17 @@ object RdvTermines {
         "rendezvous", "reunion", "reunions", "visite", "visites", "consultation", "tous", "toutes", "tout", "jarvis", "stp", "svp", "plait", "il", "elle", "s", "te",
         "merci", "ok", "alors", "bon", "voilà", "aujourd", "hui", "demain", "hier", "matin", "soir", "apres", "midi", "jour", "journee", "h", "heure", "heures",
         "premier", "premiere", "1er", "1ere", "deuxieme", "second", "seconde", "2e", "2eme", "troisieme", "3e", "3eme", "dernier", "derniere", "client", "cliente",
-        "actuel", "cours", "qui", "que", "en", "vert", "fonce", "ciel", "par", "defaut", "toujours",
+        "actuel", "cours", "qui", "que", "en", "vert", "fonce", "ciel", "par", "defaut", "toujours", "marques", "marquee", "marquees", "etat", "statut",
+        "terminez", "cloturer", "boucler", "deux", "trois", "quatre", "cinq", "six", "ceux", "celles", "celui",
     ) + COULEURS.flatMap { it.split(' ') }
+
+    /** « tous les rendez-vous », « les rendez-vous d'hier », « mes 3 rendez-vous », « … sont terminés » : tous ceux du jour visé. */
+    private val PLURIEL = listOf(
+        Regex("\\b(?:tous|toutes) (?:mes |les |ces |nos )?(?:\\d+ )?(?:rendez vous|rdvs?|reunions|visites|consultations)\\b"),
+        Regex("\\b(?:les|mes|ces|nos) (?:\\d+ |deux |trois |quatre |cinq |six )?(?:rendez vous|rdvs?|reunions|visites|consultations)\\b"),
+        Regex("\\b(?:sont|ont ete) (?:bien |enfin |maintenant |deja |donc |tous |toutes )?(?:termine|fini|acheve|clos|cloture|boucle|fait)e?s\\b"),
+        Regex("\\b(?:marque|mets?|passe)[ -]les\\b"),
+    )
 
     internal fun cible(texte: String, aujourdhui: LocalDate): Cible {
         val brut = DatesFr.normaliser(texte)
@@ -103,7 +115,7 @@ object RdvTermines {
             mots = sansHeure.split(' ').filter { it.length >= 3 && it !in VIDES && !it.all(Char::isDigit) },
             chez = Regex("\\b(?:chez|avec) (?!moi\\b|nous\\b)").containsMatchIn(n),
             rang = RANGS.firstOrNull { (r, _) -> r.containsMatchIn(sansHeure) }?.second,
-            tous = Regex("\\b(?:tous|toutes) (?:mes |les |ces )?(?:rendez vous|rdv|reunions|visites)\\b").containsMatchIn(n),
+            tous = PLURIEL.any { it.containsMatchIn(n) },
         )
     }
 
@@ -111,7 +123,7 @@ object RdvTermines {
         val o = texte.trim()
         if (o.isBlank() || o.length > 240) return null
         val n = DatesFr.normaliser(o).replace(Regex("^(?:(?:jarvis|ok|alors|bon|voila|bien)\\s+)+"), "")
-        if (!SUJET.containsMatchIn(n) || !Regex("termin|fini|fait|achev|clos|clotur|boucl|\\bfin\\b").containsMatchIn(n)) return null
+        if (!SUJET.containsMatchIn(n) || !Regex("termin|fini|fait|achev|clos|clotur|boucl|\\bfin\\b|comme marque").containsMatchIn(n)) return null
         // Réglages : « quand un rendez-vous est terminé, mets-le en gris », « la couleur seulement dans l'application ».
         val couleur = couleurDite(n)
         val google = when {
@@ -192,8 +204,10 @@ object RdvTermines {
         val nom = couleur ?: st.rdvTermineCouleur.value.ifBlank { "vert" }
         val c = CalendarRepo.parseColor(nom) ?: CalendarRepo.parseColor("vert")!!
         val m = JSONObject().put("id", e.id).put("b", e.begin).put("t", e.title).put("c", c).put("nom", nom).put("ts", System.currentTimeMillis())
-        e.eventColor?.let { m.put("avant", it) }
-        st.eventColor[e.id]?.let { m.put("avantLocal", it) }
+        // Déjà marqué terminé (nouvelle couleur) : la couleur d'origine reste celle d'avant le premier marquage.
+        val ancien = lire(st)[cle(e)]
+        if (ancien != null) { if (ancien.has("avant")) m.put("avant", ancien.optInt("avant")); if (ancien.has("avantLocal")) m.put("avantLocal", ancien.optInt("avantLocal")) }
+        else { e.eventColor?.let { m.put("avant", it) }; st.eventColor[e.id]?.let { m.put("avantLocal", it) } }
         val ou: String
         if (st.rdvTermineGoogle.value) {
             if (app.calendar.estRecurrent(e.id)) {

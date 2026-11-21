@@ -416,8 +416,9 @@ class ToolBox(
         put(tool("anniversaires", "Anniversaires (contacts Android + ceux dits à JARVIS) : lister (prochains, sur N jours) | de (date d'une personne) | ajouter (nom, date JJ/MM ou JJ/MM/AAAA) | supprimer (nom). Ils sont annoncés au point du matin, la veille au soir et par notification.",
             mapOf("action" to prop("lister (défaut) | de | ajouter | supprimer"), "nom" to prop("Personne."), "date" to prop("ajouter : JJ/MM ou JJ/MM/AAAA."), "jours" to prop("lister : nombre de jours (défaut 60).")))) 
         put(tool("rdv_termine", "Marque un rendez-vous de l'agenda comme TERMINÉ : il prend la couleur demandée (sinon celle des rendez-vous terminés) et JARVIS le considère comme fait. N'écris JAMAIS « terminé » dans le titre ou la description (pas d'update_event pour ça). Sans précision : le rendez-vous en cours, sinon le dernier commencé aujourd'hui.",
-            mapOf("phrase" to prop("La demande de l'utilisateur telle quelle (ex. « le rendez-vous avec Dupont est terminé, mets-le en gris »)."),
-                "action" to prop("terminer (défaut) | reprendre (n'est plus terminé) | lister | reglage"), "couleur" to prop("Couleur (vert, gris, bleu…), optionnel."))))
+            mapOf("phrase" to prop("La demande de l'utilisateur MOT POUR MOT (ex. « mets tous les rendez-vous d'hier comme terminés en jaune »)."),
+                "action" to prop("terminer (défaut) | reprendre (n'est plus terminé) | lister | reglage"), "couleur" to prop("Couleur (vert, gris, jaune…), optionnel."),
+                "date" to prop("Jour des rendez-vous (AAAA-MM-JJ), si la phrase en désigne un."), "tous" to prop("« oui » : TOUS les rendez-vous de ce jour (pluriel : « les rendez-vous d'hier »).")), listOf("phrase")))
         put(tool("mode_rendez_vous", "Mode rendez-vous : Ne pas déranger automatique pendant les rendez-vous de l'agenda (clients, ou tous), son rétabli à la fin, liste des appels manqués ; option SMS automatique « je te rappelle » aux contacts qui appellent. Actions : etat | activer (tous=oui pour tous les rendez-vous) | desactiver | sms_on | sms_off | message (texte, {fin} = heure de fin).",
             mapOf("action" to prop("etat | activer | desactiver | sms_on | sms_off | message"), "tous" to prop("activer : oui = tous les rendez-vous, non = seulement ceux des clients."), "texte" to prop("message : texte du SMS automatique."))))
         put(tool("courrier", "Ce que JARVIS a repéré dans les SMS et mails reçus : colis (transporteur, numéro, état, code de retrait, lien de suivi), factures et devis reçus (émetteur, montant, échéance), rendez-vous détectés. Actions : colis | a_traiter (défaut) | traiter (id) | supprimer (id) | rdv_agenda (id facultatif : ajoute le rendez-vous détecté à l'agenda) | liste (tout, avec les id).",
@@ -1221,7 +1222,16 @@ class ToolBox(
                 lue != null -> lue
                 else -> fr.dd.jarvis.device.RdvTermines.Intention.Terminer(R.cible(phrase, LocalDate.now()), coul)
             }
-            ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { R.executer(app, i) }, direct = true)
+            // Précisions données par l'IA (jour, « tous ») ajoutées à ce que la phrase dit déjà.
+            val jourDit = runCatching { LocalDate.parse(a.optString("date").trim().take(10)) }.getOrNull()
+            val tousDit = a.optString("tous").trim().lowercase() in setOf("oui", "true", "1")
+            fun fr.dd.jarvis.device.RdvTermines.Cible.plus() = copy(jour = jour ?: jourDit, tous = tous || tousDit)
+            val j = when (i) {
+                is fr.dd.jarvis.device.RdvTermines.Intention.Terminer -> i.copy(cible = i.cible.plus())
+                is fr.dd.jarvis.device.RdvTermines.Intention.Reprendre -> i.copy(cible = i.cible.plus())
+                else -> i
+            }
+            ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { R.executer(app, j) }, direct = true)
         }
         "mode_rendez_vous" -> {
             val S = fr.dd.jarvis.device.SilenceRdv
