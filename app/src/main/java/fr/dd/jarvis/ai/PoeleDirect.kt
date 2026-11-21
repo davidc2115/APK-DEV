@@ -127,13 +127,25 @@ object PoeleDirect {
     private val VIDES_LECTURE = VIDES + setOf("quelle", "quel", "quelles", "quels", "est", "sont", "ce", "que", "qu", "il", "elle", "ils", "fait", "donne",
         "temperature", "temperatures", "temp", "degres", "degre", "chaud", "froid", "consigne", "consignes", "etat", "etats", "statut", "combien",
         "allume", "allumes", "eteint", "eteints", "tourne", "marche", "route", "chauffe", "actuelle", "actuellement", "maintenant", "donne", "dis", "moi",
-        "ca", "y", "t", "quoi", "comment", "va", "vont")
+        "ca", "y", "t", "quoi", "comment", "va", "vont", "presente", "presentes", "affiche", "affiches", "montre", "montres", "indique", "indiques",
+        "tableau", "forme", "sous", "avec", "liste", "actuel", "actuels", "actuelles", "leur", "leurs", "deux", "tous", "toutes")
+
+    /**
+     * Présentation demandée (« … sous forme de tableau avec la température actuelle et la consigne ») et « tous / les
+     * deux » : retirés avant de chercher la pièce — la lecture rend déjà un tableau de TOUS les poêles.
+     */
+    private val PRESENTATION = Regex("\\b(sous (la )?forme|en (un )?tableau|dans un tableau|en colonnes?|en liste|avec (la |les |leur |leurs )?(temperatures?|consignes?|etats?)|tableau)\\b.*$")
+    private val TOUS = Regex("\\b(tous les deux|toutes les deux|les deux|les 2|tous|toutes|chacun|chacune|ensemble|l un et l autre)\\b")
 
     /** « Quelle est la température de mes poêles ? », « le poêle de l'étage est allumé ? » (texte brut), ou null. */
     fun lecture(texte: String): Lecture? {
         val brut = texte.trim()
-        val n = normaliser(brut).replace(Regex("[?!.,;:]+"), " ").replace(Regex("\\s+"), " ").trim()
-        if (n.split(' ').size > 16 || !POELE.containsMatchIn(n)) return null
+        val n0 = normaliser(brut).replace(Regex("[?!.,;:]+"), " ").replace(Regex("\\s+"), " ").trim()
+        if (n0.split(' ').size > 30 || !POELE.containsMatchIn(n0)) return null
+        // La présentation demandée ne doit ni faire refuser la phrase (trop longue) ni passer pour une pièce.
+        val sansPresentation = n0.replace(PRESENTATION, "").trim()
+        val n = (if (POELE.containsMatchIn(sansPresentation) && VALEUR.containsMatchIn(sansPresentation)) sansPresentation else n0).replace(TOUS, " ").replace(Regex("\\s+"), " ").trim()
+        if (n.split(' ').size > 16) return null
         if (ACTION.containsMatchIn(n) || Regex("\\d").containsMatchIn(n)) return null
         val valeur = VALEUR.containsMatchIn(n)
         val etat = (brut.endsWith("?") || n.startsWith("est ce")) && QUESTION_ETAT.containsMatchIn(n)
@@ -168,24 +180,65 @@ object PoeleDirect {
         fun nomDe(id: String) = parId[id]?.optJSONObject("attributes")?.optString("friendly_name").orEmpty()
         val marques = Regex("\\b(mcz|maestro|palazzetti|edilkamin|rika|extraflame|ravelli|micronova|fumis|cadel|laminox|piazzetta)\\b")
         fun estPoele(id: String) = POELE.containsMatchIn(texte(id, nomDe(id))) || marques.containsMatchIn(texte(id, nomDe(id)))
+        fun chauffe(id: String) = parId[id]?.optJSONObject("attributes")?.optJSONArray("hvac_modes")?.let { a -> (0 until a.length()).any { a.optString(it) == "heat" } } ?: true
+        // Poêles nommés comme tels ; sinon (entités « climate.etage », « climate.salon »…) tous les chauffages : « mes
+        // poêles » veut dire TOUS, jamais « lequel ? ».
         val climats = notees.filter { it.startsWith("climate.") && it in parId }.ifEmpty {
             paires.filter { (id, _) -> id.startsWith("climate.") && estPoele(id) }.map { it.first }
-        }
+        }.ifEmpty { paires.filter { (id, _) -> id.startsWith("climate.") && chauffe(id) }.map { it.first } }
         val auLieu = if (l.lieu.isEmpty()) climats else climats.filter { lieuOk(texte(it, nomDe(it)), l.lieu) }
-        if (auLieu.isNotEmpty()) return auLieu.sorted().joinToString("\n") { ligneClimat(parId.getValue(it)) }
+        if (auLieu.size == 1) return ligneClimat(parId.getValue(auLieu.single()))
+        if (auLieu.isNotEmpty()) return tableauClimats(auLieu.sorted().map { parId.getValue(it) })
         // Pas d'entité climate : capteurs de température du poêle (sensor.*), jamais un mode.
         val capteurs = paires.filter { (id, nom) ->
             id.startsWith("sensor.") && estPoele(id) && !MODE.containsMatchIn(texte(id, nom)) &&
                 (Regex("\\b(temp\\w*)\\b").containsMatchIn(texte(id, nom)) || parId[id]?.optJSONObject("attributes")?.optString("device_class") == "temperature")
         }.map { it.first }.filter { l.lieu.isEmpty() || lieuOk(texte(it, nomDe(it)), l.lieu) }
         if (capteurs.isEmpty()) return null
-        return capteurs.sorted().take(8).joinToString("\n") { id ->
-            val o = parId.getValue(id); val a = o.optJSONObject("attributes")
-            "🌡️ ${a?.optString("friendly_name").orEmpty().ifBlank { id }} : ${o.optString("state")}${a?.optString("unit_of_measurement")?.let { " $it" }.orEmpty()}"
-        }
+        fun valeur(id: String) = parId.getValue(id).let { o -> o.optString("state") + o.optJSONObject("attributes")?.optString("unit_of_measurement")?.let { " $it" }.orEmpty() }
+        if (capteurs.size == 1) return "🌡️ ${nomDe(capteurs.single()).ifBlank { capteurs.single() }} : ${valeur(capteurs.single())}"
+        return "🌡️ Températures des poêles\n\n| Capteur | Valeur |\n|---|---|\n" +
+            capteurs.sorted().take(8).joinToString("\n") { id -> "| ${nomDe(id).ifBlank { id }} | ${valeur(id)} |" }
     }
 
+    /** Plusieurs poêles : un tableau (température actuelle, consigne, état), plus lisible qu'une liste. */
+    internal fun tableauClimats(l: List<JSONObject>): String = "🔥 Poêles\n\n| Poêle | Température actuelle | Consigne | État |\n|---|---|---|---|\n" +
+        l.joinToString("\n") { o ->
+            val a = o.optJSONObject("attributes") ?: JSONObject()
+            val nom = a.optString("friendly_name").ifBlank { o.optString("entity_id") }
+            val etat = o.optString("state")
+            if (etat == "unavailable" || etat == "unknown") "| $nom | — | — | indisponible |"
+            else {
+                val mesure = a.optDouble("current_temperature").takeIf { !it.isNaN() }?.let { "${nombre(it)} °C" } ?: "—"
+                val consigne = a.optDouble("temperature").takeIf { !it.isNaN() }?.let { "${nombre(it)} °C" } ?: "—"
+                val marche = when (a.optString("hvac_action")) {
+                    "heating" -> "en chauffe"; "idle" -> "au repos"; "off" -> "éteint"; "fan" -> "ventilation"
+                    else -> when (etat) { "off" -> "éteint"; "heat", "auto", "heat_cool" -> "allumé"; else -> etat }
+                }
+                "| $nom | $mesure | $consigne | $marche |"
+            }
+        }
+
     /** Répond à la lecture ; null si ce n'en est pas une ou si aucun poêle n'est trouvé (le cerveau reprend). */
+    private val SUITE_TOUS = Regex("^(et )?(les deux|les 2|tous|toutes|tous les deux|toutes les deux|les deux poeles|tous les poeles|chacun|l un et l autre|tous les 2|ensemble|" +
+        "(donne|dis)( moi)? (les deux|tous|pour les deux|pour tous)|pour (les deux|tous|chacun))( stp| s il te plait| svp)?$")
+
+    /**
+     * « Les deux » / « tous » juste après « quel poêle ? » : la lecture précédente, pour TOUS les poêles (null sinon).
+     * Avant, la suite partait à l'IA qui rendait une liste au lieu des valeurs.
+     */
+    fun suiteTous(texte: String, history: List<fr.dd.jarvis.ai.ChatMsg>): String? {
+        val n = normaliser(texte).replace(Regex("[?!.,;:]+"), " ").replace(Regex("\\s+"), " ").trim()
+        if (!SUITE_TOUS.matches(n)) return null
+        val avant = history.dropLast(1)
+        val question = avant.lastOrNull { !it.fromUser }?.text ?: return null
+        if (!POELE.containsMatchIn(normaliser(question)) || '?' !in question) return null
+        val demande = avant.lastOrNull { it.fromUser }?.text ?: return null
+        val l = lecture(demande) ?: return null
+        // La pièce éventuellement comprise de travers dans la première demande est ignorée : tous les poêles.
+        return if (l.lieu.isEmpty()) demande else "quelle est la température de mes poêles"
+    }
+
     suspend fun executerLecture(app: JarvisApp, texte: String): String? {
         val l = lecture(texte) ?: return null
         if (!Serveur.haConfigure(app)) return null

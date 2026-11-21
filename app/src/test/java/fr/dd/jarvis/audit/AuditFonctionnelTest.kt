@@ -41,9 +41,15 @@ class AuditFonctionnelTest {
             "allume la lumière du salon" to "Domo",
             "ouvre WhatsApp" to "CD:phone_action",
             "lance Inception sur la télé" to "Plex:plex_lancer",
+            "Donne-moi la température de mes poêles sous forme de tableau avec la température actuelle et la température de consigne" to "PoeleLecture",
+            "quelles sont mes consignes" to "Consignes:Lister",
+            "oublie cette consigne" to "Consignes:Oublier",
         )
         val erreurs = attendus.filter { (p, a) -> r(p) != a }.map { (p, a) -> "« $p » → ${r(p)} (attendu $a)" }
         assertTrue(erreurs.joinToString("\n"), erreurs.isEmpty())
+        // Une commande ordinaire n'est jamais prise pour une consigne durable (ni pour sa gestion).
+        val consignes = attendus.keys.filter { fr.dd.jarvis.ai.ConsignesExplicites.detecter(it)?.ponctuelle == false }
+        assertTrue(consignes.joinToString("\n"), consignes.isEmpty())
     }
 
     @Test fun aucunReflexeNeDetourneCesPhrases() {

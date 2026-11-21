@@ -27,6 +27,10 @@ class Brain(
      */
     /** La réponse en cours vient d'un réflexe ou d'un résultat d'outil rendu tel quel (pas d'une rédaction de l'IA). */
     @Volatile private var sortieDirecte = false
+    /** Consigne enregistrée pendant cette demande (confirmée à la fin de la réponse). */
+    @Volatile private var consigneRetenue: ConsignesExplicites.Consigne? = null
+
+    private fun consigneExigeUneSuite(texte: String): Boolean = runCatching { Restitution.exigeUneSuite(app.memo.all(), texte) }.getOrDefault(false)
 
     suspend fun reply(history: List<ChatMsg>, pourHermes: Boolean = false, onTexte: ((String) -> Unit)? = null, onStatus: (String) -> Unit): String {
         // L'avatar montre que JARVIS réfléchit tant que la réponse se prépare.
@@ -38,11 +42,18 @@ class Brain(
         fr.dd.jarvis.voice.JournalVoix.noter("brain", "vérification reprise en ${System.currentTimeMillis() - debutReprise} ms")
         try {
             sortieDirecte = false
+            consigneRetenue = null
             val brut = replyInterne(h, pourHermes, onTexte, onStatus)
             // Réponse rendue sans l'IA (réflexe, résultat d'outil direct) : tes consignes de forme s'y appliquent aussi.
-            if (pourHermes || !sortieDirecte) return brut
-            val demande = h.lastOrNull { it.fromUser }?.text.orEmpty()
-            return runCatching { Restitution.appliquer(app, demande, brut) }.getOrElse { e -> if (e is kotlinx.coroutines.CancellationException) throw e; brut }
+            val finale = if (pourHermes || !sortieDirecte) brut else {
+                val demande = h.lastOrNull { it.fromUser }?.text.orEmpty()
+                runCatching { Restitution.appliquer(app, demande, brut) }.getOrElse { e -> if (e is kotlinx.coroutines.CancellationException) throw e; brut }
+            }
+            // La consigne dite dans cette demande est confirmée : l'utilisateur sait qu'elle est retenue (et comment l'annuler).
+            val c = consigneRetenue?.takeIf { !pourHermes } ?: return finale
+            consigneRetenue = null
+            return finale.trimEnd() + "\n\n" + (if (c.ponctuelle) "📌 Présentation retenue : je la reprendrai à chaque demande de ce type"
+                else "📌 Consigne retenue (${c.rubrique}) : je l'appliquerai à chaque fois") + " (« oublie cette consigne » pour l'annuler)."
         } finally {
             fr.dd.jarvis.voice.JournalVoix.noter("brain", "temps total cerveau ${System.currentTimeMillis() - debutTotal} ms")
             fr.dd.jarvis.voice.Presence.finReflexion()
@@ -187,13 +198,24 @@ class Brain(
         fun reflexeMaison(r: String) = reflexe(r).also { if (!pourHermes) fr.dd.jarvis.hermes.Routeur.noterMaison() }
         // Consigne durable dite explicitement : enregistrée tout de suite (sans dépendre du modèle), puis la phrase suit son
         // cours normal (la réponse la confirme ; une demande jointe est traitée).
-        if (!pourHermes) ConsignesExplicites.detecter(texteUser)?.let { (rubrique, consigne) ->
-            runCatching { app.memo.ajouterConsigne(rubrique, consigne) }
-                .onSuccess { fr.dd.jarvis.voice.JournalVoix.noter("brain", "consigne enregistrée [$rubrique] : ${consigne.take(80)}") }
+        if (!pourHermes) ConsignesExplicites.detecter(texteUser)?.let { c ->
+            runCatching { app.memo.ajouterConsigne(c.rubrique, c.texte) }.onSuccess { r ->
+                fr.dd.jarvis.voice.JournalVoix.noter("brain", "consigne enregistrée [${c.rubrique}] : ${c.texte.take(80)} ($r)")
+                if (r != "déjà enregistrée" && r != "rien à enregistrer") { consigneRetenue = c; ConsignesExplicites.derniere = c.rubrique to c.texte }
+            }
+        }
+        // « Quelles sont mes consignes ? », « oublie cette consigne / la consigne sur les poêles » : sans IA.
+        if (!pourHermes) GestionConsignes.demande(texteUser)?.let { a ->
+            onStatus("📌 Consignes…")
+            return reflexe(runCatching { GestionConsignes.executer(app, a) }.getOrElse { "Impossible de lire les consignes : ${it.message}" })
         }
         // Changement de profil énergétique : commande locale immédiate, sans appel à Groq/Gemini/Hermès.
         // Les trois profils sont persistés puis leurs planificateurs sont recalculés immédiatement.
-        if (!pourHermes) {
+        // Une consigne de l'utilisateur demande d'ajouter quelque chose à ce type de réponse : pas de réflexe brut, le
+        // cerveau répond en appliquant la consigne.
+        val consigneAjout = !pourHermes && consigneExigeUneSuite(texteUser)
+        if (consigneAjout) fr.dd.jarvis.voice.JournalVoix.noter("brain", "consigne d'ajout : réflexes directs ignorés")
+        if (!pourHermes && !consigneAjout) {
             // « Que sais-tu faire ? », « liste tous tes outils », « que sais-tu faire avec les mails ? » : la liste
             // complète, tirée du catalogue des capacités (sans IA).
             Capacites.demande(texteUser)?.let { d ->
@@ -304,6 +326,11 @@ class Brain(
             if (!pourSociete && MaisonDirecte.analyserLumiere(texteUser) != null) {
                 onStatus("🏠 Maison…")
                 runCatching { MaisonDirecte.executerLumiere(app, texteUser) }.getOrNull()?.let { return reflexeMaison(it) }
+            }
+            // « Les deux » / « tous » après « quel poêle ? » : la demande précédente, pour TOUS les poêles.
+            if (!pourSociete) PoeleDirect.suiteTous(texteUser, history)?.let { d ->
+                onStatus("🔥 Poêles…")
+                runCatching { PoeleDirect.executerLecture(app, d) }.getOrNull()?.let { return reflexeMaison(it) }
             }
             // Température / état des poêles : les vraies valeurs (climate), pas la liste des entités « poêle ».
             if (!pourSociete && PoeleDirect.lecture(texteUser) != null) {
@@ -522,6 +549,7 @@ class Brain(
                 (if (plan != null && plan.note.isNotBlank()) "\n\nAnalyse préalable de la demande (Gemini) — suis ce plan, avec les outils fournis : ${plan.note}" else "") +
                 runCatching { fr.dd.jarvis.hermes.ServeurInventaire.bloc(app, texteUser) }.getOrDefault("") +
                 runCatching { fr.dd.jarvis.device.Contexte.consigne(fr.dd.jarvis.device.Contexte.actuel(app)) }.getOrDefault("") +
+                runCatching { app.memo.consignesPour(texteUser) }.getOrDefault("") +
                 "\n\nDate et heure actuelles : ${Prompts.now()}."))
         // Réduction de tokens sans perte de précision : seuls les derniers échanges (où un détail précis — liste de fichiers,
         // de SMS, de permissions… — a des chances d'être encore repris par la demande en cours) gardent le plafond large de
@@ -633,7 +661,7 @@ class Brain(
                     // Liste brute des entités : seulement si l'utilisateur voulait une LISTE ; pour une valeur ou une action,
                     // le modèle lit les vraies valeurs puis répond ; vide, il réessaie.
                     "ha_entites" -> !res.text.startsWith("Aucune") && !ACTION_DOMOTIQUE.containsMatchIn(texteUser) && listeHaDemandee(texteUser) && !demandeComposee(texteUser)
-                    else -> !suiteAttendue(texteUser, name)
+                    else -> !suiteAttendue(texteUser, name) && !consigneExigeUneSuite(texteUser)
                 }
                 val contenu = if (res.direct && !finDirecte && name !in LECTURES_DIRECTES && name != "ha_entites")
                     res.text.take(11800) + "\n\n[Action déjà faite : ne la refais pas. Fais la suite de la demande, puis réponds en une phrase.]"

@@ -83,8 +83,14 @@ class PoeleDirectTest {
             JSONObject().put("entity_id", "switch.poele_etage_mode_nuit").put("state", "off").put("attributes", JSONObject().put("friendly_name", "Poêle étage Mode nuit")),
         )
         val tout = PoeleDirect.lire(etats, PoeleDirect.lecture("Quelle est la température de mes poêles ?")!!)!!
-        assertTrue(tout, tout.contains("Poêle étage : 21,5 °C (consigne 22 °C, en chauffe)"))
-        assertTrue(tout, tout.contains("Poêle salon : 19 °C (consigne 20 °C, éteint)"))
+        assertTrue(tout, tout.contains("| Poêle | Température actuelle | Consigne | État |"))
+        assertTrue(tout, tout.contains("| Poêle étage | 21,5 °C | 22 °C | en chauffe |"))
+        assertTrue(tout, tout.contains("| Poêle salon | 19 °C | 20 °C | éteint |"))
+        // Entités sans le mot « poêle » (climate.etage, climate.salon) : « mes poêles » = tous les chauffages.
+        val anonymes = listOf(climat("climate.etage", "Étage", "heat", 21.0, 22.0, "heating").apply { getJSONObject("attributes").put("hvac_modes", org.json.JSONArray(listOf("off", "heat"))) },
+            climat("climate.rdc", "Rez-de-chaussée", "off", 18.0, 20.0, "off"))
+        val t2 = PoeleDirect.lire(anonymes, PoeleDirect.lecture("Quelle est la température de mes poêles ?")!!)!!
+        assertTrue(t2, t2.contains("| Étage | 21 °C | 22 °C | en chauffe |") && t2.contains("| Rez-de-chaussée | 18 °C | 20 °C | éteint |"))
         assertTrue(tout, !tout.contains("Mode nuit"))
         val haut = PoeleDirect.lire(etats, PoeleDirect.lecture("la température du poêle de l'étage ?")!!)!!
         assertTrue(haut, haut.contains("étage") && !haut.contains("salon"))
@@ -95,5 +101,14 @@ class PoeleDirectTest {
         assertTrue(Brain.listeHaDemandee("liste les entités du poêle"))
         assertTrue(Brain.listeHaDemandee("quelles sont les entités indisponibles"))
         assertTrue(Serveur.valeursClimat(climat("climate.poele_etage", "Poêle étage", "heat", 21.5, 22.0, "heating")).contains("mesurée 21,5 °C"))
+    }
+
+    @Test fun lectureAvecPresentationEtSuiteLesDeux() {
+        assertEquals(emptyList<String>(), PoeleDirect.lecture("Donne-moi la température de mes poêles sous forme de tableau avec la température actuelle et la température de consigne")?.lieu)
+        assertEquals(emptyList<String>(), PoeleDirect.lecture("Présente-moi la température des deux poêles")?.lieu)
+        val h = listOf(ChatMsg(true, "quelle est la température du poêle"), ChatMsg(false, "Quel poêle veux-tu : étage ou salon ?"), ChatMsg(true, "les deux"))
+        assertEquals("quelle est la température du poêle", PoeleDirect.suiteTous("les deux", h))
+        assertNull(PoeleDirect.suiteTous("les deux", listOf(ChatMsg(true, "mets la musique"), ChatMsg(false, "Laquelle ?"), ChatMsg(true, "les deux"))))
+        assertNull(PoeleDirect.suiteTous("allume la lumière", h))
     }
 }

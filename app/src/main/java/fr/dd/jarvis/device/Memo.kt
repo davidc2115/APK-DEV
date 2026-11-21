@@ -108,6 +108,61 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
             if (ma.isEmpty() || mb.isEmpty()) return 0.0
             return ma.intersect(mb).size.toDouble() / minOf(ma.size, mb.size)
         }
+
+        /** Lignes de consigne d'un texte de mémoire (« ## rubrique » + lignes), normalisées. */
+        private fun lignesDe(md: String): Set<String> = md.lines().map { it.trim() }
+            .filter { it.isNotBlank() && !it.startsWith("#") && !it.startsWith("---") && !it.startsWith("_") && ':' !in it.take(6) }
+            .map { fr.dd.jarvis.societe.core.normaliser(it.removePrefix("-")) }.filter { it.isNotBlank() }.toSet()
+
+        /**
+         * Texte à charger, et s'il faut réécrire la note : la note Obsidian, sauf si la copie locale est plus récente
+         * (de plus de 2 s) ET contient des lignes absentes de la note.
+         */
+        internal fun choisirSource(note: Pair<String, Long>?, copie: Pair<String, Long>?): Pair<String, Boolean>? {
+            if (note == null) return copie?.let { it.first to false }
+            if (copie == null || note.first == copie.first) return note.first to false
+            val manquantes = lignesDe(copie.first) - lignesDe(note.first)
+            return if (note.second > 0 && copie.second > note.second + 2_000 && manquantes.isNotEmpty()) copie.first to true else note.first to false
+        }
+
+        private const val ENTETE = "\n\nCONSIGNES DE L'UTILISATEUR (mémoire durable) — règles de fonctionnement à appliquer à CHAQUE réponse " +
+            "concernée (contenu, présentation, tableau, ordre, appareils…), sans qu'il ait à les répéter ; elles priment sur ta présentation par défaut :\n"
+
+        /** Une ligne de la mémoire qui ressemble à une consigne (et pas à un simple fait). */
+        private fun estConsigne(l: String): Boolean {
+            val n = fr.dd.jarvis.societe.core.normaliser(l)
+            return fr.dd.jarvis.ai.Restitution.FORME.containsMatchIn(n) ||
+                Regex("\\b(toujours|jamais|systematiquement|quand|lorsque|chaque fois|prefere|veux|voudrais|aimerais|ne plus|plus jamais|par defaut|tous|toutes)\\b").containsMatchIn(n)
+        }
+
+        /**
+         * Bloc mémoire du prompt : tout si elle tient en peu de place ; sinon en entier les rubriques générales et celles
+         * d'un domaine (maison, plex, serveur, téléphone, musique…), les lignes « consigne » des autres rubriques, et le
+         * nom des rubriques restantes. Avant, au-delà de 1800 caractères, une rubrique « maison » ou « poêles » n'était
+         * plus que nommée : JARVIS oubliait la consigne « tableau avec température actuelle et consigne ».
+         */
+        internal fun blocPrompt(items: Map<String, String>, max: Int = 3800): String {
+            if (items.isEmpty()) return ""
+            val complet = ENTETE + items.entries.joinToString("\n") { "- [${it.key}] ${it.value.take(900)}" }
+            if (complet.length <= 2400) return complet
+            val generales = fr.dd.jarvis.ai.Restitution.RUBRIQUES_PERMANENTES
+            val entieres = items.filterKeys { fr.dd.jarvis.societe.core.normaliser(it) in generales || fr.dd.jarvis.ai.DomainesConsignes.deRubrique(it) != null }
+            val autres = items - entieres.keys
+            val lignesConsignes = autres.flatMap { (k, v) -> v.lines().map { it.trim().trimStart('-', '*', '•', ' ') }.filter { it.length >= 12 && estConsigne(it) }.map { "- [$k] $it" } }
+            val sansConsigne = autres.keys.filter { k -> lignesConsignes.none { it.startsWith("- [$k]") } }
+            return (ENTETE + entieres.entries.joinToString("\n") { "- [${it.key}] ${it.value.take(900)}" } +
+                (if (lignesConsignes.isNotEmpty()) "\n" + lignesConsignes.joinToString("\n") else "")).take(max - 300) +
+                (if (sansConsigne.isNotEmpty()) "\nAutres rubriques mémorisées (détails avec memoire_lire) : ${sansConsigne.joinToString(", ")}" else "")
+        }
+
+        /** Consignes qui concernent CETTE demande, rappelées en fin de prompt (là où le modèle les suit le mieux). */
+        internal fun blocDemande(items: Map<String, String>, demande: String): String {
+            if (items.isEmpty() || demande.isBlank()) return ""
+            val l = fr.dd.jarvis.ai.Restitution.concernees(items, demande, "", formeSeulement = false, max = 10)
+            if (l.isEmpty()) return ""
+            return "\n\n⚠️ CONSIGNES DE L'UTILISATEUR POUR CETTE DEMANDE — obligatoires, applique-les exactement (présentation, colonnes, " +
+                "contenu, appareils concernés) même s'il ne les répète pas :\n" + l.joinToString("\n") { "- $it" }
+        }
     }
 
     private fun parse(md: String) {
@@ -128,12 +183,22 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         items.forEach { (k, v) -> append("## $k\n$v\n\n") }
     }
 
+    /**
+     * Charge la mémoire : la note Obsidian (modifiable à la main) fait foi ; mais si la copie locale est PLUS RÉCENTE
+     * et contient des consignes que la note n'a pas (note pas encore synchronisée, restaurée ou remplacée par une
+     * ancienne version au démarrage / après une mise à jour), la copie locale est gardée et la note est réécrite —
+     * les consignes ne se perdent plus au redémarrage.
+     */
     @Synchronized
     fun load() {
-        val md = obsidian.read(FOLDER, FILE) ?: local.takeIf { it.exists() }?.readText()
-        if (md != null) parse(md)
+        val note = runCatching { obsidian.lireAvecDate(FOLDER, FILE) }.getOrNull()
+        val copie = runCatching { local.takeIf { it.exists() }?.let { it.readText() to it.lastModified() } }.getOrNull()
+        val choix = choisirSource(note, copie)
+        if (choix != null) parse(choix.first)
         loadCandidates()
         loaded = true
+        if (choix != null && note != null && choix.second) runCatching { obsidian.saveIn(FOLDER, FILE.removeSuffix(".md"), render()) }
+        if (choix != null && copie == null) runCatching { local.writeText(render()) }
     }
 
     @Synchronized
@@ -306,19 +371,33 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
      * déjà, en entier, dans le bloc « notes utiles » (NotesPertinentes).
      */
     @Synchronized
-    fun pourPrompt(): String {
+    fun pourPrompt(): String { ensure(); return blocPrompt(items) }
+
+    /** Consignes (de JARVIS et d'Hermès) qui concernent cette demande, à placer en fin de prompt ; vide sinon. */
+    fun consignesPour(demande: String): String {
+        val tout: Map<String, String> = synchronized(this) { ensure(); LinkedHashMap(items) }
+        val hermes = runCatching { entreesHermesListe().joinToString("\n") }.getOrDefault("")
+        return blocDemande(if (hermes.isBlank()) tout else tout + ("hermes" to hermes), demande)
+    }
+
+    /** Toutes les consignes, une par ligne : (rubrique, consigne). */
+    @Synchronized
+    fun consignesListe(): List<Pair<String, String>> {
         ensure()
-        if (items.isEmpty()) return ""
-        val complet = toutes()
-        if (complet.length <= 1800) return complet
-        // Consignes de fonctionnement (préférences, façon de répondre, musique, localisation…) : TOUJOURS en entier —
-        // avant, « mets Johnny » ne contenait pas le mot « musique » et la consigne « titre et artiste seulement » manquait.
-        val generales = fr.dd.jarvis.ai.Restitution.RUBRIQUES_PERMANENTES
-        val toujours = items.filterKeys { fr.dd.jarvis.societe.core.normaliser(it) in generales }
-        val autres = items.keys - toujours.keys
-        return "\n\nMémoire de l'utilisateur (consignes durables, à appliquer) :\n" +
-            toujours.entries.joinToString("\n") { "- [${it.key}] ${it.value.take(600)}" }.take(2800) +
-            (if (autres.isNotEmpty()) "\nAutres rubriques mémorisées (celles utiles à cette demande sont dans les notes ci-dessus ; détails avec memoire_lire) : ${autres.joinToString(", ")}" else "")
+        return items.flatMap { (k, v) -> v.lines().map { it.trim().removePrefix("-").trim() }.filter { it.isNotBlank() }.map { k to it } }
+    }
+
+    /** Retire UNE consigne (une ligne) de sa rubrique ; la rubrique disparaît si elle est vide. */
+    @Synchronized
+    fun retirerConsigne(sujet: String, ligne: String): Boolean {
+        ensure()
+        val k = sujet.trim().lowercase()
+        val lignes = items[k]?.lines()?.map { it.trim() }?.filter { it.isNotBlank() } ?: return false
+        val reste = lignes.filterNot { it.removePrefix("-").trim() == ligne.trim() }
+        if (reste.size == lignes.size) return false
+        if (reste.isEmpty()) items.remove(k) else items[k] = reste.joinToString("\n")
+        persist()
+        return true
     }
 
     @Synchronized

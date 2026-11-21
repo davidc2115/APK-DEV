@@ -11,6 +11,7 @@ object RoutageAudit {
         val parties = Brain.decouperActions(t.trim())
         val comb = if (parties.size in 2..5) " [combinée:${parties.size}]" else ""
         fr.dd.jarvis.device.CommandeMedia.intention(t) { true }?.let { return "Media:$it$comb" }
+        GestionConsignes.demande(t)?.let { return "Consignes:${it::class.simpleName}$comb" }
         Capacites.demande(t)?.let { return "Capacites$comb" }
         MailCommandes.intention(t)?.let { return "Mail:${it.first}$comb" }
         fr.dd.jarvis.device.ModeSonore.intention(t)?.let { return "ModeSonore:$it$comb" }

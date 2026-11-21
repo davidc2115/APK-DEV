@@ -32,8 +32,40 @@ object TexteParle {
     /** Partie à dire d'une réponse (avant [FIN_ORAL]). */
     fun oral(t: String): String = t.substringBefore(FIN_ORAL)
 
+    /**
+     * Tableau Markdown → phrases : « Poêle étage : température actuelle 21,5 °C, consigne 22 °C, état en chauffe. »
+     * (avant, la voix lisait les cellules à la suite, en-têtes compris, sans dire à quoi correspondait chaque valeur).
+     */
+    internal fun tableauxEnPhrases(t: String): String {
+        val lignes = t.lines()
+        fun cellules(l: String) = l.trim().removePrefix("|").removeSuffix("|").split('|').map { it.trim() }
+        fun separateur(l: String) = Regex("^\\s*\\|?\\s*:?-{2,}:?\\s*(\\|\\s*:?-{2,}:?\\s*)*\\|?\\s*$").matches(l)
+        val out = mutableListOf<String>()
+        var i = 0
+        while (i < lignes.size) {
+            val l = lignes[i]
+            if (l.trim().startsWith("|") && i + 1 < lignes.size && separateur(lignes[i + 1])) {
+                val entetes = cellules(l)
+                i += 2
+                while (i < lignes.size && lignes[i].trim().startsWith("|")) {
+                    val c = cellules(lignes[i])
+                    val reste = c.drop(1).mapIndexedNotNull { j, v ->
+                        val e = entetes.getOrNull(j + 1).orEmpty()
+                        if (v.isBlank() || v == "—" || v == "-") null else if (e.isBlank()) v else "${e.lowercase()} $v"
+                    }
+                    out += (c.firstOrNull().orEmpty() + (if (reste.isNotEmpty()) " : " + reste.joinToString(", ") else "")).trim() + "."
+                    i++
+                }
+                continue
+            }
+            out += l
+            i++
+        }
+        return out.joinToString("\n")
+    }
+
     fun preparer(t0: String): String {
-        val t = oral(t0)
+        val t = tableauxEnPhrases(oral(t0))
         var s = t
             // Symboles qui seraient retirés plus bas avec les emojis : d'abord en mots.
             .replace(Regex("(?i)\\bn°\\s*"), "numéro ").replace(Regex("(\\d)\\s*°\\s*C\\b"), "$1 degrés").replace(Regex("(\\d)\\s*°"), "$1 degrés")

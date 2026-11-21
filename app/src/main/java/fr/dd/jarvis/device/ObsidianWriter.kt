@@ -234,7 +234,10 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     }
 
     /** Relit une note du coffre Obsidian (ou du dossier de l'application) ; null si introuvable. */
-    fun read(folder: String, fileName: String): String? {
+    fun read(folder: String, fileName: String): String? = lireAvecDate(folder, fileName)?.first
+
+    /** Note et date de sa dernière modification (ms, 0 si inconnue) ; null si introuvable. */
+    fun lireAvecDate(folder: String, fileName: String): Pair<String, Long>? {
         val name = safe(fileName, "Fichier")
         val uriStr = store.obsidianUri.value
         try {
@@ -250,12 +253,12 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                     } else null
                     val cheminFichier = if (dossierRelatif.isBlank()) resoudre(name) else resoudre("$dossierRelatif/$name")
                     val f = cheminFichier?.let { trouver(it)?.takeIf { doc -> doc.isFile } } ?: cur?.trouverLoose(name)
-                    if (f != null) return ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
+                    if (f != null) return ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes().toString(Charsets.UTF_8) }?.let { it to runCatching { f.lastModified() }.getOrDefault(0L) }
                     return null
                 }
             }
             val f = File(File(ctx.getExternalFilesDir(null), folder), name)
-            return if (f.exists()) f.readText() else null
+            return if (f.exists()) f.readText() to f.lastModified() else null
         } catch (_: Exception) {
             return null
         }
