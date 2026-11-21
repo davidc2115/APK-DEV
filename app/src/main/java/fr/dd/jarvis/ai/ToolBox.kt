@@ -402,6 +402,9 @@ class ToolBox(
         put(tool("liste", "Listes à cocher de l'utilisateur (courses par défaut, bricolage, cadeaux…), gardées dans le téléphone et dans Obsidian : ajouter des articles, en retirer, les cocher (pris), lire une liste, la vider, lister les listes, envoyer une liste par SMS.",
             mapOf("action" to prop("ajouter | retirer | cocher | lire (défaut) | vider | listes | envoyer"), "nom" to prop("Nom de la liste (défaut : Courses)."),
                 "elements" to prop("Articles séparés par des virgules (ajouter / retirer / cocher)."), "destinataire" to prop("Contact ou numéro (envoyer)."))))
+        put(tool("rappel_lieu", "Rappel À L'ARRIVÉE (ou au départ) d'un lieu : notification quand l'utilisateur arrive (ou part) — maison, travail, « ici », client de la Société ou adresse. Pour un rappel à une heure, utilise rappel_creer.",
+            mapOf("texte" to prop("Ce qu'il faut rappeler."), "lieu" to prop("maison | travail | ici | nom d'un client | adresse"),
+                "depart" to prop("oui = au départ du lieu (défaut : à l'arrivée)"), "chaque_fois" to prop("oui = à chaque passage (défaut : une fois)")), listOf("texte", "lieu")))
         put(tool("courrier", "Ce que JARVIS a repéré dans les SMS et mails reçus : colis (transporteur, numéro, état, code de retrait, lien de suivi), factures et devis reçus (émetteur, montant, échéance), rendez-vous détectés. Actions : colis | a_traiter (défaut) | traiter (id) | supprimer (id) | rdv_agenda (id facultatif : ajoute le rendez-vous détecté à l'agenda) | liste (tout, avec les id).",
             mapOf("action" to prop("colis | a_traiter | liste | traiter | supprimer | rdv_agenda"), "id" to prop("Identifiant de l'élément (action liste)."))))
         put(tool("stationnement", "Place de stationnement de la voiture : noter la position actuelle (avec une précision : niveau, place…), dire où est garée la voiture (adresse, heure, distance, lien), ou l'oublier. Retenue aussi automatiquement à la fin d'Android Auto.",
@@ -944,7 +947,9 @@ class ToolBox(
             val cle = a.optString("texte").trim()
             val n = fr.dd.jarvis.societe.core.normaliser(cle)
             val cibles = fr.dd.jarvis.device.Rappels.liste(app).filter { n.isNotBlank() && fr.dd.jarvis.societe.core.normaliser(it.texte).contains(n) && (it.repetition.isNotBlank() || it.at > System.currentTimeMillis()) }
+            val lieux = if (cibles.isEmpty()) fr.dd.jarvis.device.RappelsLieu.supprimerParTexte(app, cle) else emptyList()
             when {
+                lieux.isNotEmpty() -> ToolResult("🗑️ Rappel(s) à l'arrivée supprimé(s) : " + lieux.joinToString(" ; ") { "« ${it.texte} » (${it.lieu})" })
                 cibles.isEmpty() -> ToolResult("Aucun rappel à venir ne contient « $cle ».\n" + fr.dd.jarvis.device.Echeancier.texte(app))
                 cibles.size > 1 && !confirm("Supprimer ${cibles.size} rappels ?\n" + cibles.joinToString("\n") { "• ${it.texte} (${fr.dd.jarvis.device.Rappels.format(it.at)})" }, true) -> ToolResult("Annulé : aucun rappel supprimé.")
                 else -> ToolResult("🗑️ Rappel(s) supprimé(s) : " + fr.dd.jarvis.device.Rappels.supprimerParTexte(app, cle).joinToString(" ; ") { "« ${it.texte} »" } + "\n[📋 Voir tous mes rappels et automatisations](jarvis://ecran/rappels)")
@@ -1146,6 +1151,8 @@ class ToolBox(
             else ToolResult(fr.dd.jarvis.device.Listes.executer(app, i) { d, m -> execute("envoyer_sms", JSONObject().put("destinataire", d).put("texte", m)).text }
                 ?: "Aucun de ces articles n'est sur tes listes.", direct = true)
         }
+        "rappel_lieu" -> ToolResult(fr.dd.jarvis.device.RappelsLieu.creer(app, fr.dd.jarvis.device.RappelsLieu.Demande(a.optString("texte").trim(), a.optString("lieu").trim(),
+            a.optString("depart").trim().lowercase() in setOf("oui", "true", "1"), a.optString("chaque_fois").trim().lowercase() in setOf("oui", "true", "1"))))
         "courrier" -> {
             val C = fr.dd.jarvis.device.Courrier
             val id = a.optString("id").trim()

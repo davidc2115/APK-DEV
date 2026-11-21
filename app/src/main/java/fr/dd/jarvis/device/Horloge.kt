@@ -310,6 +310,7 @@ class HorlogeReceiver : BroadcastReceiver() {
             Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> {
                 Horloge.restaurer(context)
                 runCatching { Rappels.restaurer(context) }
+                runCatching { RappelsLieu.restaurer(context) }
                 // Anti-vol : alerte en cours après un redémarrage (le voleur a éteint le téléphone) → on la reprend.
                 runCatching { (context.applicationContext as? fr.dd.jarvis.JarvisApp)?.let { fr.dd.jarvis.securite.AntiVol.reprendre(it) } }
                 // Écoute « Jarvis » : relancée si elle était active (ou notification « Relancer l'écoute » si Android refuse le micro).

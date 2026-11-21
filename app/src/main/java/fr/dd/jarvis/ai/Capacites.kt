@@ -59,6 +59,7 @@ object Capacites {
             i("Rappels, une fois ou répétés, et tout ce qui est programmé", "rappelle-moi d'appeler Martin demain à 9 h|qu'est-ce qui est programmé ?", "rappel_creer,rappels_liste,rappel_supprimer", Voie.REFLEXE),
             i("Tâches personnelles", "ajoute la tâche commander les panneaux|mes tâches", "tache_ajouter,taches_lister,tache_terminer"),
             i("Listes à cocher (courses, bricolage…) : ajouter, cocher, lire, vider, envoyer par SMS", "ajoute du lait et des œufs à la liste de courses|qu'est-ce qu'il y a sur ma liste ?|j'ai pris le lait|envoie la liste de courses à Angeline", "liste", Voie.REFLEXE),
+            i("Rappels à l'arrivée ou au départ d'un lieu (maison, travail, ici, client, adresse)", "rappelle-moi d'acheter du pain quand j'arrive à la maison|quand j'arrive chez Dupont, rappelle-moi de vérifier l'onduleur", "rappel_lieu", Voie.REFLEXE),
             i("Annuler ce que je viens de faire (réveil, rappel, note, rendez-vous, ajout à une liste)", "annule|non, annule ce que tu viens de faire", "", Voie.REFLEXE),
             i("Point du matin (la journée) et point du soir (bilan + préparation de demain), journal de bord", "fais-moi le point du jour|fais le point du soir|prépare demain|journal d'hier", "morning_briefing,journal_de_bord", Voie.REFLEXE),
             i("Colis, factures, devis et rendez-vous repérés dans les SMS et mails reçus", "où en sont mes colis ?|qu'est-ce que j'ai reçu d'important ?|ajoute le rendez-vous reçu à mon agenda", "courrier", Voie.REFLEXE),

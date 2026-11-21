@@ -294,9 +294,15 @@ object Echeancier {
 
     internal fun demandeVoir(texte: String) = texte.length <= 120 && VOIR.matches(texte.trim())
 
+    private fun texteSansLieux(l: List<Element>): String = "# ⏰ Rappels et automatisations\n" + l.groupBy { it.etat }.entries.joinToString("\n") { (etat, el) ->
+        "\n## ${etat.titre}\n" + el.joinToString("\n") { e -> "- ${e.icone} **${e.titre}**" + (e.quand?.let { " — ${Rappels.format(it)}" } ?: "") + " · ${e.detail.lines().first()}" }
+    }
+
     /** Résumé pour le chat (outil rappels_liste, « qu'est-ce qui est programmé ? »). */
     fun texte(app: JarvisApp, inclurePasses: Boolean = false): String {
         val l = tout(app).filter { inclurePasses || it.etat != Etat.PASSE }
+        val lieux = runCatching { RappelsLieu.texte(app) }.getOrDefault("")
+        if (lieux.isNotBlank()) return (if (l.isEmpty()) "# ⏰ Rappels et automatisations\n" else texteSansLieux(l)) + "\n\n## 📍 À l'arrivée / au départ\n$lieux"
         if (l.isEmpty()) return "Rien de programmé pour l'instant : aucun rappel, alarme, routine ni automatisme.\n[📋 Ouvrir la page des rappels et automatisations](jarvis://ecran/rappels)"
         return "# ⏰ Rappels et automatisations\n" + l.groupBy { it.etat }.entries.joinToString("\n") { (etat, el) ->
             "\n## ${etat.titre}\n" + el.joinToString("\n") { e ->

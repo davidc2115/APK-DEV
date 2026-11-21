@@ -25,6 +25,10 @@ object Annulation {
         derniere = Action(nom, JSONObject(args.toString()), resultat)
     }
 
+    fun noterRappelLieu(id: Int, texte: String) {
+        derniere = Action("rappel_lieu", JSONObject().put("id", id).put("texte", texte), "")
+    }
+
     fun noterListe(liste: String, elements: List<String>) {
         derniere = Action("liste_ajouter", JSONObject().put("liste", liste).put("elements", org.json.JSONArray(elements)), "")
     }
@@ -54,6 +58,7 @@ object Annulation {
         "note_prendre" -> "la note « ${a.args.optString("texte").take(60)} »"
         "create_event" -> "le rendez-vous « ${a.args.optString("title").take(60)} »"
         "liste_ajouter" -> "l'ajout à la liste ${a.args.optString("liste")}"
+        "rappel_lieu" -> "le rappel à l'arrivée « ${a.args.optString("texte").take(60)} »"
         else -> "la dernière action"
     }
 
@@ -79,6 +84,7 @@ object Annulation {
             return if (n > 0) "↩️ Annulé : ${el.joinToString(", ") { it.lowercase() }} retiré${if (n > 1) "s" else ""} de ta liste ${a.args.optString("liste")}."
                 else "↩️ Ces articles n'étaient plus sur ta liste ${a.args.optString("liste")}."
         }
+        if (a.outil == "rappel_lieu") return if (fr.dd.jarvis.device.RappelsLieu.supprimer(app, a.args.optInt("id"))) "↩️ Annulé : ${libelle(a)}." else "Ce rappel n'existe plus."
         val (outil, args) = inverse(a) ?: return "Je ne sais pas défaire ${libelle(a)} automatiquement."
         val r = outils.execute(outil, args).text
         return "↩️ Annulé : ${libelle(a)}.\n$r"

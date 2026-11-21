@@ -321,6 +321,11 @@ class Brain(
                     }
                 } else return reflexe(fr.dd.jarvis.device.Courrier.texte(app, i), lecture = true)
             }
+            // Rappel à l'arrivée / au départ d'un lieu (« rappelle-moi de … quand j'arrive chez Dupont »).
+            fr.dd.jarvis.device.RappelsLieu.intention(texteUser)?.let { d ->
+                onStatus("📍 Rappel à l'arrivée…")
+                return reflexe(fr.dd.jarvis.device.RappelsLieu.creer(app, d))
+            }
             // Listes à cocher (courses…) — avant le découpage en plusieurs actions (« du lait ET des œufs »).
             fr.dd.jarvis.device.Listes.intention(texteUser)?.let { i ->
                 onStatus("🛒 Liste…")
