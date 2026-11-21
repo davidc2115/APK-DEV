@@ -188,44 +188,7 @@ internal fun FraisTab(app: JarvisApp) {
 // ======================================================================================= Reçus (SMS / mails analysés)
 
 @Composable
-internal fun RecusTab(app: JarvisApp) {
-    var version by remember { mutableIntStateOf(0) }
-    var voirTraites by remember { mutableStateOf(false) }
-    val l = remember(version, voirTraites) { Courrier.liste(app).filter { voirTraites || !it.traite }.sortedByDescending { it.ts } }
-    val scope = rememberCoroutineScope()
-    LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item {
-            HudPanel(Modifier.fillMaxWidth(), title = "📬 Reçus dans les SMS et mails") {
-                Text("Factures, devis, rendez-vous et colis repérés automatiquement dans tes messages. Marque-les traités une fois payés, ajoutés à l'agenda ou passés en note de frais.", color = HudDim, fontSize = 12.sp)
-                Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    HudChip("À traiter", !voirTraites) { voirTraites = false }
-                    HudChip("Tout", voirTraites) { voirTraites = true }
-                }
-            }
-        }
-        if (l.isEmpty()) item { Text("Rien pour l'instant. (Réglages › Analyse des SMS et mails pour l'activer.)", color = HudDim, fontSize = 13.sp, modifier = Modifier.padding(8.dp)) }
-        items(l, key = { it.id }) { e ->
-            HudPanel(Modifier.fillMaxWidth()) {
-                MarkdownText(Courrier.ligne(e) + if (e.traite) " · ✅ traité" else "")
-                Text(e.resume.take(200), color = HudDim, fontSize = 11.sp)
-                Row(Modifier.padding(top = 6.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (e.type == Courrier.FACTURE && e.montant != null) HudChip("💶 En note de frais") {
-                        Frais.ajouter(app, NoteFrais("", LocalDate.now().toString(), e.emetteur, "Facture reçue (${e.source})", Frais.categorieDe(e.emetteur), e.montant, source = "message"))
-                        Courrier.marquer(app, e.id); version++
-                    }
-                    if (e.type == Courrier.RDV) HudChip("📅 Ajouter à l'agenda") {
-                        scope.launch {
-                            withContext(Dispatchers.IO) { runCatching { fr.dd.jarvis.ai.ToolBox(app) { _, _ -> true }.execute("create_event", Courrier.argsEvenement(e)) } }
-                            Courrier.marquer(app, e.id); version++
-                        }
-                    }
-                    if (!e.traite) HudChip("✅ Traité") { Courrier.marquer(app, e.id); version++ } else HudChip("↩️ À traiter") { Courrier.marquer(app, e.id, false); version++ }
-                    HudChip("🗑️ Supprimer") { Courrier.supprimer(app, e.id); version++ }
-                }
-            }
-        }
-    }
-}
+internal fun RecusTab(app: JarvisApp) = CourrierListe(app, Courrier.SOCIETE)
 
 // ======================================================================================= Déclarations
 

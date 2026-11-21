@@ -424,8 +424,9 @@ class ToolBox(
                 "date" to prop("Jour des rendez-vous (AAAA-MM-JJ), si la phrase en désigne un."), "tous" to prop("« oui » : TOUS les rendez-vous de ce jour (pluriel : « les rendez-vous d'hier »).")), listOf("phrase")))
         put(tool("mode_rendez_vous", "Mode rendez-vous : Ne pas déranger automatique pendant les rendez-vous de l'agenda (clients, ou tous), son rétabli à la fin, liste des appels manqués ; option SMS automatique « je te rappelle » aux contacts qui appellent. Actions : etat | activer (tous=oui pour tous les rendez-vous) | desactiver | sms_on | sms_off | message (texte, {fin} = heure de fin).",
             mapOf("action" to prop("etat | activer | desactiver | sms_on | sms_off | message"), "tous" to prop("activer : oui = tous les rendez-vous, non = seulement ceux des clients."), "texte" to prop("message : texte du SMS automatique."))))
-        put(tool("courrier", "Ce que JARVIS a repéré dans les SMS et mails reçus : colis (transporteur, numéro, état, code de retrait, lien de suivi), factures et devis reçus (émetteur, montant, échéance), rendez-vous détectés. Actions : colis | a_traiter (défaut) | traiter (id) | supprimer (id) | rdv_agenda (id facultatif : ajoute le rendez-vous détecté à l'agenda) | liste (tout, avec les id).",
-            mapOf("action" to prop("colis | a_traiter | liste | traiter | supprimer | rdv_agenda"), "id" to prop("Identifiant de l'élément (action liste)."))))
+        put(tool("courrier", "Ce que JARVIS a repéré dans les SMS et mails reçus : colis (transporteur, numéro, état, code de retrait, lien de suivi), factures et devis reçus (émetteur, montant, échéance), rendez-vous détectés, chacun classé Société ou Perso (onglet Courrier). Actions : colis | a_traiter (défaut) | traiter (id) | supprimer (id) | rdv_agenda (id facultatif : ajoute le rendez-vous détecté à l'agenda) | liste (tout, avec les id) | classer (id + domaine societe|perso ; retenu pour l'expéditeur).",
+            mapOf("action" to prop("colis | a_traiter | liste | traiter | supprimer | rdv_agenda | classer"), "id" to prop("Identifiant de l'élément (action liste)."),
+                "domaine" to prop("classer : societe | perso"))))
         put(tool("stationnement", "Place de stationnement de la voiture : noter la position actuelle (avec une précision : niveau, place…), dire où est garée la voiture (adresse, heure, distance, lien), ou l'oublier. Retenue aussi automatiquement à la fin d'Android Auto.",
             mapOf("action" to prop("noter | ou (défaut) | oublier"), "note" to prop("Précision facultative (« niveau -2, place 45 »)."))))
         put(tool("tache_terminer", "Marque une tâche comme terminée à partir de son identifiant (#id).", mapOf(
@@ -1267,7 +1268,12 @@ class ToolBox(
             val id = a.optString("id").trim()
             when (a.optString("action").trim().lowercase()) {
                 "colis" -> ToolResult(C.texte(app, fr.dd.jarvis.device.Courrier.Intention.Colis), direct = true)
-                "liste" -> ToolResult(C.liste(app).sortedByDescending { it.ts }.take(40).joinToString("\n") { "- [${it.id}]${if (it.traite) " ✅" else ""} " + C.ligne(it) }.ifBlank { "Rien de repéré." }, direct = true)
+                "liste" -> ToolResult(C.liste(app).sortedByDescending { it.ts }.take(40).joinToString("\n") { "- [${it.id}]${if (it.traite) " ✅" else ""} " + C.ligne(it) + C.etiquette(it) }.ifBlank { "Rien de repéré." }, direct = true)
+                "classer" -> {
+                    val d = a.optString("domaine").trim().lowercase().let { if (it.startsWith("soc") || it.startsWith("pro")) C.SOCIETE else if (it.startsWith("perso")) C.PERSO else "" }
+                    if (d.isBlank()) ToolResult("Indique domaine = societe ou perso.")
+                    else ToolResult(if (C.classer(app, id, d)) "✅ Classé ${if (d == C.SOCIETE) "🏢 Société" else "🏠 Perso"} (retenu pour cet expéditeur)." else "Élément « $id » introuvable (action liste pour les id).")
+                }
                 "traiter" -> ToolResult(if (C.marquer(app, id)) "✅ Marqué comme traité." else "Élément « $id » introuvable (action liste pour les id).")
                 "supprimer" -> ToolResult(if (C.supprimer(app, id)) "🗑️ Supprimé." else "Élément « $id » introuvable (action liste pour les id).")
                 "rdv_agenda" -> {

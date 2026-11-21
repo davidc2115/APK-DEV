@@ -145,6 +145,7 @@
             android:launchMode="singleTask" android:showWhenLocked="true" android:turnScreenOn="true" android:taskAffinity=".antivol" />
         <receiver android:name=".device.RappelLieuReceiver" android:exported="false" />
         <receiver android:name=".device.SilenceRdvReceiver" android:exported="false" />
+        <receiver android:name=".device.CourrierReceiver" android:exported="false" />
         <receiver android:name=".device.HorlogeReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

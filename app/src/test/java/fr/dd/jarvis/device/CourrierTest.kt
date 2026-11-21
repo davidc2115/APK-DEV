@@ -49,4 +49,17 @@ class CourrierTest {
         assertEquals(Courrier.Intention.AjouterRdv, Courrier.intention("ajoute le rendez-vous reçu à mon agenda"))
         assertNull(Courrier.intention("ajoute un rendez-vous chez Martin demain à 14h"))
     }
+
+    @Test fun societeOuPerso() {
+        val data = fr.dd.jarvis.societe.core.SocieteData(
+            societe = fr.dd.jarvis.societe.core.Societe(email = "contact@dd-solaire.fr"),
+            clients = listOf(fr.dd.jarvis.societe.core.Client("c1", "Pressigny", tel = "06 73 47 08 27"), fr.dd.jarvis.societe.core.Client("c2", "SCEA Apert", email = "apert@ferme.fr")))
+        fun el(em: String, r: String) = Courrier.Element("x", Courrier.FACTURE, "Gmail", em, r, 0L, montant = 10.0)
+        assertEquals(Courrier.SOCIETE to true, Courrier.domaine(el("M. Pressigny", "Bon pour accord"), "", data, emptyMap()))
+        assertEquals(Courrier.SOCIETE to true, Courrier.domaine(el("06 73 47 08 27", "rappelez-moi"), "", data, emptyMap()))
+        assertEquals(Courrier.SOCIETE to true, Courrier.domaine(el("Orange", "votre facture"), "contact@dd-solaire.fr", data, emptyMap()))
+        assertEquals("" to false, Courrier.domaine(el("EDF", "votre facture de 80 €"), "perso@gmail.com", data, emptyMap()))
+        // Classement retenu pour l'expéditeur.
+        assertEquals(Courrier.PERSO to true, Courrier.domaine(el("EDF", "votre facture"), "", data, mapOf(Courrier.cleEmetteur("EDF") to Courrier.PERSO)))
+    }
 }

@@ -33,6 +33,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Dashboard
@@ -300,6 +301,7 @@ private val tabs = listOf(
     Tab("Mails", Icons.Filled.Email),
     Tab("Contacts", Icons.Filled.Contacts),
     Tab("Société", Icons.Filled.Business),
+    Tab("Courrier", Icons.Filled.Inbox),
     Tab("Graphe", Icons.Filled.Hub),
     Tab("Wi-Fi", Icons.Filled.Wifi),
     Tab("Réglages", Icons.Filled.Settings)
@@ -351,7 +353,8 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
         if (terrainDemande.value.isNotBlank()) {
             val t = terrainDemande.value
             // « wifi », « wifi_lies » : l'onglet Wi-Fi (et son sous-onglet « Liés à Jarvis »).
-            if (t.startsWith("wifi")) { terrain = ""; tab = 7; fr.dd.jarvis.ui.OngletWifi.lies.value = t == "wifi_lies" }
+            if (t.startsWith("wifi")) { terrain = ""; tab = 8; fr.dd.jarvis.ui.OngletWifi.lies.value = t == "wifi_lies" }
+            else if (t == "courrier") { terrain = ""; tab = 6 }
             else { terrain = t; tab = 0 }
             terrainDemande.value = ""
         }
@@ -414,8 +417,9 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
                 3 -> MailScreen(app)
                 4 -> ContactsScreen(app)
                 5 -> SocieteScreen(app)
-                6 -> GraphScreen(app)
-                7 -> fr.dd.jarvis.ui.AppareilsWifiScreen(app, demander)
+                6 -> fr.dd.jarvis.ui.CourrierScreen(app)
+                7 -> GraphScreen(app)
+                8 -> fr.dd.jarvis.ui.AppareilsWifiScreen(app, demander)
                 else -> SettingsScreen(app) { vm.send(it) }
             }
         }

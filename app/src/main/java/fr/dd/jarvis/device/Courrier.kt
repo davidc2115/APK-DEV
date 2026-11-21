@@ -31,9 +31,14 @@ object Courrier {
         val id: String, val type: String, val source: String, val emetteur: String, val resume: String, val ts: Long,
         val transporteur: String = "", val numero: String = "", val lien: String = "", val statut: String = "", val code: String = "",
         val montant: Double? = null, val echeance: String = "", val dateRdv: Long? = null, val lieu: String = "", val traite: Boolean = false,
+        /** « societe », « perso » ou "" (à classer). */
+        val domaine: String = "",
+        /** Classé par JARVIS (client de la société, boîte mail de la société, règle apprise) plutôt qu'à la main. */
+        val auto: Boolean = false,
     )
 
     const val COLIS = "colis"; const val FACTURE = "facture"; const val DEVIS = "devis"; const val RDV = "rdv"
+    const val SOCIETE = "societe"; const val PERSO = "perso"
 
     // ------------------------------------------------------------------ analyse (pure)
 
@@ -135,7 +140,7 @@ object Courrier {
             Element(o.optString("id"), o.optString("type"), o.optString("source"), o.optString("emetteur"), o.optString("resume"), o.optLong("ts"),
                 o.optString("transporteur"), o.optString("numero"), o.optString("lien"), o.optString("statut"), o.optString("code"),
                 if (o.has("montant")) o.optDouble("montant") else null, o.optString("echeance"), if (o.has("dateRdv")) o.optLong("dateRdv") else null,
-                o.optString("lieu"), o.optBoolean("traite"))
+                o.optString("lieu"), o.optBoolean("traite"), o.optString("domaine"), o.optBoolean("auto"))
         }
     }.getOrDefault(emptyList())
 
@@ -148,7 +153,7 @@ object Courrier {
             a.put(JSONObject().put("id", e.id).put("type", e.type).put("source", e.source).put("emetteur", e.emetteur).put("resume", e.resume).put("ts", e.ts)
                 .put("transporteur", e.transporteur).put("numero", e.numero).put("lien", e.lien).put("statut", e.statut).put("code", e.code)
                 .apply { e.montant?.let { put("montant", it) }; e.dateRdv?.let { put("dateRdv", it) } }
-                .put("echeance", e.echeance).put("lieu", e.lieu).put("traite", e.traite))
+                .put("echeance", e.echeance).put("lieu", e.lieu).put("traite", e.traite).put("domaine", e.domaine).put("auto", e.auto))
         }
         fr.dd.jarvis.data.Ecritures.ecrire(fichier(c)) { a.toString() }
     }
@@ -163,7 +168,7 @@ object Courrier {
             val i = l.indexOfFirst { it.id == e.id }
             if (i < 0) { l += e; vraimentNouveaux += e }
             else if (e.type == COLIS && e.statut != l[i].statut) l[i] = l[i].copy(statut = e.statut, ts = e.ts, code = e.code.ifBlank { l[i].code }, resume = e.resume,
-                traite = if (e.statut == "livré") l[i].traite else false)
+                traite = if (e.statut == "livré") l[i].traite else false, domaine = l[i].domaine.ifBlank { e.domaine }, auto = if (l[i].domaine.isBlank()) e.auto else l[i].auto)
         }
         sauver(c, l)
         return vraimentNouveaux
@@ -183,14 +188,74 @@ object Courrier {
         sauver(c, l.filter { it.id != id }); return true
     }
 
+    // ------------------------------------------------------------------ société ou perso
+
+    private fun fichierRegles(c: Context) = File(c.filesDir, "courrier_regles.json")
+    /** Classements appris : expéditeur (normalisé) → société / perso. */
+    fun regles(c: Context): Map<String, String> = runCatching {
+        val o = JSONObject(fichierRegles(c).takeIf { it.exists() }?.readText() ?: "{}")
+        o.keys().asSequence().associateWith { o.optString(it) }
+    }.getOrDefault(emptyMap())
+
+    internal fun cleEmetteur(e: String) = normaliser(e).replace(Regex("\\b(noreply|no reply|ne pas repondre|info|contact|service client|notification|notifications)\\b"), " ")
+        .replace(Regex("\\s+"), " ").trim().take(40)
+
+    /**
+     * Société ou perso, sans IA : un client de la Société (nom, mail ou téléphone dans le message), un numéro de devis /
+     * facture de la Société cité (réponse à un document envoyé), la boîte mail de la Société, ou un classement déjà fait
+     * pour cet expéditeur. Sinon : à classer.
+     */
+    internal fun domaine(e: Element, compte: String, data: fr.dd.jarvis.societe.core.SocieteData?, regles: Map<String, String>): Pair<String, Boolean> {
+        regles[cleEmetteur(e.emetteur)]?.takeIf { it == SOCIETE || it == PERSO }?.let { return it to true }
+        if (data == null) return "" to false
+        val mailSociete = data.societe.email.trim().lowercase()
+        if (mailSociete.isNotBlank() && compte.trim().lowercase() == mailSociete) return SOCIETE to true
+        val texte = "${e.emetteur} ${e.resume}"
+        val n = " " + normaliser(texte) + " "
+        val chiffres = texte.filter(Char::isDigit)
+        val client = data.clients.any { c ->
+            val nom = normaliser(c.nom)
+            (nom.length >= 4 && n.contains(" $nom ")) ||
+                (c.email.isNotBlank() && texte.contains(c.email.trim(), true)) ||
+                (c.tel.filter(Char::isDigit).takeLast(9).let { it.length == 9 && chiffres.contains(it) })
+        }
+        if (client) return SOCIETE to true
+        if (data.docs.any { d -> d.numero.length >= 5 && texte.contains(d.numero, true) }) return SOCIETE to true
+        return "" to false
+    }
+
+    /** Classe un élément (et retient le choix pour les prochains messages du même expéditeur). */
+    @Synchronized
+    fun classer(c: Context, id: String, domaine: String, retenir: Boolean = true): Boolean {
+        val l = liste(c)
+        val e = l.firstOrNull { it.id == id } ?: return false
+        val cle = cleEmetteur(e.emetteur)
+        sauver(c, l.map {
+            when {
+                it.id == id -> it.copy(domaine = domaine, auto = false)
+                retenir && domaine.isNotBlank() && it.domaine.isBlank() && cleEmetteur(it.emetteur) == cle -> it.copy(domaine = domaine, auto = true)
+                else -> it
+            }
+        })
+        if (retenir && cle.length >= 3) runCatching {
+            val o = JSONObject(fichierRegles(c).takeIf { it.exists() }?.readText() ?: "{}")
+            if (domaine.isBlank()) o.remove(cle) else o.put(cle, domaine)
+            fr.dd.jarvis.data.Ecritures.ecrire(fichierRegles(c)) { o.toString() }
+        }
+        return true
+    }
+
     // ------------------------------------------------------------------ arrivée d'un message
 
     /** SMS / notification de mail reçus : analysés en arrière-plan, sans jamais bloquer. */
-    fun recu(app: JarvisApp, source: String, titre: String, texte: String, ts: Long = System.currentTimeMillis()) {
+    fun recu(app: JarvisApp, source: String, titre: String, texte: String, ts: Long = System.currentTimeMillis(), compte: String = "") {
         if (!app.store.courrierAnalyse.value) return
         Thread {
             runCatching {
-                val nouveaux = enregistrer(app, analyser(titre, texte, source, ts))
+                val data = runCatching { app.societe.data }.getOrNull()
+                val regles = regles(app)
+                val trouves = analyser(titre, texte, source, ts).map { e -> domaine(e, compte, data, regles).let { (d, a) -> e.copy(domaine = d, auto = a) } }
+                val nouveaux = enregistrer(app, trouves)
                 if (app.store.courrierNotif.value) nouveaux.forEach { notifier(app, it) }
             }
         }.apply { isDaemon = true }.start()
@@ -207,9 +272,9 @@ object Courrier {
                 if (deja) return
                 "📅 Rendez-vous détecté : ${quand(e.dateRdv)}" to "Ajoute à mon agenda : rendez-vous « ${e.emetteur} » ${quand(e.dateRdv)}" + (if (e.lieu.isNotBlank()) " à ${e.lieu}" else "") + " (détecté dans un message reçu)."
             }
-            FACTURE -> "🧾 Facture ${e.emetteur} : ${euros(e.montant)}${if (e.echeance.isNotBlank()) " avant le ${dateFr(e.echeance)}" else ""}" to
-                "Ajoute une note de frais de ${euros(e.montant)} chez ${e.emetteur}${if (e.echeance.isNotBlank()) " (facture à payer avant le ${dateFr(e.echeance)})" else ""}."
-            DEVIS -> "📄 Devis reçu de ${e.emetteur} : ${euros(e.montant)}" to null
+            FACTURE -> "🧾 Facture ${e.emetteur} : ${euros(e.montant)}${if (e.echeance.isNotBlank()) " avant le ${dateFr(e.echeance)}" else ""}${etiquette(e)}" to
+                if (e.domaine == PERSO) null else "Ajoute une note de frais de ${euros(e.montant)} chez ${e.emetteur}${if (e.echeance.isNotBlank()) " (facture à payer avant le ${dateFr(e.echeance)})" else ""}."
+            DEVIS -> "📄 Devis reçu de ${e.emetteur} : ${euros(e.montant)}${etiquette(e)}" to null
             else -> return
         }
         if (Build.VERSION.SDK_INT >= 26) app.getSystemService(NotificationManager::class.java)
@@ -218,13 +283,22 @@ object Courrier {
         val code = 7900 + (e.id.hashCode() and 0x3FF)
         val b = NotificationCompat.Builder(app, CANAL).setSmallIcon(android.R.drawable.ic_dialog_email).setContentTitle(titre)
             .setContentText(e.resume.take(120)).setStyle(NotificationCompat.BigTextStyle().bigText(e.resume)).setAutoCancel(true)
-            .setContentIntent(PendingIntent.getActivity(app, code, Intent(app, fr.dd.jarvis.MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), flags))
+            .setContentIntent(PendingIntent.getActivity(app, code, Intent(app, fr.dd.jarvis.MainActivity::class.java).putExtra("terrain", "courrier").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), flags))
+        // À classer : Société ou Perso directement depuis la notification.
+        if (e.domaine.isBlank()) listOf(SOCIETE to "🏢 Société", PERSO to "🏠 Perso").forEachIndexed { i, (d, libelle) ->
+            b.addAction(0, libelle, PendingIntent.getBroadcast(app, code + 2 + i, Intent(app, CourrierReceiver::class.java).setAction(ACT_CLASSER)
+                .putExtra("id", e.id).putExtra("domaine", d).putExtra("notif", code), flags))
+        }
         if (demande != null) b.addAction(0, if (e.type == RDV) "📅 Ajouter à l'agenda" else "💶 En note de frais", PendingIntent.getActivity(app, code + 1,
             Intent(app, fr.dd.jarvis.MainActivity::class.java).putExtra("demande", demande).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP), flags))
         runCatching { NotificationManagerCompat.from(app).notify(code, b.build()) }
     }
 
+    const val ACT_CLASSER = "fr.dd.jarvis.COURRIER_CLASSER"
+
     // ------------------------------------------------------------------ présentation
+
+    fun etiquette(e: Element) = when (e.domaine) { SOCIETE -> " · 🏢 Société"; PERSO -> " · 🏠 Perso"; else -> "" }
 
     private fun euros(m: Double?) = m?.let { String.format(java.util.Locale.FRANCE, "%,.2f €", it).replace(' ', ' ') } ?: "montant inconnu"
     private fun dateFr(iso: String) = runCatching { DatesFr.libelle(LocalDate.parse(iso), LocalDate.now()) }.getOrDefault(iso)
@@ -244,11 +318,11 @@ object Courrier {
 
     /** Colis suivis (non traités ou livrés dans les 2 derniers jours). */
     fun resumeColis(c: Context): String = liste(c).filter { it.type == COLIS && (!it.traite && (it.statut != "livré" || System.currentTimeMillis() - it.ts < 2 * 86_400_000L)) }
-        .sortedByDescending { it.ts }.joinToString("\n") { "- " + ligne(it) }
+        .sortedByDescending { it.ts }.joinToString("\n") { "- " + ligne(it) + etiquette(it) }
 
     /** Factures, devis et rendez-vous reçus non traités. */
     fun resumeATraiter(c: Context): String = liste(c).filter { !it.traite && it.type != COLIS && (it.type != RDV || (it.dateRdv ?: 0) > System.currentTimeMillis()) }
-        .sortedByDescending { it.ts }.take(12).joinToString("\n") { "- " + ligne(it) }
+        .sortedByDescending { it.ts }.take(12).joinToString("\n") { "- " + ligne(it) + etiquette(it) }
 
     // ------------------------------------------------------------------ demandes
 
@@ -283,5 +357,15 @@ object Courrier {
         val debut = Instant.ofEpochMilli(e.dateRdv ?: System.currentTimeMillis()).atZone(ZoneId.systemDefault()).toLocalDateTime()
         return JSONObject().put("title", "Rendez-vous ${e.emetteur}").put("start", debut.toString().take(16)).put("end", debut.plusHours(1).toString().take(16))
             .put("location", e.lieu).put("description", "Détecté par JARVIS dans un message reçu :\n${e.resume}")
+    }
+}
+
+/** « 🏢 Société » / « 🏠 Perso » touché dans la notification d'un élément reçu. */
+class CourrierReceiver : android.content.BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != Courrier.ACT_CLASSER) return
+        val id = intent.getStringExtra("id") ?: return
+        runCatching { Courrier.classer(context, id, intent.getStringExtra("domaine").orEmpty()) }
+        runCatching { NotificationManagerCompat.from(context).cancel(intent.getIntExtra("notif", 0)) }
     }
 }
