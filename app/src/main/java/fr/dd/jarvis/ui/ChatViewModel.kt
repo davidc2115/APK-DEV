@@ -200,7 +200,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 // Réflexion HORS du fil de l'écran (comme pour le service vocal) : construction du contexte, notes,
                 // JSON des outils et outils non isolés figeaient l'interface pendant chaque demande.
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                    brain.reply(historique, onTexte = { d ->
+                    brain.reply(historique, vocal = fromVoice, onTexte = { d ->
                         flux?.ajouter(d)
                         principal.post { enDirect += d; if (flux != null) parle = true }
                     }) { s -> principal.post { status = s } }

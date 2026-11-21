@@ -325,7 +325,7 @@ class ConversationVoiture private constructor(private val ctx: CarContext, priva
         val rep = withContext(Dispatchers.IO) {
             try {
                 // En voiture : les actions sensibles (envoi de SMS, appel…) qui exigent une confirmation forcée sont refusées.
-                cerveau.reply(CarBridge.contexte()) { }
+                cerveau.reply(CarBridge.contexte(), vocal = true) { }
             } catch (e: Throwable) { "Désolé, je n'ai pas pu faire ça : ${e.message ?: e.javaClass.simpleName}" }
         }
         fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "compréhension + action en ${android.os.SystemClock.elapsedRealtime() - debutTraitement} ms")
@@ -430,7 +430,7 @@ class ReponseTexteScreen(ctx: CarContext, private val question: String) : Screen
             CarBridge.ajouter(userMessage)
             app.chatAjouter(userMessage)
             val rep = withContext(Dispatchers.IO) {
-                try { Brain(app.llm, ToolBox(app) { _, force -> !force }, app) { app.store.userName.value }.reply(CarBridge.contexte()) { } }
+                try { Brain(app.llm, ToolBox(app) { _, force -> !force }, app) { app.store.userName.value }.reply(CarBridge.contexte(), vocal = true) { } }
                 catch (e: Throwable) { "Désolé, je n'ai pas pu faire ça : ${e.message ?: e.javaClass.simpleName}" }
             }
             val propre = rep.replace(Regex("[#*_`>|]+"), "").replace(Regex("\\s+"), " ").trim().ifBlank { "C'est fait." }

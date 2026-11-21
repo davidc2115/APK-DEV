@@ -1513,6 +1513,44 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 }
             }
         },
+        VoletReglages("agents", "proactif", "Point du soir", "point du soir bilan journee demain preparation notification soir") {
+            val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+            HudPanel(Modifier.fillMaxWidth(), title = "Point du soir") {
+                Text("Chaque soir, JARVIS fait le bilan de ta journée et prépare demain : planning de demain, heure de départ du premier rendez-vous, météo de demain, rappels, colis et factures à échéance. Différent du point du matin.", color = HudDim, fontSize = 12.sp)
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    HudChip(if (store.briefingSoirOn.value) "✅ Activé" else "Désactivé", store.briefingSoirOn.value) {
+                        val on = !store.briefingSoirOn.value
+                        store.briefingSoirOn.set(on)
+                        if (on) {
+                            if (Build.VERSION.SDK_INT >= 33 &&
+                                ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                            ) notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            Scheduler.scheduleSoir(ctx, store)
+                        } else Scheduler.cancelSoir(ctx)
+                    }
+                    HudChip("🕗 %02d:%02d".format(store.briefingSoirHour.value, store.briefingSoirMinute.value)) {
+                        pickTime(ctx, LocalTime.of(store.briefingSoirHour.value, store.briefingSoirMinute.value)) { t ->
+                            store.briefingSoirHour.set(t.hour)
+                            store.briefingSoirMinute.set(t.minute)
+                            if (store.briefingSoirOn.value) Scheduler.scheduleSoir(ctx, store)
+                        }
+                    }
+                }
+                Text("« Fais le point du soir » ou « prépare demain » à tout moment. Après 16 h, « fais le point » donne le point du soir.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
+            }
+        },
+        VoletReglages("agents", "proactif", "Analyse des SMS et mails", "colis colissimo facture devis rendez vous sms mails analyse suivi") {
+            HudPanel(Modifier.fillMaxWidth(), title = "📬 Analyse des SMS et mails") {
+                Text("JARVIS repère dans les SMS et mails reçus les colis (transporteur, numéro, état, code de retrait, lien de suivi), les factures et devis (montant, échéance) et les rendez-vous. Ils sont rappelés dans les points du matin et du soir, et consultables à la voix (« mes colis », « qu'est-ce que j'ai reçu d'important ? »). Les codes de connexion ne sont jamais gardés.", color = HudDim, fontSize = 12.sp)
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { store.courrierAnalyse.set(!store.courrierAnalyse.value) }) {
+                    Text((if (store.courrierAnalyse.value) "✅ " else "⬜ ") + "Analyser les SMS et mails reçus", color = HudText, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { store.courrierNotif.set(!store.courrierNotif.value) }) {
+                    Text((if (store.courrierNotif.value) "✅ " else "⬜ ") + "Notification pour un rendez-vous ou une facture détectés (avec « Ajouter à l'agenda » / « En note de frais »)", color = HudText, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
+                }
+            }
+        },
         VoletReglages("agents", "modes", "Modes", "modes a la demande creer modifier supprimer mode cinema nuit vacances automatiques voiture chantier maison") {
             fr.dd.jarvis.ui.SystemesPanel(app, onAsk)
             Spacer(Modifier.height(10.dp))

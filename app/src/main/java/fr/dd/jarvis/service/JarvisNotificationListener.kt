@@ -158,6 +158,8 @@ class JarvisNotificationListener : NotificationListenerService() {
             add(Item(sbn.packageName, label, titre, texte, sbn.postTime))
             sauver(applicationContext)
             val mail = estMail(sbn.packageName)
+            // SMS et mails : colis, factures, devis, rendez-vous repérés (en arrière-plan, sans IA).
+            if ((message || mail) && !appel) runCatching { fr.dd.jarvis.device.Courrier.recu(applicationContext as fr.dd.jarvis.JarvisApp, label, titre, texte, sbn.postTime) }
             // Jarvis ne republie plus de notification pour les SMS, mails et appels : celles d'Android suffisent.
             // Il les garde en mémoire pour les lire, les résumer, les annoncer à voix haute et alimenter ses agents.
             // Agents « en direct » : un nouveau SMS / message / mail déclenche tout de suite le passage de l'agent concerné.

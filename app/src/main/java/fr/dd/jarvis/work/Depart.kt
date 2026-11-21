@@ -145,6 +145,10 @@ object Depart {
                 ?.let { alertes += "${hhmm(e.begin)} ${e.title.take(40)}" to it }
         }
         if (alertes.isEmpty()) return
+        // Le matin, une alerte identique à celle envoyée la veille au soir pour ce jour n'est pas répétée.
+        val contenu = "$jour|" + alertes.joinToString(";") { "${it.first}=${it.second}" }
+        if (passage == "soir") app.store.meteoAlerteSoir.set(contenu)
+        else if (app.store.meteoAlerteSoir.value == contenu) return
         val quand = if (passage == "soir") "demain" else "aujourd'hui"
         notifier(app, 7731, "⚠️ Météo défavorable $quand pour ${alertes.size} rendez-vous",
             alertes.joinToString("\n") { "• ${it.first} : ${it.second}" } + "\nVeux-tu décaler ?", null,

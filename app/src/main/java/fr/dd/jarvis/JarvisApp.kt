@@ -196,6 +196,7 @@ class JarvisApp : Application() {
             if (r.startsWith("⏳")) store.hermesConfigVersion.set(fr.dd.jarvis.hermes.HermesTermux.VERSION_CONFIG)
         }
         if (store.briefingOn.value) Scheduler.schedule(this, store)
+        if (store.briefingSoirOn.value) Scheduler.scheduleSoir(this, store)
         fr.dd.jarvis.work.AgentsScheduler.apply(this, store)
         fr.dd.jarvis.work.ReseauScheduler.apply(this, store)
         runCatching {

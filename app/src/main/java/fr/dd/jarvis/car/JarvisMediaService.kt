@@ -461,7 +461,7 @@ class JarvisMediaService : MediaBrowserService() {
             if (CarBridge.contexte().isEmpty()) app.chat.toList().takeLast(10).forEach { CarBridge.ajouter(it) }
             CarBridge.ajouter(question); app.chatAjouter(question)
             val rep = withContext(Dispatchers.IO) {
-                try { cerveau.reply(CarBridge.contexte()) { } }
+                try { cerveau.reply(CarBridge.contexte(), vocal = true) { } }
                 catch (e: Throwable) { "Désolé, je n'ai pas pu faire ça : ${e.message ?: e.javaClass.simpleName}" }
             }
             val p = propre(rep).ifBlank { "C'est fait." }

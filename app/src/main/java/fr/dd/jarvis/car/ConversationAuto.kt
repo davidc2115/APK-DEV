@@ -119,7 +119,7 @@ object ConversationAuto {
             val debutTraitement = System.currentTimeMillis()
             val rep = withTimeoutOrNull(90_000) {
                 withContext(Dispatchers.IO) {
-                    try { brain.reply(CarBridge.contexte()) { } }
+                    try { brain.reply(CarBridge.contexte(), vocal = true) { } }
                     catch (e: Throwable) { "Désolé, je n'ai pas pu faire ça : ${e.message ?: e.javaClass.simpleName}" }
                 }
             } ?: run {

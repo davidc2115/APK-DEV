@@ -640,7 +640,7 @@ class JarvisService : Service() {
             val flux = withContext(Dispatchers.Main) { voice?.parole(5000) { if (gen == generation) { busy = false; if (relancer) ecouter() else goIdle() } } }
             val reply = try {
                 val debutCerveau = System.currentTimeMillis()
-                brain.reply(app.chat.toList().takeLast(16), onTexte = { d -> if (gen == generation) flux?.ajouter(d) }) { etat -> android.os.Handler(android.os.Looper.getMainLooper()).post { majNotification(etat) } }
+                brain.reply(app.chat.toList().takeLast(16), onTexte = { d -> if (gen == generation) flux?.ajouter(d) }, vocal = true) { etat -> android.os.Handler(android.os.Looper.getMainLooper()).post { majNotification(etat) } }
                     .also { fr.dd.jarvis.voice.JournalVoix.noter("service", "compréhension + action en ${System.currentTimeMillis() - debutCerveau} ms") }
             } catch (e: CancellationException) {
                 // Une requête IA / un outil peut être annulé (timeout, arrêt de tâche). Sans ce nettoyage,

@@ -38,9 +38,11 @@ object ConsignesIA {
         "à partir de l'échange précédent. Ne comptent PAS : une demande ponctuelle sans règle (« allume la lumière », « mets Johnny »), une simple " +
         "question, un fait sur l'utilisateur (adresse, nom, surnom), une donnée sensible (mot de passe, santé, banque). " +
         "Réponds UNIQUEMENT en JSON, sans texte autour : {\"consigne\":false} ou {\"consigne\":true,\"domaine\":\"maison|plex|serveur|telephone|" +
-        "musique|localisation|agenda|briefing|mails|sms|contacts|meteo|navigation|notes|societe|reponses\",\"regle\":\"la règle, générale et complète, " +
+        "musique|localisation|agenda|briefing|mails|sms|contacts|meteo|navigation|notes|societe|reponses\",\"canal\":\"vocal|ecrit|tous\",\"regle\":\"la règle, générale et complète, " +
         "en français, avec les mots précis de l'utilisateur : le sujet concerné puis ce qu'il faut faire (ex. « Pour la température des poêles : " +
-        "toujours un tableau avec la température actuelle et la température de consigne, pour tous les poêles. »)\"}"
+        "toujours un tableau avec la température actuelle et la température de consigne, pour tous les poêles. »)\"}. canal = vocal si la règle ne vaut " +
+        "que quand il parle à JARVIS à la voix (« à l'oral », « quand je te parle », « en voiture »), ecrit si elle ne vaut que par écrit (« par écrit », " +
+        "« quand je t'écris », « dans le chat »), sinon tous."
 
     /** Analyse IA (≈ 1 s) ; null si aucune consigne, réponse invalide ou IA indisponible. */
     suspend fun extraire(app: JarvisApp, texte: String, demandePrecedente: String?, reponsePrecedente: String?): Extraite? {
@@ -67,6 +69,7 @@ object ConsignesIA {
             d == "reponses" -> DomainesConsignes.domaine(n) ?: "reponses"
             else -> DomainesConsignes.domaine(n) ?: "reponses"
         }
-        return Extraite(rubrique, regle.replaceFirstChar { it.uppercase() })
+        val canal = when (normaliser(o.optString("canal"))) { "vocal", "oral", "voix" -> CanalDemande.VOCAL; "ecrit", "texte" -> CanalDemande.ECRIT; else -> CanalDemande.detecter(n) }
+        return Extraite(rubrique, CanalDemande.marque(canal) + regle.replaceFirstChar { it.uppercase() })
     }
 }

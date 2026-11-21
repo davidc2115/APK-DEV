@@ -116,4 +116,22 @@ class RestitutionTest {
         assertTrue(!Restitution.exigeUneSuite(memoire, "mets Johnny Hallyday"))
         assertTrue(!Restitution.exigeUneSuite(memoire, "allume la lumière du salon"))
     }
+
+    @Test fun consignesParCanal() {
+        val v = ConsignesExplicites.detecter("Quand je te parle à l'oral, réponds-moi toujours en une phrase courte")!!
+        assertEquals(CanalDemande.VOCAL, v.canal)
+        assertTrue(v.texte, v.texte.startsWith("(vocal) "))
+        val e = ConsignesExplicites.detecter("Par écrit, présente toujours les températures des poêles en tableau")!!
+        assertEquals(CanalDemande.ECRIT, e.canal)
+        assertEquals("maison", e.rubrique)
+        assertNull(ConsignesExplicites.detecter("À l'avenir, présente les poêles en tableau")!!.canal)
+        val items = mapOf("maison" to "- (écrit) Présente toujours les poêles en tableau avec la consigne\n- (vocal) Pour les poêles, dis seulement la température du salon en une phrase")
+        val ecrit = Restitution.concernees(items, "température des poêles", "", false, 10, vocal = false)
+        val oral = Restitution.concernees(items, "température des poêles", "", false, 10, vocal = true)
+        assertTrue(ecrit.single().contains("tableau"))
+        assertTrue(oral.single().contains("une phrase"))
+        assertTrue(fr.dd.jarvis.device.Memo.blocPrompt(items, vocal = true).let { !it.contains("en tableau avec la consigne") && it.contains("une phrase") })
+        assertTrue(CanalDemande.ligne(true).contains("VOCAL") && CanalDemande.ligne(false).contains("ÉCRIT"))
+        assertEquals("(vocal) Réponds court", ConsignesIA.lire("{\"consigne\":true,\"domaine\":\"reponses\",\"canal\":\"vocal\",\"regle\":\"Réponds court à l'oral\"}")?.texte?.substringBefore(" à"))
+    }
 }

@@ -222,7 +222,8 @@ class ToolBox(
             ), listOf("destinataire", "sujet", "corps")))
         put(tool("mail_compte", "Liste, active ou désactive un compte mail (désactivé = conservé mais ignoré par JARVIS, ses agents et le point du matin).",
             mapOf("action" to prop("lister | activer | desactiver"), "compte" to prop("Adresse ou partie de l'adresse (ou « imap »). Inutile pour lister.")), listOf("action")))
-        put(tool("morning_briefing", "Point du jour : planning du jour et mails importants."))
+        put(tool("morning_briefing", "Point du jour. Le MATIN : planning du jour, météo, rappels, mails importants, impayés, colis. Le SOIR : bilan de la journée et préparation de demain (planning de demain, heure de départ, météo de demain, rappels). moment = matin | soir (vide : selon l'heure).",
+            mapOf("moment" to prop("matin | soir (vide : selon l'heure)"))))
         put(tool("search_contacts", "Cherche des contacts du téléphone (nom, numéro, email, société).",
             mapOf("query" to prop("Texte recherché.")), listOf("query")))
         put(tool("create_contact", "Crée un contact dans le téléphone.",
@@ -401,6 +402,8 @@ class ToolBox(
         put(tool("liste", "Listes à cocher de l'utilisateur (courses par défaut, bricolage, cadeaux…), gardées dans le téléphone et dans Obsidian : ajouter des articles, en retirer, les cocher (pris), lire une liste, la vider, lister les listes, envoyer une liste par SMS.",
             mapOf("action" to prop("ajouter | retirer | cocher | lire (défaut) | vider | listes | envoyer"), "nom" to prop("Nom de la liste (défaut : Courses)."),
                 "elements" to prop("Articles séparés par des virgules (ajouter / retirer / cocher)."), "destinataire" to prop("Contact ou numéro (envoyer)."))))
+        put(tool("courrier", "Ce que JARVIS a repéré dans les SMS et mails reçus : colis (transporteur, numéro, état, code de retrait, lien de suivi), factures et devis reçus (émetteur, montant, échéance), rendez-vous détectés. Actions : colis | a_traiter (défaut) | traiter (id) | supprimer (id) | rdv_agenda (id facultatif : ajoute le rendez-vous détecté à l'agenda) | liste (tout, avec les id).",
+            mapOf("action" to prop("colis | a_traiter | liste | traiter | supprimer | rdv_agenda"), "id" to prop("Identifiant de l'élément (action liste)."))))
         put(tool("stationnement", "Place de stationnement de la voiture : noter la position actuelle (avec une précision : niveau, place…), dire où est garée la voiture (adresse, heure, distance, lien), ou l'oublier. Retenue aussi automatiquement à la fin d'Android Auto.",
             mapOf("action" to prop("noter | ou (défaut) | oublier"), "note" to prop("Précision facultative (« niveau -2, place 45 »)."))))
         put(tool("tache_terminer", "Marque une tâche comme terminée à partir de son identifiant (#id).", mapOf(
@@ -623,7 +626,7 @@ class ToolBox(
         "rechercher_mails" -> rechercherMails(a)
         "repondre_email" -> repondreEmail(a)
         "summarize_mails" -> summarizeMails(a)
-        "morning_briefing" -> ToolResult(briefing(), direct = true)
+        "morning_briefing" -> ToolResult(briefing(a.optString("moment").ifBlank { null }), direct = true)
         "trier_mails" -> trierMails(a)
         "regler_tri_mails" -> reglerTriMails(a)
         "mail_compte" -> mailCompte(a)
@@ -1142,6 +1145,22 @@ class ToolBox(
                 ToolResult("Indique les articles (elements, séparés par des virgules).")
             else ToolResult(fr.dd.jarvis.device.Listes.executer(app, i) { d, m -> execute("envoyer_sms", JSONObject().put("destinataire", d).put("texte", m)).text }
                 ?: "Aucun de ces articles n'est sur tes listes.", direct = true)
+        }
+        "courrier" -> {
+            val C = fr.dd.jarvis.device.Courrier
+            val id = a.optString("id").trim()
+            when (a.optString("action").trim().lowercase()) {
+                "colis" -> ToolResult(C.texte(app, fr.dd.jarvis.device.Courrier.Intention.Colis), direct = true)
+                "liste" -> ToolResult(C.liste(app).sortedByDescending { it.ts }.take(40).joinToString("\n") { "- [${it.id}]${if (it.traite) " ✅" else ""} " + C.ligne(it) }.ifBlank { "Rien de repéré." }, direct = true)
+                "traiter" -> ToolResult(if (C.marquer(app, id)) "✅ Marqué comme traité." else "Élément « $id » introuvable (action liste pour les id).")
+                "supprimer" -> ToolResult(if (C.supprimer(app, id)) "🗑️ Supprimé." else "Élément « $id » introuvable (action liste pour les id).")
+                "rdv_agenda" -> {
+                    val e = (if (id.isNotBlank()) C.liste(app).firstOrNull { it.id == id } else C.dernierRdv(app))?.takeIf { it.type == C.RDV }
+                    if (e == null) ToolResult("Aucun rendez-vous détecté à ajouter.")
+                    else execute("create_event", C.argsEvenement(e)).also { r -> if (Regex("\\(#\\d+\\)").containsMatchIn(r.text)) C.marquer(app, e.id) }
+                }
+                else -> ToolResult(C.texte(app, fr.dd.jarvis.device.Courrier.Intention.ATraiter), direct = true)
+            }
         }
         "stationnement" -> ToolResult(when (a.optString("action").trim().lowercase()) {
             "noter", "garer", "enregistrer" -> fr.dd.jarvis.device.Stationnement.noter(app, a.optString("note"))
@@ -2250,35 +2269,70 @@ class ToolBox(
     }
 
     /** Point du jour : agenda + mails, rédigé par l'agent Briefing. */
-    suspend fun briefing(): String {
+    /**
+     * Point du MATIN (la journée qui commence) ou du SOIR (bilan + préparation de demain) — deux contenus différents.
+     * [moment] : "matin", "soir", ou null = selon l'heure (à partir de 16 h : le soir).
+     */
+    suspend fun briefing(moment: String? = null): String {
+        val soir = when (moment?.trim()?.lowercase()) { "soir" -> true; "matin" -> false; else -> java.time.LocalTime.now().hour >= 16 }
         val consignes = app.memo.pour("briefing").lowercase()
         val sansMails = Regex("(sans|pas de|aucun|ni) (les )?(mail|e-mail|courriel)").containsMatchIn(consignes)
         // « seulement le planning xx » : un agenda nommé dans la consigne est utilisé comme filtre.
         val cible = if (app.calendar.hasPermission()) app.calendar.calendars().map { app.calendar.displayName(it) }.firstOrNull { consignes.contains(it.lowercase()) } else null
-        val planning = if (app.calendar.hasPermission()) {
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { planningData(LocalDate.now(), 1, cible) }
-                .ifBlank { "Aucun événement aujourd'hui." }
-        } else "Permission agenda non accordée."
-        val planningDemain = if (app.calendar.hasPermission()) {
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { planningData(LocalDate.now().plusDays(1), 1, cible) }
-                .ifBlank { "Aucun événement prévu demain." }
-        } else "Permission agenda non accordée."
-        val mails = if (sansMails) "(non demandés)" else if (store.mailConfigured()) {
-            try {
-                val m = app.mail.fetchRecent(15, true)
-                if (m.isEmpty()) "Aucun mail non lu." else app.mail.toPrompt(m)
-            } catch (e: Exception) {
-                "Mails indisponibles : ${e.message}"
-            }
-        } else "Mails non configurés."
+        val aujourdhui = LocalDate.now()
+        val demain = aujourdhui.plusDays(1)
+        suspend fun agenda(j: LocalDate, vide: String) = if (app.calendar.hasPermission())
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { planningData(j, 1, cible) }.ifBlank { vide } else "Permission agenda non accordée."
+        val zone = java.time.ZoneId.systemDefault()
+        fun jourDe(ms: Long) = java.time.Instant.ofEpochMilli(ms).atZone(zone).toLocalDate()
+        val rappels = runCatching { fr.dd.jarvis.device.Rappels.liste(app) }.getOrDefault(emptyList()).filter { !it.fait }
+        fun rappelsDu(j: LocalDate) = rappels.filter { jourDe(it.at) == j }.sortedBy { it.at }
+            .joinToString("\n") { "- " + java.time.Instant.ofEpochMilli(it.at).atZone(zone).format(java.time.format.DateTimeFormatter.ofPattern("HH:mm")) + " " + it.texte }
+            .ifBlank { "Aucun." }
         val impayes = app.societe.impayees()
-        val tasksDue = app.tasks.pendingDue(LocalDate.now().plusDays(1))
-        val taches = if (tasksDue.isEmpty()) "Aucune tâche en retard ou à échéance demain." else tasksDue.joinToString("\n") { "- " + it.title + (if (it.dueDate.isNotBlank()) " — " + it.dueDate else "") + " (#" + it.id + ")" }
-        val user = "Utilisateur : ${store.userName.value.ifBlank { "l'utilisateur" }}\nMaintenant : ${Prompts.now()}\n\n" +
-            "=== AGENDA DU JOUR ===\n$planning\n\n=== AGENDA DE DEMAIN ===\n$planningDemain\n\n=== TÂCHES PERSONNELLES ===\n$taches\n\n=== MAILS NON LUS ===\n$mails\n\n=== FACTURES IMPAYÉES ===\n${impayes.ifBlank { "Aucune." }}"
-        val texte = llm.agent(Prompts.briefing() + app.memo.pour("briefing"), user)
-        // Archive chaque point du matin dans son propre dossier du coffre Obsidian (un fichier par jour).
-        runCatching { app.obsidian.saveIn("Points du matin", LocalDate.now().toString(), texte) }
+        val colis = runCatching { fr.dd.jarvis.device.Courrier.resumeColis(app) }.getOrDefault("")
+        val aTraiter = runCatching { fr.dd.jarvis.device.Courrier.resumeATraiter(app) }.getOrDefault("")
+        val courses = runCatching { fr.dd.jarvis.device.Listes.charger(app)["Courses"]?.count { !it.coche } ?: 0 }.getOrDefault(0)
+        val meteo = runCatching { kotlinx.coroutines.withTimeoutOrNull(6_000) { fr.dd.jarvis.ai.Meteo.get(app, "", if (soir) 2 else 1) } }.getOrNull().orEmpty().ifBlank { "Météo indisponible." }
+        val texte = if (!soir) {
+            val planning = agenda(aujourdhui, "Aucun événement aujourd'hui.")
+            val mails = if (sansMails) "(non demandés)" else if (store.mailConfigured()) {
+                try { val m = app.mail.fetchRecent(15, true); if (m.isEmpty()) "Aucun mail non lu." else app.mail.toPrompt(m) } catch (e: Exception) { "Mails indisponibles : ${e.message}" }
+            } else "Mails non configurés."
+            val tasksDue = app.tasks.pendingDue(aujourdhui)
+            val taches = if (tasksDue.isEmpty()) "Aucune tâche en retard ou à échéance aujourd'hui." else tasksDue.joinToString("\n") { "- " + it.title + (if (it.dueDate.isNotBlank()) " — " + it.dueDate else "") + " (#" + it.id + ")" }
+            val user = "Utilisateur : ${store.userName.value.ifBlank { "l'utilisateur" }}\nMaintenant : ${Prompts.now()}\n\n" +
+                "=== AGENDA DU JOUR ===\n$planning\n\n=== MÉTÉO DU JOUR ===\n$meteo\n\n=== RAPPELS DU JOUR ===\n${rappelsDu(aujourdhui)}\n\n=== TÂCHES PERSONNELLES ===\n$taches\n\n" +
+                "=== MAILS NON LUS ===\n$mails\n\n=== FACTURES IMPAYÉES ===\n${impayes.ifBlank { "Aucune." }}\n\n=== COLIS ===\n${colis.ifBlank { "Aucun colis suivi." }}\n\n" +
+                "=== DOCUMENTS REÇUS À TRAITER ===\n${aTraiter.ifBlank { "Aucun." }}"
+            llm.agent(Prompts.briefing() + app.memo.pour("briefing"), user)
+        } else {
+            val bilan = agenda(aujourdhui, "Aucun événement aujourd'hui.")
+            val planningDemain = agenda(demain, "Aucun événement prévu demain.")
+            val tasksDue = app.tasks.pendingDue(demain)
+            val taches = if (tasksDue.isEmpty()) "Aucune tâche en retard ou à échéance demain." else tasksDue.joinToString("\n") { "- " + it.title + (if (it.dueDate.isNotBlank()) " — " + it.dueDate else "") + " (#" + it.id + ")" }
+            val nonFaits = rappels.filter { jourDe(it.at) == aujourdhui && it.at < System.currentTimeMillis() }.joinToString("\n") { "- " + it.texte }.ifBlank { "Aucun." }
+            // Départ pour le premier rendez-vous de demain avec une adresse (depuis le siège / la dernière position connue).
+            val depart = runCatching {
+                val e = app.calendar.events(demain, 1).filter { !it.allDay && it.location.isNotBlank() }.minByOrNull { it.begin } ?: return@runCatching "Aucun rendez-vous avec adresse demain."
+                val hq = app.societe.data.societe
+                val dep = (if (hq.lat != null && hq.lon != null) fr.dd.jarvis.societe.Geo.Point(hq.lat, hq.lon) else fr.dd.jarvis.device.Locator.point(app)) ?: return@runCatching "Point de départ inconnu."
+                val dest = fr.dd.jarvis.societe.Geo.geocode(e.location) ?: return@runCatching "Adresse introuvable : ${e.location}"
+                val d = fr.dd.jarvis.work.Depart.duree(app, dep, dest, e.begin) ?: return@runCatching "Itinéraire indisponible."
+                val f = java.time.format.DateTimeFormatter.ofPattern("HH:mm")
+                "${e.title} à ${java.time.Instant.ofEpochMilli(e.begin).atZone(zone).format(f)} (${e.location}) : trajet ${d.minutes} min, partir vers " +
+                    java.time.Instant.ofEpochMilli(fr.dd.jarvis.work.Depart.heureDepart(e.begin, d.minutes)).atZone(zone).format(f)
+            }.getOrDefault("Calcul du départ indisponible.")
+            val nonLus = if (sansMails || !store.mailConfigured()) "" else runCatching { app.mail.fetchRecent(15, true).size }.getOrNull()?.let { "$it mail(s) non lu(s)." }.orEmpty()
+            val user = "Utilisateur : ${store.userName.value.ifBlank { "l'utilisateur" }}\nMaintenant : ${Prompts.now()}\n\n" +
+                "=== AGENDA D'AUJOURD'HUI (bilan) ===\n$bilan\n\n=== RAPPELS D'AUJOURD'HUI NON FAITS ===\n$nonFaits\n\n=== AGENDA DE DEMAIN ===\n$planningDemain\n\n" +
+                "=== DÉPART DEMAIN ===\n$depart\n\n=== MÉTÉO (aujourd'hui puis demain) ===\n$meteo\n\n=== RAPPELS DE DEMAIN ===\n${rappelsDu(demain)}\n\n" +
+                "=== TÂCHES ===\n$taches\n\n=== FACTURES IMPAYÉES ===\n${impayes.ifBlank { "Aucune." }}\n\n=== COLIS ===\n${colis.ifBlank { "Aucun colis suivi." }}\n\n" +
+                "=== DOCUMENTS REÇUS À TRAITER ===\n${aTraiter.ifBlank { "Aucun." }}\n\n=== LISTE DE COURSES ===\n${if (courses > 0) "$courses article(s) à acheter." else "Vide."}\n\n=== MAILS ===\n${nonLus.ifBlank { "—" }}"
+            llm.agent(Prompts.briefingSoir() + app.memo.pour("briefing"), user)
+        }
+        // Archive chaque point dans son dossier du coffre Obsidian (un fichier par jour).
+        runCatching { app.obsidian.saveIn(if (soir) "Points du soir" else "Points du matin", aujourdhui.toString(), texte) }
         return texte
     }
 

@@ -91,7 +91,7 @@ object CarBridge {
             }
             val rep = try {
                 // Les opérations qui exigent une confirmation explicite restent bloquées depuis l’interface voiture.
-                Brain(app.llm, ToolBox(app) { _, force -> !force }, app) { app.store.userName.value }.reply(contexte()) { }
+                Brain(app.llm, ToolBox(app) { _, force -> !force }, app) { app.store.userName.value }.reply(contexte(), vocal = true) { }
             } catch (e: Throwable) { "Désolé, je n’ai pas pu faire ça : ${e.message ?: e.javaClass.simpleName}" }
             val propre = rep.replace(Regex("[#*_`>|]+"), "").replace(Regex("\\s+"), " ").trim().ifBlank { "C’est fait." }
             ajouter(ChatMsg(false, propre))

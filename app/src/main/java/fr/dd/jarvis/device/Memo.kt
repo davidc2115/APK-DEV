@@ -141,7 +141,9 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
          * nom des rubriques restantes. Avant, au-delà de 1800 caractères, une rubrique « maison » ou « poêles » n'était
          * plus que nommée : JARVIS oubliait la consigne « tableau avec température actuelle et consigne ».
          */
-        internal fun blocPrompt(items: Map<String, String>, max: Int = 3800): String {
+        internal fun blocPrompt(items0: Map<String, String>, max: Int = 3800, vocal: Boolean? = null): String {
+            // Consignes propres à l'autre canal (vocal / écrit) : retirées.
+            val items = if (vocal == null) items0 else items0.mapValues { fr.dd.jarvis.ai.CanalDemande.filtrer(it.value, vocal) }.filterValues { it.isNotBlank() }
             if (items.isEmpty()) return ""
             val complet = ENTETE + items.entries.joinToString("\n") { "- [${it.key}] ${it.value.take(900)}" }
             if (complet.length <= 2400) return complet
@@ -156,9 +158,9 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         }
 
         /** Consignes qui concernent CETTE demande, rappelées en fin de prompt (là où le modèle les suit le mieux). */
-        internal fun blocDemande(items: Map<String, String>, demande: String): String {
+        internal fun blocDemande(items: Map<String, String>, demande: String, vocal: Boolean? = null): String {
             if (items.isEmpty() || demande.isBlank()) return ""
-            val l = fr.dd.jarvis.ai.Restitution.concernees(items, demande, "", formeSeulement = false, max = 10)
+            val l = fr.dd.jarvis.ai.Restitution.concernees(items, demande, "", formeSeulement = false, max = 10, vocal = vocal)
             if (l.isEmpty()) return ""
             return "\n\n⚠️ CONSIGNES DE L'UTILISATEUR POUR CETTE DEMANDE — obligatoires, applique-les exactement (présentation, colonnes, " +
                 "contenu, appareils concernés) même s'il ne les répète pas :\n" + l.joinToString("\n") { "- $it" }
@@ -229,8 +231,11 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         if (nouvelle.isBlank()) return "rien à enregistrer"
         val lignes = items[k].orEmpty().lines().map { it.trim() }.filter { it.isNotBlank() }.map { it.removePrefix("-").trim() }.toMutableList()
         val n = fr.dd.jarvis.societe.core.normaliser(nouvelle)
-        if (lignes.any { fr.dd.jarvis.societe.core.normaliser(it) == n || fr.dd.jarvis.societe.core.normaliser(it).contains(n) }) return "déjà enregistrée"
-        val proche = lignes.indexOfFirst { proximite(it, nouvelle) >= 0.6 }
+        // Une consigne « (vocal) » et une « (écrit) » sur le même sujet coexistent : la comparaison se fait par canal.
+        val canal = fr.dd.jarvis.ai.CanalDemande.de(nouvelle)
+        fun memeCanal(l: String) = fr.dd.jarvis.ai.CanalDemande.de(l) == canal
+        if (lignes.any { memeCanal(it) && (fr.dd.jarvis.societe.core.normaliser(it) == n || fr.dd.jarvis.societe.core.normaliser(it).contains(n)) }) return "déjà enregistrée"
+        val proche = lignes.indexOfFirst { memeCanal(it) && proximite(it, nouvelle) >= 0.6 }
         if (proche >= 0) lignes[proche] = nouvelle else lignes += nouvelle
         items[k] = lignes.joinToString("\n") { "- $it" }
         return persist()
@@ -371,13 +376,13 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
      * déjà, en entier, dans le bloc « notes utiles » (NotesPertinentes).
      */
     @Synchronized
-    fun pourPrompt(): String { ensure(); return blocPrompt(items) }
+    fun pourPrompt(): String { ensure(); return blocPrompt(items, vocal = fr.dd.jarvis.ai.CanalDemande.vocal) }
 
     /** Consignes (de JARVIS et d'Hermès) qui concernent cette demande, à placer en fin de prompt ; vide sinon. */
     fun consignesPour(demande: String): String {
         val tout: Map<String, String> = synchronized(this) { ensure(); LinkedHashMap(items) }
         val hermes = runCatching { entreesHermesListe().joinToString("\n") }.getOrDefault("")
-        return blocDemande(if (hermes.isBlank()) tout else tout + ("hermes" to hermes), demande)
+        return blocDemande(if (hermes.isBlank()) tout else tout + ("hermes" to hermes), demande, fr.dd.jarvis.ai.CanalDemande.vocal)
     }
 
     /** Toutes les consignes, une par ligne : (rubrique, consigne). */

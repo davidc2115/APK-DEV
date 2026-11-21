@@ -675,6 +675,16 @@ class Store(context: Context) {
     val briefingHour = IPref("briefingHour", 7)
     val briefingMinute = IPref("briefingMinute", 30)
     val lastBriefing = SPref("lastBriefing", "")
+    // Point du soir : bilan de la journée et préparation du lendemain (différent du point du matin).
+    val briefingSoirOn = BPref("briefingSoirOn", false)
+    /** Analyse des SMS et mails reçus (colis, factures, devis, rendez-vous) et notification des rendez-vous / factures. */
+    val courrierAnalyse = BPref("courrierAnalyse", true)
+    val courrierNotif = BPref("courrierNotif", true)
+    val briefingSoirHour = IPref("briefingSoirHour", 20)
+    val briefingSoirMinute = IPref("briefingSoirMinute", 0)
+    val lastBriefingSoir = SPref("lastBriefingSoir", "")
+    /** Alerte météo des rendez-vous envoyée la veille au soir (jour|contenu) : le matin ne la répète pas à l'identique. */
+    val meteoAlerteSoir = SPref("meteoAlerteSoir", "")
     /** Dernière synthèse calculée par les agents proactifs, affichée dans le planning. */
     val proactiveSummary = SPref("proactiveSummary", "")
 

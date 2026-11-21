@@ -79,7 +79,7 @@ object Restitution {
      * Lignes de la mémoire qui concernent cet échange (demande + réponse). [formeSeulement] : seulement les consignes de
      * forme (pour remettre en forme une réponse directe) ; sinon toutes les consignes du sujet (pour le prompt).
      */
-    internal fun concernees(memoire: Map<String, String>, demande: String, reponse: String, formeSeulement: Boolean, max: Int): List<String> {
+    internal fun concernees(memoire: Map<String, String>, demande: String, reponse: String, formeSeulement: Boolean, max: Int, vocal: Boolean? = null): List<String> {
         val contexte = normaliser("$demande ${reponse.take(600)}")
         val motsContexte = DomainesConsignes.mots(contexte)
         val mots = fr.dd.jarvis.device.NotesPertinentes.motsCles("$demande ${reponse.take(300)}")
@@ -87,6 +87,7 @@ object Restitution {
         for ((rubrique, texte) in memoire) {
             val dr = DomainesConsignes.deRubrique(rubrique)
             for (ligne in texte.lines().map { it.trim().trimStart('-', '*', '•', ' ') }.filter { it.length >= 12 }) {
+                if (vocal != null && !CanalDemande.pour(ligne, vocal)) continue
                 val n = normaliser(ligne)
                 if (formeSeulement && !FORME.containsMatchIn(n)) continue
                 val ml = DomainesConsignes.mots(n)
@@ -110,7 +111,7 @@ object Restitution {
 
     /** Consignes de forme qui concernent cet échange (demande + réponse), au plus 6 lignes. */
     internal fun consignes(memoire: Map<String, String>, demande: String, reponse: String): List<String> =
-        concernees(memoire, demande, reponse, formeSeulement = true, max = 6)
+        concernees(memoire, demande, reponse, formeSeulement = true, max = 6, vocal = CanalDemande.vocal)
 
     private val AJOUT = Regex("\\b(aussi|en plus|egalement|ajoute\\w*|rajoute\\w*|inclu\\w*|complete\\w*|accompagne\\w*|avec (la|le|les) (meteo|temperature exterieure|previsions?))\\b")
     private val RETRAIT = Regex("\\b(n ajoute|ne rien ajouter|rien d autre|sans rien)\\b")
@@ -121,7 +122,7 @@ object Restitution {
      * la demande va au cerveau, qui applique la consigne avec ses outils.
      */
     fun exigeUneSuite(memoire: Map<String, String>, demande: String): Boolean =
-        concernees(memoire, demande, "", formeSeulement = false, max = 10).any { l -> normaliser(l).let { AJOUT.containsMatchIn(it) && !RETRAIT.containsMatchIn(it) } }
+        concernees(memoire, demande, "", formeSeulement = false, max = 10, vocal = CanalDemande.vocal).any { l -> normaliser(l).let { AJOUT.containsMatchIn(it) && !RETRAIT.containsMatchIn(it) } }
 
     private val TABLEAU_MD = Regex("(?m)^\\s*\\|.*\\|\\s*$\\n^\\s*\\|?\\s*:?-{2,}")
 
@@ -177,7 +178,7 @@ object Restitution {
  * le cerveau qui traite ensuite la phrase — elle ne dépend plus du modèle qui pense (ou non) à l'enregistrer.
  */
 object ConsignesExplicites {
-    data class Consigne(val rubrique: String, val texte: String, val ponctuelle: Boolean = false)
+    data class Consigne(val rubrique: String, val texte: String, val ponctuelle: Boolean = false, val canal: String? = null)
 
     private val MARQUEUR = Regex("\\b(a l avenir|desormais|dorenavant|a partir de maintenant|a partir d aujourd hui|(a )?chaque fois( que| qu)?|la prochaine fois|les prochaines fois|" +
         "par defaut|tu dois|il faut que tu|" +
@@ -190,7 +191,8 @@ object ConsignesExplicites {
     private val MARQUEUR_RETIENS = Regex("\\b(retiens|n oublie (pas|jamais)|souviens toi|rappelle toi que|note bien)\\b")
     private val FORME = Regex("\\b(seulement|uniquement|juste|rien d autre|pas d autres?|ne (me )?(donne|dis|mets|affiche)s? (que|pas|plus|jamais)|" +
         "sans (le|la|les|l|aucune?|autres?|nom|details?|commentaires?)|n ajoute|tableaux?|colonnes?|sous (la )?forme|en liste|liste a puces|format|presente\\w*|presentation|" +
-        "en gras|emojis?|par ordre|trie\\w*|classe\\w*|unites?|une ligne|par ligne|arrondi\\w*|en premier|d abord|avec (la|le|les|l|son|sa|ses|leur|leurs) )\\b")
+        "en gras|emojis?|par ordre|trie\\w*|classe\\w*|unites?|une ligne|par ligne|arrondi\\w*|en premier|d abord|avec (la|le|les|l|son|sa|ses|leur|leurs) |" +
+        "(en |une |deux |trois |\\d )phrases?|courte?s?|plus court|detaille\\w*|plus long|longue|concis\\w*|brefs?|breve|resume\\w*|tutoie|vouvoie|langage|mots simples)\\b")
     private val FORME_FAIBLE = Regex("\\b(toujours|jamais|systematiquement|que (le|la|les|l|son|sa|ses))\\b")
     /** Présentation demandée pour une demande (« … sous forme de tableau », « en tableau avec… ») : retenue pour la suite. */
     private val FORMAT_PONCTUEL = Regex("\\b(sous (la )?forme (d un |de |d )?(tableau|liste|colonnes?)|en (un )?tableau|dans un tableau|en colonnes?|en liste a puces|tableau (avec|des|de|recapitulatif))\\b")
@@ -213,7 +215,9 @@ object ConsignesExplicites {
         if (!durable && !ponctuelle) return null
         val rubrique = DomainesConsignes.domaine(n) ?: "reponses"
         val consigne = t.replace(Regex("^(jarvis|ok|alors|et|bon|du coup|ecoute|écoute)[ ,]+", RegexOption.IGNORE_CASE), "").trim().trimEnd('.', '!').replaceFirstChar { it.uppercase() }
-        return Consigne(rubrique, if (ponctuelle) "Présentation voulue : « $consigne »" else consigne, ponctuelle)
+        // « Quand je te parle… » / « par écrit… » : la consigne ne vaut que pour ce canal.
+        val canal = CanalDemande.detecter(n)
+        return Consigne(rubrique, CanalDemande.marque(canal) + if (ponctuelle) "Présentation voulue : « $consigne »" else consigne, ponctuelle, canal)
     }
 }
 
@@ -275,4 +279,44 @@ object GestionConsignes {
             }
         }
     }
+}
+
+/**
+ * Canal de la demande en cours : VOCAL (dictée, réponse lue à voix haute — micro, mot de réveil, voiture) ou ÉCRIT (tapée
+ * dans le chat). Une consigne peut ne valoir que pour l'un (« (vocal) réponds en une phrase », « (écrit) fais des
+ * tableaux ») : elle n'est alors rappelée et appliquée que sur ce canal.
+ */
+object CanalDemande {
+    @Volatile var vocal = false
+    const val VOCAL = "vocal"
+    const val ECRIT = "écrit"
+
+    private val TAG = Regex("^\\s*[-*•]?\\s*\\((vocal|écrit|ecrit)\\)\\s*", RegexOption.IGNORE_CASE)
+    private val VOCAL_RE = Regex("\\b(a l oral|oralement|en vocal|vocalement|par la voix|a voix haute|en audio|quand je (te )?parle|quand tu (me )?parles|" +
+        "quand je (te )?(dis|demande) (quelque chose |un truc )?(a l oral|a voix haute|en vocal|par la voix)|reponses? vocales?|en conversation vocale|" +
+        "quand tu reponds (a l oral|a voix haute|en vocal)|dans la voiture|en voiture|quand je conduis|messages? vocaux)\\b")
+    private val ECRIT_RE = Regex("\\b(par ecrit|a l ecrit|en texte|par texte|en ecrivant|quand je (t )?ecris|quand je tape|quand j ecris|dans le chat|par messages? texte|" +
+        "messages? (texte|ecrits?)|reponses? ecrites?|quand tu (m )?ecris|a l ecran|sur l ecran|quand je t envoie un message|quand je tape au clavier)\\b")
+
+    /** Canal visé par une consigne (texte normalisé), ou null s'il vaut pour les deux. */
+    fun detecter(n: String): String? {
+        val v = VOCAL_RE.containsMatchIn(n); val e = ECRIT_RE.containsMatchIn(n)
+        return when { v && !e -> VOCAL; e && !v -> ECRIT; else -> null }
+    }
+
+    /** Canal d'une ligne enregistrée (« (vocal) … »), ou null. */
+    fun de(ligne: String): String? = TAG.find(ligne)?.groupValues?.get(1)?.lowercase()?.let { if (it == "ecrit") ECRIT else it }
+
+    /** La ligne s'applique-t-elle à ce canal ? (sans marque : aux deux) */
+    fun pour(ligne: String, vocal: Boolean): Boolean = when (de(ligne)) { null -> true; VOCAL -> vocal; else -> !vocal }
+
+    /** Lignes d'une rubrique valables pour ce canal. */
+    fun filtrer(texte: String, vocal: Boolean): String = texte.lines().filter { pour(it, vocal) }.joinToString("\n").trim()
+
+    fun marque(canal: String?) = when (canal) { VOCAL -> "(vocal) "; ECRIT -> "(écrit) "; else -> "" }
+
+    /** Rappel du canal pour le modèle (fin du prompt). */
+    fun ligne(v: Boolean = vocal): String = "\n\nCANAL DE CETTE DEMANDE : " + if (v)
+        "VOCAL (dictée à la voix ; ta réponse est lue à voix haute) — applique les consignes générales et celles marquées (vocal), jamais celles marquées (écrit)."
+        else "ÉCRIT (tapée au clavier ; ta réponse est lue à l'écran) — applique les consignes générales et celles marquées (écrit), jamais celles marquées (vocal)."
 }

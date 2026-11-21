@@ -169,6 +169,8 @@ object CommandesDirectes {
         motif("(?:lis|lire|relis|montre|affiche|donne|quelles sont)(?: moi)? (?:mes |les )?(?:dernieres |nouvelles )?notifications?"),
         motif("(?:est ce que )?j ai (?:des |de nouvelles |recu des )?notifications?"),
     )
+    private val R_BRIEFING_SOIR = motif("(?:(?:fais|donne|lance|dis)(?: moi)? )?(?:le |un |mon )?(?:point du soir|briefing du soir|bilan (?:de (?:la |ma )?journee|du jour|de la soiree)|point (?:pour|de) demain|preparation de demain|prepare(?: moi)? (?:ma journee de )?demain)")
+    private val R_BRIEFING_MATIN = motif("(?:(?:fais|donne|lance|dis)(?: moi)? )?(?:le |un |mon )?(?:point du matin|briefing du matin)")
     private val R_BRIEFING = motif("(?:(?:fais|donne|lance|dis)(?: moi)? )?(?:le |un |mon )?(?:point du jour|point du matin|briefing|brief du jour|point de (?:la |ma )?journee|resume de (?:la |ma )?journee)|(?:fais|faisons)(?: moi)? le point")
     private val R_TACHES = motif("(?:(?:liste|montre|affiche|donne|lis|quelles sont)(?: moi)? )?(?:mes taches|ma liste de taches|la liste de mes taches|mes taches en cours|mes taches a faire)")
     private val R_RAPPEL = motif("(?:rappelle moi|rappelle nous|fais moi penser|fais nous penser|n oublie pas de me rappeler|pense a me rappeler|tu me rappelleras|tu peux me rappeler|" +
@@ -237,6 +239,8 @@ object CommandesDirectes {
         if (R_SMS_LIRE.any { it.matches(p) }) return Intention("lire_sms", JSONObject().put("count", "10")
             .apply { if (Regex("non lu|nouveau|j ai").containsMatchIn(k)) put("non_lus", "true") }, "💬 SMS…")
         if (R_NOTIFS.any { it.matches(p) }) return Intention("lire_notifications", JSONObject().put("count", "15"), "🔔 Notifications…")
+        if (R_BRIEFING_SOIR.matches(p)) return Intention("morning_briefing", JSONObject().put("moment", "soir"), "🌙 Point du soir…")
+        if (R_BRIEFING_MATIN.matches(p)) return Intention("morning_briefing", JSONObject().put("moment", "matin"), "☀️ Point du matin…")
         if (R_BRIEFING.matches(p)) return Intention("morning_briefing", JSONObject(), "☀️ Point du jour…")
         if (R_TACHES.matches(p)) return Intention("taches_lister", JSONObject(), "✅ Tâches…")
         navigation(o, p)?.let { return it }

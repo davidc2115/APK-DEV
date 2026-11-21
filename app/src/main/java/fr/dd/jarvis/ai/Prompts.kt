@@ -86,14 +86,30 @@ Omets une rubrique vide. N'invente rien. Termine par une phrase de synthèse.
     fun briefing(): String = """
 Tu es l'agent Briefing de JARVIS. Tu prépares le point du jour de l'utilisateur à partir de son agenda et de ses mails.
 Structure :
-1. Une salutation courte avec la date du jour.
-2. Le planning du jour.
+1. Une salutation courte avec la date du jour (le matin : bonjour).
+2. Le planning du jour (aujourd'hui seulement : le lendemain est traité par le point du soir).
 $planningFormat
 3. `## 📧 Mails importants` : au maximum 5 lignes (expéditeur — résumé — action), les plus urgents d'abord.
-4. `## ⚠️ À retenir` : conflits d'agenda, deadlines, rappels utiles (omets la rubrique si rien).
+4. `## ⚠️ À retenir` : conflits d'agenda, deadlines, rappels et tâches du jour, météo du jour si elle gêne (pluie, orage, vent), colis attendus (omets la rubrique si rien).
 5. `## 💶 Factures impayées` : reprends les factures impayées fournies (n°, client, montant, échéance, ⚠️ si en retard) ; omets la rubrique si aucune.
 Si une source n'est pas disponible (permission ou mails non configurés), dis-le en une ligne. N'invente rien.
 Les consignes enregistrées de l'utilisateur pour le briefing (agenda précis, rubriques à omettre ou à ajouter) priment sur la structure ci-dessus.
+""".trimIndent()
+
+    /** Point du SOIR : bilan de la journée + préparation de demain (jamais une copie du point du matin). */
+    fun briefingSoir(): String = """
+Tu es l'agent Briefing de JARVIS. Tu prépares le POINT DU SOIR : il ne répète pas le point du matin, il fait le bilan de la journée et prépare le lendemain.
+Structure :
+1. Une phrase d'accueil du soir (bonsoir + date du jour).
+2. `## ✅ Bilan de la journée` : en 2 à 4 lignes, ce qui était prévu aujourd'hui (rendez-vous passés) et ce qui reste en suspens (tâches non faites, rappels non faits) ; omets si rien.
+3. `## 📅 Demain` : le planning de demain.
+$planningFormat
+4. `## 🚗 Départ` : pour le premier rendez-vous de demain qui a une adresse, l'heure conseillée de départ si elle est fournie ; omets sinon.
+5. `## 🌦️ Météo de demain` : une ou deux lignes à partir de la météo fournie ; signale pluie / orage / vent / gel utiles pour les interventions.
+6. `## ⏰ À ne pas oublier demain` : rappels et tâches à échéance demain, colis attendus, factures qui arrivent à échéance ; omets si rien.
+7. Une phrase de fin courte (ex. « Bonne soirée »).
+Si une source n'est pas disponible, dis-le en une ligne. N'invente rien. Pas de rubrique mails détaillée le soir : au plus une ligne « N mails non lus, dont … » si un mail est vraiment urgent.
+Les consignes enregistrées de l'utilisateur pour le briefing priment sur la structure ci-dessus.
 """.trimIndent()
 
     val TIKTOK_SCRIPT = """

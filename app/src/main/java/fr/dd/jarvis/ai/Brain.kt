@@ -72,7 +72,10 @@ class Brain(
     /** Faux pour un message que l'utilisateur n'a pas écrit lui-même (routine, automatisme) : ses mots ne sont pas des consignes. */
     @Volatile private var captureConsignes = true
 
-    suspend fun reply(history: List<ChatMsg>, pourHermes: Boolean = false, onTexte: ((String) -> Unit)? = null, apprendre: Boolean = true, onStatus: (String) -> Unit): String {
+    suspend fun reply(history: List<ChatMsg>, pourHermes: Boolean = false, onTexte: ((String) -> Unit)? = null, apprendre: Boolean = true,
+                      vocal: Boolean = false, onStatus: (String) -> Unit): String {
+        // Canal de la demande (voix ou écrit) : les consignes propres à l'un ou à l'autre ne s'appliquent qu'à lui.
+        if (!pourHermes) CanalDemande.vocal = vocal
         // L'avatar montre que JARVIS réfléchit tant que la réponse se prépare.
         val debutTotal = System.currentTimeMillis()
         fr.dd.jarvis.voice.Presence.debutReflexion()
@@ -307,6 +310,17 @@ class Brain(
             }
             // Calculs, pourcentages, conversions, jours avant une date : exact et instantané, sans IA.
             runCatching { Calculs.repondre(texteUser) }.getOrNull()?.let { return reflexe(it, lecture = true) }
+            // Colis, documents reçus à traiter, rendez-vous détecté dans un SMS / mail.
+            fr.dd.jarvis.device.Courrier.intention(texteUser)?.let { i ->
+                if (i == fr.dd.jarvis.device.Courrier.Intention.AjouterRdv) {
+                    fr.dd.jarvis.device.Courrier.dernierRdv(app)?.let { e ->
+                        onStatus("📅 Ajout à l'agenda…")
+                        val r = tools.execute("create_event", fr.dd.jarvis.device.Courrier.argsEvenement(e)).text
+                        if (Regex("\\(#\\d+\\)").containsMatchIn(r)) fr.dd.jarvis.device.Courrier.marquer(app, e.id)
+                        return reflexe(r)
+                    }
+                } else return reflexe(fr.dd.jarvis.device.Courrier.texte(app, i), lecture = true)
+            }
             // Listes à cocher (courses…) — avant le découpage en plusieurs actions (« du lait ET des œufs »).
             fr.dd.jarvis.device.Listes.intention(texteUser)?.let { i ->
                 onStatus("🛒 Liste…")
@@ -649,7 +663,7 @@ class Brain(
                 runCatching { fr.dd.jarvis.hermes.ServeurInventaire.bloc(app, texteUser) }.getOrDefault("") +
                 runCatching { fr.dd.jarvis.device.Contexte.consigne(fr.dd.jarvis.device.Contexte.actuel(app)) }.getOrDefault("") +
                 runCatching { app.memo.consignesPour(texteUser) }.getOrDefault("") +
-                "\n\nDate et heure actuelles : ${Prompts.now()}." + runCatching { DatesFr.indice(texteUser) }.getOrDefault("")))
+                "\n\nDate et heure actuelles : ${Prompts.now()}." + runCatching { DatesFr.indice(texteUser) }.getOrDefault("") + CanalDemande.ligne()))
         // Réduction de tokens sans perte de précision : seuls les derniers échanges (où un détail précis — liste de fichiers,
         // de SMS, de permissions… — a des chances d'être encore repris par la demande en cours) gardent le plafond large de
         // 12000 caractères ; les tours plus anciens (qui ne servent plus qu'à garder le fil de la conversation) sont ramenés
