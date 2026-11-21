@@ -622,7 +622,7 @@ class Brain(
                 runCatching { fr.dd.jarvis.hermes.ServeurInventaire.bloc(app, texteUser) }.getOrDefault("") +
                 runCatching { fr.dd.jarvis.device.Contexte.consigne(fr.dd.jarvis.device.Contexte.actuel(app)) }.getOrDefault("") +
                 runCatching { app.memo.consignesPour(texteUser) }.getOrDefault("") +
-                "\n\nDate et heure actuelles : ${Prompts.now()}."))
+                "\n\nDate et heure actuelles : ${Prompts.now()}." + runCatching { DatesFr.indice(texteUser) }.getOrDefault("")))
         // Réduction de tokens sans perte de précision : seuls les derniers échanges (où un détail précis — liste de fichiers,
         // de SMS, de permissions… — a des chances d'être encore repris par la demande en cours) gardent le plafond large de
         // 12000 caractères ; les tours plus anciens (qui ne servent plus qu'à garder le fil de la conversation) sont ramenés

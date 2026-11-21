@@ -273,7 +273,7 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
         val notes = if (derniere.isBlank()) "" else runCatching { fr.dd.jarvis.device.NotesPertinentes.pour(app, derniere) }.getOrDefault("")
         return socle + si(R_HORLOGE, S_HORLOGE) + si(R_ROUTINES, S_ROUTINES) + si(R_SOCIETE, S_SOCIETE) + si(R_DOCUMENTS, S_DOCUMENTS) + (if (demande.isBlank() || ServeurInventaire.discord(demande)) "\n\n" + S_DISCORD else "") +
             si(R_EXTENSIONS, S_EXTENSIONS) + si(R_VIDEO, S_VIDEO) + si(R_APPRENTISSAGE, S_APPRENTISSAGE) + si(R_CREATION, S_CREATION) +
-            app.memo.pourPrompt() + notes + (if (derniere.isBlank()) "" else runCatching { app.memo.consignesPour(derniere) }.getOrDefault("")) +
+            app.memo.pourPrompt() + notes + (if (derniere.isBlank()) "" else runCatching { app.memo.consignesPour(derniere) + fr.dd.jarvis.ai.DatesFr.indice(derniere) }.getOrDefault("")) +
             (if (app.store.modeAdulte.value) """
                 
                 MODE CRÉATION ADULTE ACTIVÉ :

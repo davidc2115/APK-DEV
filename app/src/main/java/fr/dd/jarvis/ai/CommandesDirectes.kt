@@ -146,7 +146,11 @@ object CommandesDirectes {
     )
     private const val PERIODE = "(?:aujourd hui|d aujourd hui|du jour|ce matin|cet apres midi|ce soir|demain(?: matin| soir| apres midi)?|de demain|apres demain|d apres demain|" +
         "cette semaine|de la semaine|de cette semaine|la semaine prochaine|de la semaine prochaine|ce week end|du week end|" +
-        "(?:de |le |ce |pour )?(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)(?: prochain)?)"
+        "(?:de |le |ce |pour )?(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)(?: prochain| de la semaine prochaine| en huit| d apres| qui vient)?|" +
+        // Dates précises : « du 24 novembre », « de lundi 24 », « du 24/11(/2026) », « du 1er décembre », « dans 3 jours ».
+        "(?:du |le |pour le |de |pour |au )?(?:(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche) )?(?:\\d{1,2}|1er|premier)" +
+        "(?: (?:janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre))?(?: \\d{1,2})?(?: \\d{2,4})?|" +
+        "dans (?:\\d{1,3}|un|une|deux|trois|quatre|cinq|six|sept|huit|quinze) (?:jours?|semaines?))"
     private val PLANNING = listOf(
         motif("(?:(?:donne|montre|affiche|lis|dis|fais)(?: moi)? )?(?:(?:mon|le|l|ton) )?(?:planning|agenda|emploi du temps)(?: ($PERIODE))?"),
         motif("(?:(?:donne|montre|affiche|lis|dis)(?: moi)? )?mon programme(?: ($PERIODE))?"),
@@ -229,7 +233,7 @@ object CommandesDirectes {
         appel(o, p)?.let { return it }
         sms(o, p)?.let { return it }
         meteo(p)?.let { return it }
-        planning(p, maintenant.toLocalDate())?.let { return it }
+        planning(o, p, maintenant.toLocalDate())?.let { return it }
         if (R_SMS_LIRE.any { it.matches(p) }) return Intention("lire_sms", JSONObject().put("count", "10")
             .apply { if (Regex("non lu|nouveau|j ai").containsMatchIn(k)) put("non_lus", "true") }, "💬 SMS…")
         if (R_NOTIFS.any { it.matches(p) }) return Intention("lire_notifications", JSONObject().put("count", "15"), "🔔 Notifications…")
@@ -335,15 +339,25 @@ object CommandesDirectes {
         return Intention("meteo", JSONObject().put("lieu", lieu).put("jours", (jours ?: 3).toString()), "🌦️ Météo…")
     }
 
-    private fun planning(p: String, aujourdhui: LocalDate): Intention? {
+    private fun planning(o: String, p: String, aujourdhui: LocalDate): Intention? {
         val k = serre(p)
         if (Regex("^(?:quel est |c est quoi )?mon prochain (?:rendez vous|rdv)$").matches(k)) return Intention("get_planning",
             JSONObject().put("date", aujourdhui.toString()).put("days", "7").put("question", "Quel est mon prochain rendez-vous ?"), "📅 Planning…")
         val m = PLANNING.firstNotNullOfOrNull { it.matchEntire(p) } ?: return null
         val per = serre(m.groupValues.drop(1).firstOrNull { it.isNotBlank() }.orEmpty())
+        // Même passage dans le texte d'origine (garde « 24/11 »).
+        val perOrigine = (1 until m.groupValues.size).firstOrNull { m.groupValues[it].isNotBlank() }?.let { m.de(o, it) }.orEmpty()
         val jours = listOf("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
         val (date, n) = when {
             per.isBlank() || Regex("aujourd hui|du jour|ce matin|cet apres midi|ce soir").containsMatchIn(per) -> aujourdhui to 1
+            // Date précise, « dans 3 jours », « lundi en huit » : calculée exactement (une date sans année passée depuis
+            // moins de deux mois reste cette année — « qu'avais-je le 3 novembre ? »).
+            Regex("\\d|\\bdans\\b|en huit|de la semaine prochaine|premier|d apres|qui vient").containsMatchIn(per) -> {
+                val t = DatesFr.jour(DatesFr.normaliser(perOrigine), aujourdhui, futur = false) ?: return null
+                val sansAnnee = !Regex("\\d{4}|/\\d{2,4}\\b").containsMatchIn(t.texte)
+                val d = if (sansAnnee && t.date.isBefore(aujourdhui.minusDays(60))) t.date.plusYears(1) else t.date
+                d to 1
+            }
             per.contains("apres demain") -> aujourdhui.plusDays(2) to 1
             per.contains("demain") -> aujourdhui.plusDays(1) to 1
             per.contains("semaine prochaine") -> aujourdhui.plusDays((8 - aujourdhui.dayOfWeek.value).toLong()) to 7

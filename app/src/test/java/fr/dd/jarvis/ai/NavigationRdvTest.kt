@@ -23,7 +23,7 @@ class NavigationRdvTest {
     )
 
     private fun choix(phrase: String, maintenant: Long = t(11)) =
-        (NavigationRdv.choisir(agenda, NavigationRdv.demande(phrase)!!, maintenant, zone) as? NavigationRdv.Choix.Trouve)?.e?.id
+        (NavigationRdv.choisir(agenda, NavigationRdv.demande(phrase, java.time.LocalDate.of(2026, 11, 20))!!, maintenant, zone) as? NavigationRdv.Choix.Trouve)?.e?.id
 
     @Test fun reconnaitLesDemandes() {
         assertNotNull(NavigationRdv.demande("Lance la navigation vers mon rendez-vous"))
@@ -46,8 +46,30 @@ class NavigationRdvTest {
         assertEquals(1L, choix("navigation vers mon rendez-vous", maintenant = t(9, 20)))   // en cours
         // Mots dictés approximativement : ignorés.
         assertEquals(2L, choix("lance la navigation vers dmon rendez-vous"))
-        val echec = NavigationRdv.choisir(agenda, NavigationRdv.demande("lance le GPS chez Durand")!!, t(11), zone)
+        val echec = NavigationRdv.choisir(agenda, NavigationRdv.demande("lance le GPS chez Durand", java.time.LocalDate.of(2026, 11, 20))!!, t(11), zone)
         assertTrue(echec is NavigationRdv.Choix.Echec)
+    }
+
+    @Test fun lesJoursEtDatesDitsSontPrisEnCompte() {
+        // Vendredi 20 novembre 2026, 11 h. Lundi 23 : deux rendez-vous ; mardi 24 : un ; jeudi 3 décembre : un.
+        val semaine = agenda + listOf(
+            ev(10, "Visite Garnier", 9, "1 rue Haute, Beaune", jour = 23), ev(11, "Dépannage Petit", 15, "2 rue Basse, Dole", jour = 23),
+            ev(12, "Maintenance Roux", 10, "4 place du Marché, Gray", jour = 24),
+            EventInfo(13, 1, "Contrôle Morel", LocalDateTime.of(2026, 12, 3, 8, 0).atZone(zone).toInstant().toEpochMilli(),
+                LocalDateTime.of(2026, 12, 3, 9, 0).atZone(zone).toInstant().toEpochMilli(), false, "6 rue Vieille, Langres", "", null))
+        fun c(p: String) = (NavigationRdv.choisir(semaine, NavigationRdv.demande(p, java.time.LocalDate.of(2026, 11, 20))!!, t(11), zone) as? NavigationRdv.Choix.Trouve)?.e?.id
+        assertEquals(10L, c("lance-moi un itinéraire vers mon rendez-vous de lundi"))
+        assertEquals(11L, c("navigation vers mon 2e rendez-vous de lundi"))
+        assertEquals(11L, c("emmène-moi à mon rendez-vous de lundi après-midi"))
+        assertEquals(11L, c("GPS vers le rendez-vous de lundi à 15h"))
+        assertEquals(12L, c("lance la navigation vers mon rendez-vous de mardi 24"))
+        assertEquals(12L, c("navigation vers mon rendez-vous du 24 novembre"))
+        assertEquals(12L, c("navigation vers mon rendez-vous du 24/11"))
+        assertEquals(13L, c("emmène-moi à mon rendez-vous du 3 décembre"))
+        assertEquals(10L, c("lance le GPS vers mon premier rendez-vous de lundi prochain"))
+        assertEquals(12L, c("navigation vers mon rendez-vous dans 4 jours"))
+        val vide = NavigationRdv.choisir(semaine, NavigationRdv.demande("navigation vers mon rendez-vous de mercredi", java.time.LocalDate.of(2026, 11, 20))!!, t(11), zone)
+        assertTrue(vide is NavigationRdv.Choix.Echec && (vide as NavigationRdv.Choix.Echec).message.contains("mercredi 25 novembre"))
     }
 
     @Test fun lePlanningNeTerminePlusUneDemandeDAction() {

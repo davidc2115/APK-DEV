@@ -17,7 +17,8 @@ import java.time.ZoneId
  */
 object NavigationRdv {
     data class Demande(
-        val demain: Boolean = false,
+        /** Jour demandé (« lundi », « le 24 », « demain »…) ; null = aujourd'hui (ou le prochain pour « prochain »). */
+        val jour: LocalDate? = null,
         /** 1 = premier… ; -1 = dernier ; null = pas de rang demandé. */
         val rang: Int? = null,
         val heure: Int? = null,
@@ -27,6 +28,8 @@ object NavigationRdv {
         val mots: List<String> = emptyList(),
         /** « chez Dupont » : le nom est explicite (pas de repli s'il n'est dans aucun rendez-vous). */
         val chez: Boolean = false,
+        /** « matin », « après-midi », « soir » : heures de début acceptées. */
+        val partie: Pair<String, IntRange>? = null,
     )
 
     private val NAV = Regex("\\b(navigation|navigue|naviguer|nav|gps|itineraire|emmene|emmener|amene|amener|guide|guider|conduis|conduire|trajet|direction|waze|maps|" +
@@ -52,9 +55,15 @@ object NavigationRdv {
         "on", "va", "nom", "qui", "est", "dans", "agenda", "planning", "calendrier", "s", "maintenant", "actuel", "en", "cours", "prevu", "suis", "dois",
     )
 
-    /** Demande de navigation vers un rendez-vous de l'agenda (texte brut), ou null. */
-    fun demande(texte: String): Demande? {
-        val n = normaliser(texte).replace(Regex("[?!.,;:]+"), " ").replace(Regex("\\s+"), " ").trim()
+    /** Demande de navigation vers un rendez-vous de l'agenda (texte brut), ou null. [aujourdhui] : pour les jours dits. */
+    fun demande(texte: String, aujourdhui: LocalDate = LocalDate.now()): Demande? {
+        val brut = DatesFr.normaliser(texte)
+        // Jour / date (« lundi », « mardi 24 », « le 3 décembre », « 24/11 »…) retiré avant de chercher un rang, une heure ou
+        // un nom de client : avant, « lundi » passait pour un nom et la demande retombait sur aujourd'hui.
+        val date = DatesFr.jour(brut, aujourdhui)
+        val sansDate = (if (date != null) brut.replaceFirst(date.texte, " ") else brut).replace('/', ' ')
+        val partie = DatesFr.partie(sansDate)
+        val n = sansDate.replace(Regex("\\b(ce |cet |le |en )?(matin(ee)?|apres midi|aprem|soir(ee)?|midi)\\b"), " ").replace(Regex("\\s+"), " ").trim()
         if (n.split(' ').size > 20 || !NAV.containsMatchIn(n) || PAS_GUIDAGE.containsMatchIn(n)) return null
         val chezClient = Regex("\\bchez (?!moi\\b|nous\\b)").containsMatchIn(n)
         if (!RDV.containsMatchIn(n) && !chezClient) return null
@@ -62,13 +71,14 @@ object NavigationRdv {
         val rang = RANGS.firstOrNull { (r, _) -> r.containsMatchIn(n.replace(h?.value ?: "\u0000", " ")) }?.second
         val mots = n.replace(h?.value ?: "\u0000", " ").split(' ').filter { it.length >= 3 && it !in VIDES && !it.all { c -> c.isDigit() } }
         return Demande(
-            demain = Regex("\\bdemain\\b").containsMatchIn(n),
+            jour = date?.date,
             rang = rang,
             heure = h?.groupValues?.get(1)?.toIntOrNull()?.takeIf { it in 0..23 },
             minute = h?.groupValues?.get(2)?.toIntOrNull(),
             prochain = Regex("\\b(prochain|prochaine|suivant|suivante)\\b").containsMatchIn(n),
             mots = mots,
             chez = chezClient,
+            partie = partie,
         )
     }
 
@@ -87,12 +97,13 @@ object NavigationRdv {
         val aujourdhui = Instant.ofEpochMilli(maintenant).atZone(zone).toLocalDate()
         fun jour(e: EventInfo): LocalDate = Instant.ofEpochMilli(e.begin).atZone(if (e.allDay) java.time.ZoneOffset.UTC else zone).toLocalDate()
         val tous = evenements.sortedBy { it.begin }
-        val jourVise = if (d.demain) aujourdhui.plusDays(1) else aujourdhui
-        var c = if (d.prochain && !d.demain && d.rang == null) tous.filter { it.end > maintenant } else tous.filter { jour(it) == jourVise }
+        val jourVise = d.jour ?: aujourdhui
+        val quand = DatesFr.libelle(jourVise, aujourdhui)
+        var c = if (d.prochain && d.jour == null && d.rang == null) tous.filter { it.end > maintenant } else tous.filter { jour(it) == jourVise }
         if (d.mots.isNotEmpty()) {
             // Un nom (client, lieu…) : le rendez-vous qui le porte — le jour demandé, sinon dans les 7 jours. Des mots
             // qui ne correspondent à rien (dictée approximative) sont ignorés, sauf un « chez … » explicite.
-            val fenetre = if (d.demain || d.rang != null || d.heure != null) c else tous.filter { jour(it) >= aujourdhui && it.end > maintenant }
+            val fenetre = if (d.jour != null || d.rang != null || d.heure != null) c else tous.filter { jour(it) >= aujourdhui && it.end > maintenant }
             val scores = fenetre.associateWith { e -> val t = texte(e); d.mots.count { m -> t.contains(" $m") } }
             val meilleur = scores.values.maxOrNull() ?: 0
             if (meilleur > 0) c = fenetre.filter { scores[it] == meilleur }.let { l -> l.filter { jour(it) == jourVise }.ifEmpty { l } }
@@ -100,14 +111,18 @@ object NavigationRdv {
         }
         if (d.heure != null) {
             c = c.filter { e -> val z = Instant.ofEpochMilli(e.begin).atZone(zone); !e.allDay && z.hour == d.heure && (d.minute == null || z.minute == d.minute) }
-            if (c.isEmpty()) return Choix.Echec("Aucun rendez-vous à ${d.heure} h${d.minute?.let { "%02d".format(it) }.orEmpty()} ${if (d.demain) "demain" else "aujourd'hui"}.")
+            if (c.isEmpty()) return Choix.Echec("Aucun rendez-vous à ${d.heure} h${d.minute?.let { "%02d".format(it) }.orEmpty()} $quand.")
+        } else if (d.partie != null) {
+            val dansPartie = c.filter { e -> !e.allDay && Instant.ofEpochMilli(e.begin).atZone(zone).hour in d.partie.second }
+            if (dansPartie.isEmpty() && c.any { !it.allDay }) return Choix.Echec("Aucun rendez-vous $quand ${if (d.partie.first == "midi") "à midi" else "dans la ${d.partie.first.replace("matin", "matinée").replace("soir", "soirée")}"}.")
+            if (dansPartie.isNotEmpty()) c = dansPartie
         }
         // Les événements « journée entière » sans adresse (congés, anniversaires…) ne sont pas des rendez-vous où aller.
         val rdv = c.filter { !(it.allDay && it.location.isBlank()) }.ifEmpty { c }
-        if (rdv.isEmpty()) return Choix.Echec(if (d.demain) "Aucun rendez-vous demain dans ton agenda." else "Aucun rendez-vous ${if (d.prochain) "à venir" else "aujourd'hui"} dans ton agenda.")
+        if (rdv.isEmpty()) return Choix.Echec("Aucun rendez-vous ${if (d.prochain && d.jour == null) "à venir" else quand} dans ton agenda.")
         d.rang?.let { r ->
             val e = if (r == -1) rdv.last() else rdv.getOrNull(r - 1)
-                ?: return Choix.Echec("Tu n'as que ${rdv.size} rendez-vous ${if (d.demain) "demain" else "aujourd'hui"}.")
+                ?: return Choix.Echec("Tu n'as que ${rdv.size} rendez-vous $quand.")
             return Choix.Trouve(e)
         }
         if (rdv.size == 1 || d.heure != null) return Choix.Trouve(rdv.first())
@@ -127,14 +142,20 @@ object NavigationRdv {
 
     /** (adresse, libellé du rendez-vous) ou un message d'échec à dire tel quel. Null : pas une demande de ce type. */
     fun preparer(app: JarvisApp, texteUtilisateur: String, maintenant: Long = System.currentTimeMillis()): Pair<Pair<String, String>?, String?>? {
-        val d = demande(texteUtilisateur) ?: return null
+        val aujourdhui = Instant.ofEpochMilli(maintenant).atZone(ZoneId.systemDefault()).toLocalDate()
+        val d = demande(texteUtilisateur, aujourdhui) ?: return null
         if (!app.calendar.hasPermission()) return null to "Autorise l'agenda pour que je trouve tes rendez-vous."
-        val evenements = app.calendar.events(LocalDate.now(), if (d.demain) 2 else 7)
+        // Fenêtre qui couvre le jour demandé (jusqu'à un an), sinon les 7 prochains jours.
+        val debut = minOf(aujourdhui, d.jour ?: aujourdhui)
+        val jours = maxOf(7L, java.time.temporal.ChronoUnit.DAYS.between(debut, d.jour ?: aujourdhui) + 1).coerceAtMost(370L).toInt()
+        val evenements = app.calendar.events(debut, jours)
         return when (val c = choisir(evenements, d, maintenant)) {
             is Choix.Echec -> null to "📅 ${c.message}"
             is Choix.Trouve -> {
                 val f = java.time.format.DateTimeFormatter.ofPattern("HH'h'mm", java.util.Locale.FRENCH)
-                val heure = if (c.e.allDay) "" else Instant.ofEpochMilli(c.e.begin).atZone(ZoneId.systemDefault()).format(f) + " · "
+                val jourEv = Instant.ofEpochMilli(c.e.begin).atZone(ZoneId.systemDefault()).toLocalDate()
+                val heure = (if (jourEv != aujourdhui) DatesFr.libelle(jourEv, aujourdhui).replaceFirstChar { it.uppercase() } + " " else "") +
+                    (if (c.e.allDay) "" else Instant.ofEpochMilli(c.e.begin).atZone(ZoneId.systemDefault()).format(f)) + " · "
                 val libelle = heure + c.e.title
                 val adr = adresse(app, c.e) ?: return null to "📅 $libelle : ce rendez-vous n'a pas d'adresse dans l'agenda (ni de client avec une adresse). Dis-moi où aller."
                 (adr to libelle) to null
