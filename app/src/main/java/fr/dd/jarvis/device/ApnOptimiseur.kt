@@ -5,14 +5,9 @@ import android.net.Network
 import fr.dd.jarvis.JarvisApp
 
 /**
- * Optimisation COMPLÈTE de l'APN, par la mesure (avec Shizuku / l'ADB intégré, toujours après accord) :
- *
- * 1. mesure de l'APN actuel par le réseau mobile (latence + débit) et de la MTU réelle du chemin (taille maximale des
- *    paquets : une MTU trop grande fait « bloquer » des pages et des applis) ;
- * 2. création de réglages optimisés aux valeurs de l'opérateur — IPv4/IPv6 et IPv4 seul (certains réseaux ont une IPv6
- *    imparfaite), MTU corrigée si besoin, MMS réparés si besoin — et mesure de chacun dans les mêmes conditions ;
- * 3. le plus rapide est gardé s'il bat nettement l'actuel (+ 15 %), sinon tout est remis comme avant ; internet est
- *    vérifié à la fin, avec retour arrière automatique.
+ * Outils de mesure de l'APN utilisés par [ApnExplorateur] (qui cherche lui-même le meilleur APN) : MTU réelle du
+ * chemin (ping sans fragmentation par l'interface mobile ; une MTU trop grande fait « bloquer » des pages et des
+ * applis), colonnes MTU de cet Android, comparaison de réglages, gestion des APN « JARVIS ».
  *
  * Plus : DNS — comparaison du DNS de l'opérateur avec les DNS privés (Cloudflare, Google, Quad9) et activation du plus
  * rapide après accord, vérifiée, réversible.
@@ -92,10 +87,10 @@ object ApnOptimiseur {
     /** Une mesure courte par le réseau mobile, avec l'APN actuellement choisi. */
     private fun mesurer(app: JarvisApp): TestDebit.Mesure? = TestDebit.parMobile(app) { _, c -> TestDebit.mesureCourte(c) }
 
-    private fun choisir(app: JarvisApp, id: String) = ApnConfig.executer(app, "content insert --uri ${ApnConfig.uriPrefere()} --bind apn_id:i:$id")
+    internal fun choisir(app: JarvisApp, id: String) = ApnConfig.executer(app, "content insert --uri ${ApnConfig.uriPrefere()} --bind apn_id:i:$id")
 
     /** Colonnes MTU que connaît cet Android (0 = mtu_v4 / mtu_v6, 1 = mtu, 2 = aucune), sondées sans rien écrire. */
-    private fun niveauMtu(app: JarvisApp): Int {
+    internal fun niveauMtu(app: JarvisApp): Int {
         fun existe(col: String) = !Regex("(?i)no such column|exception|error").containsMatchIn(
             ApnConfig.executer(app, "content query --uri content://telephony/carriers --projection $col --where ${ApnConfig.q("_id=-1")}"))
         return when { existe("mtu_v4") && existe("mtu_v6") && existe("mtu") -> 0; existe("mtu") -> 1; else -> 2 }
@@ -107,91 +102,10 @@ object ApnOptimiseur {
         return sorties.none { ApnConfig.refuse(it) || Regex("(?i)exception|error").containsMatchIn(it) }
     }
 
-    private fun jarvis(app: JarvisApp, mccMnc: String) = ApnConfig.lignes(ApnConfig.executer(app,
+    internal fun jarvis(app: JarvisApp, mccMnc: String) = ApnConfig.lignes(ApnConfig.executer(app,
         "content query --uri content://telephony/carriers --where ${ApnConfig.q("name LIKE '${ApnConfig.PREFIXE}-%' AND numeric='$mccMnc'")}"))
 
-    private fun supprimer(app: JarvisApp, ids: Collection<String>) { if (ids.isNotEmpty()) ApnConfig.executer(app, "content delete --uri content://telephony/carriers --where ${ApnConfig.q("_id IN (${ids.joinToString(",")})")}") }
-
-    // ------------------------------------------------------------------ optimisation complète
-
-    suspend fun optimiser(app: JarvisApp, confirm: suspend (String, Boolean) -> Boolean): String {
-        val e = ReseauMobile.etat(app)
-        val reco = ReseauMobile.apnRecommande(e.mccMnc, e.marqueSim)
-            ?: return "🧾 Je ne connais pas les valeurs APN de ${e.marqueSim.ifBlank { "cet opérateur" }} : je ne peux pas comparer de réglages sûrs. Prends-les sur son site, puis « ouvre les réglages APN »."
-        if (!PhoneShell.ready(app)) return "🧾 Pour optimiser l'APN par la mesure, il me faut Shizuku ou l'ADB intégré (Réglages › Téléphone › Contrôle)."
-        if (e.enAppel) return "📞 Un appel est en cours : je lancerai l'optimisation après."
-        if (e.modeAvion) return "✈️ Le mode avion est activé : désactive-le d'abord."
-        if (e.donnees == false) return "🌐 Les données mobiles sont coupées : active-les (« active les données mobiles ») pour que je puisse mesurer."
-        val lecture = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { ApnConfig.lire(app, e.mccMnc) }
-        if (lecture == null || lecture.refuse) return "🔒 Ce téléphone refuse la modification des APN, même avec Shizuku : « montre-moi l'APN » pour les valeurs à saisir."
-        val analyse = ApnConfig.analyser(lecture.actuel, lecture.tous, reco)
-        val mmsAReparer = analyse.problemes.any { it.contains("MMS") || it.contains("MMSC") }
-        if (!confirm("Optimisation complète de l'APN : je mesure l'APN actuel, puis 2 réglages optimisés ${reco.operateur} (IPv4/IPv6 et IPv4 seul, MTU mesurée" +
-                (if (mmsAReparer) ", MMS réparés" else "") + ") par le réseau mobile, et je garde le plus rapide — sinon je remets tout comme avant. " +
-                "≈ 1 à 2 minutes et ≈ 15 Mo de données ; la connexion mobile se coupe quelques secondes à chaque essai. On y va ?", true))
-            return "Optimisation de l'APN annulée."
-        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            val avant = lecture.actuel?.get("_id")
-            val nomAvant = lecture.actuel?.get("name").orEmpty().ifBlank { "APN actuel" }
-            // 1. Référence : APN actuel + MTU réelle.
-            var mtuLien: Int? = null; var mtuChemin: Int? = null
-            val base = Essai(nomAvant, avant, TestDebit.parMobile(app) { n, c -> mesurerMtu(app, n).let { mtuLien = it.first; mtuChemin = it.second }; TestDebit.mesureCourte(c) }, actuel = true)
-            val mtu = mtuConseillee(mtuLien, mtuChemin)
-            // 2. Candidats (les anciens APN « JARVIS » sont remplacés ; jamais ceux de l'opérateur).
-            supprimer(app, jarvis(app, e.mccMnc).mapNotNull { it["_id"] })
-            val niveau = if (mtu != null) niveauMtu(app) else 2
-            val ok46 = creerAvecMtu(app, { m -> ApnConfig.commandesAjout(reco, e.mccMnc, avecMms = mmsAReparer, protocole = "IPV4V6", mtu = m) }, mtu, niveau)
-            val ok4 = creerAvecMtu(app, { m -> ApnConfig.commandesAjout(reco, e.mccMnc, avecMms = false, protocole = "IP", mtu = m, suffixe = "-IPv4") }, mtu, niveau)
-            val crees = jarvis(app, e.mccMnc)
-            val donnees = crees.filter { ApnConfig.estDonnees(it) }
-            if (!ok46 && !ok4 || donnees.isEmpty()) {
-                supprimer(app, crees.mapNotNull { it["_id"] })
-                return@withContext "🔒 Android a refusé la création des APN de test : rien n'a changé."
-            }
-            val essais = donnees.map { a ->
-                val id = a["_id"].orEmpty()
-                choisir(app, id); Thread.sleep(3_000)
-                val m = if (ApnConfig.internetMobileOk(app, 20)) mesurer(app) else null
-                Essai(a["name"].orEmpty() + if (a["protocol"].equals("IP", true)) " · IPv4" else " · IPv4/IPv6", id, m)
-            }
-            // 3. Choix, nettoyage, vérification.
-            val garde = meilleur(base, essais)
-            val idsJarvis = crees.mapNotNull { it["_id"] }
-            if (garde.actuel || garde.apnId == null) {
-                avant?.let { choisir(app, it) }
-                // Les MMS réparés restent (APN « mms » à part) ; les APN de test internet sont retirés.
-                supprimer(app, donnees.mapNotNull { it["_id"] })
-            } else {
-                choisir(app, garde.apnId)
-                if (avant != null && avant !in idsJarvis) app.getSharedPreferences("reseau_mobile", 0).edit().putString("apn_avant", avant).apply()
-                supprimer(app, donnees.mapNotNull { it["_id"] }.filter { it != garde.apnId })
-            }
-            Thread.sleep(3_000)
-            if (!ApnConfig.internetMobileOk(app, 20)) {
-                avant?.let { choisir(app, it) }
-                supprimer(app, idsJarvis)
-                return@withContext "↩️ Internet mobile ne répondait plus à la fin : j'ai tout remis comme avant (« $nomAvant »)."
-            }
-            val l = ArrayList<String>()
-            l += "🧪 Optimisation de l'APN (${reco.operateur}) :"
-            l += ligne(base, garde === base)
-            essais.forEach { l += ligne(it, garde === it) }
-            l += when {
-                garde === base -> "➡️ L'APN actuel est déjà le meilleur ici : je l'ai gardé" + (if (mmsAReparer) ", et j'ai ajouté un APN MMS correct." else ".")
-                else -> "➡️ Gardé : ${garde.nom} (+${((TestDebit.note(garde.mesure) / TestDebit.note(base.mesure).coerceAtLeast(0.01) - 1) * 100).toInt().coerceAtLeast(0)} %)." +
-                    " « remets l'APN d'origine » pour revenir à « $nomAvant »."
-            }
-            l += "📏 MTU : " + when {
-                mtuChemin == null -> "non mesurable ici (ping bloqué par le réseau)."
-                mtu != null -> "chemin réel $mtuChemin octets < lien ${mtuLien ?: 1500} : MTU $mtu " + (if (niveau < 2) "écrite dans l'APN (évite les pages et applis qui bloquent)." else "conseillée, mais cet Android ne permet pas de l'écrire dans l'APN.")
-                else -> "$mtuChemin octets, conforme au lien — rien à corriger."
-            }
-            if (analyse.ameliorations.isNotEmpty() || analyse.problemes.isNotEmpty()) l += "🧾 Points corrigés par les réglages JARVIS : " +
-                (analyse.problemes + analyse.ameliorations).joinToString(" ; ") { it.substringBefore(" :").substringBefore(" (") }.take(400)
-            l += "💡 DNS : « teste les DNS » compare celui de l'opérateur aux DNS privés (Cloudflare, Google, Quad9)."
-            l.joinToString("\n")
-        }
-    }
+    internal fun supprimer(app: JarvisApp, ids: Collection<String>) { if (ids.isNotEmpty()) ApnConfig.executer(app, "content delete --uri content://telephony/carriers --where ${ApnConfig.q("_id IN (${ids.joinToString(",")})")}") }
 
     // ------------------------------------------------------------------ DNS
 
