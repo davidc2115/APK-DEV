@@ -13,6 +13,10 @@ object RoutageAudit {
         fr.dd.jarvis.device.CommandeMedia.intention(t) { true }?.let { return "Media:$it$comb" }
         GestionConsignes.demande(t)?.let { return "Consignes:${it::class.simpleName}$comb" }
         Capacites.demande(t)?.let { return "Capacites$comb" }
+        if (Annulation.demande(t)) return "Annuler$comb"
+        Calculs.repondre(t, java.time.LocalDate.of(2026, 11, 20))?.let { return "Calcul$comb" }
+        fr.dd.jarvis.device.Listes.intention(t)?.let { return "Liste:${it::class.simpleName}$comb" }
+        fr.dd.jarvis.device.Stationnement.intention(t)?.let { return "Parking:${it.javaClass.simpleName}$comb" }
         MailCommandes.intention(t)?.let { return "Mail:${it.first}$comb" }
         fr.dd.jarvis.device.ModeSonore.intention(t)?.let { return "ModeSonore:$it$comb" }
         PersonneOu.personne(t)?.let { return "PersonneOu:$it$comb" }

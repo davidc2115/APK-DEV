@@ -85,7 +85,9 @@ object Carnet {
     /** Ce qui relève de l'agenda, des tâches ou d'Obsidian, pas du carnet. */
     private val EXCLU = Regex(
         "^(?:un |une |le |la |l'|mon |ma )?(?:rendez[- ]vous|rdv|rappel|t[âa]che|[ée]v[ée]nement|alarme|r[ée]veil)\\b|" +
-            "\\b(?:dans|sur|à|a) (?:l'|mon |ma |mes |le |la )?(?:agenda|calendrier|planning|t[âa]ches|liste de t[âa]ches|obsidian|fiche)",
+            "\\b(?:dans|sur|à|a) (?:l'|mon |ma |mes |le |la )?(?:agenda|calendrier|planning|t[âa]ches|liste de t[âa]ches|obsidian|fiche)|" +
+            // Listes à cocher (courses…) : gérées par les listes, pas par le carnet.
+            "\\b(?:dans|sur|à|a|aux) (?:ma |la |mes |les |notre )?(?:liste\\b|courses\\b)",
         RegexOption.IGNORE_CASE
     )
     private val LIANTS = Regex("^(?:(?:de |d'|du |que |qu'|(?:ça|ca|ceci|cela)\\s*[:–—-]|bien |ce qui suit|s'il te pla[iî]t|stp|pour moi|[:,;.\\-–—])\\s*)+", RegexOption.IGNORE_CASE)

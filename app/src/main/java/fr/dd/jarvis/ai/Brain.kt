@@ -300,6 +300,33 @@ class Brain(
                 onStatus("🔗 Appareils liés…")
                 return reflexe(AppareilsLies.texte(app), lecture = true)
             }
+            // « Annule (ça) » : la dernière création de JARVIS est défaite — sauf si JARVIS vient de poser une question
+            // (« annule » répond alors à cette question).
+            if (Annulation.demande(texteUser) && history.dropLast(1).lastOrNull { !it.fromUser }?.text?.trimEnd()?.endsWith("?") != true) {
+                runCatching { Annulation.annuler(app, tools) }.getOrNull()?.let { onStatus("↩️ Annulation…"); return reflexe(it) }
+            }
+            // Calculs, pourcentages, conversions, jours avant une date : exact et instantané, sans IA.
+            runCatching { Calculs.repondre(texteUser) }.getOrNull()?.let { return reflexe(it, lecture = true) }
+            // Listes à cocher (courses…) — avant le découpage en plusieurs actions (« du lait ET des œufs »).
+            fr.dd.jarvis.device.Listes.intention(texteUser)?.let { i ->
+                onStatus("🛒 Liste…")
+                runCatching { fr.dd.jarvis.device.Listes.executer(app, i) { d, m -> tools.execute("envoyer_sms", JSONObject().put("destinataire", d).put("texte", m)).text } }
+                    .getOrNull()?.let { return reflexe(it, lecture = i is fr.dd.jarvis.device.Listes.Intention.Lire || i is fr.dd.jarvis.device.Listes.Intention.Toutes) }
+            }
+            // Où est garée la voiture (« je suis garé ici », « où est ma voiture ? », « ramène-moi à ma voiture »).
+            fr.dd.jarvis.device.Stationnement.intention(texteUser)?.let { i ->
+                when (i) {
+                    is fr.dd.jarvis.device.Stationnement.Intention.Noter -> { onStatus("🅿️ Je retiens l'endroit…"); return reflexe(fr.dd.jarvis.device.Stationnement.noter(app, i.precision)) }
+                    fr.dd.jarvis.device.Stationnement.Intention.OuEst -> fr.dd.jarvis.device.Stationnement.ouEst(app)?.let { return reflexe(it, lecture = true) }
+                    fr.dd.jarvis.device.Stationnement.Intention.Oublier -> return reflexe(fr.dd.jarvis.device.Stationnement.oublier(app))
+                    fr.dd.jarvis.device.Stationnement.Intention.Guider -> fr.dd.jarvis.device.Stationnement.place(app)?.let { pl ->
+                        onStatus("🅿️ Guidage vers la voiture…")
+                        val maps = runCatching { app.phone.navApps().keys.firstOrNull { it.contains("Maps", true) } }.getOrNull().orEmpty()
+                        val r = tools.execute("naviguer", JSONObject().put("destination", "${pl.lat},${pl.lon}").put("mode", "marche").put("appli", maps)).text
+                        return reflexe("🅿️ Vers ta voiture${if (pl.adresse.isNotBlank()) " (${pl.adresse})" else ""} : $r")
+                    }
+                }
+            }
             // Plusieurs actions simples dans la même phrase (« passe Jarvis en mode économie et le téléphone aussi »,
             // « allume la torche et mets en vibreur ») : toutes exécutées ici, sans IA ni Hermès.
             if (!fr.dd.jarvis.hermes.Routeur.orchestrationOuNomme(texteUser)) actionsCombinees(texteUser, onStatus)?.let { return reflexe(it) }

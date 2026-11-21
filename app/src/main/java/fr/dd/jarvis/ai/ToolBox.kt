@@ -398,6 +398,11 @@ class ToolBox(
             "priorite" to prop("basse | normale | haute | urgente.")
         ), listOf("titre")))
         put(tool("taches_lister", "Affiche les tâches personnelles non terminées, triées par échéance."))
+        put(tool("liste", "Listes à cocher de l'utilisateur (courses par défaut, bricolage, cadeaux…), gardées dans le téléphone et dans Obsidian : ajouter des articles, en retirer, les cocher (pris), lire une liste, la vider, lister les listes, envoyer une liste par SMS.",
+            mapOf("action" to prop("ajouter | retirer | cocher | lire (défaut) | vider | listes | envoyer"), "nom" to prop("Nom de la liste (défaut : Courses)."),
+                "elements" to prop("Articles séparés par des virgules (ajouter / retirer / cocher)."), "destinataire" to prop("Contact ou numéro (envoyer)."))))
+        put(tool("stationnement", "Place de stationnement de la voiture : noter la position actuelle (avec une précision : niveau, place…), dire où est garée la voiture (adresse, heure, distance, lien), ou l'oublier. Retenue aussi automatiquement à la fin d'Android Auto.",
+            mapOf("action" to prop("noter | ou (défaut) | oublier"), "note" to prop("Précision facultative (« niveau -2, place 45 »)."))))
         put(tool("tache_terminer", "Marque une tâche comme terminée à partir de son identifiant (#id).", mapOf(
             "id" to prop("Identifiant exact retourné lors de la création ou de la liste.")
         ), listOf("id")))
@@ -566,6 +571,7 @@ class ToolBox(
     suspend fun execute(name: String, a0: JSONObject): ToolResult {
         val a = runCatching { fr.dd.jarvis.device.Faits.appliquer(app, name, a0) }.getOrDefault(a0)
         return kotlinx.coroutines.withContext(fr.dd.jarvis.device.Autorisations.OutilEnCours(name.removePrefix("mcp_jarvis_"), fr.dd.jarvis.device.Autorisations.canonique(a))) { executerOutil(name, a) }
+            .also { r -> runCatching { Annulation.noter(name, a, r.text) } }
     }
 
     private suspend fun executerOutil(name: String, a: JSONObject): ToolResult { return when (name) {
@@ -1120,6 +1126,28 @@ class ToolBox(
                 ToolResult(if (l.isEmpty()) "Aucune notification." else "# 🔔 Notifications\n\n" + l.joinToString("\n") { "- **${it.app}** _(${fmt.format(java.util.Date(it.time))})_ ${it.titre} — ${it.texte.take(200)}" }, direct = true)
             }
         }
+        "liste" -> {
+            val nom = a.optString("nom").ifBlank { "Courses" }
+            val el = fr.dd.jarvis.device.Listes.articles(a.optString("elements"))
+            val i = when (a.optString("action").trim().lowercase()) {
+                "ajouter", "ajoute" -> fr.dd.jarvis.device.Listes.Intention.Ajouter(nom, el)
+                "retirer", "supprimer", "enlever" -> fr.dd.jarvis.device.Listes.Intention.Retirer(nom, el)
+                "cocher", "pris" -> fr.dd.jarvis.device.Listes.Intention.Cocher(nom, el)
+                "vider" -> fr.dd.jarvis.device.Listes.Intention.Vider(nom)
+                "listes" -> fr.dd.jarvis.device.Listes.Intention.Toutes
+                "envoyer" -> fr.dd.jarvis.device.Listes.Intention.Envoyer(nom, a.optString("destinataire"))
+                else -> fr.dd.jarvis.device.Listes.Intention.Lire(nom)
+            }
+            if ((i is fr.dd.jarvis.device.Listes.Intention.Ajouter || i is fr.dd.jarvis.device.Listes.Intention.Retirer || i is fr.dd.jarvis.device.Listes.Intention.Cocher) && el.isEmpty())
+                ToolResult("Indique les articles (elements, séparés par des virgules).")
+            else ToolResult(fr.dd.jarvis.device.Listes.executer(app, i) { d, m -> execute("envoyer_sms", JSONObject().put("destinataire", d).put("texte", m)).text }
+                ?: "Aucun de ces articles n'est sur tes listes.", direct = true)
+        }
+        "stationnement" -> ToolResult(when (a.optString("action").trim().lowercase()) {
+            "noter", "garer", "enregistrer" -> fr.dd.jarvis.device.Stationnement.noter(app, a.optString("note"))
+            "oublier", "effacer" -> fr.dd.jarvis.device.Stationnement.oublier(app)
+            else -> fr.dd.jarvis.device.Stationnement.ouEst(app) ?: "🅿️ Aucune place de stationnement retenue. Dis « je suis garé ici » en te garant (c'est aussi retenu tout seul à la fin d'Android Auto)."
+        }, direct = true)
         "tache_ajouter" -> ToolResult(app.tasks.create(a.optString("titre"), a.optString("echeance"), a.optString("notes"), a.optString("priorite", "normale")))
         "taches_lister" -> ToolResult(app.tasks.list().let { tasks ->
             if (tasks.isEmpty()) "Aucune tâche personnelle en attente."

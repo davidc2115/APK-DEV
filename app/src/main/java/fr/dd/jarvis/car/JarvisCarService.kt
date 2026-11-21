@@ -71,7 +71,11 @@ class JarvisCarSession : Session() {
         // le guidage DANS Android Auto (Waze / Maps de la voiture), y compris depuis une demande vocale faite ailleurs.
         lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onCreate(owner: LifecycleOwner) { NavigationVoiture.contexte = carContext }
-            override fun onDestroy(owner: LifecycleOwner) { if (NavigationVoiture.contexte === carContext) NavigationVoiture.contexte = null }
+            override fun onDestroy(owner: LifecycleOwner) {
+                if (NavigationVoiture.contexte === carContext) NavigationVoiture.contexte = null
+                // Fin du trajet : l'endroit où la voiture est garée est retenu (« où est ma voiture ? »).
+                runCatching { fr.dd.jarvis.device.Stationnement.noterAuto(carContext.applicationContext) }
+            }
         })
     }
 

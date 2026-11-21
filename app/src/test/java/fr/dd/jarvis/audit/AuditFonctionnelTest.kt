@@ -44,6 +44,14 @@ class AuditFonctionnelTest {
             "Donne-moi la température de mes poêles sous forme de tableau avec la température actuelle et la température de consigne" to "PoeleLecture",
             "quelles sont mes consignes" to "Consignes:Lister",
             "oublie cette consigne" to "Consignes:Oublier",
+            "combien font 15 % de 240" to "Calcul",
+            "convertis 30 miles en km" to "Calcul",
+            "combien de jours avant Noël" to "Calcul",
+            "ajoute du lait et des œufs à la liste de courses" to "Liste:Ajouter",
+            "qu'est-ce qu'il y a sur ma liste" to "Liste:Lire",
+            "où est ma voiture" to "Parking:OuEst",
+            "je suis garé ici" to "Parking:Noter",
+            "annule" to "Annuler",
         )
         val erreurs = attendus.filter { (p, a) -> r(p) != a }.map { (p, a) -> "« $p » → ${r(p)} (attendu $a)" }
         assertTrue(erreurs.joinToString("\n"), erreurs.isEmpty())

@@ -58,11 +58,14 @@ object Capacites {
             i("Alarmes, minuteurs, chronomètre (sans ouvrir d'application)", "réveille-moi à 6 h 30|minuteur de 10 minutes|lance le chrono", "alarme_creer,alarme_modifier,alarme_supprimer,alarmes_liste,minuteur_creer,chronometre", Voie.REFLEXE),
             i("Rappels, une fois ou répétés, et tout ce qui est programmé", "rappelle-moi d'appeler Martin demain à 9 h|qu'est-ce qui est programmé ?", "rappel_creer,rappels_liste,rappel_supprimer", Voie.REFLEXE),
             i("Tâches personnelles", "ajoute la tâche commander les panneaux|mes tâches", "tache_ajouter,taches_lister,tache_terminer"),
+            i("Listes à cocher (courses, bricolage…) : ajouter, cocher, lire, vider, envoyer par SMS", "ajoute du lait et des œufs à la liste de courses|qu'est-ce qu'il y a sur ma liste ?|j'ai pris le lait|envoie la liste de courses à Angeline", "liste", Voie.REFLEXE),
+            i("Annuler ce que je viens de faire (réveil, rappel, note, rendez-vous, ajout à une liste)", "annule|non, annule ce que tu viens de faire", "", Voie.REFLEXE),
             i("Point du jour et journal de bord", "fais-moi le point du jour|journal d'hier", "morning_briefing,journal_de_bord", Voie.REFLEXE),
             i("Heure de départ pour un rendez-vous (trafic compris)", "à quelle heure dois-je partir pour mon prochain rendez-vous ?", "heure_depart"),
         )),
         Categorie("trajets", "🧭", "Position, trajets et météo", r("position|localisation|gps|ou suis je|trajets?|itineraire|navigation|waze|maps|route|tournee|meteo|temps qu il fait|pluie|ou est"), listOf(
             i("Ma position avec l'adresse précise", "où suis-je ?", "ma_position", Voie.REFLEXE),
+            i("Où est garée ma voiture (retenu aussi en quittant Android Auto), guidage à pied pour y retourner", "je suis garé ici, niveau -2|où est ma voiture ?|ramène-moi à ma voiture", "stationnement", Voie.REFLEXE),
             i("Où se trouve une personne (Home Assistant)", "où est Angeline ?", "ha_position", Voie.REFLEXE),
             i("Navigation dans Waze ou Google Maps", "emmène-moi chez Martin|guide-moi jusqu'à Dijon", "naviguer,appli_par_defaut", Voie.REFLEXE),
             i("Itinéraire, distances et tournée optimisée des clients", "itinéraire de ma tournée de demain|tournée optimisée Martin, Durand, Petit", "itineraire,tournee_optimisee"),
@@ -101,6 +104,11 @@ object Capacites {
             i("Site web de la société : créer, modifier, publier", "crée le site web de la société", "site_web", Voie.REFLEXE),
             i("Données de la société sur la Freebox (lisibles depuis un ordinateur) et sauvegardes chiffrées datées sur le serveur, restauration", "copie les données de la société sur la Freebox|liste les sauvegardes|restaure la sauvegarde du 3 novembre", "societe_sauvegarde"),
             i("Facturation électronique (Factur-X, e-reporting) — désactivée tant que la société est en test", "active la facturation électronique|contrôle la facture FAC-2026-0007|e-reporting d'octobre", "facture_electronique"),
+        )),
+        Categorie("calculs", "🧮", "Calculs, conversions et dates", r("calculs?|calculer|conversions?|convertir|pourcentages?|unites?|tva|dates?|jours? avant|quel jour"), listOf(
+            i("Calculs et pourcentages exacts, instantanés", "combien font 15 % de 240 ?|calcule 1250 divisé par 12|100 HT en TTC|remise de 15 % sur 80", "", Voie.REFLEXE),
+            i("Conversions d'unités (longueurs, poids, volumes, vitesses, températures, données, énergie)", "convertis 30 miles en km|100 degrés fahrenheit en celsius|combien de cl dans 1,5 litre", "", Voie.REFLEXE),
+            i("Questions de calendrier : jours avant une date ou une fête, jour de la semaine, date dans N jours, numéro de semaine", "combien de jours avant Noël ?|quel jour tombe le 3 décembre ?|quelle date serons-nous dans 10 jours ?", "", Voie.REFLEXE),
         )),
         Categorie("notes", "📝", "Notes, fichiers et mémoire", r("notes?|carnet|fichiers?|documents?|dossiers?|obsidian|coffre|pdf|word|excel|memoire|souviens|conversations?|graphiques?"), listOf(
             i("Carnet de notes : prendre note, relire, supprimer", "prends note que le code du portail est changé|relis mes notes sur le poêle", "note_prendre,notes_lire,note_supprimer", Voie.REFLEXE),
